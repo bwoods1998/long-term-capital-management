@@ -31,7 +31,8 @@ family's state. Each is bound to the evaluator it was made under, so no stale fa
    version (the live side's own check reads `gate_outcome`, which names one program a family, and counts a passed
    `review`). A program is barred when:
    - the gate refused its version at any stage (the `refusals` rows), or a holdout look on it failed (the `looks` rows);
-   - the family's `gate_outcome` names it refused, failed or demoted;
+   - the family's `gate_outcome` names it refused, failed, demoted or held (`BAD_OUTCOMES`; a held look bars its program
+     as a failed one does: THE LOOK HOLDS, Oct 2, 2026, were approved as a tightening);
    - THE GATE'S OWN REVIEW (`review`, `gate_review_bar`) names it with a verdict other than "pass", or with an audit that
      is not a readable passed audit, whatever its review contract: a failed review or audit, and one that cannot be
      read (the gate itself refuses anything but "pass"). A passed review whose audit is owed bars nothing: it is no
@@ -119,7 +120,9 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from .bands import demoted
+# BAD_OUTCOMES: the gate's outcomes that bar a program, the House's reader's own list (`bands.BAD_OUTCOMES`), so the two can
+# never disagree: refused, failed, demoted and held (THE LOOK HOLDS, Oct 2, 2026).
+from .bands import BAD_OUTCOMES, demoted
 from .researcher import drift_settings, drift_verdict, robust_at_stress, row_span, running_span
 from .store import SwarmStore, dumps, loads
 
@@ -128,8 +131,6 @@ from .store import SwarmStore, dumps, loads
 #: and read again.
 MARKS_KEPT = 24
 REVIEWS_KEPT = 8
-#: The gate's outcomes that bar a program (`bands.incubator`'s own list).
-BAD_OUTCOMES = ("refused", "failed", "demoted")
 #: A marked version is reviewed once its practice so far has this many completed sessions and program closes and a
 #: positive program P&L: ready before its first look (3 sessions and 10 closes), and paid for only when it could pass.
 REVIEW_MIN_SESSIONS = 2
@@ -247,7 +248,7 @@ def gate_bar(store: SwarmStore, fam: Mapping[str, Any], n: int, *, sha: str | No
              program_only: bool = False) -> str | None:
     """Why version `n`'s program is barred from the incubator for good, or None (the module docstring, 1): a refusal of
     the version at any stage, a failed holdout look on its program, the family's `gate_outcome` naming it refused,
-    failed or demoted, the gate's review or audit failing it or unreadable for it (`gate_review_bar`), the incubator's
+    failed, demoted or held, the gate's review or audit failing it or unreadable for it (`gate_review_bar`), the incubator's
     own failing it (`incubator_review_bar`), or such a verdict of the gate recorded earlier (`incubator_barred`, an
     entry there bars its program even when the entry cannot be read). Fail-closed: a version that cannot be read is
     barred, and so is every program of a family whose records cannot be read (`family_bar`), unless `program_only`
@@ -362,7 +363,7 @@ def program_bar(store: SwarmStore, fid: str, n: int, sha: str, *, program_only: 
 
 def unrecorded_bars(state: Mapping[str, Any]) -> dict[str, str]:
     """The gate's verdicts against a program that `incubator_barred` does not hold yet, {sha: why}: the family's
-    `gate_outcome` naming it refused, failed or demoted, and the gate's `review` barring it (`gate_review_bar`). Each
+    `gate_outcome` naming it refused, failed, demoted or held, and the gate's `review` barring it (`gate_review_bar`). Each
     names one program a family and moves on with the next version, so the sweep records it first. {} while
     `incubator_barred` cannot be read (`family_bar` bars the whole family then)."""
     recorded = state.get("incubator_barred")
@@ -724,7 +725,7 @@ def _kept(marks: Mapping[str, Any]) -> dict[str, Any]:
 def sweep(store: SwarmStore, settings: Mapping[str, Any], *, clock: Callable[[], float] = time.time) -> dict[str, list[str]]:
     """THE SWEEP (the module docstring, 1), over every alive family, whatever its band or its cohort's status: a mark goes
     when its version is demoted or lost at 1.5x, when its program is barred (`gate_bar`), or, every mark, while the
-    drift screen is off; a family's `gate_outcome` naming a program refused, failed or demoted, and its gate `review`
+    drift screen is off; a family's `gate_outcome` naming a program refused, failed, demoted or held, and its gate `review`
     failing a program or unreadable for it, are recorded in `incubator_barred` (`unrecorded_bars`: so the bar outlives
     either moving on); a passed incubator review of a program barred by name becomes verdict "fail", stage "gate". It
     only removes and records bars: it never writes a mark or a pass, nor anything the gate, validation or the bands

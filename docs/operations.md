@@ -1736,12 +1736,15 @@ gate-ready version when:
   sessions (`holdout_sessions`, Jan 2 to Sept 25, 2026: 184), and the level is the one the look would have to reach
   under Holm across every look made (`evidence.holm_level`, the gate's own `holm_passes`; with every earlier look
   failed, 0.05 / m: the 4th look 0.0125), a look in flight in another family counted as a failed one. A missing Sharpe
-  or session count holds (fail-closed). The approximation leaves out the bootstrap's extra width and the line's other
-  checks, which only lower the power, so the hold errs toward looking.
+  or session count holds (fail-closed). The approximation leaves out the line's other checks (which can only lower the
+  pass chance, and barely bind near the line). For independent daily P&L (the usual one-lot program) the gate's
+  bootstrap passes a little more often than the approximation near the line, so the hold errs toward holding (the
+  tighter side); for positively autocorrelated daily P&L (positions marked over several days) it errs toward looking.
 - **The record**: one `look_holds` row (`SwarmStore.hold_look`: family, version, run sha, stage, the researcher's words;
-  never a `refusals` row, which every reader takes as a verdict against the program), `gated_sha` with `gate_ready`
-  cleared (the tournament never readies the version again), `gate_outcome` "held" (not a bad outcome: no incubator bar,
-  and the House's reader refuses nothing for it), the researcher's status line, and one private `swarm.gate` event,
+  never a `refusals` row), the program's incubator bar (`incubator_barred[sha]`, "the gate held its holdout look (<stage>)",
+  recorded right after the row and before anything else: THE VERDICT FIRST), `gated_sha` with `gate_ready` cleared (the
+  tournament never readies the version again), `gate_outcome` "held" (one of `bands.BAD_OUTCOMES`, below), the
+  researcher's status line, and one private `swarm.gate` event,
   action `look_hold`, with `stage`, `holds` (every hold that fired, the drift hold first) and `_figures` (beta, alpha,
   drift, share; power, Sharpe, sessions, level, looks counted: operator-only, never in a model's text). No look row, no
   `look_tries`, no review, no audit, no holdout read. The round's answer lists it under `look_held`. `look()` asks
@@ -1750,11 +1753,27 @@ gate-ready version when:
   "... too few independent bets for the holdout to judge it ...", never a figure (D2a). A new version of the family is
   looked at once it clears both holds; the held version stays closed (an evaluator adoption clears `gated_sha`, and
   the gate then holds it again if its figures still say so).
-- **Not an incubator bar.** A hold is no verdict on the program: it never reached the review that would judge it. The
-  incubator's own review and audit still stand between it and a real lot.
+- **On the money path a hold is a failed look** (the owner approved the holds as a tightening; reviews A1 and B1 of
+  PR #484). "held" is one of `bands.BAD_OUTCOMES` (`incubator.BAD_OUTCOMES` is the same tuple), so:
+  - **its execution tuition ends** (`bands.read` drops the row; open tuition goes exit-only, as after a failed look).
+    This matters because a hold can land after the review: a version whose review and audit passed and that waits (for
+    the gate image, a holdout gap, a look owed) is held when a look landing elsewhere lowers its power, when `look()`'s
+    recheck under the lock fires, or when the holds are switched on. Without this its tuition row would stay for good,
+    since no look is coming to fail it;
+  - **its program never trades the incubator** (`bands.program_refusal` refuses it, `incubator.gate_bar` bars it, the
+    bar is recorded for good, and no incubator review is paid for it), where a held program would otherwise reach one
+    real lot through the incubator's own review that the failed look it replaces would have barred.
+  `bands.py` is the House's reader, so the House and the swarm deploy together (one release): a gate that writes "held"
+  before the House reads it would leave a held version's tuition running until the House restarts on the release.
+- **At the deploy** (the holds are on by default): every gate-ready version is read against the holds in the first gate
+  round, including one already reviewed and waiting, whose tuition then ends. Before the deploy, list those on the box:
+  `SELECT id, json_extract(state, '$.validation_version') FROM families WHERE retired_at IS NULL AND
+  json_extract(state, '$.gate_ready') AND json_extract(state, '$.review.verdict') = 'pass'` (each may be held in the
+  first round, and its tuition then stops); after it, check that `bands.read` has no row for a family in `look_holds`.
 - **Rollback**: `"gate": {"look_holds": {"drift_share": null}}` (or `"min_power": null`) in `swarm.json` turns one hold
-  off; `"look_holds": null` turns both off and the gate is exactly as before. A version already held stays closed; to
-  look at it, the operator clears its `gated_sha` (or it is looked at as a new version). A value that is not a number
+  off; `"look_holds": null` turns both off and the gate is exactly as before. A version already held stays closed, and
+  its program's incubator bar stays (bars are kept for good, as a failed look's); to look at it, the operator clears
+  its `gated_sha` and its `gate_outcome` (or it is looked at as a new version). A value that is not a number
   from 0 to 1 reads as its default.
 - **To see it**: `look_holds` rows (`SELECT family, version, stage, at FROM look_holds`) and `swarm.gate` events with
   action `look_hold` (their `_figures` say which figure held it). Expect most long-call and call-vertical programs held

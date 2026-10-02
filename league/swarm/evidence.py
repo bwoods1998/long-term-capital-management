@@ -63,8 +63,11 @@ the holdout cannot judge. It HOLDS the look (no look, no review, no sealed read)
   - (c) THE POWER HOLD (`holdout_power`): the one-sided power of the holdout's own test, at the level the look would
     have to reach under Holm (`holm_level`), is below `LOOK_HOLD_MIN_POWER`, taking the version's Validation all-days
     daily Sharpe as its true Sharpe over the holdout's sessions. The test is a day-block bootstrap of the mean daily
-    P&L; its power is taken in the normal approximation, P(Z >= z(level) - S sqrt(N)), which leaves out the bootstrap's
-    extra width and the line's other checks (both only lower it).
+    P&L; its power is taken in the normal approximation, P(Z >= z(level) - S sqrt(N)). The line's other checks are left
+    out (they can only lower the pass chance, and barely bind near the line). The bootstrap is not exactly normal: for
+    independent daily P&L it passes a little more often than the approximation near the line, so the hold errs toward
+    holding (the tighter side); for positively autocorrelated daily P&L (positions marked over several days) it passes
+    less often, so the hold errs toward looking.
   Missing figures hold too (fail-closed). These are the owner's settings (`gate.look_holds`), each switchable to null.
 
 THE LEAKAGE ALARM: once there are at least 10 holdout looks, more than 30% passing stops the gate.

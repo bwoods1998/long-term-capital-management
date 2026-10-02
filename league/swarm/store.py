@@ -1097,9 +1097,11 @@ class SwarmStore:
         return self._all("SELECT * FROM refusals ORDER BY seq")
 
     def hold_look(self, fid: str, version: int | None, run_sha: str, stage: str, reason: str) -> None:
-        """THE LOOK HOLDS' record (`gate.Gate.look_hold`): a refusal-style row of its own, never a `refusals` row, since every
-        reader of those (the incubator's bars, the House's belt) takes a refusal as a verdict against the program, and a
-        hold is none. `reason` is the researcher's words (no figure); the figures are in the private `swarm.gate` event."""
+        """THE LOOK HOLDS' record (`gate.Gate.look_hold`): a refusal-style row of its own, never a `refusals` row (a hold
+        judges no evidence and no program; it says the holdout could not judge it). Its money-path effect is the gate's
+        outcome "held" (`bands.BAD_OUTCOMES`: no execution tuition, no incubator) and the program's incubator bar, which
+        the gate records with the row. `reason` is the researcher's words (no figure); the figures are in the private
+        `swarm.gate` event."""
         self._exec("INSERT INTO look_holds(family, version, run_sha, at, stage, reason) VALUES(?,?,?,?,?,?)",
                    (fid, version, run_sha, self.now(), stage, str(reason)[:2000]))
 

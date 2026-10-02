@@ -52,16 +52,22 @@ place) and before anything is paid (the review, the audit) or opened (the sealed
   all-days daily Sharpe (`validation_numbers.sharpe_daily`, the figure the look's Sharpe check uses), N the holdout
   window's NYSE sessions (`holdout_sessions`) and the level the look would have to reach under Holm across every look
   made (`evidence.holm_level`), a look in flight in another family counted as a failed one. Missing figures hold
-  (fail-closed). The approximation leaves out the bootstrap's extra width and the line's other checks, which only lower
-  the power, so the hold errs toward looking.
+  (fail-closed). The approximation leaves out the line's other checks (which can only lower the pass chance); for
+  independent daily P&L the bootstrap passes a little more often than it says near the line, so the hold errs toward holding,
+  and for positively autocorrelated daily P&L (multi-day marks) toward looking (`evidence.holdout_power`).
 A held version is closed at the gate (`gated_sha`, `gate_ready` cleared, so the tournament never readies it again;
-`gate_outcome` "held"), with one `look_holds` row (`SwarmStore.hold_look`: never a `refusals` row) and one private
-`swarm.gate` event (`look_hold`, its figures under `_figures`); no look row, no try, no review, no audit, no sealed read.
-It is NOT barred from the incubator: a hold is no verdict against the program (it never reaches the review that would
-judge it), and "held" is not a bad outcome. The researcher hears that the look is held and why, in words with no figure
-(D2a). A new version of the family is looked at once it clears both. `look()` checks again under the store's lock (a
-look landing meanwhile can lower the power). Each hold is switched off by its setting set to null (`look_holds` null: both);
-a misread value is its default.
+`gate_outcome` "held"), with one `look_holds` row (`SwarmStore.hold_look`: its own table, never a `refusals` row) and
+one private `swarm.gate` event (`look_hold`, its figures under `_figures`); no look row, no try, no review, no audit, no
+sealed read. ON THE MONEY PATH A HOLD IS A FAILED LOOK (the owner approved the holds as a TIGHTENING, so a held program
+gets no real order that the look it replaces would have stopped): "held" is one of `bands.BAD_OUTCOMES`, so it ends the
+version's execution tuition (`bands.read`) and refuses its program the incubator (`bands.program_refusal`), and the hold
+is recorded as the program's incubator bar for good first (THE VERDICT FIRST, `_incubator_bar`, right after its hold row
+and before anything else, as a refusal's is). That matters because a hold can land after the review: a version reviewed
+and audited (a pass) that waits for the gate image or a holdout gap is held when a look landing elsewhere lowers its
+power, or when the holds are switched on; without the bar its tuition would never end (no look is coming). The
+researcher hears that the look is held and why, in words with no figure (D2a). A new version of the family is looked at
+once it clears both. `look()` checks again under the store's lock (a look landing meanwhile can lower the power). Each
+hold is switched off by its setting set to null (`look_holds` null: both); a misread value is its default.
 
 MISSING DATA IS THE GATE IMAGE'S, NOT THE PROGRAM'S (Oct 1, 2026). Before a look the gate checks that its image holds a
 holdout for every root the program needs (`holdout_gap`: the gate boxes' file-name listing and the Gym's own "missing
@@ -221,7 +227,8 @@ HOLD_WORDS = {
                        "so a look would most likely fail even if its edge were real, and every look raises the bar for "
                        "every later one. No look was spent; a new version can be looked at once the holdout can judge it"),
 }
-#: The outcome a hold writes (`Gate.outcome`): not one of `incubator.BAD_OUTCOMES`, so it bars nothing.
+#: The outcome a hold writes (`Gate.outcome`): one of `bands.BAD_OUTCOMES` (`incubator.BAD_OUTCOMES`), so, as a failed look's
+#: does, it ends the version's execution tuition and bars its program from the incubator.
 HOLD_OUTCOME = "held"
 
 
@@ -260,20 +267,25 @@ def holdout_sessions() -> int | None:
     return sessions_between(pool.HOLDOUT_FIRST, pool.HOLDOUT_LAST)
 
 
-@functools.lru_cache(maxsize=8)
 def sessions_between(first: str, last: str) -> int | None:
-    """The NYSE sessions from `first` to `last` (ISO days, both included); None when the calendar cannot say."""
+    """The NYSE sessions from `first` to `last` (ISO days, both included); None when the calendar cannot say. A count is
+    kept for the process; a failure is not (a hold is for good, so a calendar that failed once is asked again)."""
     try:
-        from ltcm.data import us_equity_session
-
-        day, end = dt.date.fromisoformat(str(first)), dt.date.fromisoformat(str(last))
-        sessions = 0
-        while day <= end:
-            sessions += us_equity_session(day) is not None
-            day += dt.timedelta(days=1)
+        return _sessions_between(str(first), str(last)) or None
     except Exception:  # noqa: BLE001 - no calendar, no figure: the caller holds
         return None
-    return sessions or None
+
+
+@functools.lru_cache(maxsize=8)
+def _sessions_between(first: str, last: str) -> int:
+    from ltcm.data import us_equity_session
+
+    day, end = dt.date.fromisoformat(first), dt.date.fromisoformat(last)
+    sessions = 0
+    while day <= end:
+        sessions += us_equity_session(day) is not None
+        day += dt.timedelta(days=1)
+    return sessions
 
 
 def incubator_stage(stage: str, fid: str, *, incubator: bool = False) -> tuple[str, str]:
@@ -505,13 +517,16 @@ class Gate:
         return {"stage": holds[0], "holds": holds, "figures": figures}
 
     def hold_look(self, fam: Mapping[str, Any], n: int, sha: str, hold: Mapping[str, Any], out: dict[str, Any]) -> None:
-        """THE LOOK HOLDS' record: one `look_holds` row (the researcher's words), the version closed at the gate only if it
-        is still the one validated (`gated_sha`, `gate_ready` cleared, the dormant count restarted: a verdict is news),
-        the outcome "held" (no incubator bar), the researcher's status line, and one private `swarm.gate` event with the
-        figures. No look row, no try, no review, no audit, no sealed read."""
+        """THE LOOK HOLDS' record, as a refusal's is ordered (`refuse`): one `look_holds` row (the researcher's words), the
+        program's incubator bar (THE VERDICT FIRST: whatever happens next, a held program never trades the incubator),
+        one private `swarm.gate` event with the figures, then, only if the version is still the one validated, its gate
+        place closed (`gated_sha`, `gate_ready` cleared, the dormant count restarted: a verdict is news), the outcome
+        "held" (one of `bands.BAD_OUTCOMES`: its execution tuition ends) and the researcher's status line. No look row,
+        no try, no review, no audit, no sealed read."""
         fid, stage = str(fam["id"]), str(hold["stage"])
         words = HOLD_WORDS[stage]
         self.store.hold_look(fid, n, sha, stage, words)
+        self._incubator_bar(fid, n, sha, why=f"the gate held its holdout look ({stage})")
         self.store.event("swarm.gate", fid, {"action": "look_hold", "version": n, "sha": sha[:12], "stage": stage,
                                              "holds": list(hold.get("holds") or [stage]),
                                              "_figures": hold.get("figures")})  # the figures stay private (underscore)

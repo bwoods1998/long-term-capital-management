@@ -461,18 +461,19 @@ diagnostician.
   refusal: no look, no try, no review, no sealed read, and the version is not taken up again. The researcher hears the
   earlier look's number, never a figure. A version that repeats a look still in flight waits for it. This
   only tightens: no threshold, Holm or deflated-Sharpe rule moves.
-- **A look the holdout cannot judge is held** (the look holds, L6(b) and L6(c), approved by the owner on Oct 2, 2026 as a
-  tightening; `Gate.look_hold`). The three looks after the Sept 26 reset were all long-delta programs and all failed,
+- **A look the holdout cannot judge is held** (the look holds, L6(b) and L6(c), approved by the owner on Oct 2, 2026 as
+  a tightening; `Gate.look_hold`). The three looks after the Sept 26 reset were all long-delta programs and all failed,
   and a 2025 Validation pass has mostly measured long-market drift. After the free checks that refuse (the experiment
-  contract, the drift screen, the rations) and before anything is paid or opened, the gate holds the look at:
-  (b) a long-delta version (pooled Train beta above zero) whose own Train drift fit puts a quarter or more of its
-  profit on drift (drift share = |drift| / (|alpha| + |drift|), over the years the drift screen counts); and (c) a
-  version whose expected holdout power is below 0.3: the one-sided power of the holdout line's bootstrap test, in the
-  normal approximation, at the level the look would have to reach under Holm, with the version's Validation all-days
-  daily Sharpe taken as true over the holdout's sessions. Missing figures hold (fail-closed). A held version is closed
-  at the gate (no look, no try, no review, no audit, no sealed read), with its own record (never a refusal) and no
-  incubator bar; a new version that clears both can be looked at. The researcher hears why in words, never a figure.
-  Each threshold is a setting (`gate.look_holds`), null to roll back.
+  contract, the drift screen, the rations) and before anything is paid or opened, the gate holds the look at: (b) a
+  long-delta version (pooled Train beta above zero) whose own Train drift fit puts a quarter or more of its profit on
+  drift (drift share = |drift| / (|alpha| + |drift|), over the years the drift screen counts); and (c) a version whose
+  expected holdout power is below 0.3: the one-sided power of the holdout line's bootstrap test, in the normal
+  approximation, at the level the look would have to reach under Holm, with the version's Validation all-days daily
+  Sharpe taken as true over the holdout's sessions. Missing figures hold (fail-closed). A held version is closed at the
+  gate (no look, no try, no review, no audit, no sealed read), with its own record (never a refusal); on the money path
+  it is a failed look: its execution tuition ends and its program never trades the incubator (the hold may land after a
+  passed review, while the version waits). A new version that clears both can be looked at. The researcher hears why in
+  words, never a figure. Each threshold is a setting (`gate.look_holds`), null to roll back.
 - **A look needs the data, and missing data is the image's fault, not the program's.** Before a look the gate checks,
   from file names only, that its image holds the whole holdout of every root the program needs. A look it cannot make
   waits with no try counted, and a look that fails because the Gym names a root it lacks is owed again the same way.
