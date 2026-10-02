@@ -6,16 +6,18 @@ order of work and the authority; this page holds the design alone. Where this pa
 disagree, the code is right and this page is fixed. How to operate it is in
 [operations.md](operations.md).
 
-## Where each part stands (Oct 2, 2026, 14:15Z; active development paused)
+## Where each part stands (Oct 3, 2026; autopilot)
 
 | Part | Code | State |
 |---|---|---|
 | The House, options only | `league/` | running `20261002T112610Z-e11710692569` (main `e3d0111f`: the look holds and the research canary rule; promoted 11:26Z Oct 2); real money on since Sept 27; the grant active on money digest `42c4a3af` (re-ratified at Release B); evidence resets 1 (Release A, Sept 30) and 2 (Release B, Oct 1), none since |
 | The data store and images | `scripts/data/` | the core five from 2020 and the 20 added names from 2022, 0-14 days to expiry, SPY/QQQ back months to 45; ThetaData Options Standard's history reaches 2016; Train from 2017 is released (R11a), and its image is still to be built; longer history arrives as private blocks (#413) |
 | The Gym | `league/gym/` | 25 roots, Train 2020-2024 on a sealed image adopted Sept 28 (2022-2024 for the added names); 11 types including long calls and puts; the honest fill model from Train samples; engine 4 and per-program batch failures from Release A; frozen since Release B |
-| The swarm | `league/swarm/`, `league/CONTRACT.md` | about 20 alive (start 96, floor 12); 3 holdout looks, 0 passes; births of debit verticals and two-sided singles only, under agenda v16c; the architect on Sail (DeepSeek-V4-Pro, asap queue); Claude at the gate and for the strategist; duplicate looks refused and the look holds on; automatic forks of validated lineages off; OpenAI unused |
-| Paper and production paths | `league/live/`, `gateway/` | real money opens four debit types; both paper route proofs passed Sept 28; 19 D3 calibration round trips by the Oct 2 open; one exit-only tuition lot; the House live test armed, no order yet; the practice league (validated and Train tiers); the incubator on since Oct 1, with no first look before about Oct 6; no general agent paper book; covered strategies absent |
+| The swarm | `league/swarm/`, `league/CONTRACT.md` | 16 alive at a funded floor since Oct 2 evening (start 16, floor 8, one Gym box, the Sail researchers at $0.25 an hour, the architect every two hours); 3 holdout looks, 0 passes; births of debit verticals and two-sided singles only, under agenda v16c; the architect on Sail (DeepSeek-V4-Pro, asap queue); Claude at the gate and for the strategist; duplicate looks refused and the look holds on; automatic forks of validated lineages off; OpenAI unused |
+| Paper and production paths | `league/live/`, `gateway/` | real money opens four debit types; both paper route proofs passed Sept 28; 23 D3 calibration round trips by the Oct 2 close; one exit-only tuition lot; the House live test armed, no order yet; the practice league (validated and Train tiers); the incubator on since Oct 1; no general agent paper book; covered strategies absent |
 | The public page | blakewoods.us/capital | the owner's (`personal-site`, revamped by the owner on Oct 2); the House's publisher feeds it |
+
+| v3, the unattended desk | branches `release/v3a` (draft PR #489) and `v3/*` | built Oct 2, not deployed: the House's own jobs, a research budget funded by realized profit, a standing grant, self-deploy, a forward-evidence ladder (benchmarked; does not bind yet), research v3, an engineer and a reviewer ([run record](runs/2026-10-02-unattended-desk.md)) |
 
 This is observed state, not completion of the design below. Broad universe discovery, covered strategies, the
 general paper environment and exposure-aware allocation are still to build. The incubator and its swarm-side facts (B2)
