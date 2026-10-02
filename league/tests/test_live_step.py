@@ -309,11 +309,10 @@ class Sized(LiveCase):
     def test_a_probe_that_earns_it_is_sized_by_quarter_kelly_on_its_lower_bound(self):
         live = self.make([family("vert", VERTICAL, band="probe")])
         returns = [0.30, 0.10, 0.20, -0.10, 0.25] * 5
-        self.families.add_forward("vert", "shadow", [{"id": f"s{i}", "day": f"2026-09-{i % 25 + 1:02d}", "pnl": r * 100.0,
-                                                       "max_loss": 100.0} for i, r in enumerate(returns)])
-        self.families.add_forward("vert", "real", [{"id": f"r{i}", "day": f"2026-08-{i + 1:02d}", "pnl": 6.0, "max_loss": 50.0}
-                                                   for i in range(5)])
-        live.state.put("band_moves", {"vert": {"band": "probe", "at": at(MONDAY, 9, 0) - 7 * 86400}})
+        # Evidence v3: Sized reads the Probe's real fills alone (20 or more), after 5 whole sessions at Probe.
+        self.families.add_forward("vert", "real", [{"id": f"s{i}", "day": f"2026-09-{i % 25 + 1:02d}", "pnl": r * 100.0,
+                                                     "max_loss": 100.0} for i, r in enumerate(returns)])
+        live.state.put("band_moves", {"vert": {"band": "probe", "at": at(MONDAY, 9, 0) - 9 * 86400}})
         self.run_to(9, 31)
         self.assertEqual(self.families.rows["vert"]["band"], "sized")
         [pos] = live.book.positions.values()

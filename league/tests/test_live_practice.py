@@ -515,18 +515,17 @@ class Accounting(PracticeCase):
 
 # -------------------------------------------------------------------------------------------------------- embargo
 class Embargo(LiveCase):
-    """The forward embargo: a Sized move also needs the forward record of sessions after the version was written."""
+    """The forward embargo: a Sized move also needs the forward record of sessions after the version was written. Sized
+    reads the Probe's REAL fills alone (evidence v3): the record here is real fills, on the days of September."""
 
     RETURNS = [0.30, 0.10, 0.20, -0.10, 0.25] * 5
 
     def probe(self, created, *, returns=None, real=True):
         live = self.make([dict(family("vert", VERTICAL, band="probe"), version_created_at=created)])
-        self.families.add_forward("vert", "shadow", [{"id": f"s{i}", "day": f"2026-09-{i % 25 + 1:02d}", "pnl": r * 100.0,
-                                                       "max_loss": 100.0} for i, r in enumerate(returns or self.RETURNS)])
-        if real:
-            self.families.add_forward("vert", "real", [{"id": f"r{i}", "day": f"2026-08-{i + 1:02d}", "pnl": 6.0,
-                                                        "max_loss": 50.0} for i in range(5)])
-        live.state.put("band_moves", {"vert": {"band": "probe", "at": at(MONDAY, 9, 0) - 7 * 86400}})
+        self.families.add_forward("vert", "real" if real else "shadow",
+                                  [{"id": f"s{i}", "day": f"2026-09-{i % 25 + 1:02d}", "pnl": r * 100.0, "max_loss": 100.0}
+                                   for i, r in enumerate(returns or self.RETURNS)])
+        live.state.put("band_moves", {"vert": {"band": "probe", "at": at(MONDAY, 9, 0) - 9 * 86400}})
         return live
 
     def test_sized_needs_the_record_after_the_version_was_written_too(self):

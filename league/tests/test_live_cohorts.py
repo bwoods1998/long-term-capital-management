@@ -11,6 +11,25 @@ from league.live.observe import ObserveStore
 
 
 class Cohorts(PracticeCase):
+    def pre_ladder(self):
+        """Make the frozen cohorts ones frozen BEFORE the forward ladder (evidence v3, Oct 2, 2026): no `ladder` mark, and
+        the window the old freeze gave (its declared DTE horizon). The old observation target and window still govern such
+        a cohort; every cohort frozen from evidence v3 on is a ladder cohort (`league/tests/test_live_ladder.py`)."""
+        import ast
+        import math
+
+        db = self.live.observe_store._connect()
+        for family, version, snapshot in db.execute("SELECT family, version, snapshot FROM cohorts").fetchall():
+            snap = json.loads(snapshot)
+            snap.pop("ladder", None)
+            snap.pop("practice_max_sessions", None)
+            for node in ast.parse(snap["code"]).body:
+                if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == "NEEDS" for t in node.targets):
+                    needs = ast.literal_eval(node.value)
+                    snap["practice_max_sessions"] = min(60, math.ceil(float(needs["dte"][1]) * 5 / 7) + 3)
+            db.execute("UPDATE cohorts SET snapshot=? WHERE family=? AND version=?", (json.dumps(snap, sort_keys=True),
+                                                                                     family, version))
+
     def test_live_only_semantic_upgrade_winds_down_an_existing_cohort_after_restart(self):
         with patch("league.swarm.evaluator.execution_fingerprint", return_value="old-live-code"):
             self.build(observed=[trained("f", params={"hold": 600, "opens": 2})])
@@ -54,6 +73,7 @@ class Cohorts(PracticeCase):
     def test_rotation_needs_completed_sessions_and_trades_and_never_readmits_same_snapshot(self):
         self.build(observed=[validated("f", params={"hold": 600})])
         self.run_to(9, 34)
+        self.pre_ladder()
         db = self.live.observe_store._connect()
         self.families.observed["f"][2] = {**validated("f", version=2), "observe": True, "band": "gym"}
         db.execute("UPDATE practice SET sessions=3, last_day='2026-09-30' WHERE family='f'")
@@ -76,9 +96,11 @@ class Cohorts(PracticeCase):
 
     def test_a_kept_cohort_is_not_completed_at_its_target_but_still_at_its_window(self):
         """L2' (release B): `keep` holds a cohort the incubator passed past its observation target; its window, an evaluator
-        change or a failure still end it. Empty, the league's own rule, byte for byte."""
+        change or a failure still end it. Empty, the league's own rule, byte for byte. (A cohort frozen before the
+        forward ladder: a ladder cohort has no observation target.)"""
         self.build(observed=[validated("f", params={"hold": 600})])
         self.run_to(9, 34)
+        self.pre_ladder()
         db = self.live.observe_store._connect()
         db.execute("UPDATE practice SET sessions=3, last_day='2026-09-30', open_positions=0 WHERE family='f'")
         self.live.observe_store.add("f@1:o", "f", 1, [
@@ -98,6 +120,7 @@ class Cohorts(PracticeCase):
     def test_an_empty_keep_is_the_leagues_own_rule(self):
         self.build(observed=[validated("f", params={"hold": 600})])
         self.run_to(9, 34)
+        self.pre_ladder()
         db = self.live.observe_store._connect()
         db.execute("UPDATE practice SET sessions=3, last_day='2026-09-30', open_positions=0 WHERE family='f'")
         self.live.observe_store.add("f@1:o", "f", 1, [
@@ -112,6 +135,17 @@ class Cohorts(PracticeCase):
     def test_nontrading_cohort_expires_at_bounded_session_window(self):
         self.build(observed=[trained("f")])
         self.run_to(9, 32)
+        result = self.live.observe_store.cohort_candidates([], day="2026-10-12", in_session=True)
+        self.assertEqual([r["family"] for r in result], ["f"], "a ladder cohort practises its whole window")
+        result = self.live.observe_store.cohort_candidates([], day="2026-12-23", in_session=True)
+        self.assertEqual(result, [], "sixty calendar sessions elapsed, regardless of absent fills")
+        self.assertEqual(self.live.observe_store._connect().execute("SELECT reason FROM cohorts").fetchone()[0],
+                         "ladder: its practice window ended")
+
+    def test_a_pre_ladder_nontrading_cohort_expires_at_its_old_window(self):
+        self.build(observed=[trained("f")])
+        self.run_to(9, 32)
+        self.pre_ladder()
         result = self.live.observe_store.cohort_candidates([], day="2026-10-12", in_session=True)
         self.assertEqual(result, [], "ten calendar sessions elapsed, regardless of absent fills")
         self.assertEqual(self.live.observe_store._connect().execute("SELECT reason FROM cohorts").fetchone()[0],
@@ -141,7 +175,10 @@ class Cohorts(PracticeCase):
         self.build(observed=[row])
         self.run_to(9, 32)
         result = self.live.observe_store.cohort_candidates([], day="2026-10-12", in_session=True)
-        self.assertEqual(result[0]["practice_max_sessions"], 36)
+        self.assertEqual(result[0]["practice_max_sessions"], 60, "a ladder cohort's window is the ladder's, whatever its DTE")
+        self.pre_ladder()
+        result = self.live.observe_store.cohort_candidates([], day="2026-10-12", in_session=True)
+        self.assertEqual(result[0]["practice_max_sessions"], 36, "before the ladder: its declared horizon")
         self.assertEqual(self.live.observe_store.cohort_candidates([], day="2026-12-01", in_session=True), [])
 
     def test_program_errors_are_visible_and_never_count_as_successful_decisions(self):

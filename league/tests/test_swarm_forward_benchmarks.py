@@ -44,7 +44,8 @@ class TheDefinition(unittest.TestCase):
 
         self.assertTrue(FB.aggregate(desks(("absent", "negative", 1, 1), ("fading", "negative", 0, 5)))["binding"])
         out = FB.aggregate(desks(("absent", "negative", 3, 0), ("fading", "negative", 0, 5)))
-        self.assertTrue(out["binding"], "pooled over the single-world desks")
+        self.assertEqual(out["conditions"], {"pooled": True, "mixed": True, "every_world": False})
+        self.assertFalse(out["binding"], "a pooled count that hides a world where the ladder is worse does not bind")
         self.assertEqual(out["worlds_where_ladder_exceeds_sealed"], ["absent"])
         self.assertFalse(FB.aggregate(desks(("absent", "negative", 6, 0), ("fading", "negative", 0, 5)))["binding"])
         self.assertFalse(FB.aggregate(desks(("absent", "negative", 0, 1), ("mixed", "negative", 2, 1)))["binding"],

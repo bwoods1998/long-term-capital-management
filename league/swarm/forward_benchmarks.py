@@ -37,9 +37,12 @@ THE TWO DESIGNS, on the same entrants in the same order:
 
 A FALSE PROMOTION is a negative entrant promoted; a MISSED SIGNAL a positive entrant not promoted. Rates carry exact
 (Clopper-Pearson) 95% bounds. Only the entrants whose ladder judgement ended within the desk's sessions (promoted,
-failed, or at the end of their window) are counted, for both designs. THE BINDING RULE (pre-registered): `binding` is true only when the ladder's false promotions are at or below the
-sealed design's (with its holds, the stricter of the two) both over every negative entrant of the single-world desks
-and over the negative entrants of the mixed desks. Per-world counts are reported beside them.
+failed, or at the end of their window) are counted, for both designs. THE BINDING RULE: `binding` is true only when the ladder's false promotions are at or below the sealed design's (with
+and without its holds, whichever is fewer) over every negative entrant of the single-world desks, over the negative
+entrants of the mixed desks, AND in every negative world on its own (and in the mixed desks). The per-world condition
+was added after the first world's interim figures (pure noise, `absent`: the ladder 42 of 1,020, the sealed look 1 of
+1,020) showed that a pooled count depends on the mix of worlds; it can only make binding harder, and this codebase's
+evaluator suite never judges on pooled rates alone either. The whole suite was then run again from the start.
 
 What it is not: a market simulation. Returns are not bounded by the maximum loss, trades close the session they open,
 Train is not simulated (both designs start from the same Train-eligible programs), the Gym's drift screen upstream of
@@ -101,13 +104,21 @@ WORLDS: dict[str, dict[str, Any]] = {
 }
 COST = 0.03
 MIXED = "mixed"
-#: Variants judged on the primary desk's own daily figures (never applied; their promotions do not free slots).
+#: Variants judged on the primary desk's own daily figures (never applied; their promotions do not free slots and need
+#: no second session's confirmation): a line off (`drift`, `prefilter`, `fdr` False), another false-discovery rate
+#: (`fdr_q`), the bound at a higher confidence (`p_max`: the bootstrap's p at or under it, its percentile bound's own
+#: reading), a longer record (`min_sessions`), and judging only at fixed sessions of the window (`checkpoints`).
 VARIANTS: dict[str, dict[str, Any]] = {
     "no_drift_control": {"drift": False},
     "no_prefilter": {"prefilter": False},
     "no_fdr": {"fdr": False},
     "fdr_q_0.05": {"fdr_q": 0.05},
     "fdr_q_0.02": {"fdr_q": 0.02},
+    "fdr_q_0.01": {"fdr_q": 0.01},
+    "bound_99": {"p_max": 0.01},
+    "sessions_40": {"min_sessions": 40},
+    "checkpoints_20_40_60": {"checkpoints": [20, 40, 60]},
+    "checkpoints_fdr_q_0.02": {"checkpoints": [20, 40, 60], "fdr_q": 0.02},
 }
 
 
@@ -398,10 +409,13 @@ def desk(world: str, replication: int, *, slots: int | None = None, sessions: in
             st, e = active[i], entrants[i]
             lines = figures["lines"]
             base = lines["record"] and lines["bound"] and lines["windows"]
+            practised = t - st["start"] + 1
             for name, v in VARIANTS.items():
                 if i in variants[name]:
                     continue
                 ok = base and (lines["drift"] or v.get("drift") is False)
+                ok = ok and practised >= int(v.get("min_sessions", 0)) and figures["p"] <= float(v.get("p_max", 1.0))
+                ok = ok and ("checkpoints" not in v or practised in v["checkpoints"])
                 ok = ok and (v.get("fdr") is False or (cuts[name] is not None and figures["p"] <= cuts[name]))
                 ok = ok and (v.get("prefilter") is False or e["holdout_pnl"] >= 0)
                 if ok:
@@ -493,14 +507,18 @@ def aggregate(desks: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
     mixed = [r for r in by.get(MIXED, []) if r["kind"] == "negative"]
     pooled = {design: rate(sum(1 for r in pure if r[design]), len(pure)) for design in DESIGNS}
     pooled_mixed = {design: rate(sum(1 for r in mixed if r[design]), len(mixed)) for design in DESIGNS}
-    binding = (bool(pure) and pooled["ladder"]["count"] <= pooled["sealed"]["count"]
-               and pooled["ladder"]["count"] <= pooled["sealed_bare"]["count"]
-               and (not mixed or (pooled_mixed["ladder"]["count"] <= pooled_mixed["sealed"]["count"]
-                                  and pooled_mixed["ladder"]["count"] <= pooled_mixed["sealed_bare"]["count"])))
-    exceeds = sorted(name for name, w in worlds.items() if "false_promotions" in w
-                     and w["false_promotions"]["ladder"]["count"] > w["false_promotions"]["sealed"]["count"])
-    return {"worlds": worlds, "pooled_negatives": pooled, "mixed_negatives": pooled_mixed, "binding": binding,
-            "worlds_where_ladder_exceeds_sealed": exceeds}
+    for variant in VARIANTS:
+        pooled[f"ladder:{variant}"] = rate(sum(1 for r in pure if r["variants"][variant]), len(pure))
+        pooled_mixed[f"ladder:{variant}"] = rate(sum(1 for r in mixed if r["variants"][variant]), len(mixed))
+
+    def at_or_under(block: Mapping[str, Any]) -> bool:
+        return block["ladder"]["count"] <= min(block["sealed"]["count"], block["sealed_bare"]["count"])
+
+    exceeds = sorted(name for name, w in worlds.items() if "false_promotions" in w and not at_or_under(w["false_promotions"]))
+    conditions = {"pooled": bool(pure) and at_or_under(pooled), "mixed": not mixed or at_or_under(pooled_mixed),
+                  "every_world": not exceeds}
+    return {"worlds": worlds, "pooled_negatives": pooled, "mixed_negatives": pooled_mixed, "conditions": conditions,
+            "binding": all(conditions.values()), "worlds_where_ladder_exceeds_sealed": exceeds}
 
 
 def bootstrap_agreement() -> dict[str, Any]:
@@ -571,8 +589,10 @@ def markdown(report: Mapping[str, Any]) -> str:
              f"suite sha `{report['suite_sha'][:16]}`; {report['replications']} replications a world; desks of "
              f"{report['slots']} practice slots over {report['sessions']} forward sessions; {report['seconds']} s.", "",
              f"**Binding rule: {'MET' if agg['binding'] else 'NOT MET'}** (the ladder's false promotions at or below the "
-             "sealed look's, with and without its holds, over the single-world desks' negatives and over the mixed "
-             "desks' negatives).", ""]
+             "sealed look's, with and without its holds: pooled over the single-world desks' negatives "
+             f"{'met' if agg['conditions']['pooled'] else 'NOT met'}; over the mixed desks' negatives "
+             f"{'met' if agg['conditions']['mixed'] else 'NOT met'}; in every negative world "
+             f"{'met' if agg['conditions']['every_world'] else 'NOT met'}).", ""]
 
     def cell(r: Mapping[str, Any]) -> str:
         if not r["of"]:
@@ -591,8 +611,13 @@ def markdown(report: Mapping[str, Any]) -> str:
         lines.append(f"| {name} ({what}) | {w['entrants']} | {cell(block['ladder'])} | {cell(block['sealed'])} | "
                      f"{cell(block['sealed_bare'])} | {w['validation_passed_share']} | {w['drift_held_share']} | "
                      f"{w['drift_line_passed_share']} |")
-    lines += ["", "## Variants (ladder; never applied)", "", "| world | " + " | ".join(VARIANTS) + " |",
-              "|---|" + "---|" * len(VARIANTS)]
+    lines += ["", "## Variants (ladder; never applied): pooled negatives", "", "| variant | single-world desks | mixed desks |",
+              "|---|---|---|"]
+    for variant in VARIANTS:
+        lines.append(f"| {variant} | {cell(agg['pooled_negatives'][f'ladder:{variant}'])} | "
+                     f"{cell(agg['mixed_negatives'][f'ladder:{variant}'])} |")
+    lines += ["", "## Variants (ladder; never applied): per world (FP for negatives, missed for positives)", "",
+              "| world | " + " | ".join(VARIANTS) + " |", "|---|" + "---|" * len(VARIANTS)]
     for name, w in agg["worlds"].items():
         block = w.get("false_promotions") or w.get("missed_signals")
         lines.append(f"| {name} | " + " | ".join(f"{block[f'ladder:{v}']['count']}/{block[f'ladder:{v}']['of']}"
