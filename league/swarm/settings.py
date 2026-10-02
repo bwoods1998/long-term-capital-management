@@ -71,15 +71,16 @@ DEFAULTS: dict[str, Any] = {
         "rewrite_usd_day": 1.0,         # a family's rewrites a day, on their own fuse
         "top_rewrite_profile": "k3_balanced",
         "top_rewrite_families": 10,
-        # The bandit's top `top_families` by weight run every cycle on a stronger profile at low effort (the sprint, Sept
-        # 26); the rest stay on `profile`. Null `top_profile` turns it off. The hourly pace below governs these cycles too.
+        # The top `top_families` by allocation share (`families.weight`) run every cycle on a stronger profile at low
+        # effort (the sprint, Sept 26); the rest stay on `profile`. Null `top_profile` turns it off. The hourly pace
+        # below governs these cycles too.
         "top_profile": "pro_asap",
         "top_reasoning_effort": "low",
         "top_families": 10,
         "top_max_output_tokens": 12000,  # low effort's reasoning (1,800-3,800 tokens measured) and a whole program
         # THE TOP BAND ON CLAUDE (Sept 29, 2026, the owner's decision: be bold with Claude Sonnet 5.5; researcher.py and
-        # claude_research.py). The bandit's top `claude_top` by weight run their cycles on Claude while "researcher" is in
-        # `claude.roles`; 0 turns it off. Every Claude failure finishes the turn on the family's Sail profile above.
+        # claude_research.py). The top `claude_top` by allocation share run their cycles on Claude while "researcher" is
+        # in `claude.roles`; 0 turns it off. Every Claude failure finishes the turn on the family's Sail profile above.
         "claude_top": 12,                # on `claude.role_model.researcher` (Claude Sonnet 5.5)
         "claude_effort": "medium",       # low | medium | high | xhigh | max (Anthropic: medium for multistep tool use)
         "claude_max_tokens": 12000,      # thinking and the answer together, streamed; sizes the hold (~$0.33 on a mean body)
@@ -203,11 +204,12 @@ DEFAULTS: dict[str, Any] = {
         # leaves within minutes (the operator retired 60 by hand after R3). 0 or null: the hourly round only.
         "retire_every_seconds": 300,
         "explore_share": 0.25,
-        # THE EXPLOIT POOL (R11-5): only old families with a positive latest validation mean are exploited, each earning
-        # at most this share; the explore pool (new families and old ones at zero or below) takes the rest, never less than
-        # `explore_share`. Null: `explore_share` alone.
+        # Read only by the Thompson bandit (`allocation.mode` "bandit"; the default allocator's knobs are swarm.json's
+        # `allocation` block, league/swarm/allocation.py). THE EXPLOIT POOL (R11-5): only old families with a positive
+        # latest validation mean are exploited, each earning at most this share; the explore pool (new families and old
+        # ones at zero or below) takes the rest, never less than `explore_share`. Null: `explore_share` alone.
         "exploit_per_positive": 0.15,
-        "new_family_validations": 2,    # a family is "new" to the bandit until this many validation looks
+        "new_family_validations": 2,    # bandit mode only: a family is "new" to it until this many validation looks
         "retire_revisions": 30,
         "retire_evaluations": 2000,
         "retire_dsr_below": 0.05,       # trial-adjusted evidence below the line (after `retire_min_validations`)
@@ -325,11 +327,11 @@ DEFAULTS: dict[str, Any] = {
         # $10.89 left (effectively none until the owner funds it), so the swarm spends OpenAI only after a raise.
         "openai_reserve_usd": 25.0,
     },
-    # The House's live path's switches (league/live/step.py `OptionsLive.switches`; the sprint, B4, Sept 26, 2026): these
-    # defaults, overlaid by <state>/swarm.json "live" read DIRECTLY by the live path each minute (never config.json), so
-    # they work in the no-deploy window. A switch is on only while it is JSON true; a swarm.json that is not a JSON object
-    # turns observe, calibration and the House live test off. They switch work off or bound it; no money rule lives here
-    # (the constitution's).
+    # The House's live path's switches (league/live/step.py `OptionsLive.switches`; the sprint, B4, Sept 26, 2026):
+    # these defaults, overlaid by <state>/swarm.json "live" read DIRECTLY by the live path each minute (never
+    # config.json), so they work in the no-deploy window. A switch is on only while it is JSON true; a swarm.json that
+    # is not a JSON object turns observe, calibration, the House live test and the incubator off. They switch work off
+    # or bound it; no money rule lives here (the constitution's).
     "live": {
         # THE PRACTICE LEAGUE (the observe band; Sept 29, 2026): every alive Gym-band family with a validated version, or
         # an eligible Train version (`observe_train`), trades shadow (never real) on live quotes, validated first (by
@@ -353,11 +355,11 @@ DEFAULTS: dict[str, Any] = {
         # opens are cancelled within a minute; first looks are still recorded.
         "incubator": False,
     },
-    # THE PRACTICE LEAGUE'S FEEDBACK (Sept 29, 2026; league/swarm/practice.py): the practice record (shadow trades on live
-    # quotes under the Gym's fill rules, the House's private observe.sqlite) as a RESEARCH signal, never evidence: the
-    # strategist's PRACTICE table, the architect's PRACTICE BY CLASS lines and the bandit's capped bonus. `feedback` false
-    # turns all three off (no deploy). The bonus moves only research attention (the bandit's weight); it never reaches
-    # validation, the gate, the holdout, the bands, the live path or the money table.
+    # THE PRACTICE LEAGUE'S FEEDBACK (Sept 29, 2026; league/swarm/practice.py): the practice record (shadow trades on
+    # live quotes under the Gym's fill rules, the House's private observe.sqlite) as a RESEARCH signal, never evidence:
+    # the strategist's PRACTICE table, the architect's PRACTICE BY CLASS lines and the allocation share's capped bonus.
+    # `feedback` false turns all three off (no deploy). The bonus moves only research attention (the family's allocation
+    # weight); it never reaches validation, the gate, the holdout, the bands, the live path or the money table.
     "practice": {
         "feedback": True,
         "sessions": 10,                 # the session days the feedback reads (1-60)
@@ -365,8 +367,8 @@ DEFAULTS: dict[str, Any] = {
         "bonus_total": 0.10,            # the most share the bonus moves in all (0-0.2)
         "min_trades": 3,                # program-closed practice trades before any bonus (1-50)
     },
-    # Claude through the gateway (Sept 26, 2026, the swarm sprint; league/claude.py). The gateway's CLAUDE_USD ($100, the
-    # owner's funded total) is the hard line; `usd_cap` is the swarm's own Claude line inside it and `reserve_usd` is never
+    # Claude through the gateway (Sept 26, 2026, the swarm sprint; league/claude.py). The gateway's CLAUDE_USD (the owner's
+    # funded total) is the hard line; `usd_cap` is the swarm's own Claude line inside it and `reserve_usd` is never
     # spent (the House's post-mortem). `roles` are the calls Claude answers first; removing one routes it as before. Every
     # role asks (Sept 29, 2026), so adding "rewrite" (the researcher's stall rewrite, else its Sail profile) or "review"
     # (the gate's program review, else GPT-6 Sol, else Sail) in swarm.json routes it to Claude with no deploy.

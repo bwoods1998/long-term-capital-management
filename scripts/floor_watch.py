@@ -5,7 +5,7 @@
 It runs a read-only snippet on the House box (sqlite opened `mode=ro`; nothing is written there)
 and reads the public site checkpoint from here. Sections: bands, real money, evidence, the lab,
 costs, health. Built from the Sept 23, 2026 session's scratch watch scripts (post.py, swing.py,
-holds.py, gwh.py), for the capital-ladder build (docs/goals/LTCM_NORTH_STAR_BUILD.md, "The watch").
+holds.py, gwh.py), for the capital-ladder build (archive/docs/goals/LTCM_NORTH_STAR_BUILD.md, "The watch").
 
 `--since` is any ISO time (a space or a `T` between date and time, a zone or none: UTC), and is
 turned into the ledger's own form before it is compared (`normalize_since`). Sept 24, 2026: the

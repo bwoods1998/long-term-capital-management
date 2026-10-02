@@ -4,8 +4,9 @@ Everything an agent is lives on the House's ledger: its code, its record, its jo
 trials. The ledger is one SQLite file on one Sailbox. A superstar that took a fortnight to find
 must not be lost to a dead disk, so once a day the House checkpoints its own box with Sail (a
 snapshot of the whole disk, kept by Sail outside the box) under a rolling name, each kept for a
-week. Restoring is `python3 scripts/floor_box.py restore`-style work for the owner: a new box from
-the newest checkpoint comes back with the ledger, the agents' state and the promoted release.
+week. Restoring is the owner's work (`floor_box.py` has no restore command; `floor_box.py fork` makes a
+second box from a checkpoint with the loop stopped): a new box from the newest checkpoint comes back with
+the ledger, the agents' state and the promoted release.
 
 The snapshot holds what the box holds, including its three credentials (never a venue key), and
 stays inside the owner's Sail account, like the checkpoints `floor_box.py checkpoint` takes.

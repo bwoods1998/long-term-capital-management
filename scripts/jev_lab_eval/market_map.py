@@ -2,7 +2,7 @@
 """J4 Kalshi market discovery: every Kalshi series with open markets and real volume, mapped to what
 settles it, how it settles, which of the House's recorded feeds could price it, and which desk holds it.
 
-docs/goals/LTCM_JEV_SENSES.md, J4 second bullet. Read-only everywhere: Kalshi's public market data (no
+archive/docs/goals/LTCM_JEV_SENSES.md, J4 second bullet. Read-only everywhere: Kalshi's public market data (no
 key), the repository's `league/niches.json` and `league/feeds.py` (imported, never written), and an
 optional snapshot of the House's survey and feed status taken read-only on the box.
 

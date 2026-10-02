@@ -2,7 +2,7 @@
 
 Every founder is tested as it runs: its source through `league.runner.decide(code, ctx)` with a
 hand-built ctx whose chain is priced by Black-Scholes, and every intent it returns must be one
-`league.structures.parse` accepts (the spec's schema, `docs/runs/2026-09-25-options-desk.md`). Each
+`league.structures.parse` accepts (the spec's schema, the options-desk run record, which never reached main). Each
 founder's entry fires on its own signal and stays out without it; its exits fire (the profit target,
 the stop, the time exit); it never opens past the expiry-day entry cut or holds into the close of its
 earliest expiry.

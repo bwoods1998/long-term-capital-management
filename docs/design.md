@@ -6,20 +6,20 @@ order of work and the authority; this page holds the design alone. Where this pa
 disagree, the code is right and this page is fixed. How to operate it is in
 [operations.md](operations.md).
 
-## Where each part stands (Sept 30, 2026, 18:00Z)
+## Where each part stands (Oct 2, 2026, 14:15Z; active development paused)
 
 | Part | Code | State |
 |---|---|---|
-| The House, options only | `league/` | running Release A, `20260930T200604Z-3bf48c3f8f9f` (main `777b894f`: #431-#436 plus #437, #443, #440, #439, #442, #441; promoted 20:06Z Sept 30, evidence reset 1); real money on since Sept 27; the grant active on money digest `a3e2aa7c`. Release B (the incubator, shipped switched off; L1; the research library) deploys overnight, moves the money digest to `42c4a3af` and is evidence reset 2 |
+| The House, options only | `league/` | running `20261002T112610Z-e11710692569` (main `e3d0111f`: the look holds and the research canary rule; promoted 11:26Z Oct 2); real money on since Sept 27; the grant active on money digest `42c4a3af` (re-ratified at Release B); evidence resets 1 (Release A, Sept 30) and 2 (Release B, Oct 1), none since |
 | The data store and images | `scripts/data/` | the core five from 2020 and the 20 added names from 2022, 0-14 days to expiry, SPY/QQQ back months to 45; ThetaData Options Standard's history reaches 2016; Train from 2017 is released (R11a), and its image is still to be built; longer history arrives as private blocks (#413) |
-| The Gym | `league/gym/` | 25 roots, Train 2020-2024 on a sealed image adopted Sept 28 (2022-2024 for the added names); 11 types including long calls and puts; the honest fill model from Train samples; engine 4 and per-program batch failures from Release A |
-| The swarm | `league/swarm/`, `league/CONTRACT.md` | at the Sept 30 reconciliation: about 90 alive, all in the Gym band; 2 holdout looks, 0 passes; every birth a debit vertical; since Sept 30's spend cut, the architect on Kimi-K3 and Claude only at the gate and for the strategist; OpenAI unused |
-| Paper and production paths | `league/live/`, `gateway/` | real money opens four debit types; both paper route proofs passed Sept 28; ten D3 calibration round trips by Sept 30; the House live test armed, no order yet; the practice league (validated and Train tiers) from Release A; no general agent paper book; covered strategies absent |
-| The public page | blakewoods.us/capital | deployed: genuine thoughts first, Profit/Running, clickable agent dots with evidence-based progress, a positions table that adds up to Profit (an opt-in read); Net and costs by service arrive with Release A and personal-site PR #17 |
+| The Gym | `league/gym/` | 25 roots, Train 2020-2024 on a sealed image adopted Sept 28 (2022-2024 for the added names); 11 types including long calls and puts; the honest fill model from Train samples; engine 4 and per-program batch failures from Release A; frozen since Release B |
+| The swarm | `league/swarm/`, `league/CONTRACT.md` | about 20 alive (start 96, floor 12); 3 holdout looks, 0 passes; births of debit verticals and two-sided singles only, under agenda v16c; the architect on Sail (DeepSeek-V4-Pro, asap queue); Claude at the gate and for the strategist; duplicate looks refused and the look holds on; automatic forks of validated lineages off; OpenAI unused |
+| Paper and production paths | `league/live/`, `gateway/` | real money opens four debit types; both paper route proofs passed Sept 28; 19 D3 calibration round trips by the Oct 2 open; one exit-only tuition lot; the House live test armed, no order yet; the practice league (validated and Train tiers); the incubator on since Oct 1, with no first look before about Oct 6; no general agent paper book; covered strategies absent |
+| The public page | blakewoods.us/capital | the owner's (`personal-site`, revamped by the owner on Oct 2); the House's publisher feeds it |
 
 This is observed state, not completion of the design below. Broad universe discovery, covered strategies, the
-general paper environment and exposure-aware allocation are still to build. The incubator is built (Release B, switched
-off until after its ratification), and its swarm-side facts (B2) are still to ship.
+general paper environment and exposure-aware allocation are still to build. The incubator and its swarm-side facts (B2)
+shipped in Release B; it has been on since Oct 1. The repository README's "Current state" has the rest.
 
 ## The goal and the one number
 
@@ -31,7 +31,7 @@ The September 26 owner feedback sets the scope: **all Alpaca-supported options o
 the data and mechanics needed to test them**, with no preference for complicated structures. The
 first five and next 20 roots are collection batches. Neither is the eventual universe boundary.
 Simple calls/puts, covered calls/cash-secured puts and supported spreads must compete on evidence.
-The first market session was Sept 28. No family has passed Validation yet (2 holdout looks, 0 passes),
+The first market session was Sept 28. No family has passed the holdout yet (3 holdout looks, 0 passes),
 so the record does not yet demonstrate an edge or establish that the goal will be met.
 
 **Net = the options book's realized P&L on the Brokerage Account, after every fee, minus every input
@@ -338,7 +338,7 @@ Agent count and simulated years measure activity; passing unseen evidence measur
 |---|---|---|---|---|
 | Inner | seconds to minutes | each researcher | revise the program, run it on Train, read the diagnostics, revise again | a better program or a lesson |
 | Tournament | hourly | the House | validation runs of each family's best versions, the reallocation by expected information value, forks and retirements, the leaderboard | Gym time and researcher turns follow the value of the next evidence |
-| Architect | every 4 hours by default, refilling hourly below the start; every 15 minutes live, refilling every 20 | Claude by default (`architect.openai_model` null live); Kimi-K3 on Sail when Claude has no room or line: live since Sept 30, when the architect's Claude line was set to $0 (never after a cut answer: R11b salvages its complete families and retries once on Claude at medium effort); on Sail at `architect.sail_effort` (`medium` by default since Oct 1), and a cut Sail answer is salvaged the same way, its retry on Claude alone; a complete answer whose families object has stray trailing commas is read again without them (`lenient`), and one whose families array still does not parse whole (a stray `}` or `,` between two families, 15:59Z Oct 1) is read object by object, never outside the array (`recovered`: how many, and why) | reads the leaderboard, the graveyard and the gaps; writes families with a mechanism, a structure and a rejection test; at most 12 living families a mechanism class (R11b) | 3-6 new families by default; the gap to the start, up to 24 a pass live |
+| Architect | every 4 hours by default, refilling hourly below the start; every 30 minutes live, refilling every 20 | Claude by default (`architect.openai_model` null live); Sail on `architect.sail_profile` (Kimi-K3 balanced by default; DeepSeek-V4-Pro asap live since Oct 2, when Sail's balanced queue stopped answering) when Claude has no room or line: live since Sept 30, when the architect's Claude line was set to $0 (it had $5 at times on Oct 1-2 and bore nothing in its 4 Oct 2 passes) (never after a cut answer: R11b salvages its complete families and retries once on Claude at medium effort); on Sail at `architect.sail_effort` (`medium` by default since Oct 1), and a cut Sail answer is salvaged the same way, its retry on Claude alone; a complete answer whose families object has stray trailing commas is read again without them (`lenient`), and one whose families array still does not parse whole (a stray `}` or `,` between two families, 15:59Z Oct 1) is read object by object, never outside the array (`recovered`: how many, and why) | reads the leaderboard, the graveyard and the gaps; writes families with a mechanism, a structure and a rejection test; at most 12 living families a mechanism class (R11b) | 3-6 new families by default; the gap to the start, up to 6 a pass live |
 | Diagnostician | every 5 minutes | Claude | reads a stuck or nearly-there family's Train diagnostics (never Validation's numbers); rewrites its mechanism or writes its lesson; off live since Sept 30 (`diagnostician.enabled` false: its rewrites produced no validation in 48 hours) | a new mechanism, or a lesson and a retirement |
 | Gate | when a family meets the validation line | review: Claude when "review" is in `claude.roles` (live: Sonnet 5.5), else GPT-6 Sol while the OpenAI month has room and `gate.review_openai_model` names it (null live), else DeepSeek-V4-Pro on Sail; audit: Claude (live: Opus 5.5, `claude.role_model`), then GPT-6 Astra on the same terms (null live), then a second Sail model; the gate box | first, a look that would repeat an earlier one is refused (the duplicate look, H3a); a look the holdout cannot judge is held (the look holds, L6: a long-delta program whose Train profit leans on drift, or too little holdout power); then review for lookahead, leakage and fill abuse; the audit; one holdout look | a Candidate, a recorded refusal, or a held look |
 | Nightly forward | after 01:45 ET each trading night | the data box, the gate box | the new day goes to the gate image only; every Candidate is re-run on it | one unseen day a night for every Candidate |
@@ -346,36 +346,35 @@ Agent count and simulated years measure activity; passing unseen evidence measur
 | Post-mortem | after each close; weekly | the operator for now (no scheduled post-mortem is built; it would run on Claude, whose `reserve_usd` is kept for it) | compare captured executions with the Gym; diagnose gaps and propose repairs | private reports; calibration only through the recalibration protocol |
 | Harness improvement | a measurement at least daily; each canary's registered window (6 hours to a week) | the operator agent through `scripts/harness_improve.py` (the House's supervised observer, once its policy is enabled, follows the scheduler lane, every canary's deploy receipts and writes the lanes' ranking); no model call inside the loop | five lanes (scheduler, research workflow, prompts/memory, data processing, execution reliability), each with a predeclared metric: a read-only House measurement ranks bottlenecks that repay a cycle; a candidate modifies or adds files only inside its lane's surface, never a protected path (the objective, sealed data, spend limits, capital permissions; the diff's file list, `git diff --no-renames --name-status`, checked by the controller); static guards (defense in depth, not a guarantee) refuse a new route to the store, evaluator, gate, bands, settings or constitution (an import, a re-export, a parent package, a star import) or to a process, file or loader module (directly, through another module that imports one, or through a module's `__builtins__`), a mutation of their state, and changes to the code that records trials, lineages and eligibility; an adversarial review of its exact patch and evaluated tree, recorded with the verdict approve, is required before the loop's deploy step issues the ticket it is deployed under, and a tree the watchdog shows on the House before either, more than two hours after its ticket, or in hours its release class forbids is voided at canary registration and rolled back (the protected paths, that review and the pinned base are the hard controls); capture, staging, the judges and the decision run from the pinned base commit's code (the candidate is judged as the base tree with only its staged files laid over it); a fixed judge scores it (gate forced open, and closed where it must equal the baseline) on a public dev split and a held-out split of private fault families the dev split never uses and no public text names (pools kept outside the repo, pinned by hash, burned by family, drawn after it is committed); research and memory gate it per family or mechanism (`league/swarm/canary.py`) against the concurrent control, motivating units excluded; data and execution compare the window after a release with a fresh control window before it (execution only as a planned release) | a retained, reverted or voided change with its receipts; a retained gate graduates into main (`playbooks/harness-improvement.md`) |
 
-**Models** (Sept 29, 2026; only Sail and Claude are topped up from now on). The inner loop runs on
-Sail's DeepSeek-V4-Flash (V4.1-Flash where long cached histories make it cheaper), with a cache key per
-agent and the shared contract cached once a day; the bandit's top `researcher.top_families` (10 by
-default; 0 live by Sept 30) run on DeepSeek-V4-Pro at low effort. **The top band on Claude** (PR #417): the
-bandit's top `researcher.claude_top` families by weight (12) run their research cycles on Claude Sonnet
-5.5 at medium effort through the gateway, with the same loop, tools and limits, so the families closest
-to passing get the strongest reasoning. A cycle is Claude's when it has fresh evidence (a queued run or
-a rewrite landed), after a cycle that did not hold, and on every third cycle of a hold streak; the rest
-of a streak is the family's Sail profile's. Every Claude failure (a refusal, a cut answer, the funded
-total or a daily line reached, a timeout, an input that does not validate, an answer that cannot be
-read) finishes that turn on the family's own Sail profile, never a cycle error, and a breaker pauses
-the band after repeated unknown bills (league/swarm/claude_research.py). A researcher that stalls for 5
-revisions escalates one rewrite to DeepSeek-V4-Pro asap (Kimi-K3 for the top ten families), or to Claude
-when "rewrite" is in `claude.roles`. Bulk overnight variants go through Sail's Batch API. Through the
-gateway, Claude answers first for the roles in `claude.roles` (by default the architect, the gate's
-audit, the diagnostician and the researcher's top band), each role within its own optional daily line
-(`claude.role_usd_day`; the researcher's is $100) and model (`claude.role_model`; the researcher's is
-Sonnet 5.5), on `claude.model` (Opus 5.5 by default). From 04:53Z Sept 29 the live settings put all
-five one-shot roles on Claude. Since the spend cut of Sept 30 (16:41Z; the owner: cut burn to evidence) Claude
-answers only the gate's review (Sonnet 5.5, $5 a day) and audit (Opus 5.5), so a program's two reads stay two
-different models, and the strategist. The architect's Claude line is $0, so its births run on Kimi-K3, which yielded as
-many strong validations per birth at about a quarter of the cost. Kimi-K3 answers the architect at
-`architect.sail_effort`, `medium` by default: on Oct 1, at the hard-coded `high`, every pass from 08:15Z spent the
-whole 32,000-token output on reasoning and came back cut, most with no text, while the same request at `medium` finished
-in about a minute with twelve carded families. The Sail route now says when an answer was cut (`truncated`, its
-`incomplete_reason` and its usage), so the architect salvages a cut Kimi-K3 answer's complete families as it does
-Claude's, and its event shows the effort, the reasoning tokens and why a pass was cut. Stall rewrites, the researcher's top band and the
-diagnostician are off. By default GPT-6 Sol reviews programs and GPT-6 Astra stands behind the audit while OpenAI's
-funded month lasts (to Sept 30), on its half-price flex tier wherever latency does not matter; the live
-settings switch both off, so OpenAI is unused. Sail is the last fallback of every role but the
+**Models** (Sept 29, 2026; only Sail and Claude are topped up from now on). The inner loop runs on Sail's
+DeepSeek-V4-Flash (V4.1-Flash where long cached histories make it cheaper), with a cache key per agent and the shared
+contract cached once a day; the top `researcher.top_families` by allocation share (10 by default; 0 live by Sept 30) run
+on DeepSeek-V4-Pro at low effort. **The top band on Claude** (PR #417): the top `researcher.claude_top` families by
+weight (12) run their research cycles on Claude Sonnet 5.5 at medium effort through the gateway, with the same loop,
+tools and limits, so the families closest to passing get the strongest reasoning. A cycle is Claude's when it has fresh
+evidence (a queued run or a rewrite landed), after a cycle that did not hold, and on every third cycle of a hold streak;
+the rest of a streak is the family's Sail profile's. Every Claude failure (a refusal, a cut answer, the funded total or
+a daily line reached, a timeout, an input that does not validate, an answer that cannot be read) finishes that turn on
+the family's own Sail profile, never a cycle error, and a breaker pauses the band after repeated unknown bills
+(league/swarm/claude_research.py). A researcher that stalls for 5 revisions escalates one rewrite to DeepSeek-V4-Pro
+asap (Kimi-K3 for the top ten families), or to Claude when "rewrite" is in `claude.roles`. Bulk overnight variants go
+through Sail's Batch API. Through the gateway, Claude answers first for the roles in `claude.roles` (by default the
+architect, the gate's audit, the diagnostician and the researcher's top band), each role within its own optional daily
+line (`claude.role_usd_day`; the researcher's is $100) and model (`claude.role_model`; the researcher's is Sonnet 5.5),
+on `claude.model` (Opus 5.5 by default). From 04:53Z Sept 29 the live settings put all five one-shot roles on Claude.
+Since the spend cut of Sept 30 (16:41Z; the owner: cut burn to evidence) Claude answers only the gate's review (Sonnet
+5.5, $5 a day) and audit (Opus 5.5), so a program's two reads stay two different models, and the strategist. The
+architect's Claude line is $0, so its births run on Sail: on Kimi-K3 from Sept 30, which yielded as many strong
+validations per birth at about a quarter of the cost, and on DeepSeek-V4-Pro on the asap queue (`architect.sail_profile`
+`pro_asap`) since 12:49Z Oct 2, after Sail's balanced queue stopped answering the architect from about 07:00Z. Sail
+answers the architect at `architect.sail_effort` (`medium` by default; `high` live): on Oct 1, at the hard-coded `high`,
+every pass from 08:15Z spent the whole 32,000-token output on reasoning and came back cut, most with no text, while the
+same request at `medium` finished in about a minute with twelve carded families. The Sail route now says when an answer
+was cut (`truncated`, its `incomplete_reason` and its usage), so the architect salvages a cut Sail answer's complete
+families as it does Claude's, and its event shows the effort, the reasoning tokens and why a pass was cut. Stall
+rewrites, the researcher's top band and the diagnostician are off. By default GPT-6 Sol reviews programs and GPT-6 Astra
+stands behind the audit while OpenAI's funded month lasts (to Sept 30), on its half-price flex tier wherever latency
+does not matter; the live settings switch both off, so OpenAI is unused. Sail is the last fallback of every role but the
 diagnostician.
 
 ## Evidence
@@ -402,21 +401,24 @@ diagnostician.
   class the proposal's own mechanism text reads as counts as well as the declared one, so a relabeled idea is caught.
   Rows from before cards are read into cells from their text. The check is deterministic and makes no model call. A
   rebirth on the named row's slice continues its lineage; on another slice it counts that lineage's trials.
-- **The cell's yield** (H2 of the Oct 1 edge study; `architect.cell_yield`, off by default). A self-refuted row (its own
-  researcher retired it) and a drift row (its Train record failed the drift screen) record a family's outcome, not a test
-  of the mechanism, and the productive cells hold the most of them: on Oct 1 the cells whose births passed the drift
-  screen most often were the ones the rebirth refusal closed. Switched on, each cell is read for its yield: the families
-  born in it in the lookback whose outcome is settled (retired, or holding a drift-passing eligible Train run), and how
-  many of those passed. A cell with at least the minimum of settled births whose Wilson 95% upper bound on that share is
-  below the floor is exhausted, and every one of its rows needs a rebirth as above. In every other cell, an open one, a
-  card that matches only self-refuted and drift rows needs no rebirth; a refuted row, the operator's, a diagnosed,
-  trial-adjusted or stress row and a failed mechanism test still need one. The verdict list, the rows indexed, the
-  matching, a claim's tests, both rebirth budgets, the same-slice and same-idea refusals, lineage and the card's
-  completeness are unchanged. A claim made in an open cell that needed none is kept only when it holds; otherwise the
-  card is stored without it and the birth's event says why, so an unchecked claim never links a lineage or spends a
-  budget. If the yield cannot be read, every cell is treated as exhausted. Drift-screen figures are Train figures; the
-  request shows only whether each cell is open or exhausted. A second setting (`architect.claimable_rows`, off by
-  default) lists, for each cell where a claim can be needed, the rows a claim may name and the inputs each read.
+- **The cell's yield** (H2 of the Oct 1 edge study; `architect.cell_yield`, off by default and off on the box by the
+  owner's decision, Oct 2: claims first). A self-refuted row (its own researcher retired it) and a drift row (its Train
+  record failed the drift screen) record a family's outcome, not a test of the mechanism, and the productive cells hold
+  the most of them: on Oct 1 the cells whose births passed the drift screen most often were the ones the rebirth refusal
+  closed. Switched on, each cell is read for its yield: the families born in it in the lookback whose outcome is settled
+  (retired, or holding a drift-passing eligible Train run), and how many of those passed. A cell with at least the
+  minimum of settled births whose Wilson 95% upper bound on that share is below the floor is exhausted, and every one of
+  its rows needs a rebirth as above. In every other cell, an open one, a card that matches only self-refuted and drift
+  rows needs no rebirth; a refuted row, the operator's, a diagnosed, trial-adjusted or stress row and a failed mechanism
+  test still need one. The verdict list, the rows indexed, the matching, a claim's tests, both rebirth budgets, the
+  same-slice and same-idea refusals and the card's completeness are unchanged. Lineage is not: with the setting on, an
+  open-cell restatement on a slice its matched rows did not search is born as a fresh lineage with its own
+  deflated-Sharpe N, which is why switching it on is the owner's decision. A claim made in an open cell that needed none
+  is kept only when it holds; otherwise the card is stored without it and the birth's event says why, so an unchecked
+  claim never links a lineage or spends a budget. If the yield cannot be read, every cell is treated as exhausted.
+  Drift-screen figures are Train figures; the request shows only whether each cell is open or exhausted. A second
+  setting (`architect.claimable_rows`, off by default; 4 on the box since Oct 2) lists, for each cell where a claim can
+  be needed, the rows a claim may name and the inputs each read. It changes no lineage.
 - **The mechanism test** (release B, league/swarm/mechanism.py). Before a carded family's first broad Train replay,
   its program runs with the signal on and with its card's ablation over a pre-registered sample: four windows of three
   months inside 2022-2024 (the years every Gym image holds for every root), covering every calendar month once,
@@ -497,7 +499,7 @@ diagnostician.
   researchers has seen. Its record (`observe.sqlite`, private) is never a forward row and never reaches the
   verifier, the gate, the holdout, the bands or the money table. Research reads it: the strategist a
   PRACTICE table (by mechanism class and family: sessions, trades, the sign of realized P&L, a t; never
-  dollars, dates, versions or code), the architect PRACTICE BY CLASS lines, and the bandit a capped bonus
+  dollars, dates, versions or code), the architect PRACTICE BY CLASS lines, and the allocation a capped share bonus
   (a family gains at most 25% of its share, all bonuses move at most 10% of share; the weight only orders
   research, Train jobs, retirements and the Claude band). Promotion to real money is D2 exactly:
   Validation, the holdout, then the money table.
@@ -575,16 +577,16 @@ diagnostician.
 
 | Job | Service | Model or size | Budget |
 |---|---|---|---|
-| Researchers' inner loop | Sail | DeepSeek-V4-Flash asap (V4.1-Flash for long cached histories); cached contract | the researcher Sail pace, $1.1 an hour live since Sept 30 ($12 before) |
-| The bandit's top families | Sail | DeepSeek-V4-Pro asap at low effort (10 families by default; off live by Sept 30, `researcher.top_families` 0) | inside the same pace |
+| Researchers' inner loop | Sail | DeepSeek-V4-Flash asap (V4.1-Flash for long cached histories); cached contract | the researcher Sail pace, $1.30 an hour live since Oct 1 ($1.10 from Sept 30, $12 before) |
+| The top families by allocation share | Sail | DeepSeek-V4-Pro asap at low effort (10 families by default; off live by Sept 30, `researcher.top_families` 0) | inside the same pace |
 | Rewrites on a stall | Claude, or Sail | Claude when "rewrite" is in `claude.roles` and its line has room; else DeepSeek-V4-Pro asap, Kimi-K3 balanced for the top ten | capped per family per day; off live since Sept 30 (`researcher.stall_revisions` 10000) |
 | Bulk overnight variants | Sail Batch | V4-Pro flex | capped per night |
 | Program review before live shadow | Claude or OpenAI via the gateway | Claude when "review" is in `claude.roles` (live: Sonnet 5.5); by default GPT-6 Sol, flex, while the September month has room (off live); else DeepSeek-V4-Pro on Sail | Claude's $5 a day live; about $0.03 a program on Sol |
-| Architect | Claude via the gateway, or Sail | `claude.model` (Sonnet 5.5 at $2 input, $10 output per million tokens; Opus 5.5 at $4 / $20); Kimi-K3 on Sail as the fallback, and live since Sept 30 (the architect's Claude line $0), at `architect.sail_effort` (`medium`) | inside Claude's funded total, or the Sail pace |
+| Architect | Claude via the gateway, or Sail | `claude.model` (Sonnet 5.5 at $2 input, $10 output per million tokens; Opus 5.5 at $4 / $20); Sail as the fallback (`architect.sail_profile`: Kimi-K3 balanced by default, DeepSeek-V4-Pro asap live since Oct 2), and live since Sept 30 (the architect's Claude line $0), at `architect.sail_effort` (`medium` by default, `high` live) | inside Claude's funded total, or the Sail pace |
 | Gate audit | Claude via the gateway | `claude.role_model["audit"]` or `claude.model` (live: Opus 5.5); GPT-6 Astra while the September month has room (off live), then a second Sail model, as fallbacks | inside Claude's funded total |
 | Diagnostician | Claude via the gateway | `claude.model` | `diagnostician.usd_day`; off live since Sept 30 |
 | Weekly post-mortem | - | not built; the operator writes the post-mortem | - |
-| Gym | Sail boxes | 4-8 sealed size-l boxes by default; at most 4 live since Sept 30 (6 planned after Release A) | $0.10-0.40 an hour each while busy; asleep when idle |
+| Gym | Sail boxes | 4-8 sealed size-l boxes by default; 2-6 live since Release A, Sept 30 | $0.10-0.40 an hour each while busy; asleep when idle |
 | Data | Sail box + ThetaData | one size-l box, asleep when idle | $5-15 a day while running |
 | The House | Sail box | one size-s box | about $0.03 an hour |
 | History, the nightly forward day, fill calibration | ThetaData | four concurrent requests | $80 a month |

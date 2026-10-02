@@ -779,7 +779,7 @@ class LifecycleRegressions(HouseCaseReal):
 class HaircutByAssetClass(ReviewRegressions):
     """A8 (Sept 23, 2026): the Alpaca practice haircut is charged per asset class, each class at the
     optimism measured on its own practice fills against the quote at intent time
-    (`docs/research/queries/2026-09-23/A8-haircut.py`); a plain number still charges every class."""
+    (`archive/docs/research/queries/2026-09-23/A8-haircut.py`); a plain number still charges every class."""
 
     TABLE = CONSTITUTION["allocator"]["evidence"]["alpaca_paper_haircut_bps"]
 
@@ -817,7 +817,7 @@ class HaircutByAssetClass(ReviewRegressions):
         self.assertEqual(self.cut({"crypto": 0, "equity": 0, "option": 0}), 0.0)
 
     def test_the_constitution_carries_the_measured_table(self):
-        # docs/research/queries/2026-09-23/A8-haircut.out: 368 crypto, 136 equity and 46 option fills; and O5 of the
+        # archive/docs/research/queries/2026-09-23/A8-haircut.out: 368 crypto, 136 equity and 46 option fills; and O5 of the
         # options-desk run (Sept 25, 2026): a structure's fills at the top of its row until measured.
         self.assertEqual(self.TABLE, {"crypto": 4, "equity": 2, "option": 24, "option_spread": 60})
 

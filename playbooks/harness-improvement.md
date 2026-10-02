@@ -678,12 +678,13 @@ its own `canary.json`. It never places an order, funds a service or deploys (its
 names the tree; the operator sends it through the watchdog); the gate never raises a
 cap, because every lane's surface excludes the code that holds caps.
 
-### Before release B runs
+### Before release B ran (history)
 
-The lanes, the gate, the judges' override and the `measure` command reach the House with release B.
-Until then (and to produce the first ranked list on Sept 30, 2026), the operator measured the running
-House read-only by sending this module's source to a read-only Python on the House with a guard that
-refuses every writable SQLite open, and ranked the result on the laptop. Candidates captured on a
-release other than the one that will run their canary cannot be staged (the base must reproduce the
-measured running tree): after release B deploys, measure and rank again, then run the cycle. The
-first cycle's canary needs release B's gate on the House.
+The lanes, the gate, the judges' override and the `measure` command reached the House with release B (Oct 1, 2026);
+the lanes release (13:34Z Oct 1) and the Oct 2 canary rule (#481, 11:26Z Oct 2) followed. Before release B (and to
+produce the first ranked list on Sept 30, 2026), the operator measured the running House read-only by sending this
+module's source to a read-only Python on the House with a guard that refuses every writable SQLite open, and ranked the
+result on the laptop. The rule that came out of it still holds: candidates captured on a release other than the one that
+will run their canary cannot be staged (the base must reproduce the measured running tree), so after every House
+release measure and rank again, once the swarm's heartbeat names the new release. No harness improvement has been
+retained so far (Oct 2).

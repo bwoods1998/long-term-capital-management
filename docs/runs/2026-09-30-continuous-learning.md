@@ -300,7 +300,7 @@ was changed.
 - About 90 living families, all in the Gym band. None holds a validation pass.
 - Two holdout looks, both failed.
 - Births are 100% debit verticals.
-- About 80% of allocation weight sits on three families, none with a validation t of 1 or more.
+- About 80% of allocation weight sits on three families, none of them strong at validation.
 
 **Real orders**
 - **Calibration:** ten D3 round trips, realized −$16.29. Calibration only, never strategy evidence.
@@ -368,7 +368,7 @@ promotion"). This record will log their results.
 The spend review read 48 hours of House records, read-only. All counts below are from that review.
 
 **What paid:**
-- The Sail researchers wrote every strong validation: 13 at a validation t of 1.5 or more, 7 of them at 2 or more, and
+- The Sail researchers wrote every strong validation: 13 strong validations, 7 of them meeting the line's t check, and
   one full-line pass, which the audit refused.
 - All 13 came from families under three hours old. Breadth beat depth.
 
@@ -376,8 +376,8 @@ The spend review read 48 hours of House records, read-only. All counts below are
 - **Stall rewrites:** 1,002 Train runs of rewritten versions produced 2 validation attempts, neither of them strong.
 - **The diagnostician:** 19 rewrites led to 21 Train runs and no validation. It rewrote 10 strong families after they
   validated, and none validated again.
-- **Architect births on Claude Sonnet 5.5:** 3 of 841 Sonnet-born families reached a real-type validation at t of 1.5
-  or more. 2 of 329 Kimi-K3-born families did. Kimi-K3 is level or better per birth, at about a quarter of the cost.
+- **Architect births on Claude Sonnet 5.5:** 3 of 841 Sonnet-born families reached a strong real-type validation. 2
+  of 329 Kimi-K3-born families did. Kimi-K3 is level or better per birth, at about a quarter of the cost.
 
 **What changed.** The settings are in [CHANGELOG.md](../../CHANGELOG.md), Sept 30:
 - architect births moved to Kimi-K3 on Sail;
@@ -536,11 +536,13 @@ rows are validations of different programs: same code, other parameters. See "Oc
 **The outcome.** Three revivals have re-validated so far, with numbers identical to their original validations. But the
 deflated-Sharpe check (a probability of at least 0.95) now fails for each of them:
 
-| Family | Validation t | Checks met | Validated versions in its lineage | Deflated Sharpe |
-|---|---|---|---|---|
-| `silver-industrial-cycle-debit-r` | 2.71 | 7 of 8 | 8 | about 0 |
-| `second-session-assimilation-call-r` | 2.42 | 7 of 8 | 4 | 0 |
-| `market-distraction-release-call-r-2` | 1.78 | fails the t | 3 | 0.905 |
+| Family | Checks met | Validated versions in its lineage | Deflated-Sharpe check |
+|---|---|---|---|
+| `silver-industrial-cycle-debit-r` | 7 of 8 | 8 | fails |
+| `second-session-assimilation-call-r` | 7 of 8 | 4 | fails |
+| `market-distraction-release-call-r-2` | fails the t | 3 | fails |
+
+(Oct 2: this table's Validation figures were removed. The public record carries no Validation or holdout figure.)
 
 **This is the multiple-testing control working, not a defect.** The deflated Sharpe counts N as the lineage's validated
 versions and uses their Sharpe spread (`league/swarm/evidence.py`). Silver's lineage kept producing validated variants
@@ -817,9 +819,9 @@ Net at the last close is −$568.74.
 ### The GOOGL family's holdout look
 
 The revival fix ran the GOOGL family's validated program (MSFT leads GOOGL) exactly for the first time under the
-current evaluator. It validated again (t 2.60, 335 trades, deflated Sharpe 0.96), passed review and audit, and took
-its one sealed look at the 2026 holdout on the 25-root gate. **It failed:** over 184 sessions it lost $2,968.81 in
-backtest terms, a daily Sharpe of −0.16 against 0.10 in validation (p 0.996). The catch-up did not hold out of sample.
+current evaluator. It validated again under the current evaluator, passed review and audit, and took its one sealed
+look at the 2026 holdout on the 25-root gate. **It failed.** The catch-up did not hold out of sample. (Oct 2: the
+look's figures were removed from this record; the public record carries no Validation or holdout figure.)
 The gate barred the program from the incubator. Its open tuition position stays exit-only until it closes. This is the
 qualification path working: research, exact re-run, validation, review, audit and a sealed holdout, ending in an
 honest no.
@@ -1051,3 +1053,68 @@ The goal remains unmet: no D2-qualified strategy trades real money, no harness i
 | Spend and runway | $34.18 over 24 h, last 4 h pace $23.30/day; Sail $130.24; Claude $93.61 of $265; OpenAI $0 |
 
 The goal remains unmet: no D2-qualified strategy trades real money, no harness improvement is retained, and Net is −$634.08.
+
+## Oct 2 midday: the look holds, an architect outage, and Sail's stalled queue
+
+### Releases and settings
+- **11:26, House release `20261002T112610Z-e11710692569` (main `e3d0111f`):** the look holds the owner approved at about
+  02:55 (#484). After the duplicate-look check and before any paid review or sealed read, the gate now holds a holdout
+  look for a long-delta version whose Train profit leans on market drift, and for a version whose expected holdout power
+  at the next look's Holm level is low. On the money path a hold counts as a failed look: the version's execution
+  tuition ends and its program is barred from the incubator. On the fixed benchmark the holds changed no false-promotion
+  or missed-signal count. The same release carries the corrected canary rule of the improvement loop (#481: half the
+  families for 12 hours). No evidence reset; the open tuition lot and the 9 practice cohorts were untouched. A
+  deliberate restart restored every instance, and a killed swarm process recovered in 31 seconds.
+- **The architect outage, about 07:00-12:53:** every architect request on Sail's balanced queue went unanswered until
+  the 15-minute poll gave up, while the researchers on the asap queue ran on. Thirteen passes bore nothing and the
+  population fell from 27 to 16. The Claude architect was tried again in the meantime and bore no family in any of its 4
+  passes of the day, so its Claude line went back to $0 at 11:54. At 12:49 the architect moved to DeepSeek-V4-Pro on
+  Sail's asap queue (`architect.sail_profile` `pro_asap`), at high effort from 12:54. Births resumed at once: the 13:14
+  pass bore 4 of 6, and the population was 21 at 13:40.
+- **An interim read of agenda v16c** at 22.8 of its 24 pre-registered hours: 89 births; 11.2% of births made a
+  drift-passing Train version (12.9% of Sail's, 0 of 6 Claude's); 22 validation runs a day. Drift-passing families per
+  day fell short of the target (the six-hour outage), and the root-set repeat and crowded-triangle checks failed. The
+  stop rule did not trigger.
+
+## Oct 2: pause
+
+At about 14:20 the owner paused active development and asked for the repository's comments and docs to be brought up to
+date and its clutter pruned. Asked what the House should do, the owner chose to keep the swarm running. Production
+therefore runs on, unchanged, with no deploy and no settings change until work resumes.
+
+**What runs.** House release `20261002T112610Z-e11710692569` (main `e3d0111f`), gateway `4471596a`, money digest
+`42c4a3af`, the grant `options-swarm-20260928` active. The architect is on Sail (`pro_asap`, high effort) with claimable
+rows listed (`architect.claimable_rows` 4) and open cells off (`architect.cell_yield` null); the Claude architect line
+is $0; tournament forks are off; the duplicate-look refusal and the look holds are on; agenda v16c is locked. Claude
+reads programs at the gate and writes the strategist's section. The incubator is on, the House live test runs within its
+pre-registered sessions, and the one tuition lot is exit-only.
+
+**Not applied.** The next agenda (v17: the two Train-confirmed entry filters and data-hygiene rules), a change to the
+architect's cadence and spend from the final 24-hour read, and ending the two GOOGL-lineage practice cohorts by hand
+(retiring a family does not end its cohort; both are barred from the incubator, so they cost only House compute).
+
+**What changes by itself while paused.**
+- The research burst ends at 00:00 Oct 5 (`guard.burst_until`); the swarm's Sail spend then falls to the guard's
+  after-burst line.
+- At about $130 of Sail balance and the current pace, Sail runs out around Oct 7-9; the guard brakes the swarm at $32,
+  before the House is at risk.
+- The tuition lot's program exits it before 15:10 New York on Oct 7, its expiry cutoff.
+- No incubator first look is possible before about Oct 6-7.
+
+### Scoreboard at the pause (14:15 Oct 2)
+
+| Measure | Value |
+|---|---|
+| Release running | `20261002T112610Z-e11710692569` (main `e3d0111f`), gateway `4471596a` |
+| Real orders since T0 | calibration: 19 round trips closed by the Oct 2 open; tuition: 1 open (GOOGL, exit-only); House test, incubator, Probe, Sized: 0 |
+| Realized options P&L since T0 (08:56 cutoff) | −$37.80 (calibration and fees; strategy routes $0.00) |
+| Input costs since T0 (08:56 cutoff) | $596.28 (external costs declared none) |
+| Net since T0 (08:56 cutoff) | about −$634 (−$634.08) |
+| Families alive / in practice | 21 / 8 practice rows at the Oct 2 open |
+| Holdout looks | 3, 0 passed |
+| Evidence resets | 2 (releases A and B) |
+| Retained harness improvements | 0 |
+| Spend and runway | Sail about $130 (run-out about Oct 7-9); Claude about $93 of $265; OpenAI $0 |
+
+The goal remains unmet: no D2-qualified strategy trades real money, no harness improvement is retained, and Net is about
+−$634.

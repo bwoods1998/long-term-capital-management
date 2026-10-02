@@ -55,7 +55,7 @@ frequent than the clock already allows.
    credits and verdicts wait. The idle path is untouched: an idle agent keeps its cadence. Since
    Sept 24, 2026 a locked agent's NEW session runs on `abstain_lock_profile` (`lock_profile`), the
    cheapest profile: flash_asap cost $0.0027 a call against Luna's $0.0080 and pro_asap's $0.0299
-   on the same frozen packets (league/routing_evidence.json, Sept 22).
+   on the same frozen packets (league/routing_evidence.json, Sept 22; since removed).
 8. **A session the provider broke is not a pass** (Sept 24, 2026). One that ended in a provider
    server error (`provider_fault`: HTTP 500, 502, 503, 504 or 529) is refunded by the researcher,
    and like every provider failure (`completed_pass`) it moves no streak, counts as no completed

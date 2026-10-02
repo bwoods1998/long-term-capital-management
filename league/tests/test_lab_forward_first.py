@@ -1,6 +1,6 @@
 """F1 of the forward-first run (Sept 25, 2026): the Alpha Lab breeds, places and graduates on forward growth.
 
-The evidence (docs/goals/LTCM_FORWARD_FIRST.md, gap 2, and the T0 snapshot of 04:21Z Sept 25): the archive placed
+The evidence (archive/docs/goals/LTCM_FORWARD_FIRST.md, gap 2, and the T0 snapshot of 04:21Z Sept 25): the archive placed
 every cell by search fitness (`Lab._place`) while the forward windows only ranked; 273 candidates went to the House's
 replay in 24 h (446 `lab.graduate` rows, 17% of the candidates written by Luna, Sol or an agent) and 2 of them had a
 winning forward window of their own when they went; 11 lineages whose latest window lost over six or more active

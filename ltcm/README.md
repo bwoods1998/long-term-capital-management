@@ -26,12 +26,12 @@ Two things keep this package in the tree:
    cover the modules the league depends on), and CI still runs them. Removing the unused part
    safely is a job of its own.
 
-The written record of the run is in [`docs/runs/`](../docs/runs/) (launch, the arena nights, the fee
-recovery, the pause and reset) and [`docs/history/`](../docs/history/2026-09-first-run-readme.md)
+The written record of the run is in [`archive/docs/runs/`](../archive/docs/runs/) (launch, the arena nights, the fee
+recovery, the pause and reset) and [`archive/docs/history/`](../archive/docs/history/2026-09-first-run-readme.md)
 (the README as it stood while the run was live). `python3 -m ltcm run` was how that floor was
 started; it is not how anything is started now. The run's state (`/workspace/.data/ltcm` on the
 box: the event tape, the ledgers, the strategy store) was archived and emptied on September 19
-([the pause and the clean slate](../docs/runs/2026-09-19-pause-and-reset.md)).
+([the pause and the clean slate](../archive/docs/runs/2026-09-19-pause-and-reset.md)).
 
 ## The first run's design rules
 
@@ -859,7 +859,7 @@ position-disclosure notice.
 
 The first-generation `portfolio_runtime` ran one S&P 500 paper portfolio. That was a different
 system with a different purpose, and it is retired. The plan below was carried out on September 15,
-2026; its record is [`docs/history/portfolio-agent/`](../docs/history/portfolio-agent/README.md).
+2026; its record is [`docs/history/portfolio-agent/`](../archive/docs/history/portfolio-agent/README.md).
 
 1. Until the scheduled week completes, `portfolio_runtime` and the Sailbox bundle are frozen.
 2. The filings desk (`merton`) imports the research bank -- the written case and the open questions

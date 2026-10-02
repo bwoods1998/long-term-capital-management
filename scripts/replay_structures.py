@@ -2,7 +2,7 @@
 """Replay an options strategy (structures or single contracts) over a LOCAL copy of the options
 history, the way the House would judge it, and print what the House would decide.
 
-    python3 scripts/replay_structures.py league/seeds/options_condor.py
+    python3 scripts/replay_structures.py league/seeds/options_condor_vrp.py
     python3 scripts/replay_structures.py STRATEGY.py --from 2026-08-25 --to 2026-09-24 --params '{"width": 2}' --json
 
 Built Sept 25, 2026 for the options-desk run (builder S3) so the structure founders are judged off the

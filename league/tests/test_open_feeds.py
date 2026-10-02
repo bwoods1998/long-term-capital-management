@@ -1,5 +1,5 @@
 """The recorders of the key-free hosts the Kalshi-scale run added on Sept 25-26, 2026 (workstream I2 of
-docs/goals/LTCM_KALSHI_SCALE.md), and the rule that answers the requests no recorder can (I3).
+archive/docs/goals/LTCM_KALSHI_SCALE.md), and the rule that answers the requests no recorder can (I3).
 
 Every recorder is held to the three rules of league/feeds.py -- a row is visible only from the moment
 it became knowable, live and in replay; a failed poll stores nothing; unchanged content is stored once

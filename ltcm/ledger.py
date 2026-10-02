@@ -9,7 +9,7 @@ A desk never holds a balance of its own. Its book is a *fold* of three kinds of 
 * `ledger.mark` -- a valuation observation: equity, cash, marks per position and the daily P&L.
 
 Returns are time-weighted: growth is chained across sub-periods that are broken by every external
-flow, so adding money cannot look like skill (see `docs/history/lessons/06-portfolio-returns.md`).
+flow, so adding money cannot look like skill (see `archive/docs/history/portfolio-agent/lessons/06-portfolio-returns.md`).
 Growth is carried as an exact `Fraction` and only rendered to `Decimal` at the edge. Drawdown is
 measured on the same flow-neutral growth index rather than on raw equity.
 

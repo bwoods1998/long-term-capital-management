@@ -2,7 +2,7 @@
 
 The owner, 18:15Z Sept 25: "i want rapid recursively learning loop that has paper trading and production trading as soon
 as possible based on actual progress made by the agents in the game". The money rows O1-O5 of
-docs/goals/LTCM_OPTIONS_DESK.md: O1 `option_spreads_real` (the switch, false in this deploy), O2 `spread_probe_usd` ($150),
+archive/docs/goals/LTCM_OPTIONS_DESK.md: O1 `option_spreads_real` (the switch, false in this deploy), O2 `spread_probe_usd` ($150),
 O3 `spread_position_share` (1.0 of the stake in maximum loss), O4 `spread_probe_line` (>= 3 closed practice structures at
 W_paper >= 1.01, or >= 1 and a passed replay with >= 20 structures and positive out-of-sample growth) and O5
 `evidence.alpaca_paper_haircut_bps.option_spread` (60 bps a side). A structure agent's evidence and its family's record

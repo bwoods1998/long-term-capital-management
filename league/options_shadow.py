@@ -1,7 +1,7 @@
 """The options shadow account: every level-3 structure on PRACTICE, held as one position.
 
-Sept 25, 2026 (the options-desk run, `docs/goals/LTCM_OPTIONS_DESK.md` and the owner's amendment of
-06:01Z in `docs/runs/2026-09-25-options-desk.md`, Track S). `OptionsShadowBroker` is a `Broker`
+Sept 25, 2026 (the options-desk run, `archive/docs/goals/LTCM_OPTIONS_DESK.md` and the owner's amendment of
+06:01Z in the options-desk run record, which never reached main, Track S). `OptionsShadowBroker` is a `Broker`
 (`ltcm/broker.py`) over a simulated options account, as `KalshiShadowBroker` (`league/paper.py`) is for
 Kalshi: it reads real, live option quotes, fills under the conservative rules below, charges the
 replay's fee and never sends an order anywhere (it holds no credential; its only I/O is two

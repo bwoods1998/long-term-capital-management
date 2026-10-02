@@ -4,10 +4,10 @@ Running out of Sail credits pauses EVERY box, the House included. So every few m
 Sail's balance (the usage summary through `Provider.check_balance`) and brakes the swarm, Gym boxes and
 researchers to zero, when:
 
-- the balance is below 2 x the non-swarm burn a day + `margin_usd` (plan: "two days of the House's burn
-  plus $30"). The non-swarm burn is Sail's own 24-hour spend less what the swarm itself booked in those
-  24 hours, and never less than `house_burn_usd_day`: it covers the House box, its model calls, and any
-  other box (the data box) that eats the same credits;
+- the balance is below 2 x the House's burn a day + `margin_usd` (plan: "two days of the House's burn
+  plus $30"). The House's burn is `house_burn_usd_day`; only with `measured_burn` true (off by default) is it
+  Sail's own 24-hour spend less what the swarm itself booked in those 24 hours, never less than
+  `house_burn_usd_day`, which also covers any other box on the account (the data box);
 - the swarm's Sail spend since the burst began reached `burst_cap_usd` (by default $350 until Monday Sept 28's open;
   swarm.json sets the burst's cap and end, `burst_until`);
 - after the burst: the swarm's Sail spend today (UTC) reached `after_burst_usd_day` less the House's burn,

@@ -310,7 +310,7 @@ PRIORITY = {"agent": 0, "seed": 1, "param": 2, "luna": 1, "sol": 1}
 #: Sept 25, 2026; E1 reserved `reserved_share` of the batch for them instead). Graduation asks the forward runs
 #: for their windows first too (`forward_wanted`).
 RESERVED_ORIGINS = ("agent", "luna", "sol")
-#: `lab.reserved_share` as the plans bound it (docs/goals/LTCM_FORWARD_FIRST.md, "Risk-free dials", as the close-the-gaps
+#: `lab.reserved_share` as the plans bound it (archive/docs/goals/LTCM_FORWARD_FIRST.md, "Risk-free dials", as the close-the-gaps
 #: plan did; `game.json` `lab_bounds` says the same and `economy.check_bounds` refuses a game file outside it): enforced
 #: where it is read. Kept for the parameter children since F1, so the mechanism children's share is 0.25 to 0.67.
 RESERVED_SHARE_BOUNDS = (0.33, 0.75)

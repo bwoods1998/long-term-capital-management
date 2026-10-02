@@ -1,6 +1,10 @@
 """How merged code reaches the House with no human step -- and why the code it brings cannot be
 the judge that lets it in.
 
+OFF since the options overhaul (Sept 26, 2026): `"auto_update": false` in `league/config.json` (a missing key is off,
+`league/service.py` `auto_update`), so every release is an owner deploy (`scripts/floor_box.py deploy`). What follows is
+how it works when the owner turns it back on.
+
 GitHub is the source of truth. The repository is public, so the House box needs no credential to
 read it: every half hour the House reads the commit at the head of `main`, downloads THAT commit
 (by its sha, never "whatever main is now") as a tarball, unpacks the trees a release is made of,

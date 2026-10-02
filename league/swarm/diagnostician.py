@@ -23,10 +23,11 @@ WHAT IT ANSWERS (one JSON object, a structured output): `decision` "rewrite" or 
   the best version's. It must pass the Gym's safety check and name only the family's roots. It is then queued as the
   family's next Train run (`rewrite_ready`, profile "diagnostician"), so the researcher's next cycle runs it through
   the same safety check and Gym run as any revision, as a new version authored "diagnostician".
-- A RETIRE is honored only while more families live than `population.start` (`retire_gym` with that as its floor, checked
-  in its own transaction); otherwise it is written to the family's notebook as a recommendation. Never while independent
-  evidence is pending (a version at the gate, a look out, the extension hold or, from Oct 1, a best Train version that
-  awaits validation: researcher.py's THE VALIDATION WAIT): the recommendation goes to the notebook, to be read after it.
+- A RETIRE is honored only while more families live than `population.floor` (`retire_gym` with that as its floor,
+  checked in its own transaction; `population.start` is the architect's refill target, never a second floor); otherwise
+  it is written to the family's notebook as a recommendation. Never while independent evidence is pending (a version
+  at the gate, a look out, the extension hold or, from Oct 1, a best Train version that awaits validation:
+  researcher.py's THE VALIDATION WAIT): the recommendation goes to the notebook, to be read after it.
 - A call BILLED WITHOUT AN ANSWER (a refusal, a truncation) counts as a diagnosis: the family waits for new evidence. A
   truncation is asked once more at medium effort with a tighter brief when the day's budget holds it. A call that cost
   nothing is asked again after half an hour.

@@ -113,7 +113,7 @@ STATE_RANK = {"unproven": 0, "proven": 1, "swing": 2}
 EXITS_SLICED = True
 
 # ------------------------------------------------------------ real structures (O1-O5)
-#: The bounds of the options-desk run's money rows (docs/goals/LTCM_OPTIONS_DESK.md, the table O1-O5; Deploy G, Sept 25,
+#: The bounds of the options-desk run's money rows (archive/docs/goals/LTCM_OPTIONS_DESK.md, the table O1-O5; Deploy G, Sept 25,
 #: 2026). `league.ci` refuses a constitution outside them (`spread_problems`), and a House that reads one anyway treats
 #: real structures as switched off (`spread_rule`): it fails closed. The line (O4) may be made stricter, never looser.
 SPREAD_BOUNDS: dict[str, tuple[Decimal, Decimal]] = {

@@ -1,6 +1,6 @@
 """The Kalshi-scale run's watch (`scripts/kalshi_watch.py`) reads what it says it reads.
 
-docs/goals/LTCM_KALSHI_SCALE.md, workstreams W, K3 and K4 (Sept 25, 2026). The snippet runs here against
+archive/docs/goals/LTCM_KALSHI_SCALE.md, workstreams W, K3 and K4 (Sept 25, 2026). The snippet runs here against
 a throwaway state directory built for the test: real and practice fills and settlements by family and
 league, the House's dust rows kept out of the trades (five of them on the real Kalshi book between 18:00Z
 Sept 24 and 06:20Z Sept 25, `source: dust`, no instrument), refusals by class, the hours with and without a

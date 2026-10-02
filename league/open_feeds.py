@@ -1,5 +1,5 @@
 """The recorders of the key-free data hosts added by the Kalshi-scale run on Sept 25-26, 2026
-(docs/goals/LTCM_KALSHI_SCALE.md, workstream I2), and the rule that answers the data requests no
+(archive/docs/goals/LTCM_KALSHI_SCALE.md, workstream I2), and the rule that answers the data requests no
 recorder can (workstream I3).
 
 The owner, Sept 25, 2026: "expand the allow list incredibly broadly... everything useful there for

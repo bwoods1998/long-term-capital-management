@@ -4,7 +4,7 @@ Why a sensor and not a lab (Sept 22, 2026). The semantic lab labelled 128,179 re
 states with eight fixed questions for $13.67 of the $20 lifetime Jev allowance. Out of sample, on
 events never seen in training, its labels predicted whether a midpoint MOVES (Brier +0.040 over a
 numeric model) but not which WAY (Brier -0.0014 at five minutes), and every threshold trade lost
-2-8 cents a contract after the spread, with or without them (docs/design/2026-09-22-jev-sensor.md).
+2-8 cents a contract after the spread, with or without them (archive/docs/design/2026-09-22-jev-sensor.md).
 About $5 is left, so what Jev does now is the cheap semantic step in front of expensive work:
 does this note matter to that strategy, do these two requests describe the same missing feed,
 does this text report a bug, are these two mechanisms the same idea reworded.

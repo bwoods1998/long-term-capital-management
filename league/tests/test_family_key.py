@@ -1,4 +1,4 @@
-"""C8 and C6 of the forward-first run (Sept 25, 2026; docs/goals/LTCM_FORWARD_FIRST.md): a family is its program's
+"""C8 and C6 of the forward-first run (Sept 25, 2026; archive/docs/goals/LTCM_FORWARD_FIRST.md): a family is its program's
 mechanism, and a family's capacity is read at its real size.
 
 C8. A family was the label a birth carried: a research child inherited its parent's family whatever it ran, and an agent

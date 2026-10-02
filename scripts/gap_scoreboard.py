@@ -5,7 +5,7 @@ snapshot of the House.
     python3 scripts/gap_scoreboard.py --snapshot DIR [--since ISO] [--baseline ISO] [--deploys FILE] [--json | --markdown]
     python3 scripts/gap_scoreboard.py --take DIR [--since ISO] [--baseline ISO] [--json | --markdown]
 
-Workstream Z of docs/goals/LTCM_FORWARD_FIRST.md (and before it of docs/goals/LTCM_CLOSE_THE_GAPS.md): read at
+Workstream Z of archive/docs/goals/LTCM_FORWARD_FIRST.md (and before it of archive/docs/goals/LTCM_CLOSE_THE_GAPS.md): read at
 T0, every four hours and at the end of a run. Read-only and standard library only (it borrows `league.stats`,
 itself standard library, so its bound is the ladder's own; `scripts/economics.py` for compute, as the plan's
 lifetime figures were measured; `ltcm.data`'s NYSE calendar for the US session): the sqlite files are opened
@@ -23,7 +23,7 @@ windows are measured back from it, and instants are compared as instants, never 
 (sqlite's `datetime('now', ...)` puts a space where the ledger puts `T`, which once let a whole day
 into a six-hour window).
 
-THE FORWARD-FIRST ROWS (docs/goals/LTCM_FORWARD_FIRST.md "The scoreboard", Sept 25, 2026; the first table)
+THE FORWARD-FIRST ROWS (archive/docs/goals/LTCM_FORWARD_FIRST.md "The scoreboard", Sept 25, 2026; the first table)
 
 Each row is the plan's row of the same number; each number in it names the function that computed it, and the
 plan's target is printed beside it. Windows end at the snapshot's newest ledger row and start at `--since`
@@ -93,7 +93,7 @@ plan's target is printed beside it. Windows end at the snapshot's newest ledger 
    binds on runway (`seats.population` `max_population` under `ceiling`) and the population alerts in the
    window.
 
-THE CLOSE-THE-GAPS METRICS (docs/goals/LTCM_CLOSE_THE_GAPS.md; kept, the second table)
+THE CLOSE-THE-GAPS METRICS (archive/docs/goals/LTCM_CLOSE_THE_GAPS.md; kept, the second table)
 
 THE FAMILY RECORD. By default every family record here is the House's own: `HouseRecords` runs
 `league.families.family_record` (Deploy B; `league.allocator.family_record` in Deploy A's code) on the
@@ -1427,7 +1427,7 @@ def evidence_clocks(snap: Snapshot, agents: Mapping[str, Agent], trades: Sequenc
         third = None
         for trade in sorted(by_agent.get(agent.id, []), key=lambda t: t.close_seq):
             # The House's sale of a dead member's holdings is the House's close, not the member's
-            # (the House's own clock, `House._evidence_clocks`, leaves it out since the B-seats review).
+            # (the House's own clock, `measure_evidence_clocks` in league/house.py, leaves it out since the B-seats review).
             if trade.close_t < first or trade.closing:
                 continue
             seen.add(trade.event)
@@ -2305,7 +2305,7 @@ def runway(snap: Snapshot, since: float) -> dict[str, Any]:
 # -------------------------------------------------------------------------------------- the rows together
 def forward_first(snap: Snapshot, *, since: float, agents: Mapping[str, Agent], families: Families,
                   intents: Mapping[str, Mapping[str, Any]], metrics: Mapping[str, Any], extras: Mapping[str, Any]) -> dict[str, Any]:
-    """The seven rows of docs/goals/LTCM_FORWARD_FIRST.md's scoreboard, each a dict of the functions that compute it."""
+    """The seven rows of archive/docs/goals/LTCM_FORWARD_FIRST.md's scoreboard, each a dict of the functions that compute it."""
     settled = real_settled(snap, since)
     compute = compute_per_day(snap, since)
     capital = capital_on_proof(snap, agents)
@@ -2430,7 +2430,7 @@ def summary_rows(board: Mapping[str, Any]) -> list[tuple[str, str, str, str]]:
     ]
 
 
-#: The forward-first plan's rows and targets (docs/goals/LTCM_FORWARD_FIRST.md, "The scoreboard"), word for word.
+#: The forward-first plan's rows and targets (archive/docs/goals/LTCM_FORWARD_FIRST.md, "The scoreboard"), word for word.
 FORWARD_METRICS = {
     "1": "Real settled profit a day (24 h) against compute a day (24 h); proven families and each one's capacity at its real size",
     "2": "Forward-positive share of the last day's graduates and newborns (lab forward windows, first practice day); "

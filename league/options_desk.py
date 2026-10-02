@@ -1,6 +1,6 @@
 """The options desk's structure founders, seated (Sept 25, 2026; the options-desk run, builder S2).
 
-The owner's amendment of 06:01Z (`docs/runs/2026-09-25-options-desk.md`): at least ten replay-passed
+The owner's amendment of 06:01Z (the options-desk run record, which never reached main): at least ten replay-passed
 structure founders on the options desk, seated on practice, with seats freed for them from desks whose
 7-day forward record is negative. A STRUCTURE FOUNDER is an entry of the `alpaca-options` row's
 `founders` in `league/niches.json` whose seed's NEEDS literal says `"structures": True`

@@ -1,4 +1,4 @@
-"""The move sensor (J1, docs/goals/LTCM_JEV_SENSES.md): will this Kalshi midpoint move soon, recorded point in time.
+"""The move sensor (J1, archive/docs/goals/LTCM_JEV_SENSES.md): will this Kalshi midpoint move soon, recorded point in time.
 
 Why (Sept 25, 2026). The lab's data (semantic.sqlite, Sept 21-22, events unseen in training) says a
 FREE model of 23 quote-and-contract features predicts "the midpoint moves at all" at AUC 0.859 /

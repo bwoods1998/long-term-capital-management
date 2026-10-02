@@ -20,7 +20,7 @@ What it reports, and the definitions it uses:
    The House row (venue fee activities, dust, internal-cross balancing) is shown separately.
 
    Account returns for REAL money follow the public site's definitions, which this file does not
-   change: docs/account-performance.md ("Tracked profit = current account equity - opening mark -
+   change: archive/docs/account-performance.md ("Tracked profit = current account equity - opening mark -
    subsequent net external deposits. Withdrawals are negative deposits") as superseded by
    league/publish.py `Publisher.account` / `Publisher.checkpoint` (the owner's decision of
    Sept 19, 2026): the chart's `account_equity` is on the LEAGUE'S BASIS, i.e.

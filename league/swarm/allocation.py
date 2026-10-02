@@ -101,10 +101,11 @@ long_put; butterfly; vertical; straddle; condor; calendar) may hold at most `bir
 last `births.window_hours` (24) once there were `births.min_window` (10), and at most that share of a pass's want (one
 quota a pass, the truncation retry's admits included); the first `births.per_pass_min` (1) of a structure family in a
 pass is always allowed, so a pass is never barred outright. THE POPULATION GUARD: below `births.min_alive` living
-families (null: three quarters of `population.start`, 72 of 96 live) the whole quota rests, so proposals that stay one
-structure family can thin the population to the guard but never below it. The architect's request shows the counts and
-which families are full (while `architect.structures` is set, only the families of its types: `BirthQuota.text(allowed)`);
-a refused proposal is counted in the pass's event (`structure_capped`).
+families (null: three quarters of `population.start`: 36 at the default start of 48, 72 at a start of 96) the whole
+quota rests, so proposals that stay one structure family can thin the population to the guard but never below it. The
+architect's request shows the counts and which families are full (while `architect.structures` is set, only the
+families of its types: `BirthQuota.text(allowed)`); a refused proposal is counted in the pass's event
+(`structure_capped`).
 
 Every knob lives in swarm.json's `allocation` block (read every loop, no deploy; `settings.py` has no entry: this module's
 DEFAULTS are the defaults, and a misread value falls back to its default). Standard library only. Nothing on the live
@@ -141,7 +142,7 @@ DEFAULTS: dict[str, Any] = {
     "min_concurrency": 4,
     "plan_usd_per_hour": None,   # null: no plan, so neither expansion nor contraction (researcher.concurrency is the level)
     "expand_below": 0.8,
-    # min_alive null: three quarters of population.start (72 of 96 live); below it the whole quota rests.
+    # min_alive null: three quarters of population.start (36 at the default start of 48); below it the whole quota rests.
     "births": {"max_share": 0.6, "window_hours": 24, "min_window": 10, "per_pass_min": 1, "min_alive": None},
 }
 #: What the planners (the architect's LIVING FAMILIES, the strategist's BOARD) are told a family's `research_share` is:

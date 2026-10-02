@@ -221,7 +221,7 @@ CONSTITUTION: dict[str, Any] = {
         # class's own practice fills against the order's reference at intent time (the touch for a
         # market order, the limit for a limit order), because real Alpaca fills are too few to be the
         # benchmark (2 crypto at 0.0 bps, 0 equity, 0 option). Measured on the 21:36Z snapshot, fills
-        # since Sept 21 (docs/research/queries/2026-09-23/A8-haircut.py and .out), + adverse, - better:
+        # since Sept 21 (archive/docs/research/queries/2026-09-23/A8-haircut.py and .out), + adverse, - better:
         #   crypto 368 fills, $12,148: notional-weighted mean -3.13 bps (buys -0.01, sells -6.63);
         #   equity 136 fills, $4,005: -0.21 (buys -0.17, sells -0.26), at the touch;
         #   option  46 fills, $982: -21.15 (buys -15.10, sells -32.84; a few limits filled far through).
@@ -232,7 +232,7 @@ CONSTITUTION: dict[str, Any] = {
         # was measured, since 10 a side was 3x crypto's optimism and 50x the stocks'. A plain number
         # still charges every class (the rollback form), and a class not named pays the largest rate.
         #
-        # `option_spread` (row O5 of the options-desk run's money table, docs/goals/LTCM_OPTIONS_DESK.md, Sept 25, 2026;
+        # `option_spread` (row O5 of the options-desk run's money table, archive/docs/goals/LTCM_OPTIONS_DESK.md, Sept 25, 2026;
         # 24-60 bps a side): a level-3 STRUCTURE's fill (`league/structures.py`: one held instrument whose `market_id` names
         # its type and legs) pays this rate a side on its held notional, on every Alpaca practice book a structure trades
         # on (`allocator.HAIRCUT_BOOKS`: `alpaca-paper`, and the House's `options-shadow`, whose fills the plan's row says
@@ -323,11 +323,11 @@ CONSTITUTION: dict[str, Any] = {
         # `option_bunt_usd`: an options bunt is staked this much (proposal A2a; the table allows up
         # to $80). At the old max(bunt_usd, rungs.2.option_max_position_usd) = $40 the book's
         # 50%-of-equity position and order rules held a contract to $20, so the chain was filtered at
-        # contracts the book refused (docs/proposals/2026-09-23-alpaca-stocks-and-level-3-options.md,
+        # contracts the book refused (archive/docs/proposals/2026-09-23-alpaca-stocks-and-level-3-options.md,
         # blocker 6). At $80 one $40 contract fits under half the stake, inside the $500 Alpaca
         # envelope and under the $75 order cap.
         "option_bunt_usd": "80",
-        # ---- Promotion on proof: the close-the-gaps run, Deploy A (docs/goals/LTCM_CLOSE_THE_GAPS.md,
+        # ---- Promotion on proof: the close-the-gaps run, Deploy A (archive/docs/goals/LTCM_CLOSE_THE_GAPS.md,
         # D4 and P1-P3; each key below carries one row of that plan's closed "Money-rule bounds" table).
         # The owner, Sept 23-24, 2026: "I deeply want to speed up the dynamism of agents moving up and
         # down the levels of the game as quickly as possible and aggressively aligned on incentives so
@@ -406,7 +406,7 @@ CONSTITUTION: dict[str, Any] = {
         # a symmetric record's false-positive rate at a look, and the gate is what fixes the lopsided one.
         #
         # `unit` and `reference_share` (the same row, Deploy B, Sept 24, 2026: C1 decided the unit of an
-        # observation on the T0 snapshot, docs/goals/LTCM_CLOSE_THE_GAPS.md): "at_risk" measures an event
+        # observation on the T0 snapshot, archive/docs/goals/LTCM_CLOSE_THE_GAPS.md): "at_risk" measures an event
         # by what it made per dollar its positions put at risk, as the log growth of a small reference bet,
         # ln(1 + `reference_share` x r) / `reference_share` with r never below -1, so a contract that expires
         # worthless is a finite -1.005 at 1%, not an account's ruin. Measured on the T0 snapshot: a practice
@@ -420,7 +420,7 @@ CONSTITUTION: dict[str, Any] = {
         # weighed alike, small wins and large losses -- a resting bid filled in full as the price falls
         # through it -- read as an edge while the dollars lost; weather-favorites' practice losers carried
         # 2.4 times its winners' dollars at T0, and a family that lost $44 of real money over 100 events was
-        # proven and ready to swing). Effect at T0 (docs/runs/2026-09-24-close-the-gaps.md), the same states
+        # proven and ready to swing). Effect at T0 (archive/docs/runs/2026-09-24-close-the-gaps.md), the same states
         # as Deploy A's: weather-favorites unproven (2 losses in 16; loss-rate bound -0.2112 a dollar at risk);
         # sports-central-run-under proven (bound +0.1423: 6 of 11 practice events won at about even money after
         # a 7% taker fee, its winners carrying twice its losers' dollars; weighed alike it was -0.1234); every
@@ -589,7 +589,7 @@ CONSTITUTION: dict[str, Any] = {
         #      mechanism ledger just before it.
         # A gate that cannot be read seats no probe and demotes nobody.
         # A proven or swinging family's agents are bunts, not probes: none of this applies to them. Evidence
-        # (docs/research/queries/2026-09-24/R5-family-probe.py, on the 15:06Z snapshot): of the allocator's 21
+        # (archive/docs/research/queries/2026-09-24/R5-family-probe.py, on the 15:06Z snapshot): of the allocator's 21
         # promotions to real money since Sept 23 00:00Z, 11 were onto families whose pooled forward record was negative
         # over 6 or more active blocks; they realized -$8.12 on 22 closes (8 positive) and no stay ended positive. The
         # other 10 made +$28.96 on 34 closes (26 positive). At 15:06Z 9 of the 14 seated probes, $139.75 of their $168.94
@@ -630,7 +630,7 @@ CONSTITUTION: dict[str, Any] = {
         # of its fills are the founder's), and megacaps-chip-demand-relay's (n 13, bound +0.0010, practice only) moves
         # whole to the program that earned it, mcentee-hddb4ae's eleventh rewrite. Absent: the label a birth carries.
         "family_key": "mechanism",
-        # ---- Real structures (rows O1-O4 of the options-desk run's money table, docs/goals/LTCM_OPTIONS_DESK.md, and the
+        # ---- Real structures (rows O1-O4 of the options-desk run's money table, archive/docs/goals/LTCM_OPTIONS_DESK.md, and the
         # owner's amendment of 06:01Z Sept 25, 2026, item 4 "real money follows proof, fast"; this run's money-digest
         # change 1 of 2, Deploy G; O5 is `evidence.alpaca_paper_haircut_bps.option_spread` above). The owner, 18:15Z Sept
         # 25: "i want rapid recursively learning loop that has paper trading and production trading as soon as possible

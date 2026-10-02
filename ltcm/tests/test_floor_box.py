@@ -1333,7 +1333,7 @@ class LeagueHostsTests(unittest.TestCase):
             # api.github.com: the updater deploys only a commit whose checks GitHub's API confirms.
             # The last five: the live feeds the House records (league/feeds.py).
             feeds = ["site.api.espn.com", "www.okx.com", "www.deribit.com", "api.hyperliquid.xyz", "futures.kraken.com"]
-            # The key-free data hosts the owner allowed on Sept 24, 2026 (docs/goals/LTCM_CLOSE_THE_GAPS.md, workstream I).
+            # The key-free data hosts the owner allowed on Sept 24, 2026 (archive/docs/goals/LTCM_CLOSE_THE_GAPS.md, workstream I).
             data = ["api.open-meteo.com", "ensemble-api.open-meteo.com", "historical-forecast-api.open-meteo.com", "api.weather.gov",
                     "www.sec.gov", "efts.sec.gov", "api.nasdaq.com", "markets.newyorkfed.org", "home.treasury.gov",
                     "sports.core.api.espn.com", "www.tsa.gov", "www.realclearpolling.com"]

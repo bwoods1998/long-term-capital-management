@@ -60,7 +60,7 @@ WHAT IS RECORDED
   `backfills` keeps, for each key, the endpoint its rows came from, the span they cover, and whether
   the backfill has reached its target (the provenance).
 
-THE RECORDERS OF SEPT 24, 2026 (docs/goals/LTCM_CLOSE_THE_GAPS.md, workstream I, gap 7). The owner allowed
+THE RECORDERS OF SEPT 24, 2026 (archive/docs/goals/LTCM_CLOSE_THE_GAPS.md, workstream I, gap 7). The owner allowed
 twelve key-free data hosts that morning; each recorder is a `Source` in `RECORDERS`, polled on the same
 lane, kept in the same store and read by the same point-in-time paths. Who had asked, in the T0 snapshot
 (Sept 19 21:14Z - Sept 24 01:40Z: tool requests, research summaries, request_tool arguments and paid
@@ -2160,7 +2160,7 @@ def _words(name: Any) -> set[str]:
 
 
 class Source:
-    """One recorder of Sept 24, 2026 (docs/goals/LTCM_CLOSE_THE_GAPS.md, workstream I, gap 7): a feed
+    """One recorder of Sept 24, 2026 (archive/docs/goals/LTCM_CLOSE_THE_GAPS.md, workstream I, gap 7): a feed
     a strategy names in `NEEDS["feeds"]`, the host it reads, and how it is polled and stamped.
 
     A live source (`history` False) keeps what a poll returned under the House's receive time and is

@@ -16,15 +16,27 @@ on the new state root: never roll back past it, because the release before it (D
 on, a rollback also has the real-book and structures guards of [docs/operations.md](docs/operations.md).
 
 Operator changes that are not deploys (`swarm.json`, image adoptions, grant ratifications) are listed
-beside the deploys of their day, marked "no deploy". The run record (`docs/runs/2026-09-26-options-swarm.md`
-on branch `run/options-swarm-2026-09-26`) has the detail.
+beside the deploys of their day, marked "no deploy". The run records have the detail: to Sept 29,
+`docs/runs/2026-09-26-options-swarm.md` on branch `run/options-swarm-2026-09-26`; from Sept 30,
+[docs/runs/2026-09-30-continuous-learning.md](docs/runs/2026-09-30-continuous-learning.md).
 
 ## Not yet deployed
 
-Main `e3d0111f` is the 11:26Z Oct 2 House release (below). Under the freeze (Oct 1, "The freeze"), a change to
-`league/live` or `league/gym` waits for a planned release. Nothing merged is waiting for a release.
+The running House release is `20261002T112610Z-e11710692569` (main `e3d0111f`, 11:26Z Oct 2, below). Main is ahead of
+it by docs and comments only (the Oct 2 pause refresh: no behaviour change, verified by an AST comparison), so nothing
+merged is waiting for a release. Those comment edits touch modules the live path loads (`league/constitution.py`,
+`league/swarm/{__init__,settings,evidence,researcher,pool,claude_research}.py`), so by the path rule the next House
+release from main deploys in the money path's window (20:05-13:25Z); the money digest does not move. Under the freeze (Oct 1, "The freeze"), a change to `league/live` or `league/gym` waits
+for a planned release. Active development is paused (Oct 2, 14:15Z, below).
 
 ## 2026-10-02
+
+### 14:15Z, the pause (no deploy)
+
+- The owner paused active development and chose to keep the swarm running: production runs on
+  `20261002T112610Z-e11710692569` with its `swarm.json` unchanged (`docs/operations.md`, **Paused (Oct 2, 2026)**, has
+  the settings in effect and the resume steps). Not applied: the next agenda (v17), a change to the architect's cadence
+  and spend, and ending the two GOOGL-lineage practice cohorts by hand.
 
 ### 11:26Z, House release `20261002T112610Z-e11710692569` (main `e3d0111f`; PRs #484, #481)
 
@@ -101,9 +113,16 @@ Main `e3d0111f` is the 11:26Z Oct 2 House release (below). Under the freeze (Oct
 
 - **03:00-05:26Z:** the owner chose "claims first": `architect.claimable_rows` 4 (05:26Z); `architect.cell_yield` stays null.
 - **05:03Z:** `tournament.fork_top` 3 → 0 (no automatic forks of already-validated lineages; the edge study's L7).
-- **00:06Z / 06:09Z / 06:51Z / 11:38Z:** the architect's Claude line 5 → 0 → 5 → 0 → 5 (Claude's rebirth claims failed the card
-  check; then Sail's architect calls timed out from 07:20Z to 11:27Z, 13 passes, no births). **11:38Z:** `architect.sail_effort`
-  high → medium so the Sail fallback fits its poll window.
+- **00:06Z / 06:09Z / 06:51Z / 11:38Z / 11:54Z:** the architect's Claude line 5 → 0 → 5 → 0 → 5 → 0 (Claude's rebirth
+  claims failed the card check; then Sail's architect calls timed out from about 07:00Z, 13 passes, no births; the
+  Claude architect bore no family in any of its 4 Oct 2 passes, so the line is 0 again from 11:54Z). **11:38Z:**
+  `architect.sail_effort` high → medium so the Sail fallback fits its poll window (the cause was not the effort: Sail's
+  balanced queue had stopped answering; below).
+- **12:28Z / 12:49Z:** `architect.sail_profile` `k3_balanced` (the default) → `pro_balanced` → `pro_asap`. Every
+  architect request on Sail's balanced queue since about 07:00Z had sat unanswered until the 15-minute poll gave up
+  (`provider_poll_timeout`), while the researchers on the asap queue ran on. The 12:53Z pass on `pro_asap` answered in
+  42 s and bore a family; rollback: unset the key, once the balanced queue answers again.
+- **12:54Z:** `architect.sail_effort` medium → high. The 13:14Z pass bore 4 of 6; the population was 21 at 13:40Z.
 - **07:38-07:51Z, an operator error:** a large read-only extract on the House exhausted its memory and stalled the swarm; the
   House's supervisor restarted the swarm itself. Extracts are now batched and capped.
 
@@ -140,18 +159,22 @@ Main `e3d0111f` is the 11:26Z Oct 2 House release (below). Under the freeze (Oct
     with the inputs each read.
 
   Unchanged: `MECHANISM_VERDICTS` and the rows indexed (the memory lane's judge), the matching, a claim's tests, both
-  rebirth budgets, `card_rebirth` "refuse", the same-slice and same-idea refusals, lineage and card completeness. A
-  claim made in an open cell that needed none is kept only when it holds; otherwise it is stripped before the card is
-  stored (`claim_dropped` on the birth). A yield that cannot be read leaves every cell as before. No Validation or
-  holdout figure reaches the request. The pass's event carries `cell_yield` (Train figures only). On the edge study's
-  Oct 1 12:59Z extract, none of the 127 classified cells would be exhausted. Nothing in `league/live`, `league/gym` or
-  `LEAGUE_FILES`, no evaluator adoption, no money digest. The money path: an import trace of the tree
-  (`league/live/*.py`, then the modules `league/live` imports lazily:
-  `league/swarm/{store,bands,gate,evaluator,settings}.py`, and the docs' lazy `league/gym` modules and the
-  constitution) loads `cards.py` (through `gate`, `researcher`) and `settings.py`, never `architect.py`, and no module
-  it did not load before (`cards.py` now imports `evidence.py`, already loaded), so it deploys 20:05-13:25Z only,
-  after two adversarial reviews and green CI. The live path never builds a `RebirthIndex`. To switch on and verify:
-  `docs/operations.md`, **The cell's yield**.
+  rebirth budgets, `card_rebirth` "refuse", the same-slice and same-idea refusals, and card completeness (lineage too
+  while `cell_yield` is off). A claim made in an open cell that needed none is kept only when it holds; otherwise it is
+  stripped before the card is stored (`claim_dropped` on the birth). A yield that cannot be read leaves every cell as
+  before. No Validation or holdout figure reaches the request. The pass's event carries `cell_yield` (Train figures
+  only). On the edge study's Oct 1 12:59Z extract, none of the 127 classified cells would be exhausted. Nothing in
+  `league/live`, `league/gym` or `LEAGUE_FILES`, no evaluator adoption, no money digest. The money path: an import trace
+  of the tree (`league/live/*.py`, then the modules `league/live` imports lazily:
+  `league/swarm/{store,bands,gate,evaluator,settings}.py`, and the docs' lazy `league/gym` modules and the constitution)
+  loads `cards.py` (through `gate`, `researcher`) and `settings.py`, never `architect.py`, and no module it did not load
+  before (`cards.py` now imports `evidence.py`, already loaded), so it deploys 20:05-13:25Z only, after two adversarial
+  reviews and green CI. The live path never builds a `RebirthIndex`. To switch on and verify: `docs/operations.md`,
+  **The cell's yield**.
+
+  With `cell_yield` on, an open-cell restatement on another slice is born as a fresh lineage (its own deflated-Sharpe
+  N): switching it on is the owner's decision; `claimable_rows` alone changes no lineage. Fixes from the reviews: the
+  yield reading is read before its error flag (E1); a non-finite `claimable_rows` is off, not an error (E2).
 - **Deploy.** CI green on the combined head; the daemon stopped idle; staged 05:15:30Z, promoted 05:16:03Z. No evidence reset; the
   money digest unchanged; lineage diff 0 violations. A deliberate restart at 05:27Z restored every instance, and a killed swarm
   process recovered in 31 seconds.
@@ -159,9 +182,6 @@ Main `e3d0111f` is the 11:26Z Oct 2 House release (below). Under the freeze (Oct
 ## 2026-10-01
 
 ### 20:35Z, the H1 release: House release `20261001T203426Z-6fa69bfcda55` (main `665a9e8d`; PRs #475, #476, #477)
-  With `cell_yield` on, an open-cell restatement on another slice is born as a fresh lineage (its own deflated-Sharpe N):
-  switching it on is the owner's decision; `claimable_rows` alone changes no lineage. Fixes from the reviews: the yield
-  reading is read before its error flag (E1); a non-finite `claimable_rows` is off, not an error (E2).
 
 - **Contents.** No retire while the best Train version awaits validation (H1, #475); the research lane's held-out pool
   pin after the operator's rotation r8 (#476, `league/swarm/harness_lanes.py`: the research lane's hash moves, so every
@@ -240,8 +260,10 @@ Main `e3d0111f` is the 11:26Z Oct 2 House release (below). Under the freeze (Oct
   architect reads v16c verbatim until the strategist's next accepted section.
 - **15:22:59Z, two operator retirements** (`SwarmStore.retire_gym`, source "operator"):
   `googl-lags-msft-ai-cloud-qqq-flat-r` and `googl-lags-msft-ai-cloud-qqq-flat--2`, the GOOGL lineage's two practice
-  families, withdrawn from practice and the incubator after the lineage's program failed its holdout look (09:39Z,
-  under the 09:16Z release). The open tuition lot stays exit-only to its programmed exit.
+  families, retired after the lineage's program failed its holdout look (09:39Z, under the 09:16Z release). The failed
+  look already bars the program from the incubator. Retiring a family does not end its practice cohort: both cohorts
+  kept practising (`docs/operations.md`, **Ending a cohort by hand**). The open tuition lot stays exit-only to its
+  programmed exit.
 - **What followed, as expected:** clearing the section woke the held families, and at 15:27Z the idle rule retired 26
   architect-born families with no Train best (population 69 → 40; start 96, floor 12). One more, a 14:43Z revival whose
   best Train version awaited validation, retired itself at 15:22:52Z: the defect the H1 release fixed at 20:35Z.

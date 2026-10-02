@@ -1,6 +1,6 @@
 """Capital follows proof: the forward-first run's money rules M1-M5 and the Alpaca maker record, M6 (Sept 25, 2026).
 
-The run's plan (docs/goals/LTCM_FORWARD_FIRST.md, "C. Capital follows proof" and the closed "Money-rule bounds" table)
+The run's plan (archive/docs/goals/LTCM_FORWARD_FIRST.md, "C. Capital follows proof" and the closed "Money-rule bounds" table)
 and the main session's verification of the one proven family (the run record's "The proven sports family, verified",
 07:11Z Sept 25): its 25 events lie on 3 slate dates inside one five-day MLB under-regime, the same program lost 12-14% a
 dollar over Sept 4-24 on Kalshi's public record, and one observation per date gives an 80% bound of -0.0665 -- a count of
