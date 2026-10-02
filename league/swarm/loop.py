@@ -12,7 +12,8 @@ One process beside the House loop, niced. Its threads:
 - ROUNDS on their own threads so none blocks another: the tournament (hourly), the idle pass between its rounds (every
   five minutes, the idle rule's retirements alone: `Tournament.idle_pass`), the gate (every few
   minutes), the nightly forward (once a day), the architect (`architect.every_seconds`, four hours by default; THE
-  LIBRARY's retrieval first, then the strategist, then the architect: `architect_pass`), the diagnostician (every few
+  LIBRARY's retrieval first, then the strategist, then the architect: `architect_pass`), the strategist on its own daily
+  round when it writes the whole agenda (`strategist_pass`, `strategist.writes` "agenda"), the diagnostician (every few
   minutes, Claude on the stuck and the nearly-there families);
 - RESEEDS (the sprint, Sept 26): below `population.start` while the architect is not due, the seeds' mechanisms are
   founded again on admitted roots they never tried (`reseed`, at most `population.reseed_max` a pass);
@@ -651,7 +652,8 @@ class Swarm:
             out["library"] = {"error": f"{type(exc).__name__}: {str(exc)[:200]}"}
         began = self.clock()
         try:
-            if self.architect.want() > 0 and self.strategist.due():
+            # THE WHOLE AGENDA (`strategist.writes` "agenda") is written on its own daily round (`strategist_pass`), not here.
+            if self.architect.want() > 0 and getattr(self.strategist, "in_pass", lambda: True)() and self.strategist.due():
                 out["strategist"] = self.strategist.run(**({"library": block} if block is not None else {}))
         except Exception as exc:  # noqa: BLE001 - run() never raises; this is the belt to its braces
             out["strategist"] = {"error": f"{type(exc).__name__}: {str(exc)[:200]}"}
@@ -664,6 +666,18 @@ class Swarm:
         return {**self.architect.run(paired=paired, **({"library": block} if block is not None else {})), **({"strategist": {k: ran.get(k) for k in (
             "accepted", "route", "cost_usd", "reasons", "skipped", "error", "primed", "turns", "note")}} if ran else {}),
                 **({"library": out["library"]} if "library" in out else {})}
+
+    def strategist_pass(self) -> dict[str, Any]:
+        """THE WHOLE AGENDA's own round (league/swarm/strategist.py; `strategist.writes` "agenda"): THE LIBRARY's block
+        first (the accepted agenda's `library_queries`, else the seed searches), then the strategist, once an agenda day.
+        A retrieval that fails leaves the strategist without the block; the strategist's run never raises."""
+        block, note = None, None
+        try:
+            block = Swarm.library_block(self)
+        except Exception as exc:  # noqa: BLE001 - the run goes on without the library
+            note = {"error": f"{type(exc).__name__}: {str(exc)[:200]}"}
+        out = self.strategist.run(**({"library": block} if block is not None else {}))
+        return {**out, **({"library": note} if note else {})}
 
     def round_alive(self, name: str) -> bool:
         thread = self.rounds.get(name)
@@ -788,6 +802,9 @@ class Swarm:
                     log(f"reseeded {len(born)}: {', '.join(born)}")
             if self.diagnostician.due():  # Claude's own funded line and daily budget, not the researchers' pace
                 self._round("diagnostician", self.diagnostician.run)
+        # THE WHOLE AGENDA: the strategist's own daily round (no Gym needed; under the guard, as the architect it serves).
+        if not getattr(self.strategist, "in_pass", lambda: True)() and self.guard.allows() and self.strategist.due():
+            self._round("strategist", self.strategist_pass)
         self._grow_workers()
         if self.clock() - self._beat >= float(self.settings.get("heartbeat_seconds", 20)):
             self._beat = self.clock()

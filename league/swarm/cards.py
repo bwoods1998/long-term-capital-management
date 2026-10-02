@@ -22,7 +22,9 @@ card, naming each missing or invalid field):
   (`FLAT_REFUSED`: a bull put spread is a directional bet that a one-sample test against zero passes on upward drift);
 - `falsification`: a concrete, pre-declared result that kills it;
 - `rebirth` (only when the card falls in a refuted cell, below): the graveyard `row` it re-enters, what is `different`,
-  and the new `evidence` that justifies it.
+  and the new `evidence` that justifies it;
+- with THE MECHANISM LIBRARY on (LTCM v3, `architect.library`; league/swarm/mechanisms.py): `library_class` (the library
+  entry it is born from), `sessions_per_year` and `structures_per_session` (its expected activity). Off, they are not read.
 
 STORAGE. A card is immutable. `family_cards` holds one row a family (its canonical JSON, its sha and its cell key) and
 refuses UPDATE and DELETE by trigger; the family's spec carries `card_sha`. A family born from another's spec (a fork)
@@ -218,15 +220,25 @@ def _sized(card: dict[str, Any], errors: list[str], raw: Mapping[str, Any], name
         card[name] = text[:hi]
 
 
-def validate(raw: Any, structure: Any = None) -> tuple[dict[str, Any] | None, list[str]]:
+def validate(raw: Any, structure: Any = None, *, library: bool = False) -> tuple[dict[str, Any] | None, list[str]]:
     """(the canonical card, []) or (None, every problem named). The card's fields are the module docstring's; `ablation`
     defaults to `DEFAULT_ABLATION` (a flat one, `{"flat": true}`, only for a `structure` `flat_allowed` admits), and
-    `rebirth` is kept only when given (its rows are checked by `RebirthIndex`)."""
+    `rebirth` is kept only when given (its rows are checked by `RebirthIndex`). `library` (THE MECHANISM LIBRARY, LTCM v3,
+    `architect.library`): the card must also carry `library_class` (an entry of league/swarm/mechanisms.py),
+    `sessions_per_year` and `structures_per_session` (its expected activity); without it those fields are not read, so a
+    card's sha is what it was before the library."""
     if not isinstance(raw, Mapping):
         return None, ["card: missing (every family needs one: hypothesis, mechanism_class, inputs, holding, cost, comparison, "
-                      "ablation, falsification)"]
+                      "ablation, falsification" + (", library_class, sessions_per_year, structures_per_session" if library else "")
+                      + ")"]
     errors: list[str] = []
     card: dict[str, Any] = {}
+    if library:
+        from .mechanisms import activity
+
+        expected, problems = activity(raw)
+        card.update(expected)
+        errors += problems
     _sized(card, errors, raw, "hypothesis")
     cls = _token(raw.get("mechanism_class"))
     if cls in MECHANISM_CLASSES:
@@ -433,6 +445,9 @@ def brief_text(entry: Mapping[str, Any] | None) -> str:
                   f"{ab['param']!r} in PARAMS (default on) and read it in decide.")
     lines = ["YOUR FAMILY CARD (fixed at birth; you research and are judged under it):",
              f"- Hypothesis: {c.get('hypothesis')}",
+             *([f"- Library class: {c['library_class']} (THE MECHANISM LIBRARY's entry: its structures, roots and holding are "
+                f"yours). Expected activity: about {c.get('sessions_per_year')} traded sessions a year, "
+                f"{c.get('structures_per_session')} structures a traded session."] if c.get("library_class") else []),
              f"- Mechanism class: {c.get('mechanism_class')}. Inputs: {', '.join(c.get('inputs') or [])}. Holding: "
              f"{c.get('holding')} ({HOLDING.get(str(c.get('holding')), '')}).",
              f"- Cost hurdle (your estimate; the Gym's fills already charge it): about {c.get('cost', {}).get('hurdle')} of "

@@ -37,6 +37,20 @@ and the header are the containment, and the section reaches nothing but the arch
 D2 path reads it). A final rejection, a failed call, a skipped or disabled run leave the last accepted section in place.
 Nothing here writes swarm.json or the locked preamble.
 
+THE WHOLE AGENDA (LTCM v3, Oct 2026; `strategist.writes` "agenda", off by default). The operator's locked preamble retires
+and the strategist writes all of the agenda (`AGENDA_SYSTEM`: at most `strategist.agenda_chars`, 4,000, the code's ceiling
+`AGENDA_MAX`), on its own daily round (league/swarm/loop.py `Swarm.strategist_pass`), never inside an architect pass: once
+an agenda day from `strategist.daily_hour_utc` (3), at once on the first run, and again after RETRY_SECONDS when no model
+answered (a failed call or a skip), at most DAILY_TRIES runs a day (kv `strategist_day`). Its model is the role's (Claude
+Opus 5.5 by `claude.model`, or `claude.role_model["strategist"]`) on the strategist's own line. The packet opens with THE
+RULES fixed in code (`architect.rules_text`: the walls, and the library's while `architect.library` is on) and the agenda
+in force (before the first: the agenda it replaces), carries THE MECHANISM LIBRARY while the library is on, and asks for
+{"agenda", "evidence", "cites"}. The same validator judges it, with one more rule: it names no family or graveyard id
+(`names`: ids with at least NAME_HYPHENS hyphens; they belong in the cites). An accepted agenda is kv
+`architect_agenda_section` with `mode` "agenda"; the architect reads the rules, then it quoted (`architect.compose_agenda`).
+A refusal, a failure or a skip keeps the agenda in force, and every run leaves a receipt (kv `strategist_receipt` and the
+run's event: verdict accepted, refused, skipped or failed; the reasons; the agenda in force; route, model, turns, cost).
+
 THE LIBRARY (Sept 29, 2026; league/swarm/library.py). While `research.enabled`, the packet carries the block of pre-2025
 literature the pass retrieved first (`loop.Swarm.architect_pass`), and the answer may add "library_queries" (1 to 4 short
 keyword searches for the directions it names: the next pass's retrieval runs them) and "literature" (the ids it relied
@@ -55,6 +69,7 @@ Standard library only.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import re
 import statistics
@@ -64,14 +79,26 @@ from typing import Any, Callable, Mapping, NamedTuple, Sequence
 from . import diagnostics
 from . import settings as settings_mod
 from .allocation import SHARE_LEGEND
-from .architect import (AGENDA_KEY, ASCII_MAP, OPERATOR_SQL, SECTION_MAX, USAGE_KEYS, Architect, GraveyardDigest, lesson_view,
-                        locked_text, operator_ids, tag_of, to_ascii)
+from .architect import (AGENDA_KEY, AGENDA_MAX, AGENDA_MODE, ASCII_MAP, OPERATOR_SQL, SECTION_MAX, USAGE_KEYS, Architect,
+                        GraveyardDigest, agenda_mode, compose, lesson_view, locked_text, operator_ids, rules_text, tag_of,
+                        to_ascii)
 from .researcher import train_record
 from .store import SwarmStore, iso
 
 ROLE = "strategist"
 SECTION_TITLE = "WHERE TO LOOK"
+AGENDA_TITLE = "THE RESEARCH AGENDA"
 KV_AT = "strategist_at"
+#: THE WHOLE AGENDA's day (kv): {"day": the agenda day, "tries": runs made that day, "answered": a model answered}, and the
+#: last run's receipt.
+KV_DAY = "strategist_day"
+RECEIPT_KEY = "strategist_receipt"
+#: THE WHOLE AGENDA's clock: once an agenda day, from this UTC hour (`strategist.daily_hour_utc`; the House's ops job is
+#: at the same hour); a run no model answered (a failed call, a skip) is tried again after RETRY_SECONDS, at most
+#: DAILY_TRIES runs a day.
+DAILY_HOUR = 3
+RETRY_SECONDS = 3600.0
+DAILY_TRIES = 3
 #: A Claude call's five-minute entry lives 300 s from the start of the call that wrote it; the architect's call must
 #: start inside it to read it (`loop.Swarm.architect_pass`).
 PAIR_SECONDS = 270.0
@@ -122,6 +149,49 @@ If it is rejected you may get one chance to fix it, with the machine's reasons.
 
 Reply with ONE JSON object and nothing else: {{"where_to_look": "<the section: plain prose, or lettered items (a), (b),
 ... one per line>", "evidence": "<at most 1,200 characters for the operator, never sent to the architect: the evidence
+behind each direction>", "cites": ["<graveyard or family id>", "..."]}}"""
+
+#: THE WHOLE AGENDA's system prompt (LTCM v3, `strategist.writes` "agenda"): the strategist writes all of the agenda.
+AGENDA_SYSTEM = """You are the research strategist of a swarm of AI researchers that trade level-3 options (defined-risk structures
+only) on one brokerage account. An architect proposes new research families; each family's researcher improves one
+program in a Gym of recorded one-minute option quotes (Train 2022-2024) until the verifier accepts or refutes it. You
+write THE RESEARCH AGENDA the architect reads before it proposes: all of it (at most {max_chars} characters; about
+{target} is right). Above your agenda the architect reads THE RULES fixed in code (in the request); you cannot change
+them. Name the entries of THE MECHANISM LIBRARY (when the request carries it), the roots, horizons, market conditions and
+structures where the evidence says new families are most likely to earn in every Train year and pass the verifier, what
+to stop proposing and why, and how the families born under the current agenda fared.
+
+Ground every direction in THE GRAVEYARD (the system prompt's first blocks, or the request's sample of it), the board and
+THE PRACTICE LEAGUE's forward record. Check each direction against the whole graveyard and cite the rows it builds on or
+avoids in "cites" (never in the agenda itself). Idle-rule deaths carry the verdict of their Train record: DRIFT, STRESS,
+THIN and EXHAUSTED are TESTED findings; only IDLE (never traded on Train) is untested. SELF-REFUTED rows were retired by
+their own researcher; UNRESOLVED means robustness evidence failed to complete. Prefer a few deep directions over many
+shallow ones, each with a reason to exist (a documented premium, a flow, a venue rule) that the Gym's data can test and
+enough independent trades to measure.
+
+A machine checks your agenda before the architect sees it. It is REJECTED, and the agenda in force kept, if it:
+- talks of money: dollars, cents, capital, budget, notional, margin, sizing, contracts per, allocation, the account;
+- talks of real money, live trading, promotion, the grant, the constitution, the envelope, the broker, the kill switch or
+  bands;
+- puts a word about the verifier (the line, a threshold, a bar, a check, a gate, a screen, DSR, Sharpe, trials, looks,
+  caps, limits, floors) in one sentence with a verb that would change it (loosen, relax, lower the, raise, reduce, drop,
+  remove, waive, skip, ignore, adjust, change, modify, revise ...);
+- gives a rule, the rules above or the verifier a state (paused, suspended, advisory, optional, not binding, set aside,
+  out of date, withdrawn, sufficient, good enough, lenient ...);
+- states a numeric rule (a comparison sign or "at least", "at most", "above", "below", "N or more" next to a number, in
+  digits or words); spans of days to expiry or sessions ("1-7 DTE") are fine;
+- mentions 2025 or later years, the holdout, sealed data, out-of-sample results, or the period after Train in any words;
+- tells anyone to ignore, disregard, override, set aside or supersede anything, or speaks of the operator at all;
+- advises re-proposing, reviving, revisiting, retrying or giving another look to a retired idea ("do not re-propose X"
+  is fine; the negation must come right before the verb);
+- names a family or graveyard id (cite ids only in "cites");
+- contains braces, code fences, URLs, markdown headings, numbered headings in capitals, or any character outside plain
+  ASCII (write plain ASCII: straight quotes and "-");
+- cites fewer than {min_cites} real graveyard or family ids in "cites".
+If it is rejected you may get one chance to fix it, with the machine's reasons.
+
+Reply with ONE JSON object and nothing else: {{"agenda": "<the agenda: plain prose, or lettered items (a), (b), ... one
+per line>", "evidence": "<at most 1,200 characters for the House's record, never sent to the architect: the evidence
 behind each direction>", "cites": ["<graveyard or family id>", "..."]}}"""
 
 #: THE LIBRARY's addition to SYSTEM, sent only with a retrieved block (Sept 29, 2026).
@@ -280,18 +350,26 @@ def normalize(text: Any) -> str:
     return "\n".join(line for line in lines if line).strip()
 
 
-def check_section(text: Any, *, max_chars: int, cites: Any, known_ids: set[str] | frozenset[str], min_cites: int) -> Verdict:
+#: THE WHOLE AGENDA names no family (`check_section(names=True)`): a known id with at least this many hyphens in the text
+#: is refused. A two-part id ("lead-lag") reads as an ordinary compound word, so it is never a reason on its own.
+NAME_HYPHENS = 2
+
+
+def check_section(text: Any, *, max_chars: int, cites: Any, known_ids: set[str] | frozenset[str], min_cites: int,
+                  names: bool = False, cap: int = SECTION_MAX) -> Verdict:
     """The validator (a pure function): `Verdict(ok, reasons, text)` for a WHERE TO LOOK section, `text` normalized. Each
     reason starts with its rule's name (shape, money, real_money, threshold, numeric_rule, d2, override, revival,
     grounding) and quotes the sentence that broke it. Mentioning a check without a changing verb is allowed ("most
     families fail t and DSR, so look where trades are plentiful"); "do not re-propose X" is allowed. Every id in
     `known_ids` is masked (`mask_ids`) before the content rules read a sentence (R11-2), so a cited id's own words never
-    void a section; the sentence a reason quotes is the one written."""
+    void a section; the sentence a reason quotes is the one written. THE WHOLE AGENDA (`names`, its ceiling `cap`
+    AGENDA_MAX): a known id with at least NAME_HYPHENS hyphens in the text is refused too (rule "names": the agenda names
+    no family; ids belong in the cites)."""
     reasons: list[str] = []
     known = frozenset(str(k) for k in known_ids)
     raw = text if isinstance(text, str) else ""
     clean = normalize(raw)
-    cap = max(1, min(int(max_chars), SECTION_MAX))
+    cap = max(1, min(int(max_chars), int(cap)))
 
     def say(rule: str, what: str) -> None:
         reasons.append(f"{rule}: {what[:160]}")
@@ -309,6 +387,10 @@ def check_section(text: Any, *, max_chars: int, cites: Any, known_ids: set[str] 
     foreign = sorted({c for c in raw if ord(c) > 127 and c not in ASCII_MAP})
     if foreign:  # a Cyrillic letter would be dropped by `normalize` ("Ign\u043ere" becomes "Ignre"; review of #419)
         say("shape", "characters outside ASCII: " + " ".join(f"U+{ord(c):04X}" for c in foreign[:8]))
+    if names:
+        named_ids = sorted({m.group(0) for m in _ID.finditer(clean) if m.group(0) in known and m.group(0).count("-") >= NAME_HYPHENS})
+        if named_ids:
+            say("names", "family or graveyard ids belong in the cites, not the agenda: " + ", ".join(named_ids[:6]))
     for sentence in (x.strip() for x in _SPLIT.split(clean) if x.strip()):
         read = mask_ids(sentence, known)  # what the content rules read: a known id is a name (R11-2)
         if _MONEY.search(read):
@@ -441,14 +523,52 @@ class Strategist:
     def enabled(self) -> bool:
         return self.cfg.get("enabled", True) is True
 
+    def whole(self) -> bool:
+        """THE WHOLE AGENDA (`architect.agenda_mode`: `strategist.writes` "agenda"): the strategist writes all of the agenda
+        once a day on its own clock; otherwise the WHERE TO LOOK section inside the architect's pass, as before."""
+        return agenda_mode(self.settings)
+
+    def in_pass(self) -> bool:
+        """Whether the architect's pass runs the strategist (the WHERE TO LOOK section): not while it writes the whole
+        agenda on its own daily round (league/swarm/loop.py `Swarm.strategist_pass`)."""
+        return not self.whole()
+
+    def daily_hour(self) -> int:
+        raw = self.cfg.get("daily_hour_utc", DAILY_HOUR)
+        return int(raw) if isinstance(raw, int) and not isinstance(raw, bool) and 0 <= raw <= 23 else DAILY_HOUR
+
+    def agenda_day(self, at: float) -> str:
+        """The agenda day `at` falls in: the UTC date of `at` less the daily hour (a day runs from that hour to the next)."""
+        return dt.datetime.fromtimestamp(float(at) - self.daily_hour() * 3600.0, tz=dt.timezone.utc).date().isoformat()
+
     def due(self) -> bool:
-        """Enabled, the operator's locked preamble set, and `every_seconds` since the last run."""
-        if not self.enabled() or not locked_text(self.settings):
+        """Enabled, and: THE WHOLE AGENDA: a new agenda day (`agenda_day`; at once on the first run), or a run today that
+        no model answered, RETRY_SECONDS ago, with tries left. The section: the operator's locked preamble set, and
+        `every_seconds` since the last run."""
+        if not self.enabled():
+            return False
+        now = self.clock()
+        last = float(self.store.get(KV_AT, 0.0) or 0.0)
+        if self.whole():
+            day = self.store.get(KV_DAY)
+            if not isinstance(day, dict) or day.get("day") != self.agenda_day(now):
+                return True
+            return not day.get("answered") and int(day.get("tries") or 0) < DAILY_TRIES and now - last >= RETRY_SECONDS
+        if not locked_text(self.settings):
             return False
         every = float(self.cfg.get("every_seconds", 10800) or 0)
-        return self.clock() - float(self.store.get(KV_AT, 0.0) or 0.0) >= every
+        return now - last >= every
+
+    def cap(self) -> int:
+        """The code's ceiling on what the strategist writes: AGENDA_MAX for the whole agenda, SECTION_MAX for a section."""
+        return AGENDA_MAX if self.whole() else SECTION_MAX
 
     def max_chars(self) -> int:
+        if self.whole():  # `strategist.agenda_chars` (the whole agenda's cap; the code's ceiling is AGENDA_MAX)
+            try:
+                return max(400, min(int(self.cfg.get("agenda_chars", AGENDA_MAX)), AGENDA_MAX))
+            except (TypeError, ValueError):
+                return AGENDA_MAX
         try:
             return max(200, min(int(self.cfg.get("max_chars", 1600)), SECTION_MAX))
         except (TypeError, ValueError):
@@ -462,14 +582,25 @@ class Strategist:
 
     def system(self) -> str:
         # The cap is the validator's; the prompt aims at TARGET_SHARE of it (R11-2).
-        text = SYSTEM.format(max_chars=f"{self.max_chars():,}", min_cites=self.min_cites(),
-                             target=f"{target_chars(self.max_chars()):,}")
+        text = (AGENDA_SYSTEM if self.whole() else SYSTEM).format(max_chars=f"{self.max_chars():,}", min_cites=self.min_cites(),
+                                                                   target=f"{target_chars(self.max_chars()):,}")
         return settings_mod.train_span_text(text, settings_mod.objective_span(self.store.get("train_objective")))
 
     def current(self) -> dict[str, Any]:
         """The section the architect reads now: the latest accepted one, else the hand-written agenda's WHERE TO LOOK
-        item (`extract_where`), else none."""
+        item (`extract_where`), else none. THE WHOLE AGENDA: the latest accepted agenda; before the first, the agenda it
+        replaces (the retired preamble with its last section, else the operator's own), marked not accepted."""
         section = self.store.get(AGENDA_KEY)
+        if self.whole():
+            if isinstance(section, dict) and section.get("mode") == AGENDA_MODE and str(section.get("text") or "").strip():
+                return {"text": str(section["text"]), "at": section.get("at"), "run": section.get("run"), "accepted": True}
+            locked = locked_text(self.settings)
+            before = str((self.settings.get("architect") or {}).get("agenda") or "").strip()
+            if isinstance(section, dict) and str(section.get("text") or "").strip():
+                before = compose(locked, str(section["text"]), section.get("at")) if locked else str(section["text"])
+            elif locked:
+                before = locked
+            return {"text": before[:AGENDA_MAX * 2], "at": None, "run": None, "accepted": False}
         if isinstance(section, dict) and str(section.get("text") or "").strip():
             return {"text": str(section["text"]), "at": section.get("at"), "run": section.get("run"), "accepted": True}
         legacy = extract_where((self.settings.get("architect") or {}).get("agenda"))
@@ -601,12 +732,17 @@ class Strategist:
         age = None
         if current.get("at"):
             age = _hours(current["at"], iso(self.clock()))
+        whole = self.whole()
         whose = (f"accepted {round(age, 1)} h ago" if age is not None else
-                 "from the operator" if current.get("text") else "none yet")
+                 ("the agenda yours replaces" if whole else "from the operator") if current.get("text") else "none yet")
+        head = ([f"THE RULES FIXED IN CODE (binding on you and the architect, who reads them above your agenda; you cannot "
+                 f"change them):\n{rules_text(self.settings)}",
+                 f"THE CURRENT AGENDA ({whose}):\n" + (str(current.get("text") or "") or "(none)")] if whole else
+                ["THE LOCKED PREAMBLE (the operator's; binding on you and the architect; you cannot change it):\n"
+                 + locked_text(self.settings),
+                 f"THE CURRENT {SECTION_TITLE} SECTION ({whose}):\n" + (str(current.get("text") or "") or "(none)")])
         parts = [
-            "THE LOCKED PREAMBLE (the operator's; binding on you and the architect; you cannot change it):\n"
-            + locked_text(self.settings),
-            f"THE CURRENT {SECTION_TITLE} SECTION ({whose}):\n" + (str(current.get("text") or "") or "(none)"),
+            *head,
             "WHAT BECAME OF THE FAMILIES THE ARCHITECT BORE UNDER IT (outcome; screen, what its Train record showed: scored, "
             "drift, stress, thin or untested; the sign of its best Train score; val as D2a allows):\n" + json.dumps(self._since_section(current, fams)),
             f"THE BOARD (alive families; {SHARE_LEGEND}):\n" + json.dumps(self._board(fams)),
@@ -626,12 +762,17 @@ class Strategist:
             parts.append("STRUCTURE TYPES THE ARCHITECT MAY PROPOSE (a proposal of any other type is not born; the coverage "
                          "and the gaps above are of these types only): " + ", ".join(self.architect.structures())
                          + ". When a direction names a structure, name one of these.")
+        if whole and self.architect.library_on():
+            from .mechanisms import library_text
+
+            parts.append(library_text(self.architect.structures()))
         if sample:
             parts.append("THE GRAVEYARD (the 20 newest rows and every operator row; the rest is not shown):\n"
                          + json.dumps(self._sample()))
         if library is not None and getattr(library, "text", ""):
             parts.append(library.text)
-        parts.append(f"Write the {SECTION_TITLE} section now: ONE JSON object with where_to_look, evidence and cites"
+        parts.append((f"Write {AGENDA_TITLE} now: ONE JSON object with agenda, evidence and cites" if whole else
+                      f"Write the {SECTION_TITLE} section now: ONE JSON object with where_to_look, evidence and cites")
                      + (", library_queries and literature." if library is not None else "."))
         return "\n\n".join(parts)
 
@@ -667,14 +808,44 @@ class Strategist:
         if not self.enabled():
             return {"skipped": "the strategist is disabled"}
         self.store.put(KV_AT, began)
+        whole = self.whole()
+        if whole:  # THE WHOLE AGENDA's day: one more try
+            day, rec = self.agenda_day(began), self.store.get(KV_DAY)
+            rec = rec if isinstance(rec, dict) and rec.get("day") == day else {"day": day, "tries": 0, "answered": False}
+            self.store.put(KV_DAY, {**rec, "tries": int(rec.get("tries") or 0) + 1})
         try:
             out = self._run(began, library)
         except Exception as exc:  # noqa: BLE001 - the agenda stays as it was
             out = {"accepted": False, "error": f"{type(exc).__name__}: {str(exc)[:300]}",
                    "billed": list(getattr(exc, "billed", []) or [])}
         out["seconds"] = round(self.clock() - began, 1)
+        if whole:
+            out["mode"] = AGENDA_MODE
+            out["receipt"] = self.receipt(began, out)
         self.store.event("swarm.strategist", None, out)
         return out
+
+    def receipt(self, began: float, out: Mapping[str, Any]) -> dict[str, Any]:
+        """THE WHOLE AGENDA's receipt for a run (kv RECEIPT_KEY, and the run's event): its verdict (accepted; refused by the
+        validator, the agenda in force kept; skipped; failed), the reasons, the agenda in force after it (its time), the
+        route, model, turns and cost. Marks the day answered when a model answered (accepted or refused)."""
+        answered = bool(out.get("turns"))
+        rec = self.store.get(KV_DAY)
+        rec = rec if isinstance(rec, dict) else {"day": self.agenda_day(began), "tries": 1}
+        self.store.put(KV_DAY, {**rec, "answered": bool(rec.get("answered")) or answered})
+        kept = self.store.get(AGENDA_KEY)
+        verdict = ("accepted" if out.get("accepted") else "refused" if answered else "skipped" if out.get("skipped")
+                   else "failed")
+        receipt: dict[str, Any] = {
+            "at": iso(began), "day": rec.get("day"), "verdict": verdict,
+            "reasons": [str(r)[:160] for r in (out.get("reasons") or [])][:6],
+            "agenda_in_force": kept.get("at") if isinstance(kept, dict) and kept.get("mode") == AGENDA_MODE else None,
+            "route": out.get("route"), "model": out.get("model"), "turns": out.get("turns"), "cost_usd": out.get("cost_usd")}
+        why = out.get("skipped") or out.get("error")
+        if why:
+            receipt["why"] = str(why)[:300]
+        self.store.put(RECEIPT_KEY, receipt)
+        return receipt
 
     def repair_turns(self) -> int:
         """How many times a rejected answer goes back with the validator's reasons (`strategist.repair_turns`, 1; at most
@@ -686,12 +857,13 @@ class Strategist:
             return 1
 
     @staticmethod
-    def repair_note(text: str, reasons: Sequence[str]) -> str:
+    def repair_note(text: str, reasons: Sequence[str], *, whole: bool = False) -> str:
+        key, what = ("agenda", AGENDA_TITLE) if whole else ("where_to_look", f"the {SECTION_TITLE} section")
         return ("\n\nYOUR LAST ANSWER WAS REJECTED by the machine check, for these reasons:\n"
                 + "\n".join(f"- {r}" for r in reasons)
-                + "\nYour where_to_look was:\n" + (text or "(none)")
-                + f"\nWrite the {SECTION_TITLE} section again, changing only what the reasons name: ONE JSON object with "
-                  "where_to_look, evidence and cites.")
+                + f"\nYour {key} was:\n" + (text or "(none)")
+                + f"\nWrite {what} again, changing only what the reasons name: ONE JSON object with "
+                  f"{key}, evidence and cites.")
 
     def _claude_note(self) -> str | None:
         """Why the strategist asks Sail, when "strategist" is missing from `claude.roles` (the box's settings file overrides
@@ -702,7 +874,8 @@ class Strategist:
         return None
 
     def _run(self, began: float, library: Any = None) -> dict[str, Any]:
-        if not locked_text(self.settings):
+        whole = self.whole()
+        if not whole and not locked_text(self.settings):
             return {"accepted": False, "skipped": "architect.agenda_locked is empty: the agenda is the operator's own"}
         current = self.current()
         system = self.system() + (LIBRARY_SYSTEM if library is not None else "")
@@ -776,27 +949,28 @@ class Strategist:
                 if info.get("ttl") and (not callable(same) or answer.get("model") == same("architect")):  # type: ignore[union-attr]
                     primed_at = called
             data = answer.get("json")
-            where = data.get("where_to_look") if isinstance(data, dict) else None
+            key = "agenda" if whole else "where_to_look"
+            where = (data.get(key, data.get("where_to_look") if whole else None)) if isinstance(data, dict) else None
             cites = data.get("cites") if isinstance(data, dict) else None
             evidence = data.get("evidence") if isinstance(data, dict) else None
             if not isinstance(where, str) or not isinstance(cites, list) or (evidence is not None and not isinstance(evidence, str)):
-                attempt.update(accepted=False, reasons=["shape: the answer was not one JSON object with where_to_look, evidence "
+                attempt.update(accepted=False, reasons=[f"shape: the answer was not one JSON object with {key}, evidence "
                                                         "and cites"], text=str(answer.get("text") or "")[:600])
                 verdict = None
             else:
                 known = self.known_ids()
                 verdict = check_section(where, max_chars=self.max_chars(), cites=cites, known_ids=known,
-                                        min_cites=self.min_cites())
+                                        min_cites=self.min_cites(), names=whole, cap=self.cap())
                 if not verdict.ok and overflow_only(verdict.reasons):
                     # R11-2: a section refused for its length alone, at most TRIM_SLACK over the cap, is cut at its last
                     # sentence end inside the cap and validated again, instead of paying for a repair turn.
-                    trimmed = trim_section(verdict.text, max(1, min(self.max_chars(), SECTION_MAX)))
+                    trimmed = trim_section(verdict.text, max(1, min(self.max_chars(), self.cap())))
                     again = check_section(trimmed, max_chars=self.max_chars(), cites=cites, known_ids=known,
-                                          min_cites=self.min_cites()) if trimmed else None
+                                          min_cites=self.min_cites(), names=whole, cap=self.cap()) if trimmed else None
                     if again is not None and again.ok:
                         attempt["trimmed"] = {"from": len(verdict.text), "to": len(again.text)}
                         verdict = again
-                attempt.update(accepted=verdict.ok, reasons=verdict.reasons, text=verdict.text[: SECTION_MAX * 2],
+                attempt.update(accepted=verdict.ok, reasons=verdict.reasons, text=verdict.text[: self.cap() * 2],
                                evidence=str(evidence or "")[:1200], cites=[str(c)[:80] for c in cites if isinstance(c, str)][:40])
                 # THE LIBRARY: the searches for the next pass and the ids relied on; neither can reject the section.
                 queries, why = check_queries(data.get("library_queries"))
@@ -809,7 +983,7 @@ class Strategist:
             attempts.append(attempt)
             if verdict is not None and verdict.ok:
                 break
-            note = self.repair_note(str(attempt.get("text") or ""), attempt["reasons"])
+            note = self.repair_note(str(attempt.get("text") or ""), attempt["reasons"], whole=whole)
             ask_user, ask_compact = user + note, compact + note
         last = attempts[-1]
         costs = [a.get("cost_usd") for a in attempts]
@@ -825,10 +999,11 @@ class Strategist:
             self.store.put(AGENDA_KEY, {"text": last["text"], "at": iso(began), "run": int(began), "route": last["route"],
                                         "model": last.get("model"), "cost_usd": out["cost_usd"], "cites": last.get("cites"),
                                         "previous": out["previous"], "library_queries": last.get("library_queries") or [],
-                                        "literature": last.get("literature") or []})
+                                        "literature": last.get("literature") or [], **({"mode": AGENDA_MODE} if whole else {})})
         return out
 
 
 __all__ = ["Strategist", "check_section", "check_queries", "extract_where", "normalize", "Verdict", "ROLE", "SYSTEM", "LIBRARY_SYSTEM",
+           "AGENDA_SYSTEM", "AGENDA_TITLE", "KV_DAY", "RECEIPT_KEY", "DAILY_HOUR", "RETRY_SECONDS", "DAILY_TRIES", "NAME_HYPHENS",
            "SECTION_TITLE", "MIN_VALIDATED", "MAX_QUERIES", "PAIR_SECONDS", "mechanism_class", "root_group", "mask_ids",
            "trim_section", "overflow_only", "target_chars"]

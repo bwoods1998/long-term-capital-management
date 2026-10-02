@@ -6,7 +6,9 @@
    when it passes THE DRIFT SCREEN (`tournament.drift_screen`, Sept 27, `evidence.drift_screen`: its Train drift-adjusted
    alpha has a pooled t of at least `drift_min_t` and is positive in all Train years but one: a candidate that fails is
    demoted, `researcher.screen_best`, and the next candidate that passes is validated in its place; a version whose Train
-   run predates the figures waits until the researcher's robustness label "drift" has run it again). The Gym runs its
+   run predates the figures waits until the researcher's robustness label "drift" has run it again), and, with THE TRAIN
+   KILL TESTS on (`researcher.kill_tests`, league/swarm/killtests.py), only once a carded family's version passed its
+   placebo tests (`researcher.kill_tests_passed`: its robustness label "placebo" landed and passed). The Gym runs its
    1.5x-half-spread twin in the same batch (two trials, counted) and returns only the validation VIEW (no trades, dates
    or daily series). The
    researcher is told only whether the line was met and how many of its checks passed (D2a). A version runs on
@@ -106,8 +108,8 @@ from . import diagnostics, evidence, incubator, practice
 from .architect import allowed_structures
 from .pool import GymJob, PoolError
 from .researcher import (IDLE_CAUSE, MAX_ROOTS, drift_verdict, held_at_gate, idle_cause, idle_dead, judge_extension,
-                         needs_roots, record_verdict, robust_at_stress, screen_best, train_record, validation_drift_failed,
-                         with_roots)
+                         kill_tests_passed, needs_roots, record_verdict, robust_at_stress, screen_best, train_record,
+                         validation_drift_failed, with_roots)
 from .store import CLOSEABLE, SwarmStore
 
 UNIVERSE_ROTATION = ("SPY", "QQQ", "IWM", "SPXW")
@@ -304,6 +306,9 @@ class Tournament:
                     continue
             if self.cfg.get("require_robustness", True) and not robust_at_stress(state, n):
                 waiting.append(fam["id"])  # its robustness run at 1.5x has not landed (or lost): not validated yet
+                continue
+            if kill_tests_passed(self.store, fam, n, self.settings) is not True:
+                waiting.append(fam["id"])  # THE TRAIN KILL TESTS: its placebo run has not landed (or it failed them)
                 continue
             if n == fam.get("validated_version") and state.get("validation_image") == image and state.get("validation_bundle") == bundle:
                 continue

@@ -167,6 +167,11 @@ DEFAULTS: dict[str, Any] = {
         # operator switches it on in swarm.json). `probe_timeout_seconds`: a probe not back by then says nothing.
         "probe_year": None,
         "probe_timeout_seconds": 300,
+        # THE TRAIN KILL TESTS (LTCM v3, league/swarm/killtests.py): JSON true makes an eligible Train version also trade in
+        # every Train year its roots had data, stay positive after dropping each year's five best trades, and (a carded
+        # family) beat its placebo run (its card's ablation) every year and over Train before it is validated. A
+        # tightening: off unless true.
+        "kill_tests": False,
     },
     "gym": {
         "enabled": False,
@@ -268,6 +273,11 @@ DEFAULTS: dict[str, Any] = {
         # The REFUTED CELLS list up to this many rows a claim may name in each cell where one can be needed (0: off; at
         # most 12): ids and the inputs each read, no figure.
         "claimable_rows": 0,
+        # THE MECHANISM LIBRARY (LTCM v3, league/swarm/mechanisms.py): JSON true makes every birth name a library entry on
+        # its card (`library_class`, with `sessions_per_year` and `structures_per_session`) and keep that entry's
+        # structures, roots, card classes and holding; cross-root lead-lag is at most a quarter of the trailing week's
+        # births. Off unless true.
+        "library": False,
     },
     # THE STRATEGIST (Sept 29, 2026; league/swarm/strategist.py): Claude reads the whole graveyard digest, the board, the
     # Validation check-failure counts and the day's births and retirements, and writes only the agenda's WHERE TO LOOK
@@ -289,6 +299,12 @@ DEFAULTS: dict[str, Any] = {
         "max_output_tokens": 12000,     # Sail only; Claude uses claude.max_tokens
         # A rejected answer goes back once with the validator's reasons (at most 2); the repair reads the digest's cache entry.
         "repair_turns": 1,
+        # THE WHOLE AGENDA (LTCM v3): "agenda" makes the strategist write all of the agenda (at most `agenda_chars`, the
+        # code's ceiling 4,000) once an agenda day from `daily_hour_utc`, on its own round, under the rules fixed in code;
+        # the locked preamble is then not read. "section" (the default) is the WHERE TO LOOK section, as above.
+        "writes": "section",
+        "agenda_chars": 4000,
+        "daily_hour_utc": 3,
     },
     "gate": {
         "review_openai_model": "gpt-6-sol",
