@@ -41,6 +41,10 @@
   trial's) boxes, and never one forked in the last `reconcile_grace_seconds`. Stage 1 (Sept 26, 10:22Z) named
   its boxes `ltcm-swarm-<kind>-<epoch>-<n>` without a token: `adopt` takes back every box the store knows
   whatever its name, and `reconcile` also ends an untokened one it does not know (`LEGACY_NAME`).
+- ROWS (Oct 2, 2026). A box that failed is `failed` in the store until Sail accepts its terminate call, then
+  `terminated`. `reconcile` settles the rest against Sail's list: a `failed` row, or a live row the pool does not hold
+  after `adopt` (one adopt could not take back), becomes `terminated` when Sail lists the box as gone or no longer
+  lists it, and a box Sail still runs is ended first (`_settle_rows`).
 - CAP. `max_boxes` counts every live box of the kind the pool holds, the store records, or Sail lists.
 - TRAIN'S FIRST DAY (the 2020-21 switch, Sept 27, 2026). Every Train job without its own `start` starts at the running
   swarm's span: its store's migrated objective (`settings.objective_span`; 2022-01-03 until a start migrates the switch
@@ -178,6 +182,10 @@ class Box:
 
 
 AWAKE = ("starting", "ready", "busy")
+#: Sail statuses of a box that is gone or going (it bills nothing more).
+GONE = ("terminated", "terminating", "failed", "create_failed")
+#: The most boxes one read of Sail's list asks for; a list this long may be cut short.
+LIST_LIMIT = 1000
 #: A box name from before the per-store token (the stage-1 release): ours, whichever store made it.
 LEGACY_NAME = re.compile(r"^ltcm-swarm-(gym|gate)-\d+-\d+$")
 
@@ -226,6 +234,8 @@ class GymPool:
         #: The fork threads (joined by `stop`).
         self.fork_threads: list[threading.Thread] = []
         self._span_alerts: set[tuple[Any, ...]] = set()
+        #: True once `adopt` has taken back the store's boxes: only then is a live row this pool does not hold stale.
+        self._adopted = False
         self.token = str(store.get("pool_token") or "")
         if not self.token:
             self.token = secrets.token_hex(3)
@@ -458,10 +468,7 @@ class GymPool:
             self._failed_fork(kind, str(exc)[:200])
             self.store.set_box_state(box_id, "failed")
             self.store.event("swarm.pool", None, {"action": "box_failed", "box": box_id, "kind": kind, "error": str(exc)[:400]})
-            try:
-                self.client.terminate(box_id)
-            except Exception:  # noqa: BLE001
-                pass
+            self._end_failed(box_id)
             with self._lock:
                 self.boxes.pop(box_id, None)
             if isinstance(exc, HoldoutMissing):
@@ -612,14 +619,24 @@ class GymPool:
     def unavailable(self, kind: str = "gym") -> bool:
         return self.fork_failures.get(kind, 0) >= int(self.gym.get("unavailable_after", 3))
 
+    def _end_failed(self, box_id: str) -> None:
+        """End a box that failed (its row is already `failed`): the row becomes `terminated` once Sail accepts the
+        terminate call. A call that fails leaves the row `failed`, and `reconcile` settles it against Sail's list."""
+        try:
+            self.client.terminate(box_id)
+        except Exception:  # noqa: BLE001
+            return
+        self.store.set_box_state(box_id, "terminated")
+
     def reconcile(self) -> int:
         """End every box on the account named like ours (`ltcm-swarm-`) that this pool does not know: a fork whose
-        answer was lost, or one a process that died left behind. Returns how many were ended."""
+        answer was lost, or one a process that died left behind; and settle the store's own rows against Sail's list
+        (THE ROWS, `_settle_rows`). Returns how many boxes were ended."""
         lister = getattr(self.client, "list_boxes", None)
         if lister is None:
             return 0
         try:
-            rows = lister(limit=1000)
+            rows = lister(limit=LIST_LIMIT)
         except Exception:  # noqa: BLE001
             return 0
         with self._lock:
@@ -627,7 +644,10 @@ class GymPool:
             in_flight = set(self.forking)
         mine = f"{NAME_PREFIX}{self.token}-"
         grace = float(self.gym.get("reconcile_grace_seconds", 300))
-        n = 0
+        try:
+            n = self._settle_rows(rows, grace=grace)
+        except Exception:  # noqa: BLE001 - the rows wait for the next pass; the stray sweep still runs
+            n = 0
         for row in rows:
             box_id, name = str(row.get("sailbox_id") or row.get("id") or ""), str(row.get("name") or "")
             if name in in_flight:
@@ -646,6 +666,51 @@ class GymPool:
                 pass
         self.reconciled_at = self.clock()
         return n
+
+    def _settle_rows(self, listed: Sequence[Mapping[str, Any]], *, grace: float) -> int:
+        """THE ROWS (Oct 2, 2026: six `failed` rows sat in the pool table for days, their boxes long gone). Each `failed`
+        row, and each STALE row (a live state the store records for a box this pool does not hold after `adopt`, older
+        than `grace`: one adopt could not take back), is read against Sail's list: a box Sail lists as terminal or no
+        longer lists becomes `terminated`; a box Sail still runs is ended, and its row becomes `terminated` once Sail
+        accepts the call. A list that may be cut short (`LIST_LIMIT` rows) proves nothing absent. Returns how many boxes
+        were ended."""
+        by_id = {str(r.get("sailbox_id") or r.get("id") or ""): r for r in listed}
+        complete = len(listed) < LIST_LIMIT
+        now = self.clock()
+        with self._lock:
+            held = set(self.boxes)
+            in_flight = set(self.forking)
+            adopted = self._adopted
+        ended = 0
+        for row in self.store.boxes(live=False):
+            state = str(row.get("state"))
+            if state == "terminated":
+                continue
+            if state != "failed":
+                name = (row.get("detail") or {}).get("name")
+                if not adopted or row["id"] in held or name in in_flight:
+                    continue
+                born = forked_at({"created_at": row.get("created_at")})
+                if born is None or now - born < grace:
+                    continue
+            listing = by_id.get(str(row["id"]))
+            if listing is None and not complete:
+                continue
+            status = None if listing is None else str(listing.get("status"))
+            if listing is None or status in GONE:
+                self.store.set_box_state(row["id"], "terminated")
+                self.store.event("swarm.pool", None, {"action": "row_settled", "box": row["id"], "kind": row.get("kind"),
+                                                      "was": state, "sail": status or "absent"})
+                continue
+            try:
+                self.client.terminate(row["id"])
+            except Exception:  # noqa: BLE001 - the row stays as it is: the next pass tries again
+                continue
+            ended += 1
+            self.store.set_box_state(row["id"], "terminated")
+            self.store.event("swarm.pool", None, {"action": "row_box_ended", "box": row["id"], "kind": row.get("kind"),
+                                                  "was": state, "sail": status})
+        return ended
 
     def _spawn(self, box: Box) -> None:
         if self.threaded:
@@ -695,10 +760,7 @@ class GymPool:
                 box.state = "failed"
                 self.store.set_box_state(box.id, "failed")
                 self.store.event("swarm.pool", None, {"action": "resume_failed", "box": box.id, "error": str(exc)[:300]})
-                try:
-                    self.client.terminate(box.id)
-                except Exception:  # noqa: BLE001
-                    pass
+                self._end_failed(box.id)
                 return
             box.booked_at = resuming  # the resume is awake time
         box.state = "busy"
@@ -885,7 +947,7 @@ class GymPool:
                 lister = getattr(self.client, "list_boxes", None)
                 if lister is not None:
                     try:
-                        listed = lister(limit=1000)
+                        listed = lister(limit=LIST_LIMIT)
                     except Exception:  # noqa: BLE001
                         out["inventory_unreadable"] = True
                         continue
@@ -959,6 +1021,8 @@ class GymPool:
                 self.boxes[box.id] = box
             self._spawn(box)
             n += 1
+        with self._lock:
+            self._adopted = True
         self.reconcile()
         return n
 

@@ -6,7 +6,8 @@
 Checks, each PASS / FAIL / WAIT with its numbers, as one JSON document (exit 0 when nothing FAILs):
 
 - process     the swarm's heartbeat is fresh (< 60 s), its pid is alive, it runs the House's release;
-- population  at least the population floor alive (`population.floor` in <root>/swarm.json, else 16; the plan:
+- population  at least the population floor alive (`population.floor` in effect: <root>/swarm.json over the
+              release's policy.json, else 16; the plan:
               48 at the start, a ceiling of 96, a floor of 16) and at most the ceiling; below the start the
               architect refills hourly (WAIT when it is refilling);
 - cycles      every living family has completed at least one model cycle (a cycle with a model call and no
@@ -83,10 +84,16 @@ def main(argv: list[str] | None = None) -> int:
     db = ro(db_path)
     fams = [dict(r) for r in db.execute("SELECT id, band, retired_at FROM families")]
     living = [f["id"] for f in fams if not f["retired_at"]]
-    try:
-        pop = dict(json.loads((root / "swarm.json").read_text()).get("population") or {})
-    except (OSError, ValueError, AttributeError):
-        pop = {}
+    try:  # the settings in effect: swarm.json over the release's policy.json (settings as code, V3-A)
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from league.swarm import settings as settings_mod
+
+        pop = dict(settings_mod.load(root).get("population") or {})
+    except Exception:  # noqa: BLE001 - no release beside this script: swarm.json alone, as before
+        try:
+            pop = dict(json.loads((root / "swarm.json").read_text()).get("population") or {})
+        except (OSError, ValueError, AttributeError):
+            pop = {}
     start, ceiling = int(pop.get("start", 48)), int(pop.get("ceiling", 96))
     floor = args.floor if args.floor is not None else int(pop.get("floor", 16))
     verdict = "FAIL" if not floor <= len(living) <= ceiling else ("WAIT" if len(living) < start else "PASS")

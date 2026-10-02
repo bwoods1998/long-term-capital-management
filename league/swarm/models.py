@@ -33,6 +33,11 @@
   truncated, http, stream, answer, admission, off, unknown), and the caller finishes its turn on its Sail profile from the
   same transcript.
 - Every settled cost is a `spend` row (kind `sail_model`, `openai` or `claude`, by family).
+- THE WINDOW FALLBACK (V3-A, Oct 2, 2026: Sail's balanced queue stalled 07:00-12:53Z and the architect bore nothing for six
+  hours). `ask`'s Sail call on a profile outside the asap window that `sail_fallback` maps to an asap profile (k3_balanced
+  and pro_balanced to pro_asap by default): a `provider_poll_timeout` flags the window stalled for an hour (kv
+  `sail_window_stall`, one `swarm.status` alert a stall) and retries the call once on the fallback with a new request key;
+  while the flag stands, calls on that window go straight to the fallback. The answer says so (`sail_fallback`).
 - FALLBACKS (Release A, Sept 30, 2026): a call that asked Claude and ended elsewhere (`ask`: the next paid route, Sail, or
   no route when the role has no Sail profile; `claude_turn`: the caller's Sail turn) is counted in memory by role, the
   Claude route's failure kind and where it went (`note_fallback`). The swarm's `FundingWatch` drains the counts
@@ -853,23 +858,106 @@ class ModelRouter:
             raise ModelError("; ".join(errors) or "no paid route was available, and this role has no Sail fallback", billed=billed,
                              kind=kinds[-1] if kinds else "error")
         items = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+        def on_sail(profile: str, call_key: str) -> Any:
+            return self.sail(profile, items, family=desk or family or "swarm", key=call_key, effort=effort, max_output=max_output,
+                             cache_key=f"swarm-{role}", tool_choice="auto",
+                             cap_usd_day=float(cap_usd_day if cap_usd_day is not None else
+                                               self.settings.get("researcher", {}).get("floor_usd_day", 60.0)),
+                             kind="sail_model")
+
+        def failed(exc: BaseException) -> ModelError:
+            return ModelError("; ".join(errors + [f"sail: {type(exc).__name__}: {getattr(exc, 'code', '') or str(exc)[:160]}"]),
+                              billed=billed)
+
+        # THE WINDOW FALLBACK (`sail_fallback`): a profile outside the asap window goes straight to its asap fallback while
+        # its window is flagged stalled, and a poll timeout on it flags the window and retries once there.
+        fallback = self.sail_fallback(sail_profile)
+        profile, why = sail_profile, None
+        if fallback is not None and self.window_stalled(fallback[0]) is not None:
+            profile, why = fallback[1], "flagged"
+            errors.append(f"sail {sail_profile}: the {fallback[0]} window is flagged stalled; asked {profile}")
         try:
-            response = self.sail(sail_profile, items, family=desk or family or "swarm", key=key, effort=effort, max_output=max_output,
-                                 cache_key=f"swarm-{role}", tool_choice="auto",
-                                 cap_usd_day=float(cap_usd_day if cap_usd_day is not None else
-                                                   self.settings.get("researcher", {}).get("floor_usd_day", 60.0)),
-                                 kind="sail_model")
+            response = on_sail(profile, key if why is None else fallback_key(key, profile))
         except Exception as exc:  # noqa: BLE001
-            raise ModelError("; ".join(errors + [f"sail: {type(exc).__name__}: {getattr(exc, 'code', '') or str(exc)[:160]}"]),
-                             billed=billed) from None
+            code = str(getattr(exc, "code", "") or "")
+            if why is not None or fallback is None or code != "provider_poll_timeout":
+                raise failed(exc) from None
+            window, profile, why = fallback[0], fallback[1], "stall"
+            errors.append(f"sail {sail_profile}: {code}; retried on {profile}")
+            try:
+                self.flag_stall(window, profile=sail_profile, fallback=profile, role=role, code=code)
+            except Exception:  # noqa: BLE001 - the flag is a shortcut; the retry stands without it
+                pass
+            self._require_committed_store()
+            try:
+                response = on_sail(profile, fallback_key(key, profile))
+            except Exception as again:  # noqa: BLE001
+                raise failed(again) from None
         text = response.output_text or ""
         usage = getattr(response, "usage", None)
         reason = getattr(response, "incomplete_reason", None)
-        return {"text": text, "json": extract_json(text), "route": "sail", "model": sail_profile,
-                "cost_usd": float(response.cost_usd or 0), "fallback_reasons": errors,
-                "truncated": getattr(response, "incomplete", False) is True,
-                "incomplete_reason": reason if isinstance(reason, str) else None,
-                "usage": dict(usage) if isinstance(usage, Mapping) else {}}
+        out = {"text": text, "json": extract_json(text), "route": "sail", "model": profile,
+               "cost_usd": float(response.cost_usd or 0), "fallback_reasons": errors,
+               "truncated": getattr(response, "incomplete", False) is True,
+               "incomplete_reason": reason if isinstance(reason, str) else None,
+               "usage": dict(usage) if isinstance(usage, Mapping) else {}}
+        if why is not None:
+            out["sail_fallback"] = {"from": sail_profile, "to": profile, "why": why}
+        return out
+
+    # ------------------------------------------------------------------ the Sail window fallback
+    def sail_fallback(self, profile: str | None) -> tuple[str, str] | None:
+        """(window, fallback profile) for a Sail profile outside the asap window that `sail_fallback` maps to an asap
+        profile; None for an asap profile, an unknown one, or no usable entry (null turns the whole map off)."""
+        mapping = self.settings.get("sail_fallback")
+        if not profile or not isinstance(mapping, Mapping):
+            return None
+        target = mapping.get(profile)
+        if not isinstance(target, str) or target == profile:
+            return None
+        window = sail_window(profile)
+        if window is None or window == "asap" or sail_window(target) != "asap":
+            return None
+        return window, target
+
+    def _now(self) -> float:
+        try:
+            return float(self.store.clock())
+        except Exception:  # noqa: BLE001 - a store without a clock
+            return time.time()
+
+    def window_stalled(self, window: str) -> dict[str, Any] | None:
+        """The stall flag of a Sail window (kv `sail_window_stall`) while it stands, else None."""
+        try:
+            entry = (self.store.get(STALL_KEY) or {}).get(window)
+        except Exception:  # noqa: BLE001 - an unreadable flag is no flag: the window is asked
+            return None
+        if isinstance(entry, Mapping) and float(entry.get("until") or 0) > self._now():
+            return dict(entry)
+        return None
+
+    def flag_stall(self, window: str, *, profile: str, fallback: str, role: str, code: str) -> bool:
+        """Flag `window` stalled for `STALL_SECONDS` (kv `sail_window_stall`) and raise one `swarm.status` alert a stall: a
+        window flagged again within `STALL_SECONDS` of its last flag's end is the same stall (no second alert). Returns
+        whether it alerted."""
+        now = self._now()
+        with self.store.atomic():
+            flags = self.store.get(STALL_KEY)
+            flags = {k: v for k, v in flags.items() if isinstance(v, Mapping)} if isinstance(flags, Mapping) else {}
+            last = flags.get(window) or {}
+            fresh = now >= float(last.get("until") or 0) + STALL_SECONDS
+            since = now if fresh else float(last.get("since") or now)
+            flags[window] = {"until": now + STALL_SECONDS, "since": since, "at": now, "profile": profile, "fallback": fallback,
+                             "role": role, "code": code}
+            self.store.put(STALL_KEY, flags)
+        if fresh:
+            self.store.event("swarm.status", None, {
+                "action": "sail_window_stall", "alert": True, "window": window, "profile": profile, "fallback": fallback,
+                "role": role, "code": code, "until": now + STALL_SECONDS,
+                "text": (f"Sail's {window} window did not answer a {role} call on {profile} ({code}): calls on that window go to "
+                         f"{fallback} for the next hour, then the {window} window is asked again")})
+        return fresh
 
     def _ask_openai(self, *, role: str, system: str, user: str, family: str | None, key: str, openai_model: str,
                     max_output: int, effort: str, need_usd: float, errors: list[str]) -> dict[str, Any] | None:
@@ -926,6 +1014,27 @@ class ModelRouter:
         return None
 
 
+#: The kv key of the Sail window stall flags ({window: {until, since, at, profile, fallback, role, code}}).
+STALL_KEY = "sail_window_stall"
+#: How long a stalled window stays flagged: its calls go straight to the fallback until then.
+STALL_SECONDS = 3600.0
+
+
+def sail_window(profile: str) -> str | None:
+    """The completion window a Sail profile buys (`ltcm.provider.window_of`), or None for an unknown profile."""
+    try:
+        from ltcm.provider import window_of
+
+        return window_of(str(profile))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def fallback_key(key: str, profile: str) -> str:
+    """The request key of a call's retry on its fallback profile: a new request, never the stalled one's re-read."""
+    return f"{key[:160]}:fallback:{profile}"[:200]
+
+
 def _line(value: Any, *, invalid: float = 0.0) -> float:
     """A dollar amount from settings: a finite, non-negative number, else `invalid` (0 for a line, everything for a room
     kept back: a typo never lifts a guard)."""
@@ -966,4 +1075,5 @@ def build_router(root: Any, store: SwarmStore, settings: Mapping[str, Any], *, c
                        claude_factory=claude_factory, claude_meter=claude_meter)
 
 
-__all__ = ["ModelRouter", "ModelError", "ClaudeReply", "build_router", "extract_json"]
+__all__ = ["ModelRouter", "ModelError", "ClaudeReply", "build_router", "extract_json", "fallback_key", "sail_window",
+           "STALL_KEY", "STALL_SECONDS"]
