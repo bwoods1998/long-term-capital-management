@@ -1,6 +1,13 @@
-"""The swarm's settings: defaults, overlaid by `league/config.json` ("gym" and "swarm") and then by
-`<root>/swarm.json` (the operator's file on the box: a change there needs no deploy; the process
-re-reads it every loop).
+"""The swarm's settings: defaults, overlaid by `league/config.json` ("gym" and "swarm"), then by the repo's
+`league/swarm/policy.json`, then by `<root>/swarm.json` (the operator's file on the box: a change there needs no deploy;
+the process re-reads it every loop).
+
+SETTINGS AS CODE (V3-A, Oct 2, 2026). `policy.json` is the research settings as reviewed code: a pull request changes it
+and the updater deploys it, so no laptop command touches the box to tune the swarm. It has the shape of `swarm.json`
+and sits between config.json and swarm.json: DEFAULTS < config.json < policy.json < swarm.json. The owner's switches
+(`OWNER_KEYS`: `enabled`, `live`) are never read from it (a key there is ignored and named in `_policy`); they stay in
+swarm.json, which after the V3-A migration (`scripts/settings_migrate.py`) holds only them. A missing policy.json is no
+layer (exactly as before); one that is not a JSON object is ignored, and the loop alerts once (`_policy`).
 
 The EVIDENCE LINES are not settings: they are the plan's, in `evidence.py`, and loosening one is the
 owner's decision. Everything here is throughput and money: how many, how often, how much.
@@ -440,6 +447,10 @@ DEFAULTS: dict[str, Any] = {
                          "option order flow informed trading", "dealer gamma hedging intraday",
                          "weekly options volatility risk premium", "volatility skew return predictability"],
     },
+    # THE WINDOW FALLBACK (V3-A, Oct 2, 2026; league/swarm/models.py): a one-shot call (`ModelRouter.ask`) on a Sail profile
+    # outside the asap window, mapped here to an asap profile, retries once there after a poll timeout, and the window's
+    # calls go straight there for an hour (kv `sail_window_stall`). An entry set to null removes it; null turns the map off.
+    "sail_fallback": {"k3_balanced": "pro_asap", "pro_balanced": "pro_asap"},
     "heartbeat_seconds": 20,
     "stale_heartbeat_seconds": 240,     # the House restarts a swarm whose heartbeat is older than this
     "nice": 10,
@@ -570,8 +581,38 @@ def train_span_text(text: str, span: dt.date | None) -> str:
     return text
 
 
-def load(root: str | Path | None = None, *, config: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """The swarm's settings: DEFAULTS < config.json "swarm" (and its "gym" block into "gym") < <root>/swarm.json."""
+#: The repo's settings layer (SETTINGS AS CODE in the module docstring).
+POLICY_PATH = REPO / "league" / "swarm" / "policy.json"
+#: The owner's switches: read from `<root>/swarm.json` only, never from policy.json (the live path reads `live` from
+#: swarm.json directly, league/live/step.py).
+OWNER_KEYS = ("enabled", "live")
+
+
+def read_policy(path: str | Path | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
+    """(the layer, its status) from policy.json (`POLICY_PATH` by default). The status is {"state": "absent" | "ok" |
+    "malformed", "why": ..., "ignored": [owner keys left out]}; an absent or malformed file is an empty layer."""
+    path = Path(path) if path is not None else POLICY_PATH
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}, {"state": "absent", "why": None, "ignored": []}
+    except (OSError, ValueError) as exc:
+        return {}, {"state": "malformed", "why": f"{type(exc).__name__}: {str(exc)[:160]}", "ignored": []}
+    return policy_layer(raw)
+
+
+def policy_layer(raw: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+    """(the layer, its status) from a parsed policy document: an object without its owner keys, else an empty layer."""
+    if not isinstance(raw, Mapping):
+        return {}, {"state": "malformed", "why": f"not a JSON object ({type(raw).__name__})", "ignored": []}
+    ignored = sorted(k for k in raw if k in OWNER_KEYS)
+    return {k: v for k, v in raw.items() if k not in OWNER_KEYS}, {"state": "ok", "why": None, "ignored": ignored}
+
+
+def load(root: str | Path | None = None, *, config: Mapping[str, Any] | None = None,
+         policy: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """The swarm's settings: DEFAULTS < config.json "swarm" (and its "gym" block into "gym") < policy.json (`policy`, a
+    parsed document, in place of the repo's file) < <root>/swarm.json. `_policy` says how the policy layer was read."""
     if config is None:
         try:
             config = json.loads((REPO / "league" / "config.json").read_text())
@@ -579,6 +620,9 @@ def load(root: str | Path | None = None, *, config: Mapping[str, Any] | None = N
             config = {}
     out = _merge(DEFAULTS, config.get("swarm") or {})
     out["gym"] = _merge(out["gym"], config.get("gym") or {})
+    layer, status = read_policy() if policy is None else policy_layer(policy)
+    out = _merge(out, layer)
+    out["_policy"] = status
     if root is not None:
         path = Path(root) / "swarm.json"
         try:
@@ -723,6 +767,6 @@ def ready_refusal(root: str | Path, ready: Mapping[str, Any], named: str, roots:
     return None
 
 
-__all__ = ["DEFAULTS", "load", "chain_refusal", "ready_refusal", "train_from", "train_from_note", "parse_train_from",
+__all__ = ["DEFAULTS", "load", "read_policy", "policy_layer", "POLICY_PATH", "OWNER_KEYS", "chain_refusal", "ready_refusal", "train_from", "train_from_note", "parse_train_from",
            "objective_span", "span_years", "train_years", "train_split", "run_timeout", "train_span_text",
            "TRAIN_CORE_START", "TRAIN_EARLIEST", "TRAIN_END", "TRAIN_STARTS"]

@@ -457,6 +457,8 @@ class RefillTests(R.RoundCase):
         spec = importlib.util.spec_from_file_location("stage3_verify", Path(__file__).resolve().parents[2] / "scripts/verify_swarm.py")
         verify = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(verify)
+        # The lines in effect (swarm.json over the release's policy.json): pinned here, whatever the policy holds.
+        (Path(self.root) / "swarm.json").write_text(json.dumps({"population": {"start": 48, "ceiling": 96, "floor": 16}}))
         for i in range(97):
             self.store.add_family({**R.SPEC, "id": f"f{i}"}, origin="seed")
         for count, expected in ((44, "WAIT"), (48, "PASS"), (16, "WAIT"), (15, "FAIL"), (97, "FAIL")):

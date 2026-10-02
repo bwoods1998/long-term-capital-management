@@ -1,0 +1,3 @@
+{
+  "_about": "Settings as code (league/swarm/settings.py, SETTINGS AS CODE): DEFAULTS < league/config.json swarm/gym < this file < <state>/swarm.json. Same shape as swarm.json; never `enabled` or `live` (the owner's switches stay in swarm.json and are ignored here). Its first content comes from the V3-A migration (scripts/settings_migrate.py)."
+}
