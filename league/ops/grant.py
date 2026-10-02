@@ -13,7 +13,8 @@ a moved digest, new real entries stay held until the owner ratifies. Protected: 
 `run(ctx)` reads from `ctx` (a mapping or an object; anything missing has a default): `root` (the House's state
 root; or `state_root`, or `house.root`), `base` (the release base holding `current` and `deploys.jsonl`; default the
 root's parent), `config`, `clock`, `alert(level, text)`, and the seams `read_equity()`, `read_funding(after_iso)`,
-`release`, `deploy_rows`.
+`release_id` (a release id; a string `release` is accepted too, but the runner's `Context.release` is a directory and
+is ignored: the id is then read from `<base>/current`), `deploy_rows`.
 """
 from __future__ import annotations
 
@@ -155,7 +156,10 @@ def run(ctx: Any) -> dict[str, Any]:
             equity = (_get(ctx, "read_equity") or (lambda: read_equity(config)))()
         except Exception as exc:  # noqa: BLE001
             return failed(f"the account's equity cannot be read ({type(exc).__name__}: {str(exc)[:160]})")
-        release = _get(ctx, "release") or running_release(base)
+        # The release id `<base>/current` names. The runner's `Context.release` is the release DIRECTORY (a Path, always
+        # truthy), never an id: only a string handed in as `release_id` (or `release`, a test seam) stands in for it.
+        seam = _get(ctx, "release_id") or _get(ctx, "release")
+        release = seam if isinstance(seam, str) else running_release(base)
         rows = _get(ctx, "deploy_rows")
         rows = deploy_rows(base) if rows is None else list(rows)
         out = grant.standing(clock(), equity, release, rows, funding=funding, ceiling_usd=top)

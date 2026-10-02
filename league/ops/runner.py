@@ -11,7 +11,12 @@ receipts file (`league/ops/receipts.py`) on the House's background lane.
 One child at a time: a job due while another runs waits, inside its own grace. A child the House's own restart left
 behind is killed at the next start and its row marked `interrupted`; it is started again while its grace allows (at
 most `store.MAX_ATTEMPTS` times). A job's own alerts (a pre-open FAIL) become House alerts when it ends, at most at
-warning level: a job's verdict on the world is never a fault of the release the watchdog is watching.
+warning level: a job's verdict on the world is never a fault of the release the watchdog is watching, and with any dollar
+figure in its text redacted (`ops.alert` is public; the figure rides in the private `_detail`).
+
+While the House is in a maintenance PAUSE, only the jobs the registry marks `in_pause` (the read-only checks, the close
+economics, the budget) run; every other due occurrence gets a `skipped` receipt naming the pause. While it has stopped
+buying work, the `paid` jobs are skipped the same way.
 
 Occurrences older than this runner's `installed_at` (its first tick on this state) or `LOOKBACK` are never reported.
 """
@@ -19,6 +24,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -79,6 +85,8 @@ class Ops:
         self.receipts_at = float("-inf")
         self._settled: set[tuple[str, str]] = set()
         self.last: dict[str, Any] = {}
+        #: What holds jobs this tick (`held_by`): {"paused": reason, "stopped": reason}.
+        self._holds: dict[str, str] = {}
         self.recovered = self._recover()
 
     def close(self) -> None:
@@ -94,7 +102,11 @@ class Ops:
         if settings.get("enabled") is False:
             out["enabled"] = False
         elif self.child is None:
-            out.update(self._dispatch(now, house, settings))
+            self._holds = held_by(house)
+            try:
+                out.update(self._dispatch(now, house, settings))
+            finally:
+                self._holds = {}
         if now - self.receipts_at >= RECEIPTS_EVERY:
             self.receipts_at = now
             self._receipts(house, now)
@@ -116,7 +128,7 @@ class Ops:
                 if row is not None and not retryable(row):
                     self._settled.add(key)
                     continue
-                if not self._enabled(job, settings) or not self.present(job.module):
+                if not self._enabled(job, settings) or not self.present(job.module) or self._held(job):
                     kind = "skip"
                 elif now > due_at + job.grace:
                     kind = "missed"
@@ -141,6 +153,14 @@ class Ops:
                 found.update(S.occurrences(trigger, start, now))
         return sorted(found)
 
+    def _held(self, job: Job) -> str | None:
+        """Why the House's own state holds `job` now (its maintenance pause, or its stop on buying work for a paid job)."""
+        if self._holds.get("paused") and not job.in_pause:
+            return f"the House is paused ({self._holds['paused'][:200]})"
+        if self._holds.get("stopped") and job.paid:
+            return f"the House has stopped buying work ({self._holds['stopped'][:200]})"
+        return None
+
     @staticmethod
     def _enabled(job: Job, settings: Mapping[str, Any]) -> bool:
         jobs = settings.get("jobs") if isinstance(settings.get("jobs"), Mapping) else {}
@@ -153,7 +173,8 @@ class Ops:
             due_iso = S.iso(due_at)
             if kind == "skip":
                 why = ("switched off in ops.json" if not self._enabled(job, settings)
-                       else f"{job.module} is not in this release ({job.owner})")
+                       else f"{job.module} is not in this release ({job.owner})" if not self.present(job.module)
+                       else self._held(job) or "held")
                 if self.store.run(job.name, due_iso) is None:
                     self.store.record(job.name, due_iso, "skipped", S.iso(now), summary={"why": why})
                 else:
@@ -251,6 +272,19 @@ class Ops:
         if status == "failed":
             self._alert(house, "warning", f"ops: the {job.name} job failed ({str(error or 'no detail')[:300]})")
 
+    def _alert(self, house: Any, level: str, text: str) -> None:
+        """A House alert (`ops.alert`, a PUBLIC ledger kind). A job's text may carry a dollar figure of the account (a
+        pre-open check's capital, the grant's refusal): the public text says `$[private]`, and the figures ride in the
+        underscore-private `_detail` the ledger keeps off everything published. The receipt keeps them too."""
+        alert = getattr(house, "alert", None)
+        if not callable(alert):
+            return
+        public = redact(text)
+        if public != text:
+            alert(level, public, _detail=str(text)[:1000])
+        else:
+            alert(level, text)
+
     def _recover(self) -> list[str]:
         """Rows left `running` by a House that stopped: their child (verified by its command line) is killed, and the
         row is `failed` with `INTERRUPTED` (retried while its grace allows)."""
@@ -293,11 +327,6 @@ class Ops:
             except Exception:  # noqa: BLE001 - receipts are written again in ten minutes
                 pass
 
-    def _alert(self, house: Any, level: str, text: str) -> None:
-        alert = getattr(house, "alert", None)
-        if callable(alert):
-            alert(level, text)
-
     def health(self) -> dict[str, Any]:
         """health.json `ops`: the UTC day's occurrences by state (`due`: every occurrence today so far; `late`: due,
         not started, inside its grace; `failed`/`missed`/`skipped`/`ok`: settled today) and the job running now."""
@@ -318,6 +347,37 @@ class Ops:
                 "missed": sorted(set(counts["missed"])), "skipped": len(counts["skipped"]), "late": sorted(set(late)),
                 "running": self.child["job"].name if self.child is not None else None,
                 "installed_at": S.iso(self.installed_at)}
+
+
+#: A dollar figure ($1,234.56, $ 87, $-3.2): never in a public alert's text.
+DOLLARS = re.compile(r"\$\s?-?\d[\d,]*(?:\.\d+)?")
+
+
+def redact(text: str) -> str:
+    return DOLLARS.sub("$[private]", str(text))
+
+
+def held_by(house: Any) -> dict[str, str]:
+    """What in the House's own state holds jobs: its maintenance pause (`House.paused()`) and its stop on buying work
+    (house.json `stopped.reason`, the same reason the tick summary's `stopped_because` gives). Unreadable is no hold."""
+    out: dict[str, str] = {}
+    if house is None:
+        return out
+    try:
+        paused = house.paused() if callable(getattr(house, "paused", None)) else None
+        if paused:
+            out["paused"] = str((paused or {}).get("reason") or "maintenance") if isinstance(paused, Mapping) else "maintenance"
+    except Exception:  # noqa: BLE001 - a pause that cannot be read holds nothing; the House's own steps still honour it
+        pass
+    try:
+        state = getattr(house, "_state", None)
+        stopped = (state.get("stopped") or {}) if isinstance(state, Mapping) else {}
+        reason = str(stopped.get("reason") or "") if isinstance(stopped, Mapping) else ""
+        if reason and not reason.startswith("maintenance pause"):
+            out["stopped"] = reason
+    except Exception:  # noqa: BLE001
+        pass
+    return out
 
 
 def _killpg(pid: int, sig: int) -> None:

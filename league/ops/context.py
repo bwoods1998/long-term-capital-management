@@ -4,11 +4,12 @@
     (the running release's directory), ctx.config (its league/config.json), ctx.settings (<state>/ops.json, the
     owner's private overrides; {} when absent), ctx.gateway (a GET/POST client of the Cloudflare gateway, built on
     first use from GATEWAY_TOKEN), ctx.sail (a `league.sailbox.SailboxClient`, built on first use), ctx.alert(level,
-    text) (a House alert the runner raises when the job ends), ctx.house_box() (the House box's Sail id, from the
-    environment Sail sets).
+    text) (a House alert the runner raises when the job ends), ctx.house_box() (the House box's Sail id: the config's
+    `backup.box_id` pin, else the environment Sail sets).
 
 A job's return value is its receipt (`summary_json`, a small JSON object). A job that decides it has nothing to do
-returns `{"status": "skipped", "why": ...}`; any exception is a `failed` receipt with its text.
+returns `{"status": "skipped", "why": ...}`; one that failed without raising returns `{"status": "failed", "error": ...}`;
+any exception is a `failed` receipt with its text.
 """
 from __future__ import annotations
 
@@ -160,8 +161,14 @@ class Context:
         return dict(value) if isinstance(value, dict) else {}
 
     def house_box(self) -> str | None:
+        """The House box's Sail id: `league/config.json` `backup.box_id` when pinned (the House box was forked, and Sail's
+        environment can still name the box it came from: `league/backup.py`), else the id Sail's environment gives."""
         from ..backup import BOX_ID_VARS
 
+        block = self.config.get("backup") if isinstance(self.config, Mapping) else None
+        pinned = block.get("box_id") if isinstance(block, Mapping) else None
+        if isinstance(pinned, str) and pinned.strip():
+            return pinned.strip()
         for name in BOX_ID_VARS:
             value = os.environ.get(name, "").strip()
             if value:

@@ -22,7 +22,9 @@ from . import guard
 FILE = "ops.sqlite"
 STATUSES = ("ok", "failed", "missed", "skipped")
 INTERRUPTED = "interrupted"
-MAX_ATTEMPTS = 2
+#: Three, not two: an updater release launched as its session hold lifts (20:05Z) promotes about when `economics` starts
+#: (close + 10) and a rollback inside its ten-minute watch restarts the House again: two interruptions of one run.
+MAX_ATTEMPTS = 3
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
@@ -43,9 +45,13 @@ class OpsStore:
         os.chmod(self.path, 0o600)
         self.db = sqlite3.connect(str(self.path), timeout=2.0, isolation_level=None, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
-        self.db.execute("PRAGMA journal_mode=WAL")
-        self.db.execute("PRAGMA synchronous=NORMAL")
-        self.db.executescript(SCHEMA)
+        try:
+            self.db.execute("PRAGMA journal_mode=WAL")
+            self.db.execute("PRAGMA synchronous=NORMAL")
+            self.db.executescript(SCHEMA)
+        except sqlite3.Error:
+            self.db.close()  # a torn file or a held lock: the caller decides (`league.ops.attach`)
+            raise
 
     def close(self) -> None:
         self.db.close()
