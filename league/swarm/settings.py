@@ -7,7 +7,8 @@ and the updater deploys it, so no laptop command touches the box to tune the swa
 and sits between config.json and swarm.json: DEFAULTS < config.json < policy.json < swarm.json. The owner's switches
 (`OWNER_KEYS`: `enabled`, `live`) are never read from it (a key there is ignored and named in `_policy`); they stay in
 swarm.json, which after the V3-A migration (`scripts/settings_migrate.py`) holds only them. A missing policy.json is no
-layer (exactly as before); one that is not a JSON object is ignored, and the loop alerts once (`_policy`).
+layer (exactly as before); one that is not a JSON object, or whose shape breaks the defaults' (`policy_shape`), is
+ignored whole, and the loop alerts once (`_policy`).
 
 The EVIDENCE LINES are not settings: they are the plan's, in `evidence.py`, and loosening one is the
 owner's decision. Everything here is throughput and money: how many, how often, how much.
@@ -451,6 +452,9 @@ DEFAULTS: dict[str, Any] = {
     # outside the asap window, mapped here to an asap profile, retries once there after a poll timeout, and the window's
     # calls go straight there for an hour (kv `sail_window_stall`). An entry set to null removes it; null turns the map off.
     "sail_fallback": {"k3_balanced": "pro_asap", "pro_balanced": "pro_asap"},
+    # The roles whose fallback keeps their MODEL (that model's asap profile, k3_balanced to k3, whatever the map names): the
+    # gate's audit is a second model, different from the review's DeepSeek-V4-Pro, on its fallback too. null: none.
+    "sail_fallback_same_model": ["audit"],
     "heartbeat_seconds": 20,
     "stale_heartbeat_seconds": 240,     # the House restarts a swarm whose heartbeat is older than this
     "nice": 10,
@@ -601,10 +605,40 @@ def read_policy(path: str | Path | None = None) -> tuple[dict[str, Any], dict[st
     return policy_layer(raw)
 
 
+#: The blocks of DEFAULTS a policy may set to null (each documented as "null turns it off"); every other block of DEFAULTS
+#: must stay an object in policy.json.
+POLICY_NULLABLE = frozenset({"sail_fallback", "gate.look_holds"})
+
+
+def policy_shape(raw: Mapping[str, Any], defaults: Mapping[str, Any] | None = None, prefix: str = "") -> list[str]:
+    """The paths where a policy document's shape breaks DEFAULTS': a block of DEFAULTS (an object) set to anything but an
+    object (null only at `POLICY_NULLABLE`), or an object where DEFAULTS holds a plain value. A key DEFAULTS lacks, or one
+    whose default is null, is not checked; nor are notes ("_")."""
+    defaults = DEFAULTS if defaults is None else defaults
+    bad: list[str] = []
+    for key, value in raw.items():
+        if str(key).startswith("_") or key not in defaults:
+            continue
+        path, default = f"{prefix}{key}", defaults[key]
+        if isinstance(default, Mapping):
+            if isinstance(value, Mapping):
+                bad += policy_shape(value, default, f"{path}.")
+            elif not (value is None and path in POLICY_NULLABLE):
+                bad.append(path)
+        elif default is not None and isinstance(value, Mapping):
+            bad.append(path)
+    return bad
+
+
 def policy_layer(raw: Any) -> tuple[dict[str, Any], dict[str, Any]]:
-    """(the layer, its status) from a parsed policy document: an object without its owner keys, else an empty layer."""
+    """(the layer, its status) from a parsed policy document: an object without its owner keys, else an empty layer. A
+    document whose shape breaks DEFAULTS' (`policy_shape`: e.g. `"gym": null`, `"researcher": 0.4`) is malformed: the
+    whole layer is dropped and the loop alerts, rather than every round failing on the block it replaced."""
     if not isinstance(raw, Mapping):
         return {}, {"state": "malformed", "why": f"not a JSON object ({type(raw).__name__})", "ignored": []}
+    bad = policy_shape({k: v for k, v in raw.items() if k not in OWNER_KEYS})  # those are ignored, never read
+    if bad:
+        return {}, {"state": "malformed", "why": f"not the shape of the defaults at {', '.join(sorted(bad)[:8])}", "ignored": []}
     ignored = sorted(k for k in raw if k in OWNER_KEYS)
     return {k: v for k, v in raw.items() if k not in OWNER_KEYS}, {"state": "ok", "why": None, "ignored": ignored}
 
@@ -767,6 +801,7 @@ def ready_refusal(root: str | Path, ready: Mapping[str, Any], named: str, roots:
     return None
 
 
-__all__ = ["DEFAULTS", "load", "read_policy", "policy_layer", "POLICY_PATH", "OWNER_KEYS", "chain_refusal", "ready_refusal", "train_from", "train_from_note", "parse_train_from",
+__all__ = ["DEFAULTS", "load", "read_policy", "policy_layer", "policy_shape", "POLICY_PATH", "OWNER_KEYS",
+           "POLICY_NULLABLE", "chain_refusal", "ready_refusal", "train_from", "train_from_note", "parse_train_from",
            "objective_span", "span_years", "train_years", "train_split", "run_timeout", "train_span_text",
            "TRAIN_CORE_START", "TRAIN_EARLIEST", "TRAIN_END", "TRAIN_STARTS"]

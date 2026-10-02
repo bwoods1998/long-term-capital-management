@@ -13,10 +13,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from league.swarm import settings as S
-from league.swarm.models import STALL_KEY, STALL_SECONDS, ModelError, ModelRouter, fallback_key
+from league.swarm.models import STALL_KEY, STALL_SECONDS, ModelError, ModelRouter, asap_twin, fallback_key
 from league.swarm.store import SwarmStore
 from league.tests.swarm_fakes import Clock
-from ltcm.provider import ProviderError, window_of
+from ltcm.provider import ProviderError, model_of, window_of
 
 
 class FakeProvider:
@@ -100,6 +100,41 @@ class TheFallback(Case):
         self.clock.advance(3 * STALL_SECONDS)
         self.ask(key="arch-3")
         self.assertEqual(len(self.alerts()), 2, "a new stall hours after the last flag ended")
+
+
+class TheAuditKeepsItsModel(Case):
+    """The gate's audit (Kimi-K3 on Sail) is a second model, different from the review's DeepSeek-V4-Pro: its fallback is
+    Kimi-K3's asap profile, never the map's pro_asap, so a stalled balanced window never makes one model read twice."""
+
+    def test_a_stalled_audit_retries_on_its_own_models_asap_profile(self):
+        answer = self.ask("k3_balanced", key="audit-1", role="audit")
+        self.assertEqual(self.provider.calls, [("k3_balanced", "audit-1"), ("k3", fallback_key("audit-1", "k3"))])
+        self.assertEqual(model_of(answer["model"]), model_of("k3_balanced"))
+        self.assertEqual(answer["sail_fallback"], {"from": "k3_balanced", "to": "k3", "why": "stall"})
+        self.assertEqual(self.store.get(STALL_KEY)["balanced"]["fallback"], "k3")
+
+    def test_while_flagged_the_audit_goes_to_its_own_models_asap_profile_and_the_review_to_the_map(self):
+        self.ask()  # the architect's poll timeout flags the window (to pro_asap)
+        self.provider.calls.clear()
+        review = self.ask("pro_balanced", key="review-1", role="review")
+        audit = self.ask("k3_balanced", key="audit-1", role="audit")
+        self.assertEqual([p for p, _ in self.provider.calls], ["pro_asap", "k3"])
+        self.assertNotEqual(model_of(review["model"]), model_of(audit["model"]), "two readers, not one model twice")
+
+    def test_the_roles_are_a_setting(self):
+        self.settings["sail_fallback_same_model"] = None
+        self.assertEqual(self.router.sail_fallback("k3_balanced", role="audit"), ("balanced", "pro_asap"))
+        self.settings["sail_fallback_same_model"] = ["audit", "architect"]
+        self.assertEqual(self.router.sail_fallback("k3_balanced", role="architect"), ("balanced", "k3"))
+        self.assertEqual(self.router.sail_fallback("k3_balanced", role="review"), ("balanced", "pro_asap"))
+        del self.settings["sail_fallback_same_model"]
+        self.assertEqual(self.router.sail_fallback("k3_balanced", role="audit"), ("balanced", "k3"), "absent: the audit")
+        self.settings["sail_fallback"] = None
+        self.assertIsNone(self.router.sail_fallback("k3_balanced", role="audit"), "the map off is every fallback off")
+
+    def test_asap_twin(self):
+        self.assertEqual((asap_twin("k3_balanced"), asap_twin("pro_balanced"), asap_twin("no_such_profile")),
+                         ("k3", "pro_asap", None))
 
 
 class NoFallback(Case):

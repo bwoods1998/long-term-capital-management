@@ -57,6 +57,8 @@ class TheLayer(Case):
         out = S.load(self.root, config={}, policy={"enabled": True, "live": {"incubator": True}, "population": {"start": 12}})
         self.assertIs(out["enabled"], False)
         self.assertIs(out["live"]["incubator"], False)
+        self.assertEqual(S.policy_layer({"live": None, "population": {"start": 12}})[1]["state"], "ok",
+                         "an owner key is ignored, whatever its shape")
         self.assertEqual(out["population"]["start"], 12, "the rest of the policy holds")
         self.assertEqual(out["_policy"]["ignored"], ["enabled", "live"])
         self.assertIs(S.load(self.root, config={}, policy={"enabled": True})["enabled"], False)
@@ -79,9 +81,34 @@ class TheLayer(Case):
             self.assertEqual((layer, status["state"]), ({}, "malformed"), text)
             self.assertTrue(status["why"])
 
+    def test_a_policy_that_breaks_the_defaults_shape_is_dropped_whole(self):
+        self.swarm_json({})
+        for doc, path in (({"gym": None, "population": {"start": 12}}, "gym"), ({"researcher": 0.4}, "researcher"),
+                          ({"gate": {"look_holds": 0.3}}, "gate.look_holds"), ({"population": {"start": {"n": 1}}},
+                                                                               "population.start"),
+                          ({"claude": {"role_model": []}}, "claude.role_model")):
+            layer, status = S.policy_layer(doc)
+            self.assertEqual((layer, status["state"]), ({}, "malformed"), doc)
+            self.assertIn(path, status["why"])
+            out = S.load(self.root, config={}, policy=doc)
+            self.assertEqual(out["_policy"]["state"], "malformed")
+            self.assertIsInstance(out["gym"], dict)
+            self.assertIsInstance(out["researcher"], dict)
+            self.assertEqual(out["population"]["start"], S.DEFAULTS["population"]["start"], "nothing of it is read")
+
+    def test_a_documented_null_a_key_without_a_default_and_a_note_are_the_policys_to_set(self):
+        doc = {"sail_fallback": None, "gate": {"look_holds": None}, "allocation": {"mode": "x"}, "_about": 3,
+               "architect": {"openai_model": None}, "gym": {"train_split": None}}
+        layer, status = S.policy_layer(doc)
+        self.assertEqual(status["state"], "ok")
+        out = S.load(None, config={}, policy=doc)
+        self.assertIsNone(out["sail_fallback"])
+        self.assertIsNone(out["gate"]["look_holds"])
+
     def test_the_repo_policy_file_is_read_by_default(self):
         layer, status = S.read_policy()
-        self.assertEqual(status["state"], "ok", "the committed policy.json is a JSON object")
+        self.assertEqual(status["state"], "ok", "the committed policy.json is a JSON object in the defaults' shape")
+        self.assertEqual(S.policy_shape(json.loads(S.POLICY_PATH.read_text())), [])
         self.assertEqual(status["ignored"], [], "the committed policy.json never sets the owner's switches")
         with_repo, without = S.load(None, config={}), S.load(None, config={}, policy={})
         self.assertEqual(with_repo.pop("_policy"), status)
@@ -90,6 +117,13 @@ class TheLayer(Case):
 
     def test_the_sail_fallback_default(self):
         self.assertEqual(S.DEFAULTS["sail_fallback"], {"k3_balanced": "pro_asap", "pro_balanced": "pro_asap"})
+        self.assertEqual(S.DEFAULTS["sail_fallback_same_model"], ["audit"])
+
+    def test_the_policy_file_is_a_protected_path_for_harness_candidates(self):
+        from league.swarm import harness_lanes
+
+        self.assertEqual(harness_lanes.protected_touch([("M", "league/swarm/policy.json")]),
+                         ["M league/swarm/policy.json (sealed)"])
 
 
 class TheNotice(Case):
@@ -171,7 +205,9 @@ class TheMigration(Case):
             self.m.plan({}, policy={"enabled": True}, config={})
         with self.assertRaisesRegex(self.m.MigrationError, "would change"):
             # A block the policy holds as null and swarm.json as an object merges differently once moved: refused.
-            self.m.plan({"gate": {"every_seconds": 5}}, policy={"gate": None}, config={})
+            self.m.plan({"gate": {"look_holds": {"drift_share": 0.3}}}, policy={"gate": {"look_holds": None}}, config={})
+        with self.assertRaisesRegex(self.m.MigrationError, "shape"):
+            self.m.plan({"researcher": 0.4}, policy={}, config={})
         with self.assertRaisesRegex(self.m.MigrationError, "gateway_token"):
             self.m.plan({"gateway_token": "x"}, policy={}, config={})
         counts = {"architect": {"max_output_tokens": 9000, "graveyard_digest_tokens": 50000}}
@@ -199,6 +235,12 @@ class TheMigration(Case):
         self.assertEqual(written["population"], {"start": 16, "floor": 8})
         self.assertEqual(sorted(json.loads((self.root / "swarm.reduced.json").read_text())), ["_note", "enabled", "live"])
         self.assertEqual(json.loads(swarm.read_text()), self.SWARM)
+        self.assertIn("cleared its watch", report["order"])
+        self.assertIn("rollback to a release without league/swarm/policy.json", report["rollback"])
+        code, report = self.run_tool(*common, "--swarm-out", str(swarm), "--apply")
+        self.assertEqual(code, 2)
+        self.assertIn("keep it", report["refused"])
+        self.assertEqual(json.loads(swarm.read_text()), self.SWARM, "the original is never overwritten")
         swarm.write_text("[]")
         code, report = self.run_tool(*common, "--apply")
         self.assertEqual(code, 2)
