@@ -1080,7 +1080,9 @@ FROZEN_SYMBOLS: dict[str, tuple[str, ...]] = {
         "Researcher.screen",
         # The validated-family retire guard (Oct 1): `_execute` asks the unfrozen `guarded` first, so a lane that returned
         # None there would lift it (the H1 review, finding 5).
-        "Researcher.guarded", "retire_guard", "retire_guard_days",
+        "Researcher.guarded", "retire_guard", "retire_guard_days", "RETIRE_GUARD_DAYS", "VERDICTS_KEY", "VERDICTS_KEPT",
+        "validation_refuted", "validated_at", "_line_verdict", "_passed_version", "adoption_archives", "ADOPTED_ACTION",
+        "_epoch", "_plain_int", "record_verdict",
         "Researcher.drift_blocks", "Researcher._demote", "Researcher._terminal", "Researcher.cycle",
         "Researcher._count_dormancy", "Researcher._count_holds",
         # A program's path from the model's tool call to the Gym: the arguments a tool call carries, the program text

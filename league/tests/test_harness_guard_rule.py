@@ -6,6 +6,7 @@ significant worsening; a population guard, a group count and the window lanes ke
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 from league.swarm import harness_lanes as lanes
 
@@ -162,3 +163,33 @@ class GuardRule(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FrozenSymbolsExist(unittest.TestCase):
+    """Every frozen qualname resolves in its file: a typo would silently unfreeze it (the #481 review, follow-up 2)."""
+
+    def test_every_frozen_symbol_resolves(self):
+        import ast
+        root = Path(__file__).resolve().parents[2]
+        missing = []
+        for rel, names in lanes.FROZEN_SYMBOLS.items():
+            tree = ast.parse((root / rel).read_text())
+            top, methods = set(), set()
+            for node in tree.body:
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    top.add(node.name)
+                    if isinstance(node, ast.ClassDef):
+                        methods.update(f"{node.name}.{m.name}" for m in node.body
+                                       if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)))
+                elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+                    for target in (node.targets if isinstance(node, ast.Assign) else [node.target]):
+                        for leaf in ast.walk(target):
+                            if isinstance(leaf, ast.Name):
+                                top.add(leaf.id)
+            missing += [f"{rel}:{n}" for n in names if n not in (methods if "." in n else top)]
+        self.assertEqual(missing, [])
+
+    def test_the_retire_guard_closure_is_frozen(self):
+        frozen = set(lanes.FROZEN_SYMBOLS["league/swarm/researcher.py"])
+        for name in ("Researcher.guarded", "retire_guard", "RETIRE_GUARD_DAYS", "validation_refuted", "record_verdict"):
+            self.assertIn(name, frozen)
