@@ -25,6 +25,23 @@ Main `665a9e8d` is the H1 release, deployed Oct 1 at 20:35Z (below); every House
 Under the freeze (Oct 1, "The freeze"), a change to `league/live` or `league/gym` waits for a planned release. Merged
 since and waiting for a release:
 
+- **The duplicate look** (H3a, branch `gate/h3a-no-duplicate-look`; `league/swarm/gate.py`, `league/swarm/store.py`,
+  `league/CONTRACT.md`; the money path: `gate.py` and `store.py` are loaded by the live path, so it deploys 20:05-13:25Z
+  only, after two adversarial reviews and green CI). Every holdout look raises the Holm bar for every later one, and the
+  three looks since the Sept 26 reset covered two programs (the edge study: the two Sept 27 looks had identical Train
+  and Validation results). The gate now refuses a look that would repeat an earlier one, in any family and lineage,
+  before anything else is asked of the version (the experiment contract, the drift screen, the rations, the paid review
+  and audit, the look): the same program (`run_sha`), or a version whose stored Validation run says the same as a looked
+  version's (the Gym's own run sha, the code with its parameters merged over the defaults; or the same evaluation with
+  the same outcome). Recorded as every gate refusal is (stage "duplicate look": the refusal row, the program's incubator
+  bar, `gated_sha` with `gate_ready` cleared, outcome "refused"), plus a private `swarm.gate` event `duplicate_look`
+  naming the earlier look; no look row, no try, no review, no holdout read; the researcher hears the earlier look's
+  number, never a figure. A repeat of a look in flight in another family waits for it; a version whose own look landed
+  is only closed. Before this, a gate-ready version whose `run_sha` had been looked at was skipped silently every round
+  and kept `gate_ready`, and a repeat under another `run_sha` was reviewed and looked at. Tightening only: no threshold,
+  Holm, deflated-Sharpe or forward rule moves; nothing in `league/live`, `league/gym` or `LEAGUE_FILES`, no evaluator
+  adoption, no money digest. To verify after the deploy: `swarm.gate` events with action `duplicate_look` (expect none
+  for a genuinely new version) and `refusals` rows with stage "duplicate look".
 - **The cell's yield** (H2 of the Oct 1 edge study, branch `cards/h2-yield-aware`; `league/swarm/cards.py`,
   `league/swarm/architect.py`, `league/swarm/settings.py`; off by default, so the deploy changes nothing until the
   operator sets it). From 22:00Z Oct 1 the architect bore nothing for seven passes and the population fell to 13
