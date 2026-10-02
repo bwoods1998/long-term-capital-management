@@ -246,7 +246,7 @@ class Caps(PracticeCase):
         live = self.build()
         sw = live.switches()
         self.assertEqual((sw["observe_roots_max"], sw["observe_train"], sw["observe_read_calls"], sw["observe_max"]),
-                         (24, False, 40, 48), "a switch is on only while JSON true; a bad count is its default")
+                         (24, False, 120, 48), "a switch is on only while JSON true; a bad count is its default")
         (self.root / "swarm.json").unlink()
         live._switches = None
         self.assertEqual((live.switches()["observe_train"], live.switches()["observe_roots_max"]), (True, 24))
