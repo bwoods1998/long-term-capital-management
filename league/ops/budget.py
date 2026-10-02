@@ -80,6 +80,8 @@ FLOOR_SPLIT = {"sail": 0.6, "claude": 0.4}
 #: The share of trailing realized profit research may spend, and the window it is read over (calendar days).
 PROFIT_SHARE = 0.5
 P30_DAYS = 30
+#: The close economics' p30 is used only while its cutoff is this fresh (a missed close falls back to the book).
+P30_FRESH_SECONDS = 36 * 3600
 #: Dollars on each meter research never spends.
 RESERVE_USD = {"sail": 10.0, "claude": 5.0}
 #: The no-forward-edge stop: this many sessions closed since `EDGE_START` (or the last Probe promotion) without one.
@@ -479,13 +481,20 @@ def _p30(root: Path, now: float, errors: list[str]) -> tuple[float | None, str]:
         from . import economics  # league/ops/economics.py (the close economics), when it is there
     except ImportError:
         economics = None
-    reader = getattr(economics, "p30", None)
+    reader = getattr(economics, "latest", None)
     if callable(reader):
         try:
-            value = _finite(reader(root, now=now))
-            if value is not None:
+            summary = reader(root)
+            cutoff = _epoch((summary or {}).get("cutoff"))
+            value = _amount(((summary or {}).get("p30") or {}).get("usd"))
+            if summary is None:
+                pass  # no close yet (a new House): the book's own read is the source, not an error
+            elif cutoff is None or not (0 <= now - cutoff <= P30_FRESH_SECONDS):
+                errors.append("the close economics is stale: the live book's own read is used")
+            elif value is not None:
                 return value, "league.ops.economics.p30"
-            errors.append("league.ops.economics.p30 gave no number: the live book's own read is used")
+            else:
+                errors.append("league.ops.economics.p30 gave no number: the live book's own read is used")
         except Exception as exc:  # noqa: BLE001 - the book's own read stands in
             errors.append(f"league.ops.economics.p30 failed ({type(exc).__name__}): the live book's own read is used")
     try:

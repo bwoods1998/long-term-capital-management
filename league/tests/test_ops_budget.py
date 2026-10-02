@@ -445,12 +445,18 @@ class Job(unittest.TestCase):
         self.assertEqual(self.doc()["meters"]["sail"]["research_usd_day"], 0.0)
 
     def test_the_close_economics_p30_is_preferred_when_present(self):
-        module = types.ModuleType("league.ops.economics")
-        module.p30 = lambda root, now: 300.0
-        with mock.patch.dict(sys.modules, {"league.ops.economics": module}):
+        from league.ops import economics
+        with mock.patch.object(economics, "latest", lambda root: {"cutoff": B._iso(NOW - 3 * 3600), "p30": {"usd": "300.00"}}):
             B.run(self.ctx())
         self.assertEqual((self.doc()["inputs"]["p30_usd"], self.doc()["inputs"]["p30_source"]),
                          (300.0, "league.ops.economics.p30"))
+
+    def test_a_stale_close_economics_falls_back_to_the_book(self):
+        from league.ops import economics
+        with mock.patch.object(economics, "latest", lambda root: {"cutoff": B._iso(NOW - 3 * DAY), "p30": {"usd": "300.00"}}):
+            receipt = B.run(self.ctx())
+        self.assertEqual(self.doc()["inputs"]["p30_usd"], 39.98)
+        self.assertIn("the close economics is stale: the live book's own read is used", receipt["errors"])
 
     def test_a_probe_promotion_is_read_from_the_swarm_store(self):
         store = SwarmStore(self.root, clock=Clock(at(2026, 12, 1, 15, 0)))

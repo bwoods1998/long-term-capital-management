@@ -466,7 +466,8 @@ class RefillTests(R.RoundCase):
             for i in range(count):
                 self.store.update_family(f"f{i}", retired_at=None, band="gym")
             stream = io.StringIO()
-            with contextlib.redirect_stdout(stream):
+            # The configured lines alone: the budget's tighten-only ceiling is league/tests/test_ops_budget.py's.
+            with contextlib.redirect_stdout(stream), patch.object(S, "budget_overlay", lambda out, root: out):
                 verify.main(["--root", str(self.root)])
             self.assertEqual(json.loads(stream.getvalue())["checks"]["population"]["result"], expected)
 

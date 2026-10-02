@@ -12,6 +12,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from league.swarm import settings as S
 from league.swarm.loop import Swarm
@@ -45,7 +46,8 @@ class TheLayer(Case):
         self.swarm_json({"population": {"floor": 9}, "gym": {"max_boxes": 3}})
         policy = {"population": {"start": 20, "floor": 10}, "gym": {"max_boxes": 2, "start_boxes": 1},
                   "researcher": {"sail_usd_per_hour": 0.4}}
-        out = S.load(self.root, config=self.CONFIG, policy=policy)
+        with mock.patch.object(S, "budget_overlay", lambda out, root: out):  # the layers alone (the budget is its own test)
+            out = S.load(self.root, config=self.CONFIG, policy=policy)
         self.assertEqual(out["population"], {**S.DEFAULTS["population"], "start": 20, "floor": 9})
         self.assertEqual((out["gym"]["max_boxes"], out["gym"]["start_boxes"]), (3, 1), "swarm.json over policy over defaults")
         self.assertEqual(out["architect"]["every_seconds"], 9000, "config.json where the policy says nothing")
