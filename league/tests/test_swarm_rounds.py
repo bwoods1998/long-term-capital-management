@@ -95,6 +95,9 @@ class RoundCase(unittest.TestCase):
         self.settings["tournament"]["require_robustness"] = False
         # Nor the drift screen: these families have no Train run (league/tests/test_swarm_drift.py tests it).
         self.settings["tournament"]["drift_screen"] = False
+        # Nor the look holds, which fail closed on a version with no Train drift fit (league/tests/test_swarm_look_holds.py
+        # tests them, with the defaults).
+        self.settings["gate"]["look_holds"] = None
         # Nor the family card: these proposals carry none (league/tests/test_swarm_cards.py tests it).
         self.settings["architect"]["require_card"] = False
         self.answer = strong

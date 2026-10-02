@@ -5,7 +5,8 @@ THE GATE (when a family's validated best meets the validation line):
    inherits its parent's looks); the leakage alarm (>= 10 looks, > 30% passing) stops the gate. THE DUPLICATE LOOK
    (H3a, Oct 1, 2026; `duplicate_look`) comes first: a look that would repeat an earlier one is refused. THE DRIFT SCREEN
    (Sept 27, `evidence.drift_screen`) again, in depth: a version whose Train drift-adjusted alpha fails it is refused
-   (stage "drift screen": no review is paid, no look is spent); one whose figures are owed waits.
+   (stage "drift screen": no review is paid, no look is spent); one whose figures are owed waits. THE LOOK HOLDS (L6,
+   Oct 2, 2026; `look_hold`) come after the rations and before the review: a look the holdout cannot judge is held.
 2. THE REVIEW: GPT-6 Sol through the gateway when OpenAI has room (`review_openai_model`; null skips it), else
    DeepSeek-V4-Pro balanced on Sail (Claude first once "review" is in `claude.roles`, Sept 29), reads the program for
    lookahead, leakage (calendar recognition, hard-coded regimes) and fill abuse. A failed review is a recorded refusal
@@ -35,6 +36,38 @@ number and why, never a figure or that look's verdict (D2a). A version whose loo
 closed (`gated_sha`), and one that repeats a look still in flight in another family waits for it. A genuinely new
 version compares with nothing and goes on as before. Tightening only: no threshold, no Holm or deflated-Sharpe rule,
 no forward rule moves.
+
+THE LOOK HOLDS (L6(b) and L6(c) of the edge study, approved by the owner on Oct 2, 2026 as a tightening; `look_hold`,
+`evidence.drift_lean`, `evidence.holdout_power`). Every look raises the Holm bar of every later one; the three looks since
+the Sept 26 reset were all long-delta programs, and all failed. So, after the experiment contract, the drift screen and
+the rations (each of which REFUSES, and a refusal bars the program from the incubator: a hold never takes a refusal's
+place) and before anything is paid (the review, the audit) or opened (the sealed read), the gate HOLDS the look at:
+- (b) THE DRIFT HOLD (stage "look hold (drift)"): a long-delta version (pooled Train beta above zero) whose Train drift
+  share, |drift_usd| / (|alpha_usd| + |drift_usd|) of its own drift fit over the years the drift screen counts
+  (`researcher.version_drift`, `evidence.drift_lean`), is at least `gate.look_holds.drift_share` (0.25). A version with
+  no drift fit is held too (fail-closed), and so is a long-delta one whose alpha and drift are both zero.
+- (c) THE POWER HOLD (stage "look hold (power)"): a version whose expected holdout power is below
+  `gate.look_holds.min_power` (0.30): the one-sided power of the holdout line's test of mean daily P&L above zero (a
+  day-block bootstrap, taken in the normal approximation: P(Z >= z(level) - S sqrt(N))), with S the version's Validation
+  all-days daily Sharpe (`validation_numbers.sharpe_daily`, the figure the look's Sharpe check uses), N the holdout
+  window's NYSE sessions (`holdout_sessions`) and the level the look would have to reach under Holm across every look
+  made (`evidence.holm_level`), a look in flight in another family counted as a failed one. Missing figures hold
+  (fail-closed). The approximation leaves out the line's other checks (which can only lower the pass chance); for
+  independent daily P&L the bootstrap passes a little more often than it says near the line, so the hold errs toward holding,
+  and for positively autocorrelated daily P&L (multi-day marks) toward looking (`evidence.holdout_power`).
+A held version is closed at the gate (`gated_sha`, `gate_ready` cleared, so the tournament never readies it again;
+`gate_outcome` "held"), with one `look_holds` row (`SwarmStore.hold_look`: its own table, never a `refusals` row) and
+one private `swarm.gate` event (`look_hold`, its figures under `_figures`); no look row, no try, no review, no audit, no
+sealed read. ON THE MONEY PATH A HOLD IS A FAILED LOOK (the owner approved the holds as a TIGHTENING, so a held program
+gets no real order that the look it replaces would have stopped): "held" is one of `bands.BAD_OUTCOMES`, so it ends the
+version's execution tuition (`bands.read`) and refuses its program the incubator (`bands.program_refusal`), and the hold
+is recorded as the program's incubator bar for good first (THE VERDICT FIRST, `_incubator_bar`, right after its hold row
+and before anything else, as a refusal's is). That matters because a hold can land after the review: a version reviewed
+and audited (a pass) that waits for the gate image or a holdout gap is held when a look landing elsewhere lowers its
+power, or when the holds are switched on; without the bar its tuition would never end (no look is coming). The
+researcher hears that the look is held and why, in words with no figure (D2a). A new version of the family is looked at
+once it clears both. `look()` checks again under the store's lock (a look landing meanwhile can lower the power). Each
+hold is switched off by its setting set to null (`look_holds` null: both); a misread value is its default.
 
 MISSING DATA IS THE GATE IMAGE'S, NOT THE PROGRAM'S (Oct 1, 2026). Before a look the gate checks that its image holds a
 holdout for every root the program needs (`holdout_gap`: the gate boxes' file-name listing and the Gym's own "missing
@@ -95,6 +128,7 @@ Standard library only.
 from __future__ import annotations
 
 import datetime as dt
+import functools
 import hashlib
 import json
 import secrets
@@ -107,7 +141,7 @@ from ..gym.safety import CodeRefused
 from . import evidence
 from . import settings as settings_mod
 from .pool import GymJob, PoolError
-from .researcher import drift_verdict, needs_roots
+from .researcher import drift_verdict, needs_roots, running_span, version_drift
 from .store import SwarmStore, dumps, structure_text
 
 REVIEW = """You review option-trading programs before they meet sealed data. A program is one Python file (NEEDS, PARAMS,
@@ -178,6 +212,80 @@ def duplicate_words(duplicate: Mapping[str, Any]) -> str:
         str(duplicate.get("match")), "a version whose Validation run this one repeats exactly")
     return (f"a duplicate of holdout look #{duplicate.get('seq')}, made on {what}: a second look adds no information and "
             "raises the bar for every later look, so only a genuinely different version can be looked at")
+
+
+#: THE LOOK HOLDS' stages (the module docstring).
+HOLD_DRIFT_STAGE = "look hold (drift)"
+HOLD_POWER_STAGE = "look hold (power)"
+#: What the researcher reads of a hold (D2a: never a figure, of Train, Validation or the holdout).
+HOLD_WORDS = {
+    HOLD_DRIFT_STAGE: ("the holdout look is held: the program's Train profit leans on market drift (it holds long market "
+                       "exposure, and a large share of what it made is what that exposure earns on average days), so a "
+                       "holdout pass would mostly measure the market, not the program. No look was spent; a new version "
+                       "whose profit does not lean on drift can be looked at"),
+    HOLD_POWER_STAGE: ("the holdout look is held: the program makes too few independent bets for the holdout to judge it, "
+                       "so a look would most likely fail even if its edge were real, and every look raises the bar for "
+                       "every later one. No look was spent; a new version can be looked at once the holdout can judge it"),
+}
+#: The outcome a hold writes (`Gate.outcome`): one of `bands.BAD_OUTCOMES` (`incubator.BAD_OUTCOMES`), so, as a failed look's
+#: does, it ends the version's execution tuition and bars its program from the incubator.
+HOLD_OUTCOME = "held"
+
+
+def look_hold_settings(settings: Mapping[str, Any]) -> tuple[float | None, float | None]:
+    """THE LOOK HOLDS' settings (`gate.look_holds`): (drift share, minimum power), each None when off. The key absent is the
+    defaults; JSON null (the block, or one of its keys) turns them off; any other value that is not a finite number from 0
+    to 1 is its default (a brake is never misread as off)."""
+    defaults = (evidence.LOOK_HOLD_DRIFT_SHARE, evidence.LOOK_HOLD_MIN_POWER)
+    cfg = settings.get("gate") or {}
+    if not isinstance(cfg, Mapping) or "look_holds" not in cfg:
+        return defaults
+    block = cfg.get("look_holds")
+    if block is None:
+        return None, None
+    if not isinstance(block, Mapping):
+        return defaults
+
+    def read(key: str, default: float) -> float | None:
+        if key not in block:
+            return default
+        value = block[key]
+        if value is None:
+            return None
+        number = evidence._num(value)
+        return number if number is not None and 0.0 <= number <= 1.0 else default
+
+    return read("drift_share", defaults[0]), read("min_power", defaults[1])
+
+
+def holdout_sessions() -> int | None:
+    """The holdout window's sessions (`pool.HOLDOUT_FIRST` to `HOLDOUT_LAST`, the Gym's window) by the NYSE calendar the
+    House trades on (`ltcm.data.us_equity_session`): the N of THE POWER HOLD. None when the calendar cannot say (the hold
+    then fails closed)."""
+    from . import pool
+
+    return sessions_between(pool.HOLDOUT_FIRST, pool.HOLDOUT_LAST)
+
+
+def sessions_between(first: str, last: str) -> int | None:
+    """The NYSE sessions from `first` to `last` (ISO days, both included); None when the calendar cannot say. A count is
+    kept for the process; a failure is not (a hold is for good, so a calendar that failed once is asked again)."""
+    try:
+        return _sessions_between(str(first), str(last)) or None
+    except Exception:  # noqa: BLE001 - no calendar, no figure: the caller holds
+        return None
+
+
+@functools.lru_cache(maxsize=8)
+def _sessions_between(first: str, last: str) -> int:
+    from ltcm.data import us_equity_session
+
+    day, end = dt.date.fromisoformat(first), dt.date.fromisoformat(last)
+    sessions = 0
+    while day <= end:
+        sessions += us_equity_session(day) is not None
+        day += dt.timedelta(days=1)
+    return sessions
 
 
 def incubator_stage(stage: str, fid: str, *, incubator: bool = False) -> tuple[str, str]:
@@ -370,10 +478,69 @@ class Gate:
                                                    "of_look": duplicate.get("seq"), "of_family": duplicate.get("family"),
                                                    "of_version": duplicate.get("version"), "match": duplicate.get("match")})
 
+    # ------------------------------------------------------------------ THE LOOK HOLDS (L6)
+    def look_hold(self, fam: Mapping[str, Any], n: Any) -> dict[str, Any] | None:
+        """THE LOOK HOLDS (the module docstring) on version `n` of `fam` (its state as read: `validation_numbers` must be
+        version `n`'s): {"stage", "holds" (every hold that fired, the drift hold first), "figures"} when a look at it is
+        held, else None. "figures" are operator-only: the drift fit's beta, alpha, drift and share, and the power with
+        its Sharpe, sessions, Holm level and looks counted. Each hold is skipped while its setting is null."""
+        drift_share, min_power = look_hold_settings(self.settings)
+        if drift_share is None and min_power is None:
+            return None
+        n = int(n)
+        holds: list[str] = []
+        figures: dict[str, Any] = {}
+        if drift_share is not None:
+            lean = evidence.drift_lean(version_drift(self.store, fam, n), first_year=int(running_span(self.store)[:4]))
+            held = not lean["known"] or (lean["long_delta"] and (lean["share"] is None or lean["share"] >= drift_share))
+            figures["drift"] = {**{k: lean[k] for k in ("known", "beta", "alpha_usd", "drift_usd", "share", "long_delta",
+                                                         "years", "why")}, "line": drift_share, "held": bool(held)}
+            if held:
+                holds.append(HOLD_DRIFT_STAGE)
+        if min_power is not None:
+            state = fam.get("state") or {}
+            sharpe = (state.get("validation_numbers") or {}).get("sharpe_daily") if state.get("validation_version") == n \
+                else None
+            previous = [x["p_value"] for x in self.store.looks() if x["p_value"] is not None]
+            flying = [other for other, _ in self.store.looks_inflight() if other != str(fam["id"])]
+            level = evidence.holm_level(previous + [1.0] * len(flying))  # a look in flight elsewhere: a failed one
+            sessions = holdout_sessions()
+            power = evidence.holdout_power(sharpe, sessions, level)
+            held = power is None or power < min_power
+            figures["power"] = {"power": power, "sharpe_daily": evidence._num(sharpe), "sessions": sessions, "level": level,
+                                "looks_before": len(previous), "inflight_elsewhere": len(flying), "line": min_power,
+                                "held": bool(held)}
+            if held:
+                holds.append(HOLD_POWER_STAGE)
+        if not holds:
+            return None
+        return {"stage": holds[0], "holds": holds, "figures": figures}
+
+    def hold_look(self, fam: Mapping[str, Any], n: int, sha: str, hold: Mapping[str, Any], out: dict[str, Any]) -> None:
+        """THE LOOK HOLDS' record, as a refusal's is ordered (`refuse`): one `look_holds` row (the researcher's words), the
+        program's incubator bar (THE VERDICT FIRST: whatever happens next, a held program never trades the incubator),
+        one private `swarm.gate` event with the figures, then, only if the version is still the one validated, its gate
+        place closed (`gated_sha`, `gate_ready` cleared, the dormant count restarted: a verdict is news), the outcome
+        "held" (one of `bands.BAD_OUTCOMES`: its execution tuition ends) and the researcher's status line. No look row,
+        no try, no review, no audit, no sealed read."""
+        fid, stage = str(fam["id"]), str(hold["stage"])
+        words = HOLD_WORDS[stage]
+        self.store.hold_look(fid, n, sha, stage, words)
+        self._incubator_bar(fid, n, sha, why=f"the gate held its holdout look ({stage})")
+        self.store.event("swarm.gate", fid, {"action": "look_hold", "version": n, "sha": sha[:12], "stage": stage,
+                                             "holds": list(hold.get("holds") or [stage]),
+                                             "_figures": hold.get("figures")})  # the figures stay private (underscore)
+        if not self.store.compare_and_set_state(fid, {"validation_version": n}, gated_sha=sha, gate_ready=False,
+                                                dormant_cycles=0):
+            return
+        self.outcome(fid, sha, HOLD_OUTCOME)
+        self.tell(fid, words, verdict=True)
+        out["look_held"].append(fid)
+
     # ------------------------------------------------------------------ one round
     def run(self) -> dict[str, Any]:
         self.store.put("gate_at", self.clock())
-        out: dict[str, Any] = {"looked": [], "refused": [], "waiting": [], "held": []}
+        out: dict[str, Any] = {"looked": [], "refused": [], "waiting": [], "held": [], "look_held": []}
         self._incubator_owed()  # a verdict an error kept from its bar last round: recorded first
         self._incubator_sweep()  # a look that landed, or a demotion, since the last round: its mark goes first
         if self.alarm():
@@ -444,6 +611,10 @@ class Gate:
                     self.refuse(fam, n, sha, "rations", ["the lineage's three holdout looks are spent"], out)
                 else:
                     out["waiting"].append(fam["id"])
+                continue
+            hold = self.look_hold(fam, n)
+            if hold is not None:  # THE LOOK HOLDS: after every free check that refuses, before anything is paid or opened
+                self.hold_look(fam, int(n), sha, hold, out)
                 continue
             cached = state.get("review") or {}
             review = cached if cached.get("sha") == sha and cached.get("contract_sha") == review_contract()["sha256"] else None
@@ -777,9 +948,10 @@ class Gate:
             current = self.store.family(fam["id"]) or {}
             if current.get("retired_at") or (current.get("state") or {}).get("gate_hold") or self.store.looked(sha) or \
                     self.store.lineage_looks(fam["id"], include_inflight=True) >= evidence.LOOKS_PER_LINEAGE or \
-                    self.duplicate_look(current, n, sha) is not None:
+                    self.duplicate_look(current, n, sha) is not None or self.look_hold(current, n) is not None:
                 # (held by the operator meanwhile: no look is spent, gate_ready stays; a look it would repeat landed or went
-                # out meanwhile: THE DUPLICATE LOOK refuses it next round, or waits for it)
+                # out meanwhile: THE DUPLICATE LOOK refuses it next round, or waits for it; a look that landed or went out
+                # meanwhile lowered its power: THE LOOK HOLDS hold it next round)
                 return None
             if not self.store.compare_and_set_state(fam["id"], {"validation_version": n, "validation_image": image, "validation_bundle": bundle,
                                                                "look_inflight": None}, gate_ready=False, look_inflight=marker):
@@ -1141,4 +1313,5 @@ class Gate:
 
 
 __all__ = ["Gate", "run_sha", "incubator_stage", "REVIEW", "DUPLICATE_STAGE", "VALIDATION_IDENTITY", "validation_identity",
-           "duplicate_words"]
+           "duplicate_words", "HOLD_DRIFT_STAGE", "HOLD_POWER_STAGE", "HOLD_WORDS", "HOLD_OUTCOME", "look_hold_settings",
+           "holdout_sessions", "sessions_between"]

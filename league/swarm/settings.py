@@ -299,6 +299,12 @@ DEFAULTS: dict[str, Any] = {
         # (desk "<family>:incubator", `review_usd_day` a day), so the gate's own are untouched.
         "incubator_reviews": 2,
         "gate_box_idle_sleep_seconds": 300,
+        # THE LOOK HOLDS (L6(b) and L6(c), the owner's approval of Oct 2, 2026; `gate.Gate.look_hold`): the gate holds a
+        # holdout look (no look, no review or audit, no sealed read) at a long-delta version whose Train drift share is at
+        # least `drift_share`, or whose expected holdout power at the next look's Holm level is below `min_power`. Each
+        # null turns that hold off (rollback); "look_holds": null turns both off. A value that is not a number from 0 to 1
+        # is read as its default: a brake is never misread as off.
+        "look_holds": {"drift_share": 0.25, "min_power": 0.30},
     },
     "forward": {
         "every_seconds": 3600,          # look for a new forward day on the gate image this often

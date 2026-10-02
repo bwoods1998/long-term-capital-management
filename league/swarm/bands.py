@@ -5,8 +5,9 @@
 
 One row per family the live path may run: every family in the Candidate, Probe or Sized band, and every
 family in the Gym band whose validated version met the validation line AND passed the gate's review and audit,
-and whose holdout look (or forward record) has not failed and was not refused (execution tuition: 1-lot real
-orders that measure multi-leg fills and are never evidence). Each row:
+and whose holdout look (or forward record) has not failed, was not refused and was not held (THE LOOK HOLDS, Oct 2,
+2026: a held look ends the version's tuition as a failed one does) (execution tuition: 1-lot real orders that measure
+multi-leg fills and are never evidence). Each row:
 
     family                the family's id
     band                  gym | candidate | probe | sized
@@ -58,7 +59,8 @@ objective (the store's `research_evaluator` and `train_objective`, both known: a
 retired and revived family's stale mark never passes) and showing a positive 1.5x Train P&L and the drift screen's
 figures, the family is not on D2's route (no validated version that met the validation line: its tuition row comes
 first, even when `read` cannot be read), the gate's review AND audit passed on `n`'s run sha under the current review
-contract (`state.review`, or `state.incubator_reviews[sha]`), and the gate did not refuse, fail or demote that sha.
+contract (`state.review`, or `state.incubator_reviews[sha]`), and the gate did not refuse, fail, demote or hold that
+sha (`BAD_OUTCOMES`).
 THE READER'S BELT (`incubator_refusal`; Oct 1, 2026, the owner's term that a program whose review or audit failed never
 trades the incubator) comes first and does not rely on the mark: no row for a program the swarm barred
 (`incubator_barred`, kept for good), one the gate's `review` names without a readable pass and passed audit, one whose
@@ -99,6 +101,11 @@ from . import DB_NAME, settings
 from .store import loads
 
 LIVE_BANDS = ("candidate", "probe", "sized")
+#: The gate's outcomes (`gate_outcome.result` naming the program) that end its execution tuition (`read`) and refuse it
+#: the incubator (`program_refusal`; `incubator.BAD_OUTCOMES` is this tuple): refused, failed (its holdout look), demoted,
+#: and held (THE LOOK HOLDS, Oct 2, 2026: the owner approved them as a tightening, so a held look stops every real order
+#: the look it replaces would have stopped, at whatever stage the hold lands, a passed review and audit included).
+BAD_OUTCOMES = ("refused", "failed", "demoted", "held")
 #: Seconds a process reuses the Gym bundle's version (`_bundle`).
 BUNDLE_TTL = 300.0
 _bundle_cache: tuple[float, str] | None = None
@@ -200,9 +207,10 @@ def read(root: str | Path, *, family: str | None = None) -> list[dict[str, Any]]
         if fam["band"] == "gym":
             if not image or state.get("validation_image") != image or not bundle or state.get("validation_bundle") != bundle:
                 continue
-            # Tuition only for a validated version the review (and the audit) passed and the gate has not failed, refused
-            # or demoted: a program the reviewer called dangerous, or one whose holdout or forward record failed, never
-            # sends a real order.
+            # Tuition only for a validated version the review (and the audit) passed and the gate has not failed, refused,
+            # demoted or held (`BAD_OUTCOMES`): a program the reviewer called dangerous, one whose holdout or forward record
+            # failed, or one whose look the gate held (no look is coming, so its tuition would never end), never sends a
+            # real order.
             review = state.get("review") or {}
             outcome = state.get("gate_outcome") or {}
             if review.get("sha") != sha or review.get("verdict") != "pass" or (review.get("audit") or {}).get("verdict") != "pass":
@@ -211,7 +219,7 @@ def read(root: str | Path, *, family: str | None = None) -> list[dict[str, Any]]
 
             if review.get("contract_sha") != review_contract()["sha256"] or (review.get("audit") or {}).get("contract_sha") != review_contract()["sha256"]:
                 continue
-            if outcome.get("sha") == sha and outcome.get("result") in ("refused", "failed", "demoted"):
+            if outcome.get("sha") == sha and outcome.get("result") in BAD_OUTCOMES:
                 continue
         validated = state.get("validation_version") == v["n"] and bool((state.get("validation_line") or {}).get("passed"))
         out.append({
@@ -443,7 +451,7 @@ def program_refusal(state: Any, sha: str) -> str | None:
       audit, an unclear or unreadable verdict, and a pass whose audit is still owed: not final, so the House waits);
     - the incubator's own review of it (`incubator_reviews[sha]`) failed, was revoked, or has an audit that did not
       pass, whatever its contract, or cannot be read as this program's;
-    - the gate's `gate_outcome` names it refused, failed or demoted;
+    - the gate's `gate_outcome` names it refused, failed, demoted or held (`BAD_OUTCOMES`);
     - FAIL-CLOSED: the state or one of `BELT_RECORDS` cannot be read, or the gate's `review` names no program.
     The swarm reads this same function in every other family holding the program (`incubator.program_bar`), so it
     never marks, or pays to review, a program refused here for another family's records."""
@@ -469,7 +477,7 @@ def program_refusal(state: Any, sha: str) -> str | None:
         if record.get("verdict") != "pass" or ("audit" in record and not _pass_and_audit(record)):
             return "the incubator's review or audit of it did not pass"
     outcome = state.get("gate_outcome") or {}
-    if outcome.get("sha") == sha and outcome.get("result") in ("refused", "failed", "demoted"):
+    if outcome.get("sha") == sha and outcome.get("result") in BAD_OUTCOMES:
         return f"the gate's outcome for it is {outcome['result']}"
     return None
 
@@ -562,4 +570,4 @@ def incubator(root: str | Path, *, family: str, version: int) -> list[dict[str, 
 
 
 __all__ = ["read", "observe", "incubator", "incubator_refusal", "program_refusal", "owed_bars", "priority", "practice_tier",
-           "demoted", "LIVE_BANDS", "TIERS", "BUNDLE_TTL", "BELT_RECORDS", "BARS_OWED_FILE"]
+           "demoted", "LIVE_BANDS", "TIERS", "BUNDLE_TTL", "BELT_RECORDS", "BARS_OWED_FILE", "BAD_OUTCOMES"]
