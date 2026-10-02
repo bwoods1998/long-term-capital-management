@@ -4,23 +4,26 @@ disposable state, a fake deploy record and fake account reads (invented figures)
 It ratifies the grant in force without the owner in two cases only:
 - the money digest moved, and an owner's release change (no updater attestation, no drill) is on record since the
   grant was last pinned;
-- a deposit landed since the grant was last pinned.
+- a deposit landed since the grant was last pinned (by its id: one still pending at a ratification is answered when it
+  settles, whatever time the venue gives it).
 Capital is the lower of equity and the ceiling, never above the envelope; a revoked grant is never touched; anything
 unreadable, an updater-only record, a ceiling raised without the owner, or capital under the smallest stake refuses and
 changes nothing.
 """
+from contextlib import ExitStack
 from decimal import Decimal
+import importlib.util
 import json
 import os
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
-from unittest import TestCase
+from unittest import TestCase, skipUnless
 from unittest.mock import patch
 
 from league.constitution import CONSTITUTION, money_digest
-from league.live_trading import (GRANT_ID, STORE, LiveGrant, _epoch, deposits_after, owner_change, policy,
-                                 policy_hash, smallest_stake)
+from league.live_trading import (DEPOSIT_LOOKBACK_SECONDS, GRANT_ID, STORE, LiveGrant, _epoch, deposits_after,
+                                 owner_change, policy, policy_hash, smallest_stake)
 from league.ops import grant as job
 from league.tests.fakes import Clock
 
@@ -28,6 +31,7 @@ D = Decimal
 EQUITY = "700"
 CEILING = "5500"
 HOUR = 3600.0
+DAY = 86400.0
 
 
 def moved_digest():
@@ -107,7 +111,8 @@ class TheRule(StandingCase):
     def test_nothing_moved_means_nothing_written(self):
         grant = self.enabled()
         before = grant.current()
-        out = self.standing(grant, rows=owner_deploy(self.clock() - 60), funding=[deposit(self.pinned - 60)])
+        old = deposit(self.pinned - DEPOSIT_LOOKBACK_SECONDS - 60)
+        out = self.standing(grant, rows=owner_deploy(self.clock() - 60), funding=[old])
         self.assertEqual((out["action"], out["triggers"]), ("none", []))
         self.assertEqual(out["before"], out["after"])
         self.assertEqual(grant.current(), before)
@@ -193,7 +198,8 @@ class TheRule(StandingCase):
         grant = self.enabled()
         later = self.clock() - 60
         for name, row in {
-            "landed before the pin": deposit(self.pinned - 1),
+            "timed before the lookback": deposit(self.pinned - DEPOSIT_LOOKBACK_SECONDS - 1),
+            "no id, timed before the pin": {**deposit(self.pinned - 1), "id": None},
             "a withdrawal": deposit(later, amount="-500"),
             "pending": deposit(later, status="queued"),
             "rejected": deposit(later, status="rejected"),
@@ -207,6 +213,60 @@ class TheRule(StandingCase):
             with self.subTest(name):
                 self.assertEqual(self.standing(grant, funding=[row])["action"], "none")
         self.assertEqual(grant.ratifications(), [])
+
+    def test_a_deposit_pending_across_a_ratification_is_answered_when_it_settles(self):
+        # The venue times a funding row at its request: an ACH deposit started before a ratification lands with a
+        # time before the pin it moved.
+        grant = self.enabled()
+        asked = self.clock() - 10
+        first = deposit(asked, amount="4000", status="queued", ident="ach-1")
+        self.assertEqual(self.standing(grant, funding=[first])["action"], "none", "pending is no deposit")
+        self.clock.advance(HOUR)
+        with moved_digest():
+            out = self.standing(grant, funding=[first], rows=owner_deploy(self.clock() - 60))
+            self.assertEqual((out["action"], out["triggers"]), ("ratified", ["digest"]))
+            self.clock.advance(2 * DAY)
+            second = deposit(asked + 5, amount="300", status="queued", ident="ach-2")
+            settled = {**first, "status": "executed"}
+            out = self.standing(grant, equity="4700", funding=[settled, second])
+            self.assertEqual((out["action"], out["triggers"]), ("ratified", ["deposit"]))
+            self.assertEqual(grant.current()["policy"]["capital_usd"], "4700.00")
+            self.assertEqual(self.standing(grant, equity="4700", funding=[settled, second])["action"], "none", "answered once")
+            self.clock.advance(DAY)
+            out = self.standing(grant, equity="5000", funding=[settled, {**second, "status": "executed"}])
+            self.assertEqual(out["action"], "ratified", "the second one, pending while the first was answered, too")
+            self.assertEqual(grant.current()["policy"]["capital_usd"], "5000.00")
+
+    def test_a_date_only_deposit_settling_later_the_same_day_is_answered(self):
+        grant = self.enabled()
+        day = {"id": "d-1", "activity_type": "CSD", "net_amount": "500", "date": _iso(self.clock())[:10]}
+        self.clock.advance(60)
+        with moved_digest():
+            self.standing(grant, funding=[{**day, "status": "pending"}], rows=owner_deploy(self.clock() - 30))
+            self.clock.advance(HOUR)
+            out = self.standing(grant, equity="1200", funding=[{**day, "status": "executed"}])
+        self.assertEqual((out["action"], out["triggers"]), ("ratified", ["deposit"]))
+
+    def test_a_deposit_seen_settled_before_a_pin_is_held_by_that_pin(self):
+        grant = self.enabled()
+        landed = deposit(self.clock() - 60, ident="seen-1")
+        self.assertEqual([d["id"] for d in grant.landed([landed], self.clock())], ["seen-1"])
+        self.clock.advance(60)
+        grant.ratify(GRANT_ID, "1700", CEILING)  # the owner's --ratify, after the look that saw it settled
+        self.clock.advance(HOUR)
+        self.assertEqual(grant.landed([landed], self.clock()), [])
+        self.assertEqual(self.standing(grant, equity="1700", funding=[landed])["action"], "none")
+
+    def test_a_refusal_carries_no_figures(self):
+        grant = self.enabled()
+        landed = [deposit(self.clock() - 60)]
+        low = self.standing(grant, equity="42.17", funding=landed)
+        self.assertEqual(low["action"], "refused")
+        self.assertEqual(low["why"], "standing: capital does not cover the smallest real stake")
+        high = self.standing(grant, equity="20000", top="10000.01", funding=landed, rows=owner_deploy(self.clock() - 30))
+        self.assertEqual(high["why"], "standing: the owner's ceiling is above the project envelope")
+        for out in (low, high):
+            self.assertFalse(any(ch.isdigit() for ch in out["why"]), out["why"])
 
     def test_capital_is_never_above_the_envelope_and_never_under_the_smallest_stake(self):
         grant = self.enabled()
@@ -346,38 +406,116 @@ class TheJob(StandingCase):
             self.assertTrue(grant.current()["active"])
             self.assertIn("r-owner-2", grant.ratifications()[-1]["why"])
 
-    def test_a_moved_digest_without_the_owner_fails_loudly_and_changes_nothing(self):
+    def test_a_moved_digest_without_the_owner_fails_the_occurrence_and_changes_nothing(self):
         grant = self.enabled()
-        ctx, calls = self.ctx(deploy_rows=updater_deploy(self.clock() - 60), release="main-abcdef123456")
+        ctx, calls = self.ctx(deploy_rows=updater_deploy(self.clock() - 60), release_id="main-abcdef123456")
         with moved_digest():
-            out = job.run(ctx)
-            self.assertEqual((out["status"], out["action"]), ("failed", "refused"))
+            with self.assertRaises(job.GrantRefused) as caught:
+                job.run(ctx)
+            self.assertIn("refused", str(caught.exception))
+            self.assertIn("no owner's deploy", str(caught.exception))
+            self.assertIn("triggers digest", str(caught.exception))
             self.assertFalse(grant.current()["active"])
-        self.assertEqual(calls.alerts[0][0], "warning")
-        self.assertIn("no owner's deploy", calls.alerts[0][1])
+        self.assertEqual(calls.alerts, [], "the runner raises the failed occurrence's warning")
         self.assertEqual(grant.ratifications(), [])
+
+    def test_a_refused_occurrence_carries_no_figures(self):
+        self.enabled()
+        ctx, calls = self.ctx(_funding=[deposit(self.clock() - 60, amount="1234.56")], _equity="42.17")
+        with self.assertRaises(job.GrantRefused) as caught:
+            job.run(ctx)
+        text = str(caught.exception) + json.dumps(calls.alerts)
+        self.assertIn("smallest real stake", text)
+        for figure in ("42.17", "1234.56", "5500", "700"):
+            self.assertNotIn(figure, text)
 
     def test_unreadable_reads_fail_closed(self):
         grant = self.enabled()
         ctx, calls = self.ctx(_funding=OSError("gateway down"))
-        out = job.run(ctx)
-        self.assertEqual(out["status"], "failed")
+        with self.assertRaisesRegex(job.GrantRefused, "funding cannot be read"):
+            job.run(ctx)
         self.assertEqual(calls.equity, 0)
         ctx, calls = self.ctx(_funding=[deposit(self.clock() - 60)], _equity=OSError("gateway down"))
-        out = job.run(ctx)
-        self.assertEqual((out["status"], out["triggers"]), ("failed", ["deposit"]))
+        with self.assertRaisesRegex(job.GrantRefused, "equity cannot be read.*triggers deposit"):
+            job.run(ctx)
         ctx, calls = self.ctx(config={"live_trading": {}})
-        self.assertEqual(job.run(ctx)["status"], "failed")
+        with self.assertRaisesRegex(job.GrantRefused, "ceiling cannot be read"):
+            job.run(ctx)
         self.assertEqual(grant.ratifications(), [])
-        # A moved digest is still answered while funding is unreadable: only the deposit waits.
-        ctx, calls = self.ctx(_funding=OSError("gateway down"), deploy_rows=owner_deploy(self.clock() - 60), release="r-x")
+
+    def test_a_moved_digest_answered_without_the_funding_read_is_degraded_and_warned(self):
+        self.enabled()
+        ctx, calls = self.ctx(_funding=OSError("gateway down"), deploy_rows=owner_deploy(self.clock() - 60), release_id="r-x")
         with moved_digest():
             out = job.run(ctx)
-            self.assertEqual((out["status"], out["action"], out["triggers"]), ("ok", "ratified", ["digest"]))
+        self.assertEqual((out["status"], out["action"], out["triggers"]), ("ok", "ratified", ["digest"]))
+        self.assertIn("funding cannot be read", out["degraded"])
+        self.assertEqual([level for level, _ in calls.alerts], ["warning"])
+        self.assertIn("a deposit waits", calls.alerts[0][1])
 
-    def test_no_root_is_a_failed_receipt(self):
-        self.assertEqual(job.run({})["status"], "failed")
+    def test_no_root_fails_the_occurrence(self):
+        with self.assertRaises(job.GrantRefused):
+            job.run({})
         self.assertEqual(job.run(SimpleNamespace(house=SimpleNamespace(root=self.root)))["action"], "none")
+
+    def wp2_context(self, base):
+        """Shaped like the ops runner's `Context` (`league/ops/context.py`): `release` is the release's directory, and
+        whatever else it carries is never a money input of this job."""
+        alerts = []
+
+        def poisoned():
+            raise AssertionError("a context attribute was read as a money input")
+
+        ctx = SimpleNamespace(job="grant", root=self.root, base=base, release=base / "releases" / "main-0123456789ab",
+                              clock=self.clock, config={"live_trading": {"ceiling_usd": "9999"}}, read_equity=poisoned,
+                              read_funding=poisoned, deploy_rows=owner_deploy(self.clock() - 60, release="ctx-rows"),
+                              alerts=alerts, alert=lambda level, text: alerts.append({"level": level, "text": text}))
+        return ctx
+
+    def own_reads(self, *, equity=EQUITY, funding=()):
+        stack = ExitStack()
+        stack.enter_context(patch.object(job, "own_config", lambda: {"live_trading": {"ceiling_usd": CEILING}}))
+        stack.enter_context(patch.object(job, "read_equity_now", lambda config: D(equity)))
+        stack.enter_context(patch.object(job, "_gateway_funding", lambda config: (lambda after: list(funding))))
+        return stack
+
+    def test_under_the_runners_context_the_money_inputs_are_the_jobs_own(self):
+        grant = self.enabled()
+        base = Path(self.dir.name)
+        (base / "releases" / "r-owner-3").mkdir(parents=True)
+        os.symlink("releases/r-owner-3", base / "current")
+        (base / "deploys.jsonl").write_text("".join(json.dumps(r) + "\n" for r in owner_deploy(self.clock() - 60, release="r-owner-3")))
+        ctx = self.wp2_context(base)
+        with moved_digest(), self.own_reads(equity="6000"):
+            out = job.run(ctx)
+            self.assertEqual((out["status"], out["action"]), ("ok", "ratified"))
+            self.assertEqual(out["release"], "r-owner-3", "the release id from <base>/current, not the context's path")
+            self.assertIsInstance(out["release"], str)
+            self.assertEqual(grant.current()["policy"]["ceiling_usd"], "5500.00", "the ceiling from the job's own config")
+            self.assertIn("r-owner-3", grant.ratifications()[-1]["why"])
+
+    def test_under_the_runners_context_an_unknown_release_refuses(self):
+        grant = self.enabled()
+        base = Path(self.dir.name)
+        (base / "deploys.jsonl").write_text("".join(json.dumps(r) + "\n" for r in owner_deploy(self.clock() - 60)))
+        with moved_digest(), self.own_reads():
+            with self.assertRaisesRegex(job.GrantRefused, "release is unknown"):
+                job.run(self.wp2_context(base))
+            self.assertFalse(grant.current()["active"])
+
+    @skipUnless(importlib.util.find_spec("league.ops.context") and importlib.util.find_spec("league.ops.registry"),
+                "the ops runner (WP2) is not in this tree")
+    def test_the_ops_runner_stores_a_refusal_as_failed(self):
+        from league.ops.__main__ import run_job
+        from league.ops.context import Context
+
+        self.enabled()
+        base = Path(self.dir.name)
+        with moved_digest(), self.own_reads():
+            ctx = Context("grant", root=self.root, due_at=self.clock(), base=base, clock=self.clock)
+            result = run_job("grant", root=self.root, due_at=self.clock(), base=base, ctx=ctx)
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("GrantRefused", result["error"])
 
     def test_the_schedule_the_registry_reads(self):
         self.assertEqual((job.NAME, job.EVERY_SECONDS, job.AT_START), ("grant", 3600, True))
