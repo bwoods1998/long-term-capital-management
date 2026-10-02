@@ -212,8 +212,12 @@
     // Funding and mail. Sail's `range` understands 1h/6h/24h/7d/30d/period and silently falls
     // back to 30d for anything else, so "a day" is spelled 24h.
     "SAIL_USAGE_RANGE": "24h",
-    "LOW_BALANCE_USD": "60",
-    "CRITICAL_BALANCE_USD": "20",
+    // V3-A: the House's budget rule (league/ops/budget.py) keeps research inside the prefunded meters and sends its own
+    // `funding` notice, with the exact amount, when a meter's runway falls under 60 days. These absolute lines date from
+    // a $40+/day burn; at the floor they would mail a "low" warning (a top-up ask) while the rule still holds 60+ days of
+    // runway, so they sit under the rule's own Sail floor (its reserve plus 90 days of fixed cost). The runway lines stay.
+    "LOW_BALANCE_USD": "25",
+    "CRITICAL_BALANCE_USD": "12",
     "ALERT_EVERY_SECONDS": "21600",
     "ALERT_FROM": "agent@blakewoods.us",
     "ALERT_TO": "blakewoods98@gmail.com"
