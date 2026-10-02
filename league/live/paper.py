@@ -26,7 +26,9 @@ Alpaca's convention) and closes at a positive one. Every proof's legs are checke
 (`structure_core.classify`) before the open, and its bodies are the real route's own (`real.mleg_body`). A real open of a
 type waits for that type's proof (`PROOF_FOR`; `OptionsLive._real_intent`), and `league.ci` refuses a constitution whose
 `real_types` names a type with no proof here. Paper has no money behind it: its short legs may sit in the money for the
-two minutes held (the iron butterfly's always does), which the real path refuses at entry on an American-style root.
+two minutes held (the iron butterfly's always does), which the real path, the Gym and the shadow book refuse for a
+credit structure at entry on an American-style root (`league/gym/legs.py` `assignment_refusal`): the proof is of the
+route (the order's shape and the venue's answers), not of an entry.
 
 The session loop runs this proof with real money off and no real-account client. Passing the paper route never
 changes real-money configuration, enables a grant, promotes a family, or sends an order to the real venue.
@@ -54,6 +56,8 @@ from .venue import TERMINAL, Account
 WAIT_MINUTES = 8
 HOLD_MINUTES = 2
 TRIES = 3
+#: No proof opens before this many minutes into the session (`PaperProof.step`).
+START_MINUTE = 5
 ROOT = "SPY"
 
 
@@ -203,7 +207,9 @@ class PaperProof:
                 self._event("order_observed", {"cid": work["cid"], "action": work["action"], "answer": answer})
         if work["terminal"]:
             return
-        values = [abs(Decimal(qty)) for qty in work["fills"].values()]
+        # Even is the same number of STRUCTURES on every leg: a butterfly's body fills two contracts to a wing's one.
+        ratio = {leg["symbol"]: Decimal(str(leg.get("ratio_qty") or "1")) for leg in work["body"].get("legs") or []}
+        values = [abs(Decimal(qty)) / ratio.get(symbol, Decimal(1)) for symbol, qty in work["fills"].items()]
         uneven = len(values) > 1 and max(values) != min(values)
         aged = self.clock() - float(work["at"]) >= WAIT_MINUTES * 60
         if (uneven or aged) and work.get("id"):
@@ -279,7 +285,7 @@ class PaperProof:
             body = mleg_body(self._order(symbols, sides, ratios, "close", natural, cid))
         return self._dispatch(row, body, action="cleanup" if cleanup else "close", mi=mi)
 
-    def step(self, *, day: str, mi: int, snap: Any, chain: Any, start_minute: int = 5) -> dict:
+    def step(self, *, day: str, mi: int, snap: Any, chain: Any, start_minute: int = START_MINUTE) -> dict:
         """Advance one durable attempt. A new session never discards unresolved orders or owned contracts."""
         row = self.status()
         if self.passed():

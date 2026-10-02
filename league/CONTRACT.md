@@ -193,7 +193,12 @@ A multi-leg example using the same intent interface:
 
 Types: `long_call`, `long_put`, `debit_vertical`, `credit_vertical`, `iron_condor`, `iron_butterfly`,
 `long_butterfly` (body `"ratio": 2`), `long_straddle`, `long_strangle`, `calendar`, `diagonal` (equity
-roots only; the short leg expires first). Every structure is defined-risk; no naked short. All 11
+roots only; the short leg expires first). Every structure is defined-risk; no naked short. On an
+equity root (American: SPY, QQQ, IWM, single names) a `credit_vertical`, `iron_condor` or
+`iron_butterfly` opens only with every short leg at or out of the money (a short call's strike at or
+above the underlying, a short put's at or below it): one in the money is refused at entry, in the Gym
+and on real money alike (early assignment). An iron butterfly's body always has one short leg in the
+money unless the underlying sits on its strike, so it is an index-root (XSP, SPXW) structure. All 11
 types are valid research choices. **The current real adapter is limited to five spread types:**
 debit and credit verticals, iron condors, iron butterflies, long butterflies. That is a current
 implementation boundary, not a reason to favor them in research or a claim about all Alpaca

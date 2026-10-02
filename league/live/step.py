@@ -76,8 +76,8 @@ Real opens need every one of: `config.json` `real_money`; the grant `options-swa
 in force (`House.grant`); the gateway's kill switch off; no stop tripped (`money.Stops`); reconciliation clean; the
 paper proof passed this session or before (`live.require_paper_proof`), and the order type's own paper round trip
 (`paper.PROOF_FOR`); the House not paused; the family's band (or tuition) and the instance live; a credit type only at
-`credit_min_equity_usd` of equity; a defined-risk order with no short leg in the money on an American-style root
-(`money.entry_refusal`). Exits need only the kill switch off.
+`credit_min_equity_usd` of equity; a defined-risk order, and a credit one with no short leg in the money on an
+American-style root (`money.entry_refusal`, the Gym's own rule). Exits need only the kill switch off.
 """
 
 from __future__ import annotations
@@ -110,7 +110,7 @@ from .chains import LiveDay, from_ordinal, ordinal, session_minutes, trading_day
 from .decider import BudgetSpent, DeciderError, ProgramRefused, MAX_BATCH_SECONDS
 from .families import MemoryFamilies
 from .observe import HOLD, ObserveStore, evaluator_bundle
-from .paper import KINDS as PROOF_KINDS, PROOF_FOR, PaperProof
+from .paper import KINDS as PROOF_KINDS, PROOF_FOR, START_MINUTE as PROOF_START, PaperProof
 from .real import SINGLE_TYPES, RealBook, RLeg, RPosition, is_incubator, real_legs
 from .shadow import SHADOW_FILE, ShadowAccount, ShadowBook, needs_of
 from .state import STATE_FILE, LiveState
@@ -272,6 +272,9 @@ class OptionsLive:
         # KINDS); a real open of that type waits for it (`_proof_refusal`).
         self.proofs = ({kind: PaperProof(self.state, paper, record=self.record, clock=clock, kind=kind)
                         for kind in PROOF_KINDS if kind not in ("vertical", "single")} if paper is not None else {})
+        #: When each proof after the vertical was last stepped (a count of steps, this process only): the proofs with
+        #: nothing in flight take turns (`_active_proof`), so one that cannot dispatch never holds the rest back.
+        self._proof_turns: dict[str, int] = {}
         self.calibration = Calibration(self) if self.book is not None else None
         self.house_test = HT.HouseTest(self) if self.book is not None else None
         from .incubator import Incubator
@@ -794,9 +797,14 @@ class OptionsLive:
                 if band in ("probe", "sized") and self._real_on() and self._real_eligible(fid):
                     wanted[f"{fid}@{version}:r"] = (dict(row, band=band), "real", False)
             elif (band == "gym" and row.get("validation_passed") and not row.get("holdout_passed") and self._real_on()
-                  and self.table.tuition_day > 0 and self.table.family_real(str(row.get("structure") or ""))):
+                  and self.table.tuition_day > 0 and self.table.family_real(str(row.get("structure") or ""))
+                  and self.table.family_allowed(str(row.get("structure") or ""),
+                                                equity if equity is not None else M.ZERO) is None):
                 # Tuition only for a family whose every order type is real: a `long_single` needs both `long_call` and
                 # `long_put` among the real types (`Table.family_real`); each of its orders is still checked by its type.
+                # And only while real money may open them now (`Table.family_allowed`, as the bands and the incubator's
+                # pin judge it): a credit family under `credit_min_equity_usd` gets no tuition instance whose every open
+                # would be refused.
                 wanted[f"{fid}@{version}:t"] = (row, "real", True)
         if self.house_test is not None:
             # The House live test (`league/live/house_test.py`): its own real instance while its switch, real money, its
@@ -1836,6 +1844,8 @@ class OptionsLive:
         proof = self._active_proof(day.day.isoformat())
         if proof is None:
             return
+        if mi >= PROOF_START:                       # a turn is a minute it could have opened
+            self._proof_turns[proof.key] = max(self._proof_turns.values(), default=0) + 1
         try:
             out[proof.key] = proof.step(day=day.day.isoformat(), mi=mi, snap=day.snapshot("SPY", mi), chain=day.chains["SPY"]).get("status")
         except Exception as exc:  # noqa: BLE001
@@ -1851,10 +1861,13 @@ class OptionsLive:
         return [(k, self._proof_of(k)) for k in PROOF_KINDS if every or k in ("vertical", "single") or k in needed]
 
     def _active_proof(self, today: str | None) -> PaperProof | None:
-        """The proof to step now: the vertical until it has passed (every real open waits for it); then the first of the
-        others that has not passed, skipping one that failed today (its tries are spent until the next session) or is
-        blocked (the owner's), so one stuck type never holds the rest back. An attempt in flight is always stepped: the
-        others wait for it, so no two proofs ever hold paper contracts at once."""
+        """The proof to step now: the vertical until it has passed (every real open waits for it); then, of the others
+        that have not passed, the one stepped least recently (`_proof_turns`; never stepped first, in `paper.KINDS`
+        order), skipping one that failed today (its tries are spent until the next session) or is blocked (the owner's).
+        So one stuck type -- its structure not quoted, its contracts held by another paper position, its price refused --
+        never holds the rest back: it waits its turn while the others take theirs. An attempt in flight is always
+        stepped: the others wait for it, so no two proofs ever hold paper contracts at once. Pure: the window read
+        (`_roots`) and the step (`_paper_proof`) of a minute name the same proof."""
         if self.proof is None:
             return None
         if not self.proof.passed():
@@ -1865,14 +1878,15 @@ class OptionsLive:
             row = proof.status()
             if row.get("orders") and row.get("status") not in ("failed", "blocked"):
                 return proof
-        for _, proof in self._proof_chain():
+        ready = []
+        for order, (_, proof) in enumerate(self._proof_chain()):
             if proof is None or proof.passed() or proof is self.proof:
                 continue
             row = proof.status()
             if row.get("status") == "blocked" or (row.get("status") == "failed" and today is not None and row.get("day") == today):
                 continue
-            return proof
-        return None
+            ready.append((self._proof_turns.get(proof.key, 0), order, proof))
+        return min(ready, key=lambda item: item[:2])[2] if ready else None
 
     def _proof_refusal(self, type_: str) -> str | None:
         """Why a real open of `type_` waits for the paper account, or None: its own proof (`paper.PROOF_FOR`) has passed.
@@ -2529,7 +2543,8 @@ class OptionsLive:
         why = self._proof_refusal(order.type)
         if why:
             return why
-        # Money rules v3 (D3): defined-risk only, and no short leg in the money at entry on an American-style root.
+        # Money rules v3 (D3): defined-risk only, and no credit structure's short leg in the money at entry on an
+        # American-style root (`L.resolve_open` already refuses that, as it does in the Gym and the shadow book).
         why = M.entry_refusal(order.type, order.legs, getattr(snap, "spot", None), american=rules.kind != "index")
         if why:
             return why

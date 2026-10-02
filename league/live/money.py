@@ -18,8 +18,8 @@ BANDS (the live path owns candidate <-> probe <-> sized; the swarm owns gym <-> 
   (`order_types`, `Table.family_allowed`). The table's `real_types` stay concrete types, and every real order is still
   checked by its own type (`Table.type_allowed`), at the real book and at the gateway. Money rules v3 (D3, release V3-A):
   the credit types are real types again, each opening only while the account reads `credit_min_equity_usd` of equity;
-  every real open is defined-risk and, on an American-style root, has no short leg in the money at entry
-  (`entry_refusal`).
+  every real open is defined-risk and a credit one, on an American-style root, has no short leg in the money at entry
+  (`entry_refusal`; the Gym's own rule, so the evidence never counts an entry real money refuses).
 - SIZED: a PROBE (never a Candidate at once) whose forward record has at least `sized.min_trades` trades with a mean
   return on maximum loss above zero and its one-sided `sized.confidence` lower bound above zero. The record
   (`one_record`) is the program version's own, one source a market day (real, else shadow, else nightly).
@@ -250,13 +250,16 @@ class Table:
 
 def entry_refusal(type_: str, legs: Sequence[Any], spot: Any, *, american: bool) -> str | None:
     """Why a real OPEN of `legs` may not go by its shape at entry, or None (money rules v3, the owner's D3: risk-defined
-    short premium, never a naked short leg, never a short leg in the money on an American-style root).
+    short premium, never a naked short leg, never a credit structure's short leg in the money on an American-style root).
 
-    - Defined risk: for every right and expiry, the short contracts (side -1, times ratio) are at most the long ones.
-      The structure spec already builds only such shapes; this is the money path's own check of the order it sends.
-    - Early assignment: on an American-style root (an equity option, exercisable any day; `american`), no short leg is
-      in the money at entry: a short call's strike at or above the underlying, a short put's at or below it. An
-      unreadable underlying refuses any open with a short leg there. Index roots (European, cash-settled) are exempt.
+    - Defined risk, every type: for every right and expiry, the short contracts (side -1, times ratio) are at most the
+      long ones. The structure spec already builds only such shapes; this is the money path's own check of the order it
+      sends.
+    - Early assignment, the credit types (`league.gym.legs.assignment_refusal`, the ONE rule the Gym, the shadow and
+      practice books and this path share, so no evidence counts an entry real money refuses): on an American-style root
+      (an equity option, exercisable any day; `american`), no short leg is in the money at entry: a short call's strike
+      at or above the underlying, a short put's at or below it. An unreadable underlying refuses such an open. Index
+      roots (European, cash-settled) are exempt; so are debit verticals and long butterflies, which open as before.
 
     Each leg carries `side` (+1 long, -1 short), `ratio`, `is_call`, `strike` and its expiry (`dte` or `expiry`)."""
     longs: dict[tuple[bool, Any], int] = {}
@@ -273,23 +276,9 @@ def entry_refusal(type_: str, legs: Sequence[Any], spot: Any, *, american: bool)
         if count > longs.get((is_call, expiry), 0):
             return (f"a {type_} with {count} short {'call' if is_call else 'put'} contract(s) and fewer long ones of that "
                     "right and expiry has a naked short leg: real money opens defined-risk structures only")
-    if not american or not shorts:
-        return None
-    try:
-        spot = float(spot)
-    except (TypeError, ValueError):
-        spot = math.nan
-    if not (math.isfinite(spot) and spot > 0):
-        return f"a {type_} has a short leg on an American-style root and the underlying is unreadable now: refused"
-    for leg in legs:
-        if int(leg.side) > 0:
-            continue
-        strike = float(leg.strike)
-        itm = strike < spot if leg.is_call else strike > spot
-        if itm:
-            return (f"a {type_}'s short {'call' if leg.is_call else 'put'} at {strike:g} is in the money (the underlying "
-                    f"at {spot:.2f}) on an American-style root: early assignment, refused at entry")
-    return None
+    from ..gym.legs import assignment_refusal       # numpy's side of the tree: imported only where a real open is judged
+
+    return assignment_refusal(type_, legs, spot, american=american)
 
 
 # --------------------------------------------------------------------------------------------- the forward record

@@ -137,6 +137,11 @@ every exit are values, and a trade's P&L is (exit - entry) x 100 x qty - fees. S
 Types: `long_call`, `long_put`, `debit_vertical`, `credit_vertical`, `iron_condor`, `iron_butterfly`,
 `long_butterfly` (body `"ratio": 2`), `long_straddle`, `long_strangle`, `calendar`, `diagonal`
 (equity roots only; the short leg expires first). Every structure is defined-risk; no naked short.
+On an equity root (American: SPY, QQQ, IWM, single names) a `credit_vertical`, `iron_condor` or
+`iron_butterfly` opens only with every short leg at or out of the money (a short call's strike at or
+above the underlying, a short put's at or below it): one in the money is refused at entry, in the Gym
+and on real money alike (early assignment). An iron butterfly's body always has one short leg in the
+money unless the underlying sits on its strike, so it is an index-root (XSP, SPXW) structure.
 All listed types are valid Gym research choices; single long calls and puts have no lesser status
 than spreads. The current production adapter allows five spread types (verticals, condors, iron
 butterflies, long butterflies); that implementation limit does not define Alpaca's full capability.

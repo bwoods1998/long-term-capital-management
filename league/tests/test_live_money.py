@@ -133,8 +133,9 @@ class TheTable(unittest.TestCase):
 
 
 class EntryShape(unittest.TestCase):
-    """Money rules v3 (D3; `money.entry_refusal`): every real open is defined-risk, and on an American-style root no short
-    leg is in the money at entry. Legs as the Gym resolves them (`side`, `ratio`, `dte`, `strike`, `is_call`)."""
+    """Money rules v3 (D3; `money.entry_refusal`): every real open is defined-risk, and on an American-style root no credit
+    structure's short leg is in the money at entry (the Gym's own rule, `league.gym.legs.assignment_refusal`). Legs as
+    the Gym resolves them (`side`, `ratio`, `dte`, `strike`, `is_call`)."""
 
     @staticmethod
     def leg(side, strike, *, call=True, ratio=1, dte=3):
@@ -167,8 +168,6 @@ class EntryShape(unittest.TestCase):
             "iron_butterfly": [self.leg(1, 600, call=False), self.leg(-1, 601, call=False),  # short put over the spot
                                self.leg(-1, 601), self.leg(1, 602)],
             "iron_condor": self.condor(601, 602),                                           # short put over the spot
-            "debit_vertical": [self.leg(1, 598), self.leg(-1, 599)],                        # a deep debit call vertical
-            "long_butterfly": [self.leg(1, 598), self.leg(-1, 599, ratio=2), self.leg(1, 600)],
         }
         for type_, legs in cases.items():
             why = M.entry_refusal(type_, legs, spot, american=True)
@@ -176,6 +175,18 @@ class EntryShape(unittest.TestCase):
             self.assertIn("American-style", why)
             self.assertIsNone(M.entry_refusal(type_, legs, spot, american=False), f"{type_}: an index root is European")
         self.assertIn("short put at 601", M.entry_refusal("iron_condor", self.condor(601, 602), spot, american=True))
+
+    def test_a_debit_structure_with_a_short_leg_in_the_money_opens_as_before(self):
+        # The rule is the credit types' (`ASSIGNMENT_TYPES`), and the Gym and the shadow book apply the same one: a
+        # deep debit vertical or a butterfly centred under the spot opens on real money as its practice record did.
+        from league.gym.legs import ASSIGNMENT_TYPES
+
+        self.assertEqual(set(ASSIGNMENT_TYPES), {"credit_vertical", "iron_condor", "iron_butterfly"})
+        spot = 600.4
+        for type_, legs in {"debit_vertical": [self.leg(1, 598), self.leg(-1, 599)],
+                            "long_butterfly": [self.leg(1, 598), self.leg(-1, 599, ratio=2), self.leg(1, 600)]}.items():
+            self.assertIsNone(M.entry_refusal(type_, legs, spot, american=True), type_)
+            self.assertIsNone(M.entry_refusal(type_, legs, float("nan"), american=True), type_)
 
     def test_an_unreadable_underlying_refuses_a_short_leg_on_an_american_root(self):
         legs = [self.leg(-1, 601), self.leg(1, 602)]

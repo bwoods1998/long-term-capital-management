@@ -305,6 +305,22 @@ class OrderPathInTheLoop(LiveCase):
         self.assertEqual(self.families.forward_rows("pre"), [])              # never evidence
         self.assertTrue(live.book.state.rows("SELECT tuition FROM orders WHERE action='open'")[0]["tuition"])
 
+    def test_a_credit_family_gets_tuition_only_at_the_credit_equity(self):
+        # Money rules v3 (D3): a credit type is real, but opens only at `credit_min_equity_usd`; under it a tuition
+        # instance could only send refused opens, so none is made (`Table.family_allowed`, as the bands judge it).
+        row = family("pre", CONDOR, band="gym", structure="iron_condor", holdout=False, validation=True)
+        self.venue.equity = D("1500")
+        live = self.make([dict(row)])
+        self.run_to(9, 33)
+        self.assertNotIn("pre@1:t", live.instances)
+        self.assertEqual(self.venue.sent, [])
+        self.assertFalse(self.ledger.of("live.refusal"))
+        live.state.close()
+        self.venue.equity = D("5481.65")
+        live = self.make([dict(row)])
+        self.run_to(9, 36)
+        self.assertIn("pre@1:t", live.instances)
+
 
 class Sized(LiveCase):
     def test_a_probe_that_earns_it_is_sized_by_quarter_kelly_on_its_lower_bound(self):

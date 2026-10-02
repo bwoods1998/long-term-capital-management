@@ -188,6 +188,19 @@ class OneSourceOfTruth(unittest.TestCase):
         self.assertIn("literal mapping", " ".join(self.tree(paper=called)))
         self.assertIn("could not be read", " ".join(self.tree(paper="PROOF_FOR = {")))
 
+    def test_each_type_maps_to_the_proof_of_that_type(self):
+        # A mapping that would let one type open on another's pass (or on no proof the House runs) is refused.
+        condor = '"iron_condor": "iron_condor",'
+        single = '"long_call": "single",'
+        self.assertEqual(self.paper.count(condor), 2)                  # PROOF_FOR's first, then STRUCTURE's
+        for old, new in ((condor, '"iron_condor": "vertical",'), (condor, '"iron_condor": "iron_condr",'),
+                         (condor, '"iron_condor": "credit_vertical",'), (single, '"long_call": "long_butterfly",'),
+                         ('"debit_vertical": "vertical",', '"debit_vertical": "single",')):
+            self.assertIn(old, self.paper)
+            refused = self.tree(paper=self.paper.replace(old, new, 1))
+            self.assertTrue(any("not one the House runs for that type" in p for p in refused), (new, refused))
+        self.assertIn("KINDS must be assigned once", " ".join(self.tree(paper=self.paper.replace("KINDS = (", "PROOFS = ("))))
+
     def test_the_table_and_the_gateway_change_together(self):
         self.assertEqual(self.tree(), [])
         self.assertEqual(self.tree(types=["debit_vertical"], gateway="debit_vertical"), [])

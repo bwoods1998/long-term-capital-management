@@ -265,10 +265,15 @@ class StockSplits(unittest.TestCase):
         # A put credit spread expiring on the eve: its quotes stop at 14:50, so the House cannot close it and the short
         # 305 put is assigned at 300 (100 shares). Before the fix the shares were marked to the split session's first
         # price, 100: a 20,000 loss that never happened. Now they are marked at the eve's level, as at a window's end.
+        # Its short put is in the money at entry, which money rules v3 refuse on an American root (`legs.ASSIGNMENT_TYPES`);
+        # set aside here, as for a short leg the underlying moves into the money after entry: assigned the same way.
+        from league.gym import legs as L
+
         opens = [vertical("ACME", 0, 1, 295, 305, "assigned", right="P", kind="credit_vertical")]
-        [t] = self.run_opens(opens, splits=False)["trades"]
-        self.assertEqual((t["exit_reason"], t["pnl"]), ("exercised", -20000.11))
-        [t] = self.run_opens(opens)["trades"]
+        with mock.patch.object(L, "ASSIGNMENT_TYPES", ()):
+            [t] = self.run_opens(opens, splits=False)["trades"]
+            self.assertEqual((t["exit_reason"], t["pnl"]), ("exercised", -20000.11))
+            [t] = self.run_opens(opens)["trades"]
         # Credit 5.00 (6.00 - 1.00; fees 0.06 + 0.05), assigned for 5.00 of intrinsic, the shares at the eve's level.
         self.assertEqual((t["exit_reason"], t["exit_day"], t["pnl"]), ("exercised", "2023-03-07", -0.11))
 

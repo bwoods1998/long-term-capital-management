@@ -25,17 +25,17 @@ EXAMPLES = Path(__file__).resolve().parents[1] / "gym" / "examples"
 
 @unittest.skipUnless(HAVE, "numpy not installed (requirements-gym.txt)")
 class LivePath(unittest.TestCase):
-    def chain(self, minute=700):
-        spot = 450.0
+    def chain(self, minute=700, *, root="SPY", spot=450.0):
+        """Quotes priced at 450 on `root`; the snapshot's underlying reads `spot`."""
         strikes = np.arange(440.0, 461.0)
         dte = np.zeros(strikes.size * 2, dtype=int)
         k = np.repeat(strikes, 2)
         call = np.tile([True, False], strikes.size)
         years = G.years_to_expiry(dte, minute)
-        mid = G.bs_price(spot, k, years, 0.04, 0.25, call)
+        mid = G.bs_price(450.0, k, years, 0.04, 0.25, call)
         bid = np.maximum(np.round(mid - 0.02, 2), 0.0)
         ask = np.round(mid + 0.02, 2) + 0.01
-        return C.Snapshot("SPY", minute, spot, dte, k, call, bid, ask, np.full(k.size, 50), np.full(k.size, 50), rate=0.04)
+        return C.Snapshot(root, minute, spot, dte, k, call, bid, ask, np.full(k.size, 50), np.full(k.size, 50), rate=0.04)
 
     def ctx_for(self, snap, program):
         needs = program.needs
@@ -92,6 +92,46 @@ class LivePath(unittest.TestCase):
             self.assertIn(fragment, str(caught.exception))
         with self.assertRaises(L.Refused):
             L.resolve_open({"open": "calendar", "legs": [], "qty": 1}, snap, venue.rules_for("XSP"), buying_power=1e6)
+
+    def test_a_credit_structure_opens_no_short_leg_in_the_money_on_an_equity_root(self):
+        """Money rules v3 (D3; `legs.assignment_refusal`): ONE rule for the Gym, the shadow and practice books (this
+        engine) and real money (`league/live/money.py` `entry_refusal`), so no evidence counts an entry real money
+        refuses. SPY at 450."""
+        def leg(side, right, strike):
+            return {"side": side, "right": right, "dte": 0, "strike": strike}
+
+        def call_credit(short):
+            return {"open": "credit_vertical", "qty": 1, "legs": [leg("short", "C", short), leg("long", "C", short + 1)]}
+
+        def iron_butterfly(body):
+            return {"open": "iron_butterfly", "qty": 1, "legs": [leg("long", "P", body - 1), leg("short", "P", body),
+                                                                 leg("short", "C", body), leg("long", "C", body + 1)]}
+
+        def condor(put, call):
+            return {"open": "iron_condor", "qty": 1, "legs": [leg("long", "P", put - 1), leg("short", "P", put),
+                                                              leg("short", "C", call), leg("long", "C", call + 1)]}
+
+        spy, xsp, rules = self.chain(), self.chain(root="XSP"), venue.rules_for("SPY")
+        for intent in (call_credit(450), call_credit(452), iron_butterfly(450), condor(450, 451), condor(447, 453)):
+            self.assertEqual(L.resolve_open(intent, spy, rules, buying_power=5000.0).type, intent["open"])
+        refused = {"short call at 448": call_credit(448), "short put at 451": iron_butterfly(451),
+                   "short call at 449": iron_butterfly(449), "short put at 452": condor(452, 453)}
+        for fragment, intent in refused.items():
+            with self.assertRaises(L.Refused) as caught:
+                L.resolve_open(intent, spy, rules, buying_power=5000.0)
+            self.assertIn(fragment, str(caught.exception))
+            self.assertIn("American-style", str(caught.exception))
+            # The same structure on a European, cash-settled index root opens.
+            self.assertEqual(L.resolve_open(intent, xsp, venue.rules_for("XSP"), buying_power=1e6).type, intent["open"])
+        with self.assertRaises(L.Refused) as caught:
+            L.resolve_open(call_credit(452), self.chain(spot=float("nan")), rules, buying_power=5000.0)
+        self.assertIn("unreadable", str(caught.exception))
+        # A debit vertical or a long butterfly with its short leg in the money opens as before.
+        deep = {"open": "debit_vertical", "qty": 1, "legs": [leg("long", "C", 446), leg("short", "C", 447)]}
+        self.assertEqual(L.resolve_open(deep, spy, rules, buying_power=5000.0).type, "debit_vertical")
+        fly = {"open": "long_butterfly", "qty": 1, "legs": [leg("long", "C", 447), dict(leg("short", "C", 448), ratio=2),
+                                                            leg("long", "C", 449)]}
+        self.assertEqual(L.resolve_open(fly, spy, rules, buying_power=5000.0).type, "long_butterfly")
 
     def test_limit_rules_and_ticks(self):
         self.assertEqual(L.limit_value("natural", "open", 0.73, 0.60, 0.01), 0.73)

@@ -450,6 +450,54 @@ class StructureProofs(LiveCase):
         self.run_to(9, 45)
         self.assertTrue(live.proofs["long_butterfly"].passed(), live.proofs["long_butterfly"].status())
 
+    def test_a_proof_that_can_never_open_waits_its_turn_while_the_others_pass(self):
+        # The butterfly finds no structure all session: its proof stays waiting and spends no try, so it never fails for
+        # the day; the others still take their turns (`OptionsLive._active_proof`) and pass.
+        live = self.paper_only()
+        live.proofs["long_butterfly"]._select = lambda snap, chain: None
+        self.run_to(10, 0)
+        self.assertEqual(self.passed_kinds(), list(CREDIT_PROOFS))
+        row = live.proofs["long_butterfly"].status()
+        self.assertEqual((row["status"], row["tries"], row["orders"]), ("waiting", 0, []))
+        self.assertIn("butterfly", row["why"])
+        self.assertIn("long_butterfly route", live._proof_refusal("long_butterfly"))
+        self.assertFalse(any(b["client_order_id"].startswith("lv-plb") for b in self.paper.sent))
+        self.assertFalse(any(self.paper.held.values()))
+
+    def test_a_butterfly_filled_one_two_one_is_even_and_never_cancelled(self):
+        # Evenness counts structures, not contracts: the body's two contracts are one butterfly's (`PaperProof._refresh`).
+        from league.live.paper import PaperProof
+        from league.live.state import LiveState
+
+        legs = [("SPY261007C00599000", "buy", 1), ("SPY261007C00600000", "sell", 2), ("SPY261007C00601000", "buy", 1)]
+        body = {"qty": "1", "client_order_id": "lv-plb-x-o", "order_class": "mleg",
+                "legs": [{"symbol": s, "side": side, "ratio_qty": str(r)} for s, side, r in legs]}
+
+        class Paper:
+            def __init__(self, filled):
+                self.filled, self.cancels = filled, []
+
+            def order_by_client_id(self, cid):
+                return {"client_order_id": cid, "id": "o1", "status": "partially_filled", "qty": "1",
+                        "legs": [{"symbol": s, "side": side, "filled_qty": str(q)} for (s, side, _), q in zip(legs, self.filled)]}
+
+            def cancel(self, venue_id):
+                self.cancels.append(venue_id)
+                return True, ""
+
+        for filled, cancelled in (((1, 2, 1), False), ((1, 1, 1), True)):
+            state = LiveState(self.root / f"refresh-{len(filled)}-{cancelled}.sqlite", clock=self.clock)
+            paper = Paper(filled)
+            proof = PaperProof(state, paper, clock=self.clock, kind="long_butterfly")
+            row = {"schema": 2, "day": MONDAY.isoformat(), "status": "open_sent", "tries": 1,
+                   "legs": [s for s, _, _ in legs], "sides": [1, -1, 1], "ratios": [1, 2, 1],
+                   "baseline": {s: "0" for s, _, _ in legs},
+                   "orders": [{"action": "open", "body": body, "cid": body["client_order_id"], "at": self.clock(),
+                               "id": "o1", "fills": {}, "terminal": False}]}
+            proof._refresh(row)
+            self.assertEqual(bool(paper.cancels), cancelled, filled)
+            state.close()
+
     def test_a_blocked_proof_is_skipped_and_its_type_stays_shadow_only(self):
         live = self.paper_only()
         live.state.put("paper_proof_credit_vertical", {"schema": 2, "status": "blocked", "why": "the owner's"})
@@ -579,10 +627,17 @@ def decide(ctx):
         return live
 
     def test_an_in_the_money_short_call_never_opens_on_an_equity_root(self):
-        self.credit_family("SPY")
+        live = self.credit_family("SPY")
         self.assertEqual(self.venue.sent, [])
         refusals = [p["why"] for p, _ in self.ledger.of("live.refusal")]
         self.assertTrue(any("in the money" in why and "American-style" in why for why in refusals), refusals)
+        # The shadow book (the Gym's engine) refuses the same entry, so the family's practice and forward record never
+        # count a trade real money could not make.
+        shadow = live.shadow.accounts["itm@1:s"]
+        self.assertEqual((shadow.positions, shadow.counts["opens"]), ({}, 0))
+        self.assertGreater(shadow.counts["rejected"], 0)
+        self.run_to(9, 45)
+        self.assertEqual(self.families.forward_rows("itm"), [])
 
     def test_the_same_credit_vertical_opens_on_a_european_index_root(self):
         self.credit_family("XSP")

@@ -688,8 +688,10 @@ CONSTITUTION: dict[str, Any] = {
     #   (`league/live/paper.py` `PROOF_FOR`; `league.ci` refuses a real type with no proof). `credit_types` open for real
     #   only while the account reads `credit_min_equity_usd` of equity (Alpaca's limited margin under $2,000: debit
     #   structures only), judged by the House (`league/live/money.py` `Table.type_allowed`) and by the gateway
-    #   (`CREDIT_MIN_EQUITY_USD`) alike. Every real structure is defined-risk (no naked short leg), and no real open on an
-    #   American-style (equity) root has a short leg in the money at entry (`money.entry_refusal`).
+    #   (`CREDIT_MIN_EQUITY_USD`) alike. Every real structure is defined-risk (no naked short leg), and no credit open on
+    #   an American-style (equity) root has a short leg in the money at entry (`money.entry_refusal`), a rule the Gym and
+    #   the shadow book apply too (`league/gym/legs.py` `assignment_refusal`), so no evidence counts an entry real money
+    #   refuses.
     # - `probe`: a Candidate that passed the holdout, trades a real type, and whose typical maximum loss fits the cap at
     #   the current equity (else shadow-only, the reason recorded). `max_loss_share` a structure, `open_per_family`
     #   structures, `family_share` in all; `floor_usd`: one contract whose maximum loss is at most this, whatever the
@@ -754,7 +756,9 @@ CONSTITUTION: dict[str, Any] = {
     # the two equal) and a re-ratified grant. They stay gated by equity: a credit open goes only while the account reads
     # `credit_min_equity_usd` ($2,000, pinned), at the House and at the gateway; under it they trade shadow only, as
     # before. Each type opens for real only after its own paper round trip on the practice account. Defined-risk only:
-    # no naked short legs; no short leg in the money at entry on an American-style root (early assignment).
+    # no naked short legs; no credit structure's short leg in the money at entry on an American-style root (early
+    # assignment; the Gym and the shadow book refuse it too, so an iron butterfly, whose body always has one short leg
+    # in the money, trades on index roots only).
     "options_money": {
         "real_types": ["debit_vertical", "long_butterfly", "long_call", "long_put", "credit_vertical", "iron_condor",
                        "iron_butterfly"],

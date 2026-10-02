@@ -362,7 +362,9 @@ def gateway_structures(root: Path = REPO) -> tuple[list[str], list[str]]:
 
 def paper_proofs(root: Path = REPO) -> tuple[dict[str, str], list[str]]:
     """(the paper proof each real order type waits for, why it could not be read): the literal `PROOF_FOR` of the tree's
-    `league/live/paper.py`, read from its text (never imported, as the constitution is not)."""
+    `league/live/paper.py`, read from its text (never imported, as the constitution is not). Each proof it names must be
+    one the House runs (`KINDS`) and prove that type: a multi-leg proof's `STRUCTURE` is the type itself, and a long
+    call or put waits for the single-leg proof; a mapping that would let one type open on another's pass is refused."""
     import ast
 
     path = root / "league" / "live" / "paper.py"
@@ -370,16 +372,28 @@ def paper_proofs(root: Path = REPO) -> tuple[dict[str, str], list[str]]:
         tree = ast.parse(path.read_text(encoding="utf-8"), str(path))
     except (OSError, SyntaxError, ValueError) as exc:
         return {}, [f"league/live/paper.py could not be read: {type(exc).__name__}: {exc}"]
-    found = [node.value for node in tree.body if isinstance(node, ast.Assign)
-             and any(isinstance(t, ast.Name) and t.id == "PROOF_FOR" for t in node.targets)]
-    if len(found) != 1:
-        return {}, ["league/live/paper.py: PROOF_FOR must be assigned once, at module level"]
-    try:
-        proofs = ast.literal_eval(found[0])
-    except ValueError:
-        return {}, ["league/live/paper.py: PROOF_FOR must be a literal mapping of order type to proof"]
+    literals: dict[str, Any] = {}
+    for name in ("PROOF_FOR", "KINDS", "STRUCTURE"):
+        found = [node.value for node in tree.body if isinstance(node, ast.Assign)
+                 and any(isinstance(t, ast.Name) and t.id == name for t in node.targets)]
+        if len(found) != 1:
+            return {}, [f"league/live/paper.py: {name} must be assigned once, at module level"]
+        try:
+            literals[name] = ast.literal_eval(found[0])
+        except ValueError:
+            shape = "a literal tuple of proofs" if name == "KINDS" else "a literal mapping"
+            return {}, [f"league/live/paper.py: {name} must be {shape}"]
+    proofs, kinds, structure = literals["PROOF_FOR"], literals["KINDS"], literals["STRUCTURE"]
     if not isinstance(proofs, dict) or not all(isinstance(k, str) and isinstance(v, str) and v for k, v in proofs.items()):
         return {}, ["league/live/paper.py: PROOF_FOR must be a literal mapping of order type to proof"]
+    if not isinstance(kinds, tuple) or not isinstance(structure, dict):
+        return {}, ["league/live/paper.py: KINDS must be a literal tuple and STRUCTURE a literal mapping"]
+    wrong = sorted(t for t, kind in proofs.items()
+                   if kind not in kinds or (kind != "single" and structure.get(kind) != t)
+                   or (kind == "single" and t not in ("long_call", "long_put")))
+    if wrong:
+        return {}, [f"league/live/paper.py: PROOF_FOR maps {wrong} to a proof that is not one the House runs for that type "
+                    "(KINDS; a multi-leg proof's STRUCTURE is the type, a long call or put's proof is the single)"]
     return proofs, []
 
 

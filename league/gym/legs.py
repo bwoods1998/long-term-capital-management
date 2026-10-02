@@ -21,7 +21,8 @@ touch (the bid for a buy), which fills per the fill model's touch cell (`fills.p
 
 The type of a multi-leg structure is validated by `league/structure_core.classify`, the House's own
 definition, so a structure the Gym admits is one the House would; a long call or put is one long
-leg. Calendars and diagonals are refused on index roots. Maximum loss a share: a debit structure's
+leg. Calendars and diagonals are refused on index roots. A credit structure on an equity (American) root opens
+with no short leg in the money (`assignment_refusal`, the real path's rule too). Maximum loss a share: a debit structure's
 value; a credit structure's collateral (its widest wing) less the credit. Quantity is `qty`, or the
 most whole structures whose maximum loss plus fees fits `max_loss` dollars. Buying power reserves
 (maximum loss + open and close fees) x (1 + 10%).
@@ -329,6 +330,37 @@ def classify(type_: str, root: str, legs: Sequence[LegFill], rules: venue.Rules)
     return float(spec.collateral), (None if spec.max_value is None else float(spec.max_value))
 
 
+#: The types whose short legs may not open in the money on an American-style root (`assignment_refusal`): the credit
+#: structures, whose short legs are the premium sold (money rules v3, the owner's D3).
+ASSIGNMENT_TYPES = CREDIT
+
+
+def assignment_refusal(type_: str, legs: Sequence[Any], spot: Any, *, american: bool) -> str | None:
+    """Why an open of a credit structure (`ASSIGNMENT_TYPES`) may not go at entry for early assignment, or None (money
+    rules v3, the owner's D3: no short leg in the money at entry on an American-style root). On an equity root
+    (American, physically settled; `american`) no short leg is in the money: a short call's strike at or above the
+    underlying, a short put's at or below it; an unreadable underlying refuses. Index roots (European, cash-settled) and
+    the other types are exempt. ONE rule for the Gym, the shadow and practice books (`resolve_open`) and the real path
+    (`league/live/money.py` `entry_refusal`), so no evidence counts an entry real money refuses. Each leg carries `side`
+    (+1 long, -1 short), `strike` and `is_call`."""
+    if type_ not in ASSIGNMENT_TYPES or not american or not any(int(leg.side) < 0 for leg in legs):
+        return None
+    try:
+        spot = float(spot)
+    except (TypeError, ValueError):
+        spot = math.nan
+    if not (math.isfinite(spot) and spot > 0):
+        return f"a {type_} has a short leg on an American-style root and the underlying is unreadable now: refused"
+    for leg in legs:
+        if int(leg.side) > 0:
+            continue
+        strike = float(leg.strike)
+        if (strike < spot) if leg.is_call else (strike > spot):
+            return (f"a {type_}'s short {'call' if leg.is_call else 'put'} at {strike:g} is in the money (the underlying "
+                    f"at {spot:.2f}) on an American-style root: early assignment, refused at entry")
+    return None
+
+
 def max_loss_share(type_: str, value: float, collateral: float) -> float:
     """What one structure opened at `value` can lose, a share (Refused when it could never pay)."""
     if type_ in CREDIT:
@@ -402,6 +434,9 @@ def resolve_open(intent: Mapping[str, Any], snap: Snapshot, rules: venue.Rules, 
         raise Refused(f"{root} options are index options: every leg has one expiry (no calendars or diagonals)")
     legs = resolve_legs(snap, intent.get("legs"), rules)
     collateral, top = classify(type_, root, legs, rules)
+    why = assignment_refusal(type_, legs, snap.spot, american=rules.kind != "index")
+    if why:
+        raise Refused(why)
     natural, _ = natural_value(snap, legs, "open", stress=stress)
     mid = mid_value(snap, legs)
     if not (math.isfinite(natural) and math.isfinite(mid)):
@@ -458,4 +493,5 @@ def resolve_close(intent: Mapping[str, Any], type_: str, legs: Sequence[LegFill]
 
 
 __all__ = ["Order", "LegFill", "Refused", "resolve_open", "resolve_close", "resolve_legs", "natural_value", "mid_value",
-           "limit_value", "classify", "max_loss_share", "order_fees", "tick_of", "value_bounds", "DEBIT", "CREDIT"]
+           "limit_value", "classify", "max_loss_share", "order_fees", "tick_of", "value_bounds", "DEBIT", "CREDIT",
+           "ASSIGNMENT_TYPES", "assignment_refusal"]
