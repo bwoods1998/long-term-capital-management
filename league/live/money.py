@@ -10,10 +10,11 @@ enlarges a stake. Every share in the table is a share of `E`.
 
 BANDS (the live path owns candidate <-> probe <-> sized; the swarm owns gym <-> candidate and retirement):
 
-- PROBE: a Candidate that passed the holdout, whose structure is one of the real types (credit types only while credit
-  opens are allowed), and whose typical maximum loss (one structure, with its round-trip fees) fits the Probe's cap at
-  `E`: `probe.max_loss_share x E`, or `probe.floor_usd` for one contract. Otherwise it stays a Candidate, shadow only,
-  with the reason recorded. A family's structure is what it DECLARED; `long_single` (Sept 29, 2026: one program whose
+- PROBE: a Candidate that passed the holdout (or, evidence v3, a family THE FORWARD LADDER promoted from practice:
+  `league/live/ladder.py`), whose structure is one of the real types (credit types only while credit opens are
+  allowed), and whose typical maximum loss (one structure, with its round-trip fees) fits the Probe's cap at `E`:
+  `probe.max_loss_share x E`, or `probe.floor_usd` for one contract. Otherwise it stays a Candidate, shadow only, with
+  the reason recorded. A family's structure is what it DECLARED; `long_single` (Sept 29, 2026: one program whose
   every open is a `long_call` or a `long_put`, the side chosen by its rule) is real only while BOTH are real types
   (`order_types`, `Table.family_allowed`). The table's `real_types` stay concrete types, and every real order is still
   checked by its own type (`Table.type_allowed`), at the real book and at the gateway.
@@ -37,9 +38,9 @@ by their own unit):
   and the family's open maximum loss at most max(`probe.family_share x E`, `probe.floor_usd`).
 - Sized: `sized.kelly_fraction` of Kelly on the REAL fills' LOWER bound (`stats.quarter_kelly`: fraction x lcb /
   variance of the real per-trade return on maximum loss) of `E` a structure, never above `sized.max_loss_share x E`;
-  the family at most `sized.family_share x E`. A Sized family whose Kelly stake is under the Probe's cap is sized under the Probe's limits
-  (`probe.max_loss_share` a structure, `probe.open_per_family` open, `probe.family_share` the family): Sized limits never
-  apply at a Probe-sized stake.
+  the family at most `sized.family_share x E`. A Sized family whose Kelly stake is under the Probe's cap is sized under
+  the Probe's limits (`probe.max_loss_share` a structure, `probe.open_per_family` open, `probe.family_share` the
+  family): Sized limits never apply at a Probe-sized stake.
 - Tuition: exactly one structure, only while the day's and the week's tuition maximum loss has room.
 - The House live test (`league/live/house_test.py`, not a family): one structure of at most `house_test.structure_usd`,
   at most `house_test.open` held or working, its realized loss plus what is held or working at most

@@ -342,6 +342,12 @@ class BandRace(LiveCase):
         from league.gym.driver import build_bundle
         from league.swarm.gate import run_sha
 
+        # EVIDENCE V3 (Oct 2, 2026) retired execution tuition (`bands.TUITION_ROWS` False): these races are the retired
+        # route's, read explicitly here.
+        retired = patch("league.swarm.bands.TUITION_ROWS", True)
+        retired.start()
+        self.addCleanup(retired.stop)
+
         live, store, other = self.swarm_live("gym")
         (self.root / "swarm.json").write_text(json.dumps({"gym": {"image_checkpoint": "synthetic-image"},
                                                           "live": {"calibration": False}}))
