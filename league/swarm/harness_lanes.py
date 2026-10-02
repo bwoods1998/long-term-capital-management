@@ -1094,7 +1094,8 @@ FROZEN_SYMBOLS: dict[str, tuple[str, ...]] = {
         # THE SWEEP CYCLE's placebo row (research v3): which program it is, that it is never a candidate, and whether a
         # signal row beat it (the control every sweep is read against).
         "PLACEBO", "SHUFFLE_PARAM", "PLACEBO_WHY", "placebo_beats", "placebo_years", "Researcher.placebo_switch",
-        "Researcher.placebo_params"),
+        "Researcher.placebo_params", "Researcher.is_placebo", "Researcher._mark_placebo", "Researcher._record_variant",
+        "PLACEBO_KEPT"),
     # The architect's pass: the model call and its spend reservation, the parse of the answer into proposals and the
     # hand-off to `admit` (a proposal's text reaches the store unchanged: the rebirth detector reads what was proposed).
     "league/swarm/architect.py": ("SAME_IDEA", "_STOP", "words", "same_idea", "salvage_families", "_FAMILIES",

@@ -12,7 +12,8 @@ THE ROW. `family_ledger(seq, family, at, version, change, expectation, outcome, 
 - `expectation`: the model's one line (`expectation` on gym_run and gym_sweep), else "";
 - `outcome`: the Train figures that came back, in a few words (status, trades, P&L, Train score; a sweep's best row and
   its placebo row);
-- `verdict`: one of `VERDICTS`: for a run `new_best`, `no_better`, `ineligible` or `failed`; for a sweep with a placebo
+- `verdict`: one of `VERDICTS`: for a run `new_best`, `no_better`, `ineligible` or `failed` (a zero-trade probe too), or
+  `mechanism` (its mechanism test did not pass: the test's sample figures, the broad run skipped); for a sweep with a placebo
   row that ran, `beat_placebo` (every signal row beat it on Train) or `placebo_matched` (one did not), else the run words
   (`no_placebo` when its placebo row did not complete);
 - `why`: the harness's reason for the verdict.
@@ -41,7 +42,7 @@ from .diagnostics import scrub
 LIMIT_CHARS = 6000
 #: A field's characters after cleaning (`clean`).
 FIELD_CHARS = {"version": 60, "change": 300, "expectation": 200, "outcome": 360, "why": 300}
-RUN_VERDICTS = ("new_best", "no_better", "ineligible", "failed")
+RUN_VERDICTS = ("new_best", "no_better", "ineligible", "failed", "mechanism")
 SWEEP_VERDICTS = ("beat_placebo", "placebo_matched", "no_placebo")
 VERDICTS = RUN_VERDICTS + SWEEP_VERDICTS
 HEADER = ("YOUR LEDGER (written by the harness from every Train run and sweep of your family, oldest first; the oldest "
@@ -207,13 +208,30 @@ def _change(args: Mapping[str, Any], label: str = "", keys: Sequence[str] = ()) 
     return "; ".join(parts)
 
 
+def _mechanism_entry(view_: Mapping[str, Any], args: Mapping[str, Any]) -> dict[str, Any]:
+    """The row of a gym_run whose mechanism test did not pass (gate mode: its arms were trials, the broad Train run was
+    skipped): the test's own sample figures (signal against the card's comparison), never a Validation figure."""
+    test = view_.get("mechanism_test") if isinstance(view_.get("mechanism_test"), Mapping) else {}
+    name = str(test.get("verdict") or str(view_.get("status") or "")[len("mechanism_"):] or "failed")
+    t, bound = _num(test.get("t")), _num(test.get("min_t"))
+    outcome = (f"mechanism test {name}: t {'n/a' if t is None else f'{t:.2f}'}"
+               + ("" if bound is None else f" against {bound:.2f}")
+               + f", {test.get('signal_days', 'n/a')} signal days, {test.get('comparison_days', 'n/a')} comparison days; "
+               "the broad Train run skipped")
+    return {"version": str(view_.get("version") or ""), "change": _change(args), "expectation": args.get("expectation"),
+            "outcome": outcome, "verdict": "mechanism", "why": _first(test.get("why"), view_.get("next"), name)}
+
+
 def run_entry(view_: Any, args: Mapping[str, Any], *, best: Any = None) -> dict[str, Any] | None:
-    """The row of one gym_run's answer, or None when it made no new Train run (refused, held, stored, a Gym error, a
-    mechanism test that stopped it). `best`: the family's best Train score after it (the `no_better` reason)."""
-    if not isinstance(view_, Mapping) or not view_.get("run_id") or view_.get("already_run"):
+    """The row of one gym_run's answer, or None when it made no new Gym evaluation (refused, held, stored, a Gym error).
+    A mechanism test that stopped it (its arms were trials) is a `mechanism` row; a zero-trade probe a `failed` row.
+    `best`: the family's best Train score after it (the `no_better` reason)."""
+    if not isinstance(view_, Mapping) or view_.get("already_run"):
         return None
     status = str(view_.get("status") or "")
-    if status in ("", "refused", "held", "retired", "gym_error") or status.startswith("mechanism_"):
+    if status.startswith("mechanism_"):
+        return _mechanism_entry(view_, args)
+    if not view_.get("run_id") or status in ("", "refused", "held", "retired", "gym_error"):
         return None
     s = view_.get("summary") if isinstance(view_.get("summary"), Mapping) else {}
     score = view_.get("train_score") if isinstance(view_.get("train_score"), Mapping) else {}
@@ -241,8 +259,9 @@ def sweep_entry(view_: Any, args: Mapping[str, Any], *, best: Any = None) -> dic
     if not isinstance(view_, Mapping) or not isinstance(view_.get("table"), list) or view_.get("already_run"):
         return None
     table = [r for r in view_["table"] if isinstance(r, Mapping)]
-    signal = [r for r in table if r.get("label") != "placebo"]
-    placebo = next((r for r in table if r.get("label") == "placebo"), None)
+    signal = [r for r in table if r.get("label") != "placebo"]  # an earlier sweep's placebo read back is no signal row
+    mine = view_.get("placebo") if isinstance(view_.get("placebo"), Mapping) else {}
+    placebo = next((r for r in table if r.get("label") == "placebo" and mine and r.get("version") == mine.get("version")), None)
     keys = sorted({str(k) for r in signal for k in (r.get("params") or {})})
     versions = sorted({int(r["version"]) for r in table if isinstance(r.get("version"), int)})
     ok = [r for r in table if r.get("status") == "ok"]

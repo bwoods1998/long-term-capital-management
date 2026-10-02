@@ -151,7 +151,7 @@ class Ledger(ResearcherCase):
                                           "runtime": {"messages": ["decide raised KeyError"]}}, {"params": {"a": 1}})
         self.assertEqual((failed["verdict"], failed["why"], failed["change"]), ("failed", "decide raised KeyError", "params a"))
         for none in ({"status": "refused", "reason": "x"}, {"status": "held"}, {**base, "already_run": "the stored result"},
-                     {"status": "gym_error", "error": "busy"}, {"status": "mechanism_failed", "run_id": "m"}, None):
+                     {"status": "gym_error", "error": "busy"}, {"status": "mechanism_failed", "already_run": "stored"}, None):
             self.assertIsNone(family_ledger.run_entry(none, {}), none)
 
 
@@ -475,6 +475,158 @@ class Cycles(V3Case):
         self.assertNotIn("single_run_refused", out)
         self.assertEqual([t["name"] for t in self.sail.bodies[0]["tools"]], ["gym_run", "gym_sweep"])
         self.assertNotIn("Placebo row", self.sail.bodies[0]["input"][1]["content"])
+
+
+# ------------------------------------------------------------------------------------- the review's fixes (Oct 2, B1)
+class PlaceboIdentity(V3Case):
+    """A placebo is never a candidate, the best or an eligible Train result: this sweep's, an earlier sweep's read back
+    from the store, after the state's list was capped, and for readers outside the researcher."""
+
+    def test_an_earlier_placebo_read_back_is_never_a_candidate_or_the_best(self):
+        self.placebo_t = 3.0  # the switched-off program scores above every signal row
+        first, _ = self.sweep([{"threshold": 500}, {"threshold": 600}, {"threshold": 700}])
+        old = first["placebo"]["version"]
+        self.store.set_state(self.fid, placebo_versions=[])  # past PLACEBO_KEPT: only the run rows' mark is left
+        view, _ = self.sweep([{"threshold": 800}, {"threshold": 1000}, {"threshold": 600, "signal_on": 0}],
+                             params={"threshold": 900})
+        [earlier] = [r for r in view["table"] if r["version"] == old]
+        self.assertEqual((earlier["label"], earlier["placebo_of"], earlier["eligible"]), (PLACEBO, "an earlier sweep", False))
+        self.assertTrue(earlier.get("already_run"), "read back from the store, no new trial")
+        self.assertNotEqual(view["placebo"]["version"], old, "this sweep's own placebo is the comparison")
+        self.assertNotIn("beats_placebo", earlier)
+        state = self.store.family(self.fid)["state"]
+        self.assertNotIn(state["best_train_version"], (old, view["placebo"]["version"]))
+        self.assertNotIn(old, [c[1] if isinstance(c, (list, tuple)) else c.get("version")
+                               for c in state.get("train_candidates") or []])
+        submitted = self.researcher()._local_tool(self.store.family(self.fid), "submit", {"run_id": earlier["run_id"]}, {})
+        self.assertIn("placebo row", submitted["error"])
+        row = family_ledger.rows(self.store, self.fid)[-1]
+        self.assertEqual(row["verdict"], "placebo_matched", "this sweep's placebo (3.0) beat both signal rows")
+        lost = row["why"].split(" did not")[0].split(", ")
+        self.assertEqual(sorted(lost), sorted(f"v{r['version']}" for r in view["table"] if r.get("label") != PLACEBO),
+                         "the ledger reads this sweep's placebo, never the earlier one as a signal row")
+        self.assertNotIn(f"v{old}", lost)
+
+    def test_a_placebo_row_is_never_an_eligible_train_result_outside_the_researcher(self):
+        from league.swarm.researcher import _run_record, train_record
+
+        def answer(job):  # every signal row too sparse to be eligible; the placebo eligible
+            r = surface(job)
+            if job.params.get("signal_on", 1):
+                r["by_year"] = by_year(1.5, trades=10)
+            return r
+
+        self.pool = SweepPool(answer=answer)
+        view, _ = self.sweep([{"threshold": 500}, {"threshold": 600}, {"threshold": 700}])
+        placebo = view["placebo"]["version"]
+        rows = self.store._all("SELECT version, json_extract(summary, '$.train_eligible') AS eligible, "
+                               "json_extract(summary, '$.placebo') AS placebo FROM runs WHERE family=? AND window='train'",
+                               (self.fid,))
+        self.assertEqual([(r["eligible"], r["placebo"]) for r in rows if r["version"] == placebo], [(0, 1)])
+        self.assertFalse(any(r["eligible"] for r in rows), "no eligible Train row: cards.cell_yields and the "
+                                                            "mechanism calibration count none")
+        self.assertEqual(_run_record(self.store, self.fid), (False, True))
+        self.assertFalse(train_record(self.store, self.store.family(self.fid))["eligible"])
+
+    def test_the_rewrite_reads_a_signal_run_never_the_placebo(self):
+        self.sweep([{"threshold": 500}, {"threshold": 600}, {"threshold": 700}])
+        asked: list = []
+        self.router.ask = lambda **kw: asked.append(kw["user"]) or None  # type: ignore[method-assign]
+        r = self.researcher()
+        self.store.update_family(self.fid, stall=9)
+        self.assertTrue(r.request_rewrite(self.store.family(self.fid), {}))
+        self.assertNotIn('"signal_on": 0', asked[0], "the latest Train diagnostic is a signal row's")
+        self.assertIn('"params": {"threshold": ', asked[0])
+
+
+class CycleRules(V3Case):
+    def first(self):
+        self.researcher().cycle(self.fid)
+
+    def test_a_params_change_on_a_read_turn_is_refused_never_queued(self):
+        self.first()
+        self.store.set_state(self.fid, rewrite_ready={"code": CODE, "profile": "pro_asap", "at": self.clock()})
+        self.steps = [{"calls": [("gym_run", {"params": {"threshold": 900}})]}]
+        out = self.researcher().cycle(self.fid)
+        self.assertEqual(out.get("rewrite"), "pro_asap")
+        self.assertTrue(out["single_run_refused"])
+        self.assertFalse(out["pending_run"], "never queued for the next cycle")
+        self.assertIsNone(self.store.convo(self.fid)[1])
+
+    def test_a_queued_params_change_is_refused_when_its_cycle_opens(self):
+        self.first()
+        cycles, _ = self.store.convo(self.fid)
+        self.store.save_convo(self.fid, cycles, {"call_id": "c-old", "name": "gym_run", "arguments": {"params": {"threshold": 900}},
+                                                 "author": "model"})
+        trains = len(self.pool.train())
+        self.steps = [{"calls": [("gym_run", {"hold": True, "note": "nothing new"})]}]
+        out = self.researcher().cycle(self.fid)
+        self.assertTrue(out["single_run_refused"])
+        self.assertEqual(len(self.pool.train()), trains, "the queued PARAMS change never ran as a single run")
+
+    def test_a_sweep_with_no_completed_row_is_still_the_one_run_of_the_answer(self):
+        self.first()
+
+        def answer(job):
+            r = surface(job)
+            r["status"] = "disqualified"
+            return r
+
+        self.pool = SweepPool(answer=answer)
+        self.steps = [{"calls": [("gym_sweep", {"code": CODE, "variants": [{"threshold": 500}, {"threshold": 600},
+                                                                           {"threshold": 700}]}),
+                                 ("gym_sweep", {"code": CODE, "variants": [{"threshold": 800}, {"threshold": 900},
+                                                                           {"threshold": 1000}]})]}]
+        out = self.researcher().cycle(self.fid)
+        self.assertEqual(len(self.pool.train()), 4, "one sweep and its placebo; the second refused")
+        self.assertEqual(out["model_calls"], 1, "no further paid call in the cycle")
+        self.assertFalse(out["pending_run"])
+
+    def test_a_cycle_holds_its_sweep_room_through_the_answer(self):
+        self.first()
+        self.settings["researcher"]["max_sweep_jobs_in_flight"] = 10
+        r = self.researcher()
+        self.assertTrue(r._hold_sweep("other", 6), "another family's model is answering for a sweep")
+        self.assertEqual((r.sweep_room(), r.sweep_room("other")), (4, 10))
+        self.assertTrue(r._hold_sweep("third", 6), "a third family holds what is left (4 rows: one smallest sweep)")
+        self.assertEqual(r._held["third"], 4)
+        self.assertFalse(r._hold_sweep("fourth", 6), "none left: the fourth family would wait without a model call")
+        out = r.cycle(self.fid)  # room 0 for this family: it waits, no model call
+        self.assertEqual((out["model_calls"], out.get("sweep_wait")), (0, 0))
+        r._unhold_sweep("third")
+        self.steps = [{"calls": [("gym_sweep", {"code": CODE, "variants": [{"threshold": 500}, {"threshold": 600},
+                                                                           {"threshold": 700}]})]}]
+        out = r.cycle(self.fid)
+        self.assertEqual((out["model_calls"], out["sweep"]["variants"]), (1, 4), "its held room took its sweep")
+        self.assertEqual((r._held, r._sweeping), ({"other": 6}, {}), "converted, then released at the cycle's end")
+        self.assertTrue(r._reserve_sweep("other", 6), "a family's own hold is its room")
+        self.assertEqual((r._held, r._sweeping), ({}, {"other": 6}))
+
+    def test_a_stall_rewrite_asked_while_waiting_for_room_is_a_cycle_event(self):
+        self.first()
+        self.settings["researcher"]["max_sweep_jobs_in_flight"] = 6
+        r = self.researcher()
+        r._hold_sweep("other", 6)
+        r.request_rewrite = lambda fam, out: bool(out.__setitem__("rewrite_asked", "pro_balanced")) or True  # type: ignore
+        self.store.update_family(self.fid, stall=9)
+        events = len(self.store.events_after(0))
+        out = r.cycle(self.fid)
+        self.assertEqual((out.get("sweep_wait"), out.get("rewrite_asked"), out["model_calls"]), (0, "pro_balanced", 0))
+        self.assertEqual(len(self.store.events_after(0)), events + 1, "the rewrite's spend is in the event stream")
+
+
+class LedgerOutcomes(unittest.TestCase):
+    def test_a_mechanism_test_that_stopped_a_run_is_a_row(self):
+        view = {"status": "mechanism_failed", "version": 7, "window": "mechanism",
+                "mechanism_test": {"verdict": "failed", "why": "signal entries did not beat the comparison", "t": 0.31,
+                                   "min_t": 0.75, "signal_days": 40, "comparison_days": 120}, "next": "change the signal"}
+        row = family_ledger.run_entry(view, {"code": "x", "why": "enter after the dip", "expectation": "a cleaner signal"})
+        self.assertEqual((row["verdict"], row["version"]), ("mechanism", "7"))
+        self.assertIn("mechanism test failed: t 0.31 against 0.75, 40 signal days", row["outcome"])
+        self.assertIsNone(family_ledger.run_entry({**view, "already_run": "the stored result"}, {}), "a stored test: no row")
+        probe = {"status": "disqualified", "reason": "disqualified: no trades in the probe year", "version": 8, "run_id": "r8",
+                 "probe": {"trades": 0}}
+        self.assertEqual(family_ledger.run_entry(probe, {"code": "x"})["verdict"], "failed", "a zero-trade probe is a row")
 
 
 if __name__ == "__main__":

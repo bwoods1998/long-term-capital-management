@@ -1598,6 +1598,7 @@ the swarm's loop for up to the meters' 20 s timeouts, at most once every 5 minut
 | `claude.model`, `claude.usd_cap`, `claude.max_tokens` | `swarm.json` on the box | `claude-sonnet-5-5` (since 04:53Z Sept 29), 263 (since 20:33Z Oct 1; 198 from 05:29Z Sept 29), 32000 | the swarm's Claude model, its own lifetime Claude line inside `CLAUDE_USD`, a call's output ceiling (defaults `claude-opus-5-5`, 100, 16000) | edit `swarm.json` |
 | `claude.roles`, `claude.role_usd_day`, `claude.role_model` | `swarm.json` on the box | architect, audit, diagnostician, rewrite, review, researcher, strategist; lines: architect $0 (since 11:54Z Oct 2; $5 at 20:33Z Oct 1 to 00:06Z Oct 2, 06:09-06:51Z and 11:38-11:54Z Oct 2: 0 births in its 4 Oct 2 passes; $0 from 16:41Z Sept 30), rewrite $0, researcher $0, review $5, strategist $6, diagnostician $6; audit on `claude-opus-5-5` (since 04:53Z Sept 29) | who asks Claude first; a role's own Claude line a UTC day; a role's own Claude model (defaults since PR #417: architect, audit, diagnostician, researcher; the researcher $100; the researcher on `claude-sonnet-5-5`; the box's `roles` list replaces the default, so the box's research band is off until "researcher" is added to it) | edit `swarm.json` |
 | `researcher.claude_top`, `claude_effort`, `claude_max_tokens`, `claude_hold_every` | `swarm.json` on the box | 0 on the box (the band is off); defaults: 12, `medium`, 12000, 3 | the top band on Claude (PR #417): how many of the top families by allocation share, at what effort, each call's output ceiling (it sizes the hold), and how often Claude looks during a hold streak (1: every cycle) | edit `swarm.json` |
+| `researcher.sweep_cycle`, `sweep_wait_seconds`, `ledger_chars` | `league/swarm/policy.json` (V3-A settings as code), else `swarm.json` | defaults: false, 60, 6000 (research v3, B1) | THE SWEEP CYCLE (one answer a cycle defines a sweep of 3 to 5 variants; the harness adds the placebo row), the flat wait of a family the Gym has no sweep room for (no model call; the heartbeat's `sweep_waits`), and the characters of THE FAMILY LEDGER in every status (0 leaves it out; rows are written either way) | edit `policy.json` |
 | `researcher.claude_family_usd_day`, `claude_min_room_usd`, `claude_timeout_seconds`, `claude_breaker_failures`, `claude_breaker_window_seconds`, `claude_breaker_pause_seconds` | `swarm.json` on the box | defaults: $15, $25, 180, 3, 3600, 3600 | the band's fuses: one family's Claude a UTC day, the funded room left to the other roles, one call's limit, and the breaker (unknown bills in the window that pause the band, and for how long) | edit `swarm.json` |
 | `gate.review_openai_model`, `gate.audit_openai_model` | `swarm.json` on the box | null, null (since 04:53Z Sept 29) | the review's and the audit's OpenAI route; null skips it (defaults `gpt-6-sol`, `gpt-6-astra`) | edit `swarm.json` |
 | `gate.look_holds` (`drift_share`, `min_power`) | `swarm.json` on the box | default `{"drift_share": 0.25, "min_power": 0.30}` (the owner, Oct 2, 2026) | THE LOOK HOLDS: hold a holdout look at a long-delta version whose Train drift share is at least `drift_share`, or whose expected holdout power at the next look's Holm level is below `min_power` (the look holds, in the gate's section below). A key null turns that hold off, `look_holds` null both; a value that is not a number from 0 to 1 reads as its default | edit `swarm.json` |
@@ -2143,6 +2144,38 @@ role's call:
   US-only inference (`/v1/health` `claude.geos` shows "us"). The top band's Sail spend falls by about $12 a day.
   After about 50 Claude cycles, read `claude_usage` and `claude_usd` from the cycle events: above about $0.08 a
   cycle, drop to `low` or `claude_top` 6; below about $0.04, consider `high` for the top six or `claude_hold_every` 1.
+- **Research v3** (B1, Oct 2026; league/swarm/researcher.py RESEARCH V3, league/swarm/family_ledger.py):
+  - `researcher.claude_top` takes the string "all": every family's cycles go to Claude (the researcher's role line
+    `claude.role_usd_day.researcher`, which THE BUDGET tightens, still bounds every call; a turn without room is Sail's).
+    With a number, a zero or missing k-th weight (newborns, a population below the band) no longer switches the band off.
+    THE BUDGET's overlay never touches `claude_top` (its allowlist is the spend knobs), so "all" passes through it.
+  - THE SWEEP CYCLE (`researcher.sweep_cycle` JSON true): a cycle is ONE answer that reads the last sweep's table and the
+    ledger, may submit, and calls gym_sweep with 3 to 5 variants. The harness adds the PLACEBO row: the card's ablation
+    (`signal_on` = 0 for a family born before cards), or for a flat card `signal_shuffle` = 1 (the program declares the
+    switch, default 0, and at 1 enters on a fixed pseudo-random schedule at its usual rate with the same structure,
+    tenor, strikes, sizing and exits). A program without the switch cannot sweep. The table labels the placebo and says
+    per row (`beats_placebo`: Train P&L and Train score above the placebo's) and for the sweep
+    (`every_signal_row_beat_placebo`) whether the signal beat it. A placebo version, this sweep's or an earlier one's read
+    back from the store, is never a candidate, the best or a submission (`placebo_versions` in the family's state, and
+    `placebo` true with `train_eligible` false on its run rows, which `cards.cell_yields`, the mechanism calibration,
+    `train_record` and the incubator read). gym_run only tests new code or holds: a PARAMS change on the latest code is
+    refused (`single_run_refused`), on a REVISE or a READ turn and when a queued run opens a cycle. One run an answer:
+    any run or sweep that made Gym trials ends the cycle's model calls. A family's cycle holds its sweep room
+    (`cycle_variants` + 1 rows, at least 4) while its model answers, so families waiting for room do not all pay for an
+    answer only one sweep fits; with less than 4 rows free, no model call and a flat `sweep_wait_seconds` wait (a stall
+    rewrite asked meanwhile is still a `swarm.cycle` event, `rewrite_asked`).
+  - THE FAMILY LEDGER: the `family_ledger` table (created on first use), one row per Train run, sweep or stopping
+    mechanism test (`verdict`: new_best, no_better, ineligible, failed, mechanism, beat_placebo, placebo_matched,
+    no_placebo) with the model's one-line `expectation`; the whole ledger, oldest rows compressed first within
+    `ledger_chars`, ends every status. Train and mechanism-sample figures only.
+  - The policy fragment (V3-A settings as code: these keys go into `league/swarm/policy.json` at integration; B1 ships
+    the code with everything off by default):
+    `{"researcher": {"claude_top": "all", "claude_hold_every": 1, "sweep_cycle": true, "sweep_wait_seconds": 60,
+    "ledger_chars": 6000}, "population": {"start": 12, "floor": 8, "ceiling": 16}}`, with "researcher" in `claude.roles`
+    and its `claude.role_usd_day.researcher` line set by THE BUDGET.
+  - Not yet checked by code: that a program's placebo arm keeps the signal arm's structure, tenor, strikes, hold and (for
+    a flat card) entry rate. B1 uses the placebo for advice and the ledger only; B2's kill test must not bind on it until
+    the mechanism test's arm-fidelity check covers the sweep placebo.
 - **Switching the band on** (the owner's or operator's steps, none done by the code; the runbook is in the PR): deploy
   the gateway (PR #417's tool admission, the US multiplier on every row, the checked body forwarded, overruns counted;
   until then a House tool call is a 400 and falls back to Sail), then the House release; then add "researcher" to

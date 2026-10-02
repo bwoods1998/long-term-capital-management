@@ -307,6 +307,16 @@ Agent count and simulated years measure activity; passing unseen evidence measur
   lands. The researcher reads that run first, and its status says the revival's evidence decides,
   never the evaluator change. Before this fix, revivals did not run the revived program: a bare
   `gym_run` dropped the version's params, and researchers often rewrote the code first.
+- **Research v3** (B1, Oct 2026; off until `researcher.sweep_cycle` and `claude_top` "all" in policy.json). Every
+  family's cycles run on Claude Sonnet 5.5 within the researcher's budget line. A cycle is ONE answer that defines a
+  sweep of 3 to 5 PARAMS variants; the harness adds a mandatory PLACEBO row (the card's ablation, or for a flat card a
+  shuffled-signal row) and says whether every signal row beat it on Train. A placebo version is never a candidate, the
+  best, a submission or an eligible Train result anywhere (its run rows are marked). gym_run is for a fix (new code) or a
+  hold; one run an answer; a family's cycle holds its sweep room while its model answers, and waits without a model
+  call when there is none. THE FAMILY LEDGER (league/swarm/family_ledger.py) is the family's structured memory: one row
+  per run, sweep or stopping mechanism test, written by the harness with the model's one-line expectation, and the whole
+  of it (6,000 characters, oldest compressed first) is in every status. The Oct 2 deep dive found families re-discovering
+  in a median 0.9 h what they had already refuted; the ledger and the placebo row are the cure under test.
 - **The research library** (Sept 29, not yet released; off until `research.enabled`): the agents read the
   literature as a firm's analysts do, but only literature posted before 2025. Open web access would let a
   model read about the Validation year (2025) and the sealed holdout (2026) and select on them, which fakes

@@ -260,13 +260,18 @@ families self-refuted in a median 0.9 h, re-discovering what they had already tr
   gym_sweep with `SWEEP_CYCLE_MIN` to `cycle_variants` (3 to 5) variants; the harness adds the mandatory PLACEBO row
   (`placebo_params`: the card's ablation, `signal_on` = 0 for a family born before cards, or for a flat card
   `SHUFFLE_PARAM` = 1, entries on a fixed pseudo-random schedule), labelled `placebo` in the table, never a candidate, the
-  best or a submission (`placebo_versions` in the family's state), and the answer says per row whether it beat the placebo
+  best or a submission (`placebo_versions` in the family's state, and `placebo` true with `train_eligible` false on its run
+  rows, so readers outside the researcher never count it, and an earlier sweep's placebo read back from the store is
+  labelled and excluded as well: `is_placebo`), and the answer says per row whether it beat the placebo
   on Train (`placebo_beats`: a Train P&L above the placebo's and, where both have one, a Train score above it) and whether
   every signal row did. No placebo, no sweep: a program without the switch, or a placebo the preflight refuses, refuses
   the sweep. The sweep runs in the cycle and the cycle ends after it (no READ turn; a second run in the same answer is
   refused, never queued); a refused answer may be repaired within `max_model_calls`. gym_run is for a fix (new code) or a
-  hold: a PARAMS change on the latest code is refused (`single_run_refusal`). A cycle that finds no room in the Gym for
-  a sweep (`sweep_room` below `SWEEP_CYCLE_MIN` + 1) makes no model call and backs off as an error.
+  hold: a PARAMS change on the latest code is refused (`single_run_refusal`), on any turn, never queued, and a queued one
+  is refused when its cycle opens. Any run or sweep that made Gym trials is the answer's one run. A cycle holds its
+  sweep's room (`_hold_sweep`: `cycle_variants` + 1 rows) while its model answers; a cycle that finds no room in the Gym
+  for a sweep (below `SWEEP_CYCLE_MIN` + 1) makes no model call and waits a flat `sweep_wait_seconds` (no cycle event,
+  unless a stall's rewrite was asked on the way).
 - THE FAMILY LEDGER (league/swarm/family_ledger.py): one row per Train run or sweep, written by the harness on every path
   (the model's call, a queued run, the starter, a rewrite, the operator's run), with the model's one-line `expectation`
   (gym_run and gym_sweep); the whole ledger, compressed oldest first within `researcher.ledger_chars` (6,000), ends every
@@ -1663,6 +1668,9 @@ class Researcher:
         #: sweeps add to the pool (`max_sweep_jobs_in_flight`, the module docstring's SWEEP LOAD).
         self._sweeping: dict[str, int] = {}
         self._sweep_lock = threading.Lock()
+        #: THE SWEEP CYCLE: rows of the Gym's sweep room a family's cycle holds while its model answers (`_hold_sweep`), so
+        #: families do not all pay for an answer whose sweep the room can take only one of; its sweep converts the hold.
+        self._held: dict[str, int] = {}
         #: The fill model version of the latest result the Gym returned (`_result_key`); a stored result on another one is
         #: not reused (`_reusable`). None until a result lands.
         self._fill_model: str | None = None
@@ -1784,6 +1792,32 @@ class Researcher:
             return None, {"status": "refused", "reason": f"the placebo row {param}={off!r} cannot run: {why}", "hint": hint}
         return params, None
 
+    def is_placebo(self, fid: str, n: Any, state: Mapping[str, Any] | None = None) -> bool:
+        """Is version `n` a placebo row's program (THE SWEEP CYCLE: never a candidate, the best or a submission)? Listed in
+        the family's `placebo_versions` (the newest `PLACEBO_KEPT`), or any Train run of it marked `placebo` on its row
+        (`_mark_placebo`, `_record_variant`: the mark outlives the list's cap)."""
+        try:
+            n = int(n)
+        except (TypeError, ValueError):
+            return False
+        if state is None:
+            state = (self.store.family(fid) or {}).get("state") or {}
+        if n in (state.get("placebo_versions") or []):
+            return True
+        try:
+            return self.store._one("SELECT 1 AS hit FROM runs WHERE family=? AND version=? AND window='train' AND "
+                                   "json_valid(summary) AND json_extract(summary, '$.placebo') = 1 LIMIT 1",
+                                   (str(fid), n)) is not None
+        except Exception:  # noqa: BLE001 - a store without JSON1: the list alone
+            return False
+
+    def _mark_placebo(self, fid: str, n: int) -> None:
+        """Mark every Train run row of version `n` a placebo's (`placebo` true, `train_eligible` false): readers outside the
+        researcher (cards.cell_yields, the mechanism calibration, `train_record`, the incubator) count `train_eligible`
+        and know nothing of `placebo_versions`; a placebo is never a family's eligible Train result."""
+        self.store._exec("UPDATE runs SET summary=json_set(summary, '$.placebo', json('true'), '$.train_eligible', json('false')) "
+                         "WHERE family=? AND version=? AND window='train' AND json_valid(summary)", (str(fid), int(n)))
+
     def single_run_refusal(self, fam: Mapping[str, Any], args: Mapping[str, Any]) -> dict[str, Any] | None:
         """THE SWEEP CYCLE's rule for a model's gym_run (not a hold): only a fix, never a PARAMS change. Refused (None when
         allowed) when it carries no code, or the latest version's code, with PARAMS other than that version's (the latest
@@ -1879,7 +1913,7 @@ class Researcher:
                          "than holding again: its slot goes to a new idea.")
         retire_hint = " If you abandon the entire mechanism, call retire with your reason." if may_retire else ""
         hold_hint = " With nothing new to run, call gym_run with hold=true and say why in its note."
-        fit = min(self.sweep_room(), self.max_variants)
+        fit = min(self.sweep_room(str(fam["id"])), self.max_variants)
         if self.sweep_cycle:
             # THE SWEEP CYCLE: one answer reads the last sweep, submits, and defines the next (the placebo row is the harness's).
             most = max(SWEEP_CYCLE_MIN, min(self.cycle_variants, fit - 1))
@@ -2040,18 +2074,40 @@ class Researcher:
     def max_sweep_jobs(self) -> int:
         return max(2, int(self.cfg.get("max_sweep_jobs_in_flight", MAX_SWEEP_JOBS_IN_FLIGHT)))
 
-    def sweep_room(self) -> int:
-        """Variants a new sweep may put on the pool now: `max_sweep_jobs_in_flight` less every sweep in flight."""
+    def _taken(self, fid: str | None) -> int:
+        """In-flight variants and held rows (`_held`), the family `fid`'s own hold not counted (under `_sweep_lock`)."""
+        return sum(self._sweeping.values()) + sum(self._held.values()) - (self._held.get(fid, 0) if fid else 0)
+
+    def sweep_room(self, fid: str | None = None) -> int:
+        """Variants a new sweep may put on the pool now: `max_sweep_jobs_in_flight` less every sweep in flight and every
+        other family's hold (THE SWEEP CYCLE: `_hold_sweep`); `fid`'s own hold is its room."""
         with self._sweep_lock:
-            return max(0, self.max_sweep_jobs - sum(self._sweeping.values()))
+            return max(0, self.max_sweep_jobs - self._taken(fid))
 
     def _reserve_sweep(self, fid: str, n: int) -> bool:
-        """Take `n` of the in-flight variants for a family's sweep (False, nothing taken, when they do not fit)."""
+        """Take `n` of the in-flight variants for a family's sweep (False, nothing taken, when they do not fit); the family's
+        hold (`_hold_sweep`) is part of its room and is converted (released) by the reservation."""
         with self._sweep_lock:
-            if sum(self._sweeping.values()) + n > self.max_sweep_jobs:
+            if self._taken(fid) + n > self.max_sweep_jobs:
                 return False
+            self._held.pop(fid, None)
             self._sweeping[fid] = self._sweeping.get(fid, 0) + n
             return True
+
+    def _hold_sweep(self, fid: str, n: int) -> bool:
+        """THE SWEEP CYCLE: before a family's model is asked for a sweep, hold up to `n` rows of the room (at least a sweep's
+        smallest, `SWEEP_CYCLE_MIN` + 1 with its placebo) through the model's answer. False, nothing held, when they do not
+        fit: the family waits (no model call). Released by its sweep's reservation or at the cycle's end (`_unhold_sweep`)."""
+        with self._sweep_lock:
+            room = self.max_sweep_jobs - self._taken(fid)
+            if room < SWEEP_CYCLE_MIN + 1:
+                return False
+            self._held[fid] = min(int(n), room)
+            return True
+
+    def _unhold_sweep(self, fid: str) -> None:
+        with self._sweep_lock:
+            self._held.pop(fid, None)
 
     def _release_sweep(self, fid: str, n: int) -> None:
         with self._sweep_lock:
@@ -3268,7 +3324,7 @@ class Researcher:
             current = self.store.family(fam["id"]) or {}
             state = current.get("state") or {}
             failed = n in (state.get("robust_failed") or [])
-            placebo = n in (state.get("placebo_versions") or [])  # THE SWEEP CYCLE: a placebo row is the comparison
+            placebo = self.is_placebo(fam["id"], n, state)  # THE SWEEP CYCLE: a placebo row is the comparison
             if not current.get("retired_at") and score is not None and not failed and not blocked and not placebo:
                 candidates = candidates_with(state.get("train_candidates"), score, n, run_id)
                 if candidates != state.get("train_candidates"):
@@ -3364,15 +3420,19 @@ class Researcher:
         return answer
 
     def _record_variant(self, job: GymJob, result: Mapping[str, Any], robust: Mapping[str, Any] | None = None, *,
-                        sweep: str, prune: bool = True) -> dict[str, Any]:
+                        sweep: str, prune: bool = True, placebo: bool = False) -> dict[str, Any]:
         """One sweep variant's Train result, recorded as its own run of its own version (a trial, as every Gym evaluation
         is): its row keeps its Train score and eligibility (`submit` reads them), its params and its sweep. A sweep records
-        its variants unpruned (`prune=False`) and prunes once at its end, keeping all its rows for `read_run`."""
+        its variants unpruned (`prune=False`) and prunes once at its end, keeping all its rows for `read_run`. `placebo`
+        (THE SWEEP CYCLE's placebo row): its row says so and is never eligible (`_mark_placebo`)."""
         robust = robust if robust is not None else self._robust_of(result)
         recorded = dict(result)
         if isinstance(result.get("summary"), Mapping):
-            recorded["summary"] = {**result["summary"], "train_score": robust["score"], "train_eligible": robust["eligible"],
+            recorded["summary"] = {**result["summary"], "train_score": robust["score"],
+                                   "train_eligible": bool(robust["eligible"]) and not placebo,
                                    "train_from": span_of(result), "params": dict(job.params or {}), "sweep": sweep}
+            if placebo:
+                recorded["summary"]["placebo"] = True
         days = float((result.get("summary") or {}).get("days") or 0)
         run = self.store.add_run(job.family, job.version, recorded, window="train", stress=1.0, purpose="train",
                                  program_years=days / 252.0 * max(1, len(job.roots)), prune=prune,
@@ -3503,7 +3563,7 @@ class Researcher:
                 variants = [variants[i] for i in keep]
                 fresh = len(variants) - len(stored)
         if fresh and not self._reserve_sweep(fid, fresh):  # the pool's room for sweeps (SWEEP LOAD): a plain refusal, no backoff
-            room = self.sweep_room()
+            room = self.sweep_room(fid)
             out["sweep_busy"] = True
             return {"status": "refused", "reason": "the Gym is full of other families' sweeps now"
                                                    + (f": a sweep of at most {room} variants fits" if room >= 2 else ""),
@@ -3553,6 +3613,8 @@ class Researcher:
                 kept = [v for v in ((self.store.family(fid) or {}).get("state") or {}).get("placebo_versions") or []
                         if v != placebo_version]
                 self.store.set_state(fid, placebo_versions=(kept + [placebo_version])[-PLACEBO_KEPT:])
+                if at in stored:  # a placebo read back from the store: its rows are marked as a fresh one's are
+                    self._mark_placebo(fid, placebo_version)
         group = self._sweep_group(fid, code, variants, fam["roots"])
         todo = [GymJob(family=fid, version=int(v["n"]), code=code, params=dict(p), window="train", roots=tuple(fam["roots"]),
                        stress=1.0, purpose="train", priority=float(fam.get("weight") or 0.0), group=group)
@@ -3560,7 +3622,8 @@ class Researcher:
         timeout = self.run_timeout() + 120
 
         def late(job: GymJob) -> Callable[[Mapping[str, Any]], None]:
-            return lambda result: self._record_variant(job, result, sweep=group)  # a trial whenever it lands
+            return lambda result: self._record_variant(job, result, sweep=group,  # a trial whenever it lands
+                                                       placebo=placebo_version is not None and job.version == placebo_version)
 
         if self._terminal(fid, out):
             return {"status": "retired", "reason": "the family is retired; no run started"}
@@ -3581,7 +3644,8 @@ class Researcher:
         def land(job: GymJob, result: Mapping[str, Any]) -> None:
             # Recorded as it lands; only its compact row stays in memory (many sweeps in flight must not hold every trade).
             robust = self._robust_of(result)
-            run = self._record_variant(job, result, robust, sweep=group, prune=False)
+            run = self._record_variant(job, result, robust, sweep=group, prune=False,
+                                       placebo=placebo_version is not None and job.version == placebo_version)
             rows.append(self._variant_row(job, run["run_id"], result.get("status"), result.get("summary") or {}, robust=robust,
                                           fill_rate=(result.get("fills") or {}).get("fill_rate"), reason=result.get("reason"),
                                           trials=int(result.get("trials", 0) or 0), drift=result.get("drift"),
@@ -3629,9 +3693,12 @@ class Researcher:
         from .evaluator import identity, row_matches
 
         evaluator = identity(*self._gym_identity())
+        marks = ((self.store.family(fid) or {}).get("state") or {})
         for row in rows:
             row["evaluator_current"] = row_matches(self.store, self.store.run(row["run_id"]), evaluator)
             row["placebo"] = placebo_version is not None and int(row["job"].version or 0) == placebo_version
+            # An earlier sweep's placebo read back from the store (NO DUPLICATE RUNS) is a placebo too: never a candidate.
+            row["control"] = row["placebo"] or self.is_placebo(fid, int(row["job"].version or 0), marks)
 
         blocked = {int(r["job"].version or 0): why for r in rows if r["status"] == "ok" and r["eligible"] and r["evaluator_current"]
                    for why in [self.drift_blocks(fid, int(r["job"].version or 0), r.get("figures"))] if why}
@@ -3642,7 +3709,7 @@ class Researcher:
             version = int(row["job"].version or 0)
             return row["status"] == "ok" and row["eligible"] and row["score"] is not None and version not in demoted \
                 and version not in blocked and self._counts_now(row["span"]) and row["evaluator_current"] \
-                and not row["placebo"]
+                and not row["control"]
 
         rows.sort(key=lambda r: (r["status"] != "ok", not counts(r), -(r["score"] if r["score"] is not None else -math.inf),
                                  r["job"].id))
@@ -3675,7 +3742,7 @@ class Researcher:
             job = r["job"]
             ok = counts(r)
             eligible += ok
-            positive += r["score"] is not None and r["score"] > 0 and not r["placebo"]
+            positive += r["score"] is not None and r["score"] > 0 and not r["control"]
             row: dict[str, Any] = {
                 "params": {k: v for k, v in job.params.items() if k not in base or base[k] != v},
                 "run_id": r["run_id"], "version": job.version, "status": r["status"],
@@ -3683,14 +3750,16 @@ class Researcher:
                 "trades": r["trades"], "days": r["days"], "pnl": r["pnl"], "fill_rate": r["fill_rate"], "years": r["years"]}
             if r.get("drift"):
                 row["drift"] = r["drift"]
-            if r["placebo"]:  # THE SWEEP CYCLE: the comparison every signal row is read against
+            if r["control"]:  # THE SWEEP CYCLE: the comparison every signal row is read against (this sweep's, or an earlier one's)
                 row["label"] = PLACEBO
+                if not r["placebo"]:
+                    row["placebo_of"] = "an earlier sweep"
             elif placebo is not None:
                 row["beats_placebo"] = placebo_beats(r, placebo)
                 years = placebo_years(r, placebo)
                 if years is not None:
                     row["years_above_placebo"] = years
-            if r["placebo"]:
+            if r["control"]:
                 row["why_not"] = PLACEBO_WHY
             elif not r["evaluator_current"]:
                 row["why_not"] = "it used another evaluator; rerun it on the current Gym"
@@ -3735,7 +3804,7 @@ class Researcher:
                                "error": why[:200]} for job, why in failed]
         if placebo is not None:
             # THE SWEEP CYCLE: did every signal row beat the placebo on Train (`placebo_beats`)? None when it did not run.
-            signal = [r for r in rows if not r["placebo"]]
+            signal = [r for r in rows if not r["control"]]
             every = (None if placebo["status"] != "ok" or not signal
                      else all(placebo_beats(r, placebo) is True for r in signal))
             view["placebo"] = {"version": placebo["job"].version, "run_id": placebo["run_id"], "status": placebo["status"],
@@ -3880,7 +3949,7 @@ class Researcher:
         state = current.get("state") or {}
         if int(run["version"]) in (state.get("robust_failed") or []):
             return False, f"its version {failed_why(state, run['version'])}"
-        if int(run["version"]) in (state.get("placebo_versions") or []):
+        if (run.get("summary") or {}).get("placebo") or self.is_placebo(fam["id"], run["version"], state):
             return False, PLACEBO_WHY
         verdict = drift_verdict(self.store, current, run["version"], self.settings)
         if verdict is not None and verdict["known"] and not verdict["passed"]:
@@ -4302,8 +4371,13 @@ class Researcher:
                 self._model_cycle(fam, out)
         except Exception as exc:  # noqa: BLE001 - a failed cycle is recorded, never raised into the loop
             out["error"] = f"{type(exc).__name__}: {getattr(exc, 'code', '') or str(exc)[:300]}"
-        if "sweep_wait" in out and not out["model_calls"] and not out["tool_calls"] and "error" not in out:
-            return out  # THE SWEEP CYCLE: no room for a sweep, nothing asked of a model or the Gym: no cycle, no event
+        finally:
+            self._unhold_sweep(fid)  # THE SWEEP CYCLE: the room held through the answer goes back
+        if "sweep_wait" in out and not out["model_calls"] and not out["tool_calls"] and "error" not in out \
+                and "rewrite_asked" not in out:
+            # THE SWEEP CYCLE: no room for a sweep, nothing asked of a model or the Gym: no cycle, no event. A stall's rewrite
+            # asked on the way (a background model call) is a cycle event, so its spend is seen.
+            return out
         out["seconds"] = round(self.clock() - began, 2)
         self.store.bump(fid, cycles=1)
         self._count_dormancy(fid, out)
@@ -4424,8 +4498,14 @@ class Researcher:
         if pending and not gym_done and not operated:  # the run asked for at the end of the last cycle (answered "queued" then)
             # A queued sweep carries its tool's name; a run queued before sweeps existed carries none.
             tool = pending.get("name") if pending.get("name") in RUNS else "gym_run"
-            result = self._execute(fam, tool, pending.get("arguments") or {}, out, author=pending.get("author") or "model")
-            out["tool_calls"] += 1
+            single = (self.single_run_refusal(fam, pending.get("arguments") or {})
+                      if self.sweep_cycle and tool == "gym_run" else None)
+            if single is not None:  # THE SWEEP CYCLE: a queued PARAMS change is a sweep too (never run as a single run)
+                result = self._refusal(out, single)
+                out["single_run_refused"] = True
+            else:
+                result = self._execute(fam, tool, pending.get("arguments") or {}, out, author=pending.get("author") or "model")
+                out["tool_calls"] += 1
             if result.get("status") == "gym_error":
                 out["error"] = f"gym: {str(result.get('error') or '')[:200]}"
                 tries = int(pending.get("tries") or 0) + 1
@@ -4463,11 +4543,12 @@ class Researcher:
             pending = None  # run, or superseded by the rewrite (its call was answered "queued" last cycle)
         if int(fam.get("stall") or 0) >= int(self.cfg.get("stall_revisions", 5)):
             self.request_rewrite(fam, out)
-        room = self.sweep_room()
-        if self.sweep_cycle and not gym_done and not current and room < SWEEP_CYCLE_MIN + 1:
-            # THE SWEEP CYCLE: no model is paid for an answer whose sweep the Gym has no room for now. Nothing ran, so it
-            # is no cycle (`cycle` records none) and the scheduler waits the family out (`loop.Scheduler.release`).
-            out["sweep_wait"] = room
+        if self.sweep_cycle and not gym_done and not self._hold_sweep(fid, self.cycle_variants + 1) and not current:
+            # THE SWEEP CYCLE: no model is paid for an answer whose sweep the Gym has no room for now; with room, the cycle
+            # holds it through the answer (`_hold_sweep`), so families waiting for room do not all answer at once for one
+            # sweep's worth. Nothing ran, so it is no cycle (`cycle` records none, unless a rewrite was asked) and the
+            # scheduler waits the family out (`loop.Scheduler.release`).
+            out["sweep_wait"] = self.sweep_room(fid)
             self.sweep_waits += 1
             return
         current.append({"role": "user", "content": self.status(fam)})
@@ -4573,6 +4654,13 @@ class Researcher:
                                     "output": json.dumps({"status": "refused", "reason": "one sweep a cycle: read this one's "
                                                           "table and define your next sweep in your next cycle"})})
                     continue
+                if self.sweep_cycle and call.name == "gym_run" and not call.error \
+                        and (single := self.single_run_refusal(fam, call.arguments)):
+                    # THE SWEEP CYCLE: a PARAMS change is a sweep, whether it would run now or be queued for the next cycle.
+                    current.append({"type": "function_call_output", "call_id": call.call_id,
+                                    "output": json.dumps(self._refusal(out, single), default=str)})
+                    out["single_run_refused"] = True
+                    continue
                 if call.name in RUNS and out.get("hold"):
                     # A hold ends the cycle: a run call after it in the same answer is neither run nor queued.
                     current.append({"type": "function_call_output", "call_id": call.call_id,
@@ -4608,15 +4696,14 @@ class Researcher:
                     result = {"error": "this cycle's tool budget is spent; continue next cycle"}
                 elif call.error:
                     result = {"error": call.error}
-                elif self.sweep_cycle and call.name == "gym_run" and (single := self.single_run_refusal(fam, call.arguments)):
-                    result = self._refusal(out, single)  # THE SWEEP CYCLE: a PARAMS change is a sweep
-                    out["single_run_refused"] = True
                 else:
+                    trials = int(out.get("trials") or 0)
                     result = self._execute(fam, call.name, call.arguments, out, author=author)
                     out["tool_calls"] += 1
                     if call.name in RUNS:
-                        # A stored result is no new run: the REVISE turn goes on (NO DUPLICATE RUNS).
-                        model_ran = model_ran or new_run(result)
+                        # A stored result is no new run: the REVISE turn goes on (NO DUPLICATE RUNS). THE SWEEP CYCLE's one
+                        # run an answer is any that made Gym evaluations (trials), completed or not.
+                        model_ran = model_ran or new_run(result) or int(out.get("trials") or 0) > trials
                         gym_done = gym_done or new_run(result)
                         if isinstance(result, dict) and result.get("status") == "gym_error":
                             out["error"] = f"gym: {str(result.get('error') or '')[:200]}"  # no further model call this cycle
@@ -4638,7 +4725,7 @@ class Researcher:
                 out["claude_fallback"] = f"invalid: {invalid[0]}"[:200]
             if stop or (pending is not None and pending is not carried):
                 break
-            if self.sweep_cycle and gym_done:
+            if self.sweep_cycle and (gym_done or model_ran):
                 break  # THE SWEEP CYCLE: one answer a cycle; the next cycle's answer reads what this one ran
         if self._terminal(fid, out):
             if pending:
@@ -4692,7 +4779,10 @@ class Researcher:
         profile = str(self.cfg.get("top_rewrite_profile" if is_top else "rewrite_profile", "pro_balanced"))
         latest = self.store.latest_version(fid)
         best = self.store.version(fid, fam.get("best_version")) or latest
-        runs = [r for r in self.store.runs(fid, window="train", limit=8) if r.get("purpose") != "robustness"][:1]
+        # Its newest Train run that is not a placebo row's (THE SWEEP CYCLE appends the placebo last: its switched-off
+        # program is no diagnostic of the signal).
+        runs = [r for r in self.store.runs(fid, window="train", limit=16) if r.get("purpose") != "robustness"
+                and not (r.get("summary") or {}).get("placebo") and not self.is_placebo(fid, r.get("version"), state)][:1]
         last_view = diagnostics.train_view(self.store.run_result(runs[0]["run_id"]) or {}) if runs else {}
         notes = "\n".join(f"- {diagnostics.scrub(n['text'])[:400]}" for n in self.store.notebook(fid, limit=10))
         user = (f"{self.brief(fam)}\n\nThis family has gone {fam['stall']} revisions without a better Train score. Write a NEW "
