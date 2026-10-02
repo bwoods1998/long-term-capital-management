@@ -12,8 +12,8 @@ family's state. Each is bound to the evaluator it was made under, so no stale fa
    `train_passed[str(n)] = {evaluator, objective, run, robust_pnl, drift: {t, positive, years}, at}` when ALL of these hold:
    - an eligible Train run of `n` (`train_eligible`) over the running Train span, under the current research evaluator;
    - its 1.5x Train robustness run landed with a profit (`researcher.robust_at_stress`);
-   - with THE TRAIN KILL TESTS on (`researcher.kill_tests`), a carded family's placebo tests are not owed
-     (`researcher.kill_tests_passed`; a failure demoted the version);
+   - with THE TRAIN KILL TESTS on (`researcher.kill_tests`), its kill tests are not owed (its own, and a carded
+     family's placebo tests: `researcher.kill_tests_passed`; a failure demoted the version);
    - it was not demoted (`bands.demoted`: a loss at 1.5x, or a failed drift screen);
    - THE DRIFT SCREEN is on, knows its figures and passes them (`researcher.drift_verdict`);
    - THE GATE HAS NOT BARRED ITS PROGRAM (`gate_bar`, below).
@@ -697,7 +697,7 @@ def mark_of(store: SwarmStore, fam: Mapping[str, Any], n: int, settings: Mapping
     if robust is None:
         return None, "its 1.5x Train run has not landed", False
     if kill_tests_passed(store, fam, n, settings) is None:  # THE TRAIN KILL TESTS (a failure demoted it: dropped above)
-        return None, "its placebo kill tests are owed", False
+        return None, "its Train kill tests are owed", False
     stressed = ((state.get("robustness") or {}).get(str(n)) or {}).get("stress_1.5") or {}
     from .evaluator import matches
 

@@ -7,8 +7,9 @@
    alpha has a pooled t of at least `drift_min_t` and is positive in all Train years but one: a candidate that fails is
    demoted, `researcher.screen_best`, and the next candidate that passes is validated in its place; a version whose Train
    run predates the figures waits until the researcher's robustness label "drift" has run it again), and, with THE TRAIN
-   KILL TESTS on (`researcher.kill_tests`, league/swarm/killtests.py), only once a carded family's version passed its
-   placebo tests (`researcher.kill_tests_passed`: its robustness label "placebo" landed and passed). The Gym runs its
+   KILL TESTS on (`researcher.kill_tests`, league/swarm/killtests.py), only once the version passed them
+   (`researcher.kill_tests_passed`: its robustness label "own", coverage and top_trades, and for a carded family its
+   "placebo", landed and passed; a best chosen before the switch is held to them too). The Gym runs its
    1.5x-half-spread twin in the same batch (two trials, counted) and returns only the validation VIEW (no trades, dates
    or daily series). The
    researcher is told only whether the line was met and how many of its checks passed (D2a). A version runs on
@@ -308,7 +309,7 @@ class Tournament:
                 waiting.append(fam["id"])  # its robustness run at 1.5x has not landed (or lost): not validated yet
                 continue
             if kill_tests_passed(self.store, fam, n, self.settings) is not True:
-                waiting.append(fam["id"])  # THE TRAIN KILL TESTS: its placebo run has not landed (or it failed them)
+                waiting.append(fam["id"])  # THE TRAIN KILL TESTS: owed (its "own" or placebo verdict) or failed
                 continue
             if n == fam.get("validated_version") and state.get("validation_image") == image and state.get("validation_bundle") == bundle:
                 continue

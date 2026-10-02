@@ -147,13 +147,17 @@ queue with the gate outcome "demoted"). The tournament validates a version only 
 anew under this score once, keeping the old selection in `legacy_best`.
 
 THE TRAIN KILL TESTS (LTCM v3, league/swarm/killtests.py; `researcher.kill_tests`, off unless JSON true). An eligible
-Train result must also trade in every Train year its roots had data and stay positive in each after dropping its five best
-trades (`_robust_of`: else it is not eligible, and `why_not_eligible` and the row's `train_why` name the test). A carded
-family's best then runs its PLACEBO as a robustness run labelled "placebo" (its card's ablation over Train, recorded as a
-`window="placebo"` trial, never a Train row of the version; a flat card's tests are made at once against zero): it must
-beat the placebo on the mean daily return on maximum loss in every covered year and earn more than it over Train, else it
-is demoted as a loss at 1.5x is (the reason names the test); the tournament validates a version only once they passed
-(`kill_tests_passed`).
+Train result must also trade in every Train year the Train score judges and stay positive in each after dropping its five
+best trades (`_robust_of`: else it is not eligible, and `eligible_run` and the row's `train_why` name the test; the row
+records `train_kill`, and a row flagged eligible without it, scored before the switch, is scored again from its full
+result or run again: `kill_owed`). The family's best (and its submitted best) is held to them as the robustness label
+"own" (`own_view`: made at once from its kept Train result, else its Train run made again), so a best chosen before the
+switch is too; the row keeps the figures and trade profile the placebo tests read. A carded family's best then runs its
+PLACEBO as a robustness run labelled "placebo" (its card's ablation over Train, recorded small as a `window="placebo"`
+trial under its own run_id, never a Train row of the version; a flat card's tests are made at once against zero): it
+must trade the signal's structure, tenor and strikes in every covered year the version traded, be beaten on the mean
+daily return on maximum loss in each, and earn less over Train, else the version is demoted as a loss at 1.5x is (the
+reason names the test); the tournament validates a version only once they passed (`kill_tests_passed`).
 
 THE DRIFT SCREEN (Sept 27, `evidence.drift_screen`): every Train run carries the Gym's drift block, and the researcher
 reads it per year as "drift-adjusted alpha $X (t Y), drift $Z" (`diagnostics.drift_view`: its gym_run view, `read_run`
@@ -699,15 +703,37 @@ PROGRAM_ANSWERS = ("disqualified", "no_data", "refused")
 
 
 def kill_tests_passed(store: SwarmStore, fam: Mapping[str, Any], n: Any, settings: Mapping[str, Any]) -> bool | None:
-    """THE TRAIN KILL TESTS against version `n`'s placebo (league/swarm/killtests.py): True when they passed or do not
-    apply (`researcher.kill_tests` off, or a family without a card); None while its placebo row has not landed; False when
-    they failed (the version was demoted). The tournament validates only a True."""
-    if n is None or not killtests.enabled(settings) or cards.card_of(store, str(fam["id"])) is None:
+    """THE TRAIN KILL TESTS on version `n` (league/swarm/killtests.py): True when they passed or do not apply
+    (`researcher.kill_tests` off); None while they are owed (its robustness label "own", the version's coverage and
+    top_trades, has no verdict yet, or a carded family's "placebo" has none); False when they failed (the version was
+    demoted). A family without a card has no placebo, so its own tests alone decide. The tournament validates only a True:
+    a best chosen, or a row flagged eligible, before the switch is held to them too."""
+    if n is None or not killtests.enabled(settings):
         return True
-    row = (((fam.get("state") or {}).get("robustness") or {}).get(str(n)) or {}).get(killtests.LABEL)
-    if not landed(row):
+    state = fam.get("state") or {}
+    if int(n) in (state.get("robust_failed") or []):
+        return False
+    row = (state.get("robustness") or {}).get(str(n)) or {}
+    own = row.get(killtests.OWN)
+    if not landed(own) or not isinstance(own.get("kill"), Mapping):
         return None
-    return bool((row.get("kill") or {}).get("passed"))
+    if not own["kill"].get("passed"):
+        return False
+    if cards.card_of(store, str(fam["id"])) is None:
+        return True
+    placebo = row.get(killtests.LABEL)
+    if not landed(placebo) or not isinstance(placebo.get("kill"), Mapping):
+        return None
+    return bool(placebo["kill"].get("passed"))
+
+
+def kill_marks(robust: Mapping[str, Any] | None) -> dict[str, Any]:
+    """A Train row's summary fields from THE TRAIN KILL TESTS (`Researcher._robust_of`): `train_kill` (whether its own tests
+    passed; written only when they were made, so a row scored before the switch lacks it) and `train_why` on a failure."""
+    kill = (robust or {}).get("kill")
+    if not isinstance(kill, Mapping):
+        return {}
+    return {"train_kill": bool(kill.get("passed")), **({"train_why": str(robust["why"])[:300]} if robust.get("why") else {})}
 
 
 def candidates_with(rows: Any, score: float, version: int, run_id: str) -> list[list[Any]]:
@@ -1812,9 +1838,16 @@ class Researcher:
         summary = run.get("summary") or {}
         if summary.get("fill_model") and self._fill_model and str(summary["fill_model"]) != self._fill_model:
             return None
-        if stress == 1.0 and "train_score" not in summary and self.store.run_result(run["run_id"]) is None:
-            return None
+        if stress == 1.0 and ("train_score" not in summary or self.kill_owed(summary)) and \
+                self.store.run_result(run["run_id"]) is None:
+            return None  # (THE TRAIN KILL TESTS: a row scored before them, its result pruned, is run again to be scored)
         return run
+
+    def kill_owed(self, summary: Mapping[str, Any]) -> bool:
+        """THE TRAIN KILL TESTS (`researcher.kill_tests`) are on and a Train row flagged eligible was scored without them
+        (no `train_kill`: recorded before the switch): its flag is not trusted; it is scored again from its full result,
+        or run again."""
+        return killtests.enabled(self.settings) and bool(summary.get("train_eligible")) and "train_kill" not in summary
 
     def _restart_dormancy(self, fid: str, result: Mapping[str, Any]) -> None:
         """DORMANCY: a new Gym evaluation of the family's own (its Train run or sweep variant, in its cycle or landed late)
@@ -1835,7 +1868,7 @@ class Researcher:
         if robust is not None and isinstance(result.get("summary"), Mapping):
             return {**result, "summary": {**result["summary"], "train_score": robust["score"],
                                           "train_eligible": robust["eligible"], "train_from": span_of(result),
-                                          **({"train_why": str(robust["why"])[:300]} if robust.get("kill") and robust.get("why") else {})}}, robust
+                                          **kill_marks(robust)}}, robust
         return result, robust
 
     @property
@@ -1894,13 +1927,16 @@ class Researcher:
                 f"version {v} {whys.get(str(v), 'lost money on Train at 1.5x the half-spread')}" for v in failed[-8:]) + ".")
         elif rows and not landed(rows.get("stress_1.5")):
             out.append(f"Your best (version {n}) is validated once its 1.5x robustness run comes back with a profit.")
-        if killtests.enabled(self.settings) and n is not None and cards.card_of(self.store, str(fam["id"])) is not None:
-            kill = ((rows or {}).get(killtests.LABEL) or {}).get("kill")
-            if not kill:
-                out.append(f"Your best (version {n}) is validated once its placebo run (your card's ablation over Train) is back "
-                           "and it passes the kill tests: it beats the placebo in every Train year and earns more than it.")
-            elif kill.get("passed"):
-                out.append(f"Your best (version {n}) passed the Train kill tests against its placebo.")
+        if killtests.enabled(self.settings) and n is not None:
+            carded = cards.card_of(self.store, str(fam["id"])) is not None
+            passed = kill_tests_passed(self.store, fam, n, self.settings)
+            if passed is None:
+                out.append(f"Your best (version {n}) is validated once it passes the Train kill tests: trades in every Train "
+                           "year with data, positive in each without its five best trades"
+                           + (", and, once its placebo run (your card's ablation over Train) is back, beats the placebo in "
+                              "every Train year and earns more than it." if carded else "."))
+            elif passed:
+                out.append(f"Your best (version {n}) passed the Train kill tests" + (" against its placebo." if carded else "."))
         return " ".join(out)
 
     def drift_text(self, fam: Mapping[str, Any]) -> str:
@@ -3104,7 +3140,11 @@ class Researcher:
                     "kept": "its full result is no longer kept (your newest six runs and your best are): its summary only"}
             robust = None
             if stress == 1.0 and summary.get("train_score") is not None:
-                robust = {"score": summary["train_score"], "eligible": bool(summary.get("train_eligible")), "why": None}
+                robust = {"score": summary["train_score"], "eligible": bool(summary.get("train_eligible")),
+                          "why": summary.get("train_why")}
+                if self.kill_owed(summary):  # scored before THE TRAIN KILL TESTS and no longer checkable: never eligible
+                    robust.update(eligible=False, why="it was scored before the Train kill tests and its full result is no "
+                                                      "longer kept: run it again")
             drift = diagnostics.drift_view(summary.get("drift"), screen=drift_settings(self.settings),
                                            first_year=int(str(summary.get("train_from") or CORE_SPAN)[:4]))
             if drift is not None:  # the row keeps the figures (`SwarmStore.add_run`)
@@ -3152,7 +3192,7 @@ class Researcher:
         if isinstance(result.get("summary"), Mapping):
             recorded["summary"] = {**result["summary"], "train_score": robust["score"], "train_eligible": robust["eligible"],
                                    "train_from": span_of(result), "params": dict(job.params or {}), "sweep": sweep,
-                                   **({"train_why": str(robust["why"])[:300]} if robust.get("kill") and robust.get("why") else {})}
+                                   **kill_marks(robust)}
         days = float((result.get("summary") or {}).get("days") or 0)
         run = self.store.add_run(job.family, job.version, recorded, window="train", stress=1.0, purpose="train",
                                  program_years=days / 252.0 * max(1, len(job.roots)), prune=prune,
@@ -3599,14 +3639,18 @@ class Researcher:
         summary = run.get("summary") or {}
         # Its row says the span it was scored on (a row from before the 2020-21 switch: 2022-01-03); a row recorded
         # late, without a score, has it in its kept result.
-        result = None if "train_eligible" in summary else self.store.run_result(run["run_id"])
+        trusted = "train_eligible" in summary and not self.kill_owed(summary)  # (THE TRAIN KILL TESTS: else scored again)
+        result = None if trusted else self.store.run_result(run["run_id"])
         span = str(summary.get("train_from") or (span_of(result) if result is not None else CORE_SPAN))
         if span != self.train_span():
             return False, (f"it was scored on Train from {span}, and Train now starts {self.train_span()}: run the version "
                            "again to score it on the whole of Train")
-        if "train_eligible" in summary:
+        if trusted:
             return (True, "") if summary["train_eligible"] else (False, str(summary.get("train_why") or "")[:300] or (
                 "it is not eligible under the Train score (40 trades on 20 days in every Train year)"))
+        if result is None and "train_eligible" in summary:
+            return False, ("it was scored before the Train kill tests and its full result is no longer kept, so they cannot "
+                           "be made: run it again")
         if result is None:
             return False, "its full result is no longer kept, so its Train score cannot be checked: run it again"
         robust = self._robust_of(result)
@@ -3653,14 +3697,18 @@ class Researcher:
     def robust_labels(self, fam: Mapping[str, Any], n: int) -> tuple[str, ...]:
         """The robustness runs version `n` needs: at 1.5x the half-spread and at the mid; and "drift", its Train run once
         more at the normal spread, while the drift screen is on and no run of it carries the drift figures (a version whose
-        Train run predates them, Sept 27: the screen binds, so it is made again rather than waved through); and
-        "placebo" (THE TRAIN KILL TESTS, `researcher.kill_tests`), for a carded family: its card's ablation on Train, the
-        placebo the version must beat (a flat card's tests need no run: `queue_robustness` makes them at once)."""
+        Train run predates them, Sept 27: the screen binds, so it is made again rather than waved through); and with THE
+        TRAIN KILL TESTS on (`researcher.kill_tests`) "own", the version's coverage and top_trades (made from its kept Train
+        result at once, else its Train run made again: a best chosen before the switch is held to them), and for a carded
+        family "placebo": its card's ablation on Train, the placebo the version must beat (a flat card's tests need no run:
+        `_kill_tests` makes them at once)."""
         labels: tuple[str, ...] = ("stress_1.5", "mid")
         if drift_settings(self.settings) is not None and version_drift(self.store, fam, n) is None:
             labels += ("drift",)
-        if killtests.enabled(self.settings) and fam.get("id") and cards.card_of(self.store, str(fam["id"])) is not None:
-            labels += (killtests.LABEL,)
+        if killtests.enabled(self.settings) and fam.get("id"):
+            labels += (killtests.OWN,)
+            if cards.card_of(self.store, str(fam["id"])) is not None:
+                labels += (killtests.LABEL,)
         return labels
 
     def version_result(self, fam: Mapping[str, Any], n: int) -> dict[str, Any] | None:
@@ -3676,19 +3724,6 @@ class Researcher:
             if result is not None and result.get("status") == "ok":
                 return result
         return None
-
-    def placebo_verdict(self, fam: Mapping[str, Any], n: int, placebo: Mapping[str, Any] | None) -> dict[str, Any]:
-        """THE TRAIN KILL TESTS' `placebo` and `ablation` for version `n` (`killtests.against`): its own figures against
-        its placebo run's (`placebo`: a placebo Train result, or None for a flat card's zero baseline), over the years its
-        roots had data. A version whose own Train result is no longer kept fails them (it cannot be checked)."""
-        first = self.train_first_year()
-        own = self.version_result(fam, n)
-        if own is None:
-            return killtests.verdict({killtests.PLACEBO: {"ok": False, "why": "the version's own Train result is no longer "
-                                                                              "kept, so it cannot be compared: run it again"}})
-        mine = killtests.figures(own, first_year=first)
-        theirs = killtests.figures(placebo, first_year=first) if placebo is not None else None
-        return killtests.against(mine, theirs, years=list(killtests.covered(own, first_year=first)))
 
     def queue_robustness(self, fid: str, n: int, code: str, params: Mapping[str, Any], roots: tuple[str, ...]) -> bool:
         """The Train runs of a best version (a new best by score, or a submitted one) at 1.5x the half-spread and at the
@@ -3707,12 +3742,14 @@ class Researcher:
         labels = self.robust_labels(self.store.family(fid) or {"id": fid}, int(n))
         entry = cards.card_of(self.store, fid) if killtests.LABEL in labels else None
         placebo_params = killtests.placebo_params((entry or {}).get("card"), params)
-        if killtests.LABEL in labels and placebo_params is None:
-            # A flat card's placebo is not trading: its tests need no run, so they are made now from the version's figures.
-            labels = tuple(label for label in labels if label != killtests.LABEL)
-            self._flat_placebo(fid, int(n))
+        if killtests.OWN in labels:
+            # THE TRAIN KILL TESTS made now from what is kept (the version's own tests from its Train result; a flat card's
+            # placebo, which is not trading); only what cannot be made without a run is queued.
+            self._kill_tests(fid, int(n))
             if int(n) in (((self.store.family(fid) or {}).get("state") or {}).get("robust_failed") or []):
                 return False
+        if killtests.LABEL in labels and placebo_params is None:  # a flat card's placebo is never a run
+            labels = tuple(label for label in labels if label != killtests.LABEL)
         with self.store.atomic():
             fam = self.store.family(fid) or {}
             if fam.get("retired_at"):
@@ -3730,7 +3767,8 @@ class Researcher:
                 rows.pop(old, None)  # the last six versions' figures are kept
             self.store.set_state(fid, robustness=rows)
             self._robust.update((fid, int(n), label) for label in need)
-        for label, stress in (("stress_1.5", evidence.STRESS), ("mid", 0.0), ("drift", 1.0), (killtests.LABEL, 1.0)):
+        for label, stress in (("stress_1.5", evidence.STRESS), ("mid", 0.0), ("drift", 1.0), (killtests.OWN, 1.0),
+                              (killtests.LABEL, 1.0)):
             if label not in need:
                 continue
             placebo = label == killtests.LABEL
@@ -3784,18 +3822,29 @@ class Researcher:
                 # row keeps the Train span it covered (`row_span`: `version_drift` reads the running span's rows only).
                 recorded = ({**result, "summary": {**result["summary"], "train_from": span_of(result)}}
                             if isinstance(result.get("summary"), Mapping) else result)
-                if placebo:  # THE TRAIN KILL TESTS' placebo: a trial of the lineage, never a Train row of the version
-                    self.store.add_run(fid, n, recorded, window=killtests.LABEL, stress=stress, purpose=killtests.LABEL,
+                if placebo:
+                    # THE TRAIN KILL TESTS' placebo: a trial of the lineage, never a Train row of the version. Kept small
+                    # (`killtests.compact`: the store never prunes this window) under a run_id scoped apart from Train rows.
+                    small = {**killtests.compact(recorded), "run_id": killtests.scoped_id(result.get("run_id"))}
+                    self.store.add_run(fid, n, small, window=killtests.LABEL, stress=stress, purpose=killtests.LABEL,
                                        program_years=years)
-                else:
+                else:  # (the kill tests' "own" run is the version's Train run made again, as the drift run is)
+                    if label == killtests.OWN:  # scored with the tests, so its row (one scored before them too) says so
+                        recorded = self._with_score(recorded, 1.0)[0]
                     self.store.add_run(fid, n, recorded, window="train", stress=stress,
-                                       purpose="drift" if label == "drift" else "robustness", program_years=years, key=key)
+                                       purpose="drift" if label in ("drift", killtests.OWN) else "robustness",
+                                       program_years=years, key=key)
             view = evidence.robustness_view(result) if stress is not None else {"status": "failed", "reason": reason[:200]}
             ok = result.get("status") == "ok"
             if placebo and stress is not None and ok:
-                # The placebo's figures and the tests against it (read before the store's lock: the version's result is a file).
+                # The placebo's figures and its trade profile; the tests against the version's result (`_kill_tests`, below).
                 view = {"status": "ok", **killtests.figures(result, first_year=self.train_first_year()),
-                        "kill": self.placebo_verdict(fam, int(n), result)}
+                        "profile": killtests.profile(result)}
+            elif label == killtests.OWN and stress is not None:
+                # The version's own tests (coverage, top_trades) on its Train run made again, with the figures the placebo
+                # tests read (`own_view`); a failed run is retried.
+                view = (self.own_view(result) if ok
+                        else {"status": "failed", "reason": (reason or str(result.get("status")))[:200]})
             elif placebo and stress is not None and result.get("status") in PROGRAM_ANSWERS:
                 # The program's own answer with its signal switched off (disqualified, no data, refused): a verdict, not a
                 # Gym failure to retry. The placebo did not run, so the version cannot show it beats it.
@@ -3835,10 +3884,13 @@ class Researcher:
                 elif label == "drift" and int(tries.get(label) or 0) >= ROBUSTNESS_ATTEMPTS:
                     # Its drift figures can never be made: it can never pass the screen, so the next candidate takes its place.
                     why = f"its Train run for the drift figures failed {ROBUSTNESS_ATTEMPTS} times"
-                elif placebo and ok and not (view.get("kill") or {}).get("passed"):
-                    why = str((view.get("kill") or {}).get("why_not") or "kill test placebo: failed")
+                elif label in (killtests.OWN, killtests.LABEL) and ok and isinstance(view.get("kill"), Mapping) and \
+                        not view["kill"].get("passed"):
+                    why = str(view["kill"].get("why_not") or f"kill test {label}: failed")
                 elif placebo and int(tries.get(label) or 0) >= ROBUSTNESS_ATTEMPTS:
                     why = f"its placebo run failed {ROBUSTNESS_ATTEMPTS} times, so the kill tests cannot be made"
+                elif label == killtests.OWN and int(tries.get(label) or 0) >= ROBUSTNESS_ATTEMPTS:
+                    why = f"its Train run for the kill tests failed {ROBUSTNESS_ATTEMPTS} times"
                 if why and not fam.get("retired_at"):
                     demoted = self._demote(fam, n, why=why)
             if demoted is not None:
@@ -3850,32 +3902,85 @@ class Researcher:
                                               needs_roots(version["code"], fam["roots"]))
             if label == "drift" and ok and self.screen(fid):  # the figures failed: the next candidate's robustness runs
                 self.ensure_robustness(self.store.family(fid) or fam)
+            if label in (killtests.OWN, killtests.LABEL) and ok and demoted is None:
+                # The placebo tests need both the placebo's figures and the "own" row's: made by whichever lands last.
+                self._kill_tests(fid, int(n))
         except Exception:  # noqa: BLE001 - on the dispatcher's thread: a robustness record never breaks the pool
             pass
 
-    def _flat_placebo(self, fid: str, n: int) -> None:
-        """THE TRAIN KILL TESTS for a flat card's version (no placebo run: the comparison is not trading): `placebo` and
-        `ablation` against zero, written to its robustness row as a landed "placebo" figure; a failure demotes it as a
-        loss at 1.5x does. Once a version."""
-        fam = self.store.family(fid) or {}
-        row = ((fam.get("state") or {}).get("robustness") or {}).get(str(n)) or {}
-        if fam.get("retired_at") or landed(row.get(killtests.LABEL)):
+    def own_view(self, result: Mapping[str, Any]) -> dict[str, Any]:
+        """Version `n`'s robustness label "own" from its Train result: its own tests (coverage, top_trades) and what the
+        placebo tests read of it (its `figures`, covered `years` and trade `profile`, a few hundred bytes), so they never
+        need its full result again (it may be pruned before the placebo lands)."""
+        first = self.train_first_year()
+        return {"status": "ok", "kill": killtests.own(result, first_year=first),
+                "figures": killtests.figures(result, first_year=first),
+                "years": list(killtests.covered(result, first_year=first)), "profile": killtests.profile(result)}
+
+    def _kill_tests(self, fid: str, n: int) -> None:
+        """THE TRAIN KILL TESTS on version `n` that can be made without a run, written to its robustness row: "own"
+        (`own_view` of its kept Train result, `version_result`); a flat card's "placebo" (against zero); and a landed
+        placebo run's tests against the version (`killtests.against` on the "own" row's figures, with
+        `killtests.comparison` on the two trade profiles). A failure demotes the version as a loss at 1.5x does. When the
+        "own" row lacks the figures and the version's result is gone while a landed placebo owes its tests, the "own" row is
+        cleared so the next `ensure_robustness` runs its Train run again (the tests are owed, never failed, over a storage
+        matter)."""
+        if not killtests.enabled(self.settings):
             return
-        kill = self.placebo_verdict(fam, n, None)
+        fam = self.store.family(fid) or {}
+        state = fam.get("state") or {}
+        if not fam or fam.get("retired_at") or int(n) in (state.get("robust_failed") or []):
+            return
+        row = (state.get("robustness") or {}).get(str(n)) or {}
+        card = (cards.card_of(self.store, fid) or {}).get("card")
+        flat = card is not None and killtests.placebo_params(card, {}) is None
+        mine, theirs = row.get(killtests.OWN), row.get(killtests.LABEL)
+        need_own = not (landed(mine) and isinstance(mine.get("kill"), Mapping))
+        need_placebo = card is not None and not (landed(theirs) and isinstance(theirs.get("kill"), Mapping)) and \
+            (flat or landed(theirs))
+        if not need_own and not need_placebo:
+            return
+        updates: dict[str, Any] = {}
+        if need_own or not isinstance(mine.get("figures"), Mapping):
+            result = self.version_result(fam, int(n))
+            if result is not None:
+                mine = updates[killtests.OWN] = self.own_view(result)
+            elif not need_own:
+                mine = updates[killtests.OWN] = None  # its own run is made again; the placebo tests wait for it
+            else:
+                mine = None  # its "own" run is queued (`queue_robustness`); the placebo tests wait for it
+        if need_placebo and isinstance(mine, Mapping) and isinstance(mine.get("figures"), Mapping):
+            figs, years = mine["figures"], list(mine.get("years") or [])
+            if flat:
+                updates[killtests.LABEL] = {"status": "ok", "flat": True, "kill": killtests.against(figs, None, years=years)}
+            else:
+                mismatch = killtests.comparison(mine.get("profile"), theirs.get("profile"), card)
+                updates[killtests.LABEL] = {**theirs, "kill": killtests.against(figs, theirs, years=years, mismatch=mismatch)}
+        if not updates:
+            return
+        why = next((str(v["kill"].get("why_not") or "kill test: failed") for v in updates.values()
+                    if isinstance(v, Mapping) and isinstance(v.get("kill"), Mapping) and not v["kill"].get("passed")), None)
         demoted = None
         with self.store.atomic():
             fam = self.store.family(fid) or fam
+            if fam.get("retired_at") or int(n) in ((fam.get("state") or {}).get("robust_failed") or []):
+                return
             rows = dict((fam.get("state") or {}).get("robustness") or {})
             row = dict(rows.get(str(n)) or {})
-            row[killtests.LABEL] = {"status": "ok", "flat": True, "kill": kill}
+            row.update(updates)
             row.setdefault("queued_at", self.clock())
             rows[str(n)] = row
             self.store.set_state(fid, robustness=rows)
-            if not kill["passed"] and not fam.get("retired_at"):
-                demoted = self._demote(fam, n, why=str(kill["why_not"]))
+            if why:
+                demoted = self._demote(fam, int(n), why=why)
         if demoted is not None:
-            self.store.event("swarm.robustness", fid, {"version": n, "action": "demoted", "why": kill["why_not"],
+            self.store.event("swarm.robustness", fid, {"version": int(n), "action": "demoted", "why": why,
                                                        "next": demoted.get("version")})
+            if demoted.get("version") is not None:
+                version = self.store.version(fid, int(demoted["version"]))
+                if version and version.get("code"):
+                    self.queue_robustness(fid, int(demoted["version"]), version["code"], version.get("params") or {},
+                                          needs_roots(version["code"], fam["roots"]))
 
     def _demote(self, fam: Mapping[str, Any], n: int, *, why: str = "lost money on Train at 1.5x the half-spread") -> dict[str, Any]:
         """Version `n` can never be the best again (`demote_version`, under the store's transaction)."""

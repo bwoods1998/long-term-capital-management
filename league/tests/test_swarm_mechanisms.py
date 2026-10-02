@@ -40,7 +40,7 @@ LEAD_MECH = "QQQ's move against its norm while IWM stays flat predicts SPY's nex
 def fly(slug: str, card=FLY, **kw) -> dict:
     """A butterfly proposal; its mechanism opens with its slug, so no two are the same living idea (`admit`'s duplicate check)."""
     return {"slug": slug, "mechanism": f"{slug}: " + kw.pop("mechanism", FLY_MECH), "structure": kw.pop("structure", "long_butterfly"),
-            "roots": kw.pop("roots", ["XSP", "SPY"]), "dte": [1, 2], "rejection": "no edge", "card": card, **kw}
+            "roots": kw.pop("roots", ["XSP", "SPY"]), "dte": kw.pop("dte", [1, 2]), "rejection": "no edge", "card": card, **kw}
 
 
 def lead(slug: str, card=LEAD, **kw) -> dict:
@@ -99,18 +99,35 @@ class TheLibrary(unittest.TestCase):
     def test_check_names_each_field_outside_its_entry(self):
         card, errors = cards.validate(FLY, "long_butterfly", library=True)
         self.assertEqual(errors, [])
-        self.assertEqual(mechanisms.check(card, "long_butterfly", ["XSP", "SPY"]), [])
+        self.assertEqual(mechanisms.check(card, "long_butterfly", ["XSP", "SPY"], [1, 2]), [])
         bad = {**card, "mechanism_class": "trend_momentum", "holding": "days_11_plus"}
-        text = " | ".join(mechanisms.check(bad, "debit_vertical", ["AAPL"]))
+        text = " | ".join(mechanisms.check(bad, "debit_vertical", ["AAPL"], [1, 2]))
         for field in ("structure: debit_vertical", "roots: index_variance_fly trades index, etf roots, not names",
                       "mechanism_class: trend_momentum", "holding: days_11_plus"):
             self.assertIn(field, text)
         thin = {**card, "sessions_per_year": evidence.MIN_DAYS - 1}
-        self.assertIn("expected activity", mechanisms.check(thin, "long_butterfly", ["SPY"])[0])
+        self.assertIn("expected activity", mechanisms.check(thin, "long_butterfly", ["SPY"], [1, 2])[0])
         sparse = {**card, "sessions_per_year": 30, "structures_per_session": 1}
-        self.assertIn(f"{evidence.MIN_TRADES} trades", mechanisms.check(sparse, "long_butterfly", ["SPY"])[0],
+        self.assertIn(f"{evidence.MIN_TRADES} trades", mechanisms.check(sparse, "long_butterfly", ["SPY"], [1, 2])[0],
                       "30 sessions of one structure never reach the line's trades")
         self.assertIn("library_class", mechanisms.check({**card, "library_class": "nope"}, "long_butterfly", ["SPY"])[0])
+
+    def test_the_debit_butterfly_is_xsp_or_spy_at_one_to_two_days(self):
+        """Review of B23: admission held structure, groups, class and holding only, so a GLD butterfly at 20-30 days to
+        expiry was admitted as the index variance fly. The entry fixes its roots and its tenor."""
+        card, _ = cards.validate(FLY, "long_butterfly", library=True)
+        self.assertEqual(mechanisms.check(card, "long_butterfly", ["XSP"], [1, 1]), [])
+        far = mechanisms.check(card, "long_butterfly", ["SPY"], [20, 30])
+        self.assertEqual(far, ["dte: index_variance_fly trades 1 to 2 days to expiry, not [20, 30]"])
+        self.assertTrue(mechanisms.check(card, "long_butterfly", ["SPY"], None)[0].startswith("dte:"), "a fly names its dte")
+        self.assertTrue(mechanisms.check(card, "long_butterfly", ["SPY"], [0, 2])[0].startswith("dte:"))
+        gld = mechanisms.check(card, "long_butterfly", ["GLD"], [1, 2])
+        self.assertEqual(gld, ["roots: index_variance_fly trades only XSP, SPY, not GLD"])
+        credit, _ = cards.validate({**FLY, "library_class": "index_variance_credit", "holding": "days_11_plus"},
+                                   "iron_condor", library=True)
+        self.assertEqual(mechanisms.check(credit, "iron_condor", ["GLD"], [20, 30]), [], "an entry without bounds: any")
+        text = mechanisms.library_text()
+        self.assertIn("Roots: only XSP, SPY. Days to expiry (dte): 1 to 2.", text)
 
 
 class Cards(unittest.TestCase):
@@ -146,7 +163,7 @@ class Case(unittest.TestCase):
         self.settings["population"].update(start=40, ceiling=60, floor=0)  # refilling: want is max_refill (12)
         self.settings["architect"]["library"] = True
         self.settings["architect"]["max_new"] = 20
-        self.settings["gym"]["roots"] = ["SPY", "QQQ", "IWM", "XSP", "SPXW", "AAPL"]
+        self.settings["gym"]["roots"] = ["SPY", "QQQ", "IWM", "XSP", "SPXW", "AAPL", "GLD"]
 
     def arch(self) -> Architect:
         return Architect(self.store, None, self.settings, clock=self.clock)
@@ -159,15 +176,18 @@ class Admission(Case):
         born = a.admit([fly("fly-ok"), fly("fly-no-class", card=no_class),
                         fly("fly-names", roots=["AAPL"]),
                         fly("fly-wrong-type", structure="iron_condor"),
-                        fly("fly-thin", card={**FLY, "sessions_per_year": 20})])
+                        fly("fly-thin", card={**FLY, "sessions_per_year": 20}),
+                        fly("fly-gld-far", roots=["GLD"], dte=[20, 30])])
         self.assertEqual(born, ["fly-ok"])
         refused = {r["slug"]: r["why"] for r in a.card_refused}
-        self.assertEqual(set(refused), {"fly-no-class", "fly-names", "fly-wrong-type", "fly-thin"})
+        self.assertEqual(set(refused), {"fly-no-class", "fly-names", "fly-wrong-type", "fly-thin", "fly-gld-far"})
+        self.assertIn("roots: index_variance_fly trades only XSP, SPY, not GLD", refused["fly-gld-far"])
+        self.assertIn("dte: index_variance_fly trades 1 to 2 days to expiry, not [20, 30]", refused["fly-gld-far"])
         self.assertTrue(refused["fly-no-class"].startswith("incomplete card: library_class"))
         self.assertIn("roots: index_variance_fly trades index, etf roots, not names", refused["fly-names"])
         self.assertIn("structure: iron_condor is not one of index_variance_fly's", refused["fly-wrong-type"])
         self.assertIn("expected activity", refused["fly-thin"])
-        self.assertEqual(a.library_refused, {"index_variance_fly": 3})
+        self.assertEqual(a.library_refused, {"index_variance_fly": 4})
         stored = cards.card_of(self.store, "fly-ok")["card"]
         self.assertEqual((stored["library_class"], stored["sessions_per_year"], stored["structures_per_session"]),
                          ("index_variance_fly", 120, 1))

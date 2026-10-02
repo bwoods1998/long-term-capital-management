@@ -1749,10 +1749,10 @@ class Architect:
                     self.card_refused.append({"slug": slug, "why": "incomplete card: " + "; ".join(problems)[:600]})
                     continue
                 card = None
-            # THE MECHANISM LIBRARY: a complete card outside its entry (structure, roots, class, holding, expected activity)
+            # THE MECHANISM LIBRARY: a complete card outside its entry (structure, roots, dte, class, holding, expected activity)
             # is not born, and the next request names why (deterministic, no model call).
             if in_library and card is not None:
-                outside = mechanisms.check(card, structure, roots)
+                outside = mechanisms.check(card, structure, roots, row.get("dte"))
                 if outside:
                     cls_name = str(card.get("library_class") or "none")
                     self.library_refused[cls_name] = self.library_refused.get(cls_name, 0) + 1

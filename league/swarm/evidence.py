@@ -237,6 +237,23 @@ def years_of(result: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
         return {}
 
 
+def scored_years(result: Mapping[str, Any], *, first_year: int | None = None) -> dict[str, dict[str, Any]]:
+    """The per-year rows `train_score` judges (`years_of`): from `first_year` on (None: every year), and a year before
+    `PARTIAL_YEARS_BEFORE` only when every root of the program had data in it (its Gym row's `roots`; the program's roots
+    are its NEEDS within the batch's). THE TRAIN KILL TESTS' coverage reads the same years (league/swarm/killtests.py)."""
+    years = years_of(result)
+    if first_year is not None:
+        years = {y: r for y, r in years.items() if not (y[:4].isdigit() and int(y[:4]) < int(first_year))}
+    # The program's own roots: its NEEDS within the batch's (a result's `roots` is its batch's universe).
+    wanted = {str(r).upper() for r in result.get("roots") or ()}
+    declared = (result.get("needs") or {}).get("roots") if isinstance(result.get("needs"), Mapping) else None
+    if isinstance(declared, (list, tuple)) and declared:
+        wanted &= {str(r).upper() for r in declared}
+    return {y: r for y, r in years.items()
+            if not (y[:4].isdigit() and int(y[:4]) < PARTIAL_YEARS_BEFORE and isinstance(r.get("roots"), list)
+                    and wanted - {str(x).upper() for x in r["roots"]})}
+
+
 def train_score(result: Mapping[str, Any], *, first_year: int | None = None) -> dict[str, Any]:
     """The robust Train objective (the module docstring): {score, eligible, why, worst_year, quarters, years}.
     `first_year` (the switch's first Train year) leaves out any year before it; None counts every year with data. A year
@@ -246,17 +263,7 @@ def train_score(result: Mapping[str, Any], *, first_year: int | None = None) -> 
     worst year below zero is scaled by 2 - share instead, so fewer positive quarters never flatter a loss); None when a
     year has no t. eligible: a score, and at least `TRAIN_YEAR_MIN_TRADES` trades on `TRAIN_YEAR_MIN_DAYS` traded days
     in every year; `why` names the first year short of it."""
-    years = years_of(result)
-    if first_year is not None:
-        years = {y: r for y, r in years.items() if not (y[:4].isdigit() and int(y[:4]) < int(first_year))}
-    # The program's own roots: its NEEDS within the batch's (a result's `roots` is its batch's universe).
-    wanted = {str(r).upper() for r in result.get("roots") or ()}
-    declared = (result.get("needs") or {}).get("roots") if isinstance(result.get("needs"), Mapping) else None
-    if isinstance(declared, (list, tuple)) and declared:
-        wanted &= {str(r).upper() for r in declared}
-    years = {y: r for y, r in years.items()
-             if not (y[:4].isdigit() and int(y[:4]) < PARTIAL_YEARS_BEFORE and isinstance(r.get("roots"), list)
-                     and wanted - {str(x).upper() for x in r["roots"]})}
+    years = scored_years(result, first_year=first_year)
     k, n = quarters_positive(result.get("summary") or {})
     quarters = [v for r in years.values() for v in ((r.get("quarter_pnl") or {}).values() if isinstance(r.get("quarter_pnl"), Mapping) else [])]
     if quarters:  # the quarters the program's own roots had data in (the Gym's per-year block), not its batch company's
@@ -648,7 +655,7 @@ def _allocate(draws: Mapping[str, float], total: float, out: dict[str, float]) -
 
 
 __all__ = ["validation_line", "holdout_line", "block_bootstrap", "holm_passes", "leakage_alarm", "forward_record", "thompson",
-           "train_score", "years_of", "robustness_view", "traded_sharpe", "checks_passed", "quarters_positive", "daily_pnl",
+           "train_score", "scored_years", "years_of", "robustness_view", "traded_sharpe", "checks_passed", "quarters_positive", "daily_pnl",
            "one_record", "MIN_TRADES", "MIN_DAYS", "MIN_T", "MIN_DSR", "STRESS", "LOOKS_PER_LINEAGE", "TRAIN_YEAR_MIN_TRADES",
            "TRAIN_YEAR_MIN_DAYS", "drift_numbers", "drift_screen", "DRIFT_MIN_T", "EXPLOIT_PER_POSITIVE", "drift_lean",
            "holm_level", "holdout_power", "LOOK_HOLD_DRIFT_SHARE", "LOOK_HOLD_MIN_POWER"]

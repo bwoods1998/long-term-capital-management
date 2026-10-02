@@ -10,14 +10,17 @@ pre-2025 literature; a birth names one entry (`library_class` on its card) and i
 
 AN ENTRY (`LIBRARY`): its title, the premium (who pays and why it persists), the expressions (how a program trades it), the
 structures it may use, the root groups it may trade (`strategist.root_group`: index, etf, names), the card classes its card
-may declare (`cards.MECHANISM_CLASSES`), the holding buckets (`cards.HOLDING`) and its citations. Single-name anomaly mining
+may declare (`cards.MECHANISM_CLASSES`), the holding buckets (`cards.HOLDING`) and its citations; an entry whose premium
+lives at one tenor on named roots also fixes them (`dte`, `roots_only`: the debit butterfly is XSP or SPY at one to two
+days to expiry). Single-name anomaly mining
 is not an entry: a name may be a root only where the documented premium lives on names (pinning, post-event crush,
 dispersion's constituents, a lead-lag leader). `long_single`, `long_call` and `long_put` belong only to the timing-filter
 entry. Every citation is posted before 2025 (`Citation.year`, checked by a test); the model reads authors, title and venue,
 never a year.
 
 ADMISSION (`check`, `architect.library` on; league/swarm/architect.py `admit`): a card must name an entry, and its
-structure, every root's group, its declared class and its holding must be the entry's; its expected activity
+structure, every root's group (and root, for an entry with `roots_only`), its days-to-expiry range (for an entry with
+`dte`), its declared class and its holding must be the entry's; its expected activity
 (`sessions_per_year` traded sessions a year, `structures_per_session` opened on a traded session) must reach the validation
 line's frequency (`evidence.MIN_DAYS` days and `evidence.MIN_TRADES` trades a year), since a family that expects fewer can
 never be judged. Each refusal names the field.
@@ -75,6 +78,10 @@ class Entry:
     holding: tuple[str, ...]
     citations: tuple[Citation, ...]
     practice_first: bool = False
+    #: The days to expiry a birth's range (its spec's `dte`, [lo, hi]) must lie within; None: any.
+    dte: tuple[int, int] | None = None
+    #: The only roots it may trade (empty: any root of its groups).
+    roots_only: tuple[str, ...] = ()
 
 
 _C = Citation
@@ -95,7 +102,8 @@ ENTRIES: tuple[Entry, ...] = (
         (_C("Carr and Wu", "Variance Risk Premiums", "Review of Financial Studies", 2009),
          _C("Bakshi and Kapadia", "Delta-Hedged Gains and the Negative Market Volatility Risk Premium",
             "Review of Financial Studies", 2003),
-         _C("Andersen, Fusari and Todorov", "Short-Term Market Risks Implied by Weekly Options", "Journal of Finance", 2017))),
+         _C("Andersen, Fusari and Todorov", "Short-Term Market Risks Implied by Weekly Options", "Journal of Finance", 2017)),
+        dte=(1, 2), roots_only=("XSP", "SPY")),
     Entry(
         "index_variance_credit",
         "Index variance premium, sold through defined-risk credit structures",
@@ -246,9 +254,18 @@ def activity(raw: Mapping[str, Any]) -> tuple[dict[str, Any], list[str]]:
     return out, errors
 
 
-def check(card: Mapping[str, Any], structure: Any, roots: Sequence[str]) -> list[str]:
+def _span(raw: Any) -> tuple[float, float] | None:
+    """A days-to-expiry range [lo, hi] as two numbers in order, or None."""
+    if not isinstance(raw, (list, tuple)) or len(raw) != 2:
+        return None
+    lo, hi = _number(raw[0]), _number(raw[1])
+    return None if lo is None or hi is None else (min(lo, hi), max(lo, hi))
+
+
+def check(card: Mapping[str, Any], structure: Any, roots: Sequence[str], dte: Any = None) -> list[str]:
     """Why a carded proposal is outside the library (ADMISSION in the module docstring), each problem naming its field; []
-    when it is inside. `card` is a validated card (cards.validate) carrying `library_class` and the expected activity."""
+    when it is inside. `card` is a validated card (cards.validate) carrying `library_class` and the expected activity;
+    `dte` the proposal's days-to-expiry range ([lo, hi]; None or malformed: outside an entry that fixes one)."""
     from . import evidence
     from .strategist import root_group  # a local import: the strategist imports the architect, which imports this
 
@@ -261,6 +278,14 @@ def check(card: Mapping[str, Any], structure: Any, roots: Sequence[str]) -> list
     groups = sorted({root_group(r) for r in roots or []} - set(found.root_groups))
     if groups:
         out.append(f"roots: {found.name} trades {', '.join(found.root_groups)} roots, not {', '.join(groups)}")
+    elif found.roots_only:
+        others = sorted({str(r).upper() for r in roots or []} - set(found.roots_only))
+        if others:
+            out.append(f"roots: {found.name} trades only {', '.join(found.roots_only)}, not {', '.join(others)}")
+    if found.dte is not None:
+        span = _span(dte)
+        if span is None or not found.dte[0] <= span[0] <= span[1] <= found.dte[1]:
+            out.append(f"dte: {found.name} trades {found.dte[0]} to {found.dte[1]} days to expiry, not {dte!r}")
     if card.get("mechanism_class") not in found.card_classes:
         out.append(f"mechanism_class: {card.get('mechanism_class')} is not one of {found.name}'s "
                    f"({', '.join(found.card_classes)})")
@@ -292,8 +317,10 @@ def library_text(structures: Sequence[str] | None = None) -> str:
         lines.append(head)
         lines.append(f"  Premium: {e.premium}")
         lines.append(f"  Expressions: {e.expressions}")
-        lines.append(f"  Structures: {', '.join(types)}. Roots: {', '.join(e.root_groups)}. Card classes: "
-                     f"{', '.join(e.card_classes)}. Holding: {', '.join(e.holding)}.")
+        lines.append(f"  Structures: {', '.join(types)}. Roots: "
+                     f"{'only ' + ', '.join(e.roots_only) if e.roots_only else ', '.join(e.root_groups)}. "
+                     + (f"Days to expiry (dte): {e.dte[0]} to {e.dte[1]}. " if e.dte is not None else "")
+                     + f"Card classes: {', '.join(e.card_classes)}. Holding: {', '.join(e.holding)}.")
         lines.append("  Literature: " + "; ".join(c.text() for c in e.citations) + ".")
     lines.append("ENTRY FILTERS for every family that buys premium: no long single opened on a Friday and held over the "
                  "weekend; no bearish premium bought while implied volatility is rich. Single-name anomaly mining is not "

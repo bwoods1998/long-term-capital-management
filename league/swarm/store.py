@@ -926,6 +926,11 @@ class SwarmStore:
                 if key:
                     new = {**old, **{k: summary[k] for k in ("train_score", "train_eligible") if k in summary and k not in old},
                            **{k: summary[k] for k in ("eval_key", "fill_model", "gym_image", "gym_bundle") if k in summary}}
+                    if "train_kill" in summary and "train_kill" not in old:
+                        # THE TRAIN KILL TESTS (league/swarm/killtests.py): a row scored before them takes the new score,
+                        # eligibility and verdict when the same evaluation is made again (its stale flag is never kept).
+                        new.update({k: summary[k] for k in ("train_score", "train_eligible", "train_kill", "train_why")
+                                    if k in summary})
                     if new != old:
                         self._exec("UPDATE runs SET summary=? WHERE run_id=?", (dumps(new), existing["run_id"]))
                 return self._one("SELECT * FROM runs WHERE run_id=?", (existing["run_id"],))  # type: ignore[return-value]
