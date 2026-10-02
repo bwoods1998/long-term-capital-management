@@ -26,6 +26,24 @@ class GuardTest(unittest.TestCase):
                 self.assertTrue(ci.guard([path], role), (path, role))
         self.assertTrue(ci.guard(["league/constitution.py"], None))
 
+    def test_the_houses_protected_jobs_are_judges_too(self):
+        """V3-A: the budget rule, the standing grant and the drills (league/ops/) change only by the owner's deploy."""
+        import tempfile
+
+        from league.updater import protected_changes
+
+        for path in ("league/ops/budget.py", "league/ops/drills.py", "league/ops/grant.py"):
+            self.assertIn(path, ci.FORBIDDEN)
+            for role in ci.ROLE_PATHS:
+                self.assertTrue(ci.guard([path], role), (path, role))
+        with tempfile.TemporaryDirectory() as tmp:
+            running, incoming = Path(tmp) / "running", Path(tmp) / "incoming"
+            for root, text in ((running, "RULE = 1\n"), (incoming, "RULE = 2\n")):
+                (root / "league" / "ops").mkdir(parents=True)
+                (root / "league" / "ops" / "budget.py").write_text(text)
+                (root / "league" / "ops" / "jobs.py").write_text(text)
+            self.assertEqual([p.split(":")[0] for p in protected_changes(incoming, running)], ["league/ops/budget.py"])
+
     def test_traversal_is_refused(self):
         self.assertTrue(ci.guard(["league/strategies/../constitution.py"], "architect"))
         self.assertTrue(ci.guard(["/etc/passwd"], "architect"))

@@ -75,6 +75,9 @@ FORBIDDEN: tuple[str, ...] = (
     # which the book's `max_hours_to_resolve` judges every entry by, and how it reads the settle lags
     # the House keeps as data (`settle_lags.json`).
     "league/resolution.py",
+    # The House's protected jobs (V3-A): the research budget rule that spends only what was earned, the
+    # standing grant's re-ratification, and the failure drills (league/ops/). Money and the way back.
+    "league/ops/budget.py", "league/ops/drills.py", "league/ops/grant.py",
 )
 #: The shared strategy list every architect proposal used to rewrite whole (`league/strategies`).
 RETIRED_REGISTRY = "league/strategies/registry.json"

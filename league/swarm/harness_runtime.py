@@ -2,6 +2,14 @@
 
 This starts no patch author, evaluator, deployment or paid call. The controller owns its separate
 journal; the supervisor reads a small heartbeat and process record on the House's trading path.
+
+The policy (`<state>/harness/runtime.json`) names the reviewed base commit and the digest of the release
+it was written for. A release the House's updater deployed (V3-A) is followed without the operator: when
+the running release is not the one the policy names but `deploys.jsonl` shows the watchdog promoted it
+with the updater's attestation of GitHub's checks on an exact commit, and that attestation's tree digest
+is the running tree's, the observer runs with that commit as its base and this release's digest
+(`attested_release`). The operator's file is never rewritten; an owner deploy, which carries no
+attestation, still needs the policy re-pointed by hand.
 """
 from __future__ import annotations
 
@@ -53,6 +61,47 @@ def process(pid: int) -> tuple[list[str], str] | None:
         return None
 
 
+SHA40 = re.compile(r'[0-9a-f]{40}')
+
+
+def attested_release(deploy_log: Path, release: str, digest: str) -> dict | None:
+    """`{"sha", "deploy", "promoted_at"}` of the newest deploy of `release` that the watchdog promoted
+    (a `promote` row with `ok`) and that carried the updater's attestation on its `start` row: GitHub's
+    checks `passed` (`ok`) on a 40-hex `sha`, for a tree whose digest (`tree_digest`) is `digest`, the
+    running release's own. Anything less -- no such deploy, an owner deploy (no attestation), a digest
+    that is not this tree's, an unreadable log -- is None."""
+    try:
+        lines = deploy_log.read_text(encoding='utf-8').splitlines()
+    except OSError:
+        return None
+    deploys: dict[str, dict] = {}
+    for index, line in enumerate(lines):
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(row, dict) or row.get('release') != release or not row.get('deploy'):
+            continue
+        seen = deploys.setdefault(str(row['deploy']), {})
+        if row.get('stage') == 'start' and isinstance(row.get('attestation'), dict):
+            seen['attestation'] = row['attestation']
+        elif row.get('stage') == 'promote' and row.get('ok') is True:
+            seen['promoted_at'] = row.get('at')
+            seen['order'] = index
+    found = None
+    for key, seen in deploys.items():
+        attestation = seen.get('attestation') or {}
+        sha = str(attestation.get('sha') or '')
+        if ('promoted_at' not in seen or attestation.get('ok') is not True or attestation.get('state') != 'passed'
+                or not SHA40.fullmatch(sha) or attestation.get('tree_digest') != digest):
+            continue
+        if found is None or seen['order'] >= found['order']:
+            found = {'sha': sha, 'deploy': key, 'promoted_at': seen['promoted_at'], 'order': seen['order']}
+    if found is not None:
+        found.pop('order')
+    return found
+
+
 class HarnessSupervisor:
     def __init__(self, root: Path, *, code_dir: Path = REPO, python: str = sys.executable,
                  clock=time.time, spawn=subprocess.Popen, proc=process,
@@ -63,6 +112,7 @@ class HarnessSupervisor:
         self.pidfd_open, self.pidfd_signal, self.close_fd = pidfd_open, pidfd_signal, close_fd
         self.child: Any = None
         self._digest: str | None = None
+        self._followed: tuple[tuple[int, int] | None, dict | None] = (None, None)
 
     def _policy(self) -> tuple[dict, str | None]:
         policy = read_json(self.directory / 'runtime.json')
@@ -75,8 +125,28 @@ class HarnessSupervisor:
         if self._digest is None:
             self._digest = tree_digest(self.code)[0]  # immutable release, hashed only once per House process
         if policy['release_digest'] != self._digest:
-            return policy, 'observer policy needs the reviewed base of this release'
+            followed = self._attested()
+            if followed is None:
+                return policy, 'observer policy needs the reviewed base of this release'
+            # An updater release (V3-A): its attested commit is the base, this release's digest the digest.
+            # The signature over this policy differs from the operator's, so an observer of the old base stops.
+            return {**policy, 'base': followed['sha'], 'release_digest': self._digest,
+                    'followed': {'release': self.code.name, 'deploy': followed['deploy'], 'policy_base': policy['base'],
+                                 'policy_release_digest': policy['release_digest']}}, None
         return policy, None
+
+    def _attested(self) -> dict | None:
+        """`attested_release` for the running release, read again only when `deploys.jsonl` changed."""
+        path = self.root.parent / 'deploys.jsonl'
+        try:
+            info = path.stat()
+            stamp = (info.st_size, info.st_mtime_ns)
+        except OSError:
+            stamp = None
+        if stamp is None or stamp != self._followed[0]:
+            found = attested_release(path, self.code.name, str(self._digest)) if stamp is not None else None
+            self._followed = (stamp, found)
+        return self._followed[1]
 
     def _owns(self, record: dict) -> bool:
         try:
