@@ -301,7 +301,11 @@ you see only whether the line was met and how many of its checks passed. Holdout
 per lineage, and you hear only pass or fail. Forward days (after Sept 25, 2026, and live) are the judge.
 Every fork shares that ration across all roots, including looks made after the fork. Reusing identical
 program code on the same structure and roots joins lineages; renaming a family or changing its parameters
-never creates a fresh ration. A revised retired mechanism must identify its parent.
+never creates a fresh ration. A version that repeats a program already looked at, in any family, is
+refused before its look, and no look is spent: the same code and parameters, parameters that resolve to
+the same values, or a Validation run identical to a looked version's (a renamed variable or a new comment
+changes nothing). Only a genuinely different version is looked at. A revised retired mechanism must
+identify its parent.
 
 **Trials.** Every Gym evaluation is a trial, counted per lineage (every family in it: parent, forks,
 siblings, alive or retired, and a dead slice's lineage when your idea was born on its slice) and in total. The line
