@@ -1,13 +1,27 @@
-# The desk's daily scoreboard
+# The desk's daily pages
 
-From release V3-A (LTCM v3; [the run record](../2026-10-02-unattended-desk.md)), the House commits one file here a day,
-by itself: `<YYYY-MM-DD>.md`, written by its `scoreboard` job (`league/ops/scoreboard.py`, daily at 23:30 UTC) and
-committed to `main` through the gateway's `POST /v1/github/docs` route (commit messages start with `desk:`). Nobody
-edits these files by hand.
+The House writes these pages itself, from V3-A part 1 (Oct 2-3, 2026) on: one page a UTC day, `<YYYY-MM-DD>.md`,
+written by its `scoreboard` job at 23:30Z (`league/ops/scoreboard.py`) and committed to `main` through the gateway's
+docs route (`POST /v1/github/docs`). Their commits start with `desk:`. Nobody edits them by hand: a correction goes in
+the run record ([the unattended desk](../2026-10-02-unattended-desk.md)).
 
-Each page is built from an allowlist of the House's own figures and checked by a public filter before it is posted: no
-account equity or balance, no quote, contract symbol, strike, box id, parameter or program text, and no Validation or
-holdout figure. A page that fails the filter is not posted, and the job's receipt says so.
+**What a page says**, from the House's own records only:
+- the running release; self-deployed releases and self-rollbacks (today and since the reset), owner deploys and
+  rollback drills;
+- realized options P&L since the Sept 26, 2026 reset and over the trailing 30 days, input costs by service since the
+  reset, and **Net** (realized minus costs; deposits are never profit), all at the latest close economics' cutoff;
+- how many lots are open and what they are worth at conservative marks;
+- the research budget's state (for example "research at floor") and, per meter, its research dollars a day and the next
+  date a card is needed;
+- the forward ladder's counts (entrants, in practice, promoted, the false-discovery family's size; "n/a" while the
+  ladder is not deployed);
+- how many of the House's jobs ran, failed, were missed or skipped that day.
 
-The gateway accepts only paths matching `docs/runs/desk/<YYYY-MM-DD>[-<slug>].md`, at most 64 KB each and at most six
-commits a New York day. Until V3-A is deployed this directory holds only this note.
+**What a page never says.** It is built from an allowlist of figures and is refused before posting if it names account
+equity, a balance, buying power, a quote, a strike, a contract symbol, a parameter, program text, a Sail box id or a
+Validation or holdout figure. Licensed market data never reaches it.
+
+**When there is no page.** The gateway takes at most six desk commits a New York day and only dated names under this
+folder, so this README is never written over. A page that fails the filter, or a day the docs route cannot be reached,
+leaves the page on the House only, and the job's receipt says why. Until the House's own close economics has run at a
+close, a page says it has none.

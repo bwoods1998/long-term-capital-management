@@ -1,168 +1,318 @@
-# The unattended desk (LTCM v3) — October 2, 2026
+# The unattended desk (LTCM v3): October 2, 2026
 
-This continues T0 `2026-09-26T06:23:14Z` and the financial basis of the Sept 26 reset (06:25:30Z); neither resets. The
-previous record is [the continuous-learning run](2026-09-30-continuous-learning.md). The goal is **not achieved**:
-release V3-A is built and integrated on `release/v3a` and **not yet deployed**. Until it is, production runs as the
-Oct 2 pause left it ([operations](../operations.md), "Paused").
-
-**The owner's goal:** a swarm of options trading agents that learns and profits on his brokerage account, to the point
-where there is no human in the loop and it can run for good. v3 is the plan for the "no human in the loop" half: a desk
-that costs little when it has nothing, spends more only out of what it earned, deploys and repairs itself, and tells the
-truth about its record every day.
+This continues the options swarm's run from T0 `2026-09-26T06:23:14Z` and its financial reset; neither resets. The
+previous record is [the continuous-learning run](2026-09-30-continuous-learning.md) (Sept 30-Oct 2). The goal is **not
+achieved**. All times are UTC. Private details (account figures, prices, strikes, programs, parameters, operator tools)
+stay in the operator's goal folder.
 
 ## Why v3
 
-A deep read of the repository, the operator's records and the running House on Oct 2 (and a 20-minute watch of the
-swarm in the session) found four structural reasons for the lack of progress. None of them is a bug; each is the
-design meeting the account it runs on.
+On Oct 2 the owner asked for a deep dive into why the project showed no progress, and for a swarm that runs with no
+human in the loop. A read of the repository and the operator records and a 20-minute watch of the swarm in session
+gave a plain answer: the machine ran continuously and honestly, and it was a treadmill. Since the Sept 26 reset the
+swarm had born and retired more than 2,300 families and counted more than 100,000 trials; it had made 3 holdout looks
+and passed none, and no family had ever become a Candidate. In the watch, the researchers' notes were about the
+harness, not about markets, and real money did only what the House itself scheduled. The causes, ranked:
 
-1. **The verifier was built for a fund and is applied to a small account.** The sealed-holdout look, corrected for every
-   earlier look, needs a daily t-statistic that only a dense, large net edge reaches at one contract a structure. The
-   retail-feasible options premia that the literature documents net far less than that after one-lot costs. A real edge
-   would pass a look rarely, and when it did it would earn a few dollars a day at Probe. Engineering on the current rules
-   does not change that arithmetic.
-2. **The research loop makes noise, not knowledge.** The cheapest model rewrites programs dozens of times an hour per
-   family; families refute themselves within hours; Train rank barely predicts Validation, and the Validation passes so
-   far were long-market drift. The graveyard is large and mostly unread. Agent time is real, but much of it re-discovers
-   that cheap out-of-the-money debit spreads expire worthless.
-3. **The human is the control plane.** The watchdog restarts boxes and sends mail; it cannot fund, deploy, ratify,
-   write the agenda, end a cohort, re-base the gate, write the economics or decide anything. The in-box updater that
-   would deploy `main` by itself exists and was switched off. The Oct 2 inventory counted 37 distinct human steps the
-   system depends on, most with no automatic path at all.
-4. **The cost base cannot close at this capital.** Market data, the history vendor, the House box and the data box are
-   fixed costs; research on top of them ran far above anything the options book could earn. "Compute drops to the floor
-   when the forward record is flat" was written in the design and nowhere in the code.
+1. **The verifier was built for a fund.** At one contract a structure, a sealed-holdout pass needs a net edge per
+   structure larger than the documented retail options premia carry after one-lot costs. A real edge would pass a look
+   rarely, the first qualified family was weeks to months away, and at Probe size it would earn far less a day than
+   research cost. No engineering on those rules changes that arithmetic.
+2. **Research made noise, not knowledge.** The cheapest model rewrote each family's program dozens of times an hour,
+   families refuted themselves in about an hour (the median), and the Validation passes so far had mostly measured
+   long-market drift. The graveyard's lessons were barely read.
+3. **The owner was the control plane.** The in-box updater existed and was switched off. Every deploy, ratification,
+   settings change, agenda, cohort end, economics report and top-up was a command from the owner's laptop: 37 distinct
+   human steps, 23 of them with no automatic path at all.
+4. **The cost base could not close at this capital.** The fixed costs (market data, ThetaData, the boxes) were a large
+   monthly share of a small account before any research, and the design's "compute drops to its floor when the forward
+   record does not pay for it" was written nowhere in code.
+5. **The sealed holdout taxed the loop.** The 2026 holdout is not sealed against the models' own memory, and every look
+   raises the bar for every later look. The one judge no model has seen, the forward record on live quotes, was "never
+   evidence" and was capped by a one-vCPU House.
+6. **Fragility needed hands:** Sail queue stalls, failed Gym boxes, an out-of-memory House, session times hard-coded in
+   UTC that move on Nov 1, three funding meters to watch, a vendor renewal.
 
-Two more findings feed the plan: the 2026 holdout is not sealed against the models' own training (their data runs past
-its start), and every look raises the bar for every later look, so the gate's throughput falls toward zero by design;
-meanwhile the one clean judge, the forward record on live quotes, was "never evidence" and capped by a 1-vCPU box.
+The v3 answer: a desk that costs almost nothing while it has no forward edge, spends more only out of what it earned,
+deploys and repairs itself inside walls the owner keeps, judges programs on the forward record, and reports itself
+every day.
 
-## The owner's six decisions (Oct 2)
+## The owner's decisions (Oct 2, about 17:00)
 
-- **D1 Capital:** stays as it is. The desk never deposits; the owner decides the capital.
-- **D2 Evidence:** yes to the forward ladder: promotion to real money from the forward practice record under a
-  pre-registered multiple-testing control; the 2026 holdout becomes a free pre-filter.
-- **D3 Structures:** defined-risk short premium (credit verticals, iron condors, iron butterflies) opens for real money
-  at $2,000 of equity and above, in one deploy with the gateway's list and a re-ratified grant.
-- **D4 Funding:** research is funded by a rule on realized profit, inside the prefunded meters (Sail and Claude).
-- **D5 Autonomy:** self-deploy with walls: the in-box updater on, a standing grant, protected paths still the owner's
-  own deploy.
-- **D6 Data vendor:** keep the current history plan until the ladder is live, then decide on the scoreboard's numbers.
+- **D1, capital:** stays as it is. The desk never deposits; capital is the owner's transfer.
+- **D2, evidence:** yes to the forward ladder (practice shadow, then Probe, then Sized, under a pre-registered
+  multiple-testing control) as the way to real money once it is benchmarked; the 2026 holdout becomes a free pre-filter.
+- **D3, structures:** yes to defined-risk short premium (credit verticals, iron condors, iron butterflies) on real money
+  at $2,000 of equity or more, in one deploy with the gateway's list and the grant.
+- **D4, funding:** research is funded by a rule on trailing realized options profit, inside the prefunded meters, with a
+  small floor.
+- **D5, autonomy:** self-deploy with walls: the in-box updater on, the engineer's research-class pull requests merged on
+  green CI and an automated adversarial review, protected paths still the owner's own deploy, and a standing grant.
+- **D6, data:** ThetaData Options Standard is kept until the ladder is live, then decided on the numbers.
 
-## The build plan, by phase
+## The plan, by phase
 
-| Phase | What | Class | State |
-|---|---|---|---|
-| 0 | Stop the treadmill: research settings to the floor, the stale practice cohorts ended, the live nuisances fixed, a baseline close economics | operator one-offs | settings floor applied Oct 2; the rest folded into V3-A's jobs and fixes |
-| 1 | The autonomy core: self-deploy, House jobs in place of operator scripts, funding without hands, the standing grant, time and venue hardening, monthly failure drills | protected and research-class | **V3-A** (built, not yet deployed) |
-| 2 | Research v3: fewer, stronger researchers; hypotheses from documented premia; the strategist owns the agenda; credit types in the Gym and the shadow book | research-class | after V3-A, through the updater |
-| 3 | Evidence v3, the forward ladder: Practice → Probe → Sized on the forward record, its benchmark before it binds; the one planned evidence reset | protected (moves the fingerprint) | **landing in V3-A** (WP6, being integrated) |
-| 4 | Recursive harness improvement: an engineer agent, an automated adversarial review, the updater's canary, retain or revert by a predeclared metric | research-class (the gateway's walls ship in V3-A) | after V3-A |
-| 5 | The economics autopilot and the record: the daily scoreboard, the weekly post-mortem, the budget rule in force | ops jobs | the scoreboard and the budget in V3-A; the post-mortem after |
+| Phase | What | State at A1 |
+|---|---|---|
+| 0 | Stop the treadmill: research to the floor, stale cohorts ended, a baseline economics | done Oct 2 (below) |
+| 1 | The autonomy core: self-deploy, the operator's scripts as House jobs, funding without hands, the standing grant, calendar-driven times, monthly failure drills | **A1** |
+| 2 | Research v3: fewer, stronger researchers; hypotheses from documented premia; the strategist owns the agenda; credit types in the Gym and the shadow book | built on branches, not deployed |
+| 3 | Evidence v3: the forward ladder, benchmarked before it binds | built, does not bind; a confirmation study decides |
+| 4 | Recursive harness improvement: an engineer, an automated reviewer, the updater's canary, retain or revert by a predeclared metric | the gateway's walls in A1; the engineer built, not deployed |
+| 5 | The economics autopilot: the daily page, the budget rule, the weekly post-mortem | the page and the budget in A1; the post-mortem built, not deployed |
 
-Every protected-path change is an owner deploy from the laptop, so V3-A carries all of them at once, ahead of the
-30-day unattended clock; research-class work then ships through the updater during the clock. Any change to
-`league/live/` or `league/gym/` moves the evaluator's fingerprint, so V3-A is also the one planned evidence reset of
-v3 (practice cohorts restart on the new fingerprint; trials, lineages and consumed looks are kept).
+The plan's measure of done, in plain words: 30 consecutive days in which no command from the owner's machine touched
+production, with self-deployed releases and at least one self-rollback; research that followed realized profit both
+ways with no top-up asked for; at least one program promoted to real money by the forward ladder, or the daily page
+saying honestly that none qualified, with the counts; harness changes retained end to end with no human step; and a
+one-cutoff economics with Net positive, or the desk throttled to its floor by its own rule and saying why. A deploy, a
+backtest, practice profits or a finished checklist are not done.
 
-### V3-A's work packages
+## Before A1: the floor and the baseline (Oct 2 afternoon; no deploy)
 
-- **WP1, the updater and deploys** (protected). `auto_update` on (`release_train_hours` stays 4). Before launching a
-  deploy the updater stops the nightly daemon with a marked `nightly.stop` (`updater:<release>`) and waits, bounded and
-  across ticks, for its lock; it removes only its own marker after the verdict, and a House start clears an orphaned
-  one. Its watchdog's pid goes into `deploy.pid`, so the owner's `floor_box.py deploy` refuses while an updater deploy
-  is in flight, and `push_release` clears only its own `incoming/<id>/`. The harness observer follows updater releases.
-  The watchdog's launch environment is scrubbed. `python -m league.watchdog drill-rollback` proves the automatic
-  rollback on demand. `ci.FORBIDDEN` gains `league/ops/{budget,drills,grant}.py`.
-- **WP2, the House's jobs** (`league/ops/`). A calendar-aware scheduler on the House's NYSE calendar (DST-proof), a
-  registry, a runner that starts at most one job at a time as a niced, memory- and CPU-bounded child, receipts in
-  `<state>/ops.sqlite`, a missed job as a warning, and a private daily receipts file the operator reads without exec.
-  Jobs: `preopen`, `economics`, `scoreboard`, `hygiene`, `clock`, plus `budget`, `grant` and `drills` from WP1/3/4.
-- **WP3, the budget rule** (protected, below).
-- **WP4, the standing grant** (protected, below).
-- **WP5, live-path fixes** (protected; moves the fingerprint). An exit-only instance's open intents are dropped before
-  the order path (counted, not refused every half hour); observe chain reads clamped to what the Gym store holds per
-  root, so a chain over the page cap reads its clamped window instead of failing the root; practice positions capped
-  as a Probe's (open structures per family, max loss per structure, family total) so a shadow book cannot pile up
-  dozens of positions; an honest shed and a wider observe read budget (`live.observe_read_calls` 120) so 24 roots fit.
-- **WP6, the forward ladder** (protected; moves the fingerprint). **Landing in V3-A, being integrated: the captain
-  confirms after it merges.** Below.
-- **WP7, money rules v3** (protected). **Landing in V3-A, being integrated: the captain confirms after it merges.** The
-  constitution's real types gain `credit_vertical`, `iron_condor` and `iron_butterfly`, opened for real only at
-  `credit_min_equity_usd` ($2,000) of equity, at the House and at the gateway; defined-risk only (no naked short leg),
-  no in-the-money short leg at entry on an American-style root; a paper proof round trip per new type before its first
-  real open. The gateway's `OPTION_STRUCTURES_REAL` gains the same types in the same deploy (`league/ci.py` holds the
-  two lists equal).
-- **WP8, the gateway** (protected). The desk's docs route, the engineer's review and merge routes, `funding` notices,
-  and an admin log (below).
-- **WP8b, the engineer's lanes.** `engineer/<lane>/<slug>-<hash>` branches may change only their lane's files (and add
-  new `league/tests/test_harness_candidate_*.py` tests), in `league/ci.py` and the gateway alike.
-- **WP9, fixes and settings as code.** Failed Gym pool rows settled against Sail's list; a Sail window fallback (a
-  one-shot call stalled on a balanced queue retries once on the mapped asap profile); `league/swarm/policy.json`, the
-  research settings as reviewed code (below).
+- **17:04 and 17:23, research to the floor** (`swarm.json`, before-copies kept): `population.start` 96 → 16,
+  `population.floor` 12 → 8, `architect.every_seconds` 1800 → 7200, `researcher.sail_usd_per_hour` 1.3 → 0.25,
+  `gym.max_boxes` 6 → 1, `strategist.every_seconds` unset → 86400. Calibration, the House live test, the incubator and
+  the practice league kept running.
+- **19:03, the operator's last sweeps by hand** (practice only, no real money): three practice cohorts ended (the two
+  GOOGL-lineage cohorts, whose programs failed their holdout look and are barred from the incubator, and one whose SPXW
+  chain read failed every minute), and six Gym pool rows stuck at `failed` were marked `terminated` (Sail listed none of
+  their boxes).
+- **Settings as code:** the research settings, from a copy of the box's `swarm.json` taken at 21:00, went into the
+  repository's `league/swarm/policy.json` unchanged, without the private agenda text and without the retired burst keys.
+- **The baseline**, at the Oct 2 close (20:00 cutoff, one cutoff for everything): realized options P&L −$40.63 (the
+  House's calibration round trips and regulatory fees; no strategy route closed a trade), input costs $607.88, so **Net
+  since the Sept 26 reset is −$648.51**. One tuition lot is still open and is not in the realized figure; at
+  conservative marks it is a further loss.
 
-### The forward ladder (WP6, landing in V3-A)
+## What A1 ships
 
-Train (the Gym, 2020-2024) → Validation (2025, its line unchanged) → **pre-filter** (the 2026 holdout as a free read:
-no look row, no Holm correction, no look budget; it must not be negative) → **Practice** (shadow on live quotes, an
-immutable version, every session recorded) → **Probe** (real, the money table's sizes) → **Sized** (real, quarter-Kelly
-on the forward lower bound).
+V3-A was split on Oct 2 to move faster. Part 1 (A1) is everything that must be the owner's own deploy for the desk to
+run unattended and that is reviewed: the House's jobs, the budget rule, the standing grant, the updater switched on with
+its walls hardened, the live-path fixes and the gateway. Part 2 (the forward ladder and the credit types) ships later,
+in its own owner deploy, only once it meets its bars (below).
 
-- Every practice entrant is a trial of its lineage and of the desk (an `entrants` table).
-- **Probe** on the practice record alone: at least 20 sessions and 30 program closes (House-forced closes excluded); a
-  day-block bootstrap one-sided 95% lower bound on mean P&L per dollar of maximum loss above zero; positive in at least
-  3 of 4 equal sub-windows; a drift control (P&L net of the entry delta times the underlying's move must also be
-  positive on average); Benjamini-Hochberg at q = 0.10 across every practice entrant of the trailing 90 days (an
-  entrant without a full record counts with p = 1); and the pre-filter read non-negative. Each judgement is a
-  `ladder_decisions` row (the practice receipt), and a promoted real instance runs exactly the practised version.
-- **Sized** on the Probe's real fills: at least 20 real trades, mean above zero, 80% lower bound above zero, at least 5
-  whole sessions. **Demotion:** a forward record negative over 20 trades, or a 20-session lower bound below zero.
-- A ladder cohort runs until promoted, failed or 60 sessions; the old 3-session, 10-close completion no longer ends it.
-  Tuition lots stop; the incubator stays as it is and never counts as ladder evidence.
-- **The benchmark before it binds:** synthetic forward streams (absent, cost-erased, drift-only, fading, planted dense
-  and sparse edges) through the practice ledger and the new rules, against the sealed-look design on the same worlds.
-  The constitution's `options_money.ladder.binding` turns on only if the ladder's false promotions are at or below the
-  sealed design's; until then the ladder judges and records ("would promote") and promotes nothing. The binding
-  value at deploy is the captain's to confirm.
+### The House's own jobs (`league/ops/`)
+
+The operator's daily scripts became jobs on the House's own clock. The schedule reads the House's NYSE calendar
+(`ltcm.data.us_equity_session`), so "an hour before the open" follows daylight saving and early closes; the fixed UTC
+times sit outside every session in both seasons. Each due job runs as one child process at a time (`python -m
+league.ops run <job>`): niced to 19, its address space capped at what it starts with plus 500 MB, its CPU time and wall
+time bounded, with a scrubbed environment. Every occurrence gets one receipt row in `<state>/ops.sqlite` (`ok`,
+`failed`, `missed` or `skipped`); a failed run is retried inside its grace (at most three attempts), and a missed one is
+a House warning. `health.json` carries an `ops` block (today's jobs: due, late, failed, missed, running).
+
+| Job | When | What it does |
+|---|---|---|
+| `grant` | at each House start, and hourly | the standing grant (below) |
+| `budget` | after the close economics, and daily at 00:30 | the budget rule (below) and its funding notices |
+| `hygiene` | daily at 02:00, never within 30 minutes of a session | ends practice cohorts of programs barred from the incubator, settles dead Gym pool rows against Sail, runs the tournament's idle rule (never below the floor), reports stale live instances |
+| `clock` | daily at 11:00 | Alpaca's clock and calendar against the House's calendar for the next 10 sessions; a mismatch is a warning |
+| `preopen` | trading days, an hour before the open | the operator's nine pre-open checks, read-only; each FAIL is a House warning |
+| `economics` | trading days, ten minutes after the close | the one-cutoff close economics (realized options P&L, every input cost, open lots at conservative marks, Net, and the trailing 30-day realized P&L the budget reads); private |
+| `scoreboard` | daily at 23:30 | the desk's public page (below) |
+| `drills` | the first Saturday of each month, 15:00 and 17:00 | a test funding notice, a failed Sail read, a gateway outage, a killed swarm, and the rollback drill; each must recover without a human |
+| `postmortem`, `agenda`, `engineer` | weekly; daily; daily | registry entries only: their modules are not in A1, so each occurrence is a `skipped` receipt that says so |
+
+### The budget rule (`league/ops/budget.py`, protected)
+
+Research spends from a rule, not from settings. For each meter (Sail and Claude) the rule reads the balance, the fixed
+cost a day (Sail: the House box's and the data box's own billing) and a reserve that is never spent, and computes:
+
+- what the balance sustains for **R = 90 days** above the reserve and the fixed cost, capped by a **floor of $5 a day**
+  for both meters together (60% Sail, 40% Claude);
+- plus **half of the trailing 30-day realized options P&L**, when it is positive, shared by need. Marks never fund
+  research;
+- never more than keeps the meter above **W = 60 days** of runway (the card line).
+
+After 60 sessions from Oct 5 with no promotion to Probe, the profit share stops ("no forward edge; research at floor")
+until a promotion. Unknown is never money: an unreadable balance gives its meter no research, and an unreadable profit
+earns nothing. The result (`<state>/budget.json`, private) is applied **only to tighten**: it caps the researcher's Sail
+pace, the Gym boxes, every Claude role's daily line and the population ceiling, and slows the architect. A missing
+budget is the floor, a stale one never loosens, and a rule that cannot run spends nothing. The Sail guard's daily cap is
+now the budget's, so the research burst and its three settings are gone. When a meter's runway falls under 60 days the
+House mails the owner one `funding` notice with the amount that restores 90 days, at most once a week a meter. The rule
+moves no money and raises no cap: the owner pays. OpenAI is not a meter of the rule, so the overlay closes it.
+
+### Settings as code
+
+The research settings now live in the repository, in `league/swarm/policy.json`: a reviewed pull request changes them,
+and the updater deploys them. The layers, each over the last: the code's defaults, `league/config.json`, `policy.json`,
+the box's `<state>/swarm.json`, and last the budget, tighten-only. `swarm.json` keeps the owner's switches (`enabled`,
+`live`) and the private agenda text, which a public repository must not hold.
+
+### The standing grant
+
+The owner used to ratify the grant by hand after every deploy that moved the money digest and after every deposit. The
+`grant` job (`league/ops/grant.py` and `LiveGrant.standing` in `league/live_trading.py`, both protected) now ratifies
+it in exactly those two cases: the money digest moved and an owner's release change is on the deploy record since the
+last ratification, or a deposit landed (told by its id). Capital stays the lower of equity and the owner's ceiling. It
+never creates, enables or re-enables a grant, never raises the ceiling without the owner's deploy, and refuses, changing
+nothing, when anything is unreadable. `--disable` stays the owner's stop. A1 does not change the money rules, so the
+money digest stays `42c4a3af` and this deploy needs no ratification for it (the job's first run may still answer an
+earlier deposit once more, at the same capital rule: its record of seen deposits starts empty).
+
+### Self-deploy, inside walls
+
+`league/config.json` turns `auto_update` on. Every half hour the House reads main's head and deploys that exact commit
+only when every wall holds: GitHub's Checks workflow passed on that exact commit (every required job); no file the
+running release protects changes (`league/ci.py` FORBIDDEN, now also `league/ops/{budget,grant,drills}.py`) and the
+workflows are the pinned ones; the running release's own content checks pass; `real_money` does not change; at most one
+release every four hours, none from 12:55 to 20:05 on a trading day (13:55-21:05 in winter) or within 30 minutes of a
+House start; then the watchdog's canary, promotion, ten-minute watch and automatic rollback. A1 adds:
+
+- the nightly forward daemon is stopped while it is idle before the launch, with a marker (`updater:<release>`) that is
+  removed only by whoever wrote it, and a House start removes an orphaned one;
+- one deploy at a time: the updater writes `deploy.pid`, so the owner's `floor_box.py deploy` refuses beside it, and
+  the updater waits for any watchdog in flight;
+- the harness observer follows a release the updater deployed (its attested commit); an owner deploy still needs its
+  policy re-pointed by hand;
+- the rollback drill, `python -m league.watchdog drill-rollback`: a copy of the running release carrying `DRILL_BREAK`
+  is deployed, the House it starts raises an error every tick, and the watch must roll it back by itself. It refuses in
+  the session window and beside another deploy, and the House it leaves recovers it if the drill's own process dies.
+
+A merge to main that touches only `docs/` changes no release: the release trees are `league/`, `ltcm/`, `scripts/`,
+`deploy/` and `playbooks/`.
+
+### The live-path fixes (evidence reset 3)
+
+`league/live/` changes, so the evaluator's execution fingerprint moves (`47587e22…` → `ba60c473…`): at its first start
+the swarm archives every family's derived selection evidence and the practice cohorts complete, as at Release B. Trials,
+lineages and consumed holdout looks are kept; the Gym's image and bundle do not change. The fixes:
+
+- **Exit-only instances** drop their program's opens silently before the order path (counted as
+  `exit_only_opens_dropped`), instead of a refusal every 30 minutes.
+- **Practice reads are clamped to what the Gym's store holds**: 40 strikes a side for SPXW and 25 for other roots, at
+  most 14 days to expiry (45 for SPY and QQQ). A chain over the page cap is read again narrower rather than lost (the
+  SPXW read had failed every minute).
+- **Practice accounts hold what a Probe may**, scaled to their shadow capital: at most three structures open or working,
+  each open sized to the Probe's share of capital, the whole account within the Probe's family cap. An open over its
+  size is resized; one with no room is a recorded practice refusal, never a program error. (One practice program had
+  held 33 shadow positions.)
+- **An honest shed:** only a practice read skipped for the read budget counts as pressure, and the budget is 120 calls a
+  minute (it was 40), room for 24 roots at the page cap.
+
+### The gateway
+
+- `POST /v1/github/docs`: one page committed to main under `docs/runs/desk/<date>.md` (64 KB at most, six a New York
+  day, no credential-shaped text).
+- The engineer's routes: `POST /v1/github/pr` with role `engineer` (a lane, its own files only, two a day),
+  `POST /v1/github/review` (an automated reviewer's verdict on an exact commit), `POST /v1/github/merge` (a squash merge
+  only of an `engineer/<lane>/` branch, on green checks on that exact commit, with a recorded approve, no protected
+  path, every file inside its lane, two a day; the kill switch stops merges), and read and close routes. Nothing calls
+  them yet (the engineer is parked).
+- A `funding` notice kind on `/v1/notify`; an admin log (every kill, unkill and admin-token call) in `/v1/health`; the
+  kill switch now engages with either token; Sail's low and critical balance mails at $25 and $12, under the budget
+  rule's own floor, so the rule's notice is the one that asks for a card.
+
+### Smaller fixes
+
+- Gym pool rows settle against Sail's own list, so a `failed` row no longer sits for days.
+- A one-shot model call on Sail's balanced queue that times out is asked again on the asap queue, and that queue's
+  calls go straight there for an hour (on Oct 2 the architect bore nothing for six hours while the balanced queue was
+  silent). The gate's audit keeps its own model on the fallback, so the review and the audit stay two different readers.
+
+## What is parked, and why
+
+Built or building on branches, **not deployed**:
+
+- **The forward ladder** (`v3/wp6`): practice shadow, then Probe, then Sized, on the forward record under a
+  pre-registered control, with its benchmark. It does not bind (see below). A confirmation study is running on
+  `v3/wp6b`.
+- **Credit types at $2,000 of equity or more, and a paper proof per type** (`v3/wp7`). The gateway's list of real types
+  stays the four debit types in A1, equal to the constitution's.
+- **Research v3** (`v3/b1`): researchers on Claude Sonnet 5.5, each cycle a sweep of variants with a mandatory placebo
+  row, and a per-family ledger of what was tried and why it failed.
+- **Births v3 and the strategist's whole agenda** (`v3/b23`): families only from a curated library of documented premia,
+  the Train kill tests as code, and the agenda written by the strategist alone.
+- **The weekly post-mortem** (`v3/b4`) and **the engineer and reviewer loop** (`v3/b5`).
+
+The research-class branches ship through the updater once they are reviewed and merged. The ladder and the credit types
+change `league/live/` and the constitution, so they are an owner deploy, with one more evidence reset. Until the ladder
+binds, A1 keeps the sealed-holdout gate, the look rules and execution tuition exactly as they were: D2 retires them only
+with the ladder.
+
+**The ladder's benchmark, honestly.** Synthetic forward streams with known answers (no edge, a cost-erased edge,
+drift only, a fading edge, planted edges, and mixed desks) were played through the practice ledger and the new rules,
+and through the sealed-look design on the same worlds. On the development cohort (30 replications a world) the ladder
+as specified did better where the sealed look is weakest: it promoted about 3-4% of fading and cost-erased programs,
+where the sealed look promoted about a fifth to a quarter, and in the mixed desk it missed far fewer real edges (about
+36% against 62%). But it promoted about 4-8% of pure-noise, skewed-null and drift-only programs, where the sealed look
+promoted almost none. The rule written before the build was that the ladder binds only when its false promotions are at
+or below the sealed look's on the same worlds. It does not meet that, so when it ships it ships with `binding` false: it
+records what it would promote and promotes nothing. These are development figures, not the verdict. Before any
+confirmation run, the captain pre-registered when the ladder may bind: a design chosen on the development cohort must
+then pass, on a fresh-seed confirmation cohort with at least 30 replications of every world, (1) a false-promotion rate
+of at most 1.0% in every negative world, not significantly above the sealed look's there (one-sided Fisher exact test,
+p ≥ 0.05); (2) pooled false promotions at or below the sealed look's; and (3) missed signals in the mixed desk at or
+below the sealed look's. If no design passes, `binding` stays false and the daily page says so with the counts.
 
 ## The walls
 
-What the desk may never do, whatever its agents or its updater decide:
+What the desk may not do by itself. The release, merge, money and public-text walls are code; the rest are rules every
+change is reviewed against.
 
-- **Never** a deposit, transfer or borrowing; a cap above funded money; a secret change; releasing the drawdown stop or
-  the kill switch; a naked short option; a forced or hand-placed trade; contaminated evaluation; a hidden cost;
-  cherry-picked reporting.
-- **The protected paths change only by the owner's own deploy.** Two walls, each in code:
-  - *The updater* refuses any head of `main` that changes a file its running release's `league/ci.py` lists as
-    FORBIDDEN: the money table (`league/constitution.py`), the grant (`league/live_trading.py`), the live path
-    (`league/live/`), the ledger and the book, the evaluator, the statistics, the updater, the watchdog and `ci.py`
-    itself, the gateway, the workflows, and from V3-A the budget rule, the standing grant's job and the drills
-    (`league/ops/{budget,grant,drills}.py`). It also refuses a `config.json` that moves more than its operating dials,
-    and any change to `real_money`.
-  - *The gateway's merge route*, the only way the engineer's pull requests merge, refuses that list plus the evaluator's
-    identity and its data (`league/gym/`, `league/swarm/{gate,bands,evaluator,settings,store}.py`, `ltcm/data/`,
-    `scripts/data/`), `deploy/` and `league/config.json`.
-- **The budget only ever tightens.** Research is computed from realized profit only; marks never fund research; nothing
-  in the rule tops anything up, raises a cap or moves money. The owner pays; the desk asks only when a prefund is short.
-- **The standing grant never loosens.** It ratifies only after an owner deploy that moved the money digest or after a
-  deposit landed; never above the lower of equity and the owner's ceiling, never a revoked grant. `--disable` stays the
-  owner's stop.
-- **The site is the owner's:** no commit, no deploy, no contract change from here.
+- **The owner's deploy only:** the files `league/ci.py` lists as FORBIDDEN: the constitution (the money rules), the
+  ledger and the book, `league/live/` and the grant, the watchdog, the updater and `ci.py` itself, the gateway and the
+  workflows, and from A1 the budget rule, the standing grant and the drills. The updater refuses any main head that
+  changes one of them. The gateway's merge route refuses a wider list for the engineer: those, plus `league/gym/`, the
+  swarm's gate, bands, evaluator, settings and store, `ltcm/data/`, `scripts/data/`, `deploy/` and `league/config.json`.
+- **Money:** no deposit, transfer or borrowing; no cap above funded money. The budget only tightens; the grant only
+  ratifies on an owner's deploy or a landed deposit, never above the lower of equity and the owner's ceiling. The kill
+  switch engages with either token and releases only with the owner's.
+- **Releases:** exact-commit CI, the release train, the session hold, one deploy at a time, canary and automatic
+  rollback; a head rolled back twice is never tried again.
+- **Merges** (when the engineer ships): `engineer/` branches only, inside their lane's files, green checks on the exact
+  commit, a recorded approve, two a day, none while the kill switch is on.
+- **Public text:** the daily page is built from an allowlist of figures and refused if it names equity, a balance, a
+  quote, a strike, a contract, a parameter, program text, or a Validation or holdout figure.
+- **The site** is the owner's; nothing here changes it or its data contracts.
 
-## How it is observed
+## How the desk reports itself
 
-The House writes a private receipts file every ten minutes; the operator reads it through the Sail Files API with
-`scripts/desk_receipts.py` (a GET of one file, never an exec). The public record is the daily scoreboard below.
-[Operations](../operations.md) ("LTCM v3: release V3-A") has the jobs, the settings layers, the deploy classes and the
-drill.
+- **Every day at 23:30**, the House commits a public page to [`docs/runs/desk/`](desk/README.md) through the gateway:
+  the running release; self-deploys, self-rollbacks, owner deploys and drills; realized options P&L since the reset and
+  over 30 days; input costs by service; Net; open lots at conservative marks; the budget's state and the next card date
+  per meter; the ladder's counts; the day's jobs.
+- **Every ten minutes**, the House rewrites a private receipts file, which the owner reads without touching the box
+  (`scripts/desk_receipts.py`, a Files API read; never an exec).
+- **By mail**, through the gateway: a `funding` notice when a meter's runway falls under 60 days, and the existing
+  `live_stop` notice when a real-money stop trips.
+- `/v1/health` on the gateway shows the admin log and the desk's docs commits and merges.
 
-## Scoreboard
+## The deploy
 
-From V3-A's deploy, the House's `scoreboard` job (daily 23:30 UTC) commits one public-safe page a day to
-[`docs/runs/desk/`](desk/README.md) as `<YYYY-MM-DD>.md`, through the gateway's docs route: the running release,
-self-deploys and self-rollbacks, real closes and realized options P&L (since T0 and trailing 30 days), input costs by
-service since T0, the one Net, open lots at conservative marks, the budget's state and the next card action date per
-meter, the ladder's counts, and the day's jobs. It never carries account equity or balances, quotes, contract symbols,
-strikes, parameters, program text, or Validation or holdout figures; a page that fails the filter is not posted.
+A1 is the owner's deploy, outside the session: the gateway first (the running House never calls its new routes, and
+the new House tolerates them absent), then the House with the nightly daemon stopped, then the checks in
+[operations](../operations.md) ("Now: V3-A part 1"). The box keeps its full `swarm.json` until the release after A1, so
+that a rollback finds the settings it needs.
+The release id, times and checks are recorded in the [CHANGELOG](../../CHANGELOG.md) entry "V3-A part 1".
 
-No daily page has been posted yet: V3-A is not deployed.
+## Scoreboard (Oct 2 close)
+
+| Measure | Value |
+|---|---|
+| Release | V3-A part 1, `<release id>` (the owner's deploy, Oct 2-3) |
+| Real money through evidence | none: no program has passed the holdout (3 looks, 0 passes) and the forward ladder does not bind |
+| The House's own real orders | D3 calibration round trips (23 closed by the Oct 2 close); one exit-only tuition lot open; the House live test, no round trip yet; the incubator, no lot |
+| Realized options P&L since the Sept 26 reset | −$40.63 (calibration and regulatory fees; strategy routes $0.00) |
+| Input costs since the reset | $607.88 |
+| **Net since the reset (Oct 2 close)** | **−$648.51** |
+| Research | at the funding floor: no realized profit to share, and the meters' balances bound it further |
+| Evidence resets | 3 (Release A, Release B, A1) |
+| Retained harness improvements | 0 |
+
+The goal remains unmet. No program trades real money through evidence, research runs at the floor, and Net since the
+reset is −$648.51.
+
+## Next
+
+- **The first night under A1:** the `grant` receipt at start (no digest ratification due), the `budget` job at 00:30 (its
+  `budget.json` at the floor), `hygiene` at 02:00, `clock` at 11:00.
+- **Saturday Oct 3 is the first Saturday of the month**, so the monthly drills are due at 15:00 and 17:00: a test
+  funding mail to the owner, a killed swarm that must come back, and the rollback drill (two House restarts).
+- **The first daily page** at 23:30 on Oct 3. It has no close economics until the House's own `economics` job runs at a
+  close (the first is Monday Oct 5's).
+- **Monday Oct 5:** the `preopen` job an hour before the open; the first session on the new evaluator; the no-forward-edge
+  count starts.
+- **The ladder's confirmation study,** then the research-class branches through review and the updater.
