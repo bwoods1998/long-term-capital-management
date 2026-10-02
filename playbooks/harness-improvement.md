@@ -496,22 +496,38 @@ load on the live path whenever the gate does: changes there are money path.
   arm by the predeclared effect with a one-sided cluster-bootstrap p <= 0.05 (units resampled whole)
   and enough denominator in each arm; every secondary and guard metric, the cost ones included, must
   not worsen beyond its tolerance, judged on the same bootstrap rather than its point estimate
-  (`GUARD_ALPHA`, `GUARD_BETA`): a check fails when its worsening beyond its tolerance is significant
-  (one-sided p <= 0.10) or, when it has a tolerance, when more than 20% of the replicates are worse
-  than twice it, so a canary too thin to rule out a gross harm retains nothing; a zero-tolerance
-  check fails only on a significant worsening. On the point estimate a harmless change failed at
-  least one check in about 80% of windows, while a real harm of twice a guard's tolerance still passed
-  in a third of them (the lanestats study, Oct 1 2026: 1-2% false retention with no effect, at
-  most about 5% retention of a change that harms one guard by twice its tolerance). A unit that held
-  at least a quarter of a check's events in the capture (`DOMINANT_SHARE`: an already-broken family)
-  sits out both arms with the motivating units, and the research lane's cycle-error guard tolerates
-  half a point of cycles absolutely, as its sibling rate guards do. The research
-  canary holds half the families for twelve hours (a quarter for six hours reached the 200-run floor
-  in 8% of windows at the night pace of about 120 Train runs an hour). The population guards
-  (research dollars with no family, which no arm can carry) compare the window with the capture on
-  the point estimate; the memory lane's canary arm must keep its share of births. A supported change sets the gate to `retained`; a failed one flips it to
-  `reverted` (the old behavior at the next read, within 30 seconds, with no deploy); too little
-  activity also flips it back, with no second look.
+  (`GUARD_ALPHA`, `GUARD_BETA`, `GUARD_GROSS`): a check fails when its worsening beyond its
+  tolerance is significant (one-sided p <= 0.10), or when more than 20% of the replicates are worse
+  than its gross band, so a canary too thin to rule out a gross harm retains nothing. The gross band
+  is twice the tolerance; a zero-tolerance check ("must not worsen": the research lane's
+  `gym_seconds_wasted_per_birth`, the memory lane's `validation_attempts_per_usd`) has no twice, and
+  its band is a relative worsening of 25%. A unit that held at least a quarter of a check's events
+  in the capture (`DOMINANT_SHARE`: an already-broken family) sits out both arms with the motivating
+  units; only a count of events names one, never an amount such as Gym seconds or dollars
+  (`AMOUNTS`). The research lane's cycle-error guard tolerates half a point of cycles absolutely, as
+  its sibling rate guards do, and its canary holds half the families for twelve hours (a quarter for
+  six hours reached the 200-run floor in 8% of windows at the night pace of about 120 Train runs an
+  hour: the lanestats study, Oct 1 2026). Operating characteristics, re-simulated on this code
+  (PR #481: the study's window generator driving `retention()`; research at 50%/12 h with the floor
+  and the exclusion, at 120 / 240 Train runs an hour; 600-3,000 windows a cell, Monte-Carlo SE 0.2-2
+  points): with no effect a change is retained 3.0% / 3.6% of the time; a true 1x / 2x benefit
+  17.0% / 22.6% and 37.3% / 42.8%; a 1x benefit that harms one guard by twice its tolerance at most
+  6.6% / 10.1% (`zero_trade_ok_rate`: at the 10% bound, not below it, at 240 an hour); a 1x benefit
+  that worsens the zero-tolerance secondary by 50%, 3.7% / 3.4% (by 25%: 7.9% / 8.1%). Given that
+  the primary passes, at least one check still fails in 43% / 35% of no-effect windows (the point
+  estimate: 36% / 33%; SE about 7 points), so the bootstrap rule does not remove false failures at
+  this configuration. Against the point estimate on the same windows its own gain is mainly the
+  worst guard's escape (12.3% -> 10.1% at 240 an hour), for 1-3 points of power; the power over the
+  old canary (its point estimate at 25%/6 h retained a true 1x benefit 1.5% / 15.0% of the time)
+  comes from the 50%/12 h window and the cycle-error floor. The harm bound holds at a 1x benefit
+  only: with a 2x benefit a 2x zero-trade harm is retained 13.2% / 17.0%. The memory lane's 12-hour
+  rebirth canary retains 0.8% with no effect and 3.3% of a true 1x benefit (4.9% and 13.3% with no
+  gross band): its secondary, about a dozen Validation runs a window, seldom rules out a 25% fall.
+  The population guards (research dollars with no family, which no arm can carry) compare the window
+  with the capture on the point estimate; the memory lane's canary arm must keep its share of
+  births. A supported change sets the gate to `retained`; a failed one flips it to `reverted` (the
+  old behavior at the next read, within 30 seconds, with no deploy); too little activity also flips
+  it back, with no second look.
 - Window modes (data, execution): the window after the watchdog's promotion against a fresh control
   window of the same length that ends before the deploy began and starts after the capture's window
   (the capture was chosen for being bad; comparing with it would favor retention). House-wide counts

@@ -26,23 +26,32 @@ Under the freeze (Oct 1, "The freeze"), a change to `league/live` or `league/gym
 and waiting for a release:
 
 - **The canary's retention rule judges guards on the bootstrap, not the point estimate** (branch `lanes/retention-guard-rule`;
-  `league/swarm/harness_lanes.py`, `playbooks/harness-improvement.md`, new `league/tests/test_harness_guard_rule.py`). The
-  lanestats study (Oct 1, operator-only simulation on the 24 h capture's per-family tallies, reproducing the base
+  `league/swarm/harness_lanes.py`, `playbooks/harness-improvement.md`, new `league/tests/test_harness_guard_rule.py`).
+  The lanestats study (Oct 1, operator-only simulation on the 24 h capture's per-family tallies, reproducing the base
   `retention()` on 24 of 24 draws) found the old rule defective both ways: with no effect at least one guard failed in
-  81-86% of windows (tolerance/noise 0.06-1.0), and a real harm of twice a guard's tolerance was still retained up to 12%
-  of the time; the research canary (25% of families, 6 h) also ended `insufficient_activity` in 93% of windows at the
-  night pace. Now, in arms mode, a check fails when its worsening beyond tolerance is significant (one-sided p <= 0.10,
-  `GUARD_ALPHA`) or, with a tolerance, when more than 20% of replicates are worse than twice it (`GUARD_BETA`); the
-  research canary holds 50% of families for 12 h; `cycle_error_rate` gets an absolute tolerance of 0.005 like its
-  sibling rate guards; a unit that held >= 25% of a lower-is-better check's events in the capture (>= 20 events) sits
-  out both arms, chosen before the arms exist; `binomial_low` no longer overflows past ~1,040 births. Unchanged: every
-  primary metric, `min_effect`, the primary alpha, every guard (none removed), population guards, window lanes. Simulated
-  (research, 50%/12 h): false retention with no effect 1.5-3.5%; retention of a 1x-benefit change that harms one guard by
-  2x its tolerance <= 9.3%; retention of a true 1x / 2x benefit 19-21% / 37-46% (old rule at night pace: 1.3% / 2%).
-  Also: `Researcher.guarded`, `retire_guard` and `retire_guard_days` join the research lane's frozen symbols (the H1
-  review's finding 5). The rule and lane hashes move: every registered candidate is re-captured on this release.
-  Research-class (not on the live path). To verify after the deploy: `measure` + `rank` on the new release register
-  fresh keys; the research brief's canary reads fraction 0.5, 43,200 s.
+  81-86% of windows (tolerance/noise 0.06-1.0), and a real harm of twice a guard's tolerance was still retained up to
+  12% of the time; the research canary (25% of families, 6 h) also ended `insufficient_activity` in 93% of windows at
+  the night pace. Now, in arms mode, a check fails when its worsening beyond tolerance is significant (one-sided p <=
+  0.10, `GUARD_ALPHA`) or when more than 20% of replicates are worse than its gross band (`GUARD_BETA`): twice its
+  tolerance, or, for a zero-tolerance check, a relative 25% (`GUARD_GROSS`; without it a 50% worsening of
+  `gym_seconds_wasted_per_birth` was retained 14-15% of the time, the #481 review's finding 2); the research canary
+  holds 50% of families for 12 h; `cycle_error_rate` gets an absolute tolerance of 0.005 like its sibling rate guards; a
+  unit that held >= 25% of a lower-is-better check's events in the capture (>= 20 events; an event count only, never
+  seconds or dollars, `AMOUNTS`) sits out both arms, chosen before the arms exist; `binomial_low` no longer overflows
+  from 1,030 births. Unchanged: every primary metric, `min_effect`, the primary alpha, every guard (none removed),
+  population guards, window lanes. Re-simulated on the final code (the review's simulator driving this `retention()`;
+  research 50%/12 h with the floor and the exclusion; 120 / 240 Train runs an hour; 600-3,000 windows a cell, SE 0.2-2
+  points): no effect retained 3.0% / 3.6%; a true 1x / 2x benefit 17.0% / 22.6% and 37.3% / 42.8% (the old rule at 25% /
+  6 h: 1.5% / 15.0% and 2.2% / 32.8%); a 1x benefit that harms one guard by 2x its tolerance at most 6.6% / 10.1%
+  (`zero_trade_ok_rate`, at the 10% bound at 240 an hour; with a 2x benefit 13.2% / 17.0%); a 1x benefit that worsens
+  the zero-tolerance secondary by 50%, 3.7% / 3.4%. Against the point estimate on the same windows, the bootstrap rule's
+  own gain is mainly that worst guard's escape (12.3% -> 10.1% at 240 an hour), for 1-3 points of power; the power comes
+  from the 50%/12 h window and the cycle-error floor. The memory lane's 12 h rebirth canary: 0.8% with no effect, 3.3%
+  at a true 1x benefit (4.9% / 13.3% without the gross band; its secondary seldom rules out a 25% fall at 12 h). Also:
+  `Researcher.guarded`, `retire_guard` and `retire_guard_days` join the research lane's frozen symbols (the H1 review's
+  finding 5). The rule and lane hashes move: every registered candidate is re-captured on this release. Research-class
+  (not on the live path). To verify after the deploy: `measure` + `rank` on the new release register fresh keys; the
+  research brief's canary reads fraction 0.5, 43,200 s.
 
 ## 2026-10-01
 

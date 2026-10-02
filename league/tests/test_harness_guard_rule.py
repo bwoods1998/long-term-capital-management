@@ -1,12 +1,13 @@
 """The arms canary's guard rule (the lanestats study, Oct 1 2026): a secondary or guard check is judged on the cluster
 bootstrap, not on its point estimate. It fails on a significant worsening beyond its tolerance (`GUARD_ALPHA`) or when
-the canary cannot rule out a worsening of twice its tolerance (`GUARD_BETA`); a zero-tolerance check only on a
-significant worsening; a population guard, a group count and the window lanes keep the point estimate."""
+the canary cannot rule out a gross harm (`GUARD_BETA`): twice its tolerance, or for a zero-tolerance check a relative
+`GUARD_GROSS`; a population guard, a group count and the window lanes keep the point estimate."""
 
 from __future__ import annotations
 
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from league.swarm import harness_lanes as lanes
 
@@ -31,9 +32,10 @@ def check(result, name):
 
 class GuardRule(unittest.TestCase):
     def test_constants_are_pinned(self):
-        self.assertEqual((lanes.GUARD_ALPHA, lanes.GUARD_BETA), (0.10, 0.20))
-        self.assertIn("GUARD_ALPHA", lanes.RULE_SYMBOLS["league/swarm/harness_lanes.py"], "a change voids open canaries")
-        self.assertIn("tolerated", lanes.RULE_SYMBOLS["league/swarm/harness_lanes.py"])
+        self.assertEqual((lanes.GUARD_ALPHA, lanes.GUARD_BETA, lanes.GUARD_GROSS), (0.10, 0.20, 0.25))
+        rules = lanes.RULE_SYMBOLS["league/swarm/harness_lanes.py"]
+        for name in ("GUARD_ALPHA", "GUARD_GROSS", "tolerated", "AMOUNTS", "DOMINANT_SHARE"):
+            self.assertIn(name, rules, "a change voids open canaries")
 
     def test_composition_noise_past_the_tolerance_is_no_breach(self):
         # 40 families a side, the canary's zero-trade share 11% above the control's on the point estimate (beyond the
@@ -67,17 +69,44 @@ class GuardRule(unittest.TestCase):
         self.assertFalse(row["ok"])
         self.assertEqual(out["decision"], "revert_recommended")
 
-    def test_a_zero_tolerance_check_fails_only_on_a_significant_worsening(self):
-        noisy = lanes.retention(RESEARCH, DQ, families(40, "t", dq=1, wasted=(0, 100, 200, 300, 500)),
-                                families(40, "c", dq=4, wasted=(0, 100, 200, 300, 400)), seed="s")
+    def test_a_zero_tolerance_check_fails_on_a_significant_or_a_gross_worsening(self):
+        control = families(40, "c", dq=4, wasted=(0, 100, 200, 300, 400))
+        noisy = lanes.retention(RESEARCH, DQ, families(40, "t", dq=1, wasted=(0, 100, 200, 300, 450)), control,
+                                seed="s")
         row = check(noisy, WASTED.name)
-        self.assertFalse(row["point_ok"], "10% worse on the point estimate, against a tolerance of 0")
-        self.assertTrue(row["ok"], "with no tolerance there is no twice-the-tolerance bound: only significance")
+        self.assertFalse(row["point_ok"], "5% worse on the point estimate, against a tolerance of 0")
+        self.assertGreater(row["harm_p"], lanes.GUARD_ALPHA)
+        self.assertLessEqual(row["beyond_twice"], lanes.GUARD_BETA, "a worsening beyond GUARD_GROSS is ruled out")
+        self.assertTrue(row["ok"])
         self.assertEqual(noisy["decision"], "retained", noisy)
-        worse = lanes.retention(RESEARCH, DQ, families(40, "t", dq=1, wasted=(300, 400, 500, 600)),
-                                families(40, "c", dq=4, wasted=(0, 100, 200, 300, 400)), seed="s")
+        worse = lanes.retention(RESEARCH, DQ, families(40, "t", dq=1, wasted=(300, 400, 500, 600)), control, seed="s")
         self.assertFalse(check(worse, WASTED.name)["ok"])
         self.assertEqual(worse["decision"], "revert_recommended")
+        # 50% worse on the point estimate, carried by one family in five: not significant, but the canary cannot rule
+        # out a worsening beyond GUARD_GROSS (the #481 review, finding 2: with no band this was retained).
+        gross = lanes.retention(RESEARCH, DQ, families(40, "t", dq=1, wasted=(0, 0, 0, 0, 1500)), control, seed="s")
+        row = check(gross, WASTED.name)
+        self.assertLessEqual(gross["primary"]["p_value"], 0.05)
+        self.assertGreater(row["harm_p"], lanes.GUARD_ALPHA, "a significance test alone would pass it")
+        self.assertGreater(row["beyond_twice"], lanes.GUARD_BETA)
+        self.assertFalse(row["ok"])
+        self.assertEqual(gross["decision"], "revert_recommended")
+
+    def test_the_gross_band_is_twice_the_tolerance_or_guard_gross_without_one(self):
+        t = families(30, "t", dq=1, zero=(0, 3, 6, 9), wasted=(0, 0, 0, 900))
+        c = families(30, "c", dq=4, zero=(0, 2, 4, 6), wasted=(0, 100, 200, 300))
+        rows = {}
+        for g in (0.10, lanes.GUARD_GROSS, 5.0):
+            with patch.object(lanes, "GUARD_GROSS", g):
+                rows[g] = {m.name: lanes.compare(m, t, c, seed="s", guard=True) for m in (WASTED, ZERO_TRADE)}
+        narrow, default, wide = (rows[g][WASTED.name] for g in (0.10, lanes.GUARD_GROSS, 5.0))
+        self.assertEqual({row[ZERO_TRADE.name]["beyond_twice"] for row in rows.values()},
+                         {rows[0.10][ZERO_TRADE.name]["beyond_twice"]},
+                         "a check with a tolerance keeps twice it, whatever GUARD_GROSS is")
+        self.assertEqual(narrow["harm_p"], default["harm_p"], "the band moves only the gross share")
+        self.assertGreater(narrow["beyond_twice"], default["beyond_twice"])
+        self.assertGreater(default["beyond_twice"], wide["beyond_twice"])
+        self.assertEqual(default, lanes.compare(WASTED, t, c, seed="s", guard=True))
 
     def test_population_guards_and_window_lanes_keep_the_point_estimate(self):
         out = lanes.retention(RESEARCH, DQ, families(40, "t", dq=1), families(40, "c", dq=4), seed="s",
@@ -108,6 +137,24 @@ class GuardRule(unittest.TestCase):
                                             fraction=0.5, exclude=lanes.motivating_units("research", capture))
         self.assertNotIn("broken", {**treated, **control})
 
+    def test_an_amount_names_no_outlier(self):
+        # The family that wasted most of the capture's Gym seconds is the primary's most informative unit, and twenty
+        # seconds are not twenty events: only a check whose numerator counts events names an outlier (#481, finding 6).
+        units = {f"f{k}": {"cycles": 50, "cycle_errors": 1 if k < 10 else 0, "births": 1, "dq_runs": 2,
+                           "wasted_gym_seconds": 100.0} for k in range(40)}
+        units["slow"] = {"cycles": 50, "cycle_errors": 0, "births": 1, "dq_runs": 40, "wasted_gym_seconds": 9000.0}
+        units["broken"] = {"cycles": 56, "cycle_errors": 53}
+        self.assertEqual(lanes.motivating_units("research", {"units": units}), ["broken"])
+        self.assertIn(WASTED.numerator, lanes.AMOUNTS)
+        # Every amount a lane metric names is listed: a field in seconds, dollars or hours that is missing would be
+        # counted as events.
+        fields = {f for lane in lanes.LANES.values()
+                  for m in [x for b in lane.bottlenecks for x in (b.metric, *b.secondary)] + list(lane.guards)
+                  + list(lane.population_guards) for f in (m.numerator, m.denominator)}
+        amounts = {f for f in fields if f.endswith(("_seconds", "_usd")) or f == "hours"}
+        self.assertTrue(amounts)
+        self.assertLessEqual(amounts, set(lanes.AMOUNTS))
+
     def test_cycle_errors_have_an_absolute_floor(self):
         cycle_errors = next(m for m in RESEARCH.guards if m.name == "cycle_error_rate")
         self.assertEqual((cycle_errors.min_effect, cycle_errors.abs_tolerance), (0.20, 0.005))
@@ -115,10 +162,12 @@ class GuardRule(unittest.TestCase):
         self.assertFalse(lanes.tolerated(cycle_errors, 0.011, 0.005))
 
     def test_the_birth_balance_survives_a_large_window(self):
-        # math.comb(1100, 550) is no float: the old terms raised OverflowError past about 1,040 births.
+        # math.comb(1100, 550) is no float: the old terms raised OverflowError from 1,030 births.
         self.assertAlmostEqual(lanes.binomial_low(3, 10, 0.5), 176 / 1024, places=12)
         self.assertEqual((lanes.binomial_low(4, 4, 1.0), lanes.binomial_low(3, 4, 1.0), lanes.binomial_low(0, 9, 0.0)),
                          (1.0, 0.0, 1.0))
+        self.assertEqual([lanes.binomial_low(-1, n, p) for n, p in ((9, 0.0), (9, 0.3), (9, 1.0), (0, 0.5))], [0.0] * 4,
+                         "P(X <= -1) is 0 at every p, the p = 0 edge included")
         self.assertAlmostEqual(lanes.binomial_low(550, 1100, 0.5), 0.5 + 0.5 * lanes.binomial_low(550, 1100, 0.5)
                                - 0.5 * lanes.binomial_low(549, 1100, 0.5), places=9)
         self.assertLess(lanes.binomial_low(450, 1100, 0.5), 1e-9)
@@ -161,10 +210,6 @@ class GuardRule(unittest.TestCase):
         self.assertTrue(lanes.tolerated(ok_per_usd, 81.0, 100.0, 2.0))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class FrozenSymbolsExist(unittest.TestCase):
     """Every frozen qualname resolves in its file: a typo would silently unfreeze it (the #481 review, follow-up 2)."""
 
@@ -193,3 +238,7 @@ class FrozenSymbolsExist(unittest.TestCase):
         frozen = set(lanes.FROZEN_SYMBOLS["league/swarm/researcher.py"])
         for name in ("Researcher.guarded", "retire_guard", "RETIRE_GUARD_DAYS", "validation_refuted", "record_verdict"):
             self.assertIn(name, frozen)
+
+
+if __name__ == "__main__":
+    unittest.main()
