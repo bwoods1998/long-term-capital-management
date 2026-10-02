@@ -1854,9 +1854,16 @@ prescribes this variant, not dropping those tags from the verdict list and not `
   exhausted cell. A settled birth is a retired family or one that already holds a drift-passing eligible Train run. A
   family still researching without a pass is pending, and one whose eligible runs all predate the drift figures is
   unknown; neither counts. The budgets (`max_rebirths_per_cell` 3, `max_rebirths_per_row` 2, 7 days), the matching,
-  `card_rebirth` "refuse", lineage and card completeness are unchanged. `claimable_rows` lists, for each cell where a
-  claim can be needed and the cell has rebirth room, the newest rows that still have row room, each with the inputs it
-  read.
+  `card_rebirth` "refuse" and card completeness are unchanged. **Lineage is not unchanged when `cell_yield` is on**
+  (the H2 review, F1-F2): an open-cell birth on a slice its matched self-refuted or drift rows did not search is born as
+  a fresh lineage with its own deflated-Sharpe N and look ration, where the card check used to refuse it or link a prior
+  (a probe on the Oct 1 extract: 31 of 33 verbatim restatements across root sets and structures born as fresh lineages
+  with the setting on, 0 of 34 with it off); a paraphrase on the same slice counts only the slice's newest dead lineage
+  of each type; and on the Oct 1 extract every cell is open, while a barren cell reopens within the lookback. This
+  widens the cross-slice escape from the deflated Sharpe's N that the edge study's critique flagged as an owner D2
+  item, so switching `cell_yield` on is the owner's decision. `claimable_rows` alone changes no lineage: it lists, for
+  each cell where a claim can be needed and the cell has rebirth room, the newest rows that still have row room, each
+  with the inputs it read, so a valid claim (which links its lineage) can name one.
 - **Expected effect, from the edge study's Oct 1 12:59Z extract (not live).** None of the 127 classified cells would
   be exhausted. The lowest upper bounds were `trend_momentum / directional / days_4_10` (14 passes in 156 settled
   births, 0.145) and two cells at 0 in 19 (0.168). Switching on therefore reopens the productive cells now. The guard

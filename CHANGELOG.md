@@ -55,6 +55,9 @@ since and waiting for a release:
 ## 2026-10-01
 
 ### 20:35Z, the H1 release: House release `20261001T203426Z-6fa69bfcda55` (main `665a9e8d`; PRs #475, #476, #477)
+  With `cell_yield` on, an open-cell restatement on another slice is born as a fresh lineage (its own deflated-Sharpe N):
+  switching it on is the owner's decision; `claimable_rows` alone changes no lineage. Fixes from the reviews: the yield
+  reading is read before its error flag (E1); a non-finite `claimable_rows` is off, not an error (E2).
 
 - **Contents.** No retire while the best Train version awaits validation (H1, #475); the research lane's held-out pool
   pin after the operator's rotation r8 (#476, `league/swarm/harness_lanes.py`: the research lane's hash moves, so every

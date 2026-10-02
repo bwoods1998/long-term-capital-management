@@ -354,7 +354,7 @@ class TheRequest(YieldCase):
         self.assertNotIn("claimable", index.cells(claimable=2)[0])
         self.settings["architect"].update(claimable_rows=99)
         self.assertEqual(self.arch().claimable_rows(), 12)
-        for raw in (0, -1, 2.5, True, "3", None):
+        for raw in (0, -1, 2.5, True, "3", None, float("inf"), float("-inf"), float("nan"), 1e309):
             self.settings["architect"].update(claimable_rows=raw)
             self.assertEqual(self.arch().claimable_rows(), 0, raw)
 

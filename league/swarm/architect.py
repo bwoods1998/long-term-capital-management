@@ -131,6 +131,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import time
 import unicodedata
@@ -1530,7 +1531,7 @@ class Architect:
         where a claim can be needed and the cell has rebirth room (`cards.RebirthIndex.cells`), at most
         `CLAIMABLE_ROWS_MAX`; anything but a whole number above 0 is off."""
         raw = self.cfg.get("claimable_rows")
-        if not isinstance(raw, (int, float)) or isinstance(raw, bool) or raw != raw or raw < 1 or raw != int(raw):
+        if not isinstance(raw, (int, float)) or isinstance(raw, bool) or not math.isfinite(raw) or raw < 1 or raw != int(raw):
             return 0
         return min(int(raw), CLAIMABLE_ROWS_MAX)
 
@@ -1551,7 +1552,10 @@ class Architect:
                 if index.yield_cfg is not None:
                     extra += YIELD_CELLS_NOTE
                     # THE CELL'S YIELD: the pass's admission reads the cells as its request showed them (`run`).
-                    self.pass_yields = index.yields if index.yield_error is None else None
+                    # Read the yields first: `yields` computes them and may set `yield_error`; checking the flag
+                    # before the read saw no error and passed an empty, failed reading as error-free (review A, E1).
+                    yields = index.yields
+                    self.pass_yields = yields if index.yield_error is None else None
                 if claimable:
                     extra += CLAIMABLE_NOTE
             if cells:
