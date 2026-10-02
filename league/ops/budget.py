@@ -80,8 +80,12 @@ FLOOR_SPLIT = {"sail": 0.6, "claude": 0.4}
 #: The share of trailing realized profit research may spend, and the window it is read over (calendar days).
 PROFIT_SHARE = 0.5
 P30_DAYS = 30
-#: The close economics' p30 is used only while its cutoff is this fresh (a missed close falls back to the book).
-P30_FRESH_SECONDS = 36 * 3600
+#: The close economics' p30 is used while its cutoff is the latest session close (`economics_fresh`): no session closed
+#: after it, other than one whose own economics may still be running (closed less than `ECONOMICS_LAG_SECONDS` ago:
+#: the job's three-hour grace and its half-hour wall). Measured in sessions, not hours, so a weekend or a holiday keeps
+#: Friday's close fresh; a missed close falls back to the book. Without a calendar, `P30_FRESH_SECONDS` of wall time.
+ECONOMICS_LAG_SECONDS = 3 * 3600 + 1800
+P30_FRESH_SECONDS = 4 * 86400
 #: Dollars on each meter research never spends.
 RESERVE_USD = {"sail": 10.0, "claude": 5.0}
 #: The no-forward-edge stop: this many sessions closed since `EDGE_START` (or the last Probe promotion) without one.
@@ -476,6 +480,28 @@ def book_p30(root: str | Path, now: float, *, days: int = P30_DAYS) -> tuple[flo
     return float(round(total, 2)), f"the live book: {len(rows)} closed positions, {note}"
 
 
+def economics_fresh(cutoff: float, now: float) -> bool:
+    """The close economics at `cutoff` is the latest one there should be at `now`: no NYSE session closed after it (a
+    minute's slack) and at least `ECONOMICS_LAG_SECONDS` before `now`."""
+    if not 0 <= now - cutoff:
+        return False
+    if now - cutoff > 14 * 86400:
+        return False
+    try:
+        from ltcm.data import us_equity_session
+
+        day, end = _ny_day(cutoff), _ny_day(now)
+        while day <= end:
+            session = us_equity_session(day)
+            closed = _epoch(session.close_at) if session is not None else None
+            if closed is not None and cutoff + 60 < closed <= now - ECONOMICS_LAG_SECONDS:
+                return False
+            day += dt.timedelta(days=1)
+        return True
+    except Exception:  # noqa: BLE001 - without a calendar, wall time decides
+        return now - cutoff <= P30_FRESH_SECONDS
+
+
 def _p30(root: Path, now: float, errors: list[str]) -> tuple[float | None, str]:
     try:
         from . import economics  # league/ops/economics.py (the close economics), when it is there
@@ -489,7 +515,7 @@ def _p30(root: Path, now: float, errors: list[str]) -> tuple[float | None, str]:
             value = _amount(((summary or {}).get("p30") or {}).get("usd"))
             if summary is None:
                 pass  # no close yet (a new House): the book's own read is the source, not an error
-            elif cutoff is None or not (0 <= now - cutoff <= P30_FRESH_SECONDS):
+            elif cutoff is None or not economics_fresh(cutoff, now):
                 errors.append("the close economics is stale: the live book's own read is used")
             elif value is not None:
                 return value, "league.ops.economics.p30"
