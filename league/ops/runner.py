@@ -152,7 +152,7 @@ class Ops:
         for due_at, job, kind in self.due(now, settings):
             due_iso = S.iso(due_at)
             if kind == "skip":
-                why = (f"switched off in ops.json" if not self._enabled(job, settings)
+                why = ("switched off in ops.json" if not self._enabled(job, settings)
                        else f"{job.module} is not in this release ({job.owner})")
                 if self.store.run(job.name, due_iso) is None:
                     self.store.record(job.name, due_iso, "skipped", S.iso(now), summary={"why": why})

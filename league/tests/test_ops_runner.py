@@ -248,6 +248,34 @@ class Child(unittest.TestCase):
         self.assertFalse(got["big"], "a 400 MB allocation passed a 64 MB headroom")
         self.assertEqual(got["limits"]["cpu_seconds"], 30)
 
+    def test_a_real_child_runs_with_no_secret_and_its_failure_is_the_receipt(self):
+        """The runner's own Popen: the child starts in its own session, reads no secret it was not given (the test
+        gives none, so the clock job cannot reach any gateway), and its result file becomes the receipt."""
+        import time
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {}, clear=False):
+            for name in ("GATEWAY_TOKEN", "SAIL_API_KEY"):
+                os.environ.pop(name, None)
+            base = Path(tmp)
+            clock = [time.time()]
+            ops = Ops(base / "state", base=base, release=REPO, clock=lambda: clock[0],
+                      jobs=(Job("clock", "league.ops.clock", (S.at_start(),), grace=600, cpu=60, wall=120),))
+            self.addCleanup(ops.close)
+            self.assertEqual(ops.tick(None)["started"], "clock")
+            pid = ops.child["pid"]
+            self.assertEqual(os.getpgid(pid), pid)
+            deadline = time.time() + 60
+            while ops.child is not None and time.time() < deadline:
+                time.sleep(0.2)
+                clock[0] = time.time()
+                ops.tick(None)
+            self.assertIsNone(ops.child, "the child did not finish")
+            row = read_runs(base / "state", "2000", "2100")[0]
+            self.assertEqual(row["status"], "failed")
+            self.assertIn("GATEWAY_TOKEN is not set", row["error"])
+            self.assertTrue((base / "state" / "ops" / "logs" / "clock.log").exists())
+
     def test_run_job_skips_an_absent_module_and_fails_a_raising_job(self):
         from league.ops.__main__ import run_job
         from league.ops.context import Context
