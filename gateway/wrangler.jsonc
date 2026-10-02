@@ -12,7 +12,8 @@
   //   OPENAI_SECRET_KEY                           /v1/frontier/*
   //   CLAUDE_API_KEY                              /v1/claude/* (the Anthropic key; CLAUDE_USD below meters it)
   //   TYPE_SAFE_TOKEN                             the bounded Jev shadow pilot
-  //   GITHUB_TOKEN (fine-grained, this one repository, Contents and Pull requests read/write)
+  //   GITHUB_TOKEN (fine-grained, this one repository, Contents and Pull requests read/write; V3-A: the desk's docs
+  //                commits to main and the engineer's merges use it too, and read Actions runs and jobs, public here)
   //   GATEWAY_TOKEN                               the runtime's bearer token, 32+ characters
   //   GATEWAY_ADMIN_TOKEN                         the owner's; the only token /v1/unkill accepts
   //   SAIL_API_KEY                                the watchdog; without it the watchdog only reports
@@ -151,7 +152,11 @@
     "CLAUDE_MODELS": "{\"claude-opus-5-5\":{\"input\":4,\"cache_write\":5,\"cache_read\":0.2,\"output\":20,\"geo\":{\"us\":1.1}},\"claude-sonnet-5\":{\"input\":2,\"cache_write\":2.5,\"cache_read\":0.2,\"output\":10,\"geo\":{\"us\":1.1}},\"claude-sonnet-5-5\":{\"input\":2,\"cache_write\":2.5,\"cache_read\":0.2,\"output\":10,\"geo\":{\"us\":1.1}}}",
     // Where the frontier model's proposals become pull requests, and how many may open in one
     // UTC day. The token that opens them is the secret GITHUB_TOKEN; without it the route is a
-    // 503. Nothing here merges: CI judges a pull request and a repository workflow merges it.
+    // 503. Since V3-A (LTCM v3, the owner's decision D5) the same token makes two more kinds of
+    // write, each walled in code, not here: POST /v1/github/docs commits one page under
+    // docs/runs/desk/ to main (at most 6 a New York day, lib/desk.mjs), and POST /v1/github/merge
+    // squash-merges an `engineer/` pull request on green checks.yml jobs and a recorded approve,
+    // touching no protected path (at most 2 a New York day, lib/merge.mjs, lib/protected.mjs).
     "GITHUB_REPO": "bwoods1998/long-term-capital-management",
     "GITHUB_MAX_PULLS_PER_DAY": "96",
     // Trade notices a day (one per live fill and settlement). Sept 17, 2026: 40 held the day's

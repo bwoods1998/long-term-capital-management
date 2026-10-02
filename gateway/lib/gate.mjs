@@ -17,6 +17,8 @@ import { iso } from './http.mjs';
 import * as typesafe from './typesafe.mjs';
 import { DAY_CAP as webFetchDayCap } from './fetch.mjs';
 import * as library from './library.mjs';
+import { DAY_ZONE, MERGES_PER_DAY } from './merge.mjs';
+import { DOCS_PER_DAY } from './desk.mjs';
 
 /** The one Gate instance. A single object is what makes a cap a cap and not a per-isolate guess. */
 export const GATE_OBJECT = 'gate-v1';
@@ -37,6 +39,23 @@ export const WEB_FETCH_KEY = 'web-fetch';
 export const LIBRARY_KEY = 'library-v1';
 //: Claude's funded meter (Sept 26, 2026, the swarm sprint): every call's cost or hold since the key was placed. Never reset.
 export const CLAUDE_KEY = 'claude-funded-v1';
+//: LTCM v3 (V3-A, WP8): the desk's docs commits and the engineer's merges, each a New York day's count and the last few;
+//: the reviewer's verdicts by pull request and exact head commit; the admin log (kill, unkill, every admin-token call).
+export const DOCS_KEY = 'github-docs-v1';
+export const MERGES_KEY = 'github-merges-v1';
+export const REVIEWS_KEY = 'github-reviews-v1';
+export const ADMIN_LOG_KEY = 'admin-log-v1';
+//: How many recent docs commits and merges the Gate keeps (and /v1/health shows); verdicts kept; admin entries kept.
+const RECENT = 20;
+const REVIEWS_KEPT = 200;
+const ADMIN_KEPT = 50;
+//: The admin log's entries /v1/health shows.
+export const ADMIN_SHOWN = 20;
+//: A funding notice's id is remembered this long (the House sends one per meter per ISO week; the gateway dedupes it
+//: for a week and a day), every other notice's 48 hours.
+const FUNDING_NOTICE_MS = 8 * 24 * 3600000;
+const NOTICE_MS = 48 * 3600000;
+const noticeKept = id => (typeof id === 'string' && /^funding/.test(id) ? FUNDING_NOTICE_MS : NOTICE_MS);
 
 const read = (store, key, fallback) => {
   const raw = store.get(key);
@@ -101,6 +120,36 @@ export function createGate({ store, env = {}, now = Date.now }) {
   const openOrdersCap = () => (maxLoss.maxDayOpenOrders < limits.maxDayOrders ? maxLoss.maxDayOpenOrders : limits.maxDayOrders);
 
   const killed = () => read(store, KILL_KEY, { on: false }).on === true;
+
+  /** The reviewer's verdicts (V3-A, WP8), oldest first; a row that does not read is none. */
+  const reviewRows = () => {
+    const entries = read(store, REVIEWS_KEY, {})?.entries;
+    return Array.isArray(entries) ? entries.filter(row => row && typeof row === 'object') : [];
+  };
+
+  /** One counted-a-day row (docs commits, merges; V3-A, WP8): today's count on New York's day and the last few. */
+  const slotRow = (key, at) => {
+    const row = read(store, key, {});
+    const day = tradingDay(at, DAY_ZONE);
+    return { day, count: row.day === day ? Number(row.count) || 0 : 0, next: Number(row.next) || 1,
+      recent: Array.isArray(row.recent) ? row.recent.slice(-RECENT) : [] };
+  };
+  const slotReserve = (key, cap, capName, noun, at, what) => {
+    const row = slotRow(key, at);
+    if (row.count + 1 > cap) return { ok: false, status: 429, cap: capName, error: `Today's cap of ${cap} ${noun} is already reached.` };
+    const id = row.next;
+    write(store, key, { day: row.day, count: row.count + 1, next: id + 1,
+      recent: [...row.recent, { id, at: iso(at), ...what, outcome: 'pending' }].slice(-RECENT) });
+    return { ok: true, day: row.day, id, count: row.count + 1 };
+  };
+  const slotSettle = (key, { day, id, outcome, at, extra }) => {
+    const row = slotRow(key, at);
+    const known = ['committed', 'merged', 'refused', 'unknown'].includes(outcome) ? outcome : 'unknown';
+    const giveBack = known === 'refused' && day === row.day && row.recent.some(entry => entry.id === id && entry.outcome === 'pending');
+    const recent = row.recent.map(entry => (entry.id === id ? { ...entry, outcome: known, ...extra } : entry));
+    write(store, key, { day: row.day, count: giveBack ? Math.max(0, row.count - 1) : row.count, next: row.next, recent });
+    return { ok: true, given_back: giveBack };
+  };
 
   /** The last reading of the real account's equity (`account.readAccountEquity`), or null. */
   const accountReading = () => read(store, account.ACCOUNT_EQUITY_KEY, null);
@@ -183,11 +232,55 @@ export function createGate({ store, env = {}, now = Date.now }) {
 
     killSwitch: () => killed(),
 
-    /** Engage or release the kill switch. Returns the new state. */
-    setKill(on, at = now()) {
+    /**
+     * Engage or release the kill switch. Returns the new state. With `who` (`{ caller, route, method }`, the router's)
+     * the change is written to the admin log too (V3-A, WP8): a release only once its entry is written (an entry that
+     * cannot be written releases nothing), an engage whatever the log does (stopping is never gated).
+     */
+    setKill(on, at = now(), who = null) {
       const state = { on: on === true, at: iso(at) };
+      const entry = who ? { caller: who.caller, action: on === true ? 'kill' : 'unkill', route: who.route, method: who.method, status: 200 } : null;
+      if (entry && !state.on) this.adminRecord({ ...entry, at });
       write(store, KILL_KEY, state);
+      if (entry && state.on) {
+        try {
+          this.adminRecord({ ...entry, at });
+        } catch {
+          // The switch is engaged; a log that cannot be written never undoes that.
+        }
+      }
       return state;
+    },
+
+    /**
+     * One admin-log entry (V3-A, WP8): `caller` is `admin` (the owner's GATEWAY_ADMIN_TOKEN), `runtime` (the House's
+     * GATEWAY_TOKEN) or `none` (no accepted token). A caller with no accepted token is counted, never listed, so a
+     * stranger cannot push the owner's entries out of the list. No token, header or body is ever written here.
+     */
+    adminRecord({ caller, action, route, method, status, at = now() }) {
+      const row = read(store, ADMIN_LOG_KEY, {});
+      const counts = { total: 0, kill: 0, unkill: 0, admin_token: 0, unauthorized: 0, ...(row.counts || {}) };
+      const who = ['admin', 'runtime'].includes(caller) ? caller : 'none';
+      const what = ['kill', 'unkill'].includes(action) ? action : 'call';
+      counts.total += 1;
+      if (who === 'none') counts.unauthorized += 1;
+      else if (what === 'kill' || what === 'unkill') counts[what] += 1;
+      if (who === 'admin') counts.admin_token += 1;
+      const entries = Array.isArray(row.entries) ? row.entries : [];
+      const entry = {
+        at: iso(at), caller: who, action: what,
+        route: String(route || '').replace(/[^A-Za-z0-9/_.:-]/g, '?').slice(0, 80), method: String(method || '').replace(/[^A-Z]/g, '').slice(0, 8),
+        status: Number.isInteger(status) ? status : null,
+      };
+      write(store, ADMIN_LOG_KEY, { counts, entries: who === 'none' ? entries.slice(-ADMIN_KEPT) : [...entries, entry].slice(-ADMIN_KEPT) });
+      return entry;
+    },
+
+    /** The admin log for /v1/health: the counts since the log began and the last ADMIN_SHOWN entries, newest first. */
+    adminLog() {
+      const row = read(store, ADMIN_LOG_KEY, {});
+      const counts = { total: 0, kill: 0, unkill: 0, admin_token: 0, unauthorized: 0, ...(row.counts || {}) };
+      return { counts, last: (Array.isArray(row.entries) ? row.entries : []).slice(-ADMIN_SHOWN).reverse() };
     },
 
     /**
@@ -610,6 +703,65 @@ export function createGate({ store, env = {}, now = Date.now }) {
     },
 
     /**
+     * The desk's docs commits (`docsReserve`, cap DOCS_PER_DAY) and the engineer's merges (`mergeReserve`, cap
+     * MERGES_PER_DAY), each counted on New York's day (V3-A, WP8). A reserve takes one of the day's places or refuses
+     * in the same step, so two at once cannot both take the last; its settle records what became of it, and gives the
+     * place back only when GitHub answered no (`refused`): an attempt nothing answered (`unknown`) may have committed
+     * or merged, so it stays counted.
+     */
+    docsToday(at = now()) { return slotRow(DOCS_KEY, at).count; },
+    docsReserve({ path = null, at = now() } = {}) {
+      return slotReserve(DOCS_KEY, DOCS_PER_DAY, 'docs_day', 'docs commits', at, { path: typeof path === 'string' ? path.slice(0, 120) : null });
+    },
+    docsSettle({ day, id, outcome, commit = null, at = now() } = {}) {
+      return slotSettle(DOCS_KEY, { day, id, outcome, at, extra: { commit: typeof commit === 'string' ? commit.slice(0, 64) : null } });
+    },
+    mergesToday(at = now()) { return slotRow(MERGES_KEY, at).count; },
+    mergeReserve({ pr = null, sha = null, at = now() } = {}) {
+      return slotReserve(MERGES_KEY, MERGES_PER_DAY, 'merge_day', 'merges', at, { pr, sha: typeof sha === 'string' ? sha.slice(0, 64) : null });
+    },
+    mergeSettle({ day, id, outcome, merge_sha = null, at = now() } = {}) {
+      return slotSettle(MERGES_KEY, { day, id, outcome, at, extra: { merge_sha: typeof merge_sha === 'string' ? merge_sha.slice(0, 64) : null } });
+    },
+
+    /**
+     * The reviewer's verdict on one pull request at one exact head commit (V3-A, WP8): `reject` when a reject is
+     * recorded (it is final for that commit), else `approve` when an approve is, else null.
+     */
+    reviewFor({ pr, sha } = {}) {
+      const rows = reviewRows().filter(row => row?.pr === pr && row?.sha === sha);
+      const reject = rows.find(row => row.verdict === 'reject');
+      const decided = reject || rows.find(row => row.verdict === 'approve');
+      return decided ? { verdict: decided.verdict, at: decided.at, reasons: decided.reasons } : { verdict: null };
+    },
+    /** Record a verdict. An approve after a reject of the same commit is refused; the same verdict again is a no-op. */
+    reviewRecord({ pr, sha, verdict, reasons = [], at = now() } = {}) {
+      const entries = reviewRows();
+      const held = this.reviewFor({ pr, sha });
+      if (held.verdict === 'reject' && verdict === 'approve') {
+        return { ok: false, status: 409, refused: 'review_rejected', error: 'That commit was rejected; a revision is a new commit, reviewed again.' };
+      }
+      if (held.verdict === verdict) return { ok: true, verdict, at: held.at, duplicate: true };
+      const entry = { pr, sha, verdict, reasons: reasons.map(reason => String(reason).slice(0, 1000)).slice(0, 20), at: iso(at) };
+      write(store, REVIEWS_KEY, { entries: [...entries, entry].slice(-REVIEWS_KEPT) });
+      return { ok: true, verdict, at: entry.at };
+    },
+
+    /** What /v1/health shows of the desk's docs commits, the engineer's merges and the reviews (V3-A, WP8). */
+    autonomyStatus(at = now()) {
+      const docs = slotRow(DOCS_KEY, at);
+      const merges = slotRow(MERGES_KEY, at);
+      const reviews = reviewRows();
+      return {
+        day: docs.day,
+        docs: { commits: docs.count, cap: DOCS_PER_DAY, recent: docs.recent.slice(-5).reverse() },
+        merges: { count: merges.count, cap: MERGES_PER_DAY, recent: merges.recent.slice(-5).reverse() },
+        reviews: { recorded: reviews.length, approve: reviews.filter(row => row.verdict === 'approve').length,
+          reject: reviews.filter(row => row.verdict === 'reject').length },
+      };
+    },
+
+    /**
      * Pages research read today through `/v1/web/fetch` (lib/fetch.mjs), the floor's UTC day: the
      * count, and by agent. `webFetchReserve` takes one of the day's `DAY_CAP` places or refuses, in
      * the same step. The kill switch is not consulted: a page moves no money.
@@ -761,14 +913,14 @@ export function createGate({ store, env = {}, now = Date.now }) {
       if (!id) return false;
       const row = read(store, NOTICES_KEY, {});
       const sent = row.delivered?.[id];
-      return Number.isFinite(sent) && at - sent >= 0 && at - sent < 48 * 3600000;
+      return Number.isFinite(sent) && at - sent >= 0 && at - sent < noticeKept(id);
     },
 
     recordNotice(at = now(), id = null) {
       if (this.noticeDelivered(id, at)) return this.noticesToday(at);
       const count = this.noticesToday(at) + 1;
       const row = read(store, NOTICES_KEY, {});
-      const delivered = Object.fromEntries(Object.entries(row.delivered || {}).filter(([, stamp]) => at - stamp < 48 * 3600000).slice(-2000));
+      const delivered = Object.fromEntries(Object.entries(row.delivered || {}).filter(([key, stamp]) => at - stamp < noticeKept(key)).slice(-2000));
       if (id) delivered[id] = at;
       write(store, NOTICES_KEY, { day: tradingDay(at, limits.timezone), count, delivered });
       return count;
@@ -868,7 +1020,20 @@ export function createGate({ store, env = {}, now = Date.now }) {
           run_out_at: sail.run_out_at ?? null,
         },
         alerts: read(store, ALERTS_KEY, {}),
+        // V3-A (WP8): the desk's docs commits, the engineer's merges and reviews, and the admin log. Each block is read
+        // under its own guard: a malformed row is that block's error, never a failed /v1/health (which the House reads
+        // as the kill switch engaged).
+        autonomy: guarded(() => this.autonomyStatus(at), 'autonomy'),
+        admin_log: guarded(() => this.adminLog(), 'admin log'),
       };
     },
   };
 }
+
+const guarded = (read, what) => {
+  try {
+    return read();
+  } catch {
+    return { error: `${what} status unreadable` };
+  }
+};

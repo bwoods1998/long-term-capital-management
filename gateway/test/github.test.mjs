@@ -25,7 +25,8 @@ test('each role writes under its own paths and nowhere else', () => {
     designer: ['league/game.json'],
     teacher: ['league/playbook/2026-09-19-favorites.md'],
   };
-  assert.deepEqual(Object.keys(github.ROLES), Object.keys(allowed));
+  // The engineer (V3-A) writes anywhere but the protected paths (test/merge.test.mjs), so it is not among the five.
+  assert.deepEqual(Object.keys(github.ROLES), [...Object.keys(allowed), 'engineer']);
   for (const [role, paths] of Object.entries(allowed)) {
     for (const path of paths) {
       assert.equal(github.pathRefusal(role, path), null, `${role} may write ${path}`);

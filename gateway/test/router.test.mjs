@@ -953,9 +953,13 @@ test('a proposal is refused before GitHub hears of it: the path by name, the res
 
   assert.equal((await call(ask('GET', '/v1/github/pr'), { settings: GITHUB })).response.status, 405);
   assert.equal((await call(ask('POST', '/v1/github/pr/41'), { settings: GITHUB })).response.status, 405);
-  // There is no merge route, and nothing else under /v1/github either.
-  for (const [method, path] of [['POST', '/v1/github/pr/41/merge'], ['PUT', '/v1/github/pr/41/merge'], ['POST', '/v1/github/merge'], ['GET', '/v1/github/pr/0'], ['GET', '/v1/github/pr/abc'], ['GET', '/v1/github/repos']]) {
+  // No merge route but the engineer's own (V3-A, POST /v1/github/merge: test/merge.test.mjs), and nothing else under
+  // /v1/github either.
+  for (const [method, path] of [['POST', '/v1/github/pr/41/merge'], ['PUT', '/v1/github/pr/41/merge'], ['POST', '/v1/github/merges'], ['GET', '/v1/github/pr/0'], ['GET', '/v1/github/pr/abc'], ['GET', '/v1/github/repos']]) {
     assert.equal((await call(ask(method, path), { settings: GITHUB, fetcher: hub.fetcher })).response.status, 404, `${method} ${path}`);
+  }
+  for (const path of ['/v1/github/merge', '/v1/github/review', '/v1/github/docs']) {
+    assert.equal((await call(ask('GET', path), { settings: GITHUB, fetcher: hub.fetcher })).response.status, 405, path);
   }
   assert.equal(hub.calls.length, 0);
 });
