@@ -1,3 +1,121 @@
 {
-  "_about": "Settings as code (league/swarm/settings.py, SETTINGS AS CODE): DEFAULTS < league/config.json swarm/gym < this file < <state>/swarm.json. Same shape as swarm.json; never `enabled` or `live` (the owner's switches stay in swarm.json and are ignored here). Its first content comes from the V3-A migration (scripts/settings_migrate.py)."
+  "_about": "Settings as code (league/swarm/settings.py, SETTINGS AS CODE): DEFAULTS < league/config.json swarm/gym < this file < <state>/swarm.json. Same shape as swarm.json; never `enabled` or `live` (the owner's switches stay in swarm.json and are ignored here). Its first content comes from the V3-A migration (scripts/settings_migrate.py).",
+  "architect": {
+    "claimable_rows": 4,
+    "every_seconds": 7200,
+    "max_output_tokens": 32000,
+    "max_rebirths_per_cell": 6,
+    "max_refill": 6,
+    "openai_model": null,
+    "refill_seconds": 1200,
+    "sail_effort": "high",
+    "sail_profile": "pro_asap",
+    "structures": [
+      "debit_vertical",
+      "long_single"
+    ]
+  },
+  "claude": {
+    "max_tokens": 32000,
+    "model": "claude-sonnet-5-5",
+    "role_effort": {
+      "architect": "medium"
+    },
+    "role_model": {
+      "audit": "claude-opus-5-5"
+    },
+    "role_usd_day": {
+      "architect": 0,
+      "diagnostician": 6,
+      "researcher": 0,
+      "review": 5,
+      "rewrite": 0,
+      "strategist": 6
+    },
+    "roles": [
+      "architect",
+      "audit",
+      "diagnostician",
+      "rewrite",
+      "review",
+      "researcher",
+      "strategist"
+    ],
+    "usd_cap": 263
+  },
+  "diagnostician": {
+    "enabled": false,
+    "family_hours": 3,
+    "min_validations": 2,
+    "near_miss_checks": 5,
+    "per_round": 6,
+    "usd_day": 60
+  },
+  "gate": {
+    "audit_openai_model": null,
+    "review_openai_model": null
+  },
+  "gym": {
+    "enabled": true,
+    "gate_checkpoint": "sbcp_a5e975a5-b087-4223-8412-2360bb68d87b",
+    "image_checkpoint": "sbcp_13c5a61d-e7e1-453d-8fad-8d3f997ac970",
+    "max_boxes": 1,
+    "roots": [
+      "SPY",
+      "QQQ",
+      "IWM",
+      "XSP",
+      "SPXW",
+      "TSLA",
+      "NVDA",
+      "TLT",
+      "AMD",
+      "SLV",
+      "AMZN",
+      "META",
+      "AAPL",
+      "PLTR",
+      "TQQQ",
+      "SMCI",
+      "MARA",
+      "GLD",
+      "TSM",
+      "MSFT",
+      "MU",
+      "BABA",
+      "SMH",
+      "GOOGL",
+      "SOXL"
+    ],
+    "start_boxes": 2,
+    "train_from": "2020-01-02",
+    "validation_split": 1
+  },
+  "population": {
+    "ceiling": 96,
+    "floor": 8,
+    "start": 16
+  },
+  "researcher": {
+    "claude_top": 0,
+    "dormant_cycles": 12,
+    "retire_idle_evaluations": 500,
+    "rewrite_min_hours": 6,
+    "rewrites_per_day": 1,
+    "sail_usd_per_hour": 0.25,
+    "stall_revisions": 10000,
+    "top_families": 0,
+    "top_profile": "pro_asap",
+    "usd_per_hour": 5
+  },
+  "strategist": {
+    "enabled": true,
+    "every_seconds": 86400,
+    "max_chars": 2000
+  },
+  "tournament": {
+    "fork_top": 0,
+    "retire_evaluations": 4000,
+    "retire_revisions": 200
+  }
 }
