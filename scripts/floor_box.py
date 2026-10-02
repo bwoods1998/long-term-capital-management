@@ -314,7 +314,7 @@ LEAGUE_HOSTS = (
     "api.hyperliquid.xyz",
     "futures.kraken.com",
     # The key-free data hosts the owner allowed on Sept 24, 2026 for the close-the-gaps run's
-    # recorders (docs/goals/LTCM_CLOSE_THE_GAPS.md, workstream I). Weather: Open-Meteo's forecast,
+    # recorders (archive/docs/goals/LTCM_CLOSE_THE_GAPS.md, workstream I). Weather: Open-Meteo's forecast,
     # ensemble and historical-forecast APIs, and the NWS API (the settlement authority's own
     # forecast; NWS and SEC ask for a User-Agent naming the requester and a contact address).
     # Earnings times: EDGAR full-text search and Nasdaq's calendar. Rates: SOFR and par yields.

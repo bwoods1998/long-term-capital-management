@@ -1,7 +1,7 @@
 # The league
 
 > **Legacy page (Sept 29, 2026).** This describes the league before the options overhaul of Sept 26,
-> 2026, and several documents it links to are not on main. For the options House read
+> 2026; the documents it links to are under [archive/](../archive/README.md). For the options House read
 > [the repository README](../README.md), [docs/design.md](../docs/design.md) and
 > [docs/operations.md](../docs/operations.md). The prune (#375) will retire this page.
 
@@ -10,23 +10,23 @@ agents, nets and sends their orders, scores them on a four-rung ladder, sizes th
 their evidence (the allocator, since Sept 23, 2026), pays them compute credits, retires them, and
 publishes all of it. It decides no trade. What the project is and how the game
 works are in [the repository README](../README.md); why each thing is the way it is is in
-[the build log](../docs/runs/2026-09-20-overnight-build.md). This page is for someone changing the
+[the build log](../archive/docs/runs/2026-09-20-overnight-build.md). This page is for someone changing the
 code.
 
 The active spending policy and experiment workflow are documented in
-[Phase one](../docs/phase-one.md). Production uses persistent campaign allowances; the legacy
+[Phase one](../archive/docs/phase-one.md). Production uses persistent campaign allowances; the legacy
 fourteen-day pacer remains only for compatibility and isolated fixtures.
 
-The latest execution record is [the north-star build](../docs/runs/2026-09-23-capital-ladder.md)
+The latest execution record is [the north-star build](../archive/docs/runs/2026-09-23-capital-ladder.md)
 (Sept 23, 2026: the allocator, sliced exits, the Alpha Lab, a tick that never blocks,
-profit-indexed compute and the open desks), after [Dynamism II](../docs/runs/2026-09-23-dynamism-ii.md)
-and the [Sept 22 rebuild](../docs/runs/2026-09-22-overnight-rebuild.md);
+profit-indexed compute and the open desks), after [Dynamism II](../archive/docs/runs/2026-09-23-dynamism-ii.md)
+and the [Sept 22 rebuild](../archive/docs/runs/2026-09-22-overnight-rebuild.md);
 [operations](../docs/operations.md) is the operator's page, with the switches. The
-[chief architect handoff](../docs/design/2026-09-20-chief-architect-handoff.md) describes the
+[chief architect handoff](../archive/docs/design/2026-09-20-chief-architect-handoff.md) describes the
 external spending broker and verifier still to be built. Jev, through the gateway's
-[Jev lane](../docs/design/2026-09-20-typesafe-pilot.md), is the House's cheap sensor for the
+[Jev lane](../archive/docs/design/2026-09-20-typesafe-pilot.md), is the House's cheap sensor for the
 research gate, triage, hypothesis links and exposure reports (`sensors.py`,
-[design](../docs/design/2026-09-22-jev-sensor.md)); its answers carry no order, promotion,
+[design](../archive/docs/design/2026-09-22-jev-sensor.md)); its answers carry no order, promotion,
 spending or merge authority.
 
 ## Design rules
@@ -79,11 +79,11 @@ spending or merge authority.
   even a rollback to an older release sees complete normal fill rows. Risk checks reserve earlier
   accepted intents in the same batch before considering later ones.
 
-The [persistent trading command](../docs/runs/2026-09-21-persistent-live-trading.md) enables the
+The [persistent trading command](../archive/docs/runs/2026-09-21-persistent-live-trading.md) enables the
 full earned ladder without a deadline, using the owner's fixed current-cash allocation and
 only unspent research allowance. Its default report mode and deployment do not activate it.
 
-The current [gate audit](../docs/runs/2026-09-21-game-gate-audit.md) documents the event-based
+The current [gate audit](../archive/docs/runs/2026-09-21-game-gate-audit.md) documents the event-based
 qualification path and prepared live-learning activation. `episodes.py` folds trusted cash and
 position receipts into completed, non-overlapping exposures. `live_pilot.py` records an explicit
 owner activation without changing the original campaign, commitments or deadline. Promotion

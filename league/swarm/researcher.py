@@ -195,10 +195,10 @@ ROOTS. A family holds one to five roots of the admitted list (`gym.roots`). A pr
 admitted roots changes the family's roots (a Gym family only); its validation and holdout runs use the version's own
 NEEDS roots (`needs_roots`).
 
-THE TOP TEN. The bandit's top `top_families` (10 by default) by weight run their cycles on `top_profile` (V4-Pro asap)
+THE TOP TEN. The top `top_families` (10 by default) by allocation share run their cycles on `top_profile` (V4-Pro asap)
 at `top_reasoning_effort` (low); the others on `profile`. The swarm's hourly pace governs every cycle alike.
 
-THE TOP BAND ON CLAUDE (Sept 29, 2026, the owner's decision: be bold with Claude Sonnet 5.5). The bandit's top
+THE TOP BAND ON CLAUDE (Sept 29, 2026, the owner's decision: be bold with Claude Sonnet 5.5). The top
 `claude_top` families by weight (12) run their cycles on the role's Claude model (`claude.role_model.researcher`, Claude
 Sonnet 5.5) at `claude_effort` (medium, Anthropic's advice for multistep tool use), streamed through the gateway
 (`ModelRouter.claude_turn`), while "researcher" is in `claude.roles`; the families closest to passing get the strongest
@@ -229,7 +229,7 @@ And a Claude call whose bill stays unknown (its whole hold booked: a cut stream,
 `claude_skipped`), so a slow day cannot spend the line on phantom holds.
 
 STALLS. Five revisions without a better Train score (`evidence.train_score`) buy ONE rewrite from a stronger
-model (`rewrite_profile`, DeepSeek-V4-Pro asap; Kimi-K3 balanced for the top ten families by the bandit's share;
+model (`rewrite_profile`, DeepSeek-V4-Pro asap; Kimi-K3 balanced for the top ten families by allocation share;
 Claude first once "rewrite" is in `claude.roles`, Sept 29), asked
 in the background (a cycle never waits for it) and run as the family's next cycle's Gym run; at most
 `rewrites_per_day` a family, `rewrite_min_hours` apart; then the counter starts again.
@@ -374,8 +374,8 @@ TOOLS: list[dict[str, Any]] = [
                     "is abandoned; retained in the private notebook and graveyard."}}, "required": ["reason"]}},
 ]
 
-#: A REVISE turn requires a run or a sweep (a REVISE always revises: `retire` is offered there only to a dead family,
-#: `idle_dead`, R4); a missing call fails and uses the normal backoff.
+#: A REVISE turn requires a run or a sweep (a REVISE always revises); `retire` joins it whenever the family may retire
+#: (`Researcher.can_retire`, on REVISE and READ alike: `Researcher.tools`); a missing call fails and uses the normal backoff.
 TOOLS_REVISE: list[dict[str, Any]] = [t for t in TOOLS if t["name"] in RUNS]
 #: A READ turn without `retire` (the family may not retire now: `Researcher.can_retire`).
 TOOLS_READ: list[dict[str, Any]] = TOOLS[:-1]
@@ -938,7 +938,8 @@ def idle_dead(fam: Mapping[str, Any], settings: Mapping[str, Any], *, current: t
     or a holdout look is out (`look_inflight`). Returns a clause saying which ("made no eligible Train version in 157 Gym
     evaluations since its birth"), or None. A dead family may retire at `population.start` (only `population.floor`
     holds it); the tournament retires one that does not. Train figures only: nothing Validation or the holdout measured
-    (D2). It is a time limit, not a finding that the mechanism has no edge.
+    (D2). Its words carry the verdict of the family's Train record (`train_record`, `idle_cause`, R11-1): only an
+    untested family's death is a time limit, not a finding.
 
     DORMANCY (R3, NO DUPLICATE RUNS): a family is dead too, whatever its best, when its last `researcher.dormant_cycles`
     cycles in a row made no new Gym evaluation, only stored results, holds and refused runs (`dormant_count`, counted in
@@ -1444,7 +1445,7 @@ def drift_failed(fam: Mapping[str, Any], n: Any) -> str | None:
 
 
 def validation_drift_failed(fam: Mapping[str, Any]) -> bool:
-    """The family's validated version failed the drift screen: its validation numbers earn it no fork and no bandit share
+    """The family's validated version failed the drift screen: its validation numbers earn it no fork and no allocation share
     (the tournament), whatever they were."""
     return drift_failed(fam, (fam.get("state") or {}).get("validation_version")) is not None
 
@@ -1945,14 +1946,14 @@ class Researcher:
         return int(self.settings.get("population", {}).get("floor", 16))
 
     def is_top(self, fam: Mapping[str, Any], *, top: int) -> bool:
-        """Among the bandit's `top` families by weight (a weight of zero or none never is)."""
+        """Among the top `top` families by weight (the allocation's share; a weight of zero or none never is)."""
         weight_rank = sorted((f.get("weight") or 0.0 for f in self.store.families(alive=True)), reverse=True)
         return bool(weight_rank) and top > 0 and (fam.get("weight") or 0.0) >= weight_rank[min(top, len(weight_rank)) - 1] > 0
 
     # ------------------------------------------------------------------ the top band on Claude
     def claude_route(self, fam: Mapping[str, Any]) -> bool:
         """This family's cycle runs on Claude (THE TOP BAND ON CLAUDE): `claude_top` above zero, Claude configured for the
-        "researcher" role (`claude.roles`, a client and the gateway's meter) and the family among the bandit's top
+        "researcher" role (`claude.roles`, a client and the gateway's meter) and the family among the top
         `claude_top` by weight. Room and lines are the router's to judge on each call (a turn without them is Sail's)."""
         try:
             n = int(self.cfg.get("claude_top", 0) or 0)
@@ -4032,7 +4033,7 @@ class Researcher:
         out["starter"] = True
 
     def _profile(self, history_chars: int, fam: Mapping[str, Any] | None = None) -> tuple[str, str, int]:
-        """(profile, reasoning effort, max output tokens) of a cycle's model call: the bandit's top `top_families` on
+        """(profile, reasoning effort, max output tokens) of a cycle's model call: the top `top_families` (by allocation share) on
         `top_profile` at `top_reasoning_effort` (unless the swarm is at its hourly pace); the rest as before."""
         top = self.cfg.get("top_profile")
         if top and fam is not None and not self.pace() and self.is_top(fam, top=int(self.cfg.get("top_families", 10))):

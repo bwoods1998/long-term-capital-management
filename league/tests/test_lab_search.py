@@ -1,6 +1,6 @@
 """E1 of the close-the-gaps run (Sept 24, 2026): the Alpha Lab as a search.
 
-The evidence (docs/goals/LTCM_CLOSE_THE_GAPS.md, gap 1): of the lab's 3,641 candidates at T0, 2,137 were
+The evidence (archive/docs/goals/LTCM_CLOSE_THE_GAPS.md, gap 1): of the lab's 3,641 candidates at T0, 2,137 were
 parameter mutants; 16 of the 18 born graduates were nudges (an impulse floor 0.0006 -> 0.000686); the
 attention desk went 48 h without an intent and still received lab graduates; after Deploy A the lab ran 63
 batches of 84 candidates in an hour, 1.3 a batch, because the Luna children at the queue's front each need

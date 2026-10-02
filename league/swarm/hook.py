@@ -26,6 +26,10 @@ Each tick, cheaply and never waiting on the swarm:
    `MIRROR_ERROR_COOLDOWN_SECONDS`, and an info when it works again.
 3. READ. `bands()` (what the live path may run: `bands.read`) and `site_inputs()` (the site's agents, the
    Gym's pace and the swarm's compute), which the House's own `site_inputs()` merges with the live path's.
+4. SIDE JOBS, each in its own try, never blocking the tick: `StoppedPoolCleanup` (cleanup.py) ends a stopped swarm's
+   late Gym forks; `HarnessSupervisor` (harness_runtime.py) keeps the read-only harness observer running under its
+   release-bound policy; `NightlySupervisor` (`league/data_job.py`) keeps the nightly data collector running while
+   `<state>/data-nightly.json` enables it.
 
 Standard library only.
 """
@@ -557,7 +561,8 @@ def public_payload(kind: str, payload: dict[str, Any], names: list[str]) -> dict
 
 
 def attach(house: Any, root: str | Path, config: Mapping[str, Any]) -> SwarmStep | None:
-    """Set `house.swarm` when the swarm is enabled. The live path's House (#362) has its own `site_inputs()`, which
+    """Set `house.swarm` when the swarm is enabled, or when `<state>/data-nightly.json` enables the nightly data
+    collector (the step supervises it). The live path's House (#362) has its own `site_inputs()`, which
     merges `house.swarm.site_inputs()` with its own; a House without one gets the swarm's feed as its `site_inputs`
     (the publisher's hook), so the page shows the swarm's agents, Gym and compute until then. Its compute is the
     swarm's own spend only: in swarm mode the House's Sail meter (`Budget`) is off."""

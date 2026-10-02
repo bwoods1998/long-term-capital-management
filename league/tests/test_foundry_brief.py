@@ -1,6 +1,6 @@
 """E2 and E3 of the close-the-gaps run (Sept 24, 2026): the foundry brief `foundry-2026-09-24.1`.
 
-The evidence (docs/goals/LTCM_CLOSE_THE_GAPS.md, gap 1): every kalshi-crypto-15m family was negative on its
+The evidence (archive/docs/goals/LTCM_CLOSE_THE_GAPS.md, gap 1): every kalshi-crypto-15m family was negative on its
 pooled record at T0 (crypto-15m-favorites n 106, bound -0.0064) and kalshi-crypto-strikes ran -10.3% an
 active block; the one family with real profit, resting bids on 0.90-0.97 weather favourites, earned about
 $1.41 a day and had a measured capacity of about $7.81 a day; Deploy B recorded the data the desks had

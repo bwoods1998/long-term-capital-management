@@ -1,4 +1,4 @@
-"""The hourly tournament: validation, the bandit, forks, retirements, lessons, the leaderboard.
+"""The hourly tournament: validation, the allocation, forks, retirements, lessons, the leaderboard.
 
 1. VALIDATION. Every living family whose best version (submitted, else its best Train score) has not been
    validated yet runs on Validation once, but only after that version's 1.5x-stress Train robustness run came back
@@ -30,12 +30,14 @@
    with a positive practice record on live quotes gains at most `practice.bonus` (25%) of its share, and the bonus moves
    at most `practice.bonus_total` (10%) of all share; it changes research attention only, never what is validated, the
    gate, the bands or money. The round's event records it (`practice_bonus`, private).
-4. FORKS: the top families with a positive validation t fork (never one whose validated version failed the drift screen) (a new family on the parent's roots plus one more
-   root of the rotation, same mechanism and structure; it inherits the lineage's trial count and holdout looks),
-   while the population is under its ceiling. XSP is out of the rotation: its $0.50 a contract makes a narrow
-   structure uneconomic. Only a family of a type `architect.structures` allows forks (THE STRUCTURES, Oct 1, 2026:
-   league/swarm/architect.py `allowed_structures`; every type while it is unset); one of another type is never retired
-   for it and keeps researching until a rule retires it.
+4. FORKS: the top `fork_top` (3; 0 turns forks off) families whose validation t is at least `fork_min_t` (1.0) with a
+   positive validation mean fork, each at most once every `fork_cooldown_hours` (6) (never one whose validated version
+   failed the drift screen) (a new family on the parent's roots plus one more root of the rotation, same mechanism and
+   structure; it inherits the lineage's trial count and holdout looks), while the population is under its ceiling.
+   XSP is out of the rotation: its $0.50 a contract makes a narrow structure uneconomic. Only a family of a type
+   `architect.structures` allows forks (THE STRUCTURES, Oct 1, 2026: league/swarm/architect.py `allowed_structures`;
+   every type while it is unset); one of another type is never retired for it and keeps researching until a rule
+   retires it.
 5. RETIREMENTS: no validation improvement in `retire_revisions` (30) or `retire_evaluations` (2,000; the defaults,
    swarm.json may set others) Gym evaluations, or trial-adjusted
    evidence below the line (the deflated Sharpe probability under `retire_dsr_below` after

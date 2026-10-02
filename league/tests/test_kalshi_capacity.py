@@ -1,6 +1,6 @@
 """K2's capacity study (`scripts/kalshi_capacity.py`) reads what it says it reads and does the arithmetic it says.
 
-docs/goals/LTCM_KALSHI_SCALE.md, workstream K2 (Sept 25, 2026). The box snippet runs here against a throwaway
+archive/docs/goals/LTCM_KALSHI_SCALE.md, workstream K2 (Sept 25, 2026). The box snippet runs here against a throwaway
 state directory: the families' orders with their fills (the House's `source: dust` rows are not fills),
 cancels, rejections and settlements, an order placed before the window left out, a positive family with no
 order kept with an empty book. The fill curve is checked on hand-made prints (at the bid, through it, above

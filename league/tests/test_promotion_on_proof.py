@@ -1,4 +1,4 @@
-"""Promotion on proof (the close-the-gaps run, Sept 24, 2026; docs/goals/LTCM_CLOSE_THE_GAPS.md D4, P1-P3).
+"""Promotion on proof (the close-the-gaps run, Sept 24, 2026; archive/docs/goals/LTCM_CLOSE_THE_GAPS.md D4, P1-P3).
 
 The evidence on record: the allocator's nine promotions to real money (08:28Z Sept 23 to 00:17Z Sept
 24) all ran unproven mechanisms and settled -$18.62 on 16 settlements, 0 positive; four were demoted

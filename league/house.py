@@ -705,8 +705,9 @@ class House:
         self.jev_floor: Any = None  # set by the service: research gate, inactivity, triage, links, exposure (league/sensors.py)
         self.hypotheses: Any = None  # set by the service: the hypothesis foundry (league/hypotheses.py)
         self.backup: Any = None  # set by the service on the House box: a daily checkpoint of the box, kept by Sail
-        self.updater: Any = None  # set by the service on the House box: pulls main, hands it to the watchdog
-        #: The options overhaul's two pluggable steps (`PLUGGABLE_STEPS`): None until Wave 4 and Wave 5 fill them.
+        self.updater: Any = None  # set by the service on the House box while `auto_update` is on (off since Sept 26)
+        #: The options overhaul's two pluggable steps (`PLUGGABLE_STEPS`), set by league/service.py: the swarm's
+        #: `SwarmStep` (league/swarm/hook.py `attach`) and the live options path (league/live); None while unset.
         self.swarm: Any = None
         self.options_live: Any = None
         #: A cheap deterministic look at a paper agent's first wakes and code (`league/preaudit.py`):
@@ -10318,8 +10319,10 @@ class House:
     #:   the mark pass. The live chain reads and the shadow book on live OPRA quotes, the paper account's multi-leg
     #:   route, the real route (netting across agents, the order-rate governor, expiry-day rules, buying-power
     #:   reservation, assignment polling). Real orders only under `House.grant` (`league/live_trading.py`).
-    #: - `swarm` (Wave 4, the swarm): runs after the research scheduling. Gym batches on the sealed Gym boxes, the
-    #:   researchers' inner loop, the hourly tournament and bandit, forks and retirements, the architect and the gate.
+    #: - `swarm` (Wave 4, league/swarm/hook.py `SwarmStep`): runs after the research scheduling. It supervises the
+    #:   swarm's own process (`python -m league.swarm run`: the Gym, the researchers, the tournament, the architect and
+    #:   the gate all run there, never in the House), mirrors its events into the ledger, reads its bands and site
+    #:   inputs, and runs its side jobs (the harness observer, the nightly data collector, a stopped pool's cleanup).
     PLUGGABLE_STEPS = ("options_live", "swarm")
 
     def _step_health(self, name: str) -> Any:
@@ -10580,7 +10583,7 @@ class House:
                 and self._background("house:research", self._house_job, self._schedule_research, open_for_business):
             self._cadence["house:research"] = self.clock()
         lap("research")
-        self._pluggable_step("swarm", summary, open_for_business)  # Wave 4's swarm: Gym, researchers, tournament
+        self._pluggable_step("swarm", summary, open_for_business)  # Wave 4's SwarmStep: supervise, mirror, read
         if open_for_business and self.survey_due():
             self._background("niche-survey", self.survey_niches)  # stamped when it ends; one in hand is not started twice
         if open_for_business and self.semantic_lab is not None and self.semantic_lab.due():

@@ -2,7 +2,7 @@
 
     python3 scripts/kalshi_capacity.py [--days 7] [--until ...] [--family NAME ...] [--json]
 
-docs/goals/LTCM_KALSHI_SCALE.md, workstream K2 and scoreboard rows 2 and 3 (Sept 25, 2026). Read-only
+archive/docs/goals/LTCM_KALSHI_SCALE.md, workstream K2 and scoreboard rows 2 and 3 (Sept 25, 2026). Read-only
 everywhere: a snippet runs on the House box through `scripts.floor_box.client().exec` with sqlite
 opened `mode=ro` (as `scripts/floor_watch.py` and `scripts/kalshi_watch.py` do) and returns the
 families' orders, settlements and board records; everything heavy happens HERE, against Kalshi's

@@ -1,6 +1,6 @@
 # Offline, read-only replay of the research gate over the production ledger (runs on the House box via rx.py).
 # Approximate: no market-availability, blocker-lift or Jev relevance triggers; a skipped session is still
-# counted in the next streak. Sept 22, 2026 output is in docs/design/2026-09-22-jev-sensor.md.
+# counted in the next streak. Sept 22, 2026 output is in archive/docs/design/2026-09-22-jev-sensor.md.
 import sqlite3,json,collections
 from datetime import datetime
 db=sqlite3.connect('file:/workspace/state/ledger.sqlite?mode=ro',uri=True)

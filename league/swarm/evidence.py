@@ -72,7 +72,8 @@ the holdout cannot judge. It HOLDS the look (no look, no review, no sealed read)
 
 THE LEAKAGE ALARM: once there are at least 10 holdout looks, more than 30% passing stops the gate.
 
-THE BANDIT: Thompson sampling over validation evidence, with a 25% exploration share for new families.
+THE BANDIT: Thompson sampling over validation evidence, with a 25% exploration share for new families. Used only under
+`allocation.mode` "bandit" (and as the allocator's fallback); the default allocation is league/swarm/allocation.py.
 
 Standard library only (the House box runs it without numpy).
 """

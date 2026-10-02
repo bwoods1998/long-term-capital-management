@@ -39,7 +39,7 @@ class Route:
     reason: str
 
 
-#: The table. `research` rows are resolved by `TaskRouter.research_profile` from evidence.
+#: The table. `research` rows are resolved from evidence (`best_profile`, through `TaskRouter.research_settings`).
 TABLE: dict[str, Route] = {
     # Deterministic work: exact facts are never a model's job (numbers, dates, ids, budgets).
     "market_availability": Route("code", "none", "venue calendars and listings are exact facts"),
@@ -51,7 +51,7 @@ TABLE: dict[str, Route] = {
     "triage_classify": Route("jev", "jev-1.13.0", "which requests describe the same missing feed or bug"),
     "hypothesis_rewording": Route("jev", "jev-1.13.0", "is a new mechanism a rewording of a tested one"),
     "agent_classify": Route("jev", "jev-1.13.0", "an agent's yes/no question over many records, charged at cost"),
-    # Routine research: the strongest economical option by measured evidence (see research_profile).
+    # Routine research: the strongest economical option by measured evidence (see best_profile).
     "research_routine": Route("research", "evidence", "routine research is bought where useful artifacts are cheapest"),
     # Difficult synthesis and engineering: Astra. Sept 20-22 evidence: the teacher and auditor
     # earn their keep; the code roles mostly fail CI, so they are routed here but still judged by CI.

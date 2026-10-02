@@ -11,8 +11,9 @@
   role's Sail profile. Nonurgent roles request Flex; the latency-sensitive audit requests standard.
 - CLAUDE (`ModelRouter.ask(claude=True)`, Sept 26, 2026, the swarm sprint): `claude.model` (Opus 5.5 by default) or the
   role's `claude.role_model` through the gateway (`league.claude.Claude`) for the roles in `claude.roles` (by default
-  the architect, the gate's audit, the diagnostician), first among the paid routes while the gateway's funded total has
-  room above `claude.reserve_usd` and the swarm's own Claude spend is under `claude.usd_cap`. The architect rotates only
+  the architect, the gate's audit, the diagnostician, the researchers' top band and the strategist), first among the
+  paid routes while the gateway's funded total has room above `claude.reserve_usd` and the swarm's own Claude spend is
+  under `claude.usd_cap`. The architect rotates only
   while `architect.openai_model` names a model: then every other pass asks GPT-6 Astra first. Claude capped, erring or
   unconfigured falls to OpenAI, then Sail, exactly as before. Every role's call asks for Claude (Sept 29, 2026: the
   researcher's stall rewrite and the gate's review too), so `claude.roles` alone decides who gets it: adding "rewrite"

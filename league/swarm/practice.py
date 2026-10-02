@@ -15,8 +15,9 @@ WHAT THIS MODULE GIVES RESEARCH (`observe.practice_summary`, read-only, cached `
   sessions, program-closed trades, the SIGN of their realized P&L and a t (the daily t from 2 days of closes, else the
   per-trade t; null below 3 trades). Never dollars, dates, versions, code, parameters or Validation numbers.
 - `class_lines(store, settings)`: the architect's PRACTICE BY CLASS lines (at most `MAX_CLASSES`).
-- `apply_bonus(shares, store, settings)`: THE BANDIT'S BONUS. For each family with a positive practice record (at least
-  `practice.min_trades` program-closed trades, positive P&L and a positive per-trade t) over the window:
+- `apply_bonus(shares, store, settings)`: THE SHARE BONUS (on the allocation's or the bandit's shares). For each family
+  with a positive practice record (at least `practice.min_trades` program-closed trades, positive P&L and a positive
+  per-trade t) over the window:
   `b = bonus x clip(t / 2, 0, 1) x min(1, days / 3)` (days: session days with a program close), so one day at t >= 2
   gives a third of `bonus` and three days the whole of it. If the added share `M = sum(w x b)` passes
   `practice.bonus_total`, every `b` is scaled by `bonus_total / M`. Then `w' = w x (1 + b)`, normalized. So a family
@@ -235,7 +236,7 @@ def class_lines(store: Any, settings: Mapping[str, Any]) -> list[str]:
 
 
 def family_records(store: Any, settings: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
-    """{family: {trades, days, pnl, t}} over the window, all its versions, program-closed trades only (the bandit's)."""
+    """{family: {trades, days, pnl, t}} over the window, all its versions, program-closed trades only (the share bonus's)."""
     _, rows = _rows(store, settings)
     per: dict[str, dict[str, Any]] = {}
     for row in rows:
@@ -305,7 +306,7 @@ def bonuses(shares: Mapping[str, float], records: Mapping[str, Mapping[str, Any]
 
 def apply_bonus(shares: Mapping[str, float], store: Any, settings: Mapping[str, Any]) -> tuple[dict[str, float], dict[str, float]]:
     """(the shares with the bonus, {family: b} for each family that got one). The shares unchanged when feedback is off,
-    the bonus is 0, there is no record, or anything fails (the bandit never waits on practice)."""
+    the bonus is 0, there is no record, or anything fails (the allocation never waits on practice)."""
     base = {str(k): float(v) for k, v in shares.items()}
     try:
         c = cfg(settings)

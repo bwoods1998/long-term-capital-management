@@ -73,4 +73,5 @@ attributed receipts or explicit owner coverage. Do not fill a missing input with
 receipt has `start_at` equal to the cost start, `end_at` equal to the report cutoff, a nonnegative `usd`, `complete:
 true`, `incremental_only: true`, and a nonempty `source` describing the receipts/owner declaration. `incremental_only`
 asserts that none of the model, box or subscription charges already counted above is included again. An explicit
-owner-confirmed zero is permitted; silence is not a zero. The pending owner answer is not presumed here.
+owner-confirmed zero is permitted; silence is not a zero. The owner answered on Oct 2, 2026: external costs are
+declared as none, an explicit and complete zero receipt, so Net carries no external line.

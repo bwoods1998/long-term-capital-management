@@ -1,4 +1,4 @@
-"""The mechanism ledger (C1 of the close-the-gaps run, Sept 24, 2026; docs/goals/LTCM_CLOSE_THE_GAPS.md).
+"""The mechanism ledger (C1 of the close-the-gaps run, Sept 24, 2026; archive/docs/goals/LTCM_CLOSE_THE_GAPS.md).
 
 A FAMILY is a mechanism: every agent ever born with the same `family` on one venue, living or dead.
 Its pooled forward record is the proof that moves real money, and this module is the one place

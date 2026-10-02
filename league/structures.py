@@ -1,7 +1,7 @@
 """Level-3 option structures with defined risk, each held as ONE position.
 
-Sept 25, 2026 (the options-desk run, `docs/goals/LTCM_OPTIONS_DESK.md` and the owner's amendment of
-06:01Z in `docs/runs/2026-09-25-options-desk.md`). The Alpaca accounts are approved for level 3 and the
+Sept 25, 2026 (the options-desk run, `archive/docs/goals/LTCM_OPTIONS_DESK.md` and the owner's amendment of
+06:01Z in the options-desk run record, which never reached main). The Alpaca accounts are approved for level 3 and the
 House used level 2: single long contracts under a $0.75 affordability line, which put every options
 agent on penny contracts of $10-30 stocks with spreads up to 20%. A structure puts SPY, QQQ and IWM
 inside the $75 order cap: a $1-wide vertical or iron condor can lose $30-70.

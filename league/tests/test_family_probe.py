@@ -1,7 +1,7 @@
 """No probe on a losing family (R5 of the close-the-gaps run, Sept 24, 2026; `allocator.family_probe`), and the proven
 family on the board (R3).
 
-The evidence (docs/research/queries/2026-09-24/R5-family-probe.py, the 15:06Z snapshot): of the allocator's 21 promotions
+The evidence (archive/docs/research/queries/2026-09-24/R5-family-probe.py, the 15:06Z snapshot): of the allocator's 21 promotions
 to real money since Sept 23 00:00Z, 11 went onto families whose pooled forward record -- the House's `family_forward`,
 active blocks and summed log growth over every member ever born -- was negative over 6 or more active blocks, and they
 realized -$8.12 on 22 closes with no stay positive; the other 10 made +$28.96 on 34 closes. At 15:06Z 9 of the 14 seated

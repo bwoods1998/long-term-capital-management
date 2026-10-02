@@ -1,8 +1,8 @@
 """Level-3 debit verticals: what one IS, what it can lose, and how the House holds it.
 
 Sept 23, 2026 (the learn-and-unblock run, workstream O) wrote the pure pieces on a branch nothing
-imported; Sept 25, 2026 (the options-desk run, `docs/goals/LTCM_OPTIONS_DESK.md`) puts them to work.
-The design is `docs/design/2026-09-24-level-3-debit-verticals.md`.
+imported; Sept 25, 2026 (the options-desk run, `archive/docs/goals/LTCM_OPTIONS_DESK.md`) puts them to work.
+The design is `archive/docs/design/2026-09-24-level-3-debit-verticals.md`.
 
 **A debit vertical** is two option contracts on one underlying, one expiry and one right (two calls
 or two puts), one bought and one sold in equal numbers, opened and closed as ONE order. The bought

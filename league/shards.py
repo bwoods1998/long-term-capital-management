@@ -24,7 +24,7 @@ a pass:
    balances before and after (a cross-shard move runs in up to three steps that are not undone on
    failure, so the balances are read again after every move, failed or not).
 
-Bounds (docs/goals/LTCM_LEARN_AND_UNBLOCK.md, U2): only the gateway's one allowed funds move
+Bounds (archive/docs/goals/LTCM_LEARN_AND_UNBLOCK.md, U2): only the gateway's one allowed funds move
 (`POST /portfolio/intra_exchange_instance_transfer`, between shards of the owner's own account,
 so money never leaves the account); at most `MAX_MOVE_USD` a move and `MAX_DAY_USD` a rolling day,
 counted from the ledger so a restart does not reset it (a move whose outcome is unknown counts,
@@ -72,7 +72,7 @@ TOP_UP_USD = Decimal("30")
 #: trade on the donor (`stakes_by_shard`).
 KEEP_USD = Decimal("60")
 #: The plan's bounds: at most $100 a move and $200 a rolling day, unless a run record gives a
-#: measured reason (docs/goals/LTCM_LEARN_AND_UNBLOCK.md, U2).
+#: measured reason (archive/docs/goals/LTCM_LEARN_AND_UNBLOCK.md, U2).
 MAX_MOVE_USD = Decimal("100")
 MAX_DAY_USD = Decimal("200")
 #: Below this a move is not worth a three-step transfer that cannot be undone: one bunt position.

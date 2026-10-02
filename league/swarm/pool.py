@@ -10,7 +10,7 @@
 - BATCHES. Jobs (one program version, one window) queue here; a box's dispatcher takes up to
   `batch_programs` jobs with the same settings and runs them together, day-major (the Gym's
   `driver.run`: each day's chain is loaded once for the whole batch). The highest priority first (the
-  bandit's share), then the oldest; a short batch waits `batch_wait_seconds` for company. A researcher's sweep
+  family's allocation share), then the oldest; a short batch waits `batch_wait_seconds` for company. A researcher's sweep
   (`gym_sweep`) queues its variants at once as one `group`, so they ride the same batches and never supersede one another.
 - ROBUSTNESS runs (a new best version re-run on Train at 1.5x the half-spread and at the mid, Sept 26) have the lowest
   priority (`ROBUSTNESS_PRIORITY`): a box takes them only when nothing else waits AND another Gym box is free (ready or

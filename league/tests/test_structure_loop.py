@@ -1,6 +1,6 @@
 """The learning loop for structures (G-LOOP of the options-desk run's Wave 2, Sept 25, 2026).
 
-Evidence (the run record, docs/runs/2026-09-25-options-desk.md). An in-place edit was replayed at half
+Evidence (the run record, the options-desk run record, which never reached main). An in-place edit was replayed at half
 notional ($37.50 order cap), where a $1-wide condor cannot be opened (row S3). At 15:34:48Z krasker-22
 "rewrote itself: its own rules had not fired in 11 wakes ... this file at least trades", adopting a
 program whose replay had FAILED at 15:34:26Z, and at 15:42:56Z opened a CCL condor whose stop then tried

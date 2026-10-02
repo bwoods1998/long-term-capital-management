@@ -1,7 +1,7 @@
 """Level-3 debit verticals: what one is, what it can lose, and the one position a book holds for it.
 
 Written Sept 23, 2026 (the learn-and-unblock run, workstream O) against the design in
-docs/design/2026-09-24-level-3-debit-verticals.md; the spread held as ONE instrument priced at its
+archive/docs/design/2026-09-24-level-3-debit-verticals.md; the spread held as ONE instrument priced at its
 net was added Sept 25, 2026 (the options-desk run). No venue has seen a multi-leg order from this
 code base: these tests pin what can be known without one.
 """

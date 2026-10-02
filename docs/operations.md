@@ -7,35 +7,89 @@ the swarm or live path describe their implementation, not evidence that producti
 enabled. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
-## Current operation and next work: October 1, 04:05Z
+## Paused (Oct 2, 2026)
 
-**The running House.** The House runs Release B, `20261001T034829Z-d823e014ce16`, built from main `3eaf4d06` (PR #454):
-Release A plus #451, #444, #445, #455, #456, #447, #453, #448 and #438, and the gateway's KV binding.
-- It was promoted at 03:49:07Z Oct 1, and its watch's verdict was PROMOTED.
-- It was evidence reset 2. The checks after promotion passed: 0 lineage violations; every alive family adopted the new
-  execution fingerprint, with the Gym bundle and image unchanged; the B2 backfill read 14 gate events and barred 1
-  program.
-- A deliberate restart (04:00Z) and an induced swarm crash (SIGKILL, recovered in 15 s) both recovered under it
-  ([CHANGELOG.md](../CHANGELOG.md), Oct 1).
-- The gateway runs `dafcfa05` (03:48Z): the research library and its KV binding, with the order routes unchanged. Its
-  rollback target is `ac2779ac`.
+**Active development is paused** (the owner, about 14:20Z Oct 2). The owner chose to keep the swarm running, so
+production runs on unchanged: no deploy and no `swarm.json` change until work resumes. This is not a maintenance pause
+(`floor_box.py maintenance` is off). The operator's private handoff log, newest entry first, holds the detail behind
+this section; read it before resuming.
 
-**Real money is on** (since R2, Sept 27). The grant `options-swarm-20260928` was re-ratified at about 03:59Z Oct 1 on
-money digest `42c4a3af` (its third ratification). No family has passed the holdout: two looks, both failed. So the real
-orders are the House's own, plus one earlier tuition position:
-- D3 calibration round trips;
-- the House live test: armed. It decides only inside its private, pre-registered window;
-- one tuition position opened Sept 30, before Release A, held by `googl-lags-msft-ai-cloud-qqq-flat@27:t`. Its instance
-  is exits only, since Release A's adoption dropped its engine-3 tuition row. Its program's own closes manage it.
+**The running House.** `20261002T112610Z-e11710692569`, built from main `e3d0111f` (PRs #484, the look holds, and #481,
+the research canary rule), promoted 11:26:54Z Oct 2 over `20261002T051530Z-1aebcf26b145`.
+- The gateway runs `4471596a` (`CLAUDE_USD` 265; rollback target `dafcfa05`).
+- The money digest is `42c4a3af`, and the grant `options-swarm-20260928` is active (re-ratified at Release B, about
+  03:59Z Oct 1).
+- The evaluator's execution fingerprint is `47587e22…`: two planned evidence resets (Release A, Sept 30; Release B,
+  Oct 1) and none since.
+- Main is ahead of the running release by docs and comments only. The comment edits touch modules the live path loads
+  (`league/constitution.py` among them; the money digest does not move), so the next House release from main deploys in
+  the money path's window.
 
-**The incubator is on** (since 04:01Z Oct 1: `live.incubator` true). Nothing can trade on it yet.
-- A cohort is pinned only after its first look passes, and a first look needs 3 completed sessions and 10 program closes
-  in the record before today. For cohorts admitted at the Oct 1 open, that is the Oct 6 open at the earliest (sessions
-  Oct 1, 2 and 5).
-- After that, the swarm's facts (B2), the caps and the weekly envelope still decide every open (**Real money**, "The
-  incubator", below).
-- **To switch it off**, on the box: keep a before-copy, set `live.incubator` to JSON `false` and replace the file
-  atomically, then read the switch back.
+**Real money** (on since R2, Sept 27). No family has passed the holdout: 3 looks, all failed. The real orders are the
+House's own: D3 calibration round trips (19 closed by the Oct 2 open), the House live test (armed, no order yet), and
+one tuition lot held by `googl-lags-msft-ai-cloud-qqq-flat@27:t`, exit-only, whose program exits it before 15:10 New
+York on Oct 7 (its expiry cutoff). The incubator is on (`live.incubator` true since 04:01Z Oct 1); a cohort's first look
+needs 3 completed sessions and 10 program closes, so no incubator lot can open before about Oct 6-7.
+
+**`swarm.json` values in effect** (where they differ from the code's defaults, or matter now):
+
+| Key | On the box | Since | Default |
+|---|---|---|---|
+| `architect.sail_profile` | `pro_asap` (DeepSeek-V4-Pro, asap queue) | 12:49Z Oct 2 (`pro_balanced` 12:28-12:49Z) | `k3_balanced` |
+| `architect.sail_effort` | `high` | 12:54Z Oct 2 (`medium` 11:38-12:54Z) | `medium` |
+| `architect.max_refill`, `every_seconds`, `refill_seconds` | 6, 1800, 1200 | about 14:00Z Oct 1; 02:47Z Oct 1 | 12, 14400, 3600 |
+| `architect.claimable_rows` | 4 | 05:26Z Oct 2 | 0 |
+| `architect.cell_yield` | null (the owner: claims first) | - | null |
+| `architect.structures` | `["debit_vertical", "long_single"]` | 15:22:15Z Oct 1 (`"real"` before) | null |
+| `architect.max_rebirths_per_cell` | 6 | 15:22Z Oct 1 | 3 |
+| `architect.agenda_locked`, `architect.agenda` | agenda v16c in both (private; sha256 `c7a46dca0707…`) | 15:22:15Z Oct 1 | empty |
+| `claude.role_usd_day.architect` | 0 | 11:54Z Oct 2 | none |
+| `claude.usd_cap` | 263 | 20:33Z Oct 1 | 100 |
+| `tournament.fork_top` | 0 | 05:03Z Oct 2 | 3 |
+| `gate.look_holds` | the default (on) | the 11:26Z Oct 2 release | `{"drift_share": 0.25, "min_power": 0.30}` |
+| `researcher.sail_usd_per_hour` | 1.3 | 02:47Z Oct 1 | null |
+| `researcher.top_families`, `researcher.claude_top` | 0, 0 | Sept 30 | 10, 12 |
+| `researcher.stall_revisions`, `diagnostician.enabled` | 10000, false | 16:41Z Sept 30 | 5, true |
+| `population.start`, `floor` | 96, 12 | Sept 29 | 48, 16 |
+| `gym.start_boxes`, `max_boxes` | 2, 6 | Release A, Sept 30 | 4, 8 |
+| `live.incubator`, `live.house_test` | true, true | 04:01Z Oct 1; 00:17:28Z Sept 29 | false, false |
+| `research.enabled` | false | - | false |
+| `guard.burst_until`, `burst_cap_usd` | 2026-10-05T00:00Z, $900 | Sept 27 | Sept 28's open, $350 |
+
+**What changes by itself while paused.**
+- The research burst ends at 00:00Z Oct 5 (`guard.burst_until`). The swarm's Sail spend then falls to the guard's
+  after-burst line (`guard.after_burst_usd_day`, $12 a day by default).
+- Sail had about $130 at 09:00Z Oct 2, enough until about Oct 7-9 at the current pace. The Sail guard brakes the swarm
+  at $32 (two days of the House's burn plus $30), before the House is at risk; the House itself keeps running.
+- Claude had about $93 of its $265 funded total. Only the gate's review and audit and the strategist spend it.
+- The tuition lot's program exits it before 15:10 New York on Oct 7.
+- Incubator first looks come no earlier than about Oct 6-7.
+- The House live test runs on within its pre-registered sessions.
+
+**To resume.**
+1. Read the operator's handoff log and re-check production (`floor_box.py status`, the pre-open checks): the running
+   release, health `failures`, `real_money`, the grant, the Sail and Claude balances.
+2. End the two GOOGL-lineage practice cohorts after a close (**Ending a cohort by hand**, under **The practice league**,
+   below). Retiring their families on Oct 1 did not end them; they are barred from the incubator, so they cost only
+   House compute.
+3. Read the final pre-registered 24-hour read of agenda v16c, then decide the next agenda (v17: two Train-confirmed
+   entry filters and data-hygiene rules) and the architect's cadence and spend.
+4. Return `architect.sail_profile` to its default once Sail's balanced queue answers a test pass (or keep `pro_asap` if
+   its births per pass stay as good: it was the cheaper route on Oct 2).
+5. Before the Claude architect gets a line again, test it with `architect.full_graveyard` false (its Oct 2 passes, on
+   the full-graveyard route, bore nothing).
+6. Fund Sail before the brake (above).
+7. Ship any House release by **Every House release**, below.
+
+**Still true.**
+- **The freeze** (since Release B). `league/live` and `league/gym` change only in a planned, deliberate release. A
+  change to either, or to `LEAGUE_FILES`, the fill model or the Gym image, moves the evaluator: it ends every practice
+  cohort, and with them every incubation, for good, and re-adopts selection (**Evaluator adoption and `gym-engine-4`**,
+  below). Rollbacks and fixes for bugs that block or endanger real orders are the only exceptions. Swarm-side changes
+  that the fingerprint does not hash are no reset; they still deploy only outside the session when the live path loads
+  the module.
+- **The incubator's off switch**, on the box: keep a before-copy, set `live.incubator` to JSON `false` and replace the
+  file atomically, then read the switch back.
 
   ```sh
   cd /workspace/state && cp -p swarm.json "swarm.json.before-off-$(date -u +%Y%m%dT%H%M%SZ)"
@@ -54,66 +108,20 @@ orders are the House's own, plus one earlier tuition position:
   ```
 
   The last command must show `switch` `on` false. Within a minute the incubator's instances go to exits only and their
-  working opens are cancelled. First looks are still recorded. Switch it off before any rollback across Release
-  B (**Roll back**, below).
-
-**The freeze** (since Release B). `league/live` and `league/gym` change only in a planned, deliberate release.
-- A change to either, or to `LEAGUE_FILES`, the fill model or the Gym image, moves the evaluator. Every practice cohort
-  is bound to its evaluator, so such a change ends every practice cohort, and with them every incubation, for good. It
-  also re-adopts selection (**Evaluator adoption and `gym-engine-4`**, below).
-- Batch such changes into planned releases. Rollbacks and fixes for bugs that block or endanger real orders are the only
-  exceptions.
-- Swarm-side changes that the fingerprint does not hash are no reset. They still deploy only outside the session when
-  the live path loads the module.
-
-**Next:**
-- **Oct 1, 13:31-13:35Z, the first session under B.** The deploy's canary never exercises the live path or the swarm,
-  so check by hand:
-  - `health.json` `options_live.incubator.pins.day` is `2026-10-01`;
-  - no incubator error alert, and no "the incubator's first looks failed" or "pins failed" warning;
-  - practice cohorts admitted at the open.
-- **About 4 hours after B:** Train runs and validation attempts an hour, against the spend plan's rule.
-- **After the Oct 1 close:** the close's economics, and B' (swarm side, no evidence reset): #446 family cards and the
-  final review's two fail-closed findings.
-- **In review:** #449 (harness lanes), #452 (evaluator benchmarks) and #446.
+  working opens are cancelled. First looks are still recorded. Switch it off before any rollback across Release B
+  (**Roll back**, below).
 - **The library stays off** (`research.enabled` false) until the order route's p99 is measured with the library under
   load.
 - **The runtime skew.** The House runs Python 3.11 with numpy 2.4, the Gym Python 3.12 with numpy 2.5. A program can
   train in the Gym and still fail to load on the live path; the preflight flags it (`preflight_house_unloadable`).
   Align the runtimes in a planned release.
-
-**Spend** (the owner, Sept 30: cut burn to evidence). Since 16:41Z Sept 30:
-- architect births run on Kimi-K3 on Sail (`claude.role_usd_day.architect` 0);
-- stall rewrites and the diagnostician are off;
-- the Gym pool is at most 6 boxes (4 until Release A).
-
-Since 02:47Z Oct 1:
-- the architect runs every 1,800 s (`architect.every_seconds`, 900 before);
-- the researcher Sail pace is $1.30 an hour (`researcher.sail_usd_per_hour`, $1.10 before).
-
-With the architect's Claude line at 0, its passes fell back to Sail and took about 73% of the research pace, which
-starved research. Running the architect half as often and raising the pace moves that Sail draw to research, at about
-the same total. The gate's review and audit and the strategist stay on Claude. **Models and Claude** and **Funding cliffs
-and alerts**, below, have the details.
-
-**Funding cliffs** (as read at 21:04Z Sept 30):
-- The OpenAI month's cap is $0 since 00:00Z Oct 1. No role uses OpenAI.
-- Claude's funded room was $37.17.
-- The Sail guard's brake is projected for about 20:00Z Oct 3 ($161.86 of balance).
-- `guard.burst_until` ends Oct 5 00:00Z.
-
-The swarm says each of these ahead of time (#439).
-
-**Unchanged:** D2, the sealed holdout, no forced trades and the Sail guard's line. The money table gained only the
-incubator's row, with Release B.
+- **Unchanged:** D2, the sealed holdout, no forced trades and the Sail guard's line.
 
 Re-read main, the open PRs and the running release before acting: a document's timestamp is not a fresh health check.
 
 The existing ThetaData collector owns the only account session; preserve it while it downloads. Do not log in again, or
 launch a duplicate collector to widen the universe. New discovery belongs in a data backlog until coverage and capacity
 are verified.
-
-No trading-day deploy 13:25-20:05Z except a rollback.
 
 ## What runs where
 
@@ -131,9 +139,13 @@ checkout's `.data` (the box record and the admin token): never `ln -sfn` over it
 
 ## Rules that hold every day
 
-- **No deploy from 13:25Z to 20:05Z on a trading day** (or from five minutes before the open to five
-  minutes after the close when that is wider: 14:25-21:05Z in winter), except a rollback. That
-  covers the House, the gateway and the site.
+- **No money-path deploy from 13:25Z to 20:05Z on a trading day** (or from five minutes before the open to five
+  minutes after the close when that is wider: 14:25-21:05Z in winter), except a rollback: the gateway, the
+  constitution, `league/live` and every module the live path loads (the money path, below). A research-class House
+  release (no module the live path loads) may deploy in session after an adversarial review, green CI and on-box
+  verification, never 19:30-20:00Z (15:30-16:00 New York, while the House live test runs) and never while a
+  calibration order works (`league/swarm/harness_lanes.py` `DEPLOY_RULES`). An evidence reset is a planned release
+  between evidence windows only. The site is the owner's (hands-off for this repository).
 - **A merged PR is not a deployed feature.** Verify on the box, in the change's window: the release
   id in `floor_box.py status`, the ledger rows the change should write, the behaviour itself.
 - **A deploy does not start a stopped loop**; `floor_box.py start` does.
@@ -304,6 +316,28 @@ verdict seen. Only one deploy runs at a time: `REFUSED: another deploy or rollba
 N)` means wait for that watchdog (`status`) and deploy again. With the loop stopped there is no House
 to watch, so the watchdog canaries and promotes only; then `start`.
 
+**Every House release (as run Oct 1-2).** The steps every release since Release B followed, in order:
+1. **The tree.** A clean detached checkout of the exact main commit in `~/Work/ltcm-deploy`, with CI green on it.
+   Classify it: money path (a module the live path loads, the gateway or the constitution), research-class, or an
+   evidence reset (**Rules that hold every day**, above); that sets its window.
+2. **Stop the nightly forward daemon while it is idle**, so a release change never lands mid-job. On the box:
+   `touch /workspace/state/data/nightly.stop`, then wait until `/workspace/state/data/nightly.lock` is free. The House's
+   step stops the daemon while the file is there (`league/data_job.py`), and a wake that falls in the stop is skipped.
+3. **A read-only lineage snapshot** of `swarm.sqlite`: trials, inherited trials and looks by lineage, and the run count.
+4. **Deploy:** `python3 scripts/floor_box.py deploy`. If the release moves the money digest, ratify at once
+   (`live_trading.py --ratify`) as soon as `status` shows it current.
+5. **Checks after promotion:** `real_money` true; health `failures` []; `research_evaluator.execution` unchanged (unless
+   the release is a planned reset); the tuition lot still exit-only; the practice cohorts intact; a second lineage
+   snapshot with 0 violations against the first.
+6. **Un-stop the daemon:** `rm /workspace/state/data/nightly.stop`.
+7. **Re-point the harness observer:** `/workspace/state/harness/runtime.json` `base` (the deployed commit's full sha)
+   and `release_digest` (`league.watchdog.tree_digest` of `/workspace/current`). Measure the lanes only once the swarm's
+   heartbeat names the new release: a capture taken while the swarm still runs the old one binds the wrong base.
+8. **Criterion 1 on the new release:** with no calibration order working and outside the House test's window,
+   `floor_box.py stop`, then `start`; then kill the swarm process. Both must recover (every instance restored, the swarm
+   back within a minute).
+9. **A CHANGELOG entry** for the release (the docs-only commit does not change the release tree's digest).
+
 **The first release on the new state root.** The old House's state was moved aside on Sept 26; the
 new House starts on an empty `/workspace/state` with `real_money` false. Its first owner deploy
 makes the watchdog's `previous` a release of the new era. **Never roll back past that release**:
@@ -328,15 +362,16 @@ deploy`. Deploy the gateway before a House release that needs its change. After 
 checkout of exactly `origin/main`: a deploy from a branch drops whatever else main holds. From Release B the gateway
 binds a KV namespace (`LIBRARY`, `ltcm-gateway-library`) for the research library; never delete it.
 
-**The site.** In `~/Work/personal-site`: `npm test`, then `npm run build && npx wrangler deploy`
-(its `DEPLOYMENT.md` has the details). When the publisher's schema or a bound changes, the site
-deploys first: it refuses a whole checkpoint for one field it does not allow. The one exception is the
-positions table (`positions`, Sept 28, 2026): refused, the publisher posts the checkpoint again without it
-and offers it again half an hour later (a warning per distinct reply of the site, "positions table: the site
-refused the positions table (old site, or a row it rejects) ... (the site said: ...)"), so either may go
-first. The first release of the table went site first (#15, 16:59Z Sept 28), then the House (R6, 20:08Z).
-The practice league's block (`practice`, Sept 29, 2026) and Claude's own compute part (`compute.claude_usd`, Release
-A, #441) are the second exception, handled together.
+**The site.** The page is the owner's (since Oct 2: hands-off for this repository's work; keep the publisher's data
+contracts stable and ask the owner before changing them). The owner deploys it in `~/Work/personal-site`: `npm test`,
+then `npm run build && npx wrangler deploy` (its `DEPLOYMENT.md` has the details). When the publisher's schema or a
+bound changes, the site deploys first: it refuses a whole checkpoint for one field it does not allow. The one exception
+is the positions table (`positions`, Sept 28, 2026): refused, the publisher posts the checkpoint again without it and
+offers it again half an hour later (a warning per distinct reply of the site, "positions table: the site refused the
+positions table (old site, or a row it rejects) ... (the site said: ...)"), so either may go first. The first release of
+the table went site first (#15, 16:59Z Sept 28), then the House (R6, 20:08Z). The practice league's block (`practice`,
+Sept 29, 2026) and Claude's own compute part (`compute.claude_usd`, Release A, #441) are the second exception, handled
+together.
 - **The order it tries:** a site that refuses the checkpoint is sent each older shape alone, then both:
   1. without the positions table;
   2. without the practice block and with the five-part bill (Claude folded into `other_usd`,
@@ -492,7 +527,7 @@ its main commit.
     `live.observe_train` false. These switch things off, which is allowed in session.
   - Roll back only if that fails, and never past the House test's start release while it holds anything.
 - **Then:** apply the Gym settings planned for after Release A: `gym.max_boxes` 6 and `architect.max_refill` 12
-  (CHANGELOG, Sept 30).
+  (CHANGELOG, Sept 30; applied that night).
 
 ## Release B: deploy, ratify, switch on (Oct 1, 2026; done 03:48-04:01Z)
 
@@ -559,13 +594,6 @@ reset 2. It deployed outside the session, before 13:25Z Oct 1, and never 19:30-2
 10. **Close-out:** record releases A and B as order-path deviations in the House live test's private addendum; update
     the run record and the CHANGELOG entry with the times and figures.
 
-**Rolling back across B.** Switch `live.incubator` off first and wait until no `:i` position is held or working.
-Release A does not know the route: it would restore an `:i` instance, send it to exits only and count its rows as
-tuition. Then roll back (**Roll back**, below) and ratify again at once on `a3e2aa7c`. In an emergency with `:i`
-positions held: the kill switch first, close them at the venue, then roll back. Roll the gateway back
-(`npx wrangler rollback <version>`) only if the gateway itself is at fault: Release A never calls the library. Never
-delete the KV namespace. A rollback moves the execution fingerprint back, so the swarm adopts Release A's evaluator
-again at its start: that is one more evidence reset, to be logged in the run record like the planned ones.
 
 ## Roll back
 
@@ -596,8 +624,18 @@ cd /workspace/previous && /workspace/.venv/bin/python -m league.watchdog rollbac
 - **`long_single` (#425).** Once any `long_single` family exists, alive or retired, a release before #425
   fails every architect pass (its coverage has no `long_single` row: a caught KeyError, so no family is
   born) and refuses forks of it. Roll forward, or hotfix, rather than roll back past #425.
-- **Across Release B** (the incubator): switch `live.incubator` off and wait until no `:i` position is held or working
-  before a rollback; ratify again at once on `a3e2aa7c` after it (**Release B: deploy, ratify, switch on**, above).
+- **Across Release B** (the incubator). Switch `live.incubator` off first and wait until no `:i` position is held or
+  working: Release A does not know the route, and would restore an `:i` instance, send it to exits only and count its
+  rows as tuition. Then roll back and ratify again at once on `a3e2aa7c`. In an emergency with `:i` positions held: the
+  kill switch first, close them at the venue, then roll back. Roll the gateway back (`npx wrangler rollback <version>`)
+  only if the gateway itself is at fault: Release A never calls the library. A rollback moves the execution fingerprint
+  back, so the swarm adopts Release A's evaluator again at its start: one more evidence reset, to be logged in the run
+  record like the planned ones.
+- **Across `20261002T112610Z-e11710692569`** (#484, the look holds). A release before it reads `gate_outcome` "held" as
+  no verdict (`bands.BAD_OUTCOMES` lacks it), so a held version whose review and audit passed would regain its 1-lot
+  execution tuition (its incubator bar stays: bars are kept). Before such a rollback read
+  `SELECT family, version, stage FROM look_holds` on the box; with any row, roll forward instead or take it to the
+  owner. Setting `gate.look_holds` null stops new holds and never reopens a held version.
 - **The gateway:** `npx wrangler rollback` in `gateway/`. **The site:** the same in
   `~/Work/personal-site`. Never delete the gateway's KV namespace `ltcm-gateway-library` (Release B): a rollback to a
   version that binds it needs it.
@@ -759,7 +797,7 @@ python3 scripts/data/box.py run -- ARGS         # run backfill.py ARGS (or check
 - **Gym boxes** are forks of the Gym image checkpoint, sealed, driven through Sail's file and exec
   APIs (`league/gym/driver.py`, `python -m league.gym.batch` on the box). The swarm's pool starts
   `gym.start_boxes` when there is work (4 by default; 2 on the box since Sept 30's throttle), grows to
-  `gym.max_boxes` (8 by default; 4 on the box since Sept 30, 6 planned after Release A), sleeps a box after
+  `gym.max_boxes` (8 by default; 6 on the box since Release A, Sept 30), sleeps a box after
   ten idle minutes, terminates a box whose image is no longer the configured one, and the Sail guard brakes
   it to zero before the House is at risk. They need no operator step: `swarm.json` sizes the pool, and
   adopting an image is one edit of `gym.image_checkpoint` (with `gym.gate_checkpoint` for its gate partner).
@@ -931,46 +969,44 @@ contracts already attributed to another family. Missing fill values leave an exp
 `unpriced_close` row, release stale exposure and block new entries until venue fills or expiry events
 resolve the accounting; estimated intrinsic values never become forward evidence.
 
-The checked-in deployment has `real_money: true`, the grant is active on `a3e2aa7c`, and the gateway's
-`OPTION_STRUCTURES_REAL` names the four debit types. The gateway still admits paper structures and
-verified closes of held real positions; `off` is still a permitted stricter setting in `league.ci`. The
-paper route proof runs from 09:35 ET until it has passed, even with no real-account client, grant or
-eligible family, and keeps an unfinished attempt's identity and owned contracts through restarts. Both
-proofs (the multi-leg vertical and the single-leg call) passed on Sept 28; a passed proof is not run
-again. Passing records paper execution evidence, never a family's evidence.
+The checked-in deployment has `real_money: true`, the grant is active on `42c4a3af` (re-ratified at Release B, about
+03:59Z Oct 1), and the gateway's `OPTION_STRUCTURES_REAL` names the four debit types. The gateway still admits paper
+structures and verified closes of held real positions; `off` is still a permitted stricter setting in `league.ci`. The
+paper route proof runs from 09:35 ET until it has passed, even with no real-account client, grant or eligible family,
+and keeps an unfinished attempt's identity and owned contracts through restarts. Both proofs (the multi-leg vertical and
+the single-leg call) passed on Sept 28; a passed proof is not run again. Passing records paper execution evidence, never
+a family's evidence.
 
-**The money table (the sprint, owner decision D4, Sept 26, 2026)**: real types under $2,000 of equity are
-exactly `debit_vertical`, `long_butterfly`, `long_call`, `long_put` (the credit types come back only with a
-deposit to $2,000, in one deploy with the gateway, and a re-ratified grant); Probe 5% of equity a structure
-with a $100 one-contract floor, 3 open, 15% the family; the book 90%; daily stop 35%, drawdown stop 60%;
-tuition $200 a day; the D3 calibration's day bounded at $50 of possible loss. The gateway's per-order cap is the lower of
-$1,000 and 25% of equity (at $1,473.11 of sizing equity: $368.27; 5% is $73.65, so a Probe's $100 floor
-applies), 100% of equity opened a day, 250 of 300 orders open.
+**The money table (the sprint, owner decision D4, Sept 26, 2026)**: real types under $2,000 of equity are exactly
+`debit_vertical`, `long_butterfly`, `long_call`, `long_put` (the credit types come back only with a deposit to $2,000,
+in one deploy with the gateway, and a re-ratified grant); Probe 5% of equity a structure with a $100 one-contract floor,
+3 open, 15% the family; the book 90%; daily stop 35%, drawdown stop 60%; tuition $200 a day; the D3 calibration's day
+bounded at $50 of possible loss. The gateway's per-order cap is the lower of $1,000 and 25% of equity (at Sept 28's
+$1,473.11 of sizing equity: $368.27; 5% is $73.65, so a Probe's $100 floor applies; equity was $1,312.79 on Oct 2), 100%
+of equity opened a day, 250 of 300 orders open.
 
 **The single-leg paper proof**: once the vertical's has passed, the practice account opens and closes a
 1-lot SPY call about 1-2% out of the money (nearest expiry at least a day out, at the natural, held two
 minutes) with single-leg orders. Real long calls and puts open only after it (`paper_proof_single`).
 
-**Two-sided single families (`long_single`, #425; ships in Release A)**: a family may declare `long_single`, one
-program whose every open is one `long_call` or one `long_put` (one leg, long), the side chosen by its rule,
-in place of a call/put twin pair. It is a declared structure, never an order type: the money table's
-`real_types`, the money digest (`a3e2aa7c`) and the gateway's `OPTION_STRUCTURES_REAL` are unchanged, and
-none of them may name it. The live path maps it to real (tuition, Probe, Sized, the site's `real_structure`
-check) only while BOTH `long_call` and `long_put` are real types (`money.order_types`, `Table.family_real`,
-`Table.family_allowed`); drop either and the family is held at Candidate with the reason recorded. Every
-order it sends still carries its own type and is checked (`type_allowed`, the single-leg paper proof, the
-gateway) and sized by its own unit, exactly as a one-sided family's. Its declared type is enforced on real
-opens only: the live path refuses a real open of any other type from it ("a long_single family opens only
-long_call or long_put for real, never ..."; `money.DECLARED_TYPES`, the instance's `structure`, read at each
-sync). The Gym and the shadow book never read a family's structure: there, as for every family, each order is
-judged by its own type, and a one-sided `long_call` or `long_put` family is unchanged everywhere. Its forward
-record, D2 and the drift screen are any family's (it is only as drift-neutral as its side rule: the screen
-charges whatever net exposure it holds). The site shows the agent's structure as null (the site's schema has only the
-eleven order types) and each of its positions as `long_call` or `long_put`. The Gym is unchanged: it never
-reads a family's structure, so its bundle version does not move.
+**Two-sided single families (`long_single`, #425; ships in Release A)**: a family may declare `long_single`, one program
+whose every open is one `long_call` or one `long_put` (one leg, long), the side chosen by its rule, in place of a
+call/put twin pair. It is a declared structure, never an order type: the money table's `real_types`, the money digest
+(`a3e2aa7c` then; `42c4a3af` since Release B, for the incubator's row) and the gateway's `OPTION_STRUCTURES_REAL` are
+unchanged, and none of them may name it. The live path maps it to real (tuition, Probe, Sized, the site's
+`real_structure` check) only while BOTH `long_call` and `long_put` are real types (`money.order_types`,
+`Table.family_real`, `Table.family_allowed`); drop either and the family is held at Candidate with the reason recorded.
+Every order it sends still carries its own type and is checked (`type_allowed`, the single-leg paper proof, the gateway)
+and sized by its own unit, exactly as a one-sided family's. Its declared type is enforced on real opens only: the live
+path refuses a real open of any other type from it ("a long_single family opens only long_call or long_put for real,
+never ..."; `money.DECLARED_TYPES`, the instance's `structure`, read at each sync). The Gym and the shadow book never
+read a family's structure: there, as for every family, each order is judged by its own type, and a one-sided `long_call`
+or `long_put` family is unchanged everywhere. Its forward record, D2 and the drift screen are any family's (it is only
+as drift-neutral as its side rule: the screen charges whatever net exposure it holds). The site shows the agent's
+structure as null (the site's schema has only the eleven order types) and each of its positions as `long_call` or
+`long_put`. The Gym is unchanged: it never reads a family's structure, so its bundle version does not move.
 
-**The practice league** (the observe band). The league's code was merged Sept 29-30, 2026 through #431 and deploys with
-Release A. The running release still has the older observe band, which admits only validated versions.
+**The practice league** (the observe band; live since Release A, Sept 30, 2026, through #431).
 - **Who:** every alive Gym-band family with a validated version, or with an eligible Train version (the version the
   tournament validates next, not demoted).
 - **How:** it trades the shadow book on live quotes as `<family>@<version>:o`, on a $10,000 practice account. Its program
@@ -1009,6 +1045,16 @@ Release A. The running release still has the older observe band, which admits on
   Snapshots pin the Gym bundle and fill model. If either changes, old cohorts become close-only and their wind-down
   outcomes are excluded from program feedback. The family/version ledger currently requires a newly eligible source
   version for fresh practice after an evaluator change; it never mixes evaluators into one successful cohort.
+- **Ending a cohort by hand** (the operator, after a close, never mid-session). Retiring the family does not end its
+  cohort: the two GOOGL-lineage cohorts kept practising after their families were retired on Oct 1. On the box:
+
+  ```sh
+  cd /workspace/current && /workspace/.venv/bin/python -c "from league.live.observe import ObserveStore; \
+  ObserveStore('/workspace/state').fail_cohort('<family>', <version>, day='<YYYY-MM-DD>', reason='operator: <why>')"
+  ```
+
+  The cohort then reads `failed`, and its pin is freed at the next session's first pass. The store opens SQLite with a
+  0.05 s timeout, so retry on "database is locked". Record it in the run record.
 - **Private receipts.** `observe.sqlite.events` records decisions, coverage, intents, rejections, orders and fills with
   leg quotes, fees and slippage against decision mid. The shadow account saves unacknowledged receipts and retries
   idempotently after a restart. Events retain 120 days; a prolonged ledger outage has a 10,000-event per-account buffer
@@ -1020,9 +1066,9 @@ Release A. The running release still has the older observe band, which admits on
   due / made / missed for want of quotes / missed for want of the budget / program errors, the per-minute marked P&L's peak and drawdown,
   open positions at the engine's mark). Realized P&L is the headline; open positions are apart, at the mark.
 - **Who reads it.** Nothing that feeds evidence or money (the gate, the verifier, the bands, the money table, tuition,
-  Profit). The swarm reads its summary as a research signal (`league/swarm/practice.py`: the strategist's PRACTICE table,
-  the architect's PRACTICE BY CLASS lines, the bandit's bonus: at most +25% of a family's share and at most 10% of all
-  share moved). `family_feedback` also supplies researcher context after ten program closes over three close-session
+  Profit). The swarm reads its summary as a research signal (`league/swarm/practice.py`: the strategist's PRACTICE
+  table, the architect's PRACTICE BY CLASS lines, the share bonus: at most +25% of a family's share and at most 10% of
+  all share moved). `family_feedback` also supplies researcher context after ten program closes over three close-session
   days; its revision token changes on a new close day or another five closes, so idle researchers can wake on meaningful
   observations. `practice.feedback` false turns these off. The site shows its aggregates (`practice`, below).
 - **The forward embargo.** Because practice feeds research, a Sized move also needs the forward record of the sessions
@@ -1096,8 +1142,8 @@ real fills and P&L. Never a band, a promotion, evidence or a forward record; D2 
   session's close is a full-window sample; any other end is "interrupted").
 - Off by default: `swarm.json` `{"live": {"house_test": true}}` turns it on (only after the analysis script's sha256
   is pinned in the private addendum); off again sends it to exits only and cancels its working open within a minute.
-- **State:** on since 00:17:28Z Sept 29, switched on after its analysis script was pinned. It has started. At 14:28Z
-  Sept 30 it had used 2 of its 20 sessions and sent no order.
+- **State:** on since 00:17:28Z Sept 29, switched on after its analysis script was pinned (new opens through its 20th
+  session). As of Oct 2 it has sent no order.
 - **After a restart:**
   - a restored House test instance is always `kind` real and `observe` false: #429 restores by keyword, and from
     Release A, `Instance` coerces the flag (#437);
@@ -1542,24 +1588,24 @@ the swarm's loop for up to the meters' 20 s timeouts, at most once every 5 minut
 | `LIBRARY_DAY_UPSTREAM`, the `LIBRARY` KV binding | `gateway/wrangler.jsonc` | 600; namespace `ltcm-gateway-library` (Release B) | the research library's requests to arXiv a UTC day for the whole floor (`"0"` stops them; cache hits still answer), and its cache | gateway deploy; never delete the namespace |
 | `live.observe`, `live.observe_max` | `swarm.json` on the box | true, 48 (since 13:36Z Sept 29) | the practice league (the observe band) and its instance cap (default 48); read each minute, no deploy (a swarm.json that is not a JSON object turns it off) | edit `swarm.json` |
 | `live.observe_train`, `live.observe_roots_max`, `live.observe_read_calls` | `swarm.json` on the box | defaults: true, 24, 40 (from Release A) | the Train tier; the distinct roots the league may read (1-128); the minute's data calls before observe reads stop (10-200; unset: the step's own 40) | edit `swarm.json` |
-| `practice.feedback`, `sessions`, `bonus`, `bonus_total`, `min_trades` | `swarm.json` on the box | defaults: true, 10, 0.25, 0.10, 3 (from Release A) | the practice league's research feedback: the strategist's table, the architect's lines, the bandit's bonus (code ceilings 0.5 and 0.2); off: none of the three | edit `swarm.json` |
+| `practice.feedback`, `sessions`, `bonus`, `bonus_total`, `min_trades` | `swarm.json` on the box | defaults: true, 10, 0.25, 0.10, 3 (from Release A) | the practice league's research feedback: the strategist's table, the architect's lines, the share bonus (code ceilings 0.5 and 0.2); off: none of the three | edit `swarm.json` |
 | `live.calibration`, `live.calibration_samples` | `swarm.json` on the box | true, 100 | the D3 round trips (still only with real money on, the grant and the paper proof); samples a symbol's open cell (the mid, or the patient mid at 12:00 and 14:00) stops at (defaults false, 30) | edit `swarm.json` |
 | `live.house_test` | `swarm.json` on the box | true (since 00:17:28Z Sept 29) | the House live test (still only with real money on, the grant, the paper proof and its private program verified); off: exits only | edit `swarm.json` |
 | `live.incubator` | `swarm.json` on the box | true (since 04:01Z Oct 1); default false (Release B ships it off) | the incubator (still only with real money on, the grant, a passed first look and the swarm's facts, which B2 writes); only JSON `true` is on; off: exits only, working opens cancelled within a minute; first looks are recorded either way | edit `swarm.json`, and switch on only outside a session |
 | The House live test's program | `/workspace/state/house-test/rebound-live/` on the box | present, verified | the frozen program and its params, hash-checked against `league/live/house_test.py` `FROZEN` | the operator's private upload script, `--apply` |
 | `FRONTIER_MONTH_USD`, `FRONTIER_MONTH_MAX_USD`, `FRONTIER_FUNDED_MONTH` | `gateway/wrangler.jsonc` | $707, September 2026 only; not topped up again (the owner, Sept 29), so $0 from Oct 1 | the OpenAI month; expires before an unfunded month can renew it | gateway deploy |
 | `CLAUDE_USD`, `CLAUDE_MODELS` | `gateway/wrangler.jsonc` | $265 (since Oct 1: the owner topped the account up to a $100 balance against $165.26 spent; $200 from 05:29Z Sept 29); Opus 5.5, Sonnet 5, Sonnet 5.5 | the Anthropic account's funded total (never resets) and the priced models (the allowlist) | gateway deploy after the owner adds funds |
-| `claude.model`, `claude.usd_cap`, `claude.max_tokens` | `swarm.json` on the box | `claude-sonnet-5-5` (since 04:53Z Sept 29), 198 (since 05:29Z Sept 29), 32000 | the swarm's Claude model, its own lifetime Claude line inside `CLAUDE_USD`, a call's output ceiling (defaults `claude-opus-5-5`, 100, 16000) | edit `swarm.json` |
-| `claude.roles`, `claude.role_usd_day`, `claude.role_model` | `swarm.json` on the box | architect, audit, diagnostician, rewrite, review, researcher, strategist; lines: architect $0 (since 16:41Z Sept 30: births on Kimi-K3), rewrite $0, researcher $0, review $5, strategist $6, diagnostician $6; audit on `claude-opus-5-5` (since 04:53Z Sept 29) | who asks Claude first; a role's own Claude line a UTC day; a role's own Claude model (defaults since PR #417: architect, audit, diagnostician, researcher; the researcher $100; the researcher on `claude-sonnet-5-5`; the box's `roles` list replaces the default, so the box's research band is off until "researcher" is added to it) | edit `swarm.json` |
-| `researcher.claude_top`, `claude_effort`, `claude_max_tokens`, `claude_hold_every` | `swarm.json` on the box | 0 on the box (the band is off); defaults: 12, `medium`, 12000, 3 | the top band on Claude (PR #417): how many of the bandit's top families, at what effort, each call's output ceiling (it sizes the hold), and how often Claude looks during a hold streak (1: every cycle) | edit `swarm.json` |
+| `claude.model`, `claude.usd_cap`, `claude.max_tokens` | `swarm.json` on the box | `claude-sonnet-5-5` (since 04:53Z Sept 29), 263 (since 20:33Z Oct 1; 198 from 05:29Z Sept 29), 32000 | the swarm's Claude model, its own lifetime Claude line inside `CLAUDE_USD`, a call's output ceiling (defaults `claude-opus-5-5`, 100, 16000) | edit `swarm.json` |
+| `claude.roles`, `claude.role_usd_day`, `claude.role_model` | `swarm.json` on the box | architect, audit, diagnostician, rewrite, review, researcher, strategist; lines: architect $0 (since 11:54Z Oct 2; $5 at 20:33Z Oct 1 to 00:06Z Oct 2, 06:09-06:51Z and 11:38-11:54Z Oct 2: 0 births in its 4 Oct 2 passes; $0 from 16:41Z Sept 30), rewrite $0, researcher $0, review $5, strategist $6, diagnostician $6; audit on `claude-opus-5-5` (since 04:53Z Sept 29) | who asks Claude first; a role's own Claude line a UTC day; a role's own Claude model (defaults since PR #417: architect, audit, diagnostician, researcher; the researcher $100; the researcher on `claude-sonnet-5-5`; the box's `roles` list replaces the default, so the box's research band is off until "researcher" is added to it) | edit `swarm.json` |
+| `researcher.claude_top`, `claude_effort`, `claude_max_tokens`, `claude_hold_every` | `swarm.json` on the box | 0 on the box (the band is off); defaults: 12, `medium`, 12000, 3 | the top band on Claude (PR #417): how many of the top families by allocation share, at what effort, each call's output ceiling (it sizes the hold), and how often Claude looks during a hold streak (1: every cycle) | edit `swarm.json` |
 | `researcher.claude_family_usd_day`, `claude_min_room_usd`, `claude_timeout_seconds`, `claude_breaker_failures`, `claude_breaker_window_seconds`, `claude_breaker_pause_seconds` | `swarm.json` on the box | defaults: $15, $25, 180, 3, 3600, 3600 | the band's fuses: one family's Claude a UTC day, the funded room left to the other roles, one call's limit, and the breaker (unknown bills in the window that pause the band, and for how long) | edit `swarm.json` |
 | `gate.review_openai_model`, `gate.audit_openai_model` | `swarm.json` on the box | null, null (since 04:53Z Sept 29) | the review's and the audit's OpenAI route; null skips it (defaults `gpt-6-sol`, `gpt-6-astra`) | edit `swarm.json` |
 | `gate.look_holds` (`drift_share`, `min_power`) | `swarm.json` on the box | default `{"drift_share": 0.25, "min_power": 0.30}` (the owner, Oct 2, 2026) | THE LOOK HOLDS: hold a holdout look at a long-delta version whose Train drift share is at least `drift_share`, or whose expected holdout power at the next look's Holm level is below `min_power` (the look holds, in the gate's section below). A key null turns that hold off, `look_holds` null both; a value that is not a number from 0 to 1 reads as its default | edit `swarm.json` |
-| `architect.openai_model`, `every_seconds`, `refill_seconds`, `max_refill`, `max_output_tokens` | `swarm.json` on the box | null, 1800 (since 02:47Z Oct 1; 900 before), 1200, 12 (since Release A, Sept 30; 4 from 16:07Z), 32000 | the architect: null leaves it Claude first (Sail's Kimi-K3 as the fallback, and its route while `claude.role_usd_day.architect` is 0); its cadence, its refill below `population.start` and each pass's births (defaults `gpt-6-astra`, 14400, 3600, 12, 12000) | edit `swarm.json` |
-| `architect.sail_effort` | `swarm.json` on the box | unset: `medium` (Oct 1; before it, `high` was hard-coded) | the architect's reasoning effort on Sail (Kimi-K3) and OpenAI; Claude's is `claude.role_effort` / `claude.effort`. One of `minimal`, `low`, `medium`, `high`, `xhigh`; anything else reads as `medium`. At `high`, from 08:15Z Oct 1 every pass spent the whole 32,000-token output on reasoning and came back cut, most with no text; the same request at `medium` completed in 66 s with 12 carded families. A cut Sail answer is salvaged like a Claude one (its complete families born, fewer than 3 buy the one retry on Claude alone), and the pass's `swarm.architect` event says its `effort`, its `usage` (input, cached, output and reasoning tokens) and, when cut, its `incomplete_reason`. At `medium`, k3 sometimes writes stray trailing commas (`,}`, `,]`) into a complete answer; when the strict read finds no `families` array and the families object has such a comma, the architect reads it again without them, from the `{` that opens that object (`read_families`; the event says `lenient`), where before it read as no proposals (11:57Z Oct 1). A complete answer whose families array still does not parse whole (15:59Z Oct 1: a stray `}` after the fourth and the fifth of six families, and the pass read as no proposals) is read object by object, each family decoded from its own `{` and the stray closers and commas between the families skipped, never outside the array and nothing inside a family changed beyond the strip (`recover_families`: an object that does not decode whole is passed over, never entered or kept truncated; the event's `recovered` says how many and why, and `passed` the objects passed over). An answer with no readable family still reads as none. The operator set this key to `high` in `swarm.json` at 12:00Z Oct 1 (with `architect.max_refill` 6, which completed with 6 proposals a pass) until the re-read deploys | edit `swarm.json` |
+| `architect.openai_model`, `every_seconds`, `refill_seconds`, `max_refill`, `max_output_tokens` | `swarm.json` on the box | null, 1800 (since 02:47Z Oct 1; 900 before), 1200, 6 (since about 14:00Z Oct 1; 12 from Release A, Sept 30), 32000 | the architect: null leaves it Claude first (its Sail profile, `architect.sail_profile`, as the fallback, and its route while `claude.role_usd_day.architect` is 0); its cadence, its refill below `population.start` and each pass's births (defaults `gpt-6-astra`, 14400, 3600, 12, 12000) | edit `swarm.json` |
+| `architect.sail_effort` | `swarm.json` on the box | `high` (since 12:54Z Oct 2; `medium` 11:38-12:54Z Oct 2; `high` from about 14:00Z Oct 1); default `medium` (Oct 1; before it, `high` was hard-coded) | the architect's reasoning effort on Sail (its `architect.sail_profile`) and OpenAI; Claude's is `claude.role_effort` / `claude.effort`. One of `minimal`, `low`, `medium`, `high`, `xhigh`; anything else reads as `medium`. At `high`, from 08:15Z Oct 1 every pass spent the whole 32,000-token output on reasoning and came back cut, most with no text; the same request at `medium` completed in 66 s with 12 carded families. A cut Sail answer is salvaged like a Claude one (its complete families born, fewer than 3 buy the one retry on Claude alone), and the pass's `swarm.architect` event says its `effort`, its `usage` (input, cached, output and reasoning tokens) and, when cut, its `incomplete_reason`. At `medium`, k3 sometimes writes stray trailing commas (`,}`, `,]`) into a complete answer; when the strict read finds no `families` array and the families object has such a comma, the architect reads it again without them, from the `{` that opens that object (`read_families`; the event says `lenient`), where before it read as no proposals (11:57Z Oct 1). A complete answer whose families array still does not parse whole (15:59Z Oct 1: a stray `}` after the fourth and the fifth of six families, and the pass read as no proposals) is read object by object, each family decoded from its own `{` and the stray closers and commas between the families skipped, never outside the array and nothing inside a family changed beyond the strip (`recover_families`: an object that does not decode whole is passed over, never entered or kept truncated; the event's `recovered` says how many and why, and `passed` the objects passed over). An answer with no readable family still reads as none (the CHANGELOG, Oct 1, has the history) | edit `swarm.json` |
 | `population.start`, `ceiling`, `floor` | `swarm.json` on the box | 96, 96, 12 | the refill target, the most alive, the fewest retirement may leave (defaults 48, 96, 16) | edit `swarm.json` |
 | `gym.start_boxes`, `max_boxes`, `train_from`, `image_checkpoint`, `gate_checkpoint` | `swarm.json` on the box | 2, 6 (since Release A, Sept 30; 4 from 16:07Z), "2020-01-02", the sealed 2020-24 image, its gate partner | the Gym pool, Train's first day and the images (defaults 4, 8, unset, none, none: the gate is off without a gate image). `train_from` takes "2022-01-03", "2020-01-02" or (since R11a) "2017-01-03"; the derived split and time limit are 8 and 900 s, 16 and 1500 s, 24 and 2400 s | edit `swarm.json`; `train_from` and a new image together |
-| `researcher.sail_usd_per_hour`, `usd_per_hour`, `top_families` | `swarm.json` on the box | 1.3 (since 02:47Z Oct 1; 1.1 from 16:41Z Sept 30; 12 before), 5 (not read while the Sail pace is set), 0 | the researcher pace (below) and the bandit's top band (defaults null, 4.0, 10) | edit `swarm.json` |
+| `researcher.sail_usd_per_hour`, `usd_per_hour`, `top_families` | `swarm.json` on the box | 1.3 (since 02:47Z Oct 1; 1.1 from 16:41Z Sept 30; 12 before), 5 (not read while the Sail pace is set), 0 | the researcher pace (below) and the top band by allocation share (defaults null, 4.0, 10) | edit `swarm.json` |
 | `researcher.retire_idle_evaluations`, `dormant_cycles`; `tournament.retire_revisions`, `retire_evaluations` | `swarm.json` on the box | 500, 12; 200, 4000 | the idle rule and its dormancy clause; the tournament's retirement (defaults 150, 40; 30, 2000) | edit `swarm.json` |
 | `tournament.incubator_keep_max` | `swarm.json` on the box | default 12 (Release B, L1) | the most families the cohort keep spares from the revision, evaluation and idle rules (at most 96), beside the incubator's cohorts, which it never cuts (Release B'); 0, null, a boolean or a string turns it off | edit `swarm.json` |
 | `guard.burst_cap_usd`, `burst_until` | `swarm.json` on the box | $900, 2026-10-05 | the swarm's Sail spend for the research burst (the owner's 24/7 research, Sept 27); the $32 line is unchanged (defaults $350 until Monday Sept 28's open) | edit `swarm.json` |
@@ -1567,12 +1613,16 @@ the swarm's loop for up to the meters' 20 s timeouts, at most once every 5 minut
 | `researcher.stall_revisions`, `rewrites_per_day` | `swarm.json` on the box | 10000 (since 16:41Z Sept 30: stall rewrites off; 12 before), 1 | the stall that buys a researcher one rewrite from a stronger model, and at most how many a family a day (defaults 5, 4) | edit `swarm.json` |
 | `claude.role_effort` | `swarm.json` on the box | `{"architect": "medium"}` (since Release A, Sept 30; it matters only while the architect has a Claude line) | a role's own Claude effort when the caller names none (R11b; default `{}`: `claude.effort` for every role, so the gate keeps "high") | edit `swarm.json` |
 | `architect.max_alive_per_class` | `swarm.json` on the box | default 12 (R11b) | the most living families of one mechanism class (structure x root group); `admit` refuses births past it; 0 or null off | edit `swarm.json` |
-| `architect.cell_yield` | `swarm.json` on the box | default null: off (H2) | the card check's yield-aware cells (**The cell's yield**, below). Null keeps every mechanism-verdict row needing a rebirth claim. `{"min_births": 30, "floor": 0.10, "lookback_days": 7}` (or `true`, the same) opens every cell except an exhausted one: at least `min_births` settled births in the lookback, with a Wilson 95% upper bound on their drift-pass share below `floor`. In an open cell a card that matches only self-refuted and drift rows needs no claim. A key that is missing or misstated takes its default | edit `swarm.json`; roll back with null |
-| `architect.claimable_rows` | `swarm.json` on the box | default 0: off (H2) | the most rows a claim may name that the REFUTED CELLS list for each cell where a claim can be needed (at most 12; the newest rows that still have rebirth room, each with the inputs it read). Row ids and input names only, no figure | edit `swarm.json` |
-| `architect.structures` | `swarm.json` on the box | default null: every type (Oct 1) | the structure types a birth may be. `"real"` reads the allocator's `allocation.real_structures` (one list for both, so a change of the account's real types is one edit); a list such as the gateway's real types (`["debit_vertical", "long_butterfly", "long_call", "long_put"]`) also admits `long_single` (a list must then change beside `allocation.real_structures`). The architect's and the strategist's GAPS and coverage show only these (a list naming one side alone makes that side a gap), the architect's request names them and its BIRTH QUOTAS show only their structure families, `admit` refuses any other type and the next request names each refusal still outside the list (kv `architect_structure_refusals`); the tournament forks and the loop's founding seeds and reseeds are only of these types, and a living family of another type keeps researching until a rule retires it. The pass's event: `structures`, `structure_not_allowed` by type, `structures_ignored` (a value naming no known type is ignored whole: every type) | edit `swarm.json` |
+| `architect.cell_yield` | `swarm.json` on the box | default null: off (H2); null on the box (the owner, Oct 2: claims first; switching it on is the owner's decision, because open-cell restatements on another slice are born as fresh lineages) | the card check's yield-aware cells (**The cell's yield**, below). Null keeps every mechanism-verdict row needing a rebirth claim. `{"min_births": 30, "floor": 0.10, "lookback_days": 7}` (or `true`, the same) opens every cell except an exhausted one: at least `min_births` settled births in the lookback, with a Wilson 95% upper bound on their drift-pass share below `floor`. In an open cell a card that matches only self-refuted and drift rows needs no claim. A key that is missing or misstated takes its default | edit `swarm.json`; roll back with null |
+| `architect.claimable_rows` | `swarm.json` on the box | default 0: off (H2); 4 on the box (since 05:26Z Oct 2) | the most rows a claim may name that the REFUTED CELLS list for each cell where a claim can be needed (at most 12; the newest rows that still have rebirth room, each with the inputs it read). Row ids and input names only, no figure | edit `swarm.json` |
+| `architect.structures` | `swarm.json` on the box | default null: every type (Oct 1); `["debit_vertical", "long_single"]` on the box (since 15:22:15Z Oct 1; `"real"` before) | the structure types a birth may be. `"real"` reads the allocator's `allocation.real_structures` (one list for both, so a change of the account's real types is one edit); a list such as the gateway's real types (`["debit_vertical", "long_butterfly", "long_call", "long_put"]`) also admits `long_single` (a list must then change beside `allocation.real_structures`). The architect's and the strategist's GAPS and coverage show only these (a list naming one side alone makes that side a gap), the architect's request names them and its BIRTH QUOTAS show only their structure families, `admit` refuses any other type and the next request names each refusal still outside the list (kv `architect_structure_refusals`); the tournament forks and the loop's founding seeds and reseeds are only of these types, and a living family of another type keeps researching until a rule retires it. The pass's event: `structures`, `structure_not_allowed` by type, `structures_ignored` (a value naming no known type is ignored whole: every type) | edit `swarm.json` |
+| `architect.sail_profile` | `swarm.json` on the box | `pro_asap` (DeepSeek-V4-Pro on the asap queue; since 12:49Z Oct 2; `pro_balanced` 12:28-12:49Z) | the architect's Sail route (default `k3_balanced`, Kimi-K3). From about 07:00Z to 12:53Z Oct 2 every architect request on Sail's balanced queue went unanswered past the 15-minute poll (`provider_poll_timeout`), while the researchers on the asap queue ran on; on `pro_asap` the next pass answered in 42 s | edit `swarm.json`; unset returns `k3_balanced` |
+| `tournament.fork_top`, `fork_min_t`, `fork_cooldown_hours` | `swarm.json` on the box | 0 (since 05:03Z Oct 2), 1.0, 6 | each round forks the top `fork_top` families whose validation t is at least `fork_min_t` with a positive validation mean, each at most once every `fork_cooldown_hours` (defaults 3, 1.0, 6); 0 turns forks off, because forks re-mined one validated lineage and raised its deflated-Sharpe N | edit `swarm.json`; roll back with `fork_top` 3 |
+| `architect.agenda_locked`, `architect.agenda` | `swarm.json` on the box | agenda v16c in both (private; sha256 `c7a46dca0707…`; since 15:22:15Z Oct 1) | the operator's locked preamble, which no model edits, and the fallback agenda (at most 4,000 characters each; never a Validation figure, D2a); **The graveyard**, below | edit `swarm.json`, keeping a backup |
+| `architect.max_rebirths_per_cell`, `max_rebirths_per_row`, `rebirth_window_days`, `card_rebirth`, `require_card` | `swarm.json` on the box | 6 (since 15:22Z Oct 1), 2, 7, `"refuse"`, true | the card check's rebirth budgets (a refuted cell's rebirths and a row's in the window) and its switches (defaults 3, 2, 7, `"refuse"`, true; league/swarm/cards.py) | edit `swarm.json` |
 | `researcher.retire_hold_cycles`, `retire_hold_trials`, `extension_hold_checks` | `swarm.json` on the box | defaults 3, 10, 6 (R11b) | the hold offer (retire after that many holds in a row with an eligible Train run or that many trials); the extension hold (a validation with that many checks met is exempt from the dormancy clause until cleared); 0 turns each off | edit `swarm.json` |
 | `researcher.probe_year`, `probe_timeout_seconds` | `swarm.json` on the box | default null (off), 300 (R11b) | the Gym's zero-trade probe: 2022 switches it on | edit `swarm.json` |
-| `tournament.exploit_per_positive` | `swarm.json` on the box | default 0.15 (R11b) | the bandit's exploit share a positive old family earns; null: `explore_share` alone, as before | edit `swarm.json` |
+| `tournament.exploit_per_positive` | `swarm.json` on the box | default 0.15 (R11b) | (bandit mode only, `allocation.mode` "bandit") the bandit's exploit share a positive old family earns; null: `explore_share` alone, as before | edit `swarm.json` |
 | `researcher.hold_until_news`, `retire_min_trials` | `swarm.json` on the box | defaults true, 10 (Release A, #431) | durable holds that only new evidence wakes (false: the R4 timer); the trials after which a researcher may retire its family | edit `swarm.json` |
 | `researcher.retire_guard_days` | `swarm.json` on the box | default 14 (Oct 1) | the validated-family guard: a researcher may not retire a family that holds a version which passed the validation line (in its state, in the tournament's verdict records, or archived by any evaluator adoption) last validated within this many days, unless a later validation of that version failed the line; a number at or below 0 turns it off; null, a boolean or a string reads as 14 | edit `swarm.json` |
 | `funding` (`enabled`, `every_seconds`, `lead_hours`, `repeat_hours`, `clear_factor`, `claude_out_usd`, `burn_window_hours`, `after_end_hours`, `fallback_every_seconds`, `fallback_flush_seconds`) | `swarm.json` on the box | defaults (Release A, #439): on, 300, per cliff, 12, 1.5, 2, 6, 48, 21600, 30 | the funding cliff alerts (**Funding cliffs and alerts**) | edit `swarm.json` |
@@ -1581,28 +1631,34 @@ the swarm's loop for up to the meters' 20 s timeouts, at most once every 5 minut
 | `options_money.incubator` | `league/constitution.py` | from Release B: `max_loss_usd` 50, `contracts` 1, `max_open` 4, `week_loss_usd` 150, `min_sessions` 3, `min_trades` 10, `min_coverage` 0.80 | the incubator's caps and its pre-registered practice rule; each row may only tighten, and 0 in `max_open`, `week_loss_usd` or `max_loss_usd` stops the route | owner deploy, then `--ratify` (no evidence reset) |
 
 In `swarm.json`, `researcher.sail_usd_per_hour`, when set, is the researcher pace: the Sail models' spend over the
-trailing hour (1.1 on the box since 16:41Z Sept 30; 12 from Sept 29), and `researcher.usd_per_hour` is then NOT read
-(the box's 5 is inert). Absent or null, `usd_per_hour` paces Sail models and OpenAI together. OpenAI holds still count
-against its own burst cap and funded gateway month. Claude is outside the research pace: it has its own lines
-(`claude.usd_cap`, `claude.role_usd_day`, `diagnostician.usd_day`) inside the gateway's funded total. Invalid,
-nonfinite or negative limits pause research. The heartbeat's `status.researcher_pace` reports the scope, limit, spend
-and pause reason, so a quiet research loop can be distinguished from a publication delay.
+trailing hour (1.3 on the box since 02:47Z Oct 1; 1.1 from 16:41Z Sept 30; 12 from Sept 29), and
+`researcher.usd_per_hour` is then NOT read (the box's 5 is inert). Absent or null, `usd_per_hour` paces Sail models and
+OpenAI together. OpenAI holds still count against its own burst cap and funded gateway month. Claude is outside the
+research pace: it has its own lines (`claude.usd_cap`, `claude.role_usd_day`, `diagnostician.usd_day`) inside the
+gateway's funded total. Invalid, nonfinite or negative limits pause research. The heartbeat's `status.researcher_pace`
+reports the scope, limit, spend and pause reason, so a quiet research loop can be distinguished from a publication
+delay.
 
-A Gym researcher can call `retire(reason)` to abandon its whole family, but only on a READ turn while more families
-live than `population.start` and the family has had at least two validations (Sept 26: an unguarded retire on the
-REVISE turn took the population from 49 to 16), or while more live than `population.floor` and the family is dead by
-the idle rule (R3, Sept 27; `researcher.idle_dead`): `researcher.retire_idle_evaluations` (default 150, 500 on the
-box; 0 or null turns the rule off, in `swarm.json` without a deploy; a boolean or a non-number also reads as off) Gym
+### The idle rule and a researcher's retire
+
+A Gym researcher can call `retire(reason)` to abandon its whole family on a REVISE or READ turn once retirement is
+earned (two validations, `researcher.retire_min_trials` (10) counted trials, death by the idle rule, or the hold offer)
+while more families live than `population.floor`; never while a version is at the gate, a look is out, an extension hold
+stands or its best Train version awaits validation, and the validated-family guard refuses it for
+`researcher.retire_guard_days` (14) after a passed validation (**Goal continuation**, below; on Sept 26 an unguarded
+retire on the REVISE turn took the population from 49 to 16, which is why these guards exist). A family is dead by the
+idle rule (R3, Sept 27; `researcher.idle_dead`) after `researcher.retire_idle_evaluations` (default 150, 500 on the box;
+0 or null turns the rule off, in `swarm.json` without a deploy; a boolean or a non-number also reads as off) Gym
 evaluations since its birth or last validation without an eligible Train version, or three times as many with its best
 Train score below zero. It counts evaluations, not versions: the store keeps one version for identical code and
 parameters, so a family re-running one placeholder makes trials but no revisions. A family whose validated version
 awaits the gate (`gate_ready`) or whose holdout look is out is never dead. With the population held at its start, dead
 families never qualified before and looped on placeholder runs (the operator retired 48 by hand on Sept 27). The
 tournament retires a dead family that never calls retire by the same rule, down to `population.floor`; the architect
-refills below `population.start`. The graveyard lesson and the public cause say the idle rule retired it; since R11b
-the lesson carries the verdict of its Train record (DRIFT, STRESS, THIN or EXHAUSTED, tested findings), and only a
-family that never traded on Train is "a time limit, not a refutation" (IDLE). The family's own last notebook lines carry
-its researcher's verdict.
+refills below `population.start`. The graveyard lesson and the public cause say the idle rule retired it; since R11b the
+lesson carries the verdict of its Train record (DRIFT, STRESS, THIN or EXHAUSTED, tested findings), and only a family
+that never traded on Train is "a time limit, not a refutation" (IDLE). The family's own last notebook lines carry its
+researcher's verdict.
 
 No duplicate runs (R3; the harness audit of Sept 28 found 44% of cycles wasted and 45% of trials identical
 re-runs). A `gym_run` or `gym_sweep` variant a family already ran to completion (the same code, merged params,
@@ -1632,6 +1688,35 @@ room leaves it too, unless the cycle also held, got a stored result or had a run
 the Gym band, and a Candidate sent back to the Gym starts afresh. A holding cycle is one model call, so 40 of them can
 pass in well under an hour of a family's cycles; the count is the family's state `dormant_cycles`, and each dormant
 cycle's `swarm.cycle` event carries it.
+
+Deploy impact (R3): the rule applies at once to every family that is already past it. On Sept 27 (start 72, floor
+44, 74 alive) about 29 families were past it, nearly all long-refuted placeholders, so the first tournament round and
+the dead researchers retiring themselves take the population to about 45 within minutes, and the architect's refill
+(a handful of births a pass) takes hours to restore the start. To stage it, set `researcher.retire_idle_evaluations`
+high in `swarm.json` before the deploy (for example 500, which catches only the longest loops) and lower it toward
+150 over the following passes; the setting reloads each step. Retirement stops queued research, keeps the best
+programs and every trial/look, and leaves existing positions under their exit owner. Researchers and the
+tournament share the same atomic population-floor check. A refused retire (not offered, or the floor) is a plain
+tool answer: no cycle error and no cooldown; it does not retire the family. The raw reason stays private in its
+notebook and graveyard; the public event carries only filtered prose.
+
+### Search settings
+
+The sprint's search settings (Sept 26), all in `swarm.json` without a deploy: `researcher.top_profile` (default
+`pro_asap`, null turns it off), `researcher.top_reasoning_effort` (`low`), `researcher.top_families` (10; 0 on the box
+since Sept 30, so the top band is off) and `researcher.top_max_output_tokens` (12000) put the top families by allocation
+share on the stronger Sail profile inside the same hourly pace; `architect.agenda` (default empty) closes every
+architect request as the operator's research agenda (at most 4,000 characters; the box's agenda: v16c in
+`architect.agenda_locked` and `architect.agenda` since 15:22:15Z Oct 1, after v14 from Sept 29 and v15 on Sept 30; it
+steers where to look and changes no evidence line or kill test; its text stays private); `population.reseed_max`
+(default 0, off) founds the seeds' mechanisms again on roots they never tried while the population is below its start
+and the architect is not due; `tournament.require_robustness` (default true) validates a version only after its 1.5x
+Train robustness run came back with a profit. The robust Train objective, its robustness runs (1.5x and mid, at the
+pool's lowest priority, never starting or keeping a box awake) and the D2 validation line are code, not settings. The
+objective's one-time migration beats the heartbeat while it runs, skips a family it already moved and empties (never
+keeps) the best of a family it cannot rescore.
+
+## The gate
 
 The operator's gate hold (R3): `python -m league.swarm hold-gate --root /workspace/state --family <id> --reason
 "..."` (or `SwarmStore.hold_gate(fid)` from a shell on the box; a second connection is safe beside the running
@@ -1785,30 +1870,6 @@ gate-ready version when:
   of 896 search noise lineages, missed signals stay 23 of 40 and 269 of 384 (no planted signal that reached its look is
   held). The suite's worlds have no long-drift program that reaches a look, so it shows the cost, not the saving.
 
-Deploy impact (R3): the rule applies at once to every family that is already past it. On Sept 27 (start 72, floor
-44, 74 alive) about 29 families were past it, nearly all long-refuted placeholders, so the first tournament round and
-the dead researchers retiring themselves take the population to about 45 within minutes, and the architect's refill
-(a handful of births a pass) takes hours to restore the start. To stage it, set `researcher.retire_idle_evaluations`
-high in `swarm.json` before the deploy (for example 500, which catches only the longest loops) and lower it toward
-150 over the following passes; the setting reloads each step. Retirement stops queued research, keeps the best
-programs and every trial/look, and leaves existing positions under their exit owner. Researchers and the
-tournament share the same atomic population-floor check. A refused retire (not offered, or the floor) is a plain
-tool answer: no cycle error and no cooldown; it does not retire the family. The raw reason stays private in its
-notebook and graveyard; the public event carries only filtered prose.
-
-The sprint's search settings (Sept 26), all in `swarm.json` without a deploy: `researcher.top_profile` (default
-`pro_asap`, null turns it off), `researcher.top_reasoning_effort` (`low`), `researcher.top_families` (10; 12 on the
-box since Sept 29) and `researcher.top_max_output_tokens` (12000) put the bandit's top families on the stronger Sail
-profile inside the same hourly pace; `architect.agenda` (default empty) closes every architect request as the
-operator's research agenda (at most 4,000 characters; the box's agenda, v14 since 02:30Z Sept 29, steers where to look
-and changes no evidence line or kill test; its text stays private); `population.reseed_max` (default 0, off) founds
-the seeds' mechanisms again on roots they never tried while the population is below its start and the architect is not
-due; `tournament.require_robustness` (default true) validates a version only after its 1.5x Train robustness run came
-back with a profit. The robust Train objective, its robustness runs (1.5x and mid, at the pool's lowest priority,
-never starting or keeping a box awake) and the D2 validation line are code, not settings. The objective's one-time
-migration beats the heartbeat while it runs, skips a family it already moved and empties (never keeps) the best of a
-family it cannot rescore.
-
 ## R11b: honest verdicts, corrections that land, effort where it pays (Sept 29)
 
 R11b was merged through #431 and ships in Release A. The operator's steps after it are in **Release A: after
@@ -1907,9 +1968,10 @@ them as untested, and its 13:10Z correction was voided by a family id. R11b is r
   no effort; `claude.effort` stays the default (the gate keeps "high"). After the deploy, set
   `claude.role_effort.architect` to "medium" in `swarm.json`; roll back by removing the entry. An architect answer cut
   at max_tokens keeps its complete families; fewer than 3 buys one retry on Claude alone at medium effort. A cut never
-  falls to a Kimi-K3 refill: a retry Claude has no room or line for leaves the pass, and the next pass routes as usual.
+  falls to a Sail refill: a retry Claude has no room or line for leaves the pass, and the next pass routes as usual.
   The event's `truncated` says what was salvaged and retried.
-- **The bandit exploits only positive evidence (R11-5).** Only an old family whose latest validation mean is positive is
+- **The bandit exploits only positive evidence (R11-5; the bandit runs only under `allocation.mode` "bandit" since
+  Release B's value allocator became the default).** Only an old family whose latest validation mean is positive is
   in the exploit pool, each earning at most `tournament.exploit_per_positive` (0.15) of the share; the explore pool (new
   families, and old ones at zero or below drawing from their own posterior) takes the rest, never less than
   `explore_share`. It replaces the A4 stopgap (`explore_share` 0.75): with it, return `explore_share` to 0.25.
@@ -1935,32 +1997,35 @@ Checks after R11b ships (with the plan's 4-hour check): the share of new graveya
 strategist acceptance (2 of 3 runs or better) and the largest mechanism class's share of births (expect under 25%),
 architect truncations and births per Claude pass, and `probe` outcomes once it is on.
 
-**The cell's yield** (H2, `league/swarm/cards.py`; off until `architect.cell_yield` is set). On Oct 1 from 22:00Z the
+**The cell's yield** (H2, `league/swarm/cards.py`; `architect.cell_yield` off: the owner chose claims first on Oct 2;
+`architect.claimable_rows` 4 on the box since 05:26Z Oct 2). On Oct 1 from 22:00Z the
 architect bore nothing for seven passes in a row and the population fell to 13 (floor 12). Every refusal was the card
 check's rebirth rule: the productive cells (for example `relative_value / directional / days_4_10`, 139
 mechanism-verdict rows) are full of self-refuted and drift rows, so every proposal there needed a claim naming one of
 the cell's rows, and the model named rows outside the six the refusal listed. The edge study's critique (L4, H2)
 prescribes this variant, not dropping those tags from the verdict list and not `card_rebirth` "off".
-- **Switch on**, in `swarm.json`: `"cell_yield": {"min_births": 30, "floor": 0.10, "lookback_days": 7}` and
-  `"claimable_rows": 4` under `architect`. No deploy, no restart: the next pass reads them. Roll back with
-  `"cell_yield": null` and `"claimable_rows": 0`.
+- **Switch on**, in `swarm.json` under `architect`, no deploy and no restart (the next pass reads them):
+  - claimable rows (on): `"claimable_rows": 4`. Births per Sail pass went from 0-1 to 4 within an hour of it; roll back
+    with `"claimable_rows": 0`;
+  - open cells (the owner's decision): `"cell_yield": {"min_births": 30, "floor": 0.10, "lookback_days": 7}`; roll back
+    with `"cell_yield": null`.
 - **What it does.** A cell is exhausted when it has at least 30 settled births in 7 days whose Wilson 95% upper bound on
   drift-pass share is below 10%. At 0 drift passes that takes 35 settled births; at 1 pass, 53; at 2 passes, 69. In
   every other cell, a card that matches only self-refuted and drift rows needs no claim. Refuted, the operator's,
-  diagnosed, trial-adjusted, stress and failed-mechanism-test rows still need one, and so does every row of an
-  exhausted cell. A settled birth is a retired family or one that already holds a drift-passing eligible Train run. A
-  family still researching without a pass is pending, and one whose eligible runs all predate the drift figures is
-  unknown; neither counts. The budgets (`max_rebirths_per_cell` 3, `max_rebirths_per_row` 2, 7 days), the matching,
-  `card_rebirth` "refuse" and card completeness are unchanged. **Lineage is not unchanged when `cell_yield` is on**
-  (the H2 review, F1-F2): an open-cell birth on a slice its matched self-refuted or drift rows did not search is born as
-  a fresh lineage with its own deflated-Sharpe N and look ration, where the card check used to refuse it or link a prior
-  (a probe on the Oct 1 extract: 31 of 33 verbatim restatements across root sets and structures born as fresh lineages
-  with the setting on, 0 of 34 with it off); a paraphrase on the same slice counts only the slice's newest dead lineage
-  of each type; and on the Oct 1 extract every cell is open, while a barren cell reopens within the lookback. This
-  widens the cross-slice escape from the deflated Sharpe's N that the edge study's critique flagged as an owner D2
-  item, so switching `cell_yield` on is the owner's decision. `claimable_rows` alone changes no lineage: it lists, for
-  each cell where a claim can be needed and the cell has rebirth room, the newest rows that still have row room, each
-  with the inputs it read, so a valid claim (which links its lineage) can name one.
+  diagnosed, trial-adjusted, stress and failed-mechanism-test rows still need one, and so does every row of an exhausted
+  cell. A settled birth is a retired family or one that already holds a drift-passing eligible Train run. A family still
+  researching without a pass is pending, and one whose eligible runs all predate the drift figures is unknown; neither
+  counts. The budgets (`max_rebirths_per_cell` 3 by default, 6 on the box since Oct 1; `max_rebirths_per_row` 2; 7
+  days), the matching, `card_rebirth` "refuse" and card completeness are unchanged. **Lineage is not unchanged when
+  `cell_yield` is on** (the H2 review, F1-F2): an open-cell birth on a slice its matched self-refuted or drift rows did
+  not search is born as a fresh lineage with its own deflated-Sharpe N and look ration, where the card check used to
+  refuse it or link a prior (a probe on the Oct 1 extract: 31 of 33 verbatim restatements across root sets and
+  structures born as fresh lineages with the setting on, 0 of 34 with it off); a paraphrase on the same slice counts
+  only the slice's newest dead lineage of each type; and on the Oct 1 extract every cell is open, while a barren cell
+  reopens within the lookback. This widens the cross-slice escape from the deflated Sharpe's N that the edge study's
+  critique flagged as an owner D2 item, so switching `cell_yield` on is the owner's decision. `claimable_rows` alone
+  changes no lineage: it lists, for each cell where a claim can be needed and the cell has rebirth room, the newest rows
+  that still have row room, each with the inputs it read, so a valid claim (which links its lineage) can name one.
 - **Expected effect, from the edge study's Oct 1 12:59Z extract (not live).** None of the 127 classified cells would
   be exhausted. The lowest upper bounds were `trend_momentum / directional / days_4_10` (14 passes in 156 settled
   births, 0.145) and two cells at 0 in 19 (0.168). Switching on therefore reopens the productive cells now. The guard
@@ -2021,17 +2086,17 @@ adds nothing after 2024, but it removes nothing a model already knows ([design.m
 
 ## Models and Claude
 
-Every paid model call goes through the gateway: Claude against the owner's funded total (`CLAUDE_USD`, $200; it
-never resets), OpenAI against the funded month (September 2026 only; $0 from Oct 1). Sail models (DeepSeek, Kimi)
-are the inner loop and every role's last fallback but the diagnostician's (it has none). `league/swarm/models.py`
-routes a role's call:
+Every paid model call goes through the gateway: Claude against the owner's funded total (`CLAUDE_USD`, $265 since Oct 1;
+it never resets), OpenAI against the funded month (September 2026 only; $0 from Oct 1). Sail models (DeepSeek, Kimi) are
+the inner loop and every role's last fallback but the diagnostician's (it has none). `league/swarm/models.py` routes a
+role's call:
 
 - **Claude first** for the roles in `claude.roles`: by default the architect, the gate's audit, the diagnostician and
-  (since PR #417) the researcher's top band.
-  Since R8 the researcher's stall rewrite and the gate's program review ask for Claude too, so adding "rewrite" or
-  "review" to `claude.roles` in `swarm.json` routes them to Claude with no deploy; the box has all five since 04:53Z
-  Sept 29. Claude answers while the gateway's total has room above `claude.reserve_usd` (5) and the swarm's own Claude
-  spend is under `claude.usd_cap` (198 on the box since 05:29Z Sept 29).
+  (since PR #417) the researcher's top band. Since R8 the researcher's stall rewrite and the gate's program review ask
+  for Claude too, so adding "rewrite" or "review" to `claude.roles` in `swarm.json` routes them to Claude with no
+  deploy; the box has all five since 04:53Z Sept 29. Claude answers while the gateway's total has room above
+  `claude.reserve_usd` (5) and the swarm's own Claude spend is under `claude.usd_cap` (263 on the box since 20:33Z Oct
+  1).
 - **The model** is `claude.model` (`claude-sonnet-5-5` on the box since 04:53Z Sept 29, the owner's Sonnet 5.5; the
   default is `claude-opus-5-5`), or a role's own model in `claude.role_model` {role: model id} (the box: the audit on
   `claude-opus-5-5`). A role model must be priced both in `league/claude.py` `MODEL_CEILINGS` and in
@@ -2039,36 +2104,37 @@ routes a role's call:
   five-minute cache write, $0.20 a cache hit, $10 output per million tokens (Opus 5.5: $4, $5, $0.20, $20). Sonnet 5.5's
   default effort is `high` (Opus's is `medium`); the House always sends an effort.
 - **A role's daily line**: `claude.role_usd_day` {role: usd}, a UTC day with holds included; a call counts on the day
-  its hold was booked, even when it settles after midnight. A call that would pass the line skips Claude for the
-  role's next route. No entry is no extra line (the box: the rewrite $15, the review $5). The diagnostician also keeps
-  its own `diagnostician.usd_day`.
-- **The next routes**: the architect falls to Kimi-K3 on Sail, at `architect.sail_effort` (`medium` by default); with a
-  model named in `architect.openai_model` (null on the box), every other pass would ask GPT-6 Astra first, at the same
-  effort. A Sail answer cut short is salvaged as a Claude one, and its retry asks Claude alone. The audit falls to GPT-6
-  Astra while the OpenAI month has room and `gate.audit_openai_model` names it, then to a second, different Sail model;
-  the review to GPT-6 Sol on the same terms (`gate.review_openai_model`), else DeepSeek-V4-Pro on Sail; the stall rewrite
-  to its Sail profile. Both gate OpenAI models are null on the box, so no role calls OpenAI; from Oct 1 the gateway's
-  month would refuse it anyway.
+  its hold was booked, even when it settles after midnight. A call that would pass the line skips Claude for the role's
+  next route. No entry is no extra line (the box: the architect $0, the rewrite $0, the researcher $0, the review $5,
+  the strategist $6, the diagnostician $6). The diagnostician also keeps its own `diagnostician.usd_day`.
+- **The next routes**: the architect falls to its Sail profile, `architect.sail_profile` (Kimi-K3 balanced by default;
+  DeepSeek-V4-Pro asap on the box since 12:49Z Oct 2), at `architect.sail_effort` (`medium` by default; `high` on the
+  box); with a model named in `architect.openai_model` (null on the box), every other pass would ask GPT-6 Astra first,
+  at the same effort. A Sail answer cut short is salvaged as a Claude one, and its retry asks Claude alone. The audit
+  falls to GPT-6 Astra while the OpenAI month has room and `gate.audit_openai_model` names it, then to a second,
+  different Sail model; the review to GPT-6 Sol on the same terms (`gate.review_openai_model`), else DeepSeek-V4-Pro on
+  Sail; the stall rewrite to its Sail profile. Both gate OpenAI models are null on the box, so no role calls OpenAI;
+  from Oct 1 the gateway's month would refuse it anyway.
 - **Two readers**: the plan wants two different paid models to read a program before its holdout look. A review or
   an audit on Sail, or one Claude model reading both (with "review" and "audit" both in `claude.roles`), raises the
   gate's `not_the_plans_reviewer` alert (`same_reader` true for the second); the cure is a different
   `claude.role_model` for one of them (the box gives the audit Opus 5.5).
-- **The top band on Claude** (PR #417, the owner's Sept 29 decision to use Claude Sonnet 5.5 boldly): the bandit's
-  top `researcher.claude_top` families by weight (12) run their research cycles on `claude.role_model.researcher`
-  (`claude-sonnet-5-5`) at `researcher.claude_effort` (`medium`), streamed, with `researcher.claude_max_tokens`
-  (12000; a call's hold is about $0.31 on a median body) and `claude_timeout_seconds` (180), while "researcher" is in
+- **The top band on Claude** (PR #417, the owner's Sept 29 decision to use Claude Sonnet 5.5 boldly): the top
+  `researcher.claude_top` families by allocation share (12) run their research cycles on `claude.role_model.researcher`
+  (`claude-sonnet-5-5`) at `researcher.claude_effort` (`medium`), streamed, with `researcher.claude_max_tokens` (12000;
+  a call's hold is about $0.31 on a median body) and `claude_timeout_seconds` (180), while "researcher" is in
   `claude.roles`. The loop, the tools, their limits and their semantics are the Sail loop's
   (league/swarm/claude_research.py adapts the tools and the history, checks every input against its schema before it
-  runs, and caches the tools, the system prompt and the conversation's tail). A cycle is Claude's when a queued run or
-  a rewrite landed in it, when the family's last cycle did not hold, and on every `claude_hold_every`-th cycle (3) of
-  a hold streak; the rest of a streak runs on the family's Sail profile. Any Claude failure (a refusal, a cut answer,
-  a 402, 403, 423, 429 or 5xx, the researcher's line, the family's `claude_family_usd_day` ($15), the
+  runs, and caches the tools, the system prompt and the conversation's tail). A cycle is Claude's when a queued run or a
+  rewrite landed in it, when the family's last cycle did not hold, and on every `claude_hold_every`-th cycle (3) of a
+  hold streak; the rest of a streak runs on the family's Sail profile. Any Claude failure (a refusal, a cut answer, a
+  402, 403, 423, 429 or 5xx, the researcher's line, the family's `claude_family_usd_day` ($15), the
   `claude_min_room_usd` ($25) left to the other roles, a stream timeout, an input that does not parse or validate, a
-  REVISE answer without an offered run, an answer that cannot be read) finishes that turn on the family's Sail
-  profile, never a cycle error. THE BREAKER: `claude_breaker_failures` (3) calls whose bill stayed unknown (their
-  whole hold booked: a cut stream, a 5xx, a 429) inside `claude_breaker_window_seconds` (3600), or one bill above its
-  hold, pause the band for `claude_breaker_pause_seconds` (3600); `kv claude_band` says why and until when (the
-  operator can end a pause early by setting its `paused_until` to 0).
+  REVISE answer without an offered run, an answer that cannot be read) finishes that turn on the family's Sail profile,
+  never a cycle error. THE BREAKER: `claude_breaker_failures` (3) calls whose bill stayed unknown (their whole hold
+  booked: a cut stream, a 5xx, a 429) inside `claude_breaker_window_seconds` (3600), or one bill above its hold, pause
+  the band for `claude_breaker_pause_seconds` (3600); `kv claude_band` says why and until when (the operator can end a
+  pause early by setting its `paused_until` to 0).
 - **The band's cost** (a dry estimate, Sept 29: the median top-band request of the last 3 h through this adapter, and
   the top band's measured pace of 914 cycles in 12 h, 1.01 calls a cycle): about $0.051 a call at medium (14,500
   tokens of tools and system read from the cache at $0.20, 9,300 of the family's own written at $2.50, 2,500 output
@@ -2081,19 +2147,22 @@ routes a role's call:
   the gateway (PR #417's tool admission, the US multiplier on every row, the checked body forwarded, overruns counted;
   until then a House tool call is a 400 and falls back to Sail), then the House release; then add "researcher" to
   `claude.roles` in `swarm.json` and raise `claude.usd_cap` by the day's expected Claude spend (the researcher's line
-  counts against it; 198 on the box at 05:29Z Sept 29, $82 spent lifetime), and keep `CLAUDE_USD` funded above
-  everything else plus `claude_min_room_usd`, `claude.reserve_usd` and one hold. Remove "researcher" from
-  `claude.roles`, or set `researcher.claude_top` to 0, to turn the band off.
+  counts against it), and keep `CLAUDE_USD` funded above everything else plus `claude_min_room_usd`,
+  `claude.reserve_usd` and one hold. Remove "researcher" from `claude.roles`, or set `researcher.claude_top` to 0, to
+  turn the band off.
 - **The meters**: `python3 scripts/gateway_admin.py status` (`claude`: the funded total, spent, in flight, remaining,
   holds, the priced models, `by_role`); the swarm's `spend` rows (kind `claude`, by family and role); the
   diagnostician's refusals name the line that stopped it.
 - **The spend cut of Sept 30** (16:41Z; the owner's answer was to cut burn to evidence). Claude now answers only the
   gate's review and audit (Opus 5.5 for the audit) and the strategist.
-  - `claude.role_usd_day.architect` 0: every architect call takes the role's line and falls to Kimi-K3 on Sail. From
-    Release A, the funding watch counts these as `claude_fallback` events of kind `line`, without an alert.
+  - `claude.role_usd_day.architect` 0: every architect call takes the role's line and falls to its Sail profile
+    (Kimi-K3 then; DeepSeek-V4-Pro asap since 12:49Z Oct 2). From Release A, the funding watch counts these as
+    `claude_fallback` events of kind `line`, without an alert. The architect's Claude line was $5 at times on Oct 1-2
+    (20:33Z Oct 1 to 00:06Z Oct 2, 06:09-06:51Z and 11:38-11:54Z Oct 2) and is $0 again since 11:54Z Oct 2: its Claude
+    passes on Oct 2 bore no family.
   - The researcher's top band (`researcher.claude_top` 0, the researcher's line $0) is off, and so are stall rewrites
     (`researcher.stall_revisions` 10000) and the diagnostician (`diagnostician.enabled` false).
-  - The Sail pace is $1.1 an hour.
+  - The Sail pace is $1.30 an hour (since 02:47Z Oct 1; $1.10 from 16:41Z Sept 30).
   - The evidence behind the cut is in the run record, `docs/runs/2026-09-30-continuous-learning.md`.
   - To undo it, restore the earlier values (CHANGELOG, Sept 30).
 

@@ -8,8 +8,9 @@ pace, and the loop runs that growth only while the swarm's hourly spend is under
 nothing by itself: the hourly pace caps every researcher's cycles together.
 
 Claude first (`claude.model`, or `claude.role_model["architect"]`; "architect" is a default `claude.roles` entry) while
-its funded total has room; every other pass asks GPT-6 Astra first only while `architect.openai_model` names it (null
-makes the architect Claude-only); else Kimi-K3 balanced on Sail. It reads the leaderboard (families, bands, shares, and
+its funded total and the architect's own `claude.role_usd_day` line (when set; 0 sends every pass on) have room; every
+other pass asks GPT-6 Astra first only while `architect.openai_model` names it (null makes the architect Claude-only);
+else Sail on `architect.sail_profile` (Kimi-K3 balanced by default). It reads the leaderboard (families, bands, shares, and
 of Validation only whether the line was met and how many of its checks passed: the owner's decision D2a), the
 graveyard's lessons, and the GAPS (roots x structure types no living family covers; a single option's one gap is
 `long_single`), and answers with new families: a mechanism (why it should make money), a structure, a universe slice (one
@@ -74,7 +75,7 @@ TRUNCATION SALVAGE (R11-3, Sept 29: 6 of 28 Sonnet passes were cut at the 32k ou
 refill of 19-24 births). A Claude answer cut at max_tokens comes back to the pass (`ModelRouter.ask(claude_keep_truncated)`)
 instead of falling to Sail: the complete objects of its `families` array are admitted (`salvage_families`), and fewer than
 SALVAGE_MIN (3) buys one retry on Claude alone at medium effort for what is still wanted (a second cut is salvaged too).
-Never a refill on Kimi-K3 after a cut: a retry Claude has no room or line for leaves the pass as it is, and the next pass
+Never a refill on Sail after a cut: a retry Claude has no room or line for leaves the pass as it is, and the next pass
 routes as usual (to Sail when Claude still has none). The event's `truncated` says what was salvaged and retried.
 `claude.role_effort["architect"]` sets the pass's own effort (models.py).
 

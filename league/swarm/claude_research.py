@@ -1,7 +1,7 @@
 """The researcher's tool loop on Claude (Sept 29, 2026, the owner's decision: be bold with Claude Sonnet 5.5).
 
-The bandit's top `researcher.claude_top` families run their research cycles on Claude Sonnet 5.5 through the gateway
-(`ModelRouter.claude_turn`), the rest on Sail as before. This module is the adapter between the two worlds; the loop,
+The top `researcher.claude_top` families (by allocation share) run their research cycles on Claude Sonnet 5.5 through
+the gateway (`ModelRouter.claude_turn`), the rest on Sail as before. This module is the adapter between the two worlds; the loop,
 the tools, their limits and their semantics are the researcher's own and do not change (league/swarm/researcher.py).
 
 - THE TOOLS (`anthropic_tools`): the researcher's tool schemas `{name, description, parameters}` become Anthropic's

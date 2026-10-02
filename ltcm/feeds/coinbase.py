@@ -1,7 +1,7 @@
 """Coinbase Advanced Trade over WebSocket: prices on the public feed, order state on the user feed.
 
 Verified against the WebSocket overview and endpoints pages
-(`docs/proposals/2026-09-15-push-the-limits.md`, T6):
+(`archive/docs/proposals/2026-09-15-push-the-limits.md`, T6):
 
 * Market data: `wss://advanced-trade-ws.coinbase.com`, no auth. Order data:
   `wss://advanced-trade-ws-user.coinbase.com`, one connection per user, `user` channel with a

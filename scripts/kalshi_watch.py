@@ -2,7 +2,7 @@
 
     python3 scripts/kalshi_watch.py [--since 2026-09-26T15:00:00] [--until ...] [--json]
 
-docs/goals/LTCM_KALSHI_SCALE.md, workstreams W, K3 and K4 (Sept 25, 2026). It runs a read-only snippet
+archive/docs/goals/LTCM_KALSHI_SCALE.md, workstreams W, K3 and K4 (Sept 25, 2026). It runs a read-only snippet
 on the House box (sqlite opened `mode=ro`; nothing is written there), as `scripts/floor_watch.py` does,
 and prints, for the window:
 

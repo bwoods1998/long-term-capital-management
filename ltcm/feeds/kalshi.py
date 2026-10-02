@@ -1,7 +1,7 @@
 """Kalshi over WebSocket: fills, market lifecycle and tickers for the markets the floor holds.
 
 Verified against https://docs.kalshi.com/websockets and the quick start
-(`docs/proposals/2026-09-15-push-the-limits.md`, T7):
+(`archive/docs/proposals/2026-09-15-push-the-limits.md`, T7):
 
 * Authentication is in the HTTP upgrade: the three `KALSHI-ACCESS-*` headers over
   `timestamp + "GET" + "/trade-api/ws/v2"`. The gateway signs them; this process never holds

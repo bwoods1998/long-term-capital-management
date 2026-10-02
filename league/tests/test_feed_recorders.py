@@ -1,4 +1,4 @@
-"""The recorders of Sept 24, 2026 (docs/goals/LTCM_CLOSE_THE_GAPS.md, workstream I, gap 7): the data
+"""The recorders of Sept 24, 2026 (archive/docs/goals/LTCM_CLOSE_THE_GAPS.md, workstream I, gap 7): the data
 hosts the owner allowed that morning, recorded for the strategies that asked for them.
 
 Gap 7's evidence: earnings calendars, settlement fixings, attention underlyings and weather ensembles

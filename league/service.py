@@ -125,7 +125,8 @@ def auto_update(config: dict[str, Any]) -> bool:
     """Whether the in-box updater pulls main by itself: only when `config.json` says `"auto_update":
     true`. A missing key means OFF (the options overhaul, Sept 26, 2026, trap 3: the old default of
     on let the updater ship main's heads into a House that nobody had deployed; the prune ships as
-    the owner's deploys, and the updater stays off until the overhaul has run a day)."""
+    the owner's deploys). It has stayed off since (`auto_update` false): every release is an owner deploy until the owner
+    turns it back on."""
     return config.get("auto_update", False) is True
 
 
