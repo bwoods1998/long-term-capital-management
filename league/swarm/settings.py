@@ -80,7 +80,8 @@ DEFAULTS: dict[str, Any] = {
         "top_max_output_tokens": 12000,  # low effort's reasoning (1,800-3,800 tokens measured) and a whole program
         # THE TOP BAND ON CLAUDE (Sept 29, 2026, the owner's decision: be bold with Claude Sonnet 5.5; researcher.py and
         # claude_research.py). The top `claude_top` by allocation share run their cycles on Claude while "researcher" is
-        # in `claude.roles`; 0 turns it off. Every Claude failure finishes the turn on the family's Sail profile above.
+        # in `claude.roles`; 0 turns it off, "all" puts every family on it (research v3). Every Claude failure finishes the
+        # turn on the family's Sail profile above.
         "claude_top": 12,                # on `claude.role_model.researcher` (Claude Sonnet 5.5)
         "claude_effort": "medium",       # low | medium | high | xhigh | max (Anthropic: medium for multistep tool use)
         "claude_max_tokens": 12000,      # thinking and the answer together, streamed; sizes the hold (~$0.33 on a mean body)
@@ -111,6 +112,14 @@ DEFAULTS: dict[str, Any] = {
         "sweep_enabled": True,
         "max_sweep_variants": 6,
         "max_sweep_jobs_in_flight": 24,
+        # THE SWEEP CYCLE (research v3, Oct 2026; researcher.py): true makes a cycle ONE answer that defines a sweep of 3 to
+        # 5 variants, to which the harness adds the mandatory placebo row (the card's ablation); gym_run only tests a fix.
+        # False: the cycle as before.
+        "sweep_cycle": False,
+        "sweep_wait_seconds": 60,       # a sweep-cycle family's wait when the Gym has no room for its sweep (no model call)
+        # THE FAMILY LEDGER (league/swarm/family_ledger.py): the characters of the whole ledger every status ends with
+        # (oldest rows compressed first); 0 leaves it out. Its rows are written either way.
+        "ledger_chars": 6000,
         "cycle_seconds": 170,           # a cycle's wall-time budget (target under 3 minutes)
         "history_cycles": 4,            # cycles of conversation kept (older ones live in the notebook) ...
         "history_trim_to": 2,           # ... cut back to this many at once, so the cached prefix holds for a few cycles

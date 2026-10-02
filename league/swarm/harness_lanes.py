@@ -1090,7 +1090,11 @@ FROZEN_SYMBOLS: dict[str, tuple[str, ...]] = {
         # decide in try/except, so a runtime error never reaches the Gym's disqualification rule).
         "Researcher._model_cycle", "Researcher._first_cycle", "Researcher._execute", "Researcher._gym_sweep",
         "Researcher._stored_run", "Researcher._sweep_group", "with_roots", "needs_of", "needs_roots",
-        "params_of", "sweep_variants", "check_code", "holding", "date_like"),
+        "params_of", "sweep_variants", "check_code", "holding", "date_like",
+        # THE SWEEP CYCLE's placebo row (research v3): which program it is, that it is never a candidate, and whether a
+        # signal row beat it (the control every sweep is read against).
+        "PLACEBO", "SHUFFLE_PARAM", "PLACEBO_WHY", "placebo_beats", "placebo_years", "Researcher.placebo_switch",
+        "Researcher.placebo_params"),
     # The architect's pass: the model call and its spend reservation, the parse of the answer into proposals and the
     # hand-off to `admit` (a proposal's text reaches the store unchanged: the rebirth detector reads what was proposed).
     "league/swarm/architect.py": ("SAME_IDEA", "_STOP", "words", "same_idea", "salvage_families", "_FAMILIES",

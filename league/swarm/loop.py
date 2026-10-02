@@ -96,6 +96,16 @@ def _seconds(raw: Any, default: float) -> float:
     return float(raw)
 
 
+#: `researcher.sweep_wait_seconds` unless the settings say otherwise (THE SWEEP CYCLE: no room in the Gym for a sweep).
+SWEEP_WAIT_SECONDS = 60.0
+
+
+def sweep_wait(settings: Mapping[str, Any]) -> float:
+    """THE SWEEP CYCLE (researcher.py): the wait before the next turn of a family the Gym had no room for (its turn asked
+    no model and ran nothing): `researcher.sweep_wait_seconds`, flat; null or 0 is no wait beyond `idle_seconds`."""
+    return _seconds((settings.get("researcher") or {}).get("sweep_wait_seconds", SWEEP_WAIT_SECONDS), SWEEP_WAIT_SECONDS)
+
+
 def hold_wait(settings: Mapping[str, Any], dormant: int) -> float:
     """HOLD BACKOFF (R4, Sept 28): the wait before the next turn of a family whose cycle ended in a hold with no new
     evaluation and no run queued, its dormant cycles (`researcher.dormant_count`) counted after that cycle.
@@ -339,6 +349,10 @@ class Scheduler:
                 elif error:
                     self.errors[fid] = self.errors.get(fid, 0) + 1
                     self.cooldown[fid] = self.clock() + min(1800.0, 30.0 * 2 ** min(self.errors[fid], 6))
+                elif result.get("sweep_wait") is not None:
+                    # THE SWEEP CYCLE (researcher.py): the Gym had no room for this family's sweep, so no model was asked:
+                    # a flat wait (`researcher.sweep_wait_seconds`), never an error's growing backoff.
+                    self.cooldown[fid] = self.clock() + sweep_wait(self.settings)
                 else:
                     self.errors.pop(fid, None)
             finally:
@@ -490,6 +504,7 @@ class Swarm:
                 "totals": self.store.totals(), "spend_last_hour": spend, "usd_per_hour": round(sum(spend.values()), 4),
                 "median_cycle_seconds": seconds[len(seconds) // 2] if seconds else None, "cycles_last_hour": len(recent),
                 "cycle_errors_last_hour": sum(1 for p in recent if p.get("error")),
+                "sweep_waits": int(getattr(self.researcher, "sweep_waits", 0) or 0),  # THE SWEEP CYCLE: turns with no Gym room
                 "researcher_pace": self.pace_status(), "library": self.library_status(),
                 "guard": getattr(self.guard, "last", {}), "braked": not self.guard.allows(), "pool": self.pool.status(),
                 "rounds": sorted(k for k, t in self.rounds.items() if t.is_alive()),
