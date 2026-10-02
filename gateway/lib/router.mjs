@@ -45,11 +45,12 @@
 //
 // The GitHub routes move no money, so the kill switch does not stop them: a halted floor may still
 // propose its own repair. Until V3-A there was no merge route. Since V3-A (the owner's decision D5)
-// one exists for the engineer's research-class pull requests alone: an `engineer/` branch, at an
-// exact head commit, on green `checks.yml` jobs and a recorded approve, touching no protected path
-// (lib/protected.mjs), at most two a New York day (lib/merge.mjs). Every other branch is still
-// merged by a repository workflow or by the owner. The desk's docs route commits one page under
-// docs/runs/desk/ and nothing else (lib/desk.mjs).
+// one exists for the engineer's research-class pull requests alone: an `engineer/<lane>/` branch, at
+// an exact head commit, on green `checks.yml` jobs and a recorded approve, touching no protected path
+// (lib/protected.mjs) and nothing outside its lane (github.ENGINEER_LANES; WP8b), at most two a
+// New York day (lib/merge.mjs). Every other branch is still merged by a repository workflow or by
+// the owner. The desk's docs route commits one page under docs/runs/desk/ and nothing else
+// (lib/desk.mjs).
 //
 // `gate` is the Durable Object stub (or, in tests, the gate itself): every method is awaited, so
 // the same router works against both.
@@ -823,12 +824,14 @@ function claudeStream(upstream, { admitted, settle, waitUntil }) {
  * One proposal from the frontier model, opened as a pull request. The proposal is checked against
  * its role's paths before GitHub hears of it, and takes one of the day's places before the first
  * call; the place is given back when the attempt made no new branch, so a retry of a proposal
- * that is already open costs nothing and a GitHub outage does not spend the day.
+ * that is already open costs nothing and a GitHub outage does not spend the day. The engineer's
+ * proposals (V3-A, WP8b) may be larger and are counted on a day of their own (`enginePull`).
  */
 async function proposePull(request, env, { gate, fetcher, now }) {
   const account = github.configured(env);
   if (!account) return fail('GitHub is not configured.', 503);
-  const body = await readBody(request, github.MAX_REQUEST_BYTES);
+  // Read up to the largest request any role may send; the role's own ceiling is applied once the role is known.
+  const body = await readBody(request, github.ENGINEER_MAX_REQUEST_BYTES);
   if (body.error) return fail(body.error, 413);
   let parsed;
   try {
@@ -836,14 +839,35 @@ async function proposePull(request, env, { gate, fetcher, now }) {
   } catch {
     return fail('The proposal must be JSON.', 400);
   }
+  if ((body.size || 0) > github.limitsFor(parsed?.role).requestBytes) return fail('Payload too large.', 413);
   const proposal = github.admit(parsed);
   if (proposal.error) return json({ error: proposal.error, ...(proposal.path !== undefined ? { path: proposal.path } : {}) }, proposal.status);
+  if (proposal.role === 'engineer') return enginePull(proposal, account, { gate, fetcher, now });
   const hold = await gate.pullReserve({ at: now() });
   if (!hold.ok) return json({ error: hold.error, cap: hold.cap }, hold.status, { 'Retry-After': '3600' });
   const result = await github.openPullRequest({ ...account, proposal, fetcher });
   if (!result.created) await gate.pullRefund({ day: hold.day, at: now() });
   if (result.error) return fail(result.error, result.status);
   return json({ ok: true, branch: result.branch, number: result.number, url: result.url, head: result.head });
+}
+
+/**
+ * The engineer's admitted proposal (V3-A, WP8b): one of the New York day's ENGINEER_PULLS_PER_DAY places, apart from
+ * the other roles' day, then the same pull request as any role's. The place is given back when the attempt made no new
+ * branch (GitHub's no, or a retry that found its own pull request); one that may have made a branch keeps it.
+ */
+async function enginePull(proposal, account, { gate, fetcher, now }) {
+  const hold = await gate.engineerPullReserve({ branch: proposal.branch, at: now() });
+  if (!hold.ok) return refusedWith(hold);
+  const result = await github.openPullRequest({ ...account, proposal, fetcher });
+  const outcome = result.created ? (result.error ? 'unknown' : 'opened') : (result.error ? 'refused' : 'existing');
+  try {
+    await gate.engineerPullSettle({ day: hold.day, id: hold.id, outcome, pr: result.number ?? null, at: now() });
+  } catch {
+    // The place stays taken; the record of what became of it is the only thing lost.
+  }
+  if (result.error) return fail(result.error, result.status);
+  return json({ ok: true, branch: result.branch, number: result.number, url: result.url, head: result.head, lane: proposal.lane });
 }
 
 /** A JSON body read within `limit` bytes: `{ parsed }`, or `{ response }`, the refusal to answer with. */

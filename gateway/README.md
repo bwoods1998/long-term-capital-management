@@ -252,23 +252,33 @@ constant changes only by a gateway deploy):
   commits nothing and takes no place (`{committed: false, unchanged: true}`); GitHub's no gives the place back; no
   answer keeps it. What the page says is the House's own public filter (`league/ops` scoreboard).
 - **`POST /v1/github/review`** `{pr, head_sha, verdict: "approve"|"reject", reasons}`: the automated reviewer's
-  verdict, kept by the Gate for that exact commit after the pull request is read (open, an `engineer/` branch of this
-  repository aimed at `main`, headed by `head_sha`). A reject is final for its commit (an approve after it is
+  verdict, kept by the Gate for that exact commit after the pull request is read (open, an
+  `engineer/<lane>/<slug>-<hash>` branch of this repository aimed at `main`, headed by `head_sha`). A reject is final for its commit (an approve after it is
   `409 {refused: "review_rejected"}`); a revision is a new commit, reviewed again. Nothing is written to GitHub.
 - **`POST /v1/github/merge`** `{pr, head_sha}` ([lib/merge.mjs](lib/merge.mjs)): a squash merge of exactly
-  `head_sha`, only when the branch starts `engineer/` and lives in this repository, the pull request is open, no draft
-  and aimed at `main`; the latest `checks.yml` run on that commit finished `success` with the jobs `gateway`,
+  `head_sha`, only when the branch is `engineer/<lane>/<slug>-<8 hex>` with a known lane and lives in this repository,
+  the pull request is open, no draft and aimed at `main`; the latest `checks.yml` run on that commit finished `success` with the jobs `gateway`,
   `tests (3.11)` and `tests (3.14)` each `success`; an approve and no reject is recorded for that commit; no changed
   file (either name of a rename) is protected ([lib/protected.mjs](lib/protected.mjs): `league/ci.py` FORBIDDEN, which a
   test holds as a subset, plus `league/ops/{budget,drills,grant}.py`, `league/live/`, `league/gym/`,
   `league/swarm/{gate,bands,evaluator,settings,store}.py`, `ltcm/data/`, `scripts/data/`, `.github/`, `gateway/`,
-  `deploy/`, `league/config.json`, `league/constitution.py`, and git's own `.git*` files), read whole from GitHub's
-  list (at most 300 files); at most 2 merges a New York day (`429 {cap: "merge_day"}`). Every refusal names its rule in
-  `refused` (`review_missing`, `review_rejected`, `branch`, `fork`, `base`, `not_open`, `draft`, `head_moved`,
-  `protected_path`, `files`, `ci_missing`, `ci_pending`, `ci_failed`, `ci_jobs`, `github`, `no_answer`). A merge GitHub
-  refused gives its place back; one nothing answered keeps it (`merged: "unknown"`). The engineer opens its pull
-  requests through `POST /v1/github/pr` with role `engineer` (branch `engineer/<slug>-<hash>`, any path but the
-  protected ones). The kill switch does not stop these routes: they move no money.
+  `deploy/`, `league/config.json`, `league/constitution.py`, and git's own `.git*` files) and every one (both names of
+  a rename) is inside the branch's lane (below), read whole from GitHub's list (at most 300 files); at most 2 merges a
+  New York day (`429 {cap: "merge_day"}`). Every refusal names its rule in `refused` (`review_missing`,
+  `review_rejected`, `branch`, `fork`, `base`, `not_open`, `draft`, `head_moved`, `protected_path`, `lane_path`, `files`,
+  `ci_missing`, `ci_pending`, `ci_failed`, `ci_jobs`, `github`, `no_answer`). A merge GitHub refused gives its place
+  back; one nothing answered keeps it (`merged: "unknown"`). The kill switch does not stop these routes: they move no
+  money.
+- **The engineer's pull requests** (WP8b; [lib/github.mjs](lib/github.mjs) `ENGINEER_LANES`): `POST /v1/github/pr` with
+  role `engineer` and a `lane`, on the branch `engineer/<lane>/<slug>-<8 hex>`. Each lane writes only its surface:
+  `scheduler` `league/swarm/loop.py`; `research` `league/swarm/{researcher,preflight,claude_research}.py`; `memory`
+  `league/swarm/{architect,strategist,diagnostician,seeds,mechanisms}.py`; `data` `league/{sailbox,data_job}.py`; and
+  every lane may add `league/tests/test_harness_candidate_*.py` (`*` one or more of `a-z0-9_`). Never a protected path.
+  At most 6 files of 512 KiB each, 1.5 MiB a request (the other roles keep 12 files of 64 KiB, 256 KiB a request), and
+  at most 2 a New York day, counted apart from the other roles' `GITHUB_MAX_PULLS_PER_DAY` (`429 {cap:
+  "engineer_day"}`; `/v1/health` `autonomy.engineer_pulls`). A retry that finds its own pull request, or GitHub's no
+  before any branch, gives the place back. `league/ci.py` holds the same table (`ENGINEER_LANES`; a gateway test reads
+  it) and its path guard judges `engineer/<lane>/` branches by it.
 - **The admin log**: every kill and unkill and every call presenting `GATEWAY_ADMIN_TOKEN` (refused anywhere but the
   switch) is written with its time, the caller's kind (`admin`, `runtime`), the route, the method and the answer; a
   call at the switch with no accepted token is counted (`unauthorized`), never listed. `/v1/health` carries `admin_log`
