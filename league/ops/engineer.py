@@ -3,13 +3,15 @@
 One candidate at a time walks the loop of `playbooks/harness-improvement.md` on the House, each step a receipt in the
 journal `<state>/harness/engineer.sqlite` (mode 0600):
 
-1. PICK (the daily occurrence, 04:00Z, after the scoreboard; only when no candidate is in flight and none was authored
-   today, New York's day). The lanes' measurement: the supervised observer's `<state>/harness/lanes-ranked.json` and
-   `lanes-measurement.json` when they are fresh and of the running release, else the job measures the last day itself,
-   read-only (`harness_lanes.measure`, `rank`). The top CAPTURED bottleneck of an engineer lane (research, memory, data:
-   the research-class lanes the gateway's engineer role may write; execution is an evidence reset, never this path) that
-   is not cooling down. Its predeclared metric is the lane's primary metric and `min_effect`, frozen in the journal with
-   the lane's hash (`lane_sha`), the capture's population and its motivating units.
+1. PICK (the daily occurrence, 04:00Z, after the scoreboard; only when no candidate is in flight or reverting, none was
+   authored today, New York's day, the gateway's /v1/health shows the engineer's pull requests with room today, and the
+   engineer's and the reviewer's Claude together have an attempt's cap left of `usd_day`). The lanes' measurement: the
+   supervised observer's `<state>/harness/lanes-ranked.json` and `lanes-measurement.json` when they are fresh and of the
+   running release, else the job measures the last day itself, read-only (`harness_lanes.measure`, `rank`). The top
+   CAPTURED bottleneck of an engineer lane (research, memory, data: the research-class lanes the gateway's engineer role
+   may write; execution is an evidence reset, never this path) that is not cooling down. Its predeclared metric is the
+   lane's primary metric and `min_effect`, frozen in the journal with the lane's hash (`lane_sha`), the capture's
+   population and its motivating units.
 2. AUTHOR (`league/ops/author.py`). The base is the running release's commit: the updater's attested sha for it in
    `<base>/deploys.jsonl` (an owner deploy's: the observer policy's `base` when its digest is this release's), fetched
    as a codeload tarball as the updater does and checked against the running tree's digest. Claude Opus 5.5 (role
@@ -47,7 +49,6 @@ held-out pools stay where they are. Every step's spend goes through the swarm's 
 """
 from __future__ import annotations
 
-import fnmatch
 import hashlib
 import json
 import math
@@ -63,7 +64,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from . import schedule as S
-from .author import NEW_TEST, Outcome, Workspace, run_loop, sha256, writable_paths
+from .author import NEW_TEST, Outcome, Workspace, is_new_test, run_loop, sha256, static_guards, writable_paths
 from .context import GatewayError, read_json, write_json
 
 FILE = Path("harness") / "engineer.sqlite"
@@ -92,6 +93,9 @@ DEFAULTS: dict[str, Any] = {
     "review_effort": "high",
     "max_tokens": 16000,
     "keep_usd": 5.0,
+    # The engineer's and the reviewer's Claude together, a UTC day (holds included, `claude_spent`): an attempt is
+    # capped at what is left, and no attempt or review starts with less than its own cap left.
+    "usd_day": 10.0,
     "ranked_max_age_hours": 36,
     "cooldown_hours": 72,
     "attempts_per_base": 3,
@@ -102,9 +106,12 @@ DEFAULTS: dict[str, Any] = {
     "guard_sessions": 20,
 }
 OPEN_STATES = ("pr_pending", "pr_open", "revise", "merged", "canary", "retained", "reverting")
-#: At most one candidate in flight: authored and not yet decided. A retained change under the global guard, or a revert
-#: on its way, does not hold the next one back.
+#: At most one candidate in flight: authored and not yet decided. A retained change under the global guard does not hold
+#: the next one back.
 IN_FLIGHT = ("pr_pending", "pr_open", "revise", "merged", "canary")
+#: What holds authoring: a candidate in flight, or a revert not yet merged (a new candidate cut from a base that still
+#: carries the change could lean on code the revert takes out, and CI judges only its head, not main after both merge).
+HOLDS_AUTHORING = IN_FLIGHT + ("reverting",)
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS candidates (
     id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT NOT NULL UNIQUE, lane TEXT NOT NULL, metric TEXT NOT NULL,
@@ -369,7 +376,8 @@ def brief(*, lane: str, row: Mapping[str, Any], key: str, examples: Sequence[Map
              f"(a bottleneck from {m.threshold}). The change is kept only if a concurrent canary shows a relative "
              f"improvement of at least {m.min_effect:.0%} with p <= {ALPHA}, and nothing below worsens:",
              "  " + (", ".join(x.name for x in list(bottleneck.secondary) + list(spec.guards)) or "(none)"),
-             f"FILES YOU MAY CHANGE: {', '.join(writable_paths(lane))}; and one new test file {NEW_TEST}."]
+             f"FILES YOU MAY CHANGE: {', '.join(writable_paths(lane))}; and one new test file {NEW_TEST} (the * of "
+             "lower-case letters, digits and underscores only)."]
     if canary.get("mode") == "arms":
         unit = ('the family id: a name for it such as fam["id"]' if canary.get("unit") == "family" else
                 "canary.mechanism_unit(mechanism) of the text Architect.admit admits, asked inside Architect.admit (a "
@@ -468,8 +476,17 @@ def guard_verdict(pre: Sequence[float], post: Sequence[float]) -> dict[str, Any]
 def write_arm(root: str | Path, key: str, arm: Mapping[str, Any] | None) -> Path:
     """Put `arm` under `key` in `<state>/harness/canary.json` (None drops it), keeping every other arm, atomically."""
     path = Path(root) / CANARY
-    current = read_json(path, {})
-    arms = dict(current.get("arms") or {}) if isinstance(current, dict) and current.get("schema") == 1 else {}
+    arms: dict[str, Any] = {}
+    if path.exists():
+        # An existing file that does not read as schema 1 (a transient read failure, a torn or foreign file) is never
+        # overwritten: that would drop every other arm, retained ones included. The step raises and runs again next hour.
+        try:
+            current = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise RuntimeError(f"{path} could not be read ({type(exc).__name__}); no arm was written") from None
+        if not isinstance(current, dict) or current.get("schema") != 1 or not isinstance(current.get("arms") or {}, dict):
+            raise RuntimeError(f"{path} is not a schema-1 canary file; no arm was written")
+        arms = dict(current.get("arms") or {})
     if arm is None:
         arms.pop(key, None)
     else:
@@ -510,6 +527,10 @@ class Engineer:
         out.update(mine)
         out["author_usd"] = min(float(out["author_usd"]), AUTHOR_USD_CAP)
         out["review_usd"] = min(float(out["review_usd"]), REVIEW_USD_CAP)
+        try:
+            out["usd_day"] = max(0.0, float(out["usd_day"])) if math.isfinite(float(out["usd_day"])) else 0.0
+        except (TypeError, ValueError):
+            out["usd_day"] = 0.0  # a typo never lifts the line
         out["lanes"] = [lane for lane in out.get("lanes") or [] if lane in ENGINEER_LANES]
         return out
 
@@ -606,7 +627,7 @@ class Engineer:
     def deployed(self, cand: Mapping[str, Any]) -> bool:
         """The running release carries the candidate's change (its tests aside)."""
         rec = cand["record"]
-        paths = [p for p in rec.get("files") or {} if not fnmatch.fnmatchcase(p, NEW_TEST)]
+        paths = [p for p in rec.get("files") or {} if not is_new_test(p)]
         if not paths:
             return False
         after = self.load_files(cand["key"], "cand", paths)
@@ -625,7 +646,7 @@ class Engineer:
                     self.close(journal, cand, "closed_failed", "the authoring attempt was interrupted")
             for cand in journal.open():
                 self.advance(journal, cand, cfg)
-            busy = [c for c in journal.open() if c["state"] in IN_FLIGHT]
+            busy = [c for c in journal.open() if c["state"] in HOLDS_AUTHORING]
             due = datetime.fromtimestamp(float(self.ctx.due_at), UTC)
             authoring = (due.hour, due.minute) == AUTHOR_AT
             if busy:
@@ -761,7 +782,37 @@ class Engineer:
             return f"the model router could not be built ({type(exc).__name__}: {str(exc)[:200]})"
         if room is not None and room < min(1.0, float(cfg["author_usd"])):
             return f"the engineer's Claude line has ${room:.2f} left today"
+        left = self.day_room(cfg)
+        if left < min(1.0, float(cfg["author_usd"])):
+            return f"the engineer and the reviewer have ${left:.2f} left of their ${float(cfg['usd_day']):.2f} today"
+        try:
+            health = self.ctx.gateway.get("/v1/health") or {}
+        except Exception as exc:  # noqa: BLE001 - an unknown gateway is no attempt
+            return f"the gateway's health could not be read ({type(exc).__name__}: {str(exc)[:160]})"
+        pulls = (health.get("autonomy") or {}).get("engineer_pulls") if isinstance(health, Mapping) else None
+        if not isinstance(pulls, Mapping) or "cap" not in pulls:
+            return "the gateway does not take the engineer's pull requests (no autonomy.engineer_pulls in /v1/health)"
+        try:
+            full = float(pulls.get("count") or 0) >= float(pulls["cap"])
+        except (TypeError, ValueError):
+            full = True
+        if full:
+            return f"the gateway's engineer pull requests for today are used ({pulls.get('count')} of {pulls.get('cap')})"
         return None
+
+    def day_spent(self) -> float:
+        """The engineer's and the reviewer's Claude spend this UTC day (holds included)."""
+        now = self.now()
+        since = now - now % 86400
+        return sum(max(0.0, float(self.router.claude_spent(role=role, since=since))) for role in ("engineer", "reviewer"))
+
+    def day_room(self, cfg: Mapping[str, Any]) -> float:
+        """What is left of `usd_day` today; 0 when the spend cannot be read (fail closed)."""
+        try:
+            spent = self.day_spent()
+        except Exception:  # noqa: BLE001 - an unreadable meter is no room
+            return 0.0
+        return max(0.0, float(cfg["usd_day"]) - spent) if math.isfinite(spent) else 0.0
 
     def attempt(self, journal: Journal, cand: dict[str, Any], cfg: Mapping[str, Any], *, brief_text: str,
                 start: Mapping[str, str] | None) -> dict[str, Any]:
@@ -782,14 +833,26 @@ class Engineer:
         except Exception as exc:  # noqa: BLE001 - no base, no attempt
             shutil.rmtree(tree, ignore_errors=True)
             return self.close(journal, cand, "closed_failed", f"the base tree could not be had: {type(exc).__name__}: {str(exc)[:300]}")
+        usd_cap = min(float(cfg["author_usd"]), self.day_room(cfg))
+        if usd_cap < min(1.0, float(cfg["author_usd"])):
+            shutil.rmtree(tree, ignore_errors=True)
+            return self.close(journal, cand, "closed_failed",
+                              f"the engineer and the reviewer have ${usd_cap:.2f} left of their line today")
         try:
             ws = Workspace(tree, lane, start=start)
             n = len(rec["attempts"]) + 1
             outcome: Outcome = run_loop(self.router, ws=ws, lane=lane, key=key, system=AUTHOR_SYSTEM, brief=brief_text,
-                                        request_key=f"engineer:{key}:{n}", usd_cap=float(cfg["author_usd"]),
+                                        request_key=f"engineer:{key}:{n}", usd_cap=usd_cap,
                                         max_turns=int(cfg["max_turns"]), deadline=time.time() + 60 * float(cfg["author_minutes"]),
                                         effort=str(cfg["effort"]), max_tokens=int(cfg["max_tokens"]),
                                         keep_usd=float(cfg["keep_usd"]))
+            if outcome.status == "finished":
+                # Defense in depth: the guards once more on the tree as it is now, and the files exactly that tree's.
+                final = static_guards(lane, ws, key=key)
+                if final or ws.files() != outcome.files:
+                    outcome = Outcome("failed", why="the submitted change no longer passes the static guards",
+                                      usd=outcome.usd, turns=outcome.turns,
+                                      guards=final or ["the submitted files differ from the work tree"])
             classified = lanes.classify(list(outcome.files), lanes.live_path_modules(tree)) if outcome.files else None
         finally:
             shutil.rmtree(tree, ignore_errors=True)
@@ -813,7 +876,18 @@ class Engineer:
         return cand
 
     def close(self, journal: Journal, cand: dict[str, Any], state: str, why: str) -> dict[str, Any]:
-        cand["record"]["closed_why"] = why
+        rec = cand["record"]
+        rec["closed_why"] = why
+        # The gateway has no route that closes a pull request: the ones this candidate leaves open (a superseded head,
+        # an unmerged one, a revert that did not merge) are listed for the owner (the scoreboard).
+        leftover = [int(n) for n in rec.get("superseded_prs") or [] if n is not None]
+        if state in ("closed_failed", "closed_rejected") and rec.get("pr") is not None and not rec.get("merged"):
+            leftover.append(int(rec["pr"]))
+        revert = rec.get("revert") or {}
+        if state == "closed_reverted" and revert.get("pr") is not None and why != revert.get("why"):
+            leftover.append(int(revert["pr"]))
+        if leftover:
+            rec["leftover_prs"] = sorted(set(leftover))
         self.note(f"{cand['key']}: {state}: {why}")
         cand = journal.save(cand, at=self.now(), state=state, detail={"why": why[:600]})
         if state.startswith("closed_"):
@@ -933,7 +1007,10 @@ class Engineer:
             if problems and not done:
                 done.append({"head": rec["head"], "verdict": "reject", "reasons": problems, "usd": 0.0, "mechanical": True})
             while len(done) < needed and all(r["verdict"] == "approve" for r in done):
-                got = self.review_once(cand, cfg, files, second=len(done) == 1)
+                left = self.day_room(cfg)
+                got = (self.review_once(cand, cfg, files, second=len(done) == 1) if left >= float(cfg["review_usd"]) else
+                       {"ok": False, "usd": 0.0,
+                        "why": f"${left:.2f} left of the engineer's and the reviewer's ${float(cfg['usd_day']):.2f} today"})
                 if not got.get("ok"):
                     rec["reviews"] = others + done
                     rec["review_failures"] = int(rec.get("review_failures") or 0) + (1 if got.get("usd") else 0)
@@ -1009,6 +1086,10 @@ class Engineer:
         if S.in_session(self.now(), pad_minutes=30):
             self.note(f"{cand['key']}: the revision waits for the close")
             return cand
+        left = self.day_room(cfg)
+        if left < min(1.0, float(cfg["author_usd"])):
+            self.note(f"{cand['key']}: the revision waits for room (${left:.2f} left of the day's ${float(cfg['usd_day']):.2f})")
+            return cand
         rec = cand["record"]
         rec["revise"]["tries"] = int(rec["revise"].get("tries") or 0) + 1
         if rec["revise"]["tries"] > 2:
@@ -1072,6 +1153,11 @@ class Engineer:
         window = float(canary.get("observe_seconds", 0))
         release = Path(self.ctx.release).name
         began, promoted = deploy_window(deploy_rows(self.ctx.base), release)
+        if promoted is None and canary.get("mode") != "arms":
+            # No promote row for the running release (an owner deploy, rows missing): the control window cannot be put
+            # before the deploy, and a window ending now would hold treated hours. Fail closed.
+            return self.start_revert(journal, cand, "voided: the running release has no promote row, so the control "
+                                                    "window cannot be placed before the deploy")
         promoted = promoted or now
         began = began or promoted
         rec["deployed"] = {"at": now, "release": release, "began_at": began, "promoted_at": promoted}
@@ -1171,6 +1257,13 @@ class Engineer:
         rev = rec["revert"]
         now = self.now()
         gated = (rec.get("canary") or {}).get("mode") == "arms"
+        if now - float(rev.get("at") or now) > float(cfg["deploy_days"]) * 86400:
+            # A revert holds the next authoring (HOLDS_AUTHORING): one that never lands is handed over, not waited on.
+            if not gated:
+                self.ctx.alert("warning", f"engineer: the revert of {cand['key']} did not land in {cfg['deploy_days']} days; "
+                                          "revert by hand")
+            return self.close(journal, cand, "closed_reverted", f"{rev['why']}; the revert did not land in time"
+                              + ("; the gate is reverted" if gated else "; revert by hand"))
         if rev.get("pr") is None:
             paths = list(rec["files"])
             after = self.load_files(cand["key"], "cand", paths)
@@ -1309,9 +1402,10 @@ def public_summary(root: str | Path) -> dict[str, Any] | None:
 
     rows = guard.read(path, lambda db: guard.rows(db, "SELECT lane, state, record FROM candidates"))
     out: dict[str, Any] = {"authored": len(rows), "merged": 0, "retained": 0, "reverted": 0, "rejected": 0, "failed": 0,
-                           "in_flight": None, "claude_usd": 0.0}
+                           "in_flight": None, "claude_usd": 0.0, "leftover_prs": []}
     for row in rows:
         rec = json.loads(row["record"] or "{}")
+        out["leftover_prs"] += [int(n) for n in rec.get("leftover_prs") or [] if isinstance(n, int)]
         out["claude_usd"] += float(rec.get("author_usd") or 0.0) + float(rec.get("review_usd") or 0.0)
         if rec.get("merged"):
             out["merged"] += 1
@@ -1327,6 +1421,7 @@ def public_summary(root: str | Path) -> dict[str, Any] | None:
         if state in IN_FLIGHT:
             out["in_flight"] = f"{row['lane']} ({state.replace('_', ' ')})"
     out["claude_usd"] = round(out["claude_usd"], 2)
+    out["leftover_prs"] = sorted(set(out["leftover_prs"]))
     return out
 
 
@@ -1336,4 +1431,4 @@ def run(ctx: Any) -> dict[str, Any]:
 
 __all__ = ["Engineer", "Journal", "run", "decide", "brief", "public_summary", "attested_sha", "deploy_window", "carries",
            "revert_text", "segments", "write_arm", "guard_verdict", "forward_returns", "trading_days", "scrub_examples",
-           "public_problems", "DEFAULTS", "AUTHOR_SYSTEM", "IN_FLIGHT", "OPEN_STATES"]
+           "public_problems", "DEFAULTS", "AUTHOR_SYSTEM", "IN_FLIGHT", "HOLDS_AUTHORING", "OPEN_STATES"]

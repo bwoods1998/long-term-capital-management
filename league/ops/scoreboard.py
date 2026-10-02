@@ -161,6 +161,10 @@ def engineer_lines(engineer: Mapping[str, Any] | None) -> list[str]:
              f"{_cell(engineer.get('reverted'))} | {_cell(engineer.get('rejected'))} | {_cell(engineer.get('failed'))} | "
              f"{_cell(engineer.get('claude_usd'))} |", ""]
     lines.append(f"In flight: {engineer.get('in_flight') or 'none'}.")
+    leftover = [n for n in engineer.get("leftover_prs") or [] if isinstance(n, int) and not isinstance(n, bool)]
+    if leftover:  # the gateway closes no pull request: the owner does
+        lines += ["", "Engineer pull requests left open (superseded or unmerged; the owner closes them): "
+                      + ", ".join(f"#{n}" for n in leftover[-20:]) + "."]
     return lines
 
 

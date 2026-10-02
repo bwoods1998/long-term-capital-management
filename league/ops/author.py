@@ -11,7 +11,8 @@ the tools below, and nothing else:
   protected path (`harness_lanes.protected_reason`);
 - `create_file`: a NEW test file only (`league/tests/test_harness_candidate_*.py`, absent from the base);
 - `check`: the static guards now (`static_guards`);
-- `finish` (the change, its title, what it predicts and its canary plan) or `give_up` (no viable change).
+- `finish` (the change, its title, what it predicts and its canary plan) or `give_up` (no viable change). After either,
+  every later tool call (even in the same reply) is refused, and the guards run once more on the tree as submitted.
 
 THE STATIC GUARDS (`static_guards`), git-free, the same functions the owner's controller runs: the surface and the
 protected paths (`surface_check`, `protected_touch`), the gateway's limits (at most `MAX_FILES` files, `MAX_FILE_BYTES`
@@ -21,8 +22,9 @@ record writer) and, in an arms lane, `gate_coverage` (every change sits under `c
 the old branch the baseline's own code, so the closed gate runs the baseline). They are defense in depth, never a proof:
 the reviewer (`league/ops/reviewer.py`), CI and the canary stand behind them.
 
-SPEND. An attempt stops before a turn that would take its settled spend past `usd_cap` (at most $3: the next turn is
-estimated from the last one's settled cost), at `max_turns`, or at its wall-clock `deadline`. A turn whose bill is unknown
+SPEND. An attempt stops before a turn that would take its settled spend past `usd_cap` (at most $3, and never more than
+the engineer's and the reviewer's day line has left: the next turn is estimated from the last one's settled cost and its
+growth), at `max_turns`, or at its wall-clock `deadline`. A turn whose bill is unknown
 counts at its hold. The router's own fuses (the `engineer` line a UTC day, the funded room less `keep_usd`) refuse a
 turn before it is sent; any refusal ends the attempt.
 
@@ -48,6 +50,9 @@ GATEWAY_LANE_PATHS: dict[str, tuple[str, ...]] = {
     "data": ("league/sailbox.py", "league/data_job.py"),
 }
 NEW_TEST = "league/tests/test_harness_candidate_*.py"
+#: The exact names the gateway admits for a new test (`ENGINEER_TEST` in gateway/lib/github.mjs; ci.py `_allows`):
+#: lower-case letters, digits and underscores only. `NEW_TEST` is the glob for prose; this is the rule.
+NEW_TEST_RE = re.compile(r"league/tests/test_harness_candidate_[a-z0-9_]+\.py")
 #: The gateway's limits on one engineer pull request (WP8b): files, bytes a file, bytes a request.
 MAX_FILES = 6
 MAX_FILE_BYTES = 512 * 1024
@@ -58,6 +63,13 @@ MAX_TEST_BYTES = 64 * 1024
 RESULT_CHARS = 24_000
 READ_LINES, READ_LINES_MAX = 400, 800
 GREP_RESULTS = 60
+#: The grep tool's bounds on a model-written pattern: its length, the line prefix searched, the wall time, and no shape
+#: known to backtrack catastrophically (a quantified group holding a quantifier, a backreference).
+GREP_PATTERN_CHARS = 200
+GREP_LINE_CHARS = 2000
+GREP_SECONDS = 20.0
+NESTED_QUANTIFIER = re.compile(r"[*+?}]\)*\)[*+{]")
+BACKREFERENCE = re.compile(r"\\[1-9]|\(\?P=")
 LIST_ENTRIES = 300
 TEXT_SUFFIXES = (".py", ".md", ".json", ".txt", ".toml", ".cfg", ".sh", ".yml", ".yaml")
 MARK = {"type": "ephemeral"}
@@ -65,6 +77,11 @@ MARK = {"type": "ephemeral"}
 
 class AuthorError(RuntimeError):
     pass
+
+
+def is_new_test(path: Any) -> bool:
+    """Whether `path` is a name the gateway admits for a candidate's new test (`NEW_TEST_RE`, exactly)."""
+    return isinstance(path, str) and NEW_TEST_RE.fullmatch(path) is not None
 
 
 def writable(lane: str, path: str) -> bool:
@@ -75,7 +92,7 @@ def writable(lane: str, path: str) -> bool:
     if spec is None or lanes.protected_reason(path) is not None:  # a new candidate test file is not protected
         return False
     in_surface = any(fnmatch.fnmatchcase(path, pattern) for pattern in spec.surface)
-    in_gateway = path in GATEWAY_LANE_PATHS.get(lane, ()) or fnmatch.fnmatchcase(path, NEW_TEST)
+    in_gateway = path in GATEWAY_LANE_PATHS.get(lane, ()) or is_new_test(path)
     return in_surface and in_gateway
 
 
@@ -128,7 +145,7 @@ class Workspace:
     def write(self, rel: str, text: str, *, new_test_ok: bool = False) -> None:
         path = self.resolve(rel)
         before = self.originals[rel] if rel in self.originals else (self.read(rel) if path.exists() else None)
-        if before is None and not (new_test_ok and fnmatch.fnmatchcase(rel, NEW_TEST)):
+        if before is None and not (new_test_ok and is_new_test(rel)):
             raise AuthorError(f"{rel}: only an existing surface file, or a new test file, may be written")
         self.originals.setdefault(rel, before)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -281,13 +298,21 @@ class Tools:
         self.finished: dict[str, str] | None = None
         self.gave_up: str | None = None
 
+    @property
+    def over(self) -> bool:
+        return self.finished is not None or self.gave_up is not None
+
     def call(self, name: str, args: Mapping[str, Any]) -> tuple[str, bool]:
+        # After `finish` (or `give_up`) the change is what the guards passed: a later call in the same reply (an edit
+        # after the finish) is refused, so the submitted files are exactly the checked ones.
+        if self.over:
+            return "the attempt is over (finish or give_up was called): nothing more is done", True
         try:
             handler = getattr(self, "t_" + name, None)
             if handler is None:
                 return f"unknown tool {name}", True
             return handler(**{k: v for k, v in dict(args).items()})
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, OverflowError) as exc:
             return f"bad arguments: {exc}", True
         except (AuthorError, OSError) as exc:
             return str(exc), True
@@ -316,18 +341,27 @@ class Tools:
         return _clip(f"{path}: lines {start}-{start + len(window) - 1} of {len(all_lines)}\n{body}"), False
 
     def t_grep(self, pattern: str, path: str = "league") -> tuple[str, bool]:
+        pattern = str(pattern)
+        if len(pattern) > GREP_PATTERN_CHARS:
+            return f"bad pattern: at most {GREP_PATTERN_CHARS} characters", True
+        if NESTED_QUANTIFIER.search(pattern) or BACKREFERENCE.search(pattern):
+            return ("bad pattern: no repeated group that holds a quantifier, and no backreference (they can run for "
+                    "hours)"), True
         try:
-            regex = re.compile(str(pattern))
+            regex = re.compile(pattern)
         except re.error as exc:
             return f"bad pattern: {exc}", True
+        stop = time.monotonic() + GREP_SECONDS
         target = self.ws.resolve(path)
         files = [target] if target.is_file() else sorted(p for p in target.rglob("*") if p.is_file() and p.suffix in TEXT_SUFFIXES
                                                           and "__pycache__" not in p.parts)
         hits: list[str] = []
         for file in files:
+            if time.monotonic() > stop:
+                return _clip("\n".join(hits) + f"\n... (stopped after {GREP_SECONDS:.0f} s: narrow the search)"), False
             try:
                 for n, line in enumerate(file.read_text(encoding="utf-8").splitlines(), 1):
-                    if regex.search(line):
+                    if regex.search(line[:GREP_LINE_CHARS]):
                         hits.append(f"{file.relative_to(self.ws.root).as_posix()}:{n}: {line.strip()[:240]}")
                         if len(hits) >= GREP_RESULTS:
                             return _clip("\n".join(hits) + "\n... (more hits: narrow the search)"), False
@@ -336,8 +370,8 @@ class Tools:
         return _clip("\n".join(hits) or "(no match)"), False
 
     def t_edit_file(self, path: str, old_text: str, new_text: str) -> tuple[str, bool]:
-        own_test = fnmatch.fnmatchcase(path, NEW_TEST) and path in self.ws.originals and self.ws.originals[path] is None
-        if not writable(self.lane, path) or fnmatch.fnmatchcase(path, NEW_TEST) and not own_test:
+        own_test = is_new_test(path) and path in self.ws.originals and self.ws.originals[path] is None
+        if not writable(self.lane, path) or is_new_test(path) and not own_test:
             return (f"{path}: you may change only {', '.join(writable_paths(self.lane))} (and your own new test file)"), True
         text = self.ws.read(path)
         if text is None:
@@ -354,8 +388,9 @@ class Tools:
         return f"{path}: edited ({len(changed.splitlines())} lines)", False
 
     def t_create_file(self, path: str, content: str) -> tuple[str, bool]:
-        if not fnmatch.fnmatchcase(path, NEW_TEST):
-            return f"{path}: the only new file allowed is league/tests/test_harness_candidate_<name>.py", True
+        if not is_new_test(path):
+            return (f"{path}: the only new file allowed is league/tests/test_harness_candidate_<name>.py, <name> of "
+                    "lower-case letters, digits and underscores"), True
         if path not in self.ws.originals and self.ws.resolve(path).exists():
             return f"{path}: exists in the base; an existing test is never edited", True
         if len(content.encode("utf-8")) > MAX_TEST_BYTES:
@@ -393,7 +428,7 @@ def run_loop(router: Any, *, ws: Workspace, lane: str, key: str | None, system: 
     system_blocks = [{"type": "text", "text": system, "cache_control": dict(MARK)}]
     schemas = anthropic_tools()
     messages: list[dict[str, Any]] = [{"role": "user", "content": [{"type": "text", "text": brief}]}]
-    spent, last, turns = 0.0, 0.0, 0
+    spent, last, prev, turns = 0.0, 0.0, 0.0, 0
     why = ""
     while True:
         if tools.finished is not None or tools.gave_up is not None:
@@ -401,7 +436,9 @@ def run_loop(router: Any, *, ws: Workspace, lane: str, key: str | None, system: 
         if turns >= max_turns:
             why = f"the attempt used its {max_turns} turns without submitting"
             break
-        estimate = max(0.10, 1.3 * last)
+        # The next turn resends the whole conversation: at least 1.3 times the last, and twice its growth on top.
+        growth = max(0.0, last - prev) if turns >= 2 else 0.0
+        estimate = max(0.10, 1.3 * last, last + 2.0 * growth)
         if spent + estimate > usd_cap:
             why = f"the next turn could take the attempt past its ${usd_cap:.2f} (spent ${spent:.2f})"
             break
@@ -420,13 +457,15 @@ def run_loop(router: Any, *, ws: Workspace, lane: str, key: str | None, system: 
             why = f"the model call failed ({exc.kind}): {str(exc)[:300]}"
             break
         turns += 1
-        last = float(reply.cost_usd if reply.cost_usd is not None else reply.held_usd)
+        prev, last = last, float(reply.cost_usd if reply.cost_usd is not None else reply.held_usd)
         spent += last
         answer = reply.answer
         messages.append({"role": "assistant", "content": [dict(b) for b in answer.content]})
         results: list[dict[str, Any]] = []
         for use in answer.tool_uses:
-            if use.error:
+            if tools.over:
+                text, error = tools.call(use.name, use.input)  # refused: the attempt is over
+            elif use.error:
                 text, error = f"the input did not parse: {use.error}", True
             else:
                 text, error = tools.call(use.name, use.input)
@@ -442,6 +481,10 @@ def run_loop(router: Any, *, ws: Workspace, lane: str, key: str | None, system: 
             break
     files = ws.files()
     if tools.finished is not None:
+        problems = static_guards(lane, ws, key=key)  # the tree as submitted, whatever came after the finish
+        if problems:
+            return Outcome("failed", why="the submitted tree no longer passes the static guards", usd=round(spent, 6),
+                           turns=turns, guards=problems)
         return Outcome("finished", files=files, originals={p: ws.originals.get(p) for p in files}, usd=round(spent, 6),
                        turns=turns, **tools.finished)
     if tools.gave_up is not None:
@@ -449,5 +492,6 @@ def run_loop(router: Any, *, ws: Workspace, lane: str, key: str | None, system: 
     return Outcome("failed", why=why, usd=round(spent, 6), turns=turns, guards=static_guards(lane, ws, key=key) if files else [])
 
 
-__all__ = ["GATEWAY_LANE_PATHS", "NEW_TEST", "MAX_FILES", "MAX_FILE_BYTES", "MAX_TOTAL_BYTES", "AuthorError", "Workspace",
+__all__ = ["GATEWAY_LANE_PATHS", "NEW_TEST", "NEW_TEST_RE", "is_new_test", "MAX_FILES", "MAX_FILE_BYTES", "MAX_TOTAL_BYTES",
+           "AuthorError", "Workspace",
            "Tools", "Outcome", "TOOLS", "anthropic_tools", "run_loop", "static_guards", "writable", "writable_paths", "sha256"]

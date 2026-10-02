@@ -103,9 +103,13 @@ class FakeRouter:
     def __init__(self, script=None, verdicts=("approve",), enabled=True, room=6.0, ceiling=0.5):
         self.script, self.verdicts, self.enabled, self.room, self.ceiling = script, list(verdicts), enabled, room, ceiling
         self.turns, self.asks, self.requests = [], [], []
+        self.spent = {}
 
     def claude_enabled(self, role):
         return self.enabled
+
+    def claude_spent(self, role=None, since=None, family=None):
+        return self.spent.get(role, 0.0)
 
     def claude_role_room(self, role):
         return self.room
@@ -136,6 +140,7 @@ class FakeGitHub:
         self.ci = "pending"
         self.n = 6
         self.refuse = {}
+        self.health = {"autonomy": {"engineer_pulls": {"count": 0, "cap": 2, "recent": []}}}
 
     def fetch(self, sha):
         return tarball(sha, self.commits[sha])
@@ -166,6 +171,8 @@ class FakeGitHub:
         raise AssertionError(path)
 
     def get(self, path, params=None):
+        if path == "/v1/health":
+            return self.health
         found = re.fullmatch(r"/v1/github/pr/(\d+)(/failures)?", path)
         pr = self.prs[int(found.group(1))]
         if found.group(2):
@@ -400,6 +407,14 @@ class Flow(unittest.TestCase):
         self.assertEqual(self.only()["state"], "closed_rejected")
         self.assertEqual(self.gh.merges, [])
         self.assertEqual([r["verdict"] for r in self.gh.reviews], ["reject", "reject"])
+        # The gateway closes no pull request: both are listed for the owner.
+        self.assertEqual(cand_prs := self.only()["record"]["leftover_prs"], sorted(self.gh.prs))
+        summary = E.public_summary(self.root)
+        self.assertEqual(summary["leftover_prs"], cand_prs)
+        page = SB.build(day="2026-10-06", release="r", economics=None, deploys={}, budget=None, ladder={}, jobs={},
+                        written_at="23:30Z", engineer=summary)
+        self.assertIn(", ".join(f"#{n}" for n in cand_prs), page)
+        self.assertEqual(SB.public_problems(page), [])
 
     def test_a_ci_failure_revises_with_the_annotations(self):
         self.router.script = gated_author('and "decide(" in program')
@@ -559,6 +574,77 @@ class Flow(unittest.TestCase):
         self.assertTrue(cand["record"]["guard"]["breach"])
         self.assertIn("global guard", cand["record"]["revert"]["why"])
 
+    def test_no_authoring_without_the_gateways_engineer_route_or_the_day_line(self):
+        self.gh.health = {"autonomy": {"docs": {"commits": 0, "cap": 4}}}  # a gateway before WP8b
+        out = self.go("2026-10-06T04:00:00Z")
+        self.assertEqual((self.journal(), self.router.turns), ([], []))
+        self.assertTrue(any("engineer_pulls" in a for a in out["actions"]), out)
+        self.gh.health = {"autonomy": {"engineer_pulls": {"count": 2, "cap": 2}}}
+        out = self.go("2026-10-06T04:00:00Z")
+        self.assertEqual(self.journal(), [])
+        self.assertTrue(any("are used" in a for a in out["actions"]), out)
+        self.gh.health = {"autonomy": {"engineer_pulls": {"count": 0, "cap": 2}}}
+        self.router.spent = {"engineer": 6.0, "reviewer": 3.5}  # $0.50 left of the $10 day
+        out = self.go("2026-10-06T04:00:00Z")
+        self.assertEqual((self.journal(), self.router.turns), ([], []))
+        self.assertTrue(any("left of their $10.00" in a for a in out["actions"]), out)
+
+    def test_an_attempt_is_capped_at_what_the_day_line_has_left(self):
+        def costly(kw, n):
+            b, u = use(n, "read_file", {"path": "league/swarm/researcher.py"})
+            return reply([b], [u], cost=0.5)
+        self.router = FakeRouter(costly)
+        self.router.spent = {"reviewer": 8.5}  # $1.50 left
+        self.go("2026-10-06T04:00:00Z")
+        cand = self.only()
+        self.assertEqual(cand["state"], "closed_failed")
+        self.assertLessEqual(cand["record"]["author_usd"], 1.5)
+        self.assertIn("past its $1.50", cand["record"]["attempts"][0]["why"])
+
+    def test_a_review_waits_when_the_day_line_cannot_cover_it(self):
+        self.go("2026-10-06T04:00:00Z")
+        self.gh.ci = "success"
+        self.router.spent = {"engineer": 9.5}
+        self.go("2026-10-06T05:40:00Z")
+        self.assertEqual((self.only()["state"], self.router.asks), ("pr_open", []))
+        self.router.spent = {}
+        self.go("2026-10-07T00:40:00Z")
+        self.assertEqual(self.only()["state"], "merged")
+
+    def test_a_revert_on_its_way_holds_the_next_authoring(self):
+        self.to_merged()
+        new = self.deploy(self.gh.main, "main-cccccccccccc", at("2026-10-06T08:00:00Z"))
+        self.go("2026-10-06T08:40:00Z", release=new)
+        self.gh.refuse["/v1/github/pr"] = GatewayError("POST /v1/github/pr: HTTP 429 cap", status=429)  # the revert waits
+        self.go("2026-10-06T10:40:00Z", release=self.release)  # rolled back: reverting
+        cand = self.only()
+        self.assertEqual(cand["state"], "reverting")
+        self.write_capture()
+        out = self.go("2026-10-07T04:00:00Z", release=self.release)
+        self.assertEqual(len(self.journal()), 1)
+        self.assertTrue(any("in flight" in a and "reverting" in a for a in out["actions"]), out)
+        # A revert that never lands is handed over after `deploy_days`, not waited on forever.
+        self.go("2026-10-14T05:00:00Z", release=self.release)
+        cand = self.only()
+        self.assertEqual(cand["state"], "closed_reverted")
+        self.assertIn("did not land in time", cand["record"]["closed_why"])
+
+    def test_a_window_lane_with_no_promote_row_for_its_release_fails_closed(self):
+        self.write_capture(lane="data", metric="slot_failure_rate")
+        self.router = FakeRouter(data_author)
+        self.go("2026-10-06T04:00:00Z")
+        self.gh.ci = "success"
+        self.go("2026-10-06T05:40:00Z")
+        self.go("2026-10-07T04:40:00Z")
+        self.assertEqual(self.only()["state"], "merged")
+        owner = self.base / "releases" / "main-eeeeeeeeeeee"  # an owner deploy: no watchdog rows
+        unpack(tarball(self.gh.main, self.gh.commits[self.gh.main]), owner, sha=self.gh.main)
+        self.window = lambda kw: self.fail(f"no control window may be measured: {kw}")
+        self.go("2026-10-07T06:40:00Z", release=owner)
+        cand = self.only()
+        self.assertEqual(cand["state"], "reverting")
+        self.assertIn("no promote row", cand["record"]["revert"]["why"])
+
     def test_the_scoreboard_counts_the_engineer_publicly(self):
         self.to_merged()
         summary = E.public_summary(self.root)
@@ -656,6 +742,59 @@ class Authoring(unittest.TestCase):
         self.assertEqual((out.status, out.usd), ("failed", 0.0))
         self.assertIn("(line)", out.why)
 
+    def test_nothing_after_finish_in_the_same_reply_reaches_the_change(self):
+        author = gated_author()
+
+        def script(kw, n):
+            if n < 3:
+                return author(kw, n)
+            fb, fu = use(3, "finish", {"title": "t", "summary": "s", "predicted_effect": "p", "canary_plan": "c"})
+            eb, eu = use(4, "edit_file", {"path": "league/swarm/researcher.py", "old_text": "    def tidy(self, fam, program):\n",
+                                          "new_text": "    def tidy(self, fam, program):\n        import subprocess\n"})
+            cb, cu = use(5, "create_file", {"path": "league/tests/test_harness_candidate_late.py", "content": "x = 1\n"})
+            return reply([fb, eb, cb], [fu, eu, cu])
+        out = self.run_loop(FakeRouter(script))
+        self.assertEqual(out.status, "finished", out)
+        self.assertEqual(list(out.files), ["league/swarm/researcher.py"])
+        self.assertNotIn("subprocess", out.files["league/swarm/researcher.py"])
+        self.assertEqual(A.static_guards("research", self.ws, key=self.key), [])
+
+    def test_a_finished_tree_that_fails_the_guards_is_not_submitted(self):
+        router = FakeRouter(gated_author())
+        real = A.Tools.t_finish
+
+        def finish_then_tamper(tools, **kw):  # whatever route changes the tree after the finish passed the guards
+            result = real(tools, **kw)
+            path = tools.ws.root / "league/swarm/researcher.py"
+            path.write_text(path.read_text().replace("    def tidy", "    import subprocess\n\n    def tidy"))
+            return result
+        A.Tools.t_finish = finish_then_tamper
+        try:
+            out = self.run_loop(router)
+        finally:
+            A.Tools.t_finish = real
+        self.assertEqual(out.status, "failed")
+        self.assertTrue(any("subprocess" in g for g in out.guards), out.guards)
+
+    def test_new_test_names_follow_the_gateways_rule(self):
+        for bad in ("league/tests/test_harness_candidate_Tidy-v2.py", "league/tests/test_harness_candidate_x/y.py",
+                    "league/tests/test_harness_candidate_.py", "league/tests/test_harness_candidate_a.pyc"):
+            self.assertFalse(A.is_new_test(bad), bad)
+            self.assertFalse(A.writable("research", bad), bad)
+            self.assertTrue(self.tools.call("create_file", {"path": bad, "content": "x = 1\n"})[1], bad)
+        self.assertTrue(A.is_new_test("league/tests/test_harness_candidate_tidy_2.py"))
+        self.assertEqual(self.ws.files(), {})
+
+    def test_the_tools_survive_hostile_arguments(self):
+        for pattern in ("(a+)+$", "(\\w+\\s?)*x", "(?:ab*)*", "(a)\\1", "x" * 201):
+            text, error = self.tools.call("grep", {"pattern": pattern})
+            self.assertTrue(error, pattern)
+            self.assertIn("bad pattern", text)
+        self.assertFalse(self.tools.call("grep", {"pattern": "def (tidy|__init__)\\(", "path": "league"})[1])
+        text, error = self.tools.call("read_file", {"path": "league/swarm/researcher.py", "start_line": float("inf")})
+        self.assertTrue(error)
+        self.assertTrue(self.tools.call("read_file", {"path": "league/swarm/researcher.py", "lines": float("inf")})[1])
+
     def test_finish_with_a_failing_guard_comes_back_to_fix(self):
         def script(kw, n):
             if n == 1:
@@ -745,6 +884,16 @@ class Helpers(unittest.TestCase):
             E.write_arm(tmp, "harness:a", None)
             self.assertEqual(sorted(gate.read(Path(tmp) / gate.FILE)), ["harness:b"])
             self.assertEqual((Path(tmp) / gate.FILE).stat().st_mode & 0o777, 0o600)
+            # A file that does not read as schema 1 is never overwritten: every other arm would be lost.
+            E.write_arm(tmp, "harness:c", {"lane": "research", "fraction": 0.5, "salt": "u", "state": "retained"})
+            good = (Path(tmp) / gate.FILE).read_text()
+            for broken in ("{\"schema\": 1, \"arms\": {", "[]", "{\"schema\": 2, \"arms\": {}}"):
+                (Path(tmp) / gate.FILE).write_text(broken)
+                with self.assertRaises(RuntimeError):
+                    E.write_arm(tmp, "harness:d", {"lane": "memory", "fraction": 0.5, "salt": "v", "state": "canary"})
+                self.assertEqual((Path(tmp) / gate.FILE).read_text(), broken)
+            (Path(tmp) / gate.FILE).write_text(good)
+            self.assertEqual(sorted(gate.read(Path(tmp) / gate.FILE)), ["harness:b", "harness:c"])
 
     def test_the_guard_needs_enough_trades_and_a_significant_fall(self):
         self.assertFalse(E.guard_verdict([0.1] * 5, [-0.5] * 5)["breach"])
