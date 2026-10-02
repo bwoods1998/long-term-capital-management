@@ -767,8 +767,12 @@ class NightlyStopTest(Case):
             self.assertIsNone(busy())
             self.assertIsNone(busy(state="retry", retry_at=now + 3600, next_wake=None))
             self.assertIn("running a job (store-completion)", busy(state="running", busy=True, job="store-completion"))
-            self.assertIn("within 10 minutes", busy(next_wake=wd.iso(now + 540)))
-            self.assertIn("within 10 minutes", busy(state="retry", retry_at=now + 60))
+            self.assertIsNone(busy(next_wake=wd.iso(now + 540)))
+            self.assertIn("within 120 s", busy(next_wake=wd.iso(now + 100)))
+            self.assertIn("within 120 s", busy(state="retry", retry_at=now + 60))
+            # A failing night retries every 300 s (`Controller.retry_seconds`) and sleeps in between: idle.
+            self.assertIsNone(busy(state="retry", retry_at=now + 300, next_wake=None))
+            self.assertIsNone(busy(state="retry", retry_at=now + 121, next_wake=None))
             self.assertIn("unreadable time", busy(next_wake="soon"))
             self.assertIn("not idle", busy(state="complete"))
             self.assertIn("not idle", busy(state="starting"))
@@ -792,6 +796,75 @@ class NightlyStopTest(Case):
                 self.assertTrue(wd.nightly_lock_held(self.base))
         finally:
             os.chmod(lock, 0o600)
+
+
+class NightlyHeartbeatContractTest(Case):
+    """`nightly_busy` reads what `scripts/data/nightly.py daemon` writes. A drift in that heartbeat would
+    hold every updater release on `nightly` (the bound is `NIGHTLY_FORCE_AFTER_SECONDS`), so the real
+    `Controller` makes the statuses here and the daemon's heartbeat line is pinned as written."""
+
+    DAEMON_HEARTBEAT = ('bl.write_json(state / "nightly.heartbeat", {**identity, "at": time.time(), **status,\n'
+                        '                                                       "state": status.get("phase"),\n'
+                        '                                                       "busy": status.get("phase") == "running"})')
+
+    def setUp(self):
+        super().setUp()
+        import datetime as dt
+
+        data = Path(__file__).resolve().parents[2] / "scripts" / "data"
+        if str(data) not in sys.path:
+            sys.path.insert(0, str(data))
+        import nightly
+        import storelib
+
+        self.dt, self.nightly = dt, nightly
+        self.calendar = storelib.Calendar({dt.date(2026, 11, 26): None, dt.date(2026, 11, 27): (570, 780)})
+        self.data = self.base / "state" / "data"
+        self.data.mkdir(parents=True)
+
+    def beat(self, status, at):
+        """The daemon's heartbeat for `status`, built as `nightly.daemon` builds it."""
+        beat = {"pid": 77, "start": "1", "release": "/workspace/releases/x", "at": at, **status, "state": status.get("phase"),
+                "busy": status.get("phase") == "running"}
+        (self.data / "nightly.heartbeat").write_text(json.dumps(beat, default=str))
+
+    def test_the_daemon_still_writes_the_heartbeat_this_reads(self):
+        source = (Path(self.nightly.__file__)).read_text(encoding="utf-8")
+        self.assertIn(self.DAEMON_HEARTBEAT, source)
+        self.assertIn("while not stop.is_set() and not (state / \"nightly.stop\").exists():\n                result = controller.tick()", source)
+
+    def test_waiting_retry_and_running_as_the_controller_reports_them(self):
+        import fcntl
+
+        dt = self.dt
+        moment = [dt.datetime(2026, 9, 29, 6, 0, tzinfo=dt.timezone.utc)]
+        failing = self.nightly.Controller(self.data, self.data / "ready.json", self.calendar,
+                                          run=lambda day: (_ for _ in ()).throw(RuntimeError("the data box is down")),
+                                          clock=lambda: moment[0])
+        with (self.data / "nightly.lock").open("a+") as held:
+            fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            status = failing.tick()
+            now = moment[0].timestamp()
+            self.assertEqual(status["phase"], "retry")
+            self.beat(status, now)
+            self.assertIsNone(wd.nightly_busy(self.base, now + 5))  # the retry 300 s off: idle, stoppable
+            self.beat(status, now + 190)
+            self.assertIn("within 120 s", wd.nightly_busy(self.base, now + 200))
+            moment[0] += dt.timedelta(seconds=30)
+            again = failing.tick()
+            self.assertEqual(again["phase"], "retry")
+            self.beat(again, now + 30)
+            self.assertIsNone(wd.nightly_busy(self.base, now + 35))
+            self.beat({"phase": "running", "day": "2026-09-28"}, now + 300)
+            self.assertIn("running a job", wd.nightly_busy(self.base, now + 310))
+            quiet = self.nightly.Controller(self.data / "quiet", self.data / "ready.json", self.calendar, run=lambda day: {},
+                                            clock=lambda: dt.datetime(2026, 9, 26, 16, 0, tzinfo=dt.timezone.utc))
+            (self.data / "quiet").mkdir()
+            waiting = quiet.tick()
+            self.assertEqual(waiting["phase"], "waiting")
+            at = dt.datetime(2026, 9, 26, 16, 0, tzinfo=dt.timezone.utc).timestamp()
+            self.beat(waiting, at)
+            self.assertIsNone(wd.nightly_busy(self.base, at + 10))
 
 
 # --------------------------------------------------------------------------- V3-A: the drill
@@ -833,7 +906,9 @@ class DrillTest(Case):
         return self.releases.path(release_id)
 
     def drill(self, **kw):
-        return wd.drill_rollback(self.dog, session=lambda now: self.window, in_flight=lambda: self.flight, **kw)
+        kw.setdefault("own_argv", lambda: ["/usr/bin/python3", "-m", "league.watchdog", "drill-rollback", "--here"])
+        kw.setdefault("session", lambda now: self.window)
+        return wd.drill_rollback(self.dog, in_flight=lambda: self.flight, **kw)
 
     def broken(self):
         """The watch's readings of a House that raises the drill's error alert at every tick."""
@@ -855,7 +930,7 @@ class DrillTest(Case):
         drill_id = result["release"]
         self.assertTrue(drill_id.startswith("drill-"))
         [copy] = self.copies
-        self.assertEqual(copy["marker"]["copy_of"], "rel-0001")
+        self.assertEqual((copy["marker"]["copy_of"], copy["marker"]["previous"]), ("rel-0001", "rel-0000"))
         self.assertEqual(copy["break"]["copy_digest"], wd.tree_digest(running)[0])
         self.assertEqual(copy["dir"].name, drill_id)
         # Identical code: the copy is the running tree plus the marker and nothing else.
@@ -939,7 +1014,9 @@ class DrillTest(Case):
         def unreadable(now):
             raise ValueError("no calendar")
 
-        cases.append(("calendar could not be read", wd.drill_rollback(self.dog, session=unreadable, in_flight=lambda: None)))
+        cases.append(("calendar could not be read", self.drill(session=unreadable)))
+        # A House job calling the function in its own process: its pid in deploy.pid would be no deploy in flight.
+        cases.append(("runs only as its own process", self.drill(own_argv=lambda: ["/usr/bin/python3", "-m", "league.ops", "run", "drills"])))
         for needle, result in cases:
             self.assertEqual((result["ok"], result["outcome"]), (False, "refused"), needle)
             self.assertIn(needle, " ".join(result["reasons"]))
@@ -947,7 +1024,7 @@ class DrillTest(Case):
         self.assertEqual(self.world.restarts, 0)
         self.assertEqual(sorted(p.name for p in (self.base / "releases").iterdir()), ["rel-0000", "rel-0001", "rel-0002", "rel-0003"])
         self.assertIsNone(wd.nightly_marker(self.base))
-        self.assertEqual([row["outcome"] for row in self.drill_rows()], ["refused"] * 5)
+        self.assertEqual([row["outcome"] for row in self.drill_rows()], ["refused"] * 6)
 
     def test_a_drill_copy_or_no_release_is_never_copied(self):
         self.assertEqual(self.drill()["reasons"], ["there is no current release to copy"])
@@ -991,8 +1068,85 @@ class DrillTest(Case):
     def test_the_command_line(self):
         out = io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
-            code = wd.main(["drill-rollback", "--base", str(self.base)])
+            code = wd.main(["drill-rollback", "--base", str(self.base), "--here"])
         self.assertEqual((code, json.loads(out.getvalue())["reasons"]), (2, ["there is no current release to copy"]))
+
+    def test_the_command_runs_the_drill_in_a_session_of_its_own(self):
+        import subprocess
+
+        root = Path(__file__).resolve().parents[2]
+        done = subprocess.run([sys.executable, "-m", "league.watchdog", "drill-rollback", "--base", str(self.base)], cwd=str(root),
+                              capture_output=True, text=True, timeout=120, env={**os.environ, "PYTHONPATH": str(root)})
+        self.assertEqual(done.returncode, 2, done.stderr)
+        self.assertEqual(json.loads(done.stdout)["reasons"], ["there is no current release to copy"])
+        with unittest.mock.patch.object(wd.subprocess, "Popen") as popen:
+            popen.return_value.wait.return_value = 0
+            self.assertEqual(wd.main(["drill-rollback", "--base", str(self.base)]), 0)
+        argv, kw = popen.call_args
+        self.assertEqual(argv[0][1:], ["-m", "league.watchdog", "drill-rollback", "--base", str(self.base), "--here"])
+        self.assertTrue(kw["start_new_session"])
+
+    def test_an_automatic_launchs_stop_refuses_the_drill(self):
+        """The updater wrote its stop and waits for the daemon: the drill's pid would make it stand down and
+        lift that stop under the drill, so the drill goes another time."""
+        self.running_with()
+        (self.base / "state" / "data").mkdir(parents=True, exist_ok=True)
+        (self.base / "state" / "data" / "nightly.stop").write_text("updater:main-0123456789ab\n")
+        result = self.drill()
+        self.assertEqual((result["ok"], result["outcome"]), (False, "refused"))
+        self.assertIn("an automatic release's launch holds the nightly stop (updater:main-0123456789ab)", result["reasons"][0])
+        self.assertEqual(self.world.canary_calls, [])
+        self.assertEqual(wd.nightly_marker(self.base), "updater:main-0123456789ab")
+        self.assertFalse((self.base / "deploy.pid").exists())
+
+    def test_a_promoted_copy_does_not_prune_the_release_previous_goes_back_to(self):
+        self.running_with()
+        for n in range(6):  # newer releases than rel-0000: a prune would take it
+            self.clock.advance(1)
+            self.releases.stage(self.tree(f"x{n}"), f"rel-1{n:03d}")
+        result = self.drill()  # healthy readings: the copy is promoted, then the drill rolls it back itself
+        self.assertEqual(result["deploy_verdict"], "promoted")
+        self.assertTrue((self.base / "releases" / "rel-0000").is_dir())
+        self.assertEqual((self.releases.current(), self.releases.previous()), ("rel-0001", "rel-0000"))
+
+    # ------------------------------------------------------------------ an orphaned drill copy
+    def orphaned(self):
+        """What a drill that died after the promotion leaves: its copy current, the original previous, its stop."""
+        self.running_with()
+        copy = self.tree("copy")
+        (copy / "league" / "config.json").write_text(json.dumps({"auto_update": True, "real_money": True}))
+        (copy / "DRILL_BREAK").write_text(json.dumps({"drill": "drill-20261003T150000Z", "copy_of": "rel-0001", "previous": "rel-0000"}))
+        self.clock.advance(1)
+        self.releases.stage(copy, "drill-20261003T150000Z")
+        self.releases.promote("drill-20261003T150000Z")
+        wd.stop_nightly(self.base, "drill:drill-20261003T150000Z")
+
+    def test_an_orphaned_copy_is_rolled_back_and_the_box_is_as_it_was(self):
+        self.orphaned()
+        result = wd.drill_recover(self.dog)
+        self.assertEqual((result["ok"], result["outcome"]), (True, "recovered"), result)
+        self.assertEqual((self.releases.current(), self.releases.previous()), ("rel-0001", "rel-0000"))
+        self.assertFalse((self.base / "releases" / "drill-20261003T150000Z").exists())
+        self.assertIsNone(wd.nightly_marker(self.base))
+        self.assertEqual(self.world.restarts, 1)
+        [row] = self.drill_rows()
+        self.assertEqual((row["outcome"], row["recovery"], row["copy_of"], row["previous_restored"]), ("recovered", True, "rel-0001", "rel-0000"))
+
+    def test_a_copy_no_longer_current_only_restarts_the_house(self):
+        self.orphaned()
+        self.releases.rollback()  # the drill's own rollback ran; its restart did not
+        result = wd.drill_recover(self.dog)
+        self.assertEqual((result["ok"], result["outcome"], self.releases.current()), (True, "recovered", "rel-0001"))
+        self.assertEqual(self.world.restarts, 1)
+
+    def test_the_recover_command(self):
+        self.orphaned()
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()), \
+                unittest.mock.patch.object(wd, "production", lambda *a, **kw: self.dog):
+            code = wd.main(["drill-recover", "--base", str(self.base), "--reason", "drill orphaned: test"])
+        self.assertEqual((code, json.loads(out.getvalue())["outcome"]), (0, "recovered"))
+        self.assertEqual(self.releases.current(), "rel-0001")
 
 
 # -------------------------------------------------------------------- the real thing, in small

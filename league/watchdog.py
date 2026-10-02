@@ -34,6 +34,8 @@ and never publishes: it only decides which release `current` points at, and asks
 `drill-rollback` (V3-A) proves step 4 on demand: it deploys a copy of the current release that
 carries `DRILL_BREAK`, the House started from it raises an error alert every tick, and the watch
 must roll it back (`drill_rollback`). Never inside the session window, never beside another deploy.
+`drill-recover` is the way back when the drill itself died after the promotion: the drill copy's House
+launches it once no deploy has been in flight for a while (`drill_recover`).
 
 It never writes the ledger. It reads `health.json`, and the SQLite ledger through a read-only
 connection. Standard library only, and nothing here imports the rest of the package at import
@@ -808,9 +810,13 @@ NIGHTLY_HEARTBEAT = Path("state") / "data" / "nightly.heartbeat"
 NIGHTLY_WAIT_SECONDS = 600
 #: The stop is written only while the daemon is idle with its next job at least this far off. The House's
 #: supervisor (`league/data_job.py`) TERMs the daemon at the stop and KILLs it 120 s later, busy or not:
-#: a stop written while a job runs ends that job, which is what the stop is for avoiding. The heartbeat
-#: is written every 30 s, so a job that began since it was written is caught only by this margin.
-NIGHTLY_IDLE_MARGIN_SECONDS = 10 * 60
+#: a stop written while a job runs ends that job, which is what the stop is for avoiding. An idle daemon
+#: sleeps in `stop.wait(30)` and reads the stop before its next `controller.tick`, so a job can begin
+#: after the stop only if it is due within about one poll: the margin is that poll, the heartbeat's own
+#: 30 s, and room to spare. It must stay well under the daemon's retry (`Controller.retry_seconds`,
+#: 300 s): a failing night is idle in `retry` with `retry_at` at most 300 s off, and a margin wider
+#: than that kept every release out for as long as the night kept failing (review of V3-A, Oct 2).
+NIGHTLY_IDLE_MARGIN_SECONDS = 120
 #: A heartbeat older than this says nothing about what the daemon is doing now.
 NIGHTLY_HEARTBEAT_FRESH_SECONDS = 90
 #: The markers automation writes. Only these are ever removed by code.
@@ -882,7 +888,7 @@ def nightly_busy(base: str | Path, now: float, *, margin: float = NIGHTLY_IDLE_M
     else:
         return f"the nightly daemon is {str(phase)[:40]!r}, not idle"
     if due is None or due - now < margin:
-        return f"the nightly daemon's next job is due {'at an unreadable time' if due is None else 'at ' + iso(due)}, within {int(margin // 60)} minutes"
+        return f"the nightly daemon's next job is due {'at an unreadable time' if due is None else 'at ' + iso(due)}, within {int(margin)} s"
     return None
 
 
@@ -1071,7 +1077,9 @@ class Watchdog:
             note(stage="interrupted", error=f"{type(exc).__name__}: {str(exc)[:200]}", current=self.releases.current())
             raise
         result = verdict("promoted", [])
-        removed = self.releases.prune()
+        # A drill copy promoted (its break not caught) is current with the drill's original as `previous`:
+        # a prune now could take the release the owner's way back names once the drill restores it.
+        removed = [] if release_id.startswith(DRILL_PREFIX) else self.releases.prune()
         if removed:
             note(stage="prune", removed=removed)
         return result
@@ -1302,7 +1310,9 @@ DRILL_BREAK = "DRILL_BREAK"
 #: `floor_box.py` (`<time>-<digest>`) names a release so, and a tree from GitHub carries no file at the
 #: release root (`league/updater.py` unpacks only its `TREES`).
 DRILL_PREFIX = "drill-"
-DRILL_EXIT = {"rolled_back": 0, "refused": 2}
+DRILL_EXIT = {"rolled_back": 0, "recovered": 0, "refused": 2}
+#: Set in the drill's own process once it runs in a session of its own (`main`).
+DRILL_DETACHED_FLAG = "--here"
 
 
 def drill_marker(release_dir: str | Path) -> dict[str, Any] | None:
@@ -1331,7 +1341,8 @@ def _drill_session(now: float) -> dict[str, Any] | None:
 
 def drill_rollback(dog: Watchdog, *, state: str | Path | None = None, session: Callable[[float], Mapping[str, Any] | None] | None = None,
                    in_flight: Callable[[], str | None] | None = None, nightly_wait: float = NIGHTLY_WAIT_SECONDS,
-                   canary_ticks: int = 3, watch_seconds: int = 600, watch_every: int = 30) -> dict[str, Any]:
+                   canary_ticks: int = 3, watch_seconds: int = 600, watch_every: int = 30,
+                   own_argv: Callable[[], Sequence[str] | None] | None = None) -> dict[str, Any]:
     """Stage a copy of the CURRENT release with `DRILL_BREAK`, deploy it through `dog` exactly as any
     release is deployed, and expect the watch to roll it back. Returns `{"ok", "outcome", ...}`.
 
@@ -1348,13 +1359,20 @@ def drill_rollback(dog: Watchdog, *, state: str | Path | None = None, session: C
     copy is removed from disk, and the nightly stop is lifted if it still carries the drill's marker.
     From the first check to the end the drill's own pid is in `deploy.pid`, so neither the owner's deploy
     nor the updater sends a release beside it. Every outcome, a refusal too, writes one `stage: "drill"`
-    row to `deploys.jsonl` beside the deploy's own rows. Run it as its own process (`python -m
-    league.watchdog drill-rollback`): it restarts the House twice."""
+    row to `deploys.jsonl` beside the deploy's own rows.
+
+    Only as its own `league.watchdog` process (`python -m league.watchdog drill-rollback`, which moves
+    itself into a session of its own; a House job runs that command, never this function in-process):
+    `deploy_in_flight` counts a pid in `deploy.pid` only when it is a `league.watchdog` process, so a
+    drill inside any other process would be invisible to the updater and the owner's deploy. Refused
+    otherwise. A drill that dies after the promotion is recovered by the House it left running
+    (`league/updater.py`, `drill_recover`); `DRILL_BREAK` records what `previous` named for that."""
     releases = dog.releases
     base = releases.base
     state_dir = Path(state) if state else releases.state_dir
     session = session or _drill_session
     in_flight = in_flight or (lambda: deploy_in_flight(base, ignore_pid=os.getpid()))
+    own_argv = own_argv or (lambda: _watchdog_argv(os.getpid()))
     started = dog.clock()
 
     def finish(outcome: str, ok: bool, reasons: list[str], **extra: Any) -> dict[str, Any]:
@@ -1383,6 +1401,9 @@ def drill_rollback(dog: Watchdog, *, state: str | Path | None = None, session: C
     except (OSError, ValueError) as exc:
         config = {"_unreadable": f"{type(exc).__name__}"}
     problems = []
+    if not any("league.watchdog" in part for part in own_argv() or ()):
+        problems.append("the drill runs only as its own process (`python -m league.watchdog drill-rollback`): from inside another "
+                        "process its pid in deploy.pid is not a deploy in flight to the updater or the owner's deploy")
     if not isinstance(config, dict) or config.get("auto_update") is not True:
         problems.append(f"{current}'s league/config.json does not turn auto_update on: the break is raised by the House's updater, "
                         "which is built only then, so the watch would see nothing to roll back")
@@ -1406,8 +1427,8 @@ def drill_rollback(dog: Watchdog, *, state: str | Path | None = None, session: C
         wanted, _ = tree_digest(running)
         if digest != wanted:
             raise ReleaseError(f"the copy ({digest[:12]}) is not the current release ({wanted[:12]})")
-        (source / DRILL_BREAK).write_text(json.dumps({"drill": drill_id, "copy_of": current, "copy_digest": wanted, "at": iso(started)},
-                                                     sort_keys=True) + "\n", encoding="utf-8")
+        (source / DRILL_BREAK).write_text(json.dumps({"drill": drill_id, "copy_of": current, "copy_digest": wanted, "at": iso(started),
+                                                      "previous": old_previous}, sort_keys=True) + "\n", encoding="utf-8")
         extra["copy_digest"] = wanted
     except (OSError, ReleaseError) as exc:
         shutil.rmtree(source, ignore_errors=True)
@@ -1422,7 +1443,13 @@ def drill_rollback(dog: Watchdog, *, state: str | Path | None = None, session: C
         while True:
             busy = None if stopped else nightly_busy(base, dog.clock())
             if not stopped and busy is None:
-                stop_nightly(base, marker)
+                standing = stop_nightly(base, marker)
+                if standing != marker and standing.startswith(NIGHTLY_MARKERS):
+                    # An updater launch wrote it and waits for the daemon too; the drill's own pid in
+                    # deploy.pid makes that launch stand down and lift ITS stop, which would leave the
+                    # drill running with none. The next drill goes when the box is quiet.
+                    return finish("refused", False, [f"an automatic release's launch holds the nightly stop ({standing}): "
+                                                     "a drill goes only when no other release is on its way"], **extra)
                 stopped = True
             if stopped and not nightly_lock_held(base):
                 break
@@ -1475,6 +1502,55 @@ def _drill_cleanup(releases: Releases, drill_id: str, old_previous: str | None) 
     return out
 
 
+def drill_recover(dog: Watchdog, *, reason: str = "drill orphaned: the drill's process is gone") -> dict[str, Any]:
+    """The way back from a drill whose own process died after its copy was promoted (a box restart, a
+    kill): launched, detached, by the House that copy left running (`league/updater.py`), once no
+    deploy has been in flight for `DRILL_ORPHAN_SECONDS`. Without it the copy stayed current, the House
+    raised its break at every tick, never deployed main again, and the drill's nightly stop stood.
+
+    When `current` is a drill copy: `previous` is pointed back at the release the copy was made from
+    (the promotion left it there; this only repairs a link that moved), `current := previous` with a
+    restart (`Watchdog.rollback`), then the drill's own cleanup (`previous` back to what it named before
+    the drill, the copy off the disk) and its nightly stop lifted. When `current` is no longer a copy
+    (the drill's rollback ran but its restart did not), the House is restarted into it. Always one
+    `stage: "drill"` row, `recovery: true`."""
+    releases = dog.releases
+    current = releases.current()
+
+    def finish(outcome: str, ok: bool, reasons: list[str], **extra: Any) -> dict[str, Any]:
+        releases.record({"stage": "drill", "recovery": True, "outcome": outcome, "ok": ok, "reasons": reasons, **extra})
+        dog._say(f"drill recovery: {outcome}" + (f" ({'; '.join(reasons)})" if reasons else ""))
+        return {"ok": ok, "outcome": outcome, "reasons": reasons, **extra}
+
+    if current is None or not current.startswith(DRILL_PREFIX):
+        stages: list[dict[str, Any]] = []
+        try:
+            with releases.lock():
+                problem = dog._restart(stages, {"deploy": f"drill-recover@{int(dog.clock())}", "release": current}, after="drill-recover")
+        except DeployBusy as exc:
+            return finish("refused", False, [str(exc)], current=current)
+        if problem is not None:
+            return finish("failed", False, [f"{current} is current, and the House could not be restarted into it: {problem}"], current=current)
+        return finish("recovered", True, [f"{current} is current; the House still ran a drill copy and was restarted"], current=current)
+
+    marker = drill_marker(releases.path(current)) or {}
+    copy_of, old_previous = marker.get("copy_of"), marker.get("previous")
+    extra: dict[str, Any] = {"release": current, "copy_of": copy_of}
+    try:
+        with releases.lock():
+            if isinstance(copy_of, str) and copy_of != releases.previous() and releases.path(copy_of).is_dir():
+                releases._point("previous", copy_of)
+        back = dog.rollback(reason)
+    except (DeployBusy, ReleaseError, OSError) as exc:
+        return finish("refused" if isinstance(exc, DeployBusy) else "failed", False, [f"{type(exc).__name__}: {str(exc)[:200]}"], **extra)
+    extra["rollback"] = {"ok": back.get("ok"), "current": back.get("current"), "error": back.get("error")}
+    extra.update(_drill_cleanup(releases, current, old_previous if isinstance(old_previous, str) else None))
+    unstop_nightly(releases.base, f"drill:{current}")
+    if back.get("current") != current and back.get("ok"):
+        return finish("recovered", True, [f"rolled back from {current} to {back.get('current')}"], **extra)
+    return finish("failed", False, [f"the rollback of {current} ended: {back.get('error') or back.get('current')}"], **extra)
+
+
 # ---------------------------------------------------------------------------------------- cli
 def status(releases: Releases, state: Path, *, now: float | None = None) -> dict[str, Any]:
     def raw(name: str) -> str | None:
@@ -1492,6 +1568,20 @@ def status(releases: Releases, state: Path, *, now: float | None = None) -> dict
         "house": read_health(state, now=time.time() if now is None else now).to_dict(),
         "last_deploys": [{k: row.get(k) for k in ("at", "release", "verdict", "reasons")} for row in verdicts[-5:]],
     }
+
+
+def _exit_on_signal(signum: int, frame: Any) -> None:
+    raise SystemExit(128 + int(signum))
+
+
+def _drill_detached(argv: list[str]) -> int:
+    """`drill-rollback` again, as a child in a session of its own, waited for here. The drill restarts
+    the House twice and lasts up to half an hour: an exec timeout, a hangup or a kill of whatever ran
+    this command must not reach it (the watchdog the updater and `floor_box.py` launch is detached the
+    same way). Its output comes through while this process lives; its record is `deploys.jsonl`."""
+    child = subprocess.Popen([sys.executable, "-m", "league.watchdog", *argv, DRILL_DETACHED_FLAG], start_new_session=True,
+                             stdin=subprocess.DEVNULL)
+    return child.wait()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -1523,9 +1613,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     prune = sub.add_parser("prune", help="remove old releases (never current or previous)")
     common(prune)
     prune.add_argument("--keep", type=int, default=5)
-    common(sub.add_parser("drill-rollback", help="deploy a copy of the current release carrying DRILL_BREAK and expect the watch to "
-                                                 "roll it back (refused inside the session window and while a deploy is in flight)"))
+    drill = sub.add_parser("drill-rollback", help="deploy a copy of the current release carrying DRILL_BREAK and expect the watch to "
+                                                  "roll it back (refused inside the session window and while a deploy is in flight)")
+    common(drill)
+    drill.add_argument(DRILL_DETACHED_FLAG, dest="here", action="store_true",
+                       help="run in this process (set by the command itself once it has a session of its own)")
+    recover = sub.add_parser("drill-recover", help="roll back a drill copy whose drill died (launched by the House that copy runs)")
+    common(recover)
+    recover.add_argument("--reason", default="drill orphaned: the drill's process is gone")
     args = parser.parse_args(argv)
+    if args.command == "drill-rollback" and not args.here:
+        return _drill_detached(list(sys.argv[1:] if argv is None else argv))
 
     releases = Releases(args.base)
     state = Path(args.state) if args.state else releases.state_dir
@@ -1539,9 +1637,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     say = lambda text: print(f"{iso(time.time())}  watchdog: {text}", file=sys.stderr, flush=True)  # noqa: E731
     dog = production(args.base, state=state, python=getattr(args, "python", None), tick_timeout=getattr(args, "tick_timeout", 600),
                      max_age_seconds=getattr(args, "max_age_seconds", 300), restart_within=getattr(args, "restart_within", 300) or None, log=say)
-    if args.command == "drill-rollback":
-        result = drill_rollback(dog, state=state)
-        print(json.dumps(result, indent=1, default=str))
+    if args.command in ("drill-rollback", "drill-recover"):
+        # TERM or HUP (`floor_box.py stop` signals the pid in deploy.pid) ends it through its `finally`s:
+        # the nightly stop lifted, the copy and deploy.pid removed. What it leaves current is the House's
+        # to recover (`drill_recover`).
+        before = {sig: signal.signal(sig, _exit_on_signal) for sig in (signal.SIGTERM, signal.SIGHUP)}
+        try:
+            result = drill_recover(dog, reason=args.reason) if args.command == "drill-recover" else drill_rollback(dog, state=state)
+        finally:
+            for sig, handler in before.items():
+                signal.signal(sig, handler)
+        with contextlib.suppress(OSError):  # whoever asked may be gone; the record is deploys.jsonl
+            print(json.dumps(result, indent=1, default=str), flush=True)
         return DRILL_EXIT.get(result["outcome"], 1)
     if args.command == "rollback":
         try:
