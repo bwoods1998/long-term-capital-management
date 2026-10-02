@@ -11,7 +11,8 @@ THE LANES (`LANES`; the operator's procedure is `playbooks/harness-improvement.m
 - `research` (research workflow and tools). Bottleneck: Train runs spent on programs that cannot run. Primary metric
   `train_dq_rate` = runtime-disqualified Train runs / Train runs; secondary `gym_seconds_wasted_per_birth`; guards: OK
   runs per research dollar, cycle errors, and cycles that ran the Gym but name no recorded run. Surface: the
-  researcher's admission and tools, preflight, the Claude research adapter. Canary: 25% of families, concurrent.
+  researcher's admission and tools, preflight, the Claude research adapter. Canary: 50% of families for 12 hours,
+  concurrent.
 - `memory` (prompts, memory, retrieval). Bottleneck: failed mechanisms reborn. Primary `graveyard_rebirth_rate` =
   births whose mechanism is the same idea (a FROZEN detector below, not the architect's) as an earlier graveyard row on
   the same slice / births; or `validation_attempts_per_usd` = Validation runs at the normal spread / research dollars.
@@ -1077,6 +1078,11 @@ FROZEN_SYMBOLS: dict[str, tuple[str, ...]] = {
         "Researcher._with_score", "Researcher.dead", "Researcher.hold_offer", "Researcher.can_retire",
         "Researcher.retire_earned", "Researcher.retire_floor", "Researcher._scored", "Researcher.eligible_run",
         "Researcher.screen",
+        # The validated-family retire guard (Oct 1): `_execute` asks the unfrozen `guarded` first, so a lane that returned
+        # None there would lift it (the H1 review, finding 5).
+        "Researcher.guarded", "retire_guard", "retire_guard_days", "RETIRE_GUARD_DAYS", "VERDICTS_KEY", "VERDICTS_KEPT",
+        "validation_refuted", "validated_at", "_line_verdict", "_passed_version", "adoption_archives", "ADOPTED_ACTION",
+        "_epoch", "_plain_int", "record_verdict",
         "Researcher.drift_blocks", "Researcher._demote", "Researcher._terminal", "Researcher.cycle",
         "Researcher._count_dormancy", "Researcher._count_holds",
         # A program's path from the model's tool call to the Gym: the arguments a tool call carries, the program text
@@ -1778,7 +1784,9 @@ LANES: dict[str, Lane] = {
             "a research cycle each.", judge_primary="gym_seconds_wasted", judge_effect=0.20,
             judge_floor=5 * 130.0),),
         guards=(Metric("ok_runs_per_usd", "ok_runs", "research_usd", direction="higher", min_effect=0.10),
-                Metric("cycle_error_rate", "cycle_errors", "cycles", min_effect=0.20),
+                # An absolute floor like its siblings' (the lanestats study): at about 0.5% of cycles, 20% relative is
+                # a tenth of a point, which no canary of feasible size can resolve.
+                Metric("cycle_error_rate", "cycle_errors", "cycles", min_effect=0.20, abs_tolerance=0.005),
                 # A cycle that ran the Gym but names no recorded run: the join the lane's own metrics rest on.
                 Metric("unmatched_gym_cycle_rate", "gym_cycles_unmatched", "gym_cycles", min_effect=0.0,
                        abs_tolerance=0.01),
@@ -1792,7 +1800,11 @@ LANES: dict[str, Lane] = {
         judge_cost="screen_cpu_seconds", judge_cost_rule="pays",
         regressions=("league.tests.test_swarm_researcher", "league.tests.test_swarm_store", "league.tests.test_swarm_loop")
         + CORE_REGRESSIONS,
-        canary={"mode": "arms", "unit": "family", "fraction": 0.25, "observe_seconds": 6 * 3600,
+        # Half the families for twelve hours (the lanestats study, Oct 1 2026): at about 120 Train runs an hour a 25%
+        # arm over six hours reached the 200-run floor in 8% of windows; this reaches it in all of them. Re-simulated
+        # (PR #481, with the cycle-error floor and the outlier exclusion, at 120 / 240 Train runs an hour): a true 1x
+        # benefit is retained 19.2% / 23.6% (25% for 6 h: 1.5% / 15.0%), no effect 3.4% / 3.7%.
+        canary={"mode": "arms", "unit": "family", "fraction": 0.5, "observe_seconds": 12 * 3600,
                 "min_units_per_arm": 12},
         population_guards=(UNATTRIBUTED,), heldout_pool=HELDOUT_POOLS["research"],
     ),
@@ -1918,8 +1930,8 @@ RULE_SYMBOLS: dict[str, tuple[str, ...]] = {
         "REJECT_CLASSES", "reject_class", "signature", "COST_RATIO", "HOUSE_DQ_RATE", "PAYBACK_DAYS", "CYCLE_USD",
         "HELDOUT_POOLS", "PSEUDO_UNITS", "RESEARCH_KINDS", "_WASTED", "_num", "_add", "totals", "_spend", "_research",
         "_read_runtime", "_memory", "_data", "_execution", "measure", "lane_tallies", "lane_metrics", "rank", "payback",
-        "motivating_units", "heldout_seed", "split_arms", "_ratio", "compare", "fisher_less", "judge_counts", "_pays",
-        "judge_verdict", "binomial_low", "required_units", "retention"),
+        "DOMINANT_SHARE", "AMOUNTS", "motivating_units", "heldout_seed", "split_arms", "_ratio", "compare",
+        "fisher_less", "judge_counts", "_pays", "judge_verdict", "binomial_low", "required_units", "retention"),
     "league/swarm/canary.py": ("MECHANISM_CHARS", "in_arm", "mechanism_unit", "decide"),
     "league/swarm/improvement.py": ("ALPHA", "HarnessImprovement.canary_start", "HarnessImprovement.reconcile_lane"),
 }
@@ -2614,8 +2626,23 @@ def payback(lane: Lane, stake: Mapping[str, Any], release_class: str | None = No
                                     f"${worth:.2f} over {PAYBACK_DAYS} days, below a {klass} cycle's ${cost:.0f}")}
 
 
+#: Pre-treatment outliers (the lanestats study, Oct 1 2026). In an arms lane, a unit that held at least DOMINANT_SHARE
+#: of a lower-is-better check's events in the capture (when the capture had at least DOMINANT_EVENTS of them) is excluded
+#: from both arms with the motivating units. It is chosen from the capture, before the arms exist, so it cannot bias the
+#: comparison; without it one family already broken before the canary (Oct 1: 53 of the capture's 70 cycle errors, in 53
+#: of its 56 cycles) decides that guard by the arm its hash falls in.
+DOMINANT_SHARE, DOMINANT_EVENTS = 0.25, 20
+#: Tally fields that measure an amount (seconds, dollars, hours), not a count of events. A check whose numerator is one
+#: names no outlier (`DOMINANT_SHARE`): twenty Gym seconds are not twenty events, and the family that wasted the most
+#: Gym seconds is the one whose disqualified runs the primary most needs (the #481 review, finding 6).
+AMOUNTS = ("wasted_gym_seconds", "gym_seconds", "research_usd", "gym_usd", "wasted_model_usd", "unattributed_usd",
+           "hours")
+
+
 def motivating_units(lane: str, measurement_lane: Mapping[str, Any]) -> list[str]:
-    """The units a brief shows its patch author: every unit named by an example. The retention comparison excludes them."""
+    """The units a brief shows its patch author: every unit named by an example; and, in an arms lane, every unit that
+    held most of a check's events in the capture (`DOMINANT_SHARE`; an event count, never an amount: `AMOUNTS`). The
+    retention comparison excludes them."""
     found: list[str] = []
     for row in measurement_lane.get("examples") or []:
         for key in ("families", "boxes"):
@@ -2625,6 +2652,15 @@ def motivating_units(lane: str, measurement_lane: Mapping[str, Any]) -> list[str
                 found.append(str(row[key]))
         if row.get("graveyard_row"):
             found.append(str(row["graveyard_row"]))
+    spec = LANES.get(lane)
+    if spec is not None and spec.canary.get("mode") == "arms":
+        units = {str(u): r for u, r in (measurement_lane.get("units") or {}).items() if str(u) not in spec.arm_exclude}
+        for metric in [m for b in spec.bottlenecks for m in b.secondary] + list(spec.guards):
+            if metric.direction != "lower" or metric.numerator in AMOUNTS:
+                continue
+            total = sum(float(r.get(metric.numerator) or 0.0) for r in units.values())
+            if total >= DOMINANT_EVENTS:
+                found.extend(u for u, r in units.items() if float(r.get(metric.numerator) or 0.0) >= DOMINANT_SHARE * total)
     return sorted(set(found))
 
 
@@ -2817,11 +2853,18 @@ def judge_verdict(lane: Lane, bottleneck: Bottleneck, trees: Mapping[str, Mappin
 
 
 def binomial_low(k: int, n: int, p: float) -> float:
-    """P(X <= k) for X ~ Binomial(n, p)."""
+    """P(X <= k) for X ~ Binomial(n, p). Each term in logs: `math.comb(n, x)` exceeds a float from 1,030 births,
+    which raised OverflowError in a memory window that large (the lanestats study, Oct 1 2026)."""
+    if k < 0:
+        return 0.0
     if n <= 0:
         return 1.0
     p = min(max(p, 0.0), 1.0)
-    return min(1.0, sum(math.comb(n, x) * p ** x * (1 - p) ** (n - x) for x in range(0, k + 1)))
+    if p in (0.0, 1.0):
+        return 1.0 if p == 0.0 or k >= n else 0.0
+    lp, lq, ln = math.log(p), math.log1p(-p), math.lgamma(n + 1)
+    return min(1.0, sum(math.exp(ln - math.lgamma(x + 1) - math.lgamma(n - x + 1) + x * lp + (n - x) * lq)
+                        for x in range(0, min(k, n) + 1)))
 
 
 def required_units(control: Mapping[str, float], metric: Metric, *, alpha: float, cap: int = 60) -> int | None:

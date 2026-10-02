@@ -101,6 +101,36 @@ since and waiting for a release:
   drift screen stops, would be held in all 8 worlds. The suite's worlds hold no long-drift program that reaches a look,
   so it shows the holds cost nothing there, not what they save. To verify after the deploy: `look_holds` rows and
   `swarm.gate` events with action `look_hold`.
+- **The research canary holds half the families for 12 h; the cycle-error floor; outliers sit out** (branch
+  `lanes/retention-guard-rule`; `league/swarm/harness_lanes.py`, `playbooks/harness-improvement.md`, new
+  `league/tests/test_harness_canary_rules.py`). The lanestats study (Oct 1, operator-only simulation on the 24 h
+  capture's per-family tallies, reproducing the base `retention()` on 24 of 24 draws) found the arms canary too thin to
+  decide: the research canary (25% of families, 6 h) ended `insufficient_activity` in 93% of windows at the night pace,
+  its cycle-error guard's 20% relative tolerance (a tenth of a point at about 0.5% of cycles) could not be resolved, and
+  one already-broken family (53 of the capture's 70 cycle errors) decided that guard by the arm its hash fell in. Now
+  the research canary holds 50% of families for 12 h; `cycle_error_rate` gets an absolute tolerance of 0.005 like its
+  sibling rate guards; a unit that held >= 25% of a lower-is-better check's events in the capture (>= 20 events; an
+  event count only, never seconds or dollars, `AMOUNTS`) sits out both arms, chosen before the arms exist;
+  `binomial_low` (the memory lane's birth balance) no longer overflows from 1,030 births. Checks are still judged on the
+  point estimate. Unchanged: every primary metric, `min_effect`, the primary alpha, every guard (none removed),
+  population guards, window lanes. Re-simulated (the #481 review's simulator driving `retention()`; research at 50%/12 h
+  with the floor and the exclusion, simulated together; 120 / 240 Train runs an hour; 600-3,000 windows a cell, SE 0.1-2
+  points; the old canary is the base code at 25%/6 h on fresh seeds): no effect retained 3.4% / 3.7% (old 0.5% / 3.5%);
+  a true 1x benefit 19.2% / 23.6% (old 1.5% / 15.0%); a 2x benefit 40.3% / 45.5% (old 2.2% / 32.8%). A 1x benefit that
+  harms one guard by twice its tolerance is retained at most 8.4% / 12.3% (`zero_trade_ok_rate`; old 1.0% / 7.5%): above
+  the operator's 10% at 240 an hour, below it at the night pace; the other guards at most 5.6%; with a 2x benefit the
+  zero-trade harm 18.5% / 19.3%. A 50% worsening of the zero-tolerance secondary with a 1x benefit: 5.1% / 3.7%. Given
+  that the primary passes with no effect, a check still fails in 36% / 33% of windows. The memory lane's 12 h rebirth
+  canary: 2.0% with no effect, 6.0% at a true 1x benefit. A bootstrap guard rule (a check fails on a significant
+  worsening beyond its tolerance, or when the canary cannot rule out twice it) was tried on the same windows and dropped
+  because it did not beat the point estimate: it lowered the worst 2x guard harm at 240 an hour only to 10.1% (not below
+  10%), retained a true 1x benefit less often (17.0% / 22.6%; the memory canary 3.3%) and failed a check more often (43%
+  / 35% of no-effect windows whose primary passed). Also: the validated-family retire guard and its input closure
+  (`Researcher.guarded`, `retire_guard`, `record_verdict` and the helpers they read) join the research lane's frozen
+  symbols (the H1 review's finding 5), and a test checks that every frozen symbol resolves. The rule and lane hashes
+  move: every registered candidate is re-captured on this release. Research-class (not on the live path). To verify
+  after the deploy: `measure` + `rank` on the new release register fresh keys; the research brief's canary reads
+  fraction 0.5, 43,200 s.
 
 ## 2026-10-01
 
