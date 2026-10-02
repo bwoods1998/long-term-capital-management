@@ -14,12 +14,19 @@ evidence, no band). The practice league (Sept 29, 2026) keeps a record of it her
   session day's first minute (`prior_day`: that day, the roll's) (the incubator reads the record before today, never
   today's values).
 - `cohorts`: immutable admitted program snapshots, retained through research retirement and revision until the
-  observation target or bounded session window completes; shadow-only entry authority.
+  observation target or bounded session window completes; shadow-only entry authority. A FORWARD LADDER cohort (evidence
+  v3, Oct 2, 2026: every cohort frozen from that release on; its snapshot's `ladder`) has no observation target: it
+  practises until the ladder promotes it (`promoted`) or fails it (`failed`), or its practice window ends (the
+  constitution's `options_money.ladder.max_sessions`); a promoted cohort whose Probe goes back to the Gym is `demoted`.
 - `events`: private decision, coverage, intent, rejection, order, quote and fill/slippage receipts, idempotent across
   restarts. Unwritten receipts live in the saved shadow account and retry; the bounded outage buffer reports drops.
+- `entrants`: one row per ladder cohort, written with its admission: every entrant is a trial of its lineage and of the
+  desk (the ladder's Benjamini-Hochberg counts every entrant of its trailing window), with its latest one-sided p-value.
+- `ladder_decisions`: the ladder's receipts, one per cohort a day it judged (`league/live/ladder.py`).
 
-WHO READS IT. Nothing that feeds promotion evidence: not the gate, the verifier, the bands, the forward record, D2 or
-Profit. The swarm reads `practice_summary` (read-only) as a RESEARCH signal (`league/swarm/practice.py`: the strategist's
+WHO READS IT. THE FORWARD LADDER (evidence v3, the owner's D2 of Oct 2, 2026; `league/live/ladder.py`) reads a ladder
+cohort's own program closes under its own evaluator as the promotion evidence to Probe; nothing else that promotes reads
+it (not the gate, the verifier, the bands' reads, the money table's forward record or Profit). The swarm reads `practice_summary` (read-only) as a RESEARCH signal (`league/swarm/practice.py`: the strategist's
 table, the architect's lines, the bandit's capped bonus), and the publisher shows its aggregates (the site's practice
 block: never a price, strike, leg, expiry, minute, trade date, version or code). THE INCUBATOR (release B, Oct 1, 2026;
 `league/live/incubator.py`) reads one cohort's record (`practice_record`, read-only) as a pre-registered sign test of
@@ -96,6 +103,16 @@ CREATE TABLE IF NOT EXISTS events (
     recorded_at REAL NOT NULL, PRIMARY KEY(instance, account, event_id));
 CREATE INDEX IF NOT EXISTS events_family_day ON events(family, day);
 CREATE INDEX IF NOT EXISTS events_day ON events(day);
+CREATE TABLE IF NOT EXISTS entrants (
+    family TEXT NOT NULL, version INTEGER NOT NULL, run_sha TEXT, lineage TEXT, tier TEXT, evaluator TEXT NOT NULL,
+    entered_at REAL NOT NULL, entered_day TEXT NOT NULL, p_value REAL, p_day TEXT,
+    PRIMARY KEY (family, version));
+CREATE INDEX IF NOT EXISTS entrants_day ON entrants(entered_day);
+CREATE TABLE IF NOT EXISTS ladder_decisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, day TEXT NOT NULL, family TEXT NOT NULL, version INTEGER NOT NULL,
+    run_sha TEXT, inputs TEXT NOT NULL, stats TEXT NOT NULL, p_value REAL, bh_rank INTEGER, bh_size INTEGER,
+    bh_threshold REAL, verdict TEXT NOT NULL, reasons TEXT, binding INTEGER NOT NULL, at REAL NOT NULL);
+CREATE INDEX IF NOT EXISTS ladder_decisions_cohort ON ladder_decisions(family, version, day);
 """
 #: Columns the practice league added to `trades` (Sept 29, 2026), backfilled from `body` on first open.
 TRADE_COLUMNS = (("exit_day", "TEXT"), ("reason", "TEXT"), ("forced", "INTEGER"), ("evaluator", "TEXT"))
@@ -203,23 +220,32 @@ class ObserveStore:
                 db.execute("UPDATE cohorts SET status='complete', completed_day=?, reason=? WHERE family=? AND version=?",
                            (day, "evaluator changed; a new version needs fresh practice", family, version))
                 continue
+            # THE FORWARD LADDER's cohorts (evidence v3, `league/live/ladder.py`): no observation target ends one; it runs
+            # until the ladder promotes it or fails it, or its own practice window (`practice_max_sessions`, at most 60).
+            ladder = bool(row.get("ladder"))
             horizon = max(max_sessions, int(row.get("practice_max_sessions") or max_sessions))
+            if ladder:
+                horizon = int(row.get("practice_max_sessions") or 60)
             reason = None
             if in_session and first < day:
-                evidence = db.execute("SELECT sessions, last_day, open_positions FROM practice WHERE family=? AND version=?",
-                                      (family, version)).fetchone()
-                completed = int(evidence[0]) - int(evidence[1] == day) if evidence else 0
-                trades = db.execute("SELECT COUNT(*) FROM trades WHERE family=? AND version=? AND forced=0 "
-                                    "AND evaluator=? AND exit_day<?", (family, version, self.evaluator, day)).fetchone()[0]
                 elapsed, cursor, end = 0, date.fromisoformat(first), date.fromisoformat(day)
                 while cursor < end:
                     elapsed += session_minutes(cursor) is not None
                     cursor += timedelta(days=1)
-                if (completed >= max(1, min_sessions) and trades >= max(1, min_trades) and evidence and evidence[2] == 0
-                        and not hold and (family, int(version)) not in keep):
-                    reason = "observation target reached"
-                elif elapsed >= max(min_sessions, min(60, horizon)):
-                    reason = "maximum session window reached"
+                if ladder:
+                    if elapsed >= max(1, min(60, horizon)):
+                        reason = "ladder: its practice window ended"
+                else:
+                    evidence = db.execute("SELECT sessions, last_day, open_positions FROM practice WHERE family=? "
+                                          "AND version=?", (family, version)).fetchone()
+                    completed = int(evidence[0]) - int(evidence[1] == day) if evidence else 0
+                    trades = db.execute("SELECT COUNT(*) FROM trades WHERE family=? AND version=? AND forced=0 "
+                                        "AND evaluator=? AND exit_day<?", (family, version, self.evaluator, day)).fetchone()[0]
+                    if (completed >= max(1, min_sessions) and trades >= max(1, min_trades) and evidence and evidence[2] == 0
+                            and not hold and (family, int(version)) not in keep):
+                        reason = "observation target reached"
+                    elif elapsed >= max(min_sessions, min(60, horizon)):
+                        reason = "maximum session window reached"
             if reason:
                 db.execute("UPDATE cohorts SET status='complete', completed_day=?, reason=? WHERE family=? AND version=?",
                            (day, reason, family, version))
@@ -246,14 +272,30 @@ class ObserveStore:
                     snapshot["practice_max_sessions"] = min(60, math.ceil(float(needs["dte"][1]) * 5 / 7) + 3)
         except (SyntaxError, TypeError, ValueError, KeyError, IndexError):
             pass
-        db.execute("INSERT OR IGNORE INTO cohorts(family, version, admitted_at, first_day, snapshot) VALUES(?,?,?,?,?)",
-                   (str(row["family"]), int(row["version"]), self.clock(), day,
-                    json.dumps(snapshot, sort_keys=True, allow_nan=False)))
-        stored = db.execute("SELECT snapshot, status FROM cohorts WHERE family=? AND version=?",
-                            (str(row["family"]), int(row["version"]))).fetchone()
+        # EVIDENCE V3 (the owner's D2, Oct 2, 2026): every cohort frozen from this release on is a FORWARD LADDER cohort
+        # (`league/live/ladder.py`): it practises its whole window (the constitution's `options_money.ladder.
+        # max_sessions`, whatever its DTE), and it is an ENTRANT, a trial of its lineage and of the desk, recorded once
+        # with its admission (the ladder's Benjamini-Hochberg counts every entrant of its trailing window).
+        from .ladder import LADDER_VERSION, Rules
+
+        snapshot["ladder"] = LADDER_VERSION
+        snapshot["practice_max_sessions"] = Rules.from_constitution().max_sessions
+        family, version = str(row["family"]), int(row["version"])
+        with db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("INSERT OR IGNORE INTO cohorts(family, version, admitted_at, first_day, snapshot) VALUES(?,?,?,?,?)",
+                       (family, version, self.clock(), day, json.dumps(snapshot, sort_keys=True, allow_nan=False)))
+            stored = db.execute("SELECT snapshot, status, admitted_at, first_day FROM cohorts WHERE family=? AND version=?",
+                                (family, version)).fetchone()
+            kept = json.loads(stored[0])
+            if stored[1] == "active" and kept.get("ladder"):
+                db.execute("INSERT OR IGNORE INTO entrants(family, version, run_sha, lineage, tier, evaluator, entered_at, "
+                           "entered_day) VALUES(?,?,?,?,?,?,?,?)",
+                           (family, version, kept.get("run_sha"), kept.get("lineage"), kept.get("tier") or "validated",
+                            str(kept.get("practice_evaluator") or ""), float(stored[2]), str(stored[3])))
         if stored[1] != "active":
             raise ValueError("this practice snapshot has completed")
-        return json.loads(stored[0])
+        return kept
 
     def cohort_allowed(self, expected: Mapping[str, Any]) -> bool:
         """Shadow-only identity check against an admitted snapshot, independent of the mutable research population."""
@@ -281,6 +323,74 @@ class ObserveStore:
         """A refused/disqualified program cannot benefit from more practice; preserve the reason and free its slot."""
         self._connect().execute("UPDATE cohorts SET status='failed', completed_day=?, reason=? WHERE family=? AND version=?",
                                 (day, reason[:1000], family, version))
+
+    # ------------------------------------------------------------------ the forward ladder's rows (`ladder.py`)
+    def close_cohort(self, family: str, version: int, *, status: str, day: str, reason: str,
+                     was: tuple[str, ...] = ("active",)) -> bool:
+        """THE FORWARD LADDER's ending of a cohort: `status` "promoted" (its program trades real money at Probe),
+        "failed" (it cannot be promoted) or "demoted" (its Probe went back to the Gym), from one of `was`. True when it
+        moved."""
+        if status not in ("promoted", "failed", "demoted"):
+            raise ValueError(status)
+        marks = ",".join("?" for _ in was)
+        cur = self._connect().execute(f"UPDATE cohorts SET status=?, completed_day=?, reason=? WHERE family=? AND version=? "
+                                      f"AND status IN ({marks})", (status, day, reason[:1000], str(family), int(version), *was))
+        return cur.rowcount > 0
+
+    def ladder_cohorts(self, *, statuses: tuple[str, ...] = ("active",)) -> list[dict[str, Any]]:
+        """The forward ladder's cohorts in `statuses` (its snapshot marked `ladder`): [{family, version, first_day, status,
+        snapshot}], the oldest admitted first."""
+        marks = ",".join("?" for _ in statuses)
+        out = []
+        for family, version, first, status, snapshot in self._connect().execute(
+                f"SELECT family, version, first_day, status, snapshot FROM cohorts WHERE status IN ({marks}) "
+                "ORDER BY admitted_at, family, version", statuses).fetchall():
+            snap = json.loads(snapshot)
+            if isinstance(snap, dict) and snap.get("ladder"):
+                out.append({"family": str(family), "version": int(version), "first_day": str(first), "status": str(status),
+                            "snapshot": snap})
+        return out
+
+    def ladder_rows(self, family: str, version: int, *, evaluator: str, first_day: str,
+                    through: str) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+        """One ladder cohort's record through the session day `through` (inclusive): (its practice row, or None; its
+        PROGRAM closes under `evaluator` exited from `first_day` to `through`, forced (wind-down) closes left out, in
+        record order: {seq, trade_id, pnl, max_loss, exit_day, body})."""
+        db = self._connect()
+        live = _dicts(db.execute("SELECT * FROM practice WHERE family=? AND version=?", (str(family), int(version))))
+        trades = _dicts(db.execute(
+            "SELECT seq, trade_id, pnl, max_loss, exit_day, body FROM trades WHERE family=? AND version=? AND evaluator=? "
+            "AND COALESCE(forced, 0)=0 AND exit_day IS NOT NULL AND exit_day>=? AND exit_day<=? ORDER BY seq",
+            (str(family), int(version), str(evaluator), str(first_day), str(through))))
+        return (live[0] if live else None), trades
+
+    def entrants(self, *, since: str) -> list[dict[str, Any]]:
+        """Every ladder entrant that entered on or after the day `since`: [{family, version, run_sha, lineage, tier,
+        evaluator, entered_day, p_value, p_day}]."""
+        return _dicts(self._connect().execute(
+            "SELECT family, version, run_sha, lineage, tier, evaluator, entered_day, p_value, p_day FROM entrants "
+            "WHERE entered_day>=? ORDER BY entered_at, family, version", (str(since),)))
+
+    def set_entrant_p(self, family: str, version: int, p: float, *, day: str) -> None:
+        """An entrant's latest one-sided p-value (the ladder's bootstrap; 1.0 without a full record), as of `day`."""
+        self._connect().execute("UPDATE entrants SET p_value=?, p_day=? WHERE family=? AND version=?",
+                                (float(p), str(day), str(family), int(version)))
+
+    def add_decision(self, row: Mapping[str, Any]) -> int:
+        """One `ladder_decisions` row (the ladder's receipt): its id."""
+        cur = self._connect().execute(
+            "INSERT INTO ladder_decisions(day, family, version, run_sha, inputs, stats, p_value, bh_rank, bh_size, "
+            "bh_threshold, verdict, reasons, binding, at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (str(row["day"]), str(row["family"]), int(row["version"]), row.get("run_sha"), str(row["inputs"]),
+             json.dumps(row.get("stats") or {}, sort_keys=True, default=str), row.get("p_value"), row.get("bh_rank"),
+             row.get("bh_size"), row.get("bh_threshold"), str(row["verdict"]),
+             json.dumps(list(row.get("reasons") or []), default=str), int(bool(row.get("binding"))), self.clock()))
+        return int(cur.lastrowid)
+
+    def set_verdict(self, receipt: int, verdict: str, reasons: Iterable[str]) -> None:
+        """The verdict a receipt ends with (a promotion the swarm's store refused, say)."""
+        self._connect().execute("UPDATE ladder_decisions SET verdict=?, reasons=? WHERE id=?",
+                                (str(verdict), json.dumps(list(reasons), default=str), int(receipt)))
 
     def events(self, instance: str, family: str, version: int, account: str,
                rows: Iterable[Mapping[str, Any]]) -> bool:
@@ -390,6 +500,12 @@ class ObserveStore:
         except Exception:  # noqa: BLE001
             pass
         self.db = None
+
+
+def _dicts(cursor: sqlite3.Cursor) -> list[dict[str, Any]]:
+    """A cursor's rows as dicts (the House's connection keeps plain tuples: no row factory is switched on it)."""
+    names = [c[0] for c in cursor.description or ()]
+    return [dict(zip(names, row)) for row in cursor.fetchall()]
 
 
 def _migrate(db: sqlite3.Connection) -> None:

@@ -1,6 +1,21 @@
 """The gate and the nightly forward replays: the only code that opens sealed days, on gate boxes only.
 
-THE GATE (when a family's validated best meets the validation line):
+EVIDENCE V3 (the owner's D2 of Oct 2, 2026: the forward ladder replaces the sealed-holdout look as the gate to real
+money; `league/live/ladder.py`). THE SEALED LOOK IS RETIRED (`SEALED_LOOKS` False; the look path below is kept, reached
+only by `Gate(sealed_looks=True)`, the retired route's own tests). A validated version at the gate now goes to PRACTICE
+(`_to_practice`): the experiment contract and the drift screen still refuse (a refusal, the program's incubator bar),
+and otherwise its gate place closes (`gated_sha`, `gate_ready` cleared) with the outcome "practice" and the researcher
+told the forward ladder judges it; no review, no audit, no look, no Holm, no look budget. The practice league takes it
+(`bands.observe`, the validated tier) and the ladder judges its forward record. THE PRE-FILTER (`prefilter_round`, the
+ladder's L6): the House asks (kv `ladder_prefilter_requests`) for one FREE read of a practised program's 2026 holdout
+on a gate box, once its cohort meets every other line; at most one read a round, written to kv
+`ladder_prefilter:<run_sha>` {status, passed (net P&L after fees not negative), the Gym bundle asked for and the
+bundle and image it ran on}
+and kept private (the figure under `_figures` in the event): no look row, no Holm, no look budget, no `gated_sha`, no
+word to the researcher. A read the image cannot make (a root's holdout missing) waits without a try; three failed
+tries leave it "failed" (the ladder then promotes nothing on it).
+
+THE GATE (when a family's validated best meets the validation line; the retired route, `sealed_looks=True`):
 1. RATIONS: one holdout look per program version (code + parameters), at most three per LINEAGE (a fork
    inherits its parent's looks); the leakage alarm (>= 10 looks, > 30% passing) stops the gate. THE DUPLICATE LOOK
    (H3a, Oct 1, 2026; `duplicate_look`) comes first: a look that would repeat an earlier one is refused. THE DRIFT SCREEN
@@ -231,6 +246,17 @@ HOLD_WORDS = {
 #: does, it ends the version's execution tuition and bars its program from the incubator.
 HOLD_OUTCOME = "held"
 
+#: EVIDENCE V3 (the module docstring): the sealed holdout look is retired; `Gate(sealed_looks=True)` reaches it (tests).
+SEALED_LOOKS = False
+#: A validated version's gate place under evidence v3: closed to practice (`_to_practice`).
+PRACTICE_OUTCOME = "practice"
+PRACTICE_WORDS = ("validated: the forward ladder judges it now on its live practice record (no holdout look is made); "
+                  "its practice cohort, once frozen, is its program for good")
+#: THE PRE-FILTER's key-values (the House writes the requests, the gate the results; `league/live/ladder.py`).
+PREFILTER_REQUESTS = "ladder_prefilter_requests"
+PREFILTER_KEY = "ladder_prefilter:"
+PREFILTER_TRIES = 3
+
 
 def look_hold_settings(settings: Mapping[str, Any]) -> tuple[float | None, float | None]:
     """THE LOOK HOLDS' settings (`gate.look_holds`): (drift share, minimum power), each None when off. The key absent is the
@@ -297,12 +323,14 @@ def incubator_stage(stage: str, fid: str, *, incubator: bool = False) -> tuple[s
 
 class Gate:
     def __init__(self, store: SwarmStore, pool: Any, router: Any, settings: Mapping[str, Any], *,
-                 clock: Callable[[], float] = time.time):
+                 clock: Callable[[], float] = time.time, sealed_looks: bool | None = None):
         self.store = store
         self.pool = pool
         self.router = router
         self.settings = settings
         self.clock = clock
+        #: The retired sealed look (`SEALED_LOOKS`): only the retired route's own tests switch it on.
+        self.sealed_looks = SEALED_LOOKS if sealed_looks is None else bool(sealed_looks)
         #: The incubator's reads that came back without a final verdict this process, by program: when, so that the
         #: next round reads the others first (one version's repeated error never holds a round's places).
         self.incubator_tried: dict[str, float] = {}
@@ -540,7 +568,7 @@ class Gate:
     # ------------------------------------------------------------------ one round
     def run(self) -> dict[str, Any]:
         self.store.put("gate_at", self.clock())
-        out: dict[str, Any] = {"looked": [], "refused": [], "waiting": [], "held": [], "look_held": []}
+        out: dict[str, Any] = {"looked": [], "refused": [], "waiting": [], "held": [], "look_held": [], "practice": []}
         self._incubator_owed()  # a verdict an error kept from its bar last round: recorded first
         self._incubator_sweep()  # a look that landed, or a demotion, since the last round: its mark goes first
         if self.alarm():
@@ -584,6 +612,9 @@ class Gate:
                 continue  # the gate is done with it (its look landed, or it was refused)
             if (state.get("look_inflight") or {}).get("sha") == sha:
                 continue  # its look is in flight
+            if not self.sealed_looks:
+                self._to_practice(fam, int(n), version, sha, out)  # EVIDENCE V3: the forward ladder judges it
+                continue
             duplicate = self.duplicate_look(fam, n, sha)
             if duplicate is not None:  # THE DUPLICATE LOOK, before anything is asked of the version
                 if duplicate["inflight"]:
@@ -701,6 +732,10 @@ class Gate:
                 out["looked"].append({"family": fam["id"], "passed": look})
             if self.alarm():
                 break
+        if not self.sealed_looks and not self.alarm():
+            read = self.prefilter_round()  # THE PRE-FILTER: at most one free holdout read a round
+            if read:
+                out["prefilter"] = read
         self._incubator_owed()  # before any incubator read: a program owed a bar is never read or passed meanwhile
         if not self.alarm():  # the alarm stops the gate: no review of any kind starts
             incubated = self._incubator_round()
@@ -709,6 +744,105 @@ class Gate:
         else:
             self._incubator_sweep()  # never a read: the round's verdicts still take their marks by its end
         return out
+
+    # ------------------------------------------------------------------ EVIDENCE V3: practice and the pre-filter
+    def _to_practice(self, fam: Mapping[str, Any], n: int, version: Mapping[str, Any], sha: str,
+                     out: dict[str, Any]) -> None:
+        """A validated version's gate place under evidence v3 (the module docstring): the experiment contract and the
+        drift screen refuse as before (`refuse`: the row, the incubator bar, the outcome, the researcher told); otherwise
+        the place closes to practice, only if the version is still the one validated. No review, audit or look."""
+        try:
+            check_experiment(version["code"], version.get("params") or {})
+        except CodeRefused as exc:
+            self.refuse(fam, n, sha, "experiment contract", [str(exc)], out)
+            return
+        screen = drift_verdict(self.store, fam, n, self.settings)
+        if screen is not None and not screen["passed"]:
+            if screen["known"]:
+                self.refuse(fam, n, sha, "drift screen", [screen["why"]], out)
+            else:
+                out["waiting"].append(fam["id"])  # figures owed: it waits, as before
+            return
+        if not self.store.compare_and_set_state(fam["id"], {"validation_version": n}, gated_sha=sha, gate_ready=False,
+                                                dormant_cycles=0):
+            return
+        self.outcome(fam["id"], sha, PRACTICE_OUTCOME)
+        self.tell(fam["id"], PRACTICE_WORDS, verdict=True)
+        self.store.event("swarm.gate", fam["id"], {"action": "to_practice", "version": n, "sha": sha[:12]})
+        out["practice"].append(fam["id"])
+
+    def prefilter_round(self) -> dict[str, Any] | None:
+        """THE PRE-FILTER (the module docstring): the House's open requests, oldest first; one that cannot be read now
+        is recorded as waiting (or failed) and the next is tried; the first that can is read once on a gate box and its
+        result written for the ladder. At most one read a round; None when nothing was asked or changed."""
+        requests = self.store.get(PREFILTER_REQUESTS) or {}
+        if not isinstance(requests, Mapping) or not requests:
+            return None
+        image = str(self.settings.get("gym", {}).get("gate_checkpoint") or "")
+        bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
+        noted: dict[str, Any] | None = None
+        for sha, ask in sorted(requests.items(), key=lambda kv: (str((kv[1] or {}).get("day") or ""), kv[0])):
+            if not isinstance(ask, Mapping):
+                continue
+            done = self.store.get(PREFILTER_KEY + str(sha)) or {}
+            if done.get("status") in ("done", "failed") and done.get("bundle") == ask.get("bundle"):
+                continue  # answered on the bundle asked for (or out of tries on it)
+            fid, n = str(ask.get("family") or ""), ask.get("version")
+            fam = self.store.family(fid)
+            version = self.store.version(fid, n) if fam is not None else None
+            why = None
+            status = "waiting"
+            if fam is None or version is None or not version.get("code") or run_sha(version) != sha:
+                status, why = "failed", "the store holds no version of this program to read"
+            elif not image:
+                why = "the gate image is not ready yet"
+            elif bundle is not None and ask.get("bundle") != bundle:
+                why = "the gate runs another Gym bundle than the House asked for"
+            elif self.holdout_gap(fam, version, sha):
+                why = "the gate image lacks a root's holdout"
+            if why is not None:
+                noted = self._prefilter_write(sha, ask, done, status=status, why=why) or noted
+                continue
+            job = GymJob(family=fid, version=int(n), code=version["code"], params=version.get("params") or {},
+                         window="holdout", roots=needs_roots(version["code"], fam["roots"]),
+                         gate=f"pre-filter {fid} v{n}", purpose="prefilter", priority=8.0)
+            try:
+                result = self.pool.run(job, timeout=settings_mod.run_timeout(self.settings) + 600)
+            except PoolError as exc:
+                missing = getattr(job, "missing", None)
+                return self._prefilter_write(sha, ask, done, status="waiting", tried=not missing,
+                                             why=f"the gate box could not read it ({str(exc)[:160]})") or noted
+            if result.get("status") != "ok":
+                return self._prefilter_write(sha, ask, done, status="waiting", tried=True,
+                                             why=f"the read ended {result.get('status')}") or noted
+            self.store.add_run(fid, int(n), result, window="holdout", stress=1.0, purpose="prefilter")
+            pnl = evidence._num((result.get("summary") or {}).get("pnl"))
+            return self._prefilter_write(sha, ask, done, status="done", passed=pnl is not None and pnl >= 0, pnl=pnl,
+                                         ran_bundle=result.get("gym_bundle"), ran_image=result.get("gym_image"))
+        return noted
+
+    def _prefilter_write(self, sha: str, ask: Mapping[str, Any], done: Mapping[str, Any], *, status: str,
+                         why: str | None = None, tried: bool = False, passed: bool | None = None, pnl: float | None = None,
+                         ran_bundle: Any = None, ran_image: Any = None) -> dict[str, Any] | None:
+        """The pre-filter's record for the ladder (the gate is its only writer) and one private `swarm.gate` event; None
+        (nothing written) when a waiting record would say again what it says."""
+        same = done.get("bundle") == ask.get("bundle")
+        tries = (int(done.get("tries") or 0) if same else 0) + int(bool(tried))
+        if status == "waiting" and tries >= PREFILTER_TRIES:
+            status = "failed"
+        if status != "done" and same and done.get("status") == status and done.get("why") == why \
+                and int(done.get("tries") or 0) == tries:
+            return None
+        record = {"status": status, "family": ask.get("family"), "version": ask.get("version"), "bundle": ask.get("bundle"),
+                  "ran_bundle": ran_bundle, "image": ran_image, "tries": tries, "why": why, "at": self.clock()}
+        if status == "done":
+            record.update(passed=bool(passed), pnl=pnl)
+        self.store.put(PREFILTER_KEY + str(sha), record)
+        self.store.event("swarm.gate", ask.get("family"), {
+            "action": "prefilter", "version": ask.get("version"), "sha": str(sha)[:12], "status": status,
+            **({"passed": bool(passed)} if status == "done" else {"why": why}),
+            "_figures": {"pnl": pnl} if status == "done" else None})  # the figure stays private (underscore)
+        return {"sha": str(sha)[:12], "status": status, **({"passed": bool(passed)} if status == "done" else {})}
 
     # ------------------------------------------------------------------ the incubator's review and audit
     def _incubator_bar(self, fid: str, n: int | None, sha: str, *, why: str | None = None,
@@ -1314,4 +1448,5 @@ class Gate:
 
 __all__ = ["Gate", "run_sha", "incubator_stage", "REVIEW", "DUPLICATE_STAGE", "VALIDATION_IDENTITY", "validation_identity",
            "duplicate_words", "HOLD_DRIFT_STAGE", "HOLD_POWER_STAGE", "HOLD_WORDS", "HOLD_OUTCOME", "look_hold_settings",
-           "holdout_sessions", "sessions_between"]
+           "holdout_sessions", "sessions_between", "SEALED_LOOKS", "PRACTICE_OUTCOME", "PRACTICE_WORDS",
+           "PREFILTER_REQUESTS", "PREFILTER_KEY", "PREFILTER_TRIES"]

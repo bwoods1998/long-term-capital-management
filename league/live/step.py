@@ -6,9 +6,9 @@ own thread, once a minute, a few seconds after each minute of the New York sessi
 half day), so a slow House tick never delays a fill and a slow minute never delays the House:
 
 1. The families (`league/live/families.py`, every five minutes): which programs run live, as which instances. A
-   Candidate runs a SHADOW instance; a Probe or Sized family a shadow and a REAL instance; a family that passed
-   validation but not yet its holdout a real TUITION instance (1-lot orders only to measure fills; never evidence) while
-   real money is on. The live path moves candidate <-> probe <-> sized by the money table (`league/live/money.py`).
+   Candidate runs a SHADOW instance; a Probe or Sized family a shadow and a REAL instance (a family that passed
+   validation but not yet its holdout once ran a real TUITION instance: evidence v3 retired it with the sealed look, so
+   `bands.read` gives no such row). The live path moves candidate <-> probe <-> sized by the money table (`league/live/money.py`).
    A superseded or dropped shadow instance winds down (its positions closed at the natural); a real one goes to exits
    only until it is flat (its program stays in the live state so it can still close what it holds).
 2. The chains: each root's option chain through the gateway (one read a minute a root, filtered to the expiries and
@@ -26,8 +26,9 @@ THE PRACTICE LEAGUE (the observe band: the sprint, B4, Sept 26, 2026; the league
 family with a validated version, or an eligible Train version, runs a SHADOW instance `<family>@<version>:o`
 (`league.swarm.bands.observe`), switched by `live.observe` in `<state>/swarm.json` (read at runtime: no deploy). Its
 program is frozen in `observe.sqlite` before its first decision. A cohort survives research revision and retirement
-for at least three observed sessions and ten program closes while flat, with a ten-session maximum extended to fit
-its declared DTE horizon (at most sixty sessions). Restarts preserve snapshots and shadow accounts. ADMISSION walks the rows
+for its whole FORWARD LADDER window (evidence v3, `league/live/ladder.py`: at most sixty sessions) until the ladder
+promotes or fails it (a cohort frozen before the ladder kept the old rule: three observed sessions and ten program
+closes while flat, a ten-session maximum extended to fit its declared DTE horizon). Restarts preserve snapshots and shadow accounts. ADMISSION walks the rows
 in the league's order (validated by validation t, then Train by Train score, then id) under two caps: `live.observe_max`
 instances and `live.observe_roots_max` distinct roots (the binding one: every root is read every minute); a family whose
 roots would pass the roots cap is skipped and a later one on roots already read may still join. `live.observe_train`
@@ -41,8 +42,10 @@ reset a real one. Two guards hold the line (#427): `Instance.observe` is True on
 under a `:o` key (coerced, so a real instance, the House live test's included, is never an observe one, restored or
 not), and the order path (`_real_intent`) refuses, alerted, any instance that is not real. THE RECORD: every minute,
 each practice account's equity (at the engine's mark), open positions and decision coverage go to the private practice
-ledger (`league/live/observe.py`), its closed trades too; the swarm reads its summary as a research signal
-(`league/swarm/practice.py`) and the site shows its aggregates (`site_inputs`), never a forward row and never evidence.
+ledger (`league/live/observe.py`), its closed trades too (each with the underlying at its exit, THE DRIFT CONTROL's
+figure); the swarm reads its summary as a research signal (`league/swarm/practice.py`) and the site shows its aggregates
+(`site_inputs`), never a forward row. THE FORWARD LADDER (evidence v3, Oct 2, 2026; `league/live/ladder.py`) judges every
+ladder cohort's own record at each session's end (`_end_of_day`): the one route from practice to a Probe.
 
 THE FORWARD EMBARGO (Sept 29, 2026): practice feeds research, so forward-window days select among Gym programs. A Sized
 move (`_move_band`) therefore also needs the forward record of the sessions AFTER the banded version was written AND selected to
@@ -2561,8 +2564,14 @@ class OptionsLive:
             wound = getattr(acc, "wound", set())
             changed = (getattr(acc, "practice_evaluator", None) is not None
                        and acc.practice_evaluator != self.observe_store.evaluator)
+            # THE FORWARD LADDER's drift control (`league/live/ladder.py`) needs the underlying at the exit: read from the
+            # session's own grids now, while they hold the exit minute (None when they do not).
+            from .ladder import exit_spot
+
             marked = [dict(t, forced=changed or t.get("id") in wound, evaluator=self.observe_store.evaluator,
-                           cohort_evaluator=acc.practice_evaluator, evaluator_changed=changed) for t in trades]
+                           cohort_evaluator=acc.practice_evaluator, evaluator_changed=changed,
+                           exit_spot=t["exit_spot"] if t.get("exit_spot") is not None else exit_spot(t, self.day))
+                      for t in trades]
             if not self.observe_store.add(acc.instance, acc.family, _version_of(acc.instance), marked,
                                           account=getattr(acc, "nonce", "")):
                 acc.exported -= len(trades)
@@ -2651,6 +2660,14 @@ class OptionsLive:
             self._end_volume(day)
         except Exception as exc:  # noqa: BLE001 - this optional input must not interrupt expiry bookkeeping
             out["volume_error"] = f"volume history: {type(exc).__name__}"
+        try:
+            # THE FORWARD LADDER (evidence v3, `league/live/ladder.py`): every ladder cohort judged on its record through
+            # this session, its receipts written, a promotion or a demotion made; never the session's bookkeeping.
+            from .ladder import end_of_day as ladder_end_of_day
+
+            out["ladder"] = ladder_end_of_day(self, day.day.isoformat())
+        except Exception as exc:  # noqa: BLE001 - judged again at the next session's end
+            self.alert("warning", f"live: the forward ladder's session end failed ({type(exc).__name__}: {str(exc)[:160]})")
         self.state.put("ended_day", day.day.isoformat())
         self.shadow.save()
         out["ended"] = day.day.isoformat()

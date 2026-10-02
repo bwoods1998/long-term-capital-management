@@ -17,9 +17,12 @@ BANDS (the live path owns candidate <-> probe <-> sized; the swarm owns gym <-> 
   every open is a `long_call` or a `long_put`, the side chosen by its rule) is real only while BOTH are real types
   (`order_types`, `Table.family_allowed`). The table's `real_types` stay concrete types, and every real order is still
   checked by its own type (`Table.type_allowed`), at the real book and at the gateway.
-- SIZED: a PROBE (never a Candidate at once) whose forward record has at least `sized.min_trades` trades with a mean
-  return on maximum loss above zero and its one-sided `sized.confidence` lower bound above zero. The record
-  (`one_record`) is the program version's own, one source a market day (real, else shadow, else nightly).
+- SIZED: a PROBE (never a Candidate at once) whose REAL fills (evidence v3, the owner's D2 of Oct 2, 2026: the Probe's
+  own real trades, never its shadow or nightly rows) number at least `sized.min_trades` with a mean return on maximum
+  loss above zero and its one-sided `sized.confidence` lower bound above zero, after at least
+  `sized.min_probe_real_trades` real trades and `sized.min_probe_sessions` whole sessions at Probe. The record
+  (`one_record`) is the program version's own, one source a market day (real, else shadow, else nightly); Sized reads
+  its real rows.
 - A family whose REAL trades alone lose (`REAL_MIN_TRADES` or more, mean at or below zero) is held at Probe, and a
   Sized one goes back to Probe.
 - A Probe or Sized family whose forward record turns negative (the swarm's `forward.negative`, or this record's own:
@@ -32,9 +35,9 @@ by their own unit):
 - Probe: the per-structure cap is `probe.max_loss_share x E`; quantity = floor(cap / unit); a structure that fits none
   but whose unit is at most `probe.floor_usd` trades ONE (the floor). At most `probe.open_per_family` open structures,
   and the family's open maximum loss at most max(`probe.family_share x E`, `probe.floor_usd`).
-- Sized: `sized.kelly_fraction` of Kelly on the LOWER bound (`stats.quarter_kelly`: fraction x lcb / variance of the
-  per-trade return on maximum loss) of `E` a structure, never above `sized.max_loss_share x E`; the family at most
-  `sized.family_share x E`. A Sized family whose Kelly stake is under the Probe's cap is sized under the Probe's limits
+- Sized: `sized.kelly_fraction` of Kelly on the REAL fills' LOWER bound (`stats.quarter_kelly`: fraction x lcb /
+  variance of the real per-trade return on maximum loss) of `E` a structure, never above `sized.max_loss_share x E`;
+  the family at most `sized.family_share x E`. A Sized family whose Kelly stake is under the Probe's cap is sized under the Probe's limits
   (`probe.max_loss_share` a structure, `probe.open_per_family` open, `probe.family_share` the family): Sized limits never
   apply at a Probe-sized stake.
 - Tuition: exactly one structure, only while the day's and the week's tuition maximum loss has room.
@@ -265,10 +268,17 @@ class Forward:
     negative: bool
     real_n: int = 0
     real_mean: float | None = None
+    #: The real fills alone (evidence v3: Sized reads them and Kelly sizes on their lower bound).
+    real_sd: float | None = None
+    real_lcb: float | None = None
 
     @property
     def variance(self) -> float | None:
         return None if self.sd is None else self.sd * self.sd
+
+    @property
+    def real_variance(self) -> float | None:
+        return None if self.real_sd is None else self.real_sd * self.real_sd
 
     @property
     def real_bad(self) -> bool:
@@ -326,16 +336,39 @@ def forward_stats(rows: Sequence[Mapping[str, Any]], confidence: float, *, negat
     bounds = stats.mean_bounds(returns, 1.0 - confidence) if n >= 2 else None
     mean = bounds["mean"] if bounds else (returns[0] if n == 1 else None)
     real, _ = _returns([r for r in record if str(r.get("source") or "") == "real"])
+    real_bounds = stats.mean_bounds(real, 1.0 - confidence) if len(real) >= 2 else None
     own_negative = n >= 20 and mean is not None and mean < 0
     return Forward(n=n, mean=mean, sd=bounds["sd"] if bounds else None, lcb=bounds["lcb"] if bounds else None, pnl=pnl,
                    negative=bool(negative) or own_negative, real_n=len(real),
-                   real_mean=(sum(real) / len(real)) if real else None)
+                   real_mean=(sum(real) / len(real)) if real else None,
+                   real_sd=real_bounds["sd"] if real_bounds else None,
+                   real_lcb=real_bounds["lcb"] if real_bounds else None)
+
+
+def session_bound(rows: Sequence[Mapping[str, Any]], *, sessions: int, confidence: float,
+                  version: Any = None) -> tuple[int, float | None]:
+    """THE LADDER'S SESSION DEMOTION's figure (evidence v3; `league/live/ladder.py`): over the forward record
+    (`one_record`: the version's own, one source a day) the trailing `sessions` session days that closed a trade, each
+    day's mean return on maximum loss, and the one-sided `confidence` lower bound of their mean (`stats.mean_bounds`):
+    (days counted, the bound). The bound is None under `sessions` such days (no verdict yet) or without spread."""
+    by_day: dict[str, list[float]] = {}
+    for row in one_record(rows, version=version):
+        returns, _ = _returns([row])
+        if returns:
+            by_day.setdefault(str(row.get("day") or ""), []).extend(returns)
+    days = sorted(d for d in by_day if d)[-max(1, int(sessions)):]
+    if len(days) < int(sessions):
+        return len(days), None
+    bounds = stats.mean_bounds([sum(by_day[d]) / len(by_day[d]) for d in days], 1.0 - float(confidence))
+    return len(days), (bounds["lcb"] if bounds else None)
 
 
 # --------------------------------------------------------------------------------------------------------- bands
 def sized_ok(table: Table, fwd: Forward) -> bool:
-    return (fwd.n >= table.sized_min_trades and fwd.mean is not None and fwd.mean > 0 and fwd.lcb is not None
-            and fwd.lcb > 0)
+    """THE SIZED LINE on the Probe's REAL fills alone (evidence v3): at least `sized.min_trades` real trades, their mean
+    return on maximum loss above zero and its `sized.confidence` lower bound above zero."""
+    return (fwd.real_n >= table.sized_min_trades and fwd.real_mean is not None and fwd.real_mean > 0
+            and fwd.real_lcb is not None and fwd.real_lcb > 0)
 
 
 def probe_cap(table: Table, equity: Decimal) -> Decimal:
@@ -378,8 +411,11 @@ def band_for(table: Table, row: Mapping[str, Any], equity: Decimal, fwd: Forward
                          "Probe")
     probe_done = band == "sized" or (fwd.real_n >= table.min_probe_real_trades and probe_sessions >= table.min_probe_sessions)
     if band in ("probe", "sized") and sized_ok(table, fwd) and probe_done:
-        return "sized", (f"a forward record of {fwd.n} trades, mean {fwd.mean:.4f} a dollar of maximum loss, "
-                         f"{table.sized_confidence:.0%} lower bound {fwd.lcb:.4f}, after {fwd.real_n} real Probe trades")
+        return "sized", (f"{fwd.real_n} real Probe trades, mean {fwd.real_mean:.4f} a dollar of maximum loss, "
+                         f"{table.sized_confidence:.0%} lower bound {fwd.real_lcb:.4f}, after {probe_sessions} whole "
+                         "sessions at Probe" if band == "probe" else
+                         f"{fwd.real_n} real trades, mean {fwd.real_mean:.4f} a dollar of maximum loss, "
+                         f"{table.sized_confidence:.0%} lower bound {fwd.real_lcb:.4f}")
     if band == "candidate":
         return "probe", "passed the holdout and trades a real type that fits the Probe's cap (Sized only from Probe)"
     return "probe", "passed the holdout and trades a real type that fits the Probe's cap"
@@ -406,11 +442,12 @@ class Plan:
 
 
 def kelly_cap(table: Table, equity: Decimal, fwd: Forward | None) -> Decimal:
-    """`kelly_fraction` of Kelly on the forward record's LOWER bound, as dollars of maximum loss a structure, never
-    above `sized.max_loss_share` (0 when the record cannot size anything)."""
-    if fwd is None or fwd.lcb is None or not fwd.variance:
+    """`kelly_fraction` of Kelly on the REAL fills' LOWER bound (evidence v3: the record Sized is judged on), as dollars
+    of maximum loss a structure, never above `sized.max_loss_share` (0 when the real record cannot size anything)."""
+    if fwd is None or fwd.real_lcb is None or not fwd.real_variance:
         return ZERO
-    share = D(stats.quarter_kelly(fwd.lcb, fwd.variance, fraction=table.kelly_fraction, cap=float(table.sized_share)))
+    share = D(stats.quarter_kelly(fwd.real_lcb, fwd.real_variance, fraction=table.kelly_fraction,
+                                  cap=float(table.sized_share)))
     return min(share, table.sized_share) * max(ZERO, equity)
 
 
@@ -874,6 +911,6 @@ class FlowBook:
         return before[-1] if before else None
 
 
-__all__ = ["Table", "DECLARED_TYPES", "order_types", "Forward", "forward_stats", "one_record", "kelly_cap", "sizing_band", "REAL_MIN_TRADES", "band_for", "fits_probe", "probe_cap", "structure_cap", "family_cap",
+__all__ = ["Table", "DECLARED_TYPES", "order_types", "Forward", "forward_stats", "session_bound", "one_record", "kelly_cap", "sizing_band", "REAL_MIN_TRADES", "band_for", "fits_probe", "probe_cap", "structure_cap", "family_cap",
            "Exposure", "Plan", "plan_open", "Stops", "FlowBook", "D", "cents", "sized_ok", "IncubatorTally", "practice_ok",
            "plan_incubator", "INCUBATOR_DAY_LEGS", "INCUBATOR_DAY_OPEN_SHARE"]

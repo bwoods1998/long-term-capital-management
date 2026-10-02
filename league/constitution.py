@@ -695,6 +695,22 @@ CONSTITUTION: dict[str, Any] = {
     #   loss above zero and its `confidence` one-sided lower bound above zero: `kelly_fraction` of Kelly on the LOWER
     #   bound, a structure at most `max_loss_share`, the family at most `family_share`. Only a Probe with at least
     #   `min_probe_real_trades` real trades and `min_probe_sessions` whole sessions at Probe (the review of #362).
+    #   EVIDENCE V3 (the owner's D2, Oct 2, 2026): Sized is judged on the Probe's REAL fills alone (at least 20 real
+    #   trades, their mean above zero and their 80% lower bound above zero, after at least 5 whole sessions at Probe),
+    #   and Kelly sizes on that real lower bound (`league/live/money.py`).
+    # - `ladder`: THE FORWARD LADDER (evidence v3, the owner's D2 of Oct 2, 2026; `league/live/ladder.py`): the route to
+    #   Probe is a practice cohort's own forward record (shadow on live quotes, its immutable version, the current
+    #   practice evaluator): at least `min_sessions` sessions and `min_closes` program closes; a day-block bootstrap
+    #   one-sided `confidence` lower bound on the mean P&L per dollar of maximum loss above zero (`draws` resamples);
+    #   positive in at least `windows_positive` of `windows` equal sub-windows; the DRIFT CONTROL (the mean of P&L net of
+    #   the entry delta times the underlying's move over the holding period, per dollar of maximum loss, above zero, with
+    #   those figures known for at least `drift_known_share` of the closes); Benjamini-Hochberg at `fdr_q` over every
+    #   practice entrant of the trailing `fdr_days` days (an entrant without a full record counts with p = 1); and the
+    #   2026 holdout read once as a free pre-filter (net P&L not negative). A cohort practises at most `max_sessions`
+    #   sessions. A ladder Probe goes back to the Gym when its forward record is negative over 20 trades or the
+    #   `demote_confidence` lower bound of its trailing `demote_sessions` sessions is below zero. `binding` false: the
+    #   ladder records its decisions and promotes nothing (it binds only once its benchmark's false promotions are at
+    #   or below the sealed-look design's on the same worlds).
     # - `book_share`: every real structure's open maximum loss together. `daily_stop_share`: the day's realized plus
     #   marked loss against start-of-day equity: no new real entry that day. `drawdown_stop_share`: from the peak since
     #   the reset: real money paused (exits go on, the owner told, the Gym keeps running) until the owner releases it.
@@ -750,7 +766,10 @@ CONSTITUTION: dict[str, Any] = {
         "credit_min_equity_usd": "2000",
         "probe": {"max_loss_share": "0.05", "open_per_family": 3, "family_share": "0.15", "floor_usd": "100"},
         "sized": {"min_trades": 20, "confidence": "0.80", "kelly_fraction": "0.25", "max_loss_share": "0.10",
-                  "family_share": "0.30", "min_probe_real_trades": 5, "min_probe_sessions": 1},
+                  "family_share": "0.30", "min_probe_real_trades": 20, "min_probe_sessions": 5},
+        "ladder": {"binding": False, "min_sessions": 20, "min_closes": 30, "confidence": "0.95", "draws": 2000,
+                   "windows": 4, "windows_positive": 3, "fdr_q": "0.10", "fdr_days": 90, "max_sessions": 60,
+                   "drift_known_share": "0.90", "demote_sessions": 20, "demote_confidence": "0.80"},
         "book_share": "0.90",
         "daily_stop_share": "0.35",
         "drawdown_stop_share": "0.60",
@@ -813,6 +832,22 @@ OPTIONS_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
     # program version and this many whole sessions at Probe. A tightening of the plan's row; loosening is the owner's.
     "sized.min_probe_real_trades": ("5", "50"),
     "sized.min_probe_sessions": ("1", "20"),
+    # THE FORWARD LADDER (evidence v3, Oct 2, 2026; `league/live/ladder.py`): each row's range only TIGHTENS the line the
+    # plan states (more sessions and closes, a higher confidence, more resamples, more positive sub-windows, a lower
+    # false-discovery rate over a longer window, a shorter practice window, a stricter drift control, an earlier and
+    # stricter demotion); loosening one is the owner's. `binding` is checked apart (a JSON boolean).
+    "ladder.min_sessions": ("20", "250"),
+    "ladder.min_closes": ("30", "5000"),
+    "ladder.confidence": ("0.95", "0.999"),
+    "ladder.draws": ("2000", "100000"),
+    "ladder.windows": ("4", "4"),
+    "ladder.windows_positive": ("3", "4"),
+    "ladder.fdr_q": ("0.01", "0.10"),
+    "ladder.fdr_days": ("90", "365"),
+    "ladder.max_sessions": ("20", "60"),
+    "ladder.drift_known_share": ("0.90", "1.0"),
+    "ladder.demote_sessions": ("5", "20"),
+    "ladder.demote_confidence": ("0.80", "0.99"),
     "book_share": ("0.50", "0.90"),
     "daily_stop_share": ("0.15", "0.35"),
     "drawdown_stop_share": ("0.40", "0.60"),
@@ -864,7 +899,9 @@ OPTIONS_CREDIT_TYPES = ("credit_vertical", "iron_condor", "iron_butterfly")
 _OPTIONS_COUNTS = ("probe.open_per_family", "sized.min_trades", "sized.min_probe_real_trades", "sized.min_probe_sessions", "order_path.max_orders_day", "order_path.max_requests_minute",
                    "order_path.expiry_close_lead_minutes", "gateway.max_day_orders", "gateway.max_day_open_orders",
                    "house_test.open", "house_test.sessions", "house_test.round_trips", "incubator.contracts",
-                   "incubator.max_open", "incubator.min_sessions", "incubator.min_trades")
+                   "incubator.max_open", "incubator.min_sessions", "incubator.min_trades", "ladder.min_sessions",
+                   "ladder.min_closes", "ladder.draws", "ladder.windows", "ladder.windows_positive", "ladder.fdr_days",
+                   "ladder.max_sessions", "ladder.demote_sessions")
 
 
 def options_money_problems(constitution: dict[str, Any] | None = None) -> list[str]:
@@ -904,6 +941,16 @@ def options_money_problems(constitution: dict[str, Any] | None = None) -> list[s
             problems.append("options_money.gateway.max_day_open_orders must leave exits room under max_day_orders")
     except (TypeError, ValueError):
         pass
+    ladder = table.get("ladder") if isinstance(table.get("ladder"), dict) else {}
+    if not isinstance(ladder.get("binding"), bool):
+        problems.append(f"options_money.ladder.binding is a JSON boolean: {ladder.get('binding')!r}")
+    try:
+        if int(ladder.get("max_sessions", 0)) < int(ladder.get("min_sessions", 0)):
+            problems.append("options_money.ladder.max_sessions must be at least ladder.min_sessions")
+        if int(ladder.get("windows_positive", 0)) > int(ladder.get("windows", 0)):
+            problems.append("options_money.ladder.windows_positive must be at most ladder.windows")
+    except (TypeError, ValueError):
+        pass
     return problems
 
 #: The gateway's `wrangler.jsonc` vars that repeat the money table: `league.ci` requires them equal.
@@ -927,4 +974,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '595228a68a0a0e146901ba08185dfa7b39bcb2952a2abc1ae0cf16f19193d102'
+PINNED_DIGEST = '35cb072f70134703d9c396c9698150d6ec61f7a1494c5e4b4f3346008e31501b'

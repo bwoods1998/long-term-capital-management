@@ -3,11 +3,13 @@
     from league.swarm import bands
     rows = bands.read(root)        # never raises, never waits more than a second ([] when it cannot read)
 
-One row per family the live path may run: every family in the Candidate, Probe or Sized band, and every
-family in the Gym band whose validated version met the validation line AND passed the gate's review and audit,
-and whose holdout look (or forward record) has not failed, was not refused and was not held (THE LOOK HOLDS, Oct 2,
-2026: a held look ends the version's tuition as a failed one does) (execution tuition: 1-lot real orders that measure
-multi-leg fills and are never evidence). Each row:
+One row per family the live path may run: every family in the Candidate, Probe or Sized band whose banded version's
+proof is current (`current_banded_evaluator`: a holdout look's, or THE FORWARD LADDER's, evidence v3, Oct 2, 2026:
+`league/live/ladder.py`, route "ladder", its practice receipt). EXECUTION TUITION (every family in the Gym band whose
+validated version met the validation line AND passed the gate's review and audit, and whose holdout look had not
+failed, was not refused and was not held: 1-lot real orders that measured multi-leg fills, never evidence) is RETIRED
+with the sealed look by evidence v3: `read` gives no Gym-band row (`TUITION_ROWS`; `read(tuition=True)` is the retired
+route's own read). Each row:
 
     family                the family's id
     band                  gym | candidate | probe | sized
@@ -75,9 +77,14 @@ live path then takes no new incubator pin and refuses incubator opens; exits are
 Gym bundle's version is built once per `BUNDLE_TTL` seconds a process, not once per call (it reads and hashes every file
 of the Gym's code).
 
-OWNERSHIP OF THE BANDS. The swarm moves gym <-> candidate (the gate's holdout pass; a Candidate whose forward
-record turns negative over 20 trades goes back to the Gym) and retires families. The LIVE PATH alone moves
-candidate <-> probe <-> sized by the Money table, writing through `SwarmStore(root).set_band(fid, band,
+THE LADDER'S BELT (`ladder_refusal`, evidence v3): before the forward ladder promotes a practised program, the family is
+alive in the Gym band, the store's version is that very program, it was not demoted, and THE READER'S BELT finds no bar,
+failed review or audit, refusal or bad gate outcome on the program in any family (fail-closed).
+
+OWNERSHIP OF THE BANDS. The swarm moves gym <-> candidate (the gate's holdout pass, retired by evidence v3; a Candidate
+whose forward record turns negative over 20 trades goes back to the Gym) and retires families. The LIVE PATH alone moves
+gym -> probe (THE FORWARD LADDER's promotion; its demotion back to the Gym) and candidate <-> probe <-> sized by the
+Money table, writing through `SwarmStore(root).set_band(fid, band,
 reason=...)`, and records its trades with `SwarmStore(root).add_forward(fid, "shadow" | "real", trades)` (ids
 unique per family). A Probe or Sized family whose forward record turns negative is flagged here
 (`forward.negative`) for the live path to demote.
@@ -123,10 +130,15 @@ def current_banded_evaluator(state: dict[str, Any], sha: str) -> bool:
     from .evaluator import execution_fingerprint
 
     proof = state.get("banded_evaluator") or {}
-    return (proof.get("engine") == ENGINE_VERSION and proof.get("parameter_contract") == CONTRACT_VERSION and
-            proof.get("execution_sha256") == execution_fingerprint() and
-            proof.get("run_sha") == sha and bool(proof.get("holdout_bundle")) and
-            str(proof["holdout_bundle"]).startswith(ENGINE_VERSION + "-") and
+    if not (proof.get("engine") == ENGINE_VERSION and proof.get("parameter_contract") == CONTRACT_VERSION and
+            proof.get("execution_sha256") == execution_fingerprint() and proof.get("run_sha") == sha):
+        return False
+    if proof.get("route") == "ladder":
+        # THE FORWARD LADDER's proof (evidence v3, `league/live/ladder.py`): its practice receipt, made under this very
+        # execution fingerprint and naming this exact program; the practice record itself is the evidence.
+        receipt = proof.get("receipt")
+        return isinstance(receipt, int) and not isinstance(receipt, bool) and receipt > 0
+    return (bool(proof.get("holdout_bundle")) and str(proof["holdout_bundle"]).startswith(ENGINE_VERSION + "-") and
             proof.get("validation_bundle") == proof.get("holdout_bundle"))
 
 
@@ -157,9 +169,16 @@ def _families(db: sqlite3.Connection, family: str | None, *, gym_only: bool = Fa
                                         f"families WHERE {where} ORDER BY id", (() if family is None else (str(family),)))]
 
 
-def read(root: str | Path, *, family: str | None = None) -> list[dict[str, Any]]:
+#: EXECUTION TUITION's Gym-band rows (`read`): retired by evidence v3 (the owner's D2 of Oct 2, 2026), with the sealed
+#: holdout look they waited on: the forward ladder (`league/live/ladder.py`) is the one route to real money, so `read`
+#: gives no Gym-band row and the live path makes no `:t` instance. `read(tuition=True)` is the retired route's own read.
+TUITION_ROWS = False
+
+
+def read(root: str | Path, *, family: str | None = None, tuition: bool | None = None) -> list[dict[str, Any]]:
     """The rows (the module docstring); `family`: that family's row only. [] when there is no store or it cannot be read
-    within a second."""
+    within a second. `tuition` (default `TUITION_ROWS`, off): the retired execution tuition's Gym-band rows too."""
+    tuition = TUITION_ROWS if tuition is None else bool(tuition)
     path = Path(root) / DB_NAME
     if not path.exists():
         return []
@@ -176,7 +195,8 @@ def read(root: str | Path, *, family: str | None = None) -> list[dict[str, Any]]
                 fam["state"] = state
                 if fam["band"] in LIVE_BANDS and state.get("banded_version"):
                     wanted[fam["id"]] = int(state["banded_version"])
-                elif fam["band"] == "gym" and (state.get("validation_line") or {}).get("passed") and state.get("validation_version"):
+                elif (tuition and fam["band"] == "gym" and (state.get("validation_line") or {}).get("passed")
+                      and state.get("validation_version")):
                     wanted[fam["id"]] = int(state["validation_version"])  # tuition: checked against its review below
             versions = {}
             for fid, n in wanted.items():
@@ -569,5 +589,66 @@ def incubator(root: str | Path, *, family: str, version: int) -> list[dict[str, 
              "observe": False, "holdout_passed": False, "validation_passed": False}]
 
 
+def ladder_refusal(root: str | Path, *, family: str, version: int, run_sha: str) -> str | None:
+    """THE LADDER'S BELT (evidence v3, `league/live/ladder.py`): why the forward ladder may not promote version `version`
+    of `family`, practised as program `run_sha`, now; None when it may. Read-only (`mode=ro`, a one-second timeout) and
+    FAIL-CLOSED: a store that is missing or cannot be read, or a record the belt reads that cannot be read, is a reason.
+    In order: the family alive and in the Gym band; the version in the store and the very program practised (its run
+    sha); not demoted (a loss at 1.5x, or the drift screen failed); THE READER'S BELT (`incubator_refusal`: no bar, no
+    review or audit that did not pass, no refused, failed, demoted or held gate outcome, in this family or any other
+    holding the same program); no gate refusal of the program in any family; no bar owed (`owed_bars`)."""
+    path = Path(root) / DB_NAME
+    n = _count(version)
+    if not path.exists() or n is None or not family:
+        return "the swarm's store cannot be read"
+    from .gate import run_sha as sha_of
+
+    try:
+        db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1.0)
+        db.row_factory = sqlite3.Row
+        try:
+            fam = db.execute("SELECT id, band, retired_at, state FROM families WHERE id=?", (str(family),)).fetchone()
+            row = db.execute("SELECT n, sha, params FROM versions WHERE family=? AND n=?", (str(family), n)).fetchone()
+            ruled, others = (None, []) if row is None else _program_rows(db, str(family), str(row["sha"]), str(run_sha))
+        finally:
+            db.close()
+    except sqlite3.Error:
+        return "the swarm's store cannot be read"
+    if fam is None:
+        return "the family is not in the swarm's store"
+    if fam["retired_at"]:
+        return "the family retired"
+    if fam["band"] != "gym":
+        return f"the family is at {fam['band']}, not in the Gym band"
+    if row is None or sha_of({"sha": row["sha"], "params": loads(row["params"], {}) or {}}) != run_sha:
+        return "the store's version is not the practised program"
+    state = loads(fam["state"], _UNREADABLE)
+    state = {} if state is None else state
+    if not isinstance(state, Mapping):
+        return "the family's state cannot be read"
+    if state.get("robust_failed") is not None and not isinstance(state.get("robust_failed"), list):
+        return "its robust_failed cannot be read"
+    if state.get("drift_failed") is not None and not isinstance(state.get("drift_failed"), Mapping):
+        return "its drift_failed cannot be read"
+    if demoted(state, n):
+        return "its version was demoted (a loss at 1.5x, or the drift screen failed)"
+    why = incubator_refusal(state, run_sha)
+    if why:
+        return why
+    if ruled is not None:
+        return ruled
+    for other, other_state in others:
+        why = program_refusal({} if other_state is None else other_state, run_sha)
+        if why:
+            return f"{why} (in {other})"
+    owed = owed_bars(root)
+    if owed is None:
+        return "the gate's owed bars cannot be read"
+    if any(bar.get("sha") == run_sha for bar in owed):
+        return "the gate owes the store a bar on its program"
+    return None
+
+
 __all__ = ["read", "observe", "incubator", "incubator_refusal", "program_refusal", "owed_bars", "priority", "practice_tier",
-           "demoted", "LIVE_BANDS", "TIERS", "BUNDLE_TTL", "BELT_RECORDS", "BARS_OWED_FILE", "BAD_OUTCOMES"]
+           "demoted", "ladder_refusal", "LIVE_BANDS", "TIERS", "BUNDLE_TTL", "BELT_RECORDS", "BARS_OWED_FILE",
+           "BAD_OUTCOMES", "TUITION_ROWS"]

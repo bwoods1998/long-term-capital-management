@@ -9,6 +9,7 @@ import random
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from league.swarm import settings as S
 from league.swarm.architect import Architect
@@ -82,6 +83,13 @@ def weak(job):
 
 class RoundCase(unittest.TestCase):
     def setUp(self):
+        # EVIDENCE V3 (Oct 2, 2026) retired the sealed holdout look and execution tuition (`gate.SEALED_LOOKS`,
+        # `bands.TUITION_ROWS`, both False): the gate's tests built on this case exercise that retired route, kept in the
+        # code and reached explicitly here. `league/tests/test_swarm_gate_prefilter.py` tests the gate as it runs now.
+        for name in ("league.swarm.gate.SEALED_LOOKS", "league.swarm.bands.TUITION_ROWS"):
+            retired = patch(name, True)
+            retired.start()
+            self.addCleanup(retired.stop)
         self.dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
         self.clock = Clock()
