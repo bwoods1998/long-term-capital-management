@@ -90,7 +90,7 @@ export function pullRefusal(pull, { repo, headSha }) {
 }
 
 /** The pull request, read from GitHub, checked against `pullRefusal`. Throws a Refusal. */
-async function readPull(github, { repo, number, headSha }) {
+export async function readPull(github, { repo, number, headSha }) {
   const found = await github.ask('pull request', 'GET', `/pulls/${number}`);
   if (found.status === 404) throw new Refusal('No such pull request.', 404, 'not_found');
   const pull = github.need(found, 'pull request');

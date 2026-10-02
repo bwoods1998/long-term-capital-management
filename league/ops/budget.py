@@ -581,16 +581,19 @@ def _sail_fixed(sail: Any, boxes: list[str], now: float, house_burn: float, erro
 
 
 def _claude_balance(health: Any) -> float | None:
-    """The funded Claude total left: cap - spent - in flight (`/v1/health`'s `claude` block); None when unconfigured or
-    unreadable."""
+    """The funded Claude total left (`/v1/health`'s `claude` block): its `remaining_usd`, else cap - spent; None when
+    unconfigured or unreadable. The gateway's `spent_usd` already counts the holds in flight (gate.mjs `claudeReserve`
+    adds a hold to both `spent` and `inflight`), so `inflight_usd` is never subtracted again."""
     block = health.get("claude") if isinstance(health, Mapping) else None
     if not isinstance(block, Mapping) or block.get("configured") is False:
         return None
+    if block.get("remaining_usd") is not None:
+        remaining = _finite(block.get("remaining_usd"))
+        return None if remaining is None else round(remaining, 4)
     cap, spent = _finite(block.get("cap_usd")), _finite(block.get("spent_usd"))
-    inflight = _finite(block.get("inflight_usd")) if block.get("inflight_usd") is not None else 0.0
-    if cap is None or spent is None or inflight is None:
+    if cap is None or spent is None:
         return None
-    return round(cap - spent - inflight, 4)
+    return round(max(0.0, cap - spent), 4)
 
 
 def _gateway(config: Mapping[str, Any]) -> tuple[str | None, str | None]:
@@ -712,7 +715,10 @@ def notice_facts(doc: Mapping[str, Any], meter: str, now: float, *, test: bool =
     def money(value: Any) -> str | None:
         number = _finite(value)
         return None if number is None else f"{number:.2f}"
-    return {"kind": "funding", "notice_id": f"funding{'-test' if test else ''}:{meter}:{_week(now)}", "meter": meter,
+    # A drill's id is its own minute's (the gateway remembers funding ids for 8 days, and a second drill in the same week
+    # must reach the owner again, not be answered `duplicate`).
+    notice_id = f"funding-test:{meter}:{_week(now)}:{int(now // 60)}" if test else f"funding:{meter}:{_week(now)}"
+    return {"kind": "funding", "notice_id": notice_id, "meter": meter,
             "balance_usd": money(row.get("balance_usd")), "usd_day": money(row.get("total_usd_day")),
             "fixed_usd_day": money(row.get("fixed_usd_day")), "research_usd_day": money(row.get("research_usd_day")),
             "runway_days": None if _finite(row.get("runway_days")) is None else f"{float(row['runway_days']):.1f}",
@@ -840,7 +846,8 @@ def drill(ctx: Any, meter: str = "sail") -> dict[str, Any]:
             answer = notify(facts)
         except Exception as exc:  # noqa: BLE001 - the drill's receipt says so
             error = f"{type(exc).__name__}"
-    sent = _sent(answer)
+    # Only a mail sent now counts for the drill: a `duplicate` answer proves nothing about the mail path today.
+    sent = isinstance(answer, Mapping) and answer.get("sent") is True and answer.get("duplicate") is not True
     return {"drill": "funding", "meter": meter, "root": str(root), "checks": checks, "notice_id": facts["notice_id"],
             "sent": sent, "error": error, "ok": sent and all(checks.values())}
 

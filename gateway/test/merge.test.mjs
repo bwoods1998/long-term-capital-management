@@ -72,7 +72,7 @@ test('the engineer opens engineer/ branches anywhere but the protected paths, th
   assert.match(github.pathRefusal('engineer', 'league/swarm/bands.py'), /no automated change may write this file: protected/);
   assert.match(github.pathRefusal('engineer', 'league/ops/budget.py'), /protected \(league\/ops\/budget\.py\)/);
   assert.match(github.pathRefusal('engineer', 'league/ledger.py'), /no role may write this file/);
-  const admitted = github.admit({ role: 'engineer', slug: 'agenda-reads', title: 'Faster agenda reads', files: [{ path: 'league/ops/agenda.py', content: 'x = 1\n' }] });
+  const admitted = github.admit({ role: 'engineer', slug: 'agenda-reads', title: 'Faster agenda reads', base_sha: HEAD, files: [{ path: 'league/ops/agenda.py', content: 'x = 1\n' }] });
   assert.match(admitted.branch, /^engineer\/agenda-reads-[0-9a-f]{8}$/);
   assert.equal(github.admit({ role: 'architect', slug: 'x1', title: 't', files: [{ path: 'league/strategies/x.py', content: '' }] }).branch.slice(0, 17), 'merton/architect/');
   const refused = github.admit({ role: 'engineer', slug: 'live-tweak', title: 't', files: [{ path: 'league/live/step.py', content: '' }] });

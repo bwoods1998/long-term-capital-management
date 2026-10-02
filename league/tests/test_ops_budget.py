@@ -415,7 +415,8 @@ class Job(unittest.TestCase):
         self.assertAlmostEqual(doc["earned_usd_day"], 0.5 * 39.98 / 30, places=4)
         sail, claude = doc["inputs"]["meters"]["sail"], doc["inputs"]["meters"]["claude"]
         self.assertEqual((sail["balance_usd"], sail["fixed_usd_day"], sail["need_usd"]), (600.0, 1.5, 21.0))
-        self.assertEqual((claude["balance_usd"], claude["need_usd"]), (105.0, 7.0))
+        # 300 - 185: the gateway's spent_usd already holds the 10 in flight, so it is not subtracted twice.
+        self.assertEqual((claude["balance_usd"], claude["need_usd"]), (115.0, 7.0))
         self.assertEqual(sorted(c[0] for c in self.sail.calls), ["sb_data", "sb_house"])
         self.assertEqual(doc["meters"]["sail"]["need_share"], 0.75)
         self.assertEqual(receipt["errors"], [])
@@ -511,12 +512,28 @@ class Job(unittest.TestCase):
         out = B.drill(self.ctx(), "claude")
         self.assertTrue(out["ok"], out)
         self.assertEqual(self.sent[-1]["test"], True)
-        self.assertEqual(self.sent[-1]["notice_id"], "funding-test:claude:2026-W43")
+        self.assertEqual(self.sent[-1]["notice_id"], f"funding-test:claude:2026-W43:{int(NOW // 60)}")
         self.assertEqual(self.sent[-1]["meter"], "claude")
         self.assertFalse((self.root / "budget.json").exists(), "a drill writes no budget")
         self.assertFalse((self.root / B.NOTICES_FILE).exists())
         with self.assertRaises(ValueError):
             B.drill(self.ctx(), "openai")
+
+    def test_a_second_drill_in_the_week_has_its_own_id_and_a_duplicate_is_not_delivered(self):
+        B.drill(self.ctx(), "claude")
+        B.drill(self.ctx(now=NOW + 3600), "claude")
+        self.assertNotEqual(self.sent[0]["notice_id"], self.sent[1]["notice_id"], "the gateway remembers ids 8 days")
+        self.answer = {"sent": True, "duplicate": True}
+        out = B.drill(self.ctx(), "claude")
+        self.assertFalse(out["sent"], "a duplicate sent no mail: the drill proves nothing")
+        self.assertFalse(out["ok"])
+
+    def test_the_claude_balance_never_subtracts_the_holds_twice(self):
+        self.assertEqual(B._claude_balance({"claude": {"cap_usd": "300", "spent_usd": "185", "inflight_usd": "10",
+                                                       "remaining_usd": "115"}}), 115.0)
+        self.assertEqual(B._claude_balance({"claude": {"cap_usd": 300, "spent_usd": 185, "inflight_usd": 10}}), 115.0)
+        self.assertIsNone(B._claude_balance({"claude": {"configured": False}}))
+        self.assertIsNone(B._claude_balance({"claude": {"cap_usd": "x", "spent_usd": 1}}))
 
 
 if __name__ == "__main__":

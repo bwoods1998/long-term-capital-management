@@ -56,6 +56,7 @@ export const FORBIDDEN_FILES = [
 export const FORBIDDEN_TREES = ['gateway/', '.github/'];
 
 const SLUG = /^[a-z0-9][a-z0-9-]{1,48}$/;
+const COMMIT = /^[0-9a-f]{40}$/;
 const REPO = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/;
 
 export const footer = role => `Opened by Merton (${role}) through the LTCM gateway.`;
@@ -146,12 +147,20 @@ export function admit(proposal) {
     if (typeof file.content !== 'string' || !file.content.isWellFormed()) return bad(`The content of "${file.path}" must be UTF-8 text.`);
     if (Buffer.byteLength(file.content, 'utf8') > MAX_CONTENT_BYTES) return bad(`The content of "${file.path}" is over ${MAX_CONTENT_BYTES} bytes.`);
   }
+  // The engineer writes whole files against the tree it read (V3-A): `base_sha` names that commit, and the proposal is
+  // refused when main has since changed any file it carries (`openPullRequest`), never silently laid over main's edits.
+  const base = proposal.base_sha;
+  if (role === 'engineer' ? typeof base !== 'string' || !COMMIT.test(base) : base !== undefined) {
+    return bad(role === 'engineer' ? 'base_sha must be the full 40-hex commit the files were written against.' : 'Only the engineer names a base_sha.');
+  }
   const canonical = canonicalFiles(files);
-  return { role, slug, title: title.trim(), body, files: canonical, branch: branchName(role, slug, canonical) };
+  return { role, slug, title: title.trim(), body, files: canonical, branch: branchName(role, slug, canonical), ...(base ? { base } : {}) };
 }
 
-/** The pull request's text: the proposal's own words, then who opened it and how. */
-export const pullBody = (role, body) => [String(body || '').trimEnd(), '---', footer(role)].filter(Boolean).join('\n\n');
+/** The pull request's text: the proposal's own words, then the base it was written against (the engineer's), then who opened it and how. */
+export const pullBody = (role, body, base = null) =>
+  [String(body || '').trimEnd(), '---', base ? `Base: ${base} (each file read the same on main when this was opened).` : '', footer(role)]
+    .filter(Boolean).join('\n\n');
 
 /** The headers every GitHub call carries. The token goes out in this one place and never comes back. */
 export const headers = (token, { write = false } = {}) => ({
@@ -234,6 +243,7 @@ export async function openPullRequest({ repo, token, proposal, fetcher = fetch }
   try {
     const parent = sha((await github.get('base ref', 'GET', `/git/ref/heads/${BASE}`)).object?.sha, 'base ref');
     const baseTree = sha((await github.get('base commit', 'GET', `/git/commits/${parent}`)).tree?.sha, 'base commit');
+    if (role === 'engineer') await baseHolds(github, { base: proposal.base, parent, parentTree: baseTree, files });
 
     const entries = [];
     for (const file of files) {
@@ -256,7 +266,7 @@ export async function openPullRequest({ repo, token, proposal, fetcher = fetch }
       head = await existingBranch(github, { branch, tree, entries });
     }
 
-    const pull = await github.ask('pull request', 'POST', '/pulls', { title, head: branch, base: BASE, body: pullBody(role, proposal.body) });
+    const pull = await github.ask('pull request', 'POST', '/pulls', { title, head: branch, base: BASE, body: pullBody(role, proposal.body, proposal.base) });
     let opened = pull.data;
     if (pull.status === 422) {
       // An open pull request for this head is the retry's answer; any other 422 is GitHub's no.
@@ -270,6 +280,53 @@ export async function openPullRequest({ repo, token, proposal, fetcher = fetch }
     return { ok: true, branch, number: opened.number, url: String(opened.html_url || ''), head, created };
   } catch (error) {
     return { ...refused(error, token), created };
+  }
+}
+
+/**
+ * The blob at `path` in the tree `root` (`<type>:<sha>` when the path names something that is not a file), or null when
+ * nothing is there. One directory read a level, each read once per call (`cache`): a proposal's few files share most.
+ */
+async function blobAt(github, root, path, cache) {
+  const parts = path.split('/');
+  let tree = root;
+  for (let i = 0; i < parts.length; i += 1) {
+    let listing = cache.get(tree);
+    if (!listing) {
+      const read = await github.get('base tree', 'GET', `/git/trees/${tree}`);
+      if (read.truncated === true || !Array.isArray(read.tree)) throw new Refusal('A tree on the base could not be read whole.', 502, 'base_tree');
+      listing = new Map(read.tree.map(entry => [entry?.path, entry]));
+      cache.set(tree, listing);
+    }
+    const entry = listing.get(parts[i]);
+    if (!entry) return null;
+    if (i === parts.length - 1) return entry.type === 'blob' ? String(entry.sha) : `${entry.type}:${entry.sha}`;
+    if (entry.type !== 'tree') return null;
+    tree = sha(entry.sha, 'base tree');
+  }
+  return null;
+}
+
+/**
+ * The engineer's base (V3-A): every file the proposal carries must read on main's head (`parent`) exactly as it read on
+ * the commit the engineer wrote against (`base`), present or absent alike. Otherwise main changed it since, and laying
+ * the whole file over main would silently undo that change: a 409 (`base_moved`) naming the files, and the engineer
+ * rebuilds on main's head. A base GitHub does not know is a 409 too (`base_unknown`).
+ */
+export async function baseHolds(github, { base, parent, parentTree, files }) {
+  if (typeof base !== 'string' || !COMMIT.test(base)) throw new Refusal('The engineer\'s proposal names no base commit.', 400, 'base_missing');
+  if (base === parent) return;
+  const found = await github.ask('engineer base', 'GET', `/git/commits/${base}`);
+  if (found.status === 404 || found.status === 422) throw new Refusal(`The base ${base.slice(0, 12)} is not a commit of this repository.`, 409, 'base_unknown');
+  const baseTree = sha(github.need(found, 'engineer base').tree?.sha, 'engineer base');
+  if (baseTree === parentTree) return;
+  const cache = new Map();
+  const moved = [];
+  for (const file of files) {
+    if (await blobAt(github, baseTree, file.path, cache) !== await blobAt(github, parentTree, file.path, cache)) moved.push(file.path);
+  }
+  if (moved.length) {
+    throw new Refusal(`main changed ${moved.join(', ')} since the base ${base.slice(0, 12)}: rebuild the change on main's head.`, 409, 'base_moved');
   }
 }
 
