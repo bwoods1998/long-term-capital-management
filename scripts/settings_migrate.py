@@ -16,6 +16,9 @@ value that looks like a credential, is refused.
 
 ORDER AT THE DEPLOY: commit the proposed policy.json into the release and deploy it, THEN install the reduced swarm.json
 on the box. A reduced swarm.json under a release without its policy.json runs the swarm on config.json's defaults.
+Nor is the reduced swarm.json installed while the watchdog's `previous` release is a pre-V3-A one: a rollback to it
+would run on that release's old DEFAULTS (OpenAI routes on, the old Claude role lines, no budget). Install it only once
+`previous` is itself a V3-A (or later) release; until then keep the full swarm.json.
 Standard library only.
 """
 

@@ -6,7 +6,8 @@ updater, `league/ci.py`). The `budget` job (after the close economics, and daily
 {sail, claude}:
 
 - balance_m: Sail's balance as the Sail guard last read it (its provider reading, kv `guard` in the swarm store, at most
-  `BALANCE_FRESH_SECONDS` old); Claude's funded total left at the gateway (`GET /v1/health`: cap - spent - in flight);
+  `BALANCE_FRESH_SECONDS` old); Claude's funded total left at the gateway (`GET /v1/health`: cap - spent, whose spent already holds the calls in
+  flight);
 - fixed_m: Sail: the House box's and the data box's own billing over the trailing `FIXED_WINDOW_DAYS` days
   (`SailboxClient.spend`) a day, never below `guard.house_burn_usd_day` (which is also the fallback); Claude: 0;
 - reserve_m: never spent (`RESERVE_USD`);
@@ -39,9 +40,15 @@ unset, against `researcher.usd_per_hour`, the combined pace that then governs Sa
 `architect.every_seconds`. A configured value that is not a number is left as it is (its reader already refuses it).
 The settings' `budget` block carries the $/day to the Sail guard (its daily cap: the swarm's booked Sail today under the
 Sail research $/day, Sail's own meter today under that plus fixed; `sail_caps`) and to the router (Claude's room is also
-capped by the Claude research $/day less today's Claude spend). A missing, unreadable, malformed or stale (older than
-`STALE_SECONDS`) budget.json is the FLOOR: `FLOOR_CAP * FLOOR_SPLIT` per meter. An operator's own `budget` key in
-swarm.json is replaced, never read.
+capped by the Claude research $/day less today's Claude spend). A missing, unreadable or malformed budget.json is the
+FLOOR: `FLOOR_CAP * FLOOR_SPLIT` per meter. A STALE one (older than `STALE_SECONDS`: the budget job stopped) never
+loosens: each meter is the lower of the floor and what the stale file said (0 for a meter it could not read), with a
+warning. An operator's own `budget` key in swarm.json is replaced, never read. The ceiling knob never falls below
+`population.floor + BIRTH_MARGIN` (a ceiling at the floor would freeze births and forks while research is at the floor).
+OpenAI is not a meter of the rule, so the overlay closes it: `guard.openai_cap_usd` is tightened to 0 (no OpenAI room)
+and the block says `openai_usd_day` 0. Handed settings with no `budget` block, the Sail guard and the router read
+budget.json from their store's root themselves (`effective`; the floor without a root): a caller that drops the block
+never lifts the budget.
 
 THE FUNDING NOTICE. When a meter's runway at its current total rate is under W days, one `POST /v1/notify` kind
 `funding` (`notice_facts`: the meter, its balance, $/day, runway, the amount that restores R days and the dates), at
@@ -111,6 +118,8 @@ BOX_DUTY_HOURS = 8.0
 #: Research dollars a day per living family, and the population ceiling's least value.
 FAMILY_USD_DAY = 1.0
 CEILING_MIN = 8
+#: The ceiling knob's least margin over the configured `population.floor`: room for births and forks at the floor.
+BIRTH_MARGIN = 4
 #: The architect's cadence: every 4 hours at the floor, faster in proportion to the research dollars down to 30 minutes,
 #: once a day with no research dollars at all.
 ARCHITECT_FLOOR_SECONDS = 14400
@@ -332,6 +341,35 @@ def floor_block(why: str) -> dict[str, Any]:
             "sail_usd_day": floor_usd_day("sail"), "claude_usd_day": floor_usd_day("claude"), "fixed_sail_usd_day": None}
 
 
+def stale_block(meters: Any, at: float | None, why: str) -> dict[str, Any]:
+    """The settings' `budget` block from a STALE budget.json: never looser than it, never looser than the floor. Each
+    meter is min(floor, the stale file's research), 0 for a meter the file could not read (or did not say)."""
+    meters = meters if isinstance(meters, Mapping) else {}
+    values = {}
+    for m in METERS:
+        row = meters.get(m)
+        said = _amount(row.get("research_usd_day")) if isinstance(row, Mapping) else None
+        values[m] = 0.0 if said is None else min(floor_usd_day(m), said)  # an unreadable meter's row says 0
+    sail = meters.get("sail") if isinstance(meters.get("sail"), Mapping) else {}
+    return {"source": "stale budget.json", "why": f"{why}: the lower of the floor and the stale file", "at": at,
+            "state": "research at most the floor and the stale budget (the budget job is not running)",
+            "sail_usd_day": values["sail"], "claude_usd_day": values["claude"],
+            "fixed_sail_usd_day": _amount(sail.get("fixed_usd_day")), "warning": True}
+
+
+def effective(root: str | Path, now: float | None = None) -> dict[str, Any]:
+    """The budget block `<root>/budget.json` gives now (`read`; the floor when it gives none): what the Sail guard and the
+    router read for themselves, whatever settings they were handed."""
+    import time
+
+    now = time.time() if now is None else float(now)
+    try:
+        block, why = read(root, now)
+    except Exception as exc:  # noqa: BLE001 - anything unexpected is the floor
+        block, why = None, f"budget.json could not be read ({type(exc).__name__})"
+    return block if block is not None else floor_block(why or "no budget.json")
+
+
 def read(root: str | Path, now: float) -> tuple[dict[str, Any] | None, str | None]:
     """(the settings' `budget` block from `<root>/budget.json`, None) or (None, why it is not usable)."""
     path = Path(root) / BUDGET_FILE
@@ -348,9 +386,9 @@ def read(root: str | Path, now: float) -> tuple[dict[str, Any] | None, str | Non
         return None, "budget.json has no time"
     if at > now + 300:
         return None, "budget.json is dated in the future"
-    if now - at > STALE_SECONDS:
-        return None, f"budget.json is stale ({(now - at) / 3600:.0f} h old)"
     meters = data.get("meters")
+    if now - at > STALE_SECONDS:
+        return stale_block(meters, at, f"budget.json is stale ({(now - at) / 3600:.0f} h old)"), None
     if not isinstance(meters, Mapping):
         return None, "budget.json has no meters"
     values = {}
@@ -382,15 +420,14 @@ def overlay(settings: dict[str, Any], root: str | Path, *, now: float | None = N
     """Apply the budget to merged settings in place, tighten-only (the module docstring), and set their `budget` block."""
     import time
 
-    now = time.time() if now is None else float(now)
-    try:
-        block, why = read(root, now)
-    except Exception as exc:  # noqa: BLE001 - anything unexpected is the floor
-        block, why = None, f"budget.json could not be read ({type(exc).__name__})"
-    if block is None:
-        block = floor_block(why or "no budget.json")
+    block = effective(root, time.time() if now is None else float(now))
     values = knobs(block["sail_usd_day"], block["claude_usd_day"])
+    population = settings.get("population")
+    least = _amount(population.get("floor")) if isinstance(population, Mapping) else None
+    if least is not None:  # never a ceiling at (or under) the floor: births and forks stay possible at the floor's dollars
+        values["population.ceiling"] = max(values["population.ceiling"], int(least) + BIRTH_MARGIN)
     block["knobs"] = values
+    block["openai_usd_day"] = 0.0
     researcher = settings.get("researcher")
     if isinstance(researcher, dict):
         key = "sail_usd_per_hour" if researcher.get("sail_usd_per_hour") is not None else "usd_per_hour"
@@ -398,6 +435,8 @@ def overlay(settings: dict[str, Any], root: str | Path, *, now: float | None = N
     _tighten(settings.get("gym"), "max_boxes", values["gym.max_boxes"], integer=True)
     _tighten(settings.get("population"), "ceiling", values["population.ceiling"], integer=True)
     _tighten(settings.get("architect"), "every_seconds", values["architect.every_seconds"], larger=True, integer=True)
+    # OpenAI is no meter of the rule: no research dollars for it, so no OpenAI room (models.ModelRouter.openai_room).
+    _tighten(settings.get("guard"), "openai_cap_usd", 0.0)
     claude = settings.get("claude")
     if isinstance(claude, dict):
         lines = claude.get("role_usd_day")
@@ -418,14 +457,18 @@ def overlay(settings: dict[str, Any], root: str | Path, *, now: float | None = N
     return settings
 
 
-def sail_caps(settings: Mapping[str, Any]) -> dict[str, Any]:
+def sail_caps(settings: Mapping[str, Any], root: str | Path | None = None, now: float | None = None) -> dict[str, Any]:
     """The Sail guard's daily caps from the settings' `budget` block: `research` (the swarm's own booked Sail a UTC day)
     and `account` (Sail's own meter a UTC day: research + fixed). Settings that never went through a state root's
-    `settings.load` (no block) are the floor; a malformed block is no research."""
+    `settings.load` (no block) are the guard's own read of `<root>/budget.json` (`effective`) with `root` (the guard's
+    store root), else the floor: settings handed in without the budget never lift it. A malformed block is no research."""
     guard = settings.get("guard") if isinstance(settings.get("guard"), Mapping) else {}
     house = _amount(guard.get("house_burn_usd_day"))
     house = 1.0 if house is None else house
     block = settings.get("budget")
+    if block is None and root is not None:  # handed settings without the block: the guard reads the budget itself
+        block = effective(root, now)
+        block = {**block, "source": f"{block.get('source')} (the guard's own read: the settings carried no budget)"}
     if block is None:
         research, fixed, source = floor_usd_day("sail"), house, "floor (no budget block)"
     elif not isinstance(block, Mapping) or _amount(block.get("sail_usd_day")) is None:
@@ -486,7 +529,7 @@ def _p30(root: Path, now: float, errors: list[str]) -> tuple[float | None, str]:
         try:
             summary = reader(root)
             cutoff = _epoch((summary or {}).get("cutoff"))
-            value = _amount(((summary or {}).get("p30") or {}).get("usd"))
+            value = _finite(((summary or {}).get("p30") or {}).get("usd"))  # a loss is a number, not "no number"
             if summary is None:
                 pass  # no close yet (a new House): the book's own read is the source, not an error
             elif cutoff is None or not (0 <= now - cutoff <= P30_FRESH_SECONDS):
@@ -581,16 +624,15 @@ def _sail_fixed(sail: Any, boxes: list[str], now: float, house_burn: float, erro
 
 
 def _claude_balance(health: Any) -> float | None:
-    """The funded Claude total left: cap - spent - in flight (`/v1/health`'s `claude` block); None when unconfigured or
-    unreadable."""
+    """The funded Claude total left: cap - spent (`/v1/health`'s `claude` block, whose `spent_usd` already includes the
+    holds in flight: gateway/lib/gate.mjs `claudeStatus`); None when unconfigured or unreadable."""
     block = health.get("claude") if isinstance(health, Mapping) else None
     if not isinstance(block, Mapping) or block.get("configured") is False:
         return None
     cap, spent = _finite(block.get("cap_usd")), _finite(block.get("spent_usd"))
-    inflight = _finite(block.get("inflight_usd")) if block.get("inflight_usd") is not None else 0.0
-    if cap is None or spent is None or inflight is None:
+    if cap is None or spent is None:
         return None
-    return round(cap - spent - inflight, 4)
+    return round(cap - spent, 4)
 
 
 def _gateway(config: Mapping[str, Any]) -> tuple[str | None, str | None]:
@@ -674,7 +716,7 @@ def gather(root: Path, now: float, *, config: Mapping[str, Any], settings: Mappi
         try:
             claude_balance = _claude_balance(health())
             if claude_balance is not None:
-                claude_source = "the gateway's /v1/health (cap - spent - in flight)"
+                claude_source = "the gateway's /v1/health (cap - spent, holds included)"
         except Exception as exc:  # noqa: BLE001 - unknown is never money
             errors.append(f"the gateway's /v1/health could not be read ({type(exc).__name__})")
     p30, p30_source = _p30(root, now, errors)
@@ -845,7 +887,7 @@ def drill(ctx: Any, meter: str = "sail") -> dict[str, Any]:
             "sent": sent, "error": error, "ok": sent and all(checks.values())}
 
 
-__all__ = ["compute", "knobs", "overlay", "read", "floor_block", "sail_caps", "edge_state", "book_p30", "gather",
+__all__ = ["compute", "knobs", "overlay", "read", "effective", "stale_block", "floor_block", "BIRTH_MARGIN", "sail_caps", "edge_state", "book_p30", "gather",
            "notice_facts", "send_notices", "short", "run", "drill", "floor_usd_day", "METERS", "R_DAYS", "W_DAYS",
            "FLOOR_CAP_USD_DAY", "FLOOR_SPLIT", "PROFIT_SHARE", "RESERVE_USD", "EDGE_START", "EDGE_SESSIONS", "STALE_SECONDS",
            "BUDGET_FILE", "NOTICES_FILE"]

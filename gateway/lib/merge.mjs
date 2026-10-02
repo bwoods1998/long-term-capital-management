@@ -21,7 +21,7 @@
 //
 // Every refusal names its rule in `refused`. Nothing here approves on GitHub, pushes, re-runs CI or closes anything.
 
-import { client, Refusal, refused as refusal, sha as needSha, ENGINEER_PREFIX, BASE, engineerLane, laneRefusal } from './github.mjs';
+import { client, Refusal, refused as refusal, sha as needSha, ENGINEER_PREFIX, ENGINEER_TEST, BASE, engineerLane, laneRefusal } from './github.mjs';
 import { protectedRefusal } from './protected.mjs';
 
 //: The workflow whose run on the exact head commit must have succeeded, and the jobs it must have run and passed.
@@ -128,6 +128,17 @@ async function vetFiles(github, pull, number) {
   for (const name of names) {
     const why = laneRefusal(lane, name);
     if (why) throw new Refusal(`The pull request changes ${String(name).slice(0, 200)}: ${why}.`, 403, 'lane_path');
+  }
+  // A lane may only ADD a test (harness_lanes' NEW_TEST): an earlier candidate's retained test is never modified,
+  // removed or renamed away by a later engineer pull request.
+  if (lane) {
+    for (const file of files) {
+      const touched = [file?.filename, file?.previous_filename].some(name => typeof name === 'string' && ENGINEER_TEST.test(name));
+      if (touched && file?.status !== 'added') {
+        throw new Refusal(`The pull request changes ${String(file?.filename).slice(0, 200)}: an engineer lane may only add a `
+          + `new test, never ${String(file?.status).slice(0, 20)} one.`, 403, 'lane_path');
+      }
+    }
   }
   return names;
 }

@@ -82,6 +82,9 @@ def run_job(name: str, *, root: Path, due_at: float, base: Path | None = None, c
         return {"status": "failed", "error": f"{type(exc).__name__}: {str(exc)[:600]}",
                 "trace": traceback.format_exc()[-2000:], "alerts": ctx.alerts}
     summary = dict(summary) if isinstance(summary, dict) else {"value": summary}
+    if summary.get("status") == "failed":  # a job that says it failed (e.g. the grant's refusal) is a failed receipt
+        return {"status": "failed", "summary": summary, "error": str(summary.get("error") or "the job reported failed")[:600],
+                "alerts": ctx.alerts}
     status = "skipped" if summary.get("status") == "skipped" else "ok"
     return {"status": status, "summary": summary, "alerts": ctx.alerts}
 

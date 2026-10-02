@@ -260,7 +260,7 @@ test('every changed file, by its name and its name before a rename, is inside th
   })) {
     const lanes = fakeHub();
     const listed = [...files.map(filename => ({ filename, status: 'modified' })),
-      { filename: `league/tests/test_harness_candidate_${lane}_2.py`, previous_filename: `league/tests/test_harness_candidate_${lane}.py`, status: 'renamed' }];
+      { filename: `league/tests/test_harness_candidate_${lane}_2.py`, status: 'added' }];
     lanes.files.set(77, listed);
     lanes.pulls.set(77, enginePull({ changed_files: listed.length, head: { ...enginePull().head, ref: `engineer/${lane}/lane-change-0f0f0f0f` } }));
     const at = gateAt();
@@ -276,6 +276,31 @@ test('every changed file, by its name and its name before a rename, is inside th
     await approve(elsewhere, other);
     assert.equal((await mergeIt(elsewhere, other)).body.refused, 'lane_path', lane);
   }
+});
+
+test('an engineer lane may only ADD a test: a retained candidate test modified, removed or renamed is refused (V3-A)', async () => {
+  for (const file of [
+    { filename: 'league/tests/test_harness_candidate_prior.py', status: 'modified' },
+    { filename: 'league/tests/test_harness_candidate_prior.py', status: 'removed' },
+    { filename: 'league/tests/test_harness_candidate_prior_2.py', previous_filename: 'league/tests/test_harness_candidate_prior.py', status: 'renamed' },
+    { filename: 'league/tests/test_harness_candidate_prior.py', status: 'changed' },
+  ]) {
+    const hub = fakeHub();
+    hub.files.set(77, [{ filename: 'league/swarm/preflight.py', status: 'modified' }, file]);
+    const gate = gateAt();
+    await approve(gate, hub);
+    const refused = await mergeIt(gate, hub);
+    assert.equal(refused.response.status, 403, JSON.stringify(file));
+    assert.equal(refused.body.refused, 'lane_path', JSON.stringify(file));
+    assert.match(refused.body.error, /may only add a new test/);
+    assert.equal(writes(hub).length, 0);
+  }
+  const hub = fakeHub();
+  hub.files.set(77, [{ filename: 'league/swarm/preflight.py', status: 'modified' },
+    { filename: 'league/tests/test_harness_candidate_fresh.py', status: 'added' }]);
+  const gate = gateAt();
+  await approve(gate, hub);
+  assert.equal((await mergeIt(gate, hub)).response.status, 200);
 });
 
 test('the changed files are read whole, page by page, or the merge is refused', async () => {
