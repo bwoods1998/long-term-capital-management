@@ -162,8 +162,11 @@ class House(Base):
 
     def run_job(self, *, due=DUE, gateway=None, settings=None):
         self.gateway = gateway or FakeGateway()
-        ctx = self.ctx("postmortem", gateway=self.gateway, settings=settings, due=at(due))
+        ctx = self.last_ctx = self.ctx("postmortem", gateway=self.gateway, settings=settings, due=at(due))
         return PM.run(ctx, claude_factory=self.claude, claude_meter=self.meter)
+
+    def alerts(self):
+        return [a for a in self.last_ctx.alerts if a["text"].startswith("postmortem: no reading")]
 
     def week(self):
         start, end = PM.window(at(DUE))
@@ -281,10 +284,14 @@ class CostReview(House):
 
 class Model(House):
     def test_scrub_and_the_model_safety_check(self):
-        text = PM.scrub("fam-alpha rejected SPY261009C00600000 on 2026-10-08T15:00:00Z; holdout t 2.1; café 2026",
-                        {"fam-alpha"})
-        self.assertEqual(text, "<program> rejected <contract> on <date>; <withheld> t 2.1; caf? <year>")
+        text = PM.scrub("fam-alpha rejected SPY261009C00600000 on 2026-10-08T15:00:00Z; café 2026", {"fam-alpha"})
+        self.assertEqual(text, "<program> rejected <contract> on <date>; caf? <year>")
         self.assertEqual(PM.model_problems(text, {"fam-alpha"}), [])
+        # A reason that names a Validation or holdout figure is withheld whole: the figure beside the word goes too.
+        for gated in ("demoted: holdout t -0.4 below the bar", "the Validation Sharpe 0.31", "held-out t 2.1", "held out 1.9"):
+            self.assertEqual(PM.scrub(gated, {"fam-alpha"}), PM.WITHHELD_REASON, gated)
+        self.assertNotIn("0.4", PM.scrub("holdout t -0.4", ()))
+        self.assertEqual(PM.model_problems(PM.WITHHELD_REASON), [])
         for bad, problem in (("café", "non-ASCII text"), ("the fam-alpha family", "a family name"),
                              ("its Validation t", "a Validation or holdout figure"), ("on 2026-10-08", "a date"),
                              ("SPY261009C00600000", "an option contract symbol")):
@@ -294,6 +301,8 @@ class Model(House):
         self.assertEqual(PM.model_problems("an iron condor", {"condor"}), [])
         self.assertTrue(PM.public_text_ok("an iron condor", {"condor", "fam-alpha"}))
         self.assertFalse(PM.public_text_ok("FAM-ALPHA again", {"fam-alpha"}))
+        for spelling in ("the held-out t was 2.1", "held out at 1.9", "the holdout failed", "Validation was weak"):
+            self.assertFalse(PM.public_text_ok(spelling, set()), spelling)
 
     def test_the_prompt_is_aggregates_only_and_model_safe(self):
         week = self.week()
@@ -341,6 +350,11 @@ class Model(House):
         out = self.run_job()
         self.assertEqual(self.opener.calls, [])
         self.assertIn("postmortem line for today has no room", out["model"]["missing"])
+        self.assertEqual(out["model"]["kind"], "line")  # the refusal's kind is in the receipt
+        alerts = self.alerts()
+        self.assertEqual(len(alerts), 1)
+        self.assertEqual(alerts[0]["level"], "warning")
+        self.assertIn("(line)", alerts[0]["text"])
         self.assertIn("No narrative this week", (self.root / "postmortem" / "2026-10-10.md").read_text())
         self.assertEqual(out["posted"], "docs/runs/desk/2026-10-10-postmortem.md")  # the facts are still published
 
@@ -359,16 +373,46 @@ class Model(House):
         self.assertIn("no room", self.run_job()["model"]["missing"])
         self.assertEqual(len(self.opener.calls), 1)
 
-    def test_a_role_claude_does_not_serve_is_never_asked(self):
-        self.swarm_json({"claude": {"stream": False, "roles": ["architect", "audit"]}})
+    def test_a_swarm_json_that_replaces_the_roles_still_serves_the_postmortem_at_a_small_hold(self):
+        # The House's swarm.json (scratch/v3/migrate) names its own roles and 32,000 max_tokens; `_merge` replaces lists.
+        house = {"claude": {"stream": False, "max_tokens": 32000,
+                            "roles": ["architect", "audit", "diagnostician", "rewrite", "review", "researcher", "strategist"]}}
+        self.swarm_json(house)
+        self.opener.script = [message(json.dumps(ANSWER), cost="0.31")]
+        out = self.run_job()
+        self.assertEqual(len(self.opener.calls), 1)
+        self.assertEqual(json.loads(self.opener.calls[0][0].data)["max_tokens"], PM.MAX_TOKENS)
+        self.assertLess(out["model"]["worst_case_usd"], 0.6)  # about $0.52, not the $0.87 of 32,000
+        self.assertEqual(self.alerts(), [])
+        self.assertEqual(json.loads((self.root / "swarm.json").read_text()), house)  # the box's own file is untouched
+
+    def test_the_jobs_router_adds_the_role_and_holds_max_tokens_on_its_own_copy(self):
+        for claude, tokens in (({"roles": ["architect"], "max_tokens": 32000}, 16000), ({"roles": None, "max_tokens": 8000}, 8000),
+                               ({"max_tokens": "junk"}, 16000), ({"roles": ["postmortem"], "max_tokens": 0}, 16000)):
+            with self.subTest(claude=claude):
+                self.swarm_json({"claude": {"stream": False, **claude}})
+                ctx = self.ctx("postmortem", gateway=FakeGateway(), due=at(DUE))
+                router = PM.router_for(ctx, self.store, claude_factory=self.claude, claude_meter=self.meter)
+                cfg = router.settings["claude"]
+                self.assertEqual(cfg["roles"].count("postmortem"), 1)
+                self.assertEqual(cfg["max_tokens"], tokens)
+                self.assertEqual(cfg["reserve_usd"], 0.0)
+                self.assertTrue(router.claude_enabled("postmortem"))
+
+    def test_claude_not_configured_is_a_missing_reading_with_an_alert(self):
+        self.swarm_json({"claude": {"stream": False, "model": ""}})
         out = self.run_job()
         self.assertEqual(self.opener.calls, [])
-        self.assertIn("does not serve the postmortem role", out["model"]["missing"])
+        self.assertEqual(out["model"]["kind"], "off")
+        self.assertIn("not configured for the postmortem role", out["model"]["missing"])
+        self.assertEqual(len(self.alerts()), 1)
 
     def test_a_router_that_fails_leaves_the_report_without_a_narrative(self):
         with mock.patch.object(PM, "router_for", side_effect=RuntimeError("settings unreadable")):
             out = self.run_job()
         self.assertIn("could not be made (RuntimeError: settings unreadable)", out["model"]["missing"])
+        self.assertEqual(out["model"]["kind"], "router")
+        self.assertEqual(len(self.alerts()), 1)
         self.assertTrue((self.root / "postmortem" / "2026-10-10.md").exists())
         self.assertEqual(out["posted"], "docs/runs/desk/2026-10-10-postmortem.md")
 
@@ -376,6 +420,7 @@ class Model(House):
         out = self.run_job(settings={"postmortem": {"model": False}})
         self.assertEqual(self.opener.calls, [])
         self.assertIn("switched off", out["model"]["missing"])
+        self.assertEqual(self.alerts(), [])  # the owner's own off switch is quiet
 
 
 class Pages(House):

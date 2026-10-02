@@ -35,12 +35,16 @@ and the settled cost are `spend` rows in `swarm.sqlite` like every role's and ev
 line (`claude.role_usd_day.postmortem`, $1 by default: one run a week, so it is the run's cap), the swarm's `usd_cap`,
 the gateway's funded total, and LTCM v3's research budget when it is in force. The call's worst case is also checked
 against `RUN_CAP_USD` before it is asked. The role's model is `claude.role_model.postmortem` (Claude Opus 5.5 by
-default); `claude.roles` must name the role, as for any role. It may spend the swarm's `claude.reserve_usd`: that reserve
-is kept for the House's post-mortem. It reads the week as aggregates, MODEL-SAFE (`prompt`, checked by `model_problems`:
-ASCII, no family name, no Validation or holdout figure, no date): it answers a headline, findings and actions as JSON. A
-week the model cannot be asked (not configured, no room, its line spent, an error) still gets its report: the facts and
-the reason the narrative is missing. A rerun of the same week reuses the narrative already written
-(`<state>/postmortem/<date>.json`): a week is paid for once.
+default). The job serves the role itself: its private copy of the settings adds `postmortem` to `claude.roles` (the
+House's swarm.json replaces the whole list, and its list predates this role), so the job's one off switch is `ops.json`
+`postmortem.model: false`. It may spend the swarm's `claude.reserve_usd`: that reserve is kept for the House's
+post-mortem. Its `max_tokens` is held to `MAX_TOKENS` (16,000) whatever the swarm's is, so its hold stays near $0.52 and a
+shared daily Claude line other roles have drawn on still admits it. It reads the week as aggregates, MODEL-SAFE (`prompt`,
+checked by `model_problems`: ASCII, no family name, no Validation or holdout reason, no date): it answers a headline,
+findings and actions as JSON. A week the model cannot be asked (not configured, no room, its line spent, an error) still
+gets its report: the facts and the reason the narrative is missing, with the refusal's `kind` in the receipt, and a
+warning alert (a silent week is seen; only `postmortem.model: false` is quiet). A rerun of the same week reuses the
+narrative already written (`<state>/postmortem/<date>.json`): a week is paid for once.
 
 OUTPUT. Private: `<state>/postmortem/<date>.md` (every table, the reasons, the narrative, the cost review) and
 `<date>.json` (the facts, the review and the narrative), mode 0600. Public: `docs/runs/desk/<date>-postmortem.md` through
@@ -66,6 +70,9 @@ from .context import GatewayError, read_json, write_json, write_text
 ROLE = "postmortem"
 #: The run's own cap: a call whose worst case (the gateway's reservation for the exact request) is above it is not asked.
 RUN_CAP_USD = 1.0
+#: The call's `max_tokens` (thinking and the answer together): the swarm's own, held to this. The answer is a headline,
+#: six findings and three actions; at 16,000 the worst case is about $0.52 against about $0.87 at the House's 32,000.
+MAX_TOKENS = 16000
 WEEK_SECONDS = 7 * 86400
 REVIEW_DAYS = 30
 DOCS_ROUTE = "/v1/github/docs"
@@ -613,9 +620,16 @@ def _family_pattern(names: Iterable[str]) -> re.Pattern[str] | None:
     return re.compile(r"(?<![A-Za-z0-9_-])(?:" + "|".join(re.escape(n) for n in names) + r")(?![A-Za-z0-9_-])", re.I)
 
 
+WITHHELD_REASON = "<withheld reason>"
+
+
 def scrub(text: Any, families: Iterable[str] = (), *, limit: int = 160) -> str:
-    """A receipt's free text made model-safe: contract symbols, dates, long ids and family names replaced, ASCII, cut."""
+    """A receipt's free text made model-safe: contract symbols, dates, long ids and family names replaced, ASCII, cut. A
+    text that names a Validation or holdout figure is withheld whole (`WITHHELD_REASON`): the figure beside the word is
+    the gate's own number, and no rewrite of the word keeps it from the model."""
     out = str(text or "")
+    if _HELD_OUT.search(out):
+        return WITHHELD_REASON[:limit]
     pattern = _family_pattern(families)
     if pattern is not None:
         out = pattern.sub("<program>", out)
@@ -623,7 +637,6 @@ def scrub(text: Any, families: Iterable[str] = (), *, limit: int = 160) -> str:
     out = _DATE.sub("<date>", out)
     out = _LATE_YEAR.sub("<year>", out)
     out = _LONG_ID.sub("<id>", out)
-    out = _HELD_OUT.sub("<withheld>", out)
     out = out.encode("ascii", "replace").decode("ascii")
     return " ".join(out.split())[:limit]
 
@@ -728,14 +741,24 @@ def prompt(week: Mapping[str, Any], review: Mapping[str, Any] | None, families: 
 
 def router_for(ctx: Any, store: Any, *, claude_factory: Callable[[str], Any] | None = None, claude_meter: Any = None) -> Any:
     """The swarm's `ModelRouter` for this job: the swarm's settings from the state root (with the research budget, when
-    it is in force), no Sail and no OpenAI route, and `claude.reserve_usd` 0 (the reserve is kept for this job). The
-    gateway's Claude client and meter come from `league/config.json` `gateway_url` and `GATEWAY_TOKEN` unless given."""
+    it is in force), no Sail and no OpenAI route, and in this job's private copy of `claude`: `reserve_usd` 0 (the
+    reserve is kept for this job), `ROLE` in `roles` (the House's swarm.json replaces the list; the job's off switch is
+    ops.json `postmortem.model`), and `max_tokens` held to `MAX_TOKENS`. The gateway's Claude client and meter come from
+    `league/config.json` `gateway_url` and `GATEWAY_TOKEN` unless given."""
     from ..swarm import settings as settings_mod
     from ..swarm.models import ModelRouter
 
     settings = settings_mod.load(ctx.root, config=ctx.config)
     claude = dict(settings.get("claude") or {})
     claude["reserve_usd"] = 0.0
+    roles = claude.get("roles")
+    roles = [r for r in roles if isinstance(r, str)] if isinstance(roles, (list, tuple)) else []
+    claude["roles"] = roles if ROLE in roles else [*roles, ROLE]
+    try:
+        tokens = int(claude.get("max_tokens", MAX_TOKENS))
+    except (TypeError, ValueError):
+        tokens = MAX_TOKENS
+    claude["max_tokens"] = MAX_TOKENS if tokens <= 0 else min(tokens, MAX_TOKENS)
     settings["claude"] = claude
     url = str(ctx.config.get("gateway_url") or "")
     if claude_factory is None and url:
@@ -766,7 +789,8 @@ def _clean_answer(data: Any) -> dict[str, Any] | None:
 def narrate(ctx: Any, week: Mapping[str, Any], review: Mapping[str, Any] | None, families: Iterable[str], *,
             key: str, claude_factory: Callable[[str], Any] | None = None, claude_meter: Any = None) -> dict[str, Any]:
     """One Claude call through the router (the module docstring): {"answer", "route", "model", "cost_usd", ...}, or
-    {"missing": why} when it was not asked or gave nothing."""
+    {"missing": why, "kind": what refused it} when it was not asked or gave nothing (`kind`: a router refusal's own,
+    "line", "no_room", "off", ..., or this job's: "unsafe", "no_store", "run_cap", "router", "empty")."""
     from ..swarm.models import ModelError
     from ..swarm.store import SwarmStore
 
@@ -774,31 +798,35 @@ def narrate(ctx: Any, week: Mapping[str, Any], review: Mapping[str, Any] | None,
     user = prompt(week, review, families)
     problems = model_problems(user, families)  # the facts; SYSTEM is fixed text (it names the words a public page refuses)
     if problems:
-        return {"missing": "the prompt is not model-safe (" + ", ".join(problems) + "); the model was not asked"}
+        return {"missing": "the prompt is not model-safe (" + ", ".join(problems) + "); the model was not asked",
+                "kind": "unsafe"}
     if not (Path(ctx.root) / "swarm.sqlite").exists():
-        return {"missing": "no swarm store to book the call in; the model was not asked"}
+        return {"missing": "no swarm store to book the call in; the model was not asked", "kind": "no_store"}
     try:
         store = SwarmStore(ctx.root, clock=ctx.clock)
     except Exception as exc:  # noqa: BLE001 - a store that cannot be opened books nothing: the model is not asked
-        return {"missing": f"the swarm store could not be opened ({type(exc).__name__}); the model was not asked"}
+        return {"missing": f"the swarm store could not be opened ({type(exc).__name__}); the model was not asked",
+                "kind": "no_store"}
     try:
         router = router_for(ctx, store, claude_factory=claude_factory, claude_meter=claude_meter)
         if not router.claude_enabled(ROLE):
-            return {"missing": f"Claude does not serve the {ROLE} role (claude.roles, a gateway and its token)"}
+            return {"missing": f"Claude is not configured for the {ROLE} role (a gateway, its token and claude.model)",
+                    "kind": "off"}
         _, ceiling = router.claude_request(SYSTEM, user, schema=SCHEMA, role=ROLE)
         if ceiling > RUN_CAP_USD:
-            return {"missing": f"the call's worst case {ceiling:.2f} USD is over the run's cap of {RUN_CAP_USD:.2f}; not asked"}
+            return {"missing": f"the call's worst case {ceiling:.2f} USD is over the run's cap of {RUN_CAP_USD:.2f}; not asked",
+                    "kind": "run_cap"}
         result = router.ask(role=ROLE, system=SYSTEM, user=user, family=None, key=key, openai_model=None,
                             sail_profile=None, need_usd=0.0, claude=True, schema=SCHEMA)
     except ModelError as exc:
-        return {"missing": f"Claude gave no answer: {str(exc)[:300]}"}
+        return {"missing": f"Claude gave no answer: {str(exc)[:300]}", "kind": str(getattr(exc, "kind", None) or "error")}
     except Exception as exc:  # noqa: BLE001 - the router's own failure: the week's report is written without a narrative
-        return {"missing": f"the call could not be made ({type(exc).__name__}: {str(exc)[:200]})"}
+        return {"missing": f"the call could not be made ({type(exc).__name__}: {str(exc)[:200]})", "kind": "router"}
     finally:
         store.close()
     answer = _clean_answer(result.get("json"))
     if answer is None:
-        return {"missing": "Claude's answer had no headline or findings", "route": result.get("route"),
+        return {"missing": "Claude's answer had no headline or findings", "kind": "empty", "route": result.get("route"),
                 "model": result.get("model"), "cost_usd": result.get("cost_usd")}
     return {"answer": answer, "route": result.get("route"), "model": result.get("model"), "cost_usd": result.get("cost_usd"),
             "held_usd": result.get("held_usd"), "worst_case_usd": round(ceiling, 4), "prompt_chars": len(user)}
@@ -907,11 +935,13 @@ def cost_review_lines(review: Mapping[str, Any], *, private: bool) -> list[str]:
 
 
 def public_text_ok(text: str, families: Iterable[str]) -> bool:
-    """The model's text may join the public page: the scoreboard's public filter passes and it names no family."""
+    """The model's text may join the public page: the scoreboard's public filter passes, it names no Validation or
+    holdout figure in any spelling (the filter's "holdout" misses "held-out" and "held out"), and it names no family."""
     from .scoreboard import public_problems
 
     pattern = _family_pattern(families)
-    return not public_problems(text) and text.isascii() and (pattern is None or not pattern.search(text))
+    return (not public_problems(text) and text.isascii() and not _HELD_OUT.search(text)
+            and (pattern is None or not pattern.search(text)))
 
 
 def public_page(day: str, week: Mapping[str, Any], review: Mapping[str, Any] | None, narrative: Mapping[str, Any],
@@ -997,12 +1027,17 @@ def run(ctx: Any, *, claude_factory: Callable[[str], Any] | None = None, claude_
             and earlier.get("window") == [S.iso(start), S.iso(end)]:
         narrative = {**earlier["narrative"], "reused": True}
     elif mine.get("model") is False:
-        narrative = {"missing": "switched off in ops.json (postmortem.model false)"}
+        narrative = {"missing": "switched off in ops.json (postmortem.model false)", "kind": "switched_off"}
     elif families is None:
-        narrative = {"missing": "the family names could not be read, so the prompt cannot be checked; the model was not asked"}
+        narrative = {"missing": "the family names could not be read, so the prompt cannot be checked; the model was not asked",
+                     "kind": "unsafe"}
     else:
         narrative = narrate(ctx, week, review, families, key=f"{ROLE}:{day}", claude_factory=claude_factory,
                             claude_meter=claude_meter)
+    if not narrative.get("answer") and narrative.get("kind") != "switched_off":
+        # A week without a reading is seen: only the owner's own off switch is quiet.
+        ctx.alert("warning", f"postmortem: no reading of the week to {day} ({narrative.get('kind') or 'error'}): "
+                             f"{narrative.get('missing')}")
     written = S.iso(now)[11:16] + "Z"
     write_json(folder / f"{day}.json", {"window": [S.iso(start), S.iso(end)], "facts": week, "cost_review": review,
                                         "narrative": narrative, "written_at": S.iso(now)})
@@ -1010,7 +1045,7 @@ def run(ctx: Any, *, claude_factory: Callable[[str], Any] | None = None, claude_
     receipt: dict[str, Any] = {
         "report": str(report), "window": [S.iso(start), S.iso(end)], "unread": sorted(week["unread"]),
         "model": ({k: narrative.get(k) for k in ("route", "model", "cost_usd", "worst_case_usd", "reused") if k in narrative}
-                  if narrative.get("answer") else {"missing": narrative.get("missing")}),
+                  if narrative.get("answer") else {"missing": narrative.get("missing"), "kind": narrative.get("kind")}),
         "cost_review": (review.get("proposal") or {}).get("decision") if review else None}
     if mine.get("public") is False:
         return {**receipt, "posted": None, "why": "switched off in ops.json (postmortem.public false)"}

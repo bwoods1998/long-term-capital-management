@@ -382,8 +382,9 @@ DEFAULTS: dict[str, Any] = {
     # on Claude (`researcher.claude_*`): on Claude Sonnet 5.5 (its `role_model`), within $100 a UTC day (its
     # `role_usd_day`); removing the role from `roles` turns the band off. "postmortem" (LTCM v3) is the House's weekly
     # post-mortem (league/ops/postmortem.py): Claude Opus 5.5 (its `role_model`), within $1 a UTC day (one run a week, so
-    # the run's cap); it alone may spend `reserve_usd`, kept for it. Removing it from `roles` leaves the report unwritten
-    # by the model (the facts are still written).
+    # the run's cap, at `max_tokens` 16,000 at most); it alone may spend `reserve_usd`, kept for it. The job adds the role
+    # to its own copy of `roles` (a swarm.json that replaces the list still serves it): its off switch is ops.json
+    # `postmortem.model: false`, which leaves the report unwritten by the model (the facts are still written).
     "claude": {
         "model": "claude-opus-5-5",
         "effort": "high",
