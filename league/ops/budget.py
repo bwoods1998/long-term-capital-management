@@ -14,8 +14,8 @@ updater, `league/ci.py`). The `budget` job (after the close economics, and daily
 
 and p30: the trailing-30-calendar-day realized options P&L, fees in: this file's own read of the live book's closed
 positions and the broker's posted fee corrections (`book_p30`), or the fresh close economics' `p30`
-(`league.ops.economics`) when that is SMALLER. The close economics is research-class code, so it may only cut what was
-earned, never raise it; an unreadable book earns nothing whatever the economics says. Marks never fund research. Then, a day:
+(`league.ops.economics`) when that is SMALLER. The close economics may only cut what was earned, never raise it (it is
+FORBIDDEN too, a second wall, not the only one); an unreadable book earns nothing whatever the economics says. Marks never fund research. Then, a day:
 
     sustainable_m = max(0, balance_m - reserve_m - R * fixed_m) / R
     floor_m       = min(sustainable_m, FLOOR_CAP * FLOOR_SPLIT[m])
@@ -548,7 +548,7 @@ def economics_fresh(cutoff: float, now: float) -> bool:
 
 def _p30(root: Path, now: float, errors: list[str]) -> tuple[float | None, str]:
     """p30: the live book's own read (`book_p30`), cut to the fresh close economics' p30 when that is smaller. The
-    economics (league/ops/economics.py) is research-class: it may lower what was earned, never raise it."""
+    economics (league/ops/economics.py) may lower what was earned, never raise it: the book is the wall either way."""
     try:
         book, source = book_p30(root, now)
     except Exception as exc:  # noqa: BLE001 - unknown is never money

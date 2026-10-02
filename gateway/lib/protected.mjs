@@ -22,9 +22,9 @@ export const MERGE_FORBIDDEN = Object.freeze([
   'league/families.py', 'league/shards.py', 'league/labbox.py', 'league/resolution.py',
   // The House's protected jobs (V3-A, WP1's additions to ci.FORBIDDEN): the budget rule, the drills, the standing grant.
   'league/ops/budget.py', 'league/ops/drills.py', 'league/ops/grant.py',
-  // What feeds and enforces the budget rule (V3-A integration): the Sail guard, the model router's Claude room and the
-  // job context (the settings' overlay is below).
-  'league/swarm/guard.py', 'league/swarm/models.py', 'league/ops/context.py',
+  // What feeds and enforces the budget rule (V3-A integration): the Sail guard, the model router's Claude room, the
+  // job context and the close economics (the budget's p30, the public Net; V3-A review). The settings' overlay is below.
+  'league/swarm/guard.py', 'league/swarm/models.py', 'league/ops/context.py', 'league/ops/economics.py',
   // The evaluator's identity and the evidence it reads: the Gym, the gate, the bands, the evaluator, the settings and
   // the store of the swarm; the data layer and its builders.
   'league/gym/', 'league/swarm/gate.py', 'league/swarm/bands.py', 'league/swarm/evaluator.py',

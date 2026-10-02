@@ -42,7 +42,7 @@ test('the protected paths hold every entry of league/ci.py FORBIDDEN, WP1\'s pro
   for (const entry of entries) assert.ok(MERGE_FORBIDDEN.includes(entry), `league/ci.py forbids ${entry}; the merge route must too`);
   for (const entry of ['league/ops/budget.py', 'league/ops/drills.py', 'league/ops/grant.py', 'league/live/', 'league/gym/',
     'league/swarm/gate.py', 'league/swarm/bands.py', 'league/swarm/evaluator.py', 'league/swarm/settings.py', 'league/swarm/store.py',
-    'league/swarm/guard.py', 'league/swarm/models.py', 'league/ops/context.py',
+    'league/swarm/guard.py', 'league/swarm/models.py', 'league/ops/context.py', 'league/ops/economics.py',
     'ltcm/data/', 'scripts/data/', '.github/', 'gateway/', 'deploy/', 'league/config.json', 'league/constitution.py']) {
     assert.ok(MERGE_FORBIDDEN.includes(entry), entry);
   }

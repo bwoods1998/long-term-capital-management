@@ -527,7 +527,7 @@ class Job(unittest.TestCase):
         self.assertEqual(self.doc()["meters"]["sail"]["research_usd_day"], 0.0)
 
     def test_the_close_economics_p30_may_cut_what_was_earned_never_raise_it(self):
-        """The close economics is research-class (league/ops/economics.py): an inflated p30 there must not lift the
+        """The close economics (league/ops/economics.py) is a second source: an inflated p30 there must not lift the
         budget past the live book's own read (the D4 rule), but a smaller one (more fees found) is used."""
         from league.ops import economics
         with mock.patch.object(economics, "latest", lambda root: {"cutoff": B._iso(NOW - 3 * 3600), "p30": {"usd": "300.00"}}):
