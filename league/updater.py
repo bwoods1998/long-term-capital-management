@@ -64,16 +64,21 @@ Then the launch (V3-A). No other deploy may be in flight (`deploy.pid` or the wa
 a live watchdog: a held head, tried at the next look). The nightly forward daemon is stopped first,
 as the owner's release procedure does by hand: `<state>/data/nightly.stop` is written with the marker
 `updater:<release-id>` (an operator's own stop is left as it is and obeyed) once the daemon is idle
-with its next job at least ten minutes off (`league/watchdog.py` `nightly_busy`: the House's
+with its next job at least two minutes off (`league/watchdog.py` `nightly_busy`: the House's
 supervisor kills a stopped daemon two minutes on, busy or not), and the launch waits, look by look
 and never inside one, until the daemon lets go of `nightly.lock`, at most `NIGHTLY_WAIT_SECONDS`
-in all; past that the head is held, its stop lifted, and tried again at the next look. The release train is asked again at the moment of launch. The watchdog runs detached with a
+in all; past that the head is held, its stop lifted, and tried again at the next look. When the
+daemon has kept every updater release out for `NIGHTLY_FORCE_AFTER_SECONDS` (never once seen idle by
+a launch in that time), the stop is written over a busy daemon and the House warns: a night that never goes idle,
+or a heartbeat this release cannot read, must not keep out the release that fixes it. The release
+train and the deploys in flight are asked again at the moment of launch. The watchdog runs detached with a
 scrubbed environment (`watchdog_environment`: no secret, only the path to the file that holds them,
 as the owner's deploy launches it) and its pid goes into `<base>/deploy.pid`, where
 `scripts/floor_box.py deploy` sees it and refuses to send a second release. Once no deploy is in
 flight any more (the verdict is in: promoted, rolled back, refused or failed), the stop is removed
 if it still carries the marker; a House that starts and finds an `updater:` stop with no deploy in
-flight removes it the same way, so a crash never leaves the daemon stopped.
+flight removes it the same way, so a crash never leaves the daemon stopped. The trees the updater
+and the drill leave in `incoming/` are removed once nothing is in flight (`INCOMING_STALE_SECONDS`).
 
 Then the watchdog's canary, promotion, watch and rollback, exactly as before. The attestation
 travels with the release: into the watchdog's deploy record (`deploys.jsonl`, whose every row of
@@ -82,7 +87,9 @@ stage a tree whose digest is not the attested one.
 
 A release that is a rollback drill's copy (`league/watchdog.py` `drill_marker`: `DRILL_BREAK` in a
 `drill-...` release) never looks at main: every look is the drill's deliberate break, which
-`House._update` raises as an error alert so the watch rolls the copy back.
+`House._update` raises as an error alert so the watch rolls the copy back. If the drill's own process
+is gone (no deploy in flight) for `DRILL_ORPHAN_SECONDS`, nothing will: that House launches `python -m
+league.watchdog drill-recover`, detached, which rolls the copy back and lifts the drill's stop.
 
 Sept 20, 2026 went the other way -- the incoming tree judged itself -- because a judge one commit
 out of date refused, silently and for ever, a commit that widened a bound and used the wider value
@@ -104,6 +111,7 @@ import sqlite3
 import subprocess
 import sys
 import tarfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -115,7 +123,8 @@ from typing import Any, Callable, Mapping
 # `session_time`) and `market_open_at` built on it (`_shut_session`). The holiday list lives there once.
 from ltcm.data import DataError, to_datetime, us_equity_session
 
-from .watchdog import (NIGHTLY_MARKERS, NIGHTLY_STOP, NIGHTLY_WAIT_SECONDS, Releases, _ledger_ro, deploy_in_flight, drill_marker, epoch, iso,
+from .watchdog import (DRILL_PREFIX, NIGHTLY_MARKERS, NIGHTLY_STOP, NIGHTLY_WAIT_SECONDS, Releases, _ledger_ro, deploy_in_flight, drill_marker,
+                       epoch, iso,
                        nightly_busy as _nightly_busy, nightly_lock_held, nightly_marker, stop_nightly, tree_digest, unstop_nightly, write_pid)
 
 REPO = "bwoods1998/long-term-capital-management"
@@ -168,6 +177,17 @@ SETTLE_EVERY_SECONDS = 60
 #: A `drill:` stop is the drill's own to lift (`league/watchdog.py` `drill_rollback`, in a `finally`);
 #: one older than this with no deploy in flight is a drill that died, and is lifted here.
 DRILL_STOP_STALE_SECONDS = 2 * 3600
+#: A drill copy's House that has seen no deploy in flight for this long is one whose drill died after the
+#: promotion (`league/watchdog.py` `drill_recover`). The drill holds `deploy.pid` from before its copy is
+#: promoted to after its rollback's restart, so this is only the margin for that restart to land.
+DRILL_ORPHAN_SECONDS = 15 * 60
+#: A nightly daemon that every launch has found not stoppable for this long (never once idle when asked)
+#: is stopped anyway, busy or not, with a House warning: a job it kills is retried by its controller.
+NIGHTLY_FORCE_AFTER_SECONDS = 6 * 3600
+#: What the updater and the drill leave in `incoming/` (`main-*`, `drill-*`, the attestation records)
+#: is removed once no deploy is in flight and it is this old (its newest mtime or ctime).
+INCOMING_STALE_SECONDS = 3600
+INCOMING_OWNED = ("main-", DRILL_PREFIX)
 
 
 class UpdateError(RuntimeError):
@@ -550,14 +570,29 @@ class Updater:
         self.nightly_busy = nightly_busy or (lambda: _nightly_busy(self.base, self.clock()))
         #: A head that passed every wall and waits for the nightly daemon to stop: launched at a later look.
         self._launching: dict[str, Any] | None = None
+        #: Since when every launch has found the nightly daemon not stoppable (`NIGHTLY_FORCE_AFTER_SECONDS`);
+        #: None once one finds it idle.
+        self._nightly_busy_since: float | None = None
         #: `due` said yes only to look at a nightly stop this updater wrote: `check` does only that.
         self._light = False
         self._settle_next = 0.0
         #: The drill's deliberate break, read once when the House starts (`league/watchdog.py` `drill_marker`).
         self.drill = drill_marker(self.trusted)
+        #: In a drill copy: since when no deploy has been in flight, and the recovery once launched.
+        self._orphan_since: float | None = None
+        self._recovery: dict[str, Any] | None = None
+        #: The watchdogs this process started: polled so one that exits without restarting the House is
+        #: reaped, not left a zombie whose pid in `deploy.pid` `floor_box.py` reads as a deploy running.
+        self._children: list[subprocess.Popen] = []
+        self._children_lock = threading.Lock()  # `due` runs on the tick, `check` (which spawns) on a background lane
+        #: (candidate digest, running digest) the trusted checks passed in this process: a head held at
+        #: the launch (a deploy in flight, the nightly daemon) is not judged again at the next look.
+        self._judged: set[tuple[str, str]] = set()
 
     def due(self) -> bool:
         now = self.clock()
+        with self._children_lock:
+            self._children = [child for child in self._children if child.poll() is None]
         if self.drill is not None:
             return True  # the drill's break is raised at every tick
         full = now - self._last >= self.every or (self._wake_at is not None and self._last < self._wake_at <= now)
@@ -577,20 +612,28 @@ class Updater:
         which the promotion itself will restart. The known-good release's watchdog does the judging.
         Its environment is scrubbed (`watchdog_environment`), and its pid goes into `<base>/deploy.pid`
         as `scripts/floor_box.py deploy` writes it, so the owner's deploy sees this one in flight."""
-        current = self.base / "current"
-        argv = [sys.executable, "-m", "league.watchdog", "deploy", "--base", str(self.base), "--source", str(source), "--id", release_id]
+        argv = ["deploy", "--base", str(self.base), "--source", str(source), "--id", release_id]
         if attestation is not None:
             argv += ["--attestation", str(attestation)]
+        self._spawn(argv, release_id, fallback_cwd=source)
+
+    def _spawn(self, argv: list[str], release_id: str, *, fallback_cwd: Path | None = None) -> int:
+        """`python -m league.watchdog <argv>` detached, from the current release, scrubbed, its pid in `deploy.pid`."""
+        current = self.base / "current"
+        cwd = current if current.exists() or fallback_cwd is None else fallback_cwd
         with open(self.base / "deploy.log", "ab") as log:
             process = subprocess.Popen(
-                argv, cwd=str(current if current.exists() else source), stdout=log, stderr=log, stdin=subprocess.DEVNULL, start_new_session=True,
-                env=watchdog_environment(self.base),
+                [sys.executable, "-m", "league.watchdog", *argv], cwd=str(cwd), stdout=log, stderr=log, stdin=subprocess.DEVNULL,
+                start_new_session=True, env=watchdog_environment(self.base),
             )
+        with self._children_lock:
+            self._children.append(process)
         try:
             write_pid(self.base / "deploy.pid", process.pid)
         except OSError as exc:  # the watchdog's own lock still keeps a second deploy out
             self.releases.record({"stage": "launch", "release": release_id, "unjudged": True, "pid": process.pid,
                                   "error": f"deploy.pid could not be written ({type(exc).__name__}: {str(exc)[:160]})"})
+        return process.pid
 
     def tried(self) -> set[str]:
         """The releases the watchdog has really judged. A row marked `busy` is not one of them: it
@@ -645,10 +688,7 @@ class Updater:
         running a rollback drill's copy: nothing else is done."""
         light, self._light = self._light, False
         if self.drill is not None:
-            self._last = self.clock()
-            return {"action": "drill", "release": self.trusted.name, "drill": dict(self.drill), "new": False,
-                    "reasons": [f"drill: deliberate break (this House runs {self.trusted.name}, a rollback drill's copy of "
-                                f"{self.drill.get('copy_of') or 'the running release'}); the watch rolls it back"]}
+            return self._drill_check()
         if self._launching is not None:
             self._last = self.clock()
             return self._continue_launch()
@@ -656,6 +696,7 @@ class Updater:
         if light:
             return {"action": "none", "reason": "looked only at the nightly stop", **({"nightly_resumed": resumed} if resumed else {})}
         self._last = self.clock()
+        self._sweep_incoming()
         current = self.releases.current()
         if current is None:
             return {"action": "none", "reason": "there is no current release to compare with"}
@@ -674,7 +715,8 @@ class Updater:
             _remove(incoming)
             return self._blocked(None, sha, unavailable(sha, f"the tarball of {sha[:12]} could not be read ({type(exc).__name__}: {str(exc)[:200]})"))
         digest, files = tree_digest(incoming)
-        if digest == tree_digest(running)[0]:
+        running_digest = tree_digest(running)[0]
+        if digest == running_digest:
             _remove(incoming)
             return {"action": "none", "reason": "the box already runs main", "digest": digest[:12], "sha": sha}
         release_id = f"main-{digest[:12]}"
@@ -711,22 +753,25 @@ class Updater:
             _remove(incoming)
             return self._held(release_id, sha, plan, history)
         self._wake_at = None
-        problems = list(self.judge(incoming, running))
-        if problems:
-            _remove(incoming)
-            return self._refused(release_id, sha, attestation, problems)
-        # 6. The launch: no deploy beside another, and the nightly daemon stopped first.
+        # 6. The launch: no deploy beside another (asked before the judge, which is the costly part),
+        #    then the trusted content checks once per tree, then the nightly daemon stopped first.
         why = self.in_flight()
         if why:
             _remove(incoming)
             return self._held(release_id, sha, self._hold("deploy", f"another deploy is in flight ({why}); tried again at the next look"), history)
+        if (digest, running_digest) not in self._judged:
+            problems = list(self.judge(incoming, running))
+            if problems:
+                _remove(incoming)
+                return self._refused(release_id, sha, attestation, problems)
+            self._judged.add((digest, running_digest))
         final = self.base / "incoming" / release_id
         _remove(final)
         incoming.rename(final)
         record = self.base / "incoming" / f"{release_id}.attestation.json"
         record.write_text(json.dumps(attestation, sort_keys=True, default=str), encoding="utf-8")
         self._launching = {"release": release_id, "sha": sha, "final": final, "record": record, "files": files, "attestation": attestation,
-                           "marker": f"updater:{release_id}", "standing": None, "since": self.clock(), "told": False}
+                           "marker": f"updater:{release_id}", "standing": None, "since": self.clock(), "told": False, "forced": None}
         return self._continue_launch()
 
     def _hold(self, kind: str, why: str, until: float | None = None) -> dict[str, Any]:
@@ -747,6 +792,12 @@ class Updater:
         waiting = None
         if pending["standing"] is None:
             waiting = self.nightly_busy()
+            if waiting is None:
+                self._nightly_busy_since = None
+            else:
+                self._nightly_busy_since = now if self._nightly_busy_since is None else self._nightly_busy_since
+                if now - self._nightly_busy_since >= NIGHTLY_FORCE_AFTER_SECONDS:
+                    pending["forced"], waiting = {"why": waiting, "since": self._nightly_busy_since}, None
             if waiting is None:
                 try:
                     pending["standing"] = stop_nightly(self.base, marker)
@@ -769,8 +820,13 @@ class Updater:
             self._launching = None
             self._wake_at = None
             self.launch(pending["final"], release_id, pending["record"])
-            return {"action": "deploying", "release": release_id, "files": pending["files"], "sha": sha, "attestation": pending["attestation"],
-                    "nightly": {"stop": pending["standing"], "waited_seconds": round(now - pending["since"], 1)}}
+            out = {"action": "deploying", "release": release_id, "files": pending["files"], "sha": sha, "attestation": pending["attestation"],
+                   "nightly": {"stop": pending["standing"], "waited_seconds": round(now - pending["since"], 1)}}
+            if pending.get("forced"):
+                out["nightly"]["forced"] = pending["forced"]
+                out["warn"] = (f"the nightly data job kept every updater release out since {_stamp(pending['forced']['since'])}, never "
+                               f"once idle at a launch ({pending['forced']['why']}); its stop was written anyway so {release_id} could launch")
+            return out
         if waiting is None:
             waiting = f"the nightly data job has not let go of its lock since the stop ({pending['standing'] or 'an operator stop'})"
         if now - pending["since"] >= NIGHTLY_WAIT_SECONDS:
@@ -791,6 +847,56 @@ class Updater:
         unstop_nightly(self.base, pending["marker"])
         _remove(pending["final"])
         _remove(pending["record"])
+
+    def _drill_check(self) -> dict[str, Any]:
+        """A look from a drill copy: the deliberate break, and the way back if the drill is gone. The
+        drill's own process holds `deploy.pid` until its rollback has restarted this House, so a copy
+        that has seen no deploy in flight for `DRILL_ORPHAN_SECONDS` was left current by a drill that
+        died: `drill-recover` is launched, once per process, as the updater launches a watchdog."""
+        now = self._last = self.clock()
+        reasons = [f"drill: deliberate break (this House runs {self.trusted.name}, a rollback drill's copy of "
+                   f"{self.drill.get('copy_of') or 'the running release'}); the watch rolls it back"]
+        out: dict[str, Any] = {"action": "drill", "release": self.trusted.name, "drill": dict(self.drill), "new": False, "reasons": reasons}
+        if self.in_flight():
+            self._orphan_since = None
+        elif self._recovery is None:
+            self._orphan_since = self._orphan_since if self._orphan_since is not None else now
+            if now - self._orphan_since >= DRILL_ORPHAN_SECONDS:
+                why = f"drill orphaned: no deploy in flight since {_stamp(self._orphan_since)}, and {self.trusted.name} is still running"
+                try:
+                    pid = self._spawn(["drill-recover", "--base", str(self.base), "--reason", why], self.trusted.name)
+                    self._recovery = {"pid": pid, "at": _stamp(now)}
+                except OSError as exc:
+                    self._recovery = {"error": f"{type(exc).__name__}: {str(exc)[:160]}", "at": _stamp(now)}
+                self.releases.record({"stage": "drill", "outcome": "orphaned", "release": self.trusted.name, "reasons": [why],
+                                      "recovery": dict(self._recovery)})
+                out["recovery"], out["new"] = dict(self._recovery), True
+        if self._recovery is not None:
+            reasons.append(f"the drill's process is gone; drill-recover launched at {self._recovery['at']}"
+                           + (f" failed to start: {self._recovery['error']}" if "error" in self._recovery else f" (pid {self._recovery['pid']})"))
+        return out
+
+    def _sweep_incoming(self, now: float | None = None) -> list[str]:
+        """Remove the trees (and attestation records) the updater and the drill left in `incoming/`, once
+        no deploy is in flight and none is waiting to launch: the watchdog stages a copy into
+        `releases/`, so a tree here is spent after its verdict. The owner's own uploads (`floor_box.py`)
+        are left alone. Age is the later of mtime and ctime: a copied tree keeps its source's mtime."""
+        root = self.base / "incoming"
+        if self._launching is not None or not root.is_dir() or self.in_flight():
+            return []
+        now = time.time() if now is None else now
+        removed = []
+        for entry in root.iterdir():
+            if not entry.name.startswith(INCOMING_OWNED):
+                continue
+            try:
+                stat = entry.lstat()
+            except OSError:
+                continue
+            if now - max(stat.st_mtime, stat.st_ctime) >= INCOMING_STALE_SECONDS:
+                _remove(entry)
+                removed.append(entry.name)
+        return removed
 
     def _settle_nightly(self) -> str | None:
         """Lift a nightly stop that automation wrote, once no deploy is in flight: the verdict of the
