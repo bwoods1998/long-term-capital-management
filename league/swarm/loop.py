@@ -843,7 +843,10 @@ class Swarm:
         except Exception:  # noqa: BLE001 - never keeps the swarm from starting; it reads the same events next start
             log(f"incubator backfill failed: {traceback.format_exc()[-800:]}")
         adopted_evaluator = adopt(self.store, evaluator)
-        if adopted_evaluator["adopted"]:
+        if adopted_evaluator["adopted"] and adopted_evaluator.get("gym_changed") is False:
+            log(f"evaluator adopted (league/live only): {adopted_evaluator['families']} families keep their research "
+                "selection")
+        elif adopted_evaluator["adopted"]:
             log(f"evaluator adopted: {adopted_evaluator['families']} families owe fresh evidence")
         adopted = self.pool.adopt() if hasattr(self.pool, "adopt") else 0
         self.store.event("swarm.status", None, {"action": "started", "pid": os.getpid(), "release": str(CODE_DIR), "adopted": adopted,

@@ -4,6 +4,12 @@ Run identities already include the Gym bundle, but family bests/robustness used 
 identity. This module scopes those materialized views too. Historical runs, trials, looks, versions,
 notebooks and forward records remain untouched. A stale money band returns to the Gym for fresh
 qualification; its frozen live instances retain their close path. A stale band is not entry authority.
+
+Only a change of the Gym itself (its image or bundle, `gym_changed`) clears the research selection. A change of
+league/live alone moves the execution fingerprint and leaves every Gym row current (`matches`: the same image and bundle
+answer the same), so the selection those rows earned stands (Oct 1, 2026: release B's league/live-only deploy cleared
+every best, robustness view and validation, and no Train best was selected for hours after it). Such an adoption still
+returns a stale money band to the Gym and clears the live route's facts (`LIVE_KEYS`).
 """
 
 from __future__ import annotations
@@ -31,6 +37,12 @@ SELECTION_KEYS = (
 #: version is held again only when it meets the checks on the new Gym, even one the operator cleared, whose 2017-19
 #: extension verdict is then owed again under the new Gym before the operator clears it again.
 HOLD_KEYS = ("extension_hold", "extension_versions", "extension_cleared", "extension_lapsed")
+#: THE LIVE ROUTE'S FACTS: what an adoption clears even when the Gym did not change (`gym_changed` false: league/live
+#: alone moved the execution fingerprint). The incubator's Train and drift marks name the evaluator they were made
+#: under, so the live side reads them as stale either way (`incubator.current_mark`), and its reviews read a program for
+#: the live route, whose code is what changed. Every other key of SELECTION_KEYS is Gym evidence, or the gate's verdict
+#: on it, that the same image and bundle answer the same (`matches`), so such an adoption keeps it, with the bests.
+LIVE_KEYS = ("train_passed", "incubator_reviews")
 
 
 @lru_cache(maxsize=4)
@@ -82,23 +94,32 @@ def gym_changed(previous: Mapping[str, Any] | None, expected: Mapping[str, Any])
     """Whether an adoption changes the Gym itself (its image or bundle; no identity before counts as a change), not only
     the execution fingerprint. A change of league/live alone moves the fingerprint and leaves every recorded validation
     current (`matches`, `Tournament.recorded_validation`: the same image and bundle answer the same), so the holds they
-    earned, and the operator's clears of them, stand."""
+    earned, and the operator's clears of them, stand, and so does the research selection they earned (`adopt`)."""
     return not isinstance(previous, Mapping) or any(previous.get(key) != expected.get(key) for key in ("image", "bundle"))
 
 
 def adopt(store: Any, expected: Mapping[str, Any] | None) -> dict[str, Any]:
-    """At process start, invalidate derived views once per image/bundle before workers can select.
+    """At process start, invalidate derived views once per evaluator identity before workers can select.
 
     A missing identity cannot authorize adoption. The transition is one transaction and is restart
-    safe. New families created after the transition have no old evidence to invalidate. The extension
-    hold's records (`HOLD_KEYS`) are archived and cleared with the selection when the Gym changed
-    (`gym_changed`) and kept when only the execution fingerprint moved. The idle count restarts from
-    `evaluator_trials`, worded as the evaluator's change. The incubator's marks and reviews are cleared; its bars
-    (`incubator_barred`) are kept, like the refusal and look rows: a verdict against a program is final for it. So a
-    verdict held only in what the adoption clears (the gate's `review` or `gate_outcome` failing a program, an incubator
-    review failing it) or only in the gate's bars owed (`incubator.load_owed`: an error kept them from the store before
-    a restart) is first recorded in `incubator_barred`, in the same transaction (`incubator.adoption_bars`); an
-    `incubator_barred` that cannot be read is left alone (it bars every program of the family: `incubator.family_bar`).
+    safe. New families created after the transition have no old evidence to invalidate. Two kinds:
+
+    - THE GYM CHANGED (`gym_changed`: a new image or bundle, or no identity before). The research selection
+      (`SELECTION_KEYS` and the family's bests) and the extension hold's records (`HOLD_KEYS`) are archived and
+      cleared, and the idle count restarts from `evaluator_trials`, worded as the evaluator's change.
+    - LEAGUE/LIVE ALONE (only the execution fingerprint moved). Every Gym row the selection rests on is still current
+      (`matches`, `row_matches`: the same image and bundle answer the same), so the selection, its robustness, drift and
+      validation views, the gate's verdicts and the hold's records stand, and the idle and dormancy counts go on. Only
+      the live route's facts (`LIVE_KEYS`) are archived and cleared. Clearing the rest stranded release B (Oct 1, 2026):
+      no family held a Train best or a robustness run hours after its league/live-only deploy.
+
+    Both return a money band whose banded evaluator is stale to the Gym (`bands.current_banded_evaluator`). The
+    incubator's marks and reviews are cleared; its bars (`incubator_barred`) are kept, like the refusal and look rows: a
+    verdict against a program is final for it. So a verdict held only in what the adoption clears (the gate's `review`
+    or `gate_outcome` failing a program, an incubator review failing it) or only in the gate's bars owed
+    (`incubator.load_owed`: an error kept them from the store before a restart) is first recorded in `incubator_barred`,
+    in the same transaction (`incubator.adoption_bars`); an `incubator_barred` that cannot be read is left alone (it
+    bars every program of the family: `incubator.family_bar`).
     """
     if expected is None:
         return {"adopted": False, "families": 0, "reason": "evaluator identity unavailable"}
@@ -114,7 +135,8 @@ def adopt(store: Any, expected: Mapping[str, Any] | None) -> dict[str, Any]:
         if previous == expected:
             return {"adopted": False, "families": 0}
         count = 0
-        holds = HOLD_KEYS if gym_changed(previous, expected) else ()
+        gym = gym_changed(previous, expected)
+        holds = HOLD_KEYS if gym else ()
         now = float(store.clock())
         for fam in store.families(alive=True):
             state = fam.get("state") or {}
@@ -133,15 +155,34 @@ def adopt(store: Any, expected: Mapping[str, Any] | None) -> dict[str, Any]:
 
             version = store.version(fam["id"], state.get("banded_version")) if state.get("banded_version") else None
             band_current = version is not None and current_banded_evaluator(state, run_sha(version))
-            if fam["band"] in LIVE_BANDS and not band_current:
+            moved = fam["band"] in LIVE_BANDS and not band_current
+            if moved:
                 # The House retains frozen instances for exits. Research only selects Gym families,
                 # so an old band must return there rather than become permanently unevaluable.
                 store.set_band(fam["id"], "gym", reason="execution semantics changed; fresh qualification is required")
+            if not gym:
+                # LEAGUE/LIVE ALONE: the Gym evidence stands; only the live route's facts go (archived in the event).
+                archived = {key: state[key] for key in LIVE_KEYS if key in state}
+                store.event("swarm.status", fam["id"], {"action": "evaluator_adopted", "from": previous, "to": expected,
+                                                           "gym_changed": False, "_previous_selection": archived,
+                                                           "incubator_barred": sorted(sha[:12] for sha in bars)})
+                kept: dict[str, Any] = {key: {} for key in LIVE_KEYS}
+                kept["evaluator"] = expected
+                if bars:
+                    kept["incubator_barred"] = {**dict(recorded or {}), **bars}
+                store.set_state(fam["id"], **kept)
+                if moved:
+                    store.note(fam["id"], "The live executor changed (league/live), so this family's money band "
+                               "returned to the Gym; its frozen live instances only close. The Gym did not change: its "
+                               "Train selection, stress/drift checks and validation stand. This does not grant another "
+                               "holdout look.")
+                count += 1
+                continue
             archived = {key: state[key] for key in (*SELECTION_KEYS, *holds) if key in state}
             archived.update({key: fam.get(key) for key in ("best_train", "best_version", "best_validation", "validated_version")})
             # Banded identity remains an historical claim; bands.read separately denies entry.
             store.event("swarm.status", fam["id"], {"action": "evaluator_adopted", "from": previous, "to": expected,
-                                                       "_previous_selection": archived,
+                                                       "gym_changed": True, "_previous_selection": archived,
                                                        "incubator_barred": sorted(sha[:12] for sha in bars)})
             store.update_family(fam["id"], best_train=None, best_version=None, best_validation=None,
                                 validated_version=None, stall=0, since_val_revisions=0, since_val_trials=0)
@@ -167,8 +208,8 @@ def adopt(store: Any, expected: Mapping[str, Any] | None) -> dict[str, Any]:
                        "rerun a defensible prior program before submitting it. This does not grant another holdout look.")
             count += 1
         store.put(KEY, expected)
-    return {"adopted": True, "families": count, "previous": previous, "current": expected}
+    return {"adopted": True, "families": count, "previous": previous, "current": expected, "gym_changed": gym}
 
 
-__all__ = ["KEY", "SELECTION_KEYS", "HOLD_KEYS", "identity", "matches", "row_matches", "gym_changed", "adopt",
+__all__ = ["KEY", "SELECTION_KEYS", "HOLD_KEYS", "LIVE_KEYS", "identity", "matches", "row_matches", "gym_changed", "adopt",
            "execution_fingerprint"]

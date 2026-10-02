@@ -60,7 +60,8 @@ orders are the House's own, plus one earlier tuition position:
 **The freeze** (since Release B). `league/live` and `league/gym` change only in a planned, deliberate release.
 - A change to either, or to `LEAGUE_FILES`, the fill model or the Gym image, moves the evaluator. Every practice cohort
   is bound to its evaluator, so such a change ends every practice cohort, and with them every incubation, for good. It
-  also re-adopts selection (**Evaluator adoption and `gym-engine-4`**, below).
+  also re-adopts the evaluator; a new Gym image or bundle also clears the research selection, a `league/live`-only
+  change does not (**Evaluator adoption and `gym-engine-4`**, below).
 - Batch such changes into planned releases. Rollbacks and fixes for bugs that block or endanger real orders are the only
   exceptions.
 - Swarm-side changes that the fingerprint does not hash are no reset. They still deploy only outside the session when
@@ -183,14 +184,22 @@ execution semantics for old programs that read global `PARAMS` with nondefault o
 results cannot qualify them under the new runtime.
 
 At swarm startup, before any research or tournament worker, `research_evaluator` records the current
-data image, full Gym bundle and execution fingerprint. An identity change archives and clears derived
-Train bests, candidates, submissions, stress/drift views, validation and review. Runs, versions, lineage
-trial counts, refusals, notebooks and consumed holdout looks remain. Late old-evaluator results are
+data image, full Gym bundle and execution fingerprint. A change of the Gym (its image or bundle) archives and
+clears derived Train bests, candidates, submissions, stress/drift views, validation and review. Runs, versions,
+lineage trial counts, refusals, notebooks and consumed holdout looks remain. Late old-evaluator results are
 still counted but cannot refill current selection or forward evidence. Full result pruning retains
 each worker's actual image and bundle in its run summary. The replay key and standalone engine hash
 also change, so the old cache cannot supply a new result.
 If two different evaluator identities return the same standalone worker run ID, the store keeps
 separate result rows and files; it never relabels old metrics as new evidence.
+
+A change of `league/live` alone moves only the execution fingerprint (Oct 1, 2026, the robustness-stall fix). Every
+Gym row the selection rests on is still current (the same image and bundle answer the same), so the adoption keeps
+the selection: Train bests, candidates, robustness and drift views, validation, the gate's verdicts, extension holds,
+and the idle and dormancy counts. It clears only the incubator's Train and drift marks and its reviews
+(`evaluator.LIVE_KEYS`, archived in the `evaluator_adopted` event with `gym_changed` false), still returns a stale
+money band to the Gym, and writes no "The evaluator changed" note. Release B's deploy (reset 2) predates this: it
+cleared every best, robustness view and validation, and no Train best or robustness run followed for hours.
 
 An old contract's pre-holdout refusal is archived and its active veto cleared, allowing a fresh review
 only after new-evaluator qualification. The refusal record stays; an actually consumed look remains
@@ -235,8 +244,9 @@ current evidence. Evaluator adoption is not a strategy promotion or a claim of p
   - every practice cohort from Release A completes ("evaluator changed; a new version needs fresh practice"), because
     the practice evaluator is the bundle, the fill model and the fingerprint together.
 
-  After an adoption, the idle count restarts from `evaluator_trials`, and an idle retirement says "since the evaluator
-  changed" (#453).
+  After an adoption that changes the Gym, the idle count restarts from `evaluator_trials`, and an idle retirement says
+  "since the evaluator changed" (#453). A `league/live`-only adoption keeps the selection and the count (the
+  robustness-stall fix, Oct 1).
 - Since B, those paths are frozen for at least five sessions, and for as long as any family holds Candidate, Probe or
   Sized or has an incubator-bound cohort. A change to them ends every practice cohort and every incubation. The only
   exceptions are rollbacks and fixes for bugs that block or endanger real orders.
