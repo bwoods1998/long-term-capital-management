@@ -53,8 +53,10 @@ JOBS: tuple[Job, ...] = (
         what="the weekly post-mortem"),
     Job("agenda", "league.ops.agenda", (S.daily(3, 0),), grace=6 * HOUR, cpu=900, wall=1800, owner="Phase 2",
         what="the strategist's daily agenda"),
-    Job("engineer", "league.ops.engineer", (S.daily(4, 0),), grace=6 * HOUR, cpu=1800, wall=3600, owner="Phase 4",
-        what="the engineer's daily harness change"),
+    # Authoring at 04:00Z (after the scoreboard); every hour at :40 the candidate in flight moves on (CI, the review, the
+    # merge, the deploy, the canary, the decision, a revert) without waiting a day per step.
+    Job("engineer", "league.ops.engineer", (S.daily(4, 0), S.hourly(40)), grace=50 * MINUTE, cpu=1800, wall=3000,
+        owner="Phase 4", what="the engineer's harness change: author daily, move the candidate along hourly"),
 )
 
 

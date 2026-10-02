@@ -9,6 +9,8 @@ only, never in a canary) gives the House its runner. Everything else is in the m
 - `receipts`: the private `<state>/receipts/<day>.json` and `latest.json` the operator reads (`scripts/desk_receipts.py`);
 - `guard`: read-only SQLite and the habits that keep an extract from hurting the House;
 - the jobs: `preopen`, `economics`, `scoreboard`, `hygiene`, `clock` (and `grant`, `budget`, `drills`, ... when present).
+- the engineer (`engineer`, with `author` and `reviewer`): the harness's own changes, authored by Claude inside the
+  lanes' walls, reviewed, merged through the gateway, canaried and retained or reverted (Phase 4).
 """
 from __future__ import annotations
 
