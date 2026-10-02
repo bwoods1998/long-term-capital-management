@@ -706,6 +706,7 @@ class House:
         self.hypotheses: Any = None  # set by the service: the hypothesis foundry (league/hypotheses.py)
         self.backup: Any = None  # set by the service on the House box: a daily checkpoint of the box, kept by Sail
         self.updater: Any = None  # set by the service on the House box while `auto_update` is on (off since Sept 26)
+        self.ops: Any = None  # set by the service on the House box: the House's jobs (league/ops/, `_ops_step`)
         #: The options overhaul's two pluggable steps (`PLUGGABLE_STEPS`), set by league/service.py: the swarm's
         #: `SwarmStep` (league/swarm/hook.py `attach`) and the live options path (league/live); None while unset.
         self.swarm: Any = None
@@ -10604,6 +10605,7 @@ class House:
         lap("history_coverage")
         if self.updater is not None and self.updater.due():
             self._background("update", self._update)
+        self._ops_step()  # the House's jobs (league/ops/): due jobs start as one niced child; never waits
         if self.budget is not None and getattr(self.budget, "pacer", None) is None:
             self.budget.pacer = self.pacer
         self._pace_inference()
@@ -10705,6 +10707,29 @@ class House:
         self._health(summary)
         return summary
 
+    def _ops_step(self) -> None:
+        """The House's jobs (league/ops/, LTCM v3): one cheap call a tick when the service gave the House its runner
+        (`league.ops.attach`, on the House box only). It settles the job child that ended, starts at most one due job as
+        its own niced, bounded process, records a missed one, and never waits on a job. A failure is a warning; the
+        next tick tries again."""
+        if self.ops is None:
+            return
+        try:
+            from .ops import tick as ops_tick
+
+            ops_tick(self)
+        except Exception as exc:  # noqa: BLE001 - the jobs never cost the tick
+            self.alert("warning", f"the House's jobs step failed ({type(exc).__name__}: {str(exc)[:200]})")
+
+    def _ops_health(self) -> dict[str, Any] | None:
+        """health.json `ops`: the UTC day's job occurrences (due, late, failed, missed, ...; `league/ops/runner.py`)."""
+        if self.ops is None:
+            return None
+        try:
+            return self.ops.health()
+        except Exception as exc:  # noqa: BLE001 - health is written whatever the jobs' store says
+            return {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
+
     def _health(self, summary: Mapping[str, Any]) -> None:
         now = self.clock()
         with self._state_lock:
@@ -10782,6 +10807,7 @@ class House:
             # H6 (Sept 25, 2026): the restarts of the last day and what became of the research in flight at this one.
             **self._restarts_health(),
             "restart_research": self._restart_research_health(),
+            "ops": self._ops_health(),
         }
         health["tick_steps"] = self._tick_steps(str(summary["at"]))  # last: its `health` step is this block
         tmp = self.root / "health.tmp"

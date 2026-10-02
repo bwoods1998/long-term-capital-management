@@ -1,0 +1,46 @@
+{
+ "comparison_only": {
+  "booked_gym_box_estimate_usd": "12.0"
+ },
+ "complete": false,
+ "inputs": {
+  "claude": {
+   "usd": "40.10"
+  },
+  "market_data_usd": {
+   "monthly_usd": "99",
+   "usd": "33.10"
+  },
+  "openai": {
+   "booked_usd": "3.40",
+   "included_hold_usd": "0.40",
+   "usd": "3.00"
+  },
+  "sail_model": {
+   "booked_usd": "31.0",
+   "usd": "30.123456"
+  },
+  "thetadata_usd": {
+   "monthly_usd": "80",
+   "usd": "26.30"
+  }
+ },
+ "known_input_subtotal_usd": "132.62",
+ "project_net_usd": null,
+ "reservations_and_provider_comparison": {
+  "booked_model_holds": {
+   "openai": {
+    "count": 2
+   }
+  },
+  "provider_requests": {
+   "groups": {}
+  }
+ },
+ "trading": {
+  "realized_options_net_usd": "4.7"
+ },
+ "unresolved": [
+  "x"
+ ]
+}

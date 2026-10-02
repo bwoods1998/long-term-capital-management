@@ -1,0 +1,381 @@
+{
+ "burn_per_day": {
+  "gateway_sail_meter_24h_usd": "6.10",
+  "gateway_sail_meter_checked_at": "2026-10-06T20:05:00Z",
+  "rows": [
+   {
+    "last24h_usd": "2.50",
+    "last4h_pace_per_day_usd": "2.40",
+    "service": "Claude"
+   },
+   {
+    "last24h_usd": "1.75",
+    "last4h_pace_per_day_usd": "1.20",
+    "service": "Sail models"
+   },
+   {
+    "last24h_usd": "2.40",
+    "last4h_pace_per_day_usd": "3.00",
+    "service": "Sail boxes (billed)"
+   },
+   {
+    "last24h_usd": "0.00",
+    "last4h_pace_per_day_usd": "0.00",
+    "service": "OpenAI"
+   },
+   {
+    "last24h_usd": "2.63",
+    "last4h_pace_per_day_usd": "2.63",
+    "service": "ThetaData (pro-rata)"
+   },
+   {
+    "last24h_usd": "3.25",
+    "last4h_pace_per_day_usd": "3.25",
+    "service": "Alpaca market data (pro-rata)"
+   }
+  ],
+  "total_last24h_usd": "12.53",
+  "total_last4h_pace_per_day_usd": "12.48"
+ },
+ "checks": [],
+ "collected_at": "2026-10-06T20:10:03.000000Z",
+ "cost_start": "2026-09-26T06:23:14Z",
+ "costs": [
+  {
+   "service": "Sail (models + boxes)",
+   "settled_usd": "51.37",
+   "usd": "59.08"
+  },
+  {
+   "service": "Claude (Anthropic via the gateway)",
+   "settled_usd": "40.45",
+   "usd": "40.45"
+  },
+  {
+   "service": "OpenAI",
+   "settled_usd": "3.00",
+   "usd": "3.40"
+  },
+  {
+   "service": "ThetaData",
+   "settled_usd": "26.30",
+   "usd": "26.30"
+  },
+  {
+   "service": "Alpaca market data (Algo Trader Plus)",
+   "settled_usd": "33.10",
+   "usd": "33.10"
+  },
+  {
+   "service": "TypeSafe/Jev (gateway meter)",
+   "settled_usd": "0.00",
+   "usd": "3.00"
+  },
+  {
+   "service": "Owner-declared external costs",
+   "settled_usd": "5.00",
+   "usd": "5.00"
+  }
+ ],
+ "cutoff": "2026-10-06T20:00:00Z",
+ "days_since_t0": "10.567",
+ "financial_start": "2026-09-26T06:25:30Z",
+ "funding_now": {
+  "claude_cap_usd": "50",
+  "claude_remaining_usd": "9.25",
+  "openai_month": "2026-10",
+  "openai_month_cap_usd": "0",
+  "read_at": "2026-10-06T20:10:02.000000Z",
+  "sail_balance_usd": "120.00",
+  "sail_run_out_at": "2026-11-01"
+ },
+ "house_release": "/workspace/releases/20261006T010000Z-synthetic",
+ "library_report": {
+  "complete": false,
+  "idempotent": true,
+  "known_input_subtotal_usd": "132.62",
+  "project_net_usd": null,
+  "trading": {
+   "realized_options_net_usd": "4.7"
+  },
+  "unresolved": [
+   "x"
+  ]
+ },
+ "net": {
+  "criterion_5_met": false,
+  "definition": "realized options P&L since T0 (all routes, fees in) - all input costs since T0 (conservative basis)",
+  "gap_including_open_positions_usd": "65.93",
+  "gap_to_break_even_usd": "165.66",
+  "net_settled_basis_usd": "-154.55",
+  "net_usd": "-165.66",
+  "net_with_open_and_other_account_activity_usd": "-65.92",
+  "net_with_open_at_conservative_marks_usd": "-65.93"
+ },
+ "open_positions": {
+  "cost_with_fees_usd": "-210.14",
+  "unrealized_conservative_usd": "99.73",
+  "unrealized_mid_usd": "-0.27"
+ },
+ "positions": [
+  {
+   "book_cash_usd": "-0.55",
+   "broker_fee_correction_usd": "0.00",
+   "closed_at": "2026-10-01T15:00:00.000000Z",
+   "family": "house:calibration",
+   "opened_at": "2026-10-01T14:00:00.000000Z",
+   "pid": 1,
+   "realized_usd": "-0.55",
+   "root": "SPY",
+   "route": "calibration",
+   "status_at_cutoff": "closed",
+   "type": "debit_vertical"
+  },
+  {
+   "book_cash_usd": "12.34",
+   "broker_fee_correction_usd": "-0.02",
+   "closed_at": "2026-09-30T16:00:00.000000Z",
+   "family": "fam-a",
+   "opened_at": "2026-09-20T14:00:00.000000Z",
+   "pid": 2,
+   "realized_usd": "12.32",
+   "root": "QQQ",
+   "route": "tuition",
+   "status_at_cutoff": "closed",
+   "type": "debit_vertical"
+  },
+  {
+   "book_cash_usd": "-7.01",
+   "broker_fee_correction_usd": "0.00",
+   "closed_at": "2026-10-06T15:30:00.000000Z",
+   "family": "fam-b",
+   "opened_at": "2026-10-05T14:00:00.000000Z",
+   "pid": 3,
+   "realized_usd": "-7.01",
+   "root": "IWM",
+   "route": "incubator",
+   "status_at_cutoff": "closed",
+   "type": "long_call"
+  },
+  {
+   "bid_ask_value_usd": "190.00",
+   "book_cash_usd": "-210.13",
+   "broker_fee_correction_usd": "-0.01",
+   "closed_at": null,
+   "cost_with_fees_usd": "-210.14",
+   "exit_fee_estimate_usd": "0.13",
+   "family": "fam-c",
+   "legs": [
+    {
+     "ask": 4.3,
+     "bid": 4.1,
+     "is_call": true,
+     "quote_at": "2026-10-06T19:59:58Z",
+     "side": 1,
+     "strike": 600,
+     "symbol": "SPY261009C00600000"
+    },
+    {
+     "ask": 2.2,
+     "bid": 2.0,
+     "is_call": true,
+     "quote_at": "2026-10-06T19:59:58Z",
+     "side": -1,
+     "strike": 605,
+     "symbol": "SPY261009C00605000"
+    }
+   ],
+   "mark_basis": "intrinsic floor",
+   "mark_per_share": {
+    "conservative_bid_ask": "1.9",
+    "intrinsic": "3.10",
+    "mark": "3.10",
+    "mid": "2.1"
+   },
+   "mark_value_usd": "310.00",
+   "open_qty": 1,
+   "opened_at": "2026-10-06T14:00:00.000000Z",
+   "pid": 4,
+   "root": "SPY",
+   "route": "tuition",
+   "spot_at_cutoff": "603.10",
+   "spot_bar": "2026-10-06T19:59:00Z",
+   "status_at_cutoff": "open",
+   "type": "debit_vertical",
+   "unrealized_conservative_usd": "99.73",
+   "unrealized_mid_usd": "-0.27"
+  }
+ ],
+ "realized": {
+  "by_close_day": [
+   {
+    "calibration_usd": "0.00",
+    "closed_positions": 1,
+    "day": "2026-09-30",
+    "regulatory_fees_usd": "0.00",
+    "strategy_usd": "12.32",
+    "total_usd": "12.32"
+   },
+   {
+    "calibration_usd": "-0.55",
+    "closed_positions": 1,
+    "day": "2026-10-01",
+    "regulatory_fees_usd": "-0.04",
+    "strategy_usd": "0.00",
+    "total_usd": "-0.59"
+   },
+   {
+    "calibration_usd": "0.00",
+    "closed_positions": 1,
+    "day": "2026-10-06",
+    "regulatory_fees_usd": "-0.05",
+    "strategy_usd": "-7.01",
+    "total_usd": "-7.06"
+   }
+  ],
+  "by_route": {
+   "agent_other": {
+    "closed_positions": 0,
+    "open_positions": 0,
+    "realized_usd": "0.00",
+    "unrealized_conservative_usd": "0.00",
+    "unrealized_mid_usd": "0.00"
+   },
+   "calibration": {
+    "closed_positions": 1,
+    "open_positions": 0,
+    "realized_usd": "-0.55",
+    "unrealized_conservative_usd": "0.00",
+    "unrealized_mid_usd": "0.00"
+   },
+   "d2_real": {
+    "closed_positions": 0,
+    "open_positions": 0,
+    "realized_usd": "0.00",
+    "unrealized_conservative_usd": "0.00",
+    "unrealized_mid_usd": "0.00"
+   },
+   "house_other": {
+    "closed_positions": 0,
+    "open_positions": 0,
+    "realized_usd": "0.00",
+    "unrealized_conservative_usd": "0.00",
+    "unrealized_mid_usd": "0.00"
+   },
+   "house_test": {
+    "closed_positions": 0,
+    "open_positions": 0,
+    "realized_usd": "0.00",
+    "unrealized_conservative_usd": "0.00",
+    "unrealized_mid_usd": "0.00"
+   },
+   "incubator": {
+    "closed_positions": 1,
+    "open_positions": 0,
+    "realized_usd": "-7.01",
+    "unrealized_conservative_usd": "0.00",
+    "unrealized_mid_usd": "0.00"
+   },
+   "tuition": {
+    "closed_positions": 1,
+    "open_positions": 1,
+    "realized_usd": "12.32",
+    "unrealized_conservative_usd": "99.73",
+    "unrealized_mid_usd": "-0.27"
+   }
+  },
+  "calibration_usd": "-0.55",
+  "other_account_activity": {
+   "crypto_usd": "0.00",
+   "interest_usd": "0.01",
+   "misc_usd": "0.00",
+   "unreconciled_usd": "0.00"
+  },
+  "realized_options_pnl_usd": "4.67",
+  "regulatory_fees_orderless_usd": "-0.04",
+  "strategy_routes_usd": "5.31",
+  "unposted_regulatory_fee_estimate_usd": "-0.05"
+ },
+ "reconciliation": {
+  "accrued_fees_now": "0",
+  "blocking": [],
+  "book_changes_after_cutoff": {
+   "fills": 0,
+   "orders_changed": 0,
+   "orders_placed": 0,
+   "positions_closed": 0,
+   "positions_opened": 0
+  },
+  "book_option_fill_cash_usd": "-205.00",
+  "broker_activities_after_cutoff": 0,
+  "broker_fees_posted_usd": "-0.07",
+  "broker_open_orders_now": 0,
+  "broker_option_fill_cash_usd": "-205.00",
+  "broker_positions_now": [
+   {
+    "current_price": "4.2",
+    "market_value": "420",
+    "qty": "1",
+    "symbol": "SPY261009C00600000"
+   },
+   {
+    "current_price": "2.1",
+    "market_value": "-210",
+    "qty": "-1",
+    "symbol": "SPY261009C00605000"
+   }
+  ],
+  "deposits": {
+   "net_usd": "500.00",
+   "rows": [
+    {
+     "activity_type": "CSD",
+     "date": "2026-10-02",
+     "id": "x1",
+     "net_amount": "500",
+     "transaction_time": null
+    }
+   ],
+   "treatment": "owner funding, never P&L"
+  },
+  "diagnostic_notes": 1,
+  "equity_identity": {
+   "account_pnl_usd": "-200.00",
+   "components": "closed rows + order-less option fees + other account activity + open positions (cost + broker fee correction) + the broker's own option market value",
+   "components_usd": "4.59",
+   "equity_read_at": "2026-10-06T20:10:01.000000Z",
+   "equity_usd": "1300.00",
+   "net_deposits_usd": "500.00",
+   "residual_note": "the legacy coins sold at the reset and their dust (their value inside the start mark was never recorded; not options P&L)",
+   "residual_usd": "-204.59",
+   "start_equity_usd": "1000.00"
+  },
+  "fills_match": true,
+  "pending_orders_at_cutoff": [],
+  "recon_now": {
+   "frozen": false
+  },
+  "reconciled": false,
+  "unposted_regulatory_fee_estimate_usd": "0.05",
+  "unposted_regulatory_fees": [
+   {
+    "day": "2026-10-06",
+    "estimate_usd": "0.02",
+    "label": "CAT",
+    "rate": "0.005",
+    "volume": "3"
+   },
+   {
+    "day": "2026-10-06",
+    "estimate_usd": "0.03",
+    "label": "ORF",
+    "rate": "0.005",
+    "volume": "5"
+   }
+  ],
+  "unreconciled_usd": "0.00"
+ },
+ "schema": "ltcm-econ-close-1",
+ "total_costs_settled_basis_usd": "159.22",
+ "total_costs_usd": "170.33"
+}

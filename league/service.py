@@ -389,6 +389,12 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         from .updater import Updater
 
         house.updater = Updater(REPO.parent.parent)
+    if not canary and REPO.parent.name == "releases":
+        # On the House box only: the House's jobs (league/ops/: the pre-open checks, the close economics, hygiene, the
+        # venue clock, the scoreboard, and the jobs other packages add), each a niced child on the House's calendar.
+        from .ops import attach as ops_attach
+
+        ops_attach(house, root, base=REPO.parent.parent)
     if swarm_on:
         from .swarm.hook import attach
 
