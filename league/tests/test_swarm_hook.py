@@ -600,6 +600,11 @@ class Mirror(HookCase):
 class Reads(HookCase):
     def setUp(self):
         super().setUp()
+        # EVIDENCE V3 (Oct 2, 2026) retired execution tuition (`bands.TUITION_ROWS` False): these tests read the retired
+        # route explicitly; `test_the_default_read_gives_no_tuition_row` reads it as the House does now.
+        retired = patch("league.swarm.bands.TUITION_ROWS", True)
+        retired.start()
+        self.addCleanup(retired.stop)
         self.bundle = gym_bundle_version()
         (self.root / "swarm.json").write_text(json.dumps({"gym": {"image_checkpoint": "synthetic-image"}}))
 
@@ -662,6 +667,7 @@ class Reads(HookCase):
                         gate_outcome={"sha": cases["demoted"], "result": "demoted"})
         store.close()
         self.assertEqual([r["family"] for r in bands.read(self.root)], ["reviewed"])
+        self.assertEqual(bands.read(self.root, tuition=False), [], "evidence v3: the House reads no tuition row")
 
     def test_bands_read_never_raises(self):
         self.assertEqual(bands.read(self.root / "nowhere"), [])

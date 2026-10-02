@@ -533,8 +533,15 @@ class Ladder:
         cut, m = benjamini_hochberg(entrants.values(), rules.fdr_q)
         ordered = sorted(entrants.values())
         for cohort, figures in judged:
-            verdict = self._decide(cohort, figures, day=day, rules=rules, cut=cut, m=m,
-                                   rank=bisect.bisect_left(ordered, figures["p"]) + 1)
+            try:
+                verdict = self._decide(cohort, figures, day=day, rules=rules, cut=cut, m=m,
+                                       rank=bisect.bisect_left(ordered, figures["p"]) + 1)
+            except Exception as exc:  # noqa: BLE001 - one cohort's error promotes nothing and stops no other's judgement
+                verdict = "error"
+                alert = getattr(self.live, "alert", None)
+                if callable(alert):
+                    alert("warning", f"live: the forward ladder could not judge {cohort['family']}@{cohort['version']} "
+                                     f"({type(exc).__name__}: {str(exc)[:160]}); judged again at the next session's end")
             out["judged"] += 1
             out["verdicts"][verdict] = out["verdicts"].get(verdict, 0) + 1
         out["entrants"], out["bh_size"] = len(entrants), m
@@ -612,8 +619,8 @@ class Ladder:
             return "blocked"
         store.close_cohort(f, n, status="promoted", day=day, reason=f"ladder: promoted to Probe (receipt {receipt_id})")
         self.bridge.settle_prefilter(sha)
-        self.live.record("live.ladder", {"family": f, "version": n, "verdict": "promoted", "receipt": receipt_id},
-                         agent=f)
+        self.live.record("live.band", {"family": f, "from": "gym", "to": "probe", "version": n, "receipt": receipt_id,
+                                       "why": "the forward ladder promoted it"}, agent=f)
         return "promoted"
 
     def demotions(self, day: str, rules: Rules) -> list[dict[str, Any]]:
@@ -646,8 +653,9 @@ class Ladder:
             if self.bridge.demote(fam["family"], why=why, receipt=receipt, at=float(self.live.clock())):
                 self.live.observe_store.close_cohort(fam["family"], int(version or 0), status="demoted", day=day,
                                                      reason=f"ladder: {why}", was=("promoted",))
-                self.live.record("live.ladder", {"family": fam["family"], "version": version, "verdict": "demoted",
-                                                 "why": why, "receipt": receipt}, agent=fam["family"])
+                self.live.record("live.band", {"family": fam["family"], "from": fam["band"], "to": "gym",
+                                               "version": version, "receipt": receipt,
+                                               "why": f"the forward ladder demoted it: {why}"}, agent=fam["family"])
                 out.append({"family": fam["family"], "why": why, "receipt": receipt})
         return out
 

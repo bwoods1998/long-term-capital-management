@@ -428,7 +428,8 @@ class TheSessionEnd(StoreCase):
         self.assertEqual(receipt["verdict"], "promote")
         self.assertEqual(self.status()[0], "promoted")
         self.assertNotIn("sha-fam-1", self.bridge.requests)
-        self.assertEqual(self.events[-1][1]["verdict"], "promoted")
+        self.assertEqual(self.events[-1], ("live.band", {"family": "fam", "from": "gym", "to": "probe", "version": 1,
+                                                         "receipt": receipt["id"], "why": "the forward ladder promoted it"}))
 
     def test_a_negative_prefilter_fails_the_cohort(self):
         self.strong()
@@ -484,6 +485,25 @@ class TheSessionEnd(StoreCase):
         [r] = self.receipts()
         self.assertEqual(r["verdict"], "fail")
         self.assertEqual(json.loads(r["reasons"]), ["the drift line"])
+
+    def test_one_cohorts_error_stops_no_others_judgement(self):
+        self.strong()
+        self.strong("two")
+        alerts = []
+        self.live.alert = lambda level, text: alerts.append(text)
+        calls = []
+
+        def prefilter(sha):
+            calls.append(sha)
+            if sha == "sha-fam-1":
+                raise RuntimeError("the store is locked")
+            return None
+
+        self.bridge.prefilter = prefilter
+        out = self.run_day(binding=True)
+        self.assertEqual(out["verdicts"], {"error": 1, "await_prefilter": 1})
+        self.assertIn("fam@1", alerts[0])
+        self.assertEqual(self.bridge.promoted, [])
 
     def test_a_cohort_under_another_evaluator_is_not_judged(self):
         self.strong()
@@ -616,6 +636,12 @@ class TheSwarmSide(unittest.TestCase):
         self.assertEqual((fam["band"], fam["state"]["ladder_demoted"]["receipt"]), ("gym", 4))
         self.assertFalse(self.bridge.demote("fam", why="w", receipt=5, at=3.0), "a Gym family has nothing to lose")
 
+    def test_the_sealed_routes_are_retired(self):
+        from league.swarm import bands, gate
+
+        self.assertIs(bands.TUITION_ROWS, False)
+        self.assertIs(gate.SEALED_LOOKS, False)
+
     def test_the_default_bridge_is_the_swarms_store_only(self):
         self.assertIsInstance(L.default_bridge(SimpleNamespace(families=self.families)), L.SwarmBridge)
         from league.live.families import MemoryFamilies
@@ -644,6 +670,33 @@ class TheExitSpot(unittest.TestCase):
     def test_an_expiry_takes_the_settlement_level(self):
         day = self.day([500.0, 502.0])
         self.assertEqual(L.exit_spot({"root": "SPY", "exit_day": "2026-10-05", "exit_minute": None}, day), 502.0)
+
+
+# ================================================================================================== the live path
+from league.tests.live_fakes import MONDAY, at  # noqa: E402
+from league.tests.test_live_practice import PracticeCase, trained  # noqa: E402
+
+
+class TheLivePath(PracticeCase):
+    def test_practice_closes_carry_their_exit_spot_and_the_close_judges_the_ladder(self):
+        self.clock.set(at(MONDAY, 15, 30))
+        self.build(observed=[trained("f", params={"hold": 3, "opens": 3})])
+        self.run_to(15, 50)
+        db = self.live.observe_store._connect()
+        bodies = [json.loads(b) for (b,) in db.execute("SELECT body FROM trades WHERE forced=0")]
+        self.assertTrue(bodies, "the program closed trades")
+        for b in bodies:
+            self.assertIsInstance(b.get("exit_spot"), float)
+            self.assertGreater(b["exit_spot"], 0)
+            self.assertIsNotNone(L.drift_usd(b), "the drift control's figures are all there")
+        [entrant] = self.live.observe_store.entrants(since="2026-01-01")
+        self.assertEqual((entrant["family"], entrant["entered_day"]), ("f", MONDAY.isoformat()))
+        out = self.run_to(16, 0)
+        self.assertEqual(out["ended"], MONDAY.isoformat())
+        self.assertEqual(out["ladder"]["verdicts"], {"short": 1})
+        [(verdict,)] = db.execute("SELECT verdict FROM ladder_decisions").fetchall()
+        self.assertEqual(verdict, "short")
+        self.assertEqual([a for a in self.alerts if "ladder" in a[1]], [])
 
 
 # ================================================================================================== the scoreboard
