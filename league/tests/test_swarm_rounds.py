@@ -13,7 +13,7 @@ from pathlib import Path
 from league.swarm import settings as S
 from league.swarm.architect import Architect
 from league.swarm.gate import Gate
-from league.swarm.models import ModelRouter
+from league.swarm.models import STALL_KEY, ModelRouter
 from league.swarm.pool import GymJob, PoolError
 from league.swarm.seeds import SEEDS, family_spec
 from league.swarm.store import SwarmStore
@@ -567,6 +567,42 @@ class GateTests(RoundCase):
         self.assertEqual(len(alerts), 1)
         self.assertTrue(alerts[0]["alert"])
         self.assertEqual(len(self.store.looks()), 1)
+
+    def stalled_round(self):
+        """A gate round with Sail's balanced window flagged stalled (THE WINDOW FALLBACK, league/swarm/models.py)."""
+        self.ready()
+        self.store.put(STALL_KEY, {"balanced": {"until": self.clock() + 3600, "since": self.clock()}})
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}, {"text": json.dumps({"verdict": "pass"})}]
+        Gate(self.store, self.pool, self.router, self.settings).run()
+        review = self.store.family("a")["state"]["review"]
+        alerts = [e["payload"] for e in self.store.events_after(0) if e["kind"] == "swarm.status"
+                  and e["payload"].get("action") == "not_the_plans_reviewer"]
+        return review, alerts
+
+    def test_with_the_balanced_window_flagged_the_audit_stays_a_second_different_model(self):
+        review, [alert] = self.stalled_round()
+        self.assertEqual([b["model"] for b in self.sail.bodies], ["deepseek-ai/DeepSeek-V4-Pro-0813", "moonshotai/Kimi-K3"])
+        self.assertEqual((review["model"], review["audit"]["model"]), ("pro_asap", "k3"))
+        self.assertFalse(alert["same_reader"])
+        self.assertIn("Sail models stood in", alert["text"])
+
+    def test_one_model_on_two_sail_profiles_is_one_reader_and_the_owner_is_told(self):
+        self.settings["sail_fallback_same_model"] = None  # the audit's fallback is the map's pro_asap: the review's model
+        review, [alert] = self.stalled_round()
+        self.assertEqual([b["model"] for b in self.sail.bodies], ["deepseek-ai/DeepSeek-V4-Pro-0813"] * 2)
+        self.assertEqual((review["model"], review["audit"]["model"]), ("pro_asap", "pro_asap"))
+        self.assertTrue(alert["same_reader"])
+        self.assertIn("both deepseek-ai/DeepSeek-V4-Pro-0813: one model read the program twice", alert["text"])
+
+    def test_the_one_reader_check_compares_the_models_behind_sail_profiles(self):
+        from league.swarm.gate import same_reader
+
+        self.assertTrue(same_reader({"route": "sail", "model": "pro_balanced"}, {"route": "sail", "model": "pro_asap"}))
+        self.assertFalse(same_reader({"route": "sail", "model": "pro_balanced"}, {"route": "sail", "model": "k3"}))
+        self.assertFalse(same_reader({"route": "openai", "model": "gpt-6-sol"}, {"route": "sail", "model": "k3"}))
+        self.assertTrue(same_reader({"route": "claude", "model": "claude-opus-5-5"},
+                                    {"route": "claude", "model": "claude-opus-5-5"}))
+        self.assertFalse(same_reader({"route": "sail", "model": None}, {"route": "sail", "model": None}))
 
     def test_a_sail_audit_that_refuses_costs_no_look(self):
         self.ready()

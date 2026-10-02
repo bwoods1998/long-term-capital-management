@@ -288,6 +288,29 @@ def _sessions_between(first: str, last: str) -> int:
     return sessions
 
 
+def reader(answer: Mapping[str, Any]) -> str | None:
+    """The model that read a program: for a Sail answer the model its profile dispatches to (`ltcm.provider.model_of`:
+    pro_balanced and pro_asap are one reader, DeepSeek-V4-Pro), else the answer's model; None when it names none."""
+    model = answer.get("model")
+    if model is None:
+        return None
+    if answer.get("route") == "sail":
+        try:
+            from ltcm.provider import model_of
+
+            return model_of(str(model))
+        except Exception:  # noqa: BLE001 - an unknown profile is its own name
+            return str(model)
+    return str(model)
+
+
+def same_reader(review: Mapping[str, Any], audit: Mapping[str, Any]) -> bool:
+    """Whether one model read the program twice: the review's reader is the audit's (`reader`, so a review on a Sail
+    profile and an audit on another profile of the same model, e.g. the window fallback's, are one reader)."""
+    first = reader(review)
+    return first is not None and first == reader(audit)
+
+
 def incubator_stage(stage: str, fid: str, *, incubator: bool = False) -> tuple[str, str]:
     """(the stage's name in its attempt count and model-call key, the Sail desk its fuse is on): the gate's own
     ("review" or "audit", desk "<family>:review"), or the incubator's ("incubator_review" or "incubator_audit", desk
@@ -669,13 +692,13 @@ class Gate:
                 # The plan: two different paid models read the program (GPT-6 Sol or Claude reviews, Claude or GPT-6 Astra
                 # audits). Either read on Sail, or one model reading it twice (the review and the audit on the same Claude
                 # model once "review" is in `claude.roles`; `claude.role_model` gives them different ones), is the owner's.
-                same = review.get("model") is not None and review.get("model") == audit.get("model")
+                same = same_reader(review, audit)
                 if same or review.get("route") not in ("openai", "claude") or audit.get("route") not in ("claude", "openai"):
                     self.store.event("swarm.status", fam["id"], {
                         "action": "not_the_plans_reviewer", "alert": True, "version": n, "same_reader": same,
                         "review": review.get("model"), "audit": audit.get("model"),
-                        "text": (f"the review and the audit were both {audit.get('model')}: one model read the program "
-                                 "twice (claude.role_model can give the review its own Claude model)") if same else
+                        "text": (f"the review and the audit were both {reader(audit)}: one model read the program "
+                                 f"twice ({self._one_reader_hint(audit)})") if same else
                                 "a holdout look was reviewed without the plan's models (GPT-6 Sol or Claude reviews; Claude or "
                                 "GPT-6 Astra audits): their budgets had no room, so Sail models stood in"})
                 if not self.store.compare_and_set_state(fam["id"], {"validation_version": n}, review=review):
@@ -911,16 +934,24 @@ class Gate:
         record = incubator.put_review(self.store, fid, sha, record, clock=self.clock)  # the verdict first, the alert after
         # The plan's two different paid readers (`run`): either read on Sail, or one model reading the program twice, is the
         # owner's to know, for an incubator review as for a holdout look.
-        same = record.get("model") is not None and record.get("model") == audit.get("model")
+        same = same_reader(record, audit)
         if same or record.get("route") not in ("openai", "claude") or audit.get("route") not in ("claude", "openai"):
             self.store.event("swarm.status", fid, {
                 "action": "not_the_plans_reviewer", "alert": True, "version": n, "same_reader": same, "incubator": True,
                 "review": record.get("model"), "audit": audit.get("model"),
-                "text": (f"an incubator review and its audit were both {audit.get('model')}: one model read the program twice "
-                         "(claude.role_model can give the review its own Claude model)") if same else
+                "text": (f"an incubator review and its audit were both {reader(audit)}: one model read the program twice "
+                         f"({self._one_reader_hint(audit)})") if same else
                         "an incubator review was made without the plan's models (GPT-6 Sol or Claude reviews; Claude or GPT-6 "
                         "Astra audits): their budgets had no room, so Sail models stood in"})
         return str(record["verdict"])
+
+    @staticmethod
+    def _one_reader_hint(audit: Mapping[str, Any]) -> str:
+        """What gives the two reads different models, for the owner's one-reader alert."""
+        if audit.get("route") == "sail":
+            return ("gate.review_sail_profile and gate.audit_sail_profile name different models; sail_fallback_same_model "
+                    "keeps the audit's on a stalled window")
+        return "claude.role_model can give the review its own Claude model"
 
     def _review_current(self, fid: str, n: int, image: Any, bundle: Any) -> bool:
         fam = self.store.family(fid) or {}
@@ -1314,4 +1345,4 @@ class Gate:
 
 __all__ = ["Gate", "run_sha", "incubator_stage", "REVIEW", "DUPLICATE_STAGE", "VALIDATION_IDENTITY", "validation_identity",
            "duplicate_words", "HOLD_DRIFT_STAGE", "HOLD_POWER_STAGE", "HOLD_WORDS", "HOLD_OUTCOME", "look_hold_settings",
-           "holdout_sessions", "sessions_between"]
+           "holdout_sessions", "sessions_between", "reader", "same_reader"]

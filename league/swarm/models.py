@@ -38,7 +38,10 @@
   hours). `ask`'s Sail call on a profile outside the asap window that `sail_fallback` maps to an asap profile (k3_balanced
   and pro_balanced to pro_asap by default): a `provider_poll_timeout` flags the window stalled for an hour (kv
   `sail_window_stall`, one `swarm.status` alert a stall) and retries the call once on the fallback with a new request key;
-  while the flag stands, calls on that window go straight to the fallback. The answer says so (`sail_fallback`).
+  while the flag stands, calls on that window go straight to the fallback. The answer says so (`sail_fallback`). A role
+  in `sail_fallback_same_model` (the gate's audit by default) keeps its MODEL: its fallback is the same model's asap
+  profile (k3_balanced to k3), never the mapped one, so the audit (Kimi-K3) never falls onto the review's DeepSeek-V4-Pro
+  and one model read the program twice.
 - FALLBACKS (Release A, Sept 30, 2026): a call that asked Claude and ended elsewhere (`ask`: the next paid route, Sail, or
   no route when the role has no Sail profile; `claude_turn`: the caller's Sail turn) is counted in memory by role, the
   Claude route's failure kind and where it went (`note_fallback`). The swarm's `FundingWatch` drains the counts
@@ -902,7 +905,7 @@ class ModelRouter:
 
         # THE WINDOW FALLBACK (`sail_fallback`): a profile outside the asap window goes straight to its asap fallback while
         # its window is flagged stalled, and a poll timeout on it flags the window and retries once there.
-        fallback = self.sail_fallback(sail_profile)
+        fallback = self.sail_fallback(sail_profile, role=role)
         profile, why = sail_profile, None
         if fallback is not None and self.window_stalled(fallback[0]) is not None:
             profile, why = fallback[1], "flagged"
@@ -937,15 +940,23 @@ class ModelRouter:
         return out
 
     # ------------------------------------------------------------------ the Sail window fallback
-    def sail_fallback(self, profile: str | None) -> tuple[str, str] | None:
+    def sail_fallback(self, profile: str | None, role: str | None = None) -> tuple[str, str] | None:
         """(window, fallback profile) for a Sail profile outside the asap window that `sail_fallback` maps to an asap
-        profile; None for an asap profile, an unknown one, or no usable entry (null turns the whole map off)."""
+        profile; None for an asap profile, an unknown one, or no usable entry (null turns the whole map off). For a role in
+        `sail_fallback_same_model` (default: the audit; null: none) the fallback is the same model's asap profile
+        (`asap_twin`), whatever the map names, and None when that model has no asap profile: the gate's audit is a second,
+        different model from the review, on its fallback too."""
         mapping = self.settings.get("sail_fallback")
         if not profile or not isinstance(mapping, Mapping):
             return None
         target = mapping.get(profile)
         if not isinstance(target, str) or target == profile:
             return None
+        same_model = self.settings.get("sail_fallback_same_model", ("audit",))
+        if role is not None and isinstance(same_model, (list, tuple)) and role in same_model:
+            target = asap_twin(profile)
+            if target is None:
+                return None
         window = sail_window(profile)
         if window is None or window == "asap" or sail_window(target) != "asap":
             return None
@@ -986,7 +997,8 @@ class ModelRouter:
                 "action": "sail_window_stall", "alert": True, "window": window, "profile": profile, "fallback": fallback,
                 "role": role, "code": code, "until": now + STALL_SECONDS,
                 "text": (f"Sail's {window} window did not answer a {role} call on {profile} ({code}): calls on that window go to "
-                         f"{fallback} for the next hour, then the {window} window is asked again")})
+                         f"their asap fallback ({fallback} for the {role}) for the next hour, then the {window} window is asked "
+                         "again")})
         return fresh
 
     def _ask_openai(self, *, role: str, system: str, user: str, family: str | None, key: str, openai_model: str,
@@ -1060,6 +1072,19 @@ def sail_window(profile: str) -> str | None:
         return None
 
 
+def asap_twin(profile: str) -> str | None:
+    """The asap profile of the model a Sail profile dispatches to (k3_balanced: k3; pro_balanced: pro_asap), or None for
+    an unknown profile or a model with no asap profile."""
+    try:
+        from ltcm.provider import PROFILES, model_of
+
+        model = model_of(str(profile))
+    except Exception:  # noqa: BLE001
+        return None
+    twins = sorted(name for name, spec in PROFILES.items() if spec[0] == model and spec[1] == "asap")
+    return twins[0] if twins else None
+
+
 def fallback_key(key: str, profile: str) -> str:
     """The request key of a call's retry on its fallback profile: a new request, never the stalled one's re-read."""
     return f"{key[:160]}:fallback:{profile}"[:200]
@@ -1106,4 +1131,4 @@ def build_router(root: Any, store: SwarmStore, settings: Mapping[str, Any], *, c
 
 
 __all__ = ["ModelRouter", "ModelError", "ClaudeReply", "build_router", "extract_json", "fallback_key", "sail_window",
-           "STALL_KEY", "STALL_SECONDS"]
+           "asap_twin", "STALL_KEY", "STALL_SECONDS"]

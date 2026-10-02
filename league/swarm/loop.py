@@ -736,8 +736,8 @@ class Swarm:
 
     def policy_notice(self) -> dict[str, Any] | None:
         """SETTINGS AS CODE (`settings.read_policy`): one `swarm.status` alert (and a log line) for each distinct problem
-        with the repo's policy.json (not a JSON object, or an owner key in it that is ignored), never one a loop. A missing
-        file is no problem. Returns the event's payload when one was raised."""
+        with the repo's policy.json (not a JSON object or not the defaults' shape, or an owner key in it that is ignored),
+        never one a loop. A missing file is no problem. Returns the event's payload when one was raised."""
         status = self.settings.get("_policy")
         if not isinstance(status, Mapping) or (status.get("state") != "malformed" and not status.get("ignored")):
             return None
