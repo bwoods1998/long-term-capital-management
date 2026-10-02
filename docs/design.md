@@ -16,10 +16,47 @@ disagree, the code is right and this page is fixed. How to operate it is in
 | The swarm | `league/swarm/`, `league/CONTRACT.md` | about 20 alive (start 96, floor 12); 3 holdout looks, 0 passes; births of debit verticals and two-sided singles only, under agenda v16c; the architect on Sail (DeepSeek-V4-Pro, asap queue); Claude at the gate and for the strategist; duplicate looks refused and the look holds on; automatic forks of validated lineages off; OpenAI unused |
 | Paper and production paths | `league/live/`, `gateway/` | real money opens four debit types; both paper route proofs passed Sept 28; 19 D3 calibration round trips by the Oct 2 open; one exit-only tuition lot; the House live test armed, no order yet; the practice league (validated and Train tiers); the incubator on since Oct 1, with no first look before about Oct 6; no general agent paper book; covered strategies absent |
 | The public page | blakewoods.us/capital | the owner's (`personal-site`, revamped by the owner on Oct 2); the House's publisher feeds it |
+| LTCM v3, release V3-A | `league/ops/`, `league/swarm/policy.json`, `league/updater.py`, `league/live_trading.py`, `gateway/` | built and integrated on `release/v3a`, **not yet deployed**; the forward ladder (WP6) and the credit types (WP7) landing in it, being integrated (below, "v3: the unattended desk") |
 
 This is observed state, not completion of the design below. Broad universe discovery, covered strategies, the
 general paper environment and exposure-aware allocation are still to build. The incubator and its swarm-side facts (B2)
 shipped in Release B; it has been on since Oct 1. The repository README's "Current state" has the rest.
+
+## v3: the unattended desk (V3-A; built, not yet deployed)
+
+The owner's Oct 2 decisions turn the design toward a desk with no human in the loop ([the run
+record](runs/2026-10-02-unattended-desk.md) has the diagnosis and the plan). The principles: the idle desk is nearly
+free and prefunded; the forward record is the judge and the Gym the teacher; fewer, stronger researchers; money rules
+that scale with evidence and capital; the harness improves itself inside hard walls; operations are House jobs; one
+funding action a year, not one a week; an honest record with the desk's own stop rule. Release V3-A carries every
+protected change at once:
+
+- **Self-deploy (D5).** `auto_update` on: merged code reaches the House through the updater's walls (exact-commit
+  attestation, the FORBIDDEN files, the trusted content checks, the release train and session hold, canary, watch,
+  rollback). Protected paths stay the owner's own deploy. A monthly rollback drill proves the way back.
+- **The House's jobs** (`league/ops/`): the pre-open checks, the close economics, hygiene, the venue clock, the daily
+  public scoreboard, the budget, the standing grant and the drills run on the House's own NYSE calendar as niced,
+  bounded children with receipts; the operator reads a private receipts file without exec.
+- **The budget rule (D4).** Research dollars a day per meter (Sail, Claude) = the floor (at most $5 a day in all, inside
+  90 days of runway) plus half the trailing 30-day realized options profit, capped so no meter falls under 60 days of
+  runway; after 60 sessions from Oct 5 with no Probe promotion, the floor alone. Applied last and tighten-only to the
+  spend knobs; the burst is gone. One `funding` mail per meter when a prefund is short, with the exact amount.
+- **The standing grant (D5).** The grant re-ratifies itself after an owner deploy that moves the money digest and after
+  a deposit, at the lower of equity and the owner's ceiling; never loosens.
+- **Settings as code.** `league/swarm/policy.json` sits between `config.json` and the box's `swarm.json`, which keeps
+  only the owner's switches.
+- **The forward ladder (D2; WP6, landing in V3-A).** Pre-filter (the 2026 holdout as a free read) → Practice → Probe →
+  Sized, promotion on the practice record under a day-block bootstrap bound, sub-window, drift and desk-wide
+  Benjamini-Hochberg control, benchmarked against the sealed look before it binds. It replaces the holdout look as the
+  gate to real money (**Evidence**, below, describes the running design until it deploys).
+- **Credit types (D3; WP7, landing in V3-A).** Credit verticals, iron condors and iron butterflies open for real only
+  at $2,000 of equity, defined-risk, after a paper proof per type, with the gateway's list in the same deploy.
+- **The engineer's walls (Phase 4, ahead of the engineer).** The gateway merges an `engineer/<lane>/` pull request
+  only on green CI for its exact head, a recorded automated approve, the lane's own files and no protected path.
+
+Practice also changes in V3-A (WP5): practice positions are capped as a Probe's, observe reads are clamped to what the
+Gym store holds, and the read budget fits 24 roots. With WP5 and WP6 the evaluator's fingerprint moves: the one
+planned evidence reset of v3.
 
 ## The goal and the one number
 
@@ -568,7 +605,7 @@ diagnostician.
 - **The grant** `options-swarm-20260928` (`league/live_trading.py`) covers the Brokerage Account
   only. Its capital is the lower of the account's equity and the owner's ceiling at each
   ratification; it is pinned to the money digest, re-ratified within a minute of any promotion that
-  moves the digest and whenever a deposit lands. With no active grant the House sends no real
+  moves the digest and whenever a deposit lands (from V3-A by the House's own `grant` job, the standing grant). With no active grant the House sends no real
   opening order; exits always go on.
 - **Capital flows are the owner's.** The publisher and the scoreboard read the account's funding
   activities and net out deposits and withdrawals; the daily stop and the drawdown peak do the same.
@@ -585,7 +622,7 @@ diagnostician.
 | Architect | Claude via the gateway, or Sail | `claude.model` (Sonnet 5.5 at $2 input, $10 output per million tokens; Opus 5.5 at $4 / $20); Sail as the fallback (`architect.sail_profile`: Kimi-K3 balanced by default, DeepSeek-V4-Pro asap live since Oct 2), and live since Sept 30 (the architect's Claude line $0), at `architect.sail_effort` (`medium` by default, `high` live) | inside Claude's funded total, or the Sail pace |
 | Gate audit | Claude via the gateway | `claude.role_model["audit"]` or `claude.model` (live: Opus 5.5); GPT-6 Astra while the September month has room (off live), then a second Sail model, as fallbacks | inside Claude's funded total |
 | Diagnostician | Claude via the gateway | `claude.model` | `diagnostician.usd_day`; off live since Sept 30 |
-| Weekly post-mortem | - | not built; the operator writes the post-mortem | - |
+| Weekly post-mortem | - | not built; the operator writes the post-mortem (V3-A registers a weekly House job for it; its module comes in Phase 5) | - |
 | Gym | Sail boxes | 4-8 sealed size-l boxes by default; 2-6 live since Release A, Sept 30 | $0.10-0.40 an hour each while busy; asleep when idle |
 | Data | Sail box + ThetaData | one size-l box, asleep when idle | $5-15 a day while running |
 | The House | Sail box | one size-s box | about $0.03 an hour |
@@ -598,7 +635,9 @@ diagnostician.
   within the owner's funded total (`CLAUDE_USD`, the swarm's `claude.usd_cap`). After the burst the
   plan's rule stands: Sail at most $12 a day until Net is positive over 30 days; then compute may grow
   to half the trailing 30-day gross options profit. When the forward record is flat, compute drops to
-  the floor: the nightly forward replay, live shadow and one architect pass a day.
+  the floor: the nightly forward replay, live shadow and one architect pass a day. V3-A replaces the burst and this
+  rule with the budget rule in code (`league/ops/budget.py`; above, and [operations](operations.md), "The budget
+  rule"): research follows realized profit, never marks, inside the prefunded meters' runway.
 - **The Sail guard.** Running out of Sail credits pauses every box, the House included. Gym boxes and
   researchers scale down whenever the balance falls below two days of the House's burn plus $30,
   and stop before the House does.

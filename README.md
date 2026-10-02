@@ -29,6 +29,13 @@ outcome established by more agents, more trials, or a successful backtest.
 
 ## Current state: October 2, 14:15Z (paused)
 
+- **LTCM v3, release V3-A: built, not yet deployed.** On Oct 2 the owner chose a desk with no human in the loop
+  ([the run record](docs/runs/2026-10-02-unattended-desk.md)): the in-box updater on with its walls, the operator's
+  scripts as House jobs (`league/ops/`), a research budget that follows realized profit inside prefunded meters, a
+  standing grant, settings as code (`league/swarm/policy.json`), a daily public scoreboard in
+  [docs/runs/desk/](docs/runs/desk/README.md), and the gateway's walls for an engineer agent. The forward ladder (WP6)
+  and credit types at $2,000 of equity (WP7) are landing in V3-A, being integrated. Until the owner deploys it, the
+  bullets below describe production. [Operations](docs/operations.md) ("LTCM v3: release V3-A") has the detail.
 - **Active development is paused** (the owner, Oct 2). Production keeps running unchanged: no deploy and no settings
   change until work resumes. How to resume is in [operations](docs/operations.md) ("Paused").
 - **What runs.** The House runs `20261002T112610Z-e11710692569` (main `e3d0111f`, promoted 11:26Z Oct 2), the gateway
@@ -177,13 +184,14 @@ As it will stand after the prune (#375, still a draft); until it merges the lega
 | `league/` | the House: `house.py` (the tick), `ledger.py`, `book.py`, `allocator.py`, `constitution.py` (the money rules and their digest), `live_trading.py` (the grant), `publish.py`, `trading_profit.py` and `account_activity.py` (Profit and the positions table), `claude.py` and `frontier.py` (the Claude and OpenAI clients, through the gateway), `service.py`, `watchdog.py`, `stats.py`, `config.json` |
 | `league/live/` | the live path: the shadow and observe books, the real book, the paper route proofs, the D3 calibration round trips, the House live test |
 | `league/gym/` | the Gym: the store reader, the engine, fills, the venue's rules, greeks, the batch runner, the sealed-box driver; the program contract in `PROGRAM.md` |
-| `league/swarm/` | the swarm: researchers, the tournament and the allocation, the architect, the family cards, the diagnostician, the gate, the model router, the Sail guard, the funding-cliff alerts, the Gym pool, the evaluator record |
+| `league/swarm/` | the swarm: researchers, the tournament and the allocation, the architect, the family cards, the diagnostician, the gate, the model router, the Sail guard, the funding-cliff alerts, the Gym pool, the evaluator record; `policy.json`, the research settings as code (V3-A) |
+| `league/ops/` | the House's jobs (V3-A): the scheduler on the NYSE calendar, the runner and receipts, the pre-open checks, the close economics, hygiene, the venue clock, the scoreboard, and the protected budget rule, standing grant and drills |
 | `league/CONTRACT.md` | the options strategy contract every researcher reads (about 32 KB) |
 | `league/tests/` | the tests |
 | `gateway/` | the Worker ([its README](gateway/README.md)) |
-| `scripts/` | `floor_box.py` (the House's box), `gateway_admin.py` (the kill switch), `live_trading.py` (the grant), `scripts/data/` (the data box, the backfill, the images, the nightly job, the store checks) |
+| `scripts/` | `floor_box.py` (the House's box), `gateway_admin.py` (the kill switch), `live_trading.py` (the grant), `desk_receipts.py` (the House's receipts, read without exec; V3-A), `settings_migrate.py` (swarm.json to policy.json; V3-A), `scripts/data/` (the data box, the backfill, the images, the nightly job, the store checks) |
 | `deploy/` | [how the House runs on its box](deploy/README.md) |
-| `docs/` | [design.md](docs/design.md), [operations.md](docs/operations.md), `goals/` (the run's plan and the sprint that amends it); `runs/` (the Sept 30 continuous-learning run record; the Sept 26 run's record is on branch `run/options-swarm-2026-09-26`) |
+| `docs/` | [design.md](docs/design.md), [operations.md](docs/operations.md), `goals/` (the run's plan and the sprint that amends it); `runs/` (the Oct 2 unattended-desk record and its daily scoreboard in `runs/desk/`, the Sept 30 continuous-learning run record; the Sept 26 run's record is on branch `run/options-swarm-2026-09-26`) |
 | `archive/` | the history and the documents of earlier generations |
 | `CHANGELOG.md` | one entry per deploy |
 
@@ -220,7 +228,12 @@ python3 scripts/floor_box.py rollback --reason why         # current := previous
 python3 scripts/gateway_admin.py status | kill             # the gateway; `unkill` needs the owner's token
 python3 scripts/live_trading.py [--enable | --ratify | --disable]   # the grant, on the box
 python3 scripts/data/box.py status                         # the data box and the backfill
+python3 scripts/desk_receipts.py                           # V3-A: the House's job receipts, read without exec
 ```
+
+From V3-A, merged code outside the protected paths reaches the House through the in-box updater; the protected paths
+(the money rules, the live path, the grant, the updater, the watchdog, `league/ci.py`, the gateway, the budget rule,
+the standing grant's job and the drills) stay the owner's deploy.
 
 No money-path deploy from 13:25Z to 20:05Z on a trading day except a rollback; a research-class release may deploy in
 session under the rules in [operations](docs/operations.md) ("Rules that hold every day"). A merged pull request is not

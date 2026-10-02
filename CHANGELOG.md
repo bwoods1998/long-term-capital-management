@@ -20,6 +20,52 @@ beside the deploys of their day, marked "no deploy". The run records have the de
 `docs/runs/2026-09-26-options-swarm.md` on branch `run/options-swarm-2026-09-26`; from Sept 30,
 [docs/runs/2026-09-30-continuous-learning.md](docs/runs/2026-09-30-continuous-learning.md).
 
+## Not yet deployed: V3-A
+
+LTCM v3's first release, integrated on `release/v3a` (not on `main`, not deployed). The plan and the owner's six
+decisions of Oct 2 are in [the run record](docs/runs/2026-10-02-unattended-desk.md); operating it is in
+[docs/operations.md](docs/operations.md) ("LTCM v3: release V3-A"). It is an owner deploy (the House by
+`floor_box.py deploy`, the gateway by `wrangler deploy`, the settings migration) in the money path's window
+(20:05-13:25Z), and it moves the money digest and, with WP5 and WP6, the evaluator's fingerprint (the one planned
+evidence reset of v3). The release id, main commit, gateway version, digest and ratification are recorded here when it
+lands.
+
+- **WP1, updater and deploys** (`league/updater.py`, `league/watchdog.py`, `scripts/floor_box.py`, `league/config.json`,
+  `league/ci.py`, `league/house.py`, `league/swarm/harness_runtime.py`): `auto_update` true (`release_train_hours`
+  4); the updater stops the nightly daemon with a marked `nightly.stop` before a launch and lifts only its own marker;
+  its watchdog's pid in `deploy.pid` so `floor_box.py deploy` refuses beside it; `push_release` clears only its own
+  `incoming/<id>/`; the harness observer follows updater releases; a scrubbed watchdog environment;
+  `python -m league.watchdog drill-rollback` and `drill-recover`; `ci.FORBIDDEN` adds `league/ops/{budget,drills,grant}.py`.
+- **WP2, the House's jobs** (`league/ops/`, `scripts/desk_receipts.py`): the calendar-aware scheduler, registry and
+  runner (one niced, bounded child at a time), receipts in `ops.sqlite` and the private receipts file every ten
+  minutes; jobs `preopen`, `economics` (with `p30`), `scoreboard`, `hygiene`, `clock`; `health.json` gains `ops`.
+- **WP3, the budget rule** (`league/ops/budget.py`, `league/swarm/{settings,guard,models,funding}.py`): research $/day
+  from trailing realized profit within the meters' runway, tighten-only over the spend knobs, the floor when
+  `budget.json` is missing, the no-forward-edge stop, `funding` notices. The burst trio (`guard.burst_*`,
+  `after_burst_usd_day`) and its `burst_end` cliff are removed; OpenAI is closed.
+- **WP4, the standing grant** (`league/live_trading.py`, `league/ops/grant.py`): re-ratifies after an owner release that
+  moved the money digest and after a deposit, hourly and at House start.
+- **WP5, live-path fixes** (`league/live/step.py`, `league/live/shadow.py`): exit-only opens dropped and counted;
+  observe reads clamped to the Gym store's window per root; practice positions capped as a Probe's; an honest shed;
+  `live.observe_read_calls` 120.
+- **WP6, the forward ladder** (`league/live/ladder.py`, the constitution's `options_money.ladder`, the forward
+  benchmark): **landing in V3-A, being integrated; to confirm after it merges**, including `ladder.binding` at deploy.
+- **WP7, money rules v3** (`league/constitution.py`, `league/live/{money,paper}.py`, `league/ci.py`): credit verticals,
+  iron condors and iron butterflies at `credit_min_equity_usd` ($2,000) of equity, with paper proofs per type and the
+  gateway's `OPTION_STRUCTURES_REAL` in the same deploy: **landing in V3-A, being integrated; to confirm after it
+  merges.**
+- **WP8, the gateway** (`gateway/`): `POST /v1/github/docs` (desk pages under `docs/runs/desk/`, 6 a New York day),
+  `POST /v1/github/review`, `POST /v1/github/merge` (engineer pull requests on green CI and a recorded approve, no
+  protected path, 2 a New York day; stopped by the kill switch), `GET /v1/github/pr/<n>/files`, `POST /v1/github/close`,
+  `funding` notices, the admin log in `/v1/health`; Sail mail lines `LOW_BALANCE_USD` 25 and `CRITICAL_BALANCE_USD` 12.
+- **WP8b, the engineer's lanes** (`league/ci.py` `ENGINEER_LANES`, `gateway/lib/github.mjs`): `engineer/<lane>/`
+  branches change only their lane's files and add new tests.
+- **WP9, fixes and settings as code** (`league/swarm/{pool,models,settings}.py`, `league/swarm/policy.json`,
+  `scripts/settings_migrate.py`): failed and stale pool rows settled against Sail's list; the Sail window fallback
+  (`sail_fallback`); the `policy.json` layer between `config.json` and `swarm.json`.
+- **Docs**: [the run record](docs/runs/2026-10-02-unattended-desk.md), [docs/runs/desk/](docs/runs/desk/README.md),
+  operations, design and README.
+
 ## Not yet deployed
 
 The running House release is `20261002T112610Z-e11710692569` (main `e3d0111f`, 11:26Z Oct 2, below). Main is ahead of
