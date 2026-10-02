@@ -258,6 +258,14 @@ DEFAULTS: dict[str, Any] = {
         # living families of one mechanism class (structure x root group, the strategist's `mechanism_class`); `admit`
         # refuses births past it and the request names the full classes. 0 or null turns it off.
         "max_alive_per_class": 12,
+        # THE CELL'S YIELD (H2, Oct 1; league/swarm/cards.py): null keeps the card check as it was (every mechanism-verdict
+        # row needs a rebirth claim). {"min_births": N, "floor": F, "lookback_days": D} (or true: 30, 0.10, 7) opens a cell
+        # unless its settled births over D days number at least N with a Wilson 95% upper bound on their drift-pass share
+        # below F; in an open cell a card that matches only self-refuted and drift rows needs no claim.
+        "cell_yield": None,
+        # The REFUTED CELLS list up to this many rows a claim may name in each cell where one can be needed (0: off; at
+        # most 12): ids and the inputs each read, no figure.
+        "claimable_rows": 0,
     },
     # THE STRATEGIST (Sept 29, 2026; league/swarm/strategist.py): Claude reads the whole graveyard digest, the board, the
     # Validation check-failure counts and the day's births and retirements, and writes only the agenda's WHERE TO LOOK

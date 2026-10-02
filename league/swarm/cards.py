@@ -58,6 +58,27 @@ fewer than `architect.max_rebirths_per_cell` (3) rebirths in the last `architect
 rows multiply never refills its own budget. A false match costs a justification and a budget slot, never an idea
 outright. The check is deterministic and makes no model call.
 
+THE CELL'S YIELD (`architect.cell_yield`, H2 of the Oct 1 edge study; off by default: null, every mechanism-verdict row
+needs a claim, as above). A SELF-REFUTED row (its own researcher retired it, since release A at a median of under an
+hour) or a DRIFT row (the idle rule's Train record failed the drift screen) is a family's outcome, not a test of the
+mechanism, and the productive cells hold the most of them (Oct 1: 105 of `relative_value / directional / days_4_10`'s
+134 rows were DRIFT, while its births passed the drift screen two to three times as often as the rest). Switched on
+(`{"min_births": N, "floor": F, "lookback_days": D}`; `true` or `{}` takes `CELL_YIELD_DEFAULTS`), each cell is read
+for its yield: the families born in it in the last D days whose outcome is settled (retired, or already holding a
+drift-passing eligible Train run; one still researching without a pass is pending, and one whose eligible runs all
+predate the drift figures is unknown: neither counts), and how many of them hold a drift-passing eligible Train run
+(`evidence.drift_screen` under the running screen's thresholds, from the run's own Train start). A cell with at least N
+settled births whose Wilson 95% upper bound on that share is below F is EXHAUSTED: every one of its rows needs a claim,
+as above. In an OPEN cell (every other) a SELF-REFUTED or DRIFT row (`YIELD_EXCUSED`) no longer needs one by itself;
+every other mechanism verdict (refuted, the operator's, diagnosed, trial-adjusted, stress, a failed mechanism test)
+still does, and a card matching one is checked exactly as above (its claim may name any row it matches, and the
+refusal points at the newest row that needs the claim). Nothing else moves: `MECHANISM_VERDICTS` and the rows indexed
+(the memory lane's judge reads them), the matching, a claim's tests, both rebirth budgets, the architect's same-slice
+and same-idea refusals, its lineage rules and the card's completeness. A proposal that needed no claim but carries one
+is a rebirth only when that claim passes every test above; otherwise it is born without the claim (the architect strips
+it before the card is stored and the birth's event says why), so no unchecked claim ever links a lineage or spends a
+budget. Drift-screen figures are Train figures: no Validation or holdout figure is read.
+
 Standard library only.
 """
 
@@ -66,8 +87,11 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import math
 import re
 from typing import Any, Mapping
+
+from . import evidence as evidence_mod
 
 #: The mechanism classes, each with the sentence the architect reads. Drawn from the graveyard's 1,974 rows (Sept 30):
 #: every recurring mechanism there fits one.
@@ -126,6 +150,14 @@ FLAT_REFUSED = frozenset({"credit_vertical"})
 #: EXHAUSTED (it reached a score), UNRESOLVED (an experiment failure), STALL (the tournament's clock) or OPERATOR-RETIRED
 #: (housekeeping).
 MECHANISM_VERDICTS = ("OPERATOR", "REFUTED", "SELF-REFUTED", "DIAGNOSED", "TRIALS", "DRIFT", "STRESS", "MECHANISM")
+#: The mechanism verdicts a cell's yield may excuse (THE CELL'S YIELD in the module docstring): a family's own outcome
+#: (its researcher's retirement, or its Train record failing the drift screen), not a test of the mechanism.
+YIELD_EXCUSED = ("SELF-REFUTED", "DRIFT")
+#: `architect.cell_yield` switched on with `true` or `{}`, and each key a mapping leaves out or misstates: at least 30
+#: settled births in a cell over 7 days, and a Wilson 95% upper bound on their drift-pass share below 10%.
+CELL_YIELD_DEFAULTS = {"min_births": 30, "floor": 0.10, "lookback_days": 7}
+#: The Wilson bound's z (two-sided 95%).
+WILSON_Z = 1.959963984540054
 #: The ablation when a card names none: the contract's convention (1,176 of the House's 2,003 latest programs, Sept 30).
 DEFAULT_ABLATION = {"param": "signal_on", "off": 0}
 #: Field limits (characters after whitespace is collapsed).
@@ -554,6 +586,121 @@ _SEQ = re.compile(r"card[_ ]evidence\s*(?:seq\s*)?#?\s*(\d+)", re.I)
 _RUN_ID = re.compile(r"\b[0-9a-f][0-9a-f-]{15,63}\b")
 
 
+# ------------------------------------------------------------------------------------------ the cell's yield
+def wilson_upper(passed: int, n: int, z: float = WILSON_Z) -> float:
+    """The Wilson score interval's upper bound on a share, `passed` of `n` (1.0 with no trial)."""
+    if n <= 0:
+        return 1.0
+    p = min(max(passed / n, 0.0), 1.0)
+    z2 = z * z
+    centre = p + z2 / (2 * n)
+    margin = z * math.sqrt(p * (1 - p) / n + z2 / (4 * n * n))
+    return min(1.0, (centre + margin) / (1 + z2 / n))
+
+
+def _number(value: Any) -> float | None:
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) else None
+
+
+def cell_yield_settings(settings: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """`architect.cell_yield` (THE CELL'S YIELD): None while it is off (absent, null, false or anything but `true` or a
+    mapping: every mechanism-verdict row needs a claim), else {min_births, floor, lookback_days}, a key the mapping leaves
+    out or misstates (min_births a whole number of at least 1, floor strictly between 0 and 1, lookback_days above 0)
+    taking `CELL_YIELD_DEFAULTS`."""
+    raw = ((settings or {}).get("architect") or {}).get("cell_yield")
+    if raw is True:
+        raw = {}
+    if not isinstance(raw, Mapping):
+        return None
+    out: dict[str, Any] = dict(CELL_YIELD_DEFAULTS)
+    births, floor, days = (_number(raw.get(k)) for k in ("min_births", "floor", "lookback_days"))
+    if births is not None and births >= 1 and births == int(births):
+        out["min_births"] = int(births)
+    if floor is not None and 0.0 < floor < 1.0:
+        out["floor"] = floor
+    if days is not None and days > 0:
+        out["lookback_days"] = days
+    return out
+
+
+def cell_yields(store: Any, settings: Mapping[str, Any] | None, since: str) -> dict[tuple[str, str, str], dict[str, int]]:
+    """Each cell's families born at or after `since` (ISO) and their outcomes (THE CELL'S YIELD in the module docstring):
+    {cell: {"births": settled births, "passed": those holding a drift-passing eligible Train run, "pending": alive without
+    one, "unknown": settled, eligible, and no run with drift figures the screen can read}}. A family's cell is its card's
+    (its own, else the card its spec's `card_sha` names: a fork's), else `infer_key`'s reading of its mechanism,
+    structure and days to expiry; a family with neither is in no cell. A drift pass is `evidence.drift_screen` under the
+    running screen's thresholds (`tournament.drift_min_t`, `drift_years_positive`; their defaults while the screen is off)
+    from the run's own Train start, on a completed, eligible Train run at the normal spread (purpose train or drift).
+    Train rows only, one query per 400 families, read-only."""
+    from .researcher import CORE_SPAN, drift_settings  # a local import: the researcher imports this module
+
+    screen = drift_settings(settings or {}) or (evidence_mod.DRIFT_MIN_T, None)
+    own: dict[str, dict[str, Any]] = {}
+    by_sha: dict[str, dict[str, Any]] = {}
+    if _tables(store):
+        for r in store._all("SELECT family, sha, key FROM family_cards ORDER BY at, family"):
+            key = json.loads(r["key"])
+            own[r["family"]] = key
+            by_sha.setdefault(r["sha"], key)
+    cell_by: dict[str, tuple[str, str, str]] = {}
+    alive: set[str] = set()
+    for f in store._all("SELECT id, retired_at, mechanism, structure, spec FROM families WHERE born_at >= ? "
+                        "ORDER BY born_at, id", (since,)):
+        try:
+            spec = json.loads(f["spec"] or "{}") or {}
+        except (TypeError, ValueError):
+            spec = {}
+        spec = spec if isinstance(spec, Mapping) else {}
+        key = own.get(f["id"]) or (by_sha.get(str(spec.get("card_sha"))) if spec.get("card_sha") else None)
+        if key is None:
+            key = infer_key(f["mechanism"], f["structure"], spec.get("dte"))
+        if key is None:
+            continue
+        cell_by[f["id"]] = cell_of(key)
+        if f["retired_at"] is None:
+            alive.add(f["id"])
+    passed: set[str] = set()
+    eligible: set[str] = set()
+    known: set[str] = set()
+    ids = list(cell_by)
+    for start in range(0, len(ids), 400):
+        part = ids[start:start + 400]
+        sql = ("SELECT family, json_extract(summary, '$.drift') AS drift, json_extract(summary, '$.train_from') AS train_from "
+               f"FROM runs WHERE family IN ({','.join('?' * len(part))}) AND window='train' AND stress=1.0 AND status='ok' "
+               "AND purpose IN ('train', 'drift') AND json_valid(summary) AND json_extract(summary, '$.train_eligible') = 1")
+        for r in store._all(sql, part):
+            fid = r["family"]
+            if fid in passed:
+                continue
+            eligible.add(fid)
+            try:
+                numbers = evidence_mod.drift_numbers(json.loads(r["drift"])) if r["drift"] else None
+            except (TypeError, ValueError):
+                numbers = None
+            if numbers is None:
+                continue
+            year = str(r["train_from"] or CORE_SPAN)[:4]
+            verdict = evidence_mod.drift_screen(numbers, min_t=screen[0], years_positive=screen[1],
+                                                first_year=int(year) if year.isdigit() else None)
+            if verdict["known"]:
+                known.add(fid)
+            if verdict["passed"]:
+                passed.add(fid)
+    out: dict[tuple[str, str, str], dict[str, int]] = {}
+    for fid, cell in cell_by.items():
+        tally = out.setdefault(cell, {"births": 0, "passed": 0, "pending": 0, "unknown": 0})
+        if fid in passed:
+            tally["births"] += 1
+            tally["passed"] += 1
+        elif fid in alive:
+            tally["pending"] += 1
+        elif fid in eligible and fid not in known:
+            tally["unknown"] += 1
+        else:
+            tally["births"] += 1
+    return out
+
+
 # ------------------------------------------------------------------------------------------ the rebirth refusal
 class RebirthIndex:
     """The graveyard's rows killed by a mechanism verdict, each with its cell (its card's, else `infer_key`'s), and the
@@ -566,6 +713,10 @@ class RebirthIndex:
         self.store = store
         self.settings = settings or {}
         self.cfg = self.settings.get("architect", {}) or {}
+        # THE CELL'S YIELD (`architect.cell_yield`): read on first use (`yields`), never while it is off.
+        self.yield_cfg = cell_yield_settings(self.settings)
+        self._yields: dict[tuple[str, str, str], dict[str, int]] | None = None
+        self.yield_error: str | None = None
         cards: dict[str, dict[str, Any]] = {}
         if _tables(store):
             for r in store._all("SELECT family, card, key, at FROM family_cards ORDER BY at, family"):
@@ -631,6 +782,62 @@ class RebirthIndex:
     def window_days(self) -> int:
         return max(1, self._setting("rebirth_window_days", 7))
 
+    @property
+    def yields(self) -> dict[tuple[str, str, str], dict[str, int]] | None:
+        """Each cell's births and drift passes over the lookback (`cell_yields`), read once; None while
+        `architect.cell_yield` is off. A store that cannot be read for them leaves every cell exhausted (`yield_error`):
+        the loosening never rests on figures it could not read."""
+        if self.yield_cfg is None:
+            return None
+        if self._yields is None:
+            try:
+                now = _parse_at(self.store.now())
+                if now is None:
+                    raise ValueError(f"the store's clock reads {self.store.now()!r}")
+                since = (now - dt.timedelta(days=float(self.yield_cfg["lookback_days"]))).strftime("%Y-%m-%dT%H:%M:%SZ")
+                self._yields = cell_yields(self.store, self.settings, since)
+            except Exception as exc:  # noqa: BLE001 - fail closed: today's rule for every cell
+                self.yield_error = f"{type(exc).__name__}: {str(exc)[:200]}"
+                self._yields = {}
+        return self._yields
+
+    def exhausted(self, cell: Any) -> bool:
+        """THE CELL'S YIELD: is `cell` (class, structure family, holding) exhausted, so that every row of it needs a claim:
+        at least `min_births` settled births in the lookback whose drift-pass share has a Wilson 95% upper bound below
+        `floor`. Always true while the setting is off or the figures could not be read (today's rule); false for a cell
+        with no birth in the lookback."""
+        yields = self.yields
+        if yields is None or self.yield_error is not None:
+            return True
+        tally = yields.get(tuple(cell))
+        if tally is None:
+            return False
+        cfg = self.yield_cfg or CELL_YIELD_DEFAULTS
+        return tally["births"] >= int(cfg["min_births"]) and wilson_upper(tally["passed"], tally["births"]) < float(cfg["floor"])
+
+    def needs_claim(self, row: Mapping[str, Any]) -> bool:
+        """Does a matched row by itself need a rebirth claim: every mechanism-verdict row while `architect.cell_yield` is
+        off; with it on, every row of an exhausted cell and, in an open cell, every row but the `YIELD_EXCUSED`."""
+        return row["tag"] not in YIELD_EXCUSED or self.exhausted(cell_of(row["key"]))
+
+    def yield_view(self) -> dict[str, Any] | None:
+        """THE CELL'S YIELD for a pass's event (Train figures only): the settings, and each cell with a birth in the
+        lookback: its settled births, drift passes, pending and unknown families, the Wilson upper bound and whether it
+        is exhausted. None while the setting is off."""
+        yields = self.yields
+        if yields is None:
+            return None
+        out: dict[str, Any] = {"settings": dict(self.yield_cfg or {})}
+        if self.yield_error is not None:
+            out["error"] = self.yield_error
+        cells = []
+        for cell, tally in sorted(yields.items(), key=lambda kv: (-kv[1]["births"], kv[0])):
+            cells.append({"cell": " / ".join(cell), **tally, "upper": round(wilson_upper(tally["passed"], tally["births"]), 4),
+                          "exhausted": self.exhausted(cell)})
+        out["exhausted"] = [c["cell"] for c in cells if c["exhausted"]]
+        out["cells"] = cells[:40]
+        return out
+
     def _cell_of_rebirth(self, row: str, key: Mapping[str, Any]) -> tuple[str, str, str]:
         """A rebirth counts against the cell of the row it named (its own declared cell when that row is gone)."""
         named = self.by_id.get(row)
@@ -675,12 +882,35 @@ class RebirthIndex:
 
     def check(self, card: Mapping[str, Any], structure: Any, mechanism: Any = "", dte: Any = None) -> dict[str, Any]:
         """{"ok": bool, "matched": [row ids], "reason": why refused, "row": the row the refusal points at, "lesson": its
-        lesson}. ok with no match; ok with a match only through a valid `rebirth` (the module docstring)."""
+        lesson}. ok with no match; ok with a match only through a valid `rebirth` (the module docstring). THE CELL'S
+        YIELD: ok with "open" when every matched row is one an open cell excuses; "dropped" (why) when the card's claim
+        there did not hold and must be stripped before the card is stored."""
         hit, text_class = self.matched(card, structure, mechanism, dte)
         if not hit:
             return {"ok": True, "matched": []}
+        need = [r for r in hit if self.needs_claim(r)]
+        if not need:
+            # THE CELL'S YIELD: only an open cell's self-refuted and drift rows matched, and they need no claim. A claim
+            # made anyway is a rebirth only when it holds (every test below, budgets included); else the proposal is born
+            # without it (`dropped`: the architect strips it before the card is stored), so no unchecked claim links a
+            # lineage or spends a budget.
+            ids = [r["row"] for r in hit]
+            out = {"ok": True, "matched": ids[-12:], "count": len(hit), "open": True,
+                   **({"text_class": text_class} if text_class else {})}
+            if isinstance(card, Mapping) and isinstance(card.get("rebirth"), Mapping):
+                claim = self._claim(card, structure, hit, text_class)
+                if claim["ok"]:
+                    return {**claim, "open": True}
+                out["dropped"] = claim["reason"]
+            return out
+        return self._claim(card, structure, hit, text_class, need if len(need) < len(hit) else None)
+
+    def _claim(self, card: Mapping[str, Any], structure: Any, hit: list[dict[str, Any]], text_class: str | None,
+               need: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        """`check` on matched rows `hit`: refused without a valid `rebirth` naming one of them (the module docstring).
+        `need` (THE CELL'S YIELD, only when some of `hit` need no claim): the rows that do, which the refusal points at."""
         ids = [r["row"] for r in hit]
-        newest = hit[-1]
+        newest = hit[-1] if need is None else need[-1]
         out = {"ok": False, "matched": ids[-12:], "count": len(hit), "row": newest["row"], "lesson": newest["lesson"],
                "tag": newest["tag"], "key": key_text(key_of(card, structure))}
         if text_class:
@@ -688,6 +918,10 @@ class RebirthIndex:
         where = (f"its cell ({out['key']})" + (f", and the {text_class} cell its own mechanism text reads as," if text_class else "")
                  + f" hold{'s' if not text_class else ''} {len(hit)} graveyard row(s) killed by a mechanism verdict, the newest "
                  f"{newest['row']} ({newest['tag']})")
+        if need is not None:
+            out["need"] = len(need)
+            where = (f"{where} of the {len(need)} that need a claim (an open cell's self-refuted and drift rows alone need "
+                     "none)")
         reb = card.get("rebirth") if isinstance(card, Mapping) else None
         if not isinstance(reb, Mapping):
             out["reason"] = (f"{where}: a birth there needs card.rebirth naming one of them, what is different, an input the dead "
@@ -736,8 +970,13 @@ class RebirthIndex:
             cell = self._cell_of_rebirth(row, key_of(card, structure))
             self.cell_births[cell] = self.cell_births.get(cell, 0) + 1
 
-    def cells(self, limit: int = 40) -> list[str]:
-        """The refuted cells, most rows first: one line each for the architect's request (with the cell's rebirth room)."""
+    def cells(self, limit: int = 40, claimable: int = 0) -> list[str]:
+        """The refuted cells, most rows first: one line each for the architect's request (with the cell's rebirth room).
+        With `architect.cell_yield` on, each says whether it is open (and how many of its rows need a claim) or exhausted.
+        `claimable` (`architect.claimable_rows`, 0: off) adds, for a cell with rebirth room where a claim can be needed, up
+        to that many of its rows a claim may name (rows that have backed fewer than `max_rebirths_per_row` rebirths, newest
+        first), each with the inputs it read, which a claim must add to; a carded row is matched only when the card's
+        inputs overlap those. Ids and input names only: no figure."""
         groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
         for r in self.rows:
             groups.setdefault(cell_of(r["key"]), []).append(r)
@@ -746,12 +985,24 @@ class RebirthIndex:
         for cell, rows in ranked:
             carded = sum(1 for r in rows if not r["legacy"])
             room = max(0, self.per_cell - self.cell_births.get(cell, 0))
-            out.append(f"{' / '.join(cell)}: {len(rows)} rows ({carded} carded), rebirth room {room}, newest "
-                       f"{', '.join(r['row'] for r in rows[-3:])}")
+            line = (f"{' / '.join(cell)}: {len(rows)} rows ({carded} carded), rebirth room {room}, newest "
+                    f"{', '.join(r['row'] for r in rows[-3:])}")
+            need = sum(1 for r in rows if self.needs_claim(r))
+            if self.yield_cfg is not None:
+                line += ("; exhausted: every row needs a claim" if self.exhausted(cell)
+                         else f"; open: {need} of its rows need a claim" if need else "; open: no row needs a claim")
+            if claimable > 0 and room > 0 and need:
+                named = [r for r in reversed(rows) if self.backed.get(r["row"], 0) < self.per_row][:claimable]
+                if named:
+                    line += "; claimable: " + ", ".join(
+                        f"{r['row']} (read {'+'.join(r['inputs']) or 'nothing named'}{'' if r['legacy'] else ', carded'})"
+                        for r in named)
+            out.append(line)
         return out
 
 
 __all__ = ["MECHANISM_CLASSES", "INPUTS", "HOLDING", "STRUCTURE_FAMILIES", "FLAT_REFUSED", "MECHANISM_VERDICTS", "DEFAULT_ABLATION",
            "validate", "canonical", "card_sha", "structure_family", "flat_allowed", "key_of", "key_text", "ensure", "put",
            "card_of", "add_evidence", "evidence", "vocabulary_text", "brief_text", "infer_key", "infer_inputs", "match_inputs",
-           "match_keys", "matches", "cell_of", "RebirthIndex"]
+           "match_keys", "matches", "cell_of", "RebirthIndex", "YIELD_EXCUSED", "CELL_YIELD_DEFAULTS", "WILSON_Z",
+           "wilson_upper", "cell_yield_settings", "cell_yields"]
