@@ -284,25 +284,46 @@ test('an admitted credit type is metered at its collateral less the credit, and 
   assert.match((await call(post('alpaca', mleg(VERTICAL, '0.70')), { settings })).body.error, /debit_vertical is not admitted/);
 });
 
-test('the deployed configuration opens exactly the four debit types on the real account (the sprint, Sept 26, 2026)', async () => {
-  // Until the sprint "off". The owner's D1 and D4: the two debit structures and a single long call or put, the
-  // constitution's `options_money.real_types` (league.ci holds the two equal); no credit type under $2,000 of equity.
-  // wrangler.jsonc is JSON with comments: the line itself is the check.
+test('the deployed configuration opens the four debit types at any equity and the three credit types only from $2,000 (V3-A, D3)', async () => {
+  // Until the sprint "off"; the sprint (owner decisions D1, D4) the two debit structures and a single long call or put.
+  // LTCM v3 (release V3-A, money rules v3, owner decision D3): the three credit types too, exactly the constitution's
+  // `options_money.real_types` (league.ci holds the two equal), held back by the gateway's own equity reading under
+  // CREDIT_MIN_EQUITY_USD. wrangler.jsonc is JSON with comments: the line itself is the check.
   const config = readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
   const lines = config.split('\n').filter(line => /"OPTION_STRUCTURES_REAL"/.test(line));
   assert.equal(lines.length, 1);
-  assert.match(lines[0], /^\s*"OPTION_STRUCTURES_REAL": "debit_vertical,long_butterfly,long_call,long_put",?\s*$/);
+  assert.match(lines[0],
+    /^\s*"OPTION_STRUCTURES_REAL": "debit_vertical,long_butterfly,long_call,long_put,credit_vertical,iron_condor,iron_butterfly",?\s*$/);
   const listed = /"OPTION_STRUCTURES_REAL": "([^"]*)"/.exec(lines[0])[1];
-  assert.deepEqual(admittedStructures({ OPTION_STRUCTURES_REAL: listed }), ['debit_vertical', 'long_butterfly', 'long_call', 'long_put']);
-  const settings = { OPTION_STRUCTURES_REAL: listed };
-  // A debit vertical opens; a credit vertical and a condor do not, at any equity.
+  assert.deepEqual(admittedStructures({ OPTION_STRUCTURES_REAL: listed }),
+    ['debit_vertical', 'long_butterfly', 'long_call', 'long_put', 'credit_vertical', 'iron_condor', 'iron_butterfly']);
+  const credit = /"CREDIT_MIN_EQUITY_USD": "([^"]*)"/.exec(config)[1];
+  assert.equal(credit, '2000', 'the equity line stays $2,000');
+  const settings = { OPTION_STRUCTURES_REAL: listed, CREDIT_MIN_EQUITY_USD: credit };
+  // A debit vertical and a long butterfly open at the account's small equity.
   assert.equal((await call(post('alpaca', mleg(VERTICAL, '0.70')), { settings })).response.status, 200);
-  const condor = [leg(occ(579, 'P'), BTO), leg(occ(580, 'P'), STO), leg(occ(590), STO), leg(occ(591), BTO)];
-  for (const equity of ['500.00', '5000.00']) {
-    const refused = await call(post('alpaca', mleg(condor, '-0.38')), { settings, equity });
-    assert.equal(refused.response.status, 400, equity);
-    assert.match(refused.body.error, /An iron_condor is not admitted on the real account/);
+  const fly = OPENS.find(([type]) => type === 'long_butterfly');
+  assert.equal((await call(post('alpaca', mleg(fly[1], fly[2])), { settings })).response.status, 200);
+  // Every credit type: refused under $2,000 by the gateway's own reading, with nothing sent; admitted from $2,000.
+  for (const [type, legs, limit, maxLoss] of OPENS.filter(([name]) => ['credit_vertical', 'iron_condor', 'iron_butterfly'].includes(name))) {
+    for (const equity of ['500.00', '1999.99']) {
+      const refused = await call(post('alpaca', mleg(legs, limit)), { settings, equity });
+      assert.equal(refused.response.status, 403, `${type} at ${equity}`);
+      assert.equal(refused.body.cap, 'credit_equity');
+      assert.equal(refused.calls.length, 0);
+      assert.equal((await refused.gate.status()).today.orders, 0);
+    }
+    for (const equity of ['2000.00', '5000.00']) {
+      const opened = await call(post('alpaca', mleg(legs, limit)), { settings, equity });
+      assert.equal(opened.response.status, 200, `${type} at ${equity}: ${JSON.stringify(opened.body)}`);
+      assert.equal(opened.calls.length, 1);
+      assert.equal((await opened.gate.status()).today.notional_usd, maxLoss, `${type} is metered at its maximum loss`);
+    }
   }
+  // Still defined-risk only: a naked short call is a 400 at any equity.
+  const naked = await call(post('alpaca', mleg([leg(occ(590), STO)], '-0.40')), { settings, equity: '5000.00' });
+  assert.equal(naked.response.status, 400);
+  assert.equal(naked.calls.length, 0);
 });
 
 // --- a real close must close legs the account holds (Sept 25, 2026; the route's review, MINOR 1) ---------------------------

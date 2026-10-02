@@ -182,7 +182,13 @@
     // `options_money.real_types` under $2,000 of equity -- the two debit structures and a single long call or put
     // (buy_to_open, closed with sell_to_close). The credit types come back only with a deposit to $2,000, in one
     // deploy with the constitution and a re-ratified grant. league.ci holds this line equal to the constitution.
-    "OPTION_STRUCTURES_REAL": "debit_vertical,long_butterfly,long_call,long_put",
+    // LTCM v3 (release V3-A, money rules v3; the owner's decision D3): the three credit types (credit_vertical,
+    // iron_condor, iron_butterfly) are real types again, exactly as the constitution's `options_money.real_types` names
+    // them, in the one deploy with the constitution and a re-ratified grant. They stay gated by equity HERE as well as
+    // in the House: a credit open is refused (403 {cap: "credit_equity"}) while the gateway's own reading of the
+    // account's equity is under CREDIT_MIN_EQUITY_USD ($2,000, which league.ci holds equal to `credit_min_equity_usd`).
+    // Defined-risk only, as every structure: a naked short leg is a 400 on both accounts.
+    "OPTION_STRUCTURES_REAL": "debit_vertical,long_butterfly,long_call,long_put,credit_vertical,iron_condor,iron_butterfly",
 
     // The research library (Sept 29, 2026; lib/library.mjs, GET /v1/research/*): arXiv papers posted before 2025 for the
     // swarm's agents. No secret. arXiv's API terms: "make no more than one request every three seconds, and limit
