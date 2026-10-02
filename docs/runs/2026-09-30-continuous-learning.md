@@ -1008,3 +1008,46 @@ built and reviewed. Also in review: #480, the gate refuses a holdout look that w
 | Spend and runway | $36.90 over 24 h (pace $32.53/day); Sail $137.56 (brake line $32); Claude $95.06 of $265; OpenAI $0 |
 
 The goal remains unmet: no D2-qualified strategy trades real money, no harness improvement is retained, and Net is −$623.48.
+
+## Oct 2 morning: births restored, two fixes live, an honest look at the economics
+
+### Releases and settings
+- **05:16, House release `20261002T051530Z-1aebcf26b145` (main `81ad284c`):** the gate now refuses a holdout look that repeats an
+  earlier one (same program or same Validation evaluation), before any review or sealed read (#480); and the card check can read a
+  cell's yield (#483), shipped off. No evidence reset; the open tuition lot and the practice cohorts were untouched. A deliberate
+  restart afterwards restored every instance, and a killed swarm process recovered in 31 seconds.
+- **Owner decisions (about 02:55):** keep the yield-aware open cells off and first let the architect see which buried rows a rebirth
+  claim may name (`architect.claimable_rows` 4, on at 05:26); hold holdout looks for long-delta, drift-heavy programs and for
+  programs whose expected holdout power is low (in build and review); count no external costs.
+- **Births restored:** with the claimable rows listed, Sail architect passes went from 0-1 births to 4 a pass; the population rose
+  from 13 to 27. A re-test of the Claude architect bore nothing in two passes and was reverted (its prompt path differs).
+- **Tournament forks off (05:03):** forks of already-validated lineages kept re-mining one heavily searched idea; each fork raises its
+  lineage's multiple-testing count, so they were spending research on lineages that almost cannot qualify.
+- **An operator mistake, recovered:** at 07:38 a large read-only extract on the House exhausted its memory and stalled the swarm for
+  about eight minutes; the House's supervisor restarted the swarm on its own. Extracts are now batched and capped.
+
+### What the evidence says (operator studies, summarized)
+- **Ranking cannot rescue weak ideas.** Ten rules for choosing which version goes to Validation were pre-registered on half of the
+  lineages and tested on the sealed other half; none beat the current score robustly.
+- **One lot is a hard constraint.** A strategy-class review of the published (pre-2025) options literature and our own Train evidence
+  found no class whose documented edge, after one-contract costs, could pass a sealed holdout look in a useful time; one real edge at
+  the first real-money size would earn a few dollars a day against a burn of about $25-35 a day. The next agenda will add evidence-based
+  entry filters (a meta-analysis of 139,000 Train trades confirmed two on later years: no Friday-opened long singles held over the
+  weekend; no bearish premium bought when the root's implied vol is rich) and data-hygiene rules, after the pre-registered read at
+  15:22.
+
+### Scoreboard (09:00 Oct 2)
+
+| Measure | Value |
+|---|---|
+| Release running | `20261002T051530Z-1aebcf26b145` (main `81ad284c`), gateway `4471596a` |
+| Real orders since T0 | calibration: 19 round trips closed; tuition: 1 open (GOOGL, exit-only); House test, incubator, Probe, Sized: 0 |
+| Realized options P&L since T0 | −$37.80 (calibration and fees; strategy routes $0.00) |
+| Input costs since T0 | $596.28 (external costs declared none) |
+| Net since T0 (08:56 cutoff) | −$634.08 |
+| Families alive / in practice | about 20 / 9 cohorts (7 after the next open) |
+| Holdout looks | 3, 0 passed |
+| Retained harness improvements | 0 (the corrected retention rule, #481, is in its final re-simulation) |
+| Spend and runway | $34.18 over 24 h, last 4 h pace $23.30/day; Sail $130.24; Claude $93.61 of $265; OpenAI $0 |
+
+The goal remains unmet: no D2-qualified strategy trades real money, no harness improvement is retained, and Net is −$634.08.
