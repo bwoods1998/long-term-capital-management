@@ -13,8 +13,10 @@
   role's `claude.role_model` through the gateway (`league.claude.Claude`) for the roles in `claude.roles` (by default
   the architect, the gate's audit, the diagnostician, the researchers' top band and the strategist), first among the
   paid routes while the gateway's funded total has room above `claude.reserve_usd` and the swarm's own Claude spend is
-  under `claude.usd_cap` and, LTCM v3, under THE BUDGET's Claude dollars today (league/ops/budget.py: the settings'
-  `budget` block; spent, a call takes its next route as for a role's own line, kind "line"). The architect rotates only
+  under `claude.usd_cap` and, LTCM v3, under THE BUDGET's paid-model dollars today (league/ops/budget.py
+  `paid_model_room`: the settings' `budget` block's Claude dollars less today's Claude and OpenAI spend; spent, a call
+  takes its next route as for a role's own line, kind "line", and OpenAI is refused by the same line, so Sail is
+  next). The architect rotates only
   while `architect.openai_model` names a model: then every other pass asks GPT-6 Astra first. Claude capped, erring or
   unconfigured falls to OpenAI, then Sail, exactly as before. Every role's call asks for Claude (Sept 29, 2026: the
   researcher's stall rewrite and the gate's review too), so `claude.roles` alone decides who gets it: adding "rewrite"
@@ -411,16 +413,23 @@ class ModelRouter:
         return room if budget is None else min(room, budget)
 
     def claude_budget_room(self) -> float | None:
-        """THE BUDGET's Claude dollars left this UTC day (league/ops/budget.py; the settings' `budget` block, set by every
-        `settings.load` with a state root): `claude_usd_day` less the swarm's Claude spend today, holds included (a call
-        counts on the day its hold was booked). None for settings with no `budget` block (never loaded from a state root:
-        no budget line); 0 for a block that is not a budget (FAIL CLOSED)."""
+        """THE BUDGET's paid-model dollars left this UTC day (league/ops/budget.py `paid_model_room`, the protected rule;
+        the settings' `budget` block, set by every `settings.load` with a state root): `claude_usd_day` less the swarm's
+        Claude spend today (a call counts on the day its hold was booked) and its OpenAI spend today, holds included.
+        None for settings with no `budget` block (never loaded from a state root: no budget line); 0 for a block that is
+        not a budget, or a rule that cannot be read (FAIL CLOSED). OpenAI's admission reads it too."""
         block = self.settings.get("budget")
         if block is None:
             return None
-        line = _line(block.get("claude_usd_day") if isinstance(block, Mapping) else None, invalid=0.0)
-        now = float(self.store.clock())
-        return max(0.0, line - max(0.0, self.claude_spent(since=now - now % 86400)))
+        try:
+            from ..ops.budget import paid_model_room
+
+            now = float(self.store.clock())
+            midnight = now - now % 86400
+            room = paid_model_room(block, self.claude_spent(since=midnight) + self.store.spent(["openai"], since=midnight))
+        except Exception:  # noqa: BLE001 - no rule, no paid research
+            return 0.0
+        return 0.0 if room is None else room
 
     def claude_funded_room(self) -> float:
         """Dollars the swarm may still spend on Claude by its funding: the lower of the gateway's funded total above
@@ -915,11 +924,17 @@ class ModelRouter:
             body = request_body(openai_model, [{"role": "system", "content": system}, {"role": "user", "content": user}],
                                 max_output_tokens=max_output, effort=effort, service_tier=tier, role=role)
             required = float(max(need, reservation_ceiling(body)))
+            budget = self.claude_budget_room()  # THE BUDGET's paid-model dollars today: OpenAI is under them too
+            if budget is not None and budget < required:
+                errors.append(f"openai: the research budget's paid-model line for today has no room (${budget:.2f} left; "
+                              f"this call may cost ${required:.2f})")
+                return None
             room = self.openai_room()  # network refresh must not hold the shared SQLite write transaction
             if room >= required:
                 admitted = False
                 with self.store.atomic():
-                    if min(room, self._openai_cap_room()) >= required:
+                    budget = self.claude_budget_room()  # read again inside the write transaction
+                    if (budget is None or budget >= required) and min(room, self._openai_cap_room()) >= required:
                         self.store.add_spend("openai", required, family=family,
                                              detail={"role": role, "hold": key[:120], "service_tier_requested": tier,
                                                      "max_output_tokens": body["max_output_tokens"]})
