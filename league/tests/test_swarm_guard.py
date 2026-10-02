@@ -1,4 +1,5 @@
-"""The Sail guard (league/swarm/guard.py): the swarm brakes to zero before the House is at risk."""
+"""The Sail guard (league/swarm/guard.py): the swarm brakes to zero before the House is at risk, and inside THE BUDGET's
+day (league/ops/budget.py, LTCM v3: the burst trio is gone)."""
 
 from __future__ import annotations
 
@@ -13,18 +14,21 @@ from league.swarm.guard import SailGuard
 from league.swarm.store import SwarmStore
 from league.tests.swarm_fakes import Clock
 
-BURST_END = dt.datetime(2026, 9, 28, 13, 30, tzinfo=dt.timezone.utc).timestamp()
+T = dt.datetime(2026, 10, 7, 15, 0, tzinfo=dt.timezone.utc).timestamp()
 
 
 class GuardCase(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
-        self.clock = Clock(BURST_END - 2 * 86400)
+        self.clock = Clock(T)
         self.store = SwarmStore(Path(self.dir.name), clock=self.clock)
         self.addCleanup(self.store.close)
         self.reading = (118.79, 34.0)
         self.settings = copy.deepcopy(S.DEFAULTS)
+        # A budget too large to bind, so each test meets only the line it is about (the Budget tests set their own).
+        self.settings["budget"] = {"source": "budget.json", "sail_usd_day": 10_000.0, "claude_usd_day": 0.0,
+                                   "fixed_sail_usd_day": None}
 
     def guard(self):
         return SailGuard(self.store, self.settings, lambda: self.reading, clock=self.clock, disk_free=lambda: 100.0 * 2 ** 30)
@@ -40,23 +44,6 @@ class Defaults(GuardCase):
         self.reading = (31.0, 31.0)
         g.check()
         self.assertFalse(g.allows())
-
-    def test_after_the_burst_the_daily_allowance_also_reads_sails_own_meter(self):
-        self.clock.advance(BURST_END + 86400 * 3 + 3600 - self.clock())
-        self.reading = (5000.0, 5.0)
-        g = self.guard()
-        g.check()
-        for balance in (4995.0, 4987.5):  # $12.50 metered by Sail today, none of it booked by the swarm
-            self.reading = (balance, 5.0)
-            self.clock.advance(180)
-            g.check()
-        self.assertFalse(g.allows())
-        self.assertIn("today", g.reason)
-        self.clock.advance(86400)  # a new UTC day: its own allowance
-        self.reading = (4987.0, 5.0)
-        out = g.check()
-        self.assertTrue(g.allows(), g.reason)
-        self.assertEqual(out["metered_today"], 0.5)
 
 
 class Guard(GuardCase):
@@ -119,28 +106,6 @@ class Guard(GuardCase):
         kinds = [e["payload"]["action"] for e in self.store.events_after(0) if e["kind"] == "swarm.guard"]
         self.assertEqual(kinds, ["brake", "release"])
 
-    def test_the_burst_cap(self):
-        self.reading = (5000.0, 34.0)
-        g = self.guard()
-        self.store.add_spend("sail_model", 349.0)
-        g.check()
-        self.assertTrue(g.allows())
-        self.store.add_spend("gym_box", 1.5)
-        g.check()
-        self.assertFalse(g.allows())
-        self.assertIn("burst", g.reason)
-
-    def test_after_the_burst_a_daily_allowance(self):
-        self.clock.advance(BURST_END + 86400 * 3 + 3600 - self.clock())
-        self.reading = (5000.0, 5.0)
-        g = self.guard()
-        self.store.add_spend("sail_model", 9.0)
-        g.check()
-        self.assertTrue(g.allows())
-        self.store.add_spend("sail_model", 1.5)
-        g.check()
-        self.assertFalse(g.allows(), "12 a day less the House's 2")
-
     def test_an_unreadable_balance_brakes_at_once_and_only_a_good_reading_releases(self):
         g = self.guard()
         g.check()
@@ -179,21 +144,6 @@ class Guard(GuardCase):
         self.clock.advance(601)
         self.assertFalse(g.allows(), "no reading for ten minutes: no new cycle or box")
 
-    def test_the_burst_cap_also_reads_sails_own_meter(self):
-        g = self.guard()
-        self.reading = (5000.0, 34.0)
-        g.check()
-        for balance in (4900.0, 4800.0, 4700.0, 4640.0):  # $360 metered by Sail, none of it booked by the swarm
-            self.reading = (balance, 34.0)
-            self.clock.advance(180)
-            g.check()
-        self.assertFalse(g.allows())
-        self.assertIn("burst", g.reason)
-        self.reading = (6000.0, 34.0)  # a top-up is not negative spend
-        self.clock.advance(180)
-        out = g.check()
-        self.assertEqual(out["metered_spent"], 360.0)
-
     def test_a_filling_disk_brakes(self):
         g = SailGuard(self.store, self.settings, lambda: self.reading, clock=self.clock, disk_free=lambda: 2.0 * 2 ** 30)
         g.check()
@@ -212,6 +162,108 @@ class Guard(GuardCase):
         self.assertFalse(g.due())
         self.clock.advance(181)
         self.assertTrue(g.due())
+
+
+class Budget(GuardCase):
+    """THE BUDGET's day (league/ops/budget.py `sail_caps`): the swarm's own Sail under the research dollars, Sail's own
+    meter under research + fixed; no block is the floor, a malformed one is no research."""
+
+    def budget(self, sail, fixed=None):
+        self.settings["budget"] = {"source": "budget.json", "sail_usd_day": sail, "claude_usd_day": 2.0,
+                                   "fixed_sail_usd_day": fixed}
+
+    def test_the_swarms_sail_today_is_capped_by_the_research_dollars(self):
+        self.budget(6.0)
+        self.reading = (5000.0, 5.0)
+        g = self.guard()
+        self.store.add_spend("sail_model", 5.0)
+        out = g.check()
+        self.assertTrue(g.allows(), g.reason)
+        self.assertEqual((out["budget_research_usd_day"], out["budget_account_usd_day"]), (6.0, 7.0))
+        self.store.add_spend("gym_box", 1.0)
+        g.check()
+        self.assertFalse(g.allows())
+        self.assertIn("research budget is spent", g.reason)
+        self.clock.advance(86400)  # a new UTC day: its own budget
+        g.check()
+        self.assertTrue(g.allows(), g.reason)
+
+    def test_sails_own_meter_is_capped_by_research_plus_fixed(self):
+        self.budget(6.0, fixed=2.5)  # measured fixed above the configured House burn of 1.0
+        self.reading = (5000.0, 5.0)
+        g = self.guard()
+        g.check()
+        for balance in (4995.0, 4991.5):  # $8.50 metered by Sail today, none of it booked by the swarm
+            self.reading = (balance, 5.0)
+            self.clock.advance(180)
+            g.check()
+        self.assertFalse(g.allows())
+        self.assertIn("by Sail's meter", g.reason)
+        self.assertIn("8.50 of 8.50", g.reason)
+
+    def test_a_raise_lifts_the_cap_and_a_cut_brakes_at_once(self):
+        self.budget(2.0)
+        self.reading = (5000.0, 5.0)
+        g = self.guard()
+        self.store.add_spend("sail_model", 3.0)
+        g.check()
+        self.assertFalse(g.allows())
+        self.budget(9.0)  # the next settings.load carries a raise
+        self.clock.advance(180)
+        g.check()
+        self.assertTrue(g.allows(), g.reason)
+        self.budget(1.0)
+        self.clock.advance(180)
+        g.check()
+        self.assertFalse(g.allows())
+
+    def test_a_budget_of_zero_brakes_with_no_spend_at_all(self):
+        self.budget(0.0)
+        self.reading = (5000.0, 5.0)
+        g = self.guard()
+        g.check()
+        self.assertFalse(g.allows())
+
+    def test_no_block_is_the_floor_and_a_malformed_block_is_no_research(self):
+        from league.ops import budget as B
+
+        del self.settings["budget"]
+        self.reading = (5000.0, 5.0)
+        g = self.guard()
+        out = g.check()
+        self.assertEqual(out["budget_research_usd_day"], B.floor_usd_day("sail"))
+        self.assertTrue(g.allows())
+        self.store.add_spend("sail_model", B.floor_usd_day("sail"))
+        g.check()
+        self.assertFalse(g.allows(), "the floor binds")
+        for bad in ({"sail_usd_day": "lots"}, {"sail_usd_day": -1}, {"sail_usd_day": float("nan")}, "budget", {}):
+            self.settings["budget"] = bad
+            self.assertEqual(g.check()["budget_research_usd_day"], 0.0, bad)
+
+    def test_the_burst_trio_changes_nothing(self):
+        self.budget(2.0)
+        self.settings["guard"].update(burst_cap_usd=900.0, burst_until="2026-12-31T00:00:00Z", after_burst_usd_day=500.0)
+        self.reading = (5000.0, 5.0)
+        g = self.guard()
+        self.store.add_spend("sail_model", 2.5)
+        out = g.check()
+        self.assertFalse(g.allows())
+        self.assertNotIn("in_burst", out)
+        self.assertNotIn("burst_spent", out)
+
+    def test_the_sites_meter_since_the_start_is_still_kept(self):
+        g = self.guard()
+        self.reading = (5000.0, 34.0)
+        g.check()
+        for balance in (4900.0, 4800.0):
+            self.reading = (balance, 34.0)
+            self.clock.advance(180)
+            g.check()
+        self.reading = (6000.0, 34.0)  # a top-up is not negative spend
+        self.clock.advance(180)
+        out = g.check()
+        self.assertEqual(out["metered_spent"], 200.0)
+        self.assertIsNotNone(self.store.get("burst_started_at"))
 
 
 if __name__ == "__main__":

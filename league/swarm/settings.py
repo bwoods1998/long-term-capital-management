@@ -31,6 +31,13 @@ volatility shock and the fourth-quarter 2018 selloff, 2019, then 2020-2024), wit
 (`images.py build gym --train-from 2017-01-03`); everything above holds unchanged for it (the snap: 2017-01-01 and
 2017-01-02 are 2017-01-03; the derived split 24 and time limit 2400 s over eight years). Nothing moves until the
 operator writes it with the matching image; "2020-01-02" and "2022-01-03" mean what they meant.
+
+THE BUDGET (LTCM v3, the owner's D4). The research dollars a day are not settings either: `league/ops/budget.py` computes
+them from realized profit and the meters' runways into `<state>/budget.json`, and `load` applies them LAST and only to
+tighten: min() against `researcher.sail_usd_per_hour` (or `researcher.usd_per_hour` while that is unset), `gym.max_boxes`,
+`claude.role_usd_day` (a line for every role in `claude.roles`) and `population.ceiling`; max() against
+`architect.every_seconds`. The `budget` block it sets (never the operator's: a `budget` key in swarm.json is replaced)
+caps the Sail guard's day and Claude's room. A missing or stale budget.json is the floor.
 """
 
 from __future__ import annotations
@@ -326,9 +333,8 @@ DEFAULTS: dict[str, Any] = {
         "house_burn_usd_day": 1.0,
         "measured_burn": False,
         "margin_usd": 30.0,             # scale to zero below 2 x the House's daily burn + this
-        "burst_cap_usd": 350.0,         # Sail spend for the training burst
-        "burst_until": "2026-09-28T13:30:00Z",
-        "after_burst_usd_day": 12.0,    # Sail a day after Monday while Net is not positive
+        # The daily Sail cap is THE BUDGET's (league/ops/budget.py: the `budget` block `load` sets): the trio (`burst_cap_usd`,
+        # `burst_until`, `after_burst_usd_day`) is gone (LTCM v3), and a swarm.json that still names it changes nothing.
         "openai_cap_usd": 150.0,        # OpenAI for the burst, and only while the gateway's month has room
         # Never spend the gateway month below this: the House's own roles need its last dollars, and at T0 the month had
         # $10.89 left (effectively none until the owner funds it), so the swarm spends OpenAI only after a raise.
@@ -612,7 +618,9 @@ def policy_layer(raw: Any) -> tuple[dict[str, Any], dict[str, Any]]:
 def load(root: str | Path | None = None, *, config: Mapping[str, Any] | None = None,
          policy: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """The swarm's settings: DEFAULTS < config.json "swarm" (and its "gym" block into "gym") < policy.json (`policy`, a
-    parsed document, in place of the repo's file) < <root>/swarm.json. `_policy` says how the policy layer was read."""
+    parsed document, in place of the repo's file) < <root>/swarm.json, then, with a state root, THE BUDGET tighten-only
+    (`budget_overlay`: <root>/budget.json, else the floor). `_policy` says how the policy layer was read. Without a root
+    (tests, tools) there is no budget block: the guard then reads the floor, the router no budget line."""
     if config is None:
         try:
             config = json.loads((REPO / "league" / "config.json").read_text())
@@ -663,7 +671,23 @@ def load(root: str | Path | None = None, *, config: Mapping[str, Any] | None = N
                                                        "named": named}
             except Exception:  # noqa: BLE001 - a malformed "forward" block: the settings as merged
                 pass
+        budget_overlay(out, root)
     return out
+
+
+def budget_overlay(out: dict[str, Any], root: str | Path) -> dict[str, Any]:
+    """THE BUDGET, last and tighten-only (league/ops/budget.py `overlay`): `<root>/budget.json`'s research dollars a day
+    cap the spend knobs and become the `budget` block the Sail guard and the router read; no usable file is the floor.
+    If the rule itself cannot run, nothing is spent: a budget of zero on both meters."""
+    try:
+        from ..ops import budget as budget_mod
+
+        return budget_mod.overlay(out, root)
+    except Exception as exc:  # noqa: BLE001 - FAIL CLOSED: no rule, no research spend
+        out["budget"] = {"source": "unavailable", "why": f"the budget rule could not run ({type(exc).__name__})", "at": None,
+                         "state": "no research (the budget rule could not run)", "sail_usd_day": 0.0, "claude_usd_day": 0.0,
+                         "fixed_sail_usd_day": None}
+        return out
 
 
 def _roots_lacking(held: Any, wanted: Any) -> list[str] | None:
@@ -767,6 +791,6 @@ def ready_refusal(root: str | Path, ready: Mapping[str, Any], named: str, roots:
     return None
 
 
-__all__ = ["DEFAULTS", "load", "read_policy", "policy_layer", "POLICY_PATH", "OWNER_KEYS", "chain_refusal", "ready_refusal", "train_from", "train_from_note", "parse_train_from",
+__all__ = ["DEFAULTS", "load", "read_policy", "policy_layer", "POLICY_PATH", "OWNER_KEYS", "budget_overlay", "chain_refusal", "ready_refusal", "train_from", "train_from_note", "parse_train_from",
            "objective_span", "span_years", "train_years", "train_split", "run_timeout", "train_span_text",
            "TRAIN_CORE_START", "TRAIN_EARLIEST", "TRAIN_END", "TRAIN_STARTS"]

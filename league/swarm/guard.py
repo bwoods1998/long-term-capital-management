@@ -1,4 +1,4 @@
-"""The Sail guard: the swarm stops spending before the House is at risk.
+"""The Sail guard: the swarm stops spending before the House is at risk, and inside the day's research budget.
 
 Running out of Sail credits pauses EVERY box, the House included. So every few minutes the guard reads
 Sail's balance (the usage summary through `Provider.check_balance`) and brakes the swarm, Gym boxes and
@@ -8,19 +8,18 @@ researchers to zero, when:
   plus $30"). The House's burn is `house_burn_usd_day`; only with `measured_burn` true (off by default) is it
   Sail's own 24-hour spend less what the swarm itself booked in those 24 hours, never less than
   `house_burn_usd_day`, which also covers any other box on the account (the data box);
-- the swarm's Sail spend since the burst began reached `burst_cap_usd` (by default $350 until Monday Sept 28's open;
-  swarm.json sets the burst's cap and end, `burst_until`);
-- after the burst: the swarm's Sail spend today (UTC) reached `after_burst_usd_day` less the House's burn,
-  or Sail's own meter today (every fall of the balance since midnight, the whole account) reached
-  `after_burst_usd_day`;
+- THE BUDGET's day is spent (LTCM v3, league/ops/budget.py `sail_caps`, from the settings' `budget` block): the
+  swarm's own Sail spend today (UTC) reached the Sail research dollars a day, or Sail's own meter today (every fall of
+  the balance since midnight, the whole account) reached that plus the fixed boxes a day. Settings with no `budget`
+  block (never loaded from a state root) are the floor; a malformed block is no research. The burst trio
+  (`burst_cap_usd`, `burst_until`, `after_burst_usd_day`) is gone: the budget is the one daily cap;
 - the balance could not be read (FAIL CLOSED: at once, and a failed read never releases a brake), or no
   good reading is `stale_seconds` old;
-- the burst's spend reaches the cap, counted as the larger of what the swarm booked and Sail's own meter
-  (every fall of the balance since the burst began: every box and model call on the account);
 - the state disk has under `min_free_disk_gb` free (the House's ledger lives there).
 
 It releases only on a fresh good reading above the line plus `release_margin_usd` (hysteresis) with the
-caps allowing. Every change of state is a `swarm.guard` event. Standard library only.
+caps allowing. Every change of state is a `swarm.guard` event. Sail's meter since the guard first ran
+(`metered_spent`, from `burst_started_at`) is still kept: the site's compute block reads it. Standard library only.
 """
 
 from __future__ import annotations
@@ -35,8 +34,15 @@ from .store import SwarmStore
 SWARM_SAIL_KINDS = ("sail_model", "gym_box")
 
 
-def _epoch(text: str) -> float:
-    return dt.datetime.fromisoformat(str(text).replace("Z", "+00:00")).timestamp()
+def budget_caps(settings: Mapping[str, Any]) -> dict[str, Any]:
+    """THE BUDGET's daily Sail caps (league/ops/budget.py `sail_caps`): {research, fixed, account, source}. FAIL CLOSED:
+    a rule that cannot be read is no research."""
+    try:
+        from ..ops.budget import sail_caps
+
+        return sail_caps(settings)
+    except Exception as exc:  # noqa: BLE001 - no rule, no research spend
+        return {"research": 0.0, "fixed": 0.0, "account": 0.0, "source": f"the budget rule could not be read ({type(exc).__name__})"}
 
 
 class SailGuard:
@@ -72,8 +78,8 @@ class SailGuard:
 
     def _metered(self, balance: float | None, now: float) -> tuple[float, float]:
         """Sail's own meter: every fall of the balance between two good readings (a rise is a top-up, never negative
-        spend), since the burst began and since this UTC midnight. It counts every box and model call on the account,
-        booked or not."""
+        spend), since the guard first ran (`burst_started_at`, the site's compute block) and since this UTC midnight. It
+        counts every box and model call on the account, booked or not."""
         spent = float(self.store.get("metered_spent", 0.0) or 0.0)
         day = dt.datetime.fromtimestamp(now, dt.timezone.utc).date().isoformat()
         today = self.store.get("metered_today") or {}
@@ -106,13 +112,10 @@ class SailGuard:
         measured = (burn - swarm_day) if burn is not None and cfg.get("measured_burn", False) else 0.0
         house = max(float(cfg.get("house_burn_usd_day", 1.0)), measured)
         line = 2.0 * house + float(cfg.get("margin_usd", 30.0))
-        burst_start = float(self.store.get("burst_started_at", now))
-        burst_until = _epoch(cfg.get("burst_until", "2026-09-28T13:30:00Z"))
-        in_burst = now < burst_until
         metered, metered_today = self._metered(balance, now)
-        burst_spent = max(self.store.spent(SWARM_SAIL_KINDS, since=burst_start), metered if in_burst else 0.0)
         midnight = now - (now % 86400)
         today_spent = self.store.spent(SWARM_SAIL_KINDS, since=midnight)
+        caps = budget_caps(self.settings)
         reasons = []
         if balance is None:
             # FAIL CLOSED: a failed read never releases a brake, and brakes an unbraked guard at once.
@@ -123,16 +126,13 @@ class SailGuard:
             if balance < release:
                 reasons.append(f"the Sail balance {balance:.2f} is under the House's line {release:.2f} "
                                f"(2 x {house:.2f} a day + {float(cfg.get('margin_usd', 30.0)):.0f})")
-        if in_burst and burst_spent >= float(cfg.get("burst_cap_usd", 350.0)):
-            reasons.append(f"the burst's Sail cap is spent ({burst_spent:.2f} of {float(cfg.get('burst_cap_usd', 350.0)):.0f})")
-        if not in_burst:
-            account_cap = float(cfg.get("after_burst_usd_day", 12.0))
-            day_cap = max(0.0, account_cap - house)
-            if today_spent >= day_cap:
-                reasons.append(f"today's Sail allowance after the burst is spent ({today_spent:.2f} of {day_cap:.2f})")
-            elif metered_today >= account_cap:
-                reasons.append(f"today's Sail allowance after the burst is spent by Sail's meter ({metered_today:.2f} of "
-                               f"{account_cap:.2f} for the account)")
+        # THE BUDGET's day (a research budget of 0 brakes at once: nothing is ever under a cap of 0).
+        if today_spent >= caps["research"]:
+            reasons.append(f"today's Sail research budget is spent ({today_spent:.2f} of {caps['research']:.2f}; "
+                           f"{caps['source']})")
+        elif metered_today >= caps["account"]:
+            reasons.append(f"today's Sail budget is spent by Sail's meter ({metered_today:.2f} of {caps['account']:.2f} for "
+                           f"the account: research {caps['research']:.2f} + fixed {caps['fixed']:.2f}; {caps['source']})")
         try:
             free_gb = self.disk_free() / 2 ** 30
         except OSError:
@@ -143,10 +143,11 @@ class SailGuard:
         self.braked = bool(reasons)
         self.reason = "; ".join(reasons)
         self.last = {"balance": balance, "burn_day": burn, "house_day": round(house, 2), "line": round(line, 2),
-                     "swarm_day": round(swarm_day, 4), "burst_spent": round(burst_spent, 4), "metered_spent": round(metered, 4),
-                     "metered_today": round(metered_today, 4),
-                     "today_spent": round(today_spent, 4), "free_disk_gb": None if free_gb is None else round(free_gb, 1),
-                     "in_burst": in_burst, "braked": self.braked, "reason": self.reason, "at": now}
+                     "swarm_day": round(swarm_day, 4), "metered_spent": round(metered, 4),
+                     "metered_today": round(metered_today, 4), "today_spent": round(today_spent, 4),
+                     "budget_research_usd_day": caps["research"], "budget_account_usd_day": caps["account"],
+                     "budget_source": caps["source"], "free_disk_gb": None if free_gb is None else round(free_gb, 1),
+                     "braked": self.braked, "reason": self.reason, "at": now}
         self.store.put("guard", {"braked": self.braked, "reason": self.reason, "last_ok": self.last_ok, "last": self.last})
         if was != self.braked:
             self.store.event("swarm.guard", None, {"action": "brake" if self.braked else "release", **self.last})
@@ -161,4 +162,4 @@ def provider_reader(provider: Any) -> Callable[[], tuple[Any, Any]]:
     return read
 
 
-__all__ = ["SailGuard", "provider_reader", "SWARM_SAIL_KINDS"]
+__all__ = ["SailGuard", "provider_reader", "budget_caps", "SWARM_SAIL_KINDS"]

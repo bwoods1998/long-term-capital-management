@@ -1,5 +1,6 @@
 """Funding cliffs said ahead (league/swarm/funding.py; Release A, Sept 30, 2026): runway tiers for Claude's room and the Sail
-guard from measured burn, the OpenAI month's and the burst's calendar rollovers, the Claude fallbacks the router counts
+guard from measured burn, the OpenAI month's calendar rollover (the burst's end is retired: LTCM v3's budget), the Claude
+fallbacks the router counts
 (league/swarm/models.py), the dedupe that says each tier once, and the House hearing each alert as a warning."""
 
 from __future__ import annotations
@@ -49,7 +50,6 @@ class Case(unittest.TestCase):
         self.addCleanup(self.store.close)
         self.settings = copy.deepcopy(DEFAULTS)
         self.settings["claude"]["usd_cap"] = 10_000.0  # the gateway's room binds, not the swarm's own cap
-        self.settings["guard"]["burst_until"] = "2026-10-05T00:00:00Z"
         self.meter = Meter()
         self.month = FakeMonth(None)
         self.guard = SimpleNamespace(last={})
@@ -184,9 +184,9 @@ class Dedupe(Case):
 
     def test_a_calendar_out_is_said_once_and_a_restart_says_nothing_again(self):
         w = self.watch()
-        self.assertIsNotNone(self.decide(w, "out", 0, cliff="burst_end", calendar=True, key="burst_end:x"))
+        self.assertIsNotNone(self.decide(w, "out", 0, cliff="openai_month", calendar=True, key="openai_month:x"))
         self.clock.advance(13 * HOUR)
-        self.assertIsNone(self.decide(w, "out", 0, cliff="burst_end", calendar=True, key="burst_end:x"))
+        self.assertIsNone(self.decide(w, "out", 0, cliff="openai_month", calendar=True, key="openai_month:x"))
         self.assertIsNotNone(self.decide(w, "warning", 10))
         self.assertIsNone(self.decide(self.watch(), "warning", 10), "a new watch on the same store (a restart) is quiet")
 
@@ -388,37 +388,29 @@ class OpenAIMonth(Case):
         self.assertEqual(self.said(cliff="openai_month"), [])
 
 
-class BurstEnd(Case):
-    def test_the_bursts_end_is_said_ahead_with_the_cut_and_once_when_it_comes(self):
-        self.clock.t = dt.datetime(2026, 10, 1, 20, 0, tzinfo=UTC).timestamp()  # 76 h before Oct 5 00:00Z
-        self.burn("sail_model", 33.7, 2)
-        self.burn("gym_box", 28.7, 3)
+class BudgetIsNotACliff(Case):
+    """LTCM v3: the burst's end is retired (the Sail guard's daily cap is the budget's, league/ops/budget.py), and the
+    budget's daily Claude line running out is the rule working, not a funding cliff."""
+
+    def test_the_bursts_end_is_never_assessed(self):
+        self.settings["guard"]["burst_until"] = "2026-10-05T00:00:00Z"  # a swarm.json that still names it changes nothing
+        self.burn("sail_model", 60, 1)
         w = self.watch()
         w.check()
-        [notice] = self.said(cliff="burst_end")
-        self.assertEqual((notice["tier"], notice["swarm_allowance_usd_day"]), ("notice", 11.0))
-        self.assertEqual(notice["cut_pct"], round(100 * (1 - 11.0 / 62.4)))
-        self.assertIn("research falls about 82%", notice["text"])
-        self.clock.t = dt.datetime(2026, 10, 4, 20, 0, tzinfo=UTC).timestamp()
-        self.burn("sail_model", 60, 1)
-        w.check()
-        self.assertEqual(self.said(cliff="burst_end")[-1]["tier"], "urgent")
-        self.clock.t = dt.datetime(2026, 10, 5, 0, 10, tzinfo=UTC).timestamp()
-        w.check()
-        w.check()
-        out = self.said(cliff="burst_end")[-1]
-        self.assertEqual(out["tier"], "out")
-        self.assertIn("the Sail burst ended", out["text"])
-        self.assertEqual(len(self.said(cliff="burst_end")), 3, "the end is said once")
-
-    def test_no_cut_or_an_old_end_says_nothing(self):
-        self.clock.t = dt.datetime(2026, 10, 3, 0, 0, tzinfo=UTC).timestamp()
-        self.burn("sail_model", 5, 1)  # under the $11 the swarm keeps after the burst
-        self.watch().check()
-        self.settings["guard"]["burst_until"] = "2026-09-28T13:30:00Z"  # four days ago: history
-        self.burn("sail_model", 60, 1)
-        self.watch().check()
+        self.assertNotIn("burst_end", w.last)
+        self.assertNotIn("burst_end", w.cfg["lead_hours"])
         self.assertEqual(self.said(cliff="burst_end"), [])
+
+    def test_a_spent_budget_line_is_not_claudes_room_running_out(self):
+        self.settings["budget"] = {"source": "budget.json", "sail_usd_day": 3.0, "claude_usd_day": 2.0}
+        self.burn("claude", 30, 2)  # today (UTC)
+        self.meter.value = 1000  # funded: hundreds of hours at the measured burn
+        self.assertEqual(self.router.claude_room(), 0.0, "the budget's $2 today is spent")
+        self.assertGreater(self.router.claude_funded_room(), 900)
+        w = self.watch()
+        w.check()
+        self.assertEqual(self.said(cliff="claude_room"), [], "no alert: the funded room is far from its cliff")
+        self.assertEqual(w.last["claude_room"]["tier"], "ok")
 
 
 class Fallbacks(Case):

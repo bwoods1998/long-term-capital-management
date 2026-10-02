@@ -13,7 +13,8 @@
   role's `claude.role_model` through the gateway (`league.claude.Claude`) for the roles in `claude.roles` (by default
   the architect, the gate's audit, the diagnostician, the researchers' top band and the strategist), first among the
   paid routes while the gateway's funded total has room above `claude.reserve_usd` and the swarm's own Claude spend is
-  under `claude.usd_cap`. The architect rotates only
+  under `claude.usd_cap` and, LTCM v3, under THE BUDGET's Claude dollars today (league/ops/budget.py: the settings'
+  `budget` block; spent, a call takes its next route as for a role's own line, kind "line"). The architect rotates only
   while `architect.openai_model` names a model: then every other pass asks GPT-6 Astra first. Claude capped, erring or
   unconfigured falls to OpenAI, then Sail, exactly as before. Every role's call asks for Claude (Sept 29, 2026: the
   researcher's stall rewrite and the gate's review too), so `claude.roles` alone decides who gets it: adding "rewrite"
@@ -408,7 +409,26 @@ class ModelRouter:
             return 0.0
 
     def claude_room(self) -> float:
-        """Dollars the swarm may still spend on Claude now: the lower of the gateway's funded total above
+        """Dollars the swarm may still spend on Claude now: the funded room (`claude_funded_room`), capped by what is left
+        of THE BUDGET's Claude dollars today (`claude_budget_room`)."""
+        room = self.claude_funded_room()
+        budget = self.claude_budget_room()
+        return room if budget is None else min(room, budget)
+
+    def claude_budget_room(self) -> float | None:
+        """THE BUDGET's Claude dollars left this UTC day (league/ops/budget.py; the settings' `budget` block, set by every
+        `settings.load` with a state root): `claude_usd_day` less the swarm's Claude spend today, holds included (a call
+        counts on the day its hold was booked). None for settings with no `budget` block (never loaded from a state root:
+        no budget line); 0 for a block that is not a budget (FAIL CLOSED)."""
+        block = self.settings.get("budget")
+        if block is None:
+            return None
+        line = _line(block.get("claude_usd_day") if isinstance(block, Mapping) else None, invalid=0.0)
+        now = float(self.store.clock())
+        return max(0.0, line - max(0.0, self.claude_spent(since=now - now % 86400)))
+
+    def claude_funded_room(self) -> float:
+        """Dollars the swarm may still spend on Claude by its funding: the lower of the gateway's funded total above
         `claude.reserve_usd` and what is left of the swarm's own `claude.usd_cap`. 0 when either cannot be read."""
         if self.claude_meter is None or self.claude_factory is None:
             return 0.0
@@ -544,10 +564,16 @@ class ModelRouter:
         filing (kv `claude_unsettled`) are committed in one transaction, before the gateway hears of the call, so neither a
         crash nor a restart mid-call loses it; else (None, the kind: "line", "family_fuse" or "no_room") with the reason in
         `errors`. The lines are read before the meter's network read and again inside the write transaction (a concurrent
-        call's committed hold counts): the role's own line today (`claude.role_usd_day`), the family's own line today when
+        call's committed hold counts): THE BUDGET's Claude dollars today (`claude_budget_room`, kind "line"), the role's
+        own line today (`claude.role_usd_day`), the family's own line today when
         `family_line` is given, and the room above `claude.reserve_usd` and `claude.usd_cap`, less `keep_usd` (room this
         caller leaves to the other roles)."""
         request_id = re.sub(r"[^A-Za-z0-9:._-]+", "-", key)[:150] + ":" + secrets.token_hex(4)
+        budget = self.claude_budget_room()  # THE BUDGET's Claude dollars left today: a line, not a funding cliff
+        if budget is not None and budget < required:
+            errors.append(f"claude: the research budget's Claude line for today has no room (${budget:.2f} left; this call "
+                          f"may cost ${required:.2f})")
+            return None, "line"
         line = self.claude_role_room(role)  # the role's own line today (`claude.role_usd_day`), before the meter's read
         if line is not None and line < required:
             errors.append(f"claude: the {role} line for today has no room (${line:.2f} left of claude.role_usd_day; "
@@ -559,7 +585,7 @@ class ModelRouter:
                 errors.append(f"claude: {family}'s own {role} line for today has no room (${left:.2f} left of "
                               f"${family_line:.2f}; this call may cost ${required:.2f})")
                 return None, "family_fuse"
-        room = self.claude_room()  # the meter's network read happens outside the write transaction
+        room = self.claude_funded_room()  # the meter's network read happens outside the write transaction
         if room - keep_usd < required:
             kept = f", ${keep_usd:.2f} of it kept for the other roles" if keep_usd else ""
             errors.append(f"claude: no room (${room:.2f} left above the reserve{kept}; this call may cost ${required:.2f})")
@@ -567,6 +593,10 @@ class ModelRouter:
         admitted = False
         with self.store.atomic():
             # Every line is read again inside the write transaction: a concurrent call's committed hold counts.
+            budget = self.claude_budget_room()
+            if budget is not None and budget < required:
+                errors.append("claude: the research budget's Claude line for today has no room")
+                return None, "line"
             line = self.claude_role_room(role)
             if line is not None and line < required:
                 errors.append(f"claude: the {role} line for today has no room")
