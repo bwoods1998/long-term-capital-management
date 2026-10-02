@@ -68,6 +68,34 @@ since and waiting for a release:
   it did not load before (`cards.py` now imports `evidence.py`, already loaded), so it deploys 20:05-13:25Z only,
   after two adversarial reviews and green CI. The live path never builds a `RebirthIndex`. To switch on and verify:
   `docs/operations.md`, **The cell's yield**.
+- **The look holds** (L6(b) and L6(c), branch `gate/l6-look-holds`; `league/swarm/gate.py`, `league/swarm/evidence.py`,
+  `league/swarm/store.py`, `league/swarm/settings.py`, `league/CONTRACT.md`, `scripts/verify_swarm.py`,
+  `scripts/look_holds_benchmark.py`; the money path as the duplicate look's: 20:05-13:25Z only, after two adversarial
+  reviews and green CI). The owner approved them on Oct 2 (~02:55Z) as a tightening, on the condition of fixed-benchmark
+  proof that false promotions do not rise and a report of the missed-signal cost. Every holdout look raises the Holm bar
+  for every later one; the three looks since the Sept 26 reset were all long-delta programs and all failed, and a 2025
+  Validation pass has mostly measured long-market drift (the edge study). After the duplicate look, the experiment
+  contract, the drift screen and the rations, and before the paid review and audit and the sealed read, the gate now
+  HOLDS the look at (b) a long-delta version (pooled Train beta above zero) whose own Train drift fit has drift share
+  |drift| / (|alpha| + |drift|) of at least 0.25, or (c) a version whose expected holdout power is below 0.30: the
+  normal approximation of the holdout line's one-sided bootstrap test at the level the look would have to reach under
+  Holm, with the version's Validation all-days daily Sharpe over the holdout window's 184 sessions. Missing figures hold
+  (fail-closed). A held version gets one `look_holds` row (never a `refusals` row), `gated_sha` with `gate_ready`
+  cleared, `gate_outcome` "held" (no incubator bar: a hold is no verdict on the program), words with no figure for the
+  researcher, and a private `swarm.gate` event `look_hold` whose `_figures` say why; no look row, no try, no review, no
+  audit, no holdout read. A new version that clears both is looked at. Settings `gate.look_holds` `{"drift_share": 0.25,
+  "min_power": 0.30}`, on by default; each key null turns its hold off, `look_holds` null both (today's gate).
+  Tightening only: no threshold of the validation or holdout line, no Holm, deflated-Sharpe or forward rule moves;
+  nothing in `league/live`, `league/gym` or `LEAGUE_FILES`, no evaluator adoption, no money digest; the store gains one
+  table. The fixed benchmark (`evaluator-suite-1`, #452, development cohort, full protocol, pinned): the suite on the
+  branch equals base case for case (`--compare`: comparable, no regression, no improvement; the same world rows), and
+  with the holds overlaid on its recorded outcomes (`scripts/look_holds_benchmark.py`, the branch's own functions) false
+  promotions stay 16 of 160 (the two memorized-table leaks the review alone stops) and 0 of 896 search noise lineages,
+  and missed signals stay 23 of 40 and 269 of 384: no planted signal that reached its look would be held (the nearest,
+  one dense world at power 0.297, had already failed Validation), and the drift-only negative, which the drift screen
+  stops, would be held in all 8 worlds. The suite's worlds hold no long-drift program that reaches a look, so it shows
+  the holds cost nothing there, not what they save. To verify after the deploy: `look_holds` rows and `swarm.gate`
+  events with action `look_hold`.
 
 ## 2026-10-01
 

@@ -1554,6 +1554,7 @@ the swarm's loop for up to the meters' 20 s timeouts, at most once every 5 minut
 | `researcher.claude_top`, `claude_effort`, `claude_max_tokens`, `claude_hold_every` | `swarm.json` on the box | 0 on the box (the band is off); defaults: 12, `medium`, 12000, 3 | the top band on Claude (PR #417): how many of the bandit's top families, at what effort, each call's output ceiling (it sizes the hold), and how often Claude looks during a hold streak (1: every cycle) | edit `swarm.json` |
 | `researcher.claude_family_usd_day`, `claude_min_room_usd`, `claude_timeout_seconds`, `claude_breaker_failures`, `claude_breaker_window_seconds`, `claude_breaker_pause_seconds` | `swarm.json` on the box | defaults: $15, $25, 180, 3, 3600, 3600 | the band's fuses: one family's Claude a UTC day, the funded room left to the other roles, one call's limit, and the breaker (unknown bills in the window that pause the band, and for how long) | edit `swarm.json` |
 | `gate.review_openai_model`, `gate.audit_openai_model` | `swarm.json` on the box | null, null (since 04:53Z Sept 29) | the review's and the audit's OpenAI route; null skips it (defaults `gpt-6-sol`, `gpt-6-astra`) | edit `swarm.json` |
+| `gate.look_holds` (`drift_share`, `min_power`) | `swarm.json` on the box | default `{"drift_share": 0.25, "min_power": 0.30}` (the owner, Oct 2, 2026) | THE LOOK HOLDS: hold a holdout look at a long-delta version whose Train drift share is at least `drift_share`, or whose expected holdout power at the next look's Holm level is below `min_power` (the look holds, in the gate's section below). A key null turns that hold off, `look_holds` null both; a value that is not a number from 0 to 1 reads as its default | edit `swarm.json` |
 | `architect.openai_model`, `every_seconds`, `refill_seconds`, `max_refill`, `max_output_tokens` | `swarm.json` on the box | null, 1800 (since 02:47Z Oct 1; 900 before), 1200, 12 (since Release A, Sept 30; 4 from 16:07Z), 32000 | the architect: null leaves it Claude first (Sail's Kimi-K3 as the fallback, and its route while `claude.role_usd_day.architect` is 0); its cadence, its refill below `population.start` and each pass's births (defaults `gpt-6-astra`, 14400, 3600, 12, 12000) | edit `swarm.json` |
 | `architect.sail_effort` | `swarm.json` on the box | unset: `medium` (Oct 1; before it, `high` was hard-coded) | the architect's reasoning effort on Sail (Kimi-K3) and OpenAI; Claude's is `claude.role_effort` / `claude.effort`. One of `minimal`, `low`, `medium`, `high`, `xhigh`; anything else reads as `medium`. At `high`, from 08:15Z Oct 1 every pass spent the whole 32,000-token output on reasoning and came back cut, most with no text; the same request at `medium` completed in 66 s with 12 carded families. A cut Sail answer is salvaged like a Claude one (its complete families born, fewer than 3 buy the one retry on Claude alone), and the pass's `swarm.architect` event says its `effort`, its `usage` (input, cached, output and reasoning tokens) and, when cut, its `incomplete_reason`. At `medium`, k3 sometimes writes stray trailing commas (`,}`, `,]`) into a complete answer; when the strict read finds no `families` array and the families object has such a comma, the architect reads it again without them, from the `{` that opens that object (`read_families`; the event says `lenient`), where before it read as no proposals (11:57Z Oct 1). A complete answer whose families array still does not parse whole (15:59Z Oct 1: a stray `}` after the fourth and the fifth of six families, and the pass read as no proposals) is read object by object, each family decoded from its own `{` and the stray closers and commas between the families skipped, never outside the array and nothing inside a family changed beyond the strip (`recover_families`: an object that does not decode whole is passed over, never entered or kept truncated; the event's `recovered` says how many and why, and `passed` the objects passed over). An answer with no readable family still reads as none. The operator set this key to `high` in `swarm.json` at 12:00Z Oct 1 (with `architect.max_refill` 6, which completed with 6 proposals a pass) until the re-read deploys | edit `swarm.json` |
 | `population.start`, `ceiling`, `floor` | `swarm.json` on the box | 96, 96, 12 | the refill target, the most alive, the fewest retirement may leave (defaults 48, 96, 16) | edit `swarm.json` |
@@ -1714,6 +1715,56 @@ family and lineage, and with any look in flight in another family.
   Expect none for a genuinely new version. A refusal that should not have been made (two different programs with
   byte-identical Validation outcomes) would show as `match` "validation" on programs whose code differs in more than
   comments; report it, and the owner decides whether to clear its `gated_sha`, refusal row and incubator bar.
+
+The look holds (L6(b) and L6(c) of the Oct 1 edge study, approved by the owner on Oct 2, 2026 as a tightening with
+fixed-benchmark proof; `league/swarm/gate.py` `look_hold`, `league/swarm/evidence.py` `drift_lean`, `holm_level`,
+`holdout_power`). The three looks after the Sept 26 reset were all long-delta programs and all failed, and every look
+raises the Holm bar of every later one. After the duplicate look, the experiment contract, the drift screen and the
+rations (each of which refuses, and a refusal bars the program from the incubator: a hold never takes a refusal's
+place), and before the paid review and audit, the gate image's coverage and the look, the gate HOLDS the look at a
+gate-ready version when:
+- **(b) the drift hold** (stage "look hold (drift)"): its own Train drift fit (`researcher.version_drift`, the figures
+  the drift screen reads; the pooled line over the years the screen counts, re-pooled when it leaves a year out) is
+  long-delta (beta above zero) with drift share |drift_usd| / (|alpha_usd| + |drift_usd|) at least
+  `gate.look_holds.drift_share` (0.25). A version with no drift fit, or a long-delta one with neither alpha nor drift,
+  is held too (fail-closed): with the drift screen on, such a version already waits at the screen, so this bites only
+  when `tournament.drift_screen` is off or a fit lacks a beta.
+- **(c) the power hold** (stage "look hold (power)"): its expected holdout power is below `gate.look_holds.min_power`
+  (0.30). Power = P(Z >= z(level) - S sqrt(N)), the normal approximation of the holdout line's one-sided day-block
+  bootstrap test of mean daily P&L above zero: S is the version's Validation all-days daily Sharpe
+  (`validation_numbers.sharpe_daily`, the figure the look's own Sharpe check uses), N the holdout window's NYSE
+  sessions (`holdout_sessions`, Jan 2 to Sept 25, 2026: 184), and the level is the one the look would have to reach
+  under Holm across every look made (`evidence.holm_level`, the gate's own `holm_passes`; with every earlier look
+  failed, 0.05 / m: the 4th look 0.0125), a look in flight in another family counted as a failed one. A missing Sharpe
+  or session count holds (fail-closed). The approximation leaves out the bootstrap's extra width and the line's other
+  checks, which only lower the power, so the hold errs toward looking.
+- **The record**: one `look_holds` row (`SwarmStore.hold_look`: family, version, run sha, stage, the researcher's words;
+  never a `refusals` row, which every reader takes as a verdict against the program), `gated_sha` with `gate_ready`
+  cleared (the tournament never readies the version again), `gate_outcome` "held" (not a bad outcome: no incubator bar,
+  and the House's reader refuses nothing for it), the researcher's status line, and one private `swarm.gate` event,
+  action `look_hold`, with `stage`, `holds` (every hold that fired, the drift hold first) and `_figures` (beta, alpha,
+  drift, share; power, Sharpe, sessions, level, looks counted: operator-only, never in a model's text). No look row, no
+  `look_tries`, no review, no audit, no holdout read. The round's answer lists it under `look_held`. `look()` asks
+  again under the store's lock, since a look landing meanwhile lowers the power; one held there is recorded next round.
+- **What the researcher reads**: "the holdout look is held: the program's Train profit leans on market drift ..." or
+  "... too few independent bets for the holdout to judge it ...", never a figure (D2a). A new version of the family is
+  looked at once it clears both holds; the held version stays closed (an evaluator adoption clears `gated_sha`, and
+  the gate then holds it again if its figures still say so).
+- **Not an incubator bar.** A hold is no verdict on the program: it never reached the review that would judge it. The
+  incubator's own review and audit still stand between it and a real lot.
+- **Rollback**: `"gate": {"look_holds": {"drift_share": null}}` (or `"min_power": null`) in `swarm.json` turns one hold
+  off; `"look_holds": null` turns both off and the gate is exactly as before. A version already held stays closed; to
+  look at it, the operator clears its `gated_sha` (or it is looked at as a new version). A value that is not a number
+  from 0 to 1 reads as its default.
+- **To see it**: `look_holds` rows (`SELECT family, version, stage, at FROM look_holds`) and `swarm.gate` events with
+  action `look_hold` (their `_figures` say which figure held it). Expect most long-call and call-vertical programs held
+  for drift, and sparse single-pair programs held for power.
+- **The fixed-benchmark proof** (the owner's condition): `scripts/look_holds_benchmark.py run` runs the pinned
+  `evaluator-suite-1` (#452) and records each case-world's hold figures; `analyze` counts promotions with and without
+  the holds (engine tier) and re-simulates the search tier's current rule with the power hold before each look. On the
+  branch, at full protocol: the suite equals base case for case; with the holds, false promotions stay 16 of 160 and 0
+  of 896 search noise lineages, missed signals stay 23 of 40 and 269 of 384 (no planted signal that reached its look is
+  held). The suite's worlds have no long-drift program that reaches a look, so it shows the cost, not the saving.
 
 Deploy impact (R3): the rule applies at once to every family that is already past it. On Sept 27 (start 72, floor
 44, 74 alive) about 29 families were past it, nearly all long-refuted placeholders, so the first tournament round and

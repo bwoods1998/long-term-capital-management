@@ -54,6 +54,19 @@ THE HOLDOUT LINE (one look per program version, at most three per lineage; the g
   - holdout Sharpe at least half of the validation Sharpe.
   The researcher is told pass or fail, never the numbers.
 
+THE LOOK HOLDS (L6(b) and L6(c), approved by the owner on Oct 2, 2026 as a TIGHTENING; the gate's
+`Gate.look_hold`). Every look raises the Holm bar of every later one, so the gate does not spend one on a version
+the holdout cannot judge. It HOLDS the look (no look, no review, no sealed read) when:
+  - (b) THE DRIFT HOLD (`drift_lean`): the version's own Train drift fit is long-delta (pooled beta above zero) and its
+    drift share, |drift_usd| / (|alpha_usd| + |drift_usd|) over the years THE DRIFT SCREEN counts, is at least
+    `LOOK_HOLD_DRIFT_SHARE`. A Validation pass by such a program has mostly measured the market's drift;
+  - (c) THE POWER HOLD (`holdout_power`): the one-sided power of the holdout's own test, at the level the look would
+    have to reach under Holm (`holm_level`), is below `LOOK_HOLD_MIN_POWER`, taking the version's Validation all-days
+    daily Sharpe as its true Sharpe over the holdout's sessions. The test is a day-block bootstrap of the mean daily
+    P&L; its power is taken in the normal approximation, P(Z >= z(level) - S sqrt(N)), which leaves out the bootstrap's
+    extra width and the line's other checks (both only lower it).
+  Missing figures hold too (fail-closed). These are the owner's settings (`gate.look_holds`), each switchable to null.
+
 THE LEAKAGE ALARM: once there are at least 10 holdout looks, more than 30% passing stops the gate.
 
 THE BANDIT: Thompson sampling over validation evidence, with a 25% exploration share for new families.
@@ -66,6 +79,7 @@ from __future__ import annotations
 import hashlib
 import math
 import random
+from statistics import NormalDist
 from typing import Any, Mapping, Sequence
 
 from .. import stats
@@ -449,6 +463,71 @@ def leakage_alarm(looks: int, passes: int) -> bool:
     return looks >= ALARM_MIN_LOOKS and passes > ALARM_PASS_SHARE * looks
 
 
+# ---------------------------------------------------------------------------- the look holds (L6)
+#: THE LOOK HOLDS' defaults (the module docstring; the owner's approval of Oct 2, 2026): `gate.look_holds`.
+LOOK_HOLD_DRIFT_SHARE = 0.25
+LOOK_HOLD_MIN_POWER = 0.30
+
+
+def drift_lean(numbers: Mapping[str, Any] | None, *, first_year: int | None = None) -> dict[str, Any]:
+    """THE DRIFT HOLD's figures from a version's Train drift fit (`drift_numbers`): {known, beta, alpha_usd, drift_usd,
+    share, long_delta, years, why}. The pooled line over the years THE DRIFT SCREEN counts (`drift_years`, from
+    `first_year`); when it leaves a year out, the kept years are pooled again as the Gym pools them (alpha and drift
+    dollars summed, beta the held-day-weighted mean of the years'). share = |drift_usd| / (|alpha_usd| + |drift_usd|),
+    None when both are zero; long_delta: beta above zero. `known` is False when there is no fit (a run from before the
+    figures) or it cannot be pooled; `why` says which."""
+    out: dict[str, Any] = {"known": False, "beta": None, "alpha_usd": None, "drift_usd": None, "share": None,
+                           "long_delta": None, "years": 0, "why": None}
+    if not isinstance(numbers, Mapping) or not isinstance(numbers.get("years"), Mapping) \
+            or not isinstance(numbers.get("pooled"), Mapping):
+        out["why"] = "no Train drift fit"
+        return out
+    years, left = drift_years(numbers, first_year)
+    if left:
+        rows = [(_num(r.get("alpha_usd")), _num(r.get("drift_usd")), _num(r.get("beta")), _num(r.get("held_days")))
+                for r in years.values()]
+        if not rows or any(v is None for row in rows for v in row):
+            out["why"] = "its Train drift fit cannot be pooled over the years the drift screen counts"
+            return out
+        held = sum(float(h) for _, _, _, h in rows)
+        alpha = sum(float(a) for a, _, _, _ in rows)
+        drift = sum(float(d) for _, d, _, _ in rows)
+        beta = sum(float(b) * float(h) for _, _, b, h in rows) / held if held > 0 else 0.0
+    else:
+        pooled = numbers["pooled"]
+        alpha, drift, beta = _num(pooled.get("alpha_usd")), _num(pooled.get("drift_usd")), _num(pooled.get("beta"))
+        if alpha is None or drift is None or beta is None:
+            out["why"] = "its pooled Train drift fit lacks its alpha, drift or beta"
+            return out
+    whole = abs(alpha) + abs(drift)
+    out.update(known=True, beta=beta, alpha_usd=alpha, drift_usd=drift, share=abs(drift) / whole if whole > 0 else None,
+               long_delta=beta > 0, years=len(years))
+    return out
+
+
+def holm_level(previous_ps: Sequence[float], *, alpha: float = HOLDOUT_ALPHA) -> float:
+    """The level the next holdout look's p must reach under Holm across every look (`holm_passes`, the gate's own rule,
+    with the earlier looks' p-values): the largest of alpha / (m - k), k = 0 .. m - 1, at which it would reject. With
+    every earlier look failed that is alpha / m (the 4th look: 0.0125)."""
+    m = len([p for p in previous_ps if _num(p) is not None]) + 1
+    for level in sorted({alpha / (m - k) for k in range(m)}, reverse=True):
+        if holm_passes(level, previous_ps, alpha=alpha)[0]:
+            return level
+    return alpha / m
+
+
+def holdout_power(sharpe_daily: Any, sessions: Any, level: Any) -> float | None:
+    """THE POWER HOLD's figure: the one-sided power of the holdout's test of "mean daily P&L above zero" at `level` over
+    `sessions` days, for a program whose true all-days daily Sharpe is `sharpe_daily`, in the normal approximation
+    (the day-block bootstrap's mean is about normal): P(Z >= z(1 - level) - S sqrt(N)). None without a Sharpe, at least
+    two sessions and a level strictly between 0 and 1."""
+    s, n, a = _num(sharpe_daily), _num(sessions), _num(level)
+    if s is None or n is None or n < 2 or a is None or not 0.0 < a < 1.0:
+        return None
+    normal = NormalDist()
+    return normal.cdf(s * math.sqrt(n) - normal.inv_cdf(1.0 - a))
+
+
 # ---------------------------------------------------------------------------- the forward record
 SOURCE_ORDER = ("real", "shadow", "nightly")
 
@@ -567,4 +646,5 @@ def _allocate(draws: Mapping[str, float], total: float, out: dict[str, float]) -
 __all__ = ["validation_line", "holdout_line", "block_bootstrap", "holm_passes", "leakage_alarm", "forward_record", "thompson",
            "train_score", "years_of", "robustness_view", "traded_sharpe", "checks_passed", "quarters_positive", "daily_pnl",
            "one_record", "MIN_TRADES", "MIN_DAYS", "MIN_T", "MIN_DSR", "STRESS", "LOOKS_PER_LINEAGE", "TRAIN_YEAR_MIN_TRADES",
-           "TRAIN_YEAR_MIN_DAYS", "drift_numbers", "drift_screen", "DRIFT_MIN_T", "EXPLOIT_PER_POSITIVE"]
+           "TRAIN_YEAR_MIN_DAYS", "drift_numbers", "drift_screen", "DRIFT_MIN_T", "EXPLOIT_PER_POSITIVE", "drift_lean",
+           "holm_level", "holdout_power", "LOOK_HOLD_DRIFT_SHARE", "LOOK_HOLD_MIN_POWER"]

@@ -304,7 +304,12 @@ program code on the same structure and roots joins lineages; renaming a family o
 never creates a fresh ration. A version that repeats a program already looked at, in any family, is
 refused before its look, and no look is spent: the same code and parameters, parameters that resolve to
 the same values, or a Validation run identical to a looked version's (a renamed variable or a new comment
-changes nothing). Only a genuinely different version is looked at. A revised retired mechanism must
+changes nothing). Only a genuinely different version is looked at. A look is also held, and no look is
+spent, when the holdout could not judge the version: its Train profit leans on market drift (it holds long
+market exposure, and a large share of what it made is what that exposure earns on average days: the drift
+lines of your Train runs show both), or it makes too few independent bets for the holdout to tell a real
+edge from luck. A held version is closed at the gate; a new version that clears both can be looked at.
+Build programs whose profit is their timing, not the market's drift. A revised retired mechanism must
 identify its parent.
 
 **Trials.** Every Gym evaluation is a trial, counted per lineage (every family in it: parent, forks,

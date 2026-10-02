@@ -151,8 +151,11 @@ def main(argv: list[str] | None = None) -> int:
 
     looks = [dict(r) for r in db.execute("SELECT family, version, passed, at FROM looks ORDER BY seq")]
     refusals = [dict(r) for r in db.execute("SELECT family, stage, reason, at FROM refusals ORDER BY seq DESC LIMIT 10")]
+    # THE LOOK HOLDS (L6, Oct 2, 2026): a store from before them has no table.
+    holds = [dict(r) for r in db.execute("SELECT family, version, stage, at FROM look_holds ORDER BY seq DESC LIMIT 10")] \
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='look_holds'").fetchone() else []
     checks["gate"] = {"result": "PASS" if looks else "WAIT", "looks": len(looks), "passes": sum(1 for x in looks if x["passed"]),
-                      "leakage_alarm": kv.get("leakage_alarm"), "recent_refusals": refusals}
+                      "leakage_alarm": kv.get("leakage_alarm"), "recent_refusals": refusals, "recent_look_holds": holds}
     db.close()
     print(json.dumps(out, indent=1, default=str))
     return 1 if any(c.get("result") == "FAIL" for c in checks.values()) else 0
