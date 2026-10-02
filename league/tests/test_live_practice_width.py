@@ -104,6 +104,7 @@ class StoreClamp(WidthCase):
         self.assertEqual(ST.STORE_BACK_ROOTS, frozenset(sl.BACK_MONTH_ROOTS))
         self.assertEqual(ST.STORE_BACK_ROOTS, P.BACK_MONTH_ROOTS)
         self.assertEqual(ST.STORE_STEPS, {root: row[1] for root, row in P.LISTING.items()})
+        self.assertEqual((ST.STORE_FIXED_STEP, ST.STORE_WIDER), (P.FIXED_STEP, P.WIDER))
         for price in (5.0, 40.0, 74.99, 75.0, 120.0, 149.9, 150.0, 300.0, 499.0, 500.0, 900.0):
             self.assertEqual(ST._store_strikes("NVDA", price), (25, P.equity_step(price)))
         self.assertEqual(ST._store_strikes("spxw", 6000.0), (40, 5.0))
@@ -146,6 +147,42 @@ class StoreClamp(WidthCase):
         strikes = {occ_parts(s)[3] for s in kept}
         self.assertEqual(sorted(strikes), [399.5, 400.0, 400.5, 401.0, 401.5, 402.0, 402.5])
         self.assertEqual(len(kept), 7 * 2 * 2)
+
+
+@unittest.skipUnless(HAVE, "numpy not installed")
+class ClampWindow(unittest.TestCase):
+    """`OptionsLive._observe_chain`'s window on a market that records it (and lists nothing)."""
+
+    def read(self, root, spot, *, lo=0, hi=14, band=0.9):
+        calls = []
+        market = mock.Mock()
+        market.chain.side_effect = lambda *a, **kw: calls.append(kw) or {}
+        live = mock.Mock(market=market, _observe_narrow={})
+        day = mock.Mock(day=MONDAY)
+        rows = ST.OptionsLive._observe_chain(live, day, root, lo, hi, band, spot, {"max_pages": 3}, {})
+        return rows, calls
+
+    def test_a_coarsening_listing_is_drawn_on_the_next_wider_step(self):
+        _, [slv] = self.read("SLV", 40.0)                                   # $0.50 near the money, $1 further out
+        self.assertEqual((slv["strike_from"], slv["strike_to"]), (40.0 - 25.5, 40.0 + 25.5))
+        _, [aapl] = self.read("AAPL", 250.0)                                # $2.50 near, $5 further out
+        self.assertEqual((aapl["strike_from"], aapl["strike_to"]), (250.0 - 127.5, 250.0 + 127.5))
+        _, [gld] = self.read("GLD", 300.0)
+        self.assertEqual((gld["strike_from"], gld["strike_to"]), (300.0 - 63.75, 300.0 + 63.75))
+        _, [iwm] = self.read("IWM", 220.0)                                  # a fixed $1 step: its own
+        self.assertEqual((iwm["strike_from"], iwm["strike_to"]), (220.0 - 25.5, 220.0 + 25.5))
+        _, [spxw] = self.read("SPXW", 6000.0)
+        self.assertEqual((spxw["strike_from"], spxw["strike_to"]), (6000.0 - 202.5, 6000.0 + 202.5))
+
+    def test_the_programs_band_still_bounds_the_window(self):
+        _, [slv] = self.read("SLV", 40.0, band=0.1)
+        self.assertEqual((slv["strike_from"], slv["strike_to"]), (36.0, 44.0))
+
+    def test_an_emptied_window_reads_nothing_spot_or_none(self):
+        for spot in (40.0, float("nan")):
+            self.assertEqual(self.read("IWM", spot, lo=20, hi=14), ({}, []), spot)
+        _, [read] = self.read("IWM", float("nan"), lo=0, hi=14)             # no spot: the first two days, as before
+        self.assertEqual(read["expiry_to"], (MONDAY + dt.timedelta(days=1)).isoformat())
 
 
 @unittest.skipUnless(HAVE, "numpy not installed")
@@ -353,6 +390,14 @@ class ReadBudget(unittest.TestCase):
         self.assertEqual(out.get("observe_reads_skipped_time"), None)
 
 
+@unittest.skipUnless(HAVE, "numpy not installed")
+class ReadBudgetDefault(unittest.TestCase):
+    def test_the_swarm_settings_default_is_the_steps(self):
+        from league.swarm import settings as SS
+
+        self.assertEqual(SS.DEFAULTS["live"]["observe_read_calls"], ST.DEFAULTS["observe_read_calls"])
+
+
 # ---------------------------------------------------------------------------------------------------- the honest shed
 @unittest.skipUnless(HAVE, "numpy not installed")
 class HonestShed(PracticeCase):
@@ -440,13 +485,38 @@ class PracticeCaps(PracticeCase):
         self.assertTrue(self.decisions_in_error("many"))
         self.assertFalse(any(self.decisions_in_error("many")), "a cap's refusal is never the program's error")
 
-    def test_an_open_over_the_probes_share_of_capital_is_refused(self):
+    def orders(self, family):
+        db = sqlite3.connect(self.root / "observe.sqlite")
+        try:
+            return [json.loads(b) for (b,) in db.execute(
+                "SELECT body FROM events WHERE family=? AND kind='order' ORDER BY event_id", (family,))]
+        finally:
+            db.close()
+
+    def test_an_open_over_the_probes_share_of_capital_is_sized_down_as_a_probes(self):
         self.build(observed=[opener("big", qty=40)])                        # about $2,000 of maximum loss
         self.run_to(9, 36)
         acc = self.live.shadow.accounts["big@1:o"]
+        reasons = self.rejected("big")
+        self.assertTrue(all(r.startswith("practice cap: 3 structures open or working") for r in reasons),
+                        ("a Probe would send it smaller: never refused for its size", reasons))
+        [first, *_] = self.orders("big")
+        order = first["order"]["order"]
+        self.assertEqual(first["practice_sized"], {"asked": 40, "qty": order["qty"]})
+        qty, unit = order["qty"], order["max_loss_share"] * 100 + 2 * order["fees"] / order["qty"]
+        self.assertTrue(1 <= qty < 40 and qty * unit <= 500.0 + 1e-6 < (qty + 1) * unit, (qty, unit))
+        self.assertGreaterEqual(acc.counts["opens"], 1)
+
+    def test_an_open_whose_one_structure_is_over_the_probes_cap_is_refused(self):
+        self.build(observed=[opener("wide", width=10.0)])
+        self.live.settings["shadow_capital"] = 1000.0                       # $50 a structure, the $100 floor
+        self.run_to(9, 36)
+        acc = self.live.shadow.accounts["wide@1:o"]
         self.assertEqual((len(acc.positions), acc.counts["opens"], acc.orders_today), (0, 0, 0))
-        [first, *_] = self.rejected("big")
-        self.assertRegex(first, r"^practice cap: this open risks [0-9.]+ with fees, over the Probe's 500\.00 an open$")
+        [first, *_] = self.rejected("wide")
+        self.assertRegex(first, r"^practice cap: one structure risks [0-9.]+ with fees, over the Probe's 50\.00 a "
+                                r"structure and its 100\.00 floor$")
+        self.assertFalse(any(self.decisions_in_error("wide")), "a cap's refusal is never the program's error")
 
     def test_a_candidate_shadow_keeps_the_engines_rules(self):
         from league.tests.live_fakes import family
@@ -463,9 +533,9 @@ class CapArithmetic(unittest.TestCase):
     """`ShadowAccount._practice_cap` on held structures and working opens (shadow capital $10,000: $500 an open, three
     structures, $1,500 at risk at the constitution's Probe rows)."""
 
-    def account(self, instance="fam@1:o"):
+    def account(self, instance="fam@1:o", capital=10000.0):
         needs = {"roots": ["SPY"], "dte": [0, 3], "band": 0.03, "cadence": 1, "history": 0, "start": 571, "end": 958}
-        return S.ShadowAccount(instance=instance, family="fam", needs=S.needs_of(needs), params={}, capital=10000.0)
+        return S.ShadowAccount(instance=instance, family="fam", needs=S.needs_of(needs), params={}, capital=capital)
 
     def position(self, pid, share, qty=1):
         return S._position_from({"pid": pid, "type": "debit_vertical", "root": "SPY", "legs": [], "keys": [],
@@ -490,32 +560,52 @@ class CapArithmetic(unittest.TestCase):
 
     def test_per_open_with_fees(self):
         acc = self.account()
-        self.assertIsNone(acc._practice_cap([self.working(9, 4.90, fees=5.0)]), "490 and 10 of fees: 500")
-        why = acc._practice_cap([self.working(9, 4.90, fees=5.01)])
-        self.assertTrue(why.startswith("practice cap: this open risks 500.02"), why)
+        self.assertEqual(acc._practice_cap([self.working(9, 4.90, fees=5.0)]), ({9: 1}, None), "490, 10 of fees: 500")
+        sizes, why = acc._practice_cap([self.working(9, 4.90, fees=5.01)])
+        self.assertEqual(sizes, {})
+        self.assertEqual(why, "practice cap: one structure risks 500.02 with fees, over the Probe's 500.00 a structure "
+                              "and its 100.00 floor")
+
+    def test_an_open_is_sized_as_plan_open_sizes_a_probes(self):
+        acc = self.account()
+        # 10 asked of a $99 + $1 structure: floor(500 / 100) = 5, as a Probe sends it.
+        self.assertEqual(acc._practice_cap([self.working(9, 0.99, qty=10, fees=5.0)]), ({9: 5}, None))
+        # Never more than the program asked.
+        self.assertEqual(acc._practice_cap([self.working(9, 0.99, qty=2, fees=1.0)]), ({9: 2}, None))
+        # The unit's fees are one structure's at the decision's quotes, never the whole order's.
+        self.assertEqual(acc._practice_cap([self.working(9, 0.49, qty=40, fees=20.0)]), ({9: 10}, None))
+
+    def test_the_floor_buys_one_structure_over_the_share(self):
+        acc = self.account(capital=1000.0)                                  # $50 a structure; the $100 floor
+        self.assertEqual(acc._practice_cap([self.working(9, 0.90, qty=3, fees=15.0)]), ({9: 1}, None), "90 + 10: one")
+        sizes, why = acc._practice_cap([self.working(9, 0.91, qty=3, fees=15.0)])
+        self.assertTrue(why.startswith("practice cap: one structure risks 101.00"), why)
 
     def test_structures_held_and_working_count_once_each(self):
         acc = self.account()
         acc.positions = {1: self.position(1, 1.0), 2: self.position(2, 1.0)}
         acc.orders = {5: self.working(5, 1.0, pid=2)}                        # the rest of a partly filled open: held
-        self.assertIsNone(acc._practice_cap([self.working(9, 1.0)]))
+        self.assertEqual(acc._practice_cap([self.working(9, 1.0)]), ({9: 1}, None))
         acc.orders[6] = self.working(6, 1.0)                                 # a third structure, working
-        why = acc._practice_cap([self.working(9, 1.0)])
-        self.assertEqual(why, "practice cap: 3 structures open or working, the most a Probe holds is 3")
+        self.assertEqual(acc._practice_cap([self.working(9, 1.0)]),
+                         ({}, "practice cap: 3 structures open or working, the most a Probe holds is 3"))
 
     def test_the_familys_maximum_loss_at_risk(self):
         acc = self.account()
         acc.positions = {1: self.position(1, 7.0)}                           # 700 held from before the caps
         acc.orders = {5: self.working(5, 6.0)}                               # 600 working
-        self.assertIsNone(acc._practice_cap([self.working(9, 2.0)]), "1,500 exactly")
-        why = acc._practice_cap([self.working(9, 2.01)])
-        self.assertEqual(why, "practice cap: 1501.00 of maximum loss would be at risk, over the Probe's 1500.00 a family")
+        self.assertEqual(acc._practice_cap([self.working(9, 2.0)]), ({9: 1}, None), "1,500 exactly")
+        # The family's room sizes it down: 200 of room is two $100 structures of the three asked.
+        self.assertEqual(acc._practice_cap([self.working(9, 1.0, qty=3)]), ({9: 2}, None))
+        self.assertEqual(acc._practice_cap([self.working(9, 2.01)]),
+                         ({}, "practice cap: 1300.00 of maximum loss at risk leaves no room for one structure's 201.00 "
+                              "under the Probe's 1500.00 a family"))
 
     def test_caps_that_cannot_be_read_refuse(self):
         acc = self.account()
         with mock.patch.object(S, "_probe_caps", side_effect=ValueError("the options money table is refused")):
-            why = acc._practice_cap([self.working(9, 0.5)])
-        self.assertEqual(why, "practice cap: the Probe's caps could not be read (ValueError)")
+            self.assertEqual(acc._practice_cap([self.working(9, 0.5)]),
+                             ({}, "practice cap: the Probe's caps could not be read (ValueError)"))
 
     def test_a_withdrawn_open_leaves_no_trace_in_the_engines_counts(self):
         acc = self.account()

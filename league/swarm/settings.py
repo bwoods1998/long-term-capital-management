@@ -341,7 +341,9 @@ DEFAULTS: dict[str, Any] = {
         "observe_max": 48,              # at most this many observe instances
         "observe_train": True,          # admit families with an eligible Train version and no validated one
         "observe_roots_max": 24,        # at most this many distinct roots across the observe instances (1-128)
-        "observe_read_calls": 40,       # the minute's data calls before observe reads stop (about 1.5 a root; 10-200)
+        # The minute's data calls before observe reads stop (10-200): equal to the step's own DEFAULTS (a test pins
+        # them), room for 24 roots at the 3-page cap and a held read each after the real phase's 20 (v3).
+        "observe_read_calls": 120,
         "calibration": False,           # the D3 real-fill round trips: ON only by swarm.json {"live": {"calibration": true}}
         "calibration_samples": 30,      # a symbol's round trips stop once its open-at-mid cell has this many samples
         # The House live test (league/live/house_test.py): ON only by swarm.json {"live": {"house_test": true}}, and then
