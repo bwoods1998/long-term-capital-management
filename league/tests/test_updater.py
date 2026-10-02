@@ -853,6 +853,12 @@ class TheReleaseTrain(unittest.TestCase):
         self.assertTrue(updater.due())  # fifteen minutes on, not thirty
         self.assertEqual(updater.check()["action"], "deploying")
         self.at("2026-09-24T20:10Z")
+        # Not a look at main: only at the nightly stop the launch wrote (V3-A), which is lifted once no
+        # deploy is in flight -- this fixture's launch starts none.
+        self.assertTrue(updater.due())
+        self.assertEqual(updater.check(), {"action": "none", "reason": "looked only at the nightly stop",
+                                           "nightly_resumed": f"updater:{self.launched[0][1]}"})
+        self.at("2026-09-24T20:12Z")
         self.assertFalse(updater.due())
 
     def test_the_calendar_is_the_houses(self):
@@ -869,15 +875,338 @@ class TheReleaseTrain(unittest.TestCase):
         self.assertIn("the ledger could not be read", out["reasons"][0])
 
 
-class TheUpdaterIsOffUnlessTheConfigSaysOn(unittest.TestCase):
-    """The options overhaul (Sept 26, 2026, trap 3): the in-box updater cannot carry the prune, so it
-    stays off, and a config that does not name the key never switches it on."""
+class TheNightlyDaemonStopsFirst(unittest.TestCase):
+    """V3-A (WP1): the owner's release procedure stops the nightly forward daemon before a deploy so a
+    release change never lands mid-job, and lifts the stop after the verdict. The updater does the same:
+    `<state>/data/nightly.stop` with `updater:<release-id>`, a launch only once `nightly.lock` is free
+    (asked look by look, at most ten minutes), the stop lifted once no deploy is in flight, and only if
+    it still carries the marker."""
 
-    def test_the_shipped_config_turns_it_off(self):
+    attest = UpdaterCase.attest
+
+    def setUp(self):
+        UpdaterCase.setUp(self)
+        self.main = tarball(tree(extra={"league/house.py": "# the house, improved\n"}))
+        self.clock.now = utc("2026-09-26T02:00Z")  # a Saturday: no session, no train, no start
+        self.flight: str | None = None
+        self.data = self.base / "state" / "data"
+        self.data.mkdir(parents=True)
+        self.held_lock = None
+
+    def tearDown(self):
+        self.release_lock()
+        UpdaterCase.tearDown(self)
+
+    def updater(self, **kw):
+        return Updater(self.base, head=lambda: self.sha, fetch=lambda sha: self.main,
+                       launch=lambda source, rid, record=None: self.launched.append((source, rid)),
+                       clock=self.clock, judge=lambda incoming, running: [], attest=self.attest,
+                       workflows_pin=workflows_digest(tarball(tree())), in_flight=lambda: self.flight, **kw)
+
+    def hold_lock(self, **beat):
+        """The daemon's lifetime lock, held as `scripts/data/locking.py` `process_lock` holds it, and its
+        heartbeat (`scripts/data/nightly.py daemon`): by default idle, its next job hours off."""
+        import fcntl
+
+        self.held_lock = (self.data / "nightly.lock").open("a+")
+        fcntl.flock(self.held_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        self.heartbeat(**beat)
+
+    def heartbeat(self, **beat):
+        from league.watchdog import iso
+
+        beat = {"pid": 77, "start": "1", "release": "/workspace/releases/first-release", "at": self.clock(), "state": "waiting",
+                "busy": False, "next_wake": iso(self.clock() + 4 * 3600), **beat}
+        (self.data / "nightly.heartbeat").write_text(json.dumps(beat))
+
+    def release_lock(self):
+        if self.held_lock is not None:
+            self.held_lock.close()
+            self.held_lock = None
+
+    def stop(self):
+        path = self.data / "nightly.stop"
+        return path.read_text().strip() if path.exists() else None
+
+    def test_an_idle_daemon_is_stopped_and_the_head_launches_at_once(self):
+        out = self.updater().check()
+        self.assertEqual(out["action"], "deploying")
+        release = self.launched[0][1]
+        self.assertEqual(self.stop(), f"updater:{release}")
+        self.assertEqual(out["nightly"], {"stop": f"updater:{release}", "waited_seconds": 0.0})
+
+    def test_a_running_daemon_is_waited_for_look_by_look_then_the_head_launches(self):
+        self.hold_lock()
+        updater = self.updater()
+        first = updater.check()
+        self.assertEqual((first["action"], first["new"], self.launched), ("stopping_nightly", True, []))
+        release = first["release"]
+        self.assertEqual(self.stop(), f"updater:{release}")
+        self.assertTrue((self.base / "incoming" / release).is_dir())
+        self.clock.advance(10)
+        self.assertFalse(updater.due())
+        self.clock.advance(10)
+        self.assertTrue(updater.due())  # twenty seconds on, not half an hour
+        again = updater.check()
+        self.assertEqual((again["action"], again["new"], self.launched), ("stopping_nightly", False, []))
+        self.release_lock()
+        self.clock.advance(20)
+        self.assertTrue(updater.due())
+        out = updater.check()
+        self.assertEqual((out["action"], [rid for _, rid in self.launched]), ("deploying", [release]))
+        self.assertEqual(out["nightly"]["waited_seconds"], 40.0)
+        self.assertEqual(self.stop(), f"updater:{release}")  # held through the canary, the promotion and the watch
+
+    def test_the_house_writes_one_row_for_the_wait_and_marks_the_deploy_only_at_the_launch(self):
+        from types import SimpleNamespace
+
+        from league.house import House
+
+        self.hold_lock()
+        rows, alerts = [], []
+        house = SimpleNamespace(updater=self.updater(), ledger=SimpleNamespace(append=lambda kind, payload: rows.append((kind, payload))),
+                                alert=lambda level, text, **payload: alerts.append(level), _state={},
+                                _state_lock=__import__("threading").Lock(), clock=self.clock)
+        House._update(house)
+        self.clock.advance(20)
+        House._update(house)
+        self.assertEqual([(kind, payload["action"]) for kind, payload in rows], [("ops.deploy", "stopping_nightly")])
+        self.assertEqual((alerts, house._state), ([], {}))
+        self.release_lock()
+        self.clock.advance(20)
+        House._update(house)
+        self.assertEqual([payload["action"] for _, payload in rows], ["stopping_nightly", "deploying"])
+        self.assertEqual(house._state, {"deploying_at": self.clock()})
+
+    def test_a_busy_daemon_is_never_stopped_mid_job(self):
+        """The House's supervisor kills a stopped daemon two minutes on, busy or not: the stop waits for idle."""
+        from league.watchdog import iso
+
+        self.hold_lock(state="running", busy=True, day="2026-09-25")
+        updater = self.updater()
+        out = updater.check()
+        self.assertEqual((out["action"], self.stop()), ("stopping_nightly", None))
+        self.assertIn("running a job (2026-09-25)", out["reasons"][0])
+        for beat in ({"state": "waiting", "busy": False, "next_wake": iso(self.clock() + 300)},  # its next job is five minutes off
+                     {"state": "complete", "busy": False},                                     # a catch-up may follow
+                     {"at": self.clock() - 200}):                                              # a heartbeat that says nothing now
+            self.clock.advance(20)
+            self.heartbeat(**beat)
+            out = updater.check()
+            self.assertEqual((out["action"], self.stop()), ("stopping_nightly", None), beat)
+        self.clock.advance(20)
+        self.heartbeat()
+        self.assertEqual(updater.check()["action"], "stopping_nightly")
+        self.assertEqual(self.stop(), f"updater:{out['release']}")  # idle now: stopped, and the lock still held
+        self.release_lock()
+        self.clock.advance(20)
+        self.assertEqual(updater.check()["action"], "deploying")
+
+    def test_a_daemon_that_does_not_stop_in_ten_minutes_holds_the_head_and_lifts_the_stop(self):
+        self.hold_lock()
+        updater = self.updater()
+        release = updater.check()["release"]
+        for _ in range(29):
+            self.clock.advance(20)
+            self.assertEqual(updater.check()["action"], "stopping_nightly")
+        self.clock.advance(20)
+        out = updater.check()
+        self.assertEqual((out["action"], out["holds"], self.launched), ("held", ["nightly"], []))
+        self.assertIn("was not stopped within 10 minutes: the nightly data job has not let go of its lock", out["reasons"][0])
+        self.assertIsNone(self.stop())
+        self.assertFalse((self.base / "incoming" / release).exists())
+        self.assertFalse((self.base / "incoming" / f"{release}.attestation.json").exists())
+        self.assertNotIn(release, updater.tried())  # a moment's verdict, not the tree's
+        self.release_lock()
+        self.clock.advance(1800)
+        self.assertEqual(updater.check()["action"], "deploying")
+
+    def test_an_operators_own_stop_is_obeyed_and_never_lifted(self):
+        (self.data / "nightly.stop").write_text("")
+        updater = self.updater()
+        out = updater.check()
+        self.assertEqual((out["action"], out["nightly"]["stop"]), ("deploying", ""))
+        self.clock.advance(120)
+        self.assertFalse(updater.due())  # nobody's marker: nothing for the updater to lift
+        self.assertIsNone(updater._settle_nightly())
+        self.assertEqual(self.stop(), "")
+
+    def test_the_stop_is_lifted_after_the_verdict_and_only_if_it_is_still_ours(self):
+        updater = self.updater()
+        updater.check()
+        release = self.launched[0][1]
+        self.flight = "a watchdog is running (pid 4242, deploy.pid)"
+        self.clock.advance(61)
+        self.assertTrue(updater.due())
+        self.assertEqual(updater.check(), {"action": "none", "reason": "looked only at the nightly stop"})
+        self.assertEqual(self.stop(), f"updater:{release}")  # the watch is still on
+        self.flight = None
+        self.clock.advance(61)
+        self.assertTrue(updater.due())
+        self.assertEqual(updater.check()["nightly_resumed"], f"updater:{release}")
+        self.assertIsNone(self.stop())
+        [row] = [r for r in self.releases.history() if r.get("stage") == "nightly"]
+        self.assertEqual((row["action"], row["marker"], row["unjudged"]), ("resumed", f"updater:{release}", True))
+        self.assertNotIn("release", row)
+        # Somebody else's stop written over it in the meantime stays.
+        (self.data / "nightly.stop").write_text("operator: by hand\n")
+        self.clock.advance(61)
+        self.assertFalse(updater.due())
+        self.assertIsNone(updater._settle_nightly())
+        self.assertEqual(self.stop(), "operator: by hand")
+
+    def test_a_house_that_starts_after_a_crash_lifts_an_orphaned_stop(self):
+        (self.data / "nightly.stop").write_text("updater:main-0123456789ab\n")
+        self.flight = "a watchdog is running (pid 4242, deploy.pid)"
+        self.sha = "github is out of reach"  # nothing else of the look matters here
+        self.assertEqual(self.updater().check()["action"], "blocked")
+        self.assertEqual(self.stop(), "updater:main-0123456789ab")  # a deploy is in flight: its verdict lifts it
+        self.flight = None
+        self.assertEqual(self.updater().check()["action"], "blocked")
+        self.assertIsNone(self.stop())
+
+    def test_a_drills_stop_is_the_drills_own_until_it_is_two_hours_old(self):
+        import os
+
+        path = self.data / "nightly.stop"
+        path.write_text("drill:drill-20261003T150000Z\n")
+        updater = self.updater()
+        self.assertIsNone(updater._settle_nightly())
+        old = path.stat().st_mtime - 2 * 3600 - 1
+        os.utime(path, (old, old))
+        self.assertEqual(updater._settle_nightly(), "drill:drill-20261003T150000Z")
+        self.assertFalse(path.exists())
+
+    def test_no_launch_beside_another_deploy(self):
+        self.flight = "a watchdog is running (pid 4242, deploy.pid)"
+        out = self.updater().check()
+        self.assertEqual((out["action"], out["holds"], self.launched), ("held", ["deploy"], []))
+        self.assertIn("another deploy is in flight", out["reasons"][0])
+        self.assertIsNone(self.stop())
+        self.assertEqual([p.name for p in (self.base / "incoming").iterdir()], [])
+
+    def test_a_deploy_that_begins_while_the_daemon_stops_holds_the_launch(self):
+        self.hold_lock()
+        updater = self.updater()
+        updater.check()
+        self.flight = "a watchdog is running (pid 4242, deploy.pid)"
+        self.release_lock()
+        self.clock.advance(20)
+        out = updater.check()
+        self.assertEqual((out["action"], out["holds"], self.launched), ("held", ["deploy"], []))
+        self.assertIsNone(self.stop())
+
+    def test_a_session_that_begins_while_the_daemon_stops_holds_the_launch(self):
+        self.clock.now = utc("2026-09-28T12:46Z")  # a Monday, 9 minutes before the session's lead begins
+        self.hold_lock()
+        updater = self.updater()
+        self.assertEqual(updater.check()["action"], "stopping_nightly")
+        self.clock.now = utc("2026-09-28T12:56Z")
+        self.release_lock()
+        out = updater.check()
+        self.assertEqual((out["action"], out["holds"], self.launched), ("held", ["session"], []))
+        self.assertIsNone(self.stop())
+
+    def test_the_launch_scrubs_the_environment_and_writes_deploy_pid(self):
+        import os
+        from types import SimpleNamespace
+        from unittest import mock
+
+        from league import updater as module
+        from league.watchdog import deploy_in_flight
+
+        seen = {}
+
+        def popen(argv, **kw):
+            seen.update(argv=argv, **kw)
+            return SimpleNamespace(pid=4242)
+
+        secrets = {"GATEWAY_TOKEN": "g" * 40, "SAIL_API_KEY": "s" * 40, "CAPITAL_PUBLISH_TOKEN": "c" * 40, "PATH": "/usr/bin",
+                   "HOME": "/root", "SSL_CERT_FILE": "/etc/ssl/cert.pem", "AWS_SECRET_ACCESS_KEY": "x" * 40}
+        with mock.patch.dict(os.environ, secrets), mock.patch.object(module.subprocess, "Popen", popen):
+            Updater(self.base, attest=self.attest)._launch(self.base / "incoming" / "main-0123456789ab", "main-0123456789ab")
+        env = seen["env"]
+        self.assertEqual({k: env.get(k) for k in ("PATH", "HOME", "SSL_CERT_FILE", "LEAGUE_ENV")},
+                         {"PATH": "/usr/bin", "HOME": "/root", "SSL_CERT_FILE": "/etc/ssl/cert.pem", "LEAGUE_ENV": str(self.base / ".env")})
+        for name in ("GATEWAY_TOKEN", "SAIL_API_KEY", "CAPITAL_PUBLISH_TOKEN", "AWS_SECRET_ACCESS_KEY"):
+            self.assertNotIn(name, env)
+        self.assertEqual(seen["argv"][1:4], ["-m", "league.watchdog", "deploy"])
+        self.assertTrue(seen["start_new_session"])
+        self.assertEqual((self.base / "deploy.pid").read_text(), "4242\n")
+        self.assertEqual((self.base / "deploy.pid").stat().st_mode & 0o777, 0o600)
+        # What floor_box's probe and the updater's own check read: a live watchdog under that pid.
+        self.assertIn("pid 4242", deploy_in_flight(self.base, argv_of=lambda pid: ["python3", "-m", "league.watchdog", "deploy"]))
+        self.assertIsNone(deploy_in_flight(self.base, argv_of=lambda pid: ["python3", "-m", "league", "run"]))
+        self.assertIsNone(deploy_in_flight(self.base, argv_of=lambda pid: None))
+
+
+class TheDrillCopyBreaksItself(unittest.TestCase):
+    """V3-A (WP1): a House started from a rollback drill's copy (`DRILL_BREAK` in a `drill-...` release)
+    raises an error alert at every tick and never looks at main; any other release ignores the file."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.base = Path(self.dir.name)
+        self.clock = Clock()
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def release(self, name, marker=True):
+        root = self.base / "releases" / name
+        (root / "league").mkdir(parents=True)
+        if marker:
+            (root / "DRILL_BREAK").write_text(json.dumps({"drill": name, "copy_of": "main-0123456789ab"}))
+        return root
+
+    def updater(self, trusted):
+        def never(*_):
+            raise AssertionError("a drill copy never looks at main")
+
+        return Updater(self.base, trusted=trusted, head=never, fetch=never, attest=never, launch=never, clock=self.clock)
+
+    def test_a_drill_copy_breaks_at_every_tick(self):
+        from types import SimpleNamespace
+
+        from league.house import House
+
+        updater = self.updater(self.release("drill-20261003T150000Z"))
+        rows, alerts = [], []
+        house = SimpleNamespace(updater=updater, ledger=SimpleNamespace(append=lambda kind, payload: rows.append((kind, payload))),
+                                alert=lambda level, text, **payload: alerts.append((level, text, payload)), _state={},
+                                _state_lock=__import__("threading").Lock(), clock=self.clock)
+        for _ in range(3):
+            self.assertTrue(updater.due())
+            House._update(house)
+            self.clock.advance(30)
+        self.assertEqual([level for level, _, _ in alerts], ["error"] * 3)
+        self.assertTrue(alerts[0][1].startswith("drill: deliberate break"))
+        self.assertIn("main-0123456789ab", alerts[0][1])
+        self.assertEqual(alerts[0][2], {"drill": "drill-20261003T150000Z"})
+        self.assertEqual((rows, house._state), ([], {}))
+
+    def test_the_file_in_any_other_release_is_nothing(self):
+        for name in ("main-0123456789ab", "20261003T150000Z-0123456789ab"):
+            self.assertIsNone(Updater(self.base, trusted=self.release(name), clock=self.clock).drill, name)
+        self.assertIsNone(Updater(self.base, trusted=self.release("drill-20261003T160000Z", marker=False), clock=self.clock).drill)
+
+    def test_an_unreadable_marker_in_a_drill_copy_still_breaks(self):
+        root = self.release("drill-20261003T150000Z")
+        (root / "DRILL_BREAK").write_text("not json")
+        self.assertEqual(Updater(self.base, trusted=root, clock=self.clock).drill,
+                         {"release": "drill-20261003T150000Z", "unreadable": True})
+
+
+class TheUpdaterIsOffUnlessTheConfigSaysOn(unittest.TestCase):
+    """The options overhaul (Sept 26, 2026, trap 3): the in-box updater could not carry the prune, so it
+    was off until V3-A turned it on (D5), and a config that does not name the key never switches it on."""
+
+    def test_the_shipped_config_turns_it_on(self):
         from league import service
 
-        self.assertIs(service.load_config()["auto_update"], False)
-        self.assertFalse(service.auto_update(service.load_config()))
+        self.assertIs(service.load_config()["auto_update"], True)
+        self.assertTrue(service.auto_update(service.load_config()))
+        self.assertEqual(service.load_config()["release_train_hours"], 4)
 
     def test_a_missing_key_means_off_and_only_true_means_on(self):
         from league.service import auto_update

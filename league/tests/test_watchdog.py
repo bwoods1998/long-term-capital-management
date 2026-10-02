@@ -691,6 +691,310 @@ class WatchdogTest(Case):
         self.assertEqual(self.world.restarts, 2)
 
 
+# ----------------------------------------------------------- V3-A: deploys in flight, the nightly stop
+class DeployInFlightTest(Case):
+    def test_a_live_watchdog_under_either_record_is_a_deploy_in_flight(self):
+        self.base.mkdir()
+        watchdog = lambda pid: ["/usr/bin/python3", "-m", "league.watchdog", "deploy", "--base", "/workspace"]  # noqa: E731
+        self.assertIsNone(wd.deploy_in_flight(self.base, argv_of=watchdog))  # no record at all
+        (self.base / "deploy.pid").write_text("4242\n")
+        self.assertEqual(wd.deploy_in_flight(self.base, argv_of=watchdog), "a watchdog is running (pid 4242, deploy.pid)")
+        # A pid that is gone, or reused by something that is not the watchdog, is no deploy.
+        self.assertIsNone(wd.deploy_in_flight(self.base, argv_of=lambda pid: None))
+        self.assertIsNone(wd.deploy_in_flight(self.base, argv_of=lambda pid: ["/usr/bin/python3", "-m", "league", "run"]))
+        for junk in ("", "-", "1", "12; rm -rf /", "nope"):
+            (self.base / "deploy.pid").write_text(junk)
+            self.assertIsNone(wd.deploy_in_flight(self.base, argv_of=watchdog), junk)
+        # The lock's own record: the pid `Releases.lock` writes, held or not; the lock is never taken to find out.
+        with self.releases.lock():
+            seen = wd.deploy_in_flight(self.base, argv_of=lambda pid: watchdog(pid) if pid == os.getpid() else None)
+            self.assertEqual(seen, f"a watchdog is running (pid {os.getpid()}, .deploy.lock)")
+        (self.base / "deploy.pid").unlink()
+        (self.base / "deploy.pid").mkdir()  # a record that cannot be read
+        self.assertIn("taken as a deploy in flight", wd.deploy_in_flight(self.base, argv_of=lambda pid: None))
+        (self.base / "deploy.pid").rmdir()
+        (self.base / "deploy.pid").write_text("4242")
+        only_4242 = lambda pid: watchdog(pid) if pid == 4242 else None  # noqa: E731
+        self.assertIsNotNone(wd.deploy_in_flight(self.base, argv_of=only_4242))
+        self.assertIsNone(wd.deploy_in_flight(self.base, argv_of=only_4242, ignore_pid=4242))  # the drill asking about itself
+
+    def test_this_process_is_found_through_proc(self):
+        self.base.mkdir()
+        (self.base / "deploy.pid").write_text(str(os.getpid()))
+        argv = wd._watchdog_argv(os.getpid())
+        self.assertTrue(argv)
+        self.assertEqual(wd.deploy_in_flight(self.base) is not None, any("league.watchdog" in part for part in argv))
+
+
+class NightlyStopTest(Case):
+    def test_a_marker_is_written_once_and_lifted_only_by_its_writer(self):
+        self.assertIsNone(wd.nightly_marker(self.base))
+        self.assertEqual(wd.stop_nightly(self.base, "updater:main-0123456789ab"), "updater:main-0123456789ab")
+        path = self.base / "state" / "data" / "nightly.stop"
+        self.assertEqual(path.read_text(), "updater:main-0123456789ab\n")
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(wd.stop_nightly(self.base, "updater:main-0123456789ab"), "updater:main-0123456789ab")
+        self.assertEqual(wd.stop_nightly(self.base, "drill:drill-20261003T150000Z"), "updater:main-0123456789ab")  # the first stands
+        self.assertFalse(wd.unstop_nightly(self.base, "drill:drill-20261003T150000Z"))
+        self.assertTrue(wd.unstop_nightly(self.base, "updater:main-0123456789ab"))
+        self.assertIsNone(wd.nightly_marker(self.base))
+        self.assertFalse(wd.unstop_nightly(self.base, "updater:main-0123456789ab"))
+
+    def test_an_operators_stop_is_never_replaced_or_lifted(self):
+        path = self.base / "state" / "data" / "nightly.stop"
+        path.parent.mkdir(parents=True)
+        path.write_text("")
+        self.assertEqual(wd.stop_nightly(self.base, "updater:main-0123456789ab"), "")
+        self.assertFalse(wd.unstop_nightly(self.base, ""))
+        self.assertFalse(wd.unstop_nightly(self.base, "updater:main-0123456789ab"))
+        self.assertTrue(path.exists())
+
+    def test_the_daemon_is_stopped_only_while_idle_with_its_next_job_well_off(self):
+        import fcntl
+
+        now = 1_790_000_000.0
+        beat_path = self.base / "state" / "data" / "nightly.heartbeat"
+        self.assertIsNone(wd.nightly_busy(self.base, now))  # no daemon: nothing to wait for
+        beat_path.parent.mkdir(parents=True)
+        with (self.base / "state" / "data" / "nightly.lock").open("a+") as held:
+            fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self.assertIn("cannot be read", wd.nightly_busy(self.base, now))
+
+            def busy(**beat):
+                beat_path.write_text(json.dumps({"at": now - 10, "state": "waiting", "busy": False, "next_wake": wd.iso(now + 3600), **beat}))
+                return wd.nightly_busy(self.base, now)
+
+            self.assertIsNone(busy())
+            self.assertIsNone(busy(state="retry", retry_at=now + 3600, next_wake=None))
+            self.assertIn("running a job (store-completion)", busy(state="running", busy=True, job="store-completion"))
+            self.assertIn("within 10 minutes", busy(next_wake=wd.iso(now + 540)))
+            self.assertIn("within 10 minutes", busy(state="retry", retry_at=now + 60))
+            self.assertIn("unreadable time", busy(next_wake="soon"))
+            self.assertIn("not idle", busy(state="complete"))
+            self.assertIn("not idle", busy(state="starting"))
+            self.assertIn("not fresh", busy(at=now - 91))
+            self.assertIn("not fresh", busy(at=now + 60))
+            self.assertIn("not fresh", busy(at="yesterday"))
+
+    def test_the_lock_is_read_as_the_house_reads_it(self):
+        import fcntl
+
+        self.assertFalse(wd.nightly_lock_held(self.base))  # no daemon ever ran
+        lock = self.base / "state" / "data" / "nightly.lock"
+        lock.parent.mkdir(parents=True)
+        with lock.open("a+") as held:
+            fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self.assertTrue(wd.nightly_lock_held(self.base))
+        self.assertFalse(wd.nightly_lock_held(self.base))
+        os.chmod(lock, 0)
+        try:
+            if not os.access(lock, os.R_OK):  # root reads anything
+                self.assertTrue(wd.nightly_lock_held(self.base))
+        finally:
+            os.chmod(lock, 0o600)
+
+
+# --------------------------------------------------------------------------- V3-A: the drill
+def files_of(root):
+    root = Path(root)
+    return {p.relative_to(root).as_posix(): p.read_bytes() for p in root.rglob("*") if p.is_file() and not p.name.startswith(".")}
+
+
+class DrillTest(Case):
+    """`python -m league.watchdog drill-rollback`: a copy of the running release with DRILL_BREAK goes
+    through the normal deploy, and the watch must roll it back."""
+
+    def setUp(self):
+        super().setUp()
+        self.world = World(self.clock)
+        self.dog = Watchdog(
+            self.releases, run_canary=self.world.run_canary, restart_house=self.world.restart_house,
+            read_house_health=self.world.read_house_health, clock=self.clock, sleep=self.world.sleep, log=self.world.lines.append,
+        )
+        self.window = None
+        self.flight = None
+        self.copies = []
+        canary = self.world.run_canary
+
+        def run_canary(release_dir, canary_root, ticks):
+            self.copies.append({"dir": Path(release_dir), "marker": wd.drill_marker(release_dir), "files": files_of(release_dir),
+                                "break": json.loads((Path(release_dir) / "DRILL_BREAK").read_text())})
+            return canary(release_dir, canary_root, ticks)
+
+        self.dog.run_canary = run_canary
+
+    def running_with(self, release_id="rel-0001", *, auto_update=True, before="rel-0000"):
+        for rid in (before, release_id):
+            tree = self.tree(rid)
+            (tree / "league" / "config.json").write_text(json.dumps({"auto_update": auto_update, "real_money": True}))
+            self.clock.advance(1)
+            self.releases.stage(tree, rid)
+            self.releases.promote(rid)
+        return self.releases.path(release_id)
+
+    def drill(self, **kw):
+        return wd.drill_rollback(self.dog, session=lambda now: self.window, in_flight=lambda: self.flight, **kw)
+
+    def broken(self):
+        """The watch's readings of a House that raises the drill's error alert at every tick."""
+        self.world.readings = [GOOD, GOOD, GOOD, bad("1 error alert(s) since seq 40; the first, at seq 41: drill: deliberate break")]
+
+    def idle_heartbeat(self):
+        path = self.base / "state" / "data" / "nightly.heartbeat"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"at": self.clock(), "state": "waiting", "busy": False, "next_wake": wd.iso(self.clock() + 4 * 3600)}))
+
+    def drill_rows(self):
+        return [row for row in self.releases.history() if row.get("stage") == "drill"]
+
+    def test_the_copy_is_rolled_back_by_the_watch_and_the_box_is_as_it_was(self):
+        running = self.running_with()
+        self.broken()
+        result = self.drill()
+        self.assertEqual((result["ok"], result["outcome"]), (True, "rolled_back"), result)
+        drill_id = result["release"]
+        self.assertTrue(drill_id.startswith("drill-"))
+        [copy] = self.copies
+        self.assertEqual(copy["marker"]["copy_of"], "rel-0001")
+        self.assertEqual(copy["break"]["copy_digest"], wd.tree_digest(running)[0])
+        self.assertEqual(copy["dir"].name, drill_id)
+        # Identical code: the copy is the running tree plus the marker and nothing else.
+        copied = dict(copy["files"])
+        copied.pop("DRILL_BREAK")
+        self.assertEqual(copied, files_of(running))
+        # current back, previous what it was before the drill, the copy gone, the stop lifted.
+        self.assertEqual((self.releases.current(), self.releases.previous()), ("rel-0001", "rel-0000"))
+        self.assertEqual((result["previous_restored"], result["copy_removed"]), ("rel-0000", True))
+        self.assertFalse((self.base / "releases" / drill_id).exists())
+        self.assertFalse((self.base / "incoming" / drill_id).exists())
+        self.assertIsNone(wd.nightly_marker(self.base))
+        self.assertEqual(self.world.restarts, 2)
+        stages = [row["stage"] for row in self.releases.history() if row.get("release") == drill_id]
+        self.assertEqual(stages, ["start", "stage", "canary", "house_before", "promote", "restart", "watch", "watch", "watch",
+                                  "rollback", "restart", "verdict", "drill"])
+        [row] = self.drill_rows()
+        self.assertEqual((row["outcome"], row["ok"], row["copy_of"], row["deploy_verdict"]), ("rolled_back", True, "rel-0001", "rolled_back"))
+        self.assertNotIn("verdict", row)  # floor_box and the updater read `verdict` rows; this is the drill's own
+
+    def test_the_nightly_daemon_is_stopped_for_the_drill_and_waited_for(self):
+        import fcntl
+
+        self.running_with()
+        self.broken()
+        lock = self.base / "state" / "data" / "nightly.lock"
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        held = lock.open("a+")
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        self.idle_heartbeat()
+        stops, pids = [], []
+
+        def sleep(seconds):
+            stops.append(wd.nightly_marker(self.base))
+            pids.append((self.base / "deploy.pid").read_text().strip())
+            if len(stops) == 3:
+                held.close()  # the daemon saw the stop and exited
+            self.world.sleep(seconds)
+
+        self.dog.sleep = sleep
+        result = self.drill()
+        self.assertEqual(result["outcome"], "rolled_back")
+        self.assertEqual(stops[:3], [f"drill:{result['release']}"] * 3)
+        self.assertIsNone(wd.nightly_marker(self.base))
+        # Its own pid stood in deploy.pid all along (floor_box and the updater see a deploy in flight), and is gone.
+        self.assertEqual(set(pids), {str(os.getpid())})
+        self.assertFalse((self.base / "deploy.pid").exists())
+
+    def test_a_daemon_that_will_not_stop_refuses_the_drill(self):
+        import fcntl
+
+        self.running_with()
+        lock = self.base / "state" / "data" / "nightly.lock"
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        with lock.open("a+") as held:
+            fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            result = self.drill(nightly_wait=60)
+        self.assertEqual((result["ok"], result["outcome"]), (False, "refused"))
+        self.assertIn("was not stopped in 60s: the nightly daemon's heartbeat cannot be read", result["reasons"][0])
+        self.assertEqual(self.world.canary_calls, [])
+        self.assertIsNone(wd.nightly_marker(self.base))
+        self.assertFalse((self.base / "incoming" / result["release"]).exists())
+        self.assertEqual(self.releases.current(), "rel-0001")
+
+    def test_refusals_stage_and_stop_nothing(self):
+        cases = []
+        self.running_with(auto_update=False)
+        cases.append(("auto_update", self.drill()))
+        self.running_with("rel-0003", before="rel-0002")
+        self.window = {"starts": self.clock() - 60, "closes": self.clock() + 3600}
+        cases.append(("no-release window", self.drill()))
+        self.window = None
+        self.flight = "a watchdog is running (pid 4242, deploy.pid)"
+        cases.append(("pid 4242", self.drill()))
+        self.flight = None
+        (self.base / "state" / "STOP").parent.mkdir(parents=True, exist_ok=True)
+        (self.base / "state" / "STOP").write_text("")
+        cases.append(("stopped on purpose", self.drill()))
+        (self.base / "state" / "STOP").unlink()
+
+        def unreadable(now):
+            raise ValueError("no calendar")
+
+        cases.append(("calendar could not be read", wd.drill_rollback(self.dog, session=unreadable, in_flight=lambda: None)))
+        for needle, result in cases:
+            self.assertEqual((result["ok"], result["outcome"]), (False, "refused"), needle)
+            self.assertIn(needle, " ".join(result["reasons"]))
+        self.assertEqual(self.world.canary_calls, [])
+        self.assertEqual(self.world.restarts, 0)
+        self.assertEqual(sorted(p.name for p in (self.base / "releases").iterdir()), ["rel-0000", "rel-0001", "rel-0002", "rel-0003"])
+        self.assertIsNone(wd.nightly_marker(self.base))
+        self.assertEqual([row["outcome"] for row in self.drill_rows()], ["refused"] * 5)
+
+    def test_a_drill_copy_or_no_release_is_never_copied(self):
+        self.assertEqual(self.drill()["reasons"], ["there is no current release to copy"])
+        self.running_with()
+        tree = self.tree("drill")
+        (tree / "league" / "config.json").write_text(json.dumps({"auto_update": True}))
+        self.releases.stage(tree, "drill-20261003T150000Z")
+        self.releases.promote("drill-20261003T150000Z")
+        self.assertIn("is itself a drill copy", self.drill()["reasons"][0])
+
+    def test_a_break_the_watch_does_not_catch_is_rolled_back_by_the_drill(self):
+        self.running_with()
+        result = self.drill()  # every reading healthy: the House never raised the break
+        self.assertEqual((result["ok"], result["outcome"], result["deploy_verdict"]), (False, "failed", "promoted"))
+        self.assertEqual(result["manual_rollback"]["current"], "rel-0001")
+        self.assertEqual((self.releases.current(), self.releases.previous()), ("rel-0001", "rel-0000"))
+        self.assertFalse((self.base / "releases" / result["release"]).exists())
+
+    def test_a_canary_that_refuses_the_copy_is_a_failed_drill_that_changed_nothing(self):
+        self.running_with()
+        self.world.canary = bad("tick 1: it exited 1")
+        result = self.drill()
+        self.assertEqual((result["ok"], result["outcome"], result["deploy_verdict"]), (False, "refused", "refused"))
+        self.assertEqual((self.releases.current(), self.releases.previous()), ("rel-0001", "rel-0000"))
+        self.assertEqual(self.world.restarts, 0)
+
+    def test_the_drills_marker_is_honoured_only_in_a_drill_copy(self):
+        root = self.tmp / "releases" / "main-0123456789ab"
+        root.mkdir(parents=True)
+        (root / "DRILL_BREAK").write_text("{}")
+        self.assertIsNone(wd.drill_marker(root))
+        copy = self.tmp / "releases" / "drill-20261003T150000Z"
+        copy.mkdir()
+        self.assertIsNone(wd.drill_marker(copy))
+        os.symlink(root / "DRILL_BREAK", copy / "DRILL_BREAK")
+        self.assertIsNone(wd.drill_marker(copy))  # a link is not the drill's file
+        (copy / "DRILL_BREAK").unlink()
+        (copy / "DRILL_BREAK").write_text(json.dumps({"drill": copy.name, "copy_of": "main-0123456789ab"}))
+        self.assertEqual(wd.drill_marker(copy), {"release": copy.name, "drill": copy.name, "copy_of": "main-0123456789ab"})
+
+    def test_the_command_line(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            code = wd.main(["drill-rollback", "--base", str(self.base)])
+        self.assertEqual((code, json.loads(out.getvalue())["reasons"]), (2, ["there is no current release to copy"]))
+
+
 # -------------------------------------------------------------------- the real thing, in small
 FAKE_MAIN = '''
 import argparse, json, os, sys, time

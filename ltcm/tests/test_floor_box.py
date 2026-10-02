@@ -855,6 +855,9 @@ class DeployTests(BoxCase):
         self.assertIn(f"rm -f /workspace/.upload/release-{release}.tgz", unpack)
         # Never over /workspace itself, which is how the first run's deploy replaced running code.
         self.assertNotIn("-C /workspace ", unpack)
+        # Only its own directory is cleared (V3-A): the rest of incoming/ may be an updater head waiting to launch.
+        self.assertIn(f"rm -rf /workspace/incoming/{release}; mkdir -p /workspace/incoming/{release};", unpack)
+        self.assertNotRegex(unpack, r"rm -rf /workspace/incoming(;|\s|$)")
 
     def test_the_watchdog_is_launched_detached_from_the_known_good_code_with_the_env_file(self):
         self.box.verdict = "promoted"
@@ -974,6 +977,7 @@ class DeployTests(BoxCase):
         with self.assertRaises(SystemExit) as caught:
             self.run_cmd("deploy")
         self.assertIn("still running", str(caught.exception))
+        self.assertIn("the House's updater", str(caught.exception))  # the updater writes deploy.pid too (V3-A)
         self.assertEqual(self.box.uploads(), [])
 
     def test_a_supervisor_left_by_the_first_run_is_refused_not_restarted_into(self):

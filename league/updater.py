@@ -1,9 +1,9 @@
 """How merged code reaches the House with no human step -- and why the code it brings cannot be
 the judge that lets it in.
 
-OFF since the options overhaul (Sept 26, 2026): `"auto_update": false` in `league/config.json` (a missing key is off,
-`league/service.py` `auto_update`), so every release is an owner deploy (`scripts/floor_box.py deploy`). What follows is
-how it works when the owner turns it back on.
+ON again since V3-A (Oct 2026): `"auto_update": true` in `league/config.json` (a missing key is off, `league/service.py`
+`auto_update`; it was off from the options overhaul of Sept 26, 2026, when every release was an owner deploy). The owner's
+own deploy (`scripts/floor_box.py deploy`) remains the only way the files below the walls change.
 
 GitHub is the source of truth. The repository is public, so the House box needs no credential to
 read it: every half hour the House reads the commit at the head of `main`, downloads THAT commit
@@ -60,10 +60,29 @@ The walls, in the order they are asked, each one fail-closed (no deploy, a warni
    `deploys.jsonl` and the ledger once per head per reason, never every look. A rolled-back head
    is not retired: it may be retried once, at the next train; a second rollback retires it.
 
+Then the launch (V3-A). No other deploy may be in flight (`deploy.pid` or the watchdog's lock names
+a live watchdog: a held head, tried at the next look). The nightly forward daemon is stopped first,
+as the owner's release procedure does by hand: `<state>/data/nightly.stop` is written with the marker
+`updater:<release-id>` (an operator's own stop is left as it is and obeyed) once the daemon is idle
+with its next job at least ten minutes off (`league/watchdog.py` `nightly_busy`: the House's
+supervisor kills a stopped daemon two minutes on, busy or not), and the launch waits, look by look
+and never inside one, until the daemon lets go of `nightly.lock`, at most `NIGHTLY_WAIT_SECONDS`
+in all; past that the head is held, its stop lifted, and tried again at the next look. The release train is asked again at the moment of launch. The watchdog runs detached with a
+scrubbed environment (`watchdog_environment`: no secret, only the path to the file that holds them,
+as the owner's deploy launches it) and its pid goes into `<base>/deploy.pid`, where
+`scripts/floor_box.py deploy` sees it and refuses to send a second release. Once no deploy is in
+flight any more (the verdict is in: promoted, rolled back, refused or failed), the stop is removed
+if it still carries the marker; a House that starts and finds an `updater:` stop with no deploy in
+flight removes it the same way, so a crash never leaves the daemon stopped.
+
 Then the watchdog's canary, promotion, watch and rollback, exactly as before. The attestation
 travels with the release: into the watchdog's deploy record (`deploys.jsonl`, whose every row of
 this deploy then carries the sha) and onto the ledger (`ops.deploy`), and the watchdog refuses to
 stage a tree whose digest is not the attested one.
+
+A release that is a rollback drill's copy (`league/watchdog.py` `drill_marker`: `DRILL_BREAK` in a
+`drill-...` release) never looks at main: every look is the drill's deliberate break, which
+`House._update` raises as an error alert so the watch rolls the copy back.
 
 Sept 20, 2026 went the other way -- the incoming tree judged itself -- because a judge one commit
 out of date refused, silently and for ever, a commit that widened a bound and used the wider value
@@ -96,7 +115,8 @@ from typing import Any, Callable, Mapping
 # `session_time`) and `market_open_at` built on it (`_shut_session`). The holiday list lives there once.
 from ltcm.data import DataError, to_datetime, us_equity_session
 
-from .watchdog import Releases, _ledger_ro, epoch, iso, tree_digest
+from .watchdog import (NIGHTLY_MARKERS, NIGHTLY_STOP, NIGHTLY_WAIT_SECONDS, Releases, _ledger_ro, deploy_in_flight, drill_marker, epoch, iso,
+                       nightly_busy as _nightly_busy, nightly_lock_held, nightly_marker, stop_nightly, tree_digest, unstop_nightly, write_pid)
 
 REPO = "bwoods1998/long-term-capital-management"
 TREES = ("league", "ltcm", "playbooks", "scripts", "deploy")  # what scripts/floor_box.py sends too
@@ -139,6 +159,15 @@ SESSION_PAD_SECONDS = 5 * 60
 #: launch to restart on Sept 24-25, 2026 (six updater deploys), the watch is ten minutes, and a
 #: rollback restarts the House a second time inside it.
 DEPLOY_LEAD_SECONDS = 30 * 60
+#: While a launch waits for the nightly daemon to stop, the next look comes this soon (the House's tick
+#: is 30 s; the daemon polls its stop every 30 s).
+NIGHTLY_POLL_SECONDS = 20
+#: Between full looks, a nightly stop this updater's deploys wrote is looked at this often, so it is
+#: lifted within about a minute of the verdict, not half an hour.
+SETTLE_EVERY_SECONDS = 60
+#: A `drill:` stop is the drill's own to lift (`league/watchdog.py` `drill_rollback`, in a `finally`);
+#: one older than this with no deploy in flight is a drill that died, and is lifted here.
+DRILL_STOP_STALE_SECONDS = 2 * 3600
 
 
 class UpdateError(RuntimeError):
@@ -488,7 +517,9 @@ class Updater:
                  launch: Callable[..., None] | None = None, clock: Callable[[], float] = time.time, every_seconds: int = 1800,
                  judge: Callable[[Path, Path], list[str]] | None = None, head: Callable[[], str] | None = None,
                  attest: Callable[[str], Mapping[str, Any]] | None = None, trusted: str | Path | None = None,
-                 workflows_pin: str = TRUSTED_WORKFLOWS_SHA256, hours: float | None = None):
+                 workflows_pin: str = TRUSTED_WORKFLOWS_SHA256, hours: float | None = None,
+                 in_flight: Callable[[], str | None] | None = None, nightly_held: Callable[[], bool] | None = None,
+                 nightly_busy: Callable[[], str | None] | None = None):
         self.base = Path(base)
         self.releases = Releases(self.base, clock=clock)  # its rows are dated by the clock the train is measured on
         self.head = head or (lambda: resolve_head(repo))
@@ -511,12 +542,31 @@ class Updater:
         self._wake_at: float | None = None
         self._told: set[tuple[str, str]] = set()
         self._pending_since: dict[str, float] = {}
+        #: Why a deploy is running under the base now, or None (`league/watchdog.py` `deploy_in_flight`).
+        self.in_flight = in_flight or (lambda: deploy_in_flight(self.base))
+        #: Does the nightly daemon still hold its lock (`league/watchdog.py` `nightly_lock_held`)?
+        self.nightly_held = nightly_held or (lambda: nightly_lock_held(self.base))
+        #: Why the nightly daemon may not be stopped now, or None (`league/watchdog.py` `nightly_busy`).
+        self.nightly_busy = nightly_busy or (lambda: _nightly_busy(self.base, self.clock()))
+        #: A head that passed every wall and waits for the nightly daemon to stop: launched at a later look.
+        self._launching: dict[str, Any] | None = None
+        #: `due` said yes only to look at a nightly stop this updater wrote: `check` does only that.
+        self._light = False
+        self._settle_next = 0.0
+        #: The drill's deliberate break, read once when the House starts (`league/watchdog.py` `drill_marker`).
+        self.drill = drill_marker(self.trusted)
 
     def due(self) -> bool:
         now = self.clock()
-        if now - self._last >= self.every:
-            return True
-        return self._wake_at is not None and self._last < self._wake_at <= now
+        if self.drill is not None:
+            return True  # the drill's break is raised at every tick
+        full = now - self._last >= self.every or (self._wake_at is not None and self._last < self._wake_at <= now)
+        self._light = False
+        if not full and self._launching is None and now >= self._settle_next:
+            self._settle_next = now + SETTLE_EVERY_SECONDS
+            marker = nightly_marker(self.base)
+            self._light = bool(marker) and marker.startswith(NIGHTLY_MARKERS)
+        return full or self._light
 
     def schedule(self, history: list[Mapping[str, Any]] | None = None) -> dict[str, Any]:
         """The release train's holds now (module `schedule`), from this release's own dial."""
@@ -524,16 +574,23 @@ class Updater:
 
     def _launch(self, source: Path, release_id: str, attestation: Path | None = None) -> None:
         """Hand the tree to the watchdog, detached: the canary and the watch outlive this process,
-        which the promotion itself will restart. The known-good release's watchdog does the judging."""
+        which the promotion itself will restart. The known-good release's watchdog does the judging.
+        Its environment is scrubbed (`watchdog_environment`), and its pid goes into `<base>/deploy.pid`
+        as `scripts/floor_box.py deploy` writes it, so the owner's deploy sees this one in flight."""
         current = self.base / "current"
-        log = open(self.base / "deploy.log", "ab")
         argv = [sys.executable, "-m", "league.watchdog", "deploy", "--base", str(self.base), "--source", str(source), "--id", release_id]
         if attestation is not None:
             argv += ["--attestation", str(attestation)]
-        subprocess.Popen(
-            argv, cwd=str(current if current.exists() else source), stdout=log, stderr=log, stdin=subprocess.DEVNULL, start_new_session=True,
-            env={**os.environ, "LEAGUE_ENV": str(self.base / ".env")},
-        )
+        with open(self.base / "deploy.log", "ab") as log:
+            process = subprocess.Popen(
+                argv, cwd=str(current if current.exists() else source), stdout=log, stderr=log, stdin=subprocess.DEVNULL, start_new_session=True,
+                env=watchdog_environment(self.base),
+            )
+        try:
+            write_pid(self.base / "deploy.pid", process.pid)
+        except OSError as exc:  # the watchdog's own lock still keeps a second deploy out
+            self.releases.record({"stage": "launch", "release": release_id, "unjudged": True, "pid": process.pid,
+                                  "error": f"deploy.pid could not be written ({type(exc).__name__}: {str(exc)[:160]})"})
 
     def tried(self) -> set[str]:
         """The releases the watchdog has really judged. A row marked `busy` is not one of them: it
@@ -582,7 +639,22 @@ class Updater:
         """One look at main. Returns what was found and what was done. `new` is True the first
         time a refusal or a block is seen for this commit, which is when the House says so.
         `held` is a head the release train keeps back: `holds` names why (train, session,
-        recent_start), `reasons` says it with the next eligible time, `next_eligible_at` is when."""
+        recent_start; at the launch, deploy and nightly), `reasons` says it with the next eligible
+        time, `next_eligible_at` is when. `stopping_nightly` is a head that passed everything and
+        waits, look by look, for the nightly daemon to stop before it launches. `drill` is this House
+        running a rollback drill's copy: nothing else is done."""
+        light, self._light = self._light, False
+        if self.drill is not None:
+            self._last = self.clock()
+            return {"action": "drill", "release": self.trusted.name, "drill": dict(self.drill), "new": False,
+                    "reasons": [f"drill: deliberate break (this House runs {self.trusted.name}, a rollback drill's copy of "
+                                f"{self.drill.get('copy_of') or 'the running release'}); the watch rolls it back"]}
+        if self._launching is not None:
+            self._last = self.clock()
+            return self._continue_launch()
+        resumed = self._settle_nightly()
+        if light:
+            return {"action": "none", "reason": "looked only at the nightly stop", **({"nightly_resumed": resumed} if resumed else {})}
         self._last = self.clock()
         current = self.releases.current()
         if current is None:
@@ -643,13 +715,107 @@ class Updater:
         if problems:
             _remove(incoming)
             return self._refused(release_id, sha, attestation, problems)
+        # 6. The launch: no deploy beside another, and the nightly daemon stopped first.
+        why = self.in_flight()
+        if why:
+            _remove(incoming)
+            return self._held(release_id, sha, self._hold("deploy", f"another deploy is in flight ({why}); tried again at the next look"), history)
         final = self.base / "incoming" / release_id
         _remove(final)
         incoming.rename(final)
         record = self.base / "incoming" / f"{release_id}.attestation.json"
         record.write_text(json.dumps(attestation, sort_keys=True, default=str), encoding="utf-8")
-        self.launch(final, release_id, record)
-        return {"action": "deploying", "release": release_id, "files": files, "sha": sha, "attestation": attestation}
+        self._launching = {"release": release_id, "sha": sha, "final": final, "record": record, "files": files, "attestation": attestation,
+                           "marker": f"updater:{release_id}", "standing": None, "since": self.clock(), "told": False}
+        return self._continue_launch()
+
+    def _hold(self, kind: str, why: str, until: float | None = None) -> dict[str, Any]:
+        """One hold of the launch, shaped as `schedule` shapes the train's (for `_held`): by default it
+        lifts at the next ordinary look."""
+        until = float(until if until is not None else self.clock() + self.every)
+        return {"holds": [{"hold": kind, "until": _stamp(until), "until_ts": until, "why": why}],
+                "next_eligible_at": _stamp(until), "next_eligible_ts": until}
+
+    def _continue_launch(self) -> dict[str, Any]:
+        """The launch of a head that passed every wall, once the nightly daemon has let go of its lock.
+        Asked at this look and the ones after it (`NIGHTLY_POLL_SECONDS` apart), never by waiting
+        inside one: the House's update job must not sit on a lane for ten minutes."""
+        pending = self._launching
+        assert pending is not None
+        now = self.clock()
+        release_id, sha, marker = pending["release"], pending["sha"], pending["marker"]
+        waiting = None
+        if pending["standing"] is None:
+            waiting = self.nightly_busy()
+            if waiting is None:
+                try:
+                    pending["standing"] = stop_nightly(self.base, marker)
+                except OSError as exc:
+                    self._drop_launch()
+                    return self._held(release_id, sha, self._hold("nightly", f"the nightly stop could not be written ({type(exc).__name__}: "
+                                                                             f"{str(exc)[:160]}); tried again at the next look"),
+                                      self.releases.history())
+        if pending["standing"] is not None and not self.nightly_held():
+            # Asked again at the moment of launch: the session's lead or a start may have begun while
+            # the daemon stopped, and another deploy may have begun beside this one.
+            history = self.releases.history()
+            plan = self.schedule(history)
+            why = self.in_flight()
+            if plan["holds"] or why:
+                self._drop_launch()
+                if not plan["holds"]:
+                    plan = self._hold("deploy", f"another deploy is in flight ({why}); tried again at the next look")
+                return self._held(release_id, sha, plan, history)
+            self._launching = None
+            self._wake_at = None
+            self.launch(pending["final"], release_id, pending["record"])
+            return {"action": "deploying", "release": release_id, "files": pending["files"], "sha": sha, "attestation": pending["attestation"],
+                    "nightly": {"stop": pending["standing"], "waited_seconds": round(now - pending["since"], 1)}}
+        if waiting is None:
+            waiting = f"the nightly data job has not let go of its lock since the stop ({pending['standing'] or 'an operator stop'})"
+        if now - pending["since"] >= NIGHTLY_WAIT_SECONDS:
+            self._drop_launch()
+            return self._held(release_id, sha, self._hold("nightly", (
+                f"the nightly data job was not stopped within {NIGHTLY_WAIT_SECONDS // 60} minutes: {waiting}; a release change never "
+                "lands mid-job, so tried again at the next look")), self.releases.history())
+        self._wake_at = now + NIGHTLY_POLL_SECONDS
+        new, pending["told"] = not pending["told"], True
+        return {"action": "stopping_nightly", "release": release_id, "sha": sha, "new": new, "waited_seconds": round(now - pending["since"], 1),
+                "reasons": [f"waiting for the nightly data job before {release_id} launches: {waiting}"]}
+
+    def _drop_launch(self) -> None:
+        """Give up a launch that has not happened: its stop lifted (only if still this updater's), its tree removed."""
+        pending, self._launching = self._launching, None
+        if pending is None:
+            return
+        unstop_nightly(self.base, pending["marker"])
+        _remove(pending["final"])
+        _remove(pending["record"])
+
+    def _settle_nightly(self) -> str | None:
+        """Lift a nightly stop that automation wrote, once no deploy is in flight: the verdict of the
+        deploy it was written for is in, or that deploy never began (a House that died while it waited
+        for the daemon; the House's start reaches this at its first look). A `drill:` stop is the drill's
+        to lift, and is lifted here only when it is `DRILL_STOP_STALE_SECONDS` old. An operator's stop is
+        never lifted. Returns the marker lifted, or None."""
+        marker = nightly_marker(self.base)
+        if not marker or not marker.startswith(NIGHTLY_MARKERS):
+            return None
+        if self._launching is not None and self._launching["marker"] == marker:
+            return None
+        if marker.startswith("drill:"):
+            try:
+                age = time.time() - (self.base / NIGHTLY_STOP).stat().st_mtime
+            except OSError:
+                return None
+            if age < DRILL_STOP_STALE_SECONDS:
+                return None
+        if self.in_flight():
+            return None
+        if not unstop_nightly(self.base, marker):
+            return None
+        self.releases.record({"stage": "nightly", "action": "resumed", "marker": marker, "unjudged": True})
+        return marker
 
     def _blocked(self, release_id: str | None, sha: str | None, attestation: Mapping[str, Any]) -> dict[str, Any]:
         """Not attested: nothing deploys. Pending is the normal state of a fresh head (the checks
@@ -806,7 +972,25 @@ def vet_environment() -> dict[str, str]:
     return {name: value for name, value in os.environ.items() if name in VET_ENV_KEEP}
 
 
+#: All the watchdog the updater launches may see of the House's environment (V3-A): what the trusted
+#: checks keep, and where the TLS trust store is. The House's process holds its three secrets in its
+#: environment (`service.load_env`); the watchdog needs none of them (it judges files, reads health and
+#: runs `restart.sh`, which needs only PATH), and its canary House reads the secrets file named by
+#: `LEAGUE_ENV`, exactly as when the owner's deploy launches the watchdog (`scripts/floor_box.py`
+#: `watchdog_launch`: the exec's own environment plus `LEAGUE_ENV`).
+WATCHDOG_ENV_KEEP = VET_ENV_KEEP + ("SSL_CERT_FILE", "SSL_CERT_DIR")
+
+
+def watchdog_environment(base: str | Path) -> dict[str, str]:
+    env = {name: value for name, value in os.environ.items() if name in WATCHDOG_ENV_KEEP}
+    env["LEAGUE_ENV"] = str(Path(base) / ".env")
+    return env
+
+
 def _remove(path: Path) -> None:
     import shutil
 
+    if path.is_file() or path.is_symlink():
+        path.unlink(missing_ok=True)
+        return
     shutil.rmtree(path, ignore_errors=True)

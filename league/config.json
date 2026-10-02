@@ -24,7 +24,7 @@
     "_about": "The owner's grant of real money, options-swarm-20260928 (league/live_trading.py): the Brokerage Account only. Its capital is the lower of the account's equity and ceiling_usd at each ratification (scripts/live_trading.py --enable / --ratify on the box); a deposit is answered by --ratify. Sept 26, 2026: $481.62 of cash plus the owner's planned $5,000 deposit.",
     "ceiling_usd": "5500"
   },
-  "auto_update": false,
+  "auto_update": true,
   "release_train_hours": 4,
   "tick_seconds": 30,
   "mark_every_seconds": 300,

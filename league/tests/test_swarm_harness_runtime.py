@@ -138,6 +138,53 @@ class Runtime(unittest.TestCase):
         self.assertIn('reviewed base', result['reason'])
         self.assertEqual(self.signals[-1], (first['pid'], signal.SIGTERM))
 
+    def deployed(self, *, sha='b' * 40, digest=None, attested=True, promoted=True, state='passed', release=None):
+        """The watchdog's rows for one deploy of the running release (`league/watchdog.py` `_deploy`)."""
+        release = release or self.code.name
+        digest = digest or tree_digest(self.code)[0]
+        key = f'{release}@{int(self.now)}'
+        rows = [{'deploy': key, 'release': release, 'stage': 'start',
+                 **({'sha': sha, 'attestation': {'sha': sha, 'ok': state == 'passed', 'state': state, 'tree_digest': digest}} if attested else {})},
+                {'deploy': key, 'release': release, 'stage': 'canary', 'ok': True}]
+        if promoted:
+            rows.append({'deploy': key, 'release': release, 'stage': 'promote', 'ok': True, 'at': '2026-10-03T21:00:00.000Z'})
+        with (self.base / 'deploys.jsonl').open('a') as log:
+            for row in rows:
+                log.write(json.dumps(row) + '\n')
+
+    def test_an_updater_release_is_followed_by_its_attested_commit(self):
+        """V3-A: an updater release no longer stops the observer until the operator re-points the policy."""
+        policy = self.enable()
+        first = self.supervisor.tick()
+        self.assertEqual(self.spawned[0][0][self.spawned[0][0].index('--base') + 1], 'a' * 40)
+        (self.code / 'source.py').write_text('immutable = "the next release"\n')
+        self.deployed()
+        self.now += 1
+        self.assertTrue(self.make().tick()['stopping'])  # the old base's observer goes
+        self.assertEqual(self.signals[-1], (first['pid'], signal.SIGTERM))
+        del self.processes[first['pid']]
+        self.now += 61
+        result = self.make().tick()
+        self.assertTrue(result['started'])
+        argv = self.spawned[-1][0]
+        self.assertEqual(argv[argv.index('--base') + 1], 'b' * 40)
+        self.assertEqual(argv[argv.index('--release-digest') + 1], tree_digest(self.code)[0])
+        self.assertEqual(read_json(self.state / 'harness/runtime.json'), policy)  # the operator's file is never rewritten
+        self.now += 60
+        self.heartbeat()
+        self.assertTrue(self.make().tick()['running'])
+
+    def test_only_a_promoted_attested_deploy_of_this_very_tree_is_followed(self):
+        self.enable()
+        (self.code / 'source.py').write_text('immutable = "the next release"\n')
+        for changes in ({'attested': False}, {'promoted': False}, {'digest': '0' * 64}, {'state': 'pending'}, {'sha': 'main'},
+                        {'release': 'another-release'}):
+            (self.base / 'deploys.jsonl').unlink(missing_ok=True)
+            self.deployed(**changes)
+            self.now += 1
+            self.assertIn('reviewed base', self.make().tick()['error'], changes)
+        self.assertFalse(self.spawned)
+
     def test_stop_and_explicit_disable_preserve_journal(self):
         self.enable()
         first = self.supervisor.tick()

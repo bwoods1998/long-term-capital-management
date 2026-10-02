@@ -4024,6 +4024,13 @@ class House:
     def _update(self) -> None:
         outcome = self.updater.check()
         action = outcome.get("action")
+        if action == "drill":
+            # The rollback drill (`python -m league.watchdog drill-rollback`, V3-A): this House runs a copy of
+            # the release with DRILL_BREAK in its root. An error alert every tick is the deliberate break the
+            # watch must roll back; the updater of a drill copy never looks at main.
+            self.alert("error", "drill: deliberate break " + "; ".join(str(r) for r in outcome.get("reasons") or [])[:600],
+                       drill=str(outcome.get("release") or ""))
+            return
         if action == "deploying":
             # A promotion signals this process and a fresh one comes up thirty seconds later, so
             # every research pass still running is thrown away with everything it has read. The
