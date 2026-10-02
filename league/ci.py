@@ -95,6 +95,11 @@ FORBIDDEN: tuple[str, ...] = (
     # The House's protected jobs (V3-A): the research budget rule that spends only what was earned, the
     # standing grant's re-ratification, and the failure drills (league/ops/). Money and the way back.
     "league/ops/budget.py", "league/ops/drills.py", "league/ops/grant.py",
+    # The walls around them (V3-A integration review): the close economics the budget's p30 and the public Net come
+    # from, and the Sail guard that brakes spend; the evaluator's identity (the Gym, the evaluator) and the swarm's
+    # route to real money (the gate, the bands). An automatic release may not change them; the owner's deploy may.
+    "league/ops/economics.py", "league/swarm/guard.py",
+    "league/gym/", "league/swarm/evaluator.py", "league/swarm/gate.py", "league/swarm/bands.py",
 )
 #: The shared strategy list every architect proposal used to rewrite whole (`league/strategies`).
 RETIRED_REGISTRY = "league/strategies/registry.json"
