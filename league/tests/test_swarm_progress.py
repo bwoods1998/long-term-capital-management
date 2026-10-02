@@ -204,7 +204,7 @@ class LiveProgress(ProgressCase):
         self.forward(source="real", version=2, n=90, pnl=100)
         value = self.read()
         checks = self.checks(value)
-        self.assertEqual((checks["forward_trades"], checks["real_trades"]), ((3, 20), (3, 5)))
+        self.assertEqual((checks["forward_trades"], checks["real_trades"]), ((3, 20), (3, 20)))  # evidence v3: 20 real
         self.assertEqual((checks["forward_mean"], checks["forward_confidence"]), ((0, 1), (0, 1)))
         self.assertEqual(value["blocked"], "forward_incomplete")
 
@@ -214,16 +214,18 @@ class LiveProgress(ProgressCase):
         self.local["band_moves"] = {"synthetic-family": {"band": "probe", "at": MONDAY - 7 * 86400}}
         self.store.set_state("synthetic-family", live_promoted_at=MONDAY + 30 * 60)
         value = self.read()
-        self.assertEqual((self.checks(value)["probe_sessions"], value["blocked"]), ((0, 1), "probe_incomplete"))
+        self.assertEqual((self.checks(value)["probe_sessions"], value["blocked"]), ((0, 5), "probe_incomplete"))
         self.now += 86400
-        self.assertEqual(self.checks(self.read())["probe_sessions"], (1, 1))
+        self.assertEqual((self.checks(self.read())["probe_sessions"], self.read()["blocked"]), ((1, 5), "probe_incomplete"))
+        self.now += 6 * 86400                                  # evidence v3: five whole sessions at Probe
+        self.assertEqual(self.checks(self.read())["probe_sessions"], (5, 5))
         self.assertIsNone(self.read()["blocked"])
 
     def test_no_promotion_stamp_never_borrows_an_older_family_age(self):
         self.family(band="probe")
         self.forward()
         self.store.set_state("synthetic-family", live_promoted_at=None)
-        self.assertEqual(self.checks(self.read())["probe_sessions"], (0, 1))
+        self.assertEqual(self.checks(self.read())["probe_sessions"], (0, 5))
         self.assertEqual(self.local, {}, "publishing cannot initialize the trading clock")
 
     def test_sized_means_maintain_and_a_new_gym_image_does_not_revoke_its_held_band(self):
@@ -240,6 +242,7 @@ class LiveProgress(ProgressCase):
         self.store.set_state("synthetic-family", typical_by_version={})
         self.assertEqual((self.read()["blocked"], self.checks(self.read())["risk_fit"]), ("evidence_stale", (0, 1)))
         self.store.set_band("synthetic-family", "probe", reason="synthetic established band")
+        self.store.set_state("synthetic-family", live_promoted_at=MONDAY - 9 * 86400)  # five whole sessions at Probe
         self.forward()
         value = self.read()
         self.assertEqual(self.checks(value)["risk_fit"], (1, 1))
