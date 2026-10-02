@@ -23,8 +23,51 @@ on branch `run/options-swarm-2026-09-26`) has the detail.
 
 Main `665a9e8d` is the H1 release, deployed Oct 1 at 20:35Z (below); every House release of Oct 1 has its dated entry.
 Under the freeze (Oct 1, "The freeze"), a change to `league/live` or `league/gym` waits for a planned release. Merged
-and waiting for a release:
+since and waiting for a release:
 
+- **The duplicate look** (H3a, branch `gate/h3a-no-duplicate-look`; `league/swarm/gate.py`, `league/swarm/store.py`,
+  `league/CONTRACT.md`; the money path: `gate.py` and `store.py` are loaded by the live path, so it deploys 20:05-13:25Z
+  only, after two adversarial reviews and green CI). Every holdout look raises the Holm bar for every later one, and the
+  three looks since the Sept 26 reset covered two programs (the edge study: the two Sept 27 looks had identical Train
+  and Validation results). The gate now refuses a look that would repeat an earlier one, in any family and lineage,
+  before anything else is asked of the version (the experiment contract, the drift screen, the rations, the paid review
+  and audit, the look): the same program (`run_sha`), or a version whose stored Validation run says the same as a looked
+  version's (the Gym's own run sha, the code with its parameters merged over the defaults; or the same evaluation with
+  the same outcome). Recorded as every gate refusal is (stage "duplicate look": the refusal row, the program's incubator
+  bar, `gated_sha` with `gate_ready` cleared, outcome "refused"), plus a private `swarm.gate` event `duplicate_look`
+  naming the earlier look; no look row, no try, no review, no holdout read; the researcher hears the earlier look's
+  number, never a figure. A repeat of a look in flight in another family waits for it; a version whose own look landed
+  is only closed. Before this, a gate-ready version whose `run_sha` had been looked at was skipped silently every round
+  and kept `gate_ready`, and a repeat under another `run_sha` was reviewed and looked at. Tightening only: no threshold,
+  Holm, deflated-Sharpe or forward rule moves; nothing in `league/live`, `league/gym` or `LEAGUE_FILES`, no evaluator
+  adoption, no money digest. To verify after the deploy: `swarm.gate` events with action `duplicate_look` (expect none
+  for a genuinely new version) and `refusals` rows with stage "duplicate look".
+- **The cell's yield** (H2 of the Oct 1 edge study, branch `cards/h2-yield-aware`; `league/swarm/cards.py`,
+  `league/swarm/architect.py`, `league/swarm/settings.py`; off by default, so the deploy changes nothing until the
+  operator sets it). From 22:00Z Oct 1 the architect bore nothing for seven passes and the population fell to 13
+  (floor 12). Every refusal was the card check's rebirth rule: the productive cells are full of self-refuted and drift
+  rows, which `RebirthIndex` counts as mechanism verdicts, and the model's claims named rows outside the six the refusal
+  listed. Two settings, in `swarm.json` with no deploy:
+  - `architect.cell_yield` (null) opens a cell unless it is exhausted. Exhausted means at least `min_births` settled
+    births in `lookback_days` whose Wilson 95% upper bound on drift-pass share is below `floor` (recommended, and `true`:
+    30, 0.10, 7). In an open cell a card matching only self-refuted and drift rows needs no rebirth claim. Every other
+    mechanism verdict still needs one, and so does every row of an exhausted cell.
+  - `architect.claimable_rows` (0) lists, for each cell where a claim can be needed, the newest rows a claim may name,
+    with the inputs each read.
+
+  Unchanged: `MECHANISM_VERDICTS` and the rows indexed (the memory lane's judge), the matching, a claim's tests, both
+  rebirth budgets, `card_rebirth` "refuse", the same-slice and same-idea refusals, lineage and card completeness. A
+  claim made in an open cell that needed none is kept only when it holds; otherwise it is stripped before the card is
+  stored (`claim_dropped` on the birth). A yield that cannot be read leaves every cell as before. No Validation or
+  holdout figure reaches the request. The pass's event carries `cell_yield` (Train figures only). On the edge study's
+  Oct 1 12:59Z extract, none of the 127 classified cells would be exhausted. Nothing in `league/live`, `league/gym` or
+  `LEAGUE_FILES`, no evaluator adoption, no money digest. The money path: an import trace of the tree
+  (`league/live/*.py`, then the modules `league/live` imports lazily:
+  `league/swarm/{store,bands,gate,evaluator,settings}.py`, and the docs' lazy `league/gym` modules and the
+  constitution) loads `cards.py` (through `gate`, `researcher`) and `settings.py`, never `architect.py`, and no module
+  it did not load before (`cards.py` now imports `evidence.py`, already loaded), so it deploys 20:05-13:25Z only,
+  after two adversarial reviews and green CI. The live path never builds a `RebirthIndex`. To switch on and verify:
+  `docs/operations.md`, **The cell's yield**.
 - **The canary's retention rule judges guards on the bootstrap, not the point estimate** (branch `lanes/retention-guard-rule`;
   `league/swarm/harness_lanes.py`, `playbooks/harness-improvement.md`, new `league/tests/test_harness_guard_rule.py`).
   The lanestats study (Oct 1, operator-only simulation on the 24 h capture's per-family tallies, reproducing the base
@@ -56,6 +99,9 @@ and waiting for a release:
 ## 2026-10-01
 
 ### 20:35Z, the H1 release: House release `20261001T203426Z-6fa69bfcda55` (main `665a9e8d`; PRs #475, #476, #477)
+  With `cell_yield` on, an open-cell restatement on another slice is born as a fresh lineage (its own deflated-Sharpe N):
+  switching it on is the owner's decision; `claimable_rows` alone changes no lineage. Fixes from the reviews: the yield
+  reading is read before its error flag (E1); a non-finite `claimable_rows` is off, not an error (E2).
 
 - **Contents.** No retire while the best Train version awaits validation (H1, #475); the research lane's held-out pool
   pin after the operator's rotation r8 (#476, `league/swarm/harness_lanes.py`: the research lane's hash moves, so every

@@ -160,7 +160,9 @@ checkout's `.data` (the box record and the admin token): never `ln -sfn` over it
     - `league/constitution.py`;
     - `league/swarm/{__init__,store,bands,gate,evaluator,settings}.py`;
     - through `gate`, `league/swarm/{evidence,pool,researcher,claude_research,diagnostics,inputs,public}.py`;
-    - from Release B, through `researcher`, `league/swarm/library.py` (#447).
+    - from Release B, through `researcher`, `league/swarm/library.py` (#447);
+    - from release B', through `researcher`, `league/swarm/{cards,mechanism}.py` (an import trace of the H2 tree,
+      Oct 2: `architect.py` is not loaded).
 
   `league/swarm/{funding,models,loop,guard,practice,tournament}.py` are not loaded. Re-derive the list with an import trace of
   `league/live/*.py` on each release's tree. Any change under `league/gym/` or `league/live/`, to `LEAGUE_FILES`, to the
@@ -1564,6 +1566,8 @@ the swarm's loop for up to the meters' 20 s timeouts, at most once every 5 minut
 | `researcher.stall_revisions`, `rewrites_per_day` | `swarm.json` on the box | 10000 (since 16:41Z Sept 30: stall rewrites off; 12 before), 1 | the stall that buys a researcher one rewrite from a stronger model, and at most how many a family a day (defaults 5, 4) | edit `swarm.json` |
 | `claude.role_effort` | `swarm.json` on the box | `{"architect": "medium"}` (since Release A, Sept 30; it matters only while the architect has a Claude line) | a role's own Claude effort when the caller names none (R11b; default `{}`: `claude.effort` for every role, so the gate keeps "high") | edit `swarm.json` |
 | `architect.max_alive_per_class` | `swarm.json` on the box | default 12 (R11b) | the most living families of one mechanism class (structure x root group); `admit` refuses births past it; 0 or null off | edit `swarm.json` |
+| `architect.cell_yield` | `swarm.json` on the box | default null: off (H2) | the card check's yield-aware cells (**The cell's yield**, below). Null keeps every mechanism-verdict row needing a rebirth claim. `{"min_births": 30, "floor": 0.10, "lookback_days": 7}` (or `true`, the same) opens every cell except an exhausted one: at least `min_births` settled births in the lookback, with a Wilson 95% upper bound on their drift-pass share below `floor`. In an open cell a card that matches only self-refuted and drift rows needs no claim. A key that is missing or misstated takes its default | edit `swarm.json`; roll back with null |
+| `architect.claimable_rows` | `swarm.json` on the box | default 0: off (H2) | the most rows a claim may name that the REFUTED CELLS list for each cell where a claim can be needed (at most 12; the newest rows that still have rebirth room, each with the inputs it read). Row ids and input names only, no figure | edit `swarm.json` |
 | `architect.structures` | `swarm.json` on the box | default null: every type (Oct 1) | the structure types a birth may be. `"real"` reads the allocator's `allocation.real_structures` (one list for both, so a change of the account's real types is one edit); a list such as the gateway's real types (`["debit_vertical", "long_butterfly", "long_call", "long_put"]`) also admits `long_single` (a list must then change beside `allocation.real_structures`). The architect's and the strategist's GAPS and coverage show only these (a list naming one side alone makes that side a gap), the architect's request names them and its BIRTH QUOTAS show only their structure families, `admit` refuses any other type and the next request names each refusal still outside the list (kv `architect_structure_refusals`); the tournament forks and the loop's founding seeds and reseeds are only of these types, and a living family of another type keeps researching until a rule retires it. The pass's event: `structures`, `structure_not_allowed` by type, `structures_ignored` (a value naming no known type is ignored whole: every type) | edit `swarm.json` |
 | `researcher.retire_hold_cycles`, `retire_hold_trials`, `extension_hold_checks` | `swarm.json` on the box | defaults 3, 10, 6 (R11b) | the hold offer (retire after that many holds in a row with an eligible Train run or that many trials); the extension hold (a validation with that many checks met is exempt from the dormancy clause until cleared); 0 turns each off | edit `swarm.json` |
 | `researcher.probe_year`, `probe_timeout_seconds` | `swarm.json` on the box | default null (off), 300 (R11b) | the Gym's zero-trade probe: 2022 switches it on | edit `swarm.json` |
@@ -1683,6 +1687,33 @@ the third wrote a stage "gym" refusal that bars the program from the incubator, 
   real failure there makes the count 4 and parks it at once (with the alert). Reset the count once the gate is right
   (above). Whether the refusal row and the bar stand is the owner's call: should an infrastructure refusal bar a
   program from the incubator?
+
+The duplicate look (H3a, Oct 1, 2026; `league/swarm/gate.py` `duplicate_look`). Every holdout look raises the Holm bar
+for every later one (the 4th look must reach p <= 0.0125, the 10th 0.005), and the three looks after the Sept 26 reset
+covered two programs: the two Sept 27 looks had identical Train and Validation results under different run shas. The
+gate now compares each gate-ready version, before anything else (the experiment contract, the drift screen, the
+rations, the paid review and audit, the gate image's coverage, the look), with every look in the `looks` table, in any
+family and lineage, and with any look in flight in another family.
+- **A repeat** is (1) the same program: the same `run_sha` (code and parameters); or (2) the same Validation run, read
+  from the stored Validation results of the looked version and of the candidate (`validation_identity`, hashes only):
+  the Gym's own `run_sha` (the code with its PARAMS merged over the declared defaults, so an override that restates a
+  default is the same program), or the same evaluation (`engine`, the engine's `code`, `tables`, `fill_model`, roots,
+  window, stress, capital) with the same outcome (`summary`, `fills`, `breakdown`, `stress_1.5`). The program's own
+  identity, the image and bundle labels and the runtime counters are left out. A result that names no engine or
+  engine code, or has no trade, is never compared on its outcome.
+- **The refusal** is recorded as every gate refusal is (stage "duplicate look": a `refusals` row, the program's
+  incubator bar, `gated_sha` with `gate_ready` cleared, `gate_outcome` "refused", the researcher's status line), plus
+  one private `swarm.gate` event, action `duplicate_look`, with `of_look` (the earlier look's seq), `of_family`,
+  `of_version` and `match` (`run_sha`, `program` or `validation`). No look row, no `look_tries`, no review, no holdout
+  read. The researcher reads "a duplicate of holdout look #N" and why, never a figure or that look's verdict. The
+  tournament never makes the version gate-ready again (`gate_spent` reads `gated_sha`); an evaluator adoption clears
+  `gated_sha`, so after one the gate refuses it once more.
+- **A repeat of a look still in flight** in another family is listed under `waiting` (no refusal, `gate_ready` stays)
+  and refused once that look lands. A version whose own look already landed is only closed (`gated_sha`), never refused.
+- **To see it**: `swarm.gate` events with action `duplicate_look`, and `refusals` rows with stage "duplicate look".
+  Expect none for a genuinely new version. A refusal that should not have been made (two different programs with
+  byte-identical Validation outcomes) would show as `match` "validation" on programs whose code differs in more than
+  comments; report it, and the owner decides whether to clear its `gated_sha`, refusal row and incubator bar.
 
 Deploy impact (R3): the rule applies at once to every family that is already past it. On Sept 27 (start 72, floor
 44, 74 alive) about 29 families were past it, nearly all long-refuted placeholders, so the first tournament round and
@@ -1833,6 +1864,47 @@ them as untested, and its 13:10Z correction was voided by a family id. R11b is r
 Checks after R11b ships (with the plan's 4-hour check): the share of new graveyard rows tagged IDLE (expect under 5%),
 strategist acceptance (2 of 3 runs or better) and the largest mechanism class's share of births (expect under 25%),
 architect truncations and births per Claude pass, and `probe` outcomes once it is on.
+
+**The cell's yield** (H2, `league/swarm/cards.py`; off until `architect.cell_yield` is set). On Oct 1 from 22:00Z the
+architect bore nothing for seven passes in a row and the population fell to 13 (floor 12). Every refusal was the card
+check's rebirth rule: the productive cells (for example `relative_value / directional / days_4_10`, 139
+mechanism-verdict rows) are full of self-refuted and drift rows, so every proposal there needed a claim naming one of
+the cell's rows, and the model named rows outside the six the refusal listed. The edge study's critique (L4, H2)
+prescribes this variant, not dropping those tags from the verdict list and not `card_rebirth` "off".
+- **Switch on**, in `swarm.json`: `"cell_yield": {"min_births": 30, "floor": 0.10, "lookback_days": 7}` and
+  `"claimable_rows": 4` under `architect`. No deploy, no restart: the next pass reads them. Roll back with
+  `"cell_yield": null` and `"claimable_rows": 0`.
+- **What it does.** A cell is exhausted when it has at least 30 settled births in 7 days whose Wilson 95% upper bound on
+  drift-pass share is below 10%. At 0 drift passes that takes 35 settled births; at 1 pass, 53; at 2 passes, 69. In
+  every other cell, a card that matches only self-refuted and drift rows needs no claim. Refuted, the operator's,
+  diagnosed, trial-adjusted, stress and failed-mechanism-test rows still need one, and so does every row of an
+  exhausted cell. A settled birth is a retired family or one that already holds a drift-passing eligible Train run. A
+  family still researching without a pass is pending, and one whose eligible runs all predate the drift figures is
+  unknown; neither counts. The budgets (`max_rebirths_per_cell` 3, `max_rebirths_per_row` 2, 7 days), the matching,
+  `card_rebirth` "refuse" and card completeness are unchanged. **Lineage is not unchanged when `cell_yield` is on**
+  (the H2 review, F1-F2): an open-cell birth on a slice its matched self-refuted or drift rows did not search is born as
+  a fresh lineage with its own deflated-Sharpe N and look ration, where the card check used to refuse it or link a prior
+  (a probe on the Oct 1 extract: 31 of 33 verbatim restatements across root sets and structures born as fresh lineages
+  with the setting on, 0 of 34 with it off); a paraphrase on the same slice counts only the slice's newest dead lineage
+  of each type; and on the Oct 1 extract every cell is open, while a barren cell reopens within the lookback. This
+  widens the cross-slice escape from the deflated Sharpe's N that the edge study's critique flagged as an owner D2
+  item, so switching `cell_yield` on is the owner's decision. `claimable_rows` alone changes no lineage: it lists, for
+  each cell where a claim can be needed and the cell has rebirth room, the newest rows that still have row room, each
+  with the inputs it read, so a valid claim (which links its lineage) can name one.
+- **Expected effect, from the edge study's Oct 1 12:59Z extract (not live).** None of the 127 classified cells would
+  be exhausted. The lowest upper bounds were `trend_momentum / directional / days_4_10` (14 passes in 156 settled
+  births, 0.145) and two cells at 0 in 19 (0.168). Switching on therefore reopens the productive cells now. The guard
+  binds only on a cell re-mined to at least 35 settled births with no pass within a week.
+- **Verify after switching on.** Each pass's `swarm.architect` event carries `cell_yield`: the settings, `exhausted`
+  (cells), `cells` (each with births, passed, pending, unknown, upper, exhausted), `open_born` (births in an open cell
+  that needed no claim) and `claims_dropped`. Each `swarm.born` event's `card` carries `open_cell` (and
+  `claim_dropped`, with the reason, when a claim was stripped). Expect births per pass to recover and `card_refused`
+  `rebirth` counts to fall. Track drift pass per shape birth (the critique's metric (b), at least 10%) and watch for
+  `exhausted` cells. An `error` in `cell_yield` means the yields could not be read, and every cell then needs a claim
+  as before.
+- **Not touched:** `cards.MECHANISM_VERDICTS` and the rows the index holds, which the memory lane's judge reads (its
+  settings never set `cell_yield`, so its answers are unchanged); `league/live`, `league/gym`, `LEAGUE_FILES`, the
+  constitution, the gate and the evaluator.
 
 ## The research library (Release B, #447)
 

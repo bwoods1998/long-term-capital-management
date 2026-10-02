@@ -340,7 +340,7 @@ Agent count and simulated years measure activity; passing unseen evidence measur
 | Tournament | hourly | the House | validation runs of each family's best versions, the reallocation by expected information value, forks and retirements, the leaderboard | Gym time and researcher turns follow the value of the next evidence |
 | Architect | every 4 hours by default, refilling hourly below the start; every 15 minutes live, refilling every 20 | Claude by default (`architect.openai_model` null live); Kimi-K3 on Sail when Claude has no room or line: live since Sept 30, when the architect's Claude line was set to $0 (never after a cut answer: R11b salvages its complete families and retries once on Claude at medium effort); on Sail at `architect.sail_effort` (`medium` by default since Oct 1), and a cut Sail answer is salvaged the same way, its retry on Claude alone; a complete answer whose families object has stray trailing commas is read again without them (`lenient`), and one whose families array still does not parse whole (a stray `}` or `,` between two families, 15:59Z Oct 1) is read object by object, never outside the array (`recovered`: how many, and why) | reads the leaderboard, the graveyard and the gaps; writes families with a mechanism, a structure and a rejection test; at most 12 living families a mechanism class (R11b) | 3-6 new families by default; the gap to the start, up to 24 a pass live |
 | Diagnostician | every 5 minutes | Claude | reads a stuck or nearly-there family's Train diagnostics (never Validation's numbers); rewrites its mechanism or writes its lesson; off live since Sept 30 (`diagnostician.enabled` false: its rewrites produced no validation in 48 hours) | a new mechanism, or a lesson and a retirement |
-| Gate | when a family meets the validation line | review: Claude when "review" is in `claude.roles` (live: Sonnet 5.5), else GPT-6 Sol while the OpenAI month has room and `gate.review_openai_model` names it (null live), else DeepSeek-V4-Pro on Sail; audit: Claude (live: Opus 5.5, `claude.role_model`), then GPT-6 Astra on the same terms (null live), then a second Sail model; the gate box | review for lookahead, leakage and fill abuse; the audit; one holdout look | a Candidate, or a recorded refusal |
+| Gate | when a family meets the validation line | review: Claude when "review" is in `claude.roles` (live: Sonnet 5.5), else GPT-6 Sol while the OpenAI month has room and `gate.review_openai_model` names it (null live), else DeepSeek-V4-Pro on Sail; audit: Claude (live: Opus 5.5, `claude.role_model`), then GPT-6 Astra on the same terms (null live), then a second Sail model; the gate box | first, a look that would repeat an earlier one is refused (the duplicate look, H3a); then review for lookahead, leakage and fill abuse; the audit; one holdout look | a Candidate, or a recorded refusal |
 | Nightly forward | after 01:45 ET each trading night | the data box, the gate box | the new day goes to the gate image only; every Candidate is re-run on it | one unseen day a night for every Candidate |
 | Live | 09:30-16:00 ET | the House | the practice league (from Release A): every alive family's validated or eligible Train version in observe shadow (two caps: 48 instances, 24 roots); Candidates in live shadow; Probes and Sized on real money; the House's D3 calibration round trips and its live test; from Release B, the incubator (one real lot for a cohort whose practice passed its first look; never evidence); no general agent paper book yet | separate paper, shadow, practice and real records |
 | Post-mortem | after each close; weekly | the operator for now (no scheduled post-mortem is built; it would run on Claude, whose `reserve_usd` is kept for it) | compare captured executions with the Gym; diagnose gaps and propose repairs | private reports; calibration only through the recalibration protocol |
@@ -402,6 +402,21 @@ diagnostician.
   class the proposal's own mechanism text reads as counts as well as the declared one, so a relabeled idea is caught.
   Rows from before cards are read into cells from their text. The check is deterministic and makes no model call. A
   rebirth on the named row's slice continues its lineage; on another slice it counts that lineage's trials.
+- **The cell's yield** (H2 of the Oct 1 edge study; `architect.cell_yield`, off by default). A self-refuted row (its own
+  researcher retired it) and a drift row (its Train record failed the drift screen) record a family's outcome, not a test
+  of the mechanism, and the productive cells hold the most of them: on Oct 1 the cells whose births passed the drift
+  screen most often were the ones the rebirth refusal closed. Switched on, each cell is read for its yield: the families
+  born in it in the lookback whose outcome is settled (retired, or holding a drift-passing eligible Train run), and how
+  many of those passed. A cell with at least the minimum of settled births whose Wilson 95% upper bound on that share is
+  below the floor is exhausted, and every one of its rows needs a rebirth as above. In every other cell, an open one, a
+  card that matches only self-refuted and drift rows needs no rebirth; a refuted row, the operator's, a diagnosed,
+  trial-adjusted or stress row and a failed mechanism test still need one. The verdict list, the rows indexed, the
+  matching, a claim's tests, both rebirth budgets, the same-slice and same-idea refusals, lineage and the card's
+  completeness are unchanged. A claim made in an open cell that needed none is kept only when it holds; otherwise the
+  card is stored without it and the birth's event says why, so an unchecked claim never links a lineage or spends a
+  budget. If the yield cannot be read, every cell is treated as exhausted. Drift-screen figures are Train figures; the
+  request shows only whether each cell is open or exhausted. A second setting (`architect.claimable_rows`, off by
+  default) lists, for each cell where a claim can be needed, the rows a claim may name and the inputs each read.
 - **The mechanism test** (release B, league/swarm/mechanism.py). Before a carded family's first broad Train replay,
   its program runs with the signal on and with its card's ablation over a pre-registered sample: four windows of three
   months inside 2022-2024 (the years every Gym image holds for every root), covering every calendar month once,
@@ -437,6 +452,15 @@ diagnostician.
   positive; a day-block bootstrap one-sided 95% lower bound on mean daily P&L above zero, with a
   Holm-Bonferroni correction across every holdout look the swarm has made; holdout Sharpe at least
   half the validation Sharpe. **Researchers learn only pass or fail**, never the holdout's numbers.
+- **A look that repeats an earlier one is refused** (the duplicate look, H3a, Oct 1, 2026; `Gate.duplicate_look`). Every
+  look raises the Holm bar for every later one, and the three looks after the Sept 26 reset covered two programs. Before
+  anything else is asked of a version, the gate compares it with every look the swarm has made, in any family and
+  lineage. A repeat is the same program (`run_sha`), or a version whose Validation run says the same as a looked
+  version's: the Gym's own run sha (the code with its parameters merged over the defaults), or the same evaluation (the
+  engine, its code, tables, fill model, roots and window) with the same outcome. It is refused like any other gate
+  refusal: no look, no try, no review, no sealed read, and the version is not taken up again. The researcher hears the
+  earlier look's number, never a figure. A version that repeats a look still in flight waits for it. This
+  only tightens: no threshold, Holm or deflated-Sharpe rule moves.
 - **A look needs the data, and missing data is the image's fault, not the program's.** Before a look the gate checks,
   from file names only, that its image holds the whole holdout of every root the program needs. A look it cannot make
   waits with no try counted, and a look that fails because the Gym names a root it lacks is owed again the same way.

@@ -963,3 +963,91 @@ evidence of edge: these numbers say the funnel is working again, not that a prof
 
 The goal remains unmet: no D2-qualified strategy trades real money, no harness improvement is retained, and project
 Net is −$616.81.
+
+## Oct 2, small hours: the improvement loop's own rule, a births stall, and two more fixes in review
+
+### The self-improvement loop
+- **Research-lane candidate, two attempts.** The first (a static screen for programs that cannot run) passed its own examples but
+  failed the held-out split: it did not generalize. The second (refuse only an error that recurs across sessions, synthetic
+  markets and shifted parameters) passed the held-out split, but an adversarial reviewer found valid programs it would refuse
+  (multi-day warm-ups; default parameters judged instead of the run's), and another showed its real effect on current
+  disqualifications is about 10%, below the predeclared 25%. Neither was deployed. Most current disqualifications depend on the
+  account or the data (a `None` reaching arithmetic after a fill), which no sound pre-run screen can refuse.
+- **The retention rule itself was defective.** A simulation of the loop's retain/revert rule on the House's real per-family
+  tallies found that, with no effect at all, a guard failed in 81-86% of windows, while a real harm of twice a guard's tolerance
+  could still be retained; the research canary rarely reached its activity floor at night. A corrected rule (guards judged on
+  the bootstrap, a larger and longer research canary) is in review as #481, with its operating characteristics in the PR.
+- **Memory-lane candidate parked.** Since the family cards shipped (Oct 1 07:16), the architect has reborn no buried idea, so a
+  rebirth-rate canary would have had nothing to measure.
+- **A selection study came back negative.** Ten Train-time rules for choosing which version to send to Validation were
+  pre-registered on half of the lineages and tested on the sealed other half; none beat the current score robustly. Out of
+  sample the gross edge falls away while costs persist: better hypotheses, not better ranking, are the constraint.
+
+### Births stalled, then a fix in build
+From 22:00 the architect's proposals were all refused by the card check: the productive cells had filled with families that
+refuted themselves within an hour, so every new idea there needed a rebirth claim, and the model's claims named the wrong rows.
+Population fell to 13 (floor 12). The architect went back to Sail at 00:06 (Claude passes were costing money for no births).
+A yield-aware rebirth rule (a cell stays open while its drift-screen yield is credible; refuted mechanisms still bind) is being
+built and reviewed. Also in review: #480, the gate refuses a holdout look that would repeat an earlier one.
+
+### Scoreboard (00:45 Oct 2)
+
+| Measure | Value |
+|---|---|
+| Release running | `20261001T203426Z-6fa69bfcda55` (main `665a9e8d`; main is `81a5e1e3`, docs only since), gateway `4471596a` |
+| Real orders since T0 | calibration: 19 round trips closed; tuition: 1 open (GOOGL, exit-only); House test, incubator, Probe, Sized: 0 |
+| Realized options P&L since T0 | −$37.80 (calibration and fees; strategy routes $0.00) |
+| Input costs since T0 | $585.68 (the owner's external costs not yet declared) |
+| Net since T0 (00:41 cutoff) | −$623.48 |
+| Families alive / in practice | 14 / 9 cohorts (7 after the next open) |
+| Holdout looks | 3, 0 passed |
+| Births since 15:22 Oct 1 | 48 (32 debit verticals, 16 long singles); 4 between 20:40 and 00:25 |
+| Train disqualification rate | 12.4% over the 24 h to 20:41; 10.7% since 04:00 Oct 1 |
+| Evidence resets | 2 (releases A and B) |
+| Retained harness improvements | 0 |
+| Spend and runway | $36.90 over 24 h (pace $32.53/day); Sail $137.56 (brake line $32); Claude $95.06 of $265; OpenAI $0 |
+
+The goal remains unmet: no D2-qualified strategy trades real money, no harness improvement is retained, and Net is −$623.48.
+
+## Oct 2 morning: births restored, two fixes live, an honest look at the economics
+
+### Releases and settings
+- **05:16, House release `20261002T051530Z-1aebcf26b145` (main `81ad284c`):** the gate now refuses a holdout look that repeats an
+  earlier one (same program or same Validation evaluation), before any review or sealed read (#480); and the card check can read a
+  cell's yield (#483), shipped off. No evidence reset; the open tuition lot and the practice cohorts were untouched. A deliberate
+  restart afterwards restored every instance, and a killed swarm process recovered in 31 seconds.
+- **Owner decisions (about 02:55):** keep the yield-aware open cells off and first let the architect see which buried rows a rebirth
+  claim may name (`architect.claimable_rows` 4, on at 05:26); hold holdout looks for long-delta, drift-heavy programs and for
+  programs whose expected holdout power is low (in build and review); count no external costs.
+- **Births restored:** with the claimable rows listed, Sail architect passes went from 0-1 births to 4 a pass; the population rose
+  from 13 to 27. A re-test of the Claude architect bore nothing in two passes and was reverted (its prompt path differs).
+- **Tournament forks off (05:03):** forks of already-validated lineages kept re-mining one heavily searched idea; each fork raises its
+  lineage's multiple-testing count, so they were spending research on lineages that almost cannot qualify.
+- **An operator mistake, recovered:** at 07:38 a large read-only extract on the House exhausted its memory and stalled the swarm for
+  about eight minutes; the House's supervisor restarted the swarm on its own. Extracts are now batched and capped.
+
+### What the evidence says (operator studies, summarized)
+- **Ranking cannot rescue weak ideas.** Ten rules for choosing which version goes to Validation were pre-registered on half of the
+  lineages and tested on the sealed other half; none beat the current score robustly.
+- **One lot is a hard constraint.** A strategy-class review of the published (pre-2025) options literature and our own Train evidence
+  found no class whose documented edge, after one-contract costs, could pass a sealed holdout look in a useful time; one real edge at
+  the first real-money size would earn a few dollars a day against a burn of about $25-35 a day. The next agenda will add evidence-based
+  entry filters (a meta-analysis of 139,000 Train trades confirmed two on later years: no Friday-opened long singles held over the
+  weekend; no bearish premium bought when the root's implied vol is rich) and data-hygiene rules, after the pre-registered read at
+  15:22.
+
+### Scoreboard (09:00 Oct 2)
+
+| Measure | Value |
+|---|---|
+| Release running | `20261002T051530Z-1aebcf26b145` (main `81ad284c`), gateway `4471596a` |
+| Real orders since T0 | calibration: 19 round trips closed; tuition: 1 open (GOOGL, exit-only); House test, incubator, Probe, Sized: 0 |
+| Realized options P&L since T0 | −$37.80 (calibration and fees; strategy routes $0.00) |
+| Input costs since T0 | $596.28 (external costs declared none) |
+| Net since T0 (08:56 cutoff) | −$634.08 |
+| Families alive / in practice | about 20 / 9 cohorts (7 after the next open) |
+| Holdout looks | 3, 0 passed |
+| Retained harness improvements | 0 (the corrected retention rule, #481, is in its final re-simulation) |
+| Spend and runway | $34.18 over 24 h, last 4 h pace $23.30/day; Sail $130.24; Claude $93.61 of $265; OpenAI $0 |
+
+The goal remains unmet: no D2-qualified strategy trades real money, no harness improvement is retained, and Net is −$634.08.

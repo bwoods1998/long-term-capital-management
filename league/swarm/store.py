@@ -1068,6 +1068,16 @@ class SwarmStore:
     def looked(self, run_sha: str) -> bool:
         return self._one("SELECT 1 FROM looks WHERE run_sha=?", (run_sha,)) is not None
 
+    def looks_inflight(self) -> list[tuple[str, dict[str, Any]]]:
+        """Every family's holdout look in flight: [(family, its `look_inflight` marker)], alive or retired, by family id.
+        Only the states that name a marker at all are decoded (THE DUPLICATE LOOK, `gate.Gate.duplicate_look`)."""
+        out = []
+        for row in self._all("SELECT id, state FROM families WHERE state LIKE '%look_inflight%' ORDER BY id"):
+            marker = (loads(row["state"], {}) or {}).get("look_inflight")
+            if isinstance(marker, Mapping) and marker.get("sha"):
+                out.append((str(row["id"]), dict(marker)))
+        return out
+
     def refuse(self, fid: str, version: int | None, stage: str, reason: str) -> None:
         self._exec("INSERT INTO refusals(family, version, at, stage, reason) VALUES(?,?,?,?,?)",
                    (fid, version, self.now(), stage, str(reason)[:2000]))
