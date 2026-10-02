@@ -19,8 +19,9 @@ if HAVE:
 
 REPO = Path(__file__).resolve().parents[2]
 #: The money digest the grant is pinned to: `long_single` is no money rule and must not move it. R10's (Sept 29, 2026)
-#: was a3e2aa7c; the incubator's row (release B, Oct 1, 2026: `options_money.incubator`) moved it to this one.
-MONEY_DIGEST = "42c4a3af2b5c7d1c83e720650ac0596bebf69e0bc77556601347b589f759643a"
+#: was a3e2aa7c; the incubator's row (release B, Oct 1, 2026: `options_money.incubator`) moved it to 42c4a3af; money rules
+#: v3 (the credit types among `real_types`, release V3-A) to this one.
+MONEY_DIGEST = "e4a5f7a6781645fddc91ac82053ea7fdaf03dc3d92c933abf4f452aa3a2254a3"
 
 #: One program, two sides: a long call first, then (once the call is held) a long put. The side rule here is a clock so the
 #: numbers are by hand; a family's own rule is its mechanism's.
@@ -76,8 +77,9 @@ class TheDeclaredType(unittest.TestCase):
 
     def test_the_money_table_and_its_digest_are_unchanged(self):
         self.assertEqual(money_digest(), MONEY_DIGEST)
-        self.assertEqual(CONSTITUTION["options_money"]["real_types"], ["debit_vertical", "long_butterfly", "long_call", "long_put"])
-        self.assertEqual(M.Table.from_constitution().real_types, ("debit_vertical", "long_butterfly", "long_call", "long_put"))
+        v3 = ["debit_vertical", "long_butterfly", "long_call", "long_put", "credit_vertical", "iron_condor", "iron_butterfly"]
+        self.assertEqual(CONSTITUTION["options_money"]["real_types"], v3)
+        self.assertEqual(M.Table.from_constitution().real_types, tuple(v3))
         self.assertTrue(digest())
 
     def test_the_money_table_may_never_name_long_single(self):
@@ -234,7 +236,10 @@ class OnTheLivePath(LiveCase):
 
     def test_each_real_order_is_still_checked_by_its_own_type(self):
         # Every other family is judged by each order's own type, as before: a debit_vertical family's condor is refused as a
-        # credit structure under $2,000 of equity, never by a declared type.
+        # credit structure under $2,000 of equity, never by a declared type (money rules v3: at $2,000 or more it is real).
+        self.venue.equity = self.venue.last_equity = D("1500")
+        self.venue.activity_rows.clear()                                  # no deposit: $1,500 is not a drawdown
+        self.grant.capital = "1500"
         live = self.make([family("condor", CONDOR, band="probe", structure="debit_vertical", typical=60.0)])
         self.run_to(9, 33)
         self.assertEqual([b for b in self.venue.sent if b.get("position_intent") == "buy_to_open"], [])

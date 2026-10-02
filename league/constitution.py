@@ -683,10 +683,13 @@ CONSTITUTION: dict[str, Any] = {
     # capital (`league/live_trading.py`). Deposits and withdrawals are never profit: the daily stop's base and the
     # drawdown's peak net them out (`league/live/money.py` `Stops`).
     #
-    # - `real_types`: what real money opens, the five types the venue closes in ONE order; the others trade shadow only
-    #   until a paper round trip proves them. `credit_types` open for real only once the account reads
-    #   `credit_min_equity_usd` of equity (Alpaca's limited margin under $2,000: debit structures only) or a real credit
-    #   order has been accepted.
+    # - `real_types`: what real money opens, the five types the venue closes in ONE order and a long call or put; the
+    #   others trade shadow only. Each real type opens for real only once its own paper round trip has passed
+    #   (`league/live/paper.py` `PROOF_FOR`; `league.ci` refuses a real type with no proof). `credit_types` open for real
+    #   only while the account reads `credit_min_equity_usd` of equity (Alpaca's limited margin under $2,000: debit
+    #   structures only), judged by the House (`league/live/money.py` `Table.type_allowed`) and by the gateway
+    #   (`CREDIT_MIN_EQUITY_USD`) alike. Every real structure is defined-risk (no naked short leg), and no real open on an
+    #   American-style (equity) root has a short leg in the money at entry (`money.entry_refusal`).
     # - `probe`: a Candidate that passed the holdout, trades a real type, and whose typical maximum loss fits the cap at
     #   the current equity (else shadow-only, the reason recorded). `max_loss_share` a structure, `open_per_family`
     #   structures, `family_share` in all; `floor_usd`: one contract whose maximum loss is at most this, whatever the
@@ -744,8 +747,17 @@ CONSTITUTION: dict[str, Any] = {
     # NOT real types now: they return (with the gateway's list, in one deploy) only once a deposit takes equity to $2,000
     # and the grant is ratified again. The gateway's per-order equity share is 25% so a $100 Probe fits at $481.63 of
     # equity (its $1,000 absolute cap unchanged; never above funded money).
+    #
+    # MONEY RULES V3 (LTCM v3, release V3-A, Oct 2026; the owner's decision D3, "yes"): risk-defined short premium is
+    # where the documented options premia are, so the three credit types (credit verticals, iron condors, iron
+    # butterflies) are real types again, in one deploy with the gateway's `OPTION_STRUCTURES_REAL` (`league.ci` holds
+    # the two equal) and a re-ratified grant. They stay gated by equity: a credit open goes only while the account reads
+    # `credit_min_equity_usd` ($2,000, pinned), at the House and at the gateway; under it they trade shadow only, as
+    # before. Each type opens for real only after its own paper round trip on the practice account. Defined-risk only:
+    # no naked short legs; no short leg in the money at entry on an American-style root (early assignment).
     "options_money": {
-        "real_types": ["debit_vertical", "long_butterfly", "long_call", "long_put"],
+        "real_types": ["debit_vertical", "long_butterfly", "long_call", "long_put", "credit_vertical", "iron_condor",
+                       "iron_butterfly"],
         "credit_types": ["credit_vertical", "iron_condor", "iron_butterfly"],
         "credit_min_equity_usd": "2000",
         "probe": {"max_loss_share": "0.05", "open_per_family": 3, "family_share": "0.15", "floor_usd": "100"},
@@ -927,4 +939,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '595228a68a0a0e146901ba08185dfa7b39bcb2952a2abc1ae0cf16f19193d102'
+PINNED_DIGEST = '545759375c479f19d684d112c106da9b10c3a9b410c46bb97bfc7bc4a2bea742'

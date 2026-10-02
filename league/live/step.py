@@ -74,8 +74,10 @@ own sums), and its positions are Profit, labelled "incubator" on the site.
 
 Real opens need every one of: `config.json` `real_money`; the grant `options-swarm-20260928` active on the money digest
 in force (`House.grant`); the gateway's kill switch off; no stop tripped (`money.Stops`); reconciliation clean; the
-paper proof passed this session or before (`live.require_paper_proof`); the House not paused; the family's band (or
-tuition) and the instance live. Exits need only the kill switch off.
+paper proof passed this session or before (`live.require_paper_proof`), and the order type's own paper round trip
+(`paper.PROOF_FOR`); the House not paused; the family's band (or tuition) and the instance live; a credit type only at
+`credit_min_equity_usd` of equity; a defined-risk order with no short leg in the money on an American-style root
+(`money.entry_refusal`). Exits need only the kill switch off.
 """
 
 from __future__ import annotations
@@ -108,7 +110,7 @@ from .chains import LiveDay, from_ordinal, ordinal, session_minutes, trading_day
 from .decider import BudgetSpent, DeciderError, ProgramRefused, MAX_BATCH_SECONDS
 from .families import MemoryFamilies
 from .observe import HOLD, ObserveStore, evaluator_bundle
-from .paper import PaperProof
+from .paper import KINDS as PROOF_KINDS, PROOF_FOR, PaperProof
 from .real import SINGLE_TYPES, RealBook, RLeg, RPosition, is_incubator, real_legs
 from .shadow import SHADOW_FILE, ShadowAccount, ShadowBook, needs_of
 from .state import STATE_FILE, LiveState
@@ -266,6 +268,10 @@ class OptionsLive:
         # for it (`_real_intent`).
         self.proof_single = (PaperProof(self.state, paper, record=self.record, clock=clock, kind="single")
                              if paper is not None else None)
+        # Money rules v3 (D3): each further real structure type's own round trip, after those two (`league/live/paper.py`
+        # KINDS); a real open of that type waits for it (`_proof_refusal`).
+        self.proofs = ({kind: PaperProof(self.state, paper, record=self.record, clock=clock, kind=kind)
+                        for kind in PROOF_KINDS if kind not in ("vertical", "single")} if paper is not None else {})
         self.calibration = Calibration(self) if self.book is not None else None
         self.house_test = HT.HouseTest(self) if self.book is not None else None
         from .incubator import Incubator
@@ -1266,12 +1272,11 @@ class OptionsLive:
         if self.book is not None:
             for pos in self.book.positions.values():
                 out.setdefault(pos.root, [0, 0, 0.02])
-        if self.proof is not None and not self.proof.passed():
-            w = out.setdefault("SPY", [1, 7, 0.01])
-            w[1] = max(w[1], 7)
-        elif self.proof_single is not None and not self.proof_single.passed():
-            w = out.setdefault("SPY", [1, 7, 0.025])                      # its call is 1-2% out of the money
-            w[1], w[2] = max(w[1], 7), max(w[2], 0.025)
+        proof = self._active_proof(self.day.day.isoformat() if self.day is not None else None)
+        if proof is not None:                                              # its window (`paper.WINDOW`)
+            lo, hi, band = proof.window
+            w = out.setdefault("SPY", [lo, hi, band])
+            w[1], w[2] = max(w[1], hi), max(w[2], band)
         if self.calibration is not None:
             for root, (lo, hi, band) in self.calibration.roots(self.clock()).items():
                 w = out.setdefault(root, [lo, hi, band])
@@ -1393,7 +1398,7 @@ class OptionsLive:
             for order in self.book.orders.values():
                 out.setdefault(order.root, set()).update(leg.symbol for leg in order.legs)
         if not observe:
-            for proof in (self.proof, self.proof_single):
+            for _, proof in self._proof_chain(every=True):
                 if proof is not None:
                     out.setdefault("SPY", set()).update(proof.held_symbols())
         return out
@@ -1825,17 +1830,64 @@ class OptionsLive:
 
     def _paper_proof(self, day: LiveDay, mi: int, out: dict) -> None:
         """The paper venue proves its route while real execution remains disabled, including recovery: the multi-leg
-        vertical first, then the single-leg long call."""
+        vertical first, then the single-leg long call, then each further real structure type (`_active_proof`)."""
         if self.proof is None or "SPY" not in day.chains:
             return
-        proof, label = ((self.proof, "paper_proof") if not self.proof.passed()
-                        else (self.proof_single, "paper_proof_single"))
-        if proof is None or proof.passed():
+        proof = self._active_proof(day.day.isoformat())
+        if proof is None:
             return
         try:
-            out[label] = proof.step(day=day.day.isoformat(), mi=mi, snap=day.snapshot("SPY", mi), chain=day.chains["SPY"]).get("status")
+            out[proof.key] = proof.step(day=day.day.isoformat(), mi=mi, snap=day.snapshot("SPY", mi), chain=day.chains["SPY"]).get("status")
         except Exception as exc:  # noqa: BLE001
-            out[label] = f"error: {type(exc).__name__}"
+            out[proof.key] = f"error: {type(exc).__name__}"
+
+    def _proof_of(self, kind: str | None) -> PaperProof | None:
+        return self.proof if kind == "vertical" else self.proof_single if kind == "single" else self.proofs.get(kind or "")
+
+    def _proof_chain(self, *, every: bool = False) -> list[tuple[str, PaperProof | None]]:
+        """The paper proofs in the order they run (`paper.KINDS`): the vertical and the single always, then each structure
+        proof the money table's `real_types` need (`every`: all of them, as for the contracts an attempt still holds)."""
+        needed = {PROOF_FOR.get(t) for t in self.table.real_types}
+        return [(k, self._proof_of(k)) for k in PROOF_KINDS if every or k in ("vertical", "single") or k in needed]
+
+    def _active_proof(self, today: str | None) -> PaperProof | None:
+        """The proof to step now: the vertical until it has passed (every real open waits for it); then the first of the
+        others that has not passed, skipping one that failed today (its tries are spent until the next session) or is
+        blocked (the owner's), so one stuck type never holds the rest back. An attempt in flight is always stepped: the
+        others wait for it, so no two proofs ever hold paper contracts at once."""
+        if self.proof is None:
+            return None
+        if not self.proof.passed():
+            return self.proof
+        for _, proof in self._proof_chain(every=True):
+            if proof is None or proof.passed() or proof is self.proof:
+                continue
+            row = proof.status()
+            if row.get("orders") and row.get("status") not in ("failed", "blocked"):
+                return proof
+        for _, proof in self._proof_chain():
+            if proof is None or proof.passed() or proof is self.proof:
+                continue
+            row = proof.status()
+            if row.get("status") == "blocked" or (row.get("status") == "failed" and today is not None and row.get("day") == today):
+                continue
+            return proof
+        return None
+
+    def _proof_refusal(self, type_: str) -> str | None:
+        """Why a real open of `type_` waits for the paper account, or None: its own proof (`paper.PROOF_FOR`) has passed.
+        A type with no proof never opens for real while `live.require_paper_proof` holds (fail closed)."""
+        if not self.settings.get("require_paper_proof", True):
+            return None
+        kind = PROOF_FOR.get(type_)
+        proof = self._proof_of(kind) if kind is not None else None
+        if proof is not None and proof.passed():
+            return None
+        if kind == "single":
+            return "the paper account has not yet proved the single-leg route (a long call's open and close) this run"
+        if kind == "vertical":
+            return "the paper account has not yet proved the multi-leg route this run"
+        return f"the paper account has not yet proved the {type_} route (its own paper round trip) this run"
 
     def _read_account(self, out: dict) -> None:
         try:
@@ -2474,9 +2526,13 @@ class OptionsLive:
         why = self.table.type_allowed(order.type, equity_now)
         if why:
             return why
-        if (order.type in SINGLE_TYPES and self.settings.get("require_paper_proof", True)
-                and (self.proof_single is None or not self.proof_single.passed())):
-            return "the paper account has not yet proved the single-leg route (a long call's open and close) this run"
+        why = self._proof_refusal(order.type)
+        if why:
+            return why
+        # Money rules v3 (D3): defined-risk only, and no short leg in the money at entry on an American-style root.
+        why = M.entry_refusal(order.type, order.legs, getattr(snap, "spot", None), american=rules.kind != "index")
+        if why:
+            return why
         if any(leg.dte == 0 for leg in order.legs) and minute >= rules.open_cutoff:
             return f"expiry cutoff: no new opening order on an expiring contract from {rules.open_cutoff // 60}:{rules.open_cutoff % 60:02d} ET"
         legs = real_legs(order, chain)
@@ -2817,6 +2873,7 @@ class OptionsLive:
                 "frozen": self.book.frozen if self.book is not None else None,
                 "paper_proof": self.proof.status() if self.proof is not None else None,
                 "paper_proof_single": self.proof_single.status() if self.proof_single is not None else None,
+                "paper_proofs": {kind: proof.status() for kind, proof in self.proofs.items()},
                 "instances": {k: {"family": i.family, "kind": i.kind, "band": i.band, "mode": i.mode, "error": i.error or None,
                                   "tuition": i.tuition, "observe": i.observe, "incubator": i.incubator}
                               for k, i in self.instances.items()},

@@ -33,13 +33,35 @@ class ConstitutionTest(unittest.TestCase):
                          {"max_loss_usd": "50", "contracts": 1, "max_open": 4, "week_loss_usd": "150",
                           "min_sessions": 3, "min_trades": 10, "min_coverage": "0.80"})
 
-    def test_the_incubator_row_moved_the_money_digest_to_the_one_the_owner_ratifies(self):
-        """Release B's money digest (a3e2aa7c before it) and the full digest (fcf8d735 before it): the grant is ratified
-        again on this one right after the deploy."""
+    def test_money_rules_v3_moved_the_money_digest_to_the_one_the_owner_ratifies(self):
+        """Release V3-A's money digest (42c4a3af, release B's incubator row, before it) and the full digest (595228a6
+        before it): the credit types among `options_money.real_types` (D3). The grant is ratified again on this one right
+        after the deploy (the standing grant, or the owner's `--ratify`)."""
         from league.constitution import money_digest
 
-        self.assertEqual(money_digest(), "42c4a3af2b5c7d1c83e720650ac0596bebf69e0bc77556601347b589f759643a")
-        self.assertEqual(PINNED_DIGEST, "595228a68a0a0e146901ba08185dfa7b39bcb2952a2abc1ae0cf16f19193d102")
+        self.assertEqual(money_digest(), "e4a5f7a6781645fddc91ac82053ea7fdaf03dc3d92c933abf4f452aa3a2254a3")
+        self.assertEqual(PINNED_DIGEST, "545759375c479f19d684d112c106da9b10c3a9b410c46bb97bfc7bc4a2bea742")
+
+    def test_money_rules_v3_open_the_credit_types_gated_by_equity(self):
+        """D3: the three credit types are real types, gated by `credit_min_equity_usd` ($2,000, pinned: no other value is
+        inside its bounds), and no type outside the venue's one-order closes and the long singles may join them."""
+        import copy
+
+        from league.constitution import OPTIONS_CREDIT_TYPES, OPTIONS_MONEY_BOUNDS, options_money_problems
+
+        table = CONSTITUTION["options_money"]
+        self.assertTrue(set(OPTIONS_CREDIT_TYPES) <= set(table["real_types"]))
+        self.assertEqual(table["credit_types"], list(OPTIONS_CREDIT_TYPES))
+        self.assertEqual(table["credit_min_equity_usd"], "2000")
+        self.assertEqual(OPTIONS_MONEY_BOUNDS["credit_min_equity_usd"], ("2000", "2000"))
+        for value in ("1999.99", "0", "2000.01"):
+            changed = copy.deepcopy(CONSTITUTION)
+            changed["options_money"]["credit_min_equity_usd"] = value
+            self.assertTrue(any("credit_min_equity_usd" in p for p in options_money_problems(changed)), value)
+        for extra in ("calendar", "diagonal", "long_straddle", "long_strangle", "short_put", "naked_call"):
+            changed = copy.deepcopy(CONSTITUTION)
+            changed["options_money"]["real_types"].append(extra)
+            self.assertTrue(any("real_types" in p for p in options_money_problems(changed)), extra)
 
     def test_the_incubator_row_may_only_tighten(self):
         import copy

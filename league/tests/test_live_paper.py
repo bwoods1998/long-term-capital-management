@@ -12,10 +12,12 @@ if HAVE:
     from league.live.decider import InlineDecider
     from league.live.families import MemoryFamilies
     from league.live.step import OptionsLive
-    from league.tests.live_fakes import MONDAY, at
+    from league.tests.live_fakes import MONDAY, at, iso
 
 
 PASSED = {"schema": 2, "status": "passed", "open_witness": True, "close_witness": True}
+#: The structure proofs' state keys (money rules v3): taken as passed by the tests of the vertical's and the single's.
+LATER = ("paper_proof_long_butterfly", "paper_proof_credit_vertical", "paper_proof_iron_condor", "paper_proof_iron_butterfly")
 
 
 class PaperOnlyProof(LiveCase):
@@ -28,6 +30,8 @@ class PaperOnlyProof(LiveCase):
                                 families=self.families, decider=InlineDecider(), real_money=False,
                                 config={"require_paper_proof": True}, clock=self.clock, record=self.ledger)
         self.live.state.put("paper_proof_single", PASSED)
+        for key in LATER:
+            self.live.state.put(key, PASSED)
         return self.live
 
     def test_route_is_proved_with_no_real_client_book_or_eligible_family(self):
@@ -73,6 +77,8 @@ class DurableProof(LiveCase):
     def make_proof(self):
         live = self.make([], config={"require_paper_proof": True})
         live.state.put("paper_proof_single", PASSED)   # the vertical's proof alone (`SingleLeg` has the single's)
+        for key in LATER:
+            live.state.put(key, PASSED)
         return live
 
     def restart(self, hh=9, mm=36, *, day=MONDAY):
@@ -303,6 +309,8 @@ def decide(ctx):
 
         live = self.make([family("call", self.LONG_CALL, band="probe", structure="long_call", typical=60.0)],
                          config={"require_paper_proof": True})
+        for key in LATER:
+            live.state.put(key, PASSED)
         while not live.proof.passed():
             self.clock.set(self.clock() + 60)
             live.minute()
@@ -325,3 +333,261 @@ def decide(ctx):
         self.run_to(10, 2)
         self.assertEqual([b.get("position_intent") for b in self.venue.sent][:1], ["buy_to_open"],
                          "the real long call goes once both routes are proved")
+
+
+#: Money rules v3 (D3): the structure proofs, in the order they run after the vertical and the single.
+STRUCTURE_PROOFS = ("long_butterfly", "credit_vertical", "iron_condor", "iron_butterfly")
+CREDIT_PROOFS = ("credit_vertical", "iron_condor", "iron_butterfly")
+
+
+def _structure_of(body):
+    """The structure an mleg body forms, as the gateway reads it from the legs alone (`structure_core.classify` over the
+    types the legs could be): (type, spec)."""
+    from league import structure_core as core
+
+    legs = [core.leg(leg["symbol"], 1 if leg["position_intent"] in ("buy_to_open", "sell_to_close") else -1,
+                     int(leg["ratio_qty"])) for leg in body["legs"]]
+    found = []
+    for type_ in core.TYPES:
+        try:
+            found.append((type_, core.classify(type_, legs)))
+        except ValueError:
+            pass
+    assert len(found) == 1, found
+    return found[0]
+
+
+class StructureProofs(LiveCase):
+    """Money rules v3 (D3): each further real structure type's own paper round trip, one at a time, after the vertical's
+    and the single's; a real open of a type waits for its own."""
+
+    def paper_only(self, table=None):
+        self.families = MemoryFamilies()
+        self.live = OptionsLive(self.root, market=self.market, real=None, paper=self.paper, families=self.families,
+                                decider=InlineDecider(), real_money=False, table=table,
+                                config={"require_paper_proof": True}, clock=self.clock, record=self.ledger)
+        self.live.state.put("paper_proof", PASSED)
+        self.live.state.put("paper_proof_single", PASSED)
+        return self.live
+
+    def passed_kinds(self):
+        return [p["kind"] for p, _ in self.ledger.of("live.paper_proof") if p["status"] == "passed"]
+
+    def test_each_structure_is_proved_in_turn_with_its_own_shape_and_sign(self):
+        live = self.paper_only()
+        self.assertIn("SPY", live._roots())
+        self.run_to(10, 0)
+        for kind in STRUCTURE_PROOFS:
+            self.assertTrue(live.proofs[kind].passed(), (kind, live.proofs[kind].status()))
+            self.assertIn(f"of a {kind}", live.proofs[kind].status()["why"])
+        self.assertEqual(self.passed_kinds(), list(STRUCTURE_PROOFS))
+        self.assertEqual(self.venue.sent, [])
+        self.assertFalse(any(self.paper.held.values()), "the practice account is flat again")
+        self.assertNotIn("SPY", live._roots(), "every proof done: no read for them")
+        # One open and one close each, never interleaved: no two proofs hold paper contracts at once.
+        self.assertEqual([b["client_order_id"].split("-")[1] for b in self.paper.sent],
+                         ["plb", "plb", "pcv", "pcv", "pic", "pic", "pib", "pib"])
+        spot = self.market.level("SPY")
+        for kind, (opened, closed) in zip(STRUCTURE_PROOFS, zip(self.paper.sent[::2], self.paper.sent[1::2])):
+            type_, spec = _structure_of(opened)
+            self.assertEqual(type_, kind)
+            self.assertEqual({leg["position_intent"] for leg in opened["legs"]}, {"buy_to_open", "sell_to_open"})
+            self.assertEqual({leg["position_intent"] for leg in closed["legs"]}, {"sell_to_close", "buy_to_close"})
+            self.assertEqual(sorted(leg["symbol"] for leg in opened["legs"]), sorted(leg["symbol"] for leg in closed["legs"]))
+            self.assertEqual((opened["qty"], opened["order_class"], opened["type"], opened["time_in_force"]),
+                             ("1", "mleg", "limit", "day"))
+            open_price, close_price = D(opened["limit_price"]), D(closed["limit_price"])
+            if kind in CREDIT_PROOFS:
+                # Alpaca's convention: a credit negative, a debit positive; and never at or past the collateral.
+                self.assertLess(open_price, 0, kind)
+                self.assertLess(-open_price, spec.collateral, kind)
+                self.assertGreater(close_price, 0, kind)
+                self.assertLess(close_price, spec.collateral, kind)
+            else:
+                self.assertGreater(open_price, 0)
+                self.assertLess(open_price, spec.max_value)
+                self.assertLessEqual(close_price, 0)
+            # Every wing is $1 and, but for the iron butterfly's put, no short leg starts in the money.
+            if kind in CREDIT_PROOFS:
+                self.assertEqual(spec.collateral, 1)
+            else:
+                self.assertEqual(spec.max_value, 1)
+            for leg in spec.legs:
+                if leg.sign < 0 and not (kind == "iron_butterfly" and leg.right == "put"):
+                    itm = leg.strike < D(str(spot)) if leg.right == "call" else leg.strike > D(str(spot))
+                    self.assertFalse(itm, (kind, leg.occ, spot))
+        butterfly = next(b for b in self.paper.sent if b["client_order_id"].startswith("lv-plb"))
+        self.assertEqual(sorted(leg["ratio_qty"] for leg in butterfly["legs"]), ["1", "1", "2"])
+
+    def test_only_the_proofs_the_money_tables_real_types_need_run(self):
+        import copy
+
+        from league.constitution import CONSTITUTION
+        from league.live import money as M
+
+        c = copy.deepcopy(CONSTITUTION)
+        c["options_money"]["real_types"] = ["debit_vertical", "long_butterfly", "long_call", "long_put"]
+        live = self.paper_only(table=M.Table.from_constitution(c))
+        self.run_to(10, 0)
+        self.assertTrue(live.proofs["long_butterfly"].passed())
+        for kind in CREDIT_PROOFS:
+            self.assertEqual(live.proofs[kind].status(), {}, kind)
+        self.assertEqual(self.passed_kinds(), ["long_butterfly"])
+        self.assertNotIn("SPY", live._roots())
+
+    def test_a_proof_that_failed_today_holds_back_none_of_the_others_and_runs_again_next_session(self):
+        live = self.paper_only()
+        live.state.put("paper_proof_long_butterfly", {"schema": 2, "day": MONDAY.isoformat(), "status": "failed",
+                                                      "tries": 3, "orders": []})
+        self.run_to(10, 0)
+        self.assertFalse(live.proofs["long_butterfly"].passed())
+        self.assertEqual(self.passed_kinds(), list(CREDIT_PROOFS))
+        self.live.state.close()
+        tuesday = MONDAY + dt.timedelta(days=1)
+        self.clock.set(at(tuesday, 9, 31))
+        self.market.day = tuesday
+        live = self.paper_only()
+        self.run_to(9, 45)
+        self.assertTrue(live.proofs["long_butterfly"].passed(), live.proofs["long_butterfly"].status())
+
+    def test_a_blocked_proof_is_skipped_and_its_type_stays_shadow_only(self):
+        live = self.paper_only()
+        live.state.put("paper_proof_credit_vertical", {"schema": 2, "status": "blocked", "why": "the owner's"})
+        self.run_to(10, 0)
+        self.assertEqual(self.passed_kinds(), ["long_butterfly", "iron_condor", "iron_butterfly"])
+        self.assertIn("credit_vertical route", live._proof_refusal("credit_vertical"))
+
+    def test_an_uneven_condor_open_is_unwound_leg_by_leg_and_proved_on_a_new_attempt(self):
+        live = self.paper_only()
+        for kind in ("long_butterfly", "credit_vertical"):
+            live.state.put(f"paper_proof_{kind}", PASSED)
+        seen = []
+
+        def uneven_first_condor(body):
+            cid = body.get("client_order_id", "")
+            if cid.startswith("lv-pic") and body.get("legs") and not seen:
+                seen.append(cid)
+                self.paper.fill = "uneven"
+            elif not body.get("legs"):
+                self.paper.fill = "natural"   # the cleanup's single legs fill; the next attempt is whole
+        self.paper.on_submit = uneven_first_condor
+        self.run_to(10, 15)
+        self.assertTrue(live.proofs["iron_condor"].passed(), live.proofs["iron_condor"].status())
+        self.assertTrue(live.proofs["iron_butterfly"].passed())
+        self.assertFalse(any(self.paper.held.values()))
+        cleanup = [b for b in self.paper.sent if not b.get("legs")]
+        self.assertEqual([(b["position_intent"], b["qty"]) for b in cleanup], [("sell_to_close", "1")])
+        self.assertEqual(live.proofs["iron_condor"].status()["tries"], 2)
+
+    def test_a_restart_mid_attempt_finishes_it_before_any_other_proof(self):
+        live = self.paper_only()
+        self.run_to(9, 36)                                  # the butterfly's open has filled
+        self.assertEqual(live.proofs["long_butterfly"].status()["status"], "open_filled")
+        self.live.state.close()
+        self.clock.set(at(MONDAY, 9, 37))
+        live = self.paper_only()
+        self.assertIs(live._active_proof(MONDAY.isoformat()), live.proofs["long_butterfly"])
+        self.run_to(9, 45)
+        self.assertTrue(live.proofs["long_butterfly"].passed())
+        self.assertEqual([b["client_order_id"].split("-")[1] for b in self.paper.sent][:2], ["plb", "plb"])
+
+
+class StructureGate(LiveCase):
+    """A real open of each type waits for its own paper proof (`OptionsLive._proof_refusal`), and real money opens no
+    short leg in the money on an American-style root (`money.entry_refusal`)."""
+
+    REAL = ("debit_vertical", "long_call", "long_put") + STRUCTURE_PROOFS
+
+    def test_each_type_waits_for_its_own_proof_and_an_unproved_type_never_opens(self):
+        live = self.make([], config={"require_paper_proof": True})
+        for type_ in self.REAL:
+            self.assertIn("has not yet proved", live._proof_refusal(type_), type_)
+        live.state.put("paper_proof", PASSED)
+        self.assertIsNone(live._proof_refusal("debit_vertical"))
+        self.assertIn("single-leg route", live._proof_refusal("long_call"))
+        live.state.put("paper_proof_single", PASSED)
+        self.assertIsNone(live._proof_refusal("long_call"))
+        self.assertIsNone(live._proof_refusal("long_put"))
+        for kind in STRUCTURE_PROOFS:
+            self.assertIn(f"{kind} route", live._proof_refusal(kind))
+            live.state.put(f"paper_proof_{kind}", PASSED)
+            self.assertIsNone(live._proof_refusal(kind))
+        live.state.put("paper_proof_iron_condor", {"status": "passed"})          # no witnesses: not a pass
+        self.assertIn("iron_condor route", live._proof_refusal("iron_condor"))
+        self.assertIn("has not yet proved", live._proof_refusal("calendar"), "a type with no proof never opens")
+        live.proofs.pop("iron_butterfly")
+        self.assertIn("iron_butterfly route", live._proof_refusal("iron_butterfly"), "a missing proof cannot pass")
+        live.settings["require_paper_proof"] = False
+        self.assertIsNone(live._proof_refusal("iron_condor"))
+
+    RETRY_CONDOR = '''
+NEEDS = {"roots": ["SPY"], "dte": [0, 3], "band": 0.03, "cadence": 1, "history": 0, "start": 571, "end": 958}
+PARAMS = {}
+STATE = {}
+
+def decide(ctx):
+    if ctx.positions or ctx.orders:
+        return []
+    return [{"open": "iron_condor", "root": "SPY", "qty": 1, "limit": "natural",
+             "legs": [{"side": "long", "right": "P", "rel": 1, "offset": -1.0},
+                      {"side": "short", "right": "P", "dte": 1, "atm": -3},
+                      {"side": "short", "right": "C", "dte": 1, "atm": 3},
+                      {"side": "long", "right": "C", "rel": 2, "offset": 1.0}]}]
+'''
+
+    def test_a_real_condor_waits_for_the_paper_condor_then_goes(self):
+        from league.tests.live_fakes import family
+
+        live = self.make([family("condor", self.RETRY_CONDOR, band="probe", structure="iron_condor", typical=60.0)],
+                         config={"require_paper_proof": True})
+        for key in ("paper_proof", "paper_proof_single", "paper_proof_long_butterfly", "paper_proof_credit_vertical"):
+            live.state.put(key, PASSED)
+        self.run_to(9, 34)
+        self.assertEqual(self.venue.sent, [])
+        self.assertTrue(any("iron_condor route" in p["why"] for p, _ in self.ledger.of("live.refusal")))
+        self.run_to(9, 45)
+        self.assertTrue(live.proofs["iron_condor"].passed(), live.proofs["iron_condor"].status())
+        self.assertTrue(self.venue.sent, "the real condor goes once its paper round trip has passed")
+        type_, _ = _structure_of(self.venue.sent[0])
+        self.assertEqual(type_, "iron_condor")
+        self.assertLess(D(self.venue.sent[0]["limit_price"]), 0, "a credit, Alpaca's sign")
+        passed_at = live.proofs["iron_condor"].status()["passed_at"]
+        self.assertGreaterEqual(min(o["submitted_at"] for o in self.venue.book), iso(passed_at - 60))
+
+    ITM_CREDIT = '''
+NEEDS = {"roots": ["ROOT"], "dte": [0, 3], "band": 0.03, "cadence": 1, "history": 0, "start": 571, "end": 958}
+PARAMS = {}
+STATE = {"sent": 0}
+
+def decide(ctx):
+    if ctx.positions or ctx.orders or STATE["sent"]:
+        return []
+    STATE["sent"] = 1
+    return [{"open": "credit_vertical", "root": "ROOT", "qty": 1, "limit": "natural",
+             "legs": [{"side": "short", "right": "C", "dte": 1, "atm": -2},
+                      {"side": "long", "right": "C", "rel": 0, "offset": 1.0}]}]
+'''
+
+    def credit_family(self, root):
+        from league.tests.live_fakes import family
+
+        live = self.make([family("itm", self.ITM_CREDIT.replace("ROOT", root), band="probe", structure="credit_vertical",
+                                 typical=60.0)], config={"require_paper_proof": True})
+        for key in ("paper_proof", "paper_proof_single") + tuple(f"paper_proof_{k}" for k in STRUCTURE_PROOFS):
+            live.state.put(key, PASSED)
+        self.run_to(9, 33)
+        return live
+
+    def test_an_in_the_money_short_call_never_opens_on_an_equity_root(self):
+        self.credit_family("SPY")
+        self.assertEqual(self.venue.sent, [])
+        refusals = [p["why"] for p, _ in self.ledger.of("live.refusal")]
+        self.assertTrue(any("in the money" in why and "American-style" in why for why in refusals), refusals)
+
+    def test_the_same_credit_vertical_opens_on_a_european_index_root(self):
+        self.credit_family("XSP")
+        self.assertEqual(len([b for b in self.venue.sent if b.get("legs")]), 1, [p for p, _ in self.ledger.of("live.refusal")])
+        type_, spec = _structure_of(self.venue.sent[0])
+        self.assertEqual(type_, "credit_vertical")
+        short = next(leg for leg in spec.legs if leg.sign < 0)
+        self.assertLess(short.strike, D(str(self.market.level("XSP"))), "its short call is in the money: European, allowed")

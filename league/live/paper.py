@@ -15,6 +15,19 @@ passed, proves the long call's route the same way: a 1-lot SPY call about 1-2% o
 least a day out, bought to open at the natural (the ask) with a single-leg `buy_to_open`, held two minutes, sold to close
 at the natural (the bid) with a single-leg `sell_to_close`. Real long calls and puts open only once it has passed.
 
+THE STRUCTURE PROOFS (money rules v3, release V3-A, the owner's D3): once the vertical and the single have passed, the
+House proves each remaining real structure type the same way, one at a time and in `KINDS` order, on SPY's nearest
+expiry at least a day out, 1 lot at the natural, held two minutes, closed with one multi-leg order at the natural:
+`long_butterfly` (calls: short two at the first strike at or above the spot, long one $1 either side),
+`credit_vertical` (calls: short the first strike at or above the spot, long $1 above), `iron_condor` (short the put at
+or below the spot and the call above it, each with a long wing $1 further out) and `iron_butterfly` (short a call and a
+put at the first strike at or above the spot, long wings $1 out). A credit structure opens at a negative limit (a credit,
+Alpaca's convention) and closes at a positive one. Every proof's legs are checked to form its type
+(`structure_core.classify`) before the open, and its bodies are the real route's own (`real.mleg_body`). A real open of a
+type waits for that type's proof (`PROOF_FOR`; `OptionsLive._real_intent`), and `league.ci` refuses a constitution whose
+`real_types` names a type with no proof here. Paper has no money behind it: its short legs may sit in the money for the
+two minutes held (the iron butterfly's always does), which the real path refuses at entry on an American-style root.
+
 The session loop runs this proof with real money off and no real-account client. Passing the paper route never
 changes real-money configuration, enables a grant, promotes a family, or sends an order to the real venue.
 
@@ -33,7 +46,8 @@ from typing import Any, Callable, Mapping
 
 import numpy as np
 
-from .real import RLeg, limit_price, single_body, structure_fill, ROrder
+from .. import structure_core as core
+from .real import RLeg, limit_price, mleg_body, single_body, structure_fill, ROrder
 from .state import LiveState
 from .venue import TERMINAL, Account
 
@@ -45,18 +59,43 @@ ROOT = "SPY"
 
 #: The single-leg proof's call: out of the money by about this share of the spot (1-2%).
 SINGLE_OTM = (0.01, 0.02)
+#: Every proof, in the order the House runs them (`OptionsLive._paper_proof`): the vertical first (every real open waits
+#: for it), then the single, then the structures. Real types only: a kind runs only while the money table's `real_types`
+#: names a type it proves.
+KINDS = ("vertical", "single", "long_butterfly", "credit_vertical", "iron_condor", "iron_butterfly")
+#: The proof a real open of each order type waits for. `league.ci` (`check_structures`) reads this literal from the tree
+#: and refuses a constitution whose `options_money.real_types` names a type missing here.
+PROOF_FOR = {"debit_vertical": "vertical", "long_call": "single", "long_put": "single", "long_butterfly": "long_butterfly",
+             "credit_vertical": "credit_vertical", "iron_condor": "iron_condor", "iron_butterfly": "iron_butterfly"}
+#: The structure type each multi-leg proof opens.
+STRUCTURE = {"vertical": "debit_vertical", "long_butterfly": "long_butterfly", "credit_vertical": "credit_vertical",
+             "iron_condor": "iron_condor", "iron_butterfly": "iron_butterfly"}
+#: Each proof's SPY read window: (dte low, dte high, band as a share of the spot).
+WINDOW = {"vertical": (1, 7, 0.01), "single": (1, 7, 0.025), "long_butterfly": (1, 7, 0.01),
+          "credit_vertical": (1, 7, 0.01), "iron_condor": (1, 7, 0.01), "iron_butterfly": (1, 7, 0.01)}
+#: Each proof's client order id prefix (an attempt's ids are `<prefix>-<day>-<nonce>-<try>-o`, `-c1`, ...).
+PREFIX = {"vertical": "lv-pp", "single": "lv-ps", "long_butterfly": "lv-plb", "credit_vertical": "lv-pcv",
+          "iron_condor": "lv-pic", "iron_butterfly": "lv-pib"}
+#: What each proof looks for, when the chain does not have it.
+WANTED = {"vertical": "no SPY vertical one strike wide is quoted a day or more out",
+          "single": "no SPY call 1-2% out of the money is quoted a day or more out",
+          "long_butterfly": "no SPY call butterfly $1 wide at the money is quoted a day or more out",
+          "credit_vertical": "no SPY call credit vertical $1 wide at the money is quoted a day or more out",
+          "iron_condor": "no SPY iron condor with $1 wings around the spot is quoted a day or more out",
+          "iron_butterfly": "no SPY iron butterfly with $1 wings at the money is quoted a day or more out"}
 
 
 class PaperProof:
     def __init__(self, state: LiveState, account: Account, *, record: Callable[..., Any] | None = None,
                  clock: Callable[[], float] | None = None, kind: str = "vertical"):
-        if kind not in ("vertical", "single"):
+        if kind not in KINDS:
             raise ValueError(kind)
         self.state, self.account = state, account
         self.record = record or (lambda *a, **k: None)
         self.clock = clock or time.time
         self.kind = kind
-        self.key = "paper_proof" if kind == "vertical" else "paper_proof_single"
+        self.key = "paper_proof" if kind == "vertical" else f"paper_proof_{kind}"
+        self.window = WINDOW[kind]
 
     def status(self) -> dict:
         return dict(self.state.get(self.key, {}) or {})
@@ -225,12 +264,19 @@ class PaperProof:
             body.update(symbol=symbol, qty=str(abs(qty)), side="buy" if qty < 0 else "sell",
                         position_intent="buy_to_close" if qty < 0 else "sell_to_close", limit_price=f"{max(0.01, price):.2f}")
         else:
-            natural = float(snap.bid[idx[0]]) - float(snap.ask[idx[1]])
+            sides, ratios = self._shape(row)
+            # The close at the natural: each long leg sold at its bid, each short leg bought back at its ask.
+            natural = sum(side * ratio * float(snap.bid[i] if side > 0 else snap.ask[i])
+                          for side, ratio, i in zip(sides, ratios, idx))
             if not math.isfinite(natural):
                 return row
-            body.update(order_class="mleg", qty="1", limit_price=limit_price(max(0.0, round(natural, 2)), "close"),
-                        legs=[{"symbol": symbols[0], "ratio_qty": "1", "side": "sell", "position_intent": "sell_to_close"},
-                              {"symbol": symbols[1], "ratio_qty": "1", "side": "buy", "position_intent": "buy_to_close"}])
+            spec = self._spec(row["legs"], sides, ratios)
+            if spec.credit:
+                # A buy-back: never a credit, and never at or above the collateral (the gateway's defined-risk line).
+                natural = max(min(0.0, round(natural, 2)), -(float(spec.collateral) - 0.01))
+            else:
+                natural = max(0.0, round(natural, 2))
+            body = mleg_body(self._order(symbols, sides, ratios, "close", natural, cid))
         return self._dispatch(row, body, action="cleanup" if cleanup else "close", mi=mi)
 
     def step(self, *, day: str, mi: int, snap: Any, chain: Any, start_minute: int = 5) -> dict:
@@ -263,32 +309,40 @@ class PaperProof:
             if mi < start_minute or snap is None:
                 self._put(row)
                 return row
-            legs = self._single(snap, chain) if self.kind == "single" else self._legs(snap, chain)
+            legs = self._select(snap, chain)
             if legs is None:
-                row["why"] = ("no SPY call 1-2% out of the money is quoted a day or more out" if self.kind == "single"
-                              else "no SPY vertical one strike wide is quoted a day or more out")
+                row["why"] = WANTED[self.kind]
                 self._put(row)
                 return row
             symbols = [leg[0] for leg in legs]
+            sides, ratios = [leg[3] for leg in legs], [leg[4] for leg in legs]
             if any(positions.get(symbol, Decimal(0)) for symbol in symbols):
                 row["why"] = "the selected proof contracts already belong to another paper position"
                 self._put(row)
                 return row
-            natural = legs[0][1] - (legs[1][2] if len(legs) > 1 else 0.0)
-            if not (math.isfinite(natural) and natural > 0):
+            # The open at the natural: each long leg bought at its ask, each short leg sold at its bid (a credit structure's
+            # value is negative: it takes in a credit).
+            natural = sum(leg[3] * leg[4] * (leg[1] if leg[3] > 0 else leg[2]) for leg in legs)
+            if not math.isfinite(natural):
+                return row
+            if self.kind != "single":
+                natural = round(natural, 2)
+                why = self._open_refusal(symbols, sides, ratios, natural)
+                if why:
+                    row["why"] = why
+                    self._put(row)
+                    return row
+            elif not natural > 0:
                 return row
             row["tries"] = int(row.get("tries") or 0) + 1
-            prefix = "lv-ps" if self.kind == "single" else "lv-pp"
-            row.update(legs=symbols, baseline={s: str(positions.get(s, Decimal(0))) for s in symbols},
+            prefix = PREFIX[self.kind]
+            row.update(legs=symbols, sides=sides, ratios=ratios, baseline={s: str(positions.get(s, Decimal(0))) for s in symbols},
                        attempt=f"{prefix}-{day.replace('-', '')}-{self.state.nonce}-{row['tries']}",
                        open_witness=False, close_witness=False)
             if self.kind == "single":
                 body = _single(symbols[0], "open", natural, row["attempt"] + "-o")
             else:
-                body = {"order_class": "mleg", "qty": "1", "type": "limit", "limit_price": limit_price(round(natural, 2), "open"),
-                        "time_in_force": "day", "client_order_id": row["attempt"] + "-o",
-                        "legs": [{"symbol": symbols[0], "ratio_qty": "1", "side": "buy", "position_intent": "buy_to_open"},
-                                 {"symbol": symbols[1], "ratio_qty": "1", "side": "sell", "position_intent": "sell_to_open"}]}
+                body = mleg_body(self._order(symbols, sides, ratios, "open", natural, row["attempt"] + "-o"))
             return self._dispatch(row, body, action="open", mi=mi)
         if not row.get("orders") or not self._inventory(row, positions):
             return row
@@ -296,7 +350,8 @@ class PaperProof:
         if not work.get("terminal"):
             return row
         owned = self._owned(row)
-        held = [Decimal(1)] if self.kind == "single" else [Decimal(1), Decimal(-1)]
+        sides, ratios = self._shape(row)
+        held = [Decimal(side * ratio) for side, ratio in zip(sides, ratios)]
         if work["action"] == "open" and work.get("route_full") and list(owned.values()) == held:
             if not row.get("open_witness"):
                 row.update(status="open_filled", open_witness=True, filled_at=self.clock())
@@ -308,7 +363,8 @@ class PaperProof:
         flat = not any(owned.values())
         if work["action"] == "close" and work.get("route_full") and row.get("open_witness") and flat:
             row.update(status="passed", close_witness=True, passed_at=self.clock(),
-                       why=(f"a witnessed {'single-leg' if self.kind == 'single' else 'multi-leg'} open and close returned "
+                       why=(f"a witnessed {'single-leg' if self.kind == 'single' else 'multi-leg'} open and close"
+                            f"{'' if self.kind in ('vertical', 'single') else ' of a ' + STRUCTURE[self.kind]} returned "
                             "the owned contracts to their baseline"))
             self._put(row)
             self._event("close_witness", {"cid": work["cid"], "owned": owned})
@@ -330,10 +386,103 @@ class PaperProof:
                 return Decimal(str(filled)) >= 1 and order.get("filled_avg_price") not in (None, "")
             except (ArithmeticError, ValueError):
                 return False
-        legs = [RLeg(s, 1 if i == 0 else -1, 1, True, 0.0, "", 0) for i, s in enumerate(row.get("legs") or [])]
-        fake = ROrder(0, "", "", "", "close" if closing else "open", "debit_vertical", ROOT, legs, 1, 0.0, "0", None, 0.0, "", 0)
+        sides, ratios = self._shape(row)
+        legs = [RLeg(s, side, ratio, True, 0.0, "", 0) for s, side, ratio in zip(row.get("legs") or [], sides, ratios)]
+        fake = ROrder(0, "", "", "", "close" if closing else "open", STRUCTURE[self.kind], ROOT, legs, 1, 0.0, "0", None, 0.0,
+                      "", 0)
         fill = structure_fill(fake, order)
         return fill is not None and fill[0] >= 1 and not fill[3]
+
+    def _shape(self, row: Mapping[str, Any]) -> tuple[list[int], list[int]]:
+        """The attempt's legs' sides (+1 long, -1 short) and ratios, in `legs` order. A vertical attempt recorded before
+        the shapes were (Sept 28, 2026) is long then short, 1:1; any other attempt without them is unreadable."""
+        legs = list(row.get("legs") or [])
+        if self.kind == "single":
+            return [1] * len(legs), [1] * len(legs)
+        sides = row.get("sides") if row.get("sides") is not None else ([1, -1] if self.kind == "vertical" else None)
+        ratios = row.get("ratios") if row.get("ratios") is not None else [1] * len(legs)
+        if (sides is None or len(sides) != len(legs) or len(ratios) != len(legs)
+                or any(int(x) not in (1, -1) for x in sides) or any(int(x) not in (1, 2) for x in ratios)):
+            raise ValueError("the attempt's legs have no recorded shape")
+        return [int(x) for x in sides], [int(x) for x in ratios]
+
+    def _spec(self, symbols: list[str], sides: list[int], ratios: list[int]) -> Any:
+        """The legs as this proof's structure type (`structure_core.classify`; ValueError when they are not one)."""
+        return core.classify(STRUCTURE[self.kind], [core.leg(s, side, ratio) for s, side, ratio in zip(symbols, sides, ratios)])
+
+    def _open_refusal(self, symbols: list[str], sides: list[int], ratios: list[int], natural: float) -> str | None:
+        """Why a multi-leg proof may not open these legs at this natural value a share, or None: the legs must form the
+        proof's type, and the price must be a defined-risk one (the gateway's own lines): a debit above zero and below the
+        structure's most value, a credit above zero and below its collateral."""
+        try:
+            spec = self._spec(symbols, sides, ratios)
+        except ValueError as exc:
+            return f"the proof's legs are not a {STRUCTURE[self.kind]}: {exc}"
+        if spec.credit:
+            if not (natural < 0 and -natural < float(spec.collateral)):
+                return f"the natural {natural:+.2f} is not a credit under the {spec.collateral} collateral"
+        elif not (natural > 0 and (spec.max_value is None or natural < float(spec.max_value))):
+            return f"the natural {natural:+.2f} is not a debit under the structure's most value"
+        return None
+
+    @staticmethod
+    def _order(symbols: list[str], sides: list[int], ratios: list[int], action: str, value: float, cid: str) -> ROrder:
+        """The proof's order as the real route's own `ROrder`, so `mleg_body` writes it exactly as a real one."""
+        legs = [RLeg(s, side, ratio, s[-9] == "C", 0.0, "", 0) for s, side, ratio in zip(symbols, sides, ratios)]
+        return ROrder(0, cid, "paper-proof", "paper-proof", action, "paper-proof", ROOT, legs, 1, float(value),
+                      limit_price(value, action), None, 0.0, "", 0)
+
+    def _select(self, snap: Any, chain: Any) -> list[tuple[str, float, float, int, int]] | None:
+        """This proof's legs, each (symbol, ask, bid, side, ratio), or None when the chain has no such structure now."""
+        if self.kind == "single":
+            legs = self._single(snap, chain)
+            return None if legs is None else [(*legs[0], 1, 1)]
+        if self.kind == "vertical":
+            legs = self._legs(snap, chain)
+            return None if legs is None else [(*legs[0], 1, 1), (*legs[1], -1, 1)]
+        return self._structure(self.kind, snap, chain)
+
+    @staticmethod
+    def _structure(kind: str, snap: Any, chain: Any) -> list[tuple[str, float, float, int, int]] | None:
+        """A structure proof's legs on the nearest expiry a day or more out, around A, the first strike at or above the
+        spot (the module docstring): every leg listed, a long leg with an ask and a short leg with a bid."""
+        spot = float(snap.spot)
+        if not math.isfinite(spot):
+            return None
+        ok = snap.valid & (snap.dte >= 1)
+        if not ok.any():
+            return None
+        first = int(snap.dte[ok].min())
+        at = {(bool(snap.is_call[i]), round(float(snap.strike[i]), 3)): int(i)
+              for i in np.flatnonzero(ok & (snap.dte == first))}
+        above = sorted(k for c, k in at if c and k >= spot)
+        if not above:
+            return None
+        a = above[0]
+        if kind == "long_butterfly":
+            plan = [(True, a - 1, 1, 1), (True, a, -1, 2), (True, a + 1, 1, 1)]
+        elif kind == "credit_vertical":
+            plan = [(True, a, -1, 1), (True, a + 1, 1, 1)]
+        elif kind == "iron_butterfly":
+            plan = [(False, a - 1, 1, 1), (False, a, -1, 1), (True, a, -1, 1), (True, a + 1, 1, 1)]
+        else:  # the iron condor: the short put at or below the spot, the short call the first strike above it
+            below = sorted(k for c, k in at if not c and k <= spot)
+            if not below:
+                return None
+            b = below[-1]
+            c = a if a > b else a + 1
+            plan = [(False, b - 1, 1, 1), (False, b, -1, 1), (True, c, -1, 1), (True, c + 1, 1, 1)]
+        out = []
+        for is_call, strike, side, ratio in plan:
+            i = at.get((is_call, round(strike, 3)))
+            if i is None:
+                return None
+            ask, bid = float(snap.ask[i]), float(snap.bid[i])
+            price = ask if side > 0 else bid
+            if not (math.isfinite(price) and price > 0):
+                return None
+            out.append((str(chain.symbol[i]), ask, bid, side, ratio))
+        return out
 
     @staticmethod
     def _single(snap: Any, chain: Any) -> tuple[tuple[str, float, float]] | None:
@@ -387,4 +536,4 @@ def _single(symbol: str, action: str, price: float, cid: str) -> dict:
     return single_body(order)
 
 
-__all__ = ["PaperProof"]
+__all__ = ["PaperProof", "KINDS", "PROOF_FOR", "STRUCTURE", "WINDOW"]

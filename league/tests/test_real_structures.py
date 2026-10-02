@@ -11,6 +11,7 @@ read its ACTUAL practice book (`options-shadow` today); one flat sale of a struc
 
 import copy
 import math
+import re
 import tempfile
 import unittest
 from contextlib import ExitStack
@@ -123,36 +124,69 @@ class OneSourceOfTruth(unittest.TestCase):
     # The sprint (B4, Sept 26, 2026): the four debit types under $2,000 of equity, the long call and put among them, open
     # on the real account; the credit types come back only with a deposit, in one deploy with the gateway.
     FOUR = ["debit_vertical", "long_butterfly", "long_call", "long_put"]
-    TYPES_LINE = '"real_types": ["debit_vertical", "long_butterfly", "long_call", "long_put"],'
-    GATEWAY_LINE = '"OPTION_STRUCTURES_REAL": "debit_vertical,long_butterfly,long_call,long_put",'
+    # Money rules v3 (D3, release V3-A): the four and the three credit types, the credit ones gated by equity.
+    SEVEN = ["credit_vertical", "debit_vertical", "iron_butterfly", "iron_condor", "long_butterfly", "long_call", "long_put"]
+    TYPES = re.compile(r'"real_types": \[[^\]]*\],')
 
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
         self.root = Path(self.dir.name)
-        (self.root / "league").mkdir()
+        (self.root / "league" / "live").mkdir(parents=True)
         (self.root / "gateway").mkdir()
         self.constitution = (ci.REPO / "league" / "constitution.py").read_text(encoding="utf-8")
         self.wrangler = (ci.REPO / "gateway" / "wrangler.jsonc").read_text(encoding="utf-8")
-        self.assertIn(self.TYPES_LINE, self.constitution)
-        self.assertIn(self.GATEWAY_LINE, self.wrangler)
+        self.paper = (ci.REPO / "league" / "live" / "paper.py").read_text(encoding="utf-8")
+        self.assertEqual(len(self.TYPES.findall(self.constitution)), 1)
+        [self.gateway_line] = [line for line in self.wrangler.splitlines() if ci.GATEWAY_STRUCTURES_LINE.match(line)]
 
     def tearDown(self):
         self.dir.cleanup()
 
-    def tree(self, *, gateway=None, types=None, replace=None):
+    def tree(self, *, gateway=None, types=None, replace=None, paper=None):
+        """A tree whose gateway admits the constitution's own real types unless `gateway` says otherwise."""
         text = self.constitution
         if types is not None:
-            text = text.replace(self.TYPES_LINE, f'"real_types": {types!r},'.replace("'", '"'))
+            text = self.TYPES.sub(lambda _: f'"real_types": {types!r},'.replace("'", '"'), text)
         for old, new in (replace or {}).items():
             text = text.replace(old, new)
         (self.root / "league" / "constitution.py").write_text(text, encoding="utf-8")
-        wrangler = self.wrangler if gateway is None else self.wrangler.replace(self.GATEWAY_LINE, f'"OPTION_STRUCTURES_REAL": "{gateway}",')
+        (self.root / "league" / "live" / "paper.py").write_text(self.paper if paper is None else paper, encoding="utf-8")
+        if gateway is None:
+            namespace = {"__name__": "_t"}
+            exec(compile(text, "constitution.py", "exec"), namespace)
+            gateway = ",".join(namespace["CONSTITUTION"]["options_money"]["real_types"])
+        wrangler = self.wrangler.replace(self.gateway_line, f'    "OPTION_STRUCTURES_REAL": "{gateway}",')
         (self.root / "gateway" / "wrangler.jsonc").write_text(wrangler, encoding="utf-8")
         return ci.check_structures(self.root)
 
     def test_the_repository_as_it_stands_agrees(self):
+        """The integrated tree (WP7's constitution with WP8's gateway line): both name the seven types."""
+        self.assertEqual(sorted(CONSTITUTION["options_money"]["real_types"]), self.SEVEN)
         self.assertEqual(ci.check_structures(), [])
-        self.assertEqual(ci.gateway_structures(), (sorted(self.FOUR), []))
+        self.assertEqual(ci.gateway_structures(), (self.SEVEN, []))
+
+    def test_the_v3_table_needs_the_gateways_credit_types_too(self):
+        self.assertEqual(self.tree(), [])
+        self.assertEqual(self.tree(gateway=",".join(self.SEVEN)), [])
+        self.assertEqual(self.tree(gateway="off"), [], "the external boundary may always disable real opens")
+        refused = self.tree(gateway=",".join(self.FOUR))
+        self.assertIn("admits ['debit_vertical', 'long_butterfly', 'long_call', 'long_put'] on the real account", refused[0])
+        self.assertEqual(self.tree(types=self.FOUR, gateway=",".join(self.FOUR)), [], "the sprint's table still checks")
+
+    def test_every_real_type_needs_its_own_paper_round_trip(self):
+        self.assertEqual(ci.paper_proofs()[1], [])
+        self.assertTrue(set(self.SEVEN) <= set(ci.paper_proofs()[0]))
+        without = self.paper.replace('"iron_butterfly": "iron_butterfly"}', "}", 1)   # PROOF_FOR's own entry
+        self.assertNotEqual(without, self.paper)
+        refused = self.tree(paper=without)
+        self.assertTrue(any("['iron_butterfly'] with no paper round trip" in p for p in refused), refused)
+        self.assertEqual(self.tree(types=self.FOUR, gateway=",".join(self.FOUR), paper=without), [],
+                         "a table without the type needs no proof of it")
+        self.assertIn("PROOF_FOR must be assigned once", " ".join(self.tree(paper=self.paper.replace("PROOF_FOR = {", "PROOFS = {"))))
+        called = self.paper.replace("PROOF_FOR = {", "PROOF_FOR = dict(**{", 1).replace(
+            '"iron_butterfly": "iron_butterfly"}', '"iron_butterfly": "iron_butterfly"})', 1)
+        self.assertIn("literal mapping", " ".join(self.tree(paper=called)))
+        self.assertIn("could not be read", " ".join(self.tree(paper="PROOF_FOR = {")))
 
     def test_the_table_and_the_gateway_change_together(self):
         self.assertEqual(self.tree(), [])
@@ -177,8 +211,9 @@ class OneSourceOfTruth(unittest.TestCase):
                            ("MAX_DAY_ORDERS", "400"), ("MAX_DAY_OPEN_ORDERS", "280"), ("CREDIT_MIN_EQUITY_USD", "1000")):
             import re as _re
 
-            text = _re.sub(rf'"{var}": "[^"]*"', f'"{var}": "{value}"', self.wrangler, count=1)
-            (self.root / "league" / "constitution.py").write_text(self.constitution, encoding="utf-8")
+            self.tree()
+            text = _re.sub(rf'"{var}": "[^"]*"', f'"{var}": "{value}"',
+                           (self.root / "gateway" / "wrangler.jsonc").read_text(encoding="utf-8"), count=1)
             (self.root / "gateway" / "wrangler.jsonc").write_text(text, encoding="utf-8")
             refused = ci.check_structures(self.root)
             self.assertTrue(any(var in p for p in refused), (var, refused))

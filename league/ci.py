@@ -360,6 +360,29 @@ def gateway_structures(root: Path = REPO) -> tuple[list[str], list[str]]:
     return sorted(set(names)), []
 
 
+def paper_proofs(root: Path = REPO) -> tuple[dict[str, str], list[str]]:
+    """(the paper proof each real order type waits for, why it could not be read): the literal `PROOF_FOR` of the tree's
+    `league/live/paper.py`, read from its text (never imported, as the constitution is not)."""
+    import ast
+
+    path = root / "league" / "live" / "paper.py"
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"), str(path))
+    except (OSError, SyntaxError, ValueError) as exc:
+        return {}, [f"league/live/paper.py could not be read: {type(exc).__name__}: {exc}"]
+    found = [node.value for node in tree.body if isinstance(node, ast.Assign)
+             and any(isinstance(t, ast.Name) and t.id == "PROOF_FOR" for t in node.targets)]
+    if len(found) != 1:
+        return {}, ["league/live/paper.py: PROOF_FOR must be assigned once, at module level"]
+    try:
+        proofs = ast.literal_eval(found[0])
+    except ValueError:
+        return {}, ["league/live/paper.py: PROOF_FOR must be a literal mapping of order type to proof"]
+    if not isinstance(proofs, dict) or not all(isinstance(k, str) and isinstance(v, str) and v for k, v in proofs.items()):
+        return {}, ["league/live/paper.py: PROOF_FOR must be a literal mapping of order type to proof"]
+    return proofs, []
+
+
 def gateway_caps_problems(root: Path, table: dict[str, Any], names: dict[str, str]) -> list[str]:
     """The gateway's caps that repeat the options money table (`constitution.GATEWAY_VARS`), equal to it: a cap changes
     only with the money row it repeats (the review of #362, m17)."""
@@ -392,7 +415,10 @@ def check_structures(root: Path = REPO) -> list[str]:
 
     Since the options swarm (Sept 26, 2026, Wave 5) the constitution's `options_money` table governs real money: its rows
     inside `constitution.OPTIONS_MONEY_BOUNDS` (`options_money_problems`), and the gateway's `OPTION_STRUCTURES_REAL`
-    disabled, or admitting exactly its `real_types` (the gateway holds credit types back under $2,000 of equity). A tree
+    disabled, or admitting exactly its `real_types` (the gateway holds credit types back under $2,000 of equity). Money
+    rules v3 (D3): `real_types` is the equity-gated list -- the credit types among it open only at `credit_min_equity_usd`
+    of equity, which the gateway's `CREDIT_MIN_EQUITY_USD` repeats (`gateway_caps_problems`) -- and every type in it has
+    its own paper round trip in `league/live/paper.py` (`PROOF_FOR`), so no type reaches real money unproved. A tree
     whose constitution has no such table is judged by the options-desk run's rows (O1-O5, G of Sept 25, 2026): the gateway
     admits exactly `allocator.spread_types_real()` (`option_spread_real_types` while O1 is on, none while it is off). The
     constitution is read from `root` without importing the tree's package."""
@@ -421,6 +447,16 @@ def check_structures(root: Path = REPO) -> list[str]:
     problems += unreadable
     if table is not None and isinstance(table, dict):
         problems += gateway_caps_problems(root, table, namespace.get("GATEWAY_VARS") or {})
+        credit = [t for t in wanted if t in (namespace.get("OPTIONS_CREDIT_TYPES") or ())]
+        if credit and "CREDIT_MIN_EQUITY_USD" not in (namespace.get("GATEWAY_VARS") or {}):
+            problems.append(f"league/constitution.py: real_types names credit types {credit} but the gateway's "
+                            "CREDIT_MIN_EQUITY_USD is not held equal to options_money.credit_min_equity_usd")
+        proofs, unreadable = paper_proofs(root)
+        problems += unreadable
+        unproved = [t for t in wanted if t not in proofs]
+        if not unreadable and unproved:
+            problems.append(f"league/constitution.py: options_money.real_types names {unproved} with no paper round trip "
+                            "(league/live/paper.py PROOF_FOR): a type opens for real only once the paper account proves it")
     if not problems and gateway != wanted and not (table is not None and not gateway):
         problems.append(f"gateway/wrangler.jsonc: OPTION_STRUCTURES_REAL admits {gateway or 'none'} on the real account, "
                         f"but the constitution opens {wanted or 'none'} ({source}): the two change together, in one deploy")

@@ -874,7 +874,14 @@ class Eligibility(Base):
         self.assertEqual(self.pinned(practice_first="2026-09-22"), [], "a practice row older than its cohort")
 
     def test_structures_real_money_does_not_trade(self):
+        # Money rules v3 (D3): a credit type is a real type, from $2,000 of sizing equity (the fixture's grant and account
+        # are over it); under it, shadow only.
+        self.assertEqual(self.pinned(structure="credit_vertical"), ["fam@1:i"], "credit at $2,000 or more")
+        self.live.state.close()
+        self.setUp()
+        self.grant.capital = "1999.99"
         self.assertEqual(self.pinned(structure="credit_vertical"), [], "credit under $2,000")
+        self.assertIn("credit structure", self.pins()["refused"]["fam@1"])
         self.live.state.close()
         self.setUp()
         self.assertEqual(self.pinned(structure="long_strangle"), [])

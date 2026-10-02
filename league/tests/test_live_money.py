@@ -39,9 +39,11 @@ FIVE = ["debit_vertical", "credit_vertical", "iron_condor", "iron_butterfly", "l
 class TheTable(unittest.TestCase):
     def test_the_defaults_are_the_sprints(self):
         """The sprint (Sept 26, 2026), owner decision D4: the bold end of the plan's ranges; D3's calibration cap; the four
-        debit types under $2,000 (the long call and put among them, B4)."""
+        debit types (the long call and put among them, B4) and, since money rules v3 (D3), the three credit types, which
+        open only at $2,000 of equity."""
         t = M.Table.from_constitution()
-        self.assertEqual(t.real_types, ("debit_vertical", "long_butterfly", "long_call", "long_put"))
+        self.assertEqual(t.real_types, ("debit_vertical", "long_butterfly", "long_call", "long_put", "credit_vertical",
+                                        "iron_condor", "iron_butterfly"))
         self.assertEqual(t.credit_types, ("credit_vertical", "iron_condor", "iron_butterfly"))
         self.assertEqual((t.probe_share, t.probe_open, t.probe_family_share, t.probe_floor), (D("0.05"), 3, D("0.15"), D("100")))
         self.assertEqual((t.sized_min_trades, t.sized_confidence, t.kelly_fraction), (20, 0.8, 0.25))
@@ -97,12 +99,23 @@ class TheTable(unittest.TestCase):
         self.assertNotEqual(money_digest(c), money_digest())
 
     def test_credit_waits_for_two_thousand_dollars_on_equity_alone(self):
-        # As it stands (the sprint): no credit type is a real type, at any equity; they come back with a deposit.
+        # Money rules v3 (D3): the credit types are real types, gated by equity alone at $2,000 (the gateway's own rule).
         t = M.Table.from_constitution()
+        for type_ in ("credit_vertical", "iron_condor", "iron_butterfly"):
+            for equity in ("0", "481.63", "1999.99"):
+                why = t.type_allowed(type_, D(equity))
+                self.assertIn("credit structure", why, (type_, equity))
+                self.assertIn("$2000 of equity", why)
+            for equity in ("2000", "2000.00", "9000"):
+                self.assertIsNone(t.type_allowed(type_, D(equity)), (type_, equity))
+            self.assertTrue(t.family_credit(type_))
+        # A table that drops them again (the sprint's, Sept 26, 2026): shadow only at any equity, until a deposit and a
+        # re-ratification bring them back.
+        sprint = table(real_types=["debit_vertical", "long_butterfly", "long_call", "long_put"])
         for equity in ("1999.99", "2000", "9000"):
-            self.assertIn("credit structure", t.type_allowed("iron_condor", D(equity)))
-            self.assertIn("ratified again", t.type_allowed("credit_vertical", D(equity)))
-        # With the credit types listed again, they open at $2,000 of equity on equity alone (the gateway's own rule).
+            self.assertIn("credit structure", sprint.type_allowed("iron_condor", D(equity)))
+            self.assertIn("ratified again", sprint.type_allowed("credit_vertical", D(equity)))
+        # With the credit types listed, they open at $2,000 of equity on equity alone (the gateway's own rule).
         t = table(real_types=FIVE)
         self.assertIn("credit structure", t.type_allowed("iron_condor", D("1999.99")))
         self.assertIsNone(t.type_allowed("iron_condor", D("2000")))
@@ -117,6 +130,78 @@ class TheTable(unittest.TestCase):
         for type_ in ("long_call", "long_put", "debit_vertical", "long_butterfly"):
             self.assertIsNone(t.type_allowed(type_, D("100")), type_)
         self.assertIn("closes in more than one order", t.type_allowed("long_straddle", D("9000")))
+
+
+class EntryShape(unittest.TestCase):
+    """Money rules v3 (D3; `money.entry_refusal`): every real open is defined-risk, and on an American-style root no short
+    leg is in the money at entry. Legs as the Gym resolves them (`side`, `ratio`, `dte`, `strike`, `is_call`)."""
+
+    @staticmethod
+    def leg(side, strike, *, call=True, ratio=1, dte=3):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(side=side, ratio=ratio, dte=dte, strike=strike, is_call=call)
+
+    def condor(self, sp, sc):
+        return [self.leg(1, sp - 1, call=False), self.leg(-1, sp, call=False), self.leg(-1, sc), self.leg(1, sc + 1)]
+
+    def test_out_of_the_money_short_legs_open_on_an_equity_root(self):
+        spot = 600.4
+        shapes = {
+            "credit_vertical": [self.leg(-1, 601), self.leg(1, 602)],
+            "iron_condor": self.condor(600, 601),
+            "long_butterfly": [self.leg(1, 600), self.leg(-1, 601, ratio=2), self.leg(1, 602)],
+            "debit_vertical": [self.leg(1, 600), self.leg(-1, 601)],
+            "long_call": [self.leg(1, 603)],
+        }
+        for type_, legs in shapes.items():
+            self.assertIsNone(M.entry_refusal(type_, legs, spot, american=True), type_)
+        # At the money exactly is not in the money.
+        self.assertIsNone(M.entry_refusal("iron_condor", self.condor(600, 601), 600.0, american=True))
+        self.assertIsNone(M.entry_refusal("credit_vertical", [self.leg(-1, 600), self.leg(1, 601)], 600.0, american=True))
+
+    def test_an_in_the_money_short_leg_is_refused_on_an_american_root_only(self):
+        spot = 600.4
+        cases = {
+            "credit_vertical": [self.leg(-1, 600), self.leg(1, 601)],                       # short call under the spot
+            "iron_butterfly": [self.leg(1, 600, call=False), self.leg(-1, 601, call=False),  # short put over the spot
+                               self.leg(-1, 601), self.leg(1, 602)],
+            "iron_condor": self.condor(601, 602),                                           # short put over the spot
+            "debit_vertical": [self.leg(1, 598), self.leg(-1, 599)],                        # a deep debit call vertical
+            "long_butterfly": [self.leg(1, 598), self.leg(-1, 599, ratio=2), self.leg(1, 600)],
+        }
+        for type_, legs in cases.items():
+            why = M.entry_refusal(type_, legs, spot, american=True)
+            self.assertIn("in the money", why, type_)
+            self.assertIn("American-style", why)
+            self.assertIsNone(M.entry_refusal(type_, legs, spot, american=False), f"{type_}: an index root is European")
+        self.assertIn("short put at 601", M.entry_refusal("iron_condor", self.condor(601, 602), spot, american=True))
+
+    def test_an_unreadable_underlying_refuses_a_short_leg_on_an_american_root(self):
+        legs = [self.leg(-1, 601), self.leg(1, 602)]
+        for spot in (float("nan"), float("inf"), 0.0, -1.0, None, "x"):
+            self.assertIn("unreadable", M.entry_refusal("credit_vertical", legs, spot, american=True), spot)
+        self.assertIsNone(M.entry_refusal("long_call", [self.leg(1, 603)], float("nan"), american=True),
+                          "no short leg: nothing to judge")
+        self.assertIsNone(M.entry_refusal("credit_vertical", legs, float("nan"), american=False))
+
+    def test_a_naked_short_leg_is_refused_everywhere(self):
+        spot = 600.0
+        naked = {
+            "short_call": [self.leg(-1, 610)],
+            "ratio": [self.leg(1, 600), self.leg(-1, 601, ratio=2)],                  # two short against one long
+            "wrong_right": [self.leg(1, 590, call=False), self.leg(-1, 610)],         # a put does not cover a call
+            "wrong_expiry": [self.leg(1, 611, dte=1), self.leg(-1, 610, dte=5)],      # the cover expires first
+            "butterfly_short_wing": [self.leg(1, 600), self.leg(-1, 601, ratio=2)],
+        }
+        for name, legs in naked.items():
+            for american in (True, False):
+                self.assertIn("naked short", M.entry_refusal("credit_vertical", legs, spot, american=american), name)
+
+    def test_a_malformed_leg_is_refused(self):
+        for side, ratio in ((0, 1), (2, 1), (1, 0), (-1, -1)):
+            self.assertIn("neither one long nor one short", M.entry_refusal("debit_vertical", [self.leg(side, 600, ratio=ratio)],
+                                                                            600.0, american=True))
 
 
 class Bands(unittest.TestCase):
@@ -150,8 +235,11 @@ class Bands(unittest.TestCase):
         self.assertIn("holdout", M.band_for(self.t, row(holdout_passed=False), D("5000"), fwd([]))[1])
         self.assertIn("more than one order", M.band_for(self.t, row(structure="long_strangle"), D("5000"), fwd([]))[1])
         self.assertIn("credit structure", M.band_for(self.t, row(structure="iron_condor"), D("1999"), fwd([]))[1])
-        self.assertEqual(M.band_for(self.t, row(structure="iron_condor"), D("2000"), fwd([]))[0], "candidate",
-                         "no credit type is real until a deposit re-ratifies the grant")
+        self.assertEqual(M.band_for(self.t, row(structure="iron_condor"), D("2000"), fwd([]))[0], "probe",
+                         "money rules v3: a credit type is a Probe from $2,000 of equity")
+        sprint = table(real_types=["debit_vertical", "long_butterfly", "long_call", "long_put"])
+        self.assertEqual(M.band_for(sprint, row(structure="iron_condor"), D("2000"), fwd([]))[0], "candidate",
+                         "a table without the credit types keeps them shadow only at any equity")
         self.assertEqual(M.band_for(table(real_types=FIVE), row(structure="iron_condor"), D("2000"), fwd([]))[0], "probe")
         self.assertEqual(M.band_for(self.t, row(structure="long_call"), D("5000"), fwd([]))[0], "probe")
         self.assertEqual(M.band_for(self.t, row(band="gym"), D("5000"), fwd([]))[0], "gym")

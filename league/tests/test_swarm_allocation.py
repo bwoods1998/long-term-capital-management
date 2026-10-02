@@ -63,7 +63,10 @@ class Settings(unittest.TestCase):
     def test_the_real_structures_are_the_constitutions_real_types_and_long_single(self):
         from league.constitution import CONSTITUTION
 
-        real = CONSTITUTION["options_money"]["real_types"]
+        # The types real money opens at ANY equity: since money rules v3 the credit types are real types too, but only from
+        # `credit_min_equity_usd` of equity, so the default leaves them to a setting made when the account reads it.
+        table = CONSTITUTION["options_money"]
+        real = [t for t in table["real_types"] if t not in table["credit_types"]]
         self.assertEqual(sorted(A.DEFAULTS["real_structures"]), sorted(set(real) | {"long_single"}),
                          "a grant that changes the real types changes this default in the same release")
 
