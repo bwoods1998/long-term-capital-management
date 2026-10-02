@@ -372,8 +372,8 @@ def brief(*, lane: str, row: Mapping[str, Any], key: str, examples: Sequence[Map
              f"FILES YOU MAY CHANGE: {', '.join(writable_paths(lane))}; and one new test file {NEW_TEST}."]
     if canary.get("mode") == "arms":
         unit = ('the family id: a name for it such as fam["id"]' if canary.get("unit") == "family" else
-                'canary.mechanism_unit(mechanism) of the text Architect.admit admits, or canary.mechanism_unit(fam["mechanism"]) '
-                "in league/swarm/researcher.py")
+                "canary.mechanism_unit(mechanism) of the text Architect.admit admits, asked inside Architect.admit (a "
+                "per-pass prompt cannot be gated per mechanism)")
         lines += [f"GATE KEY: {key}",
                   f"Every change must sit under canary.enabled({key!r}, <unit>, root=<the swarm's state directory, e.g. "
                   f"self.store.root>) with <unit> = {unit}; the else branch is the existing code unchanged. The canary "
@@ -936,7 +936,9 @@ class Engineer:
                 got = self.review_once(cand, cfg, files, second=len(done) == 1)
                 if not got.get("ok"):
                     rec["reviews"] = others + done
-                    if now - float(rec.get("pr_at") or now) > float(cfg["review_hours"]) * 3600:
+                    rec["review_failures"] = int(rec.get("review_failures") or 0) + (1 if got.get("usd") else 0)
+                    # A billed failure (a refusal, a cut answer) is paid for: three end the candidate, whatever the line.
+                    if rec["review_failures"] >= 3 or now - float(rec.get("pr_at") or now) > float(cfg["review_hours"]) * 3600:
                         return self.close(journal, cand, "closed_failed", f"no review could be had: {got.get('why')}")
                     self.note(f"{cand['key']}: the review waits ({str(got.get('why'))[:120]})")
                     return journal.save(cand, at=now, kind="review_wait", detail={"why": str(got.get("why"))[:300]})

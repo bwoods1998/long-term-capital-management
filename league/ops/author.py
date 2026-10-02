@@ -287,9 +287,9 @@ class Tools:
             if handler is None:
                 return f"unknown tool {name}", True
             return handler(**{k: v for k, v in dict(args).items()})
-        except TypeError as exc:
+        except (TypeError, ValueError) as exc:
             return f"bad arguments: {exc}", True
-        except AuthorError as exc:
+        except (AuthorError, OSError) as exc:
             return str(exc), True
 
     def t_list_dir(self, path: str) -> tuple[str, bool]:

@@ -346,6 +346,23 @@ class Flow(unittest.TestCase):
         self.assertIn(cand["key"], user)
         self.assertEqual(self.router.asks[0]["role"], "reviewer")
 
+    def test_a_review_with_no_room_waits_and_three_billed_failures_end_it(self):
+        self.go("2026-10-06T04:00:00Z")
+        self.gh.ci = "success"
+        self.router.verdicts = [ModelError("claude: no room", kind="no_room")]
+        self.go("2026-10-06T05:40:00Z")
+        self.assertEqual(self.only()["state"], "pr_open")
+        self.assertEqual(self.gh.reviews, [])
+        self.router.verdicts = [ModelError("claude: refused", kind="refusal", billed=[{"cost_usd": 0.4}])]
+        for hour in ("06", "07"):
+            self.go(f"2026-10-06T{hour}:40:00Z")
+            self.assertEqual(self.only()["state"], "pr_open")
+        self.go("2026-10-06T08:40:00Z")
+        cand = self.only()
+        self.assertEqual(cand["state"], "closed_failed")
+        self.assertAlmostEqual(cand["record"]["review_usd"], 1.2)
+        self.assertEqual(self.gh.merges, [])
+
     def test_a_pull_request_carrying_other_bytes_is_rejected_by_code_without_a_model(self):
         self.go("2026-10-06T04:00:00Z")
         cand = self.only()
@@ -579,6 +596,9 @@ class Authoring(unittest.TestCase):
         self.assertTrue(self.tools.call("edit_file", {"path": "league/swarm/researcher.py", "old_text": "    ",
                                                       "new_text": "  "})[1])  # not unique
         self.assertIn("league/swarm/researcher.py:9:", self.tools.call("grep", {"pattern": "len\\(program\\)"})[0])
+        self.assertTrue(self.tools.call("read_file", {"path": "league/swarm/researcher.py", "start_line": "x"})[1])
+        self.assertTrue(self.tools.call("grep", {"pattern": "("})[1])
+        self.assertTrue(self.tools.call("no_such_tool", {})[1])
         self.assertEqual(sorted(self.ws.files()), ["league/tests/test_harness_candidate_tidy.py"])
 
     def test_the_static_guards_refuse_ungated_and_dangerous_changes_and_pass_a_gated_one(self):
@@ -739,6 +759,13 @@ class Helpers(unittest.TestCase):
                          [{"signature": "x", "count": 3}])
         self.assertTrue(E.public_problems("account equity is 1300"))
         self.assertEqual(E.public_problems(f"base {BASE}, key harness:research:train_dq_rate:0123456789abcdef"), [])
+
+    def test_the_memory_lanes_brief_names_its_only_gate(self):
+        text = E.brief(lane="memory", row={"metric": "graveyard_rebirth_rate", "value": 0.2, "denominator": 40},
+                       key="harness:memory:graveyard_rebirth_rate:00", examples=[])
+        self.assertTrue(text.isascii())
+        self.assertIn("inside Architect.admit", text)
+        self.assertNotIn("researcher.py", text)
 
     def test_the_engineer_is_authored_daily_and_moved_hourly(self):
         job = by_name()["engineer"]
