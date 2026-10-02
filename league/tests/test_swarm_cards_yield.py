@@ -396,7 +396,10 @@ class ThePass(YieldCase):
                                                    roots=["QQQ"], mechanism="Dealer inventory after the late sell-off "
                                                                             "sorts which rebounds finish on QQQ.")]),
                       self.settings, clock=self.clock)
-        out = a.run()
+        with patch.object(cards, "cell_yields", wraps=cards.cell_yields) as reads:
+            out = a.run()
+        self.assertEqual(reads.call_count, 1, "the request's reading of the cells is the admission's")
+        self.assertIsNone(a.pass_yields, "and it is used once")
         self.assertEqual(sorted(out["born"]), ["dropped", "open-birth"])
         event = [e["payload"] for e in self.store.events_after(0) if e["kind"] == "swarm.architect"][-1]
         cy = event["cell_yield"]

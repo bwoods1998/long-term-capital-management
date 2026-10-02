@@ -662,6 +662,8 @@ def cell_yields(store: Any, settings: Mapping[str, Any] | None, since: str) -> d
     passed: set[str] = set()
     eligible: set[str] = set()
     known: set[str] = set()
+    # A version's runs made again carry the same figures: each distinct block and Train start is screened once.
+    screened: dict[tuple[str, str], tuple[bool, bool]] = {}
     ids = list(cell_by)
     for start in range(0, len(ids), 400):
         part = ids[start:start + 400]
@@ -673,18 +675,22 @@ def cell_yields(store: Any, settings: Mapping[str, Any] | None, since: str) -> d
             if fid in passed:
                 continue
             eligible.add(fid)
-            try:
-                numbers = evidence_mod.drift_numbers(json.loads(r["drift"])) if r["drift"] else None
-            except (TypeError, ValueError):
-                numbers = None
-            if numbers is None:
+            if not r["drift"]:
                 continue
             year = str(r["train_from"] or CORE_SPAN)[:4]
-            verdict = evidence_mod.drift_screen(numbers, min_t=screen[0], years_positive=screen[1],
-                                                first_year=int(year) if year.isdigit() else None)
-            if verdict["known"]:
+            memo = (str(r["drift"]), year)
+            if memo not in screened:
+                try:
+                    numbers = evidence_mod.drift_numbers(json.loads(r["drift"]))
+                except (TypeError, ValueError):
+                    numbers = None
+                verdict = evidence_mod.drift_screen(numbers, min_t=screen[0], years_positive=screen[1],
+                                                    first_year=int(year) if year.isdigit() else None) if numbers else {}
+                screened[memo] = (bool(verdict.get("known")), bool(verdict.get("passed")))
+            is_known, is_passed = screened[memo]
+            if is_known:
                 known.add(fid)
-            if verdict["passed"]:
+            if is_passed:
                 passed.add(fid)
     out: dict[tuple[str, str, str], dict[str, int]] = {}
     for fid, cell in cell_by.items():
@@ -707,15 +713,17 @@ class RebirthIndex:
     rebirths already born by row and by cell, read once for an architect pass. `check(card, structure, mechanism)`
     answers a proposal."""
 
-    def __init__(self, store: Any, settings: Mapping[str, Any] | None = None):
+    def __init__(self, store: Any, settings: Mapping[str, Any] | None = None, *,
+                 yields: dict[tuple[str, str, str], dict[str, int]] | None = None):
         from .architect import lesson_view, tag_of  # a local import: the architect imports this module
 
         self.store = store
         self.settings = settings or {}
         self.cfg = self.settings.get("architect", {}) or {}
-        # THE CELL'S YIELD (`architect.cell_yield`): read on first use (`yields`), never while it is off.
+        # THE CELL'S YIELD (`architect.cell_yield`): read on first use (`yields`), never while it is off; `yields`, a
+        # reading the same pass already made (the request's), is used as it is.
         self.yield_cfg = cell_yield_settings(self.settings)
-        self._yields: dict[tuple[str, str, str], dict[str, int]] | None = None
+        self._yields: dict[tuple[str, str, str], dict[str, int]] | None = yields if self.yield_cfg is not None else None
         self.yield_error: str | None = None
         cards: dict[str, dict[str, Any]] = {}
         if _tables(store):

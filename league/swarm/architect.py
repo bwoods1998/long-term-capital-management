@@ -1550,6 +1550,8 @@ class Architect:
             else:
                 if index.yield_cfg is not None:
                     extra += YIELD_CELLS_NOTE
+                    # THE CELL'S YIELD: the pass's admission reads the cells as its request showed them (`run`).
+                    self.pass_yields = index.yields if index.yield_error is None else None
                 if claimable:
                     extra += CLAIMABLE_NOTE
             if cells:
@@ -1584,6 +1586,7 @@ class Architect:
         open_born: list[str] = []
         dropped: list[dict[str, Any]] = []
         self.cell_yield_seen: dict[str, Any] | None = None
+        pass_yields, self.pass_yields = getattr(self, "pass_yields", None), None  # the request's reading, used once
         require_card, index = self.require_card(), None
         cap = self.want()
         known = self.graveyard_ids()
@@ -1643,7 +1646,7 @@ class Architect:
             # CARD-BASED REBIRTH REFUSAL: a card in a refuted cell needs a valid rebirth (deterministic, no model call).
             if card is not None and self.rebirth_mode() == "refuse":
                 if index is None:
-                    index = cards.RebirthIndex(self.store, self.settings)
+                    index = cards.RebirthIndex(self.store, self.settings, yields=pass_yields)
                 verdict = index.check(card, structure, mechanism, dte)
                 if not verdict["ok"]:
                     self.card_refused.append({"slug": slug, "why": verdict["reason"], "row": verdict.get("row"),
@@ -1818,6 +1821,7 @@ class Architect:
         # answer's retry; the pass's event counts its refusals, and the next pass reads its own window.
         self.pass_quota = None
         self.pass_quota = self.birth_quota()
+        self.pass_yields = None  # THE CELL'S YIELD: the request's reading of the cells (`card_block`), which `admit` uses
         info: dict[str, Any] | None = None
         try:
             # SYSTEM itself while Train is 2022-2024; else the running swarm's span (its store's migrated objective)
