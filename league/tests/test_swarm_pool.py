@@ -7,7 +7,9 @@ import copy
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
+from league.swarm import pool as pool_mod
 from league.swarm import settings as S
 from league.swarm.pool import Box, GymJob, GymPool, PoolError
 from league.swarm.store import SwarmStore
@@ -306,9 +308,10 @@ class Boxes(PoolCase):
         pool.submit(job("a"))
         self.clock.advance(9)
         pool.run_batch(box, pool._take(box))
-        self.assertEqual(self.store.boxes(live=False)[0]["state"], "failed")
+        self.assertEqual(self.store.boxes(live=False)[0]["state"], "terminated", "Sail took the terminate call")
         self.assertEqual(self.sail.terminated, [box.id])
         self.assertEqual(len(pool.queue), 1, "its job goes back to the queue")
+        self.assertIn("resume_failed", [e["payload"].get("action") for e in self.store.events_after(0) if e["kind"] == "swarm.pool"])
 
     def test_awake_idle_and_resume_time_is_booked_asleep_time_is_not(self):
         rate = 0.20 / 3600
@@ -461,6 +464,120 @@ class Boxes(PoolCase):
         j = pool.submit(job("a"))
         pool.manage()
         self.assertEqual(pool.wait(j, 10)["status"], "ok")
+
+
+
+class Rows(PoolCase):
+    """THE ROWS (Oct 2, 2026: six `failed` rows sat in the pool table, their boxes long terminated on Sail)."""
+
+    def state(self, box_id):
+        return {r["id"]: r["state"] for r in self.store.boxes(live=False)}.get(box_id)
+
+    def actions(self, name):
+        return [e["payload"] for e in self.store.events_after(0) if e["kind"] == "swarm.pool" and e["payload"].get("action") == name]
+
+    def refuse_terminate(self, *ids):
+        real = self.sail.terminate
+
+        def terminate(box_id):
+            if box_id in ids:
+                raise RuntimeError("HTTP 503")
+            return real(box_id)
+
+        self.sail.terminate = terminate
+
+    def test_a_box_that_fails_to_start_is_terminated_in_the_store_once_sail_takes_the_call(self):
+        class Broken(FakeDriver):
+            def ensure_code(inner):
+                raise RuntimeError("python not found")
+
+        pool = GymPool(self.store, self.sail, settings(start_boxes=1), clock=self.clock, threaded=False,
+                       driver_factory=lambda client, box: Broken(client, box))
+        pool.submit(job("a"))
+        pool.manage()
+        box_id = self.sail.forks[0][1]
+        self.assertEqual(self.sail.terminated, [box_id])
+        self.assertEqual(self.state(box_id), "terminated")
+        self.assertEqual(len(self.actions("box_failed")), 1, "the failure is still recorded")
+
+    def test_a_refused_terminate_leaves_the_row_failed_until_sail_lists_the_box_gone(self):
+        pool = self.pool()
+        box = self.ready_box(pool)
+        self.store.upsert_box(box.id, kind="gym", version=box.version, state="asleep", detail={})
+        box.state = "asleep"
+        self.sail.resume = lambda box_id, **kw: (_ for _ in ()).throw(RuntimeError("HTTP 409 not resumable"))
+        self.refuse_terminate(box.id)
+        pool.submit(job("a"))
+        self.clock.advance(9)
+        pool.run_batch(box, pool._take(box))
+        self.assertEqual(self.state(box.id), "failed", "Sail never took the call: the row stays failed")
+        self.sail.extra = [{"sailbox_id": box.id, "name": "x", "status": "terminated"}]  # Sail ended it on its own
+        pool.reconcile()
+        self.assertEqual(self.state(box.id), "terminated")
+        self.assertEqual([(a["box"], a["was"], a["sail"]) for a in self.actions("row_settled")], [(box.id, "failed", "terminated")])
+
+    def test_reconcile_settles_failed_rows_against_sails_list(self):
+        for i in range(1, 6):
+            self.store.upsert_box(f"sb_f{i}", kind="gym", version="sbcp_11111111-aaaa", state="failed", detail={})
+        self.store.upsert_box("sb_ok", kind="gym", version="sbcp_11111111-aaaa", state="terminated", detail={})
+        self.sail.extra = [{"sailbox_id": "sb_f2", "name": "n2", "status": "running"},      # still billing: ended
+                           {"sailbox_id": "sb_f3", "name": "n3", "status": "terminating"},  # going: settled, no call
+                           {"sailbox_id": "sb_f4", "name": "n4", "status": "sleeping"},     # its terminate is refused
+                           {"sailbox_id": "sb_f5", "name": "n5", "status": "create_failed"}]
+        self.refuse_terminate("sb_f4")
+        pool = self.pool()
+        self.assertEqual(pool.reconcile(), 1)
+        self.assertEqual(self.sail.terminated, ["sb_f2"])
+        self.assertEqual({i: self.state(f"sb_f{i}") for i in range(1, 6)},
+                         {1: "terminated", 2: "terminated", 3: "terminated", 4: "failed", 5: "terminated"})
+        self.assertEqual(sorted(a["box"] for a in self.actions("row_settled")), ["sb_f1", "sb_f3", "sb_f5"])
+        self.assertEqual([a["box"] for a in self.actions("row_box_ended")], ["sb_f2"])
+        del self.sail.terminate  # Sail takes the call again
+        pool.reconcile()
+        self.assertEqual(self.state("sb_f4"), "terminated", "the next pass tries again")
+
+    def test_a_list_that_may_be_cut_short_proves_nothing_absent(self):
+        self.store.upsert_box("sb_f1", kind="gym", version="sbcp_11111111-aaaa", state="failed", detail={})
+        self.sail.extra = [{"sailbox_id": f"sb_other{i}", "name": f"other-{i}", "status": "running"} for i in range(2)]
+        pool = self.pool()
+        with mock.patch.object(pool_mod, "LIST_LIMIT", 2):
+            pool.reconcile()
+        self.assertEqual(self.state("sb_f1"), "failed")
+        pool.reconcile()
+        self.assertEqual(self.state("sb_f1"), "terminated")
+
+    def test_a_live_row_adopt_could_not_take_back_is_ended_and_terminated(self):
+        image = "sbcp_11111111-aaaa"
+        for box_id in ("sb_good", "sb_stale", "sb_gone"):
+            self.store.upsert_box(box_id, kind="gym", version=image, state="asleep", detail={"name": f"n-{box_id}"})
+        self.sail.extra = [{"sailbox_id": "sb_good", "name": "n-sb_good", "status": "sleeping"},
+                           {"sailbox_id": "sb_stale", "name": "n-sb_stale", "status": "sleeping"}]
+        self.clock.advance(3600)
+
+        def factory(client, box_id):
+            if box_id != "sb_good":
+                raise RuntimeError("no driver")
+            return FakeDriver(client, box_id)
+
+        pool = GymPool(self.store, self.sail, settings(), clock=self.clock, threaded=False, driver_factory=factory)
+        self.assertEqual(pool.adopt(), 1)
+        self.assertEqual(self.sail.terminated, ["sb_stale"], "the box Sail still keeps is ended; the adopted one is not")
+        self.assertEqual((self.state("sb_good"), self.state("sb_stale"), self.state("sb_gone")),
+                         ("asleep", "terminated", "terminated"))
+        self.assertEqual([(a["box"], a["was"]) for a in self.actions("row_box_ended")], [("sb_stale", "asleep")])
+        self.assertEqual([(a["box"], a["sail"]) for a in self.actions("row_settled")], [("sb_gone", "absent")])
+
+    def test_live_rows_wait_for_adopt_and_the_grace(self):
+        self.store.upsert_box("sb_row", kind="gym", version="sbcp_11111111-aaaa", state="ready", detail={})
+        self.clock.advance(3600)
+        pool = self.pool()
+        pool.reconcile()
+        self.assertEqual(self.state("sb_row"), "ready", "before adopt a row the pool does not hold may still be adopted")
+        pool._adopted = True
+        self.store.upsert_box("sb_young", kind="gym", version="sbcp_11111111-aaaa", state="starting", detail={})
+        pool.reconcile()
+        self.assertEqual((self.state("sb_row"), self.state("sb_young")), ("terminated", "starting"),
+                         "a row made within the grace may be a fork whose answer is still on its way")
 
 
 if __name__ == "__main__":

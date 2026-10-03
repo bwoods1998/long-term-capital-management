@@ -1,4 +1,5 @@
-"""The Sail guard (league/swarm/guard.py): the swarm brakes to zero before the House is at risk."""
+"""The Sail guard (league/swarm/guard.py): the swarm brakes to zero before the House is at risk, and inside THE BUDGET's
+day (league/ops/budget.py, LTCM v3: the burst trio is gone)."""
 
 from __future__ import annotations
 
@@ -9,22 +10,25 @@ import unittest
 from pathlib import Path
 
 from league.swarm import settings as S
-from league.swarm.guard import SailGuard
+from league.swarm.guard import BUDGET_CAUSES, CAUSES, SailGuard, causes_of
 from league.swarm.store import SwarmStore
 from league.tests.swarm_fakes import Clock
 
-BURST_END = dt.datetime(2026, 9, 28, 13, 30, tzinfo=dt.timezone.utc).timestamp()
+T = dt.datetime(2026, 10, 7, 15, 0, tzinfo=dt.timezone.utc).timestamp()
 
 
 class GuardCase(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
-        self.clock = Clock(BURST_END - 2 * 86400)
+        self.clock = Clock(T)
         self.store = SwarmStore(Path(self.dir.name), clock=self.clock)
         self.addCleanup(self.store.close)
         self.reading = (118.79, 34.0)
         self.settings = copy.deepcopy(S.DEFAULTS)
+        # A budget too large to bind, so each test meets only the line it is about (the Budget tests set their own).
+        self.settings["budget"] = {"source": "budget.json", "sail_usd_day": 10_000.0, "claude_usd_day": 0.0,
+                                   "fixed_sail_usd_day": None}
 
     def guard(self):
         return SailGuard(self.store, self.settings, lambda: self.reading, clock=self.clock, disk_free=lambda: 100.0 * 2 ** 30)
@@ -40,23 +44,6 @@ class Defaults(GuardCase):
         self.reading = (31.0, 31.0)
         g.check()
         self.assertFalse(g.allows())
-
-    def test_after_the_burst_the_daily_allowance_also_reads_sails_own_meter(self):
-        self.clock.advance(BURST_END + 86400 * 3 + 3600 - self.clock())
-        self.reading = (5000.0, 5.0)
-        g = self.guard()
-        g.check()
-        for balance in (4995.0, 4987.5):  # $12.50 metered by Sail today, none of it booked by the swarm
-            self.reading = (balance, 5.0)
-            self.clock.advance(180)
-            g.check()
-        self.assertFalse(g.allows())
-        self.assertIn("today", g.reason)
-        self.clock.advance(86400)  # a new UTC day: its own allowance
-        self.reading = (4987.0, 5.0)
-        out = g.check()
-        self.assertTrue(g.allows(), g.reason)
-        self.assertEqual(out["metered_today"], 0.5)
 
 
 class Guard(GuardCase):
@@ -119,28 +106,6 @@ class Guard(GuardCase):
         kinds = [e["payload"]["action"] for e in self.store.events_after(0) if e["kind"] == "swarm.guard"]
         self.assertEqual(kinds, ["brake", "release"])
 
-    def test_the_burst_cap(self):
-        self.reading = (5000.0, 34.0)
-        g = self.guard()
-        self.store.add_spend("sail_model", 349.0)
-        g.check()
-        self.assertTrue(g.allows())
-        self.store.add_spend("gym_box", 1.5)
-        g.check()
-        self.assertFalse(g.allows())
-        self.assertIn("burst", g.reason)
-
-    def test_after_the_burst_a_daily_allowance(self):
-        self.clock.advance(BURST_END + 86400 * 3 + 3600 - self.clock())
-        self.reading = (5000.0, 5.0)
-        g = self.guard()
-        self.store.add_spend("sail_model", 9.0)
-        g.check()
-        self.assertTrue(g.allows())
-        self.store.add_spend("sail_model", 1.5)
-        g.check()
-        self.assertFalse(g.allows(), "12 a day less the House's 2")
-
     def test_an_unreadable_balance_brakes_at_once_and_only_a_good_reading_releases(self):
         g = self.guard()
         g.check()
@@ -154,6 +119,18 @@ class Guard(GuardCase):
         self.clock.advance(180)
         g.check()
         self.assertTrue(g.allows())
+
+    def test_the_last_good_reading_outlives_a_failed_read(self):
+        g = self.guard()
+        g.check()
+        good_at = self.clock()
+        self.reading = (None, None)
+        self.clock.advance(180)
+        g.check()
+        saved = self.store.get("guard")
+        self.assertIsNone(saved["last"]["balance"], "the latest check failed")
+        self.assertEqual(saved["last_good"], {"balance": 118.79, "at": good_at}, "the budget job reads this one")
+        self.assertEqual(self.guard().last_good["balance"], 118.79, "a restart keeps it")
 
     def test_a_failed_read_while_braked_keeps_the_brake(self):
         self.reading = (20.0, 34.0)
@@ -179,21 +156,6 @@ class Guard(GuardCase):
         self.clock.advance(601)
         self.assertFalse(g.allows(), "no reading for ten minutes: no new cycle or box")
 
-    def test_the_burst_cap_also_reads_sails_own_meter(self):
-        g = self.guard()
-        self.reading = (5000.0, 34.0)
-        g.check()
-        for balance in (4900.0, 4800.0, 4700.0, 4640.0):  # $360 metered by Sail, none of it booked by the swarm
-            self.reading = (balance, 34.0)
-            self.clock.advance(180)
-            g.check()
-        self.assertFalse(g.allows())
-        self.assertIn("burst", g.reason)
-        self.reading = (6000.0, 34.0)  # a top-up is not negative spend
-        self.clock.advance(180)
-        out = g.check()
-        self.assertEqual(out["metered_spent"], 360.0)
-
     def test_a_filling_disk_brakes(self):
         g = SailGuard(self.store, self.settings, lambda: self.reading, clock=self.clock, disk_free=lambda: 2.0 * 2 ** 30)
         g.check()
@@ -212,6 +174,335 @@ class Guard(GuardCase):
         self.assertFalse(g.due())
         self.clock.advance(181)
         self.assertTrue(g.due())
+
+
+class Budget(GuardCase):
+    """THE BUDGET's day (league/ops/budget.py `sail_caps`): the swarm's own Sail under the research dollars, Sail's own
+    meter under research + fixed; no block is the floor, a malformed one is no research."""
+
+    def budget(self, sail, fixed=None):
+        self.settings["budget"] = {"source": "budget.json", "sail_usd_day": sail, "claude_usd_day": 2.0,
+                                   "fixed_sail_usd_day": fixed}
+
+    def test_the_swarms_sail_today_is_capped_by_the_research_dollars(self):
+        self.budget(6.0)
+        self.reading = (5000.0, 5.0)
+        g = self.guard()
+        self.store.add_spend("sail_model", 5.0)
+        out = g.check()
+        self.assertTrue(g.allows(), g.reason)
+        self.assertEqual((out["budget_research_usd_day"], out["budget_account_usd_day"]), (6.0, 7.0))
+        self.store.add_spend("gym_box", 1.0)
+        g.check()
+        self.assertFalse(g.allows())
+        self.assertIn("research budget is spent", g.reason)
+        self.clock.advance(86400)  # a new UTC day: its own budget
+        g.check()
+        self.assertTrue(g.allows(), g.reason)
+
+    def test_sails_own_meter_is_capped_by_research_plus_fixed(self):
+        self.budget(6.0, fixed=2.5)  # measured fixed above the configured House burn of 1.0
+        self.reading = (5000.0, 5.0)
+        g = self.guard()
+        g.check()
+        for balance in (4995.0, 4991.5):  # $8.50 metered by Sail today, none of it booked by the swarm
+            self.reading = (balance, 5.0)
+            self.clock.advance(180)
+            g.check()
+        self.assertFalse(g.allows())
+        self.assertIn("by Sail's meter", g.reason)
+        self.assertIn("8.50 of 8.50", g.reason)
+
+    def test_a_raise_lifts_the_cap_and_a_cut_brakes_at_once(self):
+        self.budget(2.0)
+        self.reading = (5000.0, 5.0)
+        g = self.guard()
+        self.store.add_spend("sail_model", 3.0)
+        g.check()
+        self.assertFalse(g.allows())
+        self.budget(9.0)  # the next settings.load carries a raise
+        self.clock.advance(180)
+        g.check()
+        self.assertTrue(g.allows(), g.reason)
+        self.budget(1.0)
+        self.clock.advance(180)
+        g.check()
+        self.assertFalse(g.allows())
+
+    def test_a_budget_of_zero_brakes_with_no_spend_at_all(self):
+        self.budget(0.0)
+        self.reading = (5000.0, 5.0)
+        g = self.guard()
+        g.check()
+        self.assertFalse(g.allows())
+
+    def test_no_block_is_the_floor_and_a_malformed_block_is_no_research(self):
+        from league.ops import budget as B
+
+        del self.settings["budget"]
+        self.reading = (5000.0, 5.0)
+        g = self.guard()
+        out = g.check()
+        self.assertEqual(out["budget_research_usd_day"], B.floor_usd_day("sail"))
+        self.assertTrue(g.allows())
+        self.store.add_spend("sail_model", B.floor_usd_day("sail"))
+        g.check()
+        self.assertFalse(g.allows(), "the floor binds")
+        for bad in ({"sail_usd_day": "lots"}, {"sail_usd_day": -1}, {"sail_usd_day": float("nan")}, "budget", {}):
+            self.settings["budget"] = bad
+            self.assertEqual(g.check()["budget_research_usd_day"], 0.0, bad)
+
+    def test_the_burst_trio_changes_nothing(self):
+        self.budget(2.0)
+        self.settings["guard"].update(burst_cap_usd=900.0, burst_until="2026-12-31T00:00:00Z", after_burst_usd_day=500.0)
+        self.reading = (5000.0, 5.0)
+        g = self.guard()
+        self.store.add_spend("sail_model", 2.5)
+        out = g.check()
+        self.assertFalse(g.allows())
+        self.assertNotIn("in_burst", out)
+        self.assertNotIn("burst_spent", out)
+
+    def test_the_sites_meter_since_the_start_is_still_kept(self):
+        g = self.guard()
+        self.reading = (5000.0, 34.0)
+        g.check()
+        for balance in (4900.0, 4800.0):
+            self.reading = (balance, 34.0)
+            self.clock.advance(180)
+            g.check()
+        self.reading = (6000.0, 34.0)  # a top-up is not negative spend
+        self.clock.advance(180)
+        out = g.check()
+        self.assertEqual(out["metered_spent"], 200.0)
+        self.assertIsNotNone(self.store.get("burst_started_at"))
+
+
+class Causes(GuardCase):
+    """The brake's causes by name beside the human reason (`CAUSES`, one per braking branch of `check`): the record, its
+    `last` and the event carry the same list, and a record kept before the list reads as cause unknown."""
+
+    def budget(self, sail, fixed=None):
+        self.settings["budget"] = {"source": "budget.json", "sail_usd_day": sail, "claude_usd_day": 2.0,
+                                   "fixed_sail_usd_day": fixed}
+
+    def check(self, g):
+        """One check; wherever the list is kept it is the same list, named from CAUSES, and empty exactly when unbraked."""
+        out = g.check()
+        saved = self.store.get("guard")
+        self.assertEqual((out["causes"], saved["causes"], saved["last"]["causes"], causes_of(saved)), (g.causes,) * 4)
+        self.assertLessEqual(set(g.causes), set(CAUSES))
+        self.assertEqual((bool(g.causes), bool(g.reason)), (g.braked, g.braked))
+        return g.causes
+
+    def test_the_budgets_causes_are_two_of_the_names(self):
+        self.assertEqual(CAUSES, ("balance_unreadable", "under_line", "research_budget", "account_budget", "budget_unreadable",
+                                  "disk", "no_reading"))
+        self.assertEqual(BUDGET_CAUSES, ("research_budget", "account_budget"), "a rule that could not be read is not one")
+
+    def test_before_a_first_check_the_cause_is_no_reading(self):
+        g = self.guard()
+        self.assertEqual((g.braked, g.reason, g.causes, g.last), (True, "no reading yet", ["no_reading"], {}))
+        self.assertIsNone(self.store.get("guard"), "nothing is stored before a check")
+
+    def test_a_guard_that_allows_names_no_cause(self):
+        g = self.guard()
+        self.assertEqual(self.check(g), [])
+        self.assertTrue(g.allows())
+
+    def test_an_unreadable_balance(self):
+        g = self.guard()
+        self.reading = (None, None)
+        self.assertEqual(self.check(g), ["balance_unreadable"], "on the first check")
+        self.reading = (118.79, 34.0)
+        self.clock.advance(180)
+        self.assertEqual(self.check(g), [])
+        self.reading = (None, None)
+        self.clock.advance(180)
+        self.assertEqual(self.check(g), ["balance_unreadable"], "and from an unbraked guard")
+
+    def test_a_reader_that_raises_is_an_unreadable_balance(self):
+        def down():
+            raise OSError("no route to Sail")
+
+        g = SailGuard(self.store, self.settings, down, clock=self.clock, disk_free=lambda: 100.0 * 2 ** 30)
+        self.assertEqual(self.check(g), ["balance_unreadable"])
+
+    def test_a_balance_under_the_line(self):
+        self.reading = (31.0, 31.0)
+        self.assertEqual(self.check(self.guard()), ["under_line"])
+
+    def test_the_days_research_budget(self):
+        self.budget(6.0)
+        self.reading = (5000.0, 5.0)
+        g = self.guard()
+        self.store.add_spend("sail_model", 6.0)
+        self.assertEqual(self.check(g), ["research_budget"])
+        self.assertIn("research budget is spent", g.reason)
+
+    def test_the_days_account_budget_by_sails_meter(self):
+        self.budget(6.0, fixed=2.5)
+        self.reading = (5000.0, 5.0)
+        g = self.guard()
+        self.assertEqual(self.check(g), [])
+        self.reading = (4991.5, 5.0)  # $8.50 metered by Sail today, none of it booked by the swarm
+        self.clock.advance(180)
+        self.assertEqual(self.check(g), ["account_budget"])
+        self.assertIn("by Sail's meter", g.reason)
+        self.store.add_spend("sail_model", 6.0)  # the research cap is read first: one budget cause at a time
+        self.clock.advance(180)
+        self.assertEqual(self.check(g), ["research_budget"])
+
+    def test_a_budget_of_zero_the_rule_itself_gives_is_the_budgets_own(self):
+        from league.ops import budget as B
+
+        self.reading = (5000.0, 5.0)
+        for block in ({"source": "budget.json", "sail_usd_day": 0.0, "claude_usd_day": 0.0, "fixed_sail_usd_day": None},
+                      {"sail_usd_day": 0}):
+            self.settings["budget"] = block
+            g = self.guard()
+            self.assertEqual(self.check(g), ["research_budget"], block)
+            self.clock.advance(180)
+        del self.settings["budget"]  # the guard's own read of the root's budget.json: none is the floor, which binds
+        g = self.guard()
+        self.assertEqual(self.check(g), [])
+        self.store.add_spend("sail_model", B.floor_usd_day("sail"))
+        self.clock.advance(180)
+        self.assertEqual(self.check(g), ["research_budget"])
+
+    def unread(self, source):
+        """One check of a guard on a balance far above the line: braked at no research, as it always was, and named
+        apart from the budget's own daily stop."""
+        self.reading = (5000.0, 5.0)
+        g = self.guard()
+        self.assertEqual(self.check(g), ["budget_unreadable"])
+        self.assertEqual((g.braked, g.allows(), g.reason),
+                         (True, False, f"today's Sail research budget is spent (0.00 of 0.00; {source})"))
+        self.assertEqual(g.last["budget_research_usd_day"], 0.0)
+        self.assertFalse(set(g.causes) & set(BUDGET_CAUSES))
+        return g
+
+    def test_a_rule_that_could_not_run_is_not_the_budgets_own(self):
+        from unittest import mock
+
+        from league.ops import budget as B
+
+        with mock.patch.object(B, "overlay", side_effect=RuntimeError("boom")):
+            self.settings = S.load(Path(self.dir.name), config={})  # the block `settings.load` writes for it
+        self.assertEqual((self.settings["budget"]["sail_usd_day"], self.settings["budget"]["read"]), (0.0, False))
+        self.unread("unavailable")
+
+    def test_a_malformed_block_is_not_the_budgets_own(self):
+        for bad in ({"sail_usd_day": "lots"}, {"sail_usd_day": -1}, {"sail_usd_day": float("nan")}, "budget", {},
+                    {"source": "budget.json"}):
+            self.settings["budget"] = bad
+            self.unread("malformed budget block: no research")
+            self.clock.advance(180)
+
+    def test_a_rule_that_cannot_be_read_is_not_the_budgets_own(self):
+        from unittest import mock
+
+        from league.ops import budget as B
+
+        with mock.patch.object(B, "sail_caps", side_effect=RuntimeError("boom")):
+            g = self.unread("the budget rule could not be read (RuntimeError)")
+        self.clock.advance(180)
+        self.assertEqual(self.check(g), [], "the rule reads again: the guard releases as it always did")
+
+    def test_caps_that_do_not_say_they_were_read_are_not_the_budgets_own(self):
+        from unittest import mock
+
+        from league.swarm import guard as G
+
+        self.reading = (5000.0, 5.0)
+        g = self.guard()
+        self.check(g)
+        self.reading = (4990.0, 5.0)  # $10 by Sail's meter today, none of it booked
+        for caps, want in (({"research": 0.0, "fixed": 1.0, "account": 1.0, "source": "x"}, ["budget_unreadable"]),
+                           ({"research": 0.0, "fixed": 1.0, "account": 1.0, "source": "x", "read": None}, ["budget_unreadable"]),
+                           ({"research": 0.0, "fixed": 1.0, "account": 1.0, "source": "x", "read": "yes"}, ["budget_unreadable"]),
+                           ({"research": 0.0, "fixed": 1.0, "account": 1.0, "source": "x", "read": True}, ["research_budget"]),
+                           ({"research": 6.0, "fixed": 1.0, "account": 7.0, "source": "x", "read": False}, ["budget_unreadable"]),
+                           ({"research": 6.0, "fixed": 1.0, "account": 7.0, "source": "x", "read": True}, ["account_budget"]),
+                           ({"research": 6.0, "fixed": 9.0, "account": 15.0, "source": "x", "read": False}, [])):
+            self.clock.advance(180)
+            with mock.patch.object(G, "budget_caps", return_value=caps):
+                self.assertEqual(self.check(g), want, caps)
+
+    def test_a_filling_disk(self):
+        g = SailGuard(self.store, self.settings, lambda: self.reading, clock=self.clock, disk_free=lambda: 2.0 * 2 ** 30)
+        self.assertEqual(self.check(g), ["disk"])
+
+    def test_several_causes_are_all_named_in_the_checks_order(self):
+        self.budget(2.0)
+        self.store.add_spend("gym_box", 2.0)
+        self.reading = (None, None)
+        g = SailGuard(self.store, self.settings, lambda: self.reading, clock=self.clock, disk_free=lambda: 2.0 * 2 ** 30)
+        self.assertEqual(self.check(g), ["balance_unreadable", "research_budget", "disk"])
+        self.reading = (20.0, 5.0)
+        self.clock.advance(180)
+        self.assertEqual(self.check(g), ["under_line", "research_budget", "disk"])
+        self.settings["budget"] = "budget"  # a block that is no budget, in the budget's place in the order
+        self.clock.advance(180)
+        self.assertEqual(self.check(g), ["under_line", "budget_unreadable", "disk"])
+
+    def test_a_budget_brake_under_the_release_line_names_the_line_too(self):
+        self.budget(2.0)
+        self.reading = (5000.0, 5.0)
+        g = self.guard()
+        self.assertEqual(self.check(g), [])
+        self.store.add_spend("sail_model", 3.0)
+        self.clock.advance(180)
+        self.assertEqual(self.check(g), ["research_budget"], "the budget alone: the balance is far above the line")
+        self.reading = (35.0, 5.0)  # over the $32 line, under the $37 a braked guard releases at
+        self.clock.advance(180)
+        self.assertEqual(self.check(g), ["under_line", "research_budget"])
+        self.clock.advance(86400)  # a new UTC day lifts the budget's cause, never the line's
+        self.assertEqual(self.check(g), ["under_line"])
+        self.reading = (37.0, 5.0)
+        self.clock.advance(180)
+        self.assertEqual(self.check(g), [])
+
+    def test_the_brake_and_release_events_carry_the_causes(self):
+        self.budget(6.0)
+        self.reading = (5000.0, 5.0)
+        g = self.guard()
+        self.store.add_spend("sail_model", 6.0)
+        self.check(g)
+        self.clock.advance(86400)
+        self.check(g)
+        events = [e["payload"] for e in self.store.events_after(0) if e["kind"] == "swarm.guard"]
+        self.assertEqual([(e["action"], e["causes"], causes_of(e)) for e in events],
+                         [("brake", ["research_budget"], ["research_budget"]), ("release", [], [])])
+        self.assertIn("research budget is spent", events[0]["reason"], "the human reason is still beside them")
+
+    def test_a_restart_remembers_the_causes(self):
+        self.reading = (10.0, 34.0)
+        self.check(self.guard())
+        again = self.guard()
+        self.assertEqual((again.braked, again.causes), (True, ["under_line"]))
+
+    def test_a_record_kept_before_the_list_reads_as_cause_unknown_and_decides_as_before(self):
+        reason = "today's Sail research budget is spent (5.00 of 5.00; budget.json)"
+        last = {"balance": 118.79, "line": 32.0, "braked": True, "reason": reason, "at": T - 60}
+        old = {"braked": True, "reason": reason, "last_ok": T - 60, "last": last, "last_good": {"balance": 118.79, "at": T - 60}}
+        self.store.put("guard", old)
+        g = self.guard()
+        self.assertIsNone(g.causes, "unknown: never guessed from the reason's words")
+        self.assertEqual((causes_of(old), causes_of(last)), (None, None))
+        self.assertEqual((g.braked, g.reason, g.last, g.last_good), (True, reason, last, old["last_good"]), "the old fields read as before")
+        self.assertFalse(g.allows())
+        self.assertEqual(self.check(g), [], "the next check writes the list: 118.79 is above the release line")
+        self.assertTrue(g.allows())
+
+    def test_a_list_that_is_not_names_is_cause_unknown(self):
+        for bad in (None, "research_budget", {"research_budget": True}, ["research_budget", 3], [None], ("research_budget",), 7):
+            self.assertIsNone(causes_of({"braked": True, "causes": bad}), bad)
+        for record in (None, "braked", [], 0):
+            self.assertIsNone(causes_of(record), record)
+        self.assertEqual(causes_of({"causes": []}), [], "an empty list is no brake, not unknown")
+        self.store.put("guard", {"braked": True, "reason": "x", "causes": "research_budget"})
+        self.assertIsNone(self.guard().causes)
 
 
 if __name__ == "__main__":

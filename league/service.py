@@ -221,7 +221,7 @@ def options_live(house: House, root: Path, config: dict[str, Any], *, real_money
 
 def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandbox: bool = False, research: bool = True,
           publish: bool = True, tape: str | None = None, game: dict[str, Any] | None = None, name_prefix: str = "league",
-          merton: bool = True, canary: bool = False) -> House:
+          merton: bool = True, canary: bool = False, jobs: bool = False) -> House:
     """The options House (the options overhaul, Sept 26, 2026, Wave 2a): the books are the Brokerage
     Account (`alpaca`, only when `real_money`), the Alpaca practice account (`alpaca-paper`) and the
     options shadow book (`options-shadow`). Nothing Kalshi (real or shadow), no Jev, no Alpha Lab, no
@@ -389,6 +389,15 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         from .updater import Updater
 
         house.updater = Updater(REPO.parent.parent)
+    if jobs and not canary and REPO.parent.name == "releases":
+        # On the House box only, and only in the House's own loop (`python -m league run`: `jobs=True`): the House's jobs
+        # (league/ops/: the pre-open checks, the close economics, hygiene, the venue clock, the scoreboard, and the jobs
+        # other packages add), each a niced child on the House's calendar. A `status` or `tick` beside the running House
+        # never builds a runner (its start would kill the House's job child as an orphan), and a runner that cannot be
+        # built is a warning, never a House that does not start.
+        from .ops import start as ops_start
+
+        ops_start(house, root, base=REPO.parent.parent)
     if swarm_on:
         from .swarm.hook import attach
 

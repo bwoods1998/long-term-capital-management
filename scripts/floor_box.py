@@ -614,15 +614,16 @@ def up(seen: Mapping[str, str], name: str) -> bool:
 def push_release(api: SailboxClient, box: str, release_id: str, blob: bytes) -> str:
     """Upload one bundle and unpack it into `/workspace/incoming/<id>/`. Returns that directory.
 
-    `incoming/` holds one upload at a time: the watchdog copies what it stages into `releases/`,
-    so whatever an earlier deploy left here is spent. Nothing outside `incoming/` and `.upload/`
-    is written."""
+    Only `incoming/<id>/` is cleared first: the rest of `incoming/` is not this deploy's (V3-A). The
+    House's updater stages its own heads there (`main-<digest>/` and its attestation record), one of
+    which may be waiting to launch or in its canary, and a deploy that emptied the whole directory
+    would pull the tree out from under it. Nothing outside `incoming/<id>/` and `.upload/` is written."""
     name = f"{REMOTE_ROOT}/.upload/release-{release_id}.tgz"
     target = f"{INCOMING_DIR}/{release_id}"
     api.upload(box, name, blob, mode=0o600)
     api.exec(
         box,
-        ["sh", "-c", f"set -e; umask 077; rm -rf {INCOMING_DIR}; mkdir -p {target}; "
+        ["sh", "-c", f"set -e; umask 077; rm -rf {target}; mkdir -p {target}; "
                      f"tar -xzf {name} -C {target} --no-same-owner; rm -f {name}; "
                      f"test -f {target}/league/__main__.py"],
         timeout=300,
@@ -1068,8 +1069,8 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         raise SystemExit(f"the box could not be probed, so nothing was sent: {seen['error']}")
     if up(seen, "deploy.pid"):
         raise SystemExit(
-            f"a deploy is still running on the box (pid {seen['deploy.pid']}); wait for its verdict "
-            "(`status` shows it, `logs --deploy` follows it) before sending another release."
+            f"a deploy is still running on the box (pid {seen['deploy.pid']}: yours, or one the House's updater launched); "
+            "wait for its verdict (`status` shows it, `logs --deploy` follows it) before sending another release."
         )
     if up(seen, "run.pid") and b"-m league run" not in (supervisor_script(api, box) or b""):
         raise SystemExit(

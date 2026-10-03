@@ -1,6 +1,7 @@
 """FUNDING CLIFFS, SAID AHEAD (Release A, Sept 30, 2026): a paid line never runs out without the operator hearing first.
 
-On Sept 30 four cliffs stood, and none of them would have said a word:
+On Sept 30 four cliffs stood, and none of them would have said a word (LTCM v3 retired the fourth, the burst's end: the
+Sail guard's daily cap is now THE BUDGET's, league/ops/budget.py, whose own card notices go to the owner by mail):
 
 - CLAUDE'S ROOM. The gateway's funded Claude total above `claude.reserve_usd` (and the swarm's own `claude.usd_cap`) runs
   out; every role in `claude.roles` then quietly takes its next route (`ModelRouter.ask`: OpenAI, then Sail) and the
@@ -10,12 +11,13 @@ On Sept 30 four cliffs stood, and none of them would have said a word:
 - THE SAIL GUARD. `SailGuard` brakes the Gym and the researchers when Sail's balance falls under its line (2 x the
   House's burn + `guard.margin_usd`), and releases only at the line + `guard.release_margin_usd`: while braked under
   that release line the cliff stays out (state "braked", `release_usd`), even after a top-up over the line itself.
-- THE BURST'S END. At `guard.burst_until` the guard's allowance becomes `guard.after_burst_usd_day` for the account.
+- (retired) THE BURST'S END: `guard.burst_until` and `guard.after_burst_usd_day` are gone with the burst.
 
 `FundingWatch.tick()` runs on the swarm's main loop (`Swarm.step`) and does two cheap things:
 
-1. Every `funding.every_seconds` (300) it assesses each cliff from what the swarm already reads: the router's Claude room
-   (`ModelRouter.claude_room`, the gateway meter behind its two-minute cache), the frontier month's `remaining()`, the
+1. Every `funding.every_seconds` (300) it assesses each cliff from what the swarm already reads: the router's funded
+   Claude room (`ModelRouter.claude_funded_room`, the gateway meter behind its two-minute cache; the budget's daily line
+   is not a cliff), the frontier month's `remaining()`, the
    guard's last reading (`SailGuard.last`: balance, line, Sail's own 24-hour burn) and the swarm's spend rows. RUNWAY is
    the room left before the cliff divided by the MEASURED burn: the larger of the last 24 hours' and the last
    `funding.burn_window_hours` (6) hours' rate, each from the swarm's booked spend and from the meter's own fall between
@@ -27,7 +29,7 @@ On Sept 30 four cliffs stood, and none of them would have said a word:
 
 TIERS. Each cliff's hours go through its leads (`funding.lead_hours`, hours before the cliff, most distant first):
 "notice" inside the first, "warning" inside the second, "urgent" inside the third, "out" once the cliff is here, "ok"
-before any of them. Defaults: Claude 48/24/6, the Sail guard 72/24/6, the OpenAI month 48/24/6, the burst 96/24/6.
+before any of them. Defaults: Claude 48/24/6, the Sail guard 72/24/6, the OpenAI month 48/24/6.
 
 DEDUPED (`FundingWatch._decide`). Each cliff (a calendar cliff keyed by its date) says a tier as ONE `swarm.status`
 event with `alert: true` when it RISES to it; a tier already said is said again only after `funding.repeat_hours` (12),
@@ -64,7 +66,6 @@ import threading
 import time
 from typing import Any, Callable, Mapping, Sequence
 
-from .guard import SWARM_SAIL_KINDS
 
 #: The tiers, least severe first.
 TIERS = ("ok", "notice", "warning", "urgent", "out")
@@ -78,8 +79,7 @@ DEFAULTS: dict[str, Any] = {
     "enabled": True,
     "every_seconds": 300.0,
     "fallback_flush_seconds": 30.0,
-    "lead_hours": {"claude_room": [48.0, 24.0, 6.0], "sail_guard": [72.0, 24.0, 6.0], "openai_month": [48.0, 24.0, 6.0],
-                   "burst_end": [96.0, 24.0, 6.0]},
+    "lead_hours": {"claude_room": [48.0, 24.0, 6.0], "sail_guard": [72.0, 24.0, 6.0], "openai_month": [48.0, 24.0, 6.0]},
     "repeat_hours": 12.0,
     "clear_factor": 1.5,
     "claude_out_usd": 2.0,
@@ -114,13 +114,6 @@ def _number(value: Any, default: float) -> float:
 
 def _stamp(t: float) -> str:
     return dt.datetime.fromtimestamp(float(t), dt.timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
-
-
-def _epoch(text: Any) -> float | None:
-    try:
-        return dt.datetime.fromisoformat(str(text).replace("Z", "+00:00")).timestamp()
-    except (TypeError, ValueError):
-        return None
 
 
 def month_end(now: float) -> float:
@@ -214,7 +207,7 @@ class FundingWatch:
         said: list[dict[str, Any]] = []
         assessed: dict[str, Any] = {}
         for name, assess in (("claude_room", self.claude_room), ("sail_guard", self.sail_guard),
-                             ("openai_month", self.openai_month), ("burst_end", self.burst_end)):
+                             ("openai_month", self.openai_month)):
             try:
                 found = assess(now, cfg)
                 payload = self._decide(found, now, cfg) if found.get("tier") is not None else None
@@ -342,7 +335,9 @@ class FundingWatch:
             return {"cliff": "claude_room", "state": "off"}
         if meter.remaining() is None:
             return {"cliff": "claude_room", "state": "unreadable"}
-        room = float(router.claude_room())
+        # The FUNDED room: the budget's daily Claude line (league/ops/budget.py) runs out every day by design, not a cliff.
+        funded = getattr(router, "claude_funded_room", None)
+        room = float(funded() if callable(funded) else router.claude_room())
         spent = (getattr(meter, "last", None) or {}).get("spent_usd")
         sampled = (self._sample("claude", now, window_hours=cfg["burn_window_hours"], total=_number(spent, -1.0))
                    if _number(spent, -1.0) >= 0 else None)
@@ -463,36 +458,6 @@ class FundingWatch:
                           f"${remaining:.2f} left; a funded month does not roll over, so OpenAI goes to $0 then unless the "
                           f"owner funds the next one{uses}")}
         return found
-
-    def burst_end(self, now: float, cfg: Mapping[str, Any]) -> dict[str, Any]:
-        guard_cfg = self.settings.get("guard") if isinstance(self.settings.get("guard"), Mapping) else {}
-        end = _epoch(guard_cfg.get("burst_until", "2026-09-28T13:30:00Z"))
-        if end is None:
-            return {"cliff": "burst_end", "state": "unreadable"}
-        last = getattr(self.guard, "last", None) or {}
-        house = max(_number(guard_cfg.get("house_burn_usd_day", 1.0), 1.0), _number(last.get("house_day"), 0.0))
-        account = _number(guard_cfg.get("after_burst_usd_day", 12.0), 12.0)
-        allowance = max(0.0, account - house)
-        swarm_day = float(self.store.spent(list(SWARM_SAIL_KINDS), since=now - 86400))
-        cut = 1.0 - allowance / swarm_day if swarm_day > allowance and swarm_day > 0 else 0.0
-        hours = (end - now) / 3600
-        base = {"cliff": "burst_end", "key": f"burst_end:{_stamp(end)}", "calendar": True, "ends_at": _stamp(end),
-                "after_burst_usd_day": round(account, 2), "swarm_allowance_usd_day": round(allowance, 2),
-                "swarm_sail_usd_day": round(swarm_day, 2), "cut_pct": round(100 * cut)}
-        if hours <= 0:
-            if cut <= 0 or -hours > float(cfg["after_end_hours"]):
-                return {**base, "state": "ended"}
-            return {**base, "state": "ended", "tier": "out", "hours": 0.0,
-                    "text": (f"funding: the Sail burst ended at {_stamp(end)}: the guard now allows the swarm ${allowance:.2f} "
-                             f"of Sail a day (guard.after_burst_usd_day ${account:.2f} less the House's ${house:.2f}); it "
-                             f"spent ${swarm_day:.2f} in the last 24 h, so research falls about {100 * cut:.0f}%")}
-        if cut <= 0:
-            return {**base, "state": "no cut", "hours": round(hours, 1)}
-        return {**base, "state": "in burst", "tier": tier_for(hours, cfg["lead_hours"]["burst_end"]), "hours": round(hours, 1),
-                "text": (f"funding: the Sail burst ends at {_stamp(end)} (in about {_hours_text(hours)}): after it the guard "
-                         f"allows the swarm ${allowance:.2f} of Sail a day (guard.after_burst_usd_day ${account:.2f} less "
-                         f"the House's ${house:.2f}); it spent ${swarm_day:.2f} in the last 24 h, so research falls about "
-                         f"{100 * cut:.0f}% unless guard.burst_until moves")}
 
     # ------------------------------------------------------------------ fallbacks
     def flush_fallbacks(self, now: float, cfg: Mapping[str, Any]) -> list[dict[str, Any]]:

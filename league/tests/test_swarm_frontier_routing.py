@@ -27,6 +27,9 @@ class SwarmFrontierRouting(unittest.TestCase):
         self.store = SwarmStore(self.root, clock=self.clock)
         self.addCleanup(self.store.close)
         self.settings = copy.deepcopy(DEFAULTS)
+        # THE BUDGET is not what these tests judge: a paid-model line well above the holds asked here (no block is the
+        # floor, and OpenAI is admitted under that line too).
+        self.settings["budget"] = {"source": "test", "sail_usd_day": 1000.0, "claude_usd_day": 1000.0}
         self.month = FakeMonth(1000)
         self.sail_calls = []
 

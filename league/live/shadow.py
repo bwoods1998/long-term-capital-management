@@ -17,10 +17,22 @@ XSP/SPXW and exercise of equity legs at the close, a day's working orders expiri
 
 State: the accounts are written to `<root>/live-shadow.json` after every minute (`ShadowBook.save`), so a restart
 resumes them, working orders and all.
+
+THE PRACTICE CAPS (v3, Oct 2026): a practice account (`<family>@<version>:o`) holds what a Probe may hold, scaled to its
+own shadow capital, from the constitution's `options_money.probe` (`money.Table`), and sized as `money.plan_open` sizes
+a Probe's open: at most `open_per_family` structures open or working; a new open's size at most floor(`max_loss_share` x
+capital / unit), where unit is one structure's maximum loss with its open and close fees (one structure when that is
+none and the unit is within `floor_usd`), and at most what keeps the account's maximum loss at risk (open structures and
+working opens) within max(`family_share` x capital, `floor_usd`). An open over its size is resolved again at that size
+(never above what the program asked: the program's own size stays its ceiling, where a Probe sizes to the cap), its
+order event marked `practice_sized`. An open the caps leave no structure is withdrawn before it can work (the engine's
+counts as if it was never sent) and refused: a practice `rejected` event with its reason, told to the program like any
+refusal, never a program error. A Candidate's shadow (`:s`) keeps the engine's own rules.
 """
 
 from __future__ import annotations
 
+import functools
 import math
 import os
 from dataclasses import asdict
@@ -108,10 +120,92 @@ class ShadowAccount(E.Account):
         before = set(self.orders)
         self.practice_event("intent", {"intent": dict(intent)}, day=day, mi=mi)
         super()._intent(day, mi, intent)
+        opens = [self.orders[oid] for oid in sorted(set(self.orders) - before) if self.orders[oid].order.action == "open"]
+        sized: dict[int, int] = {}
+        if opens:
+            sizes, why = self._practice_cap(opens, day=day, mi=mi)
+            if why:
+                for work in opens:
+                    self._withdraw(work)
+                raise L.Refused(why)
+            for work in opens:
+                if sizes[work.oid] < work.order.qty:
+                    # Sized down as `money.plan_open` sizes a Probe's open: the engine resolves it again at the size the
+                    # caps leave (its fees, reserve and context with it) in the withdrawn order's place.
+                    self._withdraw(work)
+                    prior = set(self.orders)
+                    again = {k: v for k, v in intent.items() if k not in ("qty", "max_loss")}
+                    super()._intent(day, mi, dict(again, qty=sizes[work.oid]))
+                    sized.update(dict.fromkeys(set(self.orders) - prior, work.order.qty))
         for oid in set(self.orders) - before:
             work = self.orders[oid]
-            self.practice_event("order", {"order": _working_state(work), "quotes": self._quotes(day, mi, work)},
-                                day=day, mi=mi)
+            body = {"order": _working_state(work), "quotes": self._quotes(day, mi, work)}
+            if oid in sized:
+                body["practice_sized"] = {"asked": sized[oid], "qty": work.order.qty}
+            self.practice_event("order", body, day=day, mi=mi)
+
+    def _practice_cap(self, opens: Sequence[E.Working], *, day: LiveDay | None = None,
+                      mi: int = 0) -> tuple[dict[int, int], str | None]:
+        """({oid: the most structures the practice caps (the module docstring) leave each new open}, None), or ({}, why
+        they refuse it). As `money.plan_open` sizes a Probe's open: a structure's `unit` is its maximum loss with its
+        open and close fees at the decision's quotes (without `day`, the order's own fees shared out); the size is
+        floor(max_loss_share x capital / unit), one structure when that is none and the unit is within `floor_usd`, then
+        no more than the family's room under max(family_share x capital, floor_usd) leaves; never more than the program
+        asked. Never raises: caps that cannot be read refuse the open."""
+        try:
+            (share, floor), open_max, family_share = _probe_caps()
+            capital = float(self.cfg.capital)
+            new = {w.oid for w in opens}
+            working = [w for w in self.orders.values() if w.order.action == "open" and w.oid not in new]
+            open_now = len(self.positions) + sum(1 for w in working if w.pid not in self.positions)
+            # As the real book's exposure: open structures and working opens at their maximum loss.
+            at_risk = sum(p.max_loss_share * V.MULTIPLIER * p.qty for p in self.positions.values()) + sum(
+                w.order.max_loss_share * V.MULTIPLIER * w.remaining for w in working)
+            cap = share * capital
+            family = max(family_share * capital, floor)
+            sizes: dict[int, int] = {}
+            for work in opens:
+                if open_now >= open_max:
+                    return {}, (f"practice cap: {open_now} structures open or working, the most a Probe holds is "
+                                f"{open_max}")
+                unit = round(work.order.max_loss_share * V.MULTIPLIER + 2.0 * self._unit_fees(work, day, mi), 2)
+                if not (math.isfinite(unit) and unit > 0 and math.isfinite(at_risk)):
+                    return {}, "practice cap: the structure's maximum loss is not a positive number"
+                qty = math.floor(cap / unit + 1e-9)
+                if qty < 1 and unit <= floor + 1e-9:
+                    qty = 1
+                if qty < 1:
+                    return {}, (f"practice cap: one structure risks {unit:.2f} with fees, over the Probe's {cap:.2f} a "
+                                f"structure and its {floor:.2f} floor")
+                room = family - at_risk
+                qty = min(qty, math.floor(room / unit + 1e-9) if room > 0 else 0, int(work.order.qty))
+                if qty < 1:
+                    return {}, (f"practice cap: {at_risk:.2f} of maximum loss at risk leaves no room for one "
+                                f"structure's {unit:.2f} under the Probe's {family:.2f} a family")
+                sizes[work.oid] = qty
+                open_now += 1
+                at_risk += unit * qty
+            return sizes, None
+        except Exception as exc:  # noqa: BLE001 - fail closed: no open without its caps read
+            return {}, f"practice cap: the Probe's caps could not be read ({type(exc).__name__})"
+
+    @staticmethod
+    def _unit_fees(work: E.Working, day: LiveDay | None, mi: int) -> float:
+        """One structure's opening fees at the decision's quotes (the real path's `unit` fees); without the day's
+        quotes, the order's own fees shared out."""
+        order = work.order
+        snap = day.snapshot(order.root, mi) if day is not None else None
+        if snap is None:
+            return float(order.fees) / max(1, int(order.qty))
+        prices = [float(snap.ask[leg.idx] if leg.side > 0 else snap.bid[leg.idx]) for leg in order.legs]
+        return L.order_fees(order.root, order.legs, prices, 1, "open")
+
+    def _withdraw(self, work: E.Working) -> None:
+        """An open the practice caps refused, taken back before it can work: the engine's counts as if never sent."""
+        self.orders.pop(work.oid, None)
+        self.orders_today = max(0, self.orders_today - 1)
+        for key in ("orders", "opens"):
+            self.counts[key] = max(0, int(self.counts.get(key, 0)) - 1)
 
     @staticmethod
     def _quotes(day: LiveDay, mi: int, work: E.Working) -> list[dict]:
@@ -255,6 +349,16 @@ class ShadowAccount(E.Account):
         acc.practice_dropped_events = int(row.get("practice_dropped_events") or 0)
         acc.practice_evaluator = row.get("practice_evaluator")
         return acc
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_caps() -> tuple[tuple[float, float], int, float]:
+    """((max_loss_share, floor_usd), open_per_family, family_share) of the constitution's `options_money.probe`, as the
+    money table reads it (ValueError on a table outside its bounds: the practice caps then refuse every open)."""
+    from .money import Table
+
+    table = Table.from_constitution()
+    return (float(table.probe_share), float(table.probe_floor)), int(table.probe_open), float(table.probe_family_share)
 
 
 def _num(value: float) -> float | None:

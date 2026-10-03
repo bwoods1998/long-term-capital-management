@@ -1,6 +1,17 @@
-"""The swarm's settings: defaults, overlaid by `league/config.json` ("gym" and "swarm") and then by
-`<root>/swarm.json` (the operator's file on the box: a change there needs no deploy; the process
-re-reads it every loop).
+"""The swarm's settings: defaults, overlaid by `league/config.json` ("gym" and "swarm"), then by the repo's
+`league/swarm/policy.json`, then by `<root>/swarm.json` (the operator's file on the box: a change there needs no deploy;
+the process re-reads it every loop).
+
+SETTINGS AS CODE (V3-A, Oct 2, 2026). `policy.json` is the research settings as reviewed code: a pull request changes
+it, so the swarm is tuned in the repository, not by a laptop command editing the box's file. Since the WP8 review the
+file is protected (`league/ci.py` FORBIDDEN, the gateway's list with it): the gateway merges no change to it and the
+updater ships none, so a merged change reaches the box by the owner's deploy alone, and until that deploy the updater
+refuses every later release too (it compares each one with the running release). It has the shape of `swarm.json`
+and sits between config.json and swarm.json: DEFAULTS < config.json < policy.json < swarm.json. The owner's switches
+(`OWNER_KEYS`: `enabled`, `live`) are never read from it (a key there is ignored and named in `_policy`); they stay in
+swarm.json, which after the V3-A migration (`scripts/settings_migrate.py`) holds only them. A missing policy.json is no
+layer (exactly as before); one that is not a JSON object, or whose shape breaks the defaults' (`policy_shape`), is
+ignored whole, and the loop alerts once (`_policy`).
 
 The EVIDENCE LINES are not settings: they are the plan's, in `evidence.py`, and loosening one is the
 owner's decision. Everything here is throughput and money: how many, how often, how much.
@@ -24,6 +35,17 @@ volatility shock and the fourth-quarter 2018 selloff, 2019, then 2020-2024), wit
 (`images.py build gym --train-from 2017-01-03`); everything above holds unchanged for it (the snap: 2017-01-01 and
 2017-01-02 are 2017-01-03; the derived split 24 and time limit 2400 s over eight years). Nothing moves until the
 operator writes it with the matching image; "2020-01-02" and "2022-01-03" mean what they meant.
+
+THE BUDGET (LTCM v3, the owner's D4). The research dollars a day are not settings either: `league/ops/budget.py` computes
+them from realized profit and the meters' runways into `<state>/budget.json`, and `load` applies them LAST and only to
+tighten: min() against `researcher.sail_usd_per_hour` (or `researcher.usd_per_hour` while that is unset), `gym.max_boxes`,
+`claude.role_usd_day` (a line for every role in `claude.roles`) and `population.ceiling` (the budget's ceiling is never
+under `population.floor` plus its birth margin), with `population.start` held to the tightened ceiling; max() against
+`architect.every_seconds` and `architect.refill_seconds`; and `guard.openai_cap_usd` is tightened to 0 (OpenAI is no
+meter of the rule). The `budget` block it sets (never the operator's: a `budget` key in swarm.json is replaced) caps the
+Sail guard's day and the paid models' room (Claude's, and OpenAI's under the same line). A missing, unreadable or
+malformed budget.json is the floor; a stale one never loosens (each meter the lower of the floor and what the stale file
+said).
 """
 
 from __future__ import annotations
@@ -319,9 +341,8 @@ DEFAULTS: dict[str, Any] = {
         "house_burn_usd_day": 1.0,
         "measured_burn": False,
         "margin_usd": 30.0,             # scale to zero below 2 x the House's daily burn + this
-        "burst_cap_usd": 350.0,         # Sail spend for the training burst
-        "burst_until": "2026-09-28T13:30:00Z",
-        "after_burst_usd_day": 12.0,    # Sail a day after Monday while Net is not positive
+        # The daily Sail cap is THE BUDGET's (league/ops/budget.py: the `budget` block `load` sets): the trio (`burst_cap_usd`,
+        # `burst_until`, `after_burst_usd_day`) is gone (LTCM v3), and a swarm.json that still names it changes nothing.
         "openai_cap_usd": 150.0,        # OpenAI for the burst, and only while the gateway's month has room
         # Never spend the gateway month below this: the House's own roles need its last dollars, and at T0 the month had
         # $10.89 left (effectively none until the owner funds it), so the swarm spends OpenAI only after a raise.
@@ -341,7 +362,9 @@ DEFAULTS: dict[str, Any] = {
         "observe_max": 48,              # at most this many observe instances
         "observe_train": True,          # admit families with an eligible Train version and no validated one
         "observe_roots_max": 24,        # at most this many distinct roots across the observe instances (1-128)
-        "observe_read_calls": 40,       # the minute's data calls before observe reads stop (about 1.5 a root; 10-200)
+        # The minute's data calls before observe reads stop (10-200): equal to the step's own DEFAULTS (a test pins
+        # them), room for 24 roots at the 3-page cap and a held read each after the real phase's 20 (v3).
+        "observe_read_calls": 120,
         "calibration": False,           # the D3 real-fill round trips: ON only by swarm.json {"live": {"calibration": true}}
         "calibration_samples": 30,      # a symbol's round trips stop once its open-at-mid cell has this many samples
         # The House live test (league/live/house_test.py): ON only by swarm.json {"live": {"house_test": true}}, and then
@@ -440,6 +463,13 @@ DEFAULTS: dict[str, Any] = {
                          "option order flow informed trading", "dealer gamma hedging intraday",
                          "weekly options volatility risk premium", "volatility skew return predictability"],
     },
+    # THE WINDOW FALLBACK (V3-A, Oct 2, 2026; league/swarm/models.py): a one-shot call (`ModelRouter.ask`) on a Sail profile
+    # outside the asap window, mapped here to an asap profile, retries once there after a poll timeout, and the window's
+    # calls go straight there for an hour (kv `sail_window_stall`). An entry set to null removes it; null turns the map off.
+    "sail_fallback": {"k3_balanced": "pro_asap", "pro_balanced": "pro_asap"},
+    # The roles whose fallback keeps their MODEL (that model's asap profile, k3_balanced to k3, whatever the map names): the
+    # gate's audit is a second model, different from the review's DeepSeek-V4-Pro, on its fallback too. null: none.
+    "sail_fallback_same_model": ["audit"],
     "heartbeat_seconds": 20,
     "stale_heartbeat_seconds": 240,     # the House restarts a swarm whose heartbeat is older than this
     "nice": 10,
@@ -570,8 +600,71 @@ def train_span_text(text: str, span: dt.date | None) -> str:
     return text
 
 
-def load(root: str | Path | None = None, *, config: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """The swarm's settings: DEFAULTS < config.json "swarm" (and its "gym" block into "gym") < <root>/swarm.json."""
+#: The repo's settings layer (SETTINGS AS CODE in the module docstring).
+POLICY_PATH = REPO / "league" / "swarm" / "policy.json"
+#: The owner's switches: read from `<root>/swarm.json` only, never from policy.json (the live path reads `live` from
+#: swarm.json directly, league/live/step.py).
+OWNER_KEYS = ("enabled", "live")
+
+
+def read_policy(path: str | Path | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
+    """(the layer, its status) from policy.json (`POLICY_PATH` by default). The status is {"state": "absent" | "ok" |
+    "malformed", "why": ..., "ignored": [owner keys left out]}; an absent or malformed file is an empty layer."""
+    path = Path(path) if path is not None else POLICY_PATH
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}, {"state": "absent", "why": None, "ignored": []}
+    except (OSError, ValueError) as exc:
+        return {}, {"state": "malformed", "why": f"{type(exc).__name__}: {str(exc)[:160]}", "ignored": []}
+    return policy_layer(raw)
+
+
+#: The blocks of DEFAULTS a policy may set to null (each documented as "null turns it off"); every other block of DEFAULTS
+#: must stay an object in policy.json.
+POLICY_NULLABLE = frozenset({"sail_fallback", "gate.look_holds"})
+
+
+def policy_shape(raw: Mapping[str, Any], defaults: Mapping[str, Any] | None = None, prefix: str = "") -> list[str]:
+    """The paths where a policy document's shape breaks DEFAULTS': a block of DEFAULTS (an object) set to anything but an
+    object (null only at `POLICY_NULLABLE`), or an object where DEFAULTS holds a plain value. A key DEFAULTS lacks, or one
+    whose default is null, is not checked; nor are notes ("_")."""
+    defaults = DEFAULTS if defaults is None else defaults
+    bad: list[str] = []
+    for key, value in raw.items():
+        if str(key).startswith("_") or key not in defaults:
+            continue
+        path, default = f"{prefix}{key}", defaults[key]
+        if isinstance(default, Mapping):
+            if isinstance(value, Mapping):
+                bad += policy_shape(value, default, f"{path}.")
+            elif not (value is None and path in POLICY_NULLABLE):
+                bad.append(path)
+        elif default is not None and isinstance(value, Mapping):
+            bad.append(path)
+    return bad
+
+
+def policy_layer(raw: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+    """(the layer, its status) from a parsed policy document: an object without its owner keys, else an empty layer. A
+    document whose shape breaks DEFAULTS' (`policy_shape`: e.g. `"gym": null`, `"researcher": 0.4`) is malformed: the
+    whole layer is dropped and the loop alerts, rather than every round failing on the block it replaced."""
+    if not isinstance(raw, Mapping):
+        return {}, {"state": "malformed", "why": f"not a JSON object ({type(raw).__name__})", "ignored": []}
+    bad = policy_shape({k: v for k, v in raw.items() if k not in OWNER_KEYS})  # those are ignored, never read
+    if bad:
+        return {}, {"state": "malformed", "why": f"not the shape of the defaults at {', '.join(sorted(bad)[:8])}", "ignored": []}
+    ignored = sorted(k for k in raw if k in OWNER_KEYS)
+    return {k: v for k, v in raw.items() if k not in OWNER_KEYS}, {"state": "ok", "why": None, "ignored": ignored}
+
+
+def load(root: str | Path | None = None, *, config: Mapping[str, Any] | None = None,
+         policy: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """The swarm's settings: DEFAULTS < config.json "swarm" (and its "gym" block into "gym") < policy.json (`policy`, a
+    parsed document, in place of the repo's file) < <root>/swarm.json, then, with a state root, THE BUDGET tighten-only
+    (`budget_overlay`: <root>/budget.json, else the floor). `_policy` says how the policy layer was read. Without a root
+    (tests, tools) there is no budget block: the Sail guard and the router then read the budget themselves, from their
+    store root's budget.json, the floor when there is none (settings without the block never lift the budget)."""
     if config is None:
         try:
             config = json.loads((REPO / "league" / "config.json").read_text())
@@ -579,6 +672,9 @@ def load(root: str | Path | None = None, *, config: Mapping[str, Any] | None = N
             config = {}
     out = _merge(DEFAULTS, config.get("swarm") or {})
     out["gym"] = _merge(out["gym"], config.get("gym") or {})
+    layer, status = read_policy() if policy is None else policy_layer(policy)
+    out = _merge(out, layer)
+    out["_policy"] = status
     if root is not None:
         path = Path(root) / "swarm.json"
         try:
@@ -619,7 +715,24 @@ def load(root: str | Path | None = None, *, config: Mapping[str, Any] | None = N
                                                        "named": named}
             except Exception:  # noqa: BLE001 - a malformed "forward" block: the settings as merged
                 pass
+        budget_overlay(out, root)
     return out
+
+
+def budget_overlay(out: dict[str, Any], root: str | Path) -> dict[str, Any]:
+    """THE BUDGET, last and tighten-only (league/ops/budget.py `overlay`): `<root>/budget.json`'s research dollars a day
+    cap the spend knobs and become the `budget` block the Sail guard and the router read; no usable file is the floor, and
+    a stale one is never looser than the floor. If the rule itself cannot run, nothing is spent: a budget of zero on both
+    meters, its `read` false (no reading of the rule: the Sail guard names that brake apart from the budget's own)."""
+    try:
+        from ..ops import budget as budget_mod
+
+        return budget_mod.overlay(out, root)
+    except Exception as exc:  # noqa: BLE001 - FAIL CLOSED: no rule, no research spend
+        out["budget"] = {"source": "unavailable", "why": f"the budget rule could not run ({type(exc).__name__})", "at": None,
+                         "state": "no research (the budget rule could not run)", "sail_usd_day": 0.0, "claude_usd_day": 0.0,
+                         "fixed_sail_usd_day": None, "read": False}
+        return out
 
 
 def _roots_lacking(held: Any, wanted: Any) -> list[str] | None:
@@ -723,6 +836,7 @@ def ready_refusal(root: str | Path, ready: Mapping[str, Any], named: str, roots:
     return None
 
 
-__all__ = ["DEFAULTS", "load", "chain_refusal", "ready_refusal", "train_from", "train_from_note", "parse_train_from",
+__all__ = ["DEFAULTS", "load", "read_policy", "policy_layer", "policy_shape", "POLICY_PATH", "OWNER_KEYS",
+           "POLICY_NULLABLE", "budget_overlay", "chain_refusal", "ready_refusal", "train_from", "train_from_note", "parse_train_from",
            "objective_span", "span_years", "train_years", "train_split", "run_timeout", "train_span_text",
            "TRAIN_CORE_START", "TRAIN_EARLIEST", "TRAIN_END", "TRAIN_STARTS"]

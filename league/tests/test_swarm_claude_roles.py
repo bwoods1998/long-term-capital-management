@@ -55,6 +55,8 @@ class RouterCase(unittest.TestCase):
         self.store = SwarmStore(Path(self.tmp.name), clock=self.clock)
         self.addCleanup(self.store.close)
         self.settings = copy.deepcopy(DEFAULTS)
+        # THE BUDGET is not what these tests judge: a line well above every role's own (no block is the floor).
+        self.settings["budget"] = {"source": "test", "sail_usd_day": 1000.0, "claude_usd_day": 1000.0}
         self.month = FakeMonth(1000)
         self.meter = FakeClaudeMeter(100)
         self.sail_calls = []

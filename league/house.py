@@ -706,6 +706,7 @@ class House:
         self.hypotheses: Any = None  # set by the service: the hypothesis foundry (league/hypotheses.py)
         self.backup: Any = None  # set by the service on the House box: a daily checkpoint of the box, kept by Sail
         self.updater: Any = None  # set by the service on the House box while `auto_update` is on (off since Sept 26)
+        self.ops: Any = None  # set by the service on the House box: the House's jobs (league/ops/, `_ops_step`)
         #: The options overhaul's two pluggable steps (`PLUGGABLE_STEPS`), set by league/service.py: the swarm's
         #: `SwarmStep` (league/swarm/hook.py `attach`) and the live options path (league/live); None while unset.
         self.swarm: Any = None
@@ -4024,6 +4025,13 @@ class House:
     def _update(self) -> None:
         outcome = self.updater.check()
         action = outcome.get("action")
+        if action == "drill":
+            # The rollback drill (`python -m league.watchdog drill-rollback`, V3-A): this House runs a copy of
+            # the release with DRILL_BREAK in its root. An error alert every tick is the deliberate break the
+            # watch must roll back; the updater of a drill copy never looks at main.
+            self.alert("error", "drill: deliberate break " + "; ".join(str(r) for r in outcome.get("reasons") or [])[:600],
+                       drill=str(outcome.get("release") or ""))
+            return
         if action == "deploying":
             # A promotion signals this process and a fresh one comes up thirty seconds later, so
             # every research pass still running is thrown away with everything it has read. The
@@ -4036,6 +4044,9 @@ class House:
             # The attestation is the record of what GitHub said about the exact commit (see
             # league/updater.py); a head that is merely waiting for its checks is not news.
             self.ledger.append("ops.deploy", {k: v for k, v in outcome.items() if k in ("action", "release", "reasons", "files", "sha", "attestation")})
+        if outcome.get("warn"):
+            # A launch that had to stop the nightly data job while it was not idle (`NIGHTLY_FORCE_AFTER_SECONDS`).
+            self.alert("warning", str(outcome["warn"])[:700])
         if action in ("refused", "blocked", "waiting") and outcome.get("new"):
             # A warning, never an error: an error alert inside a release's watch rolls THAT release
             # back, and a head that cannot be deployed says nothing about the one running.
@@ -5330,7 +5341,13 @@ class House:
             self.alert("info", f"the floor is open for business again (it had stopped: {told})")
 
     def _expedition_notices(self) -> None:
-        """Tell the owner, once each, when a budget is gone or the expedition's last day is over."""
+        """Tell the owner, once each, when a budget is gone or the expedition's last day is over.
+
+        A budget spent before its last day is an error: paid work stopped early. The last day being over is the
+        run's own scheduled end, a warning: no failure of the House, and none of a release. Oct 3, 2026 (the day
+        after the fourteenth): a canary is a fresh House with nothing told yet, so on every day after the
+        expedition it tells this again on its first tick; as an error it made the watchdog refuse every release,
+        the one carrying a fix included (`league/watchdog.py` `read_health`: any unmarked error in a canary)."""
         told = self._state.setdefault("expedition_told", {})
         for kind, name in (("sail", "Sail"), ("openai", "frontier model")):
             if self.pacer.over(kind) and not told.get(kind):
@@ -5341,7 +5358,8 @@ class House:
                     self.alert("info", f"{self.campaigns.policy['phase']}: {name} allowance closed ({why}). "
                                "New paid work stops; position reconciliation and exits continue. The next phase is not automatically funded.")
                     continue
-                self.alert("error", f"The expedition's {name} spending has stopped: {why} (${spent:.2f} of ${budget}). "
+                self.alert("error" if spent >= budget else "warning",
+                           f"The expedition's {name} spending has stopped: {why} (${spent:.2f} of ${budget}). "
                                     + ("Research passes stop; agents still wake and trade." if kind == "sail" else "Merton's five pull-request roles stop. Audits are not paced and go on under the gateway's monthly cap."))
 
     def _floor_invariants(self) -> None:
@@ -10604,6 +10622,7 @@ class House:
         lap("history_coverage")
         if self.updater is not None and self.updater.due():
             self._background("update", self._update)
+        self._ops_step()  # the House's jobs (league/ops/): due jobs start as one niced child; never waits
         if self.budget is not None and getattr(self.budget, "pacer", None) is None:
             self.budget.pacer = self.pacer
         self._pace_inference()
@@ -10705,6 +10724,29 @@ class House:
         self._health(summary)
         return summary
 
+    def _ops_step(self) -> None:
+        """The House's jobs (league/ops/, LTCM v3): one cheap call a tick when the service gave the House its runner
+        (`league.ops.attach`, on the House box only). It settles the job child that ended, starts at most one due job as
+        its own niced, bounded process, records a missed one, and never waits on a job. A failure is a warning; the
+        next tick tries again."""
+        if self.ops is None:
+            return
+        try:
+            from .ops import tick as ops_tick
+
+            ops_tick(self)
+        except Exception as exc:  # noqa: BLE001 - the jobs never cost the tick
+            self.alert("warning", f"the House's jobs step failed ({type(exc).__name__}: {str(exc)[:200]})")
+
+    def _ops_health(self) -> dict[str, Any] | None:
+        """health.json `ops`: the UTC day's job occurrences (due, late, failed, missed, ...; `league/ops/runner.py`)."""
+        if self.ops is None:
+            return None
+        try:
+            return self.ops.health()
+        except Exception as exc:  # noqa: BLE001 - health is written whatever the jobs' store says
+            return {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
+
     def _health(self, summary: Mapping[str, Any]) -> None:
         now = self.clock()
         with self._state_lock:
@@ -10782,6 +10824,7 @@ class House:
             # H6 (Sept 25, 2026): the restarts of the last day and what became of the research in flight at this one.
             **self._restarts_health(),
             "restart_research": self._restart_research_health(),
+            "ops": self._ops_health(),
         }
         health["tick_steps"] = self._tick_steps(str(summary["at"]))  # last: its `health` step is this block
         tmp = self.root / "health.tmp"

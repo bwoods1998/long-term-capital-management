@@ -485,7 +485,11 @@ class Swarm:
         recent = [json.loads(row["payload"]) for row in
                   self.store._all("SELECT payload FROM events WHERE kind='swarm.cycle' AND at >= ? ORDER BY seq DESC LIMIT 3000", (since,))]
         seconds = sorted(float(p.get("seconds") or 0) for p in recent[:300] if not p.get("error"))
-        return {"families_alive": len(self.store.families(alive=True)), "running": len(self.scheduler.running),
+        with self.scheduler._lock:
+            running = sorted(self.scheduler.running)
+        return {"families_alive": len(self.store.families(alive=True)), "running": len(running),
+                # The families in a researcher's cycle now (`Scheduler.busy`): the House's daily hygiene spares them too.
+                "running_families": running,
                 "holding": self.scheduler.waiting(),
                 "totals": self.store.totals(), "spend_last_hour": spend, "usd_per_hour": round(sum(spend.values()), 4),
                 "median_cycle_seconds": seconds[len(seconds) // 2] if seconds else None, "cycles_last_hour": len(recent),
@@ -734,12 +738,38 @@ class Swarm:
         log(payload["text"])
         return payload
 
+    def policy_notice(self) -> dict[str, Any] | None:
+        """SETTINGS AS CODE (`settings.read_policy`): one `swarm.status` alert (and a log line) for each distinct problem
+        with the repo's policy.json (not a JSON object or not the defaults' shape, or an owner key in it that is ignored),
+        never one a loop. A missing file is no problem. Returns the event's payload when one was raised."""
+        status = self.settings.get("_policy")
+        if not isinstance(status, Mapping) or (status.get("state") != "malformed" and not status.get("ignored")):
+            return None
+        seen = json.dumps(status, sort_keys=True, default=str)
+        if self.store.get("policy_notice") == seen:
+            return None
+        self.store.put("policy_notice", seen)
+        if status.get("state") == "malformed":
+            text = (f"league/swarm/policy.json was not read ({status.get('why')}): the swarm runs on config.json and "
+                    "swarm.json alone until a release fixes it")
+        else:
+            text = (f"league/swarm/policy.json sets {', '.join(map(str, status.get('ignored') or []))}, the owner's "
+                    "switches: ignored there (they are read from swarm.json only)")
+        payload = {"action": "policy_layer", "alert": True, **dict(status), "text": text}
+        self.store.event("swarm.status", None, payload)
+        log(text)
+        return payload
+
     def step(self) -> None:
         """One pass of the main loop (tests call it directly)."""
         fresh = settings_mod.load(self.root, config=self.config)
         self.settings.update(fresh)  # in place (every piece holds this dict), and no key ever disappears mid-read
         try:
             self.train_span_notice()
+        except Exception:  # noqa: BLE001 - a notice never stops the loop
+            pass
+        try:
+            self.policy_notice()
         except Exception:  # noqa: BLE001 - a notice never stops the loop
             pass
         try:

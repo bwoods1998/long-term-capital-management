@@ -13,6 +13,9 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from league.constitution import digest
+# Importing league.tests switches on the suite's isolation (an empty policy layer, league/tests/__init__.py). This is a
+# laptop tool, outside the House's import closure, which must never reach league.tests
+# (league/tests/test_swarm_settings_policy.py TheHouseNeverImportsTheTests holds it to that).
 from league.tests.test_episodes import Episodes
 
 

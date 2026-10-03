@@ -2,8 +2,9 @@
 // the venue credentials are added on the way out and never come back. The whole surface is:
 //
 //   GET             /v1/health               caps, counters, the caps by maximum loss, kill switch, frontier month, pulls, watchdog
-//   POST            /v1/kill                 engage the kill switch: the runtime token may
+//   POST            /v1/kill                 engage the kill switch: the runtime token may, and so may the owner's
 //   POST            /v1/unkill               release it: GATEWAY_ADMIN_TOKEN only, the owner's
+//                                            (both written to the admin log, with every admin-token call: V3-A)
 //   GET|POST|DELETE /v1/kalshi/<path>        signed with the Kalshi key, forwarded to the venue
 //   GET|POST|DELETE /v1/alpaca/<path>        keyed with the Alpaca headers, forwarded to the venue; its orders are
 //                                            options capped by maximum loss against the account's own equity, and
@@ -11,7 +12,7 @@
 //   GET|POST|DELETE /v1/alpaca-paper/<path>  the practice account: same paths, simulated money, no caps;
 //                                            its option orders are held to defined-risk shapes
 //   GET             /v1/kalshi/ws-auth       handshake headers for the Kalshi WebSocket, 30 s of life
-//   POST            /v1/notify               one trade notice mailed to the owner, capped per day
+//   POST            /v1/notify               one notice mailed to the owner (a trade, a stop, a funding cliff), capped per day
 //   GET             /v1/frontier/models      the model ids the OpenAI key can reach, and which are priced
 //   POST            /v1/frontier/responses   one frontier call, reserved and settled against the month
 //   GET             /v1/claude/models        the Claude model ids the Anthropic key can reach, and which are priced
@@ -26,6 +27,11 @@
 //   POST            /v1/github/pr            a proposal becomes a branch and a pull request, never a push
 //   GET             /v1/github/pr/<n>        that pull request and its CI, so the VM can watch it
 //   GET             /v1/github/pr/<n>/failures  why CI refused it: failed runs and their annotations
+//   GET             /v1/github/pr/<n>/files?head_sha=  the exact change at that head, file by file (lib/pulls.mjs; V3-A)
+//   POST            /v1/github/close         close one engineer pull request at its exact head (lib/pulls.mjs; V3-A)
+//   POST            /v1/github/docs          one desk page committed to main under docs/runs/desk/ (lib/desk.mjs; V3-A)
+//   POST            /v1/github/review        the automated reviewer's verdict on one engineer pull request's exact head
+//   POST            /v1/github/merge         squash-merge one engineer pull request inside lib/merge.mjs's walls (V3-A)
 //
 // Anything else is a 404, and so is any venue name but these three (Coinbase was removed on
 // Sept 19, 2026). A venue path outside `caps.VENUE_PATHS` is a 403 before any key is touched.
@@ -40,8 +46,17 @@
 // the gate at all.
 //
 // The GitHub routes move no money, so the kill switch does not stop them: a halted floor may still
-// propose its own repair. There is deliberately no merge route. CI judges a pull request and a
-// repository workflow merges it; the most this gateway can do to `main` is ask.
+// propose its own repair, and publish its desk page. The one exception is the merge, which lands
+// code the updater then deploys: while the switch is engaged it is refused (gate.mergeReserve, 423
+// `kill_switch`): with auto_update on, a merge is a deploy, and the owner's stop must freeze the
+// code the owner is looking at. Proposals, reviews, closes and docs stay open.
+// Until V3-A there was no merge route. Since V3-A (the owner's decision D5)
+// one exists for the engineer's research-class pull requests alone: an `engineer/<lane>/` branch, at
+// an exact head commit, on green `checks.yml` jobs and a recorded approve, touching no protected path
+// (lib/protected.mjs) and nothing outside its lane (github.ENGINEER_LANES; WP8b) or outside what the
+// harness lanes declare (github.ENGINEER_SURFACE), at most two a New York day (lib/merge.mjs). Every
+// other branch is still merged by a repository workflow or by the owner. The desk's docs route
+// commits one page under docs/runs/desk/ and nothing else (lib/desk.mjs).
 //
 // `gate` is the Durable Object stub (or, in tests, the gate itself): every method is awaited, so
 // the same router works against both.
@@ -63,6 +78,9 @@ import * as typesafe from './typesafe.mjs';
 import * as web from './fetch.mjs';
 import * as library from './library.mjs';
 import * as github from './github.mjs';
+import * as desk from './desk.mjs';
+import * as merge from './merge.mjs';
+import * as pulls from './pulls.mjs';
 
 export const VENUES = ['kalshi', 'alpaca', 'alpaca-paper'];
 //: Venues that hold no real money. Their orders are never metered and the kill switch does not
@@ -109,8 +127,27 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/+$/, '') || '/';
 
+  // Who is calling (V3-A, WP8: the admin log). The owner's token is accepted at /v1/unkill and /v1/kill (stopping is
+  // never gated), the runtime token everywhere but /v1/unkill. Every call that presents the owner's token, and every
+  // kill and unkill, is written to the admin log with its time, the caller's kind, the route and the answer; a call
+  // with no accepted token at the switch is counted. Nothing of the request but its route and method is kept.
   const ownerAction = path === '/v1/unkill';
-  if (!authorized(request, ownerAction ? env.GATEWAY_ADMIN_TOKEN : env.GATEWAY_TOKEN)) {
+  const switchAction = ownerAction || path === '/v1/kill';
+  const admin = authorized(request, env.GATEWAY_ADMIN_TOKEN);
+  const runtime = authorized(request, env.GATEWAY_TOKEN);
+  const caller = admin ? 'admin' : runtime ? 'runtime' : 'none';
+  const allowed = ownerAction ? admin : path === '/v1/kill' ? admin || runtime : runtime;
+  const audit = async status => {
+    try {
+      await gate.adminRecord({ caller, action: 'call', route: path, method: request.method, status, at: now() });
+    } catch {
+      // The log is a record, never a gate on an answer that refuses or reads.
+    }
+  };
+  if (!allowed) {
+    // A caller with no accepted token is never written: the Gate serializes every order, and a stranger's flood at the
+    // public switch must not queue writes in front of them.
+    if (caller !== 'none' && (admin || switchAction)) await audit(401);
     return fail('Unauthorized.', 401, { 'WWW-Authenticate': 'Bearer' });
   }
 
@@ -121,9 +158,17 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
     // refresh reads both venues one after the other. The frontier path refreshes it (ten minutes).
     return json(await gate.status());
   }
-  if (path === '/v1/kill' || path === '/v1/unkill') {
-    if (request.method !== 'POST') return fail('Method not allowed.', 405, { Allow: 'POST' });
-    await gate.setKill(path === '/v1/kill');
+  if (switchAction) {
+    if (request.method !== 'POST') {
+      if (admin) await audit(405);
+      return fail('Method not allowed.', 405, { Allow: 'POST' });
+    }
+    try {
+      // The switch and its admin-log entry in one step: a release whose entry cannot be written releases nothing.
+      await gate.setKill(path === '/v1/kill', now(), { caller, route: path, method: request.method });
+    } catch {
+      return json({ error: 'The kill switch could not be changed; it is as it was.', cap: 'setup' }, 503);
+    }
     return json(await gate.status());
   }
 
@@ -236,6 +281,18 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
     if (request.method !== 'POST') return fail('Method not allowed.', 405, { Allow: 'POST' });
     return proposePull(request, env, { gate, fetcher, now });
   }
+  if (path === '/v1/github/docs') {
+    if (request.method !== 'POST') return fail('Method not allowed.', 405, { Allow: 'POST' });
+    return deskDocs(request, env, { gate, fetcher, now });
+  }
+  if (path === '/v1/github/review') {
+    if (request.method !== 'POST') return fail('Method not allowed.', 405, { Allow: 'POST' });
+    return recordReview(request, env, { gate, fetcher, now });
+  }
+  if (path === '/v1/github/merge') {
+    if (request.method !== 'POST') return fail('Method not allowed.', 405, { Allow: 'POST' });
+    return mergePull(request, env, { gate, fetcher, now });
+  }
   const refusals = /^\/v1\/github\/pr\/([1-9][0-9]{0,8})\/failures$/.exec(path);
   if (refusals) {
     // Read-only and free: why CI refused, so a proposal can be revised against the real reason.
@@ -244,6 +301,21 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
     if (!account) return fail('GitHub is not configured.', 503);
     const found = await github.pullFailures({ ...account, number: Number(refusals[1]), fetcher });
     return found.error ? fail(found.error, found.status) : json(found);
+  }
+  if (path === '/v1/github/close') {
+    if (request.method !== 'POST') return fail('Method not allowed.', 405, { Allow: 'POST' });
+    return closeEngineerPull(request, env, { fetcher });
+  }
+  const changes = /^\/v1\/github\/pr\/([1-9][0-9]{0,8})\/files$/.exec(path);
+  if (changes) {
+    // Read-only and free: the exact diff at one head, for the automated reviewer (lib/pulls.mjs).
+    if (request.method !== 'GET') return fail('Method not allowed.', 405, { Allow: 'GET' });
+    const account = github.configured(env);
+    if (!account) return fail('GitHub is not configured.', 503);
+    const asked = pulls.admitFilesQuery(url);
+    if (asked.error) return fail(asked.error, asked.status);
+    const found = await pulls.pullFiles({ ...account, number: Number(changes[1]), headSha: asked.headSha, fetcher });
+    return found.error ? refusedWith(found) : json(found);
   }
   const watched = /^\/v1\/github\/pr\/([1-9][0-9]{0,8})$/.exec(path);
   if (watched) {
@@ -776,12 +848,14 @@ function claudeStream(upstream, { admitted, settle, waitUntil }) {
  * One proposal from the frontier model, opened as a pull request. The proposal is checked against
  * its role's paths before GitHub hears of it, and takes one of the day's places before the first
  * call; the place is given back when the attempt made no new branch, so a retry of a proposal
- * that is already open costs nothing and a GitHub outage does not spend the day.
+ * that is already open costs nothing and a GitHub outage does not spend the day. The engineer's
+ * proposals (V3-A, WP8b) may be larger and are counted on a day of their own (`enginePull`).
  */
 async function proposePull(request, env, { gate, fetcher, now }) {
   const account = github.configured(env);
   if (!account) return fail('GitHub is not configured.', 503);
-  const body = await readBody(request, github.MAX_REQUEST_BYTES);
+  // Read up to the largest request any role may send; the role's own ceiling is applied once the role is known.
+  const body = await readBody(request, github.ENGINEER_MAX_REQUEST_BYTES);
   if (body.error) return fail(body.error, 413);
   let parsed;
   try {
@@ -789,12 +863,151 @@ async function proposePull(request, env, { gate, fetcher, now }) {
   } catch {
     return fail('The proposal must be JSON.', 400);
   }
+  if ((body.size || 0) > github.limitsFor(parsed?.role).requestBytes) return fail('Payload too large.', 413);
   const proposal = github.admit(parsed);
   if (proposal.error) return json({ error: proposal.error, ...(proposal.path !== undefined ? { path: proposal.path } : {}) }, proposal.status);
+  if (proposal.role === 'engineer') return enginePull(proposal, account, { gate, fetcher, now });
   const hold = await gate.pullReserve({ at: now() });
   if (!hold.ok) return json({ error: hold.error, cap: hold.cap }, hold.status, { 'Retry-After': '3600' });
   const result = await github.openPullRequest({ ...account, proposal, fetcher });
   if (!result.created) await gate.pullRefund({ day: hold.day, at: now() });
   if (result.error) return fail(result.error, result.status);
   return json({ ok: true, branch: result.branch, number: result.number, url: result.url, head: result.head });
+}
+
+/**
+ * The engineer's admitted proposal (V3-A, WP8b): one of the New York day's ENGINEER_PULLS_PER_DAY places, apart from
+ * the other roles' day, then the same pull request as any role's. The place is given back when the attempt made no new
+ * branch (GitHub's no, or a retry that found its own pull request); one that may have made a branch keeps it.
+ */
+async function enginePull(proposal, account, { gate, fetcher, now }) {
+  const hold = await gate.engineerPullReserve({ branch: proposal.branch, at: now() });
+  if (!hold.ok) return refusedWith(hold);
+  const result = await github.openPullRequest({ ...account, proposal, fetcher });
+  const outcome = result.created ? (result.error ? 'unknown' : 'opened') : (result.error ? 'refused' : 'existing');
+  try {
+    await gate.engineerPullSettle({ day: hold.day, id: hold.id, outcome, pr: result.number ?? null, at: now() });
+  } catch {
+    // The place stays taken; the record of what became of it is the only thing lost.
+  }
+  if (result.error) return fail(result.error, result.status);
+  return json({ ok: true, branch: result.branch, number: result.number, url: result.url, head: result.head, lane: proposal.lane });
+}
+
+/** A JSON body read within `limit` bytes: `{ parsed }`, or `{ response }`, the refusal to answer with. */
+async function jsonBody(request, limit) {
+  const body = await readBody(request, limit);
+  if (body.error) return { response: fail(body.error, 413) };
+  try {
+    return { parsed: JSON.parse(body.text || '') };
+  } catch {
+    return { response: fail('The request must be JSON.', 400) };
+  }
+}
+
+/** A refusal that names its rule (`refused`) or cap, as the docs, review and merge routes answer. */
+const refusedWith = (outcome, extra = {}) => json({
+  error: outcome.error, ...(outcome.refused ? { refused: outcome.refused } : {}), ...(outcome.cap ? { cap: outcome.cap } : {}), ...extra,
+}, outcome.status || 502, outcome.status === 429 ? { 'Retry-After': '3600' } : {});
+
+/**
+ * One desk page committed to main (V3-A, WP8; lib/desk.mjs): admitted by its path, size, text and message first, then
+ * compared with what main holds (the same text again commits nothing and takes no place), then one of the day's
+ * DOCS_PER_DAY places, then GitHub's Contents API. A place is given back only when GitHub answered no.
+ */
+async function deskDocs(request, env, { gate, fetcher, now }) {
+  const account = github.configured(env);
+  if (!account) return fail('GitHub is not configured.', 503);
+  const body = await jsonBody(request, desk.MAX_REQUEST_BYTES);
+  if (body.response) return body.response;
+  const doc = desk.admitDoc(body.parsed, env);
+  if (doc.error) return refusedWith(doc);
+  if (await gate.docsToday(now()) >= desk.DOCS_PER_DAY) {
+    return refusedWith({ status: 429, cap: 'docs_day', error: `Today's cap of ${desk.DOCS_PER_DAY} docs commits is already reached.` });
+  }
+  const held = await desk.readDoc({ ...account, path: doc.path, fetcher });
+  if (held.error) return refusedWith(held);
+  if (held.sha === desk.blobSha(doc.content)) return json({ ok: true, committed: false, unchanged: true, path: doc.path });
+  const hold = await gate.docsReserve({ path: doc.path, at: now() });
+  if (!hold.ok) return refusedWith(hold);
+  const result = await desk.putDoc({ ...account, doc, sha: held.sha, fetcher });
+  const outcome = result.committed === true ? 'committed' : result.committed === false ? 'refused' : 'unknown';
+  try {
+    await gate.docsSettle({ day: hold.day, id: hold.id, outcome, commit: result.commit ?? null, at: now() });
+  } catch {
+    // The place stays taken; the record of what became of it is the only thing lost.
+  }
+  if (result.committed !== true) return refusedWith({ ...result, refused: result.committed === null ? 'no_answer' : 'github' });
+  return json({ ok: true, committed: true, path: doc.path, commit: result.commit, docs_today: hold.count });
+}
+
+/**
+ * The automated reviewer's verdict (V3-A, WP8; lib/merge.mjs): recorded for one engineer pull request at its exact
+ * current head, read from GitHub first. A reject is final for that commit.
+ */
+async function recordReview(request, env, { gate, fetcher, now }) {
+  const account = github.configured(env);
+  if (!account) return fail('GitHub is not configured.', 503);
+  const body = await jsonBody(request, merge.MAX_REQUEST_BYTES);
+  if (body.response) return body.response;
+  const review = merge.admitReview(body.parsed);
+  if (review.error) return refusedWith(review);
+  const target = await merge.reviewTarget({ ...account, number: review.pr, headSha: review.head_sha, fetcher });
+  if (target.error) return refusedWith(target);
+  const recorded = await gate.reviewRecord({ pr: review.pr, sha: review.head_sha, verdict: review.verdict, reasons: review.reasons,
+    opened_at: typeof target.pull?.created_at === 'string' ? target.pull.created_at : null, at: now() });
+  if (!recorded.ok) return refusedWith(recorded);
+  return json({ ok: true, pr: review.pr, head_sha: review.head_sha, verdict: recorded.verdict, at: recorded.at,
+    ...(recorded.duplicate ? { duplicate: true } : {}) });
+}
+
+/** Close one engineer pull request at its exact head (V3-A; lib/pulls.mjs): a superseded revision or a rejected one. */
+async function closeEngineerPull(request, env, { fetcher }) {
+  const account = github.configured(env);
+  if (!account) return fail('GitHub is not configured.', 503);
+  const body = await jsonBody(request, merge.MAX_REQUEST_BYTES);
+  if (body.response) return body.response;
+  const asked = merge.admitMerge(body.parsed);
+  if (asked.error) return refusedWith(asked);
+  const result = await pulls.closePull({ ...account, number: asked.pr, headSha: asked.head_sha, fetcher });
+  if (result.error) return refusedWith(result);
+  return json({ ok: true, closed: true, pr: asked.pr, head_sha: asked.head_sha });
+}
+
+/**
+ * Squash-merge one engineer pull request (V3-A, WP8; lib/merge.mjs). The Gate's checks first (the day's count, an
+ * approve and no reject on the exact commit), then GitHub's (the pull request, its files, its CI), then one of the
+ * day's MERGES_PER_DAY places, taken in the step that checks the kill switch and the review again, then the merge of
+ * exactly that commit. A place is given back only when GitHub answered a definite no (a 4xx); a merge nothing answered,
+ * or answered with a 5xx, stays counted (`merged: "unknown"`).
+ */
+async function mergePull(request, env, { gate, fetcher, now }) {
+  const account = github.configured(env);
+  if (!account) return fail('GitHub is not configured.', 503);
+  const body = await jsonBody(request, merge.MAX_REQUEST_BYTES);
+  if (body.response) return body.response;
+  const asked = merge.admitMerge(body.parsed);
+  if (asked.error) return refusedWith(asked);
+  if (await gate.mergesToday(now()) >= merge.MERGES_PER_DAY) {
+    return refusedWith({ status: 429, cap: 'merge_day', error: `Today's cap of ${merge.MERGES_PER_DAY} merges is already reached.` });
+  }
+  const review = await gate.reviewFor({ pr: asked.pr, sha: asked.head_sha });
+  if (review.verdict !== 'approve') {
+    return refusedWith({ status: 409, refused: review.verdict === 'reject' ? 'review_rejected' : 'review_missing',
+      error: review.verdict === 'reject' ? 'The automated review rejected that commit.' : 'No approve is recorded for that commit.' });
+  }
+  const vet = await merge.vetMerge({ ...account, number: asked.pr, headSha: asked.head_sha, fetcher });
+  if (vet.error) return refusedWith(vet);
+  const hold = await gate.mergeReserve({ pr: asked.pr, sha: asked.head_sha, at: now() });
+  if (!hold.ok) return refusedWith(hold);
+  const result = await merge.squashMerge({ ...account, number: asked.pr, headSha: asked.head_sha, title: vet.title, ci: vet.ci, fetcher });
+  const outcome = result.merged === true ? 'merged' : result.merged === false ? 'refused' : 'unknown';
+  try {
+    await gate.mergeSettle({ day: hold.day, id: hold.id, outcome, merge_sha: result.sha ?? null, at: now() });
+  } catch {
+    // The place stays taken; the record of what became of it is the only thing lost.
+  }
+  if (result.merged !== true) return refusedWith({ ...result, refused: result.merged === null ? 'no_answer' : result.refused || 'github' },
+    { merged: result.merged === null ? 'unknown' : false });
+  return json({ ok: true, merged: true, pr: asked.pr, head_sha: asked.head_sha, sha: result.sha, ci: vet.ci, merges_today: hold.count });
 }

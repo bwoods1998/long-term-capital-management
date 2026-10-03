@@ -1,0 +1,3 @@
+{
+  "_about": "The settings layer the league's tests read in place of league/swarm/policy.json (league/tests/__init__.py): the same shape, and it sets nothing, so a test judges the code against settings.py's DEFAULTS and what the test itself sets, whatever the House's research settings are today."
+}

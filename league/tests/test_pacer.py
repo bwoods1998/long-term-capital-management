@@ -684,3 +684,51 @@ class OneBudgetOneNumber(HouseCase):
         self.house.economy.charge(agent.id, self.house.economy.balance(agent.id), "spent it all")
         self.house.keep_population(refill=False)
         self.assertNotIn(agent.id, [a.id for a in self.house.registry.living()])
+
+
+class TheExpeditionsLastDay(HouseCase):
+    """Oct 3, 2026, the day after the expedition's fourteenth: a canary (a fresh House, nothing told yet) told the run's
+    scheduled end as an error on its first tick, and the watchdog refused every release on it, a fix's included."""
+
+    def after(self, days):
+        rules = CONSTITUTION["budgets"]["expedition"]
+        start = datetime.fromisoformat(rules["start"]).replace(tzinfo=timezone.utc).timestamp()
+        self.clock.now = start + (int(rules["days"]) + days) * 86400 + 3600  # an hour into that day
+        return int(rules["days"])
+
+    def said(self):
+        return [e.payload for e in self.house.ledger.iter(kinds="ops.alert") if "expedition" in e.payload["text"]]
+
+    def test_the_last_day_being_over_is_a_warning_told_once_a_kind(self):
+        days = self.after(0)
+        self.house.pacer = Pacer(self.house.ledger, clock=self.clock)  # the constitution's own expedition
+        self.house._expedition_notices()
+        self.house._expedition_notices()
+        said = self.said()
+        self.assertEqual([a["level"] for a in said], ["warning", "warning"], said)
+        self.assertTrue(all(f"day {days} is over" in a["text"] for a in said), said)
+        self.assertEqual([("Sail" in a["text"], "frontier model" in a["text"]) for a in said], [(True, False), (False, True)])
+
+    def test_a_budget_spent_before_its_last_day_is_still_an_error(self):
+        today = __import__("league.ledger", fromlist=["now_iso"]).now_iso(self.clock)[:10]
+        self.house.pacer = Pacer(self.house.ledger, clock=self.clock,
+                                 expedition={"start": today, "days": 10, "sail_usd": "50", "openai_usd": "1"})
+        self.house.ledger.append("merton.pass", {"role": "architect", "cost_usd": "1.00"})
+        self.house.pacer._cache.clear()
+        self.house._expedition_notices()
+        said = self.said()
+        self.assertEqual([a["level"] for a in said], ["error"], said)
+        self.assertIn("its budget is spent", said[0]["text"])
+
+    def test_a_fresh_house_is_healthy_to_the_watchdog_on_any_day_after_the_expedition(self):
+        """What the watchdog reads of a canary's first tick: no error alert is a reason, the day after and a year on."""
+        from league.watchdog import read_health
+
+        for days in (0, 400):
+            with self.subTest(days_after=days):
+                self.after(days)
+                self.house._state.pop("expedition_told", None)  # a canary's state is fresh every time
+                self.house.tick()
+                health = read_health(Path(self.dir.name) / "house", now=self.clock(), since_seq=0)
+                self.assertEqual([r for r in health.reasons if "alert" in r], [], health.reasons)
+                self.assertEqual([a["level"] for a in self.said()][-2:], ["warning", "warning"])

@@ -24,18 +24,22 @@ the House (Sailbox)        this Worker                                  outside
 ## Routes the options House uses
 
 Every route takes `Authorization: Bearer $GATEWAY_TOKEN` except `/v1/unkill`, which takes only the
-owner's `GATEWAY_ADMIN_TOKEN`.
+owner's `GATEWAY_ADMIN_TOKEN`; `/v1/kill` takes either (V3-A: stopping is never gated).
 
 | Route | What it does |
 |---|---|
 | `GET /v1/health` | the kill switch, caps and today's counters, the OpenAI month, the Claude meter (`claude`: funded total, spent, in flight, remaining, holds, overruns, the priced models, `by_role`, `by_agent`, stop reasons, geographies), Sail's balance and the House box's state; never reads a venue itself |
-| `POST /v1/kill`, `POST /v1/unkill` | engage the kill switch (any token), release it (owner only) |
+| `POST /v1/kill`, `POST /v1/unkill` | engage the kill switch (either token), release it (owner only); both written to the admin log |
 | `/v1/alpaca/<path>` | the Brokerage Account (orders to `api.alpaca.markets`, market data to `data.alpaca.markets`) |
 | `/v1/alpaca-paper/<path>` | the paper account: never metered, not stopped by the kill switch, held to the same defined-risk shapes |
 | `POST /v1/frontier/responses`, `GET /v1/frontier/models` | one metered OpenAI Responses call; the models the key reaches |
 | `POST /v1/claude/messages` | one Claude Messages call, reserved and settled against the funded total; streamed when `stream: true`; stopped by the kill switch |
 | `GET /v1/claude/models`, `GET /v1/claude/request/<id>` | the Claude models the key reaches and which are priced; what became of the House's call `<id>` (its `X-LTCM-Request`): held, settled, unknown, released or absent |
 | `POST /v1/github/pr`, `GET /v1/github/pr/<n>[/failures]` | open a pull request from a proposal; read its state and CI |
+| `GET /v1/github/pr/<n>/files?head_sha=`, `POST /v1/github/close` | the exact diff of a pull request at one head; close one engineer pull request at its head (V3-A, below) |
+| `POST /v1/github/docs` | commit one desk page `docs/runs/desk/<date>[-slug].md` to `main` (V3-A, below) |
+| `POST /v1/github/review`, `POST /v1/github/merge` | record the automated reviewer's verdict on an engineer pull request's exact head; squash-merge it inside the walls below (V3-A) |
+| `POST /v1/notify` | one notice to the owner: a `live_stop`, a `funding` cliff (V3-A), a `test` |
 | `GET /v1/research/search?q=&cat=&max=` | the research library: up to `max` (1-10) arXiv papers posted before 2025 for plain keywords, each pinned to a version (below) |
 | `GET /v1/research/read?id=&start=&chars=` | one pinned version's metadata and a window (at most 10,000 characters) of its text |
 | `GET /v1/research/health` | the library's pace, lease and day's count (the same `library` block `/v1/health` carries) |
@@ -43,7 +47,8 @@ owner's `GATEWAY_ADMIN_TOKEN`.
 Still in the code until the prune removes them (Wave 2b), and unused by the options House:
 `/v1/kalshi/*` and `/v1/kalshi/ws-auth`, `/v1/typesafe/systemone` (Jev), `/v1/web/fetch`,
 and the crypto and stock order paths (the close of an assignment's shares stays). `/v1/notify`
-mails the owner a `live_stop` notice when a real-money stop trips (Sept 26, 2026).
+mails the owner a `live_stop` notice when a real-money stop trips (Sept 26, 2026), and a `funding`
+notice when the budget rule finds a prefund under its card line (V3-A, below).
 
 ## The caps
 
@@ -59,7 +64,7 @@ account. **Reads and cancels always pass.** Deployed values (`wrangler.jsonc`, d
 | `MAX_DAY_OPEN_ORDERS` | 250 | no order OPENS once the day's orders (exits included) reach it: the last 50 are kept for exits (`403 {cap: "day_open_orders"}`) |
 | `CREDIT_MIN_EQUITY_USD` | 2000 | a credit structure (credit vertical, iron condor, iron butterfly) opens only at this equity or more |
 | `EQUITY_CAP_MAX_AGE_MS` | 120000 | the oldest equity reading an opening order is sized against |
-| `OPTION_STRUCTURES_REAL` | `debit_vertical,long_butterfly,long_call,long_put` | the types a real OPEN may be: exactly the constitution's `options_money.real_types` under $2,000 of equity; `off` opens none. Paper structures and closes of already held real positions go whatever it says |
+| `OPTION_STRUCTURES_REAL` | `debit_vertical,long_butterfly,long_call,long_put` (V3-A part 1 leaves it so; `credit_vertical,iron_condor,iron_butterfly` join it only in the credit-types release, with the constitution's list) | the types a real OPEN may be: exactly the constitution's `options_money.real_types`; the credit types only at `CREDIT_MIN_EQUITY_USD` of the gateway's own equity reading; `off` opens none. Paper structures and closes of already held real positions go whatever it says |
 | `CAP_TIMEZONE` | America/New_York | the calendar the day rolls on |
 | `MAX_ORDER_USD`, `MAX_ORDER_USD_KALSHI`, `MAX_DAY_USD` | 75, 75, 4000 | Kalshi only (dead until the prune removes it); the real account's orders never spend Kalshi's day |
 
@@ -230,9 +235,113 @@ on them, so the swarm gets a library instead, and the date rule is enforced here
   [{ "binding": "LIBRARY", "id": "<id>" }],` (the comment by `LIBRARY_DAY_UPSTREAM` says the same) and merge it with the
   library to `main`; then deploy the gateway from a clean checkout of exactly `origin/main` (`git rev-parse HEAD` equal
   to `git rev-parse origin/main`, `git status --porcelain` empty), never from a branch, which would drop whatever else
-  `main` holds: `npm run check && npm test`, `npx wrangler deploy`. No Durable Object class is added (a new class would
-  end `wrangler rollback` for the gateway that carries real orders); never delete the namespace once a version has
-  bound it.
+  `main` holds: `npm run check && npm test`, `npx wrangler deploy` (as run then; today the pinned
+  `npx wrangler@4.129.1 deploy`, below). No Durable Object class is added (a new class would end `wrangler rollback` for
+  the gateway that carries real orders); never delete the namespace once a version has bound it.
+
+## The desk's own writes and the admin log (LTCM v3, V3-A)
+
+The 30-day unattended clock needs the House to publish its record and merge its engineer's research-class changes with
+no laptop step, and the owner to see that nothing else touched production. Four additions, each walled in code (a
+constant changes only by a gateway deploy):
+
+- **`POST /v1/github/docs`** ([lib/desk.mjs](lib/desk.mjs)) `{path, content, message?}`: one file committed straight
+  to `main` through the Contents API. The path is `docs/runs/desk/<YYYY-MM-DD>[-<slug>].md` with a real date and
+  nothing else; the content is UTF-8 text without NUL, at most 64 KB, carrying no credential the gateway holds and no
+  key-shaped text (a private key block, a GitHub token, an `sk-` key): `403 {refused: "secret"}`; the message is
+  `desk: <one line>` plus a footer. At most 6 commits a New York day (`429 {cap: "docs_day"}`); the same text again
+  commits nothing and takes no place (`{committed: false, unchanged: true}`); GitHub's no gives the place back; no
+  answer keeps it. What the page says is the House's own public filter (`league/ops` scoreboard).
+- **`POST /v1/github/review`** `{pr, head_sha, verdict: "approve"|"reject", reasons}`: the automated reviewer's
+  verdict, kept by the Gate for that exact commit after the pull request is read (open, an
+  `engineer/<lane>/<slug>-<hash>` branch of this repository aimed at `main`, headed by `head_sha`). A reject is final
+  for its commit (an approve after it is `409 {refused: "review_rejected"}`); a revision is a new commit, reviewed
+  again. Rejected commits are kept apart from the verdict list (the last 2,000); once one has been forgotten, an approve
+  of a pull request opened no later than it is `409 {refused: "review_forgotten"}`, and an approve recorded no later
+  than it no longer counts. Nothing is written to GitHub. The reviewer and the engineer present the same runtime token:
+  the gateway records verdicts, it cannot tell who gave them, so the review is as independent as the House's own jobs
+  keep it.
+- **`POST /v1/github/merge`** `{pr, head_sha}` ([lib/merge.mjs](lib/merge.mjs)): a squash merge of exactly
+  `head_sha`, only when the branch is `engineer/<lane>/<slug>-<8 hex>` with a known lane and lives in this repository,
+  the pull request is open, no draft and aimed at `main`; the latest `checks.yml` run on that commit finished `success`
+  with the jobs `gateway`, `tests (3.11)` and `tests (3.14)` each `success`; an approve and no reject is recorded for
+  that commit; no changed file (either name of a rename) is protected ([lib/protected.mjs](lib/protected.mjs): the
+  list is `league/ci.py` FORBIDDEN, the updater's own wall, and `league/config.json`, held to that by a test on each
+  side: the judges and money rules, the House's job framework `league/ops/`, `league/live/`, `league/gym/`, the swarm's
+  gate, bands, evaluator, settings, `policy.json` and store, `ltcm/data/`, `scripts/data/`, every module `league/live/`
+  and `league/gym/` import or seal into the decider (`league/__init__.py`, `league/structure_core.py`,
+  `ltcm/performance.py`, ...), the swarm's spend limits, the harness loop's objective, `.github/`, `gateway/`,
+  `deploy/`, `league/house.py`; tests hold each source list as a subset; a package, compiled module or `.pyc` that would
+  shadow a protected module, any `.pth`, `.so` or `sitecustomize.py`, and git's own `.git*` files); every one lies in
+  the engineer's lane surfaces (`outside_surface`; below) and inside the branch's own lane (`lane_path`), and a
+  candidate's test file is only ever added, never changed, removed or renamed (`outside_surface`); all read whole from
+  GitHub's list (at most 300 files); at most 2 merges a New York day (`429 {cap: "merge_day"}`); the kill switch not
+  engaged (`423 {cap: "kill_switch"}`: with `auto_update` on a merge is a deploy, and the owner's stop must freeze the
+  code being looked at). The day's place is taken in one step with the switch and the review checked again. Every
+  refusal names its rule in `refused` (`review_missing`, `review_rejected`, `branch`, `fork`, `base`, `not_open`,
+  `draft`, `head_moved`, `protected_path`, `outside_surface`, `lane_path`, `files`, `ci_missing`, `ci_pending`,
+  `ci_failed`, `ci_jobs`, `github`, `no_answer`). A merge GitHub refused with a 4xx gives its place back; one nothing
+  answered, or answered with a 5xx, keeps it (`merged: "unknown"`); the docs route does the same. The proposal, review,
+  close and docs routes stay open under the kill switch: they move no money and land no code.
+- **The engineer's pull requests** (WP8b; [lib/github.mjs](lib/github.mjs) `ENGINEER_LANES`): `POST /v1/github/pr` with
+  role `engineer` and a `lane`, on the branch `engineer/<lane>/<slug>-<8 hex>`. Each lane writes only its surface:
+  `scheduler` `league/swarm/loop.py`; `research` `league/swarm/{researcher,preflight,claude_research}.py`; `memory`
+  `league/swarm/{architect,strategist,diagnostician,seeds,mechanisms}.py`; `data` `league/{sailbox,data_job}.py`; and
+  every lane may add `league/tests/test_harness_candidate_*.py` (`*` one to eighty of `a-z0-9_`). Never a protected
+  path, and only what the harness lanes themselves declare (`ENGINEER_SURFACE`: the unprotected files of the lanes in
+  `league/swarm/harness_lanes.py`; a test reads them and fails while the list is wider). Two paths of the table are in
+  no harness lane's surface, so they are refused, on this route and the merge route, until `harness_lanes.py` names
+  them: the memory lane's `league/swarm/mechanisms.py` and the scheduler lane's `league/swarm/loop.py`. The harness
+  loop's own scheduler lane (`league/swarm/improvement.py`) changes the `Scheduler` class's body alone, and the file
+  also holds the calls to the Sail guard's brake, so the gateway, which reads no class, admits no write to it: the
+  scheduler lane opens and merges new tests only.
+  At most 6 files of 512 KiB each, 1.5 MiB a request (the other roles keep 12 files of 64 KiB, 256 KiB a request), and
+  at most 2 a New York day, counted apart from the other roles' `GITHUB_MAX_PULLS_PER_DAY` (`429 {cap:
+  "engineer_day"}`; `/v1/health` `autonomy.engineer_pulls`). A retry that finds its own pull request, or GitHub's no
+  before any branch, gives the place back. `league/ci.py` holds the same table (`ENGINEER_LANES`; a gateway test reads
+  it) and its path guard judges `engineer/<lane>/` branches by it.
+- **The engineer's base**: an engineer proposal names `base_sha`, the full commit its whole files were written against
+  (the running release's attested sha). Before anything is written, every file it carries must read on `main`'s head
+  exactly as on that base, present or absent alike; otherwise `409 {refused: "base_moved"}` names the files `main`
+  changed since (laying the whole file over them would silently undo them), and the engineer rebuilds on `main`'s head.
+  An unknown base is `409 base_unknown`. The pull request's body records the base.
+- **`GET /v1/github/pr/<n>/files?head_sha=<40 hex>`** ([lib/pulls.mjs](lib/pulls.mjs)): the files a pull request
+  changes at exactly that head, each with GitHub's patch, read whole (at most 300 files; a moved head is
+  `409 head_moved`); a patch GitHub left out or one cut at 600 KiB (1.5 MiB in all) makes `complete: false`, which a
+  reviewer must read as "not seen". Read-only.
+- **`POST /v1/github/close`** `{pr, head_sha}`: closes one open engineer pull request at its exact head inside the merge
+  route's walls on the branch (a superseded revision, a rejected one). It never deletes a branch, merges or reopens.
+- **The admin log**: every kill and unkill and every call presenting `GATEWAY_ADMIN_TOKEN` (refused anywhere but the
+  switch) is written with its time, the caller's kind (`admin`, `runtime`), the route, the method and the answer; a
+  call at the switch with no accepted token is not written at all: the Gate serializes every order reservation, so a
+  stranger's flood at the public switch must not queue writes in front of them (`unauthorized` stays in `counts`). `/v1/health` carries `admin_log`
+  (`counts` and the `last` 20, newest first) and `autonomy` (today's docs commits and merges with the last few, the
+  reviews recorded), each read under its own guard. A release whose entry cannot be written releases nothing (`503`);
+  an engage never waits on the log.
+- **`funding` notices** on `/v1/notify` (`league/ops/budget.py` `notice_facts`): one mail that names each of its
+  figures. It says what the meter (`sail` or `claude`) holds; the rate the desk is held to on it a day now (its fixed
+  cost plus the research the budget rule throttles it to: a ceiling, never worded as a spend) and the runway at that
+  rate (`current_usd_day`, `current_research_usd_day`, `current_runway_days`); what the rule wants for it a day
+  (`usd_day`: fixed + the research floor + what profit earned) and the runway at THAT rate (`runway_days`,
+  `runs_out_on`), which is the one under the card line and the one in the subject; the amount that restores 90 days at
+  the wanted rate and the date to add it by. Both runways are days until the meter's reserve, not until it is empty,
+  and each is said as days "above its reserve" (the House sends no reserve figure, so none is printed). What happens
+  with no card is one sentence, worded from the runway at the held rate when that was sent and from the wanted rate's
+  only when it was not, so the mail never says that the meter lasts some days and that it has none left. It says that
+  nothing stops (research stays throttled to what the meter sustains) only when the figures sent show it:
+  `current_research_usd_day` above zero, `current_runway_days` at or over `card_line_days`, and a runway left at the
+  wanted rate. With research already at 0.00 the throttle has nothing left to cut and the fixed cost still runs the
+  meter to its reserve, so the mail says how long the meter lasts at the held rate and promises nothing; a runway
+  sent as zero at the rate the closing sentence reads says no runway is left above the reserve. It says that the rule
+  never raises a cap or moves money. With no `current_usd_day` (an older House, or a balance the rule could not read
+  for research) it claims no current rate, says its figures are the wanted rate, and says that how long the meter
+  lasts at the held rate was not sent. The composer invents no figure: one that is not a decimal or a date reads
+  `unknown`. `test: true` is marked a drill in the subject and the first line, its figures said to be the drill's. A
+  `funding*` notice id is remembered eight days (others 48 hours); `NOTIFY_MAX_PER_DAY` is unchanged.
+
+The token needs nothing new: Contents and Pull requests read/write already cover the docs commit and the merge, and the
+Actions runs and jobs it reads are public on this repository. A branch protection rule on `main` that requires pull
+requests or reviews would refuse the docs commit and the merge; the owner keeps `main` as it is or exempts the token.
 
 ## The watchdog
 
@@ -272,12 +381,17 @@ deletes them with `npx wrangler secret delete <NAME>`.
 
 ```sh
 cd gateway
-npm install
 npm run check    # node --check on the worker and every module
 npm test         # node --test test/*.test.mjs: no network, keys generated in-process
-npx wrangler deploy
+npx wrangler@4.129.1 deploy
 ```
 
-Run the check and the suite, read the result, then deploy; roll back with `npx wrangler rollback`.
+The check and the suite need Node alone: no lockfile is tracked, so there is nothing for `npm ci` to install from (it
+exits 1), and an `npm install` would leave untracked files in a deploy checkout. Wrangler is run at 4.129.1, the version
+`package.json` names, because a bare `npx wrangler` may resolve to a newer one. Run the check and the suite, read the
+result, then deploy; roll back with `npx wrangler@4.129.1 rollback <version id>`.
 No deploy from 13:25Z to 20:05Z on a trading day except a rollback. Deploy the gateway before a
-House release that depends on its change.
+House release that depends on its change. With the House's updater on (from V3-A part 1) nothing does that by itself:
+`gateway/` never reaches the box, so a merged change here holds no House release, while unprotected House code merged
+with it or after it ships at the next release train. Merge and deploy the gateway change first, then merge the House
+change that needs it.

@@ -32,11 +32,18 @@ in the league's order (validated by validation t, then Train by Train score, the
 instances and `live.observe_roots_max` distinct roots (the binding one: every root is read every minute); a family whose
 roots would pass the roots cap is skipped and a later one on roots already read may still join. `live.observe_train`
 false keeps (and winds down) the Train tier. SUSTAINED PRESSURE: when 3 of the last 10 session minutes were pressed (the
-observe batch skipped or failed, or an observe read skipped), the lowest-priority quarter (at least one) of the Train-tier
-pins is shed for the rest of the session (at most once every 10 minutes; never a validated one), and no new family joins
-past what is left. An observe instance is never real, never tuition, never a band move, never a forward row; it winds
-down when its cohort completes, a switch disables it or capacity/pressure removes it. Its programs run in their OWN
-decider child, asked after every real decision of the minute has been sent, so no observe program can delay, starve or
+observe batch skipped or failed, or an observe read skipped for the read budget), the lowest-priority quarter (at least
+one) of the Train-tier pins is shed for the rest of the session (at most once every 10 minutes; never a validated one),
+and no new family joins past what is left. A read skipped because the minute's time is spent is not pressure (the
+observe batch then says so itself); only one skipped because the read budget (`live.observe_read_calls`) is spent is.
+THE STORE CLAMP (v3): the observe band reads only what the Gym's store holds of a root (scripts/data/storelib.py, as
+`league/swarm/preflight.py` reads it): its listed strikes a side of the money (40 for SPXW, 25 for every other root) and
+at most 14 days to expiry (45 for SPY and QQQ, whose back months the store keeps), inside the program's own window; a
+clamped read still over the page cap is read again narrower (half the strikes, then half the expiries too, kept for the
+session day) rather than lost. THE PRACTICE CAPS (`league/live/shadow.py`): a practice account holds what a Probe may,
+scaled to its shadow capital. An observe instance is never real, never tuition, never a band move, never a forward row;
+it winds down when its cohort completes, a switch disables it or capacity/pressure removes it. Its programs run in their
+OWN decider child, asked after every real decision of the minute has been sent, so no observe program can delay, starve or
 reset a real one. Two guards hold the line (#427): `Instance.observe` is True only for a shadow, non-tuition instance
 under a `:o` key (coerced, so a real instance, the House live test's included, is never an observe one, restored or
 not), and the order path (`_real_intent`) refuses, alerted, any instance that is not real. THE RECORD: every minute,
@@ -47,6 +54,10 @@ ledger (`league/live/observe.py`), its closed trades too; the swarm reads its su
 THE FORWARD EMBARGO (Sept 29, 2026): practice feeds research, so forward-window days select among Gym programs. A Sized
 move (`_move_band`) therefore also needs the forward record of the sessions AFTER the banded version was written AND selected to
 meet Sized; the whole record still decides everything else (negative, Candidate, Probe). It only makes Sized harder.
+
+EXIT-ONLY INSTANCES (v3): a real instance on exits only (`mode` not "live": demoted, retired, switched off, or its
+program gone) may still close and cancel; its program's opens are dropped before the order path, silently (no reject to
+the program, no `live.refusal` row), and counted in the minute's summary as `exit_only_opens_dropped`.
 
 THE CALIBRATION ROUND TRIPS (D3; `league/live/calibration.py`): the House's own 1-lot SPY, QQQ and IWM debit verticals,
 hourly from 10:00 to 15:00 ET (a patient 25-minute mid at 12:00 and 14:00), sent through the same order path, only while
@@ -132,6 +143,22 @@ MINUTE_OFFSET = 3.0          # seconds into each minute the live step runs
 PRESSURE_MINUTES = 10
 PRESSED_MINUTES = 3
 SHED_EVERY = 600.0
+#: The real phase's market-data calls of a minute the observe read budget leaves room for (`DEFAULTS`
+#: "observe_read_calls"): the stocks read, the real roots' chains and their held contracts.
+OBSERVE_REAL_CALLS = 20
+#: THE STORE CLAMP's narrower windows (`_observe_chain`): 1 halves the strikes a side, 2 halves the expiry span too.
+OBSERVE_NARROWEST = 2
+#: THE STORE CLAMP: what the Gym's store holds of a root's chain (scripts/data/storelib.py `STRIKE_RANGE`, `MAX_DTE`,
+#: `BACK_MONTH_DTE`; `league/swarm/preflight.py` `STORE_STRIKES`, `FRONT_DTE`, `LISTING`, `equity_step`; a test pins
+#: all three alike): listed strikes a side of the money, the step they are listed on near it, and the days to expiry.
+STORE_STRIKES, STORE_DEFAULT_STRIKES = {"SPXW": 40}, 25
+STORE_FRONT_DTE, STORE_BACK_DTE, STORE_BACK_ROOTS = 14, 45, frozenset({"SPY", "QQQ"})
+STORE_STEPS = {"SPY": 1.0, "QQQ": 1.0, "SPXW": 5.0, "SPX": 5.0, "IWM": 1.0, "XSP": 1.0, "DIA": 1.0, "GLD": 1.0}
+#: The roots listed on their near-money step across the store's whole reach (preflight `FIXED_STEP`); any other root's
+#: listings coarsen away from the money, so its price window is drawn on the next wider step (preflight `WIDER`) and
+#: `_nearest_strikes` keeps the store's count of listed strikes a side.
+STORE_FIXED_STEP = frozenset({"SPY", "QQQ", "IWM", "XSP", "DIA", "SPXW", "SPX"})
+STORE_WIDER = {0.5: 1.0, 1.0: 2.5, 2.5: 5.0, 5.0: 10.0}
 #: The session days the site's practice block covers (`site_inputs`).
 SITE_PRACTICE_SESSIONS = 20
 CALIBRATION_BACKSTOP = 10    # minutes before the close from which the House itself closes a calibration position left open
@@ -148,8 +175,10 @@ DEFAULTS = {
     "observe_decider_memory_mb": 1024,  # the observe band's own child (the real one keeps `decider_memory_mb`)
     "instance_orders_day": 60,   # a real instance's orders a day, opens and closes (the Gym's `max_orders_day`)
     # The observe band's chain reads come after the real path, and only while the minute's market-data calls are under
-    # this many, each root at most this many pages (a root over it is skipped this minute; nothing read is dropped).
-    "observe_read_calls": 40,
+    # this many, each root at most this many pages a read (THE STORE CLAMP: the window narrows before a root is lost).
+    # THE READ BUDGET (v3): `observe_roots_max` (24) roots at their worst, every one at the page cap with a held-contract
+    # read (4 calls), and the stocks read, after a real phase of up to `OBSERVE_REAL_CALLS`: 1 + 24 x 4 + 20 = 117.
+    "observe_read_calls": 120,
     "observe_read_pages": 3,
     "observe_read_timeout_seconds": 5.0,   # each observe read's own timeout (a slow API never holds the minute)
     # Observe programs loaded a minute, after the real batch, only while this much of the minute's budget remains.
@@ -253,6 +282,8 @@ class OptionsLive:
         self._pressure_day: str | None = None
         self._shed_at = float("-inf")
         self._observe_status: dict[str, Any] = {}
+        #: THE STORE CLAMP's narrowed roots: {"day": ISO session day, "roots": {root: level}} (`_observe_chain`).
+        self._observe_narrow: dict[str, Any] = {"day": None, "roots": {}}
         #: Decider batches skipped because the minute's budget was spent, by child ("decider", "observe_decider").
         self.budget_spent: dict[str, int] = {}
         self.state = LiveState(self.root / STATE_FILE, clock=clock)
@@ -1036,7 +1067,9 @@ class OptionsLive:
         if self._pressure_day != today:
             self._pressure_day = today
             self._pressure.clear()
-        self._pressure.append(bool(out.get("observe_decider")) or int(out.get("observe_reads_skipped") or 0) > 0)
+        # Pressed: the observe batch skipped or failed, or an observe read skipped for the read budget (never for the
+        # minute's time alone: a minute out of time is the batch's to say).
+        self._pressure.append(bool(out.get("observe_decider")) or int(out.get("observe_reads_skipped_budget") or 0) > 0)
         if sum(self._pressure) < PRESSED_MINUTES or now - self._shed_at < SHED_EVERY:
             return
         pins = dict(self.state.get("observe_pins", {}) or {})
@@ -1063,8 +1096,8 @@ class OptionsLive:
         self._shed_at = now
         self._pressure.clear()
         why = (f"{PRESSED_MINUTES} of the last {PRESSURE_MINUTES} session minutes were pressed (the observe batch skipped "
-               f"or failed, or an observe read skipped): {len(shed)} Train-tier practice instance(s) shed for the session; "
-               f"at most {len(order)} run until the next session")
+               f"or failed, or an observe read skipped for the read budget): {len(shed)} Train-tier practice instance(s) "
+               f"shed for the session; at most {len(order)} run until the next session")
         self.record("live.observe", {"shed": shed, "effective_cap": len(order), "why": why})
         self.alert("warning", f"live: the practice league is under pressure: {why}")
 
@@ -1260,9 +1293,11 @@ class OptionsLive:
             for pos in acc.positions.values():
                 out.setdefault(pos.root, [0, 0, 0.02])
         if observe:
+            # THE STORE CLAMP (the module docstring): never past the days to expiry the Gym's store holds of the root.
+            # A window wholly past them (low over high) reads no chain, only the contracts held (`_observe_chain`).
             margin_dte, margin_band = int(self.settings["read_dte_margin"]), float(self.settings["read_band_margin"])
-            return {r: (int(max(0, w[0])), int(min(60, w[1] + margin_dte)), float(min(0.30, w[2] + margin_band)))
-                    for r, w in out.items()}
+            return {r: (int(max(0, w[0])), int(min(60, w[1] + margin_dte, _store_dte(r))),
+                        float(min(0.30, w[2] + margin_band))) for r, w in out.items()}
         if self.book is not None:
             for pos in self.book.positions.values():
                 out.setdefault(pos.root, [0, 0, 0.02])
@@ -1315,10 +1350,15 @@ class OptionsLive:
         pages = ({"max_pages": int(self.settings["observe_read_pages"]),
                   "timeout": float(self.settings["observe_read_timeout_seconds"])} if observe else {})
         for root, (lo, hi, band) in roots.items():
-            if observe and (self.market.minute_calls.used() >= int(self.switches()["observe_read_calls"])
-                            or self._decision_budget() < float(self.settings["observe_load_floor_seconds"])):
-                out["observe_reads_skipped"] = out.get("observe_reads_skipped", 0) + 1
-                continue  # the minute's data or time budget is spent: the observe band reads this root next minute
+            if observe:
+                # The minute's data or time budget is spent: the observe band reads this root next minute. Only the read
+                # budget's skips are the practice league's pressure (`_observe_shed`): a spent minute is the batch's.
+                why = ("budget" if self.market.minute_calls.used() >= int(self.switches()["observe_read_calls"]) else
+                       "time" if self._decision_budget() < float(self.settings["observe_load_floor_seconds"]) else None)
+                if why is not None:
+                    out["observe_reads_skipped"] = out.get("observe_reads_skipped", 0) + 1
+                    out[f"observe_reads_skipped_{why}"] = out.get(f"observe_reads_skipped_{why}", 0) + 1
+                    continue
             chain = day.chain(root)
             snapshot = stock_rows.get(root)
             if chain.record_volume(mi, snapshot.get("minuteBar") if isinstance(snapshot, Mapping) else None):
@@ -1332,7 +1372,9 @@ class OptionsLive:
                 known = known[np.isfinite(known)]
                 spot = float(known[-1]) if known.size else self._index_guess(root, prices)
             try:
-                if math.isfinite(spot) and spot > 0:
+                if observe:
+                    rows = self._observe_chain(day, root, lo, hi, band, spot, pages, out)
+                elif math.isfinite(spot) and spot > 0:
                     rows = self.market.chain(root, expiry_from=(day.day + dt.timedelta(days=lo)).isoformat(),
                                              expiry_to=(day.day + dt.timedelta(days=hi)).isoformat(),
                                              strike_from=spot * (1 - band), strike_to=spot * (1 + band), **pages)
@@ -1362,6 +1404,50 @@ class OptionsLive:
         elif (observe and recorded) or volume_changed:
             day.invalidate()  # the minute's snapshots were built before these quotes merged in
         out["data_calls"] = self.market.minute_calls.used()
+
+    def _observe_chain(self, day: LiveDay, root: str, lo: int, hi: int, band: float, spot: float,
+                       pages: Mapping[str, Any], out: dict) -> dict[str, Any]:
+        """THE STORE CLAMP (the module docstring): an observe read of `root`'s chain inside the program's window
+        (`_roots`: days `lo`-`hi`, `band` of spot) and what the Gym's store holds of it, its strikes a side of the money
+        (`_store_strikes`; the price window half a step wider, on the next wider step for a root whose listings coarsen
+        away from the money, `_reach_step`, then each expiry kept to them, `_nearest_strikes`). A read over the page cap
+        is read again narrower, at most `OBSERVE_NARROWEST` times and only while the minute's read and time budgets
+        allow (else it raises, as before): half the strikes a side, then half the expiry span too; the level is kept for
+        the session day so later minutes go straight to it. A window the clamp empties (`lo` past `hi`) reads nothing,
+        spot or none. With no spot to centre it on, the read is the first two days of the window, unclamped, as
+        before."""
+        if lo > hi:
+            return {}  # the program's window lies past what the store holds: only its held contracts are read
+        start = (day.day + dt.timedelta(days=lo)).isoformat()
+        if not (math.isfinite(spot) and spot > 0):
+            return self.market.chain(root, expiry_from=start,
+                                     expiry_to=(day.day + dt.timedelta(days=min(hi, lo + 1))).isoformat(), **pages)
+        today = day.day.isoformat()
+        if self._observe_narrow.get("day") != today:
+            self._observe_narrow = {"day": today, "roots": {}}
+        side, step = _store_strikes(root, spot)
+        step = _reach_step(root, step)
+        level = int(self._observe_narrow["roots"].get(root, 0))
+        while True:
+            n = side if level == 0 else max(1, side // 2)
+            top = hi if level < 2 else lo + (hi - lo) // 2
+            reach = (n + 0.5) * step
+            try:
+                rows = self.market.chain(root, expiry_from=start,
+                                         expiry_to=(day.day + dt.timedelta(days=top)).isoformat(),
+                                         strike_from=max(spot * (1 - band), spot - reach),
+                                         strike_to=min(spot * (1 + band), spot + reach), **pages)
+            except VenueError as exc:
+                if (not _over_pages(exc) or level >= OBSERVE_NARROWEST
+                        or self.market.minute_calls.used() >= int(self.switches()["observe_read_calls"])
+                        or self._decision_budget() < float(self.settings["observe_load_floor_seconds"])):
+                    raise
+                level += 1
+                self._observe_narrow["roots"][root] = level
+                continue
+            if level:
+                out["observe_reads_narrowed"] = out.get("observe_reads_narrowed", 0) + 1
+            return _nearest_strikes(rows, spot, n)
 
     def _index_guess(self, root: str, prices: Mapping[str, float]) -> float:
         spy = prices.get("SPY", float("nan"))
@@ -2386,6 +2472,14 @@ class OptionsLive:
     def _real_intents(self, inst: Instance, day: LiveDay, mi: int, intents: Iterable[Mapping[str, Any]], out: dict) -> None:
         book = self.book
         assert book is not None
+        intents = list(intents)
+        if inst.mode != "live" and inst.kind == "real" and inst.observe is False and not _is_observe(inst.key):
+            # EXIT-ONLY INSTANCES (the module docstring): its program's opens are dropped here, silently and counted; its
+            # closes and cancels go on. Anything not a real instance still meets `_real_intent`'s belt, alerted.
+            dropped = sum(1 for intent in intents if _is_open_intent(intent))
+            if dropped:
+                out["exit_only_opens_dropped"] = int(out.get("exit_only_opens_dropped") or 0) + dropped
+                intents = [intent for intent in intents if not _is_open_intent(intent)]
         for intent in intents:
             try:
                 why = self._real_intent(inst, day, mi, dict(intent), out)
@@ -2823,7 +2917,9 @@ class OptionsLive:
                 # Read from the House's thread: the live state (its own lock) and the last minute's switches only; the
                 # calibration's samples file belongs to the minute thread (`python -m league.live --calibration` reads it).
                 "observe": {"switches": dict(self._switches or {}), "pins": self.state.get("observe_pins"),
-                            **dict(self._observe_status or {})},
+                            **dict(self._observe_status or {}),
+                            # THE STORE CLAMP's roots read narrower today (their level: `_observe_chain`).
+                            "narrowed": dict((self._observe_narrow or {}).get("roots") or {})},
                 "budget_spent": dict(self.budget_spent),
                 "calibration": self.calibration.status() if self.calibration is not None else None,
                 "house_test": self.house_test.status() if self.house_test is not None else None,
@@ -2846,6 +2942,52 @@ def _row_roots(row: Mapping[str, Any] | None) -> list[str]:
     """The roots a practice row's program reads (its NEEDS roots, else the family's)."""
     roots = (row or {}).get("needs_roots") or (row or {}).get("roots") or []
     return sorted({str(r).upper() for r in roots if str(r).strip()})
+
+
+def _store_dte(root: str) -> int:
+    """The days to expiry the Gym's store holds of `root` (THE STORE CLAMP)."""
+    return STORE_BACK_DTE if str(root).upper() in STORE_BACK_ROOTS else STORE_FRONT_DTE
+
+
+def _store_strikes(root: str, spot: float) -> tuple[int, float]:
+    """(strikes a side of the money, their step near `spot`) the Gym's store holds of `root` (THE STORE CLAMP): an index
+    root's or a listed ETF's own step, else a stock's by its price (`league/swarm/preflight.py` `equity_step`)."""
+    root = str(root).upper()
+    step = STORE_STEPS.get(root) or (0.5 if spot < 75 else 1.0 if spot < 150 else 2.5 if spot < 500 else 5.0)
+    return int(STORE_STRIKES.get(root, STORE_DEFAULT_STRIKES)), float(step)
+
+
+def _reach_step(root: str, step: float) -> float:
+    """The step THE STORE CLAMP's price window is drawn on: a fixed-step root's own, any other's next wider one (its
+    listings coarsen away from the money, where the store still counts listed strikes)."""
+    return step if str(root).upper() in STORE_FIXED_STEP else STORE_WIDER.get(step, 2.0 * step)
+
+
+def _nearest_strikes(rows: Mapping[str, Any], spot: float, side: int) -> dict[str, Any]:
+    """`rows` ({OCC: snapshot}) kept to each expiry's `side` listed strikes either side of the one nearest `spot`, as the
+    store keeps them (a strike listed finer than the step the window was drawn on is not one more strike of reach)."""
+    parts = {sym: occ_parts(sym) for sym in rows}
+    by_expiry: dict[str, set[float]] = {}
+    for p in parts.values():
+        if p is not None:
+            by_expiry.setdefault(p[1], set()).add(float(p[3]))
+    keep: dict[str, set[float]] = {}
+    for expiry, strikes in by_expiry.items():
+        ks = sorted(strikes)
+        i = min(range(len(ks)), key=lambda j: (abs(ks[j] - spot), ks[j]))
+        keep[expiry] = set(ks[max(0, i - side): i + side + 1])
+    return {sym: row for sym, row in rows.items()
+            if parts[sym] is not None and float(parts[sym][3]) in keep[parts[sym][1]]}
+
+
+def _over_pages(exc: BaseException) -> bool:
+    """A chain read refused for its page cap (`MarketData.chain`: "chain <U>: more than <n> pages")."""
+    return isinstance(exc, VenueError) and " pages" in str(exc) and "more than" in str(exc)
+
+
+def _is_open_intent(intent: Any) -> bool:
+    """An intent the order path takes as an open (`_real_intent` reads cancel, then close, then open)."""
+    return isinstance(intent, Mapping) and "open" in intent and "cancel" not in intent and "close" not in intent
 
 
 def _rank(inst: Instance) -> int:

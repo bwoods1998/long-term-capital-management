@@ -4,7 +4,8 @@ asks a model anything.
 
     python3 -m league.ci --base origin/main [--branch merton/architect/some-slug]
 
-1. **Path guard.** A branch named `merton/<role>/...` may touch only that role's paths. The
+1. **Path guard.** A branch named `merton/<role>/...` may touch only that role's paths, and one
+   named `engineer/<lane>/<slug>-<hash>` only that lane's surface and new harness tests. The
    constitution, the ledger, the book, the evaluator, the statistics, the auditor, the watchdog,
    this file, the gateway and the workflows are out of reach of every role. (The gateway enforces
    the same list before a branch exists; this is the second wall, and it also covers a branch
@@ -36,12 +37,36 @@ from typing import Any, Iterable
 
 REPO = Path(__file__).resolve().parents[1]
 
+#: The engineer's lanes (LTCM v3, V3-A, WP8b): the whole paths of each lane's surface. A branch
+#: `engineer/<lane>/<slug>-<8 hex>` may change only these and add new tests (ENGINEER_TESTS). The
+#: gateway admits and merges by the same table (`gateway/lib/github.mjs` ENGINEER_LANES; a gateway
+#: test reads this one and fails while the two differ). The gateway's surface is the STRICTER wall,
+#: and this guard has no copy of it: the gateway opens and merges only what the harness lanes
+#: themselves declare (its ENGINEER_SURFACE), so two paths this table admits are closed there, to
+#: their own lane too: the scheduler lane's league/swarm/loop.py and the memory lane's
+#: league/swarm/mechanisms.py. They stay closed until an owner deploy opens them (the path named in
+#: `league/swarm/harness_lanes.py` LANES and in ENGINEER_SURFACE, both protected). The gateway is
+#: the only merge route, so what this guard alone would pass is a branch pushed by hand.
+ENGINEER_LANES: dict[str, tuple[str, ...]] = {
+    "scheduler": ("league/swarm/loop.py",),
+    "research": ("league/swarm/researcher.py", "league/swarm/preflight.py", "league/swarm/claude_research.py"),
+    "memory": ("league/swarm/architect.py", "league/swarm/strategist.py", "league/swarm/diagnostician.py",
+               "league/swarm/seeds.py", "league/swarm/mechanisms.py"),
+    "data": ("league/sailbox.py", "league/data_job.py"),
+}
+#: Every lane's new tests. `*` is one to eighty of a-z, 0-9 and `_` (ENGINEER_TEST_NAME, the gateway's
+#: ENGINEER_TEST bound): never a `/`, never another suffix.
+ENGINEER_TESTS = "league/tests/test_harness_candidate_*.py"
+ENGINEER_TEST_NAME = "[a-z0-9_]{1,80}"
+ENGINEER_BRANCH = re.compile(r"engineer/([a-z]+)/[a-z0-9][a-z0-9-]{1,48}-[0-9a-f]{8}")
+
 ROLE_PATHS: dict[str, tuple[str, ...]] = {
     "architect": ("league/strategies/",),
     "toolsmith": ("league/tools/", "league/tests/test_tool_"),
     "operator": ("league/config.json",),
     "designer": ("league/game.json",),
     "teacher": ("league/playbook/",),
+    **{f"engineer/{lane}": (*paths, ENGINEER_TESTS) for lane, paths in ENGINEER_LANES.items()},
 }
 #: Never, for any role, whatever the table above comes to say.
 FORBIDDEN: tuple[str, ...] = (
@@ -75,7 +100,54 @@ FORBIDDEN: tuple[str, ...] = (
     # which the book's `max_hours_to_resolve` judges every entry by, and how it reads the settle lags
     # the House keeps as data (`settle_lags.json`).
     "league/resolution.py",
+    # The House's protected jobs (V3-A): the research budget rule that spends only what was earned, the
+    # standing grant's re-ratification, and the failure drills (league/ops/). Money and the way back.
+    "league/ops/budget.py", "league/ops/drills.py", "league/ops/grant.py",
+    # What feeds and enforces THE BUDGET (V3-A integration): the overlay that applies budget.json to the settings, the
+    # Sail guard that caps the day by it and writes the Sail balance reading the rule reads, the model router that caps
+    # Claude by it, and the job context that hands the rule its clock, its Sail client and its gateway. A research-class
+    # edit to any one of them would bypass the owner's rule as surely as an edit to budget.py. The close economics the
+    # budget's p30 and the public Net come from (V3-A integration review): the rule takes the smaller of its p30 and the
+    # live book's own read, so it could only cut, and it is the owner's deploy's to change all the same.
+    "league/swarm/settings.py", "league/swarm/guard.py", "league/swarm/models.py", "league/ops/context.py",
+    "league/ops/economics.py",
+    # The evaluator's identity and the evidence it reads (WP6/WP8): the Gym, the gate, the bands, the evaluator and the
+    # swarm's store (`set_band(..., "probe")` promotes to real money); the data layer and its builders, which carry the
+    # session calendar the updater's own session hold reads; how the House is deployed.
+    "league/gym/", "league/swarm/gate.py", "league/swarm/bands.py", "league/swarm/evaluator.py", "league/swarm/store.py",
+    "ltcm/data/", "scripts/data/", "deploy/",
+    # What the gateway's merge route protects besides (the WP8 review; `gateway/lib/protected.mjs`, whose tests read each
+    # source from the repository): one list, so a path the gateway will not merge does not self-deploy either. The
+    # framework that schedules and runs the House's jobs (the whole of league/ops/).
+    "league/ops/",
+    # What league/live/ and league/gym/ import from outside their trees, and what is sealed into the Gym bundle and the
+    # decider's runtime with them: the packages' own __init__ files, the structure core that classifies, limits and
+    # prices every real order, and the owner's flows the stops net out.
+    "league/__init__.py", "league/structure_core.py", "league/structures.py", "league/swarm/__init__.py",
+    "ltcm/__init__.py", "ltcm/performance.py",
+    # The swarm's settings as code (WP9) and its funded spend: the funding reader; the floor's own budget, pacer and
+    # economics.
+    "league/swarm/policy.json", "league/swarm/funding.py",
+    "league/budget.py", "league/pacer.py", "league/economy.py", "league/project_economics.py",
+    # Capital permissions outside league/live/.
+    "league/grants.py", "league/capital.py", "league/exposure.py",
+    # The harness loop's objective (`league/swarm/harness_lanes.py` PROTECTED): the lanes, their judges, the canary and
+    # the loop that retains or reverts a change, the benchmarks and the evidence lines it measures by; and what a
+    # researcher may see of Validation (D2a).
+    "league/swarm/harness_lanes.py", "league/swarm/harness_judges/", "league/swarm/harness_runtime.py",
+    "league/swarm/harness_improve.py", "league/swarm/improvement.py", "league/swarm/improvement_benchmark.py",
+    "league/swarm/canary.py", "league/swarm/benchmarks.py", "league/swarm/long_single_benchmarks.py",
+    "league/swarm/evidence.py", "league/swarm/diagnostics.py", "league/swarm/tournament.py", "scripts/harness_improve.py",
+    "playbooks/harness-improvement.md", "docs/goals/", "docs/benchmarks/",
+    # How the House is deployed and the House itself (its tick calls the updater).
+    "scripts/floor_box.py", "league/house.py", "CHANGELOG.md",
 )
+#: The one path the gateway's merge route refuses (`gateway/lib/protected.mjs` MERGE_FORBIDDEN) that is not FORBIDDEN:
+#: the House's configuration. The operator role proposes its dials (`CONFIG_DIALS`), and the updater ships a change to
+#: it only when the RUNNING release's `check_config` finds nothing but those dials moved, inside their bounds (the
+#: real-money switch is refused before that: `league/updater.py` `Updater.walls`). Every other path the gateway's list
+#: names, the updater refuses too (league/tests/test_ci.py holds the two lists to this difference).
+MERGE_ONLY: tuple[str, ...] = ("league/config.json",)
 #: The shared strategy list every architect proposal used to rewrite whole (`league/strategies`).
 RETIRED_REGISTRY = "league/strategies/registry.json"
 #: The only keys of league/config.json the operator may move, with their bounds.
@@ -95,9 +167,27 @@ CONFIG_DIALS: dict[str, tuple[float, float]] = {
 PREFIXES = ("merton", "astra")
 
 
+#: What a branch name must look like to be judged by the path guard (`guard_branch`, `check`).
+BRANCH_FORMS = "merton/<role>/<slug> or engineer/<lane>/<slug>-<hash>"
+
+
 def role_of(branch: str) -> str | None:
-    parts = str(branch or "").split("/")
+    """`<role>` of `merton/<role>/...`, or `engineer/<lane>` of `engineer/<lane>/<slug>-<8 hex>`; else None."""
+    text = str(branch or "")
+    engineer = ENGINEER_BRANCH.fullmatch(text)
+    if engineer:
+        role = f"engineer/{engineer.group(1)}"
+        return role if role in ROLE_PATHS else None
+    parts = text.split("/")
     return parts[1] if len(parts) >= 3 and parts[0] in PREFIXES and parts[1] in ROLE_PATHS else None
+
+
+def _allows(entry: str, path: str) -> bool:
+    """A role's path entry: a whole path, a prefix (ending `/` or `_`), or a glob whose `*` is a name (ENGINEER_TESTS,
+    ENGINEER_TEST_NAME)."""
+    if "*" in entry:
+        return re.fullmatch(re.escape(entry).replace(r"\*", ENGINEER_TEST_NAME), path) is not None
+    return path == entry or (entry.endswith(("/", "_")) and path.startswith(entry))
 
 
 def guard(paths: Iterable[str], role: str | None) -> list[str]:
@@ -109,11 +199,11 @@ def guard(paths: Iterable[str], role: str | None) -> list[str]:
             problems.append(f"{path}: not a plain repository path")
             continue
         lowered = clean.lower()
-        if any(lowered == f or (f.endswith("/") and lowered.startswith(f)) for f in FORBIDDEN):
+        if any(lowered == f.lower() or (f.endswith("/") and lowered.startswith(f.lower())) for f in FORBIDDEN):
             problems.append(f"{path}: no role may change this file")
         elif role is not None:
             allowed = ROLE_PATHS[role]
-            if not any(clean == a or (a.endswith(("/", "_")) and clean.startswith(a)) for a in allowed):
+            if not any(_allows(a, clean) for a in allowed):
                 problems.append(f"{path}: outside what the {role} may change ({', '.join(allowed)})")
     return problems
 
@@ -440,21 +530,39 @@ def guard_branch(base: str, head: str, branch: str, *, root: Path = REPO) -> lis
     request's commits, so a branch cannot loosen the guard that judges it."""
     role = role_of(branch)
     if role is None:
-        return [f"{branch}: not a branch name of the form merton/<role>/<slug>"]
+        return [f"{branch}: not a branch name of the form {BRANCH_FORMS}"]
     paths = changed_paths(base, head, cwd=root)
     if not paths:
         return ["the branch changes nothing"]
-    return guard(paths, role)
+    problems = guard(paths, role)
+    if role.startswith("engineer/"):
+        problems += engineer_test_problems(base, head, cwd=root)
+    return problems
+
+
+def engineer_test_problems(base: str, head: str = "HEAD", *, cwd: Path = REPO) -> list[str]:
+    """An engineer lane may only ADD a test (`ENGINEER_TESTS`): a test of that name the branch modifies, removes or renames
+    away (renames read as a removal and an addition) is refused."""
+    out = subprocess.run(["git", "diff", "--name-status", "--no-renames", f"{base}...{head}"], cwd=cwd, capture_output=True,
+                         text=True, check=True)
+    problems = []
+    for line in out.stdout.splitlines():
+        status, _, path = line.partition("\t")
+        if path and _allows(ENGINEER_TESTS, path.strip()) and status.strip() != "A":
+            problems.append(f"{path.strip()}: an engineer lane may only add a new test, never change or remove one")
+    return problems
 
 
 def check(base: str | None, branch: str | None, *, root: Path = REPO, tests: bool = True, head: str = "HEAD") -> list[str]:
     problems: list[str] = []
     role = role_of(branch or "")
     paths = changed_paths(base, head, cwd=root) if base else []
-    if (branch or "").startswith(tuple(f"{p}/" for p in PREFIXES)):
+    if (branch or "").startswith(tuple(f"{p}/" for p in (*PREFIXES, "engineer"))):
         if role is None:
-            problems.append(f"{branch}: not a branch name of the form merton/<role>/<slug>")
+            problems.append(f"{branch}: not a branch name of the form {BRANCH_FORMS}")
         problems.extend(guard(paths, role))
+        if role is not None and role.startswith("engineer/") and base:
+            problems.extend(engineer_test_problems(base, head, cwd=root))
         if RETIRED_REGISTRY in paths:
             # Every proposal rewrote this one shared file from a stale copy and dropped the rows
             # merged after it (PRs #72/#73 against #71, Sept 21, 2026). Each strategy now carries

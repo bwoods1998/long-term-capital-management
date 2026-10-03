@@ -13,7 +13,10 @@
   role's `claude.role_model` through the gateway (`league.claude.Claude`) for the roles in `claude.roles` (by default
   the architect, the gate's audit, the diagnostician, the researchers' top band and the strategist), first among the
   paid routes while the gateway's funded total has room above `claude.reserve_usd` and the swarm's own Claude spend is
-  under `claude.usd_cap`. The architect rotates only
+  under `claude.usd_cap` and, LTCM v3, under THE BUDGET's paid-model dollars today (league/ops/budget.py
+  `paid_model_room`: the settings' `budget` block's Claude dollars less today's Claude and OpenAI spend; spent, a call
+  takes its next route as for a role's own line, kind "line", and OpenAI is refused by the same line, so Sail is
+  next). The architect rotates only
   while `architect.openai_model` names a model: then every other pass asks GPT-6 Astra first. Claude capped, erring or
   unconfigured falls to OpenAI, then Sail, exactly as before. Every role's call asks for Claude (Sept 29, 2026: the
   researcher's stall rewrite and the gate's review too), so `claude.roles` alone decides who gets it: adding "rewrite"
@@ -33,6 +36,14 @@
   truncated, http, stream, answer, admission, off, unknown), and the caller finishes its turn on its Sail profile from the
   same transcript.
 - Every settled cost is a `spend` row (kind `sail_model`, `openai` or `claude`, by family).
+- THE WINDOW FALLBACK (V3-A, Oct 2, 2026: Sail's balanced queue stalled 07:00-12:53Z and the architect bore nothing for six
+  hours). `ask`'s Sail call on a profile outside the asap window that `sail_fallback` maps to an asap profile (k3_balanced
+  and pro_balanced to pro_asap by default): a `provider_poll_timeout` flags the window stalled for an hour (kv
+  `sail_window_stall`, one `swarm.status` alert a stall) and retries the call once on the fallback with a new request key;
+  while the flag stands, calls on that window go straight to the fallback. The answer says so (`sail_fallback`). A role
+  in `sail_fallback_same_model` (the gate's audit by default) keeps its MODEL: its fallback is the same model's asap
+  profile (k3_balanced to k3), never the mapped one, so the audit (Kimi-K3) never falls onto the review's DeepSeek-V4-Pro
+  and one model read the program twice.
 - FALLBACKS (Release A, Sept 30, 2026): a call that asked Claude and ended elsewhere (`ask`: the next paid route, Sail, or
   no route when the role has no Sail profile; `claude_turn`: the caller's Sail turn) is counted in memory by role, the
   Claude route's failure kind and where it went (`note_fallback`). The swarm's `FundingWatch` drains the counts
@@ -403,7 +414,60 @@ class ModelRouter:
             return 0.0
 
     def claude_room(self) -> float:
-        """Dollars the swarm may still spend on Claude now: the lower of the gateway's funded total above
+        """Dollars the swarm may still spend on Claude now: the funded room (`claude_funded_room`), capped by what is left
+        of THE BUDGET's Claude dollars today (`claude_budget_room`; no reading of that line is no room, FAIL CLOSED)."""
+        room = self.claude_funded_room()
+        budget = self.claude_budget_room()
+        return 0.0 if budget is None else min(room, budget)
+
+    def claude_budget_room(self) -> float:
+        """THE BUDGET's paid-model dollars left this UTC day (league/ops/budget.py `paid_model_room`, the protected rule;
+        the settings' `budget` block, set by every `settings.load` with a state root): `claude_usd_day` less the swarm's
+        Claude spend today and its OpenAI spend today, holds included (`claude_spent`, `openai_spent`: a call counts on
+        the day its hold was booked, and each model's spend is floored at 0 on its own, so no release lifts the line).
+        Settings with no `budget` block are the router's own read of its store root's budget.json (`budget.effective`: the
+        floor when it gives none), as the Sail guard reads them: settings handed in without the block never lift the
+        budget. 0 for a block that is not a budget, or a rule that cannot be read (FAIL CLOSED). OpenAI's admission reads
+        it too."""
+        try:
+            from ..ops import budget as budget_mod
+
+            block = self.settings.get("budget")
+            now = float(self.store.clock())
+            if block is None:  # handed settings without the block: the router reads the budget itself, never no line
+                root = getattr(self.store, "root", None)
+                block = budget_mod.effective(root, now) if root is not None else budget_mod.floor_block("no budget block")
+            midnight = now - now % 86400
+            room = budget_mod.paid_model_room(block, self.claude_spent(since=midnight),
+                                              self.openai_spent(since=midnight))
+        except Exception:  # noqa: BLE001 - no rule, no paid research
+            return 0.0
+        return 0.0 if room is None else room
+
+    def openai_spent(self, *, since: float) -> float:
+        """The swarm's OpenAI spend (holds included) since an epoch, a call counted from when its hold was booked, as
+        `claude_spent` counts Claude's. A row that lowers the spend (a true-up's `settles` or a refusal's `releases`:
+        the hold's key) counts only against a hold of that key booked since `since` and not yet released, in the rows'
+        order, and for no more than that hold: no call counts under 0. The release of a hold booked before `since` (a
+        call across 00:00 UTC) belongs to the hold's day; counted, it would lift today's line. One that names no hold
+        (a refusal booked before the row named it) is not counted either: which day's hold it released is unknown."""
+        held: dict[Any, list[float]] = {}  # the holds booked since `since` and not yet released, by key
+        total = 0.0
+        for row in self.store._all("SELECT usd, detail FROM spend WHERE kind='openai' AND epoch>=? ORDER BY seq",
+                                   [float(since)]):
+            usd, detail = float(row["usd"]), json.loads(row["detail"] or "{}") or {}
+            key = detail.get("settles") or detail.get("releases")
+            if detail.get("hold"):
+                held.setdefault(detail["hold"], []).append(usd)
+            elif key is not None and held.get(key):
+                usd = max(usd, -held[key].pop(0))
+            elif usd < 0:
+                continue  # it releases no hold booked since `since`
+            total += usd
+        return total
+
+    def claude_funded_room(self) -> float:
+        """Dollars the swarm may still spend on Claude by its funding: the lower of the gateway's funded total above
         `claude.reserve_usd` and what is left of the swarm's own `claude.usd_cap`. 0 when either cannot be read."""
         if self.claude_meter is None or self.claude_factory is None:
             return 0.0
@@ -539,10 +603,16 @@ class ModelRouter:
         filing (kv `claude_unsettled`) are committed in one transaction, before the gateway hears of the call, so neither a
         crash nor a restart mid-call loses it; else (None, the kind: "line", "family_fuse" or "no_room") with the reason in
         `errors`. The lines are read before the meter's network read and again inside the write transaction (a concurrent
-        call's committed hold counts): the role's own line today (`claude.role_usd_day`), the family's own line today when
+        call's committed hold counts): THE BUDGET's Claude dollars today (`claude_budget_room`, kind "line"), the role's
+        own line today (`claude.role_usd_day`), the family's own line today when
         `family_line` is given, and the room above `claude.reserve_usd` and `claude.usd_cap`, less `keep_usd` (room this
         caller leaves to the other roles)."""
         request_id = re.sub(r"[^A-Za-z0-9:._-]+", "-", key)[:150] + ":" + secrets.token_hex(4)
+        budget = self.claude_budget_room()  # THE BUDGET's Claude dollars left today: a line, not a funding cliff
+        if budget is None or budget < required:  # no reading is no room, never "no line" (FAIL CLOSED)
+            errors.append(f"claude: the research budget's Claude line for today has no room (${budget or 0.0:.2f} left; "
+                          f"this call may cost ${required:.2f})")
+            return None, "line"
         line = self.claude_role_room(role)  # the role's own line today (`claude.role_usd_day`), before the meter's read
         if line is not None and line < required:
             errors.append(f"claude: the {role} line for today has no room (${line:.2f} left of claude.role_usd_day; "
@@ -554,7 +624,7 @@ class ModelRouter:
                 errors.append(f"claude: {family}'s own {role} line for today has no room (${left:.2f} left of "
                               f"${family_line:.2f}; this call may cost ${required:.2f})")
                 return None, "family_fuse"
-        room = self.claude_room()  # the meter's network read happens outside the write transaction
+        room = self.claude_funded_room()  # the meter's network read happens outside the write transaction
         if room - keep_usd < required:
             kept = f", ${keep_usd:.2f} of it kept for the other roles" if keep_usd else ""
             errors.append(f"claude: no room (${room:.2f} left above the reserve{kept}; this call may cost ${required:.2f})")
@@ -562,6 +632,10 @@ class ModelRouter:
         admitted = False
         with self.store.atomic():
             # Every line is read again inside the write transaction: a concurrent call's committed hold counts.
+            budget = self.claude_budget_room()
+            if budget is None or budget < required:
+                errors.append("claude: the research budget's Claude line for today has no room")
+                return None, "line"
             line = self.claude_role_room(role)
             if line is not None and line < required:
                 errors.append(f"claude: the {role} line for today has no room")
@@ -853,23 +927,115 @@ class ModelRouter:
             raise ModelError("; ".join(errors) or "no paid route was available, and this role has no Sail fallback", billed=billed,
                              kind=kinds[-1] if kinds else "error")
         items = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+        def on_sail(profile: str, call_key: str) -> Any:
+            return self.sail(profile, items, family=desk or family or "swarm", key=call_key, effort=effort, max_output=max_output,
+                             cache_key=f"swarm-{role}", tool_choice="auto",
+                             cap_usd_day=float(cap_usd_day if cap_usd_day is not None else
+                                               self.settings.get("researcher", {}).get("floor_usd_day", 60.0)),
+                             kind="sail_model")
+
+        def failed(exc: BaseException) -> ModelError:
+            return ModelError("; ".join(errors + [f"sail: {type(exc).__name__}: {getattr(exc, 'code', '') or str(exc)[:160]}"]),
+                              billed=billed)
+
+        # THE WINDOW FALLBACK (`sail_fallback`): a profile outside the asap window goes straight to its asap fallback while
+        # its window is flagged stalled, and a poll timeout on it flags the window and retries once there.
+        fallback = self.sail_fallback(sail_profile, role=role)
+        profile, why = sail_profile, None
+        if fallback is not None and self.window_stalled(fallback[0]) is not None:
+            profile, why = fallback[1], "flagged"
+            errors.append(f"sail {sail_profile}: the {fallback[0]} window is flagged stalled; asked {profile}")
         try:
-            response = self.sail(sail_profile, items, family=desk or family or "swarm", key=key, effort=effort, max_output=max_output,
-                                 cache_key=f"swarm-{role}", tool_choice="auto",
-                                 cap_usd_day=float(cap_usd_day if cap_usd_day is not None else
-                                                   self.settings.get("researcher", {}).get("floor_usd_day", 60.0)),
-                                 kind="sail_model")
+            response = on_sail(profile, key if why is None else fallback_key(key, profile))
         except Exception as exc:  # noqa: BLE001
-            raise ModelError("; ".join(errors + [f"sail: {type(exc).__name__}: {getattr(exc, 'code', '') or str(exc)[:160]}"]),
-                             billed=billed) from None
+            code = str(getattr(exc, "code", "") or "")
+            if why is not None or fallback is None or code != "provider_poll_timeout":
+                raise failed(exc) from None
+            window, profile, why = fallback[0], fallback[1], "stall"
+            errors.append(f"sail {sail_profile}: {code}; retried on {profile}")
+            try:
+                self.flag_stall(window, profile=sail_profile, fallback=profile, role=role, code=code)
+            except Exception:  # noqa: BLE001 - the flag is a shortcut; the retry stands without it
+                pass
+            self._require_committed_store()
+            try:
+                response = on_sail(profile, fallback_key(key, profile))
+            except Exception as again:  # noqa: BLE001
+                raise failed(again) from None
         text = response.output_text or ""
         usage = getattr(response, "usage", None)
         reason = getattr(response, "incomplete_reason", None)
-        return {"text": text, "json": extract_json(text), "route": "sail", "model": sail_profile,
-                "cost_usd": float(response.cost_usd or 0), "fallback_reasons": errors,
-                "truncated": getattr(response, "incomplete", False) is True,
-                "incomplete_reason": reason if isinstance(reason, str) else None,
-                "usage": dict(usage) if isinstance(usage, Mapping) else {}}
+        out = {"text": text, "json": extract_json(text), "route": "sail", "model": profile,
+               "cost_usd": float(response.cost_usd or 0), "fallback_reasons": errors,
+               "truncated": getattr(response, "incomplete", False) is True,
+               "incomplete_reason": reason if isinstance(reason, str) else None,
+               "usage": dict(usage) if isinstance(usage, Mapping) else {}}
+        if why is not None:
+            out["sail_fallback"] = {"from": sail_profile, "to": profile, "why": why}
+        return out
+
+    # ------------------------------------------------------------------ the Sail window fallback
+    def sail_fallback(self, profile: str | None, role: str | None = None) -> tuple[str, str] | None:
+        """(window, fallback profile) for a Sail profile outside the asap window that `sail_fallback` maps to an asap
+        profile; None for an asap profile, an unknown one, or no usable entry (null turns the whole map off). For a role in
+        `sail_fallback_same_model` (default: the audit; null: none) the fallback is the same model's asap profile
+        (`asap_twin`), whatever the map names, and None when that model has no asap profile: the gate's audit is a second,
+        different model from the review, on its fallback too."""
+        mapping = self.settings.get("sail_fallback")
+        if not profile or not isinstance(mapping, Mapping):
+            return None
+        target = mapping.get(profile)
+        if not isinstance(target, str) or target == profile:
+            return None
+        same_model = self.settings.get("sail_fallback_same_model", ("audit",))
+        if role is not None and isinstance(same_model, (list, tuple)) and role in same_model:
+            target = asap_twin(profile)
+            if target is None:
+                return None
+        window = sail_window(profile)
+        if window is None or window == "asap" or sail_window(target) != "asap":
+            return None
+        return window, target
+
+    def _now(self) -> float:
+        try:
+            return float(self.store.clock())
+        except Exception:  # noqa: BLE001 - a store without a clock
+            return time.time()
+
+    def window_stalled(self, window: str) -> dict[str, Any] | None:
+        """The stall flag of a Sail window (kv `sail_window_stall`) while it stands, else None."""
+        try:
+            entry = (self.store.get(STALL_KEY) or {}).get(window)
+        except Exception:  # noqa: BLE001 - an unreadable flag is no flag: the window is asked
+            return None
+        if isinstance(entry, Mapping) and float(entry.get("until") or 0) > self._now():
+            return dict(entry)
+        return None
+
+    def flag_stall(self, window: str, *, profile: str, fallback: str, role: str, code: str) -> bool:
+        """Flag `window` stalled for `STALL_SECONDS` (kv `sail_window_stall`) and raise one `swarm.status` alert a stall: a
+        window flagged again within `STALL_SECONDS` of its last flag's end is the same stall (no second alert). Returns
+        whether it alerted."""
+        now = self._now()
+        with self.store.atomic():
+            flags = self.store.get(STALL_KEY)
+            flags = {k: v for k, v in flags.items() if isinstance(v, Mapping)} if isinstance(flags, Mapping) else {}
+            last = flags.get(window) or {}
+            fresh = now >= float(last.get("until") or 0) + STALL_SECONDS
+            since = now if fresh else float(last.get("since") or now)
+            flags[window] = {"until": now + STALL_SECONDS, "since": since, "at": now, "profile": profile, "fallback": fallback,
+                             "role": role, "code": code}
+            self.store.put(STALL_KEY, flags)
+        if fresh:
+            self.store.event("swarm.status", None, {
+                "action": "sail_window_stall", "alert": True, "window": window, "profile": profile, "fallback": fallback,
+                "role": role, "code": code, "until": now + STALL_SECONDS,
+                "text": (f"Sail's {window} window did not answer a {role} call on {profile} ({code}): calls on that window go to "
+                         f"their asap fallback ({fallback} for the {role}) for the next hour, then the {window} window is asked "
+                         "again")})
+        return fresh
 
     def _ask_openai(self, *, role: str, system: str, user: str, family: str | None, key: str, openai_model: str,
                     max_output: int, effort: str, need_usd: float, errors: list[str]) -> dict[str, Any] | None:
@@ -885,11 +1051,17 @@ class ModelRouter:
             body = request_body(openai_model, [{"role": "system", "content": system}, {"role": "user", "content": user}],
                                 max_output_tokens=max_output, effort=effort, service_tier=tier, role=role)
             required = float(max(need, reservation_ceiling(body)))
+            budget = self.claude_budget_room()  # THE BUDGET's paid-model dollars today: OpenAI is under them too
+            if budget is None or budget < required:  # no reading is no room, never "no line" (FAIL CLOSED)
+                errors.append(f"openai: the research budget's paid-model line for today has no room (${budget or 0.0:.2f} "
+                              f"left; this call may cost ${required:.2f})")
+                return None
             room = self.openai_room()  # network refresh must not hold the shared SQLite write transaction
             if room >= required:
                 admitted = False
                 with self.store.atomic():
-                    if min(room, self._openai_cap_room()) >= required:
+                    budget = self.claude_budget_room()  # read again inside the write transaction
+                    if budget is not None and budget >= required and min(room, self._openai_cap_room()) >= required:
                         self.store.add_spend("openai", required, family=family,
                                              detail={"role": role, "hold": key[:120], "service_tier_requested": tier,
                                                      "max_output_tokens": body["max_output_tokens"]})
@@ -921,9 +1093,45 @@ class ModelRouter:
             except Exception as exc:  # noqa: BLE001 - every OpenAI failure falls back to Sail
                 status = getattr(exc, "status", None)
                 if isinstance(status, int) and 400 <= status < 500:
-                    self.store.add_spend("openai", -hold, family=family, detail={"role": role, "refused": status})
+                    # The release names its hold (`releases`), so `openai_spent` counts it on the hold's day.
+                    self.store.add_spend("openai", -hold, family=family,
+                                         detail={"role": role, "refused": status, "releases": key[:120]})
                 errors.append(f"openai: {type(exc).__name__}: {str(exc)[:160]}")
         return None
+
+
+#: The kv key of the Sail window stall flags ({window: {until, since, at, profile, fallback, role, code}}).
+STALL_KEY = "sail_window_stall"
+#: How long a stalled window stays flagged: its calls go straight to the fallback until then.
+STALL_SECONDS = 3600.0
+
+
+def sail_window(profile: str) -> str | None:
+    """The completion window a Sail profile buys (`ltcm.provider.window_of`), or None for an unknown profile."""
+    try:
+        from ltcm.provider import window_of
+
+        return window_of(str(profile))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def asap_twin(profile: str) -> str | None:
+    """The asap profile of the model a Sail profile dispatches to (k3_balanced: k3; pro_balanced: pro_asap), or None for
+    an unknown profile or a model with no asap profile."""
+    try:
+        from ltcm.provider import PROFILES, model_of
+
+        model = model_of(str(profile))
+    except Exception:  # noqa: BLE001
+        return None
+    twins = sorted(name for name, spec in PROFILES.items() if spec[0] == model and spec[1] == "asap")
+    return twins[0] if twins else None
+
+
+def fallback_key(key: str, profile: str) -> str:
+    """The request key of a call's retry on its fallback profile: a new request, never the stalled one's re-read."""
+    return f"{key[:160]}:fallback:{profile}"[:200]
 
 
 def _line(value: Any, *, invalid: float = 0.0) -> float:
@@ -966,4 +1174,5 @@ def build_router(root: Any, store: SwarmStore, settings: Mapping[str, Any], *, c
                        claude_factory=claude_factory, claude_meter=claude_meter)
 
 
-__all__ = ["ModelRouter", "ModelError", "ClaudeReply", "build_router", "extract_json"]
+__all__ = ["ModelRouter", "ModelError", "ClaudeReply", "build_router", "extract_json", "fallback_key", "sail_window",
+           "asap_twin", "STALL_KEY", "STALL_SECONDS"]

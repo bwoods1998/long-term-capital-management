@@ -55,6 +55,7 @@ def settings():
 
 class LoopCase(unittest.TestCase):
     def setUp(self):
+        self.threads_before = set(threading.enumerate())  # what was running before this fixture's pool (join_dispatchers)
         self.dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
         self.root = Path(self.dir.name) / "state"
@@ -71,7 +72,27 @@ class LoopCase(unittest.TestCase):
         self.box_sail = FakeSail()
         self.pool = GymPool(self.store, self.box_sail, self.settings, allowed=lambda k: self.guard.allows(k),
                             driver_factory=lambda client, box: FakeDriver(client, box))
+        self.addCleanup(self.join_dispatchers)  # runs after the pool's stop, before the provider and the store close
         self.addCleanup(self.pool.stop)
+        self.addCleanup(self.join_rounds)  # registered last, so it runs first: no round outlives the store it writes to
+
+    @staticmethod
+    def join_rounds(seconds=30):
+        """Wait for the rounds a `Swarm.step` left running (`Swarm._round`'s threads, named round-<name>), however the test
+        built its Swarm: one still running when the store closes fails in its thread with `Cannot operate on a closed
+        database`, after the test that started it has passed."""
+        for thread in threading.enumerate():
+            if thread.name.startswith("round-"):
+                thread.join(seconds)
+
+    def join_dispatchers(self, seconds=30):
+        """Wait for the pool's dispatchers (`GymPool._serve`'s threads, named gym-<box>) once the pool is stopped: `stop`
+        tells them to leave and joins its forks only, so one still delivering a batch (`run_batch` books the box's use
+        and its state) when the store closes fails in its thread the same way. Every gym-* thread started since setUp is
+        this fixture's pool's, whether or not `manage` still holds its box."""
+        for thread in threading.enumerate():
+            if thread.name.startswith("gym-") and thread not in self.threads_before:
+                thread.join(seconds)
 
     def script(self, body):
         return {"calls": [("notebook", {"action": "append", "text": "noted"})]} if len(body["input"]) < 6 else {"text": "ok"}
@@ -118,6 +139,7 @@ class Process(LoopCase):
             t.join(60)
         manager_stop.set()
         elapsed = time.time() - began
+        m.join(30)  # its pass in flight writes to the store too: it ends before the fixture closes it
         self.assertEqual(len(results), 48)
         errors = {k: v.get("error") for k, v in results.items() if v.get("error")}
         self.assertEqual(errors, {})
@@ -234,6 +256,10 @@ class Process(LoopCase):
                     self.assertIn(f"invalid researcher.{key}", pace["reason"])
 
     def test_the_architect_grows_the_population_only_under_the_pace_but_always_refills_it(self):
+        # THE BUDGET holds population.start to its ceiling (league/ops/budget.py), and with no budget.json that is the
+        # floor's: a budget whose ceiling is over the 48 founders, so the refill under the start is what is judged here.
+        (self.root / "budget.json").write_text(json.dumps({"schema": 1, "at": time.time(), "meters": {
+            "sail": {"research_usd_day": 60.0}, "claude": {"research_usd_day": 40.0}}}))
         sw = self.swarm()
         sw.seed()
         self.store.add_spend("sail_model", float(self.settings["researcher"]["usd_per_hour"]) + 0.5)  # the hour's spend is past the pace
@@ -404,6 +430,14 @@ class Library(LoopCase):
         self.assertEqual(block.queries, tuple(self.settings["research"]["seed_queries"][:4]))
         self.assertEqual(len(client.calls), 4)
         self.assertEqual(sw.status()["library"], {"enabled": True, "calls_today": 4, "line": 300, "families_today": 0})
+
+
+class Heartbeat(LoopCase):
+    def test_the_heartbeat_names_the_families_in_a_cycle_now(self):
+        sw = self.swarm()
+        sw.scheduler.running.update({"fam-b", "fam-a"})
+        status = sw.status()
+        self.assertEqual((status["running"], status["running_families"]), (2, ["fam-a", "fam-b"]))
 
 
 if __name__ == "__main__":

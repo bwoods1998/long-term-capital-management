@@ -48,7 +48,9 @@ export class Gate extends DurableObject {
   // The real Alpaca account's equity for the caps by maximum loss (Sept 26, 2026 (the options-swarm run, Wave 5)).
   accountEquity() { return this.gate.accountEquity(); }
   recordAccountEquity(reading) { return this.ctx.storage.transactionSync(() => this.gate.recordAccountEquity(reading)); }
-  setKill(on) { return this.gate.setKill(on === true); }
+  // The switch and its admin-log entry (V3-A, WP8) in one transaction: a release whose entry cannot be written releases nothing.
+  setKill(on, at, who) { return this.ctx.storage.transactionSync(() => this.gate.setKill(on === true, at, who)); }
+  adminRecord(entry) { return this.ctx.storage.transactionSync(() => this.gate.adminRecord(entry)); }
   noticesToday(at) { return this.gate.noticesToday(at); }
   noticeDelivered(id, at) { return this.gate.noticeDelivered(id, at); }
   recordNotice(at, id) { return this.gate.recordNotice(at, id); }
@@ -65,6 +67,18 @@ export class Gate extends DurableObject {
   typesafeSettle(request) { return this.ctx.storage.transactionSync(() => this.gate.typesafeSettle(request)); }
   pullReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.pullReserve(request)); }
   pullRefund(request) { return this.ctx.storage.transactionSync(() => this.gate.pullRefund(request)); }
+  // The desk's docs commits, the engineer's merges and the reviewer's verdicts (V3-A, WP8), each step one transaction.
+  docsToday(at) { return this.gate.docsToday(at); }
+  docsReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.docsReserve(request)); }
+  docsSettle(request) { return this.ctx.storage.transactionSync(() => this.gate.docsSettle(request)); }
+  mergesToday(at) { return this.gate.mergesToday(at); }
+  mergeReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.mergeReserve(request)); }
+  mergeSettle(request) { return this.ctx.storage.transactionSync(() => this.gate.mergeSettle(request)); }
+  // The engineer's pull requests (V3-A, WP8b): a New York day's count of their own, each step one transaction.
+  engineerPullReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.engineerPullReserve(request)); }
+  engineerPullSettle(request) { return this.ctx.storage.transactionSync(() => this.gate.engineerPullSettle(request)); }
+  reviewFor(request) { return this.gate.reviewFor(request); }
+  reviewRecord(request) { return this.ctx.storage.transactionSync(() => this.gate.reviewRecord(request)); }
   webFetchReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.webFetchReserve(request)); }
   // The research library's pace (Sept 29, 2026; lib/library.mjs): a turn and its release, each one synchronous transaction.
   libraryAcquire(request) { return this.ctx.storage.transactionSync(() => this.gate.libraryAcquire(request)); }

@@ -112,13 +112,25 @@ export function compose(kind, facts = {}) {
   return { subject, text: lines.filter(line => line !== undefined && line !== null).join('\n') + '\n' };
 }
 
-// What the floor may post to /v1/notify: fills, settlements, the sample, a disk warning, and a real-money stop.
-export const NOTICE_KINDS = ['trade', 'settled', 'test', 'disk_low', 'live_stop'];
+// What the floor may post to /v1/notify: fills, settlements, the sample, a disk warning, a real-money stop, and a
+// funding cliff (V3-A, WP8: the budget rule's card notice, league/ops/budget.py).
+export const NOTICE_KINDS = ['trade', 'settled', 'test', 'disk_low', 'live_stop', 'funding'];
+//: The meters a funding notice may name (league/ops/budget.py): Sail's prefund and the Anthropic account.
+export const FUNDING_METERS = { sail: 'Sail', claude: 'Claude (Anthropic)' };
 //: The stops the House trips on real money (Sept 26, 2026 (the options-swarm run, Wave 5)). A stop not named here is not
 //: composed (a 400): a subject names only these words.
 export const LIVE_STOPS = ['drawdown', 'daily', 'reconciliation', 'assignment'];
 export const RELEASE_DRAWDOWN = 'Exits go on; the Gym keeps running. Release the drawdown pause on the box with python3 -m league.live --root /workspace/state --release-drawdown.';
 const DECIMAL = /^-?\d{1,12}(\.\d{1,6})?$/;
+//: A dollar figure or a count of days the House sent as a string or a number: echoed only when it reads as a decimal.
+const decimal = value => {
+  const text = typeof value === 'number' && Number.isFinite(value) ? String(value) : value;
+  return typeof text === 'string' && DECIMAL.test(text) ? text : null;
+};
+const dollars = value => (decimal(value) === null ? 'unknown' : `$${Number(decimal(value)).toFixed(2)}`);
+const dayCount = value => (decimal(value) === null ? 'unknown' : `${Number(decimal(value))}`);
+const DATE = /^\d{4}-\d{2}-\d{2}(T[0-9:.]{2,15}Z)?$/;
+const dateOf = value => (typeof value === 'string' && DATE.test(value) ? value.slice(0, 10) : 'unknown');
 const clip = (value, max) => (typeof value === 'string' ? value.slice(0, max) : '');
 const price = value => (typeof value === 'string' && value ? `$${value}` : 'unknown');
 
@@ -181,6 +193,57 @@ export function composeNotice(facts = {}) {
         `Equity: ${equity}.`,
         `At: ${clip(facts.at, 40) || 'an unknown time'}.`,
         stop === 'drawdown' ? RELEASE_DRAWDOWN : null,
+      );
+      break;
+    }
+    case 'funding': {
+      // A prefund under the card line (V3-A, WP8): the budget rule (league/ops/budget.py `notice_facts`) found a meter's
+      // runway at the rate it WANTS (`usd_day`: fixed + its full research floor + what profit earned) under
+      // `card_line_days`, and says exactly what restores `restore_days` at that rate. The rule throttles research, so the
+      // desk is held under that: `current_*` are the rate it is held to now (the fixed cost plus the day's research
+      // budget: a ceiling the rule sets, not a metered spend). The mail says both, each named, and words neither as a
+      // spend. Both runways are days until the meter's RESERVE, not until it is empty (the House sends no reserve figure),
+      // so each is said as days above the reserve. With no `current_usd_day` (an older House, or a balance the rule could
+      // not read for research) it claims no current rate. At most once per meter per ISO week (its notice id, which the
+      // gateway also remembers for eight days). `test: true` is a drill.
+      if (!Object.hasOwn(FUNDING_METERS, facts.meter)) return null;
+      const meter = FUNDING_METERS[facts.meter];
+      const drill = facts.test === true;
+      const fixed = dollars(facts.fixed_usd_day);
+      const current = decimal(facts.current_usd_day) !== null;
+      // A runway the House sent as zero: the meter sustains nothing at that rate.
+      const zero = value => decimal(value) !== null && Number(decimal(value)) <= 0;
+      // What happens with no card is ONE sentence, worded from the runway at the rate the desk is held to now when that
+      // was sent, and from the runway at the wanted rate only when it was not: the mail never says that the meter lasts
+      // some days and that it has none left.
+      const lasts = current && decimal(facts.current_runway_days) !== null ? dayCount(facts.current_runway_days) : null;
+      const spent = lasts !== null ? zero(facts.current_runway_days) : zero(facts.runway_days);
+      // "Nothing stops" is said only when the figures sent show it: research above zero (the throttle still has something
+      // to cut), the runway at that rate at or over the card line, AND a runway left at the wanted rate. Research already
+      // at 0.00 leaves the fixed cost running the meter to its reserve (at Sail's the desks stop: `floor_stopped` above),
+      // so the mail then says how long it lasts and promises nothing; with no current rate, or no runway at it, it says
+      // that was not sent.
+      const idle = current && zero(facts.current_research_usd_day);
+      const holds = lasts !== null && !idle && !zero(facts.runway_days) && decimal(facts.current_research_usd_day) !== null
+        && decimal(facts.card_line_days) !== null && Number(lasts) >= Number(decimal(facts.card_line_days));
+      subject = `${drill ? 'LTCM [drill]' : 'LTCM'}: ${meter} runway ${dayCount(facts.runway_days)} days at the rate the budget wants; add ${dollars(facts.restore_usd)} by ${dateOf(facts.card_date)}`;
+      lines.push(
+        drill ? 'THIS IS A DRILL: a synthetic cliff tests that this notice reaches you. Its figures are the drill\'s, not the desk\'s. Nothing needs doing.' : null,
+        `${meter} holds ${dollars(facts.balance_usd)}.`,
+        current
+          ? `The desk is held to ${dollars(facts.current_usd_day)} a day on it now (fixed ${fixed}, research up to ${dollars(facts.current_research_usd_day)}); ${lasts === null ? 'the House sent no runway at that rate' : `at that rate it lasts ${lasts} days above its reserve`}.`
+          : 'What the desk is held to on it now was not sent: the figures below are at the rate the budget rule wants, not a spend the desk is making.',
+        `The budget rule wants ${dollars(facts.usd_day)} a day for it (fixed ${fixed}, research ${dollars(facts.research_usd_day)}: the research floor plus what profit earned); at that rate it lasts ${dayCount(facts.runway_days)} days above its reserve, to about ${dateOf(facts.runs_out_on)}. That is the runway under the ${dayCount(facts.card_line_days)}-day card line.`,
+        `Adding ${dollars(facts.restore_usd)} restores ${dayCount(facts.restore_days)} days of runway at the rate the rule wants. Add it by ${dateOf(facts.card_date)}.`,
+        spent
+          ? `${meter} has no runway left above its reserve: research on it stays throttled until it is funded.`
+          : holds
+            ? `Nothing stops if no card is added: research stays throttled to what ${meter} sustains.`
+            : lasts !== null
+              ? `If no card is added, ${meter} lasts ${lasts} days above its reserve at the rate the desk is held to now: research on it ${idle ? `is already at ${dollars(facts.current_research_usd_day)}, so there is nothing left to throttle` : 'stays throttled'}.`
+              : `If no card is added, research on ${meter} stays throttled; how long ${meter} lasts at the rate the desk is held to now was not sent.`,
+        'The budget rule never raises a cap or moves money.',
+        `At: ${clip(facts.at, 40) || 'an unknown time'}.`,
       );
       break;
     }

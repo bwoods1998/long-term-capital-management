@@ -111,6 +111,9 @@ def main() -> None:
         from league.gym.runtime import load_program
         from league.live.chains import LiveDay
         from league.live.shadow import ShadowAccount
+        # Importing league.tests switches on the suite's isolation (an empty policy layer, league/tests/__init__.py).
+        # This judge runs in its own sandboxed process, outside the House's import closure, which must never reach
+        # league.tests (league/tests/test_swarm_settings_policy.py TheHouseNeverImportsTheTests holds it to that).
         from league.tests.live_fakes import MONDAY, at, iso
 
         needs = load_program(CODE).needs
