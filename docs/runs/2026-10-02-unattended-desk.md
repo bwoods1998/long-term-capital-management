@@ -5,9 +5,9 @@ previous record is [the continuous-learning run](2026-09-30-continuous-learning.
 achieved**. All times are UTC. Private details (account figures, prices, strikes, programs, parameters, operator tools)
 stay in the operator's goal folder.
 
-**State on Oct 3: v3 is built. Its first release, V3-A part 1 (A1), is integrated on `release/v3a` and ready for the
-owner's deploy; it is not deployed. Production runs on autopilot on the Oct 2 release, with research cut to a funded
-floor.**
+**State on Oct 3: v3's first release, V3-A part 1 (A1), is live. House release `20261003T084912Z-be16b05904ff` (main
+`266e6861`) was promoted at 08:49:56 on Oct 3, with the gateway `e95a2d4a` and the updater on. Production runs on
+autopilot on it, with research at the budget rule's floor. The forward ladder and research v3 are not in it.**
 
 ## Why v3
 
@@ -62,11 +62,11 @@ every day.
 | Phase | What | State on Oct 3 |
 |---|---|---|
 | 0 | Stop the treadmill: research to the floor, stale cohorts ended, a baseline economics | done on the box Oct 2 (below) |
-| 1 | The autonomy core: self-deploy, the operator's scripts as House jobs, funding without hands, the standing grant, calendar-driven times, monthly failure drills | built in A1; not deployed |
+| 1 | The autonomy core: self-deploy, the operator's scripts as House jobs, funding without hands, the standing grant, calendar-driven times, monthly failure drills | live in A1 since Oct 3; at the deploy no self-deploy, self-rollback or drill had yet happened on the box |
 | 2 | Research v3: fewer, stronger researchers; hypotheses from documented premia; the strategist owns the agenda; credit types in the Gym and the shadow book | built on branches; not deployed |
 | 3 | Evidence v3: the forward ladder, benchmarked before it binds | built; its confirmation study is not run; it does not bind |
-| 4 | Recursive harness improvement: an engineer, an automated reviewer, the updater's canary, retain or revert by a predeclared metric | the gateway's walls built in A1; the engineer built on a branch; neither deployed |
-| 5 | The economics autopilot: the daily page, the budget rule, the weekly post-mortem | the page and the budget built in A1; the post-mortem built on a branch; none deployed |
+| 4 | Recursive harness improvement: an engineer, an automated reviewer, the updater's canary, retain or revert by a predeclared metric | the gateway's walls live in A1 (nothing calls them yet); the engineer built on a branch, not deployed |
+| 5 | The economics autopilot: the daily page, the budget rule, the weekly post-mortem | the page and the budget live in A1 (the first page and the first budget run come after this record); the post-mortem built on a branch, not deployed |
 
 The plan's measure of done, in plain words: 30 consecutive days in which no command from the owner's machine touched
 production, with self-deployed releases and at least one self-rollback; research that followed realized profit both
@@ -116,7 +116,8 @@ On Oct 3 the integration was finished on `release/v3a` (PR #489), offline:
   threads now joins them;
 - the docs were brought to the tree as it is.
 
-Before A1 ships: CI green on the exact head, the merge to main, and the owner's deploy outside a session.
+A1 then shipped by that order: CI green on the exact head, the merge to main, and the owner's deploy outside a session
+(**The deploy**, below).
 
 ## What A1 contains
 
@@ -190,7 +191,8 @@ last ratification, or a deposit landed (told by its id). Capital stays the lower
 never creates, enables or re-enables a grant, never raises the ceiling without the owner's deploy, and refuses, changing
 nothing, when anything is unreadable. `--disable` stays the owner's stop. A1 does not change the money rules, so the
 money digest stays `42c4a3af` and its deploy needs no ratification for it (the job's first run may still answer an
-earlier deposit once more, at the same capital rule: its record of seen deposits starts empty).
+earlier deposit once more, at the same capital rule: its record of seen deposits starts empty; at the deploy it did,
+once).
 
 ### Self-deploy, inside walls
 
@@ -295,8 +297,9 @@ development cohort must then pass, on a fresh-seed confirmation cohort with at l
 (1) a false-promotion rate of at most 1.0% in every negative world, not significantly above the sealed look's there
 (one-sided Fisher exact test, p ≥ 0.05); (2) pooled false promotions at or below the sealed look's; and (3) missed
 signals in the mixed desk at or below the sealed look's. A tighter design, judged only at fixed checkpoints, was chosen
-on development data and frozen on Oct 3, before any confirmation run. The confirmation has not been run. If no design
-passes, `binding` stays false and the daily page says so with the counts.
+on development data and frozen on Oct 3, before any confirmation run; it was amended once the same morning, still
+before any run. The confirmation has not been run. If no design passes, `binding` stays false and the daily page says
+so with the counts.
 
 ## The walls
 
@@ -341,35 +344,67 @@ change is reviewed against.
   and the existing `live_stop` notice when a real-money stop trips.
 - `/v1/health` on the gateway shows the admin log and the desk's docs commits and merges.
 
-## Autopilot (from Oct 3, until the deploy)
+## Autopilot before the deploy (Oct 2 evening to 08:49 Oct 3)
 
 - Production: House release `20261002T112610Z-e11710692569`, gateway `4471596a`; the updater off.
 - Research at a funded floor (since 17:04-17:23 Oct 2): 16 families at the start, floor 8, one Gym box, the Sail
   researchers at $0.25 an hour, the architect every two hours, the strategist once a day: about $5 a day of Sail.
 - Trading every New York session: calibration round trips, the House live test, the incubator, and the practice league
   in shadow. The one tuition lot exits before its Oct 7 expiry cutoff.
-- The settings in effect and the deploy that waits: [operations](../operations.md) ("Now").
+- The settings in effect since the deploy: [operations](../operations.md) ("Now").
 
-## The deploy (not made yet)
+## The deploy (Oct 3, 2026)
 
-A1 is the owner's deploy, outside the session: the gateway first (the running House never calls its new routes, and
-the new House tolerates them absent), then the House with the nightly daemon stopped, then the checks in
-[operations](../operations.md) ("The A1 deploy, in order"). The box keeps its full `swarm.json` while the release it
-could roll back to is a pre-V3-A one, so that a rollback finds the settings it needs. A rollback restores code only and
-goes to whatever release `previous` names, so it is run only when that is the release meant.
+A1 was the owner's deploy, on a Saturday, outside the session. The order followed: the rollback rehearsed on
+production first; CI green on the exact head and the merge; the gateway (the running House never calls its new routes,
+and the new House tolerates them absent), with its own rollback rehearsed; the House with the nightly daemon stopped;
+the checks in [operations](../operations.md) ("The A1 deploy, in order"); criterion 1. The box keeps its full
+`swarm.json` while the release it could roll back to is a pre-V3-A one, so that a rollback finds the settings it needs.
+A rollback restores code only and goes to whatever release `previous` names, so it is run only when that is the
+release meant.
 
-**The deploy's record** (to be written at the deploy; the release id, times and checks also go in the
-[CHANGELOG](../../CHANGELOG.md) entry "V3-A part 1"):
+**The rehearsal found that no release could land.** At 08:23 a deploy of main alone (the running release's tree plus
+docs, comment-only edits and a prune of dead files) was refused by its canary: exit 2, production untouched. The old
+League's fourteen-day expedition had ended at 00:00 that day. A canary is a fresh House with nothing told yet, so on
+its first tick it told the run's scheduled end, as an error, and the watchdog refuses any unmarked error in a canary.
+From 00:00 on Oct 3 every canary was refused, so no release of any kind could land: not A1, not a re-deploy of a
+rollback target, not an updater release, not the rollback drill. The fix (commit `0c8e8107`, `league/house.py`
+`_expedition_notices`) makes the calendar ending the run a warning; a budget spent before its last day is still an
+error. Its three tests fail on the old code with the refusal's own words.
+
+**The rehearsal then ran on main plus that one fix** (08:28-08:41). Release `20261003T082921Z-f313be66cb82` passed its
+canary, was promoted at 08:30:04, was watched for ten minutes (clean), and was rolled back with no force flag in 4
+seconds. The restored Oct 2 release was verified: health fresh, real money on, no failures, the evaluator unchanged,
+the same nine practice cohorts active, no new grant ratification, and the operator's pre-open check 9 of 9. It had one
+side effect: each swarm restart lifts the families' holds, and in the cycles after the two restarts three families
+retired themselves (self-refuted by their researchers), which left 13 alive.
+
+**The deploy's record** (the release id, times and checks are also in the [CHANGELOG](../../CHANGELOG.md) entry
+"V3-A part 1" and in operations):
 
 | What | Value |
 |---|---|
-| Deployed at | to be filled |
-| House release (main commit) | to be filled |
-| Gateway version | to be filled |
-| The watch's verdict | to be filled |
-| Evidence reset 3 (adoption, cohorts ended) | to be filled |
-| First `grant` receipt | to be filled |
-| Criterion 1 (a restart and a killed swarm) | to be filled |
+| The tree | CI green on the exact head `0c8e8107` at 08:44:41 (`gateway`, `tests (3.11)`, `tests (3.14)`); merged at 08:45:39 as main `266e6861`, whose tree equals the tested head's |
+| Gateway version | `e95a2d4a`, deployed at 08:46 after 404 of 404 tests; its rollback rehearsed at 08:47-08:48 (to `4471596a` and back) |
+| Deployed at | promoted at 08:49:56, after its canary |
+| House release (main commit) | `20261003T084912Z-be16b05904ff` (main `266e6861`); `auto_update` true; `previous`, the rollback target, is `20261002T112610Z-e11710692569` |
+| The watch's verdict | the ten-minute watch clean; PROMOTED, exit 0 |
+| Health and the jobs | the new release, real money on, no failures, nothing stopped; an `ops` block (one job due, one ok, none failed or missed); a registry of 11 jobs; the receipts read with no exec |
+| Evidence reset 3 (adoption, cohorts ended) | 13 adoption events at 08:50:34, one per alive family; all nine practice cohorts completed, "evaluator changed" |
+| First `grant` receipt | ok at the start; ratified once on its first look, trigger `deposit` (earlier deposits, first seen by the job's new record), on money digest `42c4a3af`, capital at the account's equity; the looks after it answer `none` |
+| The budget | no `budget.json` until the first run at 00:30 on Oct 4, so the floor is in force; its knobs are applied and the Sail guard is not braked |
+| The updater | built; its first look at the first tick, with no alert and no deploy row |
+| The one expected non-pass | the operator's pre-open check, 9 of 10: check 6 (bands) reads "observe rows 0", because the reset cleared every family's selection; named before the run |
+| Criterion 1 (a restart and a killed swarm) | 09:01-09:02: stop and start, with the swarm's heartbeat fresh 16 seconds after the start; the swarm killed, recovered in 16 seconds |
+
+**By itself from here.** The `grant` job hourly; the first daily page at 23:30; the budget's first run at 00:30 on
+Oct 4, which writes the first `budget.json` and then sends its funding notices; `hygiene` at 02:00; and the first
+drills on Oct 3 at 15:00 and 17:00: two test funding mails, a failed Sail read, a gateway outage, a killed swarm, and
+the rollback drill (a broken copy promoted and rolled back by the watch, which restarts the House twice). Until
+Monday's close each budget run raises one warning, because there is no close economics summary yet.
+
+**What it does not do yet.** Practice is empty until new versions qualify on the new evaluator or the ladder release
+lands. The forward ladder (its design frozen, its confirmation not yet run) and research v3 are not in this release.
 
 ## Honest expectations
 
@@ -379,9 +414,12 @@ goes to whatever release `previous` names, so it is run only when that is the re
   across Sail and Claude, and to less where a meter's balance does not sustain that for 90 days. Once the day's
   research dollars are spent the Sail guard brakes the swarm until 00:00 UTC, which at the floor can be most of the
   day. More research comes only from realized profit or the owner's top-up.
-- **Practice starts empty.** The deploy's evidence reset ends every practice cohort, and the versions practising today
-  do not come back. The practice league and the incubator have nothing until new versions qualify on the new evaluator,
-  and a cohort's first look then needs 3 sessions and 10 program closes.
+- **Practice starts empty.** The deploy's evidence reset ended every practice cohort (nine), and the versions that
+  were practising do not come back. The practice league and the incubator have nothing until new versions qualify on
+  the new evaluator, and a cohort's first look then needs 3 sessions and 10 program closes. At the research pace the
+  budget rule allows, almost no new version is expected to qualify, so Monday's practice league is expected to be empty
+  unless the ladder release lands first (its re-entry rule takes the cohorts a release interrupted back in as ladder
+  entrants).
 - **No promotion by forward evidence is possible under A1.** The ladder is not in it. As first specified a program
   needs at least 20 practice sessions before it can be judged; the frozen design judges only at fixed checkpoints later
   in its 60-session window, so a first promotion is further out than that. If the ladder has promoted nothing by the
@@ -390,26 +428,27 @@ goes to whatever release `previous` names, so it is run only when that is the re
   sealed look's, and its missed signals are about equal to the sealed look's, slightly worse. The pre-registered rule
   asks for no more misses than the sealed look, so the confirmation is more likely to fail on that item than to pass.
   If it fails, the ladder ships recording only and the sealed-holdout gate stays the way to real money.
-- **The unattended clock has not started.** It starts at the deploy and ends at the first command that touches
-  production. The updater's first self-deploy, the first self-rollback and the monthly drills are unproven on the box
-  until they happen there.
+- **The unattended clock has counted nothing yet.** It starts at the deploy and ends at the first command that touches
+  production. The deploy's own commands on the box ran until at least 09:02 on Oct 3 (criterion 1), and this record
+  claims no unattended day. The updater's first self-deploy, the first self-rollback and the monthly drills are
+  unproven on the box until they happen there.
 - **Net keeps falling by the fixed costs** (the data vendors and the boxes) for as long as realized options profit does
   not exceed them.
 
-## Scoreboard (Oct 2 close)
+## Scoreboard (money at the Oct 2 close; the release as of the Oct 3 deploy)
 
 | Measure | Value |
 |---|---|
-| Release running | `20261002T112610Z-e11710692569` (main `e3d0111f`), gateway `4471596a` |
-| V3-A part 1 | built and integrated on `release/v3a`; not deployed |
+| Release running | `20261003T084912Z-be16b05904ff` (main `266e6861`), gateway `e95a2d4a`, since Oct 3; at the Oct 2 close `20261002T112610Z-e11710692569` (main `e3d0111f`), gateway `4471596a` |
+| V3-A part 1 | live since 08:49:56 on Oct 3 |
 | Real money through evidence | none: no program has passed the holdout (3 looks, 0 passes) and the forward ladder is not deployed |
 | The House's own real orders | D3 calibration round trips (23 closed by the Oct 2 close); one exit-only tuition lot open; the House live test, no order yet; the incubator, no lot |
 | Realized options P&L since the Sept 26 reset | −$40.63 (calibration −$38.76; regulatory fees −$1.87; strategy routes $0.00) |
 | Input costs since the reset | $607.88 |
 | **Net since the reset (Oct 2 close)** | **−$648.51** (−$772.67 with the open tuition lot at its conservative mark) |
-| Families alive | 16 |
-| Research | at a funded floor set by hand; under A1 the budget rule's floor |
-| Evidence resets | 2 (Release A, Release B); A1's deploy is the third |
+| Families alive | 16 at the Oct 2 close; 13 at the deploy |
+| Research | at the budget rule's floor since the deploy (a funded floor set by hand before it) |
+| Evidence resets | 3 (Release A, Release B, A1's deploy on Oct 3) |
 | Programs promoted by forward evidence | 0 |
 | Retained harness improvements | 0 |
 
@@ -418,13 +457,13 @@ reset is −$648.51.
 
 ## Next
 
-- **CI on the integrated head, the merge, the owner's deploy** of A1, by the order in
-  [operations](../operations.md).
-- **The first days on A1:** the `grant` receipt at the start (no digest ratification due), the `budget` job at 00:30
-  (its first `budget.json`: research at the floor, or under it where a balance does not sustain it), `hygiene` at
-  02:00, `clock` at 11:00, the first daily page at 23:30 (its money section says there is no close economics yet until
-  the House's own `economics` job has run at a close), `preopen` an hour before the first open.
-- **The monthly drills,** on the first Saturday of a month that the House reaches on A1 before 15:00: a test
-  funding mail for each meter, a killed swarm that must come back, and the rollback drill (two House restarts).
+- **Done on Oct 3:** CI on the integrated head, the merge, the owner's deploy of A1 (**The deploy**, above).
+- **The first days on A1:** the first daily page at 23:30 on Oct 3 (its money section says there is no close economics
+  yet until the House's own `economics` job has run at a close), the `budget` job at 00:30 on Oct 4 (its first
+  `budget.json`: research at the floor, or under it where a balance does not sustain it), `hygiene` at 02:00, `clock`
+  at 11:00, `preopen` an hour before Monday's open.
+- **The first drills,** on Oct 3 at 15:00 and 17:00 (the House was on A1 before both): a test funding mail for each
+  meter, a killed swarm that must come back, and the rollback drill (two House restarts). Their receipts, not this
+  record, say how they went.
 - **The ladder's confirmation study,** then A2 (the ladder and the credit types) by its own owner deploy.
 - **Research v3 and the rest,** each after its own review and integration, by the owner's deploy.

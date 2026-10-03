@@ -3,8 +3,9 @@
 The House writes these pages itself, from the V3-A part 1 deploy on: one page a UTC day, `<YYYY-MM-DD>.md`, written by
 its `scoreboard` job at 23:30Z (`league/ops/scoreboard.py`) and committed to `main` through the gateway's docs route
 (`POST /v1/github/docs`). Their commits start with `desk:`. Nobody edits them by hand: a correction goes in the run
-record ([the unattended desk](../2026-10-02-unattended-desk.md)). That release is built and not yet deployed, so until
-its deploy this folder holds only this page.
+record ([the unattended desk](../2026-10-02-unattended-desk.md)). That release went live on Oct 3, 2026 (House release
+`20261003T084912Z-be16b05904ff`, promoted 08:49:56Z), so the first page is due at 23:30Z that day; until the House
+commits it this folder holds only this page.
 
 **What a page says**, from the House's own records only:
 - the running release; self-deployed releases and self-rollbacks (today and since the reset), owner deploys and
