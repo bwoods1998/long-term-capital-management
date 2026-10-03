@@ -84,7 +84,10 @@ DEFAULTS: dict[str, Any] = {
     # `reseed_max`: families a main-loop pass founds from the seeds on untried roots while below the start and the architect
     # is not due (`Swarm.reseed`). Off (0) by default: reseeds fill the gap the architect's refill cadence keys on, so a
     # swarm that reseeds sees the architect every `every_seconds` instead of every `refill_seconds`.
-    "population": {"start": 48, "ceiling": 96, "floor": 16, "reseed_max": 0},
+    # `floor_researching` (F1, Oct 3, 2026; researcher.py THE TURNOVER): the floor counts the living families that are
+    # researching, so a dead slot (the idle rule finds it dead, or its researcher held `researcher.retire_hold_cycles`
+    # cycles in a row with nothing pending) may retire at the floor; false counts every living family, as before.
+    "population": {"start": 48, "ceiling": 96, "floor": 16, "reseed_max": 0, "floor_researching": True},
     "researcher": {
         # DeepSeek-V4-Flash at asap for the inner loop. V4.1-Flash (`long_profile`) is for long, well-cached histories:
         # measured Sept 26 at the cache share a trimmed history gets (44-66%), it cost four times V4-Flash a call, so it
@@ -155,6 +158,10 @@ DEFAULTS: dict[str, Any] = {
         # Holds survive restarts and resume only on new evidence, guidance, data or a harness release. False restores
         # the legacy timer below. A researcher may retire an exhausted mechanism before choosing to wait.
         "hold_until_news": True,
+        # PARKED DORMANCY (F1, Oct 3; loop.py `Scheduler.count_parked`): a park until news counts one dormant cycle each
+        # `hold_idle_seconds` it lasts (no model call), up to `dormant_cycles`, so the dormancy clause retires a family
+        # that only waits. False: a parked family's dormant count never moves (the standstill of Oct 3).
+        "parked_dormancy": True,
         "retire_min_trials": 10,         # evidence-backed abandonment before a first hold, down to population.floor
         # HOLD BACKOFF (R4, Sept 28: 2,223 of 2,364 cycles in ten minutes were holds, a holding family back every ~12 s,
         # ~$6.6/h of holds against a $4.5/h pace). A family whose cycle ended in a hold with no new evaluation (and no run
@@ -184,6 +191,14 @@ DEFAULTS: dict[str, Any] = {
         # lesson is SELF-REFUTED. 0 cycles turns it off; 0 trials leaves the eligible run alone.
         "retire_hold_cycles": 3,
         "retire_hold_trials": 10,
+        # F1 (Oct 3): the hold offer whatever the trial count (six of the eight families alive that day had 3 to 9 trials,
+        # no eligible Train run and notes that asked to retire). False: an eligible run or `retire_hold_trials`, as above.
+        "retire_hold_untested": True,
+        # THE DEPTH RULE (F1, Oct 3; `researcher.short_dead`, a clause of the idle rule): a family whose latest counted
+        # validation met at most `retire_short_checks` of the line's checks retires `retire_short_cycles` cycles after
+        # it; one that met more keeps researching. 0 or null in either turns the rule off.
+        "retire_short_checks": 5,
+        "retire_short_cycles": 10,
         # THE EXTENSION HOLD (R11-4's swarm rule): a family whose latest validation met this many of the line's checks is
         # exempt from the dormancy clause until the operator clears its flag (its 2017-19 extension result landed:
         # scripts/extension_hold.py). 0 or null turns the rule off.
@@ -254,6 +269,10 @@ DEFAULTS: dict[str, Any] = {
         "fork_min_t": 1.0,              # a family forks when its validation t is at least this and it is in the top
         "fork_top": 3,
         "fork_cooldown_hours": 6,
+        # AN IDENTICAL PROGRAM IS VALIDATED ONCE (F1, Oct 3; `Tournament.known_validation`): a version whose program (code,
+        # merged params, roots) another family's version already validated on the Gym in use takes that result's verdict:
+        # no job, no trial. False validates it again, as before.
+        "reuse_validations": True,
     },
     "architect": {
         "every_seconds": 14400,
@@ -295,6 +314,9 @@ DEFAULTS: dict[str, Any] = {
         # The REFUTED CELLS list up to this many rows a claim may name in each cell where one can be needed (0: off; at
         # most 12): ids and the inputs each read, no figure.
         "claimable_rows": 0,
+        # The rebirths one cell may bear in `rebirth_window_days` (7; cards.py reads 3 when the key is absent). policy.json
+        # holds the House's value: 6 from Oct 1, 12 from F1 (Oct 3: 16 of the 41 cells that need a claim were at 6 of 6).
+        "max_rebirths_per_cell": 3,
     },
     # THE STRATEGIST (Sept 29, 2026; league/swarm/strategist.py): Claude reads the whole graveyard digest, the board, the
     # Validation check-failure counts and the day's births and retirements, and writes only the agenda's WHERE TO LOOK
@@ -316,6 +338,9 @@ DEFAULTS: dict[str, Any] = {
         "max_output_tokens": 12000,     # Sail only; Claude uses claude.max_tokens
         # A rejected answer goes back once with the validator's reasons (at most 2); the repair reads the digest's cache entry.
         "repair_turns": 1,
+        # THE GYM'S ROOTS (F1, Oct 3; `strategist.foreign_roots`): a section that names a ticker outside `gym.roots`, as a
+        # signal or as the traded root, is refused. False turns the rule off.
+        "gym_roots_only": True,
     },
     "gate": {
         "review_openai_model": "gpt-6-sol",

@@ -113,7 +113,14 @@ holds, else it is stripped before the card is stored (the birth's event says why
 then mark each cell open or exhausted, and the pass's event carries `cell_yield` (each cell's settled births, drift
 passes and bound; the open-cell births and the dropped claims). `architect.claimable_rows` (0, off) lists up to that many
 rows a claim may name in each cell where one can be needed, with the inputs each read. Ids and input names only: no
-Validation or holdout figure reaches the request.
+Validation or holdout figure reaches the request. THE BIRTH CELLS (F1, Oct 3, 2026): while `architect.structures`
+leaves any type out, the list is every cell of the allowed types' structure families and no other (`cell_families`,
+`cards.RebirthIndex.grid`; BIRTH_CELLS_HEADER), each with its room and its claimable rows, inside BIRTH_CELLS_CHARS. NO
+PAID PASS WITHOUT A CELL (`closed`): when none of those cells can bear a birth (none without a row that needs a claim,
+none with rebirth room and a row a claim may still name), the pass asks no model: it is one `swarm.architect` event
+with `skipped` ("no_cell"; "ceiling" for a population at its ceiling) and no cost, and the round before it runs no
+retrieval and no strategist (`loop.Swarm.architect_pass`). THE GYM'S ROOTS: a stored WHERE TO LOOK section that names a
+ticker the Gym does not hold is followed by one line of the harness's own saying so (`agenda`, FOREIGN_ROOTS_NOTE).
 
 THE LIBRARY (Sept 29, 2026; league/swarm/library.py). While `research.enabled`, the pass retrieves a block of pre-2025
 literature first (`loop.Swarm.architect_pass`: the strategist's accepted `library_queries`, else the seed searches) and
@@ -1240,6 +1247,31 @@ CLAIMABLE_NOTE = ("; \"claimable\" lists rows a rebirth may name, newest first, 
                   "inputs must add one it did not read, and a carded row is matched only when your inputs overlap what it read")
 #: The most claimable rows a cell lists (`architect.claimable_rows`).
 CLAIMABLE_ROWS_MAX = 12
+#: THE CELLS A BIRTH MAY LAND IN (F1, Oct 3, 2026): the card section's list while `architect.structures` leaves any type
+#: out. On Oct 3 the request listed the 40 largest of 127 refuted cells across every structure type: 16 lines went to
+#: types no birth may be, 17 allowed cells with rebirth room were left out, and 13 of the day's 15 refusals were claimless
+#: proposals in cells the architect was never shown. Now it lists every cell of the allowed types' structure families
+#: (`cards.RebirthIndex.grid`) and none of another type's. Words only: no figure.
+BIRTH_CELLS_HEADER = ("BIRTH CELLS (mechanism_class / structure family / holding: every cell a birth may land in now, the "
+                      "allowed structure types' cells and no other. A cell's rows are graveyard rows killed by a mechanism "
+                      "verdict: a card in such a cell needs \"rebirth\" naming one of its rows with an input that row did "
+                      "not read, and the cell's rebirth room; at rebirth room 0 no card that needs a rebirth is born there "
+                      "until the window moves on, so propose in a cell with room. A cell with no row needs no rebirth, "
+                      "unless your own mechanism text reads as another class whose cell has rows. Carded rows count when "
+                      "your inputs, declared or named in your mechanism and hypothesis, overlap theirs, declared or named "
+                      "in their own words)")
+#: The most characters of cell lines the request carries (F1): past it the claimable rows are named in fewer cells, the
+#: first cells of the list (`cards.RebirthIndex.cells`), and every cell keeps its line. The 44 directional cells at four
+#: claimable rows ran 20,546 characters on the Oct 3 store at a cell budget of 12 (the 40-line list before: 22,032).
+BIRTH_CELLS_CHARS = 24000
+#: THE GYM'S ROOTS (F1): the line after a stored WHERE TO LOOK section that names tickers the Gym does not hold
+#: (`Architect.agenda`): the harness's words, outside the quoted section.
+FOREIGN_ROOTS_NOTE = ("\n(The harness, not the strategist: the section above names {names}, which the Gym does not hold. No "
+                      "program can read or trade them: take no direction that needs them, as a signal or as the traded root.)")
+#: `swarm.architect`'s `skipped` (F1): a pass that made no model call, and why. "ceiling": the population is at its
+#: ceiling; "no_cell": no cell a birth may land in has rebirth room or is open (`Architect.closed`).
+SKIPPED_CEILING = "ceiling"
+SKIPPED_NO_CELL = "no_cell"
 #: THE LIBRARY's addition to the system prompt, sent only with a retrieved block (Sept 29, 2026).
 LIBRARY_RULE = """
 
@@ -1360,8 +1392,28 @@ class Architect:
         locked = locked_text(self.settings)
         section = self.store.get(AGENDA_KEY)
         if locked and isinstance(section, dict) and str(section.get("text") or "").strip():
-            return COMPOSED_AGENDA_TITLE, compose(locked, str(section["text"]), section.get("at"))
+            agenda = compose(locked, str(section["text"]), section.get("at"))
+            foreign = self.foreign_roots(str(section["text"]))
+            if foreign:
+                # THE GYM'S ROOTS (F1): a section accepted before the strategist's `roots` rule stays until the next one
+                # is accepted; the request says, in the harness's own words, which of its tickers no program can use.
+                agenda += FOREIGN_ROOTS_NOTE.format(names=", ".join(foreign[:12]))
+            return COMPOSED_AGENDA_TITLE, agenda
         return LEGACY_AGENDA_TITLE, str(self.cfg.get("agenda") or "").strip()[:4000]
+
+    def foreign_roots(self, text: str) -> list[str]:
+        """The tickers a WHERE TO LOOK section names that the Gym does not hold (`strategist.foreign_roots` against
+        `gym.roots`); [] while `strategist.gym_roots_only` is false, with no roots named, or when it cannot be read. A
+        local import: the strategist imports this module."""
+        try:
+            from .strategist import foreign_roots
+
+            roots = [str(r).upper() for r in (self.settings.get("gym") or {}).get("roots") or [] if str(r).strip()]
+            if not roots or (self.settings.get("strategist") or {}).get("gym_roots_only", True) is False:
+                return []
+            return foreign_roots(text, roots)
+        except Exception:  # noqa: BLE001 - the agenda goes as it is
+            return []
 
     def use_digest(self) -> bool:
         """The whole graveyard on the Claude route: `architect.full_graveyard` and Claude serves the architect."""
@@ -1536,17 +1588,64 @@ class Architect:
             return 0
         return min(int(raw), CLAIMABLE_ROWS_MAX)
 
+    def cell_families(self) -> tuple[str, ...] | None:
+        """THE CELLS A BIRTH MAY LAND IN (F1): the structure families of THE STRUCTURES while `architect.structures` leaves
+        any type out (the request then lists every cell of them and no other, `card_block`, and a pass none of them can
+        bear in is skipped, `closed`); None while every type is allowed (the refuted cells, most rows first, as before)."""
+        if not self.restricted():
+            return None
+        return tuple(dict.fromkeys(cards.structure_family(s) for s in self.structures()))
+
+    def closed(self) -> dict[str, Any] | None:
+        """NO PAID PASS WITHOUT A CELL (F1, Oct 3, 2026: six passes cost $0.51 that day and every one of their 15
+        proposals was refused): why no proposal of this pass could be born whatever the model answered, or None. With
+        cards required, the rebirth refusal on and `architect.structures` naming the types a birth may be, a card is
+        born only in a cell of those types' families that needs no claim (no mechanism-verdict row in it, or THE CELL'S
+        YIELD's open cell) or that has rebirth room and a row a claim may still name (`cards.RebirthIndex.bearable`).
+        When no cell is either, the answer is {"cells", "full", "spent"}: the cells read, those at rebirth room 0 and
+        those whose every row has backed its rebirths. A reading that fails skips nothing (None): `admit` still checks
+        every card. Deterministic, no model call."""
+        families = self.cell_families()
+        if families is None or not self.require_card() or self.rebirth_mode() != "refuse":
+            return None
+        try:
+            index = cards.RebirthIndex(self.store, self.settings)
+            grid = index.grid(families)
+            if any(index.bearable(cell, rows) for cell, rows in grid):
+                return None
+            full = sum(1 for cell, _ in grid if index.room(cell) <= 0)
+        except Exception:  # noqa: BLE001 - never a skipped pass on a reading that failed
+            return None
+        return {"cells": len(grid), "full": full, "spent": len(grid) - full}
+
+    def skip(self, kind: str, why: str, **detail: Any) -> dict[str, Any]:
+        """A pass that made no model call: one `swarm.architect` event with `skipped` (its kind: SKIPPED_CEILING,
+        SKIPPED_NO_CELL), `why` in words and no cost, so the funnel counts the passes that were not paid for."""
+        out = {"born": [], "skipped": kind, "why": why, **detail}
+        self.store.event("swarm.architect", None, out)
+        return out
+
+    def skip_closed(self, closed: Mapping[str, Any]) -> dict[str, Any]:
+        """`skip` for a pass `closed` answered: the pass is counted as made (`architect_at`), so the next is tried at the
+        architect's own cadence, when a window may have moved on or a setting changed."""
+        self.store.put("architect_at", self.clock())
+        return self.skip(SKIPPED_NO_CELL, "no cell a birth may land in has rebirth room or is open: no model was asked",
+                         cells=dict(closed), structures=list(self.structures()))
+
     def card_block(self) -> str:
         """The request's card section: the vocabularies, the REFUTED CELLS (the rows the rebirth refusal reads, most rows
-        first) and the last pass's card refusals, each with the lesson it points at. "" while cards are not required."""
+        first; while `architect.structures` leaves any type out, the BIRTH CELLS instead: every cell of the allowed types
+        and no other, `cell_families`) and the last pass's card refusals, each with the lesson it points at. "" while
+        cards are not required."""
         if not self.require_card():
             return ""
         parts = ["FAMILY CARD VOCABULARY (each family's card uses exactly these words):\n" + cards.vocabulary_text()]
         if self.rebirth_mode() == "refuse":
             claimable, extra = self.claimable_rows(), ""
+            families = self.cell_families()
             try:
                 index = cards.RebirthIndex(self.store, self.settings)
-                cells = index.cells(claimable=claimable)
+                cells = index.cells(claimable=claimable, families=families, chars=BIRTH_CELLS_CHARS)
             except Exception:  # noqa: BLE001 - the request goes without the list; admit still checks every card
                 cells = []
             else:
@@ -1559,7 +1658,9 @@ class Architect:
                     self.pass_yields = yields if index.yield_error is None else None
                 if claimable:
                     extra += CLAIMABLE_NOTE
-            if cells:
+            if cells and families is not None:
+                parts.append(BIRTH_CELLS_HEADER + extra + ":\n" + "\n".join(cells))
+            elif cells:
                 parts.append("REFUTED CELLS (mechanism_class / structure family / holding: graveyard rows killed by a mechanism "
                              "verdict; a card in one needs \"rebirth\" naming one of its rows with an input that row did not read, "
                              "and the cell's rebirth room; carded rows count when your inputs, declared or named in your "
@@ -1819,9 +1920,11 @@ class Architect:
         self.store.put("architect_at", began)
         room = int(self.settings.get("population", {}).get("ceiling", 96)) - len(self.store.families(alive=True))
         if room <= 0:
-            out = {"born": [], "why": "the population is at its ceiling"}
-            self.store.event("swarm.architect", None, out)
-            return out
+            return self.skip(SKIPPED_CEILING, "the population is at its ceiling")
+        # NO PAID PASS WITHOUT A CELL (F1): when no cell a birth may land in can bear, no model is asked.
+        closed = self.closed()
+        if closed is not None:
+            return self.skip_closed(closed)
         # THE BIRTH QUOTA (Release B): one for the whole pass (`pass_quota`): its request, its admits and a truncated
         # answer's retry; the pass's event counts its refusals, and the next pass reads its own window.
         self.pass_quota = None
@@ -1962,4 +2065,5 @@ __all__ = ["Architect", "SYSTEM", "GraveyardDigest", "Digest", "lesson_view", "p
            "GRAVEYARD_POINTER", "SECTION_MAX", "AGENDA_LOCKED_MAX", "MAX_DIGEST_BYTES", "COMPOSED_AGENDA_TITLE",
            "LEGACY_AGENDA_TITLE", "USAGE_KEYS", "ASCII_MAP", "is_operator", "operator_ids", "operator_scale", "LEVELS",
            "LIST_LEVEL", "WHERE_HEADER", "DIGEST_FORMAT", "CARD_REFUSALS_KEY", "LIBRARY_RULE", "allowed_structures",
-           "structures_ignored", "STRUCTURE_REFUSALS_KEY", "STRUCTURE_REFUSALS_MAX", "REAL_STRUCTURES"]
+           "structures_ignored", "STRUCTURE_REFUSALS_KEY", "STRUCTURE_REFUSALS_MAX", "REAL_STRUCTURES",
+           "BIRTH_CELLS_HEADER", "BIRTH_CELLS_CHARS", "FOREIGN_ROOTS_NOTE", "SKIPPED_CEILING", "SKIPPED_NO_CELL"]

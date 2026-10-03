@@ -4,7 +4,7 @@
     "claimable_rows": 4,
     "every_seconds": 7200,
     "max_output_tokens": 32000,
-    "max_rebirths_per_cell": 6,
+    "max_rebirths_per_cell": 12,
     "max_refill": 6,
     "openai_model": null,
     "refill_seconds": 1200,
@@ -94,12 +94,17 @@
   "population": {
     "ceiling": 96,
     "floor": 8,
+    "floor_researching": true,
     "start": 16
   },
   "researcher": {
     "claude_top": 0,
     "dormant_cycles": 12,
+    "parked_dormancy": true,
+    "retire_hold_untested": true,
     "retire_idle_evaluations": 500,
+    "retire_short_checks": 5,
+    "retire_short_cycles": 10,
     "rewrite_min_hours": 6,
     "rewrites_per_day": 1,
     "sail_usd_per_hour": 0.25,
@@ -111,11 +116,13 @@
   "strategist": {
     "enabled": true,
     "every_seconds": 86400,
+    "gym_roots_only": true,
     "max_chars": 2000
   },
   "tournament": {
     "fork_top": 0,
     "retire_evaluations": 4000,
-    "retire_revisions": 200
+    "retire_revisions": 100,
+    "reuse_validations": true
   }
 }

@@ -25,7 +25,10 @@ accept the section: no money, real money or envelope talk, no word about the ver
 or a state that would void it (paused, advisory, not binding, out of date ...), no numeric rule (in digits or words), no
 2025, holdout or Validation period in any words, no override of the preamble and no word of the operator's (op- rows
 aside), no revival of a retired idea (a negation must come right before the verb), plain ASCII only, and at least
-`strategist.min_cites` real ids cited. Every known graveyard or family id in the section is masked before the content
+`strategist.min_cites` real ids cited, and (F1, `strategist.gym_roots_only`, true: `foreign_roots`) no ticker that is not
+one of the Gym's roots (`gym.roots`), as a signal or as the traded root: on Oct 2 the accepted section's one direction
+named five leaders the Gym does not hold, and no program can read or trade a root it has no data for. Every known
+graveyard or family id in the section is masked before the content
 rules read it (R11-2, `mask_ids`: an id is a name, and `letf-rebalance-notional-giveback` voided the 13:10Z run of Sept 29).
 The prompt asks for about 85% of the cap (`target_chars`); a section refused for its length alone and at most 15% over
 the cap is cut at its last sentence end inside the cap and validated again (`trim_section`; the attempt records
@@ -117,6 +120,8 @@ A machine checks your section before the architect sees it. It is REJECTED, and 
   idea ("do not re-propose X" and "never revisit X" are fine; the negation must come right before the verb);
 - contains braces, code fences, URLs, markdown headings, numbered headings in capitals, or any character outside plain
   ASCII (write plain ASCII: straight quotes and "-");
+- names a ticker that is not one of the Gym's roots (THE GYM'S ROOTS in the request), as a signal or as the traded
+  root: no program can read or trade a root the Gym holds no data for;
 - cites fewer than {min_cites} real graveyard or family ids in "cites".
 If it is rejected you may get one chance to fix it, with the machine's reasons.
 
@@ -280,13 +285,55 @@ def normalize(text: Any) -> str:
     return "\n".join(line for line in lines if line).strip()
 
 
-def check_section(text: Any, *, max_chars: int, cites: Any, known_ids: set[str] | frozenset[str], min_cites: int) -> Verdict:
+#: A ticker as a section writes one: two to five capitals, a digit allowed after the first ("$XLF" too).
+_TICKER = r"\$?[A-Z][A-Z0-9]{1,4}"
+_TICKER_AT = re.compile(r"(?<![A-Za-z0-9.-])\$?([A-Z][A-Z0-9]{1,4})(?![A-Za-z0-9-])")
+#: Tickers written as a list: joined only by commas, slashes, "&", "+", "and", "or", "vs" and "versus".
+_TICKER_LIST = re.compile(r"(?<![A-Za-z0-9.-])" + _TICKER + r"(?:\s*(?:,\s*(?i:and|or)\b|,|/|&|\+|\b(?i:and|or|versus)\b|"
+                          r"\b(?i:vs)\.?)\s*" + _TICKER + r")+(?![A-Za-z0-9-])")
+_SECTOR_ETF = re.compile(r"XL[A-Z]{1,2}")
+#: Capitals that are words or research terms, never a ticker a list names (a section writes "STOP", "DTE", "ETF").
+_CAPS_WORDS = frozenset(
+    "A AN AND ARE AS AT BE BY DO FOR IF IN IS IT NO NOT OF ON OR SO THE TO UP US ALL ANY FEW ONE TWO ONLY STOP READ LAST "
+    "DEEP DAY DAYS NEW OLD ATM OTM ITM DTE IV RV HV VRP VOL ETF ETFS FOMC CPI NFP PCE PPI GDP OPEX EOD EOM AM PM ET UTC "
+    "USD VWAP ATR RSI EMA SMA OI GEX POC HAR ADR MOC LOC DSR DRIFT STRESS THIN IDLE TRAIN TRIALS STALL".split())
+
+
+def foreign_roots(text: Any, roots: Sequence[str]) -> list[str]:
+    """THE GYM'S ROOTS (F1): the tickers `text` names that are not among `roots` (the admitted roots, `gym.roots`), in
+    the order written. A ticker is two to five capitals that is (a) an index or ETF symbol this module knows
+    (INDEX_ROOTS, ETF_ROOTS, a sector fund "XL.."), or (b) written in a list with an admitted root or such a symbol
+    ("SMH, QQQ and JPM": a list names roots, so its other members are roots too) and not a plain word in capitals
+    (`_CAPS_WORDS`). Any other capitals are read as words ("STOP", "ONE", "DRIFT"): the rule refuses what it can tell is
+    a root, never a section for its emphasis. Deterministic; no data is read."""
+    admitted = {str(r).upper() for r in roots or ()}
+    body = str(text or "")
+    known = INDEX_ROOTS | ETF_ROOTS
+
+    def symbol(token: str) -> bool:
+        return token in known or _SECTOR_ETF.fullmatch(token) is not None
+
+    named: list[str] = []
+    for found in _TICKER_AT.finditer(body):
+        if symbol(found.group(1)):
+            named.append(found.group(1))
+    for found in _TICKER_LIST.finditer(body):
+        members = [m.group(1) for m in _TICKER_AT.finditer(found.group(0))]
+        if any(m in admitted or symbol(m) for m in members):
+            named += [m for m in members if m not in _CAPS_WORDS]
+    return [t for t in dict.fromkeys(named) if t not in admitted]
+
+
+def check_section(text: Any, *, max_chars: int, cites: Any, known_ids: set[str] | frozenset[str], min_cites: int,
+                  roots: Sequence[str] | None = None) -> Verdict:
     """The validator (a pure function): `Verdict(ok, reasons, text)` for a WHERE TO LOOK section, `text` normalized. Each
     reason starts with its rule's name (shape, money, real_money, threshold, numeric_rule, d2, override, revival,
-    grounding) and quotes the sentence that broke it. Mentioning a check without a changing verb is allowed ("most
+    roots, grounding) and quotes the sentence that broke it. Mentioning a check without a changing verb is allowed ("most
     families fail t and DSR, so look where trades are plentiful"); "do not re-propose X" is allowed. Every id in
     `known_ids` is masked (`mask_ids`) before the content rules read a sentence (R11-2), so a cited id's own words never
-    void a section; the sentence a reason quotes is the one written."""
+    void a section; the sentence a reason quotes is the one written. `roots` (F1: the Gym's admitted roots, `gym.roots`;
+    None: the rule is off): a section that names a ticker outside them (`foreign_roots`) is refused, the tickers named
+    in the reason."""
     reasons: list[str] = []
     known = frozenset(str(k) for k in known_ids)
     raw = text if isinstance(text, str) else ""
@@ -330,6 +377,11 @@ def check_section(text: Any, *, max_chars: int, cites: Any, known_ids: set[str] 
             say("override", "speaks of the operator: " + sentence)
         if _revives(read):
             say("revival", sentence)
+    if roots is not None:
+        foreign = foreign_roots(mask_ids(clean, known), roots)
+        if foreign:
+            say("roots", f"{', '.join(foreign[:12])}: not among the Gym's roots, which are the only tickers a program can "
+                         "read or trade (THE GYM'S ROOTS)")
     named = {str(c) for c in cites if isinstance(c, str)} if isinstance(cites, list) else set()
     real = named & known
     if len(real) < int(min_cites):
@@ -479,6 +531,12 @@ class Strategist:
         return ({r["family"] for r in self.store._all("SELECT family FROM graveyard")}
                 | {r["id"] for r in self.store._all("SELECT id FROM families")})
 
+    def roots(self) -> list[str] | None:
+        """THE GYM'S ROOTS (F1): the admitted roots a section may name (`gym.roots`), or None while
+        `strategist.gym_roots_only` is JSON false or the settings name none (the rule is then off)."""
+        named = [str(r).upper() for r in (self.settings.get("gym") or {}).get("roots") or [] if str(r).strip()]
+        return named if named and self.cfg.get("gym_roots_only", True) is not False else None
+
     # ------------------------------------------------------------------ the packet
     def _since_section(self, current: Mapping[str, Any], fams: list[dict[str, Any]]) -> dict[str, Any]:
         at = current.get("at") if current.get("accepted") else None
@@ -620,6 +678,15 @@ class Strategist:
             + json.dumps(self.architect.coverage(allowed_only=True), separators=(",", ":")),
             "GAPS (uncovered structure types by root):\n" + json.dumps(self.architect.gaps()),
         ]
+        roots = self.roots()
+        if roots is not None:
+            # THE GYM'S ROOTS (F1): what the validator's `roots` rule reads. A current section that breaks it (one
+            # accepted before the rule) is named, so the next one does not carry its tickers over.
+            stale = foreign_roots(str(current.get("text") or ""), roots)
+            parts.append("THE GYM'S ROOTS (the only tickers a program can read or trade, as a signal or as the traded root; "
+                         "name no other): " + ", ".join(roots)
+                         + (f". The current section names {', '.join(stale)}, which the Gym does not hold: do not carry "
+                            "them over." if stale else "."))
         if self.architect.restricted():
             # THE STRUCTURES (`architect.structures`): the architect births only these types, so a direction names one of
             # them. No money words here: the section's validator refuses them, and a model echoes what it reads.
@@ -786,13 +853,13 @@ class Strategist:
             else:
                 known = self.known_ids()
                 verdict = check_section(where, max_chars=self.max_chars(), cites=cites, known_ids=known,
-                                        min_cites=self.min_cites())
+                                        min_cites=self.min_cites(), roots=self.roots())
                 if not verdict.ok and overflow_only(verdict.reasons):
                     # R11-2: a section refused for its length alone, at most TRIM_SLACK over the cap, is cut at its last
                     # sentence end inside the cap and validated again, instead of paying for a repair turn.
                     trimmed = trim_section(verdict.text, max(1, min(self.max_chars(), SECTION_MAX)))
                     again = check_section(trimmed, max_chars=self.max_chars(), cites=cites, known_ids=known,
-                                          min_cites=self.min_cites()) if trimmed else None
+                                          min_cites=self.min_cites(), roots=self.roots()) if trimmed else None
                     if again is not None and again.ok:
                         attempt["trimmed"] = {"from": len(verdict.text), "to": len(again.text)}
                         verdict = again
@@ -830,5 +897,6 @@ class Strategist:
 
 
 __all__ = ["Strategist", "check_section", "check_queries", "extract_where", "normalize", "Verdict", "ROLE", "SYSTEM", "LIBRARY_SYSTEM",
+           "foreign_roots",
            "SECTION_TITLE", "MIN_VALIDATED", "MAX_QUERIES", "PAIR_SECONDS", "mechanism_class", "root_group", "mask_ids",
            "trim_section", "overflow_only", "target_chars"]
