@@ -460,9 +460,11 @@ class ArchitectRoutes(RouteCase):
         self.assertEqual((out["route"], out["digest"]["used"]), ("sail", False))
         self.assertEqual(len(self.old_view(self.sail_calls[-1][1]["content"])), 20)
         self.assertNotIn("differs_from", self.sail_calls[-1][0]["content"])
-        # OpenAI (Claude not serving the architect): the same.
+        # OpenAI (Claude not serving the architect): the same. It is admitted under THE BUDGET's paid-model line, which is
+        # not what this test judges (no block is the floor, and the erring Claude call's hold above has taken it).
         self.settings["claude"]["roles"] = ["audit"]
         self.settings["architect"]["openai_model"] = "gpt-6-astra"
+        self.settings["budget"] = {"source": "test", "sail_usd_day": 1000.0, "claude_usd_day": 1000.0}
         out = self.architect(self.router(FakeOpener())).run()
         self.assertEqual(out["route"], "openai")
         sent = json.dumps(json.loads(self.openai.request.data))

@@ -100,6 +100,9 @@ class RoundCase(unittest.TestCase):
         self.settings["gate"]["look_holds"] = None
         # Nor the family card: these proposals carry none (league/tests/test_swarm_cards.py tests it).
         self.settings["architect"]["require_card"] = False
+        # Nor THE BUDGET's day: no block is the floor, and the gate's OpenAI reads are admitted under its paid-model line
+        # (league/tests/test_ops_budget.py tests it).
+        self.settings["budget"] = {"source": "test", "sail_usd_day": 1000.0, "claude_usd_day": 1000.0}
         self.answer = strong
         self.pool = FakeGymPool(lambda job: self.answer(job))
         self.replies: list = []

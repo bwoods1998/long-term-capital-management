@@ -5,17 +5,21 @@ THE RULE (pre-registered: the constants below, changed only by the owner's own d
 updater, `league/ci.py`). The `budget` job (after the close economics, and daily at 00:30 UTC) reads, for each meter m in
 {sail, claude}:
 
-- balance_m: Sail's balance as the Sail guard last read it (its provider reading, kv `guard` in the swarm store, at most
-  `BALANCE_FRESH_SECONDS` old); Claude's funded total left at the gateway (`GET /v1/health`: cap - spent, whose spent already holds the calls in
-  flight);
+- balance_m: Sail's balance as the Sail guard last read it well (its provider reading, kv `guard` in the swarm store:
+  `last_good`, else `last`, at most `BALANCE_FRESH_SECONDS` old); Claude's funded total left at the gateway
+  (`GET /v1/health`: its `remaining_usd`, else cap - spent, the holds in flight already inside spent);
 - fixed_m: Sail: the House box's and the data box's own billing over the trailing `FIXED_WINDOW_DAYS` days
   (`SailboxClient.spend`) a day, never below `guard.house_burn_usd_day` (which is also the fallback); Claude: 0;
 - reserve_m: never spent (`RESERVE_USD`);
 
-and p30: the trailing-30-calendar-day realized options P&L, fees in: this file's own read of the live book's closed
-positions and the broker's posted fee corrections (`book_p30`), or the fresh close economics' `p30`
-(`league.ops.economics`) when that is SMALLER. The close economics may only cut what was earned, never raise it (it is
-FORBIDDEN too, a second wall, not the only one); an unreadable book earns nothing whatever the economics says. Marks never fund research. Then, a day:
+and p30: the trailing-30-day realized options P&L, fees in, every real route: this file's own read of the live book's
+closed positions and the broker's posted fee corrections (`book_p30`), or `league.ops.economics.p30` over the latest
+close summary (`economics.latest`) when that module is there, its summary is the latest close (`economics_fresh`) and
+its number is SMALLER. The close economics may only cut what was earned, never raise it (it is FORBIDDEN too, a second
+wall, not the only one); an unreadable book earns nothing whatever the economics says. Either read is UNKNOWN (nothing
+earned, never the other read) while a position is closed but unpriced (`unpriced_close`), an order is pending or
+unknown, reconciliation is frozen or the account reading names an event the book has not settled (`blocking`). Marks
+never fund research. Then, a day:
 
     sustainable_m = max(0, balance_m - reserve_m - R * fixed_m) / R
     floor_m       = min(sustainable_m, FLOOR_CAP * FLOOR_SPLIT[m])
@@ -24,37 +28,47 @@ FORBIDDEN too, a second wall, not the only one); an unreadable book earns nothin
     research_m    = min(floor_m + earned_m, max(0, balance_m - reserve_m - W * fixed_m) / W)
 
 so research never pushes a meter under W days. THE NO-FORWARD-EDGE STOP: once `EDGE_SESSIONS` sessions have closed since
-`EDGE_START` (or since the day after the last Probe promotion, whichever is later) with no Probe promotion, earned is 0
-and the state says "no forward edge; research at floor"; a promotion lifts it.
+`EDGE_START` (or since the day after the last ladder Probe promotion, whichever is later) with no ladder Probe promotion,
+earned is 0 and the state says "no forward edge; research at floor"; a promotion lifts it. A ladder promotion is a
+`swarm.band` move to probe whose reason carries the ladder's practice receipt (`LADDER_MARK`, league/live/ladder.py), or
+a `ladder_decisions` row (observe.sqlite) with verdict promote: any other move to probe (the Money table's) is not one.
 
 UNKNOWN IS NEVER MONEY. An unreadable balance or fixed cost gives its meter no research. An unreadable p30 earns nothing;
 so does an unreadable promotion record once the stop could apply (the sessions are then counted from `EDGE_START`).
 
 THE OUTPUT, `<state>/budget.json` (private): the inputs, each meter's research $/day, the knob values, the direction
-against the last file (cut, raise or same), each meter's runway at its current total rate (fixed + research) and its
-next card action date (when that runway falls to W days), and why.
+against the last file (cut, raise or same), each meter's runway at its current total rate (fixed + research, which the
+rule itself throttles), its runway at the rate it WANTS (`demand_usd_day`: fixed + its full floor share + its earned
+share; `card_runway_days`), its next card action date (when that runway falls to W days) and why.
 
 ENFORCEMENT, TIGHTEN-ONLY (`overlay`, the last step of `league.swarm.settings.load` with a state root). The research
 $/day become knob values (`knobs`), applied as min() against the configured `researcher.sail_usd_per_hour` (while that is
 unset, against `researcher.usd_per_hour`, the combined pace that then governs Sail), `gym.max_boxes`, every
 `claude.role_usd_day` line (and a line for each role in `claude.roles`) and `population.ceiling`, and as max() against
-`architect.every_seconds`. A configured value that is not a number is left as it is (its reader already refuses it).
-The settings' `budget` block carries the $/day to the Sail guard (its daily cap: the swarm's booked Sail today under the
-Sail research $/day, Sail's own meter today under that plus fixed; `sail_caps`) and to the router (Claude's room is also
-capped by the Claude research $/day less today's Claude spend). A missing, unreadable or malformed budget.json is the
-FLOOR: `FLOOR_CAP * FLOOR_SPLIT` per meter. A STALE one (older than `STALE_SECONDS`: the budget job stopped) never
-loosens: each meter is the lower of the floor and what the stale file said (0 for a meter it could not read), with a
-warning. An operator's own `budget` key in swarm.json is replaced, never read. The ceiling knob never falls below
-`population.floor + BIRTH_MARGIN` (a ceiling at the floor would freeze births and forks while research is at the floor).
-OpenAI is not a meter of the rule, so the overlay closes it: `guard.openai_cap_usd` is tightened to 0 (no OpenAI room)
-and the block says `openai_usd_day` 0. Handed settings with no `budget` block, the Sail guard and the router read
-budget.json from their store's root themselves (`effective`; the floor without a root): a caller that drops the block
-never lifts the budget.
+`architect.every_seconds` (and `architect.refill_seconds`, so a population under its start never runs the architect
+faster); `population.start` is held to the tightened ceiling. A configured value that is not a number is left as it is
+(its reader already refuses it). The settings' `budget` block carries the $/day to the Sail guard (its daily cap: the
+swarm's booked Sail today under the Sail research $/day, Sail's own meter today under that plus fixed; `sail_caps`) and
+to the router (`paid_model_room`: Claude's room, and OpenAI's with it, is also capped by the Claude research $/day less
+today's Claude and OpenAI spend, each model's counted on the day its hold was booked and never under 0: a hold released
+after 00:00 UTC lifts no line). A missing, unreadable or malformed budget.json is the FLOOR: `FLOOR_CAP * FLOOR_SPLIT`
+per meter. A STALE one (older than `STALE_SECONDS`: the budget job stopped) never loosens: each meter is the lower of
+the floor and what the stale file said (0 for a meter it could not read), with a warning. An operator's own `budget`
+key in swarm.json is replaced, never read. The ceiling knob never falls below `population.floor + BIRTH_MARGIN` (a
+ceiling at the floor would freeze births and forks while research is at the floor). OpenAI is not a meter of the rule,
+so the overlay closes it: `guard.openai_cap_usd` is tightened to 0 (no OpenAI room) and the block says
+`openai_usd_day` 0. Handed settings with no `budget` block, the Sail guard and the router read budget.json from their
+store's root themselves (`effective`; the floor without a root): a caller that drops the block never lifts the budget.
 
-THE FUNDING NOTICE. When a meter's runway at its current total rate is under W days, one `POST /v1/notify` kind
-`funding` (`notice_facts`: the meter, its balance, $/day, runway, the amount that restores R days and the dates), at
-most once per meter every `NOTICE_EVERY_SECONDS` (notice id `funding:<meter>:<ISO week>`, which the gateway dedupes too;
-`<state>/budget-notices.json` remembers what was sent). `drill` sends the same from a synthetic cliff with `test: true`.
+THE FUNDING NOTICE. When a meter's runway at the rate it wants (`card_runway_days`: the throttled rate would hide a
+short prefund, since research is cut to keep that runway at R or W days) is under W days, one `POST /v1/notify` kind
+`funding` (`notice_facts`: the meter, its balance, the $/day it wants, that runway, the amount that restores R days at
+it and the dates), at most once per meter every `NOTICE_EVERY_SECONDS` (notice id `funding:<meter>:<ISO week>`, which
+the gateway dedupes too; `<state>/budget-notices.json` remembers what was sent). With no fresh guard reading, Sail's
+card line is read from the gateway's own Sail reading (`/v1/health` `sail.balance_usd`): for the notice only, never for
+research. `drill` sends the same from a synthetic cliff in the production shape (Claude's fixed cost 0) with `test:
+true`. A meter that cannot be read, a p30 from the fallback read or unknown, and a notice not sent are each a House
+warning (`ctx.alert`).
 
 Nothing here moves money, tops anything up or raises a cap: the owner pays, and the budget only ever tightens the
 configured knobs. Standard library only (and `ltcm.data`'s computed NYSE calendar for the session count).
@@ -106,13 +120,17 @@ FIXED_WINDOW_DAYS = 7
 NEED_WINDOW_DAYS = 7
 #: The Sail guard's balance reading older than this is no reading.
 BALANCE_FRESH_SECONDS = 6 * 3600
+#: The ladder's own promotion reason carries this (league/live/ladder.py: "the forward ladder promoted it (practice
+#: receipt N)"); a move to probe without it is not a ladder promotion.
+LADDER_MARK = "practice receipt"
 #: A budget.json older than this is the floor.
 STALE_SECONDS = 36 * 3600
 #: A funding notice per meter at most this often.
 NOTICE_EVERY_SECONDS = 7 * 86400
-#: The swarm's Sail spend kinds (league/swarm/guard.py SWARM_SAIL_KINDS) and Claude's.
+#: The swarm's Sail spend kinds (league/swarm/guard.py SWARM_SAIL_KINDS) and the paid models' (Claude's line holds
+#: OpenAI too: `paid_model_room`).
 SAIL_KINDS = ("sail_model", "gym_box")
-CLAUDE_KINDS = ("claude",)
+CLAUDE_KINDS = ("claude", "openai")
 
 # ---------------------------------------------------------------------------------------------- the knobs' constants
 #: The Sail research dollars that buy Gym boxes (the rest buys Sail models: measured Oct 2, about 60/40).
@@ -232,11 +250,24 @@ def _ny_day(epoch: float) -> dt.date:
     return dt.datetime.fromtimestamp(float(epoch), ZoneInfo("America/New_York")).date()
 
 
+def _card(balance: float, fixed: float, demand: float, reserve: float, today: dt.date) -> dict[str, Any]:
+    """THE CARD LINE of one meter, at the rate it WANTS (`demand`: fixed + its full floor share + its earned share), never
+    at the rate the rule throttled it to (that runway is kept at W days or more by construction, so it could never fall
+    under the line): the runway, the card action date (when it falls to W days) and the amount that restores R days."""
+    room = balance - reserve
+    runway = 0.0 if room <= 0 else room / demand
+    return {"demand_usd_day": round(demand, 4), "card_runway_days": round(runway, 1),
+            "card_date": (today + dt.timedelta(days=max(0.0, runway - W_DAYS))).isoformat(),
+            "card_runs_out_on": (today + dt.timedelta(days=runway)).isoformat(),
+            "restore_usd": round(max(0.0, reserve + R_DAYS * demand - balance), 2)}
+
+
 def compute(inputs: Mapping[str, Any], *, now: float, previous: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """budget.json from the rule's inputs (`gather`'s shape):
 
         {"p30_usd": float | None, "p30_source": str, "edge": edge_state(...),
-         "meters": {m: {"balance_usd": float | None, "fixed_usd_day": float | None, "need_usd": float, ...sources}}}
+         "meters": {m: {"balance_usd": float | None, "fixed_usd_day": float | None, "need_usd": float,
+                        "notice_balance_usd": float | None (Sail with no guard reading: the card line only), ...sources}}}
 
     `previous` is the last budget.json (for the direction). Pure: no I/O."""
     meters_in = inputs.get("meters") or {}
@@ -262,10 +293,17 @@ def compute(inputs: Mapping[str, Any], *, now: float, previous: Mapping[str, Any
         balance, fixed, reserve = _finite(given.get("balance_usd")), _amount(given.get("fixed_usd_day")), RESERVE_USD[m]
         row: dict[str, Any] = {"balance_usd": balance, "fixed_usd_day": fixed, "reserve_usd": reserve,
                                "need_share": round(shares[m], 4), "earned_usd_day": round(earned * shares[m], 4)}
+        wanted_research = FLOOR_CAP_USD_DAY * FLOOR_SPLIT[m] + earned * shares[m]
         if balance is None or fixed is None:
             row.update(research_usd_day=0.0, limited_by="unreadable", runway_days=None, card_date=None,
-                       total_usd_day=None, restore_usd=None)
+                       total_usd_day=None, restore_usd=None, demand_usd_day=None, card_runway_days=None)
             why.append(f"{m}: the {'balance' if balance is None else 'fixed cost'} could not be read: no research")
+            seen = _finite(given.get("notice_balance_usd"))
+            if seen is not None and fixed is not None:
+                # The card line only (never research): the owner still hears of a prefund running short.
+                row.update(_card(seen, fixed, fixed + wanted_research, reserve, today), card_balance_usd=seen,
+                           card_balance_source=given.get("notice_balance_source"))
+                why.append(f"{m}: its card line is read from {given.get('notice_balance_source') or 'another reading'}")
             meters[m] = row
             continue
         room = balance - reserve
@@ -286,13 +324,12 @@ def compute(inputs: Mapping[str, Any], *, now: float, previous: Mapping[str, Any
             runway = room / rate
         else:
             runway = None  # nothing is spent: no runway to run out
-        restore_rate = max(rate, fixed + FLOOR_CAP_USD_DAY * FLOOR_SPLIT[m])
         row.update(sustainable_usd_day=round(sustainable, 4), floor_usd_day=round(floor, 4), w_cap_usd_day=round(w_cap, 4),
-                   research_usd_day=round(research, 4), limited_by=limited, total_usd_day=round(rate, 4),
+                   research_usd_day=round(research, 4), wanted_research_usd_day=round(wanted_research, 4),
+                   limited_by=limited, total_usd_day=round(rate, 4),
                    runway_days=None if runway is None else round(runway, 1),
-                   card_date=None if runway is None else (today + dt.timedelta(days=max(0.0, runway - W_DAYS))).isoformat(),
                    runs_out_on=None if runway is None else (today + dt.timedelta(days=runway)).isoformat(),
-                   restore_usd=round(max(0.0, reserve + R_DAYS * restore_rate - balance), 2))
+                   **_card(balance, fixed, fixed + wanted_research, reserve, today))
         meters[m] = row
     total = round(sum(meters[m]["research_usd_day"] for m in METERS), 4)
     before = _finite((previous or {}).get("research_usd_day")) if isinstance(previous, Mapping) else None
@@ -438,8 +475,12 @@ def overlay(settings: dict[str, Any], root: str | Path, *, now: float | None = N
         key = "sail_usd_per_hour" if researcher.get("sail_usd_per_hour") is not None else "usd_per_hour"
         _tighten(researcher, key, values["researcher.sail_usd_per_hour"])
     _tighten(settings.get("gym"), "max_boxes", values["gym.max_boxes"], integer=True)
-    _tighten(settings.get("population"), "ceiling", values["population.ceiling"], integer=True)
+    _tighten(population, "ceiling", values["population.ceiling"], integer=True)
+    if isinstance(population, dict) and _amount(population.get("ceiling")) is not None:
+        # The start under the ceiling: a population under its start refills hourly and reseeds toward it.
+        _tighten(population, "start", float(population["ceiling"]), integer=True)
     _tighten(settings.get("architect"), "every_seconds", values["architect.every_seconds"], larger=True, integer=True)
+    _tighten(settings.get("architect"), "refill_seconds", values["architect.every_seconds"], larger=True, integer=True)
     # OpenAI is no meter of the rule: no research dollars for it, so no OpenAI room (models.ModelRouter.openai_room).
     _tighten(settings.get("guard"), "openai_cap_usd", 0.0)
     claude = settings.get("claude")
@@ -486,27 +527,65 @@ def sail_caps(settings: Mapping[str, Any], root: str | Path | None = None, now: 
     return {"research": round(research, 4), "fixed": round(fixed, 4), "account": round(research + fixed, 4), "source": source}
 
 
+def paid_model_room(block: Any, *spent_today: Any) -> float | None:
+    """THE BUDGET's paid-model dollars left this UTC day, for the router (league/swarm/models.py `claude_budget_room`):
+    the settings' `budget` block's `claude_usd_day` less the swarm's Claude and OpenAI spend today (`spent_today`, holds
+    included: one number a model, each floored at 0 on its own, so a hold one model released never pays for the other's
+    spend). None with no block (settings never loaded from a state root: no budget line); 0 for a block that is not
+    a budget, or a spend that is not given or not a number (FAIL CLOSED). Here, in the protected rule, so the line's
+    arithmetic changes only by the owner's deploy."""
+    if block is None:
+        return None
+    line = _amount(block.get("claude_usd_day")) if isinstance(block, Mapping) else None
+    spent = [_finite(usd) for usd in spent_today]
+    if line is None or not spent or None in spent:
+        return 0.0
+    return max(0.0, line - sum(max(0.0, usd) for usd in spent))
+
+
 # ---------------------------------------------------------------------------------------------- the inputs
 def book_p30(root: str | Path, now: float, *, days: int = P30_DAYS) -> tuple[float | None, str]:
     """The live book's own trailing realized options P&L: every closed real position opened at or after `PNL_BASIS` and
     closed in the window, its cash (fees in) plus the broker's posted fee correction for it (the publisher's last
-    activity reading in `<root>/publish.json`, when there is one). None when a closed row cannot be priced."""
+    activity reading in `<root>/publish.json`, when there is one). UNKNOWN (None), as `league.trading_profit` reads
+    Profit, when a closed row cannot be priced, a position since the basis is closed but unpriced (`unpriced_close`: its
+    result is real, its number not yet), any order is pending or unknown, reconciliation is frozen, or the activity
+    reading names an event the book has not settled (`blocking`)."""
     path = Path(root) / "live.sqlite"
     if not path.exists():
         return 0.0, "no live book: nothing realized"
     since, basis = now - days * 86400, _epoch(PNL_BASIS) or 0.0
     conn = _read_only(path)
     try:
+        conn.execute("BEGIN")  # one read: the rows, the orders and the freeze as of one moment
         rows = [dict(r) for r in conn.execute(
             "SELECT pid, cash, qty, closed_at FROM positions WHERE status='closed' AND closed_at IS NOT NULL "
             "AND closed_at>? AND closed_at<=? AND opened_at>=?", (since, now, basis))]
+        unpriced = [r[0] for r in conn.execute(
+            "SELECT pid FROM positions WHERE status='unpriced_close' AND opened_at>=? LIMIT 5", (basis,))]
+        uncertain = conn.execute("SELECT COUNT(*) FROM orders WHERE status IN ('pending', 'unknown')").fetchone()[0]
+        recon = conn.execute("SELECT value FROM kv WHERE key='recon'").fetchone()
+        conn.rollback()
     finally:
         conn.close()
+    if unpriced:
+        return None, f"position {unpriced[0]} is closed but not priced yet (unpriced_close): p30 is unknown"
+    if uncertain:
+        return None, f"{uncertain} orders are pending or unknown: p30 is unknown"
+    try:
+        frozen = (json.loads(recon[0]) or {}).get("frozen") if recon else None
+    except (TypeError, ValueError, AttributeError):
+        return None, "the reconciliation state cannot be read: p30 is unknown"
+    if frozen:
+        return None, "reconciliation is frozen: p30 is unknown"
     corrections: dict[str, Any] = {}
     note = "no broker fee corrections read"
     try:
         saved = json.loads((Path(root) / "publish.json").read_text(encoding="utf-8")).get("activity") or {}
-        fees = (saved.get("reading") or {}).get("fees_by_pid")
+        reading = saved.get("reading") or {}
+        if reading.get("blocking"):
+            return None, "the account reading names an event the book has not settled (blocking): p30 is unknown"
+        fees = reading.get("fees_by_pid")
         if isinstance(fees, Mapping):
             corrections, note = dict(fees), "with the broker's posted fee corrections"
     except (OSError, ValueError, AttributeError):
@@ -546,41 +625,88 @@ def economics_fresh(cutoff: float, now: float) -> bool:
         return now - cutoff <= P30_FRESH_SECONDS
 
 
+def economics_p30(economics: Any, summary: Mapping[str, Any]) -> tuple[float | None, str]:
+    """p30 from one close summary (`league.ops.economics.p30(summary)` -> {"usd": "..."}; a loss is a number): UNKNOWN
+    (None, never the book's read instead) when its number does not read, or the summary holds a position closed but
+    unpriced, an order pending at the cutoff, or an event the book has not settled (`reconciliation.blocking`)."""
+    try:
+        recon = summary.get("reconciliation") if isinstance(summary.get("reconciliation"), Mapping) else {}
+        if recon.get("blocking"):
+            return None, "the close economics: an event the book has not settled (blocking): p30 is unknown"
+        if recon.get("pending_orders_at_cutoff"):
+            return None, "the close economics: orders were pending at the cutoff: p30 is unknown"
+        if any(isinstance(row, Mapping) and row.get("status_at_cutoff") == "unpriced_close"
+               for row in summary.get("positions") or []):
+            return None, "the close economics: a position is closed but not priced yet (unpriced_close): p30 is unknown"
+        value = _finite((economics.p30(summary) or {}).get("usd"))
+    except Exception as exc:  # noqa: BLE001 - unknown is never money
+        return None, f"the close economics' p30 failed ({type(exc).__name__}): p30 is unknown"
+    if value is None:
+        return None, "the close economics' p30 is not a number: p30 is unknown"
+    return value, f"league.ops.economics.p30 (cutoff {summary.get('cutoff')})"
+
+
 def _p30(root: Path, now: float, errors: list[str]) -> tuple[float | None, str]:
-    """p30: the live book's own read (`book_p30`), cut to the fresh close economics' p30 when that is smaller. The
-    economics (league/ops/economics.py) may lower what was earned, never raise it: the book is the wall either way."""
+    """p30: the live book's own read (`book_p30`), cut to the close economics' p30 over its latest summary when that
+    module is there, the summary is fresh and its number is smaller. The economics (league/ops/economics.py) may lower
+    what was earned, never raise it: the book is the wall either way. Unknown from either is unknown, never the other
+    read; with no fresh summary the book's read stands alone, and the job says so."""
     try:
         book, source = book_p30(root, now)
     except Exception as exc:  # noqa: BLE001 - unknown is never money
         errors.append(f"the live book could not be read ({type(exc).__name__}): nothing earned")
         return None, "unreadable"
     if book is None:
+        errors.append(source)
         return None, source
     try:
         from . import economics  # league/ops/economics.py (the close economics), when it is there
     except ImportError:
         economics = None
-    reader = getattr(economics, "latest", None)
-    if callable(reader):
+    if economics is not None and callable(getattr(economics, "latest", None)) and callable(getattr(economics, "p30", None)):
         try:
-            summary = reader(root)
-            cutoff = _epoch((summary or {}).get("cutoff"))
-            value = _finite(((summary or {}).get("p30") or {}).get("usd"))  # a loss is a number, not "no number"
-            if summary is None:
-                pass  # no close yet (a new House): the book's own read stands
-            elif cutoff is None or not economics_fresh(cutoff, now):
-                errors.append("the close economics is stale: the live book's own read is used")
-            elif value is None:
-                errors.append("league.ops.economics.p30 gave no number: the live book's own read is used")
-            elif value < book:
-                return value, "league.ops.economics.p30 (below the live book's own read, which caps it)"
-        except Exception as exc:  # noqa: BLE001 - the book's own read stands
-            errors.append(f"league.ops.economics.p30 failed ({type(exc).__name__}): the live book's own read is used")
+            summary = economics.latest(root)
+        except Exception as exc:  # noqa: BLE001 - no summary: the book's own read stands
+            errors.append(f"the close economics could not be read ({type(exc).__name__}): the live book's own read is used")
+            summary = False
+        cutoff = _epoch(summary.get("cutoff")) if isinstance(summary, Mapping) else None
+        if cutoff is not None and economics_fresh(cutoff, now):
+            value, said = economics_p30(economics, summary)
+            if value is None:
+                errors.append(said)
+                return None, said
+            if value < book:
+                return value, f"{said}: below the live book's own read, which caps it"
+        elif isinstance(summary, Mapping):
+            errors.append("the close economics is stale: the live book's own read is used")
+        elif summary is None:
+            errors.append("no close economics summary yet: the live book's own read is used")
     return book, source
 
 
+def ladder_promotions(root: Path, errors: list[str]) -> list[float] | None:
+    """The ladder's own Probe promotions in `<root>/observe.sqlite` (`ladder_decisions` rows with verdict promote: their
+    epochs); [] with no practice record or no such table yet, None when it cannot be read."""
+    path = root / "observe.sqlite"
+    if not path.exists():
+        return []
+    try:
+        conn = _read_only(path)
+        try:
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ladder_decisions'").fetchone() is None:
+                return []
+            return [float(r[0]) for r in conn.execute(
+                "SELECT at FROM ladder_decisions WHERE verdict IN ('promote', 'promoted') AND at IS NOT NULL")]
+        finally:
+            conn.close()
+    except (sqlite3.Error, TypeError, ValueError) as exc:
+        errors.append(f"the ladder's record could not be read ({type(exc).__name__})")
+        return None
+
+
 def _swarm_reads(root: Path, now: float, errors: list[str]) -> dict[str, Any]:
-    """From the swarm store, read-only: the Sail guard's last reading, the Probe promotions, each meter's research spend."""
+    """From the swarm store, read-only: the Sail guard's last reading, the ladder's Probe promotions (`LADDER_MARK`; and
+    `ladder_promotions`), each meter's research spend."""
     out: dict[str, Any] = {"guard": None, "promotions": None, "need": {m: 0.0 for m in METERS}}
     path = root / "swarm.sqlite"
     if not path.exists():
@@ -602,16 +728,18 @@ def _swarm_reads(root: Path, now: float, errors: list[str]) -> dict[str, Any]:
         out["guard"] = json.loads(row["value"]) if row else None
     except (TypeError, ValueError):
         out["guard"] = None
-    promotions = []
+    promotions: list[float] | None = []
     for event in bands:
         try:
             payload = json.loads(event["payload"] or "{}")
         except (TypeError, ValueError):
             continue
         at = _epoch(event["at"])
-        if payload.get("band_to") == "probe" and payload.get("band_from") in ("gym", "candidate") and at is not None:
+        # Only the ladder's own promotion: a Money-table move to probe (or a re-promotion after a demotion) is not one.
+        if payload.get("band_to") == "probe" and LADDER_MARK in str(payload.get("reason") or "") and at is not None:
             promotions.append(at)
-    out["promotions"] = promotions
+    ladder = ladder_promotions(root, errors)
+    out["promotions"] = None if ladder is None and not promotions else promotions + (ladder or [])
     by_kind = {r["kind"]: float(r["usd"] or 0.0) for r in spend}
     out["need"] = {"sail": sum(by_kind.get(k, 0.0) for k in SAIL_KINDS), "claude": sum(by_kind.get(k, 0.0) for k in CLAUDE_KINDS)}
     return out
@@ -656,9 +784,10 @@ def _sail_fixed(sail: Any, boxes: list[str], now: float, house_burn: float, erro
 
 
 def _claude_balance(health: Any) -> float | None:
-    """The funded Claude total left (`/v1/health`'s `claude` block): its `remaining_usd`, else cap - spent; None when
-    unconfigured or unreadable. The gateway's `spent_usd` already counts the holds in flight (gate.mjs `claudeReserve`
-    adds a hold to both `spent` and `inflight`), so `inflight_usd` is never subtracted again."""
+    """The funded Claude total left (`/v1/health`'s `claude` block): its `remaining_usd`, else cap - spent, floored at 0
+    as `remaining_usd` is (gateway/lib/gate.mjs `claudeStatus`); None when unconfigured or unreadable. The gateway's
+    `spent_usd` already counts the holds in flight (gate.mjs `claudeReserve` adds a hold to both `spent` and
+    `inflight`), so `inflight_usd` is never subtracted again."""
     block = health.get("claude") if isinstance(health, Mapping) else None
     if not isinstance(block, Mapping) or block.get("configured") is False:
         return None
@@ -669,6 +798,33 @@ def _claude_balance(health: Any) -> float | None:
     if cap is None or spent is None:
         return None
     return round(max(0.0, cap - spent), 4)
+
+
+def _gateway_sail(health: Any, now: float) -> tuple[float | None, str | None]:
+    """The gateway watchdog's own Sail balance (`/v1/health` `sail.balance_usd`, at most `BALANCE_FRESH_SECONDS` old by
+    its `checked_at`): Sail's card line when the guard has no fresh reading. Never research."""
+    block = health.get("sail") if isinstance(health, Mapping) else None
+    if not isinstance(block, Mapping):
+        return None, None
+    balance, checked = _finite(block.get("balance_usd")), block.get("checked_at")
+    at = _finite(checked)
+    at = (at / 1000.0 if at is not None and at > 1e11 else at) if at is not None else _epoch(checked)
+    if balance is None or at is None or not -300 <= now - at <= BALANCE_FRESH_SECONDS:
+        return None, None
+    return balance, f"the gateway's Sail reading at {_iso(at)} (the card line only)"
+
+
+def _guard_balance(guard: Any, now: float) -> tuple[float | None, str]:
+    """Sail's balance from the guard's kv: its last GOOD reading (`last_good`; one failed read after it does not erase
+    it), else its last reading, at most `BALANCE_FRESH_SECONDS` old; None when there is neither."""
+    guard = guard if isinstance(guard, Mapping) else {}
+    for key in ("last_good", "last"):
+        row = guard.get(key)
+        row = row if isinstance(row, Mapping) else {}
+        balance, at = _finite(row.get("balance")), _finite(row.get("at"))
+        if balance is not None and at is not None and 0 <= now - at <= BALANCE_FRESH_SECONDS:
+            return balance, f"the Sail guard's {'last good ' if key == 'last_good' else ''}reading at {_iso(at)}"
+    return None, "the Sail guard has no fresh reading"
 
 
 def _gateway(config: Mapping[str, Any]) -> tuple[str | None, str | None]:
@@ -738,23 +894,25 @@ def gather(root: Path, now: float, *, config: Mapping[str, Any], settings: Mappi
     guard_cfg = settings.get("guard") if isinstance(settings.get("guard"), Mapping) else {}
     house_burn = _amount(guard_cfg.get("house_burn_usd_day"))
     house_burn = 1.0 if house_burn is None else house_burn
-    last = (swarm["guard"] or {}).get("last") if isinstance(swarm["guard"], Mapping) else None
-    last = last if isinstance(last, Mapping) else {}
-    balance, at = _finite(last.get("balance")), _finite(last.get("at"))
-    if balance is None or at is None or not 0 <= now - at <= BALANCE_FRESH_SECONDS:
-        balance_source = "the Sail guard has no fresh reading"
-        balance = None
-    else:
-        balance_source = f"the Sail guard's reading at {_iso(at)}"
+    balance, balance_source = _guard_balance(swarm["guard"], now)
     fixed, fixed_source = _sail_fixed(sail, _house_boxes(root, config), now, house_burn, errors)
     claude_balance, claude_source = None, "the gateway's /v1/health could not be read"
+    seen, seen_source = None, None
     if health is not None:
         try:
-            claude_balance = _claude_balance(health())
+            read = health()
+            claude_balance = _claude_balance(read)
             if claude_balance is not None:
                 claude_source = "the gateway's /v1/health (cap - spent, holds included)"
+            if balance is None:
+                seen, seen_source = _gateway_sail(read, now)
         except Exception as exc:  # noqa: BLE001 - unknown is never money
             errors.append(f"the gateway's /v1/health could not be read ({type(exc).__name__})")
+    if balance is None:
+        errors.append(f"Sail's balance: {balance_source}: no Sail research" +
+                      ("" if seen is None else "; the card line reads the gateway's Sail reading"))
+    if claude_balance is None:
+        errors.append(f"Claude's balance: {claude_source}: no Claude research")
     p30, p30_source = _p30(root, now, errors)
     try:
         edge = edge_state(now, swarm["promotions"])
@@ -762,7 +920,8 @@ def gather(root: Path, now: float, *, config: Mapping[str, Any], settings: Mappi
         edge = {"stop": True, "why": f"the forward edge could not be judged ({type(exc).__name__}): earned is 0"}
     return {"p30_usd": p30, "p30_source": p30_source, "edge": edge,
             "meters": {"sail": {"balance_usd": balance, "balance_source": balance_source, "fixed_usd_day": round(fixed, 4),
-                                "fixed_source": fixed_source, "need_usd": round(swarm["need"]["sail"], 4)},
+                                "fixed_source": fixed_source, "need_usd": round(swarm["need"]["sail"], 4),
+                                "notice_balance_usd": seen, "notice_balance_source": seen_source},
                        "claude": {"balance_usd": claude_balance, "balance_source": claude_source, "fixed_usd_day": 0.0,
                                   "fixed_source": "none", "need_usd": round(swarm["need"]["claude"], 4)}}}
 
@@ -774,31 +933,41 @@ def _week(now: float) -> str:
 
 
 def short(doc: Mapping[str, Any]) -> list[str]:
-    """The meters whose runway at their current total rate is under W days."""
+    """The meters whose runway at the rate they want (`card_runway_days`) is under W days."""
     out = []
     for m in METERS:
-        runway = _finite(((doc.get("meters") or {}).get(m) or {}).get("runway_days"))
+        runway = _finite(((doc.get("meters") or {}).get(m) or {}).get("card_runway_days"))
         if runway is not None and runway < W_DAYS:
             out.append(m)
     return out
 
 
 def notice_facts(doc: Mapping[str, Any], meter: str, now: float, *, test: bool = False) -> dict[str, Any]:
-    """The `funding` notice's facts (the gateway composes the words): decimals as strings."""
+    """The `funding` notice's facts (the gateway composes the words): decimals as strings. The $/day, the runway and the
+    date it runs out are at the rate the meter WANTS (fixed + its full floor share + its earned share: `usd_day`,
+    `research_usd_day`, `runway_days`, `runs_out_on`); `current_*` are at the rate the rule holds it to now."""
     row = (doc.get("meters") or {}).get(meter) or {}
 
     def money(value: Any) -> str | None:
         number = _finite(value)
         return None if number is None else f"{number:.2f}"
+
+    def days(value: Any) -> str | None:
+        number = _finite(value)
+        return None if number is None else f"{number:.1f}"
+    fixed, demand = _finite(row.get("fixed_usd_day")), _finite(row.get("demand_usd_day"))
+    balance = row.get("balance_usd") if _finite(row.get("balance_usd")) is not None else row.get("card_balance_usd")
     # A drill's id is its own minute's (the gateway remembers funding ids for 8 days, and a second drill in the same week
     # must reach the owner again, not be answered `duplicate`).
     notice_id = f"funding-test:{meter}:{_week(now)}:{int(now // 60)}" if test else f"funding:{meter}:{_week(now)}"
     return {"kind": "funding", "notice_id": notice_id, "meter": meter,
-            "balance_usd": money(row.get("balance_usd")), "usd_day": money(row.get("total_usd_day")),
-            "fixed_usd_day": money(row.get("fixed_usd_day")), "research_usd_day": money(row.get("research_usd_day")),
-            "runway_days": None if _finite(row.get("runway_days")) is None else f"{float(row['runway_days']):.1f}",
+            "balance_usd": money(balance), "usd_day": money(demand), "fixed_usd_day": money(fixed),
+            "research_usd_day": money(None if demand is None or fixed is None else demand - fixed),
+            "runway_days": days(row.get("card_runway_days")), "runs_out_on": row.get("card_runs_out_on"),
+            "current_usd_day": money(row.get("total_usd_day")), "current_research_usd_day": money(row.get("research_usd_day")),
+            "current_runway_days": days(row.get("runway_days")),
             "restore_usd": money(row.get("restore_usd")), "restore_days": R_DAYS, "card_line_days": W_DAYS,
-            "card_date": row.get("card_date"), "runs_out_on": row.get("runs_out_on"), "at": _iso(now), "test": bool(test)}
+            "card_date": row.get("card_date"), "at": _iso(now), "test": bool(test)}
 
 
 def _sent(answer: Any) -> bool:
@@ -857,6 +1026,16 @@ def _settings(root: Path, config: Mapping[str, Any]) -> Mapping[str, Any]:
         return {}
 
 
+def _alert(ctx: Any, text: str) -> None:
+    """A House warning through the job's context (`ctx.alert(level, text)`, league/ops/context.py), when it has one."""
+    try:
+        alert = _get(ctx, "alert")
+        if callable(alert):
+            alert("warning", text[:900])
+    except Exception:  # noqa: BLE001 - the receipt still carries the errors
+        pass
+
+
 def run(ctx: Any) -> dict[str, Any]:
     """The `budget` job (league/ops: after the close economics, and daily at 00:30 UTC). `ctx` gives `root` (the House's
     state root; or `state_root`, or `house.root`), and optionally `now` or `clock`, `config` (league/config.json),
@@ -865,8 +1044,12 @@ def run(ctx: Any) -> dict[str, Any]:
     Writes `<root>/budget.json` and returns the receipt."""
     root, now, config = _root(ctx), _now(ctx), _config(ctx)
     errors: list[str] = []
-    sail = _get(ctx, "sail")
-    if sail is None:
+    try:
+        sail = _get(ctx, "sail")  # the ops context builds its client on first use: that may fail
+    except Exception as exc:  # noqa: BLE001 - the configured burn stands in
+        sail = None
+        errors.append(f"no Sail client from the job's context ({type(exc).__name__})")
+    if sail is None and not errors:
         try:
             from league.sailbox import SailboxClient
 
@@ -887,6 +1070,10 @@ def run(ctx: Any) -> dict[str, Any]:
     if notices:
         doc["notices"], doc["errors"] = notices, list(errors)
         _write_json(root / BUDGET_FILE, doc)
+    if errors:
+        # Fail-closed is quiet by design (no research, no notice): a House warning says so (a stale guard, a paused
+        # swarm, an unread gateway, a p30 from the fallback read or unknown, a notice not sent).
+        _alert(ctx, "budget: " + "; ".join(errors))
     return {"state": doc["state"], "direction": doc["direction"], "research_usd_day": doc["research_usd_day"],
             "earned_usd_day": doc["earned_usd_day"],
             "meters": {m: {k: doc["meters"][m].get(k) for k in ("research_usd_day", "limited_by", "runway_days", "card_date",
@@ -894,22 +1081,29 @@ def run(ctx: Any) -> dict[str, Any]:
             "notices": notices, "errors": errors, "warning": bool(errors)}
 
 
+#: The drill's synthetic fixed cost a day per meter: the production shape (Claude has none).
+DRILL_FIXED = {"sail": 1.0, "claude": 0.0}
+
+
 def drill(ctx: Any, meter: str = "sail") -> dict[str, Any]:
-    """The funding drill (league/ops drills, monthly): (1) a synthetic cliff on `meter` (its balance 30 days of its fixed
-    cost above the reserve) goes through `compute` and is sent as the real notice would be, with `test: true` and its
-    own notice id; (2) the same meter with an unreadable balance must give no research. Writes nothing to budget.json
-    or to the notices' record."""
+    """The funding drill (league/ops drills, monthly; one call per meter): (1) a synthetic cliff on `meter` in the
+    production shape (its fixed cost `DRILL_FIXED`, Claude's 0; its balance 30 days of fixed + its floor share above the
+    reserve, so the rule itself throttles its research and only the card line at the wanted rate sees it) goes through
+    `compute` and is sent as the real notice would be, with `test: true` and its own notice id; (2) the same meter with
+    an unreadable balance must give no research. Writes nothing to budget.json or to the notices' record."""
     if meter not in METERS:
         raise ValueError(f"no meter {meter!r}")
     root, now, config = _root(ctx), _now(ctx), _config(ctx)
-    fixed = 1.0
     synthetic = {"p30_usd": 0.0, "p30_source": "drill", "edge": {"stop": False, "why": "drill"},
-                 "meters": {m: {"balance_usd": RESERVE_USD[m] + (30 * fixed if m == meter else 10_000.0),
-                                "fixed_usd_day": fixed, "need_usd": 0.0} for m in METERS}}
+                 "meters": {m: {"balance_usd": RESERVE_USD[m] + (30 * (DRILL_FIXED[m] + floor_usd_day(m)) if m == meter
+                                                                 else 10_000.0),
+                                "fixed_usd_day": DRILL_FIXED[m], "need_usd": 0.0} for m in METERS}}
     doc = compute(synthetic, now=now)
-    unreadable = compute({**synthetic, "meters": {**synthetic["meters"], meter: {"balance_usd": None, "fixed_usd_day": fixed}}},
+    unreadable = compute({**synthetic, "meters": {**synthetic["meters"],
+                                                  meter: {"balance_usd": None, "fixed_usd_day": DRILL_FIXED[meter]}}},
                          now=now)
     checks = {"cliff_seen": meter in short(doc),
+              "throttled_and_still_seen": doc["meters"][meter]["research_usd_day"] < floor_usd_day(meter),
               "unreadable_gives_no_research": unreadable["meters"][meter]["research_usd_day"] == 0.0}
     facts = notice_facts(doc, meter, now, test=True)
     notify = _get(ctx, "notify") or _notifier(config)
@@ -927,7 +1121,8 @@ def drill(ctx: Any, meter: str = "sail") -> dict[str, Any]:
             "sent": sent, "error": error, "ok": sent and all(checks.values())}
 
 
-__all__ = ["compute", "knobs", "overlay", "read", "effective", "stale_block", "floor_block", "BIRTH_MARGIN", "sail_caps", "edge_state", "book_p30", "gather",
+__all__ = ["compute", "knobs", "overlay", "read", "effective", "stale_block", "floor_block", "BIRTH_MARGIN", "sail_caps",
+           "paid_model_room", "edge_state", "book_p30", "economics_p30", "economics_fresh", "ladder_promotions", "gather",
            "notice_facts", "send_notices", "short", "run", "drill", "floor_usd_day", "METERS", "R_DAYS", "W_DAYS",
            "FLOOR_CAP_USD_DAY", "FLOOR_SPLIT", "PROFIT_SHARE", "RESERVE_USD", "EDGE_START", "EDGE_SESSIONS", "STALE_SECONDS",
-           "BUDGET_FILE", "NOTICES_FILE"]
+           "BUDGET_FILE", "NOTICES_FILE", "LADDER_MARK", "P30_FRESH_SECONDS"]

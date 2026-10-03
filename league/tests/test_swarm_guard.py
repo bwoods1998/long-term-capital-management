@@ -120,6 +120,18 @@ class Guard(GuardCase):
         g.check()
         self.assertTrue(g.allows())
 
+    def test_the_last_good_reading_outlives_a_failed_read(self):
+        g = self.guard()
+        g.check()
+        good_at = self.clock()
+        self.reading = (None, None)
+        self.clock.advance(180)
+        g.check()
+        saved = self.store.get("guard")
+        self.assertIsNone(saved["last"]["balance"], "the latest check failed")
+        self.assertEqual(saved["last_good"], {"balance": 118.79, "at": good_at}, "the budget job reads this one")
+        self.assertEqual(self.guard().last_good["balance"], 118.79, "a restart keeps it")
+
     def test_a_failed_read_while_braked_keeps_the_brake(self):
         self.reading = (20.0, 34.0)
         g = self.guard()

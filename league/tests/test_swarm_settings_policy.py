@@ -71,7 +71,8 @@ class TheLayer(Case):
         self.swarm_json({"population": {"floor": 9}})
         layer, status = S.read_policy(self.root / "nowhere.json")
         self.assertEqual((layer, status["state"]), ({}, "absent"))
-        before = S.load(self.root, config=self.CONFIG, policy={})
+        with mock.patch.object(S, "budget_overlay", lambda out, root: out):  # the layers alone (the budget holds the start)
+            before = S.load(self.root, config=self.CONFIG, policy={})
         self.assertEqual(before["population"]["floor"], 9)
         self.assertEqual(before["population"]["start"], 40)
 
@@ -92,7 +93,8 @@ class TheLayer(Case):
             layer, status = S.policy_layer(doc)
             self.assertEqual((layer, status["state"]), ({}, "malformed"), doc)
             self.assertIn(path, status["why"])
-            out = S.load(self.root, config={}, policy=doc)
+            with mock.patch.object(S, "budget_overlay", lambda out, root: out):  # the layers alone, as above
+                out = S.load(self.root, config={}, policy=doc)
             self.assertEqual(out["_policy"]["state"], "malformed")
             self.assertIsInstance(out["gym"], dict)
             self.assertIsInstance(out["researcher"], dict)
