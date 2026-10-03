@@ -1118,3 +1118,5 @@ architect's cadence and spend from the final 24-hour read, and ending the two GO
 
 The goal remains unmet: no D2-qualified strategy trades real money, no harness improvement is retained, and Net is about
 −$634.
+
+The next record: [2026-10-02-unattended-desk.md](2026-10-02-unattended-desk.md) (v3, the unattended desk).

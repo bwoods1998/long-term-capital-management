@@ -7,12 +7,14 @@ the swarm or live path describe their implementation, not evidence that producti
 enabled. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
-## Paused (Oct 2, 2026)
+## Autopilot (from Oct 3, 2026)
 
-**Active development is paused** (the owner, about 14:20Z Oct 2). The owner chose to keep the swarm running, so
-production runs on unchanged: no deploy and no `swarm.json` change until work resumes. This is not a maintenance pause
-(`floor_box.py maintenance` is off). The operator's private handoff log, newest entry first, holds the detail behind
-this section; read it before resuming.
+**The project runs on autopilot** (the owner, about 23:30Z Oct 2: "let this project go in auto pilot for some time").
+Production is the same release as at the Oct 2 pause; the evening of Oct 2 cut research to a funded floor, ended three
+practice cohorts and repaired the Gym pool's bookkeeping (below). The swarm researches around the clock at that floor;
+the live path trades every New York session. Nothing is deployed until work resumes. The v3 rebuild (the unattended
+desk) is built on branches and **not deployed** (see **v3: built, parked**, below). The operator's private handoff log
+holds the detail; read it before resuming.
 
 **The running House.** `20261002T112610Z-e11710692569`, built from main `e3d0111f` (PRs #484, the look holds, and #481,
 the research canary rule), promoted 11:26:54Z Oct 2 over `20261002T051530Z-1aebcf26b145`.
@@ -21,65 +23,90 @@ the research canary rule), promoted 11:26:54Z Oct 2 over `20261002T051530Z-1aebc
   03:59Z Oct 1).
 - The evaluator's execution fingerprint is `47587e22…`: two planned evidence resets (Release A, Sept 30; Release B,
   Oct 1) and none since.
-- Main is ahead of the running release by docs and comments only. The comment edits touch modules the live path loads
-  (`league/constitution.py` among them; the money digest does not move), so the next House release from main deploys in
-  the money path's window.
+- `auto_update` is off: nothing on main reaches the House until an owner deploy. Main is ahead of the running release
+  by docs and comments only.
 
 **Real money** (on since R2, Sept 27). No family has passed the holdout: 3 looks, all failed. The real orders are the
-House's own: D3 calibration round trips (19 closed by the Oct 2 open), the House live test (armed, no order yet), and
+House's own: D3 calibration round trips (23 closed by the Oct 2 close), the House live test (armed, no order yet), and
 one tuition lot held by `googl-lags-msft-ai-cloud-qqq-flat@27:t`, exit-only, whose program exits it before 15:10 New
 York on Oct 7 (its expiry cutoff). The incubator is on (`live.incubator` true since 04:01Z Oct 1); a cohort's first look
-needs 3 completed sessions and 10 program closes, so no incubator lot can open before about Oct 6-7.
+needs 3 completed sessions and 10 program closes. Project Net since the Sept 26 reset at the Oct 2 close: −$648.51
+(realized options P&L −$40.63; input costs $607.88).
+
+**The Oct 2 evening changes** (operator, no deploy):
+- 17:04Z and 17:23Z, research to a funded floor (the v3 plan's Phase 0): `population.start` 96 → 16, `population.floor`
+  12 → 8, `architect.every_seconds` 1800 → 7200, `researcher.sail_usd_per_hour` 1.3 → 0.25, `gym.max_boxes` 6 → 1,
+  `strategist.every_seconds` → 86400 (once a day). The swarm had spent about $29 in the 24 hours to the close; at the
+  floor its Sail spend (models plus Gym boxes) is about $5 a day at Sail's own billing.
+- 19:03Z, three practice cohorts ended: the two GOOGL-lineage cohorts (holdout-failed, incubator-barred) and
+  `qqq-exsemis-residual-smh-flat-on-s-2` v1, whose SPXW chain read failed every live minute (more than the observe
+  read's three pages). Nine cohorts remain active.
+- 19:03Z, the six Gym pool rows left in state `failed` were marked `terminated` (Sail had already ended those boxes).
 
 **`swarm.json` values in effect** (where they differ from the code's defaults, or matter now):
 
 | Key | On the box | Since | Default |
 |---|---|---|---|
-| `architect.sail_profile` | `pro_asap` (DeepSeek-V4-Pro, asap queue) | 12:49Z Oct 2 (`pro_balanced` 12:28-12:49Z) | `k3_balanced` |
-| `architect.sail_effort` | `high` | 12:54Z Oct 2 (`medium` 11:38-12:54Z) | `medium` |
-| `architect.max_refill`, `every_seconds`, `refill_seconds` | 6, 1800, 1200 | about 14:00Z Oct 1; 02:47Z Oct 1 | 12, 14400, 3600 |
+| `population.start`, `floor` | 16, 8 | 17:04Z Oct 2 (96, 12 before) | 48, 16 |
+| `architect.every_seconds` | 7200 | 17:04Z Oct 2 (1800 before) | 14400 |
+| `architect.max_refill`, `refill_seconds` | 6, 1200 | about 14:00Z Oct 1; 02:47Z Oct 1 | 12, 3600 |
+| `architect.sail_profile` | `pro_asap` (DeepSeek-V4-Pro, asap queue) | 12:49Z Oct 2 | `k3_balanced` |
+| `architect.sail_effort` | `high` | 12:54Z Oct 2 | `medium` |
 | `architect.claimable_rows` | 4 | 05:26Z Oct 2 | 0 |
 | `architect.cell_yield` | null (the owner: claims first) | - | null |
-| `architect.structures` | `["debit_vertical", "long_single"]` | 15:22:15Z Oct 1 (`"real"` before) | null |
+| `architect.structures` | `["debit_vertical", "long_single"]` | 15:22:15Z Oct 1 | null |
 | `architect.max_rebirths_per_cell` | 6 | 15:22Z Oct 1 | 3 |
 | `architect.agenda_locked`, `architect.agenda` | agenda v16c in both (private; sha256 `c7a46dca0707…`) | 15:22:15Z Oct 1 | empty |
+| `strategist.every_seconds` | 86400 | 17:04Z Oct 2 | 10800 |
 | `claude.role_usd_day.architect` | 0 | 11:54Z Oct 2 | none |
 | `claude.usd_cap` | 263 | 20:33Z Oct 1 | 100 |
 | `tournament.fork_top` | 0 | 05:03Z Oct 2 | 3 |
 | `gate.look_holds` | the default (on) | the 11:26Z Oct 2 release | `{"drift_share": 0.25, "min_power": 0.30}` |
-| `researcher.sail_usd_per_hour` | 1.3 | 02:47Z Oct 1 | null |
+| `researcher.sail_usd_per_hour` | 0.25 | 17:23Z Oct 2 (1.3 before) | null |
 | `researcher.top_families`, `researcher.claude_top` | 0, 0 | Sept 30 | 10, 12 |
 | `researcher.stall_revisions`, `diagnostician.enabled` | 10000, false | 16:41Z Sept 30 | 5, true |
-| `population.start`, `floor` | 96, 12 | Sept 29 | 48, 16 |
-| `gym.start_boxes`, `max_boxes` | 2, 6 | Release A, Sept 30 | 4, 8 |
+| `gym.start_boxes`, `max_boxes` | 2, 1 | Release A, Sept 30; 17:23Z Oct 2 | 4, 8 |
 | `live.incubator`, `live.house_test` | true, true | 04:01Z Oct 1; 00:17:28Z Sept 29 | false, false |
 | `research.enabled` | false | - | false |
 | `guard.burst_until`, `burst_cap_usd` | 2026-10-05T00:00Z, $900 | Sept 27 | Sept 28's open, $350 |
 
-**What changes by itself while paused.**
-- The research burst ends at 00:00Z Oct 5 (`guard.burst_until`). The swarm's Sail spend then falls to the guard's
-  after-burst line (`guard.after_burst_usd_day`, $12 a day by default).
-- Sail had about $130 at 09:00Z Oct 2, enough until about Oct 7-9 at the current pace. The Sail guard brakes the swarm
-  at $32 (two days of the House's burn plus $30), before the House is at risk; the House itself keeps running.
-- Claude had about $93 of its $265 funded total. Only the gate's review and audit and the strategist spend it.
+**What changes by itself on autopilot.**
+- The research burst ends at 00:00Z Oct 5 (`guard.burst_until`). From then the Sail guard caps the swarm's booked Sail
+  spend at `guard.after_burst_usd_day` ($12 a day by default, less the House's burn), above the floor's pace.
+- Sail had $122 at 23:30Z Oct 2: about three weeks at the floor. The Sail guard brakes research at $32 (two days of the
+  House's burn plus $30) before the House is at risk; the House and the live path keep running. The gateway's watchdog
+  mails the owner a daily digest at 21:00 UTC, and a warning when Sail falls under $60.
+- Claude had about $92 of its $265 funded total; only the strategist (once a day) and the gate's review and audit spend
+  it.
+- Sail's model API answers some calls with HTTP 502 (about one researcher cycle in seven on Oct 2); a failed cycle is
+  retried, nothing else.
 - The tuition lot's program exits it before 15:10 New York on Oct 7.
-- Incubator first looks come no earlier than about Oct 6-7.
-- The House live test runs on within its pre-registered sessions.
+- Calibration round trips (up to six a session, at most $50 of possible loss a day), the House live test and the
+  practice league run every session; incubator first looks come when a cohort has 3 sessions and 10 program closes.
+
+**How to look without changing anything.** The public site (blakewoods.us/capital) and the gateway's 21:00 UTC digest
+mail touch nothing on the box. The pre-open checks (**Pre-open**, below) and `floor_box.py status` read the box and
+change nothing.
+
+**v3: built, parked.** The v3 rebuild ("the unattended desk": the House's own jobs, a research budget funded by realized
+profit, a standing grant, self-deploy, a forward-evidence ladder, research on stronger models, an engineer that improves
+the harness) was built on Oct 2 on branches and is **not deployed**. The integration branch is `release/v3a` (draft PR
+#489): the ops jobs (`league/ops/`), the budget rule, the standing grant, updater hardening with `auto_update` on, the
+live-path fixes (exit-only opens, observe read clamp, practice position caps), the gateway's docs, review and merge
+routes, and the policy.json settings layer. Parked beside it: the forward ladder (`v3/wp6`, `v3/wp6b`: benchmarked; as
+specified it promotes too many pure-noise programs, so it does not bind), credit types at $2,000 of equity
+(`v3/wp7`), research v3 (`v3/b1`), births v3 and the strategist's whole agenda (`v3/b23`), the weekly post-mortem
+(`v3/b4`) and the engineer and reviewer (`v3/b5`). The public run record `docs/runs/2026-10-02-unattended-desk.md` has
+the plan and the honest state. Before any of it ships: finish integrating the review fixes still on side branches, get
+one green CI run on the exact head, and deploy outside a session.
 
 **To resume.**
 1. Read the operator's handoff log and re-check production (`floor_box.py status`, the pre-open checks): the running
    release, health `failures`, `real_money`, the grant, the Sail and Claude balances.
-2. End the two GOOGL-lineage practice cohorts after a close (**Ending a cohort by hand**, under **The practice league**,
-   below). Retiring their families on Oct 1 did not end them; they are barred from the incubator, so they cost only
-   House compute.
-3. Read the final pre-registered 24-hour read of agenda v16c, then decide the next agenda (v17: two Train-confirmed
-   entry filters and data-hygiene rules) and the architect's cadence and spend.
-4. Return `architect.sail_profile` to its default once Sail's balanced queue answers a test pass (or keep `pro_asap` if
-   its births per pass stay as good: it was the cheaper route on Oct 2).
-5. Before the Claude architect gets a line again, test it with `architect.full_graveyard` false (its Oct 2 passes, on
-   the full-graveyard route, bore nothing).
-6. Fund Sail before the brake (above).
-7. Ship any House release by **Every House release**, below.
+2. Read the run record's v3 section and PR #489; integrate, test and deploy V3-A outside a session (it moves the
+   evaluator's fingerprint: one planned evidence reset).
+3. Fund Sail before the brake if research should run faster than the floor.
+4. Ship any House release by **Every House release**, below.
 
 **Still true.**
 - **The freeze** (since Release B). `league/live` and `league/gym` change only in a planned, deliberate release. A

@@ -29,6 +29,10 @@ merged is waiting for a release. Those comment edits touch modules the live path
 release from main deploys in the money path's window (20:05-13:25Z); the money digest does not move. Under the freeze (Oct 1, "The freeze"), a change to `league/live` or `league/gym` waits
 for a planned release. Active development is paused (Oct 2, 14:15Z, below).
 
+Built on Oct 2 and NOT merged to main (draft PR #489, integration branch `release/v3a`, and the `v3/*` branches): the
+v3 rebuild, the unattended desk ([the run record](docs/runs/2026-10-02-unattended-desk.md)). It moves the evaluator's
+fingerprint and carries money-path changes, so it ships only by a planned owner deploy outside a session.
+
 Also merged after the pause: a prune of dead files from the Kalshi era and the first run.
 `scripts/jev_lab_eval/`, `scripts/{attribute_fills,repair_leg_fills,repair_no_fills,survey_kalshi}.py`,
 `deploy/ltcm.service` and `league/FEEDS.md` are removed. Nothing imports or runs them, and they stay
@@ -36,6 +40,25 @@ readable at tag `archive/pre-options-2026-09-26`. These paths are in the release
 release id moves with them. No behaviour changes, and the money digest does not move.
 
 ## 2026-10-02
+
+### 23:30Z, autopilot (no deploy)
+
+The owner put the project on autopilot. Production stays on `20261002T112610Z-e11710692569`; the box's updater stays
+off. The live path trades every session (calibration round trips, the House live test, the incubator, the practice
+league in shadow); the swarm researches at the funded floor set below.
+
+### 17:04-20:06Z, research to a funded floor; three cohorts ended; the v3 baseline (operator, no deploy)
+
+- 17:04Z and 17:23Z (`swarm.json`): `population.start` 96 → 16, `population.floor` 12 → 8, `architect.every_seconds`
+  1800 → 7200, `researcher.sail_usd_per_hour` 1.3 → 0.25, `gym.max_boxes` 6 → 1, `strategist.every_seconds` → 86400.
+  The swarm had spent about $29 in the 24 hours to the close (Sail models $13.04, Sail boxes $3.78, Claude $6.67, plus
+  data vendors pro rata); the floor is about $5 a day of Sail.
+- 19:03Z (`observe.sqlite`): practice cohorts ended with an operator reason: `googl-lags-msft-ai-cloud-qqq-flat-r` v1
+  and `googl-lags-msft-ai-cloud-qqq-flat--2` v83 (holdout-failed lineage, barred from the incubator) and
+  `qqq-exsemis-residual-smh-flat-on-s-2` v1 (its SPXW chain read failed every live minute). Nine cohorts remain.
+- 19:03Z (`swarm.sqlite`): the six Gym pool rows in state `failed` marked `terminated` (Sail had ended those boxes).
+- 20:06Z: the one-cutoff economics at the 20:00Z close, the v3 baseline: realized options P&L -$40.63, input costs
+  $607.88, Net -$648.51; with the open tuition lot at its conservative mark, -$772.67.
 
 ### 14:15Z, the pause (no deploy)
 
