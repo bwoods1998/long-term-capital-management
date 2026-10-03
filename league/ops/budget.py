@@ -12,9 +12,10 @@ updater, `league/ci.py`). The `budget` job (after the close economics, and daily
   (`SailboxClient.spend`) a day, never below `guard.house_burn_usd_day` (which is also the fallback); Claude: 0;
 - reserve_m: never spent (`RESERVE_USD`);
 
-and p30: the trailing-30-calendar-day realized options P&L, fees in, every real route (`league.ops.economics.p30` when
-that module is there, else its own read of the live book's closed positions and the broker's posted fee corrections).
-Marks never fund research. Then, a day:
+and p30: the trailing-30-calendar-day realized options P&L, fees in: this file's own read of the live book's closed
+positions and the broker's posted fee corrections (`book_p30`), or the fresh close economics' `p30`
+(`league.ops.economics`) when that is SMALLER. The close economics may only cut what was earned, never raise it (it is
+FORBIDDEN too, a second wall, not the only one); an unreadable book earns nothing whatever the economics says. Marks never fund research. Then, a day:
 
     sustainable_m = max(0, balance_m - reserve_m - R * fixed_m) / R
     floor_m       = min(sustainable_m, FLOOR_CAP * FLOOR_SPLIT[m])
@@ -546,6 +547,15 @@ def economics_fresh(cutoff: float, now: float) -> bool:
 
 
 def _p30(root: Path, now: float, errors: list[str]) -> tuple[float | None, str]:
+    """p30: the live book's own read (`book_p30`), cut to the fresh close economics' p30 when that is smaller. The
+    economics (league/ops/economics.py) may lower what was earned, never raise it: the book is the wall either way."""
+    try:
+        book, source = book_p30(root, now)
+    except Exception as exc:  # noqa: BLE001 - unknown is never money
+        errors.append(f"the live book could not be read ({type(exc).__name__}): nothing earned")
+        return None, "unreadable"
+    if book is None:
+        return None, source
     try:
         from . import economics  # league/ops/economics.py (the close economics), when it is there
     except ImportError:
@@ -557,20 +567,16 @@ def _p30(root: Path, now: float, errors: list[str]) -> tuple[float | None, str]:
             cutoff = _epoch((summary or {}).get("cutoff"))
             value = _finite(((summary or {}).get("p30") or {}).get("usd"))  # a loss is a number, not "no number"
             if summary is None:
-                pass  # no close yet (a new House): the book's own read is the source, not an error
+                pass  # no close yet (a new House): the book's own read stands
             elif cutoff is None or not economics_fresh(cutoff, now):
                 errors.append("the close economics is stale: the live book's own read is used")
-            elif value is not None:
-                return value, "league.ops.economics.p30"
-            else:
+            elif value is None:
                 errors.append("league.ops.economics.p30 gave no number: the live book's own read is used")
-        except Exception as exc:  # noqa: BLE001 - the book's own read stands in
+            elif value < book:
+                return value, "league.ops.economics.p30 (below the live book's own read, which caps it)"
+        except Exception as exc:  # noqa: BLE001 - the book's own read stands
             errors.append(f"league.ops.economics.p30 failed ({type(exc).__name__}): the live book's own read is used")
-    try:
-        return book_p30(root, now)
-    except Exception as exc:  # noqa: BLE001 - unknown is never money
-        errors.append(f"the live book could not be read ({type(exc).__name__}): nothing earned")
-        return None, "unreadable"
+    return book, source
 
 
 def _swarm_reads(root: Path, now: float, errors: list[str]) -> dict[str, Any]:

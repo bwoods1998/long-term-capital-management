@@ -64,7 +64,7 @@ JOBS: tuple[Job, ...] = (
         what="the one-cutoff close economics and the trailing 30-day realized options P&L"),
     Job("scoreboard", "league.ops.scoreboard", (S.daily(23, 30),), grace=2 * HOUR, cpu=120, wall=300,
         what="the public-safe daily scoreboard, committed through the gateway"),
-    # Twice: 15:00Z runs the drills and launches the rollback drill last; 17:00Z checks its verdict (and runs any drill
+    # Twice: 15:00Z runs the drills and requests the rollback drill last (the updater launches it); 17:00Z checks its verdict (and runs any drill
     # the first could not reach). A drill done this month is never run again (`league/ops/drills.py`).
     Job("drills", "league.ops.drills", (S.monthly_first(5, 15, 0), S.monthly_first(5, 17, 0)), grace=6 * HOUR, cpu=1800, wall=3600, owner="WP1/WP3",
         what="the monthly failure drills, each with a recovery check", retry=False),

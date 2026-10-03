@@ -44,6 +44,82 @@ class GuardTest(unittest.TestCase):
                 (root / "league" / "ops" / "jobs.py").write_text(text)
             self.assertEqual([p.split(":")[0] for p in protected_changes(incoming, running)], ["league/ops/budget.py"])
 
+    def test_the_updaters_wall_and_the_gateways_merge_list_are_one_list(self):
+        """A path the gateway will not merge must not self-deploy either, whatever route put it on main (V3-A
+        integration): `FORBIDDEN` (read by `league.updater.protected_changes`) is the gateway's `MERGE_FORBIDDEN` but for
+        `MERGE_ONLY` (the configuration, whose bounded dials the running release's checks judge).
+        gateway/test/merge.test.mjs checks FORBIDDEN is inside the gateway's list from its side."""
+        import re
+
+        source = (ci.REPO / "gateway" / "lib" / "protected.mjs").read_text(encoding="utf-8")
+        block = re.search(r"MERGE_FORBIDDEN = Object\.freeze\(\[([\s\S]*?)\]\);", source)
+        self.assertIsNotNone(block)
+        gateway = set(re.findall(r"'([^']+)'", re.sub(r"//[^\n]*", "", block.group(1))))
+        self.assertGreater(len(gateway), 40)
+        self.assertEqual(set(ci.FORBIDDEN) - gateway, set(), "the updater protects these; the gateway would merge them")
+        self.assertEqual(gateway - set(ci.FORBIDDEN), set(ci.MERGE_ONLY), "the gateway protects these; the updater would deploy them")
+        for path in ("league/swarm/bands.py", "league/swarm/store.py", "ltcm/data/us_equity_session.py", "deploy/restart.sh",
+                     "league/gym/engine.py", "league/swarm/guard.py"):
+            self.assertTrue(ci.guard([path], None), path)
+        import tempfile
+
+        from league.updater import protected_changes
+
+        with tempfile.TemporaryDirectory() as tmp:
+            running, incoming = Path(tmp) / "running", Path(tmp) / "incoming"
+            for root, text in ((running, "X = 1\n"), (incoming, "X = 2\n")):
+                for rel in ("league/swarm/bands.py", "ltcm/data/us_equity_session.py", "league/swarm/pool.py"):
+                    (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                    (root / rel).write_text(text)
+            self.assertEqual([p.split(":")[0] for p in protected_changes(incoming, running)],
+                             ["league/swarm/bands.py", "ltcm/data/us_equity_session.py"])
+
+    def test_what_feeds_or_enforces_the_budget_is_protected(self):
+        """D4: the budget rule changes only by the owner's deploy, so neither may what applies it (every module that calls
+        `sail_caps`, the overlay or the Claude budget room) nor what budget.py imports to compute it. The Sail client and
+        the notifier are transports (the arithmetic on their answers is budget.py's), and the close economics may only
+        cut p30 (`budget._p30` takes the smaller of it and the book): those three are named here on purpose."""
+        import ast
+        import re
+
+        def protected(path: str) -> bool:
+            return any(path == f or (f.endswith("/") and path.startswith(f)) for f in ci.FORBIDDEN)
+
+        callers = re.compile(r"\bsail_caps\(|\bclaude_budget_room\(|budget_mod\.overlay\(|from \.\.?ops\.budget import|"
+                             r"from \.\.?ops import budget|from league\.ops(\.budget)? import (budget|sail_caps|overlay)")
+        found = []
+        for top in ("league", "ltcm", "scripts"):
+            for path in (ci.REPO / top).rglob("*.py"):
+                rel = path.relative_to(ci.REPO).as_posix()
+                if "/tests/" in rel or rel.startswith("league/tests/"):
+                    continue
+                if callers.search(path.read_text(encoding="utf-8", errors="replace")):
+                    found.append(rel)
+        self.assertIn("league/swarm/guard.py", found)
+        self.assertIn("league/swarm/settings.py", found)
+        self.assertIn("league/swarm/models.py", found)
+        self.assertEqual([rel for rel in found if not protected(rel)], [])
+
+        transports = {"league/sailbox.py", "ltcm/notify.py", "league/ops/economics.py"}
+        tree = ast.parse((ci.REPO / "league" / "ops" / "budget.py").read_text(encoding="utf-8"))
+        imported = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                parent = ["league", "ops"][: 3 - node.level] if node.level else []
+                module = parent + ((node.module or "").split(".") if node.module else [])
+                for alias in node.names:
+                    # `from league.swarm import settings` imports the module league/swarm/settings.py.
+                    for parts in (module + [alias.name], module):
+                        if parts and parts[0] in ("league", "ltcm"):
+                            hits = [c for c in ("/".join(parts) + ".py", "/".join(parts) + "/__init__.py") if (ci.REPO / c).exists()]
+                            if hits:
+                                imported.add(hits[0])
+                                break
+        self.assertIn("league/ops/economics.py", imported)
+        self.assertEqual(sorted(p for p in imported if not protected(p) and p not in transports), [])
+        for path in ("league/ops/context.py", "league/swarm/guard.py", "league/swarm/models.py", "league/swarm/settings.py"):
+            self.assertTrue(ci.guard([path], None), path)
+
     def test_traversal_is_refused(self):
         self.assertTrue(ci.guard(["league/strategies/../constitution.py"], "architect"))
         self.assertTrue(ci.guard(["/etc/passwd"], "architect"))
@@ -255,7 +331,8 @@ class TheEngineersLanes(unittest.TestCase):
             (root / "league" / "swarm").mkdir(parents=True)
             (root / "league" / "tests").mkdir()
             (root / "league" / "swarm" / "loop.py").write_text("A = 1\n")
-            (root / "league" / "swarm" / "models.py").write_text("B = 1\n")
+            (root / "league" / "swarm" / "pool.py").write_text("B = 1\n")
+            (root / "league" / "swarm" / "models.py").write_text("C = 1\n")
             git("add", "-A")
             git("commit", "-q", "-m", "base")
             base = git("rev-parse", "HEAD")
@@ -269,11 +346,16 @@ class TheEngineersLanes(unittest.TestCase):
                               f"({', '.join((*self.SURFACES['research'], ci.ENGINEER_TESTS))})"])
             self.assertEqual(ci.guard_branch(base, "HEAD", "engineer/faster-loop-0123abcd", root=root),
                              [f"engineer/faster-loop-0123abcd: not a branch name of the form {ci.BRANCH_FORMS}"])
-            (root / "league" / "swarm" / "models.py").write_text("B = 2\n")
+            (root / "league" / "swarm" / "pool.py").write_text("B = 2\n")
             git("commit", "-q", "-am", "outside")
             self.assertEqual(ci.guard_branch(base, "HEAD", "engineer/scheduler/faster-loop-0123abcd", root=root),
-                             [f"league/swarm/models.py: outside what the engineer/scheduler may change "
+                             [f"league/swarm/pool.py: outside what the engineer/scheduler may change "
                               f"(league/swarm/loop.py, {ci.ENGINEER_TESTS})"])
+            # A path that feeds or enforces the budget is no lane's at all (FORBIDDEN, V3-A integration).
+            (root / "league" / "swarm" / "models.py").write_text("C = 2\n")
+            git("commit", "-q", "-am", "protected")
+            self.assertIn("league/swarm/models.py: no role may change this file",
+                          ci.guard_branch(base, "HEAD", "engineer/scheduler/faster-loop-0123abcd", root=root))
 
     def test_a_lane_may_only_add_a_test_never_change_remove_or_rename_one(self):
         """harness_lanes' NEW_TEST: an earlier candidate's retained test is never modified, removed or renamed away."""

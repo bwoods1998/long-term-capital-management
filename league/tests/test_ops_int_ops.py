@@ -282,7 +282,6 @@ class Drills(unittest.TestCase):
         self.root = self.base / "state"
         self.root.mkdir()
         self.now = [at("2026-11-07T15:00:30Z")]
-        self.launched = []
 
     def ctx(self, **extra):
         class Health:
@@ -296,7 +295,6 @@ class Drills(unittest.TestCase):
 
         ctx = {"root": self.root, "base": self.base, "now": lambda: self.now[0], "gateway": Health(), "dead_gateway": Dead(),
                "notify": lambda facts: {"ok": True, "sent": True}, "config": {},
-               "launch": lambda argv: self.launched.append(argv) or 4242,
                "lock_held": lambda path: False}
         ctx.update(extra)
         return ctx
@@ -308,8 +306,9 @@ class Drills(unittest.TestCase):
         db.commit()
         db.close()
 
-    def test_a_month_of_drills_launches_the_rollback_last_and_checks_it_later(self):
+    def test_a_month_of_drills_requests_the_rollback_last_and_checks_it_later(self):
         from league.ops import drills
+        from league.updater import DRILL_REQUEST
 
         self.guard_reading(600)
         with mock.patch("league.ops.budget._sent", lambda answer: True):
@@ -318,8 +317,12 @@ class Drills(unittest.TestCase):
         self.assertEqual(out["ran"], ["funding", "sail_read", "gateway_outage", "swarm_kill", "rollback"])
         self.assertEqual(out["pending"], ["rollback"])
         self.assertEqual(out["drills"]["swarm_kill"]["ok"], None)
-        self.assertEqual(self.launched[0][1:4], ["-m", "league.watchdog", "drill-rollback"])
+        # Requested, never launched from the job's child: the updater launches it from the House's own process.
+        request = json.loads((self.root / DRILL_REQUEST).read_text())
+        self.assertEqual(request["at"], "2026-11-07T15:00:30Z")
+        self.assertEqual(sorted(out["drills"]["funding"]["meters"]), ["claude", "sail"])
         self.assertIn("gym_box_failure", out["not_drilled"])
+        (self.root / DRILL_REQUEST).unlink()  # the updater took it
         # 17:00Z: the verdict is on record; nothing else runs again.
         launched = at("2026-11-07T15:00:30Z")
         rows = [{"ts": launched + 300, "stage": "restart", "ok": True, "release": "drill-x"},
@@ -330,7 +333,7 @@ class Drills(unittest.TestCase):
         out = drills.run(self.ctx())
         self.assertEqual(out["ran"], ["rollback"])
         self.assertTrue(out["drills"]["rollback"]["ok"])
-        self.assertEqual(len(self.launched), 1, "launched once a month")
+        self.assertFalse((self.root / DRILL_REQUEST).exists(), "requested once a month")
         self.assertEqual(drills.run(self.ctx())["status"], "skipped")
 
     def test_a_drill_that_does_not_recover_fails_the_run(self):
@@ -351,13 +354,18 @@ class Drills(unittest.TestCase):
         from league.ops import drills
 
         state = {"month": "2026-11", "drills": {n: {"ok": True} for n in drills.ORDER if n != "rollback"}}
-        state["drills"]["rollback"] = {"launched": {"launched_ts": self.now[0]}, "checked": False}
+        state["drills"]["rollback"] = {"requested": drills.request_rollback(self.ctx()), "checked": False}
         drills.save(self.root, state)
         self.now[0] += 600
         self.assertEqual(drills.run(self.ctx())["pending"], ["rollback"])
+        self.assertTrue((self.root / drills.REQUEST).exists())
         self.now[0] += drills.ROLLBACK_VERDICT_SECONDS
         out = drills.run(self.ctx())
         self.assertEqual((out["status"], out["failed"]), ("failed", ["rollback"]))
+        # The updater never took it (auto_update off, or a deploy in flight all along): withdrawn, so it never runs unchecked.
+        self.assertTrue(out["drills"]["rollback"]["withdrawn"])
+        self.assertIn("never took it", out["drills"]["rollback"]["error"])
+        self.assertFalse((self.root / drills.REQUEST).exists())
 
     def test_the_swarm_kill_waits_for_a_new_swarm(self):
         from league.ops import drills

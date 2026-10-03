@@ -328,6 +328,18 @@ class TheReaders(TestCase):
         self.assertIsNone(owner_change([{"at": "2026-10-02T00:00:00Z", "stage": "promote", "ok": True}, "junk", None], 1e12))
         self.assertIsNotNone(owner_change([{"at": "2026-10-02T00:00:00Z", "stage": "promote", "ok": True}], 0.0))
 
+    def test_the_rollback_drills_copy_is_never_an_owner_change(self):
+        """Its promote row lands before the drill's own `stage: "drill"` row, and the House started from the copy runs
+        the grant job at once: the copy's rows are told apart by the copy's name."""
+        drill = owner_deploy(400.0, release="drill-20261003T150000Z")
+        rows = owner_deploy(100.0, release="a") + drill + [
+            {"ts": 410.0, "deploy": drill[0]["deploy"], "release": "drill-20261003T150000Z", "stage": "rollback", "ok": True,
+             "from": "drill-20261003T150000Z", "to": "a"},
+            {"ts": 420.0, "deploy": "rollback@420", "release": "drill-20261003T150000Z", "stage": "rollback", "ok": True,
+             "from": "drill-20261003T150000Z", "to": "a"}]
+        self.assertEqual(owner_change(rows, 0.0)["release"], "a")
+        self.assertIsNone(owner_change(rows, 150.0))
+
 
 class TheJob(StandingCase):
     def ctx(self, **extra):

@@ -526,12 +526,27 @@ class Job(unittest.TestCase):
         B.run(self.ctx())
         self.assertEqual(self.doc()["meters"]["sail"]["research_usd_day"], 0.0)
 
-    def test_the_close_economics_p30_is_preferred_when_present(self):
+    def test_the_close_economics_p30_may_cut_what_was_earned_never_raise_it(self):
+        """The close economics (league/ops/economics.py) is a second source: an inflated p30 there must not lift the
+        budget past the live book's own read (the D4 rule), but a smaller one (more fees found) is used."""
         from league.ops import economics
         with mock.patch.object(economics, "latest", lambda root: {"cutoff": B._iso(NOW - 3 * 3600), "p30": {"usd": "300.00"}}):
             B.run(self.ctx())
-        self.assertEqual((self.doc()["inputs"]["p30_usd"], self.doc()["inputs"]["p30_source"]),
-                         (300.0, "league.ops.economics.p30"))
+        self.assertEqual(self.doc()["inputs"]["p30_usd"], 39.98)
+        self.assertIn("the live book", self.doc()["inputs"]["p30_source"])
+        with mock.patch.object(economics, "latest", lambda root: {"cutoff": B._iso(NOW - 3 * 3600), "p30": {"usd": "12.50"}}):
+            B.run(self.ctx())
+        self.assertEqual(self.doc()["inputs"]["p30_usd"], 12.5)
+        self.assertTrue(self.doc()["inputs"]["p30_source"].startswith("league.ops.economics.p30"))
+
+    def test_an_unreadable_book_earns_nothing_whatever_the_economics_says(self):
+        from league.ops import economics
+        (self.root / "live.sqlite").unlink()
+        self.book([(9, 50.0, NOW - 6 * DAY, NOW - 5 * DAY)], qty=1)  # a "closed" row still holding contracts
+        with mock.patch.object(economics, "latest", lambda root: {"cutoff": B._iso(NOW - 3 * 3600), "p30": {"usd": "300.00"}}):
+            B.run(self.ctx())
+        self.assertIsNone(self.doc()["inputs"]["p30_usd"])
+        self.assertEqual(self.doc()["earned_usd_day"], 0.0)
 
     def test_a_losing_month_in_the_close_economics_is_a_number_not_a_fallback(self):
         """A negative p30 is a loss, never "no number": the book (which can read positive) does not stand in for it."""
@@ -539,7 +554,8 @@ class Job(unittest.TestCase):
         with mock.patch.object(economics, "latest", lambda root: {"cutoff": B._iso(NOW - 3 * 3600), "p30": {"usd": "-3.10"}}):
             receipt = B.run(self.ctx())
         doc = self.doc()
-        self.assertEqual((doc["inputs"]["p30_usd"], doc["inputs"]["p30_source"]), (-3.1, "league.ops.economics.p30"))
+        self.assertEqual(doc["inputs"]["p30_usd"], -3.1)
+        self.assertTrue(doc["inputs"]["p30_source"].startswith("league.ops.economics.p30"), doc["inputs"]["p30_source"])
         self.assertEqual(doc["earned_usd_day"], 0.0)
         self.assertEqual(receipt["errors"], [])
 

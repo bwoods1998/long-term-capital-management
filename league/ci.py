@@ -95,12 +95,26 @@ FORBIDDEN: tuple[str, ...] = (
     # The House's protected jobs (V3-A): the research budget rule that spends only what was earned, the
     # standing grant's re-ratification, and the failure drills (league/ops/). Money and the way back.
     "league/ops/budget.py", "league/ops/drills.py", "league/ops/grant.py",
-    # The walls around them (V3-A integration review): the close economics the budget's p30 and the public Net come
-    # from, and the Sail guard that brakes spend; the evaluator's identity (the Gym, the evaluator) and the swarm's
-    # route to real money (the gate, the bands). An automatic release may not change them; the owner's deploy may.
-    "league/ops/economics.py", "league/swarm/guard.py",
-    "league/gym/", "league/swarm/evaluator.py", "league/swarm/gate.py", "league/swarm/bands.py",
+    # What feeds and enforces THE BUDGET (V3-A integration): the overlay that applies budget.json to the settings, the
+    # Sail guard that caps the day by it and writes the Sail balance reading the rule reads, the model router that caps
+    # Claude by it, and the job context that hands the rule its clock, its Sail client and its gateway. A research-class
+    # edit to any one of them would bypass the owner's rule as surely as an edit to budget.py. The close economics the
+    # budget's p30 and the public Net come from (V3-A integration review): the rule takes the smaller of its p30 and the
+    # live book's own read, so it could only cut, and it is the owner's deploy's to change all the same.
+    "league/swarm/settings.py", "league/swarm/guard.py", "league/swarm/models.py", "league/ops/context.py",
+    "league/ops/economics.py",
+    # The evaluator's identity and the evidence it reads (WP6/WP8): the Gym, the gate, the bands, the evaluator and the
+    # swarm's store (`set_band(..., "probe")` promotes to real money); the data layer and its builders, which carry the
+    # session calendar the updater's own session hold reads; how the House is deployed.
+    "league/gym/", "league/swarm/gate.py", "league/swarm/bands.py", "league/swarm/evaluator.py", "league/swarm/store.py",
+    "ltcm/data/", "scripts/data/", "deploy/",
 )
+#: The one path the gateway's merge route refuses (`gateway/lib/protected.mjs` MERGE_FORBIDDEN) that is not FORBIDDEN:
+#: the House's configuration. The operator role proposes its dials (`CONFIG_DIALS`), and the updater ships a change to
+#: it only when the RUNNING release's `check_config` finds nothing but those dials moved, inside their bounds (the
+#: real-money switch is refused before that: `league/updater.py` `Updater.walls`). Every other path the gateway refuses,
+#: the updater refuses too (league/tests/test_ci.py holds the two lists to this difference).
+MERGE_ONLY: tuple[str, ...] = ("league/config.json",)
 #: The shared strategy list every architect proposal used to rewrite whole (`league/strategies`).
 RETIRED_REGISTRY = "league/strategies/registry.json"
 #: The only keys of league/config.json the operator may move, with their bounds.

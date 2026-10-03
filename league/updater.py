@@ -90,6 +90,10 @@ A release that is a rollback drill's copy (`league/watchdog.py` `drill_marker`: 
 `House._update` raises as an error alert so the watch rolls the copy back. If the drill's own process
 is gone (no deploy in flight) for `DRILL_ORPHAN_SECONDS`, nothing will: that House launches `python -m
 league.watchdog drill-recover`, detached, which rolls the copy back and lifts the drill's stop.
+The drill itself is launched here too: the House's monthly `drills` job (league/ops/drills.py) only
+writes `<state>/ops/drill-request.json` (`DRILL_REQUEST`), and a full look with nothing in flight
+launches `python -m league.watchdog drill-rollback` detached from the House's own process, never from
+the job's child, whose nice 19 and CPU and memory limits the watchdog and its canary would inherit.
 
 Sept 20, 2026 went the other way -- the incoming tree judged itself -- because a judge one commit
 out of date refused, silently and for ever, a commit that widened a bound and used the wider value
@@ -123,8 +127,8 @@ from typing import Any, Callable, Mapping
 # `session_time`) and `market_open_at` built on it (`_shut_session`). The holiday list lives there once.
 from ltcm.data import DataError, to_datetime, us_equity_session
 
-from .watchdog import (DRILL_PREFIX, NIGHTLY_MARKERS, NIGHTLY_STOP, NIGHTLY_WAIT_SECONDS, Releases, _ledger_ro, deploy_in_flight, drill_marker,
-                       epoch, iso,
+from .watchdog import (DRILL_DETACHED_FLAG, DRILL_PREFIX, NIGHTLY_MARKERS, NIGHTLY_STOP, NIGHTLY_WAIT_SECONDS, Releases, _ledger_ro,
+                       deploy_in_flight, drill_marker, epoch, iso,
                        nightly_busy as _nightly_busy, nightly_lock_held, nightly_marker, stop_nightly, tree_digest, unstop_nightly, write_pid)
 
 REPO = "bwoods1998/long-term-capital-management"
@@ -188,6 +192,12 @@ NIGHTLY_FORCE_AFTER_SECONDS = 6 * 3600
 #: is removed once no deploy is in flight and it is this old (its newest mtime or ctime).
 INCOMING_STALE_SECONDS = 3600
 INCOMING_OWNED = ("main-", DRILL_PREFIX)
+#: The House's monthly `drills` job (league/ops/drills.py) asks for the rollback drill with this file, under
+#: the House's state directory; the updater, in the House's own process, launches it detached (a job child
+#: runs at nice 19 under CPU and memory limits that a watchdog and its canary would inherit, and the House's
+#: next start kills a job child it finds). A request older than this is dropped unlaunched.
+DRILL_REQUEST = Path("ops") / "drill-request.json"
+DRILL_REQUEST_TTL_SECONDS = 6 * 3600
 
 
 class UpdateError(RuntimeError):
@@ -539,7 +549,7 @@ class Updater:
                  attest: Callable[[str], Mapping[str, Any]] | None = None, trusted: str | Path | None = None,
                  workflows_pin: str = TRUSTED_WORKFLOWS_SHA256, hours: float | None = None,
                  in_flight: Callable[[], str | None] | None = None, nightly_held: Callable[[], bool] | None = None,
-                 nightly_busy: Callable[[], str | None] | None = None):
+                 nightly_busy: Callable[[], str | None] | None = None, launch_watchdog: Callable[[list[str]], int] | None = None):
         self.base = Path(base)
         self.releases = Releases(self.base, clock=clock)  # its rows are dated by the clock the train is measured on
         self.head = head or (lambda: resolve_head(repo))
@@ -588,6 +598,9 @@ class Updater:
         #: (candidate digest, running digest) the trusted checks passed in this process: a head held at
         #: the launch (a deploy in flight, the nightly daemon) is not judged again at the next look.
         self._judged: set[tuple[str, str]] = set()
+        #: Starts `python -m league.watchdog <args>` detached (`_spawn`), its pid in `deploy.pid`; returns the pid.
+        #: The monthly rollback drill's launch (`_drill_request`). Tests hand in a stub.
+        self.launch_watchdog = launch_watchdog or (lambda args: self._spawn(args, "drill-request", fallback_cwd=self.trusted))
 
     def due(self) -> bool:
         now = self.clock()
@@ -635,6 +648,44 @@ class Updater:
                                   "error": f"deploy.pid could not be written ({type(exc).__name__}: {str(exc)[:160]})"})
         return process.pid
 
+    def _drill_request(self) -> dict[str, Any] | None:
+        """The rollback drill the `drills` job asked for (`DRILL_REQUEST`): launched here, detached, once nothing is
+        in flight; the drill refuses by itself what it must (the session window, a stopped House, auto_update off) and
+        writes its `stage: "drill"` row either way. A request past `DRILL_REQUEST_TTL_SECONDS` is dropped.
+
+        Launched with `DRILL_DETACHED_FLAG`: `_spawn` already gives it a session of its own and puts ITS pid in
+        `deploy.pid`, which the drill ignores as its own. Without the flag the command would re-run itself as a child
+        (`league/watchdog.py` `_drill_detached`), and that child would find this launch's pid in `deploy.pid` -- a live
+        watchdog -- and refuse as a deploy in flight."""
+        path = self.releases.state_dir / DRILL_REQUEST
+        try:
+            request = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError):
+            request = {}
+        now = self.clock()
+        asked = epoch(request.get("at")) if isinstance(request, dict) else None
+        if asked is None or not -300 <= now - asked <= DRILL_REQUEST_TTL_SECONDS:
+            path.unlink(missing_ok=True)
+            self.releases.record({"stage": "drill", "outcome": "dropped", "unjudged": True,
+                                  "reasons": ["the drill request was unreadable or older than "
+                                              f"{DRILL_REQUEST_TTL_SECONDS // 3600} h; nothing was launched"]})
+            return {"drill_request": "dropped"}
+        if self._launching is not None:
+            return {"drill_request": "waiting", "why": "a release launch is pending"}
+        why = self.in_flight()
+        if why:
+            return {"drill_request": "waiting", "why": why}
+        path.unlink(missing_ok=True)
+        try:
+            pid = self.launch_watchdog(["drill-rollback", "--base", str(self.base), DRILL_DETACHED_FLAG])
+        except Exception as exc:  # noqa: BLE001 - the drills job's next receipt reads the row
+            self.releases.record({"stage": "drill", "outcome": "failed", "unjudged": True,
+                                  "reasons": [f"the drill could not be launched ({type(exc).__name__}: {str(exc)[:200]})"]})
+            return {"drill_request": "failed"}
+        return {"drill_request": "launched", "pid": pid}
+
     def tried(self) -> set[str]:
         """The releases the watchdog has really judged. A row marked `busy` is not one of them: it
         means another deploy held the lock, so the code was never unpacked, let alone run. And the
@@ -651,11 +702,19 @@ class Updater:
         2026): it is tried again at the next train, which its own restart holds off for
         `release_train_hours`. On Sept 24-25 five updater releases in a row (22:21Z to 01:14Z) were
         rolled back by Sail's checkpoint outage, not by anything in them, the two heads carrying the
-        backup fix (#289) among them. A second rollback, or a refusal, retires it for good."""
+        backup fix (#289) among them. A second rollback, or a refusal, retires it for good.
+
+        Nor is a tree that was promoted and never rolled back from, while the box runs ANOTHER updater
+        release (V3-A): main reverted to it (the engineer's revert of a bad change that passed its
+        watch) and that revert is the way back. Not while the box runs the owner's release (main may
+        lag what the owner deployed by hand), and not once anything rolled back from it."""
         judged: set[str] = set()
         verdicts: dict[str, list[str]] = {}
         starts: dict[str, int] = {}
+        backed_out: set[str] = set()
         for row in self.releases.history():
+            if row.get("stage") == "rollback" and row.get("ok") is not False:
+                backed_out.add(str(row.get("from") or row.get("release")))
             release = row.get("release")
             if not release or row.get("busy") or row.get("unjudged"):
                 continue
@@ -666,6 +725,10 @@ class Updater:
             elif row.get("stage") == "start":
                 starts[release] = starts.get(release, 0) + 1
         again = {r for r in judged if verdicts.get(r) == ["rolled_back"] and starts.get(r, 0) <= 1}
+        current = self.releases.current() or ""
+        if current.startswith("main-"):
+            again |= {r for r in judged if r != current and r.startswith("main-") and r not in backed_out
+                      and verdicts.get(r) and set(verdicts[r]) == {"promoted"}}
         return judged - again
 
     def _trusted_identity(self) -> dict[str, Any]:
@@ -695,6 +758,11 @@ class Updater:
         resumed = self._settle_nightly()
         if light:
             return {"action": "none", "reason": "looked only at the nightly stop", **({"nightly_resumed": resumed} if resumed else {})}
+        drill = self._drill_request()
+        if drill is not None and drill.get("drill_request") == "launched":
+            self._last = self.clock()
+            return {"action": "drill_launched", "reason": "the monthly rollback drill was launched", "new": True,
+                    "reasons": [f"the monthly rollback drill was launched (pid {drill['pid']}); it restarts the House twice"], **drill}
         self._last = self.clock()
         self._sweep_incoming()
         current = self.releases.current()
@@ -874,6 +942,11 @@ class Updater:
         if self._recovery is not None:
             reasons.append(f"the drill's process is gone; drill-recover launched at {self._recovery['at']}"
                            + (f" failed to start: {self._recovery['error']}" if "error" in self._recovery else f" (pid {self._recovery['pid']})"))
+        # A stop automation wrote with nothing in flight (a `drill:` one only once it is stale) is lifted here too:
+        # `drill-recover` lifts the drill's own, and this is the net under a recovery that could not start.
+        resumed = self._settle_nightly()
+        if resumed:
+            out["nightly_resumed"] = resumed
         return out
 
     def _sweep_incoming(self, now: float | None = None) -> list[str]:
@@ -1036,8 +1109,10 @@ def protected_changes(incoming: Path, running: Path) -> list[str]:
     """The files of the running release's judges that the candidate adds, removes or changes.
 
     The list is the RUNNING `league/ci.py`'s `FORBIDDEN`, imported from this process's own package
-    (importing it executes no candidate code). Only the release trees are compared: `gateway/` and
-    `.github/` never reach the box as files (the workflows are pinned by `TRUSTED_WORKFLOWS_SHA256`)."""
+    (importing it executes no candidate code); the gateway's merge route refuses the same list and the House's
+    configuration (`ci.MERGE_ONLY`, whose dials only the running release's checks let through here). Only the release
+    trees are compared: `gateway/` and `.github/` never reach the box as files (the workflows are pinned by
+    `TRUSTED_WORKFLOWS_SHA256`)."""
     from .ci import FORBIDDEN
 
     def files(root: Path) -> dict[str, Path]:

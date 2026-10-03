@@ -271,6 +271,42 @@ class ABusyLockDoesNotRetireACommit(UpdaterCase):
         self.releases.record({"release": "main-twice", "stage": "verdict", "verdict": "rolled_back"})
         self.assertIn("main-twice", updater.tried())
 
+    def test_a_revert_to_a_tree_promoted_before_is_deployed_again(self):
+        """main-A promoted, then main-B (it passed its watch, but is bad); the engineer reverts B, so main's tree is A's
+        again. That revert is the way back: it must not be answered "already tried" while the box runs B."""
+        house_a, house_b = "# the house, improved\n", "# the house, improved again\n"
+
+        def ship(text):
+            self.main = tarball(tree(extra={"league/house.py": text}))
+            out = updater.check()
+            self.assertEqual(out["action"], "deploying", out)
+            source, release_id = self.launched[-1]
+            if release_id not in [row["id"] for row in self.releases.list()]:
+                self.releases.stage(source, release_id)
+            self.releases.promote(release_id)
+            self.releases.record({"release": release_id, "stage": "start"})
+            self.releases.record({"release": release_id, "stage": "verdict", "verdict": "promoted"})
+            return release_id
+
+        updater = self.updater()
+        rid_a = ship(house_a)
+        self.assertIn(rid_a, updater.tried())  # it is what runs
+        rid_b = ship(house_b)
+        self.assertNotIn(rid_a, updater.tried())
+        self.assertEqual(ship(house_a), rid_a)  # the revert ships
+        self.assertEqual(self.releases.current(), rid_a)
+        self.assertEqual(len(self.launched), 3)
+        # Once anything rolled back FROM a tree (the owner's rollback, or a watch's), it stays retired.
+        self.releases.record({"deploy": "rollback@1", "release": rid_b, "stage": "rollback", "ok": True, "from": rid_b, "to": "x"})
+        self.assertIn(rid_b, updater.tried())
+
+    def test_a_tree_promoted_before_stays_retired_while_the_box_runs_the_owners_release(self):
+        """main may lag what the owner deployed by hand: the owner's release is never replaced by a tree main had before."""
+        self.releases.record({"release": "main-aaaaaaaaaaaa", "stage": "start"})
+        self.releases.record({"release": "main-aaaaaaaaaaaa", "stage": "verdict", "verdict": "promoted"})
+        self.assertEqual(self.releases.current(), "first-release")
+        self.assertIn("main-aaaaaaaaaaaa", self.updater().tried())
+
 
 class ExactCommitAttestation(UpdaterCase):
     """GitHub's check runs on the exact commit, or nothing deploys."""
@@ -1350,3 +1386,90 @@ class TheUpdaterIsOffUnlessTheConfigSaysOn(unittest.TestCase):
         for value in (False, None, 0, 1, "true", "yes"):
             self.assertFalse(auto_update({"auto_update": value}), value)
         self.assertTrue(auto_update({"auto_update": True}))
+
+
+class TheDrillRequest(unittest.TestCase):
+    """The monthly `drills` job (league/ops/drills.py) asks for the rollback drill with a file; the updater, in the
+    House's own process, launches it detached (never the job's child: its limits, its priority, its death at restart)."""
+
+    setUp, tearDown, attest = UpdaterCase.setUp, UpdaterCase.tearDown, UpdaterCase.attest
+
+    def request(self, at=None):
+        from league.watchdog import iso
+
+        path = self.base / "state" / "ops" / "drill-request.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"at": iso(self.clock() if at is None else at), "by": "league.ops.drills"}))
+        return path
+
+    def updater(self, **kw):
+        self.started = []
+        self.flight = kw.pop("flight", None)
+        return Updater(self.base, head=lambda: self.sha, fetch=lambda sha: self.main,
+                       launch=lambda source, rid, record=None: self.launched.append((source, rid)), clock=self.clock,
+                       judge=lambda incoming, running: [], attest=self.attest, workflows_pin=workflows_digest(tarball(tree())),
+                       in_flight=lambda: self.flight, launch_watchdog=lambda args: self.started.append(args) or 999)
+
+    def test_a_request_is_launched_detached_once_nothing_is_in_flight(self):
+        path = self.request()
+        updater = self.updater(flight="a watchdog is running (pid 5, deploy.pid)")
+        out = updater.check()
+        self.assertEqual(self.started, [])
+        self.assertTrue(path.exists(), "kept for the next look")
+        self.assertNotEqual(out["action"], "drill_launched")
+        self.flight = None
+        self.clock.advance(1800)
+        out = updater.check()
+        self.assertEqual((out["action"], out["pid"], out["new"]), ("drill_launched", 999, True))
+        self.assertEqual(self.started, [["drill-rollback", "--base", str(self.base), "--here"]])
+        self.assertFalse(path.exists())
+        self.clock.advance(1800)
+        self.assertNotEqual(updater.check()["action"], "drill_launched")
+        self.assertEqual(len(self.started), 1)
+
+    def test_the_default_launch_is_the_drill_itself_in_deploy_pid(self):
+        """`_spawn` gives the drill its own session, the scrubbed environment and ITS pid in deploy.pid. With `--here`
+        the drill runs in that very process, so the pid it finds in deploy.pid is its own (ignored); without it the
+        command re-ran itself as a child that took the launch's pid for a deploy in flight, and refused."""
+        import os
+        from types import SimpleNamespace
+        from unittest import mock
+
+        from league import updater as module
+        from league.watchdog import deploy_in_flight
+
+        self.request()
+        spawned = []
+
+        def popen(argv, **kw):
+            spawned.append((argv, kw))
+            return SimpleNamespace(pid=6161, poll=lambda: None)
+
+        updater = Updater(self.base, head=lambda: self.sha, fetch=lambda sha: self.main, launch=lambda *a: None, clock=self.clock,
+                          judge=lambda incoming, running: [], attest=self.attest, workflows_pin=workflows_digest(tarball(tree())),
+                          in_flight=lambda: None)
+        with mock.patch.object(module.subprocess, "Popen", popen), mock.patch.dict(os.environ, {"GATEWAY_TOKEN": "g" * 40}):
+            out = updater.check()
+        self.assertEqual((out["action"], out["pid"]), ("drill_launched", 6161))
+        [(argv, kw)] = spawned
+        self.assertEqual(argv[1:], ["-m", "league.watchdog", "drill-rollback", "--base", str(self.base), "--here"])
+        self.assertTrue(kw["start_new_session"])
+        self.assertNotIn("GATEWAY_TOKEN", kw["env"])
+        self.assertEqual((self.base / "deploy.pid").read_text(), "6161\n")
+        drill = lambda pid: ["python3", "-m", "league.watchdog", *argv[3:]]  # noqa: E731
+        self.assertIsNone(deploy_in_flight(self.base, argv_of=drill, ignore_pid=6161), "the drill's own pid")
+        self.assertIn("pid 6161", deploy_in_flight(self.base, argv_of=drill), "a deploy in flight to everyone else")
+
+    def test_a_stale_or_unreadable_request_is_dropped_with_a_row(self):
+        from league.updater import DRILL_REQUEST_TTL_SECONDS
+
+        path = self.request(at=self.clock() - DRILL_REQUEST_TTL_SECONDS - 60)
+        updater = self.updater()
+        updater.check()
+        self.assertFalse(path.exists())
+        path.write_text("not json")
+        self.clock.advance(1800)
+        updater.check()
+        self.assertEqual(self.started, [])
+        self.assertEqual([r["outcome"] for r in self.releases.history() if r.get("stage") == "drill"], ["dropped", "dropped"])
+

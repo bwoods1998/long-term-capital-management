@@ -213,6 +213,8 @@ def owner_change(deploy_rows: Iterable[Any], after: float) -> dict[str, Any] | N
             continue
         if row.get("sha") or row.get("attestation") or str(row.get("deploy")) in drills:
             continue
+        if any(str(row.get(k) or "").startswith("drill-") for k in ("release", "current", "from")):
+            continue  # the drill's copy (`drill-...`, league/watchdog.py) is never an owner's release, even before its row
         when = _epoch(row.get("ts") if row.get("ts") is not None else row.get("at"))
         if when is None or when <= after:
             continue

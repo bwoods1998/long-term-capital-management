@@ -12,7 +12,8 @@ else is in the modules:
 - the jobs: `preopen`, `economics`, `scoreboard`, `hygiene`, `clock` (and `grant`, `budget`, `drills`, ... when present).
 
 `budget` (league/ops/budget.py) is the budget rule and the funding notices: protected (`league/ci.py` FORBIDDEN), as are
-`grant` and `drills`.
+`grant`, `drills` (which asks the updater for the rollback drill rather than running it in its child) and `context`
+(what every job, the budget rule included, is handed).
 """
 from __future__ import annotations
 
