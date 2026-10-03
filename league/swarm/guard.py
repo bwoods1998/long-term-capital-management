@@ -20,6 +20,10 @@ researchers to zero, when:
 It releases only on a fresh good reading above the line plus `release_margin_usd` (hysteresis) with the
 caps allowing. Every change of state is a `swarm.guard` event. Sail's meter since the guard first ran
 (`metered_spent`, from `burst_started_at`) is still kept: the site's compute block reads it. Standard library only.
+
+Beside the human `reason` the record, its `last` and the event carry `causes`: the brake's causes by name (CAUSES), one
+per braking branch of `check`. A reader that must tell THE BUDGET's designed daily stop (BUDGET_CAUSES) from the House
+at risk reads the names, never the reason's text; a record with no list is cause unknown (`causes_of`).
 """
 
 from __future__ import annotations
@@ -32,6 +36,20 @@ from typing import Any, Callable, Mapping
 from .store import SwarmStore
 
 SWARM_SAIL_KINDS = ("sail_model", "gym_box")
+# The brake's causes, one name per braking branch of `SailGuard.check` ("no_reading": no check yet). BUDGET_CAUSES are THE
+# BUDGET's own daily caps: the designed stop of each UTC day, research at its cap until 00:00 UTC. Every other cause is
+# the House at risk or a guard that cannot see.
+CAUSES = ("balance_unreadable", "under_line", "research_budget", "account_budget", "disk", "no_reading")
+BUDGET_CAUSES = ("research_budget", "account_budget")
+
+
+def causes_of(record: Any) -> list[str] | None:
+    """The causes a guard record names (the kv record, its `last`, a `swarm.guard` event, the heartbeat's `guard`): [] is
+    no brake. None is cause UNKNOWN: a record written before the list was kept, or one whose list is not names."""
+    causes = record.get("causes") if isinstance(record, Mapping) else None
+    if not isinstance(causes, list) or not all(isinstance(cause, str) for cause in causes):
+        return None
+    return list(causes)
 
 
 def budget_caps(settings: Mapping[str, Any], root: Any = None, now: float | None = None) -> dict[str, Any]:
@@ -60,6 +78,8 @@ class SailGuard:
         state = store.get("guard", {}) or {}
         self.braked: bool = bool(state.get("braked", True))  # nothing is allowed before a first good reading
         self.reason: str = str(state.get("reason") or "no reading yet")
+        # The reason's causes by name (CAUSES); None is unknown (a record kept before the list was).
+        self.causes: list[str] | None = causes_of(state) if state else ["no_reading"]
         self.last_ok: float = float(state.get("last_ok") or 0.0)
         self.last: dict[str, Any] = dict(state.get("last") or {})
         # The last GOOD reading {balance, at}: the budget job (league/ops/budget.py) reads it, so one failed read just
@@ -122,21 +142,25 @@ class SailGuard:
         midnight = now - (now % 86400)
         today_spent = self.store.spent(SWARM_SAIL_KINDS, since=midnight)
         caps = budget_caps(self.settings, getattr(self.store, "root", None), now)
-        reasons = []
+        reasons, causes = [], []  # each braking branch: what it says, and its name in CAUSES
         if balance is None:
             # FAIL CLOSED: a failed read never releases a brake, and brakes an unbraked guard at once.
+            causes.append("balance_unreadable")
             reasons.append("the Sail balance could not be read" + (" (braked before it)" if self.braked else ""))
         else:
             self.last_ok = now
             release = line + (float(cfg.get("release_margin_usd", 5.0)) if self.braked else 0.0)
             if balance < release:
+                causes.append("under_line")
                 reasons.append(f"the Sail balance {balance:.2f} is under the House's line {release:.2f} "
                                f"(2 x {house:.2f} a day + {float(cfg.get('margin_usd', 30.0)):.0f})")
         # THE BUDGET's day (a research budget of 0 brakes at once: nothing is ever under a cap of 0).
         if today_spent >= caps["research"]:
+            causes.append("research_budget")
             reasons.append(f"today's Sail research budget is spent ({today_spent:.2f} of {caps['research']:.2f}; "
                            f"{caps['source']})")
         elif metered_today >= caps["account"]:
+            causes.append("account_budget")
             reasons.append(f"today's Sail budget is spent by Sail's meter ({metered_today:.2f} of {caps['account']:.2f} for "
                            f"the account: research {caps['research']:.2f} + fixed {caps['fixed']:.2f}; {caps['source']})")
         try:
@@ -144,18 +168,20 @@ class SailGuard:
         except OSError:
             free_gb = None
         if free_gb is not None and free_gb < float(cfg.get("min_free_disk_gb", 3.0)):
+            causes.append("disk")
             reasons.append(f"the state disk has {free_gb:.1f} GB free (the House's ledger needs room)")
         was = self.braked if self.store.get("guard") is not None else None  # the first check says where it starts
         self.braked = bool(reasons)
         self.reason = "; ".join(reasons)
+        self.causes = causes
         self.last = {"balance": balance, "burn_day": burn, "house_day": round(house, 2), "line": round(line, 2),
                      "swarm_day": round(swarm_day, 4), "metered_spent": round(metered, 4),
                      "metered_today": round(metered_today, 4), "today_spent": round(today_spent, 4),
                      "budget_research_usd_day": caps["research"], "budget_account_usd_day": caps["account"],
                      "budget_source": caps["source"], "free_disk_gb": None if free_gb is None else round(free_gb, 1),
-                     "braked": self.braked, "reason": self.reason, "at": now}
-        self.store.put("guard", {"braked": self.braked, "reason": self.reason, "last_ok": self.last_ok, "last": self.last,
-                                 "last_good": self.last_good})
+                     "braked": self.braked, "reason": self.reason, "causes": list(causes), "at": now}
+        self.store.put("guard", {"braked": self.braked, "reason": self.reason, "causes": list(causes),
+                                 "last_ok": self.last_ok, "last": self.last, "last_good": self.last_good})
         if was != self.braked:
             self.store.event("swarm.guard", None, {"action": "brake" if self.braked else "release", **self.last})
         return dict(self.last)
@@ -169,4 +195,4 @@ def provider_reader(provider: Any) -> Callable[[], tuple[Any, Any]]:
     return read
 
 
-__all__ = ["SailGuard", "provider_reader", "budget_caps", "SWARM_SAIL_KINDS"]
+__all__ = ["SailGuard", "provider_reader", "budget_caps", "causes_of", "SWARM_SAIL_KINDS", "CAUSES", "BUDGET_CAUSES"]

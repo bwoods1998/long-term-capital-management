@@ -14,8 +14,11 @@ and went stale (GOAL Appendix C 7); here each check asks what the running House 
  4 account   the account is ACTIVE, readable and not blocked, options level >= 3; the kill switch off; no House stop
              tripped; the real book not frozen (open orders and option positions are listed, not judged)
  5 swarm     swarm.json is an object with a `live` block the live path reads as such; population at or above the
-             floor; heartbeat fresh and on the current release; the Gym on with images named; the Sail guard not braked
- 6 bands     the observe rows the live path would pin (when observe is on); every Probe/Sized row fits the Probe cap
+             floor; heartbeat fresh and on the current release; the Gym on with images named; the Sail guard not
+             braked, or braked by THE BUDGET's daily caps alone on a fresh balance above its line (research at its cap
+             until 00:00 UTC is the day as designed; any other cause, or one not named, is a FAIL)
+ 6 bands     the observe rows the swarm offers the live path (when observe is on; a count of rows offered, not of
+             cohorts pinned or practising); every Probe/Sized row fits the Probe cap
  7 mirror    the House's swarm mirror keeps up with the swarm's events (lag <= one batch)
  8 backup    the latest House backup row is ok and at most 30 hours old
  9 compute   Sail balance above the guard's line now and, at the last hour's pace, at the close; Claude and OpenAI
@@ -334,6 +337,29 @@ def check_account(h: Mapping[str, Any]) -> Check:
     return c
 
 
+def budget_brake(gd: Mapping[str, Any], funded: bool, now: Any, stale_seconds: float) -> tuple[bool, str]:
+    """A braked Sail guard, from its own record in the heartbeat: (the brake is THE BUDGET's daily stop and nothing else,
+    what the line says). It is the budget's alone when the record itself is braked, every cause it names is one of the
+    budget's daily caps (`league/swarm/guard.py` BUDGET_CAUSES; the names, never the reason's text), the balance was read
+    above the line (`funded`), and that reading is fresh by the guard's own `stale_seconds`. No named cause (a record
+    from before the list was kept, or a brake only the swarm's status says: no good reading) is cause unknown: never
+    the budget's."""
+    from ..swarm.guard import BUDGET_CAUSES, causes_of
+
+    causes = causes_of(gd) if gd.get("braked") is True else None
+    if not causes:
+        return False, "braked True, cause unknown"
+    if any(cause not in BUDGET_CAUSES for cause in causes):
+        return False, "braked True, causes " + ", ".join(causes)
+    said = "the day's " + " and ".join(cause.replace("_", " ") for cause in causes)
+    if not funded:
+        return False, f"braked True by {said}, and no balance read above the line"
+    age = None if now is None or gd.get("at") is None else float(now) - float(gd["at"])
+    if age is None or not 0 <= age < stale_seconds:
+        return False, f"braked True by {said}, on a reading {ago(age)} old (no fresh reading of the balance)"
+    return True, f"braked by {said} alone, as designed"
+
+
 def check_swarm(h: Mapping[str, Any]) -> Check:
     c = Check(5, "swarm")
     s = h.get("swarm")
@@ -356,8 +382,13 @@ def check_swarm(h: Mapping[str, Any]) -> Check:
     gd = s.get("guard") or {}
     braked = bool(gd.get("braked")) or (s.get("status") or {}).get("braked") is True
     bal, line = gd.get("balance"), gd.get("line")
-    c.req(gd and not braked and bal is not None and line is not None and bal > line,
-          f"the Sail guard: balance vs line {usd(bal)} / {usd(line)}; braked {braked}" + (f" ({gd.get('reason')})" if gd.get("reason") else ""))
+    funded = bool(gd) and bal is not None and line is not None and bal > line
+    # THE BUDGET's day is no alarm: under v3 the guard brakes for the rest of each UTC day once the day's research
+    # dollars are spent. That brake alone passes, said plainly; the balance must still be read and above the line.
+    budget, said = budget_brake(gd, funded, h.get("at"), float((s.get("eff_guard") or {}).get("stale_seconds", 600))) \
+        if braked else (False, "braked False")
+    c.req(funded and (not braked or budget),
+          f"the Sail guard: balance vs line {usd(bal)} / {usd(line)}; {said}" + (f" ({gd.get('reason')})" if gd.get("reason") else ""))
     return c
 
 
@@ -368,8 +399,11 @@ def check_bands(h: Mapping[str, Any]) -> Check:
         c.req(False, "the bands could not be read: " + str(h.get("errors", {}).get("bands")))
         return c
     sw = live_switches(s) if s else {"observe": False, "observe_max": 0}
-    c.req(b.get("observe") or not sw["observe"], f"observe rows {b.get('observe')}; the live path pins up to {sw['observe_max']}"
-          if sw["observe"] else "observe is off for the live path")
+    # The count is of the rows the swarm OFFERS (`league/swarm/bands.py` `observe`), not of the cohorts the live path has
+    # pinned: a pass here is rows on offer, never a practice league seen running.
+    c.req(b.get("observe") or not sw["observe"],
+          f"observe rows the swarm offers: {b.get('observe')} (a count of rows on offer, not of cohorts the live path has "
+          f"pinned or practises); the live path pins up to {sw['observe_max']}" if sw["observe"] else "observe is off for the live path")
     for r in b.get("read") or []:
         text = f"{r['band']} {r['family']} v{r['version']}: typical max loss {usd(r.get('typical_max_loss_usd'))}"
         if r["band"] in ("probe", "sized"):
