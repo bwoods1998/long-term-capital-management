@@ -10,7 +10,9 @@ Settings as code (V3-A, Oct 2, 2026) put the House's research settings in the re
 every `settings.load` reads them; until then they lived in the box's swarm.json, which no test ever saw. These tests
 judge the code against `settings.py`'s DEFAULTS and what each test sets, so a change of the House's settings never
 changes what they test: they read `fixtures/policy_empty.json`, a layer that sets nothing. A test that must see the
-committed policy reads `REAL_POLICY_PATH` (`league/tests/test_swarm_settings_policy.py` does).
+committed policy reads `REAL_POLICY_PATH`. `league/tests/test_swarm_settings_policy.py` does, and it is where the
+committed file is judged (`TheCommittedPolicy`): its values' kinds, the budget and the guard's lines over it, and the
+House's own loop stepping on it, so a settings change the House could not run fails there and nowhere else.
 """
 
 from pathlib import Path

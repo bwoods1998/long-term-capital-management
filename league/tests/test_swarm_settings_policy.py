@@ -1,7 +1,8 @@
 """Settings as code (V3-A, Oct 2, 2026; league/swarm/settings.py SETTINGS AS CODE, scripts/settings_migrate.py): the
 repo's `league/swarm/policy.json` sits between config.json and `<state>/swarm.json`, the owner's switches are read
 from swarm.json only, a missing policy.json changes nothing, and the migration moves swarm.json's research settings into
-policy.json without changing the settings in effect. Every value here is invented."""
+policy.json without changing the settings in effect. Every value here is invented, but for the committed file's own:
+`TheCommittedPolicy` judges it by value and by the House's own loop."""
 
 from __future__ import annotations
 
@@ -9,15 +10,19 @@ import contextlib
 import importlib.util
 import io
 import json
+import math
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
+from league.ops import budget as B
 from league.swarm import settings as S
 from league.swarm.loop import Swarm
+from league.swarm.seeds import SEEDS, family_spec
 from league.swarm.store import SwarmStore
 from league.tests import EMPTY_POLICY_PATH, REAL_POLICY_PATH
+from league.tests import test_swarm_loop as L
 from league.tests.swarm_fakes import Clock
 
 REPO = Path(__file__).resolve().parents[2]
@@ -138,6 +143,127 @@ class TheLayer(Case):
 
         self.assertEqual(harness_lanes.protected_touch([("M", "league/swarm/policy.json")]),
                          ["M league/swarm/policy.json (sealed)"])
+
+
+#: The plain values of DEFAULTS a null switches off, each documented where it is read (settings.py's comments on DEFAULTS;
+#: architect.py and gate.py for their OpenAI models). A null anywhere else in the committed policy is no setting.
+NULLS = frozenset({
+    "researcher.top_profile", "researcher.hold_idle_seconds", "researcher.hold_idle_max_seconds",
+    "researcher.retire_idle_evaluations", "researcher.dormant_cycles", "researcher.extension_hold_checks",
+    "tournament.retire_every_seconds", "tournament.exploit_per_positive", "architect.max_alive_per_class",
+    "architect.openai_model", "gate.review_openai_model", "gate.look_holds.drift_share", "gate.look_holds.min_power",
+    "sail_fallback.k3_balanced", "sail_fallback.pro_balanced", "sail_fallback_same_model"})
+
+
+def number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def wrong_kind(layer, defaults=S.DEFAULTS, prefix=""):
+    """The paths where a policy layer's plain value is not of DEFAULTS' kind: a switch that is not JSON true or false; a
+    number that is not a finite number of zero or more (text, a bool and a negative are none: the budget's overlay leaves
+    such a value as it is, `league.ops.budget._tighten`); text or a list that is something else; a null outside `NULLS`.
+    Blocks are `settings.policy_shape`'s; a key DEFAULTS lacks, or one whose default is null, is not judged."""
+    bad = []
+    for key, value in layer.items():
+        if str(key).startswith("_") or key not in defaults or defaults[key] is None:
+            continue
+        path, default = f"{prefix}{key}", defaults[key]
+        if isinstance(default, dict):
+            bad += wrong_kind(value, default, f"{path}.") if isinstance(value, dict) else []
+        elif value is None:
+            bad += [] if path in NULLS else [path]
+        elif isinstance(default, bool):
+            bad += [] if isinstance(value, bool) else [path]
+        elif number(default):
+            bad += [] if number(value) and value >= 0 else [path]
+        elif not isinstance(value, type(default)):
+            bad.append(path)
+    return bad
+
+
+class TheCommittedPolicy(L.LoopCase):
+    """The House's research settings as committed (`REAL_POLICY_PATH`): a pull request changes the file and the updater
+    ships it, and the league's other tests read an empty layer in its place (league/tests/__init__.py). So it is judged
+    here, by value and by the House's own loop, as the House reads it after the migration: config.json, the policy, and
+    a swarm.json that holds the owner's switches alone. A policy that sets nothing passes (the file before the migration)."""
+
+    def setUp(self):
+        super().setUp()
+        (self.root / "swarm.json").write_text(json.dumps({"enabled": True}))
+        patch = mock.patch.object(S, "POLICY_PATH", REAL_POLICY_PATH)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_every_value_it_sets_is_of_the_defaults_kind(self):
+        doc = {"architect": {"every_seconds": None, "max_alive_per_class": None, "openai_model": None, "agenda": 3},
+               "population": {"start": "sixteen", "ceiling": True, "floor": -1}, "gym": {"enabled": 1, "roots": "SPY"},
+               "claude": {"usd_cap": float("inf"), "role_usd_day": {"strategist": "six", "review": "five"}},
+               "gate": {"look_holds": None, "every_seconds": 300.5}, "researcher": {"probe_year": "x"}, "_note": 1}
+        self.assertEqual(wrong_kind(doc), ["architect.every_seconds", "architect.agenda", "population.start",
+                                           "population.ceiling", "population.floor", "gym.enabled", "gym.roots",
+                                           "claude.usd_cap", "claude.role_usd_day.strategist"], "the judge itself")
+        layer, status = S.read_policy()
+        self.assertEqual(status["state"], "ok")
+        self.assertEqual(wrong_kind(layer), [], "a switch is true or false, a number a finite number of zero or more, text "
+                                                "is text, a list a list, and a null stands only where its reader takes one")
+        population = S.load(None)["population"]
+        self.assertLessEqual(population["floor"], population["start"])
+        self.assertLessEqual(population["start"], population["ceiling"])
+
+    def test_it_sets_no_budget_and_loosens_no_line_of_the_guard(self):
+        layer, _ = S.read_policy()
+        self.assertNotIn("budget", layer, "THE BUDGET is never a setting: settings without a state root would carry it")
+        with_policy, without = S.load(None)["guard"], S.load(None, policy={})["guard"]
+        for line in ("house_burn_usd_day", "margin_usd", "openai_reserve_usd"):
+            # The Sail guard's brake line, the budget rule's fixed cost and the OpenAI month's reserve: the release's own
+            # (settings.py, the owner's deploy) or tighter.
+            self.assertGreaterEqual(with_policy[line], without[line], f"guard.{line}")
+
+    def test_the_budget_binds_it(self):
+        loaded = S.load(self.root)  # no budget.json: the floor
+        block = loaded["budget"]
+        self.assertEqual((block["source"], block["sail_usd_day"], block["claude_usd_day"]),
+                         ("floor", B.floor_usd_day("sail"), B.floor_usd_day("claude")))
+        knobs, researcher = block["knobs"], loaded["researcher"]
+        pace = researcher["usd_per_hour"] if researcher["sail_usd_per_hour"] is None else researcher["sail_usd_per_hour"]
+        self.assertLessEqual(pace, knobs["researcher.sail_usd_per_hour"])
+        self.assertLessEqual(loaded["gym"]["max_boxes"], knobs["gym.max_boxes"])
+        self.assertLessEqual(loaded["population"]["ceiling"], knobs["population.ceiling"])
+        self.assertGreaterEqual(loaded["architect"]["every_seconds"], knobs["architect.every_seconds"])
+        self.assertEqual(loaded["guard"]["openai_cap_usd"], 0.0, "no OpenAI room under the budget")
+        lines = loaded["claude"]["role_usd_day"]
+        self.assertEqual([r for r in loaded["claude"]["roles"] if r not in lines], [], "a line for every role Claude answers")
+        self.assertEqual({r: v for r, v in lines.items() if not (number(v) and 0 <= v <= knobs["claude.role_usd_day"])}, {},
+                         "no role's Claude line is over the budget's, and none is a value the overlay leaves alone")
+
+    def test_the_houses_loop_runs_on_it(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            sw = Swarm(self.root, store=self.store, router=self.router, pool=self.pool, guard=self.guard,
+                       sleep=lambda s: None)  # the settings are its own load
+            self.router.settings = self.pool.settings = sw.settings  # as in the House: every piece reads the Swarm's dict
+            ready = sw.gym_ready()
+            born = sw.seed()
+            for spec in SEEDS:  # a full population first (THE STRUCTURES may found fewer than the start)
+                if sw.architect.refilling() and spec["id"] not in born:
+                    self.store.add_family(family_spec(spec), origin="seed")
+            sw.step()  # the notices, the guard, the pool, the gate, the architect's own cadence
+            self.join_rounds()
+            self.store.put("tournament_at", 0.0)
+            sw.step()  # the tournament is due
+            self.join_rounds()
+            for fam in self.store.families(alive=True)[:2]:
+                self.store.retire(fam["id"], "test")
+            self.store.put("architect_at", 0.0)
+            sw.step()  # fewer alive than the start: the architect refills
+            self.join_rounds()
+        self.assertEqual(sw.settings["_policy"], {"state": "ok", "why": None, "ignored": []})
+        self.assertEqual(sw.settings["budget"]["source"], "floor")
+        self.assertEqual({"gate", "tournament", "architect"} <= set(sw.rounds), ready,
+                         "with the Gym on, the rounds ran on the policy's settings (with it off, none starts)")
+        failed = [e["payload"] for e in self.store.events_after(0, limit=10_000)
+                  if e["kind"] == "swarm.status" and (e["payload"] or {}).get("error")]
+        self.assertEqual(failed, [], "no round raised")
 
 
 class TheNotice(Case):
