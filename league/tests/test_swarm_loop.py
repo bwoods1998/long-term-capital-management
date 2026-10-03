@@ -72,6 +72,16 @@ class LoopCase(unittest.TestCase):
         self.pool = GymPool(self.store, self.box_sail, self.settings, allowed=lambda k: self.guard.allows(k),
                             driver_factory=lambda client, box: FakeDriver(client, box))
         self.addCleanup(self.pool.stop)
+        self.addCleanup(self.join_rounds)  # registered last, so it runs first: no round outlives the store it writes to
+
+    @staticmethod
+    def join_rounds(seconds=30):
+        """Wait for the rounds a `Swarm.step` left running (`Swarm._round`'s threads, named round-<name>), however the test
+        built its Swarm: one still running when the store closes fails in its thread with `Cannot operate on a closed
+        database`, after the test that started it has passed."""
+        for thread in threading.enumerate():
+            if thread.name.startswith("round-"):
+                thread.join(seconds)
 
     def script(self, body):
         return {"calls": [("notebook", {"action": "append", "text": "noted"})]} if len(body["input"]) < 6 else {"text": "ok"}
