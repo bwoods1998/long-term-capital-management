@@ -36,16 +36,21 @@ volatility shock and the fourth-quarter 2018 selloff, 2019, then 2020-2024), wit
 2017-01-02 are 2017-01-03; the derived split 24 and time limit 2400 s over eight years). Nothing moves until the
 operator writes it with the matching image; "2020-01-02" and "2022-01-03" mean what they meant.
 
-THE BUDGET (LTCM v3, the owner's D4). The research dollars a day are not settings either: `league/ops/budget.py` computes
-them from realized profit and the meters' runways into `<state>/budget.json`, and `load` applies them LAST and only to
-tighten: min() against `researcher.sail_usd_per_hour` (or `researcher.usd_per_hour` while that is unset), `gym.max_boxes`,
-`claude.role_usd_day` (a line for every role in `claude.roles`) and `population.ceiling` (the budget's ceiling is never
-under `population.floor` plus its birth margin), with `population.start` held to the tightened ceiling; max() against
-`architect.every_seconds` and `architect.refill_seconds`; and `guard.openai_cap_usd` is tightened to 0 (OpenAI is no
-meter of the rule). The `budget` block it sets (never the operator's: a `budget` key in swarm.json is replaced) caps the
-Sail guard's day and the paid models' room (Claude's, and OpenAI's under the same line). A missing, unreadable or
-malformed budget.json is the floor; a stale one never loosens (each meter the lower of the floor and what the stale file
-said).
+THE BUDGET (LTCM v3, the owner's D4; its rule version 2, Oct 3, 2026). The research dollars a day are not settings
+either: `league/ops/budget.py` computes them from the owner's ceiling and the meters' runways into `<state>/budget.json`,
+and `load` applies them LAST and only to tighten: min() against `researcher.sail_usd_per_hour` (or
+`researcher.usd_per_hour` while that is unset), `gym.max_boxes`, `claude.role_usd_day` (a line for every role in
+`claude.roles`) and `population.ceiling` (the budget's ceiling is never under `population.floor` plus its birth margin),
+with `population.start` held to the tightened ceiling; max() against `architect.every_seconds` and
+`architect.refill_seconds` (each its own knob; while the tightened ceiling holds the start down, the refill is held
+to the scheduled cadence); and `guard.openai_cap_usd` is tightened to 0 (OpenAI is no meter of the rule). So the layers
+under it (this file's DEFAULTS, policy.json, swarm.json) are caps the budget works inside: a knob the budget would give
+is reached only where they allow it (policy.json's `gym.max_boxes`, `researcher.sail_usd_per_hour`, the cadences and
+the role lines are set with the owner's ceiling in mind). The `budget` block it sets (never the operator's: a `budget`
+key in swarm.json is replaced) caps the Sail guard's day, with the last part of it kept for validation, the gate and
+the nightly forward, and the paid models' room (Claude's, and OpenAI's under the same line, with the gate's review and
+audit holds kept in it). A missing, unreadable or malformed budget.json is the floor; a stale one never loosens (each
+meter the lower of the floor and what the stale file said).
 """
 
 from __future__ import annotations

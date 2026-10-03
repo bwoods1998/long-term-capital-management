@@ -235,6 +235,9 @@ class ArchitectWithoutOpenAI(RouterCase):
 class RewriteThroughTheResearcher(ResearcherCase):
     def setUp(self):
         super().setUp()
+        # THE BUDGET is not what these tests judge: a line well above the rewrite's hold (no block is the floor, whose $2
+        # of Claude less the holds it keeps for the gate's review and audit leaves a rewrite no room).
+        self.settings["budget"] = {"source": "test", "sail_usd_day": 1000.0, "claude_usd_day": 1000.0}
         self.claude = FakeOpener()
         self.router.claude_factory = lambda model: Claude(GATEWAY, lambda: "synthetic", model=model, opener=self.claude)
         self.router.claude_meter = FakeClaudeMeter(100)

@@ -256,10 +256,12 @@ class Process(LoopCase):
                     self.assertIn(f"invalid researcher.{key}", pace["reason"])
 
     def test_the_architect_grows_the_population_only_under_the_pace_but_always_refills_it(self):
-        # THE BUDGET holds population.start to its ceiling (league/ops/budget.py), and with no budget.json that is the
-        # floor's: a budget whose ceiling is over the 48 founders, so the refill under the start is what is judged here.
-        (self.root / "budget.json").write_text(json.dumps({"schema": 1, "at": time.time(), "meters": {
-            "sail": {"research_usd_day": 60.0}, "claude": {"research_usd_day": 40.0}}}))
+        # THE BUDGET holds population.start to its ceiling (league/ops/budget.py): at the owner's ceiling of $25 a day
+        # that is 25 families, so the 48 founders are over the start and the refill is judged under it.
+        from league.ops import budget as B
+
+        (self.root / "budget.json").write_text(json.dumps({"schema": B.SCHEMA, "at": time.time(), "meters": {
+            "sail": {"research_usd_day": B.ceiling_usd_day("sail")}, "claude": {"research_usd_day": B.ceiling_usd_day("claude")}}}))
         sw = self.swarm()
         sw.seed()
         self.store.add_spend("sail_model", float(self.settings["researcher"]["usd_per_hour"]) + 0.5)  # the hour's spend is past the pace
@@ -268,13 +270,14 @@ class Process(LoopCase):
         sw.step()
         for t in list(sw.rounds.values()):
             t.join(30)
+        self.assertEqual((sw.settings["population"]["ceiling"], sw.settings["population"]["start"]), (25, 25))
         self.assertNotIn("architect", sw.rounds, "48 alive: no growth while the money is spent")
-        for fam in self.store.families(alive=True)[:10]:
+        for fam in self.store.families(alive=True)[:28]:
             self.store.retire(fam["id"], "test")
         sw.step()
         for t in list(sw.rounds.values()):
             t.join(30)
-        self.assertIn("architect", sw.rounds, "38 alive: it refills whatever the pace")
+        self.assertIn("architect", sw.rounds, "20 alive under the start of 25: it refills whatever the pace")
 
     def test_it_leaves_on_a_stop_file_or_a_new_release(self):
         sw = self.swarm()

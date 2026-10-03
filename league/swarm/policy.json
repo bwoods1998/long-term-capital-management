@@ -26,7 +26,7 @@
     },
     "role_usd_day": {
       "architect": 0,
-      "diagnostician": 6,
+      "diagnostician": 0,
       "researcher": 0,
       "review": 5,
       "rewrite": 0,
@@ -59,7 +59,7 @@
     "enabled": true,
     "gate_checkpoint": "sbcp_a5e975a5-b087-4223-8412-2360bb68d87b",
     "image_checkpoint": "sbcp_13c5a61d-e7e1-453d-8fad-8d3f997ac970",
-    "max_boxes": 1,
+    "max_boxes": 5,
     "roots": [
       "SPY",
       "QQQ",

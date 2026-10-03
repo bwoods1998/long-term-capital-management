@@ -14,7 +14,8 @@
   the architect, the gate's audit, the diagnostician, the researchers' top band and the strategist), first among the
   paid routes while the gateway's funded total has room above `claude.reserve_usd` and the swarm's own Claude spend is
   under `claude.usd_cap` and, LTCM v3, under THE BUDGET's paid-model dollars today (league/ops/budget.py
-  `paid_model_room`: the settings' `budget` block's Claude dollars less today's Claude and OpenAI spend; spent, a call
+  `paid_model_room`: the settings' `budget` block's Claude dollars less today's Claude and OpenAI spend, and, for every
+  role but the gate's review and audit, less the holds the rule keeps in the line for those two; spent, a call
   takes its next route as for a role's own line, kind "line", and OpenAI is refused by the same line, so Sail is
   next). The architect rotates only
   while `architect.openai_model` names a model: then every other pass asks GPT-6 Astra first. Claude capped, erring or
@@ -420,11 +421,13 @@ class ModelRouter:
         budget = self.claude_budget_room()
         return 0.0 if budget is None else min(room, budget)
 
-    def claude_budget_room(self) -> float:
+    def claude_budget_room(self, role: str | None = None) -> float:
         """THE BUDGET's paid-model dollars left this UTC day (league/ops/budget.py `paid_model_room`, the protected rule;
         the settings' `budget` block, set by every `settings.load` with a state root): `claude_usd_day` less the swarm's
         Claude spend today and its OpenAI spend today, holds included (`claude_spent`, `openai_spent`: a call counts on
         the day its hold was booked, and each model's spend is floored at 0 on its own, so no release lifts the line).
+        For a call of `role` (an admission), also less THE GATE'S HOLDS the rule keeps inside the line for the gate's
+        review and audit (`budget.paid_model_reserve`: none for those two roles; with no role, the line itself).
         Settings with no `budget` block are the router's own read of its store root's budget.json (`budget.effective`: the
         floor when it gives none), as the Sail guard reads them: settings handed in without the block never lift the
         budget. 0 for a block that is not a budget, or a rule that cannot be read (FAIL CLOSED). OpenAI's admission reads
@@ -439,7 +442,7 @@ class ModelRouter:
                 block = budget_mod.effective(root, now) if root is not None else budget_mod.floor_block("no budget block")
             midnight = now - now % 86400
             room = budget_mod.paid_model_room(block, self.claude_spent(since=midnight),
-                                              self.openai_spent(since=midnight))
+                                              self.openai_spent(since=midnight), role=role)
         except Exception:  # noqa: BLE001 - no rule, no paid research
             return 0.0
         return 0.0 if room is None else room
@@ -608,7 +611,7 @@ class ModelRouter:
         `family_line` is given, and the room above `claude.reserve_usd` and `claude.usd_cap`, less `keep_usd` (room this
         caller leaves to the other roles)."""
         request_id = re.sub(r"[^A-Za-z0-9:._-]+", "-", key)[:150] + ":" + secrets.token_hex(4)
-        budget = self.claude_budget_room()  # THE BUDGET's Claude dollars left today: a line, not a funding cliff
+        budget = self.claude_budget_room(role)  # THE BUDGET's Claude dollars left today: a line, not a funding cliff
         if budget is None or budget < required:  # no reading is no room, never "no line" (FAIL CLOSED)
             errors.append(f"claude: the research budget's Claude line for today has no room (${budget or 0.0:.2f} left; "
                           f"this call may cost ${required:.2f})")
@@ -632,7 +635,7 @@ class ModelRouter:
         admitted = False
         with self.store.atomic():
             # Every line is read again inside the write transaction: a concurrent call's committed hold counts.
-            budget = self.claude_budget_room()
+            budget = self.claude_budget_room(role)
             if budget is None or budget < required:
                 errors.append("claude: the research budget's Claude line for today has no room")
                 return None, "line"
@@ -1051,7 +1054,7 @@ class ModelRouter:
             body = request_body(openai_model, [{"role": "system", "content": system}, {"role": "user", "content": user}],
                                 max_output_tokens=max_output, effort=effort, service_tier=tier, role=role)
             required = float(max(need, reservation_ceiling(body)))
-            budget = self.claude_budget_room()  # THE BUDGET's paid-model dollars today: OpenAI is under them too
+            budget = self.claude_budget_room(role)  # THE BUDGET's paid-model dollars today: OpenAI is under them too
             if budget is None or budget < required:  # no reading is no room, never "no line" (FAIL CLOSED)
                 errors.append(f"openai: the research budget's paid-model line for today has no room (${budget or 0.0:.2f} "
                               f"left; this call may cost ${required:.2f})")
@@ -1060,7 +1063,7 @@ class ModelRouter:
             if room >= required:
                 admitted = False
                 with self.store.atomic():
-                    budget = self.claude_budget_room()  # read again inside the write transaction
+                    budget = self.claude_budget_room(role)  # read again inside the write transaction
                     if budget is not None and budget >= required and min(room, self._openai_cap_room()) >= required:
                         self.store.add_spend("openai", required, family=family,
                                              detail={"role": role, "hold": key[:120], "service_tier_requested": tier,

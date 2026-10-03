@@ -241,6 +241,77 @@ class TheCommittedPolicy(L.LoopCase):
         self.assertEqual({r: v for r, v in lines.items() if not (number(v) and 0 <= v <= knobs["claude.role_usd_day"])}, {},
                          "no role's Claude line is over the budget's, and none is a value the overlay leaves alone")
 
+    def at_usd_day(self, total):
+        """The settings the House loads with the budget at `total` dollars a day (split as the rule splits them)."""
+        import time
+
+        (self.root / "budget.json").write_text(json.dumps({"schema": B.SCHEMA, "at": time.time() - 60, "meters": {
+            "sail": {"research_usd_day": total * B.SPLIT["sail"], "fixed_usd_day": 1.0},
+            "claude": {"research_usd_day": total * B.SPLIT["claude"]}}}))
+        loaded = S.load(self.root)
+        self.assertEqual(loaded["budget"]["source"], "budget.json")
+        return loaded
+
+    def test_at_the_owners_ceiling_it_lets_the_budget_reach_its_knobs(self):
+        """The budget only tightens, so the policy's own values are caps it works inside. At the owner's $25 a day they
+        let it reach what those dollars buy: five Gym boxes, the Sail model pace, the policy's own architect cadences
+        (never the floor's four hours), 25 families and the start of 16."""
+        loaded = self.at_usd_day(B.CEILING_USD_DAY)
+        knobs = B.knobs(15.0, 10.0)
+        self.assertEqual((loaded["budget"]["sail_usd_day"], loaded["budget"]["claude_usd_day"]), (15.0, 10.0))
+        self.assertEqual((loaded["gym"]["max_boxes"], knobs["gym.max_boxes"]), (5, 5), "floor(15 x 0.6 / 1.6)")
+        self.assertEqual((loaded["researcher"]["sail_usd_per_hour"], knobs["researcher.sail_usd_per_hour"]), (0.25, 0.25))
+        self.assertEqual((loaded["architect"]["every_seconds"], loaded["architect"]["refill_seconds"]), (7200, 1200),
+                         "the policy's own cadences: the budget's (2880 and 1152 s) are faster, so it holds neither back")
+        self.assertEqual((loaded["population"]["floor"], loaded["population"]["start"], loaded["population"]["ceiling"]),
+                         (8, 16, 25))
+        layer, _ = S.read_policy()
+        for path, cap, knob in (("gym.max_boxes", layer["gym"]["max_boxes"], knobs["gym.max_boxes"]),
+                                ("researcher.sail_usd_per_hour", layer["researcher"]["sail_usd_per_hour"],
+                                 knobs["researcher.sail_usd_per_hour"]),
+                                ("population.ceiling", layer["population"]["ceiling"], knobs["population.ceiling"])):
+            self.assertGreaterEqual(cap, knob, f"{path}: the policy's cap is not under what the ceiling's dollars buy")
+        for path, cadence, knob in (("every_seconds", layer["architect"]["every_seconds"], knobs["architect.every_seconds"]),
+                                    ("refill_seconds", layer["architect"]["refill_seconds"], knobs["architect.refill_seconds"])):
+            self.assertGreaterEqual(cadence, knob, f"architect.{path}: the budget does not slow the policy's cadence")
+        caps = B.sail_caps(loaded)
+        self.assertEqual((caps["research"], caps["account"], caps["gate_reserve"]), (15.0, 16.0, 1.5))
+
+    def test_an_operators_tighter_setting_stands_under_the_ceiling(self):
+        """swarm.json may run the swarm under what the ceiling's dollars buy (the budget only tightens, and so may the
+        operator): fewer boxes and a lower population ceiling stand, and with the start at that ceiling (not held down by
+        the budget) the policy's own cadences stand too."""
+        (self.root / "swarm.json").write_text(json.dumps({"enabled": True, "population": {"ceiling": 16}, "gym": {"max_boxes": 2}}))
+        loaded = self.at_usd_day(B.CEILING_USD_DAY)
+        self.assertEqual((loaded["gym"]["max_boxes"], loaded["population"]["ceiling"], loaded["population"]["start"]), (2, 16, 16))
+        self.assertEqual((loaded["architect"]["every_seconds"], loaded["architect"]["refill_seconds"]), (7200, 1200))
+        self.assertEqual(loaded["researcher"]["sail_usd_per_hour"], 0.25)
+        self.assertEqual(B.sail_caps(loaded)["research"], 15.0, "the day's cap is the rule's, whatever the knobs are")
+
+    def test_the_paid_model_lines_are_the_gates_and_the_strategists(self):
+        """Claude's $10 a day at the ceiling: the gate's review and audit and the strategist have a line; the researchers,
+        the rewrites, the diagnostician and the architect have none (the stronger models bought no Validation pass)."""
+        lines = self.at_usd_day(B.CEILING_USD_DAY)["claude"]["role_usd_day"]
+        self.assertEqual({r: v for r, v in lines.items() if v}, {"review": 5, "audit": 10.0, "strategist": 6})
+        self.assertEqual({r for r, v in lines.items() if not v}, {"architect", "researcher", "rewrite", "diagnostician"})
+        for role, hold in B.GATE_HOLDS_USD.items():
+            self.assertGreaterEqual(lines[role], hold, f"{role}: its line holds its hold")
+        self.assertLessEqual(lines["strategist"], B.ceiling_usd_day("claude") - sum(B.GATE_HOLDS_USD.values()),
+                             "what the strategist may take leaves the gate's holds")
+
+    def test_fewer_dollars_tighten_every_knob(self):
+        """$12, $5 and $1 a day on the committed policy: (boxes, pace, ceiling, start, every, refill, each Claude line)."""
+        want = {12.0: (2, 0.12, 12, 12, 7200, 6000, 4.8), 5.0: (1, 0.05, 12, 12, 14400, 14400, 2.0),
+                1.0: (1, 0.01, 12, 12, 72000, 72000, 0.4)}
+        for total, (boxes, pace, ceiling, start, every, refill, line) in want.items():
+            loaded = self.at_usd_day(total)
+            self.assertEqual((loaded["gym"]["max_boxes"], loaded["researcher"]["sail_usd_per_hour"]), (boxes, pace), total)
+            self.assertEqual((loaded["population"]["ceiling"], loaded["population"]["start"]), (ceiling, start), total)
+            # The budget's ceiling is under the policy's start of 16: every pass is a refill, held to the scheduled cadence.
+            self.assertEqual((loaded["architect"]["every_seconds"], loaded["architect"]["refill_seconds"]), (every, refill), total)
+            lines = loaded["claude"]["role_usd_day"]
+            self.assertEqual((lines["review"], lines["audit"], lines["strategist"]), (line, line, line), total)
+
     def test_the_houses_loop_runs_on_it(self):
         with contextlib.redirect_stdout(io.StringIO()):
             sw = Swarm(self.root, store=self.store, router=self.router, pool=self.pool, guard=self.guard,

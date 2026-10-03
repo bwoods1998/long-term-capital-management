@@ -197,15 +197,17 @@ export function composeNotice(facts = {}) {
       break;
     }
     case 'funding': {
-      // A prefund under the card line (V3-A, WP8): the budget rule (league/ops/budget.py `notice_facts`) found a meter's
-      // runway at the rate it WANTS (`usd_day`: fixed + its full research floor + what profit earned) under
-      // `card_line_days`, and says exactly what restores `restore_days` at that rate. The rule throttles research, so the
-      // desk is held under that: `current_*` are the rate it is held to now (the fixed cost plus the day's research
-      // budget: a ceiling the rule sets, not a metered spend). The mail says both, each named, and words neither as a
-      // spend. Both runways are days until the meter's RESERVE, not until it is empty (the House sends no reserve figure),
-      // so each is said as days above the reserve. With no `current_usd_day` (an older House, or a balance the rule could
-      // not read for research) it claims no current rate. At most once per meter per ISO week (its notice id, which the
-      // gateway also remembers for eight days). `test: true` is a drill.
+      // A prefund under the card line (V3-A, WP8; the budget's rule version 2, Oct 3, 2026): the budget rule
+      // (league/ops/budget.py `notice_facts`) found a meter's days of research left at the rate it WANTS (`usd_day`:
+      // fixed + its share of the owner's research ceiling) under `card_line_days`, and says exactly what buys
+      // `topup_days` more of them at that rate. Below a short runway the rule tapers research, so the desk may be held
+      // under that: `current_*` are the rate it is held to now (the fixed cost plus the day's research budget: a
+      // ceiling the rule sets, not a metered spend; the same as the wanted rate until the taper starts). The mail says
+      // both, each named, and words neither as a spend. Both runways are days until the meter's RESERVE, not until it
+      // is empty (the House sends no reserve figure), so each is said as days above the reserve. With no
+      // `current_usd_day` (an older House, or a balance the rule could not read for research) it claims no current
+      // rate. At most once per meter per ISO week (its notice id, which the gateway also remembers for eight days).
+      // `test: true` is a drill.
       if (!Object.hasOwn(FUNDING_METERS, facts.meter)) return null;
       const meter = FUNDING_METERS[facts.meter];
       const drill = facts.test === true;
@@ -226,21 +228,21 @@ export function composeNotice(facts = {}) {
       const idle = current && zero(facts.current_research_usd_day);
       const holds = lasts !== null && !idle && !zero(facts.runway_days) && decimal(facts.current_research_usd_day) !== null
         && decimal(facts.card_line_days) !== null && Number(lasts) >= Number(decimal(facts.card_line_days));
-      subject = `${drill ? 'LTCM [drill]' : 'LTCM'}: ${meter} runway ${dayCount(facts.runway_days)} days at the rate the budget wants; add ${dollars(facts.restore_usd)} by ${dateOf(facts.card_date)}`;
+      subject = `${drill ? 'LTCM [drill]' : 'LTCM'}: ${meter} runway ${dayCount(facts.runway_days)} days at the rate the budget wants; add ${dollars(facts.topup_usd)} by ${dateOf(facts.card_date)}`;
       lines.push(
         drill ? 'THIS IS A DRILL: a synthetic cliff tests that this notice reaches you. Its figures are the drill\'s, not the desk\'s. Nothing needs doing.' : null,
         `${meter} holds ${dollars(facts.balance_usd)}.`,
         current
           ? `The desk is held to ${dollars(facts.current_usd_day)} a day on it now (fixed ${fixed}, research up to ${dollars(facts.current_research_usd_day)}); ${lasts === null ? 'the House sent no runway at that rate' : `at that rate it lasts ${lasts} days above its reserve`}.`
           : 'What the desk is held to on it now was not sent: the figures below are at the rate the budget rule wants, not a spend the desk is making.',
-        `The budget rule wants ${dollars(facts.usd_day)} a day for it (fixed ${fixed}, research ${dollars(facts.research_usd_day)}: the research floor plus what profit earned); at that rate it lasts ${dayCount(facts.runway_days)} days above its reserve, to about ${dateOf(facts.runs_out_on)}. That is the runway under the ${dayCount(facts.card_line_days)}-day card line.`,
-        `Adding ${dollars(facts.restore_usd)} restores ${dayCount(facts.restore_days)} days of runway at the rate the rule wants. Add it by ${dateOf(facts.card_date)}.`,
+        `The budget rule wants ${dollars(facts.usd_day)} a day for it (fixed ${fixed}, research ${dollars(facts.research_usd_day)}: its share of the research ceiling); at that rate it lasts ${dayCount(facts.runway_days)} days above its reserve, to about ${dateOf(facts.runs_out_on)}. That is the runway under the ${dayCount(facts.card_line_days)}-day card line.`,
+        `Adding ${dollars(facts.topup_usd)} buys ${dayCount(facts.topup_days)} more days at the rate the rule wants. Add it by ${dateOf(facts.card_date)}.`,
         spent
           ? `${meter} has no runway left above its reserve: research on it stays throttled until it is funded.`
           : holds
             ? `Nothing stops if no card is added: research stays throttled to what ${meter} sustains.`
             : lasts !== null
-              ? `If no card is added, ${meter} lasts ${lasts} days above its reserve at the rate the desk is held to now: research on it ${idle ? `is already at ${dollars(facts.current_research_usd_day)}, so there is nothing left to throttle` : 'stays throttled'}.`
+              ? `If no card is added, ${meter} lasts ${lasts} days above its reserve at the rate the desk is held to now: research on it ${idle ? `is already at ${dollars(facts.current_research_usd_day)}, so there is nothing left to throttle` : 'tapers as the balance falls'}.`
               : `If no card is added, research on ${meter} stays throttled; how long ${meter} lasts at the rate the desk is held to now was not sent.`,
         'The budget rule never raises a cap or moves money.',
         `At: ${clip(facts.at, 40) || 'an unknown time'}.`,

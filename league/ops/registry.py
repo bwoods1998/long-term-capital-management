@@ -50,7 +50,7 @@ JOBS: tuple[Job, ...] = (
         what="the standing grant: re-ratify after an owner deploy that moved the money digest, or a deposit"),
     Job("budget", "league.ops.budget", (S.after("economics"), S.daily(0, 30)), grace=3 * HOUR, cpu=300, wall=600,
         owner="WP3", in_pause=True,
-        what="the research budget from trailing realized profit; funding notices"),
+        what="the research budget (the owner's ceiling, each meter's runway); funding notices"),
     Job("hygiene", "league.ops.hygiene", (S.daily(2, 0),), grace=3 * HOUR, cpu=600, wall=1200,
         what="end barred practice cohorts, retire dead pool rows and idle families, report stale live instances"),
     Job("clock", "league.ops.clock", (S.daily(11, 0),), grace=2 * HOUR, cpu=120, wall=300,
