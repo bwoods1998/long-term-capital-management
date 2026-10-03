@@ -370,6 +370,8 @@ class ClaudeMeter:
 class RouteCase(StoreCase):
     def setUp(self):
         super().setUp()
+        # THE BUDGET is not what these tests judge: a line well above a day of the architect's calls (no block is the floor).
+        self.settings["budget"] = {"source": "test", "sail_usd_day": 1000.0, "claude_usd_day": 1000.0}
         self.sail_calls = []
         self.openai = FakeOpener(*[ok(text='{"families": []}', cost="0.05") for _ in range(4)])
 
