@@ -288,10 +288,13 @@ constant changes only by a gateway deploy):
   `scheduler` `league/swarm/loop.py`; `research` `league/swarm/{researcher,preflight,claude_research}.py`; `memory`
   `league/swarm/{architect,strategist,diagnostician,seeds,mechanisms}.py`; `data` `league/{sailbox,data_job}.py`; and
   every lane may add `league/tests/test_harness_candidate_*.py` (`*` one to eighty of `a-z0-9_`). Never a protected
-  path, and only what the harness lanes themselves declare (`ENGINEER_SURFACE`: the scheduler lane's file in
-  `league/swarm/improvement.py` and the unprotected files of the lanes in `league/swarm/harness_lanes.py`; a test reads
-  both and fails while the list is wider): `league/swarm/mechanisms.py` is in the memory lane's table and in no harness
-  lane's surface, so it is refused until `harness_lanes.py` names it.
+  path, and only what the harness lanes themselves declare (`ENGINEER_SURFACE`: the unprotected files of the lanes in
+  `league/swarm/harness_lanes.py`; a test reads them and fails while the list is wider). Two paths of the table are in
+  no harness lane's surface, so they are refused, on this route and the merge route, until `harness_lanes.py` names
+  them: the memory lane's `league/swarm/mechanisms.py` and the scheduler lane's `league/swarm/loop.py`. The harness
+  loop's own scheduler lane (`league/swarm/improvement.py`) changes the `Scheduler` class's body alone, and the file
+  also holds the calls to the Sail guard's brake, so the gateway, which reads no class, admits no write to it: the
+  scheduler lane opens and merges new tests only.
   At most 6 files of 512 KiB each, 1.5 MiB a request (the other roles keep 12 files of 64 KiB, 256 KiB a request), and
   at most 2 a New York day, counted apart from the other roles' `GITHUB_MAX_PULLS_PER_DAY` (`429 {cap:
   "engineer_day"}`; `/v1/health` `autonomy.engineer_pulls`). A retry that finds its own pull request, or GitHub's no

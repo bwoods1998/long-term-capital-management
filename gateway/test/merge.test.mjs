@@ -132,11 +132,7 @@ test('the engineer\'s surface is the harness lanes\' surfaces, less the protecte
   const lanes = [...source.matchAll(/\n\s+surface=\(([\s\S]*?)\),\n/g)].map(match =>
     [...match[1].matchAll(/"([^"]+)"|NEW_TEST/g)].map(found => found[1] ?? newTest));
   assert.equal(lanes.length, 4, 'the research, memory, data and execution lanes');
-  // The scheduler lane is the loop's first: the controller declares its one file itself (harness_lanes.py holds "the
-  // lanes beyond the scheduler"), and WP8b's lane table names it.
-  const scheduler = /\nSCHEDULER_PATH = "([^"]+)"/.exec(repoText('league/swarm/improvement.py'))?.[1];
-  assert.equal(scheduler, 'league/swarm/loop.py');
-  const surface = new Set([scheduler, ...lanes.flat()]);
+  const surface = new Set(lanes.flat());
   assert.equal(newTest, github.ENGINEER_TEST_GLOB);
   assert.equal(github.ENGINEER_SURFACE.tests, github.ENGINEER_TEST);
   const laneOf = path => Object.keys(github.ENGINEER_LANES).find(lane => github.ENGINEER_LANES[lane].includes(path));
@@ -153,11 +149,20 @@ test('the engineer\'s surface is the harness lanes\' surfaces, less the protecte
   }
   // The lane table (league/ci.py ENGINEER_LANES) is written no wider than the lanes declare: a path of its that no
   // harness lane's surface holds is refused to its own lane.
+  const undeclared = [];
   for (const [lane, paths] of Object.entries(github.ENGINEER_LANES)) {
     for (const path of paths.filter(listed => !surface.has(listed))) {
+      undeclared.push(path);
       assert.match(github.pathRefusal('engineer', path, github.ROLES, lane), /outside the engineer's lane surfaces/, `${lane} ${path}`);
     }
   }
+  // The scheduler lane's file is one of them. The harness loop's own scheduler lane (league/swarm/improvement.py) is not
+  // one of LANES and changes the Scheduler class's body alone (its patch_guard); the gateway reads no class, so the
+  // whole file stays out of the surface.
+  const scheduler = /\nSCHEDULER_PATH = "([^"]+)"/.exec(repoText('league/swarm/improvement.py'))?.[1];
+  assert.equal(scheduler, 'league/swarm/loop.py');
+  assert.deepEqual(github.ENGINEER_LANES.scheduler, [scheduler]);
+  assert.deepEqual(undeclared, [scheduler, 'league/swarm/mechanisms.py']);
   assert.ok(Object.isFrozen(github.ENGINEER_SURFACE) && Object.isFrozen(github.ENGINEER_SURFACE.only));
 });
 
@@ -195,7 +200,8 @@ test('a protected path is refused by name, by tree, by a file that would shadow 
 
 test('the engineer opens engineer/<lane>/ branches inside its lane and never on a protected path (WP8b: test/engineer.test.mjs)', () => {
   assert.equal(github.pathRefusal('engineer', 'league/swarm/preflight.py', github.ROLES, 'research'), null);
-  assert.match(github.pathRefusal('engineer', 'league/swarm/loop.py', github.ROLES, 'research'), /outside the research lane/);
+  assert.match(github.pathRefusal('engineer', 'league/swarm/architect.py', github.ROLES, 'research'), /outside the research lane/);
+  assert.match(github.pathRefusal('engineer', 'league/swarm/loop.py', github.ROLES, 'research'), /outside the engineer's lane surfaces/);
   assert.match(github.pathRefusal('engineer', 'league/swarm/pool.py', github.ROLES, 'research'), /outside the engineer's lane surfaces/);
   assert.match(github.pathRefusal('engineer', 'league/ops/agenda.py', github.ROLES, 'research'), /protected \(league\/ops\/\)/);
   assert.match(github.pathRefusal('engineer', 'league/swarm/bands.py', github.ROLES, 'research'), /no automated change may write this file: protected/);
@@ -225,8 +231,10 @@ test('the engineer opens engineer/ branches inside its lanes\' surfaces only, th
       assert.match(github.pathRefusal('engineer', path, github.ROLES, lane), /outside the engineer's lane surfaces|no automated change may write this file/, `${lane} ${path}`);
     }
   }
-  // league/swarm/mechanisms.py is in the memory lane's table and in no harness lane's surface: its own lane may not write it.
+  // league/swarm/mechanisms.py is in the memory lane's table and league/swarm/loop.py is the scheduler lane's, and
+  // neither is in a harness lane's surface: its own lane may not write it.
   assert.match(github.pathRefusal('engineer', 'league/swarm/mechanisms.py', github.ROLES, 'memory'), /outside the engineer's lane surfaces/);
+  assert.match(github.pathRefusal('engineer', 'league/swarm/loop.py', github.ROLES, 'scheduler'), /outside the engineer's lane surfaces/);
   assert.match(github.pathRefusal('engineer', 'league/swarm/bands.py', github.ROLES, 'research'), /no automated change may write this file: protected/);
   assert.match(github.pathRefusal('engineer', 'league/ops/budget.py', github.ROLES, 'research'), /protected \(league\/ops\/budget\.py\)/);
   assert.match(github.pathRefusal('engineer', 'league/ops/agenda.py', github.ROLES, 'research'), /protected \(league\/ops\/\)/);
@@ -237,7 +245,8 @@ test('the engineer opens engineer/ branches inside its lanes\' surfaces only, th
     files: [{ path: 'league/swarm/preflight.py', content: 'x = 1\n' }] });
   assert.match(admitted.branch, /^engineer\/research\/preflight-screen-[0-9a-f]{8}$/);
   assert.equal(github.admit({ role: 'architect', slug: 'x1', title: 't', files: [{ path: 'league/strategies/x.py', content: '' }] }).branch.slice(0, 17), 'merton/architect/');
-  for (const path of ['league/live/step.py', 'league/swarm/models.py', 'league/house.py', 'league/swarm/hook.py', 'league/swarm/mechanisms.py']) {
+  for (const path of ['league/live/step.py', 'league/swarm/models.py', 'league/house.py', 'league/swarm/hook.py', 'league/swarm/mechanisms.py',
+    'league/swarm/loop.py']) {
     for (const lane of Object.keys(github.ENGINEER_LANES)) {
       assert.equal(github.admit({ role: 'engineer', lane, slug: 'tweak-x', title: 't', base_sha: HEAD, files: [{ path, content: '' }] }).status, 403, `${lane} ${path}`);
     }
@@ -396,10 +405,10 @@ test('every changed file, by its name and its name before a rename, is inside th
   const OTHER_LANE = ['lane_path', /outside the research lane/];
   const NO_LANE = ['outside_surface', /outside the engineer's lane surfaces/];
   for (const [file, refusal, says] of [
-    [{ filename: 'league/swarm/loop.py', status: 'modified' }, ...OTHER_LANE],                      // the scheduler lane's, not research's
     [{ filename: 'league/swarm/architect.py', status: 'modified' }, ...OTHER_LANE],                 // the memory lane's
     [{ filename: 'league/sailbox.py', status: 'removed' }, ...OTHER_LANE],                          // the data lane's
     // In no lane's surface at all: refused as that, before the branch's lane is asked.
+    [{ filename: 'league/swarm/loop.py', status: 'modified' }, ...NO_LANE],                         // the scheduler lane's table, no harness lane's surface
     [{ filename: 'league/swarm/pool.py', status: 'modified' }, ...NO_LANE],                         // research-class, but no lane's
     [{ filename: 'League/Swarm/Preflight.py', status: 'modified' }, ...NO_LANE],                    // the lane's file, in another case
     [{ filename: 'league/tests/test_harness_candidate_.py', status: 'added' }, ...NO_LANE],
@@ -427,7 +436,6 @@ test('every changed file, by its name and its name before a rename, is inside th
   assert.equal((await mergeIt(gate, hub)).body.refused, 'protected_path');
   // Each lane merges its own surface and the new tests, a rename inside it included.
   for (const [lane, files] of Object.entries({
-    scheduler: ['league/swarm/loop.py'],
     research: ['league/swarm/researcher.py', 'league/swarm/preflight.py', 'league/swarm/claude_research.py'],
     memory: ['league/swarm/architect.py', 'league/swarm/strategist.py', 'league/swarm/diagnostician.py', 'league/swarm/seeds.py'],
     data: ['league/sailbox.py', 'league/data_job.py'],
@@ -461,6 +469,33 @@ test('every changed file, by its name and its name before a rename, is inside th
   assert.equal(kept.response.status, 403);
   assert.equal(kept.body.refused, 'outside_surface');
   assert.equal(writes(undeclared).length, 0);
+  // Nor does the scheduler lane's branch merge league/swarm/loop.py, all its table holds: the harness loop's scheduler
+  // lane changes the Scheduler class's body alone, and the file holds the Sail guard's brake besides. Changed, removed
+  // or renamed, alone or beside a new test, nothing merges; the lane's branch merges a new test and no more.
+  for (const listed of [
+    [{ filename: 'league/swarm/loop.py', status: 'modified' }],
+    [{ filename: 'league/swarm/loop.py', status: 'modified' }, { filename: 'league/tests/test_harness_candidate_scheduler_2.py', status: 'added' }],
+    [{ filename: 'league/swarm/loop.py', status: 'removed' }],
+    [{ filename: 'league/tests/test_harness_candidate_scheduler_2.py', previous_filename: 'league/swarm/loop.py', status: 'renamed' }],
+  ]) {
+    const loop = fakeHub();
+    loop.files.set(77, listed);
+    loop.pulls.set(77, enginePull({ changed_files: listed.length, head: { ...enginePull().head, ref: 'engineer/scheduler/lane-change-0f0f0f0f' } }));
+    const held = gateAt();
+    await approve(held, loop);
+    const stopped = await mergeIt(held, loop);
+    assert.equal(stopped.response.status, 403, JSON.stringify(listed));
+    assert.equal(stopped.body.refused, 'outside_surface', JSON.stringify(listed));
+    assert.match(stopped.body.error, /league\/swarm\/loop\.py: outside the engineer's lane surfaces/);
+    assert.equal(writes(loop).length, 0);
+    assert.equal(held.status(NOW).autonomy.merges.count, 0);
+  }
+  const tests = fakeHub();
+  tests.files.set(77, [{ filename: 'league/tests/test_harness_candidate_scheduler_2.py', status: 'added' }]);
+  tests.pulls.set(77, enginePull({ changed_files: 1, head: { ...enginePull().head, ref: 'engineer/scheduler/lane-change-0f0f0f0f' } }));
+  const open = gateAt();
+  await approve(open, tests);
+  assert.equal((await mergeIt(open, tests)).body.merged, true);
 });
 
 test('an engineer lane may only ADD a test: a retained candidate test modified, removed or renamed is refused (V3-A)', async () => {

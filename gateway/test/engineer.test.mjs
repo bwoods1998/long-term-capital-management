@@ -84,12 +84,13 @@ test('the new-test glob is one name of a-z, 0-9 and _ under league/tests, ending
 });
 
 test('the engineer s proposal names a known lane and writes only that lane s surface and new tests', () => {
+  const undeclared = [];
   for (const [lane, own] of Object.entries(SURFACES)) {
     for (const path of own) {
       if (!github.ENGINEER_SURFACE.only.includes(path)) {
         // The wall behind the table (the WP8 review; test/merge.test.mjs): a lane's path that no harness lane's surface
         // declares is refused to every lane, its own included, until league/swarm/harness_lanes.py names it.
-        assert.equal(path, 'league/swarm/mechanisms.py');
+        undeclared.push(path);
         for (const any of Object.keys(SURFACES)) {
           const refused = github.admit(engineer({ lane: any, files: [{ path, content: 'X = 1\n' }] }));
           assert.equal(refused.status, 403, `${any} may not write ${path}`);
@@ -111,6 +112,9 @@ test('the engineer s proposal names a known lane and writes only that lane s sur
       }
     }
   }
+  // The scheduler lane's one file (the harness loop's scheduler lane changes the Scheduler class's body alone, and no
+  // lane of harness_lanes.py names the file) and the memory lane's mechanisms.py, and no other path of the table.
+  assert.deepEqual(undeclared, ['league/swarm/loop.py', 'league/swarm/mechanisms.py']);
   // Research-class paths outside every lane, and the protected and judged paths, are refused to every lane.
   for (const path of ['league/ops/agenda.py', 'league/swarm/models.py', 'league/house.py', 'league/swarm/loop_v2.py',
     'League/Swarm/Loop.py', 'league/swarm/harness_lanes.py', 'scripts/data/boxlib.py', 'league/tests/test_swarm_loop.py']) {
@@ -129,7 +133,8 @@ test('the engineer s proposal names a known lane and writes only that lane s sur
     assert.equal(refused.status, 400, JSON.stringify(bad));
     assert.match(refused.error, /The lane must be one of: scheduler, research, memory, data\./);
   }
-  assert.equal(github.pathRefusal('engineer', 'league/swarm/loop.py'), 'the lane is unknown', 'without its lane the engineer writes nothing');
+  assert.equal(github.pathRefusal('engineer', 'league/swarm/preflight.py'), 'the lane is unknown', 'without its lane the engineer writes nothing');
+  assert.match(github.pathRefusal('engineer', 'league/swarm/loop.py'), /outside the engineer's lane surfaces/);
   for (const lane of ['research', null, '']) {
     const refused = github.admit({ ...ARCHITECT, lane });
     assert.equal(refused.status, 400);
@@ -225,7 +230,16 @@ test('two engineer pull requests a New York day, apart from the other roles  day
   // The other roles' day is their own: one architect proposal fills it, and the engineer is not stopped by it.
   assert.equal((await send(ARCHITECT, { gate, hub })).response.status, 200);
   assert.equal((await send({ ...ARCHITECT, slug: 'another-one' }, { gate, hub })).response.status, 429);
-  const second = await send(engineer({ lane: 'scheduler', slug: 'faster-loop', files: [{ path: 'league/swarm/loop.py', content: 'FAST = 1\n' }] }), { gate, hub });
+  // The scheduler lane's league/swarm/loop.py is in no harness lane's surface: refused before GitHub hears of it, and
+  // it takes no place in the day.
+  const heard = hub.calls.length;
+  const loop = await send(engineer({ lane: 'scheduler', slug: 'faster-loop', files: [{ path: 'league/swarm/loop.py', content: 'FAST = 1\n' }] }), { gate, hub });
+  assert.equal(loop.response.status, 403);
+  assert.equal(loop.body.path, 'league/swarm/loop.py');
+  assert.match(loop.body.error, /outside the engineer's lane surfaces/);
+  assert.equal(hub.calls.length, heard, 'GitHub heard nothing');
+  assert.equal(gate.status(NOW).autonomy.engineer_pulls.count, 1);
+  const second = await send(engineer({ lane: 'scheduler', slug: 'faster-loop', files: [{ path: 'league/tests/test_harness_candidate_loop.py', content: 'FAST = 1\n' }] }), { gate, hub });
   assert.equal(second.response.status, 200, JSON.stringify(second.body));
   assert.match(second.body.branch, /^engineer\/scheduler\/faster-loop-[0-9a-f]{8}$/);
   assert.equal(gate.status(NOW).github.pull_requests, 1, 'the engineer s pull requests are not the other roles  count');

@@ -62,19 +62,21 @@ export const ROLES = {
   engineer: { lanes: ENGINEER_LANES },
 };
 
-//: What the harness lanes themselves declare (the WP8 review): the union of the lanes' surfaces (the scheduler lane's
-//: `league/swarm/improvement.py` SCHEDULER_PATH and `league/swarm/harness_lanes.py` LANES) less every protected path
-//: (the execution lane's league/live/ files and the data lane's scripts/data/ files are the owner's deploys). `only` is
-//: a whole path; `tests` is the lanes' NEW_TEST. A lane of ENGINEER_LANES writes a path only when it is here too, so
-//: the lane table is never wider than the lanes the harness loop judges: `league/swarm/mechanisms.py` is in the memory
-//: lane's table and in no harness lane's surface, and stays refused until harness_lanes.py names it.
-//: test/merge.test.mjs reads the lanes from the repository and fails while this list is wider than they are, misses an
+//: What the harness lanes themselves declare (the WP8 review): the union of the lanes' surfaces
+//: (`league/swarm/harness_lanes.py` LANES) less every protected path (the execution lane's league/live/ files and the
+//: data lane's scripts/data/ files are the owner's deploys). `only` is a whole path; `tests` is the lanes' NEW_TEST. A
+//: lane of ENGINEER_LANES writes a path only when it is here too, so the lane table is never wider than the lanes the
+//: harness loop judges. Two paths of the table are in no harness lane's surface and stay refused, to their own lane
+//: too, until harness_lanes.py names them: the memory lane's `league/swarm/mechanisms.py`, and the scheduler lane's
+//: `league/swarm/loop.py`, which is all that lane's table holds (so the scheduler lane opens and merges new tests
+//: only). The harness loop's own scheduler lane (`league/swarm/improvement.py` SCHEDULER_PATH) is not one of LANES and
+//: changes the `Scheduler` class's body alone (`patch_guard`); a whole-file write here would also reach the `Swarm`
+//: class beside it, where the Sail guard's brake is called.
+//: test/merge.test.mjs reads LANES from the repository and fails while this list is wider than they are, misses an
 //: unprotected path of theirs or names a path outside ENGINEER_LANES. A new lane, or a wider one, is a change to
 //: harness_lanes.py and to this list, both owner deploys.
 export const ENGINEER_SURFACE = Object.freeze({
   only: Object.freeze([
-    // scheduler: the swarm's loop
-    'league/swarm/loop.py',
     // research: the researcher's workflow, its preflight screens, its Claude path
     'league/swarm/researcher.py', 'league/swarm/preflight.py', 'league/swarm/claude_research.py',
     // memory: the architect's, the strategist's and the diagnostician's prompts and retrieval, the seeds

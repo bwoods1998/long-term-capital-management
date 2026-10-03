@@ -41,7 +41,8 @@ REPO = Path(__file__).resolve().parents[1]
 #: `engineer/<lane>/<slug>-<8 hex>` may change only these and add new tests (ENGINEER_TESTS). The
 #: gateway admits and merges by the same table (`gateway/lib/github.mjs` ENGINEER_LANES; a gateway
 #: test reads this one and fails while the two differ), and only what the harness lanes themselves
-#: declare (its ENGINEER_SURFACE): it refuses league/swarm/mechanisms.py until a harness lane names it.
+#: declare (its ENGINEER_SURFACE): it refuses league/swarm/mechanisms.py and the scheduler lane's
+#: league/swarm/loop.py until a harness lane (`league/swarm/harness_lanes.py` LANES) names them.
 ENGINEER_LANES: dict[str, tuple[str, ...]] = {
     "scheduler": ("league/swarm/loop.py",),
     "research": ("league/swarm/researcher.py", "league/swarm/preflight.py", "league/swarm/claude_research.py"),
