@@ -17,6 +17,7 @@ from unittest import mock
 from league.swarm import settings as S
 from league.swarm.loop import Swarm
 from league.swarm.store import SwarmStore
+from league.tests import EMPTY_POLICY_PATH, REAL_POLICY_PATH
 from league.tests.swarm_fakes import Clock
 
 REPO = Path(__file__).resolve().parents[2]
@@ -108,14 +109,25 @@ class TheLayer(Case):
         self.assertIsNone(out["gate"]["look_holds"])
 
     def test_the_repo_policy_file_is_read_by_default(self):
-        layer, status = S.read_policy()
-        self.assertEqual(status["state"], "ok", "the committed policy.json is a JSON object in the defaults' shape")
-        self.assertEqual(S.policy_shape(json.loads(S.POLICY_PATH.read_text())), [])
-        self.assertEqual(status["ignored"], [], "the committed policy.json never sets the owner's switches")
-        with_repo, without = S.load(None, config={}), S.load(None, config={}, policy={})
+        self.assertEqual(REAL_POLICY_PATH, REPO / "league" / "swarm" / "policy.json")
+        with mock.patch.object(S, "POLICY_PATH", REAL_POLICY_PATH):  # the House's file, not the tests' empty layer
+            layer, status = S.read_policy()
+            self.assertEqual(status["state"], "ok", "the committed policy.json is a JSON object in the defaults' shape")
+            self.assertEqual(S.policy_shape(json.loads(S.POLICY_PATH.read_text())), [])
+            self.assertEqual(status["ignored"], [], "the committed policy.json never sets the owner's switches")
+            with_repo, without = S.load(None, config={}), S.load(None, config={}, policy={})
         self.assertEqual(with_repo.pop("_policy"), status)
         without.pop("_policy")
         self.assertEqual(with_repo, S._merge(without, layer))
+
+    def test_the_tests_read_a_layer_that_sets_nothing(self):
+        self.assertEqual(S.POLICY_PATH, EMPTY_POLICY_PATH, "league/tests/__init__.py: never the House's settings")
+        layer, status = S.read_policy()
+        self.assertEqual(status, {"state": "ok", "why": None, "ignored": []})
+        self.assertEqual([key for key in layer if not key.startswith("_")], [])
+        with_layer, without = S.load(None, config={}), S.load(None, config={}, policy={})
+        self.assertEqual({k: v for k, v in with_layer.items() if not k.startswith("_")},
+                         {k: v for k, v in without.items() if not k.startswith("_")})
 
     def test_the_sail_fallback_default(self):
         self.assertEqual(S.DEFAULTS["sail_fallback"], {"k3_balanced": "pro_asap", "pro_balanced": "pro_asap"})
