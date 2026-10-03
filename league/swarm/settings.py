@@ -2,8 +2,11 @@
 `league/swarm/policy.json`, then by `<root>/swarm.json` (the operator's file on the box: a change there needs no deploy;
 the process re-reads it every loop).
 
-SETTINGS AS CODE (V3-A, Oct 2, 2026). `policy.json` is the research settings as reviewed code: a pull request changes it
-and the updater deploys it, so no laptop command touches the box to tune the swarm. It has the shape of `swarm.json`
+SETTINGS AS CODE (V3-A, Oct 2, 2026). `policy.json` is the research settings as reviewed code: a pull request changes
+it, so the swarm is tuned in the repository, not by a laptop command editing the box's file. Since the WP8 review the
+file is protected (`league/ci.py` FORBIDDEN, the gateway's list with it): the gateway merges no change to it and the
+updater ships none, so a merged change reaches the box by the owner's deploy alone, and until that deploy the updater
+refuses every later release too (it compares each one with the running release). It has the shape of `swarm.json`
 and sits between config.json and swarm.json: DEFAULTS < config.json < policy.json < swarm.json. The owner's switches
 (`OWNER_KEYS`: `enabled`, `live`) are never read from it (a key there is ignored and named in `_policy`); they stay in
 swarm.json, which after the V3-A migration (`scripts/settings_migrate.py`) holds only them. A missing policy.json is no

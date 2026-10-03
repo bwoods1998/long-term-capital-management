@@ -254,28 +254,47 @@ constant changes only by a gateway deploy):
   answer keeps it. What the page says is the House's own public filter (`league/ops` scoreboard).
 - **`POST /v1/github/review`** `{pr, head_sha, verdict: "approve"|"reject", reasons}`: the automated reviewer's
   verdict, kept by the Gate for that exact commit after the pull request is read (open, an
-  `engineer/<lane>/<slug>-<hash>` branch of this repository aimed at `main`, headed by `head_sha`). A reject is final for its commit (an approve after it is
-  `409 {refused: "review_rejected"}`); a revision is a new commit, reviewed again. Nothing is written to GitHub.
+  `engineer/<lane>/<slug>-<hash>` branch of this repository aimed at `main`, headed by `head_sha`). A reject is final
+  for its commit (an approve after it is `409 {refused: "review_rejected"}`); a revision is a new commit, reviewed
+  again. Rejected commits are kept apart from the verdict list (the last 2,000); once one has been forgotten, an approve
+  of a pull request opened no later than it is `409 {refused: "review_forgotten"}`, and an approve recorded no later
+  than it no longer counts. Nothing is written to GitHub. The reviewer and the engineer present the same runtime token:
+  the gateway records verdicts, it cannot tell who gave them, so the review is as independent as the House's own jobs
+  keep it.
 - **`POST /v1/github/merge`** `{pr, head_sha}` ([lib/merge.mjs](lib/merge.mjs)): a squash merge of exactly
   `head_sha`, only when the branch is `engineer/<lane>/<slug>-<8 hex>` with a known lane and lives in this repository,
-  the pull request is open, no draft and aimed at `main`; the latest `checks.yml` run on that commit finished `success` with the jobs `gateway`,
-  `tests (3.11)` and `tests (3.14)` each `success`; an approve and no reject is recorded for that commit; no changed
-  file (either name of a rename) is protected ([lib/protected.mjs](lib/protected.mjs): `league/ci.py` FORBIDDEN, which a
-  test holds as a subset, plus `league/ops/{budget,drills,grant}.py`, `league/live/`, `league/gym/`,
-  `league/swarm/{gate,bands,evaluator,settings,store}.py`, `ltcm/data/`, `scripts/data/`, `.github/`, `gateway/`,
-  `deploy/`, `league/config.json`, `league/constitution.py`, and git's own `.git*` files) and every one (both names of
-  a rename) is inside the branch's lane (below), read whole from GitHub's list (at most 300 files); at most 2 merges a
-  New York day (`429 {cap: "merge_day"}`). Every refusal names its rule in `refused` (`review_missing`,
-  `review_rejected`, `branch`, `fork`, `base`, `not_open`, `draft`, `head_moved`, `protected_path`, `lane_path`, `files`,
-  `ci_missing`, `ci_pending`, `ci_failed`, `ci_jobs`, `github`, `no_answer`). A merge GitHub refused gives its place
-  back; one nothing answered keeps it (`merged: "unknown"`). The kill switch stops the merge (`423 {cap:
-  "kill_switch"}`): with `auto_update` on a merge is a deploy, and the owner's stop must freeze the code being looked
-  at. The proposal, review, close and docs routes stay open: they move no money and deploy nothing.
+  the pull request is open, no draft and aimed at `main`; the latest `checks.yml` run on that commit finished `success`
+  with the jobs `gateway`, `tests (3.11)` and `tests (3.14)` each `success`; an approve and no reject is recorded for
+  that commit; no changed file (either name of a rename) is protected ([lib/protected.mjs](lib/protected.mjs): the
+  list is `league/ci.py` FORBIDDEN, the updater's own wall, and `league/config.json`, held to that by a test on each
+  side: the judges and money rules, the House's job framework `league/ops/`, `league/live/`, `league/gym/`, the swarm's
+  gate, bands, evaluator, settings, `policy.json` and store, `ltcm/data/`, `scripts/data/`, every module `league/live/`
+  and `league/gym/` import or seal into the decider (`league/__init__.py`, `league/structure_core.py`,
+  `ltcm/performance.py`, ...), the swarm's spend limits, the harness loop's objective, `.github/`, `gateway/`,
+  `deploy/`, `league/house.py`; tests hold each source list as a subset; a package, compiled module or `.pyc` that would
+  shadow a protected module, any `.pth`, `.so` or `sitecustomize.py`, and git's own `.git*` files); every one lies in
+  the engineer's lane surfaces (`outside_surface`; below) and inside the branch's own lane (`lane_path`), and a
+  candidate's test file is only ever added, never changed, removed or renamed (`outside_surface`); all read whole from
+  GitHub's list (at most 300 files); at most 2 merges a New York day (`429 {cap: "merge_day"}`); the kill switch not
+  engaged (`423 {cap: "kill_switch"}`: with `auto_update` on a merge is a deploy, and the owner's stop must freeze the
+  code being looked at). The day's place is taken in one step with the switch and the review checked again. Every
+  refusal names its rule in `refused` (`review_missing`, `review_rejected`, `branch`, `fork`, `base`, `not_open`,
+  `draft`, `head_moved`, `protected_path`, `outside_surface`, `lane_path`, `files`, `ci_missing`, `ci_pending`,
+  `ci_failed`, `ci_jobs`, `github`, `no_answer`). A merge GitHub refused with a 4xx gives its place back; one nothing
+  answered, or answered with a 5xx, keeps it (`merged: "unknown"`); the docs route does the same. The proposal, review,
+  close and docs routes stay open under the kill switch: they move no money and land no code.
 - **The engineer's pull requests** (WP8b; [lib/github.mjs](lib/github.mjs) `ENGINEER_LANES`): `POST /v1/github/pr` with
   role `engineer` and a `lane`, on the branch `engineer/<lane>/<slug>-<8 hex>`. Each lane writes only its surface:
   `scheduler` `league/swarm/loop.py`; `research` `league/swarm/{researcher,preflight,claude_research}.py`; `memory`
   `league/swarm/{architect,strategist,diagnostician,seeds,mechanisms}.py`; `data` `league/{sailbox,data_job}.py`; and
-  every lane may add `league/tests/test_harness_candidate_*.py` (`*` one or more of `a-z0-9_`). Never a protected path.
+  every lane may add `league/tests/test_harness_candidate_*.py` (`*` one to eighty of `a-z0-9_`). Never a protected
+  path, and only what the harness lanes themselves declare (`ENGINEER_SURFACE`: the unprotected files of the lanes in
+  `league/swarm/harness_lanes.py`; a test reads them and fails while the list is wider). Two paths of the table are in
+  no harness lane's surface, so they are refused, on this route and the merge route, until `harness_lanes.py` names
+  them: the memory lane's `league/swarm/mechanisms.py` and the scheduler lane's `league/swarm/loop.py`. The harness
+  loop's own scheduler lane (`league/swarm/improvement.py`) changes the `Scheduler` class's body alone, and the file
+  also holds the calls to the Sail guard's brake, so the gateway, which reads no class, admits no write to it: the
+  scheduler lane opens and merges new tests only.
   At most 6 files of 512 KiB each, 1.5 MiB a request (the other roles keep 12 files of 64 KiB, 256 KiB a request), and
   at most 2 a New York day, counted apart from the other roles' `GITHUB_MAX_PULLS_PER_DAY` (`429 {cap:
   "engineer_day"}`; `/v1/health` `autonomy.engineer_pulls`). A retry that finds its own pull request, or GitHub's no

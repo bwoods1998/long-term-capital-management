@@ -40,7 +40,9 @@ REPO = Path(__file__).resolve().parents[1]
 #: The engineer's lanes (LTCM v3, V3-A, WP8b): the whole paths of each lane's surface. A branch
 #: `engineer/<lane>/<slug>-<8 hex>` may change only these and add new tests (ENGINEER_TESTS). The
 #: gateway admits and merges by the same table (`gateway/lib/github.mjs` ENGINEER_LANES; a gateway
-#: test reads this one and fails while the two differ).
+#: test reads this one and fails while the two differ), and only what the harness lanes themselves
+#: declare (its ENGINEER_SURFACE): it refuses league/swarm/mechanisms.py and the scheduler lane's
+#: league/swarm/loop.py until a harness lane (`league/swarm/harness_lanes.py` LANES) names them.
 ENGINEER_LANES: dict[str, tuple[str, ...]] = {
     "scheduler": ("league/swarm/loop.py",),
     "research": ("league/swarm/researcher.py", "league/swarm/preflight.py", "league/swarm/claude_research.py"),
@@ -108,12 +110,37 @@ FORBIDDEN: tuple[str, ...] = (
     # session calendar the updater's own session hold reads; how the House is deployed.
     "league/gym/", "league/swarm/gate.py", "league/swarm/bands.py", "league/swarm/evaluator.py", "league/swarm/store.py",
     "ltcm/data/", "scripts/data/", "deploy/",
+    # What the gateway's merge route protects besides (the WP8 review; `gateway/lib/protected.mjs`, whose tests read each
+    # source from the repository): one list, so a path the gateway will not merge does not self-deploy either. The
+    # framework that schedules and runs the House's jobs (the whole of league/ops/).
+    "league/ops/",
+    # What league/live/ and league/gym/ import from outside their trees, and what is sealed into the Gym bundle and the
+    # decider's runtime with them: the packages' own __init__ files, the structure core that classifies, limits and
+    # prices every real order, and the owner's flows the stops net out.
+    "league/__init__.py", "league/structure_core.py", "league/structures.py", "league/swarm/__init__.py",
+    "ltcm/__init__.py", "ltcm/performance.py",
+    # The swarm's settings as code (WP9) and its funded spend: the funding reader; the floor's own budget, pacer and
+    # economics.
+    "league/swarm/policy.json", "league/swarm/funding.py",
+    "league/budget.py", "league/pacer.py", "league/economy.py", "league/project_economics.py",
+    # Capital permissions outside league/live/.
+    "league/grants.py", "league/capital.py", "league/exposure.py",
+    # The harness loop's objective (`league/swarm/harness_lanes.py` PROTECTED): the lanes, their judges, the canary and
+    # the loop that retains or reverts a change, the benchmarks and the evidence lines it measures by; and what a
+    # researcher may see of Validation (D2a).
+    "league/swarm/harness_lanes.py", "league/swarm/harness_judges/", "league/swarm/harness_runtime.py",
+    "league/swarm/harness_improve.py", "league/swarm/improvement.py", "league/swarm/improvement_benchmark.py",
+    "league/swarm/canary.py", "league/swarm/benchmarks.py", "league/swarm/long_single_benchmarks.py",
+    "league/swarm/evidence.py", "league/swarm/diagnostics.py", "league/swarm/tournament.py", "scripts/harness_improve.py",
+    "playbooks/harness-improvement.md", "docs/goals/", "docs/benchmarks/",
+    # How the House is deployed and the House itself (its tick calls the updater).
+    "scripts/floor_box.py", "league/house.py", "CHANGELOG.md",
 )
 #: The one path the gateway's merge route refuses (`gateway/lib/protected.mjs` MERGE_FORBIDDEN) that is not FORBIDDEN:
 #: the House's configuration. The operator role proposes its dials (`CONFIG_DIALS`), and the updater ships a change to
 #: it only when the RUNNING release's `check_config` finds nothing but those dials moved, inside their bounds (the
-#: real-money switch is refused before that: `league/updater.py` `Updater.walls`). Every other path the gateway refuses,
-#: the updater refuses too (league/tests/test_ci.py holds the two lists to this difference).
+#: real-money switch is refused before that: `league/updater.py` `Updater.walls`). Every other path the gateway's list
+#: names, the updater refuses too (league/tests/test_ci.py holds the two lists to this difference).
 MERGE_ONLY: tuple[str, ...] = ("league/config.json",)
 #: The shared strategy list every architect proposal used to rewrite whole (`league/strategies`).
 RETIRED_REGISTRY = "league/strategies/registry.json"
@@ -165,7 +192,7 @@ def guard(paths: Iterable[str], role: str | None) -> list[str]:
             problems.append(f"{path}: not a plain repository path")
             continue
         lowered = clean.lower()
-        if any(lowered == f or (f.endswith("/") and lowered.startswith(f)) for f in FORBIDDEN):
+        if any(lowered == f.lower() or (f.endswith("/") and lowered.startswith(f.lower())) for f in FORBIDDEN):
             problems.append(f"{path}: no role may change this file")
         elif role is not None:
             allowed = ROLE_PATHS[role]

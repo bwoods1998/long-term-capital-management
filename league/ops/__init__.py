@@ -13,7 +13,9 @@ else is in the modules:
 
 `budget` (league/ops/budget.py) is the budget rule and the funding notices: protected (`league/ci.py` FORBIDDEN), as are
 `grant`, `drills` (which asks the updater for the rollback drill rather than running it in its child) and `context`
-(what every job, the budget rule included, is handed).
+(what every job, the budget rule included, is handed). Since the WP8 review the whole package is (`league/ops/`): the
+framework schedules and runs those jobs, so the gateway merges no change to it and the updater ships none; a new job is
+the owner's deploy.
 """
 from __future__ import annotations
 

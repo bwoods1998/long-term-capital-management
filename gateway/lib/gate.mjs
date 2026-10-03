@@ -47,9 +47,13 @@ export const REVIEWS_KEY = 'github-reviews-v1';
 //: The engineer's pull requests (V3-A, WP8b): a New York day's count of their own, apart from the other roles' UTC day.
 export const ENGINEER_PULLS_KEY = 'github-engineer-pulls-v1';
 export const ADMIN_LOG_KEY = 'admin-log-v1';
-//: How many recent docs commits and merges the Gate keeps (and /v1/health shows); verdicts kept; admin entries kept.
+//: How many recent docs commits and merges the Gate keeps (and /v1/health shows); verdicts kept with their reasons;
+//: rejected commits kept apart, longer (a reject is final for its commit, so it outlives the verdict list; past this
+//: many the oldest are forgotten and the Gate refuses an approve that a forgotten reject could have been about:
+//: `reviewRecord`, `reviewFor`); admin entries kept.
 const RECENT = 20;
 const REVIEWS_KEPT = 200;
+const REJECTS_KEPT = 2000;
 const ADMIN_KEPT = 50;
 //: The admin log's entries /v1/health shows.
 export const ADMIN_SHOWN = 20;
@@ -123,11 +127,29 @@ export function createGate({ store, env = {}, now = Date.now }) {
 
   const killed = () => read(store, KILL_KEY, { on: false }).on === true;
 
-  /** The reviewer's verdicts (V3-A, WP8), oldest first; a row that does not read is none. */
-  const reviewRows = () => {
-    const entries = read(store, REVIEWS_KEY, {})?.entries;
-    return Array.isArray(entries) ? entries.filter(row => row && typeof row === 'object') : [];
+  /**
+   * The reviewer's record (V3-A, WP8): `entries`, the verdicts with their reasons, oldest first (the last REVIEWS_KEPT);
+   * `rejected`, every rejected commit as `<pr>:<sha>` with its time (the last REJECTS_KEPT, kept apart so that no run of
+   * later verdicts pushes a reject out); `forgotten`, the time of the newest reject ever pushed out of `rejected`, or
+   * null. A row that does not read is none.
+   */
+  const reviewState = () => {
+    const row = read(store, REVIEWS_KEY, {}) || {};
+    const entries = Array.isArray(row.entries) ? row.entries.filter(entry => entry && typeof entry === 'object') : [];
+    const rejected = Array.isArray(row.rejected) ? row.rejected.filter(entry => entry && typeof entry.key === 'string') : [];
+    // A record written before `rejected` existed keeps its rejects in `entries`: they count as well.
+    const keys = new Set(rejected.map(held => held.key));
+    for (const entry of entries) {
+      const key = reviewKey(entry);
+      if (entry.verdict === 'reject' && !keys.has(key)) {
+        keys.add(key);
+        rejected.push({ key, at: entry.at });
+      }
+    }
+    const forgotten = typeof row.forgotten === 'string' && Number.isFinite(Date.parse(row.forgotten)) ? row.forgotten : null;
+    return { entries, rejected, forgotten };
   };
+  const reviewRows = () => reviewState().entries;
 
   /** One counted-a-day row (docs commits, merges; V3-A, WP8): today's count on New York's day and the last few. */
   const slotRow = (key, at) => {
@@ -722,9 +744,19 @@ export function createGate({ store, env = {}, now = Date.now }) {
       return slotSettle(DOCS_KEY, { day, id, outcome, at, extra: { commit: typeof commit === 'string' ? commit.slice(0, 64) : null } });
     },
     mergesToday(at = now()) { return slotRow(MERGES_KEY, at).count; },
+    /**
+     * The merge's place, taken in the same step that checks again what the router checked before it read GitHub: the
+     * kill switch (a merge lands code, and the updater deploys it, so a halted floor merges nothing) and the review (an
+     * approve on the exact commit and no reject: a reject recorded while GitHub was being read stops the merge here).
+     */
     mergeReserve({ pr = null, sha = null, at = now() } = {}) {
       // With auto_update on a merge is a deploy: the owner's kill switch stops it (proposals, reviews and docs pass).
       if (killed()) return { ok: false, status: 423, cap: 'kill_switch', error: 'The kill switch is engaged; no pull request is being merged.' };
+      const review = this.reviewFor({ pr, sha });
+      if (review.verdict !== 'approve') {
+        return { ok: false, status: 409, refused: review.verdict === 'reject' ? 'review_rejected' : 'review_missing',
+          error: review.verdict === 'reject' ? 'The automated review rejected that commit.' : 'No approve is recorded for that commit.' };
+      }
       return slotReserve(MERGES_KEY, MERGES_PER_DAY, 'merge_day', 'merges', at, { pr, sha: typeof sha === 'string' ? sha.slice(0, 64) : null });
     },
     mergeSettle({ day, id, outcome, merge_sha = null, at = now() } = {}) {
@@ -747,24 +779,48 @@ export function createGate({ store, env = {}, now = Date.now }) {
 
     /**
      * The reviewer's verdict on one pull request at one exact head commit (V3-A, WP8): `reject` when a reject is
-     * recorded (it is final for that commit), else `approve` when an approve is, else null.
+     * recorded (it is final for that commit), else `approve` when an approve is, else null. An approve recorded no later
+     * than a forgotten reject counts for nothing: that reject may have been of this commit.
      */
     reviewFor({ pr, sha } = {}) {
-      const rows = reviewRows().filter(row => row?.pr === pr && row?.sha === sha);
-      const reject = rows.find(row => row.verdict === 'reject');
-      const decided = reject || rows.find(row => row.verdict === 'approve');
-      return decided ? { verdict: decided.verdict, at: decided.at, reasons: decided.reasons } : { verdict: null };
+      const { entries, rejected, forgotten } = reviewState();
+      const key = reviewKey({ pr, sha });
+      const detail = verdict => entries.findLast(row => row.pr === pr && row.sha === sha && row.verdict === verdict);
+      const reject = rejected.find(row => row.key === key);
+      if (reject) return { verdict: 'reject', at: reject.at, reasons: detail('reject')?.reasons ?? [] };
+      const approve = detail('approve');
+      if (!approve || (forgotten && !(Date.parse(approve.at) > Date.parse(forgotten)))) return { verdict: null };
+      return { verdict: 'approve', at: approve.at, reasons: approve.reasons };
     },
-    /** Record a verdict. An approve after a reject of the same commit is refused; the same verdict again is a no-op. */
-    reviewRecord({ pr, sha, verdict, reasons = [], at = now() } = {}) {
-      const entries = reviewRows();
+    /**
+     * Record a verdict. An approve after a reject of the same commit is refused; the same verdict again is a no-op. Once
+     * a reject has been forgotten, an approve needs `opened_at` (the pull request's own creation time, read from GitHub)
+     * after it: a pull request opened later cannot have been the forgotten reject's.
+     */
+    reviewRecord({ pr, sha, verdict, reasons = [], opened_at = null, at = now() } = {}) {
+      const state = reviewState();
       const held = this.reviewFor({ pr, sha });
       if (held.verdict === 'reject' && verdict === 'approve') {
         return { ok: false, status: 409, refused: 'review_rejected', error: 'That commit was rejected; a revision is a new commit, reviewed again.' };
       }
       if (held.verdict === verdict) return { ok: true, verdict, at: held.at, duplicate: true };
+      if (verdict === 'approve' && state.forgotten && !(Date.parse(opened_at) > Date.parse(state.forgotten))) {
+        return { ok: false, status: 409, refused: 'review_forgotten',
+          error: 'Rejects as old as that pull request are no longer held; open the change again as a new pull request.' };
+      }
       const entry = { pr, sha, verdict, reasons: reasons.map(reason => String(reason).slice(0, 1000)).slice(0, 20), at: iso(at) };
-      write(store, REVIEWS_KEY, { entries: [...entries, entry].slice(-REVIEWS_KEPT) });
+      let { rejected, forgotten } = state;
+      if (verdict === 'reject') {
+        rejected = [...rejected, { key: reviewKey(entry), at: entry.at }];
+        const dropped = rejected.slice(0, Math.max(0, rejected.length - REJECTS_KEPT));
+        for (const row of dropped) {
+          // A dropped reject whose time does not read is taken as now's: every approve before it stops counting.
+          const stamp = Number.isFinite(Date.parse(row.at)) ? row.at : entry.at;
+          if (!forgotten || Date.parse(stamp) > Date.parse(forgotten)) forgotten = stamp;
+        }
+        rejected = rejected.slice(-REJECTS_KEPT);
+      }
+      write(store, REVIEWS_KEY, { entries: [...state.entries, entry].slice(-REVIEWS_KEPT), rejected, forgotten });
       return { ok: true, verdict, at: entry.at };
     },
 
@@ -1055,6 +1111,9 @@ export function createGate({ store, env = {}, now = Date.now }) {
     },
   };
 }
+
+//: A verdict's commit: one pull request at one exact head.
+const reviewKey = ({ pr, sha }) => `${pr}:${sha}`;
 
 const guarded = (read, what) => {
   try {
