@@ -34,10 +34,12 @@ operations are House jobs; one funding action a year, not one a week; an honest 
 **In V3-A part 1** (built and integrated on `release/v3a`; not deployed):
 - **Self-deploy (D5).** `auto_update` on: main's head reaches the House through the updater's walls (exact-commit
   attestation, the FORBIDDEN files, the trusted content checks, the release train and session hold, canary, watch,
-  rollback). The protected paths stay the owner's own deploy, and the list is wide on purpose (86 files and trees: the
-  money rules, the live path, the Gym, the evaluator, the gate and the bands, the House and all of its jobs, the budget
-  and what enforces it, `policy.json`, the walls themselves). A merged change to one of them deploys nothing and holds
-  every later head until the owner deploys. A monthly rollback drill proves the way back.
+  rollback). The protected paths are closed to every automated merge, and the list is wide on purpose (86 files and
+  trees: the money rules, the live path, the Gym, the evaluator, the gate and the bands, the House and all of its jobs,
+  the budget and what enforces it, `policy.json`, the walls themselves). A merged change to one of them inside the
+  release trees deploys nothing and holds every later head until the owner deploys. The gateway is on the list and
+  outside those trees: it ships only by the owner's wrangler deploy, and its merge holds nothing, so a House change
+  that needs it is merged after it is deployed. A monthly rollback drill proves the way back.
 - **The House's jobs** (`league/ops/`): the pre-open checks, the close economics, hygiene, the venue clock, the daily
   public scoreboard, the budget, the standing grant and the drills run on the House's own NYSE calendar as niced,
   bounded children with receipts; the operator reads a private receipts file without exec.

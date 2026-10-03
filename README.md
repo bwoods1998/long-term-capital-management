@@ -51,7 +51,8 @@ outcome established by more agents, more trials, or a successful backtest.
     moves the money rules or a deposit;
   - self-deploy: the in-box updater on, so main's head reaches the House through its walls (exact-commit CI, the
     protected files, the release train and session hold, canary and automatic rollback), while the 86 protected files
-    and trees stay the owner's own deploy;
+    and trees are closed to every automated merge (those inside a release ship only by the owner's own deploy, the
+    gateway only by his wrangler deploy);
   - live-path fixes (practice accounts capped as a Probe, practice reads clamped to the Gym's store, exit-only opens
     dropped) and the gateway's routes for the desk's pages and, later, an engineer agent.
 
@@ -256,17 +257,21 @@ python3 scripts/desk_receipts.py [YYYY-MM-DD]              # the House's job rec
 **Until V3-A part 1 is deployed, every release is the owner's deploy** (the running release has its updater off).
 **From that deploy a merge to main is a deploy.** The in-box updater deploys main's head by itself through its walls:
 exact-commit CI, a release train every four hours, no release from 12:55Z to 20:05Z on a trading day (to 21:05Z in
-winter), canary and automatic rollback. What `league/ci.py` lists as FORBIDDEN stays the owner's deploy, which ships
-main's head only: 86 files and trees, among them the money rules, the live path, the grant, the ledger and the book,
-the Gym, the evaluator, the gate and the bands, the House and all of its jobs (`league/ops/`), the budget rule and what
-enforces it (the settings loader, the Sail guard, the model router), `league/swarm/policy.json`, the updater, the
-watchdog, `ci.py`, `scripts/floor_box.py`, the gateway and the workflows. A merge that changes one of them deploys
-nothing, and holds every later head, until the owner deploys main's head. No money-path owner deploy from 13:25Z to
-20:05Z on a trading day except a rollback; a research-class release may deploy in session under the rules in
-[operations](docs/operations.md) ("Rules that hold every day"). `floor_box.py rollback` moves `current` to `previous`
-and restores code only: read `status` first and run it only when `previous` is the release you mean to return to. A
-merged pull request is not a deployed feature: verify it in the receipts or on the box. While the owner is away the
-desk is read, not touched: [operations](docs/operations.md), "Observing without exec".
+winter), canary and automatic rollback. What `league/ci.py` lists as FORBIDDEN (86 files and trees) no role and no
+automated merge may change. Inside the release trees (`league/`, `ltcm/`, `playbooks/`, `scripts/`, `deploy/`) a
+change is the owner's deploy, which ships main's head only: the money rules, the live path, the grant, the ledger and
+the book, the Gym, the evaluator, the gate and the bands, the House and all of its jobs (`league/ops/`), the budget
+rule and what enforces it (the settings loader, the Sail guard, the model router), `league/swarm/policy.json`, the
+updater, the watchdog, `ci.py` and `scripts/floor_box.py`. A merge that changes one of them deploys nothing, and holds
+every later head, until the owner deploys main's head. The rest of the list never reaches the box (`gateway/`,
+`.github/`, `CHANGELOG.md`, `docs/goals/`, `docs/benchmarks/`): a merge that changes only those is no release and holds
+nothing. The gateway ships only by `npx wrangler@4.129.1 deploy`, so a House change that needs a gateway change is
+merged after that gateway change is deployed; the workflows are held by the updater's own pin. No money-path owner
+deploy from 13:25Z to 20:05Z on a trading day except a rollback; a research-class release may deploy in session under
+the rules in [operations](docs/operations.md) ("Rules that hold every day"). `floor_box.py rollback` moves `current` to
+`previous` and restores code only: read `status` first and run it only when `previous` is the release you mean to
+return to. A merged pull request is not a deployed feature: verify it in the receipts or on the box. While the owner is
+away the desk is read, not touched: [operations](docs/operations.md), "Observing without exec".
 
 ## The public repository
 

@@ -374,4 +374,7 @@ exits 1), and an `npm install` would leave untracked files in a deploy checkout.
 `package.json` names, because a bare `npx wrangler` may resolve to a newer one. Run the check and the suite, read the
 result, then deploy; roll back with `npx wrangler@4.129.1 rollback <version id>`.
 No deploy from 13:25Z to 20:05Z on a trading day except a rollback. Deploy the gateway before a
-House release that depends on its change.
+House release that depends on its change. With the House's updater on (from V3-A part 1) nothing does that by itself:
+`gateway/` never reaches the box, so a merged change here holds no House release, while unprotected House code merged
+with it or after it ships at the next release train. Merge and deploy the gateway change first, then merge the House
+change that needs it.

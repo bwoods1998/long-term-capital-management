@@ -97,8 +97,13 @@ ladder and the credit types are not in it (below).
   to that). New on it: `league/house.py`, all of `league/ops/`, `scripts/floor_box.py`, `deploy/`,
   `league/swarm/policy.json`, `league/swarm/{settings,guard,models,funding}.py`, `league/gym/`,
   `league/swarm/{gate,bands,evaluator,store,evidence,tournament}.py`, the structure core, `ltcm/data/`, `scripts/data/`
-  and the harness loop's own objective. A change to any of them is the owner's deploy; the updater refuses it, and every
-  later head with it.
+  and the harness loop's own objective. A change to any entry inside the release trees (`league/`, `ltcm/`,
+  `playbooks/`, `scripts/`, `deploy/`) is the owner's deploy; the updater refuses it, and every later head with it.
+  Five entries are outside those trees and never reach the box (`gateway/`, `.github/`, `CHANGELOG.md`, `docs/goals/`,
+  `docs/benchmarks/`): the list holds the roles and the gateway's merge route there, the updater neither refuses nor
+  ships a change to them, and a merge that changes only those is no release and holds nothing. The gateway ships only
+  by wrangler, so a House change that needs a gateway change is merged after that gateway change is deployed; the
+  workflows are held by the updater's pin.
 - **`policy.json` is no longer delivered by the updater.** A merged change to it reaches the box by the owner's deploy,
   or the box's `swarm.json`, which wins over it, is edited instead. Research-class work that touches any protected file
   is an owner deploy.
@@ -129,7 +134,8 @@ ladder and the credit types are not in it (below).
   operations (**Now**, **Running unattended**, the release checklist, **Roll back**), design and README.
 
 **The deploy's record** (to be filled in at the deploy; the entry then moves under its date with the heading
-"`<time>`Z, House release `<release id>` (main `<commit>`), gateway `<gateway version>`"):
+"`<time>`Z, House release `<release id>` (main `<commit>`), gateway `<gateway version>`"; writing it is a docs-only
+merge by hand, which changes no release, holds nothing and needs no deploy):
 - the tree: main's commit, the CI run on it, the tree digest equal on both paths;
 - the gateway first: its version, `/v1/health` with `admin_log` and `autonomy`, the vars read from the version;
 - the House: the nightly daemon stopped idle; staged, promoted and the watch's verdict; the full `swarm.json` kept on

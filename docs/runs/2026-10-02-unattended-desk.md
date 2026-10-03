@@ -211,8 +211,9 @@ rollback. A1 adds:
   the session window and beside another deploy, and the House it leaves recovers it if the drill's own process dies.
   The monthly `drills` job only requests it; the updater launches it in the House's own process.
 
-The protected list is wide on purpose: 86 files and trees (below, **The walls**). A merge to main that touches only
-`docs/` changes no release: the release trees are `league/`, `ltcm/`, `scripts/`, `deploy/` and `playbooks/`.
+The protected list is wide on purpose: 86 files and trees (below, **The walls**). The release trees are `league/`,
+`ltcm/`, `scripts/`, `deploy/` and `playbooks/`: a merge to main that changes nothing in them (docs, the CHANGELOG,
+`gateway/`) changes no release and holds nothing. The gateway reaches production only by the owner's wrangler deploy.
 
 ### The live-path fixes (evidence reset 3, at the deploy)
 
@@ -301,13 +302,19 @@ passes, `binding` stays false and the daily page says so with the counts.
 What the desk may not do by itself. The release, merge, money and public-text walls are code; the rest are rules every
 change is reviewed against.
 
-- **The owner's deploy only:** the 86 files and trees `league/ci.py` lists as FORBIDDEN. The updater refuses any main
-  head that changes one of them, and the gateway's merge route refuses the same list and `league/config.json`. It
-  covers the constitution (the money rules), the ledger and the book, `league/live/` and the grant; the Gym, the
-  evaluator, the gate, the bands, the swarm's store and the data layer; the House and all of its jobs; the budget rule
-  and what enforces it (the settings loader, the Sail guard, the model router) and `policy.json`; the harness loop's
-  own objective; and the walls themselves: the watchdog, the updater, `ci.py`, `scripts/floor_box.py`, the gateway and
-  the workflows.
+- **The owner only:** the 86 files and trees `league/ci.py` lists as FORBIDDEN. No role's branch may change one, and
+  the gateway's merge route refuses the same list and `league/config.json`. It covers the constitution (the money
+  rules), the ledger and the book, `league/live/` and the grant; the Gym, the evaluator, the gate, the bands, the
+  swarm's store and the data layer; the House and all of its jobs; the budget rule and what enforces it (the settings
+  loader, the Sail guard, the model router) and `policy.json`; the harness loop's own objective; and the walls
+  themselves: the watchdog, the updater, `ci.py`, `scripts/floor_box.py`, the gateway and the workflows.
+  - Inside the release trees a change is the owner's deploy: the updater refuses any main head that changes one of
+    those files, and every later head with it.
+  - Five entries are outside the release trees and never reach the box: `gateway/`, `.github/`, `CHANGELOG.md`,
+    `docs/goals/` and `docs/benchmarks/`. The updater neither refuses nor ships a change to them, so a merge that
+    changes only those holds nothing. The gateway ships only by the owner's wrangler deploy, and a House change that
+    needs a gateway change is merged after that gateway change is deployed. The workflows are held by the updater's own
+    pin.
 - **Money:** no deposit, transfer or borrowing; no cap above funded money. The budget only tightens; the grant only
   ratifies on an owner's deploy or a landed deposit, never above the lower of equity and the owner's ceiling. The kill
   switch engages with either token and releases only with the owner's.

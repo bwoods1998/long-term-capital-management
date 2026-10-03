@@ -161,8 +161,11 @@ and output go into the record below.
 2. **The settings.** Take a fresh copy of the box's `swarm.json` and run `scripts/settings_migrate.py --swarm <copy>
    --policy-out <scratch> --swarm-out <scratch>` as a dry run. Never `--apply` into the repository: the box's file
    holds the private agenda, and `--apply` would write it into the public `policy.json`. The committed `policy.json`
-   must give the same settings as the box's file apart from the agenda keys and the retired burst keys; anything else
-   is re-cut by hand and goes through CI again.
+   must give the same settings as the box's file apart from the agenda keys and the retired burst keys: the dry run's
+   `changed` list (the keys of the box's file whose values the committed `policy.json` does not hold) names those and
+   nothing else. Anything else is re-cut by hand and goes through CI again. The tool's `settings_in_effect: unchanged
+   (checked)` is not that check: it compares the box's file with the tool's own proposed `policy.json`, which would
+   carry the agenda.
 3. **The gateway first.** In `gateway/` of a clean checkout of the same commit: `npm run check && npm test`, read the
    result. No lockfile is tracked, so never `npm ci` (it exits 1 without one) and no install is needed (the checks and
    the tests use Node alone). Then `npx wrangler@4.129.1 deploy`: the pinned version, because a bare `npx wrangler`
@@ -181,7 +184,8 @@ and output go into the record below.
    wins), and it is what the release in `previous` needs: a pre-V3-A release reads the research settings from
    `swarm.json` alone. The reduced file (the owner's switches and the private agenda only) is installed only once
    `previous` is itself a V3-A release, that is after the next House release (`scripts/settings_migrate.py`, ORDER AT
-   THE DEPLOY).
+   THE DEPLOY). It is not the tool's `--swarm-out` file as written: that one keeps `enabled` and `live` and drops the
+   agenda. How it is made and checked is in **The settings layers** ("The reduced `swarm.json`").
 6. **The checks.** `health.json`: the new release id, `real_money` true, `failures` [], an `ops` block, nothing in
    `stopped_because`. The grant: a `grant` receipt at the start reading `none` on `42c4a3af`, or `ratified` with the
    trigger `deposit` (once: **The standing grant**); no ratification without a deposit. The evaluator:
@@ -201,7 +205,9 @@ go back to. After a refused deploy (exit 2) nothing needs undoing; after exit 3 
 **Roll back**, below, has what else a rollback across A1 needs. The gateway's way back is `npx wrangler@4.129.1
 rollback <old version id>`.
 
-**The deploy's record** (to be written at the deploy; until then production is the Oct 2 release above):
+**The deploy's record** (to be written at the deploy; until then production is the Oct 2 release above). Writing it,
+here and in the CHANGELOG, is a docs-only merge by hand: it changes no release, holds nothing and needs no deploy
+(**The protected paths**, below).
 
 | Step | UTC | Result |
 |---|---|---|
@@ -240,9 +246,12 @@ No command is needed for any of this; read the receipts (**Observing without exe
   on the state, so each of Oct 3's two occurrences runs only if the House is on A1 before it; otherwise the first
   drills are Nov 7's. To skip a month, set `{"jobs": {"drills": {"enabled": false}}}` in `<state>/ops.json` before
   15:00Z.
-- **The updater is on.** A merge to main that passes CI on its exact commit and changes no protected path deploys
-  itself at the next release train. A merge that changes a protected path is refused, and so is every later head, until
-  the owner deploys main's head.
+- **The updater is on.** A merge to main that passes CI on its exact commit, changes the release trees (`league/`,
+  `ltcm/`, `playbooks/`, `scripts/`, `deploy/`) and changes no protected path in them deploys itself at the next
+  release train. A merge that changes a protected path in those trees is refused, and so is every later head, until the
+  owner deploys main's head. A merge that changes nothing in those trees (docs, the CHANGELOG, `gateway/`) is no release
+  and holds nothing: a gateway change reaches production only by `npx wrangler@4.129.1 deploy` (**The protected
+  paths**, below).
 - **The no-forward-edge count** of the budget rule starts at Monday Oct 5's session; its 60th session closes on
   Dec 29, 2026.
 
@@ -300,13 +309,14 @@ standing grant and the gateway's new routes. The code is the authority; these su
 
 | Class | What | How | When |
 |---|---|---|---|
-| Owner deploy | any change to a protected path (below), a `config.json` change beyond its operating dials, `real_money`, and every gateway change | `scripts/floor_box.py deploy` from `~/Work/ltcm-deploy`; the gateway by `npx wrangler@4.129.1 deploy` | the money path's window (20:05-13:25Z on a trading day; from 21:05Z in winter), except a rollback |
-| The updater | a change merged to `main` that touches the release trees (`league/`, `ltcm/`, `playbooks/`, `scripts/`, `deploy/`) and no protected path: the swarm's loop, researcher, architect, strategist and pool, the publisher, the House's service code. `league/config.json` only when the running release's checks find nothing but its bounded dials moved. A docs-only merge changes no release | the House by itself: it reads main's head every half hour, then the attested commit, the walls, the release train, the canary, promotion, the ten-minute watch, rollback | never inside its calendar hold (12:55Z to 20:05Z on a trading day, to 21:05Z in winter), never within 30 minutes of a House start, at most one release every `release_train_hours` (4) |
+| Owner deploy | any change to a protected path in the release trees (below), a `config.json` change beyond its operating dials, `real_money`, and every gateway change | `scripts/floor_box.py deploy` from `~/Work/ltcm-deploy`; the gateway by `npx wrangler@4.129.1 deploy` | the money path's window (20:05-13:25Z on a trading day; from 21:05Z in winter), except a rollback |
+| The updater | a change merged to `main` that touches the release trees (`league/`, `ltcm/`, `playbooks/`, `scripts/`, `deploy/`) and no protected path: the swarm's loop, researcher, architect, strategist and pool, the publisher, the House's service code. `league/config.json` only when the running release's checks find nothing but its bounded dials moved. A merge that changes nothing in those trees (docs, the CHANGELOG, `gateway/`) changes no release and holds nothing | the House by itself: it reads main's head every half hour, then the attested commit, the walls, the release train, the canary, promotion, the ten-minute watch, rollback | never inside its calendar hold (12:55Z to 20:05Z on a trading day, to 21:05Z in winter), never within 30 minutes of a House start, at most one release every `release_train_hours` (4) |
 | Engineer merges (the engineer is not in A1, so nothing calls these routes yet) | `engineer/<lane>/<slug>-<hash>` pull requests | the gateway's `POST /v1/github/merge`: green `checks.yml` on the exact head (its three jobs), a recorded approve and no reject for that commit, no protected path, only the branch's own lane and only what the harness lanes declare, new `league/tests/test_harness_candidate_*.py` files only ever added; at most 2 a New York day; never while the kill switch is on | a merge is then an updater release |
 
-**The protected paths.** `league/ci.py` `FORBIDDEN` lists 86 files and trees. The updater refuses a main head that
-changes any of them, and the gateway's merge route refuses the same list plus `league/config.json`
-(`gateway/lib/protected.mjs`; a test on each side fails while the two lists differ by anything else). It covers:
+**The protected paths.** `league/ci.py` `FORBIDDEN` lists 86 files and trees. No role's branch may change one, and the
+gateway's merge route refuses the same list plus `league/config.json` (`gateway/lib/protected.mjs`; a test on each
+side fails while the two lists differ by anything else). The updater refuses a main head that changes any of them
+inside the release trees; five entries lie outside those trees and never reach the box (below). The list covers:
 - the money rules, the grant and the order path: `league/constitution.py`, `league/live/`, `league/live_trading.py`,
   the ledger, the book, `league/structure_core.py`;
 - the evaluator's identity and the evidence: `league/gym/`, `league/evaluator.py`, `league/stats.py`,
@@ -315,18 +325,37 @@ changes any of them, and the gateway's merge route refuses the same list plus `l
 - the budget and everything that feeds or enforces it: all of `league/ops/` (the job framework, the budget rule, the
   close economics, the standing grant's job, the drills), `league/swarm/settings.py`, `guard.py`, `models.py` and
   `funding.py`, and `league/swarm/policy.json`;
-- the harness loop's own objective: `league/swarm/harness_lanes.py`, its judges, canary and benchmarks;
+- the harness loop's own objective: `league/swarm/harness_lanes.py`, its judges, canary and benchmarks, and the goal
+  and benchmark documents (`docs/goals/`, `docs/benchmarks/`);
 - the walls themselves and how the House is deployed: `league/ci.py`, `league/updater.py`, `league/watchdog.py`,
-  `league/house.py`, `scripts/floor_box.py`, `deploy/`, `gateway/`, `.github/`.
+  `league/house.py`, `scripts/floor_box.py`, `deploy/`, `gateway/`, `.github/`, and the release record `CHANGELOG.md`.
 
 Read the list itself before relying on a path being free: it is the authority.
 
-**A merged change to a protected file waits for the owner, and holds the train.** The updater compares main's head
-with the running tree file by file. A head that changes a protected file is refused, with a House warning that names
-the file, and so is every later head, because each still differs from the running release in that file. Nothing
-self-deploys again until the owner deploys main's head. Research-class work that touches a protected file (a new job
-under `league/ops/`, a setting in `league/swarm/settings.py` or `policy.json`, the store, the tournament) is therefore
-an owner deploy: merge it when that deploy is at hand.
+**What the updater does with the list.** The updater unpacks and compares only the release trees: `league/`, `ltcm/`,
+`playbooks/`, `scripts/` and `deploy/` (`league/updater.py` `TREES`, the trees `floor_box.py deploy` sends too). Its
+wall is the part of the list inside them. Five entries lie outside and never reach the box as files: `gateway/`,
+`.github/`, `CHANGELOG.md`, `docs/goals/` and `docs/benchmarks/`. For those the list holds the roles and the gateway's
+merge route only: the updater neither refuses a change to them nor ships it.
+- **A head whose release trees equal the running release's is no release.** The digests are equal, so the updater's
+  look reads "the box already runs main": nothing deploys, nothing is refused and nothing is held. That is what a
+  docs-only merge (the CHANGELOG entry of a deploy among them) or a gateway-only merge gives when the box runs the head
+  before it.
+- **A gateway change reaches production only by `npx wrangler@4.129.1 deploy`**, and its merge holds nothing. A merge
+  that changes `gateway/` together with unprotected House code ships the House part by itself at the next train, while
+  the gateway part waits for the owner. So a House change that needs a gateway change is merged only after that gateway
+  change is merged and deployed.
+- **`.github/workflows/` is held by the updater's pin**, not by the list: a head that would be a release is refused
+  while its workflows differ from the running release's `TRUSTED_WORKFLOWS_SHA256`, and the re-pin is a change to
+  `league/updater.py`, which is protected (**Rules that hold every day**). Nothing on the box holds the other files
+  under `.github/`.
+
+**A merged change to a protected file in the release trees waits for the owner, and holds the train.** The updater
+compares main's head with the running tree file by file. A head that changes a protected file is refused, with a House
+warning that names the file, and so is every later head, because each still differs from the running release in that
+file. Nothing self-deploys again until the owner deploys main's head. Research-class work that touches a protected file
+(a new job under `league/ops/`, a setting in `league/swarm/settings.py` or `policy.json`, the store, the tournament) is
+therefore an owner deploy: merge it when that deploy is at hand.
 
 **An owner deploy ships main's head, nothing else.** An owner release of any other tree is replaced by main's head at
 the next train, or, where it differs from main in a protected file, makes every later head read as a protected change.
@@ -359,8 +388,8 @@ DEFAULTS (settings.py) < league/config.json "swarm"/"gym" < league/swarm/policy.
 - **`<state>/swarm.json`** keeps the owner's switches and the private agenda text (`architect.agenda`,
   `architect.agenda_locked`), which the public repository must not hold. Any other key left there still wins over
   `policy.json`: at the A1 deploy the full file stays (its values equal `policy.json`'s), and the reduced one goes in
-  only once `previous` is itself a V3-A release (**The A1 deploy**, step 5). A hand edit of `swarm.json` is a command on
-  the box, and it outlives every release.
+  only once `previous` is itself a V3-A release (**The A1 deploy**, step 5; "The reduced `swarm.json`", below). A hand
+  edit of `swarm.json` is a command on the box, and it outlives every release.
 - **`<state>/budget.json`** is applied last and only to tighten (the budget rule, below). The retired burst trio
   (`guard.burst_until`, `burst_cap_usd`, `after_burst_usd_day`) changes nothing if a file still names it, and an
   operator's own `budget` key in `swarm.json` is replaced, never read.
@@ -369,6 +398,39 @@ DEFAULTS (settings.py) < league/config.json "swarm"/"gym" < league/swarm/policy.
 What the swarm actually runs on is the merged result, budget included: the receipts carry the budget's knobs
 (`budget.knobs`), and the heartbeat shows the Sail guard's budget line (`budget_research_usd_day`, `budget_source`) and
 the researcher pace (`status.researcher_pace`).
+
+**The reduced `swarm.json`.** `scripts/settings_migrate.py` writes one to `--swarm-out`, and that file is not yet the
+one for the box. It keeps only `enabled`, `live` and the top-level notes, and moves every other key into the tool's
+proposed `policy.json`, the two agenda keys among them. The proposed file is never committed (the repository is
+public), so over the committed `policy.json` the tool's file leaves the box with no agenda: the architect runs without
+one and the strategist stops (it runs only while `architect.agenda_locked` is set). The file for the box is the tool's
+output plus `architect.agenda` and `architect.agenda_locked`, copied by hand from the full file. Before it is
+installed, the settings are loaded over the committed `policy.json` with the full file and with the reduced one, and
+the two must be equal, both agenda keys included. On the owner's machine, against copies, from the root of a checkout
+of the commit the box runs:
+
+```sh
+python3 - swarm.full.json swarm.reduced.json <<'EOF'
+import json, sys
+from league.swarm import settings
+
+def layers(path):   # DEFAULTS < config.json < the committed policy.json < this swarm.json, before the budget
+    out = settings._merge(settings.load(), json.load(open(path)))
+    for key in ("burst_until", "burst_cap_usd", "after_burst_usd_day"):   # retired: no code reads them
+        out["guard"].pop(key, None)
+    return out
+
+full, reduced = layers(sys.argv[1]), layers(sys.argv[2])
+assert full == reduced, "the reduced swarm.json changes the settings"
+print("same settings; agenda:", bool(full["architect"]["agenda"]), "locked:", bool(full["architect"]["agenda_locked"]))
+EOF
+```
+
+The last line says whether each agenda key is set (both are, in the box's file today). The comparison is made before
+the budget, which caps the spend knobs and would hide a difference under its cap. The tool's own `settings_in_effect:
+unchanged (checked)` is not this check: it sets the full file over the current `policy.json` against its reduced file
+over its own proposed `policy.json`, which holds the agenda. Keep the full file: a rollback to a pre-V3-A release needs
+it (**Roll back**).
 
 **How the tests see the layers.** The league's tests read an empty policy layer
 (`league/tests/fixtures/policy_empty.json`, switched on for the whole process by importing `league.tests`), so they
@@ -597,8 +659,10 @@ checkout's `.data` (the box record and the admin token): never `ln -sfn` over it
   key means off, and the release that runs today has it off). A merge to main is then a deploy: it reaches the House at
   the next release train unless a wall refuses it (**Deploy classes**, above). Merge to main only what may run on the
   House, and in the window its class allows; the updater holds every release through the session itself (12:55Z to
-  20:05Z, to 21:05Z in winter), whatever the class. A merge that changes a protected file deploys nothing and holds
-  every later head until the owner deploys main's head.
+  20:05Z, to 21:05Z in winter), whatever the class. A merge that changes a protected file in the release trees deploys
+  nothing and holds every later head until the owner deploys main's head. A merge that changes only `gateway/` or docs
+  is no release and holds nothing: the gateway ships by wrangler alone, so a House change that needs a gateway change is
+  merged only after that gateway change is deployed (**The protected paths**, above).
 - **From the A1 deploy ratification is the House's job**: a deploy that moves the money digest leaves the grant
   inactive until it is ratified, and the `grant` job (at each start and hourly) does it after an owner release that
   moved the digest and after a deposit (**The standing grant**, above). Read its receipt after any money-rule deploy;
@@ -805,7 +869,9 @@ its CHANGELOG entry is written when the record is next brought up to date.
 8. **Criterion 1 on the new release:** with no calibration order working and outside the House test's window,
    `floor_box.py stop`, then `start`; then kill the swarm process. Both must recover (every instance restored, the swarm
    back within a minute).
-9. **A CHANGELOG entry** for the release (the docs-only commit does not change the release tree's digest).
+9. **A CHANGELOG entry** for the release (the docs-only commit does not change the release tree's digest, so from A1
+   the updater reads "the box already runs main": it is no release, it holds nothing and it needs no deploy).
+   `CHANGELOG.md` is on the protected list for the roles and the gateway's merge route, so the entry is merged by hand.
 
 **The first release on the new state root.** The old House's state was moved aside on Sept 26; the
 new House starts on an empty `/workspace/state` with `real_money` false. Its first owner deploy
@@ -831,10 +897,12 @@ lockfile is tracked, so never `npm ci` (it exits 1 without one), and no install 
 use Node alone. Wrangler is run at the pinned version (4.129.1, the one `gateway/package.json` names), because a bare
 `npx wrangler` may resolve to a newer one. Record the version id the deploy prints: it is what
 `npx wrangler@4.129.1 rollback <version id>` returns to. Deploy the gateway before a House release that needs its
-change. After a deploy, read `python3 scripts/gateway_admin.py status`. Caps and `OPTION_STRUCTURES_REAL` change only
-this way. Deploy from a clean checkout of exactly `origin/main`: a deploy from a branch drops whatever else main
-holds. From Release B the gateway
-binds a KV namespace (`LIBRARY`, `ltcm-gateway-library`) for the research library; never delete it.
+change. From A1 that order is set by the merges: a merged gateway change holds nothing on the box, and a merge of
+unprotected House code is a release at the next train, so the House change is merged only after the gateway change it
+needs is merged and deployed. After a deploy, read `python3 scripts/gateway_admin.py status`. Caps and
+`OPTION_STRUCTURES_REAL` change only this way. Deploy from a clean checkout of exactly `origin/main`: a deploy from a
+branch drops whatever else main holds. From Release B the gateway binds a KV namespace (`LIBRARY`,
+`ltcm-gateway-library`) for the research library; never delete it.
 
 **The site.** The page is the owner's (since Oct 2: hands-off for this repository's work; keep the publisher's data
 contracts stable and ask the owner before changing them). The owner deploys it in `~/Work/personal-site`: `npm test`,
@@ -2104,7 +2172,9 @@ effect with no deploy and outlives every release. A change to `policy.json` is a
 owner's deploy (the file is protected: the updater ships no change to it), and it takes effect only for keys the box's
 file does not set, that is once the reduced `swarm.json` is installed (**The A1 deploy**, step 5). The budget rule then
 tightens the result. The rows that stay only in `swarm.json` on the box are the owner's switches (`enabled`, every
-`live.*` row) and the private agenda (`architect.agenda`, `architect.agenda_locked`).
+`live.*` row) and the private agenda (`architect.agenda`, `architect.agenda_locked`). `scripts/settings_migrate.py`'s
+`--swarm-out` file keeps the switches only: the two agenda keys are added by hand and the result is checked before it
+is installed (**The settings layers**, "The reduced `swarm.json`").
 
 | Switch | Where | Now | What it does | How it changes |
 |---|---|---|---|---|
@@ -2113,7 +2183,7 @@ tightens the result. The rows that stay only in `swarm.json` on the box are the 
 | `live_trading.ceiling_usd` | `league/config.json` | 5500 | the grant's capital ceiling | owner deploy; the standing grant ratifies a raise after it (`--ratify` if it refuses) |
 | `performance.start_at`, `start_equity` | `league/config.json` | 06:25:30Z Sept 26, $481.65 | the profit baseline; equals the site's `PERFORMANCE_START_AT` | only with a site reset |
 | `gym.enabled`, `swarm.enabled` | `league/config.json`, overlaid by `swarm.json` | false in `config.json`; true in `swarm.json` | the Gym and the swarm in the House's tick | edit `swarm.json`; a change of `enabled` takes a House restart (`config.json` `swarm._about`) |
-| `swarm.json` | `/workspace/state/` on the box | present, mode 600; the full file until the reduced one is installed | the owner's switches (`enabled`, `live`) and the private agenda, over `policy.json`; re-read every loop (the live path each minute), no deploy; never the evidence lines | edit it on the box, keeping a before-copy |
+| `swarm.json` | `/workspace/state/` on the box | present, mode 600; the full file until the reduced one is installed (the migration tool's output plus the two agenda keys by hand: **The settings layers**) | the owner's switches (`enabled`, `live`) and the private agenda, over `policy.json`; re-read every loop (the live path each minute), no deploy; never the evidence lines | edit it on the box, keeping a before-copy |
 | `league/swarm/policy.json` | the repository (in every release from A1) | the research settings, the box's as of 21:00Z Oct 2 | the swarm's throughput and research settings as code, between `config.json` and `swarm.json`; never `enabled` or `live` (ignored there, with one alert); a malformed file is ignored whole, with one alert | a reviewed pull request, then the owner's deploy (protected: the updater ships no change to it) |
 | `budget.json` | `/workspace/state/` on the box | absent today; written by the `budget` job from A1 | the budget rule's research dollars a day, applied last and only to tighten; missing: the floor; older than 36 h: never looser | the rule alone (`league/ops/budget.py`, owner deploy); never by hand |
 | `ops.json` | `/workspace/state/` on the box | the owner's private file, read from A1; absent, every job runs and no external cost is declared | the House's jobs: `enabled` false stops them all, `jobs.<name>.enabled` false one; `economics.external` (the owner's declared external costs, `complete` true when the list is whole: undeclared, the close economics lists them as unknown, never zero), `hygiene.end_retired_cohorts` | edit it on the box (a command on the box) |
