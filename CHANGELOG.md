@@ -19,37 +19,48 @@ Operator changes that are not deploys (`swarm.json`, image adoptions, grant rati
 beside the deploys of their day, marked "no deploy". The run records have the detail: to Sept 29,
 `docs/runs/2026-09-26-options-swarm.md` on branch `run/options-swarm-2026-09-26`; Sept 30-Oct 2,
 [docs/runs/2026-09-30-continuous-learning.md](docs/runs/2026-09-30-continuous-learning.md); from Oct 2,
-[docs/runs/2026-10-02-unattended-desk.md](docs/runs/2026-10-02-unattended-desk.md). From the V3-A part 1 deploy the
-House also deploys main by itself (the updater): its daily pages in [docs/runs/desk/](docs/runs/desk/README.md) count
-its self-deploys and self-rollbacks, and they get entries here like any other deploy.
+[docs/runs/2026-10-02-unattended-desk.md](docs/runs/2026-10-02-unattended-desk.md). From the V3-A part 1 deploy
+(Oct 3, below) the House also deploys main by itself (the updater): its daily pages in
+[docs/runs/desk/](docs/runs/desk/README.md) count its self-deploys and self-rollbacks, and they get entries here like
+any other deploy.
 
 ## Not yet deployed
 
-The running House release is `20261002T112610Z-e11710692569` (main `e3d0111f`, 11:26Z Oct 2, below), and the box's
-updater is off. Until PR #489 merges, main is ahead of it by docs, by comment-only edits (the Oct 2 pause refresh: no
-behaviour change, verified by an AST comparison) and by a prune of dead files from the Kalshi era and the first run
-(`scripts/jev_lab_eval/`, `scripts/{attribute_fills,repair_leg_fills,repair_no_fills,survey_kalshi}.py`,
-`deploy/ltcm.service` and `league/FEEDS.md`: nothing imports or runs them, and they stay readable at tag
-`archive/pre-options-2026-09-26`). Those paths are in the release bundle, and the comment edits touch modules the live
-path loads, so the next House release from main deploys in the money path's window (20:05-13:25Z); the money digest
-does not move. Once PR #489 merges, main's head is V3-A part 1 (below) as well, which the running release, its updater
-off, does not take until the owner's deploy.
+The running House release is `20261003T084912Z-be16b05904ff` (main `266e6861`, 08:49Z Oct 3, below), the gateway is
+`e95a2d4a`, and the box's updater is on. Main holds nothing in its release trees that the box does not run, and the
+gateway runs main's `gateway/`. What is built and not deployed is on branches.
 
-### V3-A part 1: built and integrated, waiting for the owner's deploy (`release/v3a`, PR #489)
+### On branches, not in V3-A part 1
+
+- `v3/wp6`, the forward ladder and its benchmark (evidence v3, the owner's D2). As first specified it does not meet its
+  benchmark rule. A tighter design was frozen before any confirmation run; the confirmation, under a rule
+  pre-registered before it, has not been run. It changes `league/live/` and the constitution: an owner deploy and one
+  more evidence reset.
+- `v3/wp7`, credit types at $2,000 of equity or more and a paper proof per type (money rules v3, D3), with the
+  gateway's credit list: an owner deploy and a money-digest move. With the ladder it is V3-A part 2.
+- `v3/b1` (research v3), `v3/b23` (births from the mechanism library, the Train kill tests as code, the strategist's
+  whole agenda), `v3/b4` (the weekly post-mortem and the monthly cost review), `v3/b5` (the engineer and the reviewer).
+  Each changes a protected file as it stands (`league/swarm/settings.py`, the store, the evidence and tournament
+  modules, `league/ops/`), so each is an owner deploy, not an updater release.
+
+## 2026-10-03
+
+### 08:49Z, V3-A part 1: House release `20261003T084912Z-be16b05904ff` (main `266e6861`; PR #489), gateway `e95a2d4a`, evidence reset 3
 
 LTCM v3's first release, the one that lets the desk run unattended
-([the run record](docs/runs/2026-10-02-unattended-desk.md) has the why and the owner's six decisions). It is **not
-deployed**: this is what the release contains, and its deploy's record goes at the end of this entry. It carries
+([the run record](docs/runs/2026-10-02-unattended-desk.md) has the why and the owner's six decisions). It is **live**:
+the owner's deploy on Saturday Oct 3, outside a session, promoted 08:49:56Z. This entry says what the release contains
+and ends with the deploy's record. It carries
 WP1-WP5, WP8, WP8b and WP9 with their review fixes, the four integration lenses (ops, money, deploy, contract), the
-settings migration, the fixes for the causes of the integrated head's CI failures, main (the dead-file prune above) and
-this docs pass. It moves the evaluator's fingerprint and carries money-path changes, so it ships only by a planned owner
-deploy outside a session.
+settings migration, the fixes for the causes of the integrated head's CI failures, the canary fix the rollback
+rehearsal called for (the entry below), main and the docs pass. It moves the evaluator's fingerprint and carries
+money-path changes, so it shipped by a planned owner deploy outside a session.
 
 Money digest `42c4a3af`, unchanged (the constitution is untouched, `digest()` equals `PINNED_DIGEST`): no digest
-ratification. **Evidence reset 3** at the deploy: `league/live/` changes, so the execution fingerprint moves
-`47587e22…` → `ba60c473…`; the Gym's image and bundle are unchanged. Every practice cohort ends, and a
+ratification. **Evidence reset 3** at the deploy: `league/live/` changes, so the execution fingerprint moved
+`47587e22…` → `ba60c473…`; the Gym's image and bundle are unchanged. Every practice cohort ended (nine), and a
 (family, version) that had a cohort does not practise again: practice refills only from new versions. The forward
-ladder and the credit types are not in it (below).
+ladder and the credit types are not in it (**Not yet deployed**, above).
 
 - **WP1, the updater and deploys** (`league/updater.py`, `league/watchdog.py`, `scripts/floor_box.py`,
   `league/config.json`, `league/ci.py`, `league/house.py`, `league/swarm/harness_runtime.py`): `auto_update` true
@@ -134,32 +145,113 @@ ladder and the credit types are not in it (below).
 - **Tests.** The league's tests read an empty policy layer; the committed `policy.json` is judged in one place, by
   value and by the House's own loop; fixtures that route to Claude state the budget they need; the House is held to
   never importing `league.tests`.
+- **From main** (ahead of the release before by docs and by two changes inside the release bundle, both of Oct 2):
+  comment-only edits (the Oct 2 pause refresh: no behaviour change, verified by an AST comparison) and a prune of dead
+  files from the Kalshi era and the first run (`scripts/jev_lab_eval/`,
+  `scripts/{attribute_fills,repair_leg_fills,repair_no_fills,survey_kalshi}.py`, `deploy/ltcm.service` and
+  `league/FEEDS.md`: nothing imports or runs them, and they stay readable at tag `archive/pre-options-2026-09-26`).
+  The comment edits touch modules the live path loads, so they shipped in the money path's window.
+- **The canary fix** (`league/house.py` `_expedition_notices`, commit `0c8e8107`; three tests in
+  `league/tests/test_pacer.py`): the calendar ending the old League's expedition is a warning, not an error; a budget
+  spent before its last day is still an error. Without it no release could pass its canary from 00:00Z Oct 3 (the
+  entry below has the finding).
 - **Docs:** [the run record](docs/runs/2026-10-02-unattended-desk.md), [docs/runs/desk/](docs/runs/desk/README.md),
   operations (**Now**, **Running unattended**, the release checklist, **Roll back**), design and README.
 
-**The deploy's record** (to be filled in at the deploy; the entry then moves under its date with the heading
-"`<time>`Z, House release `<release id>` (main `<commit>`), gateway `<gateway version>`"; writing it is a docs-only
-merge by hand, which changes no release, holds nothing and needs no deploy):
-- the tree: main's commit, the CI run on it, the tree digest equal on both paths;
-- the gateway first: its version, `/v1/health` with `admin_log` and `autonomy`, the vars read from the version;
-- the House: the nightly daemon stopped idle; staged, promoted and the watch's verdict; the full `swarm.json` kept on
-  the box;
-- the checks: the evaluator adopted (reset 3) with trials, lineages and looks unchanged; the first `grant` receipt;
-  `ops` in `health.json`; `budget.json` written or the floor in force; the updater built with no head pending;
-- criterion 1 (a restart and a killed swarm) on the new release.
+**The deploy's record** (Oct 3, UTC; writing it is a docs-only merge by hand, which changes no release, holds nothing
+and needs no deploy). The order followed: the rollback rehearsed on production first (the entry below), CI green on
+the exact head, the merge, the gateway with its own rollback rehearsed, the House, the checks, criterion 1.
+- **The tree.** CI green on the exact head `0c8e8107` (run 37109800144, 08:44:41Z: the `gateway`, `tests (3.11)` and
+  `tests (3.14)` jobs). PR #489 merged at 08:45:39Z as the merge commit `266e6861`, whose whole tree equals the tested
+  head's; CI on the merge commit passed too (push run 37110781254).
+  - On that commit: the tree `floor_box.py` packs (941 files, bundle `be16b05904ff`) and the updater's unpack of the
+    commit have one tree digest (`d817cbf1…`); `digest()` equals `PINNED_DIGEST`; the money digest is `42c4a3af`; the
+    execution fingerprint is `ba60c473…`; `auto_update` is true.
+  - The settings: the box's `swarm.json` at 08:45Z was JSON-equal to the copy `policy.json` was cut from, and the
+    dry-run migration changed exactly the four expected keys.
+- **The gateway first: `e95a2d4a`,** deployed at 08:46Z from the merge commit with `npx wrangler@4.129.1 deploy`, after
+  404 of 404 tests on Node 26 and on Node 24. The version serves 100%.
+  - `/v1/health` answers ok with `autonomy` and `admin_log` present; the kill switch stayed false and the caps are
+    unchanged.
+  - Read from the deployed version: `OPTION_STRUCTURES_REAL` is the four debit types, `LOW_BALANCE_USD` 25,
+    `CRITICAL_BALANCE_USD` 12.
+  - Its own rollback was rehearsed at 08:47-08:48Z: back to `4471596a` (16 keys in `/v1/health`), then to `e95a2d4a`
+    again (18 keys). The rollback target is `4471596a`.
+  - The old House ran healthy on the new gateway before its own deploy (`failures` [], 9 instances).
+- **The House.** The nightly daemon was stopped while idle (`nightly.stop`, the lock free). `floor_box.py deploy` from
+  the deploy checkout at the merge commit: the canary passed, the release was promoted at 08:49:56Z, the ten-minute
+  watch was clean, the verdict was PROMOTED and the deploy exited 0. The rollback target (`previous`) is
+  `20261002T112610Z-e11710692569`. `nightly.stop` was removed and the daemon came back; the harness observer was
+  re-pointed to the merge commit and its tree digest. The full `swarm.json` stays on the box, untouched.
+- **The checks** (09:00-09:01Z, read-only).
+  - Health: the new release id, `real_money` true, `failures` [], nothing in `stopped_because`, the session closed (a
+    Saturday); an `ops` block with one job due and one ok, none failed or missed (the runner installed at 08:50:29Z).
+  - The standing grant: its start receipt is ok. It ratified once, on its first look, with the trigger `deposit`:
+    deposits that landed before the last pin, seen for the first time by the job's new record of deposits (the one
+    extra ratification [operations](docs/operations.md), "The standing grant", says a first run may make). The digest
+    is `42c4a3af` and the capital is the account's equity, under the ceiling. The looks after it answer `none`, and
+    `blocked` reads null.
+  - Evidence reset 3: `research_evaluator.execution` is `ba60c473…`, the head's; 13 `evaluator_adopted` events at
+    08:50:34Z, one per alive family; all nine practice cohorts `complete: evaluator changed`.
+  - The jobs: a registry of 11; `scripts/desk_receipts.py` reads `latest.json` through the Files API with no exec.
+  - The budget: no `budget.json` until the first run at 00:30Z, so the floor is in force ($3 a day of Sail research,
+    $2 of Claude). The knobs are applied: the researchers' Sail pace $0.05 an hour, the population's ceiling and start
+    12, the architect every 14,400 s, OpenAI's cap 0. The Sail guard's cap comes from the budget, and it is not braked.
+  - The updater: built; its first look came at the first tick, with no alert and no deploy row; the train is 4 hours
+    and its hold reads "no release within 30 minutes of a start".
+  - The operator's pre-open check, told the new release and gateway: 9 of 10 PASS. The one FAIL was named before the
+    run: check 6 (bands), "observe rows 0", because the evidence reset cleared every family's selection.
+- **Criterion 1 on the new release** (09:01-09:02Z).
+  - `floor_box.py stop` (the loop quiesced in 5 s), then `start`: health fresh on the new release, `real_money` true,
+    `failures` [], `ops` present, a new `grant` receipt, and the swarm's heartbeat fresh 16 s after the start.
+  - The swarm process killed: a new one, recovered in 16 s, with 13 families alive and the same count of runs before
+    and after.
+  - After a restart outside the session, `options_live.blocked` reads "the account could not be read this minute"
+    until the live path's next quiet pass: off-session it reads the account every 15 minutes. It cleared at 09:14Z. The
+    release before behaved the same.
+  - The tuition instance is still exit-only.
+- **By itself from here.** The `grant` job hourly at :05; `scoreboard` at 23:30Z (the first daily page, a docs commit
+  to main through the gateway); `budget` at 00:30Z (the first `budget.json`, then the `funding` notices); `hygiene` at
+  02:00Z. The first drills are due the same day, at 15:00Z and 17:00Z: two test `funding` mails, a failed Sail read,
+  a gateway outage, a killed swarm, and the rollback drill (a broken copy promoted and rolled back by the watch: two
+  House restarts). Until Monday's close each budget run raises one warning, "no close economics summary yet".
+- **What it does not do yet.** Practice is empty until new versions qualify on the new evaluator or the ladder release
+  lands. The forward ladder (its design frozen, its confirmation not yet run) and research v3 are not in this release.
 
-### On branches, not in V3-A part 1
+### 08:23-08:41Z, the rollback rehearsal: House release `20261003T082921Z-f313be66cb82` (main `d0a2d01b` plus one fix), promoted 08:30Z and rolled back
 
-- `v3/wp6`, the forward ladder and its benchmark (evidence v3, the owner's D2). As first specified it does not meet its
-  benchmark rule. A tighter design was frozen before any confirmation run; the confirmation, under a rule
-  pre-registered before it, has not been run. It changes `league/live/` and the constitution: an owner deploy and one
-  more evidence reset.
-- `v3/wp7`, credit types at $2,000 of equity or more and a paper proof per type (money rules v3, D3), with the
-  gateway's credit list: an owner deploy and a money-digest move. With the ladder it is V3-A part 2.
-- `v3/b1` (research v3), `v3/b23` (births from the mechanism library, the Train kill tests as code, the strategist's
-  whole agenda), `v3/b4` (the weekly post-mortem and the monthly cost review), `v3/b5` (the engineer and the reviewer).
-  Each changes a protected file as it stands (`league/swarm/settings.py`, the store, the evidence and tournament
-  modules, `league/ops/`), so each is an owner deploy, not an updater release.
+Before V3-A part 1 shipped, the way back was rehearsed on production: deploy main as it stood, watch it, roll it back.
+Main then was `d0a2d01b`, ahead of the running release by docs, comment-only edits and the dead-file prune. The
+rehearsal found that no release could land at all.
+
+- **08:23Z, the blocker.** `floor_box.py deploy` of main `d0a2d01b` alone was refused by the canary (exit 2, production
+  untouched): "2 error alert(s) ... The expedition's Sail spending has stopped: day 14 is over".
+  - The old League's fourteen-day expedition (the constitution's `budgets.expedition`, from Sept 19) ended at 00:00Z
+    Oct 3.
+  - A canary is a fresh House with nothing told yet, so it tells the run's scheduled end on its first tick. It told it
+    as an error, and the watchdog refuses any unmarked error in a canary.
+  - So from 00:00Z Oct 3 every canary was refused and no release of any kind could land: not V3-A, not a re-deploy of
+    a rollback target, not an updater release, not the rollback drill.
+- **The fix** (commit `0c8e8107`, `league/house.py` `_expedition_notices`): the calendar ending the run is a warning; a
+  budget spent before its last day is still an error. Its three tests (`league/tests/test_pacer.py`: the notice's level
+  in both cases, and a fresh House after the expedition reading healthy to the watchdog) fail on the old code with the
+  refusal's own words. It reached main in PR #489.
+- **08:28-08:41Z, the rehearsal, on main plus that one fix** (a local cherry-pick onto `d0a2d01b`, not pushed: the
+  running release's money digest `42c4a3af` and execution fingerprint `47587e22…`, so no evidence reset, and
+  `auto_update` false; 209 tests of the pacer, the watchdog and the House pass on Python 3.11 and 3.14).
+  - The nightly daemon was stopped while idle; the lock was free 20 s later.
+  - `floor_box.py deploy`: release `20261003T082921Z-f313be66cb82`, the canary passed, promoted at 08:30:04Z, the
+    ten-minute watch clean, PROMOTED and exit 0 at 08:40Z, with `previous` the Oct 2 release.
+  - `floor_box.py rollback --reason "rehearsal before V3-A"`, with no force flag: the real-book guard passed (the
+    previous release manages the real book) and the rollback exited 0 in 4 s.
+- **The restored release, verified at 08:41Z:** `current` was `20261002T112610Z-e11710692569` and `previous` empty;
+  health was fresh on it, `real_money` true, `failures` []; the research evaluator was unchanged (no adoption event)
+  and the same nine practice cohorts were active; there was no new grant ratification; `swarm.json` and the harness
+  observer's runtime file were unchanged; `nightly.stop` was removed; a `deploy` at `e3d0111f` answered "nothing to
+  deploy"; the operator's pre-open check was 9 of 9 PASS.
+- **A side effect to know:** each swarm restart lifts the families' holds. In the cycles after the rehearsal's two
+  restarts three families retired themselves (self-refuted by their researchers, 08:30Z and 08:41Z), which left 13
+  alive.
 
 ## 2026-10-02
 

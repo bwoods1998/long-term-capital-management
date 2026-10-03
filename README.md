@@ -27,21 +27,24 @@ session was Monday September 28 (13:30Z); no family had passed the holdout, so i
 orders were the House's own calibration round trips. Profitable production trading is the goal, not an
 outcome established by more agents, more trials, or a successful backtest.
 
-## Current state: October 3, 2026 (autopilot; V3-A part 1 built, not deployed)
+## Current state: October 3, 2026 (V3-A part 1 is live: the unattended desk)
 
-- **The project runs on autopilot** (the owner, Oct 2). Production keeps running on the release below: the swarm
-  researches around the clock at a funded floor and the live path trades every New York session. What runs, the
-  settings in effect and the deploy that waits are in [operations](docs/operations.md) ("Now").
-- **What runs.** The House runs `20261002T112610Z-e11710692569` (main `e3d0111f`, promoted 11:26Z Oct 2), the gateway
-  `4471596a`, the money digest `42c4a3af`, and the grant `options-swarm-20260928` is active (re-ratified at Release B,
-  Oct 1). There have been two planned evidence resets (Release A, Sept 30; Release B, Oct 1) and none since. The box's
-  updater is off.
-- **LTCM v3, the unattended desk: its first release is built and ready, not deployed.** On Oct 2 the project was
+- **The project runs on autopilot** (the owner, Oct 2), and since Oct 3 on the release built for it. The swarm
+  researches inside the budget rule's floor and the live path trades every New York session. What runs, the settings
+  in effect and the deploy's record are in [operations](docs/operations.md) ("Now").
+- **What runs.** The House runs `20261003T084912Z-be16b05904ff` (main `266e6861`, promoted 08:49:56Z Oct 3 after its
+  canary; the ten-minute watch was clean), the gateway `e95a2d4a` (08:46Z Oct 3), the money digest `42c4a3af`
+  (unchanged), and the grant `options-swarm-20260928` is active (ratified once by the House's standing grant at its
+  first look on the new release). There have been three planned evidence resets (Release A, Sept 30; Release B, Oct 1;
+  V3-A part 1, Oct 3). The box's updater is on. The release before it, `20261002T112610Z-e11710692569`, is kept as the
+  rollback target.
+- **LTCM v3, the unattended desk: its first release is live** (Oct 3). On Oct 2 the project was
   diagnosed as a treadmill (2,370 families born and 2,349 retired in six days, no family through the holdout, every
   deploy and decision a human step), the owner asked for a desk with no human in the loop, and v3 was built
-  ([the run record](docs/runs/2026-10-02-unattended-desk.md): why, the owner's six decisions, what was built, what
-  waits). **V3-A part 1** is this tree (`release/v3a`, PR #489), integrated and waiting for the owner's deploy. From
-  that deploy it gives the House:
+  ([the run record](docs/runs/2026-10-02-unattended-desk.md): why, the owner's six decisions, what was built, the
+  deploy, what waits). **V3-A part 1** (PR #489) went out by the owner's deploy on Oct 3, after a rollback rehearsal on
+  production that found and fixed a blocker: from 00:00Z Oct 3 the canary refused every release (the
+  [CHANGELOG](CHANGELOG.md) has the record). It gives the House:
   - its own jobs (`league/ops/`): pre-open checks, the close economics, hygiene, the venue's clock, monthly failure
     drills and a daily public page in [docs/runs/desk/](docs/runs/desk/README.md), each with a receipt the owner reads
     without touching the box (`scripts/desk_receipts.py`);
@@ -56,8 +59,14 @@ outcome established by more agents, more trials, or a successful backtest.
   - live-path fixes (practice accounts capped as a Probe, practice reads clamped to the Gym's store, exit-only opens
     dropped) and the gateway's routes for the desk's pages and, later, an engineer agent.
 
-  Its deploy is a planned evidence reset (the `league/live` fixes move the evaluator's fingerprint): every practice
-  cohort ends, and practice refills only from new versions. The money digest does not move.
+  Its deploy was a planned evidence reset, the third (the `league/live` fixes move the evaluator's fingerprint): all
+  nine practice cohorts ended, and practice refills only from new versions, so the practice league is empty until new
+  versions qualify or the ladder release lands. The money digest did not move.
+- **What it does by itself from here:** the standing grant hourly, the budget rule at 00:30Z (first run Oct 4, with a
+  funding notice for a meter whose prefund is short), hygiene at 02:00Z, the venue clock at 11:00Z, the pre-open checks
+  and the close economics on trading days, the daily page at 23:30Z, and the monthly failure drills, the first of them
+  on Oct 3 at 15:00Z and 17:00Z. Its first self-deploy, self-rollback and drills are unproven on the box until they
+  happen there.
 - **Not in it** (on branches): the forward ladder (its confirmation study is not run, and as first specified it would
   not bind) and credit types at $2,000 of equity, which are part 2; research v3, births from a mechanism library with
   the strategist's whole agenda, the weekly post-mortem, and the engineer and reviewer. Each changes a protected file,
@@ -77,10 +86,13 @@ outcome established by more agents, more trials, or a successful backtest.
 - **Research at a funded floor** (Oct 2 evening). The swarm had been spending about $29 a day; research now runs at a
   floor set by hand: 16 families at the start (floor 8), one Gym box, the Sail researchers (DeepSeek) at $0.25 an hour,
   the architect every two hours (DeepSeek-V4-Pro on the asap queue, agenda v16c, debit verticals and two-sided singles
-  only), the strategist once a day. The practice league's cohorts trade shadow on live quotes. Claude reads programs at
-  the gate (Sonnet 5.5 review, Opus 5.5 audit). OpenAI is unused. The same settings are in `policy.json`. Under A1 the
-  budget rule sets the pace instead: at most $5 a day of research across Sail and Claude while there is no realized
-  profit to share, and less when a meter's balance does not sustain it for 90 days. The swarm trains on 25 roots, with
+  only), the strategist once a day. Claude reads programs at the gate (Sonnet 5.5 review, Opus 5.5 audit). OpenAI is
+  closed. The same settings are in `policy.json`. Since the Oct 3 deploy the budget rule sets the pace over them: at
+  most $5 a day of research across Sail and Claude while there is no realized profit to share, and less when a meter's
+  balance does not sustain it for 90 days. Until the rule's first run (00:30Z Oct 4) its floor is in force: the
+  researchers' Sail pace $0.05 an hour, the population's ceiling and start 12, the architect every four hours. 13
+  families were alive at the deploy (three had retired themselves that morning), and the practice league is empty
+  since the deploy's evidence reset. The swarm trains on 25 roots, with
   Train 2020-2024 (2022-2024 for the 20 added names). Alpaca's asset lookup returned 6,177 tradable optionable
   equity/ETF assets: discovery is much broader than training readiness.
 - **What real money may open:** four debit types under $2,000 of equity. The simulator supports 11 types. Covered calls
@@ -254,8 +266,8 @@ python3 scripts/data/box.py status                         # the data box and th
 python3 scripts/desk_receipts.py [YYYY-MM-DD]              # the House's job receipts, read without an exec (V3-A part 1)
 ```
 
-**Until V3-A part 1 is deployed, every release is the owner's deploy** (the running release has its updater off).
-**From that deploy a merge to main is a deploy.** The in-box updater deploys main's head by itself through its walls:
+**V3-A part 1 is live (since Oct 3, 2026), so a merge to main is a deploy.** Before it every release was the owner's
+deploy (the updater was off). The in-box updater deploys main's head by itself through its walls:
 exact-commit CI, a release train every four hours, no release from 12:55Z to 20:05Z on a trading day (to 21:05Z in
 winter), canary and automatic rollback. What `league/ci.py` lists as FORBIDDEN (86 files and trees) no role and no
 automated merge may change. Inside the release trees (`league/`, `ltcm/`, `playbooks/`, `scripts/`, `deploy/`) a
