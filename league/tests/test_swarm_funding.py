@@ -50,6 +50,8 @@ class Case(unittest.TestCase):
         self.addCleanup(self.store.close)
         self.settings = copy.deepcopy(DEFAULTS)
         self.settings["claude"]["usd_cap"] = 10_000.0  # the gateway's room binds, not the swarm's own cap
+        # Nor THE BUDGET's day, which is a line and never a cliff (no block is the floor): above every call asked here.
+        self.settings["budget"] = {"source": "test", "sail_usd_day": 100_000.0, "claude_usd_day": 100_000.0}
         self.meter = Meter()
         self.month = FakeMonth(None)
         self.guard = SimpleNamespace(last={})

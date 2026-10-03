@@ -42,6 +42,8 @@ def reply(decision="rewrite", *, program="", note="Enter only after a calm open.
 class DiagnosticianCase(ResearcherCase):
     def setUp(self):
         super().setUp()
+        # THE BUDGET is not what these tests judge: a line well above the diagnostician's own day (no block is the floor).
+        self.settings["budget"] = {"source": "test", "sail_usd_day": 1000.0, "claude_usd_day": 1000.0}
         self.claude = FakeOpener()
         self.meter = FakeClaudeMeter(100)
         self.router.claude_factory = lambda model: Claude(GATEWAY, lambda: "synthetic", model=model, opener=self.claude)
