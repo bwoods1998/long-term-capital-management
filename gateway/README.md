@@ -323,13 +323,17 @@ constant changes only by a gateway deploy):
   budget rule throttles research to, and the runway at that rate (`current_usd_day`, `current_research_usd_day`,
   `current_runway_days`); what the rule wants for it a day (`usd_day`: fixed + the research floor + what profit earned)
   and the runway at THAT rate (`runway_days`, `runs_out_on`), which is the one under the card line and the one in the
-  subject; the amount that restores 90 days at the wanted rate and the date to add it by. It says that nothing stops if
-  no card is added (research stays throttled to what the meter sustains), unless a runway it words is zero, and that
-  the rule never raises a cap or moves money. With no `current_usd_day` (an older House, or a balance the rule could
-  not read for research) it claims no current spend and says its figures are the wanted rate. The composer invents no
-  figure: one that is not a decimal or a date reads `unknown`. `test: true` is marked a drill in the subject and the
-  first line, its figures said to be the drill's. A `funding*` notice id is remembered eight days (others 48 hours);
-  `NOTIFY_MAX_PER_DAY` is unchanged.
+  subject; the amount that restores 90 days at the wanted rate and the date to add it by. What happens with no card is
+  worded from what the desk spends now. It says that nothing stops (research stays throttled to what the meter
+  sustains) only when the figures sent show it: `current_research_usd_day` above zero AND `current_runway_days` at or
+  over `card_line_days`. With research already at 0.00 the throttle has nothing left to cut and the fixed cost still
+  runs the meter to its reserve, so the mail says how long the meter lasts at what the desk spends and promises
+  nothing; a runway sent as zero, at either rate, reads as no runway left. It says that the rule never raises a cap or
+  moves money. With no `current_usd_day` (an older House, or a balance the rule could not read for research) it claims
+  no current spend, says its figures are the wanted rate, and says that how long the meter lasts at what the desk
+  spends was not sent. The composer invents no figure: one that is not a decimal or a date reads `unknown`.
+  `test: true` is marked a drill in the subject and the first line, its figures said to be the drill's. A `funding*`
+  notice id is remembered eight days (others 48 hours); `NOTIFY_MAX_PER_DAY` is unchanged.
 
 The token needs nothing new: Contents and Pull requests read/write already cover the docs commit and the merge, and the
 Actions runs and jobs it reads are public on this repository. A branch protection rule on `main` that requires pull

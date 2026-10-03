@@ -209,10 +209,18 @@ export function composeNotice(facts = {}) {
       const drill = facts.test === true;
       const fixed = dollars(facts.fixed_usd_day);
       const current = decimal(facts.current_usd_day) !== null;
-      // A runway the House sent as zero (of the rates this mail words): the meter sustains nothing, so the mail does not
-      // say that nothing stops.
+      // A runway the House sent as zero (of the rates this mail words): the meter sustains nothing.
       const zero = value => decimal(value) !== null && Number(decimal(value)) <= 0;
       const spent = zero(facts.runway_days) || (current && zero(facts.current_runway_days));
+      // Otherwise what happens with no card is worded from what the desk spends now. "Nothing stops" is said only when
+      // the figures sent show it: research above zero (the throttle still has something to cut) AND the runway at that
+      // rate at or over the card line. Research already at 0.00 leaves the fixed cost running the meter to its reserve
+      // (at Sail's the desks stop: `floor_stopped` above), so the mail then says how long it lasts and promises nothing;
+      // with no current rate, or no runway at it, it says that was not sent.
+      const lasts = current && decimal(facts.current_runway_days) !== null ? dayCount(facts.current_runway_days) : null;
+      const idle = current && zero(facts.current_research_usd_day);
+      const holds = lasts !== null && !idle && decimal(facts.current_research_usd_day) !== null
+        && decimal(facts.card_line_days) !== null && Number(lasts) >= Number(decimal(facts.card_line_days));
       subject = `${drill ? 'LTCM [drill]' : 'LTCM'}: ${meter} runway ${dayCount(facts.runway_days)} days at the rate the budget wants; add ${dollars(facts.restore_usd)} by ${dateOf(facts.card_date)}`;
       lines.push(
         drill ? 'THIS IS A DRILL: a synthetic cliff tests that this notice reaches you. Its figures are the drill\'s, not the desk\'s. Nothing needs doing.' : null,
@@ -224,7 +232,11 @@ export function composeNotice(facts = {}) {
         `Adding ${dollars(facts.restore_usd)} restores ${dayCount(facts.restore_days)} days of runway at the rate the rule wants. Add it by ${dateOf(facts.card_date)}.`,
         spent
           ? `${meter} has no runway left: research on it stays throttled until it is funded.`
-          : `Nothing stops if no card is added: research stays throttled to what ${meter} sustains.`,
+          : holds
+            ? `Nothing stops if no card is added: research stays throttled to what ${meter} sustains.`
+            : lasts !== null
+              ? `If no card is added, ${meter} lasts ${lasts} days at what the desk spends on it now: research on it ${idle ? `is already at ${dollars(facts.current_research_usd_day)}, so there is nothing left to throttle` : 'stays throttled'}.`
+              : `If no card is added, research on ${meter} stays throttled; how long ${meter} lasts at what the desk spends on it now was not sent.`,
         'The budget rule never raises a cap or moves money.',
         `At: ${clip(facts.at, 40) || 'an unknown time'}.`,
       );
