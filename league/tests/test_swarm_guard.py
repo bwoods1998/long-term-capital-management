@@ -296,8 +296,9 @@ class Causes(GuardCase):
         return g.causes
 
     def test_the_budgets_causes_are_two_of_the_names(self):
-        self.assertEqual(CAUSES, ("balance_unreadable", "under_line", "research_budget", "account_budget", "disk", "no_reading"))
-        self.assertEqual(BUDGET_CAUSES, ("research_budget", "account_budget"))
+        self.assertEqual(CAUSES, ("balance_unreadable", "under_line", "research_budget", "account_budget", "budget_unreadable",
+                                  "disk", "no_reading"))
+        self.assertEqual(BUDGET_CAUSES, ("research_budget", "account_budget"), "a rule that could not be read is not one")
 
     def test_before_a_first_check_the_cause_is_no_reading(self):
         g = self.guard()
@@ -352,6 +353,82 @@ class Causes(GuardCase):
         self.clock.advance(180)
         self.assertEqual(self.check(g), ["research_budget"])
 
+    def test_a_budget_of_zero_the_rule_itself_gives_is_the_budgets_own(self):
+        from league.ops import budget as B
+
+        self.reading = (5000.0, 5.0)
+        for block in ({"source": "budget.json", "sail_usd_day": 0.0, "claude_usd_day": 0.0, "fixed_sail_usd_day": None},
+                      {"sail_usd_day": 0}):
+            self.settings["budget"] = block
+            g = self.guard()
+            self.assertEqual(self.check(g), ["research_budget"], block)
+            self.clock.advance(180)
+        del self.settings["budget"]  # the guard's own read of the root's budget.json: none is the floor, which binds
+        g = self.guard()
+        self.assertEqual(self.check(g), [])
+        self.store.add_spend("sail_model", B.floor_usd_day("sail"))
+        self.clock.advance(180)
+        self.assertEqual(self.check(g), ["research_budget"])
+
+    def unread(self, source):
+        """One check of a guard on a balance far above the line: braked at no research, as it always was, and named
+        apart from the budget's own daily stop."""
+        self.reading = (5000.0, 5.0)
+        g = self.guard()
+        self.assertEqual(self.check(g), ["budget_unreadable"])
+        self.assertEqual((g.braked, g.allows(), g.reason),
+                         (True, False, f"today's Sail research budget is spent (0.00 of 0.00; {source})"))
+        self.assertEqual(g.last["budget_research_usd_day"], 0.0)
+        self.assertFalse(set(g.causes) & set(BUDGET_CAUSES))
+        return g
+
+    def test_a_rule_that_could_not_run_is_not_the_budgets_own(self):
+        from unittest import mock
+
+        from league.ops import budget as B
+
+        with mock.patch.object(B, "overlay", side_effect=RuntimeError("boom")):
+            self.settings = S.load(Path(self.dir.name), config={})  # the block `settings.load` writes for it
+        self.assertEqual((self.settings["budget"]["sail_usd_day"], self.settings["budget"]["read"]), (0.0, False))
+        self.unread("unavailable")
+
+    def test_a_malformed_block_is_not_the_budgets_own(self):
+        for bad in ({"sail_usd_day": "lots"}, {"sail_usd_day": -1}, {"sail_usd_day": float("nan")}, "budget", {},
+                    {"source": "budget.json"}):
+            self.settings["budget"] = bad
+            self.unread("malformed budget block: no research")
+            self.clock.advance(180)
+
+    def test_a_rule_that_cannot_be_read_is_not_the_budgets_own(self):
+        from unittest import mock
+
+        from league.ops import budget as B
+
+        with mock.patch.object(B, "sail_caps", side_effect=RuntimeError("boom")):
+            g = self.unread("the budget rule could not be read (RuntimeError)")
+        self.clock.advance(180)
+        self.assertEqual(self.check(g), [], "the rule reads again: the guard releases as it always did")
+
+    def test_caps_that_do_not_say_they_were_read_are_not_the_budgets_own(self):
+        from unittest import mock
+
+        from league.swarm import guard as G
+
+        self.reading = (5000.0, 5.0)
+        g = self.guard()
+        self.check(g)
+        self.reading = (4990.0, 5.0)  # $10 by Sail's meter today, none of it booked
+        for caps, want in (({"research": 0.0, "fixed": 1.0, "account": 1.0, "source": "x"}, ["budget_unreadable"]),
+                           ({"research": 0.0, "fixed": 1.0, "account": 1.0, "source": "x", "read": None}, ["budget_unreadable"]),
+                           ({"research": 0.0, "fixed": 1.0, "account": 1.0, "source": "x", "read": "yes"}, ["budget_unreadable"]),
+                           ({"research": 0.0, "fixed": 1.0, "account": 1.0, "source": "x", "read": True}, ["research_budget"]),
+                           ({"research": 6.0, "fixed": 1.0, "account": 7.0, "source": "x", "read": False}, ["budget_unreadable"]),
+                           ({"research": 6.0, "fixed": 1.0, "account": 7.0, "source": "x", "read": True}, ["account_budget"]),
+                           ({"research": 6.0, "fixed": 9.0, "account": 15.0, "source": "x", "read": False}, [])):
+            self.clock.advance(180)
+            with mock.patch.object(G, "budget_caps", return_value=caps):
+                self.assertEqual(self.check(g), want, caps)
+
     def test_a_filling_disk(self):
         g = SailGuard(self.store, self.settings, lambda: self.reading, clock=self.clock, disk_free=lambda: 2.0 * 2 ** 30)
         self.assertEqual(self.check(g), ["disk"])
@@ -365,6 +442,9 @@ class Causes(GuardCase):
         self.reading = (20.0, 5.0)
         self.clock.advance(180)
         self.assertEqual(self.check(g), ["under_line", "research_budget", "disk"])
+        self.settings["budget"] = "budget"  # a block that is no budget, in the budget's place in the order
+        self.clock.advance(180)
+        self.assertEqual(self.check(g), ["under_line", "budget_unreadable", "disk"])
 
     def test_a_budget_brake_under_the_release_line_names_the_line_too(self):
         self.budget(2.0)

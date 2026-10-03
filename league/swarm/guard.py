@@ -23,7 +23,9 @@ caps allowing. Every change of state is a `swarm.guard` event. Sail's meter sinc
 
 Beside the human `reason` the record, its `last` and the event carry `causes`: the brake's causes by name (CAUSES), one
 per braking branch of `check`. A reader that must tell THE BUDGET's designed daily stop (BUDGET_CAUSES) from the House
-at risk reads the names, never the reason's text; a record with no list is cause unknown (`causes_of`).
+at risk reads the names, never the reason's text; a record with no list is cause unknown (`causes_of`). Caps that are
+no reading of the rule (`budget_caps`' `read` not true: the rule could not be read or run, a malformed block) brake
+the same, at no research, under their own name (`budget_unreadable`): a broken rule is never the designed stop.
 """
 
 from __future__ import annotations
@@ -38,8 +40,9 @@ from .store import SwarmStore
 SWARM_SAIL_KINDS = ("sail_model", "gym_box")
 # The brake's causes, one name per braking branch of `SailGuard.check` ("no_reading": no check yet). BUDGET_CAUSES are THE
 # BUDGET's own daily caps: the designed stop of each UTC day, research at its cap until 00:00 UTC. Every other cause is
-# the House at risk or a guard that cannot see.
-CAUSES = ("balance_unreadable", "under_line", "research_budget", "account_budget", "disk", "no_reading")
+# the House at risk or a guard that cannot see: "budget_unreadable" is a budget brake on caps that are no reading of the
+# rule (FAIL CLOSED to no research), so it is never one of the budget's own.
+CAUSES = ("balance_unreadable", "under_line", "research_budget", "account_budget", "budget_unreadable", "disk", "no_reading")
 BUDGET_CAUSES = ("research_budget", "account_budget")
 
 
@@ -53,15 +56,16 @@ def causes_of(record: Any) -> list[str] | None:
 
 
 def budget_caps(settings: Mapping[str, Any], root: Any = None, now: float | None = None) -> dict[str, Any]:
-    """THE BUDGET's daily Sail caps (league/ops/budget.py `sail_caps`): {research, fixed, account, source}; with `root`
-    (the store's state root) also capped by the guard's own read of `<root>/budget.json`. FAIL CLOSED: a rule that
-    cannot be read is no research."""
+    """THE BUDGET's daily Sail caps (league/ops/budget.py `sail_caps`): {research, fixed, account, source, read}; with
+    `root` (the store's state root) also capped by the guard's own read of `<root>/budget.json`. FAIL CLOSED: a rule that
+    cannot be read is no research, and `read` false says so (the caps are then no reading of the rule)."""
     try:
         from ..ops.budget import sail_caps
 
         return sail_caps(settings, root, now)
     except Exception as exc:  # noqa: BLE001 - no rule, no research spend
-        return {"research": 0.0, "fixed": 0.0, "account": 0.0, "source": f"the budget rule could not be read ({type(exc).__name__})"}
+        return {"research": 0.0, "fixed": 0.0, "account": 0.0, "read": False,
+                "source": f"the budget rule could not be read ({type(exc).__name__})"}
 
 
 class SailGuard:
@@ -154,13 +158,15 @@ class SailGuard:
                 causes.append("under_line")
                 reasons.append(f"the Sail balance {balance:.2f} is under the House's line {release:.2f} "
                                f"(2 x {house:.2f} a day + {float(cfg.get('margin_usd', 30.0)):.0f})")
-        # THE BUDGET's day (a research budget of 0 brakes at once: nothing is ever under a cap of 0).
+        # THE BUDGET's day (a research budget of 0 brakes at once: nothing is ever under a cap of 0). Caps that are no
+        # reading of the rule (`read` not true) brake by the same arithmetic and are named apart from the budget's own.
+        unread = caps.get("read") is not True
         if today_spent >= caps["research"]:
-            causes.append("research_budget")
+            causes.append("budget_unreadable" if unread else "research_budget")
             reasons.append(f"today's Sail research budget is spent ({today_spent:.2f} of {caps['research']:.2f}; "
                            f"{caps['source']})")
         elif metered_today >= caps["account"]:
-            causes.append("account_budget")
+            causes.append("budget_unreadable" if unread else "account_budget")
             reasons.append(f"today's Sail budget is spent by Sail's meter ({metered_today:.2f} of {caps['account']:.2f} for "
                            f"the account: research {caps['research']:.2f} + fixed {caps['fixed']:.2f}; {caps['source']})")
         try:

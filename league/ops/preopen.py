@@ -16,7 +16,8 @@ and went stale (GOAL Appendix C 7); here each check asks what the running House 
  5 swarm     swarm.json is an object with a `live` block the live path reads as such; population at or above the
              floor; heartbeat fresh and on the current release; the Gym on with images named; the Sail guard not
              braked, or braked by THE BUDGET's daily caps alone on a fresh balance above its line (research at its cap
-             until 00:00 UTC is the day as designed; any other cause, or one not named, is a FAIL)
+             until 00:00 UTC is the day as designed; any other cause, a budget rule that could not be read among them,
+             or one not named, is a FAIL)
  6 bands     the observe rows the swarm offers the live path (when observe is on; a count of rows offered, not of
              cohorts pinned or practising); every Probe/Sized row fits the Probe cap
  7 mirror    the House's swarm mirror keeps up with the swarm's events (lag <= one batch)
@@ -25,7 +26,9 @@ and went stale (GOAL Appendix C 7); here each check asks what the running House 
              spend under their caps
 
 Read-only (`guard.readonly()`; GET only). Each FAIL is one House warning ("preopen 5 swarm FAIL: ..."); the receipt
-holds every line.
+holds every line. The warning is PUBLIC (`ops.alert`) and the runner scrubs only what carries a `$`
+(`league/ops/runner.py` `public_text`): a text that holds the account's numbers bare (the Sail guard's reason) is never
+part of a FAIL's line; it goes on a line of its own, which only the receipt holds.
 """
 from __future__ import annotations
 
@@ -387,8 +390,12 @@ def check_swarm(h: Mapping[str, Any]) -> Check:
     # dollars are spent. That brake alone passes, said plainly; the balance must still be read and above the line.
     budget, said = budget_brake(gd, funded, h.get("at"), float((s.get("eff_guard") or {}).get("stale_seconds", 600))) \
         if braked else (False, "braked False")
-    c.req(funded and (not braked or budget),
-          f"the Sail guard: balance vs line {usd(bal)} / {usd(line)}; {said}" + (f" ({gd.get('reason')})" if gd.get("reason") else ""))
+    ok, reason = funded and (not braked or budget), gd.get("reason")
+    # The guard's reason holds the balance and the day's dollars as bare numbers, which the runner's scrub of the public
+    # warning does not see: a passing line (never a warning) says it, a FAIL keeps it to a line only the receipt holds.
+    c.req(ok, f"the Sail guard: balance vs line {usd(bal)} / {usd(line)}; {said}" + (f" ({reason})" if ok and reason else ""))
+    if reason and not ok:
+        c.info(f"the guard's reason: {reason}")
     return c
 
 

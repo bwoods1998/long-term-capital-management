@@ -509,7 +509,10 @@ def sail_caps(settings: Mapping[str, Any], root: str | Path | None = None, now: 
     """The Sail guard's daily caps from the settings' `budget` block: `research` (the swarm's own booked Sail a UTC day)
     and `account` (Sail's own meter a UTC day: research + fixed). Settings that never went through a state root's
     `settings.load` (no block) are the guard's own read of `<root>/budget.json` (`effective`) with `root` (the guard's
-    store root), else the floor: settings handed in without the budget never lift it. A malformed block is no research."""
+    store root), else the floor: settings handed in without the budget never lift it. A malformed block is no research.
+    `read` is false when the caps are no reading of the rule: a malformed block, or a block whose own `read` is not true
+    (the one `settings.load` writes when the rule itself could not run). The dollars are as before either way; the guard
+    names that brake apart from the budget's own daily stop."""
     guard = settings.get("guard") if isinstance(settings.get("guard"), Mapping) else {}
     house = _amount(guard.get("house_burn_usd_day"))
     house = 1.0 if house is None else house
@@ -517,16 +520,19 @@ def sail_caps(settings: Mapping[str, Any], root: str | Path | None = None, now: 
     if block is None and root is not None:  # handed settings without the block: the guard reads the budget itself
         block = effective(root, now)
         block = {**block, "source": f"{block.get('source')} (the guard's own read: the settings carried no budget)"}
+    read = True
     if block is None:
         research, fixed, source = floor_usd_day("sail"), house, "floor (no budget block)"
     elif not isinstance(block, Mapping) or _amount(block.get("sail_usd_day")) is None:
-        research, fixed, source = 0.0, house, "malformed budget block: no research"
+        research, fixed, source, read = 0.0, house, "malformed budget block: no research", False
     else:
         research = _amount(block.get("sail_usd_day"))
         measured = _amount(block.get("fixed_sail_usd_day"))
         fixed = max(house, measured) if measured is not None else house
         source = str(block.get("source") or "budget")
-    return {"research": round(research, 4), "fixed": round(fixed, 4), "account": round(research + fixed, 4), "source": source}
+        read = block.get("read", True) is True  # the rule's own blocks say nothing; one that says anything else is unread
+    return {"research": round(research, 4), "fixed": round(fixed, 4), "account": round(research + fixed, 4), "source": source,
+            "read": read}
 
 
 def paid_model_room(block: Any, *spent_today: Any) -> float | None:
