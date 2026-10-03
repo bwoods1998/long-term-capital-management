@@ -1,8 +1,9 @@
 """THE BUDGET RULE (league/ops/budget.py, LTCM v3, D4; its rule version 2): the owner's ceiling and the one runway term
-(the taper day by day, a cut and a raise), the card line, the knobs the dollars buy, the gate's reserve on both meters,
-the no-forward-edge stop and both routes to Probe, the fail-closed reads, the tighten-only overlay in `settings.load`,
-Claude's room under the budget's daily line, the funding notice (once per meter a week) and the drill. Fakes only: no
-network, no Sail."""
+(the taper day by day, a cut and a raise), Sail's reserve at the Sail guard's own line, the day's figure set once a UTC
+day, the card line, the knobs the dollars buy, the gate's reserve on both meters, the no-forward-edge stop and both
+routes to Probe, the fail-closed reads, the tighten-only overlay in `settings.load`, Claude's room under the budget's
+daily line, the funding notice (once per meter a week) and the drill. Fakes only: no network, no Sail. Every balance
+here is a round example figure, never the account's."""
 
 from __future__ import annotations
 
@@ -17,6 +18,7 @@ from unittest import mock
 
 from league.ops import budget as B
 from league.swarm import settings as S
+from league.swarm.guard import SailGuard, house_line
 from league.swarm.models import ModelRouter
 from league.swarm.store import SwarmStore
 from league.tests.swarm_fakes import Clock, FakeFrontier, FakeMonth
@@ -31,18 +33,26 @@ def at(*args) -> float:
     return dt.datetime(*args, tzinfo=UTC).timestamp()
 
 
-def inputs(*, sail=600.0, fixed=1.5, claude=100.0, p30=0.0, stop=False, need_sail=0.0, need_claude=0.0):
+#: The Sail guard's own line on the default settings: it brakes under $32 and a braked guard releases at $37.
+GUARD = house_line(S.DEFAULTS["guard"])
+
+
+def inputs(*, sail=600.0, fixed=1.5, claude=100.0, p30=0.0, stop=False, need_sail=0.0, need_claude=0.0, reserve=None):
+    """The rule's inputs. `reserve` is Sail's reserve as `gather` hands it (the Sail guard's release line); without it
+    the rule's own least reserve (`RESERVE_USD`) is in force, as for Claude."""
+    sail_row = {"balance_usd": sail, "fixed_usd_day": fixed, "need_usd": need_sail}
+    if reserve is not None:
+        sail_row["reserve_usd"] = reserve
     return {"p30_usd": p30, "p30_source": "test", "edge": {"stop": stop, "why": "test edge"},
-            "meters": {"sail": {"balance_usd": sail, "fixed_usd_day": fixed, "need_usd": need_sail},
-                       "claude": {"balance_usd": claude, "fixed_usd_day": 0.0, "need_usd": need_claude}}}
+            "meters": {"sail": sail_row, "claude": {"balance_usd": claude, "fixed_usd_day": 0.0, "need_usd": need_claude}}}
 
 
-def spend_down(meter: str, balance: float, fixed: float, days: int) -> list[tuple[float, float]]:
+def spend_down(meter: str, balance: float, fixed: float, days: int, reserve: float | None = None) -> list[tuple[float, float]]:
     """(the balance, the research the rule gives on it) day by day while the meter spends its whole day: the fixed cost
-    and every research dollar the rule allows (the fastest a balance can fall)."""
+    and every research dollar the rule allows (the fastest a balance can fall). Each day is its own first run."""
     out = []
     for _ in range(days):
-        given = inputs(sail=balance, fixed=fixed) if meter == "sail" else inputs(claude=balance)
+        given = inputs(sail=balance, fixed=fixed, reserve=reserve) if meter == "sail" else inputs(claude=balance)
         research = B.compute(given, now=NOW)["meters"][meter]["research_usd_day"]
         out.append((round(balance, 4), research))
         balance -= fixed + research
@@ -84,8 +94,8 @@ class Rule(unittest.TestCase):
         self.assertEqual((doc["direction"], doc["meters"]["sail"]["direction"]), ("same", "same"))
         self.assertEqual(doc["state"], "research at the ceiling")
         self.assertIn("inside the ceiling", doc["why"][0])
-        for sail in (0.0, 20.0, 121.0, 600.0, 1e6):
-            for claude in (0.0, 30.0, 92.0, 1e6):
+        for sail in (0.0, 20.0, 120.0, 600.0, 1e6):
+            for claude in (0.0, 30.0, 90.0, 1e6):
                 for p30 in (None, -40.0, 0.0, 120.0, 3000.0, 5e7):
                     doc = B.compute(inputs(sail=sail, claude=claude, p30=p30, need_sail=1.0), now=NOW)
                     self.assertLessEqual(doc["research_usd_day"], B.CEILING_USD_DAY, (sail, claude, p30))
@@ -117,31 +127,130 @@ class Rule(unittest.TestCase):
         again = B.compute(inputs(sail=600.0), now=NOW + DAY, previous=doc)
         self.assertEqual((again["direction"], again["meters"]["sail"]["direction"]), ("raise", "raise"))
 
-    def test_the_taper_day_by_day_from_121_and_from_92(self):
-        """A Sail prefund of $121 at $1 a day fixed and a Claude prefund of $92, neither topped up, each spending its
-        whole day: each runs at its share of the ceiling while it holds five days of it, then spends a fifth of what it
-        holds above its reserve and five days of fixed cost a day. The ceiling is what research may spend, never what it
-        spends: a prefund left alone drains and the research with it."""
-        sail = spend_down("sail", 121.0, 1.0, 12)
-        self.assertEqual(sail, [(121.0, 15.0), (105.0, 15.0), (89.0, 14.8), (73.2, 11.64), (60.56, 9.112), (50.448, 7.0896),
-                                (42.3584, 5.4717), (35.8867, 4.1773), (30.7094, 3.1419), (26.5675, 2.3135),
-                                (23.254, 1.6508), (20.6032, 1.1206)])
-        claude = spend_down("claude", 92.0, 0.0, 12)
-        self.assertEqual(claude, [(92.0, 10.0), (82.0, 10.0), (72.0, 10.0), (62.0, 10.0), (52.0, 9.4), (42.6, 7.52),
-                                  (35.08, 6.016), (29.064, 4.8128), (24.2512, 3.8502), (20.401, 3.0802), (17.3208, 2.4642),
-                                  (14.8566, 1.9713)])
-        for meter, fixed, days in (("sail", 1.0, spend_down("sail", 121.0, 1.0, 60)), ("claude", 0.0, spend_down("claude", 92.0, 0.0, 60))):
+    def test_the_taper_day_by_day_from_two_example_prefunds(self):
+        """A Sail prefund of $250 at $1 a day fixed (its reserve the Sail guard's release line, as the job hands it) and a
+        Claude prefund of $150, neither topped up, each spending its whole day: each runs at its share of the ceiling
+        while it holds five days of it, then spends a fifth of what it holds above its reserve and five days of fixed cost
+        a day. The ceiling is what research may spend, never what it spends: a prefund left alone drains and the research
+        with it."""
+        release = GUARD["release"]
+        sail = spend_down("sail", 250.0, 1.0, 24, reserve=release)
+        self.assertEqual(sail, [(250.0, 15.0), (234.0, 15.0), (218.0, 15.0), (202.0, 15.0), (186.0, 15.0), (170.0, 15.0),
+                                (154.0, 15.0), (138.0, 15.0), (122.0, 15.0), (106.0, 12.8), (92.2, 10.04), (81.16, 7.832),
+                                (72.328, 6.0656), (65.2624, 4.6525), (59.6099, 3.522), (55.0879, 2.6176), (51.4703, 1.8941),
+                                (48.5762, 1.3152), (46.261, 0.8522), (44.4088, 0.4818), (42.927, 0.1854), (41.7416, 0.0),
+                                (40.7416, 0.0), (39.7416, 0.0)])
+        claude = spend_down("claude", 150.0, 0.0, 16)
+        self.assertEqual(claude, [(150.0, 10.0), (140.0, 10.0), (130.0, 10.0), (120.0, 10.0), (110.0, 10.0), (100.0, 10.0),
+                                  (90.0, 10.0), (80.0, 10.0), (70.0, 10.0), (60.0, 10.0), (50.0, 9.0), (41.0, 7.2),
+                                  (33.8, 5.76), (28.04, 4.608), (23.432, 3.6864), (19.7456, 2.9491)])
+        for meter, fixed, reserve, days in (("sail", 1.0, release, spend_down("sail", 250.0, 1.0, 60, reserve=release)),
+                                            ("claude", 0.0, B.RESERVE_USD["claude"], spend_down("claude", 150.0, 0.0, 60))):
             research = [r for _, r in days]
             self.assertEqual(research, sorted(research, reverse=True), f"{meter}: it only tapers")
             self.assertGreaterEqual(min(research), 0.0, f"{meter}: never below zero")
             self.assertLessEqual(max(research), B.ceiling_usd_day(meter))
             for balance, spent in days:
                 if spent > 0:  # research never spends the reserve nor the five days of the House's own fixed cost
-                    self.assertGreaterEqual(balance - spent, B.RESERVE_USD[meter] + B.RUNWAY_DAYS * fixed - 1e-3, (meter, balance))
-        # Sail's research ends above its reserve and five days of fixed cost; from there only the fixed cost falls.
-        done = next(balance for balance, spent in spend_down("sail", 121.0, 1.0, 60) if spent == 0.0)
-        self.assertLessEqual(done, B.RESERVE_USD["sail"] + B.RUNWAY_DAYS * 1.0)
-        self.assertGreater(done, B.RESERVE_USD["sail"] + (B.RUNWAY_DAYS - 1) * 1.0)
+                    self.assertGreaterEqual(balance - spent, reserve + B.RUNWAY_DAYS * fixed - 1e-3, (meter, balance))
+        # Sail's research ends above its reserve and four days of fixed cost; from there only the fixed cost falls.
+        done = next(balance for balance, spent in spend_down("sail", 250.0, 1.0, 60, reserve=release) if spent == 0.0)
+        self.assertLessEqual(done, release + B.RUNWAY_DAYS * 1.0)
+        self.assertGreater(done, release + (B.RUNWAY_DAYS - 1) * 1.0)
+
+    def test_the_taper_ends_above_the_sail_guards_own_line(self):
+        """Sail's reserve is the Sail guard's release line, so from any balance, with no top-up and every day spent whole,
+        research reaches zero before the balance meets the line the guard brakes at: the rule never drains the meter
+        until the guard stops the gate and pre-open fails. From there only the House's own fixed cost falls."""
+        line, release = GUARD["line"], GUARD["release"]
+        self.assertEqual((line, release), (32.0, 37.0), "2 x the House's burn + 30, and + 5 to release")
+        self.assertGreater(release, B.RESERVE_USD["sail"], "the least reserve is under the guard's line: never the one in force")
+        for start in (0.0, 20.0, 36.9, 37.0, 41.9, 42.1, 60.0, 100.0, 117.0, 250.0, 1000.0, 5000.0):
+            for fixed in (0.5, 1.0, 1.5, 4.0):
+                balance, days = start, 0
+                while True:
+                    row = B.compute(inputs(sail=balance, fixed=fixed, reserve=release), now=NOW)["meters"]["sail"]
+                    self.assertEqual(row["reserve_usd"], release)
+                    if row["research_usd_day"] == 0.0:
+                        break
+                    balance -= fixed + row["research_usd_day"]  # the day spent whole: the fastest the balance can fall
+                    days += 1
+                    self.assertGreater(balance, release + (B.RUNWAY_DAYS - 1) * fixed - 1e-3, (start, fixed, days))
+                    self.assertGreater(balance, line, "a day with research never ends under the guard's brake")
+                    self.assertLess(days, 1000, (start, fixed))
+                self.assertLessEqual(balance, max(start, release + B.RUNWAY_DAYS * fixed + 1e-3), (start, fixed))
+                if start >= release:
+                    self.assertGreaterEqual(balance, release, "research was never what took the meter to the line")
+        # A reserve under the rule's least is the least (the constant is the floor of the reserve, never a ceiling on it),
+        # and a reserve the job could not read is no research: unknown is never money.
+        self.assertEqual(B.compute(inputs(sail=100.0, reserve=3.0), now=NOW)["meters"]["sail"]["reserve_usd"], B.RESERVE_USD["sail"])
+        for unread in ("lots", float("nan"), -1.0):
+            given = inputs(sail=600.0)
+            given["meters"]["sail"]["reserve_usd"] = unread
+            doc = B.compute(given, now=NOW)
+            self.assertEqual((doc["meters"]["sail"]["research_usd_day"], doc["meters"]["sail"]["limited_by"]), (0.0, "unreadable"))
+            self.assertIn("sail: the reserve could not be read: no research", doc["why"])
+        given = inputs(sail=600.0)
+        given["meters"]["sail"]["reserve_usd"] = None
+        self.assertEqual(B.compute(given, now=NOW)["meters"]["sail"]["research_usd_day"], 0.0, "a line the job could not read")
+
+    def test_a_second_run_in_the_same_utc_day_keeps_the_days_figure(self):
+        """THE DAY'S FIGURE IS SET ONCE. The job runs at 00:30 UTC and again after the close economics; the second reading
+        has paid for the day's research, so a taper recomputed from it would put the day's cap under what the day booked.
+        A later run the same day raises nothing and lowers nothing for today, and records what it would have set."""
+        morning_at, evening_at = at(2026, 10, 20, 0, 30), at(2026, 10, 20, 20, 10)
+        morning = B.compute(inputs(sail=80.0), now=morning_at)
+        figure = {"day": "2026-10-20", "usd_day": 12.5, "limited_by": "runway", "set_at": "2026-10-20T00:30:00Z"}
+        sail = morning["meters"]["sail"]
+        self.assertEqual((sail["research_usd_day"], sail["would_set_usd_day"], sail["limited_by"], sail["day_figure"]),
+                         (12.5, 12.5, "runway", figure), "the first run of the day sets it: (70 - 5 x 1.5) / 5")
+        # After the close: the meter has paid for 11.00 of the day's research and most of the day's fixed cost.
+        evening = B.compute(inputs(sail=80.0 - 11.0 - 1.25), now=evening_at, previous=morning)
+        sail = evening["meters"]["sail"]
+        self.assertEqual((sail["research_usd_day"], sail["limited_by"], sail["day_figure"]), (12.5, "runway", figure),
+                         "today's cap stands: 11.00 is still under it and under its hold line")
+        self.assertEqual(sail["would_set_usd_day"], 10.05, "(57.75 - 5 x 1.5) / 5: what this reading would have set")
+        self.assertEqual((evening["direction"], sail["direction"], evening["research_usd_day"]), ("same", "same", 22.5))
+        self.assertIn("sail: today's figure stands (12.5000 a day, set at 2026-10-20T00:30:00Z); this run's reading would "
+                      "set 10.0500", evening["why"])
+        self.assertEqual(evening["knobs"], morning["knobs"])
+        # The card line is this run's own reading: the owner hears of the balance as it is.
+        self.assertLess(sail["card_runway_days"], morning["meters"]["sail"]["card_runway_days"])
+        # A top-up the same day raises nothing for today either: the next day's first run sets it.
+        topped = B.compute(inputs(sail=600.0), now=evening_at + 600, previous=evening)
+        self.assertEqual((topped["meters"]["sail"]["research_usd_day"], topped["meters"]["sail"]["would_set_usd_day"]), (12.5, 15.0))
+        # FAIL CLOSED at once: a meter that cannot be read is no research; read again the same day, the day's figure.
+        unread = B.compute(inputs(sail=None), now=evening_at + 1200, previous=topped)
+        self.assertEqual((unread["meters"]["sail"]["research_usd_day"], unread["meters"]["sail"]["limited_by"],
+                          unread["meters"]["sail"]["day_figure"]), (0.0, "unreadable", figure))
+        again = B.compute(inputs(sail=40.0), now=evening_at + 1800, previous=unread)
+        self.assertEqual((again["meters"]["sail"]["research_usd_day"], again["meters"]["sail"]["would_set_usd_day"]), (12.5, 4.5))
+        # The first run of the next UTC day sets that day's figure from its own reading.
+        tomorrow = B.compute(inputs(sail=67.75), now=morning_at + DAY, previous=evening)
+        sail = tomorrow["meters"]["sail"]
+        self.assertEqual((sail["research_usd_day"], sail["would_set_usd_day"], sail["direction"]), (10.05, 10.05, "cut"))
+        self.assertEqual(sail["day_figure"], {"day": "2026-10-21", "usd_day": 10.05, "limited_by": "runway",
+                                              "set_at": "2026-10-21T00:30:00Z"})
+        # A meter no run of the day has read yet is set by the first run that reads it.
+        blind = B.compute(inputs(sail=None), now=morning_at)
+        self.assertIsNone(blind["meters"]["sail"]["day_figure"])
+        first = B.compute(inputs(sail=67.75), now=evening_at, previous=blind)
+        self.assertEqual((first["meters"]["sail"]["research_usd_day"], first["meters"]["sail"]["day_figure"]["set_at"]),
+                         (10.05, "2026-10-20T20:10:00Z"))
+        self.assertEqual(first["meters"]["claude"]["day_figure"]["set_at"], "2026-10-20T00:30:00Z", "each meter its own")
+        # What sets no day's figure: another version of the rule's file, another format's, a figure that does not read.
+        for spoiled in ({**morning, "rule_version": 1}, {**morning, "schema": 1}, "budget", None):
+            self.assertEqual(B.compute(inputs(sail=67.75), now=evening_at, previous=spoiled)["meters"]["sail"]["research_usd_day"],
+                             10.05, spoiled if not isinstance(spoiled, dict) else (spoiled["schema"], spoiled["rule_version"]))
+        for bad in ({"usd_day": "lots"}, {"usd_day": -1.0}, {"limited_by": "unreadable"}, {"day": "2026-10-19"}, {"day": None}):
+            spoiled = copy.deepcopy(morning)
+            spoiled["meters"]["sail"]["day_figure"].update(bad)
+            self.assertEqual(B.compute(inputs(sail=67.75), now=evening_at, previous=spoiled)["meters"]["sail"]["research_usd_day"],
+                             10.05, bad)
+        # NEVER ABOVE THE CEILING: a day's figure that says more is read as the meter's share of it.
+        over = copy.deepcopy(morning)
+        over["meters"]["sail"]["day_figure"]["usd_day"] = 500.0
+        self.assertEqual(B.compute(inputs(sail=67.75), now=evening_at, previous=over)["meters"]["sail"]["research_usd_day"], 15.0)
 
     def test_a_tapered_meter_still_asks_for_a_card(self):
         """The review's case under the taper: research tapered to what the meter holds keeps its own runway at the runway
@@ -547,9 +656,9 @@ class ClaudeRoom(unittest.TestCase):
         self.router = ModelRouter(self.store, None, settings=self.settings, claude_factory=lambda model: None,
                                   claude_meter=Meter(500))
 
-    def admit(self, required, role="review"):
-        """One Claude admission. By default for the gate's review, which reads the day's whole line; any role but the
-        gate's two leaves their holds in it (`test_the_gates_holds_are_kept_inside_the_line`)."""
+    def admit(self, required, role="audit"):
+        """One Claude admission. By default for the gate's audit, the last stage, which reads the day's whole line; the
+        review leaves the audit's hold in it and every other role both (`test_the_gates_holds_are_kept_by_stage`)."""
         errors = []
         out = self.router._claude_admit(role=role, family=None, key="k", model="claude-opus-5-5",
                                         body={"max_tokens": 100, "output_config": {"effort": "high"}}, required=required,
@@ -565,32 +674,44 @@ class ClaudeRoom(unittest.TestCase):
             "sail": {"research_usd_day": 1.0}, "claude": {"research_usd_day": 0.5}}}))
         self.assertEqual(self.router.claude_budget_room(), 0.5)
 
-    def test_the_gates_holds_are_kept_inside_the_line(self):
-        """THE GATE NEVER WAITS FOR MIDNIGHT, on the paid models: every role but the gate's review and audit leaves their
-        holds ($0.50 and $1.00) in the day's Claude line, so late in the day the two still find them."""
-        self.assertEqual(B.GATE_HOLDS_USD, {"review": 0.5, "audit": 1.0})
+    def test_the_gates_holds_are_kept_by_stage(self):
+        """THE GATE NEVER WAITS FOR MIDNIGHT, on the paid models: the day's Claude line is kept by stage. Every role but
+        the gate's two leaves the review's hold and the audit's; the review leaves the audit's. So late in the day a
+        review finds its hold, and the audit still finds its own after that review was paid."""
+        self.assertEqual((B.GATE_HOLDS_USD, B.GATE_STAGES), ({"review": 0.65, "audit": 1.30}, ("review", "audit")))
         self.assertEqual([B.paid_model_reserve(role) for role in ("review", "audit", "strategist", "architect", "researcher",
                                                                   "rewrite", "diagnostician", None)],
-                         [0.0, 0.0, 1.5, 1.5, 1.5, 1.5, 1.5, 0.0], "no role named is a reading of the line, never a call")
-        self.settings["budget"] = {"source": "budget.json", "sail_usd_day": 3.0, "claude_usd_day": 2.0}
-        self.assertEqual((self.router.claude_budget_room(), self.router.claude_budget_room("review"),
-                          self.router.claude_budget_room("audit"), self.router.claude_budget_room("strategist")),
-                         (2.0, 2.0, 2.0, 0.5))
-        (request, _), _ = self.admit(0.5, role="strategist")
+                         [1.3, 0.0, 1.95, 1.95, 1.95, 1.95, 1.95, 0.0], "no role named is a reading of the line, never a call")
+        self.settings["budget"] = {"source": "budget.json", "sail_usd_day": 3.0, "claude_usd_day": 4.0}
+        rooms = [self.router.claude_budget_room(role) for role in (None, "audit", "review", "strategist")]
+        self.assertEqual(rooms[:2], [4.0, 4.0])
+        self.assertAlmostEqual(rooms[2], 2.7, places=9)
+        self.assertAlmostEqual(rooms[3], 2.05, places=9)
+        (request, _), _ = self.admit(2.0, role="strategist")
         self.assertIsNotNone(request, "what the line holds over the gate's holds is the other roles'")
         for role in ("strategist", "architect", "researcher", "rewrite", "diagnostician"):
-            (request, kind), errors = self.admit(0.01, role=role)
-            self.assertEqual((request, kind), (None, "line"), f"{role}: the last $1.50 of the day is the gate's")
+            (request, kind), errors = self.admit(0.1, role=role)
+            self.assertEqual((request, kind), (None, "line"), f"{role}: the last $1.95 of the day is the gate's")
             self.assertIn("research budget's Claude line for today has no room", errors[0])
-        # Late in the day: the review and the audit find their holds.
-        (request, _), _ = self.admit(0.5, role="review")
+        # Late in the day: a review finds its hold, and a second review may not spend the audit's.
+        (request, _), _ = self.admit(0.65, role="review")
         self.assertIsNotNone(request)
-        (request, _), _ = self.admit(1.0, role="audit")
-        self.assertIsNotNone(request)
-        self.assertEqual((self.store.spent(["claude"]), self.router.claude_budget_room()), (2.0, 0.0), "the whole line, no more")
-        self.assertEqual(self.admit(0.01, role="audit")[0], (None, "line"), "the line itself still binds the gate")
-        # OpenAI is under the same line and leaves the same holds; a line under the holds is all the gate's.
+        (request, kind), _ = self.admit(0.1, role="review")
+        self.assertEqual((request, kind), (None, "line"), "what is left of the day is the audit's hold")
+        (request, _), _ = self.admit(1.3, role="audit")
+        self.assertIsNotNone(request, "the audit finds its hold after the review was paid")
+        self.assertAlmostEqual(self.store.spent(["claude"]), 3.95, places=9)
+        self.assertEqual(self.admit(0.1, role="audit")[0], (None, "line"), "the line itself still binds the gate")
+        # The review's case: another role at its limit and reviews first. Pooled, three reviews took the audit's dollar.
         self.clock.advance(DAY)
+        self.settings["budget"]["claude_usd_day"] = B.ceiling_usd_day("claude")
+        self.store.add_spend("claude", 8.0, detail={"role": "strategist"})
+        admitted = [self.admit(0.5, role="review")[0][0] is not None for _ in range(3)]
+        self.assertEqual(admitted, [True, False, False], "10.00 - 8.00 - the audit's 1.30 holds one review of 0.50")
+        self.assertIsNotNone(self.admit(1.3, role="audit")[0][0], "and the audit's hold is whole")
+        # OpenAI is under the same line and leaves the same holds; a line under the audit's hold is all the audit's.
+        self.clock.advance(DAY)
+        self.settings["budget"]["claude_usd_day"] = 2.0
         errors: list[str] = []
         self.router.month, self.router.frontier_factory = FakeMonth(1000), lambda model: FakeFrontier(model)
         self.assertIsNone(self.router._ask_openai(role="architect", system="s", user="u", family=None, key="k", max_output=1000,
@@ -598,11 +719,38 @@ class ClaudeRoom(unittest.TestCase):
         self.assertIn("paid-model line", errors[0])
         self.settings["budget"]["claude_usd_day"] = 1.2
         self.assertEqual(self.admit(0.01, role="strategist")[0], (None, "line"))
-        self.assertIsNotNone(self.admit(0.5, role="review")[0][0])
-        # At the owner's ceiling the other roles have the line less the holds.
+        self.assertEqual(self.admit(0.5, role="review")[0], (None, "line"))
+        self.assertIsNotNone(self.admit(1.0, role="audit")[0][0])
+        # At the owner's ceiling the other roles have the line less both holds, the review the line less the audit's.
         self.clock.advance(DAY)
         self.settings["budget"]["claude_usd_day"] = B.ceiling_usd_day("claude")
-        self.assertEqual((self.router.claude_budget_room("strategist"), self.router.claude_budget_room("audit")), (8.5, 10.0))
+        self.assertEqual([round(self.router.claude_budget_room(role), 9) for role in ("strategist", "review", "audit")],
+                         [8.05, 8.7, 10.0])
+
+    def test_a_handed_block_is_held_to_the_ceiling(self):
+        """NEVER ABOVE THE CEILING, whatever way the block came: the Sail guard's caps and the router's room hold a
+        `budget` block that says more (settings handed in, never through `settings.load` and `read`) to each meter's
+        share of the owner's ceiling."""
+        block = {"source": "handed", "sail_usd_day": 500.0, "claude_usd_day": 500.0, "fixed_sail_usd_day": 1.0}
+        caps = B.sail_caps({"budget": block})
+        self.assertEqual((caps["research"], caps["account"], caps["gate_reserve"], caps["read"]), (15.0, 16.0, 1.5, True))
+        self.assertEqual(B.paid_model_room(block, 0.0, 0.0), 10.0)
+        self.assertEqual(round(B.paid_model_room(block, 1.0, 0.0, role="strategist"), 9), 7.05)
+        self.settings["budget"] = block
+        self.assertEqual((self.router.claude_budget_room(), self.router.claude_room()), (10.0, 10.0))
+        (request, kind), _ = self.admit(10.5)
+        self.assertEqual((request, kind), (None, "line"))
+        guard = SailGuard(self.store, self.settings, lambda: (5000.0, 5.0), clock=self.clock, disk_free=lambda: 100.0 * 2 ** 30)
+        self.store.add_spend("gym_box", 14.99)
+        guard.check()
+        self.assertEqual((guard.allows(), guard.last["budget_research_usd_day"]), (True, 15.0))
+        self.store.add_spend("gym_box", 0.01)
+        self.clock.advance(180)
+        guard.check()
+        self.assertEqual((guard.allows(), guard.causes), (False, ["research_budget"]), "the day's cap is the ceiling's share")
+        # A block under the ceiling is read as it is.
+        self.assertEqual(B.sail_caps({"budget": {**block, "sail_usd_day": 14.99}})["research"], 14.99)
+        self.assertEqual(B.paid_model_room({"claude_usd_day": 9.5}, 0.0), 9.5)
 
     def test_the_budgets_claude_dollars_today_cap_the_room_and_admission(self):
         self.settings["budget"] = {"source": "budget.json", "sail_usd_day": 3.0, "claude_usd_day": 2.0}
@@ -673,7 +821,7 @@ class ClaudeRoom(unittest.TestCase):
                 return super().ask(**kw)
 
         self.router.month, self.router.frontier_factory = FakeMonth(1000), lambda model: Slow(model, **answer)
-        return self.router._ask_openai(role="review", system="s", user="u", family=None, key="k", max_output=1000,
+        return self.router._ask_openai(role="audit", system="s", user="u", family=None, key="k", max_output=1000,
                                        openai_model="gpt-6-astra", effort="medium", need_usd=1.0, errors=[])
 
     def test_an_openai_call_counts_on_its_holds_day_at_its_settled_cost(self):
@@ -719,9 +867,11 @@ class ClaudeRoom(unittest.TestCase):
         self.assertEqual(B.paid_model_room({"claude_usd_day": 2.0}, 0.5, float("nan")), 0.0)
         self.assertEqual(B.paid_model_room({"claude_usd_day": 2.0}, 0.5, None), 0.0)
         self.assertEqual(B.paid_model_room({"claude_usd_day": 2.0}), 0.0, "no spend given is no room")
-        # The gate's holds, for a named role: kept by every role but the gate's two, never under 0.
-        self.assertEqual(B.paid_model_room({"claude_usd_day": 2.0}, 0.25, role="strategist"), 0.25)
+        # The gate's holds, for a named role, by stage: every role but the gate's two leaves both, the review the
+        # audit's, the audit none; never under 0.
+        self.assertEqual(round(B.paid_model_room({"claude_usd_day": 4.0}, 0.25, role="strategist"), 9), 1.8)
         self.assertEqual(B.paid_model_room({"claude_usd_day": 2.0}, 0.25, 0.5, role="architect"), 0.0)
+        self.assertEqual(round(B.paid_model_room({"claude_usd_day": 2.0}, 0.25, role="review"), 9), 0.45)
         self.assertEqual(B.paid_model_room({"claude_usd_day": 2.0}, 0.25, role="audit"), 1.75)
         self.assertEqual(B.paid_model_room({"claude_usd_day": 2.0}, float("nan"), role="audit"), 0.0)
         self.assertIsNone(B.paid_model_room(None, 5.0, role="audit"))
@@ -902,6 +1052,9 @@ class Job(unittest.TestCase):
         self.assertAlmostEqual(doc["earned_usd_day"], 0.5 * 39.98 / 30, places=4)
         sail, claude = doc["inputs"]["meters"]["sail"], doc["inputs"]["meters"]["claude"]
         self.assertEqual((sail["balance_usd"], sail["fixed_usd_day"], sail["need_usd"]), (600.0, 1.5, 21.0))
+        self.assertEqual((sail["reserve_usd"], doc["meters"]["sail"]["reserve_usd"], doc["meters"]["claude"]["reserve_usd"]),
+                         (GUARD["release"], 37.0, 5.0), "Sail's reserve is the Sail guard's release line; Claude's the rule's")
+        self.assertIn("the Sail guard's release line", sail["reserve_source"])
         # 400 - 185: the gateway's spent_usd already holds the 10 in flight, so it is not subtracted twice.
         self.assertEqual((claude["balance_usd"], claude["need_usd"]), (215.0, 7.0), "cap - spent: the holds are in spent")
         self.assertEqual(sorted(c[0] for c in self.sail.calls), ["sb_data", "sb_house"])
@@ -913,6 +1066,64 @@ class Job(unittest.TestCase):
         self.assertIsNone(why)
         self.assertEqual(block["sail_usd_day"], doc["meters"]["sail"]["research_usd_day"])
         self.assertEqual(block["fixed_sail_usd_day"], 1.5)
+
+    def test_sails_reserve_is_the_sail_guards_own_release_line(self):
+        """Read from the guard's own arithmetic over the settings the swarm runs on (`guard.house_line`), so the rule's
+        zero point follows the guard's line wherever the operator puts it, and is never under the rule's least."""
+        def reserve(guard=None):
+            (self.root / "swarm.json").write_text(json.dumps({"guard": guard or {}}))
+            B.run(self.ctx())
+            return self.doc()["meters"]["sail"]["reserve_usd"]
+
+        self.assertEqual(reserve(), 37.0, "2 x 1.00 + 30 + 5")
+        self.assertEqual(reserve({"margin_usd": 50.0}), 57.0)
+        self.assertEqual(reserve({"house_burn_usd_day": 3.0, "release_margin_usd": 10.0}), 46.0)
+        self.assertEqual(reserve({"house_burn_usd_day": 1.0, "measured_burn": True}), 38.0,
+                         "a guard on the measured burn: Sail's fixed cost of 1.50 a day is the House's burn")
+        self.assertEqual(reserve({"house_burn_usd_day": 0.0, "margin_usd": 0.0, "release_margin_usd": 0.0}), B.RESERVE_USD["sail"],
+                         "never under the rule's least")
+        for cfg in ({}, {"margin_usd": 50.0}, {"house_burn_usd_day": 3.0, "measured_burn": True}):
+            fixed = 4.0
+            lines = house_line(cfg, fixed if cfg.get("measured_burn") else 0.0)
+            self.assertEqual(B._sail_reserve(cfg, fixed, []), (lines["release"], "the Sail guard's release line "
+                                                                                  "(league/swarm/guard.py house_line)"))
+        # A line that cannot be read is no Sail research (unknown is never money), and the job says so.
+        errors: list[str] = []
+        self.assertEqual(B._sail_reserve({"margin_usd": "lots"}, 1.0, errors), (None, "the Sail guard's line could not be read"))
+        self.assertEqual(errors, ["Sail's reserve: the Sail guard's line could not be read: no Sail research"])
+        with mock.patch.object(B, "_sail_reserve", side_effect=lambda cfg, fixed, errors: (
+                errors.append("Sail's reserve: the Sail guard's line could not be read: no Sail research")
+                or (None, "the Sail guard's line could not be read"))):
+            receipt = B.run(self.ctx(now=NOW + DAY))
+        sail = self.doc()["meters"]["sail"]
+        self.assertEqual((sail["research_usd_day"], sail["limited_by"], sail["reserve_usd"]), (0.0, "unreadable", None))
+        self.assertTrue(any("Sail's reserve" in e for e in receipt["errors"]))
+
+    def test_the_jobs_second_run_of_a_utc_day_keeps_the_days_cap(self):
+        """The job as scheduled on a session day: 00:30 UTC, then after the close economics. The second run reads a
+        balance that has paid for the day's research; the day's cap in budget.json stays what the first run set, the
+        guard's caps with it, and the receipt records what the second reading would have set."""
+        morning, evening = at(2026, 10, 21, 0, 30), at(2026, 10, 21, 20, 10)
+        self.reading(100.0, morning - 60)
+        first = B.run(self.ctx(now=morning))
+        self.assertEqual(first["meters"]["sail"], {"research_usd_day": 11.1, "would_set_usd_day": 11.1, "limited_by": "runway",
+                                                   "runway_days": 5.0, "card_date": "2026-10-21", "direction": "same"},
+                         "(100 - 37 - 5 x 1.5) / 5: a taper day")
+        self.reading(100.0 - 9.9 - 1.2, evening - 60)  # 9.90 of research booked (under the hold line at 9.99) and the fixed cost
+        second = B.run(self.ctx(now=evening))
+        self.assertEqual((second["meters"]["sail"]["research_usd_day"], second["meters"]["sail"]["would_set_usd_day"]),
+                         (11.1, 8.88), "today's cap stands; (88.9 - 44.5) / 5 is what this reading would have set")
+        self.assertEqual((second["direction"], second["meters"]["sail"]["direction"]), ("same", "same"))
+        block, _ = B.read(self.root, evening + 60)
+        caps = B.sail_caps({"budget": block})
+        self.assertEqual((caps["research"], caps["gate_reserve"]), (11.1, 1.11), "what the guard holds the day to")
+        self.assertEqual(self.doc()["meters"]["sail"]["day_figure"]["set_at"], "2026-10-21T00:30:00Z")
+        # A guard reading gone stale at the second run is no research at once; the next day's first run sets its own.
+        self.reading(88.9, evening - 7 * 3600)
+        self.assertEqual(B.run(self.ctx(now=evening + 600))["meters"]["sail"]["research_usd_day"], 0.0)
+        self.reading(88.9, morning + DAY - 60)
+        third = B.run(self.ctx(now=morning + DAY))
+        self.assertEqual((third["meters"]["sail"]["research_usd_day"], third["meters"]["sail"]["would_set_usd_day"]), (8.88, 8.88))
 
     def test_every_read_that_fails_is_closed(self):
         (self.root / "live.sqlite").unlink()
@@ -1197,6 +1408,34 @@ class Job(unittest.TestCase):
         self.assertIs(edge["promotions_readable"], False)
         self.assertIn("the ladder's record could not be read", edge["why"])
 
+    def test_a_demotion_from_sized_is_no_looks_probe_even_with_a_passed_look_behind_it(self):
+        """The ladder put the family at Probe (its receipt), it was sized up, a look of it passed meanwhile, and the Money
+        table demoted it from Sized: a move to Probe from Sized is no Probe a look earned, whatever looks stand."""
+        import sqlite3
+
+        db = sqlite3.connect(self.root / "observe.sqlite")
+        db.execute("CREATE TABLE ladder_decisions (id INTEGER PRIMARY KEY, day TEXT, family TEXT, version INTEGER, "
+                   "verdict TEXT NOT NULL, at REAL NOT NULL)")
+        db.execute("INSERT INTO ladder_decisions VALUES (7, '2026-11-10', 'lad', 1, 'promote', ?)", (at(2026, 11, 10, 21, 0),))
+        db.commit()
+        db.close()
+        self.band("lad", "gym", "probe", at(2026, 11, 10, 21, 1), reason="the forward ladder promoted it (practice receipt 7)")
+        self.band("lad", "probe", "sized", at(2026, 11, 17, 15, 0), reason="sized")
+        self.look("lad", passed=True, at_=at(2026, 11, 18, 14, 0))
+        self.band("lad", "sized", "probe", at(2026, 11, 19, 15, 0), reason="its real trades lose")
+        reads = B._swarm_reads(self.root, at(2026, 12, 29, 21, 30), [])
+        self.assertEqual((reads["probes"], reads["promotions"]), ([], [at(2026, 11, 10, 21, 1)]))
+
+    def test_two_passed_looks_before_one_move_are_one_probe_and_a_return_is_none(self):
+        """Two passed looks of a family stand before its first move to Probe: that move answers both, so a later return to
+        Probe with no new look is no new Probe."""
+        self.look("f", passed=True, at_=at(2026, 11, 2, 14, 0), sha="a")
+        self.look("f", passed=True, at_=at(2026, 11, 3, 14, 0), sha="b")
+        self.band("f", "candidate", "probe", at(2026, 11, 4, 15, 0))
+        self.band("f", "probe", "candidate", at(2026, 11, 5, 15, 0), reason="its type no longer fits the Probe's cap")
+        self.band("f", "candidate", "probe", at(2026, 11, 6, 15, 0))
+        self.assertEqual(B._swarm_reads(self.root, at(2026, 12, 29, 21, 30), [])["probes"], [at(2026, 11, 4, 15, 0)])
+
     def test_a_ladder_promotion_and_a_looks_probe_both_count_and_the_later_one_anchors(self):
         import sqlite3
 
@@ -1266,20 +1505,24 @@ class Job(unittest.TestCase):
         facts = self.sent[0]
         self.assertEqual(facts["kind"], "funding")
         self.assertEqual(facts["notice_id"], "funding:sail:2026-W43:r2", "the meter, the ISO week and the rule's version")
-        # At the rate it wants: 1.5 fixed + its 15 of the ceiling (the 39.98 of profit is inside the ceiling): 50 above
-        # the reserve is 3 days of research left at the ceiling.
+        # At the rate it wants: 1.5 fixed + its 15 of the ceiling (the 39.98 of profit is inside the ceiling): 23 above
+        # the reserve (the Sail guard's release line, 37) is 1.4 days of research left at the ceiling.
         self.assertEqual((facts["meter"], facts["balance_usd"], facts["usd_day"], facts["research_usd_day"], facts["runway_days"]),
-                         ("sail", "60.00", "16.50", "15.00", "3.0"))
-        # At the rate the rule holds it to now: tapered to (50 - 5 x 1.5) / 5 a day, which keeps 5 days.
+                         ("sail", "60.00", "16.50", "15.00", "1.4"))
+        # At the rate the rule holds it to now: tapered to (23 - 5 x 1.5) / 5 a day, which keeps 5 days.
         self.assertEqual((facts["current_usd_day"], facts["current_research_usd_day"], facts["current_runway_days"]),
-                         ("10.00", "8.50", "5.0"))
+                         ("4.60", "3.10", "5.0"))
         # What buys 7 more days at the ceiling, the line it is under, and the day the taper starts (it has).
         self.assertEqual((facts["topup_usd"], facts["topup_days"], facts["card_line_days"], facts["card_date"]),
                          ("115.50", 7, 7, "2026-10-20"))
+        # The same amount and days under rule version 1's names: a gateway still on that rule's composer (it is its own
+        # deploy, and a House rollback does not take it back) reads only those, and must never mail "add unknown".
+        self.assertEqual((facts["restore_usd"], facts["restore_days"]), (facts["topup_usd"], facts["topup_days"]))
         self.assertEqual(sorted(facts), sorted([
             "kind", "notice_id", "meter", "balance_usd", "usd_day", "fixed_usd_day", "research_usd_day", "runway_days",
             "runs_out_on", "current_usd_day", "current_research_usd_day", "current_runway_days", "topup_usd", "topup_days",
-            "card_line_days", "card_date", "at", "test"]), "no account figure beyond the balance and the rates it always said")
+            "restore_usd", "restore_days", "card_line_days", "card_date", "at", "test"]),
+            "no account figure beyond the balance and the rates it always said")
         self.assertIs(facts["test"], False)
         self.answer = {"sent": True}
         B.run(self.ctx(now=NOW + 3600))

@@ -208,9 +208,17 @@ export function composeNotice(facts = {}) {
       // `current_usd_day` (an older House, or a balance the rule could not read for research) it claims no current
       // rate. At most once per meter per ISO week (its notice id, which the gateway also remembers for eight days).
       // `test: true` is a drill.
+      // THE AMOUNT UNDER EITHER RULE'S NAMES. The House and this gateway are separate deploys, so the facts may be the
+      // other rule version's: rule version 2 sends `topup_usd`/`topup_days` (what buys more days at the ceiling) and,
+      // the same values, version 1's `restore_usd`/`restore_days`; a House still on version 1 sends only those (what
+      // restores its runway at the floor plus the profit share). The amount is read from the names that came and the
+      // mail keeps that rule's words, so a House and a gateway on different versions never mail "add unknown".
       if (!Object.hasOwn(FUNDING_METERS, facts.meter)) return null;
       const meter = FUNDING_METERS[facts.meter];
       const drill = facts.test === true;
+      const topupUsd = facts.topup_usd, topupDays = facts.topup_days, restoreUsd = facts.restore_usd, restoreDays = facts.restore_days;
+      const versionOne = (topupUsd ?? null) === null && (restoreUsd ?? null) !== null;
+      const amount = dollars(versionOne ? restoreUsd : topupUsd);
       const fixed = dollars(facts.fixed_usd_day);
       const current = decimal(facts.current_usd_day) !== null;
       // A runway the House sent as zero: the meter sustains nothing at that rate.
@@ -228,21 +236,23 @@ export function composeNotice(facts = {}) {
       const idle = current && zero(facts.current_research_usd_day);
       const holds = lasts !== null && !idle && !zero(facts.runway_days) && decimal(facts.current_research_usd_day) !== null
         && decimal(facts.card_line_days) !== null && Number(lasts) >= Number(decimal(facts.card_line_days));
-      subject = `${drill ? 'LTCM [drill]' : 'LTCM'}: ${meter} runway ${dayCount(facts.runway_days)} days at the rate the budget wants; add ${dollars(facts.topup_usd)} by ${dateOf(facts.card_date)}`;
+      subject = `${drill ? 'LTCM [drill]' : 'LTCM'}: ${meter} runway ${dayCount(facts.runway_days)} days at the rate the budget wants; add ${amount} by ${dateOf(facts.card_date)}`;
       lines.push(
         drill ? 'THIS IS A DRILL: a synthetic cliff tests that this notice reaches you. Its figures are the drill\'s, not the desk\'s. Nothing needs doing.' : null,
         `${meter} holds ${dollars(facts.balance_usd)}.`,
         current
           ? `The desk is held to ${dollars(facts.current_usd_day)} a day on it now (fixed ${fixed}, research up to ${dollars(facts.current_research_usd_day)}); ${lasts === null ? 'the House sent no runway at that rate' : `at that rate it lasts ${lasts} days above its reserve`}.`
           : 'What the desk is held to on it now was not sent: the figures below are at the rate the budget rule wants, not a spend the desk is making.',
-        `The budget rule wants ${dollars(facts.usd_day)} a day for it (fixed ${fixed}, research ${dollars(facts.research_usd_day)}: its share of the research ceiling); at that rate it lasts ${dayCount(facts.runway_days)} days above its reserve, to about ${dateOf(facts.runs_out_on)}. That is the runway under the ${dayCount(facts.card_line_days)}-day card line.`,
-        `Adding ${dollars(facts.topup_usd)} buys ${dayCount(facts.topup_days)} more days at the rate the rule wants. Add it by ${dateOf(facts.card_date)}.`,
+        `The budget rule wants ${dollars(facts.usd_day)} a day for it (fixed ${fixed}, research ${dollars(facts.research_usd_day)}: ${versionOne ? 'the research floor plus what profit earned' : 'its share of the research ceiling'}); at that rate it lasts ${dayCount(facts.runway_days)} days above its reserve, to about ${dateOf(facts.runs_out_on)}. That is the runway under the ${dayCount(facts.card_line_days)}-day card line.`,
+        versionOne
+          ? `Adding ${amount} restores ${dayCount(restoreDays)} days of runway at the rate the rule wants. Add it by ${dateOf(facts.card_date)}.`
+          : `Adding ${amount} buys ${dayCount(topupDays)} more days at the rate the rule wants. Add it by ${dateOf(facts.card_date)}.`,
         spent
           ? `${meter} has no runway left above its reserve: research on it stays throttled until it is funded.`
           : holds
             ? `Nothing stops if no card is added: research stays throttled to what ${meter} sustains.`
             : lasts !== null
-              ? `If no card is added, ${meter} lasts ${lasts} days above its reserve at the rate the desk is held to now: research on it ${idle ? `is already at ${dollars(facts.current_research_usd_day)}, so there is nothing left to throttle` : 'tapers as the balance falls'}.`
+              ? `If no card is added, ${meter} lasts ${lasts} days above its reserve at the rate the desk is held to now: research on it ${idle ? `is already at ${dollars(facts.current_research_usd_day)}, so there is nothing left to throttle` : versionOne ? 'stays throttled' : 'tapers as the balance falls'}.`
               : `If no card is added, research on ${meter} stays throttled; how long ${meter} lasts at the rate the desk is held to now was not sent.`,
         'The budget rule never raises a cap or moves money.',
         `At: ${clip(facts.at, 40) || 'an unknown time'}.`,

@@ -223,6 +223,11 @@ class TheCommittedPolicy(L.LoopCase):
             # The Sail guard's brake line, the budget rule's fixed cost and the OpenAI month's reserve: the release's own
             # (settings.py, the owner's deploy) or tighter.
             self.assertGreaterEqual(with_policy[line], without[line], f"guard.{line}")
+        from league.swarm.guard import house_line
+
+        # The line a braked guard releases at is THE BUDGET's Sail reserve (league/ops/budget.py): the release's own or higher.
+        self.assertGreaterEqual(house_line(with_policy)["release"], house_line(without)["release"])
+        self.assertEqual(house_line(with_policy), {"house": 1.0, "line": 32.0, "release": 37.0})
 
     def test_the_budget_binds_it(self):
         loaded = S.load(self.root)  # no budget.json: the floor
@@ -298,6 +303,27 @@ class TheCommittedPolicy(L.LoopCase):
             self.assertGreaterEqual(lines[role], hold, f"{role}: its line holds its hold")
         self.assertLessEqual(lines["strategist"], B.ceiling_usd_day("claude") - sum(B.GATE_HOLDS_USD.values()),
                              "what the strategist may take leaves the gate's holds")
+
+    def test_the_gates_holds_cover_what_the_router_books(self):
+        """THE GATE'S HOLDS (`budget.GATE_HOLDS_USD`, kept inside the day's Claude line by stage) are sized by what the
+        router really books for the gate's review and audit on this policy: the larger of the call's need and its
+        request's own worst case (`claude_request`), for the largest program the Gym accepts."""
+        from league.gym.safety import MAX_CODE_CHARS
+        from league.swarm import gate as G
+        from league.swarm.models import ModelRouter
+
+        loaded = self.at_usd_day(B.CEILING_USD_DAY)
+        router = ModelRouter(self.store, None, settings=loaded, claude_factory=lambda model: None, claude_meter=None)
+        program = ("x = 1\n" * MAX_CODE_CHARS)[:MAX_CODE_CHARS]  # a newline every six characters: more bytes than code is
+        contract = json.dumps(G.review_contract(), sort_keys=True)
+        needs = {"review": 0.5, "audit": float(loaded["gate"].get("audit_need_usd", 1.0))}  # league/swarm/gate.py's own
+        for head, role, effort in (("", "review", "medium"), ("AUDIT. ", "audit", "high")):
+            user = (f"{head}Family f0123456789ab: {'a mechanism in words. ' * 20}\nStructure debit_vertical, roots SPY, QQQ.\n\n"
+                    f"Runtime contract (actual deployed source): {contract}\n\n```python\n{program}\n```\nPARAMS overrides: {{}}")
+            _, worst = router.claude_request(G.REVIEW, user, effort=effort, role=role)
+            self.assertGreater(worst, needs[role], f"{role}: for a program this large the request's worst case is the hold")
+            self.assertLessEqual(max(needs[role], worst), B.GATE_HOLDS_USD[role], f"{role}: the hold the router books")
+        self.assertEqual(B.GATE_STAGES, ("review", "audit"), "the gate's order: the review leaves the audit's hold")
 
     def test_fewer_dollars_tighten_every_knob(self):
         """$12, $5 and $1 a day on the committed policy: (boxes, pace, ceiling, start, every, refill, each Claude line)."""

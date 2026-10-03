@@ -19,7 +19,7 @@ from league.swarm.funding import DEFAULTS as FUNDING_DEFAULTS, FundingWatch, mon
 from league.swarm.models import ModelError, ModelRouter
 from league.swarm.settings import DEFAULTS
 from league.swarm.store import SwarmStore
-from league.tests.swarm_fakes import Clock, FakeMonth
+from league.tests.swarm_fakes import Clock, FakeMonth, unbound_budget
 from league.tests.test_swarm_loop import LoopCase
 
 UTC = dt.timezone.utc
@@ -51,7 +51,7 @@ class Case(unittest.TestCase):
         self.settings = copy.deepcopy(DEFAULTS)
         self.settings["claude"]["usd_cap"] = 10_000.0  # the gateway's room binds, not the swarm's own cap
         # Nor THE BUDGET's day, which is a line and never a cliff (no block is the floor): above every call asked here.
-        self.settings["budget"] = {"source": "test", "sail_usd_day": 100_000.0, "claude_usd_day": 100_000.0}
+        self.settings["budget"] = unbound_budget(self, 100_000.0)
         self.meter = Meter()
         self.month = FakeMonth(None)
         self.guard = SimpleNamespace(last={})

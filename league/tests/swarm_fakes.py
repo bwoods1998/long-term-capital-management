@@ -36,6 +36,21 @@ class Clock:
         self.t += seconds
 
 
+def unbound_budget(case: Any, usd_day: float = 1000.0) -> dict[str, Any]:
+    """The settings' `budget` block for a test that does not judge THE BUDGET: `usd_day` dollars a day on each meter, far
+    over anything the test spends. The Sail guard and the router hold every block to the owner's ceiling, however it
+    reached them (league/ops/budget.py `sail_caps`, `paid_model_room`), so the ceiling is lifted over the block for the
+    life of `case` (a `unittest.TestCase`). No block at all is the floor."""
+    from unittest import mock
+
+    from league.ops import budget
+
+    lifted = mock.patch.object(budget, "CEILING_USD_DAY", float(usd_day) / min(budget.SPLIT.values()))
+    lifted.start()
+    case.addCleanup(lifted.stop)
+    return {"source": "test", "sail_usd_day": float(usd_day), "claude_usd_day": float(usd_day)}
+
+
 def summary(trades: int = 150, days: int = 120, pnl: float = 500.0, mean: float = 0.05, t: float = 2.5, sharpe_daily: float = 0.2,
             quarters: str = "4/4") -> dict[str, Any]:
     return {"trades": trades, "days": 250, "days_traded": days, "pnl": pnl, "pnl_per_max_loss": mean, "mean_return_on_max_loss": mean,

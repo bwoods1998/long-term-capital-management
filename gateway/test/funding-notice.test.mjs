@@ -17,19 +17,20 @@ const GATEWAY = 'https://ltcm-gateway.workers.dev';
 const env = (extra = {}) => ({ GATEWAY_TOKEN: TOKEN, GATEWAY_ADMIN_TOKEN: TOKEN + '-owner', CAP_TIMEZONE: 'America/New_York', ...extra });
 
 //: The facts as league/ops/budget.py `notice_facts` writes them (money as two-decimal strings, runway as one-decimal)
-//: under the budget's rule version 2, for a synthetic Sail prefund of 121 with 1.00 a day fixed: research runs at its
-//: 15.00 share of the owner's ceiling, the meter holds 6.9 days of that above its reserve (under the 7-day card line),
-//: 112.00 buys 7 more, and the taper starts on the card date (when 5 days are left).
+//: under the budget's rule version 2, for an example Sail prefund of 140 with 1.00 a day fixed (a round figure, never
+//: the account's): research runs at its 15.00 share of the owner's ceiling, the meter holds 6.4 days of that above its
+//: reserve (the Sail guard's own line, 37: under the 7-day card line), 112.00 buys 7 more, and the taper starts on the
+//: card date (when 5 days are left). The amount and its days go out under rule version 1's names too (`restore_*`).
 const FACTS = {
-  kind: 'funding', notice_id: 'funding:sail:2026-W41:r2', meter: 'sail', balance_usd: '121.00', usd_day: '16.00', fixed_usd_day: '1.00',
-  research_usd_day: '15.00', runway_days: '6.9', runs_out_on: '2026-10-11', current_usd_day: '16.00', current_research_usd_day: '15.00',
-  current_runway_days: '6.9', topup_usd: '112.00', topup_days: 7, card_line_days: 7, card_date: '2026-10-06',
-  at: '2026-10-05T00:30:00Z', test: false,
+  kind: 'funding', notice_id: 'funding:sail:2026-W41:r2', meter: 'sail', balance_usd: '140.00', usd_day: '16.00', fixed_usd_day: '1.00',
+  research_usd_day: '15.00', runway_days: '6.4', runs_out_on: '2026-10-11', current_usd_day: '16.00', current_research_usd_day: '15.00',
+  current_runway_days: '6.4', topup_usd: '112.00', topup_days: 7, restore_usd: '112.00', restore_days: 7, card_line_days: 7,
+  card_date: '2026-10-06', at: '2026-10-05T00:30:00Z', test: false,
 };
-const SUBJECT = 'LTCM: Sail runway 6.9 days at the rate the budget wants; add $112.00 by 2026-10-06';
-const HOLDS = 'Sail holds $121.00.';
-const HELD = 'The desk is held to $16.00 a day on it now (fixed $1.00, research up to $15.00); at that rate it lasts 6.9 days above its reserve.';
-const WANTS = 'The budget rule wants $16.00 a day for it (fixed $1.00, research $15.00: its share of the research ceiling); at that rate it lasts 6.9 days above its reserve, to about 2026-10-11. That is the runway under the 7-day card line.';
+const SUBJECT = 'LTCM: Sail runway 6.4 days at the rate the budget wants; add $112.00 by 2026-10-06';
+const HOLDS = 'Sail holds $140.00.';
+const HELD = 'The desk is held to $16.00 a day on it now (fixed $1.00, research up to $15.00); at that rate it lasts 6.4 days above its reserve.';
+const WANTS = 'The budget rule wants $16.00 a day for it (fixed $1.00, research $15.00: its share of the research ceiling); at that rate it lasts 6.4 days above its reserve, to about 2026-10-11. That is the runway under the 7-day card line.';
 const TOPUP = 'Adding $112.00 buys 7 more days at the rate the rule wants. Add it by 2026-10-06.';
 const NOTHING_STOPS = 'Nothing stops if no card is added: research stays throttled to what Sail sustains.';
 const NOT_SENT = 'What the desk is held to on it now was not sent: the figures below are at the rate the budget rule wants, not a spend the desk is making.';
@@ -47,7 +48,7 @@ test('a funding notice says what the meter holds, the rate the desk is held to o
   assert.ok(NOTICE_KINDS.includes('funding'));
   const message = composeNotice(FACTS);
   assert.equal(message.subject, SUBJECT);
-  assert.deepEqual(message.text.split('\n'), [HOLDS, HELD, WANTS, TOPUP, lasts('6.9', TAPERS), ...END]);
+  assert.deepEqual(message.text.split('\n'), [HOLDS, HELD, WANTS, TOPUP, lasts('6.4', TAPERS), ...END]);
   // What the rule wants is said as the meter's share of the research ceiling, and the amount as what buys more days:
   // no floor, no profit share and no days restored (the budget's rule version 1) are named.
   assert.equal(/floor|profit|restores/i.test(message.text), false);
@@ -56,14 +57,15 @@ test('a funding notice says what the meter holds, the rate the desk is held to o
   assert.equal(/spen[dt]/i.test(message.text), false);
   assert.deepEqual(message.text.match(/held to \$[\d.]+/g), ['held to $16.00']);
   // Each runway is days until the meter's reserve, and is said as that wherever a count of days is.
-  assert.deepEqual(message.text.match(/lasts [\d.]+ days( above its reserve)?/g), Array(3).fill('lasts 6.9 days above its reserve'));
+  assert.deepEqual(message.text.match(/lasts [\d.]+ days( above its reserve)?/g), Array(3).fill('lasts 6.4 days above its reserve'));
   const claude = composeNotice({ ...FACTS, meter: 'claude', notice_id: 'funding:claude:2026-W41:r2' });
-  assert.match(claude.subject, /^LTCM: Claude \(Anthropic\) runway 6\.9 days at the rate the budget wants;/);
-  assert.match(claude.text, /^Claude \(Anthropic\) holds \$121\.00\.\n/);
-  assert.ok(claude.text.includes('If no card is added, Claude (Anthropic) lasts 6.9 days above its reserve at the rate the desk is held to now: research on it tapers as the balance falls.'));
+  assert.match(claude.subject, /^LTCM: Claude \(Anthropic\) runway 6\.4 days at the rate the budget wants;/);
+  assert.match(claude.text, /^Claude \(Anthropic\) holds \$140\.00\.\n/);
+  assert.ok(claude.text.includes('If no card is added, Claude (Anthropic) lasts 6.4 days above its reserve at the rate the desk is held to now: research on it tapers as the balance falls.'));
   // Tapered (the House's own pinned notice is below): the rate the desk is held to is under the one the rule wants.
-  const tapered = composeNotice({ ...FACTS, balance_usd: '45.00', runway_days: '2.2', current_usd_day: '7.00', current_research_usd_day: '6.00', current_runway_days: '5.0' });
-  assert.deepEqual(tapered.text.match(/held to \$[\d.]+|wants \$[\d.]+/g), ['held to $7.00', 'wants $16.00']);
+  const tapered = composeNotice({ ...FACTS, balance_usd: '75.00', runway_days: '2.4', runs_out_on: '2026-10-07', current_usd_day: '7.60',
+    current_research_usd_day: '6.60', current_runway_days: '5.0', card_date: '2026-10-05' });
+  assert.deepEqual(tapered.text.match(/held to \$[\d.]+|wants \$[\d.]+/g), ['held to $7.60', 'wants $16.00']);
   assert.ok(tapered.text.includes(lasts('5', TAPERS)));
 });
 
@@ -88,7 +90,7 @@ test('with no current rate sent, no current spend is claimed, the figures are sa
   for (const [name, facts] of [
     ['an older House', older],
     ['an unreadable balance', { ...FACTS, current_usd_day: null, current_research_usd_day: '0.00', current_runway_days: null }],
-    ['a runway with no rate', { ...older, current_runway_days: '6.9' }],
+    ['a runway with no rate', { ...older, current_runway_days: '6.4' }],
     ['not a decimal', { ...FACTS, current_usd_day: '16.00\nBcc: x' }],
   ]) {
     const message = composeNotice(facts);
@@ -99,30 +101,30 @@ test('with no current rate sent, no current spend is claimed, the figures are sa
   }
   // The unreadable balance as `notice_facts` writes it (the card line read from the gateway's own Sail reading): a
   // short runway at the wanted rate, and no word that nothing stops under it.
-  const unread = composeNotice({ ...FACTS, balance_usd: '40.00', runway_days: '1.9', runs_out_on: '2026-10-06', current_usd_day: null,
+  const unread = composeNotice({ ...FACTS, balance_usd: '60.00', runway_days: '1.4', runs_out_on: '2026-10-06', current_usd_day: null,
     current_research_usd_day: '0.00', current_runway_days: null, card_date: '2026-10-05' });
-  assert.equal(unread.subject, 'LTCM: Sail runway 1.9 days at the rate the budget wants; add $112.00 by 2026-10-05');
+  assert.equal(unread.subject, 'LTCM: Sail runway 1.4 days at the rate the budget wants; add $112.00 by 2026-10-05');
   assert.deepEqual(unread.text.split('\n'), [
-    'Sail holds $40.00.', NOT_SENT,
-    'The budget rule wants $16.00 a day for it (fixed $1.00, research $15.00: its share of the research ceiling); at that rate it lasts 1.9 days above its reserve, to about 2026-10-06. That is the runway under the 7-day card line.',
+    'Sail holds $60.00.', NOT_SENT,
+    'The budget rule wants $16.00 a day for it (fixed $1.00, research $15.00: its share of the research ceiling); at that rate it lasts 1.4 days above its reserve, to about 2026-10-06. That is the runway under the 7-day card line.',
     'Adding $112.00 buys 7 more days at the rate the rule wants. Add it by 2026-10-05.',
     NO_PROMISE, ...END,
   ]);
 });
 
 test('nothing stops is said only while research is above zero and the runway at the rate the desk is held to is at or over the card line', () => {
-  // The House's own pinned notice (league/tests/test_ops_budget.py, the short meter told once a week): Sail with 3 days
-  // of research left at the ceiling. The rule has tapered its research to 8.50 a day, which keeps 5 days above the
+  // The House's own pinned notice (league/tests/test_ops_budget.py, the short meter told once a week): Sail with 1.4
+  // days of research left at the ceiling. The rule has tapered its research to 3.10 a day, which keeps 5 days above the
   // reserve at the rate it is held to: under the card line, so nothing is promised.
-  const pinned = { ...FACTS, notice_id: 'funding:sail:2026-W43:r2', balance_usd: '60.00', usd_day: '16.50', fixed_usd_day: '1.50', runway_days: '3.0',
-    runs_out_on: '2026-10-23', current_usd_day: '10.00', current_research_usd_day: '8.50', current_runway_days: '5.0', topup_usd: '115.50',
-    card_date: '2026-10-20', at: '2026-10-20T21:30:00Z' };
+  const pinned = { ...FACTS, notice_id: 'funding:sail:2026-W43:r2', balance_usd: '60.00', usd_day: '16.50', fixed_usd_day: '1.50', runway_days: '1.4',
+    runs_out_on: '2026-10-21', current_usd_day: '4.60', current_research_usd_day: '3.10', current_runway_days: '5.0', topup_usd: '115.50',
+    restore_usd: '115.50', card_date: '2026-10-20', at: '2026-10-20T21:30:00Z' };
   const message = composeNotice(pinned);
-  assert.equal(message.subject, 'LTCM: Sail runway 3 days at the rate the budget wants; add $115.50 by 2026-10-20');
+  assert.equal(message.subject, 'LTCM: Sail runway 1.4 days at the rate the budget wants; add $115.50 by 2026-10-20');
   assert.deepEqual(message.text.split('\n'), [
     'Sail holds $60.00.',
-    'The desk is held to $10.00 a day on it now (fixed $1.50, research up to $8.50); at that rate it lasts 5 days above its reserve.',
-    'The budget rule wants $16.50 a day for it (fixed $1.50, research $15.00: its share of the research ceiling); at that rate it lasts 3 days above its reserve, to about 2026-10-23. That is the runway under the 7-day card line.',
+    'The desk is held to $4.60 a day on it now (fixed $1.50, research up to $3.10); at that rate it lasts 5 days above its reserve.',
+    'The budget rule wants $16.50 a day for it (fixed $1.50, research $15.00: its share of the research ceiling); at that rate it lasts 1.4 days above its reserve, to about 2026-10-21. That is the runway under the 7-day card line.',
     'Adding $115.50 buys 7 more days at the rate the rule wants. Add it by 2026-10-20.',
     'If no card is added, Sail lasts 5 days above its reserve at the rate the desk is held to now: research on it tapers as the balance falls.',
     'The budget rule never raises a cap or moves money.', 'At: 2026-10-20T21:30:00Z.', '', FLOOR, CONSOLE, '',
@@ -130,18 +132,18 @@ test('nothing stops is said only while research is above zero and the runway at 
   // Research at 0.00 is never told that nothing stops, days from the reserve or over the card line alike (a prefund left
   // with no card passes through every one of these, week by week).
   const idle = { current_usd_day: '1.00', current_research_usd_day: '0.00' };
-  for (const [current_runway_days, said] of [['0.3', '0.3'], ['2.0', '2'], ['4.9', '4.9'], ['6.9', '6.9'], ['7.0', '7'], ['8.5', '8.5'], [9, '9']]) {
+  for (const [current_runway_days, said] of [['0.3', '0.3'], ['2.0', '2'], ['4.9', '4.9'], ['6.4', '6.4'], ['7.0', '7'], ['8.5', '8.5'], [9, '9']]) {
     assert.equal(closing({ ...FACTS, ...idle, current_runway_days }), lasts(said, AT_ZERO), said);
   }
   assert.equal(closing({ ...FACTS, ...idle, current_research_usd_day: 0, current_runway_days: '4.9' }), lasts('4.9', AT_ZERO));
   assert.equal(closing({ ...FACTS, meter: 'claude', current_usd_day: '0.00', current_research_usd_day: '0.00' }),
-    'If no card is added, Claude (Anthropic) lasts 6.9 days above its reserve at the rate the desk is held to now: research on it is already at $0.00, so there is nothing left to throttle.');
+    'If no card is added, Claude (Anthropic) lasts 6.4 days above its reserve at the rate the desk is held to now: research on it is already at $0.00, so there is nothing left to throttle.');
   // Research above zero: with the runway at the rate the desk is held to at the card line or over it nothing stops;
   // under it (where the rule's own facts always are: a meter is told only while it holds fewer days than the line at the
   // ceiling, and the taper keeps fewer still) nothing is promised.
   for (const current_runway_days of ['7.0', 7, '7.1', '9.0']) assert.equal(closing({ ...FACTS, current_runway_days }), NOTHING_STOPS, String(current_runway_days));
   assert.equal(closing({ ...FACTS, current_usd_day: '8.00', current_research_usd_day: '7.00', current_runway_days: '7.0' }), NOTHING_STOPS);
-  for (const [current_runway_days, said] of [['6.9', '6.9'], [6.99, '6.99'], ['5.0', '5'], ['0.1', '0.1']]) {
+  for (const [current_runway_days, said] of [['6.4', '6.4'], [6.49, '6.49'], ['5.0', '5'], ['0.1', '0.1']]) {
     assert.equal(closing({ ...FACTS, current_runway_days }), lasts(said, TAPERS), said);
   }
   // A card line or a research figure that does not read shows nothing; a line over the runway is a line it is under.
@@ -152,12 +154,12 @@ test('nothing stops is said only while research is above zero and the runway at 
   let said = 0;
   for (const current_usd_day of [undefined, null, 'x', '16.00']) {
     for (const current_research_usd_day of [undefined, null, 'x', '-0.50', '0.00', 0, '0.01', 15]) {
-      for (const current_runway_days of [undefined, null, 'soon', '0.0', '0.3', '6.9', '7.0', 9]) {
+      for (const current_runway_days of [undefined, null, 'soon', '0.0', '0.3', '6.4', '7.0', 9]) {
         for (const card_line_days of [undefined, null, 'x', 7, '7']) {
-          for (const runway_days of ['0.0', '6.9']) {
+          for (const runway_days of ['0.0', '6.4']) {
             const facts = { ...FACTS, current_usd_day, current_research_usd_day, current_runway_days, card_line_days, runway_days };
             const shown = current_usd_day === '16.00' && ['0.01', 15].includes(current_research_usd_day)
-              && ['7.0', 9].includes(current_runway_days) && [7, '7'].includes(card_line_days) && runway_days === '6.9';
+              && ['7.0', 9].includes(current_runway_days) && [7, '7'].includes(card_line_days) && runway_days === '6.4';
             assert.equal(composeNotice(facts).text.includes('Nothing stops'), shown, JSON.stringify(facts));
             assert.equal(closing(facts) === NOTHING_STOPS, shown, JSON.stringify(facts));
             said += shown ? 1 : 0;
@@ -180,7 +182,7 @@ test('a current rate with no runway says so; a meter with no runway left is not 
   // meter lacks to its reserve and seven days at the ceiling above it.
   const empty = { ...FACTS, meter: 'claude', balance_usd: '3.00', usd_day: '10.00', fixed_usd_day: '0.00', research_usd_day: '10.00',
     runway_days: '0.0', runs_out_on: '2026-10-05', current_usd_day: '0.00', current_research_usd_day: '0.00', current_runway_days: '0.0', topup_usd: '72.00',
-    card_date: '2026-10-05' };
+    restore_usd: '72.00', card_date: '2026-10-05' };
   const message = composeNotice(empty);
   assert.equal(message.subject, 'LTCM: Claude (Anthropic) runway 0 days at the rate the budget wants; add $72.00 by 2026-10-05');
   assert.deepEqual(message.text.split('\n'), [
@@ -202,7 +204,7 @@ test('a current rate with no runway says so; a meter with no runway left is not 
   // held rate's do not): the mail has said how long the meter lasts at the held rate, so it does not also say that it has
   // none left, and it does not say that nothing stops.
   for (const [over, said] of [
-    [{}, lasts('6.9', TAPERS)],
+    [{}, lasts('6.4', TAPERS)],
     [{ current_usd_day: '1.00', current_research_usd_day: '0.00', current_runway_days: '0.1' }, lasts('0.1', AT_ZERO)],
   ]) {
     const facts = { ...FACTS, ...over, runway_days: '0.0' };
@@ -214,8 +216,8 @@ test('a current rate with no runway says so; a meter with no runway left is not 
   // Over every combination of the two runways and the current rate: a mail that says the meter lasts some days at the
   // held rate never says it has none left, and one that says none is left never says it lasts a day at that rate.
   for (const current_usd_day of [undefined, null, '16.00']) {
-    for (const current_runway_days of [undefined, null, '0.0', 0, '0.3', '6.9', '9.0']) {
-      for (const runway_days of [undefined, null, '0.0', 0, '1.9', '6.9']) {
+    for (const current_runway_days of [undefined, null, '0.0', 0, '0.3', '6.4', '9.0']) {
+      for (const runway_days of [undefined, null, '0.0', 0, '1.9', '6.4']) {
         const facts = { ...FACTS, current_usd_day, current_runway_days, runway_days };
         const text = composeNotice(facts).text;
         const held = /at that rate it lasts ([\d.]+) days above its reserve\.\n/.exec(text);
@@ -235,7 +237,7 @@ test('a current rate with no runway says so; a meter with no runway left is not 
 test('a drill says it is one; a meter not named is refused; a figure that is not a decimal is never echoed', () => {
   const drill = composeNotice({ ...FACTS, test: true, notice_id: 'funding-test:sail:2026-W41' });
   assert.equal(drill.subject, SUBJECT.replace(/^LTCM/, 'LTCM [drill]'));
-  assert.deepEqual(drill.text.split('\n'), [DRILL, HOLDS, HELD, WANTS, TOPUP, lasts('6.9', TAPERS), ...END]);
+  assert.deepEqual(drill.text.split('\n'), [DRILL, HOLDS, HELD, WANTS, TOPUP, lasts('6.4', TAPERS), ...END]);
   // Only `true` is a drill, and nothing but a drill is marked as one.
   for (const flag of [false, undefined, null, 'true', 1]) {
     const real = composeNotice({ ...FACTS, test: flag });
@@ -246,9 +248,10 @@ test('a drill says it is one; a meter not named is refused; a figure that is not
     assert.equal(composeNotice({ ...FACTS, meter }), null, String(meter));
   }
   const odd = composeNotice({
-    ...FACTS, balance_usd: '1e9<script>', topup_usd: null, runway_days: 'soon', card_date: 'tomorrow\nBcc: x', at: 'x'.repeat(100),
-    usd_day: '16.00; DROP', fixed_usd_day: {}, research_usd_day: [15], runs_out_on: '2026-10-11\nBcc: x', current_usd_day: 16,
-    current_research_usd_day: '<b>', current_runway_days: Infinity, topup_days: '7 days', card_line_days: NaN,
+    ...FACTS, balance_usd: '1e9<script>', topup_usd: '112<b>', restore_usd: null, runway_days: 'soon', card_date: 'tomorrow\nBcc: x',
+    at: 'x'.repeat(100), usd_day: '16.00; DROP', fixed_usd_day: {}, research_usd_day: [15], runs_out_on: '2026-10-11\nBcc: x',
+    current_usd_day: 16, current_research_usd_day: '<b>', current_runway_days: Infinity, topup_days: '7 days', restore_days: NaN,
+    card_line_days: NaN,
   });
   assert.equal(odd.subject, 'LTCM: Sail runway unknown days at the rate the budget wants; add unknown by unknown');
   assert.deepEqual(odd.text.split('\n').slice(0, 5), [
@@ -260,9 +263,47 @@ test('a drill says it is one; a meter not named is refused; a figure that is not
   ]);
   for (const echoed of ['<script>', '<b>', 'Bcc', 'DROP', 'Infinity', 'NaN', '[object', 'x'.repeat(41)]) assert.equal(odd.text.includes(echoed), false, echoed);
   // Numbers as numbers read as well as numbers as strings.
-  const numbers = composeNotice({ ...FACTS, balance_usd: 121, usd_day: 16, fixed_usd_day: 1, research_usd_day: 15, runway_days: 6.9,
-    current_usd_day: 16, current_research_usd_day: 15, current_runway_days: 6.9, topup_usd: 112, topup_days: '7', card_line_days: '7' });
+  const numbers = composeNotice({ ...FACTS, balance_usd: 140, usd_day: 16, fixed_usd_day: 1, research_usd_day: 15, runway_days: 6.4,
+    current_usd_day: 16, current_research_usd_day: 15, current_runway_days: 6.4, topup_usd: 112, topup_days: '7', restore_usd: 112,
+    restore_days: '7', card_line_days: '7' });
   assert.deepEqual(numbers, composeNotice(FACTS));
+});
+
+test('a House and a gateway on different rule versions never mail an amount that could not be read', () => {
+  // THIS gateway, a House still on rule version 1 (the gateway deploys first, and a House rollback does not take it
+  // back): the facts name the amount `restore_usd`/`restore_days` only, with that rule's figures (a research floor plus
+  // a profit share, a 60-day card line, what restores 90 days). The mail is that rule's own, word for word.
+  const one = {
+    kind: 'funding', notice_id: 'funding:sail:2026-W41', meter: 'sail', balance_usd: '200.00', usd_day: '4.00', fixed_usd_day: '1.00',
+    research_usd_day: '3.00', runway_days: '47.5', runs_out_on: '2026-11-21', current_usd_day: '2.11', current_research_usd_day: '1.11',
+    current_runway_days: '90.0', restore_usd: '170.00', restore_days: 90, card_line_days: 60, card_date: '2026-10-05',
+    at: '2026-10-05T00:30:00Z', test: false,
+  };
+  const old = composeNotice(one);
+  assert.equal(old.subject, 'LTCM: Sail runway 47.5 days at the rate the budget wants; add $170.00 by 2026-10-05');
+  assert.deepEqual(old.text.split('\n'), [
+    'Sail holds $200.00.',
+    'The desk is held to $2.11 a day on it now (fixed $1.00, research up to $1.11); at that rate it lasts 90 days above its reserve.',
+    'The budget rule wants $4.00 a day for it (fixed $1.00, research $3.00: the research floor plus what profit earned); at that rate it lasts 47.5 days above its reserve, to about 2026-11-21. That is the runway under the 60-day card line.',
+    'Adding $170.00 restores 90 days of runway at the rate the rule wants. Add it by 2026-10-05.',
+    NOTHING_STOPS, ...END,
+  ]);
+  assert.equal(closing({ ...one, current_runway_days: '30.0' }),
+    'If no card is added, Sail lasts 30 days above its reserve at the rate the desk is held to now: research on it stays throttled.');
+  assert.equal(/unknown|ceiling|buys|tapers/.test(old.subject + old.text), false);
+  // A House on rule version 2, an OLDER gateway (it reads `restore_*` only): the House sends the same amount and days
+  // under both names (league/tests/test_ops_budget.py pins that `notice_facts` writes them equal), so that composer
+  // finds its amount. Here the new names decide: the old ones change no word, present, absent or different.
+  assert.deepEqual([FACTS.restore_usd, FACTS.restore_days], [FACTS.topup_usd, FACTS.topup_days]);
+  const { restore_usd, restore_days, ...newNames } = FACTS;
+  for (const facts of [newNames, { ...FACTS, restore_usd: null, restore_days: null }, { ...FACTS, restore_usd: '999.00', restore_days: 90 }]) {
+    assert.deepEqual(composeNotice(facts), composeNotice(FACTS));
+  }
+  assert.ok(composeNotice(FACTS).text.includes(TOPUP));
+  // Neither name: nothing is known, and the mail says so rather than borrow a figure.
+  const neither = composeNotice({ ...newNames, topup_usd: undefined, topup_days: undefined });
+  assert.match(neither.subject, /; add unknown by 2026-10-06$/);
+  assert.ok(neither.text.includes('Adding unknown buys unknown more days at the rate the rule wants.'));
 });
 
 test('through /v1/notify: mailed once per notice id for eight days, counted against the day\'s cap like any notice', async () => {

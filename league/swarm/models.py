@@ -14,10 +14,10 @@
   the architect, the gate's audit, the diagnostician, the researchers' top band and the strategist), first among the
   paid routes while the gateway's funded total has room above `claude.reserve_usd` and the swarm's own Claude spend is
   under `claude.usd_cap` and, LTCM v3, under THE BUDGET's paid-model dollars today (league/ops/budget.py
-  `paid_model_room`: the settings' `budget` block's Claude dollars less today's Claude and OpenAI spend, and, for every
-  role but the gate's review and audit, less the holds the rule keeps in the line for those two; spent, a call
-  takes its next route as for a role's own line, kind "line", and OpenAI is refused by the same line, so Sail is
-  next). The architect rotates only
+  `paid_model_room`: the settings' `budget` block's Claude dollars less today's Claude and OpenAI spend, and less the
+  holds the rule keeps in the line for the gate, by stage: the review leaves the audit's, every other role both;
+  spent, a call takes its next route as for a role's own line, kind "line", and OpenAI is refused by the same line, so
+  Sail is next). The architect rotates only
   while `architect.openai_model` names a model: then every other pass asks GPT-6 Astra first. Claude capped, erring or
   unconfigured falls to OpenAI, then Sail, exactly as before. Every role's call asks for Claude (Sept 29, 2026: the
   researcher's stall rewrite and the gate's review too), so `claude.roles` alone decides who gets it: adding "rewrite"
@@ -427,7 +427,8 @@ class ModelRouter:
         Claude spend today and its OpenAI spend today, holds included (`claude_spent`, `openai_spent`: a call counts on
         the day its hold was booked, and each model's spend is floored at 0 on its own, so no release lifts the line).
         For a call of `role` (an admission), also less THE GATE'S HOLDS the rule keeps inside the line for the gate's
-        review and audit (`budget.paid_model_reserve`: none for those two roles; with no role, the line itself).
+        review and audit, by stage (`budget.paid_model_reserve`: none for the audit, the audit's for the review, both for
+        every other role; with no role, the line itself).
         Settings with no `budget` block are the router's own read of its store root's budget.json (`budget.effective`: the
         floor when it gives none), as the Sail guard reads them: settings handed in without the block never lift the
         budget. 0 for a block that is not a budget, or a rule that cannot be read (FAIL CLOSED). OpenAI's admission reads

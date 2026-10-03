@@ -18,8 +18,10 @@ researchers to zero, when:
 - the state disk has under `min_free_disk_gb` free (the House's ledger lives there).
 
 It releases only on a fresh good reading above the line plus `release_margin_usd` (hysteresis) with the
-caps allowing. Every change of state is a `swarm.guard` event. Sail's meter since the guard first ran
-(`metered_spent`, from `burst_started_at`) is still kept: the site's compute block reads it. Standard library only.
+caps allowing. The line and that release line are `house_line`'s: THE BUDGET's Sail reserve is the release line
+(league/ops/budget.py), so research tapers to zero before the balance meets this brake. Every change of state is a
+`swarm.guard` event. Sail's meter since the guard first ran (`metered_spent`, from `burst_started_at`) is still kept:
+the site's compute block reads it. Standard library only.
 
 THE GATE NEVER WAITS FOR MIDNIGHT (the budget's `gate_reserve`, the caps' `gate_reserve`: the last tenth of the day's
 Sail research dollars, at least $0.50). Before the brake there is a HOLD: when the swarm's own Sail spend today reaches
@@ -66,6 +68,18 @@ def causes_of(record: Any) -> list[str] | None:
     if not isinstance(causes, list) or not all(isinstance(cause, str) for cause in causes):
         return None
     return list(causes)
+
+
+def house_line(cfg: Any, measured: float = 0.0) -> dict[str, float]:
+    """THE HOUSE'S LINE on Sail's balance, from the `guard` settings: `house` is the House's burn a day
+    (`house_burn_usd_day`, or `measured` when that is larger), `line` two days of it plus `margin_usd` (under it the
+    guard brakes everything), `release` the line plus `release_margin_usd` (a braked guard, the day's cap included,
+    releases only at or above it). One arithmetic for `SailGuard.check` and for THE BUDGET's Sail reserve
+    (league/ops/budget.py `gather`: research tapers to zero above `release`), so the two cannot drift apart."""
+    cfg = cfg if isinstance(cfg, Mapping) else {}
+    house = max(float(cfg.get("house_burn_usd_day", 1.0)), float(measured))
+    line = 2.0 * house + float(cfg.get("margin_usd", 30.0))
+    return {"house": house, "line": line, "release": line + float(cfg.get("release_margin_usd", 5.0))}
 
 
 def budget_caps(settings: Mapping[str, Any], root: Any = None, now: float | None = None) -> dict[str, Any]:
@@ -162,8 +176,8 @@ class SailGuard:
         # the account (the data box) and, for a day after a restart, whatever ran before it; false (the default) trusts
         # the configured `house_burn_usd_day` alone.
         measured = (burn - swarm_day) if burn is not None and cfg.get("measured_burn", False) else 0.0
-        house = max(float(cfg.get("house_burn_usd_day", 1.0)), measured)
-        line = 2.0 * house + float(cfg.get("margin_usd", 30.0))
+        lines = house_line(cfg, measured)
+        house, line = lines["house"], lines["line"]
         metered, metered_today = self._metered(balance, now)
         midnight = now - (now % 86400)
         today_spent = self.store.spent(SWARM_SAIL_KINDS, since=midnight)
@@ -175,7 +189,7 @@ class SailGuard:
             reasons.append("the Sail balance could not be read" + (" (braked before it)" if self.braked else ""))
         else:
             self.last_ok = now
-            release = line + (float(cfg.get("release_margin_usd", 5.0)) if self.braked else 0.0)
+            release = lines["release"] if self.braked else line
             if balance < release:
                 causes.append("under_line")
                 reasons.append(f"the Sail balance {balance:.2f} is under the House's line {release:.2f} "
@@ -245,5 +259,5 @@ def provider_reader(provider: Any) -> Callable[[], tuple[Any, Any]]:
     return read
 
 
-__all__ = ["SailGuard", "provider_reader", "budget_caps", "causes_of", "SWARM_SAIL_KINDS", "CAUSES", "BUDGET_CAUSES",
-           "RESEARCH_KINDS"]
+__all__ = ["SailGuard", "provider_reader", "budget_caps", "house_line", "causes_of", "SWARM_SAIL_KINDS", "CAUSES",
+           "BUDGET_CAUSES", "RESEARCH_KINDS"]
