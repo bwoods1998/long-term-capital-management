@@ -220,13 +220,7 @@ class Process(LoopCase):
         self.assertEqual(set(sw.rounds), {"tournament", "gate", "forward"}, "those three go on to the day's cap")
         self.assertEqual(ran, ["forward"], "no architect pass, no reseed, no diagnostician")
         self.assertEqual(scaled, [], "a hold is no brake: validation and the look need the Gym")
-        worker = threading.Thread(target=sw._worker, args=(0,), daemon=True)
-        worker.start()
-        time.sleep(0.3)
-        sw.stop.set()
-        worker.join(10)
-        self.assertEqual([e for e in self.store.events_after(0) if e["kind"] == "swarm.cycle"], [], "no researcher cycles")
-        self.assertIn("research", self.guard.asked, "the researchers and the births ask for research")
+        self.assertIn("research", self.guard.asked, "the births ask for research")
         self.assertFalse(json.loads((self.root / "swarm.heartbeat").read_text())["status"]["braked"], "the heartbeat says no brake")
         # The hold over (a new day, or a raise): the same pass starts the architect again.
         sw.stop.clear()
@@ -245,6 +239,36 @@ class Process(LoopCase):
         sw.step()
         self.assertEqual((sw.rounds, ran), ({}, []))
         self.assertEqual(len(scaled), 1, "and the brake scales the Gym to zero, as ever")
+
+    def worker_cycles(self, sw, seconds=0.4):
+        """The families one researcher worker starts a cycle on in `seconds` (the cycle itself stubbed: what is judged is
+        whether the worker starts one), and what it asked the guard for."""
+        cycles: list[str] = []
+        sw.researcher.cycle = lambda fid: cycles.append(fid) or {}
+        self.guard.asked.clear()
+        sw.stop.clear()
+        worker = threading.Thread(target=sw._worker, args=(0,), daemon=True)
+        worker.start()
+        time.sleep(seconds)
+        sw.stop.set()
+        worker.join(10)
+        self.assertFalse(worker.is_alive(), "the worker left when asked")
+        return cycles, set(self.guard.asked)
+
+    def test_at_the_gates_reserve_a_researcher_starts_no_cycle(self):
+        """A researcher's cycle is new research (most of the day's Sail spend): under the guard's hold the worker starts
+        none, and with the hold over the same worker takes a family (the control: the hold alone was what stopped it)."""
+        sw = self.swarm()
+        sw.seed()
+        self.guard.research_held = True
+        cycles, asked = self.worker_cycles(sw)
+        self.assertEqual((cycles, asked), ([], {"research"}), "held: no cycle, and the worker asks for research by name")
+        self.guard.research_held = False
+        cycles, asked = self.worker_cycles(sw)
+        self.assertTrue(cycles, "not held: the worker takes a family")
+        self.assertEqual(asked, {"research"})
+        self.guard.braked = True
+        self.assertEqual(self.worker_cycles(sw)[0], [], "and under the brake none, as ever")
 
     def test_researchers_hold_while_the_last_hours_spend_is_at_the_pace(self):
         sw = self.swarm()
