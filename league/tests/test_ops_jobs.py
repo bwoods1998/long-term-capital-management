@@ -358,7 +358,7 @@ def passing_house(now):
         "swarm": {"raw_is_object": True, "raw_live": {"observe": True, "observe_max": 24, "calibration": True},
                   "defaults_live": {"observe": True, "observe_max": 48, "calibration": False},
                   "eff_gym": {"enabled": True, "image_checkpoint": "img", "gate_checkpoint": "gate"}, "eff_guard": {"house_burn_usd_day": 1.0},
-                  "eff_claude": {"usd_cap": 150}, "floor": 8, "alive": 12, "heartbeat_age_s": 15,
+                  "eff_claude": {"usd_cap": 150}, "floor": 8, "alive": 12, "read_at": now, "heartbeat_age_s": 15,
                   "heartbeat_release": "/workspace/releases/r1", "status": {"spend_last_hour": {"sail_model": 0.1}, "braked": False},
                   "guard": {"balance": 300, "line": 32, "braked": False}},
         "bands": {"observe": 10, "read": [{"family": "f", "band": "probe", "version": 2, "typical_max_loss_usd": 50, "fits_probe": True}],
@@ -457,11 +457,17 @@ class PreopenBrake(Base):
             self.assertFalse(self.swarm(h)[0], balance)
 
     def test_a_brake_by_the_days_budget_alone_passes_and_says_so(self):
-        for causes, said in ((["research_budget"], "the day's research budget"), (["account_budget"], "the day's account budget"),
-                             (["research_budget", "account_budget"], "the day's research budget and account budget")):
+        # Research at its cap is the day as designed. Sail's own meter at the account's cap is the budget's stop too, and no
+        # ordinary day (the account was billed its research and fixed dollars with the swarm's booked research under its
+        # cap): it passes, said as what it is and never as designed.
+        meter = "Sail's own meter is at the day's cap for the whole account"
+        for causes, said in ((["research_budget"], "the day's research budget alone, as designed"),
+                             (["account_budget"], f"the day's account budget alone: {meter}"),
+                             (["research_budget", "account_budget"], f"the day's research budget and account budget alone: {meter}")):
             h = self.braked(causes=causes)
-            self.assertEqual(self.swarm(h), (True, f"the Sail guard: balance vs line $300.00 / $32.00; braked by {said} alone, "
-                                                   f"as designed ({BUDGET_SPENT})"), causes)
+            self.assertEqual(self.swarm(h), (True, f"the Sail guard: balance vs line $300.00 / $32.00; braked by {said} "
+                                                   f"({BUDGET_SPENT})"), causes)
+            self.assertEqual("as designed" in self.swarm(h)[1], causes == ["research_budget"], causes)
             self.assertIsNone(self.kept(h), "a pass says the reason on the guard's own line")
             self.assertEqual([c.ok for c in PO.checks(h, self.now)], [True] * 9)
 
@@ -528,8 +534,9 @@ class PreopenBrake(Base):
             self.assertFalse(ok, stamp)
             self.assertIn(f"braked True by the day's research budget, {said} (no fresh reading of the balance)", line)
         h = self.braked()
-        del h["at"]  # the check's own time unknown: nothing is fresh
-        self.assertFalse(self.swarm(h)[0])
+        del h["swarm"]["read_at"]  # the time of the heartbeat's read unknown: nothing is fresh (the job's `now` is not it)
+        self.assertEqual(self.swarm(h), (False, "the Sail guard: balance vs line $300.00 / $32.00; braked True by the day's research "
+                                                "budget, on a reading ? old (no fresh reading of the balance)"))
         h = self.braked(at=self.now - 200)
         h["swarm"]["eff_guard"]["stale_seconds"] = 120
         self.assertFalse(self.swarm(h)[0], "the guard's own setting")
@@ -659,6 +666,113 @@ class PreopenBrake(Base):
         h["swarm"].update(eff_guard=settings["guard"], guard=json.loads(json.dumps(g.last)))
         h["swarm"]["status"]["braked"] = not g.allows()
         self.assertEqual(self.swarm(h)[0], False)
+
+    def on_disk(self):
+        """A state root as the swarm leaves it, for `collect` itself: swarm.json, the swarm's store, health.json and a real
+        guard on the settings the root loads (no budget.json: the floor). Returns (the guard, the store, `beat`), where
+        `beat()` writes the heartbeat as `league/swarm/loop.py` does, the guard's `last` under `status.guard`."""
+        from league.swarm import settings as SS
+        from league.swarm.guard import SailGuard
+        from league.swarm.store import SwarmStore
+
+        (self.root / "swarm.json").write_text(json.dumps({
+            "live": {"observe": True, "observe_max": 24, "calibration": False}, "population": {"floor": 0},
+            "gym": {"enabled": True, "image_checkpoint": "img", "gate_checkpoint": "gate"}}))
+        (self.root / "health.json").write_text(json.dumps({"at": datetime.fromtimestamp(self.now, timezone.utc).isoformat()}))
+        store = SwarmStore(self.root, clock=lambda: self.now)
+        self.addCleanup(store.close)
+        reading = [(300.0, 1.0)]
+        g = SailGuard(store, SS.load(self.root, config={}), lambda: reading[0], clock=lambda: self.now,
+                      disk_free=lambda: 100.0 * 2 ** 30)
+
+        def beat():
+            (self.root / "swarm.heartbeat").write_text(json.dumps({
+                "pid": 1, "at": self.now, "release": os.path.realpath(self.base / "current"),
+                "status": {"spend_last_hour": {}, "guard": g.last, "braked": not g.allows()}}))
+
+        return g, store, reading, beat
+
+    def collected(self, **kw):
+        """Check 5 on what `collect` reads from the root: (ok, the guard's line)."""
+        h = PO.collect(self.root, self.base, self.base / "releases" / "r1", FakeGateway(), now=self.now, config={}, **kw)
+        self.assertNotIn("swarm", h["errors"])
+        c = PO.check_swarm(h)
+        return c.ok, [text for ok, text in c.items if ok is not None][-1]
+
+    def test_through_collect_a_real_guards_heartbeat_passes_on_the_days_brake_alone_and_fails_once_stale(self):
+        g, store, reading, beat = self.on_disk()
+        g.check()
+        beat()
+        self.assertEqual(self.collected(), (True, "the Sail guard: balance vs line $300.00 / $32.00; braked False"))
+        store.add_spend("sail_model", 3.0)  # the floor's Sail research dollars a day
+        self.now += 180
+        self.assertEqual(g.check()["causes"], ["research_budget"])
+        beat()
+        self.assertEqual(self.collected(), (True, "the Sail guard: balance vs line $300.00 / $32.00; braked by the day's research "
+                                                  "budget alone, as designed (today's Sail research budget is spent (3.00 of 3.00; "
+                                                  "floor))"))
+        # The swarm goes on beating while its guard stops checking: the heartbeat is fresh, the reading in it is not.
+        self.now += 599
+        beat()
+        self.assertTrue(self.collected()[0])
+        self.now += 1
+        beat()
+        self.assertEqual(self.collected(), (False, "the Sail guard: balance vs line $300.00 / $32.00; braked True by the day's "
+                                                   "research budget, on a reading 10m old (no fresh reading of the balance)"))
+        # A cause that is not the budget's, read the same way.
+        reading[0] = (None, None)
+        self.assertEqual(g.check()["causes"], ["balance_unreadable", "research_budget"])
+        beat()
+        self.assertEqual(self.collected(), (False, "the Sail guard: balance vs line ? / $32.00; braked True, causes "
+                                                   "balance_unreadable, research_budget"))
+
+    def test_through_collect_sails_own_meter_at_the_accounts_cap_passes_and_is_never_said_as_designed(self):
+        g, store, reading, beat = self.on_disk()
+        g.check()
+        reading[0] = (296.0, 1.0)  # the account billed the day's research and fixed dollars; the swarm booked none of it
+        self.now += 180
+        self.assertEqual(g.check()["causes"], ["account_budget"])
+        beat()
+        ok, line = self.collected()
+        self.assertTrue(ok, line)
+        self.assertIn("braked by the day's account budget alone: Sail's own meter is at the day's cap for the whole account "
+                      "(today's Sail budget is spent by Sail's meter (4.00 of 4.00 for the account", line)
+        self.assertNotIn("as designed", line)
+
+    def test_a_guard_check_between_the_jobs_now_and_the_heartbeats_read_is_a_fresh_reading(self):
+        """The job reads its clock, then the gateway (four GETs), then the heartbeat: a guard check and a heartbeat written
+        in between are stamped after the job's `now`. They are aged on the clock as read once the heartbeat was."""
+        g, store, reading, beat = self.on_disk()
+        store.add_spend("sail_model", 3.0)
+        started = self.now
+        self.now = started + 3
+        self.assertEqual(g.check()["causes"], ["research_budget"])
+        self.now = started + 4
+        beat()
+        ticks = iter([started])  # the job's `now`; every later read is after the gateway's GETs
+        ctx = Context("preopen", root=self.root, base=self.base, release=self.base / "releases" / "r1", due_at=started, config={},
+                      clock=lambda: next(ticks, started + 5), gateway=FakeGateway(), settings_value={})
+        out = PO.run(ctx)
+        self.assertEqual(out["at"], "2026-10-05T12:30:00Z")
+        row = next(c for c in out["checks"] if c["name"] == "swarm")
+        self.assertTrue(row["ok"], row)
+        self.assertIn({"ok": True, "text": "heartbeat 1s old"}, row["items"])
+        self.assertIn("braked by the day's research budget alone, as designed", row["items"][-1]["text"])
+        self.assertNotIn("5 swarm", out["failed"])
+        # A reading stamped after the heartbeat's read is still no reading, near or far.
+        self.now = started + 5
+        for ahead, said in ((1, "-1s"), (30, "-30s"), (86400, "-86400s")):
+            body = json.loads((self.root / "swarm.heartbeat").read_text())
+            body["status"]["guard"]["at"] = started + 5 + ahead
+            (self.root / "swarm.heartbeat").write_text(json.dumps(body))
+            self.assertEqual(self.collected(clock=lambda: started + 5),
+                             (False, "the Sail guard: balance vs line $300.00 / $32.00; braked True by the day's research budget, "
+                                     f"on a reading {said} old (no fresh reading of the balance)"), ahead)
+        # With no clock handed in, the job's `now` is the only read there is: the same reading is after it, and fails.
+        beat()
+        self.assertTrue(self.collected(clock=lambda: started + 5)[0])
+        self.now = started
+        self.assertFalse(self.collected()[0])
 
 
 class Receipts(Base):

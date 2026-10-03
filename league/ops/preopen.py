@@ -16,8 +16,8 @@ and went stale (GOAL Appendix C 7); here each check asks what the running House 
  5 swarm     swarm.json is an object with a `live` block the live path reads as such; population at or above the
              floor; heartbeat fresh and on the current release; the Gym on with images named; the Sail guard not
              braked, or braked by THE BUDGET's daily caps alone on a fresh balance above its line (research at its cap
-             until 00:00 UTC is the day as designed; any other cause, a budget rule that could not be read among them,
-             or one not named, is a FAIL)
+             until 00:00 UTC is the day as designed; Sail's own meter at the account's cap passes and is said as that;
+             any other cause, a budget rule that could not be read among them, or one not named, is a FAIL)
  6 bands     the observe rows the swarm offers the live path (when observe is on; a count of rows offered, not of
              cohorts pinned or practising); every Probe/Sized row fits the Probe cap
  7 mirror    the House's swarm mirror keeps up with the swarm's events (lag <= one batch)
@@ -97,8 +97,10 @@ class Check:
 
 
 # ------------------------------------------------------------------------------------------------ the House reads
-def collect(root: Path, base: Path, release: Path, gateway: Any, *, now: float, config: Mapping[str, Any]) -> dict[str, Any]:
-    """What the checks read, one section at a time (a section that cannot be read is an error, never a pass)."""
+def collect(root: Path, base: Path, release: Path, gateway: Any, *, now: float, config: Mapping[str, Any],
+            clock: Callable[[], float] | None = None) -> dict[str, Any]:
+    """What the checks read, one section at a time (a section that cannot be read is an error, never a pass). `clock` is
+    read again once the swarm's heartbeat has been (the swarm section's `read_at`; `now` without one)."""
     out: dict[str, Any] = {"at": now, "errors": {}}
 
     def section(name: str, fn: Callable[[], Any]) -> None:
@@ -181,6 +183,9 @@ def collect(root: Path, base: Path, release: Path, gateway: Any, *, now: float, 
         raw = json.loads((root / "swarm.json").read_text())
         eff = SS.load(root, config=config)
         hb = json.loads((root / "swarm.heartbeat").read_text())
+        # The swarm's stamps are aged on a clock read AFTER its heartbeat is: `now` is from before the gateway's GETs, so a
+        # heartbeat, or the guard's check inside it, written in between is stamped after `now`.
+        read_at = float(clock()) if clock is not None else now
         st = hb.get("status") or {}
         alive = guard.read(root / "swarm.sqlite", lambda db: guard.ids(db, "SELECT count(*) FROM families WHERE retired_at IS NULL"))[0]
         return {"raw_is_object": isinstance(raw, dict), "raw_live": raw.get("live") if isinstance(raw, dict) else None,
@@ -188,7 +193,8 @@ def collect(root: Path, base: Path, release: Path, gateway: Any, *, now: float, 
                 "eff_gym": {k: (eff.get("gym") or {}).get(k) for k in ("enabled", "image_checkpoint", "gate_checkpoint")},
                 "eff_guard": eff.get("guard"), "eff_claude": {k: (eff.get("claude") or {}).get(k) for k in ("usd_cap",)},
                 "floor": int((eff.get("population") or {}).get("floor", 0) or 0),
-                "alive": alive, "heartbeat_age_s": round(now - float(hb["at"]), 1), "heartbeat_release": hb.get("release"),
+                "alive": alive, "read_at": read_at, "heartbeat_age_s": round(read_at - float(hb["at"]), 1),
+                "heartbeat_release": hb.get("release"),
                 "status": {k: st.get(k) for k in ("spend_last_hour", "usd_per_hour", "braked")}, "guard": st.get("guard")}
 
     def bands() -> dict:
@@ -340,13 +346,16 @@ def check_account(h: Mapping[str, Any]) -> Check:
     return c
 
 
-def budget_brake(gd: Mapping[str, Any], funded: bool, now: Any, stale_seconds: float) -> tuple[bool, str]:
+def budget_brake(gd: Mapping[str, Any], funded: bool, read_at: Any, stale_seconds: float) -> tuple[bool, str]:
     """A braked Sail guard, from its own record in the heartbeat: (the brake is THE BUDGET's daily stop and nothing else,
     what the line says). It is the budget's alone when the record itself is braked, every cause it names is one of the
     budget's daily caps (`league/swarm/guard.py` BUDGET_CAUSES; the names, never the reason's text), the balance was read
-    above the line (`funded`), and that reading is fresh by the guard's own `stale_seconds`. No named cause (a record
-    from before the list was kept, or a brake only the swarm's status says: no good reading) is cause unknown: never
-    the budget's."""
+    above the line (`funded`), and that reading is fresh by the guard's own `stale_seconds`, aged at `read_at`: the
+    clock as read once the heartbeat was (`collect`), so a reading stamped after it is no reading. No named cause (a
+    record from before the list was kept, or a brake only the swarm's status says: no good reading) is cause unknown:
+    never the budget's. Research at its cap is the day as designed; Sail's own meter at the account's cap passes as the
+    budget's stop too and is said as what it is (the account was billed research plus the fixed boxes with the swarm's
+    booked research still under its cap), never as designed."""
     from ..swarm.guard import BUDGET_CAUSES, causes_of
 
     causes = causes_of(gd) if gd.get("braked") is True else None
@@ -357,9 +366,11 @@ def budget_brake(gd: Mapping[str, Any], funded: bool, now: Any, stale_seconds: f
     said = "the day's " + " and ".join(cause.replace("_", " ") for cause in causes)
     if not funded:
         return False, f"braked True by {said}, and no balance read above the line"
-    age = None if now is None or gd.get("at") is None else float(now) - float(gd["at"])
+    age = None if read_at is None or gd.get("at") is None else float(read_at) - float(gd["at"])
     if age is None or not 0 <= age < stale_seconds:
         return False, f"braked True by {said}, on a reading {ago(age)} old (no fresh reading of the balance)"
+    if "account_budget" in causes:
+        return True, f"braked by {said} alone: Sail's own meter is at the day's cap for the whole account"
     return True, f"braked by {said} alone, as designed"
 
 
@@ -388,7 +399,7 @@ def check_swarm(h: Mapping[str, Any]) -> Check:
     funded = bool(gd) and bal is not None and line is not None and bal > line
     # THE BUDGET's day is no alarm: under v3 the guard brakes for the rest of each UTC day once the day's research
     # dollars are spent. That brake alone passes, said plainly; the balance must still be read and above the line.
-    budget, said = budget_brake(gd, funded, h.get("at"), float((s.get("eff_guard") or {}).get("stale_seconds", 600))) \
+    budget, said = budget_brake(gd, funded, s.get("read_at"), float((s.get("eff_guard") or {}).get("stale_seconds", 600))) \
         if braked else (False, "braked False")
     ok, reason = funded and (not braked or budget), gd.get("reason")
     # The guard's reason holds the balance and the day's dollars as bare numbers, which the runner's scrub of the public
@@ -504,7 +515,7 @@ def checks(h: Mapping[str, Any], now: float) -> list[Check]:
 def run(ctx: Any) -> dict[str, Any]:
     now = ctx.now()
     with guard.readonly():
-        h = collect(ctx.root, ctx.base, ctx.release, ctx.gateway, now=now, config=ctx.config)
+        h = collect(ctx.root, ctx.base, ctx.release, ctx.gateway, now=now, config=ctx.config, clock=ctx.now)
     done = checks(h, now)
     failed = [c for c in done if not c.ok]
     for c in failed:

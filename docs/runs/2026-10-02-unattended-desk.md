@@ -123,13 +123,14 @@ Before A1 ships: CI green on the exact head, the merge to main, and the owner's 
 ### The House's own jobs (`league/ops/`)
 
 The operator's daily scripts became jobs on the House's own clock. The schedule reads the House's NYSE calendar
-(`ltcm.data.us_equity_session`), so "an hour before the open" follows daylight saving and early closes; the fixed UTC
-times sit outside every session in both seasons. Each due job runs as one child process at a time (`python -m
-league.ops run <job>`): niced to 19, its address space capped at what it starts with plus 500 MB, its CPU time and wall
-time bounded, with a scrubbed environment. Every occurrence gets one receipt row in `<state>/ops.sqlite` (`ok`,
-`failed`, `missed` or `skipped`); a failed run is retried inside its grace (at most three attempts), and a missed one is
-a House warning. `health.json` carries an `ops` block (today's jobs: due, late, failed, missed, running). The whole
-package is a protected path: a new job or a changed one is the owner's deploy.
+(`ltcm.data.us_equity_session`), so "an hour before the open" follows daylight saving and early closes; the fixed
+daily, weekly and monthly UTC times sit outside every session in both seasons, and the hourly `grant` job also runs in
+session. Each due job runs as one child process at a time (`python -m league.ops run <job>`): niced to 19, its address
+space capped at what it starts with plus 500 MB, its CPU time and wall time bounded, with a scrubbed environment. Every
+occurrence gets one receipt row in `<state>/ops.sqlite` (`ok`, `failed`, `missed` or `skipped`); a failed run is retried
+inside its grace (at most three attempts), and a missed one is a House warning. `health.json` carries an `ops` block
+(today's jobs: due, late, failed, missed, running). The whole package is a protected path: a new job or a changed one
+is the owner's deploy.
 
 | Job | When | What it does |
 |---|---|---|
@@ -381,9 +382,10 @@ goes to whatever release `previous` names, so it is run only when that is the re
 - **Practice starts empty.** The deploy's evidence reset ends every practice cohort, and the versions practising today
   do not come back. The practice league and the incubator have nothing until new versions qualify on the new evaluator,
   and a cohort's first look then needs 3 sessions and 10 program closes.
-- **No promotion by forward evidence is possible under A1.** The ladder is not in it. When it ships, a program needs at
-  least 20 practice sessions before it can be judged. If the ladder has promoted nothing by the 60th session from
-  Oct 5 (the close of Dec 29, 2026), the budget's profit share stops by its own rule.
+- **No promotion by forward evidence is possible under A1.** The ladder is not in it. As first specified a program
+  needs at least 20 practice sessions before it can be judged; the frozen design judges only at fixed checkpoints later
+  in its 60-session window, so a first promotion is further out than that. If the ladder has promoted nothing by the
+  60th session from Oct 5 (the close of Dec 29, 2026), the budget's profit share stops by its own rule.
 - **The ladder's confirmation may fail.** On development data the frozen design's false promotions are far below the
   sealed look's, and its missed signals are about equal to the sealed look's, slightly worse. The pre-registered rule
   asks for no more misses than the sealed look, so the confirmation is more likely to fail on that item than to pass.

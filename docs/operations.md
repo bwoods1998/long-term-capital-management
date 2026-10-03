@@ -31,8 +31,9 @@ the research canary rule), promoted 11:26:54Z Oct 2 over `20261002T051530Z-1aebc
   03:59Z Oct 1).
 - The evaluator's execution fingerprint is `47587e22…`: two planned evidence resets (Release A, Sept 30; Release B,
   Oct 1) and none since.
-- `auto_update` is off in that release: nothing on main reaches the House until an owner deploy. Main is ahead of it by
-  docs, comment-only edits and a prune of dead files (no behaviour change).
+- `auto_update` is off in that release: nothing on main reaches the House until an owner deploy. Until PR #489 merges,
+  main is ahead of it by docs, comment-only edits and a prune of dead files (no behaviour change); once it merges,
+  main's head is V3-A part 1, which the running release does not take until the owner's deploy.
 
 **Real money** (on since R2, Sept 27). No family has passed the holdout: 3 looks, all failed. The real orders are the
 House's own: D3 calibration round trips (23 closed by the Oct 2 close), the House live test (armed, no order yet), and
@@ -232,9 +233,10 @@ No command is needed for any of this; read the receipts (**Observing without exe
   and the job says so every time). The House's first own close economics runs ten minutes after the first session's
   close on A1.
 - **The first budget run mails a `funding` notice for each meter whose runway is under 60 days at the rate it wants.**
-  It is the desk's own notice, at most one a meter a week, and it names both rates: what the desk spends now and what
-  the rule wants. While research is above zero and the balance covers the card line at the current rate, nothing stops
-  if no card is added: the rule goes on throttling research to what the balance sustains.
+  It is the desk's own notice, at most one a meter a week, and it names both rates: the rate the rule holds the meter
+  to now (its fixed cost plus the day's research budget) and the rate the rule wants. While research is above zero and
+  the balance covers the card line at the current rate, nothing stops if no card is added: the rule goes on throttling
+  research to what the balance sustains.
 - **Practice is empty** until new versions qualify on the new evaluator (above).
 - **The jobs:** `grant` at every start and hourly at :05; `budget` at 00:30Z; `hygiene` at 02:00Z; `clock` at 11:00Z;
   `preopen` an hour before the open and `economics` ten minutes after the close on trading days; `scoreboard` at
@@ -444,13 +446,13 @@ House's own loop stepping on it. The same module holds the House to never import
 `league/ops/`: the House's tick calls `_ops_step` once (never waiting); due jobs start as one child at a time
 (`python -m league.ops run <job>`: nice 19, memory bounded at what it holds plus 500 MB, CPU and wall limits, a
 scrubbed environment). Session triggers read the House's NYSE calendar (`ltcm.data.us_equity_session`), so they follow
-DST and early closes; the fixed UTC times sit outside every session in both seasons. Every occurrence gets one row in
+DST and early closes; the fixed daily, weekly and monthly UTC times sit outside every session in both seasons, and the
+hourly `grant` job also runs in session (a niced, bounded child like every other). Every occurrence gets one row in
 `<state>/ops.sqlite` (`ok`, `failed`, `missed` or `skipped`; a run a House restart cut short is marked interrupted and
-started again while its grace allows); a job not started within its grace is
-`missed` and a House warning; a failed run is retried after 15 minutes inside its grace (at most 3 attempts) unless the
-job may not repeat. Alerts a job raises reach the House at warning level at most, scrubbed of box ids and dollar
-figures (the full text stays in the private receipt). An occurrence older than the runner's first tick on the state, or
-than 8 days, is never reported.
+started again while its grace allows); a job not started within its grace is `missed` and a House warning; a failed run
+is retried after 15 minutes inside its grace (at most 3 attempts) unless the job may not repeat. Alerts a job raises
+reach the House at warning level at most, scrubbed of box ids and dollar figures (the full text stays in the private
+receipt). An occurrence older than the runner's first tick on the state, or than 8 days, is never reported.
 
 | Job | When (UTC) | Grace | What | In a maintenance pause |
 |---|---|---|---|---|
@@ -479,10 +481,15 @@ economics' declared external costs (`economics.external`) and `hygiene.end_retir
 
 **The pre-open check 5 (swarm) and the budget's day.** Under the budget rule the Sail guard brakes the swarm for the
 rest of each UTC day once the day's research dollars are spent, so a braked guard an hour before the open is the
-ordinary case. Check 5 passes when the guard is not braked, or when it is braked by the budget's own daily caps alone
-and its balance was read fresh and is above the House's line. A brake for any other cause (the balance under the line,
-an unreadable balance, a full disk), or one that names no cause, is a FAIL. Check 6 counts the practice rows the swarm
-offers, not the cohorts the live path has pinned.
+ordinary case. The guard names its brake's causes (`causes` in its record and in the heartbeat), and the check reads
+the names, never the reason's words. Check 5 passes when the guard is not braked, or when it is braked by the budget's
+own daily caps alone (`research_budget`, `account_budget`) and its balance was read fresh, by the guard's own
+`stale_seconds`, and is above the House's line. Research at its cap is said as the day as designed; a brake by Sail's
+own meter at the account's cap passes too and is said as that, since it means the account was billed the day's research
+and fixed dollars while the swarm's booked research was under its cap. A brake for any other cause (the balance under
+the line, an unreadable balance, a budget rule that could not be read, a full disk), or one that names no cause, is a
+FAIL; a FAIL's public warning never carries the guard's reason, which holds the account's numbers (the receipt keeps
+it). Check 6 counts the practice rows the swarm offers, not the cohorts the live path has pinned.
 
 ### Observing without exec
 
@@ -594,10 +601,12 @@ research_m    = min(floor_m + earned_m, max(0, balance_m − reserve_m − 60·f
   construction, so it would never say a prefund is short. When the runway at the wanted rate is under 60 days the House
   posts one `POST /v1/notify` kind `funding` with the meter, the balance, both rates (the wanted one and the current
   one, each with its runway), the amount that restores 90 days and the card date; at most once a meter every 7 days
-  (`funding:<meter>:<ISO week>`). The mail names both rates: what the desk spends on the meter now and what the rule
-  wants for it. It says that nothing stops without a card only when the figures sent show it (research above zero and
-  the runway at the current rate at or over the card line: the rule goes on throttling research). Otherwise it says how
-  long the meter lasts at what the desk spends now, and a runway of zero reads as none left. With no fresh guard
+  (`funding:<meter>:<ISO week>`). The mail names both rates: the rate the rule holds the meter to now (its fixed cost
+  plus the day's research budget; a ceiling, not a metered spend) and the rate the rule wants for it. Each runway is
+  days until the meter's reserve, not until it is empty, and the mail says it as days above the reserve. It says that
+  nothing stops without a card only when the figures sent show it (research above zero and the runway at the current
+  rate at or over the card line: the rule goes on throttling research). Otherwise it says how long the meter lasts at
+  the rate it is held to now, and a runway of zero there reads as none left above the reserve. With no fresh guard
   reading, Sail's card line is read from the gateway's own Sail reading, for the notice only, never for research. The
   gateway's absolute Sail mail lines drop to $25 (low) and $12 (critical), under the rule's own floor.
 
@@ -608,13 +617,14 @@ money-rule deploy and after a deposit. It ratifies the grant in force, writing a
 exactly two cases: the money digest moved and an owner release change (a promotion or rollback with no updater
 attestation, not a drill's) is on `deploys.jsonl` since the last pin; or a deposit landed since then (told by its
 id). Capital is the lower of equity and the owner's ceiling; it never enables a grant, never touches a revoked one,
-never lifts the ceiling above the one last ratified without an owner release change, and refuses (changing nothing, the occurrence `failed` and a warning) when anything is
-unreadable or capital would not cover the smallest stake. `scripts/live_trading.py --disable` stays the owner's stop;
-the ceiling and the money table stay owner deploys. `--ratify` on the box still works and is the way when the job
-refuses: a digest that moved with no owner release on the record, or a deposit of a type the funding read cannot ask
-for (a wire). A1 does not move the money digest. Its record of the deposits it has seen starts empty, so its first run
-may answer, once more, a deposit an earlier ratification already held (one dated up to 14 days before that pin): one
-extra ratification at the same capital rule, as its code says. After that a receipt reads `none` until a trigger.
+never lifts the ceiling above the one last ratified without an owner release change, and refuses (changing nothing,
+the occurrence `failed` and a warning) when anything is unreadable or capital would not cover the smallest stake.
+`scripts/live_trading.py --disable` stays the owner's stop; the ceiling and the money table stay owner deploys.
+`--ratify` on the box still works and is the way when the job refuses: a digest that moved with no owner release on
+the record, or a deposit of a type the funding read cannot ask for (a wire). A1 does not move the money digest. Its
+record of the deposits it has seen starts empty, so its first run may answer, once more, a deposit an earlier
+ratification already held (one dated up to 14 days before that pin): one extra ratification at the same capital rule,
+as its code says. After that a receipt reads `none` until a trigger.
 
 ### The gateway's V3-A routes
 
@@ -1090,7 +1100,8 @@ reset 2. It deployed outside the session, before 13:25Z Oct 1, and never 19:30-2
    close). Take a read-only lineage snapshot of `swarm.sqlite` (trials, inherited trials and looks by lineage, and the
    run count).
 3. **The gateway first.** It carries the library's code and its KV binding. From a clean checkout of exactly the merge
-   commit, in `gateway/`: `npm run check && npm test`, read the result, then `npx wrangler deploy`. Then:
+   commit, in `gateway/`: `npm run check && npm test`, read the result, then `npx wrangler deploy` (as run then; today
+   the pinned `npx wrangler@4.129.1 deploy`). Then:
    - `python3 scripts/gateway_admin.py status`: the kill switch unchanged, the caps and `OPTION_STRUCTURES_REAL` as
      before;
    - `GET /v1/research/health` answers a `library` block with `cap` 600;
@@ -1179,10 +1190,10 @@ cd /workspace/previous && /workspace/.venv/bin/python -m league.watchdog rollbac
 - **Across Release B** (the incubator). Switch `live.incubator` off first and wait until no `:i` position is held or
   working: Release A does not know the route, and would restore an `:i` instance, send it to exits only and count its
   rows as tuition. Then roll back and ratify again at once on `a3e2aa7c`. In an emergency with `:i` positions held: the
-  kill switch first, close them at the venue, then roll back. Roll the gateway back (`npx wrangler rollback <version>`)
-  only if the gateway itself is at fault: Release A never calls the library. A rollback moves the execution fingerprint
-  back, so the swarm adopts Release A's evaluator again at its start: one more evidence reset, to be logged in the run
-  record like the planned ones.
+  kill switch first, close them at the venue, then roll back. Roll the gateway back
+  (`npx wrangler@4.129.1 rollback <version>`) only if the gateway itself is at fault: Release A never calls the library.
+  A rollback moves the execution fingerprint back, so the swarm adopts Release A's evaluator again at its start: one
+  more evidence reset, to be logged in the run record like the planned ones.
 - **Across `20261002T112610Z-e11710692569`** (#484, the look holds). A release before it reads `gate_outcome` "held" as
   no verdict (`bands.BAD_OUTCOMES` lacks it), so a held version whose review and audit passed would regain its 1-lot
   execution tuition (its incubator bar stays: bars are kept). Before such a rollback read

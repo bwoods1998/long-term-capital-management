@@ -26,13 +26,14 @@ its self-deploys and self-rollbacks, and they get entries here like any other de
 ## Not yet deployed
 
 The running House release is `20261002T112610Z-e11710692569` (main `e3d0111f`, 11:26Z Oct 2, below), and the box's
-updater is off. Main is ahead of it by docs, by comment-only edits (the Oct 2 pause refresh: no behaviour change,
-verified by an AST comparison) and by a prune of dead files from the Kalshi era and the first run
+updater is off. Until PR #489 merges, main is ahead of it by docs, by comment-only edits (the Oct 2 pause refresh: no
+behaviour change, verified by an AST comparison) and by a prune of dead files from the Kalshi era and the first run
 (`scripts/jev_lab_eval/`, `scripts/{attribute_fills,repair_leg_fills,repair_no_fills,survey_kalshi}.py`,
 `deploy/ltcm.service` and `league/FEEDS.md`: nothing imports or runs them, and they stay readable at tag
 `archive/pre-options-2026-09-26`). Those paths are in the release bundle, and the comment edits touch modules the live
 path loads, so the next House release from main deploys in the money path's window (20:05-13:25Z); the money digest
-does not move.
+does not move. Once PR #489 merges, main's head is V3-A part 1 (below) as well, which the running release, its updater
+off, does not take until the owner's deploy.
 
 ### V3-A part 1: built and integrated, waiting for the owner's deploy (`release/v3a`, PR #489)
 
@@ -118,15 +119,18 @@ ladder and the credit types are not in it (below).
   the paid-model line counts each model's spend on its own, on the day its hold was booked; a budget room that cannot
   be read refuses the call.
 - **The funding notice** is computed at the rate the meter wants, so a throttled desk still says when a card is
-  needed, and it carries the current rate beside it. The gateway's mail names both rates and says that nothing stops
-  without a card only when the figures sent show it; otherwise it says how long the meter lasts at what the desk spends
-  now. Sail's low and critical balance mails sit under the rule's own floor.
+  needed, and it carries the current rate beside it: the rate the rule holds the meter to now (its fixed cost plus the
+  day's research budget), not a metered spend. The gateway's mail names both rates, says each runway as days above the
+  meter's reserve, and says that nothing stops without a card only when the figures sent show it; otherwise it says how
+  long the meter lasts at the rate it is held to now. Sail's low and critical balance mails sit under the rule's own
+  floor.
 - **The jobs.** A failed run is retried after 15 minutes inside its grace, at most three attempts; a job that reports
   its own failure gets a `failed` receipt; the rollback drill is requested by the `drills` job and launched by the
   updater in the House's own process; a maintenance pause holds the jobs that write, post or spend; the House box's id
   is read from the release's pin first.
-- **The pre-open job's check 5** passes when the Sail guard is braked only by the budget's own daily cap with the
-  balance above the line; any other brake is a FAIL.
+- **The pre-open job's check 5** passes when the Sail guard is braked only by the budget's own daily caps with a fresh
+  balance above the line. The guard names its brake's causes and the check reads the names; any other cause (a budget
+  rule that could not be read among them), or none named, is a FAIL.
 - **Tests.** The league's tests read an empty policy layer; the committed `policy.json` is judged in one place, by
   value and by the House's own loop; fixtures that route to Claude state the budget they need; the House is held to
   never importing `league.tests`.
