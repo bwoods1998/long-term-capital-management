@@ -50,7 +50,8 @@ faster); `population.start` is held to the tightened ceiling. A configured value
 (its reader already refuses it). The settings' `budget` block carries the $/day to the Sail guard (its daily cap: the
 swarm's booked Sail today under the Sail research $/day, Sail's own meter today under that plus fixed; `sail_caps`) and
 to the router (`paid_model_room`: Claude's room, and OpenAI's with it, is also capped by the Claude research $/day less
-today's Claude and OpenAI spend). A missing, unreadable or malformed budget.json is the FLOOR: `FLOOR_CAP * FLOOR_SPLIT`
+today's Claude and OpenAI spend, each model's counted on the day its hold was booked and never under 0: a hold released
+after 00:00 UTC lifts no line). A missing, unreadable or malformed budget.json is the FLOOR: `FLOOR_CAP * FLOOR_SPLIT`
 per meter. A STALE one (older than `STALE_SECONDS`: the budget job stopped) never loosens: each meter is the lower of
 the floor and what the stale file said (0 for a meter it could not read), with a warning. An operator's own `budget`
 key in swarm.json is replaced, never read. The ceiling knob never falls below `population.floor + BIRTH_MARGIN` (a
@@ -526,19 +527,20 @@ def sail_caps(settings: Mapping[str, Any], root: str | Path | None = None, now: 
     return {"research": round(research, 4), "fixed": round(fixed, 4), "account": round(research + fixed, 4), "source": source}
 
 
-def paid_model_room(block: Any, spent_today: Any) -> float | None:
+def paid_model_room(block: Any, *spent_today: Any) -> float | None:
     """THE BUDGET's paid-model dollars left this UTC day, for the router (league/swarm/models.py `claude_budget_room`):
     the settings' `budget` block's `claude_usd_day` less the swarm's Claude and OpenAI spend today (`spent_today`, holds
-    included). None with no block (settings never loaded from a state root: no budget line); 0 for a block that is not
-    a budget or a spend that is not a number (FAIL CLOSED). Here, in the protected rule, so the line's arithmetic changes
-    only by the owner's deploy."""
+    included: one number a model, each floored at 0 on its own, so a hold one model released never pays for the other's
+    spend). None with no block (settings never loaded from a state root: no budget line); 0 for a block that is not
+    a budget, or a spend that is not given or not a number (FAIL CLOSED). Here, in the protected rule, so the line's
+    arithmetic changes only by the owner's deploy."""
     if block is None:
         return None
     line = _amount(block.get("claude_usd_day")) if isinstance(block, Mapping) else None
-    spent = _finite(spent_today)
-    if line is None or spent is None:
+    spent = [_finite(usd) for usd in spent_today]
+    if line is None or not spent or None in spent:
         return 0.0
-    return max(0.0, line - max(0.0, spent))
+    return max(0.0, line - sum(max(0.0, usd) for usd in spent))
 
 
 # ---------------------------------------------------------------------------------------------- the inputs

@@ -18,7 +18,7 @@ from league.ops import budget as B
 from league.swarm import settings as S
 from league.swarm.models import ModelRouter
 from league.swarm.store import SwarmStore
-from league.tests.swarm_fakes import Clock
+from league.tests.swarm_fakes import Clock, FakeFrontier, FakeMonth
 
 UTC = dt.timezone.utc
 DAY = 86400.0
@@ -434,6 +434,83 @@ class ClaudeRoom(unittest.TestCase):
         self.assertIn("paid-model line", errors[0])
         self.assertEqual(self.store.spent(["openai"]), 1.25, "nothing admitted")
 
+    def test_an_openai_hold_released_after_midnight_lifts_no_line(self):
+        """OpenAI's spend counts on the day its hold was booked, as Claude's does: the true-up or the refusal of a hold
+        booked before 00:00 UTC is a negative row today, and it pays for neither model's spend today."""
+        self.settings["budget"] = {"source": "budget.json", "sail_usd_day": 3.0, "claude_usd_day": 2.0}
+        releases = ((0.4 - 3.0, {"settles": "k0"}), (-3.0, {"refused": 429, "releases": "k1"}),
+                    (-3.0, {"refused": 429}))  # the last: a refusal row from before it named its hold
+        for day, (usd, detail) in enumerate(releases, start=1):
+            with self.subTest(detail=detail):
+                midnight = NOW - NOW % DAY + day * DAY
+                self.clock.t = midnight - 60
+                self.store.add_spend("openai", 3.0, detail={"role": "audit", "hold": f"k{day - 1}"})
+                self.clock.t = midnight + 60
+                self.store.add_spend("openai", usd, detail={"role": "audit", **detail})
+                self.assertLess(self.store.spent(["openai"], since=midnight), 0, "today's OpenAI rows sum under 0")
+                self.assertEqual(self.router.openai_spent(since=midnight), 0.0)
+                self.assertEqual(self.router.claude_budget_room(), 2.0)
+                (request, _), _ = self.admit(1.5)
+                self.assertIsNotNone(request)
+                self.assertEqual(self.router.claude_budget_room(), 0.5, "the line less Claude's own spend today")
+                (request, kind), errors = self.admit(1.0)
+                self.assertEqual((request, kind), (None, "line"), "yesterday's release bought no Claude today")
+                self.assertIn("research budget", errors[0])
+                self.store.add_spend("openai", 0.25, detail={"role": "audit", "hold": f"today{day}"})
+                self.assertEqual(self.router.claude_budget_room(), 0.25, "nor does it hide OpenAI's spend today")
+        # Two calls on one key across 00:00 UTC: the older, larger hold's release meets today's hold and counts for no
+        # more than it, so it hides none of today's other OpenAI spend.
+        midnight = NOW - NOW % DAY + (len(releases) + 1) * DAY
+        self.clock.t = midnight - 60
+        self.store.add_spend("openai", 3.0, detail={"role": "audit", "hold": "same"})
+        self.clock.t = midnight + 60
+        self.store.add_spend("openai", 1.0, detail={"role": "audit", "hold": "same"})
+        self.store.add_spend("openai", -3.0, detail={"role": "audit", "refused": 429, "releases": "same"})
+        self.store.add_spend("openai", 0.5, detail={"role": "audit", "hold": "other"})
+        self.assertEqual(self.router.openai_spent(since=midnight), 0.5)
+        self.assertEqual(self.router.claude_budget_room(), 1.5)
+
+    def openai(self, *, takes=0.0, **answer):
+        """One `_ask_openai` call (a $1 hold) on a fake client that answers `takes` seconds after the hold is booked."""
+        clock = self.clock
+
+        class Slow(FakeFrontier):
+            def ask(self, **kw):
+                clock.advance(takes)
+                return super().ask(**kw)
+
+        self.router.month, self.router.frontier_factory = FakeMonth(1000), lambda model: Slow(model, **answer)
+        return self.router._ask_openai(role="architect", system="s", user="u", family=None, key="k", max_output=1000,
+                                       openai_model="gpt-6-astra", effort="medium", need_usd=1.0, errors=[])
+
+    def test_an_openai_call_counts_on_its_holds_day_at_its_settled_cost(self):
+        """The router's own rows: a refusal names the hold it releases, so a call refused or settled on its hold's day
+        counts at its cost that day, and one answered after 00:00 UTC still counts on the day it was held."""
+        from league.frontier import FrontierError
+
+        self.settings["budget"] = {"source": "budget.json", "sail_usd_day": 3.0, "claude_usd_day": 2.0}
+        refusal = FrontierError("refused", status=429)
+        self.assertIsNone(self.openai(fail=refusal))
+        self.assertEqual(self.store.spent(["openai"]), 0.0)
+        self.assertEqual(self.router.claude_budget_room(), 2.0, "refused on its hold's own day: the line is whole again")
+        self.assertEqual(self.openai(cost="0.40")["cost_usd"], 0.4)
+        self.assertAlmostEqual(self.router.claude_budget_room(), 1.6, places=6, msg="settled that day: its cost")
+        # Held a minute before 00:00 UTC, answered a minute after it: the release is booked on the new day.
+        for day, answer in enumerate(({"cost": "0.25"}, {"fail": refusal}), start=1):
+            with self.subTest(answer=answer):
+                midnight = NOW - NOW % DAY + day * DAY
+                self.clock.t = midnight - 60
+                self.openai(takes=120.0, **answer)
+                self.assertEqual(self.clock(), midnight + 60)
+                self.assertLess(self.store.spent(["openai"], since=midnight), 0, "held yesterday, released today")
+                self.assertEqual(self.router.claude_budget_room(), 2.0)
+                (request, _), _ = self.admit(0.5)
+                self.assertIsNotNone(request)
+                self.assertEqual(self.router.claude_budget_room(), 1.5, "the line less Claude's own spend today")
+                (request, kind), errors = self.admit(1.75)
+                self.assertEqual((request, kind), (None, "line"))
+                self.assertIn("research budget", errors[0])
+
     def test_the_line_is_the_protected_rules_arithmetic(self):
         self.settings["budget"] = {"source": "budget.json", "sail_usd_day": 3.0, "claude_usd_day": 2.0}
         with mock.patch.object(B, "paid_model_room", return_value=0.42) as rule:
@@ -444,6 +521,11 @@ class ClaudeRoom(unittest.TestCase):
         self.assertIsNone(B.paid_model_room(None, 5.0))
         self.assertEqual(B.paid_model_room({"claude_usd_day": 2.0}, 0.5), 1.5)
         self.assertEqual(B.paid_model_room({"claude_usd_day": 2.0}, float("nan")), 0.0)
+        self.assertEqual(B.paid_model_room({"claude_usd_day": 2.0}, 1.5, -2.6), 0.5, "each model's spend floored on its own")
+        self.assertEqual(B.paid_model_room({"claude_usd_day": 2.0}, 0.5, 0.25), 1.25)
+        self.assertEqual(B.paid_model_room({"claude_usd_day": 2.0}, 0.5, float("nan")), 0.0)
+        self.assertEqual(B.paid_model_room({"claude_usd_day": 2.0}, 0.5, None), 0.0)
+        self.assertEqual(B.paid_model_room({"claude_usd_day": 2.0}), 0.0, "no spend given is no room")
 
     def test_a_malformed_block_is_no_claude(self):
         for bad in ({"claude_usd_day": "lots"}, {"claude_usd_day": -3}, [], "budget"):

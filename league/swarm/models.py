@@ -423,7 +423,8 @@ class ModelRouter:
     def claude_budget_room(self) -> float:
         """THE BUDGET's paid-model dollars left this UTC day (league/ops/budget.py `paid_model_room`, the protected rule;
         the settings' `budget` block, set by every `settings.load` with a state root): `claude_usd_day` less the swarm's
-        Claude spend today (a call counts on the day its hold was booked) and its OpenAI spend today, holds included.
+        Claude spend today and its OpenAI spend today, holds included (`claude_spent`, `openai_spent`: a call counts on
+        the day its hold was booked, and each model's spend is floored at 0 on its own, so no release lifts the line).
         Settings with no `budget` block are the router's own read of its store root's budget.json (`budget.effective`: the
         floor when it gives none), as the Sail guard reads them: settings handed in without the block never lift the
         budget. 0 for a block that is not a budget, or a rule that cannot be read (FAIL CLOSED). OpenAI's admission reads
@@ -437,11 +438,33 @@ class ModelRouter:
                 root = getattr(self.store, "root", None)
                 block = budget_mod.effective(root, now) if root is not None else budget_mod.floor_block("no budget block")
             midnight = now - now % 86400
-            room = budget_mod.paid_model_room(block, self.claude_spent(since=midnight)
-                                              + self.store.spent(["openai"], since=midnight))
+            room = budget_mod.paid_model_room(block, self.claude_spent(since=midnight),
+                                              self.openai_spent(since=midnight))
         except Exception:  # noqa: BLE001 - no rule, no paid research
             return 0.0
         return 0.0 if room is None else room
+
+    def openai_spent(self, *, since: float) -> float:
+        """The swarm's OpenAI spend (holds included) since an epoch, a call counted from when its hold was booked, as
+        `claude_spent` counts Claude's. A row that lowers the spend (a true-up's `settles` or a refusal's `releases`:
+        the hold's key) counts only against a hold of that key booked since `since` and not yet released, in the rows'
+        order, and for no more than that hold: no call counts under 0. The release of a hold booked before `since` (a
+        call across 00:00 UTC) belongs to the hold's day; counted, it would lift today's line. One that names no hold
+        (a refusal booked before the row named it) is not counted either: which day's hold it released is unknown."""
+        held: dict[Any, list[float]] = {}  # the holds booked since `since` and not yet released, by key
+        total = 0.0
+        for row in self.store._all("SELECT usd, detail FROM spend WHERE kind='openai' AND epoch>=? ORDER BY seq",
+                                   [float(since)]):
+            usd, detail = float(row["usd"]), json.loads(row["detail"] or "{}") or {}
+            key = detail.get("settles") or detail.get("releases")
+            if detail.get("hold"):
+                held.setdefault(detail["hold"], []).append(usd)
+            elif key is not None and held.get(key):
+                usd = max(usd, -held[key].pop(0))
+            elif usd < 0:
+                continue  # it releases no hold booked since `since`
+            total += usd
+        return total
 
     def claude_funded_room(self) -> float:
         """Dollars the swarm may still spend on Claude by its funding: the lower of the gateway's funded total above
@@ -1070,7 +1093,9 @@ class ModelRouter:
             except Exception as exc:  # noqa: BLE001 - every OpenAI failure falls back to Sail
                 status = getattr(exc, "status", None)
                 if isinstance(status, int) and 400 <= status < 500:
-                    self.store.add_spend("openai", -hold, family=family, detail={"role": role, "refused": status})
+                    # The release names its hold (`releases`), so `openai_spent` counts it on the hold's day.
+                    self.store.add_spend("openai", -hold, family=family,
+                                         detail={"role": role, "refused": status, "releases": key[:120]})
                 errors.append(f"openai: {type(exc).__name__}: {str(exc)[:160]}")
         return None
 
