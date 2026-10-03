@@ -6,20 +6,18 @@ order of work and the authority; this page holds the design alone. Where this pa
 disagree, the code is right and this page is fixed. How to operate it is in
 [operations.md](operations.md).
 
-## Where each part stands (Oct 3, 2026; autopilot)
+## Where each part stands (Oct 3, 2026: autopilot; V3-A part 1 built, not deployed)
 
 | Part | Code | State |
 |---|---|---|
-| The House, options only | `league/` | V3-A part 1, `<release id>` (the owner's deploy, Oct 2-3); real money on since Sept 27; the grant active on money digest `42c4a3af` (unchanged by A1); evidence resets 1 (Release A, Sept 30), 2 (Release B, Oct 1) and 3 (A1's live-path fixes) |
-| Running unattended | `league/ops/`, `league/updater.py`, `league/swarm/policy.json`, `league/live_trading.py`, `gateway/` | from A1: the House's own jobs with receipts, the budget rule, settings as code, the standing grant, self-deploy through the updater's walls, monthly failure drills, a daily public page; the post-mortem, the strategist's agenda and the engineer are registered and not yet built into the release |
+| The House, options only | `league/` | running `20261002T112610Z-e11710692569` (main `e3d0111f`: the look holds and the research canary rule; promoted 11:26Z Oct 2); real money on since Sept 27; the grant active on money digest `42c4a3af` (re-ratified at Release B); evidence resets 1 (Release A, Sept 30) and 2 (Release B, Oct 1), none since. V3-A part 1 is built and waits for the owner's deploy: it leaves the money digest as it is, and its live-path fixes make its deploy reset 3 |
+| Running unattended | `league/ops/`, `league/updater.py`, `league/swarm/policy.json`, `league/live_trading.py`, `gateway/` | built in V3-A part 1 (`release/v3a`, PR #489), not deployed: the House's own jobs with receipts, the budget rule, settings as code, the standing grant, self-deploy through the updater's walls, monthly failure drills, a daily public page; the post-mortem, the strategist's agenda and the engineer are registered as jobs and their modules are not in the release |
 | The data store and images | `scripts/data/` | the core five from 2020 and the 20 added names from 2022, 0-14 days to expiry, SPY/QQQ back months to 45; ThetaData Options Standard's history reaches 2016; Train from 2017 is released (R11a), and its image is still to be built; longer history arrives as private blocks (#413) |
-| The Gym | `league/gym/` | 25 roots, Train 2020-2024 on a sealed image adopted Sept 28 (2022-2024 for the added names); 11 types including long calls and puts; the honest fill model from Train samples; engine 4 and per-program batch failures from Release A; frozen since Release B |
-| The swarm | `league/swarm/`, `league/CONTRACT.md` | 16 alive at a funded floor since Oct 2 evening (start 16, floor 8, one Gym box, the Sail researchers at $0.25 an hour, the architect every two hours); 3 holdout looks, 0 passes; births of debit verticals and two-sided singles only, under agenda v16c; the architect on Sail (DeepSeek-V4-Pro, asap queue); Claude at the gate and for the strategist; duplicate looks refused and the look holds on; automatic forks of validated lineages off; OpenAI unused |
-| Paper and production paths | `league/live/`, `gateway/` | real money opens four debit types; both paper route proofs passed Sept 28; 23 D3 calibration round trips by the Oct 2 close; one exit-only tuition lot; the House live test armed, no order yet; the practice league (validated and Train tiers); the incubator on since Oct 1; no general agent paper book; covered strategies absent |
-| Built, not deployed | branches `v3/wp6`, `v3/wp7`, `v3/b1`, `v3/b23`, `v3/b4`, `v3/b5` | the forward ladder (does not yet meet its benchmark rule), credit types at $2,000 of equity, research v3, births from a mechanism library and the strategist's agenda, the weekly post-mortem, the engineer and reviewer |
+| The Gym | `league/gym/` | 25 roots, Train 2020-2024 on a sealed image adopted Sept 28 (2022-2024 for the added names); 11 types including long calls and puts; the honest fill model from Train samples; engine 4 and per-program batch failures from Release A; frozen since Release B (A1 does not change it) |
+| The swarm | `league/swarm/`, `league/CONTRACT.md` | 16 alive at a funded floor since Oct 2 evening (start 16, floor 8, one Gym box, the Sail researchers at $0.25 an hour, the architect every two hours); 3 holdout looks, 0 passes; births of debit verticals and two-sided singles only, under agenda v16c; the architect on Sail (DeepSeek-V4-Pro, asap queue); Claude at the gate and for the strategist; duplicate looks refused and the look holds on; automatic forks of validated lineages off; OpenAI unused. Under A1 the budget rule tightens the floor further and closes OpenAI |
+| Paper and production paths | `league/live/`, `gateway/` | real money opens four debit types; both paper route proofs passed Sept 28; 23 D3 calibration round trips by the Oct 2 close; one exit-only tuition lot; the House live test armed, no order yet; the practice league (validated and Train tiers; under A1 capped as a Probe, and emptied by its evidence reset until new versions qualify); the incubator on since Oct 1; no general agent paper book; covered strategies absent |
+| Built, not deployed | `release/v3a` (PR #489); branches `v3/wp6`, `v3/wp7`, `v3/b1`, `v3/b23`, `v3/b4`, `v3/b5` | V3-A part 1, integrated and ready for the owner's deploy; and after it, each an owner deploy of its own: the forward ladder (its confirmation study is not run; as first specified it does not meet its benchmark rule) and credit types at $2,000 of equity (part 2), research v3, births from a mechanism library and the strategist's agenda, the weekly post-mortem, the engineer and reviewer ([run record](runs/2026-10-02-unattended-desk.md)) |
 | The public page | blakewoods.us/capital | the owner's (`personal-site`, revamped by the owner on Oct 2); the House's publisher feeds it |
-
-| v3, the unattended desk | branches `release/v3a` (draft PR #489) and `v3/*` | built Oct 2, not deployed: the House's own jobs, a research budget funded by realized profit, a standing grant, self-deploy, a forward-evidence ladder (benchmarked; does not bind yet), research v3, an engineer and a reviewer ([run record](runs/2026-10-02-unattended-desk.md)) |
 
 This is observed state, not completion of the design below. Broad universe discovery, covered strategies, the
 general paper environment and exposure-aware allocation are still to build. The incubator and its swarm-side facts (B2)
@@ -33,39 +31,50 @@ desk is nearly free and prefunded; the forward record is the judge and the Gym t
 researchers; money rules that scale with evidence and capital; the harness improves itself inside hard walls;
 operations are House jobs; one funding action a year, not one a week; an honest record with the desk's own stop rule.
 
-**In V3-A part 1** (deployed Oct 2-3):
+**In V3-A part 1** (built and integrated on `release/v3a`; not deployed):
 - **Self-deploy (D5).** `auto_update` on: main's head reaches the House through the updater's walls (exact-commit
   attestation, the FORBIDDEN files, the trusted content checks, the release train and session hold, canary, watch,
-  rollback). Protected paths stay the owner's own deploy. A monthly rollback drill proves the way back.
+  rollback). The protected paths stay the owner's own deploy, and the list is wide on purpose (86 files and trees: the
+  money rules, the live path, the Gym, the evaluator, the gate and the bands, the House and all of its jobs, the budget
+  and what enforces it, `policy.json`, the walls themselves). A merged change to one of them deploys nothing and holds
+  every later head until the owner deploys. A monthly rollback drill proves the way back.
 - **The House's jobs** (`league/ops/`): the pre-open checks, the close economics, hygiene, the venue clock, the daily
   public scoreboard, the budget, the standing grant and the drills run on the House's own NYSE calendar as niced,
   bounded children with receipts; the operator reads a private receipts file without exec.
 - **The budget rule (D4).** Research dollars a day per meter (Sail, Claude) = the floor (at most $5 a day in all, and
   only what a meter's balance sustains for 90 days) plus half the trailing 30-day realized options profit, capped so no
-  meter falls under 60 days of runway; after 60 sessions from Oct 5 with no Probe promotion, the floor alone. Applied
-  last and tighten-only to the spend knobs; the burst is gone. One `funding` mail per meter when a prefund is short,
-  with the exact amount. (**Compute**, below.)
+  meter falls under 60 days of runway; after 60 sessions from Oct 5 with no promotion by the forward ladder, the floor
+  alone. The realized profit is the live book's own read, which the close economics can only cut; unknown earns
+  nothing. Applied last and tighten-only to the spend knobs; the burst is gone and OpenAI is closed. One `funding` mail
+  per meter when a prefund is short at the rate the meter wants, with the exact amount. (**Compute**, below.)
 - **The standing grant (D5).** The grant re-ratifies itself after an owner deploy that moves the money digest and after
   a deposit, at the lower of equity and the owner's ceiling; never loosens.
 - **Settings as code.** `league/swarm/policy.json` sits between `config.json` and the box's `swarm.json`, which keeps
-  the owner's switches and the private agenda text.
-- **Practice as Probe** (WP5, in `league/live/`, evidence reset 3): practice accounts hold what a Probe may, observe
-  reads are clamped to what the Gym store holds, the read budget fits 24 roots, and an exit-only instance's opens are
-  dropped before the order path.
+  the owner's switches and the private agenda text and wins over it. The file is protected: a change to it is a
+  reviewed pull request and then the owner's deploy.
+- **Practice as Probe** (WP5, in `league/live/`; its deploy is evidence reset 3): practice accounts hold what a Probe
+  may, observe reads are clamped to what the Gym store holds, the read budget fits 24 roots, and an exit-only
+  instance's opens are dropped before the order path. The reset ends every practice cohort, and a (family, version)
+  that had one does not practise again: practice refills only from new versions until the ladder release changes that
+  rule.
 - **The engineer's walls, ahead of the engineer.** The gateway merges an `engineer/<lane>/` pull request only on green
   CI for its exact head, a recorded automated approve, the lane's own files and no protected path, two a day, never
-  while the kill switch is on.
+  while the kill switch is on. It holds the engineer to the paths the harness lanes declare, so the scheduler lane
+  admits new candidate tests only until an owner deploy opens `league/swarm/loop.py`.
 
-**Built, not deployed** (each ships only when it meets its bar):
+**Built, not deployed, and not in part 1** (each ships only when it meets its bar, each by the owner's deploy):
 - **The forward ladder (D2; `v3/wp6`).** Pre-filter (the 2026 holdout as a free read) → Practice → Probe → Sized,
   promotion on the practice record under a day-block bootstrap bound, sub-window, drift and desk-wide
   Benjamini-Hochberg control. It replaces the holdout look as the gate to real money only once it binds, and it binds
   only when its false promotions are at or below the sealed look's on the same synthetic worlds. On its development
-  benchmark it beat the sealed look on fading and cost-erased programs and missed far fewer real edges, but promoted too
-  many pure-noise programs, so it does not bind; a pre-registered confirmation study decides. Until then **Evidence**,
-  below, is the running design: the holdout line, the look rules and tuition.
+  benchmark, as first specified, it beat the sealed look on fading and cost-erased programs and missed far fewer real
+  edges, but promoted too many pure-noise programs, so it does not bind. A tighter design, judged only at fixed
+  checkpoints, was chosen on development data and frozen before any confirmation run; the confirmation, under a rule
+  pre-registered before it, decides and has not been run. Until then **Evidence**, below, is the running design: the
+  holdout line, the look rules and tuition.
 - **Credit types (D3; `v3/wp7`).** Credit verticals, iron condors and iron butterflies open for real only at $2,000 of
-  equity, defined-risk, after a paper proof per type, with the gateway's list in the same deploy.
+  equity, defined-risk, after a paper proof per type, with the gateway's list in the same deploy. With the ladder it is
+  V3-A part 2: one more evidence reset and a money-digest move.
 - **Research v3 and births v3** (`v3/b1`, `v3/b23`): every family on Claude Sonnet 5.5, a cycle as a sweep of variants
   with a placebo row, a per-family ledger; births only from a curated library of documented premia, the Train kill
   tests as code, the strategist writing the whole agenda.
@@ -102,10 +111,10 @@ The bar at steady-state budgets, as the plan estimated it (Sept 26):
 | Claude (Anthropic, through the gateway) | a funded total, not a month: `CLAUDE_USD` $100, raised only by what the owner adds; the swarm's own line is `claude.usd_cap` |
 | **Total** | **about $565-740 in the plan; to be re-estimated with Claude in place of OpenAI** |
 
-On a $6,500 account the plan's figure is 9-11% a month before Net turns positive. The bar falls in
-proportion as the account grows, and compute drops to its floor whenever the forward record does not
-pay for it. From V3-A part 1 that last clause is code, not intent: the budget rule (**Compute**, below) spends on
-research only a small floor plus half of what the options book realized over 30 days.
+On a $6,500 account the plan's figure is 9-11% a month before Net turns positive. The bar falls in proportion as the
+account grows, and compute drops to its floor whenever the forward record does not pay for it. In V3-A part 1 (built,
+not yet deployed) that last clause is code, not intent: the budget rule (**Compute**, below) spends on research only a
+small floor plus half of what the options book realized over 30 days.
 
 ## The venue
 
@@ -298,9 +307,10 @@ Agent count and simulated years measure activity; passing unseen evidence measur
   intraday momentum, opening-range breaks and fades, gap reversion, end-of-day drift, 0DTE pinning,
   term-structure and skew mean reversion, post-event volatility crush, weekly-expiry dynamics).
 - **Population:** by default 48 researchers at the start, a ceiling of 96 and a floor of 16; the
-  live settings (Sept 29) started at 96, the ceiling, with a floor of 12, and the v3 floor (Oct 2, now in
-  `league/swarm/policy.json`) starts at 16 with a floor of 8, the budget rule capping the ceiling at a family per
-  research dollar a day. Families compete for Gym time
+  live settings (Sept 29) started at 96, the ceiling, with a floor of 12, and the v3 floor (Oct 2, on the box and in
+  `league/swarm/policy.json`) starts at 16 with a floor of 8. From V3-A part 1 the budget rule caps the ceiling at a
+  family per research dollar a day, never under the floor plus four, and holds the start to it. Families compete for
+  Gym time
   and researcher turns by **expected information value** (Release B, `league/swarm/allocation.py`): a
   family's value is the variance of its next validation's pass or fail under an empirical-Bayes
   posterior (the swarm's recent validation looks on the running evaluator, pooled by mechanism class
@@ -393,7 +403,7 @@ Agent count and simulated years measure activity; passing unseen evidence measur
 |---|---|---|---|---|
 | Inner | seconds to minutes | each researcher | revise the program, run it on Train, read the diagnostics, revise again | a better program or a lesson |
 | Tournament | hourly | the House | validation runs of each family's best versions, the reallocation by expected information value, forks and retirements, the leaderboard | Gym time and researcher turns follow the value of the next evidence |
-| Architect | every 4 hours by default, refilling hourly below the start; every 2 hours in `policy.json` since Oct 2 (every 30 minutes before), refilling every 20, and from V3-A part 1 never more often than the budget allows (every 4 hours at the floor, once a day with no research dollars) | Claude by default (`architect.openai_model` null live); Sail on `architect.sail_profile` (Kimi-K3 balanced by default; DeepSeek-V4-Pro asap live since Oct 2, when Sail's balanced queue stopped answering) when Claude has no room or line: live since Sept 30, when the architect's Claude line was set to $0 (it had $5 at times on Oct 1-2 and bore nothing in its 4 Oct 2 passes) (never after a cut answer: R11b salvages its complete families and retries once on Claude at medium effort); on Sail at `architect.sail_effort` (`medium` by default since Oct 1), and a cut Sail answer is salvaged the same way, its retry on Claude alone; a complete answer whose families object has stray trailing commas is read again without them (`lenient`), and one whose families array still does not parse whole (a stray `}` or `,` between two families, 15:59Z Oct 1) is read object by object, never outside the array (`recovered`: how many, and why) | reads the leaderboard, the graveyard and the gaps; writes families with a mechanism, a structure and a rejection test; at most 12 living families a mechanism class (R11b) | 3-6 new families by default; the gap to the start, up to 6 a pass live |
+| Architect | every 4 hours by default, refilling hourly below the start; every 2 hours on the live settings since Oct 2 (every 30 minutes before), refilling every 20, and from V3-A part 1 neither more often than the budget allows (every 4 hours at the floor, once a day with no research dollars) | Claude by default (`architect.openai_model` null live); Sail on `architect.sail_profile` (Kimi-K3 balanced by default; DeepSeek-V4-Pro asap live since Oct 2, when Sail's balanced queue stopped answering) when Claude has no room or line: live since Sept 30, when the architect's Claude line was set to $0 (it had $5 at times on Oct 1-2 and bore nothing in its 4 Oct 2 passes) (never after a cut answer: R11b salvages its complete families and retries once on Claude at medium effort); on Sail at `architect.sail_effort` (`medium` by default since Oct 1), and a cut Sail answer is salvaged the same way, its retry on Claude alone; a complete answer whose families object has stray trailing commas is read again without them (`lenient`), and one whose families array still does not parse whole (a stray `}` or `,` between two families, 15:59Z Oct 1) is read object by object, never outside the array (`recovered`: how many, and why) | reads the leaderboard, the graveyard and the gaps; writes families with a mechanism, a structure and a rejection test; at most 12 living families a mechanism class (R11b) | 3-6 new families by default; the gap to the start, up to 6 a pass live |
 | Diagnostician | every 5 minutes | Claude | reads a stuck or nearly-there family's Train diagnostics (never Validation's numbers); rewrites its mechanism or writes its lesson; off live since Sept 30 (`diagnostician.enabled` false: its rewrites produced no validation in 48 hours) | a new mechanism, or a lesson and a retirement |
 | Gate | when a family meets the validation line | review: Claude when "review" is in `claude.roles` (live: Sonnet 5.5), else GPT-6 Sol while the OpenAI month has room and `gate.review_openai_model` names it (null live), else DeepSeek-V4-Pro on Sail; audit: Claude (live: Opus 5.5, `claude.role_model`), then GPT-6 Astra on the same terms (null live), then a second Sail model; the gate box | first, a look that would repeat an earlier one is refused (the duplicate look, H3a); a look the holdout cannot judge is held (the look holds, L6: a long-delta program whose Train profit leans on drift, or too little holdout power); then review for lookahead, leakage and fill abuse; the audit; one holdout look | a Candidate, a recorded refusal, or a held look |
 | Nightly forward | after 01:45 ET each trading night | the data box, the gate box | the new day goes to the gate image only; every Candidate is re-run on it | one unseen day a night for every Candidate |
@@ -586,8 +596,10 @@ diagnostician.
   to a free pre-filter. Its benchmark plays synthetic forward streams through the practice ledger against the sealed
   look on the same worlds; the rule is that it binds only when its false promotions are at or below the sealed look's.
   On the development cohort it was better on fading and cost-erased programs and on missed signals, and worse on pure
-  noise, so it ships, when it ships, with `binding` false (it records what it would promote). A confirmation cohort on
-  fresh seeds, under a rule pre-registered before it ran, decides. Until then the lines above are the gate.
+  noise, so as first specified it would ship with `binding` false (it records what it would promote). A tighter design,
+  judged only at fixed checkpoints, was chosen on development data and frozen before any confirmation run. A
+  confirmation cohort on fresh seeds, under a rule pre-registered before it, decides; it has not been run. Until then
+  the lines above are the gate.
 - The lines may be tightened on evidence; loosening one is the owner's decision. Eligibility and scoring rules change only
   when fixed benchmarks show false promotions do not rise and missed signals fall (the owner, Sept 30, 2026); the sealed
   holdout, the multiple-testing control and the forward requirement never loosen, and prior evidence keeps its prior
@@ -660,19 +672,21 @@ diagnostician.
 | History, the nightly forward day, fill calibration | ThetaData | four concurrent requests | $80 a month |
 | Live quotes, SIP bars, paper and real orders | Alpaca | through the gateway | already paid |
 
-- **Budgets: the budget rule** (V3-A part 1, the owner's D4; `league/ops/budget.py`, protected; the details are in
-  [operations](operations.md), "The budget rule"). Research is bought out of what the options book realized, inside
-  money already paid in. For each prefunded meter (Sail and Claude) the House computes a day's research dollars: a floor
-  of at most $5 a day for both together (60% Sail, 40% Claude), never more than the meter's balance sustains for 90
-  days above a reserve and its fixed cost, plus half of the trailing 30-day realized options P&L when it is positive,
-  and never so much that the meter falls under 60 days of runway. Marks never fund research, and anything unreadable
-  is no research. After 60 sessions from Oct 5, 2026 with no promotion to Probe the profit share stops ("no forward
-  edge; research at floor") until one. The result only tightens the configured spend: the researcher pace, the Gym
-  boxes, every Claude role's daily line, the population ceiling and the architect's cadence. When a meter's runway
-  falls under 60 days the owner gets one mail with the amount that restores 90. It replaces the training burst
-  (Sept 26 to Oct 5, its last cap $900 of Sail) and the plan's "Sail at most $12 a day until Net is positive", which
-  were settings, not code. OpenAI is not topped up after September, and the rule leaves it no room; Claude also stays
-  within the owner's funded total (`CLAUDE_USD`, the swarm's `claude.usd_cap`).
+- **Budgets: the budget rule** (V3-A part 1, built and not yet deployed; the owner's D4; `league/ops/budget.py`,
+  protected; the details are in [operations](operations.md), "The budget rule"). Research is bought out of what the
+  options book realized, inside money already paid in. For each prefunded meter (Sail and Claude) the House computes a
+  day's research dollars: a floor of at most $5 a day for both together (60% Sail, 40% Claude), never more than the
+  meter's balance sustains for 90 days above a reserve and its fixed cost, plus half of the trailing 30-day realized
+  options P&L when it is positive, and never so much that the meter falls under 60 days of runway. The realized P&L is
+  the live book's own read, which the close economics can only cut. Marks never fund research, and anything unreadable
+  is no research. After 60 sessions from Oct 5, 2026 with no promotion to Probe by the forward ladder the profit share
+  stops ("no forward edge; research at floor") until one. The result only tightens the configured spend: the researcher
+  pace, the Gym boxes, every Claude role's daily line, the population's ceiling and start, and the architect's cadence.
+  When a meter's runway at the rate it wants falls under 60 days the owner gets one mail with the amount that restores
+  90 and both rates, the wanted one and the one the rule holds it to. From its deploy it replaces the training
+  burst (Sept 26 to Oct 5, its last cap $900 of Sail) and the plan's "Sail at most $12 a day until Net is positive",
+  which were settings, not code. OpenAI is not topped up after September, and the rule leaves it no room; Claude also
+  stays within the owner's funded total (`CLAUDE_USD`, the swarm's `claude.usd_cap`).
 - **The Sail guard.** Running out of Sail credits pauses every box, the House included. Gym boxes and
   researchers scale down whenever the balance falls below two days of the House's burn plus $30,
   and stop before the House does. From V3-A part 1 its daily cap is the budget's: the swarm's own Sail a day at most
@@ -716,7 +730,7 @@ has climbed, with no prose on the page:
 
 It is an opt-in read (`...&practice=1&window=1`), and a site that predates it gets the checkpoint without it.
 
-**The desk's daily page** (V3-A part 1): the House commits one page a day to
+**The desk's daily page** (V3-A part 1, from its deploy): the House commits one page a day to
 [runs/desk/](runs/desk/README.md) through the gateway: the release, self-deploys and rollbacks, realized P&L, costs by
 service, Net, open lots at conservative marks, the budget's state, the ladder's counts and the day's jobs. It is built
 from an allowlist of figures and refused if it names equity, a balance, a quote, a strike, a contract, a parameter,

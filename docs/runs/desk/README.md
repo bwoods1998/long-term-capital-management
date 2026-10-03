@@ -1,9 +1,10 @@
 # The desk's daily pages
 
-The House writes these pages itself, from V3-A part 1 (Oct 2-3, 2026) on: one page a UTC day, `<YYYY-MM-DD>.md`,
-written by its `scoreboard` job at 23:30Z (`league/ops/scoreboard.py`) and committed to `main` through the gateway's
-docs route (`POST /v1/github/docs`). Their commits start with `desk:`. Nobody edits them by hand: a correction goes in
-the run record ([the unattended desk](../2026-10-02-unattended-desk.md)).
+The House writes these pages itself, from the V3-A part 1 deploy on: one page a UTC day, `<YYYY-MM-DD>.md`, written by
+its `scoreboard` job at 23:30Z (`league/ops/scoreboard.py`) and committed to `main` through the gateway's docs route
+(`POST /v1/github/docs`). Their commits start with `desk:`. Nobody edits them by hand: a correction goes in the run
+record ([the unattended desk](../2026-10-02-unattended-desk.md)). That release is built and not yet deployed, so until
+its deploy this folder holds only this page.
 
 **What a page says**, from the House's own records only:
 - the running release; self-deployed releases and self-rollbacks (today and since the reset), owner deploys and
@@ -13,8 +14,8 @@ the run record ([the unattended desk](../2026-10-02-unattended-desk.md)).
 - how many lots are open and what they are worth at conservative marks;
 - the research budget's state (for example "research at floor") and, per meter, its research dollars a day and the next
   date a card is needed;
-- the forward ladder's counts (entrants, in practice, promoted, the false-discovery family's size; "n/a" while the
-  ladder is not deployed);
+- the forward ladder's counts: entrants, promoted and the false-discovery family's size ("n/a" while the ladder is not
+  deployed), and how many cohorts are in practice;
 - how many of the House's jobs ran, failed, were missed or skipped that day.
 
 **What a page never says.** It is built from an allowlist of figures and is refused before posting if it names account
