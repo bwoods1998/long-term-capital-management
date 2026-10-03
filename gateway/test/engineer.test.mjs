@@ -86,6 +86,18 @@ test('the new-test glob is one name of a-z, 0-9 and _ under league/tests, ending
 test('the engineer s proposal names a known lane and writes only that lane s surface and new tests', () => {
   for (const [lane, own] of Object.entries(SURFACES)) {
     for (const path of own) {
+      if (!github.ENGINEER_SURFACE.only.includes(path)) {
+        // The wall behind the table (the WP8 review; test/merge.test.mjs): a lane's path that no harness lane's surface
+        // declares is refused to every lane, its own included, until league/swarm/harness_lanes.py names it.
+        assert.equal(path, 'league/swarm/mechanisms.py');
+        for (const any of Object.keys(SURFACES)) {
+          const refused = github.admit(engineer({ lane: any, files: [{ path, content: 'X = 1\n' }] }));
+          assert.equal(refused.status, 403, `${any} may not write ${path}`);
+          assert.match(refused.error, /is refused: outside the engineer's lane surfaces/);
+          assert.equal(refused.path, path);
+        }
+        continue;
+      }
       assert.equal(github.pathRefusal('engineer', path, github.ROLES, lane), null, `${lane} ${path}`);
       const admitted = github.admit(engineer({ lane, files: [{ path, content: 'X = 1\n' }] }));
       assert.equal(admitted.error, undefined, `${lane} ${path}`);

@@ -27,22 +27,30 @@ class GuardTest(unittest.TestCase):
         self.assertTrue(ci.guard(["league/constitution.py"], None))
 
     def test_the_houses_protected_jobs_are_judges_too(self):
-        """V3-A: the budget rule, the standing grant and the drills (league/ops/) change only by the owner's deploy."""
+        """V3-A: the budget rule, the standing grant and the drills (league/ops/) change only by the owner's deploy; since
+        the WP8 review so does the framework that schedules and runs them (the whole of league/ops/)."""
         import tempfile
 
         from league.updater import protected_changes
 
-        for path in ("league/ops/budget.py", "league/ops/drills.py", "league/ops/grant.py"):
+        for path in ("league/ops/budget.py", "league/ops/drills.py", "league/ops/grant.py", "league/ops/"):
             self.assertIn(path, ci.FORBIDDEN)
+        for path in ("league/ops/budget.py", "league/ops/drills.py", "league/ops/grant.py", "league/ops/jobs.py",
+                     "league/ops/registry.py", "league/ops/__init__.py"):
             for role in ci.ROLE_PATHS:
                 self.assertTrue(ci.guard([path], role), (path, role))
+            self.assertTrue(ci.guard([path], None), path)
         with tempfile.TemporaryDirectory() as tmp:
             running, incoming = Path(tmp) / "running", Path(tmp) / "incoming"
             for root, text in ((running, "RULE = 1\n"), (incoming, "RULE = 2\n")):
                 (root / "league" / "ops").mkdir(parents=True)
+                (root / "league" / "swarm").mkdir(parents=True)
                 (root / "league" / "ops" / "budget.py").write_text(text)
                 (root / "league" / "ops" / "jobs.py").write_text(text)
-            self.assertEqual([p.split(":")[0] for p in protected_changes(incoming, running)], ["league/ops/budget.py"])
+                (root / "league" / "swarm" / "pool.py").write_text(text)
+            # The research-class file beside them (league/swarm/pool.py) changed too, and is not the owner's deploy.
+            self.assertEqual([p.split(":")[0] for p in protected_changes(incoming, running)],
+                             ["league/ops/budget.py", "league/ops/jobs.py"])
 
     def test_the_updaters_wall_and_the_gateways_merge_list_are_one_list(self):
         """A path the gateway will not merge must not self-deploy either, whatever route put it on main (V3-A
@@ -59,8 +67,16 @@ class GuardTest(unittest.TestCase):
         self.assertEqual(set(ci.FORBIDDEN) - gateway, set(), "the updater protects these; the gateway would merge them")
         self.assertEqual(gateway - set(ci.FORBIDDEN), set(ci.MERGE_ONLY), "the gateway protects these; the updater would deploy them")
         for path in ("league/swarm/bands.py", "league/swarm/store.py", "ltcm/data/us_equity_session.py", "deploy/restart.sh",
-                     "league/gym/engine.py", "league/swarm/guard.py"):
+                     "league/gym/engine.py", "league/swarm/guard.py",
+                     # the WP8 review's additions to the gateway's list, which the updater's wall gained with them
+                     "league/__init__.py", "league/structure_core.py", "league/structures.py", "ltcm/performance.py",
+                     "league/swarm/policy.json", "league/swarm/funding.py", "league/budget.py", "league/grants.py",
+                     "league/swarm/harness_lanes.py", "league/swarm/harness_judges/research.py", "playbooks/harness-improvement.md",
+                     "docs/goals/x.md", "scripts/floor_box.py", "league/house.py", "CHANGELOG.md", "changelog.md"):
             self.assertTrue(ci.guard([path], None), path)
+        # The engineer's lane files are none of them: a lane the path guard admits is never one the wall refuses.
+        for lane, paths in ci.ENGINEER_LANES.items():
+            self.assertEqual(ci.guard(list(paths), f"engineer/{lane}"), [], lane)
         import tempfile
 
         from league.updater import protected_changes
@@ -73,6 +89,16 @@ class GuardTest(unittest.TestCase):
                     (root / rel).write_text(text)
             self.assertEqual([p.split(":")[0] for p in protected_changes(incoming, running)],
                              ["league/swarm/bands.py", "ltcm/data/us_equity_session.py"])
+        # A name is compared without case on both sides, as the gateway compares (an entry may carry capitals).
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(ci, "FORBIDDEN", ci.FORBIDDEN + ("league/Mixed_Case.py",)):
+            running, incoming = Path(tmp) / "running", Path(tmp) / "incoming"
+            for root, text in ((running, "X = 1\n"), (incoming, "X = 2\n")):
+                (root / "league").mkdir(parents=True)
+                (root / "league" / "mixed_case.py").write_text(text)
+            self.assertEqual([p.split(":")[0] for p in protected_changes(incoming, running)], ["league/mixed_case.py"])
+            self.assertTrue(ci.guard(["league/MIXED_case.py"], None))
 
     def test_what_feeds_or_enforces_the_budget_is_protected(self):
         """D4: the budget rule changes only by the owner's deploy, so neither may what applies it (every module that calls

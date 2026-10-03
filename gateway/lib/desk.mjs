@@ -15,7 +15,7 @@
 // wall that keeps the commit to one file in one directory.
 
 import { createHash } from 'node:crypto';
-import { client, refused as refusal, sha as needSha, BASE } from './github.mjs';
+import { client, refused as refusal, sha as needSha, definiteNo, BASE } from './github.mjs';
 
 export const DOCS_PATH = /^docs\/runs\/desk\/(\d{4})-(\d{2})-(\d{2})(-[a-z0-9-]+)?\.md$/;
 export const DOCS_MAX_BYTES = 64 * 1024;
@@ -106,9 +106,9 @@ export async function readDoc({ repo, token, path, fetcher = fetch }) {
 
 /**
  * Commit the admitted doc to `main` (`PUT /contents/<path>`), replacing the blob `sha` when there is one.
- * `{ committed: true, commit, blob }`, `{ committed: false, error, status }` when GitHub answered no (a 409 or 422 is a
- * file that moved meanwhile: read it again), or `{ committed: null, error, status }` when nothing answered: the commit
- * may have been made, so the day's place stays taken.
+ * `{ committed: true, commit, blob }`, `{ committed: false, error, status }` when GitHub answered a definite no (a 4xx;
+ * a 409 or 422 is a file that moved meanwhile: read it again), or `{ committed: null, error, status }` when nothing
+ * answered or the answer was a 5xx: the commit may have been made, so the day's place stays taken.
  */
 export async function putDoc({ repo, token, doc, sha = null, fetcher = fetch }) {
   const github = client({ repo, token, fetcher });
@@ -130,5 +130,7 @@ export async function putDoc({ repo, token, doc, sha = null, fetcher = fetch }) 
   } catch (caught) {
     error = refusal(caught, token).error;
   }
+  // Only a 4xx is GitHub's no; a 5xx may come after the commit was made, so it is no answer and the place stays taken.
+  if (!definiteNo(reply.status)) return { committed: null, error, status: 502 };
   return { committed: false, error, status: reply.status === 409 || reply.status === 422 ? 409 : 502 };
 }

@@ -1125,7 +1125,7 @@ def protected_changes(incoming: Path, running: Path) -> list[str]:
 
     def guarded(name: str) -> bool:
         lowered = name.lower()
-        return any(lowered == f or (f.endswith("/") and lowered.startswith(f)) for f in FORBIDDEN)
+        return any(lowered == f.lower() or (f.endswith("/") and lowered.startswith(f.lower())) for f in FORBIDDEN)
 
     mine, theirs = files(Path(running)), files(Path(incoming))
     changed = []

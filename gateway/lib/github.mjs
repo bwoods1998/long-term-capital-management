@@ -42,10 +42,10 @@ export const ENGINEER_LANES = Object.freeze({
     'league/swarm/seeds.py', 'league/swarm/mechanisms.py']),
   data: Object.freeze(['league/sailbox.py', 'league/data_job.py']),
 });
-//: `league/tests/test_harness_candidate_*.py`, the `*` one or more of a-z, 0-9 and `_`: never a `/`, never another
-//: suffix.
+//: `league/tests/test_harness_candidate_*.py`, the `*` one to eighty of a-z, 0-9 and `_`: never a `/`, never another
+//: suffix. A candidate's own test file, which may only be added, never edited (the merge route reads its status).
 export const ENGINEER_TEST_GLOB = 'league/tests/test_harness_candidate_*.py';
-export const ENGINEER_TEST = /^league\/tests\/test_harness_candidate_[a-z0-9_]+\.py$/;
+export const ENGINEER_TEST = /^league\/tests\/test_harness_candidate_[a-z0-9_]{1,80}\.py$/;
 
 /** What each role may write: `under` is a path prefix, `only` is a whole path, `lanes` the engineer's lane surfaces. */
 export const ROLES = {
@@ -54,12 +54,43 @@ export const ROLES = {
   operator: { only: ['league/config.json'] },
   designer: { only: ['league/game.json'] },
   teacher: { under: ['league/playbook/'] },
-  // The engineer (LTCM v3, V3-A, D5; WP8b): an isolated harness change inside ONE lane's surface (ENGINEER_LANES) and
-  // its new tests, never a protected path (lib/protected.mjs), on an `engineer/<lane>/<slug>-<hash>` branch, the only
-  // branches `POST /v1/github/merge` merges. The merge route checks the same lane again against the pull request's
-  // whole diff, and `league/ci.py` a third time.
+  // The engineer (LTCM v3, V3-A, D5; GOAL §5 Phase 4; WP8b): an isolated harness change inside ONE lane's surface
+  // (ENGINEER_LANES) that the harness lanes themselves declare (ENGINEER_SURFACE), and its new tests, never a protected
+  // path (lib/protected.mjs), on an `engineer/<lane>/<slug>-<hash>` branch, the only branches `POST /v1/github/merge`
+  // merges. The merge route checks the same rule again against the pull request's whole diff, and `league/ci.py` the
+  // lane a third time.
   engineer: { lanes: ENGINEER_LANES },
 };
+
+//: What the harness lanes themselves declare (the WP8 review): the union of the lanes' surfaces (the scheduler lane's
+//: `league/swarm/improvement.py` SCHEDULER_PATH and `league/swarm/harness_lanes.py` LANES) less every protected path
+//: (the execution lane's league/live/ files and the data lane's scripts/data/ files are the owner's deploys). `only` is
+//: a whole path; `tests` is the lanes' NEW_TEST. A lane of ENGINEER_LANES writes a path only when it is here too, so
+//: the lane table is never wider than the lanes the harness loop judges: `league/swarm/mechanisms.py` is in the memory
+//: lane's table and in no harness lane's surface, and stays refused until harness_lanes.py names it.
+//: test/merge.test.mjs reads the lanes from the repository and fails while this list is wider than they are, misses an
+//: unprotected path of theirs or names a path outside ENGINEER_LANES. A new lane, or a wider one, is a change to
+//: harness_lanes.py and to this list, both owner deploys.
+export const ENGINEER_SURFACE = Object.freeze({
+  only: Object.freeze([
+    // scheduler: the swarm's loop
+    'league/swarm/loop.py',
+    // research: the researcher's workflow, its preflight screens, its Claude path
+    'league/swarm/researcher.py', 'league/swarm/preflight.py', 'league/swarm/claude_research.py',
+    // memory: the architect's, the strategist's and the diagnostician's prompts and retrieval, the seeds
+    'league/swarm/architect.py', 'league/swarm/strategist.py', 'league/swarm/diagnostician.py', 'league/swarm/seeds.py',
+    // data: the Sail box client and the data job (the data builders under scripts/data/ are protected)
+    'league/sailbox.py', 'league/data_job.py',
+  ]),
+  tests: ENGINEER_TEST,
+});
+
+/** Whether `path` is the engineer's own new test file (ENGINEER_TEST), which may only be added. */
+export const engineerTest = path => typeof path === 'string' && ENGINEER_TEST.test(path);
+
+/** Why `path` is in no harness lane's surface (ENGINEER_SURFACE), or null when it is one of them or a new test. */
+export const surfaceRefusal = path => (ENGINEER_SURFACE.only.includes(path) || engineerTest(path) ? null
+  : `outside the engineer's lane surfaces (${[...ENGINEER_SURFACE.only, ENGINEER_TEST_GLOB].join(', ')})`);
 
 //: The branch prefix of the engineer's pull requests (lib/merge.mjs merges only these).
 export const ENGINEER_PREFIX = 'engineer/';
@@ -88,7 +119,7 @@ export function engineerLane(ref) {
 export function laneRefusal(lane, path, lanes = ENGINEER_LANES) {
   const surface = typeof lane === 'string' && Object.hasOwn(lanes, lane) ? lanes[lane] : null;
   if (!surface) return 'the lane is unknown';
-  if (surface.includes(path) || (typeof path === 'string' && ENGINEER_TEST.test(path))) return null;
+  if (surface.includes(path) || engineerTest(path)) return null;
   return `outside the ${lane} lane (${[...surface, ENGINEER_TEST_GLOB].join(', ')})`;
 }
 
@@ -124,7 +155,8 @@ export function dayCap(env = {}) {
 /**
  * Why this role may not write this path, or `null` when it may. The shape of the path is checked
  * first, then the judges, then the role's own paths -- so a judge is refused by name even under
- * a rule table (`roles`) that would otherwise let it through. The engineer's paths are its `lane`'s.
+ * a rule table (`roles`) that would otherwise let it through. The engineer's paths are its `lane`'s,
+ * inside what the harness lanes declare (ENGINEER_SURFACE).
  */
 export function pathRefusal(role, path, roles = ROLES, lane = null) {
   if (typeof path !== 'string' || !path) return 'a path must be a non-empty string';
@@ -142,7 +174,9 @@ export function pathRefusal(role, path, roles = ROLES, lane = null) {
   if (!rule) return 'the role is unknown';
   if (rule.lanes) {
     const why = protectedRefusal(path);
-    return why ? `no automated change may write this file: ${why}` : laneRefusal(lane, path, rule.lanes);
+    if (why) return `no automated change may write this file: ${why}`;
+    // Two walls: what the harness lanes declare at all, then the proposal's own lane.
+    return surfaceRefusal(path) ?? laneRefusal(lane, path, rule.lanes);
   }
   const allowed = (rule.only || []).includes(path) || (rule.under || []).some(prefix => path.startsWith(prefix));
   return allowed ? null : `outside what the ${role} may write`;
@@ -276,6 +310,12 @@ export function client({ repo, token, fetcher }) {
   };
   return { ask, need, get: async (step, method, path, body) => need(await ask(step, method, path, body), step) };
 }
+
+/**
+ * Whether GitHub's HTTP status on a write says the write was not made: a 4xx. A 5xx (or anything else that is not a
+ * success) may come after the write was made, so a cap's place taken for it stays taken (lib/merge.mjs, lib/desk.mjs).
+ */
+export const definiteNo = status => Number.isInteger(status) && status >= 400 && status < 500;
 
 export const sha = (value, step) => {
   if (typeof value !== 'string' || !/^[0-9a-f]{40,64}$/.test(value)) throw new Refusal(`GitHub's answer carried no sha (${step}).`);

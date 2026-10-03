@@ -25,7 +25,7 @@ test('each role writes under its own paths and nowhere else', () => {
     designer: ['league/game.json'],
     teacher: ['league/playbook/2026-09-19-favorites.md'],
   };
-  // The engineer (V3-A) writes anywhere but the protected paths (test/merge.test.mjs), so it is not among the five.
+  // The engineer (V3-A) writes inside its lanes' surfaces, never the protected paths (test/merge.test.mjs), so it is not among the five.
   assert.deepEqual(Object.keys(github.ROLES), [...Object.keys(allowed), 'engineer']);
   for (const [role, paths] of Object.entries(allowed)) {
     for (const path of paths) {
