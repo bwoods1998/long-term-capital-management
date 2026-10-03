@@ -17,9 +17,11 @@ One process beside the House loop, niced. Its threads:
 - RESEEDS (the sprint, Sept 26): below `population.start` while the architect is not due, the seeds' mechanisms are
   founded again on admitted roots they never tried (`reseed`, at most `population.reseed_max` a pass);
 - THE MAIN LOOP (every few seconds): re-read the settings, check the guard (brake: the Gym to sleep and the
-  researchers idle), say the funding cliffs ahead and the Claude fallbacks (`funding.FundingWatch`: deduped
-  `swarm.status` alerts, `status.funding` in the heartbeat), manage the pool, start the rounds that are due, write the
-  heartbeat, and leave when
+  researchers idle; THE GATE'S RESERVE, before the brake: at the last part of the day's Sail research dollars the
+  researchers, the births and the architect stop, and the tournament's validation round, the gate round and the nightly
+  forward go on to the day's cap, `guard.SailGuard.allows`), say the funding cliffs ahead and the Claude fallbacks
+  (`funding.FundingWatch`: deduped `swarm.status` alerts, `status.funding` in the heartbeat), manage the pool, start
+  the rounds that are due, write the heartbeat, and leave when
   asked (the STOP files, `<root>/swarm.stop`) or when the House's release changed (the House starts the new one).
 
 The heartbeat (`<root>/swarm.heartbeat`, JSON) carries the pid, the release directory, the time, and a live
@@ -607,7 +609,8 @@ class Swarm:
     def _worker(self, index: int) -> None:
         idle = float(self.settings.get("researcher", {}).get("idle_seconds", 5))
         while not self.stop.is_set():
-            if not self.guard.allows() or not self.gym_ready() or index >= int(self.concurrency_status()["workers"]):
+            # A researcher's cycle is new research: it stops at THE GATE'S RESERVE, before the brake (`SailGuard.allows`).
+            if not self.guard.allows("research") or not self.gym_ready() or index >= int(self.concurrency_status()["workers"]):
                 self.sleep(5.0)
                 continue
             if self.over_pace():
@@ -778,6 +781,7 @@ class Swarm:
             pass
         if getattr(self.guard, "due", lambda: True)():
             was = not self.guard.allows()
+            held = bool(getattr(self.guard, "research_held", False))
             self.guard.check()
             try:  # requests a stopped process left in flight: settled or released (their holds would count forever)
                 self.router.provider.reconcile_stale()
@@ -792,6 +796,8 @@ class Swarm:
                 if not was:
                     log(f"guard: brake ({getattr(self.guard, 'reason', '')})")
                 self.pool.scale_to_zero(getattr(self.guard, "reason", "the guard"))
+            elif getattr(self.guard, "research_held", False) and not held:
+                log(f"guard: research held ({getattr(self.guard, 'held', '')})")
         try:  # after the guard's reading, braked or not: a cliff is news most of all under the brake
             self.funding.tick()
         except Exception:  # noqa: BLE001 - a notice never stops the loop
@@ -808,15 +814,20 @@ class Swarm:
                 self._round("gate", self.gate.run)
             if self.gate.forward_due():
                 self._round("forward", self.gate.forward)
+            # THE GATE'S RESERVE: the three above go on to the day's cap; what makes new research (the architect, a
+            # reseed, the diagnostician; the researchers' cycles in `_worker`) stops at the reserve under it.
+            research = self.guard.allows("research")
             # Refilling to the start population always (a birth spends nothing by itself: the pace caps all cycles);
             # growing past it toward the ceiling only while the hourly spend is under the pace.
-            if self.architect.due() and self.store.get("tournament_at") and (self.architect.refilling() or not self.over_pace()):
+            if not research:
+                pass
+            elif self.architect.due() and self.store.get("tournament_at") and (self.architect.refilling() or not self.over_pace()):
                 self._round("architect", self.architect_pass)
             elif self.architect.refilling() and not self.architect.due() and self.store.get("tournament_at"):
                 born = self.reseed()
                 if born:
                     log(f"reseeded {len(born)}: {', '.join(born)}")
-            if self.diagnostician.due():  # Claude's own funded line and daily budget, not the researchers' pace
+            if research and self.diagnostician.due():  # Claude's own funded line and daily budget, not the researchers' pace
                 self._round("diagnostician", self.diagnostician.run)
         self._grow_workers()
         if self.clock() - self._beat >= float(self.settings.get("heartbeat_seconds", 20)):

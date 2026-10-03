@@ -16,6 +16,7 @@ import unittest
 from pathlib import Path
 
 from league.swarm import settings as S
+from league.swarm.guard import RESEARCH_KINDS
 from league.swarm.loop import Scheduler, Swarm
 from league.swarm.models import ModelRouter
 from league.swarm.pool import GymPool
@@ -30,11 +31,15 @@ class Guard:
     def __init__(self):
         self.braked = False
         self.reason = ""
+        self.research_held = False  # THE GATE'S RESERVE: new research is held, the gate's rounds go on (`SailGuard.allows`)
+        self.held = ""
         self.last = {}
         self.checks = 0
+        self.asked: list[str] = []
 
     def allows(self, kind="any"):
-        return not self.braked
+        self.asked.append(kind)
+        return not self.braked and not (self.research_held and kind in RESEARCH_KINDS)
 
     def due(self):
         return True
@@ -184,6 +189,62 @@ class Process(LoopCase):
         worker.join(10)
         self.assertEqual([e for e in self.store.events_after(0) if e["kind"] == "swarm.cycle"], [], "no researcher cycles")
         self.assertEqual(self.box_sail.forks, [])
+
+    def test_at_the_gates_reserve_new_research_stops_and_the_gates_rounds_go_on(self):
+        """THE GATE NEVER WAITS FOR MIDNIGHT: with the day's Sail research at its line (the guard's hold, no brake), the
+        tournament's validation round, the gate round and the nightly forward still start; the architect, a reseed, the
+        diagnostician and the researchers' cycles do not, and the Gym is not scaled to zero."""
+        self.settings["population"]["reseed_max"] = 4
+        (self.root / "swarm.json").write_text(json.dumps({"enabled": True, "gym": self.settings["gym"],
+                                                          "researcher": {"idle_seconds": 0}, "population": {"reseed_max": 4}}))
+        sw = self.swarm()
+        sw.seed()
+        for fam in self.store.families(alive=True)[:40]:  # 8 alive: under the start, so the architect would refill
+            self.store.retire(fam["id"], "test")
+        ran: list[str] = []
+        sw.gate.forward_due = lambda: True
+        sw.gate.forward = lambda: ran.append("forward") or {"ran": True}
+        sw.architect_pass = lambda: ran.append("architect") or {}
+        sw.reseed = lambda: ran.append("reseed") or []
+        sw.diagnostician.due = lambda: True
+        sw.diagnostician.run = lambda: ran.append("diagnostician") or {}
+        scaled: list[str] = []
+        self.pool.scale_to_zero = lambda why, **kw: scaled.append(why)
+        self.store.put("tournament_at", 0.0)
+        self.store.put("architect_at", 0.0)
+        self.guard.research_held = True
+        self.guard.held = "today's Sail research is at its line (13.50 of 15.00)"
+        sw.step()
+        for t in list(sw.rounds.values()):
+            t.join(30)
+        self.assertEqual(set(sw.rounds), {"tournament", "gate", "forward"}, "those three go on to the day's cap")
+        self.assertEqual(ran, ["forward"], "no architect pass, no reseed, no diagnostician")
+        self.assertEqual(scaled, [], "a hold is no brake: validation and the look need the Gym")
+        worker = threading.Thread(target=sw._worker, args=(0,), daemon=True)
+        worker.start()
+        time.sleep(0.3)
+        sw.stop.set()
+        worker.join(10)
+        self.assertEqual([e for e in self.store.events_after(0) if e["kind"] == "swarm.cycle"], [], "no researcher cycles")
+        self.assertIn("research", self.guard.asked, "the researchers and the births ask for research")
+        self.assertFalse(json.loads((self.root / "swarm.heartbeat").read_text())["status"]["braked"], "the heartbeat says no brake")
+        # The hold over (a new day, or a raise): the same pass starts the architect again.
+        sw.stop.clear()
+        self.guard.research_held = False
+        self.store.put("architect_at", 0.0)
+        sw.step()
+        for t in list(sw.rounds.values()):
+            t.join(30)
+        self.assertIn("architect", sw.rounds)
+        self.assertEqual(ran.count("architect"), 1)
+        # And under the brake nothing starts, the gate's rounds included (a low or unreadable balance, the cap itself).
+        sw.rounds.clear()
+        ran.clear()
+        self.store.put("tournament_at", 0.0)
+        self.guard.braked = True
+        sw.step()
+        self.assertEqual((sw.rounds, ran), ({}, []))
+        self.assertEqual(len(scaled), 1, "and the brake scales the Gym to zero, as ever")
 
     def test_researchers_hold_while_the_last_hours_spend_is_at_the_pace(self):
         sw = self.swarm()

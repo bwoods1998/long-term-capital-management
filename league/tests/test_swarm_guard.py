@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 
 from league.swarm import settings as S
-from league.swarm.guard import BUDGET_CAUSES, CAUSES, SailGuard, causes_of
+from league.swarm.guard import BUDGET_CAUSES, CAUSES, RESEARCH_KINDS, SailGuard, causes_of
 from league.swarm.store import SwarmStore
 from league.tests.swarm_fakes import Clock
 
@@ -276,6 +276,162 @@ class Budget(GuardCase):
         out = g.check()
         self.assertEqual(out["metered_spent"], 200.0)
         self.assertIsNotNone(self.store.get("burst_started_at"))
+
+
+class Reserve(GuardCase):
+    """THE GATE NEVER WAITS FOR MIDNIGHT: the last tenth of the day's Sail research dollars (at least $0.50) is kept for
+    the tournament's validation round, the gate round and the nightly forward. Researcher cycles, births and the
+    architect stop at the line under it (a hold, no brake); those three go on to the day's cap."""
+
+    #: What `Swarm` asks the guard for: its rounds and the Gym's boxes by the default kind and the box kinds, new research
+    #: by `RESEARCH_KINDS`.
+    GATE = ("any", "gym", "gate", "tournament", "forward")
+
+    def budget(self, sail, fixed=None):
+        self.settings["budget"] = {"source": "budget.json", "sail_usd_day": sail, "claude_usd_day": 2.0,
+                                   "fixed_sail_usd_day": fixed}
+
+    def allowed(self, g):
+        """(the gate's kinds allowed, the research kinds allowed): each all or none."""
+        gate, research = {g.allows(kind) for kind in self.GATE}, {g.allows(kind) for kind in RESEARCH_KINDS}
+        self.assertEqual((len(gate), len(research)), (1, 1))
+        self.assertEqual(g.allows(), g.allows("any"))
+        return gate.pop(), research.pop()
+
+    def actions(self):
+        return [e["payload"]["action"] for e in self.store.events_after(0) if e["kind"] == "swarm.guard"]
+
+    def test_the_reserve_is_a_tenth_of_the_day_and_at_least_fifty_cents(self):
+        from league.ops import budget as B
+
+        self.assertEqual((B.GATE_RESERVE_SHARE, B.GATE_RESERVE_MIN_USD), (0.10, 0.50))
+        self.assertEqual([B.gate_reserve(usd) for usd in (15.0, 7.2, 5.0, 3.0, 0.6, 0.5, 0.4, 0.0)],
+                         [1.5, 0.72, 0.5, 0.5, 0.5, 0.5, 0.4, 0.0], "never more than the day's own dollars")
+        self.assertEqual([B.gate_reserve(bad) for bad in ("lots", None, -1, float("nan"), True)], [0.0] * 5)
+        self.assertEqual(RESEARCH_KINDS, ("research", "architect", "birth", "diagnostician"))
+
+    def test_research_stops_at_ninety_percent_and_the_gate_goes_on_to_the_cap(self):
+        self.budget(15.0)  # the owner's ceiling on Sail: the last $1.50 is the gate's
+        self.reading = (5000.0, 5.0)
+        g = self.guard()
+        self.store.add_spend("gym_box", 9.0)
+        self.store.add_spend("sail_model", 4.49)
+        out = g.check()
+        self.assertEqual((out["gate_reserve_usd"], out["research_held"], out["held"]), (1.5, False, ""))
+        self.assertEqual(self.allowed(g), (True, True), "13.49 of 15.00: everything runs")
+        self.store.add_spend("sail_model", 0.01)
+        self.clock.advance(180)
+        out = g.check()
+        self.assertEqual(self.allowed(g), (True, False), "13.50 of 15.00: no new research, and the gate goes on")
+        self.assertEqual((g.braked, g.reason, g.causes), (False, "", []), "a hold is no brake: no cause, no reason")
+        self.assertEqual(out["held"], "today's Sail research is at its line (13.50 of 15.00): the last 1.50 is kept for "
+                                      "validation, the gate and the nightly forward")
+        saved = self.store.get("guard")
+        self.assertEqual((saved["braked"], saved["research_held"], saved["held"]), (False, True, out["held"]))
+        self.store.add_spend("gym_box", 1.49)  # validation, the look and the forward spend inside the reserve
+        self.clock.advance(180)
+        g.check()
+        self.assertEqual(self.allowed(g), (True, False), "14.99 of 15.00: the gate still runs")
+        self.store.add_spend("gym_box", 0.01)
+        self.clock.advance(180)
+        g.check()
+        self.assertEqual(self.allowed(g), (False, False), "the day's cap: everything stops until 00:00 UTC")
+        self.assertEqual(g.causes, ["research_budget"])
+        self.clock.advance(86400)  # a new UTC day: its own budget and its own reserve
+        g.check()
+        self.assertEqual(self.allowed(g), (True, True))
+        self.assertEqual((g.research_held, g.held), (False, ""))
+        self.assertEqual(self.actions(), ["release", "research_hold", "brake", "release", "research_release"],
+                         "each change is said: the first reading, the hold, the cap, the new day and its hold's end")
+
+    def test_sails_own_meter_holds_research_at_the_same_reserve(self):
+        self.budget(6.0, fixed=2.5)  # the account cap is 8.50; the reserve of a $6 day is $0.60
+        self.reading = (5000.0, 5.0)
+        g = self.guard()
+        g.check()
+        self.reading = (4992.5, 5.0)  # $7.50 metered by Sail today, none of it booked by the swarm
+        self.clock.advance(180)
+        g.check()
+        self.assertEqual(self.allowed(g), (True, True), "7.50 of 8.50: under the line at 7.90")
+        self.reading = (4992.0, 5.0)
+        self.clock.advance(180)
+        out = g.check()
+        self.assertEqual(self.allowed(g), (True, False), "8.00 of 8.50: inside the reserve by Sail's meter")
+        self.assertIn("by Sail's meter (8.00 of 8.50 for the account)", out["held"])
+        self.reading = (4991.5, 5.0)
+        self.clock.advance(180)
+        g.check()
+        self.assertEqual(self.allowed(g), (False, False))
+        self.assertEqual(g.causes, ["account_budget"])
+
+    def test_a_small_day_is_the_gates_first(self):
+        """Under a dollar a day the reserve's fifty cents are most of it; under fifty cents all of it: the research that
+        is left to do is the gate's."""
+        self.reading = (5000.0, 5.0)
+        self.budget(0.6)
+        g = self.guard()
+        g.check()
+        self.assertEqual(self.allowed(g), (True, True))
+        self.store.add_spend("sail_model", 0.10)
+        self.clock.advance(180)
+        g.check()
+        self.assertEqual(self.allowed(g), (True, False), "0.10 of 0.60: the last 0.50 is the gate's")
+        self.budget(0.4)
+        self.clock.advance(86400)
+        out = g.check()
+        self.assertEqual((out["gate_reserve_usd"], self.allowed(g)), (0.4, (True, False)), "nothing spent: all of it is the gate's")
+        self.budget(0.0)
+        self.clock.advance(180)
+        g.check()
+        self.assertEqual((self.allowed(g), g.causes), ((False, False), ["research_budget"]), "no dollars brake at once, as ever")
+
+    def test_a_low_or_unreadable_balance_still_stops_everything(self):
+        self.budget(15.0)
+        self.reading = (40.0, 5.0)  # over the House's line of 32 (and the 37 a braked guard releases at)
+        g = self.guard()
+        self.store.add_spend("gym_box", 14.0)
+        g.check()
+        self.assertEqual(self.allowed(g), (True, False), "inside the reserve: the gate runs")
+        for reading, cause in (((31.5, 5.0), "under_line"), ((None, None), "balance_unreadable")):
+            self.reading = reading
+            self.clock.advance(180)
+            g.check()
+            self.assertEqual((self.allowed(g), g.causes), ((False, False), [cause]), "the House at risk: the gate stops too")
+            self.assertTrue(g.research_held, "the hold stands under the brake: it is the brake that answers")
+            self.reading = (40.0, 5.0)
+            self.clock.advance(180)
+            g.check()
+            self.assertEqual(self.allowed(g), (True, False))
+        # A reading gone stale and a full disk are the same: nothing is allowed, reserve or not.
+        self.clock.advance(float(self.settings["guard"].get("stale_seconds", 600)) + 1)
+        self.assertEqual(self.allowed(g), (False, False))
+        low = SailGuard(self.store, self.settings, lambda: self.reading, clock=self.clock, disk_free=lambda: 1.0 * 2 ** 30)
+        low.check()
+        self.assertEqual((self.allowed(low), low.causes), ((False, False), ["disk"]))
+
+    def test_a_raise_ends_the_hold_and_a_restart_keeps_it(self):
+        self.budget(6.0)
+        self.reading = (5000.0, 5.0)
+        g = self.guard()
+        self.store.add_spend("sail_model", 5.5)
+        g.check()
+        self.assertEqual(self.allowed(g), (True, False), "5.50 of 6.00 with 0.60 kept")
+        again = self.guard()  # a restarted swarm reads the record before its first check
+        self.assertEqual((again.braked, again.research_held, again.held), (False, True, g.held))
+        self.budget(9.0)  # the next settings.load carries a raise: 5.50 of 9.00 with 0.90 kept
+        self.clock.advance(180)
+        g.check()
+        self.assertEqual(self.allowed(g), (True, True))
+        self.assertEqual(self.actions(), ["release", "research_hold", "research_release"],
+                         "the first reading releases the guard and finds the hold in the same check")
+
+    def test_caps_that_are_no_reading_of_the_rule_keep_nothing_and_brake(self):
+        self.reading = (5000.0, 5.0)
+        self.settings["budget"] = {"sail_usd_day": "lots"}
+        g = self.guard()
+        out = g.check()
+        self.assertEqual((out["gate_reserve_usd"], out["research_held"], g.causes), (0.0, False, ["budget_unreadable"]))
+        self.assertEqual(self.allowed(g), (False, False))
 
 
 class Causes(GuardCase):
