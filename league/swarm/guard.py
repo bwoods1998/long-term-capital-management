@@ -143,7 +143,9 @@ class SailGuard:
     def _metered(self, balance: float | None, now: float) -> tuple[float, float]:
         """Sail's own meter: every fall of the balance between two good readings (a rise is a top-up, never negative
         spend), since the guard first ran (`burst_started_at`, the site's compute block) and since this UTC midnight. It
-        counts every box and model call on the account, booked or not."""
+        counts every box and model call on the account, booked or not. The day's meter (`metered_today`: {day, spent},
+        kept beside each good reading) is also what THE BUDGET's first run of a UTC day adds back to that reading
+        (league/ops/budget.py `_sail_paid_today`), so a first run that comes late sets the cap an early one would have."""
         spent = float(self.store.get("metered_spent", 0.0) or 0.0)
         day = dt.datetime.fromtimestamp(now, dt.timezone.utc).date().isoformat()
         today = self.store.get("metered_today") or {}

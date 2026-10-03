@@ -36,6 +36,18 @@ nothing for today, and records what its own reading would have set (`would_set_u
 next UTC day sets from its own reading. A meter that cannot be read is still no research at once (FAIL CLOSED); read
 again the same day, it is back at the day's figure. Another version of the rule's file sets no day's figure.
 
+THE DAY'S FIRST RUN ADDS BACK WHAT THE DAY ALREADY PAID. When the first run of a UTC day comes late (the 00:30 run
+missed, a deploy in the evening, a meter no earlier run could read), its reading has already paid for part of the day's
+research, and a figure computed from it would sit under what the day has booked. So the run that SETS the day's figure
+computes it from the balance as the day began: the reading plus what the meter has paid since 00:00 UTC
+(`paid_today_usd`, `gather`). Sail's is the Sail guard's own meter of the day (the store's `metered_today`: every fall
+of the balance since midnight, the research and the fixed cost alike), never more than the swarm's booked Sail
+research today plus a day of fixed cost, and nothing when the reading is from before midnight. Claude's is the swarm's
+Claude spend booked today, never under 0. Neither is ever more than the meter's share of the ceiling plus its fixed
+cost a day, and what cannot be read is nothing added back. So a first run at 20:10 UTC sets the cap a run at 00:30
+would have. Only the day's figure reads it: a later run's `would_set_usd_day`, the runway, the card line and the
+notice are the reading as it stands.
+
 NEVER ABOVE THE CEILING. Nothing lifts a meter over its share of the ceiling: not the profit share (below), not a
 budget.json that says more (`read` holds each meter to its share), not a setting (the overlay only tightens), not a
 `budget` block handed to the Sail guard or the router by any other way (`sail_caps` and `paid_model_room` hold what
@@ -72,11 +84,12 @@ earns nothing; so does an unreadable promotion record once the stop could apply 
 `EDGE_START`, or from the last Probe a look earned when the swarm's record shows one).
 
 THE OUTPUT, `<state>/budget.json` (private): the inputs, each meter's research $/day, the knob values, the direction
-against the last file (cut, raise or same), each meter's reserve in force, its day's figure and what this run's own
-reading would have set, its runway at its current total rate (fixed + research), its days of research left at the
-ceiling (`card_runway_days`: what it holds above its reserve over `demand_usd_day`, its fixed cost plus its share of
-the ceiling), its next card action date (`card_date`: when those days fall to `RUNWAY_DAYS`, the day the taper starts),
-the amount that buys `TOPUP_DAYS` more days at the ceiling (`topup_usd`) and why.
+against the last file (cut, raise or same), each meter's reserve in force, its day's figure, what the run that set it
+added back (`added_back_usd`; 0 on a later run) and what this run's own reading would have set, its runway at its
+current total rate (fixed + research), its days of research left at the ceiling (`card_runway_days`: what it holds
+above its reserve over `demand_usd_day`, its fixed cost plus its share of the ceiling), its next card action date
+(`card_date`: when those days fall to `RUNWAY_DAYS`, the day the taper starts), the amount that buys `TOPUP_DAYS` more
+days at the ceiling (`topup_usd`) and why.
 
 ENFORCEMENT, TIGHTEN-ONLY (`overlay`, the last step of `league.swarm.settings.load` with a state root). The research
 $/day become knob values (`knobs`), applied as min() against the configured `researcher.sail_usd_per_hour` (while that is
@@ -211,6 +224,8 @@ GATE_STAGES = ("review", "audit")
 #: OpenAI too: `paid_model_room`).
 SAIL_KINDS = ("sail_model", "gym_box")
 CLAUDE_KINDS = ("claude", "openai")
+#: The spend kind Claude's own meter pays (the gateway's funded total): what THE DAY'S FIRST RUN ADDS BACK on Claude.
+PAID_CLAUDE_KIND = "claude"
 
 # ---------------------------------------------------------------------------------------------- the knobs' constants
 #: The Sail research dollars that buy Gym boxes (the rest buys Sail models: measured Oct 2, about 60/40).
@@ -271,6 +286,11 @@ def _epoch(text: Any) -> float | None:
 
 def _day(epoch: float) -> dt.date:
     return dt.datetime.fromtimestamp(float(epoch), dt.timezone.utc).date()
+
+
+def _day_start(epoch: float) -> float:
+    """00:00 UTC of the day `epoch` is in: the Sail guard's and the router's own day."""
+    return float(epoch) - float(epoch) % 86400
 
 
 def _get(ctx: Any, name: str, default: Any = None) -> Any:
@@ -412,10 +432,13 @@ def compute(inputs: Mapping[str, Any], *, now: float, previous: Mapping[str, Any
         {"p30_usd": float | None, "p30_source": str, "edge": edge_state(...),
          "meters": {m: {"balance_usd": float | None, "fixed_usd_day": float | None, "need_usd": float,
                         "reserve_usd": float | None (Sail: the Sail guard's release line; absent: `RESERVE_USD`),
+                        "paid_today_usd": float | None (what the meter has paid since 00:00 UTC; absent: nothing),
                         "notice_balance_usd": float | None (Sail with no guard reading: the card line only), ...sources}}}
 
     `previous` is the last budget.json: for the direction, and for THE DAY'S FIGURE (a meter an earlier run of this UTC
-    day read keeps that run's research: `_day_figure`). Pure: no I/O."""
+    day read keeps that run's research: `_day_figure`). The run that sets a meter's figure ADDS BACK what the meter has
+    paid since 00:00 UTC (`paid_today_usd`, never more than its share of the ceiling plus its fixed cost a day): the
+    figure is from the balance as the day began, whenever in the day the first run comes. Pure: no I/O."""
     meters_in = inputs.get("meters") or {}
     edge = dict(inputs.get("edge") or {"stop": True, "why": "no edge state: earned is 0"})
     p30 = _finite(inputs.get("p30_usd"))
@@ -446,7 +469,8 @@ def compute(inputs: Mapping[str, Any], *, now: float, previous: Mapping[str, Any
         if balance is None or fixed is None or reserve is None:
             # FAIL CLOSED, at once: the day's figure (kept in the row) stands again only when the meter reads again.
             row.update(research_usd_day=0.0, limited_by="unreadable", runway_days=None, card_date=None,
-                       total_usd_day=None, topup_usd=None, demand_usd_day=None, card_runway_days=None, would_set_usd_day=None)
+                       total_usd_day=None, topup_usd=None, demand_usd_day=None, card_runway_days=None, would_set_usd_day=None,
+                       added_back_usd=None)
             what = "balance" if balance is None else "fixed cost" if fixed is None else "reserve"
             why.append(f"{m}: the {what} could not be read: no research")
             seen = _finite(given.get("notice_balance_usd"))
@@ -458,11 +482,17 @@ def compute(inputs: Mapping[str, Any], *, now: float, previous: Mapping[str, Any
             meters[m] = row
             continue
         room = balance - reserve
-        runway_cap = max(0.0, room - RUNWAY_DAYS * fixed) / RUNWAY_DAYS
+        added = 0.0
+        if kept is None:
+            # The first run of this UTC day to read the meter sets the day's figure, FROM THE BALANCE AS THE DAY BEGAN:
+            # what the meter has paid since 00:00 UTC is added back, so a late first run sets the cap an early one would
+            # have. Unknown is nothing added; never more than a day's own most (its share of the ceiling and its fixed cost).
+            added = min(_amount(given.get("paid_today_usd")) or 0.0, ceiling + fixed)
+        runway_cap = max(0.0, room + added - RUNWAY_DAYS * fixed) / RUNWAY_DAYS
         research = min(ceiling, runway_cap)  # never above the ceiling, whatever was earned
         limited = "ceiling" if runway_cap >= ceiling else "runway"  # the taper: under RUNWAY_DAYS days of the ceiling
         would_set = research
-        if kept is None:  # the first run of this UTC day to read the meter: it sets the day's figure
+        if kept is None:
             kept = {"day": today.isoformat(), "usd_day": round(research, 4), "limited_by": limited, "set_at": _iso(now)}
         else:  # THE DAY'S FIGURE IS SET ONCE: this reading has paid for the day's research, and raises and lowers nothing
             research, limited = kept["usd_day"], kept["limited_by"]
@@ -474,13 +504,16 @@ def compute(inputs: Mapping[str, Any], *, now: float, previous: Mapping[str, Any
         else:
             runway = None  # nothing is spent: no runway to run out
         row.update(runway_cap_usd_day=round(runway_cap, 4), research_usd_day=round(research, 4),
-                   would_set_usd_day=round(would_set, 4), day_figure=kept,
+                   would_set_usd_day=round(would_set, 4), day_figure=kept, added_back_usd=round(added, 4),
                    wanted_research_usd_day=round(ceiling, 4), limited_by=limited, total_usd_day=round(rate, 4),
                    runway_days=None if runway is None else round(runway, 1),
                    runs_out_on=None if runway is None else _date_after(today, runway),
                    **_card(balance, fixed, fixed + ceiling, reserve, today))
         if limited == "runway":
             why.append(f"{m}: under {RUNWAY_DAYS} days of the ceiling: research {research:.4f} of {ceiling:.2f} a day")
+        if added > EPSILON:
+            why.append(f"{m}: the day's first run: the {added:.4f} the meter has paid since 00:00 UTC is added back (the "
+                       "day's figure is from the balance as the day began)")
         if abs(would_set - research) > EPSILON:
             why.append(f"{m}: today's figure stands ({research:.4f} a day, set at {kept['set_at']}); this run's reading "
                        f"would set {would_set:.4f}")
@@ -909,8 +942,11 @@ def _swarm_reads(root: Path, now: float, errors: list[str]) -> dict[str, Any]:
     receipt of `ladder_receipts`: its band move's own time when the store's `swarm.band` event names it, `LADDER_MARK`,
     else the receipt's; None when the ladder's record cannot be read), the Probes a passed look earned (`probes`: the
     time of the first move from `LOOK_BAND` to probe at or after each passed look of that family in the store's `looks`;
-    they need no receipt of the ladder's), each meter's research spend."""
-    out: dict[str, Any] = {"guard": None, "promotions": None, "probes": [], "need": {m: 0.0 for m in METERS}}
+    they need no receipt of the ladder's), each meter's research spend, and what THE DAY'S FIRST RUN ADDS BACK: the
+    guard's own meter of the UTC day (`metered_today`, the kv record as it is) and the day's own spend rows (`today`:
+    (kind, epoch, usd) of the Sail kinds and Claude since 00:00 UTC of `now`'s day))."""
+    out: dict[str, Any] = {"guard": None, "promotions": None, "probes": [], "need": {m: 0.0 for m in METERS},
+                           "metered_today": None, "today": []}
     path = root / "swarm.sqlite"
     if not path.exists():
         errors.append("no swarm store: no guard reading, no promotion record")
@@ -919,6 +955,11 @@ def _swarm_reads(root: Path, now: float, errors: list[str]) -> dict[str, Any]:
         conn = _read_only(path)
         try:
             row = conn.execute("SELECT value FROM kv WHERE key='guard'").fetchone()
+            meter = conn.execute("SELECT value FROM kv WHERE key='metered_today'").fetchone()
+            kinds = (*SAIL_KINDS, PAID_CLAUDE_KIND)
+            today = [(str(r[0]), r[1], r[2]) for r in conn.execute(
+                f"SELECT kind, epoch, usd FROM spend WHERE epoch>=? AND kind IN ({','.join('?' * len(kinds))})",
+                (_day_start(now), *kinds))]
             bands = [dict(r) for r in conn.execute("SELECT at, family, payload FROM events WHERE kind='swarm.band' "
                                                    "ORDER BY seq")]
             looked = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='looks'").fetchone() is not None
@@ -934,6 +975,11 @@ def _swarm_reads(root: Path, now: float, errors: list[str]) -> dict[str, Any]:
         out["guard"] = json.loads(row["value"]) if row else None
     except (TypeError, ValueError):
         out["guard"] = None
+    try:
+        out["metered_today"] = json.loads(meter["value"]) if meter else None
+    except (TypeError, ValueError):
+        out["metered_today"] = None
+    out["today"] = today
     receipts = ladder_receipts(root, errors)
     passed: dict[str, list[float]] = {}  # each family's passed looks, oldest first
     for look in looks:
@@ -1057,17 +1103,58 @@ def _gateway_sail(health: Any, now: float) -> tuple[float | None, str | None]:
     return balance, f"the gateway's Sail reading at {_iso(at)} (the card line only)"
 
 
-def _guard_balance(guard: Any, now: float) -> tuple[float | None, str]:
-    """Sail's balance from the guard's kv: its last GOOD reading (`last_good`; one failed read after it does not erase
-    it), else its last reading, at most `BALANCE_FRESH_SECONDS` old; None when there is neither."""
+def _guard_reading(guard: Any, now: float) -> tuple[float | None, float | None, str]:
+    """(Sail's balance, when it was read, the source) from the guard's kv: its last GOOD reading (`last_good`; one failed
+    read after it does not erase it), else its last reading, at most `BALANCE_FRESH_SECONDS` old; (None, None, why) when
+    there is neither."""
     guard = guard if isinstance(guard, Mapping) else {}
     for key in ("last_good", "last"):
         row = guard.get(key)
         row = row if isinstance(row, Mapping) else {}
         balance, at = _finite(row.get("balance")), _finite(row.get("at"))
         if balance is not None and at is not None and 0 <= now - at <= BALANCE_FRESH_SECONDS:
-            return balance, f"the Sail guard's {'last good ' if key == 'last_good' else ''}reading at {_iso(at)}"
-    return None, "the Sail guard has no fresh reading"
+            return balance, at, f"the Sail guard's {'last good ' if key == 'last_good' else ''}reading at {_iso(at)}"
+    return None, None, "the Sail guard has no fresh reading"
+
+
+def _booked_today(rows: Any, kinds: tuple[str, ...], now: float, until: float) -> float:
+    """The dollars of `kinds` in the day's spend rows (`_swarm_reads`' `today`: (kind, epoch, usd)) from 00:00 UTC of
+    `now`'s day to `until`, never under 0 (a release of a hold booked the day before lowers no day's spend under 0)."""
+    start, total = _day_start(now), 0.0
+    for row in rows if isinstance(rows, (list, tuple)) else ():
+        try:
+            kind, epoch, usd = row[0], _finite(row[1]), _finite(row[2])
+        except (TypeError, IndexError, KeyError):
+            continue
+        if kind in kinds and epoch is not None and usd is not None and start <= epoch <= until:
+            total += usd
+    return max(0.0, total)
+
+
+def _sail_paid_today(swarm: Mapping[str, Any], read_at: float | None, now: float, fixed: float) -> tuple[float, str]:
+    """WHAT SAIL'S METER HAS PAID since 00:00 UTC of `now`'s day, as of the guard's balance reading at `read_at`: what
+    THE DAY'S FIRST RUN ADDS BACK. It is the guard's own meter of the day (the store's `metered_today`, kept at every
+    good reading beside the balance: every fall of the balance since midnight, the research and the fixed cost alike,
+    in the provider's own dollars), never more than the swarm's booked Sail research today up to the reading plus one
+    day of fixed cost: a guard that did not read across midnight meters the hours before it into today, and the Gym's
+    booked box time is an estimate above the provider's bill, so each bounds the other. 0 when the reading is from
+    before 00:00 UTC or the guard kept no meter of today: nothing known is nothing added back."""
+    if read_at is None or read_at < _day_start(now):
+        return 0.0, "no reading of today: nothing added back"
+    meter = swarm.get("metered_today")
+    metered = _amount(meter.get("spent")) if isinstance(meter, Mapping) and meter.get("day") == _day(now).isoformat() else None
+    if metered is None:
+        return 0.0, "the Sail guard kept no meter of today: nothing added back"
+    booked = _booked_today(swarm.get("today"), SAIL_KINDS, now, read_at)
+    return min(metered, booked + fixed), (f"the Sail guard's meter today ({metered:.4f}), at most the booked research "
+                                          f"({booked:.4f}) and a day of fixed cost")
+
+
+def _claude_paid_today(swarm: Mapping[str, Any], now: float) -> tuple[float, str]:
+    """WHAT CLAUDE'S METER HAS PAID since 00:00 UTC of `now`'s day: the swarm's own Claude spend booked today (the
+    store's `claude` rows, holds included, as the gateway's `spent_usd` counts them; never OpenAI's, which this meter
+    does not pay), never under 0. What THE DAY'S FIRST RUN ADDS BACK."""
+    return _booked_today(swarm.get("today"), (PAID_CLAUDE_KIND,), now, now), "the swarm's Claude spend booked today"
 
 
 def _gateway(config: Mapping[str, Any]) -> tuple[str | None, str | None]:
@@ -1137,9 +1224,12 @@ def gather(root: Path, now: float, *, config: Mapping[str, Any], settings: Mappi
     guard_cfg = settings.get("guard") if isinstance(settings.get("guard"), Mapping) else {}
     house_burn = _amount(guard_cfg.get("house_burn_usd_day"))
     house_burn = 1.0 if house_burn is None else house_burn
-    balance, balance_source = _guard_balance(swarm["guard"], now)
+    balance, read_at, balance_source = _guard_reading(swarm["guard"], now)
     fixed, fixed_source = _sail_fixed(sail, _house_boxes(root, config), now, house_burn, errors)
     reserve, reserve_source = _sail_reserve(guard_cfg, fixed, errors)
+    # What THE DAY'S FIRST RUN ADDS BACK: what each meter has paid since 00:00 UTC, as of its balance's reading.
+    sail_paid, sail_paid_source = _sail_paid_today(swarm, read_at, now, fixed)
+    claude_paid, claude_paid_source = _claude_paid_today(swarm, now)
     claude_balance, claude_source = None, "the gateway's /v1/health could not be read"
     seen, seen_source = None, None
     if health is not None:
@@ -1174,9 +1264,11 @@ def gather(root: Path, now: float, *, config: Mapping[str, Any], settings: Mappi
             "meters": {"sail": {"balance_usd": balance, "balance_source": balance_source, "fixed_usd_day": round(fixed, 4),
                                 "fixed_source": fixed_source, "need_usd": round(swarm["need"]["sail"], 4),
                                 "reserve_usd": None if reserve is None else round(reserve, 4), "reserve_source": reserve_source,
+                                "paid_today_usd": round(sail_paid, 4), "paid_today_source": sail_paid_source,
                                 "notice_balance_usd": seen, "notice_balance_source": seen_source},
                        "claude": {"balance_usd": claude_balance, "balance_source": claude_source, "fixed_usd_day": 0.0,
-                                  "fixed_source": "none", "need_usd": round(swarm["need"]["claude"], 4)}}}
+                                  "fixed_source": "none", "need_usd": round(swarm["need"]["claude"], 4),
+                                  "paid_today_usd": round(claude_paid, 4), "paid_today_source": claude_paid_source}}}
 
 
 # ---------------------------------------------------------------------------------------------- the funding notice

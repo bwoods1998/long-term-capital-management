@@ -252,6 +252,82 @@ class Rule(unittest.TestCase):
         over["meters"]["sail"]["day_figure"]["usd_day"] = 500.0
         self.assertEqual(B.compute(inputs(sail=67.75), now=evening_at, previous=over)["meters"]["sail"]["research_usd_day"], 15.0)
 
+    def test_a_late_first_run_of_the_day_adds_back_what_the_day_already_paid(self):
+        """THE DAY'S FIRST RUN ADDS BACK WHAT THE DAY ALREADY PAID. A first run that comes late (the 00:30 run missed, a
+        deploy in the evening) reads a balance that has paid for part of the day's research: computed from that reading
+        alone, the day's cap lands under what the day has booked. The run that sets the day's figure adds back what the
+        meter has paid since 00:00 UTC, so it sets the cap a run at 00:30 would have."""
+        release = GUARD["release"]
+        early_at, late_at = at(2026, 10, 20, 0, 30), at(2026, 10, 20, 20, 10)
+        early = B.compute(inputs(sail=100.0, fixed=1.0, reserve=release), now=early_at)["meters"]["sail"]
+        self.assertEqual((early["research_usd_day"], early["limited_by"], early["added_back_usd"]), (11.6, "runway", 0.0),
+                         "(100 - 37 - 5 x 1) / 5: a taper day")
+
+        def late(paid, sail=100.0 - 10.84, **kw):
+            given = inputs(sail=sail, fixed=1.0, reserve=release, **kw)
+            given["meters"]["sail"]["paid_today_usd"] = paid
+            return given
+        # 20:10 UTC: the meter has paid 10.00 of research and 0.84 of the day's fixed cost.
+        doc = B.compute(late(10.84), now=late_at)
+        sail = doc["meters"]["sail"]
+        self.assertEqual((sail["research_usd_day"], sail["limited_by"], sail["added_back_usd"], sail["would_set_usd_day"]),
+                         (11.6, "runway", 10.84, 11.6), "the cap a first run at 00:30 would have set")
+        self.assertEqual(sail["day_figure"], {"day": "2026-10-20", "usd_day": 11.6, "limited_by": "runway",
+                                              "set_at": "2026-10-20T20:10:00Z"})
+        self.assertIn("sail: the day's first run: the 10.8400 the meter has paid since 00:00 UTC is added back (the day's "
+                      "figure is from the balance as the day began)", doc["why"])
+        # The control: the same reading with nothing added back is under the 10.00 the day has booked.
+        naive = B.compute(inputs(sail=100.0 - 10.84, fixed=1.0, reserve=release), now=late_at)["meters"]["sail"]
+        self.assertEqual((naive["research_usd_day"], naive["added_back_usd"]), (9.432, 0.0), "(89.16 - 42) / 5")
+        self.assertLess(naive["research_usd_day"], 10.0)
+        # Only the day's figure reads it: the runway, the card line and the top-up are the reading as it stands.
+        for key in ("balance_usd", "card_runway_days", "card_date", "card_runs_out_on", "topup_usd", "demand_usd_day"):
+            self.assertEqual(sail[key], naive[key], key)
+        self.assertEqual(sail["runway_days"], round((89.16 - 37.0) / 12.6, 1), "what is left over the day's rate")
+        # A later run of the day adds nothing back: the figure stands, and it records its reading as it stands.
+        later = B.compute(late(11.5, sail=88.5), now=late_at + 3600, previous=doc)["meters"]["sail"]
+        self.assertEqual((later["research_usd_day"], later["added_back_usd"], later["would_set_usd_day"]), (11.6, 0.0, 9.3))
+        # Whenever in the day the first run comes, and whatever the day has paid by then, the figure is the same.
+        for hour in range(24):
+            paid = round(11.6 * hour / 24 + 1.0 * hour / 24, 4)  # the research and the fixed cost of the hours gone
+            run = B.compute(late(paid, sail=100.0 - paid), now=at(2026, 10, 20, hour, 5))["meters"]["sail"]
+            self.assertEqual(run["research_usd_day"], 11.6, hour)
+        # Claude the same (no fixed cost): 40 at 00:00 is (40 - 5) / 5; 3.00 paid by the evening.
+        given = inputs(claude=37.0)
+        self.assertEqual(B.compute(given, now=late_at)["meters"]["claude"]["research_usd_day"], 6.4)
+        given["meters"]["claude"]["paid_today_usd"] = 3.0
+        claude = B.compute(given, now=late_at)["meters"]["claude"]
+        self.assertEqual((claude["research_usd_day"], claude["added_back_usd"]), (7.0, 3.0))
+        # NEVER ABOVE THE CEILING, and never more added back than a day's own most (its share of the ceiling and its
+        # fixed cost): a figure that says more is read as that.
+        self.assertEqual(B.compute(late(10.84, sail=600.0), now=late_at)["meters"]["sail"]["research_usd_day"], 15.0)
+        most = B.compute(late(500.0, sail=50.0), now=late_at)["meters"]["sail"]
+        self.assertEqual((most["added_back_usd"], most["research_usd_day"]), (16.0, 4.8), "(50 + 16 - 42) / 5")
+        # UNKNOWN IS NEVER MONEY: what could not be read is nothing added back.
+        for unread in (None, "lots", -3.0, float("nan"), float("inf"), True):
+            row = B.compute(late(unread), now=late_at)["meters"]["sail"]
+            self.assertEqual((row["research_usd_day"], row["added_back_usd"]), (9.432, 0.0), unread)
+        # FAIL CLOSED is untouched: a meter that cannot be read is no research whatever it has paid.
+        blind = B.compute(late(10.84, sail=None), now=late_at)["meters"]["sail"]
+        self.assertEqual((blind["research_usd_day"], blind["limited_by"], blind["added_back_usd"]), (0.0, "unreadable", None))
+        # A meter the day's earlier run could not read is set by the first run that reads it, with the day added back.
+        first = B.compute(late(10.84), now=late_at, previous=B.compute(late(0.0, sail=None), now=early_at))["meters"]["sail"]
+        self.assertEqual((first["research_usd_day"], first["added_back_usd"]), (11.6, 10.84))
+        # The taper still ends above the Sail guard's line when every day's first run is late: each day's figure is the
+        # one its 00:00 balance gives, and the day spends no more than it.
+        balance, days = 250.0, 0
+        while True:
+            want = B.compute(inputs(sail=balance, fixed=1.0, reserve=release), now=early_at)["meters"]["sail"]["research_usd_day"]
+            paid = round(0.8 * want + 0.84, 4)  # by 20:10: most of the day's research and of its fixed cost
+            got = B.compute(late(paid, sail=balance - paid), now=late_at)["meters"]["sail"]["research_usd_day"]
+            self.assertAlmostEqual(got, want, places=3, msg=(days, balance))
+            if want == 0.0:
+                break
+            balance -= got + 1.0
+            days += 1
+            self.assertGreater(balance, release + (B.RUNWAY_DAYS - 1) * 1.0 - 1e-3, days)
+            self.assertLess(days, 100)
+
     def test_a_tapered_meter_still_asks_for_a_card(self):
         """The review's case under the taper: research tapered to what the meter holds keeps its own runway at the runway
         term, so the card line must be judged at the rate the meter wants (its share of the ceiling)."""
@@ -1124,6 +1200,134 @@ class Job(unittest.TestCase):
         self.reading(88.9, morning + DAY - 60)
         third = B.run(self.ctx(now=morning + DAY))
         self.assertEqual((third["meters"]["sail"]["research_usd_day"], third["meters"]["sail"]["would_set_usd_day"]), (8.88, 8.88))
+
+    def account(self, name, *, start):
+        """A state root of its own whose Sail meter the REAL guard reads (league/swarm/guard.py: its balance, its meter
+        of the UTC day, the swarm's booked spend), beginning at 23:57 UTC of the day before `start` (00:00 UTC) with
+        $100.00 on Sail. Returns (root, store, clock, check): `check(balance)` is one guard reading at the clock's time."""
+        root = self.root / name
+        root.mkdir()
+        clock = Clock(start - 180)
+        store = SwarmStore(root, clock=clock)
+        self.addCleanup(store.close)
+        settings = copy.deepcopy(S.DEFAULTS)
+        settings["budget"] = {"source": "budget.json", "sail_usd_day": 12.0, "claude_usd_day": 8.0, "fixed_sail_usd_day": 1.2}
+        reading = [100.0]
+        guard = SailGuard(store, settings, lambda: (reading[0], 5.0), clock=clock, disk_free=lambda: 100.0 * 2 ** 30)
+
+        def check(balance):
+            reading[0] = balance
+            return guard.check()
+        check(100.0)
+        return root, store, clock, check
+
+    def run_at(self, root, now, claude_left):
+        return B.run({**self.ctx(now=now), "root": root,
+                      "gateway_health": lambda: {"claude": {"remaining_usd": claude_left, "configured": True}}})
+
+    def test_a_late_first_run_of_the_day_sets_the_cap_a_run_at_00_30_would_have(self):
+        """THE DAY'S FIRST RUN ADDS BACK WHAT THE DAY ALREADY PAID, the job end to end over the real guard's store. Two
+        accounts with the same day: in one the job runs at 00:30 UTC; in the other that run was missed and the first
+        run of the day is the one after the close, at 20:10 UTC, on a balance that has paid for the day so far. Both set
+        the same cap for the day, on each meter."""
+        day = at(2026, 10, 21)
+        fixed = 1.2  # the House box's own billing a day (the fake's): Sail's fixed cost
+        figures = {}
+        for name, first_run in (("early", day + 1800), ("late", day + 20 * 3600 + 600)):
+            root, store, clock, check = self.account(name, start=day)
+            # 00:27 UTC: a first model call booked, and 27 minutes of the fixed cost.
+            clock.t = day + 600
+            store.add_spend("sail_model", 0.01)
+            clock.t = day + 27 * 60
+            check(100.0 - 0.01 - fixed * 27 / 1440)
+            if name == "early":
+                receipt = self.run_at(root, first_run, claude_left=40.0)
+                figures[name] = {m: receipt["meters"][m]["research_usd_day"] for m in B.METERS}
+                doc = json.loads((root / "budget.json").read_text())
+                self.assertEqual(doc["meters"]["sail"]["added_back_usd"], 0.0325, "the half hour's own fall: 0.01 + 0.0225")
+            # The day: 9.90 more of Sail research booked (the Gym's box time is booked above the provider's bill: 5.90
+            # booked, 3.90 billed), 3.00 of Claude, an OpenAI row this meter does not pay, and the fixed cost to 20:07 UTC.
+            clock.t = day + 15 * 3600
+            store.add_spend("gym_box", 5.9)
+            store.add_spend("sail_model", 4.0)
+            store.add_spend("claude", 3.0, detail={"role": "audit"})
+            store.add_spend("openai", 1.0, detail={"role": "architect"})
+            clock.t = day + 20 * 3600 + 7 * 60
+            paid = 0.01 + 3.9 + 4.0 + fixed * 1207 / 1440
+            check(100.0 - paid)
+            store.close()
+            receipt = self.run_at(root, day + 20 * 3600 + 600, claude_left=37.0)
+            doc = json.loads((root / "budget.json").read_text())
+            sail, claude = doc["meters"]["sail"], doc["meters"]["claude"]
+            if name == "early":  # its second run of the day: the figure stands, nothing is added back
+                self.assertEqual((sail["added_back_usd"], claude["added_back_usd"]), (0.0, 0.0))
+                self.assertEqual((sail["would_set_usd_day"], claude["would_set_usd_day"]), (9.6168, 6.4),
+                                 "the reading as it stands: (91.084 - 43) / 5 and (37 - 5) / 5")
+                self.assertEqual(sail["day_figure"]["set_at"], "2026-10-21T00:30:00Z")
+            else:
+                figures[name] = {m: receipt["meters"][m]["research_usd_day"] for m in B.METERS}
+                given = doc["inputs"]["meters"]
+                self.assertEqual((given["sail"]["paid_today_usd"], given["claude"]["paid_today_usd"]), (round(paid, 4), 3.0))
+                self.assertEqual(given["sail"]["paid_today_source"], f"the Sail guard's meter today ({paid:.4f}), at most the "
+                                 "booked research (9.9100) and a day of fixed cost")
+                self.assertEqual((sail["added_back_usd"], claude["added_back_usd"]), (round(paid, 4), 3.0))
+                self.assertEqual(sail["day_figure"]["set_at"], "2026-10-21T20:10:00Z")
+            # What the guard holds the day to: over the 9.91 booked and over its hold line, so nothing brakes or holds.
+            caps = B.sail_caps({"budget": B.read(root, day + 20 * 3600 + 660)[0]})
+            self.assertEqual((caps["research"], caps["gate_reserve"]), (11.4, 1.14), name)
+            self.assertLess(9.91, caps["research"] - caps["gate_reserve"], name)
+        self.assertEqual(figures["late"], figures["early"], "the same day's cap, whenever the first run comes")
+        self.assertEqual(figures["early"], {"sail": 11.4, "claude": 7.0}, "(100 - 37 - 5 x 1.2) / 5 and (40 - 5) / 5")
+
+    def test_what_the_day_paid_is_read_from_the_guards_meter_and_bounded_by_what_was_booked(self):
+        """What a first run adds back is never more than the meter really fell today, and never more than the day booked
+        (with a day of fixed cost): unknown is nothing added."""
+        day = at(2026, 10, 21)
+        now = day + 20 * 3600
+        rows = [("gym_box", day + 3600, 5.0), ("sail_model", day + 7200, 2.0), ("claude", day + 7200, 3.0),
+                ("claude", day + 9000, -0.5), ("sail_model", day + 19 * 3600 + 1800, 4.0)]
+
+        def swarm(spent, meter_day="2026-10-21"):
+            return {"metered_today": {"day": meter_day, "spent": spent}, "today": rows}
+        paid = lambda reads, read_at=now - 3600, fixed=1.0: B._sail_paid_today(reads, read_at, now, fixed)[0]  # noqa: E731
+        # The guard's own meter (the provider's dollars: the Gym's booked box time is an estimate above the bill).
+        self.assertEqual(paid(swarm(5.5)), 5.5, "under the 7.00 booked by the reading at 19:00 and a day of fixed cost")
+        # A guard that did not read across midnight meters the hours before it into today: the booked research bounds it.
+        self.assertEqual(paid(swarm(60.0)), 8.0, "7.00 booked by the reading + 1.00: the row booked after the reading is out")
+        self.assertEqual(paid(swarm(60.0), read_at=now), 12.0, "11.00 booked + 1.00")
+        self.assertEqual(paid(swarm(60.0), fixed=2.5), 9.5)
+        # A reading from before 00:00 UTC has paid for nothing of today; no meter of today is nothing known.
+        self.assertEqual(B._sail_paid_today(swarm(5.5), day - 60, now, 1.0),
+                         (0.0, "no reading of today: nothing added back"))
+        self.assertEqual(B._sail_paid_today(swarm(5.5), None, now, 1.0)[0], 0.0)
+        for reads in (swarm(5.5, meter_day="2026-10-20"), swarm("lots"), swarm(-1.0), swarm(None), {"metered_today": None},
+                      {"metered_today": "meter", "today": rows}, {}):
+            self.assertEqual(B._sail_paid_today(reads, now - 3600, now, 1.0),
+                             (0.0, "the Sail guard kept no meter of today: nothing added back"), reads.get("metered_today"))
+        # Claude: the swarm's own Claude rows of today (a true-up included), never OpenAI's, never under 0.
+        self.assertEqual(B._claude_paid_today(swarm(0.0), now), (2.5, "the swarm's Claude spend booked today"))
+        self.assertEqual(B._claude_paid_today({"today": [("claude", day + 60, -4.0), ("openai", day + 60, 9.0)]}, now)[0], 0.0,
+                         "a release of yesterday's hold is no spend under 0")
+        self.assertEqual(B._claude_paid_today({}, now)[0], 0.0)
+        self.assertEqual(B._booked_today([("claude", "soon", 1.0), ("claude", day + 60, "lots"), ("claude",), None,
+                                          ("claude", day - 1, 5.0), ("claude", now + 1, 5.0), ("claude", day, 0.25)],
+                                         ("claude",), now, now), 0.25, "rows that do not read, and rows of another day, are out")
+        # The production reader: the store's own meter of the day and its rows since 00:00 UTC, read-only.
+        clock = Clock(day - 3600)
+        store = SwarmStore(self.root, clock=clock)
+        store.add_spend("gym_box", 9.0)  # the day before
+        clock.t = day + 3600
+        store.add_spend("gym_box", 5.0)
+        store.add_spend("claude", 3.0)
+        store.add_spend("openai", 1.0)
+        store.put("metered_today", {"day": "2026-10-21", "spent": 4.2})
+        store.close()
+        reads = B._swarm_reads(self.root, now, [])
+        self.assertEqual((reads["metered_today"], sorted(reads["today"])),
+                         ({"day": "2026-10-21", "spent": 4.2}, [("claude", day + 3600, 3.0), ("gym_box", day + 3600, 5.0)]))
+        (self.root / "swarm.sqlite").unlink()
+        empty = B._swarm_reads(self.root, now, [])
+        self.assertEqual((empty["metered_today"], empty["today"]), (None, []), "no store: nothing added back")
 
     def test_every_read_that_fails_is_closed(self):
         (self.root / "live.sqlite").unlink()
