@@ -415,10 +415,10 @@ class ModelRouter:
 
     def claude_room(self) -> float:
         """Dollars the swarm may still spend on Claude now: the funded room (`claude_funded_room`), capped by what is left
-        of THE BUDGET's Claude dollars today (`claude_budget_room`)."""
+        of THE BUDGET's Claude dollars today (`claude_budget_room`; no reading of that line is no room, FAIL CLOSED)."""
         room = self.claude_funded_room()
         budget = self.claude_budget_room()
-        return room if budget is None else min(room, budget)
+        return 0.0 if budget is None else min(room, budget)
 
     def claude_budget_room(self) -> float:
         """THE BUDGET's paid-model dollars left this UTC day (league/ops/budget.py `paid_model_room`, the protected rule;
@@ -609,9 +609,9 @@ class ModelRouter:
         caller leaves to the other roles)."""
         request_id = re.sub(r"[^A-Za-z0-9:._-]+", "-", key)[:150] + ":" + secrets.token_hex(4)
         budget = self.claude_budget_room()  # THE BUDGET's Claude dollars left today: a line, not a funding cliff
-        if budget is not None and budget < required:
-            errors.append(f"claude: the research budget's Claude line for today has no room (${budget:.2f} left; this call "
-                          f"may cost ${required:.2f})")
+        if budget is None or budget < required:  # no reading is no room, never "no line" (FAIL CLOSED)
+            errors.append(f"claude: the research budget's Claude line for today has no room (${budget or 0.0:.2f} left; "
+                          f"this call may cost ${required:.2f})")
             return None, "line"
         line = self.claude_role_room(role)  # the role's own line today (`claude.role_usd_day`), before the meter's read
         if line is not None and line < required:
@@ -633,7 +633,7 @@ class ModelRouter:
         with self.store.atomic():
             # Every line is read again inside the write transaction: a concurrent call's committed hold counts.
             budget = self.claude_budget_room()
-            if budget is not None and budget < required:
+            if budget is None or budget < required:
                 errors.append("claude: the research budget's Claude line for today has no room")
                 return None, "line"
             line = self.claude_role_room(role)
@@ -1052,16 +1052,16 @@ class ModelRouter:
                                 max_output_tokens=max_output, effort=effort, service_tier=tier, role=role)
             required = float(max(need, reservation_ceiling(body)))
             budget = self.claude_budget_room()  # THE BUDGET's paid-model dollars today: OpenAI is under them too
-            if budget is not None and budget < required:
-                errors.append(f"openai: the research budget's paid-model line for today has no room (${budget:.2f} left; "
-                              f"this call may cost ${required:.2f})")
+            if budget is None or budget < required:  # no reading is no room, never "no line" (FAIL CLOSED)
+                errors.append(f"openai: the research budget's paid-model line for today has no room (${budget or 0.0:.2f} "
+                              f"left; this call may cost ${required:.2f})")
                 return None
             room = self.openai_room()  # network refresh must not hold the shared SQLite write transaction
             if room >= required:
                 admitted = False
                 with self.store.atomic():
                     budget = self.claude_budget_room()  # read again inside the write transaction
-                    if (budget is None or budget >= required) and min(room, self._openai_cap_room()) >= required:
+                    if budget is not None and budget >= required and min(room, self._openai_cap_room()) >= required:
                         self.store.add_spend("openai", required, family=family,
                                              detail={"role": role, "hold": key[:120], "service_tier_requested": tier,
                                                      "max_output_tokens": body["max_output_tokens"]})

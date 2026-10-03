@@ -6,6 +6,7 @@ policy.json without changing the settings in effect. Every value here is invente
 
 from __future__ import annotations
 
+import ast
 import contextlib
 import importlib.util
 import io
@@ -185,10 +186,11 @@ def wrong_kind(layer, defaults=S.DEFAULTS, prefix=""):
 
 
 class TheCommittedPolicy(L.LoopCase):
-    """The House's research settings as committed (`REAL_POLICY_PATH`): a pull request changes the file and the updater
-    ships it, and the league's other tests read an empty layer in its place (league/tests/__init__.py). So it is judged
-    here, by value and by the House's own loop, as the House reads it after the migration: config.json, the policy, and
-    a swarm.json that holds the owner's switches alone. A policy that sets nothing passes (the file before the migration)."""
+    """The House's research settings as committed (`REAL_POLICY_PATH`): a pull request changes the file and the owner's
+    deploy ships it (`league/ci.py` FORBIDDEN names it, so the updater ships no change to it), and the league's other
+    tests read an empty layer in its place (league/tests/__init__.py). So it is judged here, by value and by the House's
+    own loop, as the House reads it after the migration: config.json, the policy, and a swarm.json that holds the
+    owner's switches alone. A policy that sets nothing passes (the file before the migration)."""
 
     def setUp(self):
         super().setUp()
@@ -266,6 +268,122 @@ class TheCommittedPolicy(L.LoopCase):
         failed = [e["payload"] for e in self.store.events_after(0, limit=10_000)
                   if e["kind"] == "swarm.status" and (e["payload"] or {}).get("error")]
         self.assertEqual(failed, [], "no round raised")
+
+
+#: What the House runs: `python -m league` (the House, with its watchdog and its updater), the swarm's process, the ops
+#: runner and the live path. A package stands for every module under it: the runner imports its jobs by name
+#: (`league.ops.registry`), and the live path's decider is a process of its own.
+HOUSE_ENTRIES = ("league.__main__", "league.house", "league.watchdog", "league.updater", "league.ops", "league.swarm.loop",
+                 "league.swarm.__main__", "league.live")
+TESTS = "league.tests"
+
+
+def module_file(name: str, repo: Path = REPO) -> Path | None:
+    """The repository file of module `name` (a/b.py, else a/b/__init__.py); None for a module that is not the repository's."""
+    base = repo.joinpath(*name.split("."))
+    for path in (base.with_suffix(".py"), base / "__init__.py"):
+        if path.is_file():
+            return path
+    return None
+
+
+def imported(name: str, path: Path) -> set[str]:
+    """Every module name the import statements of `path` (module `name`) can load, wherever they stand (an import inside
+    a function runs when the function does), with `import_module("...")` and `__import__("...")` of a literal name."""
+    package = name.split(".") if path.name == "__init__.py" else name.split(".")[:-1]
+    found: set[str] = set()
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Import):
+            found.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level > len(package):
+                continue
+            base = package[: len(package) - node.level + 1] if node.level else []
+            target = ".".join(base + (node.module.split(".") if node.module else []))
+            if target:
+                found.add(target)
+                found.update(f"{target}.{alias.name}" for alias in node.names)  # `from a import b`: b may be a module
+        elif isinstance(node, ast.Call) and node.args and isinstance(node.args[0], ast.Constant):
+            called = getattr(node.func, "attr", getattr(node.func, "id", ""))
+            if called in ("import_module", "__import__") and isinstance(node.args[0].value, str):
+                found.add(node.args[0].value)
+    return found
+
+
+def import_closure(entries, repo: Path = REPO) -> dict[str, str | None]:
+    """{module: the module that first led to it} for every repository module reachable from `entries` by static imports;
+    a package entry brings every module under it, and a module brings its parent packages (their `__init__` runs first)."""
+    todo: list[tuple[str, str | None]] = []
+    for entry in entries:
+        path = module_file(entry, repo)
+        todo.append((entry, None))
+        if path is not None and path.name == "__init__.py":
+            for sub in sorted(path.parent.rglob("*.py")):
+                parts = sub.relative_to(repo).with_suffix("").parts
+                todo.append((".".join(parts[:-1] if parts[-1] == "__init__" else parts), entry))
+    reached: dict[str, str | None] = {}
+    while todo:
+        name, via = todo.pop()
+        parts = name.split(".")
+        for i in range(1, len(parts) + 1):
+            module = ".".join(parts[:i])
+            path = module_file(module, repo)
+            if path is None or module in reached:
+                continue
+            reached[module] = via
+            todo.extend((dep, module) for dep in imported(module, path))
+    return reached
+
+
+class TheHouseNeverImportsTheTests(unittest.TestCase):
+    """Importing `league.tests` is what switches the suite's isolation on (league/tests/__init__.py): it points
+    `settings.POLICY_PATH` at a layer that sets nothing and `niches.NICHES_PATH` at the pre-overhaul desks, for the whole
+    process. In a process of the House that would empty the policy layer in production: the swarm would run on
+    settings.py's DEFAULTS, not the research settings the owner deployed, and nothing would say so. So no module the
+    House can import may import `league.tests` or anything under it: the import closure of the House's entry points is
+    walked here by their source (static AST, imports inside functions too) and must not reach it. Two files outside
+    that closure do import the tests' fakes today: league/swarm/harness_judges/execution.py (a harness judge, run in
+    its own sandboxed process on a candidate's tree) and scripts/verify_learning_gates.py (a laptop tool)."""
+
+    def test_the_closure_of_the_houses_entry_points_never_reaches_the_tests(self):
+        from league.ops.registry import JOBS
+
+        for entry in HOUSE_ENTRIES:
+            self.assertIsNotNone(module_file(entry), f"{entry} is one of the House's entry points")
+        reached = import_closure((*HOUSE_ENTRIES, *sorted({job.module for job in JOBS})))  # a job is imported by name
+        for module in ("league.swarm.settings", "league.niches", "league.swarm.loop", "league.live.step", "league.ops.budget",
+                       "league.ops.__main__", "league.updater", "league.ci"):
+            self.assertIn(module, reached, "the walk covers what the House runs")
+        self.assertGreater(len(reached), 150)
+
+        def chain(module):
+            out = [module]
+            while reached.get(out[-1]) is not None:
+                out.append(reached[out[-1]])
+            return " <- ".join(out)
+
+        self.assertEqual([chain(m) for m in sorted(reached) if m == TESTS or m.startswith(TESTS + ".")], [],
+                         "a module the House can import imports league.tests: the policy layer would be emptied in production")
+
+    def test_the_walk_sees_an_import_wherever_it_stands(self):
+        """The judge of the walk itself, on a planted tree: a relative import inside a function, a `from` import of a
+        submodule, a literal `import_module`, a package entry's modules and a parent package's `__init__`."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            files = {"league/__init__.py": "", "league/house.py": "from . import clean\n", "league/clean.py": "import json\n",
+                     "league/tests/__init__.py": "", "league/tests/fakes.py": "",
+                     "league/lazy.py": "def f():\n    from .tests import fakes\n",
+                     "league/named.py": "import importlib\nM = importlib.import_module('league.tests')\n",
+                     "league/ops/__init__.py": "", "league/ops/job.py": "from league.tests.fakes import X\n",
+                     "league/deep/__init__.py": "from .. import tests\n", "league/deep/leaf.py": "",
+                     "league/far.py": "import league.deep.leaf\n"}
+            for rel, text in files.items():
+                (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+                (repo / rel).write_text(text)
+            self.assertEqual(sorted(import_closure(["league.house"], repo)), ["league", "league.clean", "league.house"])
+            for entry in ("league.lazy", "league.named", "league.ops", "league.far"):
+                self.assertIn(TESTS, import_closure([entry], repo), entry)
+            self.assertIn("league.tests.fakes", import_closure(["league.lazy"], repo))
 
 
 class TheNotice(Case):

@@ -343,6 +343,26 @@ class TheEngineersLanes(unittest.TestCase):
             self.assertTrue(ci.guard(["league/swarm/loop.py"], role))
             self.assertTrue(ci.guard(["league/tests/test_harness_candidate_x.py"], role))
 
+    def test_a_new_tests_name_is_bounded_as_the_gateways(self):
+        """The name after `test_harness_candidate_` is 1 to 80 of a-z, 0-9 and `_`: the gateway's bound
+        (`gateway/lib/github.mjs` ENGINEER_TEST), read from its source here so the two copies of the rule admit the same
+        names."""
+        import re
+
+        source = (ci.REPO / "gateway" / "lib" / "github.mjs").read_text(encoding="utf-8")
+        gateway = re.search(r"ENGINEER_TEST = /\^league\\/tests\\/test_harness_candidate_(.+?)\\\.py\$/;", source)
+        self.assertIsNotNone(gateway, "gateway/lib/github.mjs declares ENGINEER_TEST")
+        self.assertEqual(ci.ENGINEER_TEST_NAME, gateway.group(1))
+        self.assertEqual(ci.ENGINEER_TEST_NAME, "[a-z0-9_]{1,80}")
+        name = "league/tests/test_harness_candidate_{}.py"
+        for lane in self.SURFACES:
+            role = f"engineer/{lane}"
+            self.assertEqual(ci.guard([name.format("x"), name.format("x" * 80), name.format("a_1" * 26 + "_z")], role), [], lane)
+            for stem in ("", "x" * 81, "x" * 200):
+                self.assertEqual(ci.guard([name.format(stem)], role),
+                                 [f"{name.format(stem)}: outside what the {role} may change "
+                                  f"({', '.join((*self.SURFACES[lane], ci.ENGINEER_TESTS))})"], (lane, len(stem)))
+
     def test_guard_branch_judges_an_engineer_branch_by_its_lane(self):
         import subprocess
 

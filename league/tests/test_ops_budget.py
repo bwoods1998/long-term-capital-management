@@ -7,7 +7,6 @@ from __future__ import annotations
 import copy
 import datetime as dt
 import json
-import sys
 import tempfile
 import types
 import unittest
@@ -162,9 +161,10 @@ class Rule(unittest.TestCase):
         self.assertEqual(sail["card_runway_days"], round(50 / 4.5, 1))
         self.assertEqual(sail["card_date"], "2026-10-20", "already under the card line")
         self.assertEqual(sail["restore_usd"], 355.0, "10 + 90 x (1.5 + 3) - 60")
-        self.assertIn("sail", B.short(doc))
+        self.assertEqual(B.short(doc), ["sail", "claude"], "Claude's 95 over its reserve is 47.5 days at the 2 it wants")
         empty = B.compute(inputs(claude=3.0), now=NOW)
-        self.assertEqual(empty["meters"]["claude"]["card_runway_days"], 0.0)
+        claude = empty["meters"]["claude"]
+        self.assertEqual((claude["runway_days"], claude["card_runway_days"]), (0.0, 0.0), "under the reserve at either rate")
         self.assertIn("claude", B.short(empty))
 
     def test_an_unreadable_balance_reads_its_card_line_elsewhere_but_never_research(self):
@@ -533,6 +533,36 @@ class ClaudeRoom(unittest.TestCase):
             self.assertEqual(self.router.claude_room(), 0.0, bad)
             self.assertEqual(self.admit(0.01)[0], (None, "line"))
 
+    def test_no_reading_of_the_line_is_no_room_never_no_line(self):
+        """`claude_budget_room` answers a number whatever it is handed. Were it ever to answer None, that is no room for
+        either paid model, at the first read and at the read inside the write transaction: never "no line, admit"."""
+        self.settings["budget"] = {"source": "budget.json", "sail_usd_day": 3.0, "claude_usd_day": 2.0}
+        asked: list[dict] = []
+        self.router.month, self.router.frontier_factory = FakeMonth(1000), lambda model: FakeFrontier(model, asked=asked)
+
+        def unread(*first):
+            reads = iter(first)  # the line as it reads first, then None for ever
+            return mock.patch.object(self.router, "claude_budget_room", side_effect=lambda: next(reads, None))
+
+        for first in ((), (2.0,)):
+            with self.subTest(first=first):
+                with unread(*first):
+                    (request, kind), errors = self.admit(0.5)
+                self.assertEqual((request, kind), (None, "line"))
+                self.assertIn("research budget's Claude line for today has no room", errors[0])
+                errors = []
+                with unread(*first):
+                    out = self.router._ask_openai(role="architect", system="s", user="u", family=None, key="k", max_output=1000,
+                                                  openai_model="gpt-6-astra", effort="medium", need_usd=1.0, errors=errors)
+                self.assertIsNone(out)
+                self.assertEqual(["paid-model line" in e for e in errors], [] if first else [True])
+        with unread():
+            self.assertEqual(self.router.claude_room(), 0.0)
+        self.assertEqual(asked, [], "no call was sent")
+        self.assertEqual((self.store.spent(["claude"]), self.store.spent(["openai"])), (0.0, 0.0), "and no hold was booked")
+        self.assertIsNotNone(self.admit(0.5)[0][0], "the same call is admitted once the line reads")
+        self.assertEqual(self.openai()["route"], "openai")
+
 
 class OwnRead(unittest.TestCase):
     """The protected budget does not rest on the scheduler lane passing the block: the Sail guard and the router read
@@ -749,6 +779,9 @@ class Job(unittest.TestCase):
         return {"cutoff": B._iso(cutoff), "p30": {"usd": usd}, "positions": [], "reconciliation": {"blocking": []},
                 "realized": {"by_close_day": closes}, **extra}
 
+    #: The source the budget names when the close economics (a summary cut three hours before NOW) cuts the book's read.
+    CUT = f"league.ops.economics.p30 (cutoff {B._iso(NOW - 3 * 3600)}): below the live book's own read, which caps it"
+
     def test_the_close_economics_p30_may_cut_what_was_earned_never_raise_it(self):
         """The close economics (league/ops/economics.py) is a second source: an inflated p30 there must not lift the
         budget past the live book's own read (the D4 rule), but a smaller one (more fees found) is used."""
@@ -760,7 +793,7 @@ class Job(unittest.TestCase):
         with mock.patch.object(economics, "latest", lambda root: self.summary("12.50", cutoff=NOW - 3 * 3600)):
             B.run(self.ctx())
         self.assertEqual(self.doc()["inputs"]["p30_usd"], 12.5)
-        self.assertTrue(self.doc()["inputs"]["p30_source"].startswith("league.ops.economics.p30"))
+        self.assertEqual(self.doc()["inputs"]["p30_source"], self.CUT)
 
     def test_an_unreadable_book_earns_nothing_whatever_the_economics_says(self):
         from league.ops import economics
@@ -777,8 +810,7 @@ class Job(unittest.TestCase):
         with mock.patch.object(economics, "latest", lambda root: self.summary("-3.10", cutoff=NOW - 3 * 3600)):
             receipt = B.run(self.ctx())
         doc = self.doc()
-        self.assertEqual(doc["inputs"]["p30_usd"], -3.1)
-        self.assertTrue(doc["inputs"]["p30_source"].startswith("league.ops.economics.p30"), doc["inputs"]["p30_source"])
+        self.assertEqual((doc["inputs"]["p30_usd"], doc["inputs"]["p30_source"]), (-3.1, self.CUT))
         self.assertEqual(doc["earned_usd_day"], 0.0)
         self.assertEqual(receipt["errors"], [])
 
@@ -808,7 +840,9 @@ class Job(unittest.TestCase):
         cases = {"not a number": self.summary(usd=None),
                  "unpriced close": self.summary(positions=[{"pid": 7, "status_at_cutoff": "unpriced_close"}]),
                  "blocking": self.summary(reconciliation={"blocking": ["an expiry the book has not settled"]}),
-                 "pending at the cutoff": self.summary(reconciliation={"blocking": [], "pending_orders_at_cutoff": [3]})}
+                 "pending at the cutoff": self.summary(reconciliation={"blocking": [], "pending_orders_at_cutoff": [3]}),
+                 # A summary too malformed to inspect (its positions are no list) is unknown, not a crashed job.
+                 "malformed": self.summary(positions=7)}
         for name, summary in cases.items():
             self.alerts.clear()
             with self.economics(summary):
@@ -833,6 +867,46 @@ class Job(unittest.TestCase):
         self.assertEqual(self.doc()["inputs"]["p30_usd"], 12.5, "a weekend's summary is still read")
         self.assertTrue(B.economics_fresh(at(2026, 10, 16, 20, 10), at(2026, 10, 20, 0, 30)) is False,
                         "Monday's close came and went: Friday's summary is stale")
+
+    def test_a_fresh_summary_without_its_closes_by_day_is_unknown_and_says_so(self):
+        """`realized.by_close_day` is the list the economics' own p30 sums. A fresh summary without it would read 0.00
+        from nothing: it is unknown (never that 0.00, never the book's +39.98), and the job says so."""
+        from league.ops import economics
+        said = "the close economics' summary holds no closes by day (realized.by_close_day): p30 is unknown"
+        shapes = {"no realized": None, "no by_close_day": {}, "a null": {"by_close_day": None},
+                  "not a list": {"by_close_day": {}}}
+        for name, realized in shapes.items():
+            self.alerts.clear()
+            summary = self.summary("12.50", cutoff=NOW - 3 * 3600, realized=realized)
+            self.assertEqual(economics.p30(summary)["usd"], "0.00", f"{name}: what the economics' p30 makes of it")
+            with mock.patch.object(economics, "latest", lambda root: summary):
+                receipt = B.run(self.ctx())
+            doc = self.doc()
+            self.assertEqual((doc["inputs"]["p30_usd"], doc["inputs"]["p30_source"]), (None, said), name)
+            self.assertEqual(doc["earned_usd_day"], 0.0, name)
+            self.assertEqual(receipt["errors"], [said], name)
+            self.assertEqual(len(self.alerts), 1, name)
+        quiet = self.summary("12.50", cutoff=NOW - 3 * 3600, realized={"by_close_day": []})
+        with mock.patch.object(economics, "latest", lambda root: quiet):
+            receipt = B.run(self.ctx())
+        self.assertEqual((self.doc()["inputs"]["p30_usd"], receipt["errors"]), (0.0, []), "no closes in the window is a number")
+
+    def test_a_close_summary_that_is_not_a_summary_is_said_and_the_book_stands(self):
+        """`economics.latest` answering anything but a summary or None is never passed over in silence."""
+        from league.ops import economics
+        for summary in (["2026-10-20"], "summary.json", 0, False):
+            self.alerts.clear()
+            with mock.patch.object(economics, "latest", lambda root: summary):
+                receipt = B.run(self.ctx())
+            self.assertEqual(self.doc()["inputs"]["p30_usd"], 39.98, repr(summary))
+            self.assertIn("the live book", self.doc()["inputs"]["p30_source"])
+            self.assertEqual(receipt["errors"], [f"the close economics' summary is not a mapping ({type(summary).__name__}): "
+                                                 "the live book's own read is used"], repr(summary))
+            self.assertEqual(len(self.alerts), 1, repr(summary))
+        with mock.patch.object(economics, "latest", side_effect=OSError("gone")):
+            receipt = B.run(self.ctx())
+        self.assertEqual(receipt["errors"], ["the close economics could not be read (OSError): the live book's own read is used"],
+                         "a read that failed is said once")
 
     def test_the_books_own_read_is_unknown_on_what_profit_calls_unknown(self):
         """The review's case: an expired structure closed at the venue but not priced (unpriced_close, a real -80) must

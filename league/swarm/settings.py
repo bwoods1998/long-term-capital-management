@@ -39,9 +39,13 @@ operator writes it with the matching image; "2020-01-02" and "2022-01-03" mean w
 THE BUDGET (LTCM v3, the owner's D4). The research dollars a day are not settings either: `league/ops/budget.py` computes
 them from realized profit and the meters' runways into `<state>/budget.json`, and `load` applies them LAST and only to
 tighten: min() against `researcher.sail_usd_per_hour` (or `researcher.usd_per_hour` while that is unset), `gym.max_boxes`,
-`claude.role_usd_day` (a line for every role in `claude.roles`) and `population.ceiling`; max() against
-`architect.every_seconds`. The `budget` block it sets (never the operator's: a `budget` key in swarm.json is replaced)
-caps the Sail guard's day and Claude's room. A missing or stale budget.json is the floor.
+`claude.role_usd_day` (a line for every role in `claude.roles`) and `population.ceiling` (the budget's ceiling is never
+under `population.floor` plus its birth margin), with `population.start` held to the tightened ceiling; max() against
+`architect.every_seconds` and `architect.refill_seconds`; and `guard.openai_cap_usd` is tightened to 0 (OpenAI is no
+meter of the rule). The `budget` block it sets (never the operator's: a `budget` key in swarm.json is replaced) caps the
+Sail guard's day and the paid models' room (Claude's, and OpenAI's under the same line). A missing, unreadable or
+malformed budget.json is the floor; a stale one never loosens (each meter the lower of the floor and what the stale file
+said).
 """
 
 from __future__ import annotations
@@ -659,7 +663,8 @@ def load(root: str | Path | None = None, *, config: Mapping[str, Any] | None = N
     """The swarm's settings: DEFAULTS < config.json "swarm" (and its "gym" block into "gym") < policy.json (`policy`, a
     parsed document, in place of the repo's file) < <root>/swarm.json, then, with a state root, THE BUDGET tighten-only
     (`budget_overlay`: <root>/budget.json, else the floor). `_policy` says how the policy layer was read. Without a root
-    (tests, tools) there is no budget block: the guard then reads the floor, the router no budget line."""
+    (tests, tools) there is no budget block: the Sail guard and the router then read the budget themselves, from their
+    store root's budget.json, the floor when there is none (settings without the block never lift the budget)."""
     if config is None:
         try:
             config = json.loads((REPO / "league" / "config.json").read_text())
@@ -716,8 +721,9 @@ def load(root: str | Path | None = None, *, config: Mapping[str, Any] | None = N
 
 def budget_overlay(out: dict[str, Any], root: str | Path) -> dict[str, Any]:
     """THE BUDGET, last and tighten-only (league/ops/budget.py `overlay`): `<root>/budget.json`'s research dollars a day
-    cap the spend knobs and become the `budget` block the Sail guard and the router read; no usable file is the floor.
-    If the rule itself cannot run, nothing is spent: a budget of zero on both meters."""
+    cap the spend knobs and become the `budget` block the Sail guard and the router read; no usable file is the floor, and
+    a stale one is never looser than the floor. If the rule itself cannot run, nothing is spent: a budget of zero on both
+    meters."""
     try:
         from ..ops import budget as budget_mod
 

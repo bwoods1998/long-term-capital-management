@@ -18,8 +18,10 @@ close summary (`economics.latest`) when that module is there, its summary is the
 its number is SMALLER. The close economics may only cut what was earned, never raise it (it is FORBIDDEN too, a second
 wall, not the only one); an unreadable book earns nothing whatever the economics says. Either read is UNKNOWN (nothing
 earned, never the other read) while a position is closed but unpriced (`unpriced_close`), an order is pending or
-unknown, reconciliation is frozen or the account reading names an event the book has not settled (`blocking`). Marks
-never fund research. Then, a day:
+unknown, reconciliation is frozen or the account reading names an event the book has not settled (`blocking`); so is a
+fresh summary that cannot be inspected or holds no closes by day (`realized.by_close_day`). With no fresh summary the
+book's read stands alone and the job says why (none yet, stale, not a summary, a read that failed). Marks never fund
+research. Then, a day:
 
     sustainable_m = max(0, balance_m - reserve_m - R * fixed_m) / R
     floor_m       = min(sustainable_m, FLOOR_CAP * FLOOR_SPLIT[m])
@@ -123,7 +125,7 @@ BALANCE_FRESH_SECONDS = 6 * 3600
 #: The ladder's own promotion reason carries this (league/live/ladder.py: "the forward ladder promoted it (practice
 #: receipt N)"); a move to probe without it is not a ladder promotion.
 LADDER_MARK = "practice receipt"
-#: A budget.json older than this is the floor.
+#: A budget.json older than this never loosens (`stale_block`: each meter the lower of the floor and what it said).
 STALE_SECONDS = 36 * 3600
 #: A funding notice per meter at most this often.
 NOTICE_EVERY_SECONDS = 7 * 86400
@@ -531,9 +533,10 @@ def paid_model_room(block: Any, *spent_today: Any) -> float | None:
     """THE BUDGET's paid-model dollars left this UTC day, for the router (league/swarm/models.py `claude_budget_room`):
     the settings' `budget` block's `claude_usd_day` less the swarm's Claude and OpenAI spend today (`spent_today`, holds
     included: one number a model, each floored at 0 on its own, so a hold one model released never pays for the other's
-    spend). None with no block (settings never loaded from a state root: no budget line); 0 for a block that is not
-    a budget, or a spend that is not given or not a number (FAIL CLOSED). Here, in the protected rule, so the line's
-    arithmetic changes only by the owner's deploy."""
+    spend). None with no block: the router never hands one in (settings with no block are its own read of budget.json,
+    the floor without one) and reads a None as no room. 0 for a block that is not a budget, or a spend that is not
+    given or not a number (FAIL CLOSED). Here, in the protected rule, so the line's arithmetic changes only by the
+    owner's deploy."""
     if block is None:
         return None
     line = _amount(block.get("claude_usd_day")) if isinstance(block, Mapping) else None
@@ -627,8 +630,10 @@ def economics_fresh(cutoff: float, now: float) -> bool:
 
 def economics_p30(economics: Any, summary: Mapping[str, Any]) -> tuple[float | None, str]:
     """p30 from one close summary (`league.ops.economics.p30(summary)` -> {"usd": "..."}; a loss is a number): UNKNOWN
-    (None, never the book's read instead) when its number does not read, or the summary holds a position closed but
-    unpriced, an order pending at the cutoff, or an event the book has not settled (`reconciliation.blocking`)."""
+    (None, never the book's read instead) when its number does not read, the summary holds a position closed but
+    unpriced, an order pending at the cutoff or an event the book has not settled (`reconciliation.blocking`), or it
+    holds no closes by day (`realized.by_close_day`, the list p30 sums: without it p30 would read 0.00 from nothing). A
+    summary too malformed to inspect is unknown too."""
     try:
         recon = summary.get("reconciliation") if isinstance(summary.get("reconciliation"), Mapping) else {}
         if recon.get("blocking"):
@@ -638,6 +643,9 @@ def economics_p30(economics: Any, summary: Mapping[str, Any]) -> tuple[float | N
         if any(isinstance(row, Mapping) and row.get("status_at_cutoff") == "unpriced_close"
                for row in summary.get("positions") or []):
             return None, "the close economics: a position is closed but not priced yet (unpriced_close): p30 is unknown"
+        realized = summary.get("realized")
+        if not isinstance(realized, Mapping) or not isinstance(realized.get("by_close_day"), list):
+            return None, "the close economics' summary holds no closes by day (realized.by_close_day): p30 is unknown"
         value = _finite((economics.p30(summary) or {}).get("usd"))
     except Exception as exc:  # noqa: BLE001 - unknown is never money
         return None, f"the close economics' p30 failed ({type(exc).__name__}): p30 is unknown"
@@ -650,7 +658,8 @@ def _p30(root: Path, now: float, errors: list[str]) -> tuple[float | None, str]:
     """p30: the live book's own read (`book_p30`), cut to the close economics' p30 over its latest summary when that
     module is there, the summary is fresh and its number is smaller. The economics (league/ops/economics.py) may lower
     what was earned, never raise it: the book is the wall either way. Unknown from either is unknown, never the other
-    read; with no fresh summary the book's read stands alone, and the job says so."""
+    read; with no fresh summary (none yet, a stale one, one that is not a summary, a read that failed) the book's read
+    stands alone, and the job says so every time."""
     try:
         book, source = book_p30(root, now)
     except Exception as exc:  # noqa: BLE001 - unknown is never money
@@ -668,7 +677,7 @@ def _p30(root: Path, now: float, errors: list[str]) -> tuple[float | None, str]:
             summary = economics.latest(root)
         except Exception as exc:  # noqa: BLE001 - no summary: the book's own read stands
             errors.append(f"the close economics could not be read ({type(exc).__name__}): the live book's own read is used")
-            summary = False
+            return book, source
         cutoff = _epoch(summary.get("cutoff")) if isinstance(summary, Mapping) else None
         if cutoff is not None and economics_fresh(cutoff, now):
             value, said = economics_p30(economics, summary)
@@ -681,6 +690,9 @@ def _p30(root: Path, now: float, errors: list[str]) -> tuple[float | None, str]:
             errors.append("the close economics is stale: the live book's own read is used")
         elif summary is None:
             errors.append("no close economics summary yet: the live book's own read is used")
+        else:
+            errors.append(f"the close economics' summary is not a mapping ({type(summary).__name__}): the live book's own "
+                          "read is used")
     return book, source
 
 

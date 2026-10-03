@@ -55,6 +55,7 @@ def settings():
 
 class LoopCase(unittest.TestCase):
     def setUp(self):
+        self.threads_before = set(threading.enumerate())  # what was running before this fixture's pool (join_dispatchers)
         self.dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
         self.root = Path(self.dir.name) / "state"
@@ -71,6 +72,7 @@ class LoopCase(unittest.TestCase):
         self.box_sail = FakeSail()
         self.pool = GymPool(self.store, self.box_sail, self.settings, allowed=lambda k: self.guard.allows(k),
                             driver_factory=lambda client, box: FakeDriver(client, box))
+        self.addCleanup(self.join_dispatchers)  # runs after the pool's stop, before the provider and the store close
         self.addCleanup(self.pool.stop)
         self.addCleanup(self.join_rounds)  # registered last, so it runs first: no round outlives the store it writes to
 
@@ -81,6 +83,15 @@ class LoopCase(unittest.TestCase):
         database`, after the test that started it has passed."""
         for thread in threading.enumerate():
             if thread.name.startswith("round-"):
+                thread.join(seconds)
+
+    def join_dispatchers(self, seconds=30):
+        """Wait for the pool's dispatchers (`GymPool._serve`'s threads, named gym-<box>) once the pool is stopped: `stop`
+        tells them to leave and joins its forks only, so one still delivering a batch (`run_batch` books the box's use
+        and its state) when the store closes fails in its thread the same way. Every gym-* thread started since setUp is
+        this fixture's pool's, whether or not `manage` still holds its box."""
+        for thread in threading.enumerate():
+            if thread.name.startswith("gym-") and thread not in self.threads_before:
                 thread.join(seconds)
 
     def script(self, body):
@@ -128,6 +139,7 @@ class Process(LoopCase):
             t.join(60)
         manager_stop.set()
         elapsed = time.time() - began
+        m.join(30)  # its pass in flight writes to the store too: it ends before the fixture closes it
         self.assertEqual(len(results), 48)
         errors = {k: v.get("error") for k, v in results.items() if v.get("error")}
         self.assertEqual(errors, {})

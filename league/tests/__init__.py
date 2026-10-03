@@ -13,6 +13,10 @@ changes what they test: they read `fixtures/policy_empty.json`, a layer that set
 committed policy reads `REAL_POLICY_PATH`. `league/tests/test_swarm_settings_policy.py` does, and it is where the
 committed file is judged (`TheCommittedPolicy`): its values' kinds, the budget and the guard's lines over it, and the
 House's own loop stepping on it, so a settings change the House could not run fails there and nowhere else.
+
+Importing this package is what switches both on, for the whole process. So nothing the House runs may import it (the
+House would lose its policy layer and its desks): `TheHouseNeverImportsTheTests`, in the same module, walks the import
+closure of the House's entry points and fails if it reaches `league.tests`.
 """
 
 from pathlib import Path

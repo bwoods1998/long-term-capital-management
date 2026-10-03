@@ -40,9 +40,13 @@ REPO = Path(__file__).resolve().parents[1]
 #: The engineer's lanes (LTCM v3, V3-A, WP8b): the whole paths of each lane's surface. A branch
 #: `engineer/<lane>/<slug>-<8 hex>` may change only these and add new tests (ENGINEER_TESTS). The
 #: gateway admits and merges by the same table (`gateway/lib/github.mjs` ENGINEER_LANES; a gateway
-#: test reads this one and fails while the two differ), and only what the harness lanes themselves
-#: declare (its ENGINEER_SURFACE): it refuses league/swarm/mechanisms.py and the scheduler lane's
-#: league/swarm/loop.py until a harness lane (`league/swarm/harness_lanes.py` LANES) names them.
+#: test reads this one and fails while the two differ). The gateway's surface is the STRICTER wall,
+#: and this guard has no copy of it: the gateway opens and merges only what the harness lanes
+#: themselves declare (its ENGINEER_SURFACE), so two paths this table admits are closed there, to
+#: their own lane too: the scheduler lane's league/swarm/loop.py and the memory lane's
+#: league/swarm/mechanisms.py. They stay closed until an owner deploy opens them (the path named in
+#: `league/swarm/harness_lanes.py` LANES and in ENGINEER_SURFACE, both protected). The gateway is
+#: the only merge route, so what this guard alone would pass is a branch pushed by hand.
 ENGINEER_LANES: dict[str, tuple[str, ...]] = {
     "scheduler": ("league/swarm/loop.py",),
     "research": ("league/swarm/researcher.py", "league/swarm/preflight.py", "league/swarm/claude_research.py"),
@@ -50,8 +54,10 @@ ENGINEER_LANES: dict[str, tuple[str, ...]] = {
                "league/swarm/seeds.py", "league/swarm/mechanisms.py"),
     "data": ("league/sailbox.py", "league/data_job.py"),
 }
-#: Every lane's new tests. `*` is one or more of a-z, 0-9 and `_`: never a `/`, never another suffix.
+#: Every lane's new tests. `*` is one to eighty of a-z, 0-9 and `_` (ENGINEER_TEST_NAME, the gateway's
+#: ENGINEER_TEST bound): never a `/`, never another suffix.
 ENGINEER_TESTS = "league/tests/test_harness_candidate_*.py"
+ENGINEER_TEST_NAME = "[a-z0-9_]{1,80}"
 ENGINEER_BRANCH = re.compile(r"engineer/([a-z]+)/[a-z0-9][a-z0-9-]{1,48}-[0-9a-f]{8}")
 
 ROLE_PATHS: dict[str, tuple[str, ...]] = {
@@ -177,9 +183,10 @@ def role_of(branch: str) -> str | None:
 
 
 def _allows(entry: str, path: str) -> bool:
-    """A role's path entry: a whole path, a prefix (ending `/` or `_`), or a glob whose `*` is a name (ENGINEER_TESTS)."""
+    """A role's path entry: a whole path, a prefix (ending `/` or `_`), or a glob whose `*` is a name (ENGINEER_TESTS,
+    ENGINEER_TEST_NAME)."""
     if "*" in entry:
-        return re.fullmatch(re.escape(entry).replace(r"\*", "[a-z0-9_]+"), path) is not None
+        return re.fullmatch(re.escape(entry).replace(r"\*", ENGINEER_TEST_NAME), path) is not None
     return path == entry or (entry.endswith(("/", "_")) and path.startswith(entry))
 
 
