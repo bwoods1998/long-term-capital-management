@@ -310,6 +310,30 @@ class Overlay(unittest.TestCase):
         self.assertEqual((out["budget"]["sail_usd_day"], out["budget"]["claude_usd_day"]), (0.0, 0.0),
                          "a meter the stale file could not read (or did not say) is 0, not the floor")
 
+    def test_the_guards_caps_say_whether_they_are_a_reading_of_the_rule(self):
+        """`sail_caps`' `read`: the floor, budget.json (a 0 of its own included) and a stale file are the rule's own answer;
+        a malformed block and the block of a rule that could not run are not, at the same dollars as ever."""
+        floor = B.floor_usd_day("sail")
+        self.assertEqual(B.sail_caps(self.overlay()),
+                         {"research": floor, "fixed": 1.0, "account": floor + 1.0, "source": "floor", "read": True})
+        self.assertEqual(B.sail_caps({}), {"research": floor, "fixed": 1.0, "account": floor + 1.0,
+                                           "source": "floor (no budget block)", "read": True})
+        self.assertIs(B.sail_caps({}, self.root, NOW)["read"], True, "the guard's own read of the root")
+        for sail, at_, want in ((10.0, NOW - 3600, 10.0), (0.0, NOW - 3600, 0.0), (10.0, NOW - 37 * 3600, floor),
+                                (0.0, NOW - 37 * 3600, 0.0)):
+            self.write(sail=sail, at_=at_)
+            caps = B.sail_caps(self.overlay())
+            self.assertEqual((caps["research"], caps["read"]), (want, True), (sail, at_))
+            self.assertIs(B.sail_caps({}, self.root, NOW)["read"], True, (sail, at_))
+        no_research = {"research": 0.0, "fixed": 1.0, "account": 1.0, "read": False}
+        for bad in ({"sail_usd_day": "lots"}, {"sail_usd_day": -1}, {"sail_usd_day": float("nan")}, "budget", {}, 7):
+            self.assertEqual(B.sail_caps({"budget": bad}), {**no_research, "source": "malformed budget block: no research"}, bad)
+        block = {"source": "unavailable", "sail_usd_day": 0.0, "claude_usd_day": 0.0, "fixed_sail_usd_day": None, "read": False}
+        self.assertEqual(B.sail_caps({"budget": block}), {**no_research, "source": "unavailable"})
+        self.assertIs(B.sail_caps({"budget": {**block, "read": True}})["read"], True)
+        for said in (None, 0, "yes"):  # the rule's own blocks say nothing; a block that says anything but true is unread
+            self.assertIs(B.sail_caps({"budget": {**block, "read": said}})["read"], False, said)
+
     def test_the_ceiling_never_falls_to_the_population_floor(self):
         """Births and forks stay possible at the floor's dollars (the production floor of 8 and BUILD-2's 8/16)."""
         settings = copy.deepcopy(S.DEFAULTS)
@@ -370,6 +394,9 @@ class SettingsLoad(unittest.TestCase):
             loaded = S.load(self.root, config={})
         self.assertEqual((loaded["budget"]["sail_usd_day"], loaded["budget"]["claude_usd_day"]), (0.0, 0.0))
         self.assertEqual(loaded["budget"]["source"], "unavailable")
+        self.assertIs(loaded["budget"]["read"], False, "no reading of the rule, and the block says so")
+        self.assertEqual(B.sail_caps(loaded),
+                         {"research": 0.0, "fixed": 1.0, "account": 1.0, "source": "unavailable", "read": False})
 
 
 class Meter:

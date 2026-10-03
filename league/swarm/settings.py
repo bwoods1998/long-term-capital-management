@@ -723,7 +723,7 @@ def budget_overlay(out: dict[str, Any], root: str | Path) -> dict[str, Any]:
     """THE BUDGET, last and tighten-only (league/ops/budget.py `overlay`): `<root>/budget.json`'s research dollars a day
     cap the spend knobs and become the `budget` block the Sail guard and the router read; no usable file is the floor, and
     a stale one is never looser than the floor. If the rule itself cannot run, nothing is spent: a budget of zero on both
-    meters."""
+    meters, its `read` false (no reading of the rule: the Sail guard names that brake apart from the budget's own)."""
     try:
         from ..ops import budget as budget_mod
 
@@ -731,7 +731,7 @@ def budget_overlay(out: dict[str, Any], root: str | Path) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 - FAIL CLOSED: no rule, no research spend
         out["budget"] = {"source": "unavailable", "why": f"the budget rule could not run ({type(exc).__name__})", "at": None,
                          "state": "no research (the budget rule could not run)", "sail_usd_day": 0.0, "claude_usd_day": 0.0,
-                         "fixed_sail_usd_day": None}
+                         "fixed_sail_usd_day": None, "read": False}
         return out
 
 

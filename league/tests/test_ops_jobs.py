@@ -340,6 +340,7 @@ class Scoreboard(Base):
 def passing_house(now):
     stamp = datetime.fromtimestamp(now, timezone.utc).isoformat()
     return {
+        "at": now,
         "errors": {},
         "release": {"current": "/workspace/releases/r1", "running": "r1", "health_age_s": 20, "release": "r1", "real_money": True,
                     "failures": [], "fill_model": {"version": "fm-1", "cells": 40}, "fill_model_file_sha256": "ab" * 32,
@@ -393,6 +394,271 @@ class Preopen(Base):
         self.assertEqual((out["passed"], out["of"]), (0, 9))
         self.assertEqual(len(ctx.alerts), 9)
         self.assertTrue(all(a["level"] == "warning" and a["text"].startswith("preopen ") for a in ctx.alerts))
+
+    def test_the_bands_line_says_it_counts_rows_on_offer_and_passes_as_before(self):
+        now = at("2026-10-05T12:30:00Z")
+
+        def bands(h):
+            return next(c for c in PO.checks(h, now) if c.name == "bands")
+
+        h = passing_house(now)
+        c = bands(h)
+        self.assertTrue(c.ok)
+        self.assertEqual(c.items[0], (True, "observe rows the swarm offers: 10 (a count of rows on offer, not of cohorts the live "
+                                            "path has pinned or practises); the live path pins up to 24"))
+        h["bands"]["observe"] = 0
+        self.assertFalse(bands(h).ok, "observe on and no row on offer")
+        h["swarm"]["raw_live"]["observe"] = False
+        c = bands(h)
+        self.assertEqual((c.ok, c.items[0]), (True, (True, "observe is off for the live path")))
+
+
+BUDGET_SPENT = "today's Sail research budget is spent (5.00 of 5.00; budget.json)"
+
+
+class PreopenBrake(Base):
+    """Check 5 and a braked Sail guard: THE BUDGET's daily stop alone passes and is said; every other cause, a cause not
+    named, a balance not read or not above the line, a reading that is not fresh, FAILS as it always did. A FAIL's line
+    is the House's public warning: the guard's reason (the account's numbers, bare) is on a line only the receipt holds."""
+
+    def setUp(self):
+        super().setUp()
+        self.now = at("2026-10-05T12:30:00Z")
+
+    def braked(self, **over):
+        """A passing House whose swarm is braked: the heartbeat's `braked`, and its `guard` as `SailGuard.last` writes it."""
+        h = passing_house(self.now)
+        h["swarm"]["status"]["braked"] = True
+        h["swarm"]["guard"] = {"balance": 300, "line": 32, "braked": True, "reason": BUDGET_SPENT, "causes": ["research_budget"],
+                               "at": self.now - 100, **over}
+        return h
+
+    def swarm(self, h):
+        c = next(c for c in PO.checks(h, self.now) if c.name == "swarm")
+        return c.ok, [text for ok, text in c.items if ok is not None][-1]  # the guard's line is the last one judged
+
+    def kept(self, h):
+        """The guard's reason on its own line (a FAIL's): never judged, so never a warning's text. None when the judged
+        line says it (a pass) or there is none."""
+        c = next(c for c in PO.checks(h, self.now) if c.name == "swarm")
+        own = [text for ok, text in c.items if ok is None]
+        if not own:
+            return None
+        self.assertEqual((len(own), c.items[-1]), (1, (None, own[0])), "one line, after the guard's")
+        return own[0]
+
+    def test_an_unbraked_guard_reads_as_before(self):
+        h = passing_house(self.now)
+        self.assertEqual(self.swarm(h), (True, "the Sail guard: balance vs line $300.00 / $32.00; braked False"))
+        h["swarm"]["guard"]["causes"] = []  # as the guard now writes an unbraked reading
+        self.assertEqual(self.swarm(h), (True, "the Sail guard: balance vs line $300.00 / $32.00; braked False"))
+        for balance in (32, 31, None):
+            h["swarm"]["guard"]["balance"] = balance
+            self.assertFalse(self.swarm(h)[0], balance)
+
+    def test_a_brake_by_the_days_budget_alone_passes_and_says_so(self):
+        for causes, said in ((["research_budget"], "the day's research budget"), (["account_budget"], "the day's account budget"),
+                             (["research_budget", "account_budget"], "the day's research budget and account budget")):
+            h = self.braked(causes=causes)
+            self.assertEqual(self.swarm(h), (True, f"the Sail guard: balance vs line $300.00 / $32.00; braked by {said} alone, "
+                                                   f"as designed ({BUDGET_SPENT})"), causes)
+            self.assertIsNone(self.kept(h), "a pass says the reason on the guard's own line")
+            self.assertEqual([c.ok for c in PO.checks(h, self.now)], [True] * 9)
+
+    def test_the_days_brake_is_no_warning_and_a_real_one_still_is(self):
+        from unittest import mock
+
+        for causes, failed in ((["research_budget"], []), (["under_line", "research_budget"], ["5 swarm"])):
+            ctx = self.ctx("preopen", gateway=FakeGateway())
+            with mock.patch.object(PO, "collect", return_value=self.braked(causes=causes)):
+                out = PO.run(ctx)
+            self.assertEqual((out["passed"], out["failed"]), (9 - len(failed), failed), causes)
+            self.assertEqual([a["text"].split(": ")[0] for a in ctx.alerts], [f"preopen {name} FAIL" for name in failed])
+
+    def test_every_other_cause_fails(self):
+        for cause in ("balance_unreadable", "under_line", "budget_unreadable", "disk", "no_reading", "a_cause_not_yet_named"):
+            h = self.braked(causes=[cause])
+            self.assertEqual(self.swarm(h), (False, "the Sail guard: balance vs line $300.00 / $32.00; braked True, causes "
+                                                    + cause), cause)
+            self.assertEqual(self.kept(h), f"the guard's reason: {BUDGET_SPENT}", cause)
+
+    def test_a_budget_cause_beside_any_other_fails(self):
+        for causes in (["under_line", "research_budget"], ["research_budget", "disk"], ["balance_unreadable", "account_budget"],
+                       ["research_budget", "account_budget", "disk"], ["research_budget", "a_cause_not_yet_named"],
+                       ["research_budget", "budget_unreadable"], ["budget_unreadable", "account_budget"]):
+            ok, line = self.swarm(self.braked(causes=causes))
+            self.assertFalse(ok, causes)
+            self.assertIn("braked True, causes " + ", ".join(causes), line)
+
+    def test_a_cause_not_named_fails_and_the_reasons_words_are_never_read(self):
+        h = self.braked()
+        del h["swarm"]["guard"]["causes"]  # a record from before the list was kept: its reason reads like the budget's
+        self.assertEqual(self.swarm(h), (False, "the Sail guard: balance vs line $300.00 / $32.00; braked True, cause unknown"))
+        self.assertEqual(self.kept(h), f"the guard's reason: {BUDGET_SPENT}")
+        for bad in (None, [], "research_budget", ["research_budget", 3], {"research_budget": True}):
+            ok, line = self.swarm(self.braked(causes=bad))
+            self.assertFalse(ok, bad)
+            self.assertIn("cause unknown", line)
+        # The names decide: the budget's name passes whatever the words beside it say.
+        self.assertTrue(self.swarm(self.braked(reason="the day's stop, in words no reader was written for"))[0])
+
+    def test_a_brake_only_the_swarms_status_says_fails(self):
+        # `allows()` is false with no good reading for `stale_seconds` while the guard's own record is not braked.
+        for guard in ({"balance": 300, "line": 32, "braked": False, "causes": [], "at": self.now - 100},
+                      {"balance": 300, "line": 32, "braked": False, "causes": ["research_budget"], "at": self.now - 100},
+                      {"balance": 300, "line": 32, "braked": False}, {}):
+            h = self.braked()
+            h["swarm"]["guard"] = guard
+            ok, line = self.swarm(h)
+            self.assertFalse(ok, guard)
+            self.assertIn("braked True, cause unknown", line)
+
+    def test_a_budget_brake_still_needs_the_balance_read_and_above_the_line(self):
+        self.assertTrue(self.swarm(self.braked(balance=32.01))[0])
+        for over in ({"balance": None}, {"balance": 32}, {"balance": 31.99}, {"balance": 0}, {"line": None}):
+            ok, line = self.swarm(self.braked(**over))
+            self.assertFalse(ok, over)
+            self.assertIn("braked True by the day's research budget, and no balance read above the line", line)
+
+    def test_a_budget_brake_needs_a_fresh_reading_by_the_guards_own_stale_seconds(self):
+        self.assertTrue(self.swarm(self.braked(at=self.now - 599))[0])
+        for stamp, said in ((self.now - 600, "on a reading 10m old"), (self.now - 9 * 3600, "on a reading 9.0h old"),
+                            (self.now + 30, "on a reading -30s old"), (None, "on a reading ? old")):
+            ok, line = self.swarm(self.braked(at=stamp))
+            self.assertFalse(ok, stamp)
+            self.assertIn(f"braked True by the day's research budget, {said} (no fresh reading of the balance)", line)
+        h = self.braked()
+        del h["at"]  # the check's own time unknown: nothing is fresh
+        self.assertFalse(self.swarm(h)[0])
+        h = self.braked(at=self.now - 200)
+        h["swarm"]["eff_guard"]["stale_seconds"] = 120
+        self.assertFalse(self.swarm(h)[0], "the guard's own setting")
+
+    def test_a_fails_public_warning_never_carries_the_guards_reason(self):
+        """`ops.alert` is public and the runner's scrub replaces only what carries a `$`: the guard's reason holds the Sail
+        balance, the line and the day's dollars bare."""
+        import re
+        from unittest import mock
+
+        from league.ops.runner import public_text
+
+        under = "the Sail balance 31.00 is under the House's line 37.00 (2 x 1.00 a day + 30)"
+        unread = "today's Sail research budget is spent (0.00 of 0.00; unavailable)"
+        cases = (({"balance": 31.0, "causes": ["under_line"], "reason": under}, "braked True, causes under_line"),
+                 ({"causes": ["under_line", "research_budget"], "reason": under + "; " + BUDGET_SPENT},
+                  "braked True, causes under_line, research_budget"),
+                 ({"causes": ["budget_unreadable"], "reason": unread}, "braked True, causes budget_unreadable"),
+                 ({"causes": None}, "braked True, cause unknown"),
+                 ({"balance": 31.0}, "braked True by the day's research budget, and no balance read above the line"),
+                 ({"at": self.now - 9 * 3600}, "braked True by the day's research budget, on a reading 9.0h old (no fresh "
+                                               "reading of the balance)"))
+        for over, said in cases:
+            h = self.braked(**over)
+            reason = h["swarm"]["guard"]["reason"]
+            ctx = self.ctx("preopen", gateway=FakeGateway())
+            with mock.patch.object(PO, "collect", return_value=h):
+                out = PO.run(ctx)
+            self.assertEqual(out["failed"], ["5 swarm"], over)
+            self.assertEqual(len(ctx.alerts), 1, over)
+            public = public_text(ctx.alerts[0]["text"])  # as the runner hands it to the House's alert
+            self.assertEqual(public, f"preopen 5 swarm FAIL: the Sail guard: balance vs line $<amount> / $<amount>; {said}", over)
+            self.assertNotIn(reason, ctx.alerts[0]["text"], over)
+            figures = set(re.findall(r"\d+(?:\.\d+)?", reason))
+            self.assertTrue(figures, over)
+            self.assertFalse(figures & set(re.findall(r"\d+(?:\.\d+)?", public)), over)
+            row = next(c for c in out["checks"] if c["name"] == "swarm")
+            self.assertEqual(row["headline"], ctx.alerts[0]["text"].split("FAIL: ", 1)[1], over)
+            self.assertEqual(row["items"][-1], {"ok": None, "text": f"the guard's reason: {reason}"}, "the receipt keeps it")
+
+    def test_a_budget_rule_that_could_not_be_read_fails_through_the_guards_own_reading(self):
+        """The guard FAILS CLOSED to no research when the rule could not run, its block is malformed or it cannot be read:
+        the same arithmetic as the day's cap, on a healthy balance, and never the designed stop."""
+        import contextlib
+        import copy
+        from unittest import mock
+
+        from league.ops import budget as B
+        from league.swarm import settings as SS
+        from league.swarm.guard import SailGuard
+        from league.swarm.store import SwarmStore
+
+        store = SwarmStore(self.root, clock=lambda: self.now)
+        self.addCleanup(store.close)
+
+        def check(settings, patch=None):
+            self.now += 180
+            g = SailGuard(store, settings, lambda: (300.0, 1.0), clock=lambda: self.now, disk_free=lambda: 100.0 * 2 ** 30)
+            with patch or contextlib.nullcontext():
+                g.check()
+            h = passing_house(self.now)
+            h["swarm"].update(eff_guard=settings["guard"], guard=json.loads(json.dumps(g.last)))  # the heartbeat is JSON
+            h["swarm"]["status"]["braked"] = not g.allows()
+            return self.swarm(h), self.kept(h)
+
+        failed = (False, "the Sail guard: balance vs line $300.00 / $32.00; braked True, causes budget_unreadable")
+        with mock.patch.object(B, "overlay", side_effect=RuntimeError("boom")):
+            could_not_run = SS.load(self.root, config={})  # the block `settings.load` writes when the rule cannot run
+        self.assertEqual(check(could_not_run), (failed, "the guard's reason: today's Sail research budget is spent (0.00 of 0.00; "
+                                                        "unavailable)"))
+        malformed = copy.deepcopy(SS.DEFAULTS)
+        malformed["budget"] = {"source": "budget.json", "sail_usd_day": "lots"}
+        self.assertEqual(check(malformed), (failed, "the guard's reason: today's Sail research budget is spent (0.00 of 0.00; "
+                                                    "malformed budget block: no research)"))
+        good = copy.deepcopy(SS.DEFAULTS)
+        good["budget"] = {"source": "budget.json", "sail_usd_day": 5.0, "claude_usd_day": 0.0, "fixed_sail_usd_day": None}
+        self.assertEqual(check(good, mock.patch.object(B, "sail_caps", side_effect=RuntimeError("boom"))),
+                         (failed, "the guard's reason: today's Sail research budget is spent (0.00 of 0.00; the budget rule could "
+                                  "not be read (RuntimeError))"))
+        self.assertEqual(check(good), ((True, "the Sail guard: balance vs line $300.00 / $32.00; braked False"), None))
+        # A budget of zero the rule itself gives is the budget's own: the day as designed, said with its dollars.
+        zero = copy.deepcopy(good)
+        zero["budget"]["sail_usd_day"] = 0.0
+        self.assertEqual(check(zero), ((True, "the Sail guard: balance vs line $300.00 / $32.00; braked by the day's research budget "
+                                              "alone, as designed (today's Sail research budget is spent (0.00 of 0.00; budget.json))"),
+                                       None))
+
+    def test_the_guards_own_reading_is_what_the_check_reads(self):
+        import copy
+
+        from league.swarm import settings as SS
+        from league.swarm.guard import SailGuard
+        from league.swarm.store import SwarmStore
+
+        store = SwarmStore(self.root, clock=lambda: self.now)
+        self.addCleanup(store.close)
+        settings = copy.deepcopy(SS.DEFAULTS)
+        settings["budget"] = {"source": "budget.json", "sail_usd_day": 5.0, "claude_usd_day": 0.0, "fixed_sail_usd_day": None}
+        reading, free = [(300.0, 1.0)], [100.0]
+        g = SailGuard(store, settings, lambda: reading[0], clock=lambda: self.now, disk_free=lambda: free[0] * 2 ** 30)
+
+        def check():
+            self.now += 180
+            g.check()
+            h = passing_house(self.now)
+            h["swarm"].update(eff_guard=settings["guard"], guard=json.loads(json.dumps(g.last)))  # the heartbeat is JSON
+            h["swarm"]["status"]["braked"] = not g.allows()
+            return self.swarm(h)
+
+        self.assertEqual(check(), (True, "the Sail guard: balance vs line $300.00 / $32.00; braked False"))
+        store.add_spend("sail_model", 5.0)
+        ok, line = check()
+        self.assertTrue(ok, line)
+        self.assertIn("braked by the day's research budget alone, as designed (today's Sail research budget is spent (5.00 of 5.00", line)
+        reading[0] = (35.0, 1.0)  # over the $32 line, under the $37 a braked guard releases at: the guard names the line too
+        self.assertEqual(check()[0], False)
+        reading[0] = (None, None)
+        self.assertEqual(check()[0], False)
+        reading[0] = (300.0, 1.0)
+        self.assertEqual(check()[0], True)
+        free[0] = 2.0
+        self.assertEqual(check()[0], False)
+        free[0] = 100.0
+        self.assertEqual(check()[0], True)
+        self.now += 601  # the guard stops checking: its last reading goes stale while the heartbeat still carries it
+        h = passing_house(self.now)
+        h["swarm"].update(eff_guard=settings["guard"], guard=json.loads(json.dumps(g.last)))
+        h["swarm"]["status"]["braked"] = not g.allows()
+        self.assertEqual(self.swarm(h)[0], False)
 
 
 class Receipts(Base):
