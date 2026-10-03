@@ -197,19 +197,35 @@ export function composeNotice(facts = {}) {
       break;
     }
     case 'funding': {
-      // A prefund under the card line (V3-A, WP8): the budget rule (league/ops/budget.py) found a meter's runway at its
-      // current total rate under `card_line_days`, and says exactly what restores `restore_days`. At most once per meter
-      // per ISO week (its notice id, which the gateway also remembers for eight days). `test: true` is a drill.
+      // A prefund under the card line (V3-A, WP8): the budget rule (league/ops/budget.py `notice_facts`) found a meter's
+      // runway at the rate it WANTS (`usd_day`: fixed + its full research floor + what profit earned) under
+      // `card_line_days`, and says exactly what restores `restore_days` at that rate. The rule throttles research, so the
+      // desk spends less than that: `current_*` are the rate it is held to now. The mail says both, each named, and never
+      // words the wanted rate as a spend. With no `current_usd_day` (an older House, or a balance the rule could not read
+      // for research) it claims no current spend. At most once per meter per ISO week (its notice id, which the gateway
+      // also remembers for eight days). `test: true` is a drill.
       if (!Object.hasOwn(FUNDING_METERS, facts.meter)) return null;
       const meter = FUNDING_METERS[facts.meter];
       const drill = facts.test === true;
-      subject = `${drill ? 'LTCM [drill]' : 'LTCM'}: ${meter} runway ${dayCount(facts.runway_days)} days; add ${dollars(facts.restore_usd)} by ${dateOf(facts.card_date)}`;
+      const fixed = dollars(facts.fixed_usd_day);
+      const current = decimal(facts.current_usd_day) !== null;
+      // A runway the House sent as zero (of the rates this mail words): the meter sustains nothing, so the mail does not
+      // say that nothing stops.
+      const zero = value => decimal(value) !== null && Number(decimal(value)) <= 0;
+      const spent = zero(facts.runway_days) || (current && zero(facts.current_runway_days));
+      subject = `${drill ? 'LTCM [drill]' : 'LTCM'}: ${meter} runway ${dayCount(facts.runway_days)} days at the rate the budget wants; add ${dollars(facts.restore_usd)} by ${dateOf(facts.card_date)}`;
       lines.push(
-        drill ? 'THIS IS A DRILL: a synthetic cliff tests that this notice reaches you. Nothing needs doing.' : null,
-        `${meter} balance: ${dollars(facts.balance_usd)}, spending ${dollars(facts.usd_day)} a day (fixed ${dollars(facts.fixed_usd_day)}, research ${dollars(facts.research_usd_day)}).`,
-        `Runway at that rate: ${dayCount(facts.runway_days)} days (runs out about ${dateOf(facts.runs_out_on)}); the card line is ${dayCount(facts.card_line_days)} days.`,
-        `Adding ${dollars(facts.restore_usd)} restores ${dayCount(facts.restore_days)} days of runway. Add it by ${dateOf(facts.card_date)}.`,
-        'The research budget already throttles itself toward the floor; it never raises a cap or moves money.',
+        drill ? 'THIS IS A DRILL: a synthetic cliff tests that this notice reaches you. Its figures are the drill\'s, not the desk\'s. Nothing needs doing.' : null,
+        `${meter} holds ${dollars(facts.balance_usd)}.`,
+        current
+          ? `The desk spends ${dollars(facts.current_usd_day)} a day on it now (fixed ${fixed}, research ${dollars(facts.current_research_usd_day)}); ${decimal(facts.current_runway_days) === null ? 'the House sent no runway at that rate' : `at that rate it lasts ${dayCount(facts.current_runway_days)} days`}.`
+          : 'What the desk spends on it now was not sent: the figures below are at the rate the budget rule wants, not a spend the desk is making.',
+        `The budget rule wants ${dollars(facts.usd_day)} a day for it (fixed ${fixed}, research ${dollars(facts.research_usd_day)}: the research floor plus what profit earned); at that rate it lasts ${dayCount(facts.runway_days)} days, to about ${dateOf(facts.runs_out_on)}. That is the runway under the ${dayCount(facts.card_line_days)}-day card line.`,
+        `Adding ${dollars(facts.restore_usd)} restores ${dayCount(facts.restore_days)} days of runway at the rate the rule wants. Add it by ${dateOf(facts.card_date)}.`,
+        spent
+          ? `${meter} has no runway left: research on it stays throttled until it is funded.`
+          : `Nothing stops if no card is added: research stays throttled to what ${meter} sustains.`,
+        'The budget rule never raises a cap or moves money.',
         `At: ${clip(facts.at, 40) || 'an unknown time'}.`,
       );
       break;

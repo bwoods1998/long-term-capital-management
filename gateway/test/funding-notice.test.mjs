@@ -1,55 +1,140 @@
 // The funding notice (V3-A, WP8): the budget rule's card notice (league/ops/budget.py `notice_facts`) composed into one
-// compact mail, a drill marked as one, at most once per notice id for eight days, inside the day's notice cap.
+// compact mail that names each figure (what the desk spends now, what the rule wants), a drill marked as one, at most
+// once per notice id for eight days, inside the day's notice cap.
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 
 import { route } from '../lib/router.mjs';
 import { createGate } from '../lib/gate.mjs';
-import { composeNotice, NOTICE_KINDS } from '../lib/email.mjs';
+import { composeNotice, NOTICE_KINDS, FLOOR, CONSOLE } from '../lib/email.mjs';
 import { memoryStore, TOKEN } from './helpers.mjs';
 
 const NOW = Date.parse('2026-10-05T00:30:00Z');
 const GATEWAY = 'https://ltcm-gateway.workers.dev';
 const env = (extra = {}) => ({ GATEWAY_TOKEN: TOKEN, GATEWAY_ADMIN_TOKEN: TOKEN + '-owner', CAP_TIMEZONE: 'America/New_York', ...extra });
 
-//: The facts as league/ops/budget.py `notice_facts` writes them: money as two-decimal strings, runway as one-decimal.
+//: The facts as league/ops/budget.py `notice_facts` writes them (money as two-decimal strings, runway as one-decimal)
+//: for a synthetic Sail prefund of 200 with 1.50 a day fixed and no profit: the rule holds research to 0.61 a day (90
+//: days above the reserve) and wants the floor's 3.00 (42.2 days: under the card line).
 const FACTS = {
-  kind: 'funding', notice_id: 'funding:sail:2026-W41', meter: 'sail', balance_usd: '84.20', usd_day: '1.62', fixed_usd_day: '1.12',
-  research_usd_day: '0.50', runway_days: '51.9', restore_usd: '61.60', restore_days: 90, card_line_days: 60,
-  card_date: '2026-10-05', runs_out_on: '2026-11-25', at: '2026-10-05T00:30:00Z', test: false,
+  kind: 'funding', notice_id: 'funding:sail:2026-W41', meter: 'sail', balance_usd: '200.00', usd_day: '4.50', fixed_usd_day: '1.50',
+  research_usd_day: '3.00', runway_days: '42.2', runs_out_on: '2026-11-16', current_usd_day: '2.11', current_research_usd_day: '0.61',
+  current_runway_days: '90.0', restore_usd: '215.00', restore_days: 90, card_line_days: 60, card_date: '2026-10-05',
+  at: '2026-10-05T00:30:00Z', test: false,
 };
+const SUBJECT = 'LTCM: Sail runway 42.2 days at the rate the budget wants; add $215.00 by 2026-10-05';
+const HOLDS = 'Sail holds $200.00.';
+const SPENDS = 'The desk spends $2.11 a day on it now (fixed $1.50, research $0.61); at that rate it lasts 90 days.';
+const WANTS = 'The budget rule wants $4.50 a day for it (fixed $1.50, research $3.00: the research floor plus what profit earned); at that rate it lasts 42.2 days, to about 2026-11-16. That is the runway under the 60-day card line.';
+const RESTORES = 'Adding $215.00 restores 90 days of runway at the rate the rule wants. Add it by 2026-10-05.';
+const NOTHING_STOPS = 'Nothing stops if no card is added: research stays throttled to what Sail sustains.';
+const NOT_SENT = 'What the desk spends on it now was not sent: the figures below are at the rate the budget rule wants, not a spend the desk is making.';
+const END = ['The budget rule never raises a cap or moves money.', 'At: 2026-10-05T00:30:00Z.', '', FLOOR, CONSOLE, ''];
+const DRILL = 'THIS IS A DRILL: a synthetic cliff tests that this notice reaches you. Its figures are the drill\'s, not the desk\'s. Nothing needs doing.';
 
-test('a funding notice says the meter, the balance, the rate, the runway, the exact amount that restores it, and by when', () => {
+test('a funding notice says what the meter holds, what the desk spends on it now, what the rule wants, the runway at each, the exact amount that restores it, and by when', () => {
   assert.ok(NOTICE_KINDS.includes('funding'));
   const message = composeNotice(FACTS);
-  assert.equal(message.subject, 'LTCM: Sail runway 51.9 days; add $61.60 by 2026-10-05');
-  assert.equal(message.text.split('\n').slice(0, 6).join('\n'), [
-    'Sail balance: $84.20, spending $1.62 a day (fixed $1.12, research $0.50).',
-    'Runway at that rate: 51.9 days (runs out about 2026-11-25); the card line is 60 days.',
-    'Adding $61.60 restores 90 days of runway. Add it by 2026-10-05.',
-    'The research budget already throttles itself toward the floor; it never raises a cap or moves money.',
-    'At: 2026-10-05T00:30:00Z.',
-    '',
-  ].join('\n'));
+  assert.equal(message.subject, SUBJECT);
+  assert.deepEqual(message.text.split('\n'), [HOLDS, SPENDS, WANTS, RESTORES, NOTHING_STOPS, ...END]);
+  // The rate the rule wants is never worded as a spend: the only spend said is the one the desk makes.
+  assert.deepEqual(message.text.match(/spend\w* \$[\d.]+/g), ['spends $2.11']);
   const claude = composeNotice({ ...FACTS, meter: 'claude', notice_id: 'funding:claude:2026-W41' });
-  assert.match(claude.subject, /^LTCM: Claude \(Anthropic\) runway/);
+  assert.match(claude.subject, /^LTCM: Claude \(Anthropic\) runway 42\.2 days at the rate the budget wants;/);
+  assert.match(claude.text, /^Claude \(Anthropic\) holds \$200\.00\.\n/);
+  assert.ok(claude.text.includes('research stays throttled to what Claude (Anthropic) sustains.'));
+});
+
+test('the composer reads every fact notice_facts writes, and no fact it does not write', () => {
+  // The House's own list: a fact added or renamed there must be worded here, not ignored (the current rate once was).
+  const source = readFileSync(new URL('../../league/ops/budget.py', import.meta.url), 'utf8');
+  const written = /\ndef notice_facts\([\s\S]*?\n    return \{([\s\S]*?)\}\n/.exec(source);
+  assert.ok(written, 'league/ops/budget.py notice_facts returns its facts as one dict');
+  const keys = [...written[1].matchAll(/"([a-z_]+)":/g)].map(match => match[1]).sort();
+  assert.deepEqual(keys, Object.keys(FACTS).sort(), 'the fixture is the House\'s shape');
+  const read = new Set();
+  composeNotice(new Proxy(FACTS, { get: (facts, key) => (read.add(key), facts[key]) }));
+  // `notice_id` is the router's (the dedupe); `desk_name` is read for every kind and is no funding fact.
+  assert.deepEqual([...read].filter(key => key !== 'desk_name').sort(), keys.filter(key => key !== 'notice_id'));
+});
+
+test('with no current rate sent, no current spend is claimed and the figures are said to be the rate the rule wants', () => {
+  const { current_usd_day, current_research_usd_day, current_runway_days, ...older } = FACTS;
+  // An older House sends none of them; a balance the rule could not read for research sends no total and no runway
+  // (league/ops/budget.py: its research is 0.00); a total that is not a decimal is no total.
+  for (const [name, facts] of [
+    ['an older House', older],
+    ['an unreadable balance', { ...FACTS, current_usd_day: null, current_research_usd_day: '0.00', current_runway_days: null }],
+    ['a runway with no rate', { ...older, current_runway_days: '90.0' }],
+    ['not a decimal', { ...FACTS, current_usd_day: '2.11\nBcc: x' }],
+  ]) {
+    const message = composeNotice(facts);
+    assert.equal(message.subject, SUBJECT, name);
+    assert.deepEqual(message.text.split('\n'), [HOLDS, NOT_SENT, WANTS, RESTORES, NOTHING_STOPS, ...END], name);
+    assert.equal(/spend\w* \$/.test(message.text), false, name);
+  }
+});
+
+test('a current spend with no runway says so; a meter with no runway left is not told that nothing stops', () => {
+  for (const current_runway_days of [null, undefined, 'soon']) {
+    assert.deepEqual(composeNotice({ ...FACTS, current_runway_days }).text.split('\n').slice(0, 3), [
+      HOLDS, 'The desk spends $2.11 a day on it now (fixed $1.50, research $0.61); the House sent no runway at that rate.', WANTS,
+    ]);
+  }
+  // Claude under its reserve, as `notice_facts` writes it: nothing is sustained, at either rate.
+  const empty = { ...FACTS, meter: 'claude', balance_usd: '3.00', usd_day: '2.00', fixed_usd_day: '0.00', research_usd_day: '2.00',
+    runway_days: '0.0', runs_out_on: '2026-10-05', current_usd_day: '0.00', current_research_usd_day: '0.00', current_runway_days: '0.0', restore_usd: '182.00' };
+  const message = composeNotice(empty);
+  assert.equal(message.subject, 'LTCM: Claude (Anthropic) runway 0 days at the rate the budget wants; add $182.00 by 2026-10-05');
+  assert.deepEqual(message.text.split('\n'), [
+    'Claude (Anthropic) holds $3.00.',
+    'The desk spends $0.00 a day on it now (fixed $0.00, research $0.00); at that rate it lasts 0 days.',
+    'The budget rule wants $2.00 a day for it (fixed $0.00, research $2.00: the research floor plus what profit earned); at that rate it lasts 0 days, to about 2026-10-05. That is the runway under the 60-day card line.',
+    'Adding $182.00 restores 90 days of runway at the rate the rule wants. Add it by 2026-10-05.',
+    'Claude (Anthropic) has no runway left: research on it stays throttled until it is funded.',
+    ...END,
+  ]);
+  // Either runway at zero is enough, and with no current rate only the wanted one is read.
+  for (const facts of [{ ...FACTS, current_runway_days: 0 }, { ...FACTS, runway_days: '0.0' }, { ...FACTS, current_usd_day: null, runway_days: '0.0' }]) {
+    assert.equal(composeNotice(facts).text.includes('Nothing stops'), false);
+    assert.ok(composeNotice(facts).text.includes('Sail has no runway left: research on it stays throttled until it is funded.'));
+  }
+  assert.ok(composeNotice({ ...FACTS, current_usd_day: null, current_runway_days: '0.0' }).text.includes(NOTHING_STOPS), 'a runway with no rate is not read');
 });
 
 test('a drill says it is one; a meter not named is refused; a figure that is not a decimal is never echoed', () => {
   const drill = composeNotice({ ...FACTS, test: true, notice_id: 'funding-test:sail:2026-W41' });
-  assert.match(drill.subject, /^LTCM \[drill\]: Sail runway/);
-  assert.match(drill.text, /^THIS IS A DRILL: a synthetic cliff tests that this notice reaches you\. Nothing needs doing\.\n/);
+  assert.equal(drill.subject, SUBJECT.replace(/^LTCM/, 'LTCM [drill]'));
+  assert.deepEqual(drill.text.split('\n'), [DRILL, HOLDS, SPENDS, WANTS, RESTORES, NOTHING_STOPS, ...END]);
+  // Only `true` is a drill, and nothing but a drill is marked as one.
+  for (const flag of [false, undefined, null, 'true', 1]) {
+    const real = composeNotice({ ...FACTS, test: flag });
+    assert.equal(real.subject, SUBJECT, String(flag));
+    assert.equal(/drill/i.test(real.text), false, String(flag));
+  }
   for (const meter of ['openai', 'SAIL', '', undefined, 'sail\nBcc: x', '__proto__', 'toString']) {
     assert.equal(composeNotice({ ...FACTS, meter }), null, String(meter));
   }
-  const odd = composeNotice({ ...FACTS, balance_usd: '1e9<script>', restore_usd: null, runway_days: 'soon', card_date: 'tomorrow\nBcc: x', at: 'x'.repeat(100) });
-  assert.equal(odd.subject, 'LTCM: Sail runway unknown days; add unknown by unknown');
-  assert.match(odd.text, /^Sail balance: unknown, spending \$1\.62/);
-  assert.equal(odd.text.includes('<script>'), false);
-  assert.equal(odd.text.includes('Bcc'), false);
+  const odd = composeNotice({
+    ...FACTS, balance_usd: '1e9<script>', restore_usd: null, runway_days: 'soon', card_date: 'tomorrow\nBcc: x', at: 'x'.repeat(100),
+    usd_day: '4.50; DROP', fixed_usd_day: {}, research_usd_day: [3], runs_out_on: '2026-11-16\nBcc: x', current_usd_day: 2.11,
+    current_research_usd_day: '<b>', current_runway_days: Infinity, restore_days: '90 days', card_line_days: NaN,
+  });
+  assert.equal(odd.subject, 'LTCM: Sail runway unknown days at the rate the budget wants; add unknown by unknown');
+  assert.deepEqual(odd.text.split('\n').slice(0, 5), [
+    'Sail holds unknown.',
+    'The desk spends $2.11 a day on it now (fixed unknown, research unknown); the House sent no runway at that rate.',
+    'The budget rule wants unknown a day for it (fixed unknown, research unknown: the research floor plus what profit earned); at that rate it lasts unknown days, to about unknown. That is the runway under the unknown-day card line.',
+    'Adding unknown restores unknown days of runway at the rate the rule wants. Add it by unknown.',
+    NOTHING_STOPS,
+  ]);
+  for (const echoed of ['<script>', '<b>', 'Bcc', 'DROP', 'Infinity', 'NaN', '[object', 'x'.repeat(41)]) assert.equal(odd.text.includes(echoed), false, echoed);
   // Numbers as numbers read as well as numbers as strings.
-  assert.equal(composeNotice({ ...FACTS, restore_usd: 61.6, runway_days: 51.9 }).subject, 'LTCM: Sail runway 51.9 days; add $61.60 by 2026-10-05');
+  const numbers = composeNotice({ ...FACTS, balance_usd: 200, usd_day: 4.5, fixed_usd_day: 1.5, research_usd_day: 3, runway_days: 42.2,
+    current_usd_day: 2.11, current_research_usd_day: 0.61, current_runway_days: 90, restore_usd: 215, restore_days: '90', card_line_days: '60' });
+  assert.deepEqual(numbers, composeNotice(FACTS));
 });
 
 test('through /v1/notify: mailed once per notice id for eight days, counted against the day\'s cap like any notice', async () => {
@@ -60,7 +145,7 @@ test('through /v1/notify: mailed once per notice id for eight days, counted agai
   }), env(settings), { gate, now: () => at, mailer: async message => void sent.push(message) });
   const first = await (await post(FACTS, NOW)).json();
   assert.equal(first.sent, true);
-  assert.equal(first.subject, 'LTCM: Sail runway 51.9 days; add $61.60 by 2026-10-05');
+  assert.equal(first.subject, SUBJECT);
   // The House retries, or a second instance sends the same week's notice, days later: one mail.
   for (const days of [1, 3, 6.9]) {
     const again = await (await post(FACTS, NOW + days * 86400000)).json();
