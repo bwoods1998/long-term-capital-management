@@ -5341,7 +5341,13 @@ class House:
             self.alert("info", f"the floor is open for business again (it had stopped: {told})")
 
     def _expedition_notices(self) -> None:
-        """Tell the owner, once each, when a budget is gone or the expedition's last day is over."""
+        """Tell the owner, once each, when a budget is gone or the expedition's last day is over.
+
+        A budget spent before its last day is an error: paid work stopped early. The last day being over is the
+        run's own scheduled end, a warning: no failure of the House, and none of a release. Oct 3, 2026 (the day
+        after the fourteenth): a canary is a fresh House with nothing told yet, so on every day after the
+        expedition it tells this again on its first tick; as an error it made the watchdog refuse every release,
+        the one carrying a fix included (`league/watchdog.py` `read_health`: any unmarked error in a canary)."""
         told = self._state.setdefault("expedition_told", {})
         for kind, name in (("sail", "Sail"), ("openai", "frontier model")):
             if self.pacer.over(kind) and not told.get(kind):
@@ -5352,7 +5358,8 @@ class House:
                     self.alert("info", f"{self.campaigns.policy['phase']}: {name} allowance closed ({why}). "
                                "New paid work stops; position reconciliation and exits continue. The next phase is not automatically funded.")
                     continue
-                self.alert("error", f"The expedition's {name} spending has stopped: {why} (${spent:.2f} of ${budget}). "
+                self.alert("error" if spent >= budget else "warning",
+                           f"The expedition's {name} spending has stopped: {why} (${spent:.2f} of ${budget}). "
                                     + ("Research passes stop; agents still wake and trade." if kind == "sail" else "Merton's five pull-request roles stop. Audits are not paced and go on under the gateway's monthly cap."))
 
     def _floor_invariants(self) -> None:
