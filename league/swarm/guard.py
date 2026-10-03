@@ -62,6 +62,9 @@ class SailGuard:
         self.reason: str = str(state.get("reason") or "no reading yet")
         self.last_ok: float = float(state.get("last_ok") or 0.0)
         self.last: dict[str, Any] = dict(state.get("last") or {})
+        # The last GOOD reading {balance, at}: the budget job (league/ops/budget.py) reads it, so one failed read just
+        # before the job never zeroes a day's Sail research.
+        self.last_good: dict[str, Any] = dict(state.get("last_good") or {})
         self.checked_at: float = 0.0
         if not store.get("burst_started_at"):
             store.put("burst_started_at", self.clock())
@@ -106,6 +109,8 @@ class SailGuard:
             balance, burn = None, None
         balance = float(balance) if balance is not None else None
         burn = float(burn) if burn is not None else None
+        if balance is not None:
+            self.last_good = {"balance": balance, "at": now}
         swarm_day = self.store.spent(SWARM_SAIL_KINDS, since=now - 86400)
         # `measured_burn`: Sail's own 24-hour spend less the swarm's, never below the floor. It counts every other box on
         # the account (the data box) and, for a day after a restart, whatever ran before it; false (the default) trusts
@@ -149,7 +154,8 @@ class SailGuard:
                      "budget_research_usd_day": caps["research"], "budget_account_usd_day": caps["account"],
                      "budget_source": caps["source"], "free_disk_gb": None if free_gb is None else round(free_gb, 1),
                      "braked": self.braked, "reason": self.reason, "at": now}
-        self.store.put("guard", {"braked": self.braked, "reason": self.reason, "last_ok": self.last_ok, "last": self.last})
+        self.store.put("guard", {"braked": self.braked, "reason": self.reason, "last_ok": self.last_ok, "last": self.last,
+                                 "last_good": self.last_good})
         if was != self.braked:
             self.store.event("swarm.guard", None, {"action": "brake" if self.braked else "release", **self.last})
         return dict(self.last)

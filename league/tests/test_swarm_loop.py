@@ -234,6 +234,10 @@ class Process(LoopCase):
                     self.assertIn(f"invalid researcher.{key}", pace["reason"])
 
     def test_the_architect_grows_the_population_only_under_the_pace_but_always_refills_it(self):
+        # THE BUDGET holds population.start to its ceiling (league/ops/budget.py), and with no budget.json that is the
+        # floor's: a budget whose ceiling is over the 48 founders, so the refill under the start is what is judged here.
+        (self.root / "budget.json").write_text(json.dumps({"schema": 1, "at": time.time(), "meters": {
+            "sail": {"research_usd_day": 60.0}, "claude": {"research_usd_day": 40.0}}}))
         sw = self.swarm()
         sw.seed()
         self.store.add_spend("sail_model", float(self.settings["researcher"]["usd_per_hour"]) + 0.5)  # the hour's spend is past the pace
