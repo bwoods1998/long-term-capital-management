@@ -64,7 +64,7 @@ account. **Reads and cancels always pass.** Deployed values (`wrangler.jsonc`, d
 | `MAX_DAY_OPEN_ORDERS` | 250 | no order OPENS once the day's orders (exits included) reach it: the last 50 are kept for exits (`403 {cap: "day_open_orders"}`) |
 | `CREDIT_MIN_EQUITY_USD` | 2000 | a credit structure (credit vertical, iron condor, iron butterfly) opens only at this equity or more |
 | `EQUITY_CAP_MAX_AGE_MS` | 120000 | the oldest equity reading an opening order is sized against |
-| `OPTION_STRUCTURES_REAL` | `debit_vertical,long_butterfly,long_call,long_put` (V3-A adds `credit_vertical,iron_condor,iron_butterfly`) | the types a real OPEN may be: exactly the constitution's `options_money.real_types`; the credit types only at `CREDIT_MIN_EQUITY_USD` of the gateway's own equity reading; `off` opens none. Paper structures and closes of already held real positions go whatever it says |
+| `OPTION_STRUCTURES_REAL` | `debit_vertical,long_butterfly,long_call,long_put` (V3-A part 1 leaves it so; `credit_vertical,iron_condor,iron_butterfly` join it only in the credit-types release, with the constitution's list) | the types a real OPEN may be: exactly the constitution's `options_money.real_types`; the credit types only at `CREDIT_MIN_EQUITY_USD` of the gateway's own equity reading; `off` opens none. Paper structures and closes of already held real positions go whatever it says |
 | `CAP_TIMEZONE` | America/New_York | the calendar the day rolls on |
 | `MAX_ORDER_USD`, `MAX_ORDER_USD_KALSHI`, `MAX_DAY_USD` | 75, 75, 4000 | Kalshi only (dead until the prune removes it); the real account's orders never spend Kalshi's day |
 
@@ -377,12 +377,17 @@ deletes them with `npx wrangler secret delete <NAME>`.
 
 ```sh
 cd gateway
-npm install
 npm run check    # node --check on the worker and every module
 npm test         # node --test test/*.test.mjs: no network, keys generated in-process
-npx wrangler deploy
+npx wrangler@4.129.1 deploy
 ```
 
-Run the check and the suite, read the result, then deploy; roll back with `npx wrangler rollback`.
+The check and the suite need Node alone: no lockfile is tracked, so there is nothing for `npm ci` to install from (it
+exits 1), and an `npm install` would leave untracked files in a deploy checkout. Wrangler is run at 4.129.1, the version
+`package.json` names, because a bare `npx wrangler` may resolve to a newer one. Run the check and the suite, read the
+result, then deploy; roll back with `npx wrangler@4.129.1 rollback <version id>`.
 No deploy from 13:25Z to 20:05Z on a trading day except a rollback. Deploy the gateway before a
-House release that depends on its change.
+House release that depends on its change. With the House's updater on (from V3-A part 1) nothing does that by itself:
+`gateway/` never reaches the box, so a merged change here holds no House release, while unprotected House code merged
+with it or after it ships at the next release train. Merge and deploy the gateway change first, then merge the House
+change that needs it.
