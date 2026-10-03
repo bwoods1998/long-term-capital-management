@@ -7,7 +7,8 @@ One process beside the House loop, niced. Its threads:
   experiments wait and the research spend, Sail and Gym, is under the plan, and contracted while it runs over), each
   taking the next family (THE TURNS: the lowest start tag among the ready, so a family's turns follow its share under
   contention) and running one cycle, while the guard allows; a family that held waits out its hold (`Scheduler`'s
-  durable event-driven holds);
+  durable event-driven holds; the main loop counts each park toward the idle rule's dormancy clause, F1's PARKED
+  DORMANCY, so a family that only waits still leaves);
 - THE GYM POOL's dispatchers (one per box) and forks (`pool.py`);
 - ROUNDS on their own threads so none blocks another: the tournament (hourly), the idle pass between its rounds (every
   five minutes, the idle rule's retirements alone: `Tournament.idle_pass`), the gate (every few
@@ -116,6 +117,27 @@ def hold_wait(settings: Mapping[str, Any], dormant: int) -> float:
     return min(cap, base * 2.0 ** min(past, 30))
 
 
+#: THE ARCHITECT'S OWN SPEND (F1): how a spend row of the architect's pass is told from a researcher's. Every model call's
+#: row carries its request key (`key`, `hold`, `settles` or `releases` in its detail), and the architect's keys are
+#: "swarm:architect:<pass>" (its truncation retry and its window fallback keep the prefix).
+ARCHITECT_KEY = ':"swarm:architect:'
+
+
+def architect_spent(store: SwarmStore, kinds: Any, since: float) -> float:
+    """The architect's own model spend of `kinds` since `since` (seconds): the rows whose request key is the architect's
+    (`ARCHITECT_KEY`). F1, Oct 3, 2026: at the floor's $0.05 an hour one pass ($0.064 to $0.103) paused every researcher
+    for the hour after it, and the architect was 86% to 89% of the Sail-model spend. The researchers' hourly pace
+    (`Swarm.pace_status`) leaves it out; the Sail guard's day still counts every dollar of it."""
+    kinds = list(kinds)
+    row = store._one(f"SELECT COALESCE(SUM(usd),0) AS usd FROM spend WHERE kind IN ({','.join('?' * len(kinds))}) AND epoch>=? "
+                     "AND instr(detail, ?) > 0", (*kinds, float(since), ARCHITECT_KEY))
+    return float(row["usd"]) if row else 0.0
+
+
+#: PARKED DORMANCY (F1): `Scheduler.count_parked` reads the parked families at most this often.
+PARKED_EVERY = 30.0
+
+
 class Scheduler:
     """Which family runs next: THE TURNS (allocation.py's `StrideTurns`, Release B): among the families ready now, the one
     whose start tag is lowest, so under contention a family's turns follow its share; with `allocation.max_wait_seconds`
@@ -128,7 +150,11 @@ class Scheduler:
     Time, weight changes and process restarts never buy another model call. Trials, gate state, rewrites,
     notebook guidance, the agenda, data and the harness release can wake it. Pending work stays runnable.
     ``researcher.hold_until_news=false`` restores the optional legacy timer (`hold_wait`); those waits
-    are kept in memory and also end when news arrives. Only local evidence inspection is periodic."""
+    are kept in memory and also end when news arrives. Only local evidence inspection is periodic.
+
+    PARKED DORMANCY (F1, `count_parked`): a park is free, and it is also time the family made no new evaluation. Each
+    `researcher.hold_idle_seconds` a park lasts counts one dormant cycle (no model call), so the idle rule's dormancy
+    clause still retires a family that only waits, as it did under the timer."""
 
     #: A worker with nothing to take sleeps until the next family could be ready (its hold's end, its idle seconds, its
     #: cooldown), at least `MIN_PAUSE` and at most `MAX_PAUSE` (news is noticed within it), so idle workers do not all
@@ -155,6 +181,7 @@ class Scheduler:
         self.queued_useful = 0
         #: The families the tournament's last allocation named useful experiments (the Swarm wires it to its tournament).
         self.useful_ids: Callable[[], Any] = lambda: ()
+        self.parked_at = float("-inf")  # the last `count_parked` (PARKED DORMANCY)
 
     @property
     def event_holds(self) -> bool:
@@ -236,6 +263,48 @@ class Scheduler:
         for fid in [fid for fid in self.held if fid not in alive]:
             del self.held[fid]
         self.turns.forget(alive)
+
+    def count_parked(self) -> list[str]:
+        """PARKED DORMANCY (F1, Oct 3, 2026). Under event holds (`researcher.hold_until_news`) a parked family gets no
+        cycle, and the dormant count (`researcher.dormant_count`) advanced only at the end of one: the dormancy clause
+        never fired, and on Oct 3 eight parked families held every slot (dormancy deaths took a median 1.6 hours on
+        Sept 29, under the timer, and 20 on Oct 2). Here a park still in force (its evidence key unchanged, the family not
+        in a cycle) counts ONE dormant cycle each `researcher.hold_idle_seconds` it has lasted since it began or was last
+        counted (300 s, the wait the timer gave a held family; 300 s too when that setting is 0), never more than one a
+        call (a stopped swarm's hours do not count at once) and never past `researcher.dormant_cycles` (the clause's
+        count: the idle rule decides from there, with its exemptions). No model call, no Gym job. Gym-band families
+        only; off with `researcher.parked_dormancy` false, with the clause off, or under the legacy timer. Reads the
+        families at most every PARKED_EVERY seconds. The families counted."""
+        cfg = self.settings.get("researcher") or {}
+        limit = dormant_limit(self.settings)
+        now = self.clock()
+        if not self.event_holds or cfg.get("parked_dormancy", True) is False or limit <= 0 or 0 <= now - self.parked_at < PARKED_EVERY:
+            return []
+        self.parked_at = now
+        every = _seconds(cfg.get("hold_idle_seconds", HOLD_IDLE_SECONDS), HOLD_IDLE_SECONDS) or HOLD_IDLE_SECONDS
+        counted: list[str] = []
+        scan: dict[str, Any] = {}
+        for fam in self.store.families(alive=True):
+            wait = (fam.get("state") or {}).get("research_wait")
+            if fam.get("band") != "gym" or not isinstance(wait, Mapping) or wait.get("format") != 1 or dormant_count(fam) >= limit:
+                continue
+            last = wait.get("counted", wait.get("since"))
+            if isinstance(last, bool) or not isinstance(last, (int, float)) or not now - float(last) >= every:
+                continue
+            with self._lock:
+                if fam["id"] in self.running:
+                    continue
+            try:
+                with self.store.atomic():
+                    fresh = self.store.family(fam["id"])
+                    if fresh is None or fresh.get("retired_at") or (fresh.get("state") or {}).get("research_wait") != wait \
+                            or wait.get("evidence") != self.evidence_key(fresh, scan=scan):
+                        continue  # retired, re-parked or woken meanwhile: news is never counted as a wait
+                    self.store.set_state(fam["id"], dormant_cycles=dormant_count(fresh) + 1, research_wait={**wait, "counted": now})
+                counted.append(fam["id"])
+            except Exception:  # noqa: BLE001 - a count is an economy of the idle rule, never a reason to stop the loop
+                continue
+        return counted
 
     def pause(self) -> float:
         """How long a worker that found nothing to take sleeps: until the next family could be ready as the last such
@@ -546,7 +615,8 @@ class Swarm:
         return bool(gym.get("enabled")) and bool(gym.get("image_checkpoint")) and not unavailable("gym")
 
     def pace_status(self) -> dict[str, Any]:
-        """The funded researcher stream's trailing-hour spend; absent/null Sail limit keeps the legacy combined cap."""
+        """The funded researcher stream's trailing-hour spend; absent/null Sail limit keeps the legacy combined cap. The
+        architect's own pass is not in it (F1, `architect_spent`): one pass never pauses every researcher for an hour."""
         cfg = self.settings.get("researcher", {})
         sail_limit = cfg.get("sail_usd_per_hour")
         scope = "sail_model" if sail_limit is not None else "all_models"
@@ -560,7 +630,9 @@ class Swarm:
         now = self.clock()
         cached = self._pace
         if now - cached[0] >= 10.0 or now < cached[0] or cached[1] != scope:
-            spent = self.store.spent(["sail_model"] if scope == "sail_model" else ["sail_model", "openai"], since=now - 3600)
+            kinds = ["sail_model"] if scope == "sail_model" else ["sail_model", "openai"]
+            # F1: the researchers' stream, the architect's own pass apart (`architect_spent`; the guard's day counts it).
+            spent = max(0.0, self.store.spent(kinds, since=now - 3600) - architect_spent(self.store, kinds, now - 3600))
             cached = self._pace = (now, scope, spent)
         paused = not valid or cached[2] >= limit
         label = "Sail models" if scope == "sail_model" else "Sail and OpenAI models"
@@ -648,7 +720,12 @@ class Swarm:
         then the architect, both given the same block. The architect's call marks the sealed digest for the five-minute
         cache only when the strategist's last Claude call just marked it and started less than PAIR_SECONDS ago (the
         entry lives five minutes from the start of the call that wrote or last read it). A retrieval or a strategist that
-        fails or raises leaves the agenda as it was and never stops the architect."""
+        fails or raises leaves the agenda as it was and never stops the architect. NO PAID PASS WITHOUT A CELL (F1,
+        `Architect.closed`): when no cell a birth may land in has rebirth room or is open, nothing is asked at all (no
+        retrieval, no strategist, no architect); the pass is one `swarm.architect` event with `skipped`."""
+        closed = getattr(self.architect, "closed", lambda: None)() if self.architect.want() > 0 else None
+        if closed is not None:
+            return self.architect.skip_closed(closed)
         out: dict[str, Any] = {}
         block = None
         try:
@@ -829,6 +906,10 @@ class Swarm:
                     log(f"reseeded {len(born)}: {', '.join(born)}")
             if research and self.diagnostician.due():  # Claude's own funded line and daily budget, not the researchers' pace
                 self._round("diagnostician", self.diagnostician.run)
+            if not self.over_pace():
+                # PARKED DORMANCY (F1): a park counts toward the dormancy clause only while a cycle could have run, as
+                # the timer's holds did (never under the brake, with the Gym down or over the pace).
+                self.scheduler.count_parked()
         self._grow_workers()
         if self.clock() - self._beat >= float(self.settings.get("heartbeat_seconds", 20)):
             self._beat = self.clock()
@@ -1000,4 +1081,4 @@ def main_run(root: str, *, once: bool = False) -> int:
     return swarm.run(once=once)
 
 
-__all__ = ["Swarm", "Scheduler", "main_run", "load_env"]
+__all__ = ["Swarm", "Scheduler", "main_run", "load_env", "architect_spent", "ARCHITECT_KEY", "PARKED_EVERY"]

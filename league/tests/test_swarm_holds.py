@@ -340,8 +340,22 @@ class DeadExit(ResearcherCase):
                 self.assertIsNone(self.store.family(self.fid)["retired_at"])
         self.assertEqual(self.store.graveyard(), [])
 
+    def test_a_dead_slot_leaves_at_the_floor(self):
+        """THE FLOOR COUNTS RESEARCH (F1): two dormant (dead) families at a floor of 2. Neither is one of the floor's, so
+        the retire tool is offered and the idle pass retires the other; `test_the_floor_stops_retirement` is the switch."""
+        self.settings["population"]["floor"] = 2
+        self.dormant()
+        self.dormant(fid="other-family")
+        self.steps = [{"calls": [("retire", {"reason": "Dead."})]}]
+        out = self.researcher().cycle(self.fid)
+        self.assertIn("retire", self.tools()[0], "a dead slot at the floor: offered")
+        self.assertTrue(out["retired"])
+        self.assertEqual([row["family"] for row in Tournament(self.store, self.pool, self.settings).idle_pass()["retired"]],
+                         ["other-family"])
+        self.assertEqual(self.alive(), [])
+
     def test_the_floor_stops_retirement(self):
-        self.settings["population"]["floor"] = 2  # two alive: at the floor
+        self.settings["population"].update(floor=2, floor_researching=False)  # two alive: at the floor, every family counted
         self.dormant()
         self.dormant(fid="other-family")
         self.steps = [{"calls": [("retire", {"reason": "Dead."}), ("gym_run", {"hold": True, "note": "At the floor."})]}]
