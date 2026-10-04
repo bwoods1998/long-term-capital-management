@@ -81,6 +81,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes bubblewrap
+          # Only this disposable hosted runner: Ubuntu's default AppArmor
+          # restriction otherwise denies the sandbox's namespace capabilities.
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
           /usr/bin/bwrap --unshare-all --die-with-parent --ro-bind / / --proc /proc --dev /dev /usr/bin/true
       - name: Run the first run's runtime tests
         # Both suites run until the full prune (Wave 2b) deletes ltcm/ and its tests.
