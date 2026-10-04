@@ -356,6 +356,68 @@ class PersistentDecisions(HarnessCase):
 
 @unittest.skipUnless(shutil.which("bwrap"), "credential-free network namespace requires bwrap")
 class IsolatedEvaluation(unittest.TestCase):
+    def test_all_48_threads_allocate_concurrently_within_the_fixed_memory_limit(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            tree, judge = root / "tree", root / "judge"
+            tree.mkdir()
+            judge.mkdir()
+            code = """
+import ctypes, json, os, resource, threading
+from pathlib import Path
+assert os.environ['MALLOC_ARENA_MAX'] == '2'
+assert resource.getrlimit(resource.RLIMIT_AS) == (2 * 1024 ** 3, 2 * 1024 ** 3)
+libc = ctypes.CDLL(None)
+libc.malloc.argtypes = [ctypes.c_size_t]
+libc.malloc.restype = ctypes.c_void_p
+libc.free.argtypes = [ctypes.c_void_p]
+ready, release = threading.Barrier(49), threading.Event()
+ready_finished = False
+errors, threads = [], []
+def worker():
+    blocks = []
+    try:
+        for _ in range(8):
+            block = libc.malloc(32768)
+            if not block:
+                raise MemoryError('bounded allocation refused')
+            blocks.append(block)
+            ctypes.memset(block, 1, 32768)
+        ready.wait(20)
+        assert release.wait(20)
+    except BaseException as error:
+        errors.append(repr(error))
+        ready.abort()
+    finally:
+        for block in blocks:
+            libc.free(block)
+try:
+    for _ in range(48):
+        thread = threading.Thread(target=worker)
+        thread.start()
+        threads.append(thread)
+    ready.wait(20)
+    ready_finished = True
+    assert sum(thread.is_alive() for thread in threads) == 48
+    print(json.dumps({'concurrent': len(threads), 'arena_max': os.environ['MALLOC_ARENA_MAX'],
+                      'memory_limit': list(resource.getrlimit(resource.RLIMIT_AS))}))
+finally:
+    release.set()
+    if not ready_finished:
+        ready.abort()
+    for thread in threads:
+        thread.join(20)
+assert not errors, errors
+assert not any(thread.is_alive() for thread in threads)
+"""
+            # An owner's ambient allocator setting cannot widen the judge's reviewed allowance.
+            with patch.dict("os.environ", {"MALLOC_ARENA_MAX": "64"}):
+                result = labmod.sandbox(tree, judge, ["-c", code], python=Path(sys.executable), timeout=60)
+            self.assertEqual(result["exit"], 0, result)
+            observed = json.loads(result["stdout"])
+            self.assertEqual(observed, {"concurrent": 48, "arena_max": "2",
+                                        "memory_limit": [2 * 1024 ** 3, 2 * 1024 ** 3]})
+
     def test_sandbox_cannot_see_host_home_or_network_or_write_candidate(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
