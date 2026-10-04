@@ -38,6 +38,11 @@ Import survivors through `research_state.capture_snapshot` and `import_snapshot`
 snapshot, original evaluator identity, metadata digest, approved program hashes and approved Train
 run identities are explicit inputs. The importer retains lineage, trial counts, consumed looks,
 retirements and failure inheritance while excluding raw Validation, unseen and forward payloads.
+For an existing large corpus, pass an explicit `CaptureSelection` to `capture_snapshot` with
+reviewed program SHA256 values and Train run IDs. This selects artifact bytes while retaining the
+entire coherent SQLite history and metadata digest, including pruned runs and owed failure bars.
+It grants no export approval. Missing or changed selected bytes refuse capture; non-Train or
+unseen run IDs are refused. Review and pin a separate `ExportApproval` before importing.
 A historical pass is historical evidence; it does not qualify the new evaluator. Never copy a
 production database directly into the controller mount or initialize an empty replacement ledger
 to avoid its existing obligations.
