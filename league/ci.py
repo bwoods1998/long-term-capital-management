@@ -112,6 +112,11 @@ FORBIDDEN: tuple[str, ...] = (
     "league/swarm/settings.py", "league/swarm/guard.py", "league/swarm/models.py", "league/ops/context.py",
     # Provider commitments and dispatch now enforce the same research ceiling; changing them could evade it.
     "league/swarm/compute.py", "league/swarm/daily_compute.py", "league/swarm/pool.py",
+    # The standalone research authority holds credentials, scope, evidence exports and daily obligations.
+    # It ships through its isolated host runbook, never the House's automatic release train.
+    "league/swarm/research_state.py", "league/swarm/research_transport.py", "league/swarm/research_adapters.py",
+    "league/swarm/research_ipc.py", "league/swarm/research_controller.py", "league/swarm/research_sandbox.py",
+    "league/swarm/research_host.py",
     "league/ops/economics.py",
     # The evaluator's identity and the evidence it reads (WP6/WP8): the Gym, the gate, the bands, the evaluator and the
     # swarm's store (`set_band(..., "probe")` promotes to real money); the data layer and its builders, which carry the

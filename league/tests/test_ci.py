@@ -7,6 +7,27 @@ from league import ci
 
 
 class GuardTest(unittest.TestCase):
+    def test_isolated_research_authority_and_aliases_never_self_deploy_into_the_house(self):
+        from league.updater import protected_changes
+
+        modules = ("research_state", "research_transport", "research_adapters", "research_ipc",
+                   "research_controller", "research_sandbox", "research_host")
+        with tempfile.TemporaryDirectory() as tmp:
+            running, incoming = Path(tmp) / "running", Path(tmp) / "incoming"
+            forbidden = []
+            for module in modules:
+                for rel in (f"league/swarm/{module}.py", f"league/swarm/{module}/__init__.py",
+                            f"league/swarm/{module}.cpython-314-x86_64-linux-gnu.so"):
+                    for role in (*ci.ROLE_PATHS, None, "engineer/data", "engineer/research"):
+                        self.assertTrue(ci.guard([rel], role), (rel, role))
+                    target = incoming / rel
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(b"unreviewed isolated authority")
+                    forbidden.append(rel)
+            control = incoming / "league/swarm/library.py"
+            control.write_text("VALUE = 1\n")
+            self.assertEqual(sorted(p.split(":")[0] for p in protected_changes(incoming, running)), sorted(forbidden))
+
     def test_compute_commitments_and_dispatch_cannot_be_changed_or_shadowed_automatically(self):
         for module in ("compute", "daily_compute", "pool"):
             for path in (f"league/swarm/{module}.py", f"league/swarm/{module}/__init__.py",

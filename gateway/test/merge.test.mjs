@@ -175,6 +175,17 @@ test('the engineer\'s surface is the harness lanes\' surfaces, less the protecte
   assert.ok(Object.isFrozen(github.ENGINEER_SURFACE) && Object.isFrozen(github.ENGINEER_SURFACE.only));
 });
 
+test('the isolated research authority and its loader aliases cannot enter an automatic House release', () => {
+  for (const module of ['research_state', 'research_transport', 'research_adapters', 'research_ipc',
+    'research_controller', 'research_sandbox', 'research_host']) {
+    for (const path of [`league/swarm/${module}.py`, `league/swarm/${module}/__init__.py`,
+      `league/swarm/${module}.cpython-314-x86_64-linux-gnu.so`]) {
+      assert.match(protectedRefusal(path), /^protected \(/, path);
+    }
+  }
+  assert.equal(protectedRefusal('league/swarm/library.py'), null);
+});
+
 test('a protected path is refused by name, by tree, by a file that would shadow it, and without case; a plain path is not', () => {
   for (const path of ['league/constitution.py', 'League/Constitution.PY', 'league/live/step.py', 'league/gym/engine.py',
     'league/swarm/gate.py', 'league/swarm/settings.py', 'ltcm/data/us_equity_session.py', 'scripts/data/storelib.py',
