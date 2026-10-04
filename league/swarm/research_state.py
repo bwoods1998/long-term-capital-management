@@ -231,14 +231,40 @@ def _metadata(connection):
     return {"families": families, "versions": versions, "cards": _rows(connection, "family_cards"), "operators": operators}
 
 
-def capture_snapshot(source_root, archive_root, *, snapshot_id: str, original_evaluator) -> dict:
+@dataclass(frozen=True)
+class CaptureSelection:
+    """Explicit artifact bytes to capture; this grants no export approval.
+
+    The coherent database always retains every lineage, trial, look and failure.
+    Only matching program bytes and identified Train receipts are selected.
+    """
+    program_sha256s: tuple[str, ...]
+    train_run_ids: tuple[str, ...]
+
+    def __post_init__(self):
+        if (not isinstance(self.program_sha256s, tuple)
+                or any(not isinstance(value, str) or not _SHA.fullmatch(value) for value in self.program_sha256s)
+                or len(set(self.program_sha256s)) != len(self.program_sha256s)):
+            raise ResearchStateError("capture selection needs distinct exact program SHA256 values")
+        if (not isinstance(self.train_run_ids, tuple)
+                or any(not isinstance(value, str) or not value or value != value.strip() for value in self.train_run_ids)
+                or len(set(self.train_run_ids)) != len(self.train_run_ids)):
+            raise ResearchStateError("capture selection needs distinct exact Train run identities")
+
+
+def capture_snapshot(source_root, archive_root, *, snapshot_id: str, original_evaluator,
+                     selection: CaptureSelection | None = None) -> dict:
     """Online SQLite backup and hash manifest; raw evidence is never put in a controller mount.
 
     The caller must keep archive_root host-only. No source file or database is mutated.
-    A racing unavailable/pruned artifact aborts capture rather than producing a false
-    complete manifest; retry from a new coherent snapshot after the writer settles.
+    By default every referenced artifact is captured. Explicit selection captures
+    only the requested development bytes; it never subsets or edits database history.
+    A racing unavailable/pruned selected artifact aborts capture rather than producing
+    a false complete manifest. Owed failure reservations are always captured.
     """
     _name(snapshot_id, "snapshot ID")
+    if selection is not None and not isinstance(selection, CaptureSelection):
+        raise ResearchStateError("explicit typed capture selection required")
     original = _identity(original_evaluator)
     source, archive = Path(source_root), Path(archive_root)
     _disjoint(source, archive)
@@ -263,7 +289,20 @@ def capture_snapshot(source_root, archive_root, *, snapshot_id: str, original_ev
             recorded = _identity(_json(previous)) if previous is not None else None
             if recorded != original:
                 raise ResearchStateError("declared source evaluator differs from its authoritative snapshot")
-            for row in _rows(database, "versions"):
+            versions, runs = _rows(database, "versions"), _rows(database, "runs")
+            if selection is not None:
+                if set(selection.program_sha256s) - {row["sha"] for row in versions}:
+                    raise ResearchStateError("selected program is absent from the coherent snapshot")
+                by_run = {row["run_id"]: row for row in runs}
+                for identity in selection.train_run_ids:
+                    row = by_run.get(identity)
+                    if row is None or row["window"] != "train" or row["purpose"] not in _TRAIN_PURPOSES:
+                        raise ResearchStateError("capture selection cannot expose non-Train or unknown-purpose results")
+                    if row["path"] is None:
+                        raise ResearchStateError("selected Train artifact has been pruned")
+            for row in versions:
+                if selection is not None and row["sha"] not in selection.program_sha256s:
+                    continue
                 _name(row["family"], "family artifact directory")
                 body = _read_file(source, row["path"], PROGRAMS_DIR)
                 if _digest(body) != row["sha"]:
@@ -271,7 +310,9 @@ def capture_snapshot(source_root, archive_root, *, snapshot_id: str, original_ev
                 artifacts[row["path"]] = {"sha256": _digest(body), "kind": "program"}
                 if not (archive / row["path"]).exists():
                     _write_file(archive, row["path"], body)
-            for row in _rows(database, "runs"):
+            for row in runs:
+                if selection is not None and row["run_id"] not in selection.train_run_ids:
+                    continue
                 if row["path"] is None:
                     continue
                 body = _read_file(source, row["path"], RUNS_DIR)
@@ -289,6 +330,8 @@ def capture_snapshot(source_root, archive_root, *, snapshot_id: str, original_ev
                     "source_root": str(source.resolve()),
                     "database_sha256": _digest((archive / DB_NAME).read_bytes()), "metadata_sha256": metadata,
                     "original_evaluator": original, "artifacts": artifacts, "host_only": True}
+        if selection is not None:
+            manifest["artifact_selection"] = asdict(selection)
         _write_file(archive, MANIFEST, (_canonical(manifest) + "\n").encode())
         return {**manifest, "manifest_sha256": _digest((archive / MANIFEST).read_bytes())}
     except BaseException:

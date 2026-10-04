@@ -17,7 +17,7 @@ from unittest import mock
 
 from league.swarm import cards
 from league.swarm.research_state import (
-    ArtifactIdentity, ExportApproval, ResearchStateError, MANIFEST, WORKING_MANIFEST,
+    ArtifactIdentity, CaptureSelection, ExportApproval, ResearchStateError, MANIFEST, WORKING_MANIFEST,
     artifact_identity, capture_snapshot, import_snapshot, assert_isolated_state, guard_tournament,
 )
 from league.swarm.store import SwarmStore
@@ -123,6 +123,153 @@ class ResearchState(unittest.TestCase):
         self.assertFalse((self.audit / "swarm.sqlite-wal").exists())
         self.assertEqual((self.audit.stat().st_mode & 0o777), 0o700)
         self.assertEqual(((self.audit / "swarm.sqlite").stat().st_mode & 0o777), 0o600)
+
+    def test_selected_capture_retains_entire_lineage_and_pruned_history_without_reading_unseen_bytes(self):
+        from league.swarm import research_state
+        from league.swarm.incubator import save_owed
+        from league.swarm.gate import run_sha
+        program = self.store.version("child", 1)
+        for index in range(8):
+            self.store.add_run("parent", 1, result("retained-trials-"+str(index)), window="train", stress=1,
+                               purpose="train")
+        self.assertGreater(self.store._one("SELECT count(*) n FROM runs WHERE path IS NULL")["n"], 0)
+        save_owed(self.source, {("parent", run_sha(self.store.version("parent", 1))): (1, SEALED)})
+        unapproved = self.store.version("other", 1)["path"]
+        (self.source/unapproved).unlink()
+        (self.source/self.validation["path"]).unlink()
+        (self.source/self.holdout["path"]).unlink()
+        original = research_state._read_file
+        def selected_only(root, relative, namespace=None):
+            if Path(root) == self.source and (relative == unapproved or relative.startswith("swarm-runs/")):
+                raise AssertionError("unselected program or evaluation payload was read")
+            return original(root, relative, namespace)
+        archive = self.base/"selected-audit"
+        with mock.patch.object(research_state, "_read_file", side_effect=selected_only):
+            snapshot = capture_snapshot(self.source, archive, snapshot_id="selected-lineage", original_evaluator=self.old,
+                                        selection=CaptureSelection((program["sha"],), ()))
+        self.assertEqual(snapshot["metadata_sha256"], self.snapshot["metadata_sha256"])
+        self.assertTrue(all(row["kind"] != "run" for row in snapshot["artifacts"].values()))
+        self.assertIn("incubator-bars-owed.json", snapshot["artifacts"])
+        approval = ExportApproval(snapshot["snapshot_id"], snapshot["manifest_sha256"], snapshot["metadata_sha256"],
+                                  (program["sha"],), (), "explicit synthetic development metadata/code review only")
+        import_snapshot(archive, self.fresh, runtime_scope="synthetic-research-1", expected_evaluator=self.actual,
+                        artifact_root=self.repo, approval=approval)
+        working = self.working_store()
+        for fid in ("parent", "child", "other"):
+            self.assertEqual(working.lineages(fid), self.store.lineages(fid))
+            self.assertEqual(working.lineage_trials(fid), self.store.lineage_trials(fid))
+            self.assertEqual(working.lineage_looks(fid, include_inflight=True), self.store.lineage_looks(fid, include_inflight=True))
+            for field in ("trials", "inherited_trials", "inherited_looks", "retired_at"):
+                self.assertEqual(working.family(fid)[field], self.store.family(fid)[field])
+        self.assertEqual(working._one("SELECT count(*) n FROM runs")["n"], self.store._one("SELECT count(*) n FROM runs")["n"])
+        self.assertEqual(working.totals()["trials"], self.store.totals()["trials"])
+        self.assertIn(run_sha(self.store.version("parent", 1)), working.family("parent")["state"]["incubator_barred"])
+        self.assertFalse(working.family("parent")["state"]["validation_verdicts"]["1"]["passed"])
+        self.assertEqual(working.family("other")["band"], "retired")
+        self.assertIsNone(working.run_result(self.train["run_id"]))
+        self.assertFalse((self.fresh/unapproved).exists())
+        self.assertNotIn(SEALED.encode(), (self.fresh/"swarm.sqlite").read_bytes())
+
+    def test_selected_train_receipt_and_program_require_separate_matching_export_approval(self):
+        program = self.store.version("parent", 1)
+        archive = self.base/"selected-train-audit"
+        snapshot = capture_snapshot(self.source, archive, snapshot_id="selected-train", original_evaluator=self.old,
+                                    selection=CaptureSelection((program["sha"],), (self.train["run_id"],)))
+        self.assertEqual({row["run_id"] for row in snapshot["artifacts"].values() if row["kind"] == "run"},
+                         {self.train["run_id"]})
+        self.assertFalse((archive/self.validation["path"]).exists())
+        self.assertFalse((archive/self.holdout["path"]).exists())
+        approval = ExportApproval(snapshot["snapshot_id"], snapshot["manifest_sha256"], snapshot["metadata_sha256"],
+                                  (program["sha"],), (self.train["run_id"],), "separate synthetic exact bytes review")
+        with self.assertRaises(ResearchStateError):
+            import_snapshot(archive, self.fresh, runtime_scope="synthetic-research-1", expected_evaluator=self.actual,
+                            artifact_root=self.repo, approval=replace(approval, train_run_ids=(self.validation["run_id"],)))
+        self.assertFalse(self.fresh.exists())
+        with self.assertRaises(ResearchStateError):
+            import_snapshot(archive, self.fresh, runtime_scope="synthetic-research-1", expected_evaluator=self.actual,
+                            artifact_root=self.repo, approval=replace(approval, program_sha256s=(self.store.version("other", 1)["sha"],)))
+        import_snapshot(archive, self.fresh, runtime_scope="synthetic-research-1", expected_evaluator=self.actual,
+                        artifact_root=self.repo, approval=approval)
+        self.assertEqual(self.working_store().run_result(self.train["run_id"])["approved_train_value"], "TRAIN_VISIBLE")
+
+    def test_empty_artifact_selection_still_preserves_history_and_does_not_grant_export(self):
+        archive = self.base/"metadata-only-audit"
+        snapshot = capture_snapshot(self.source, archive, snapshot_id="metadata-only", original_evaluator=self.old,
+                                    selection=CaptureSelection((), ()))
+        self.assertEqual(snapshot["artifacts"], {})
+        self.assertEqual(snapshot["metadata_sha256"], self.snapshot["metadata_sha256"])
+        self.assertNotIn("export_approval", snapshot)
+        approval = ExportApproval(snapshot["snapshot_id"], snapshot["manifest_sha256"], snapshot["metadata_sha256"],
+                                  (), (), "explicit synthetic metadata-only review, no program or Train export")
+        with self.assertRaises(ResearchStateError):
+            import_snapshot(archive, self.fresh, runtime_scope="synthetic-research-1", expected_evaluator=self.actual,
+                            artifact_root=self.repo, approval=replace(approval, program_sha256s=(self.store.version("parent", 1)["sha"],)))
+        import_snapshot(archive, self.fresh, runtime_scope="synthetic-research-1", expected_evaluator=self.actual,
+                        artifact_root=self.repo, approval=approval)
+        working = self.working_store()
+        self.assertEqual(working.totals()["trials"], self.store.totals()["trials"])
+        self.assertEqual(working.lineage_trials("child"), self.store.lineage_trials("child"))
+        self.assertFalse(list((self.fresh/"programs").rglob("*.py")))
+
+    def test_capture_selection_rejects_bad_types_unknown_and_non_train_identities(self):
+        for programs, runs in (([], ()), (("bad",), ()), (("a"*64, "a"*64), ()), ((), []),
+                               ((), ("",)), ((), (" x ",)), ((), ("same", "same"))):
+            with self.subTest(programs=programs, runs=runs), self.assertRaises(ResearchStateError):
+                CaptureSelection(programs, runs)
+        for index, selection in enumerate(({}, CaptureSelection(("f"*64,), ()), CaptureSelection((), ("unknown",)),
+                                            CaptureSelection((), (self.validation["run_id"],)),
+                                            CaptureSelection((), (self.holdout["run_id"],)))):
+            target = self.base/("bad-selected-"+str(index))
+            with self.subTest(selection=selection), self.assertRaises(ResearchStateError):
+                capture_snapshot(self.source, target, snapshot_id="bad-selected", original_evaluator=self.old, selection=selection)
+            self.assertFalse(target.exists())
+        self.store._exec("UPDATE runs SET purpose='unreviewed' WHERE run_id=?", (self.train["run_id"],))
+        with self.assertRaises(ResearchStateError):
+            capture_snapshot(self.source, self.base/"bad-purpose", snapshot_id="bad-purpose", original_evaluator=self.old,
+                             selection=CaptureSelection((), (self.train["run_id"],)))
+
+    def test_selected_missing_pruned_or_changed_bytes_fail_without_partial_archive(self):
+        program = self.store.version("parent", 1)
+        path = self.source/program["path"]
+        original = path.read_bytes()
+        for change in ("missing", "changed"):
+            if change == "missing": path.unlink()
+            else: path.write_bytes(original+b"# changed\n")
+            target = self.base/("selected-"+change)
+            with self.subTest(change=change), self.assertRaises(ResearchStateError):
+                capture_snapshot(self.source, target, snapshot_id="selected-bytes", original_evaluator=self.old,
+                                 selection=CaptureSelection((program["sha"],), ()))
+            self.assertFalse(target.exists())
+            path.write_bytes(original)
+        self.store._exec("UPDATE runs SET path=NULL WHERE run_id=?", (self.train["run_id"],))
+        target = self.base/"selected-pruned"
+        with self.assertRaises(ResearchStateError):
+            capture_snapshot(self.source, target, snapshot_id="selected-pruned", original_evaluator=self.old,
+                             selection=CaptureSelection((), (self.train["run_id"],)))
+        self.assertFalse(target.exists())
+
+    def test_selected_capture_detects_artifact_change_after_coherent_backup(self):
+        from league.swarm import research_state
+        program = self.store.version("parent", 1)
+        path = self.source/program["path"]
+        body = path.read_bytes()
+        original = research_state._read_file
+        changed = False
+        def race(root, relative, namespace=None):
+            nonlocal changed
+            raw = original(root, relative, namespace)
+            if Path(root) == self.source and relative == program["path"] and not changed:
+                changed = True
+                path.write_bytes(body+b"# changed after first read\n")
+            return raw
+        target = self.base/"selected-race"
+        try:
+            with mock.patch.object(research_state, "_read_file", side_effect=race), self.assertRaises(ResearchStateError):
+                capture_snapshot(self.source, target, snapshot_id="selected-race", original_evaluator=self.old,
+                                 selection=CaptureSelection((program["sha"],), ()))
+        finally:
+            path.write_bytes(body)
+        self.assertFalse(target.exists())
 
     def test_source_state_and_artifacts_remain_unchanged_by_import(self):
         before = {table: self.store._all(f"SELECT * FROM {table}") for table in ("families", "runs", "looks", "boxes", "kv")}
