@@ -39,6 +39,12 @@ _SHA = re.compile(r"[0-9a-f]{64}\Z")
 _NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,79}\Z")
 _TRAIN_PURPOSES = {"train", "probe", "mechanism", "robustness"}
 _SPEC_KEYS = {"id", "mechanism", "structure", "roots", "dte", "card_sha", "prior_lineage", "prior_lineages"}
+# Original operator predeclarations are cell identities, not supported options
+# structures. Retain these exact reviewed labels; never map them into a current
+# options cell or infer a new permissible structure from their words.
+_LEGACY_OPERATOR_STRUCTURES = frozenset({"long_call + long_put (pair)", "long_call / long_put",
+    "underlying only (zero-cost daily returns, no options)", "debit_vertical + long_call",
+    "none (signal study on underlying returns)", "debit_vertical (long_straddle compared)"})
 _COUNTERS = ("trials", "inherited_trials", "inherited_looks", "revisions", "cycles", "rewrites", "validations")
 _OWED_BARS = "incubator-bars-owed.json"
 _RESEARCH_KV = {"research_evaluator", "program_lineages_indexed", IMPORT_KEY, "train_objective", "claude_band",
@@ -206,19 +212,146 @@ class ExportApproval:
     program_sha256s: tuple[str, ...]
     train_run_ids: tuple[str, ...]
     provenance: str
+    safe_metadata_sha256: str
 
     def __post_init__(self):
         _name(self.snapshot_id, "snapshot ID")
-        for field in ("manifest_sha256", "metadata_sha256"):
+        for field in ("manifest_sha256", "metadata_sha256", "safe_metadata_sha256"):
             if not isinstance(getattr(self, field), str) or not _SHA.fullmatch(getattr(self, field)):
                 raise ResearchStateError("approval needs exact snapshot and metadata hashes")
-        if not isinstance(self.program_sha256s, tuple) or any(not _SHA.fullmatch(v) for v in self.program_sha256s):
+        if not isinstance(self.program_sha256s, tuple) or any(not isinstance(v, str) or not _SHA.fullmatch(v) for v in self.program_sha256s):
             raise ResearchStateError("approval needs exact program SHA256 values")
         if not isinstance(self.train_run_ids, tuple) or any(not isinstance(v, str) or not v for v in self.train_run_ids):
             raise ResearchStateError("approval needs exact Train run identities")
         if len(set(self.program_sha256s)) != len(self.program_sha256s) or len(set(self.train_run_ids)) != len(self.train_run_ids):
             raise ResearchStateError("duplicate export approval identity")
         _text(self.provenance, "host export review provenance")
+
+
+@dataclass(frozen=True)
+class SafeMetadataProjection:
+    """Explicit host-reviewed development metadata, never an automatic redaction approval.
+
+    Each tuple must cover the entire corresponding source metadata collection. Family
+    specs contain only the fixed development fields; descriptions are reviewed text.
+    Version parameters and card control fields retain their exact original values.
+    The original archive and this projection have separate, approval-bound hashes.
+    """
+    source_metadata_sha256: str
+    families: tuple[dict, ...]
+    operators: tuple[dict, ...]
+    cards: tuple[dict, ...]
+    version_params: tuple[dict, ...]
+    provenance: str
+
+    def __post_init__(self):
+        if not isinstance(self.source_metadata_sha256, str) or not _SHA.fullmatch(self.source_metadata_sha256):
+            raise ResearchStateError("safe projection needs the original metadata SHA256")
+        for field in ("families", "operators", "cards", "version_params"):
+            if not isinstance(getattr(self, field), tuple) or any(type(row) is not dict for row in getattr(self, field)):
+                raise ResearchStateError("safe projection needs explicit metadata tuples")
+        _text(self.provenance, "safe metadata review provenance")
+        _canonical(asdict(self))
+
+    @property
+    def sha256(self):
+        return _value_sha(asdict(self))
+
+
+def _projection_rows(rows, fields, identity):
+    out = {}
+    for row in rows:
+        if set(row) != set(fields):
+            raise ResearchStateError("safe metadata projection has missing or unknown fields")
+        key = tuple(row[k] for k in identity)
+        try:
+            if key in out:
+                raise ResearchStateError("duplicate safe metadata identity")
+            out[key] = row
+        except TypeError as exc:
+            raise ResearchStateError("invalid safe metadata identity") from exc
+    return out
+
+
+def _approved_projection(source, projection, approval):
+    """Validate exact structural coverage before copying a single development description."""
+    from . import cards
+    if not isinstance(projection, SafeMetadataProjection):
+        raise ResearchStateError("explicit matching host-reviewed safe metadata projection required")
+    # Capture nested dictionaries once; the frozen dataclass does not freeze its
+    # contents, and concurrent caller mutation must never swap approved bytes.
+    frozen = _json(_canonical(asdict(projection)))
+    if (frozen["source_metadata_sha256"] != approval.metadata_sha256
+            or _value_sha(frozen) != approval.safe_metadata_sha256):
+        raise ResearchStateError("explicit matching host-reviewed safe metadata projection required")
+    metadata = _metadata(source)
+    families = _projection_rows(frozen["families"], ("id", "mechanism", "spec"), ("id",))
+    operators = _projection_rows(frozen["operators"], ("family", "mechanism", "structure", "roots"), ("family",))
+    projected_cards = _projection_rows(frozen["cards"], ("family", "card"), ("family",))
+    params = _projection_rows(frozen["version_params"], ("family", "n", "sha", "params"), ("family", "n"))
+    for rows, originals, identity in ((families, metadata["families"], ("id",)),
+                                     (operators, metadata["operators"], ("family",)),
+                                     (projected_cards, metadata["cards"], ("family",)),
+                                     (params, metadata["versions"], ("family", "n"))):
+        if set(rows) != {tuple(row[k] for k in identity) for row in originals}:
+            raise ResearchStateError("safe metadata projection must cover the entire original history")
+    for original in metadata["families"]:
+        row = families[(original["id"],)]
+        _text(row["mechanism"], "reviewed family mechanism")
+        spec = _json(original["spec"])
+        if type(spec) is not dict or type(row["spec"]) is not dict:
+            raise ResearchStateError("safe metadata family specification is unreadable")
+        expected = {k: v for k, v in spec.items() if k in _SPEC_KEYS}
+        if (set(row["spec"]) != set(expected)
+                or any(_canonical(row["spec"][k]) != _canonical(v) for k, v in expected.items() if k != "mechanism")):
+            raise ResearchStateError("safe projection changed family lineage or execution controls")
+        if "mechanism" in expected:
+            _text(row["spec"]["mechanism"], "reviewed specification mechanism")
+    for original in metadata["operators"]:
+        row = operators[(original["family"],)]
+        _text(row["mechanism"], "reviewed operator mechanism")
+        if (row["structure"] != original["structure"]
+                or _canonical(row["roots"]) != _canonical(_json(original["roots"]))
+                or row["structure"] not in set(cards.STRUCTURE_FAMILIES) | _LEGACY_OPERATOR_STRUCTURES):
+            raise ResearchStateError("safe projection changed or cannot identify original operator controls")
+    for original in metadata["versions"]:
+        row = params[(original["family"], original["n"])]
+        if (type(row["n"]) is not int or row["sha"] != original["sha"]
+                or _canonical(row["params"]) != _canonical(_json(original["params"]))):
+            raise ResearchStateError("safe projection changed original program parameters or identity")
+    family_map = {row["id"]: row for row in metadata["families"]}
+    for original in metadata["cards"]:
+        old, new = _json(original["card"]), projected_cards[(original["family"],)]["card"]
+        fields = {"hypothesis", "mechanism_class", "inputs", "holding", "cost", "comparison", "ablation", "falsification", "rebirth"}
+        if (type(old) is not dict or type(new) is not dict or set(old) != set(new)
+                or set(old) - fields or not {"hypothesis", "mechanism_class", "inputs", "holding", "cost", "comparison", "ablation", "falsification"} <= set(old)):
+            raise ResearchStateError("safe card projection has missing or unknown fields")
+        if any(_canonical(new[k]) != _canonical(old[k]) for k in ("mechanism_class", "inputs", "holding", "ablation", "comparison")):
+            raise ResearchStateError("safe projection changed original card controls")
+        for name in ("hypothesis", "comparison", "falsification"):
+            _text(new[name], "reviewed card description")
+        if (type(old["cost"]) is not dict or type(new["cost"]) is not dict
+                or set(old["cost"]) != {"hurdle", "why"} or set(new["cost"]) != {"hurdle", "why"}
+                or _canonical(new["cost"]["hurdle"]) != _canonical(old["cost"]["hurdle"])):
+            raise ResearchStateError("safe projection changed original card cost controls")
+        _text(new["cost"]["why"], "reviewed card cost description")
+        if "rebirth" in old:
+            if (type(old["rebirth"]) is not dict or type(new["rebirth"]) is not dict
+                    or set(old["rebirth"]) != {"row", "different", "evidence"}
+                    or set(new["rebirth"]) != set(old["rebirth"]) or old["rebirth"]["row"] != new["rebirth"]["row"]):
+                raise ResearchStateError("safe projection changed original rebirth identity")
+            for name in ("different", "evidence"):
+                _text(new["rebirth"][name], "reviewed rebirth description")
+        family = family_map.get(original["family"])
+        if (family is None or original["sha"] != cards.card_sha(old)
+                or _json(original["key"]) != cards.key_of(old, family["structure"])
+                or old["mechanism_class"] not in cards.MECHANISM_CLASSES
+                or old["holding"] not in cards.HOLDING or type(old["inputs"]) is not list
+                or any(v not in cards.INPUTS for v in old["inputs"])):
+            raise ResearchStateError("original card identity or controlled cell is unreadable")
+    return {"families": {k[0]: v for k, v in families.items()},
+            "operators": {k[0]: v for k, v in operators.items()},
+            "cards": {k[0]: v["card"] for k, v in projected_cards.items()}}
 
 
 def _metadata(connection):
@@ -517,6 +650,69 @@ def _retirement_reason(family, graveyard):
     return f"{prefix}: historical retirement remains in force; original evidence retained in host-only audit"
 
 
+def _seal_card_matching(target, source, families):
+    """Bind original card inheritance and controlled word-derived inputs before redaction."""
+    from . import cards
+    rows = _rows(source, "family_cards")
+    own = {row["family"]: row for row in rows}
+    by_sha = {}
+    for row in sorted(rows, key=lambda row: (row["at"], row["family"])):
+        by_sha.setdefault(row["sha"], row)
+    for family in families:
+        spec = _json(family["spec"])
+        row = own.get(family["id"]) or by_sha.get(spec.get("card_sha"))
+        if row:
+            card = _json(row["card"])
+            keys, _ = cards.match_keys(card, family["structure"], family["mechanism"], spec.get("dte"))
+            cell_key = cards.key_of(card, family["structure"])
+        else:
+            keys = None
+            cell_key = cards.infer_key(family["mechanism"], family["structure"], spec.get("dte"))
+        for key in ([cell_key] if cell_key else []) + (keys or []):
+            if (key["class"] not in cards.MECHANISM_CLASSES or key["holding"] not in cards.HOLDING
+                    or key["family"] not in set(cards.STRUCTURE_FAMILIES.values())
+                    or any(item not in cards.INPUTS for item in key["inputs"] or [])):
+                raise ResearchStateError("original family card matching authority is unreadable")
+        _seal(target, "card_matching", family["id"], {
+            "source_card_sha": row["sha"] if row else None, "keys": keys, "cell_key": cell_key,
+            "source_family_sha256": _value_sha(family), "source_card_row_sha256": _value_sha(row) if row else None})
+
+
+def _seal_rebirth_failure(target, source, original, family):
+    """Derive original failure matching on the host; export only controlled identities.
+
+    The original prose comparison needed to authorize a rebirth remains host-only,
+    so a matched historical claim cannot be authorized by its replacement text.
+    """
+    from . import cards
+    from .architect import tag_of
+    tag = tag_of(original, family)
+    if tag not in cards.MECHANISM_VERDICTS:
+        return
+    own = next((row for row in _rows(source, "family_cards") if row["family"] == original["family"]), None)
+    if own:
+        key = {**_json(own["key"]), "inputs": cards.match_inputs(_json(own["card"]), original["mechanism"])}
+    else:
+        dte = _json(family["spec"]).get("dte") if family else None
+        key = cards.infer_key(original["mechanism"], original["structure"], dte)
+    inputs = sorted(key["inputs"]) if key and key.get("inputs") is not None else cards.infer_inputs(original["mechanism"])
+    structure_families = set(cards.STRUCTURE_FAMILIES.values())
+    if family is None and original["family"].startswith("op-"):
+        structure_families |= _LEGACY_OPERATOR_STRUCTURES
+    if (any(item not in cards.INPUTS for item in inputs)
+            or (key is not None and (set(key) != {"class", "inputs", "family", "holding"}
+                or key["class"] not in cards.MECHANISM_CLASSES or key["holding"] not in cards.HOLDING
+                or key["family"] not in structure_families))):
+        raise ResearchStateError("original failure matching authority is unreadable")
+    _seal(target, "rebirth_failure", original["family"], {
+        "row": original["family"], "at": original["at"], "tag": tag, "key": key,
+        "inputs": inputs, "legacy": own is None, "structure": original["structure"],
+        "structure_family": cards.structure_family(original["structure"]),
+        "source_card_sha": own["sha"] if own else None,
+        "lineage": family["lineage"] if family else None, "source_sha256": _value_sha(original),
+        "original_prose_host_only": True})
+
+
 def _assert_failure_floor(state, prior, *, guarded_verdicts=None):
     if (not isinstance(state, dict) or state.get("isolation_no_live_authority") is not True
             or (prior.get("gate_hold") and state.get("gate_hold") is not True)):
@@ -779,7 +975,7 @@ def _assert_private_reporting(connection):
 
 
 def import_snapshot(snapshot_root, fresh_root, *, runtime_scope: str, expected_evaluator: ArtifactIdentity,
-                    artifact_root, approval: ExportApproval) -> dict:
+                    artifact_root, approval: ExportApproval, metadata_projection: SafeMetadataProjection) -> dict:
     """Create a private fresh SwarmStore-compatible view; never overwrite or modify source/audit state."""
     _name(runtime_scope, "isolated runtime scope")
     if not isinstance(expected_evaluator, ArtifactIdentity) or not isinstance(approval, ExportApproval):
@@ -805,7 +1001,9 @@ def import_snapshot(snapshot_root, fresh_root, *, runtime_scope: str, expected_e
             target.execute("BEGIN IMMEDIATE")
             if _value_sha(_metadata(source)) != approval.metadata_sha256:
                 raise ResearchStateError("approved development metadata changed")
+            projected = _approved_projection(source, metadata_projection, approval)
             family_rows = _rows(source, "families")
+            _seal_card_matching(target, source, family_rows)
             historical_bars = _historical_bars(source, snapshot, manifest)
             graveyards = {row["family"]: row for row in _rows(source, "graveyard")}
             versions, runs = _rows(source, "versions"), _rows(source, "runs")
@@ -831,7 +1029,8 @@ def import_snapshot(snapshot_root, fresh_root, *, runtime_scope: str, expected_e
                 elif isinstance(safe["incubator_barred"], dict):
                     safe["incubator_barred"].update(extra)
                 safe.update(evaluator=asdict(actual), evaluator_trials=row["trials"], dormant_cycles=0)
-                row.update(spec=_canonical({k: v for k, v in spec.items() if k in _SPEC_KEYS}), state=_canonical(safe),
+                reviewed = projected["families"][row["id"]]
+                row.update(mechanism=reviewed["mechanism"], spec=_canonical(reviewed["spec"]), state=_canonical(safe),
                            band="retired" if row["retired_at"] else "gym", weight=None, best_train=None,
                            best_version=None, best_validation=None, validated_version=None, spent_usd=0,
                            stall=0, since_val_trials=0, since_val_revisions=0, origin="historical-research")
@@ -894,17 +1093,25 @@ def import_snapshot(snapshot_root, fresh_root, *, runtime_scope: str, expected_e
                         family = next((f for f in family_rows if f["id"] == row["family"]), None)
                         if family is None and not row["family"].startswith("op-"):
                             raise ResearchStateError("graveyard evidence has no authoritative family")
-                        metadata = family or row  # operator-only predeclared rows are explicitly in the metadata approval
-                        row.update(mechanism=metadata["mechanism"], structure=metadata["structure"], roots=metadata["roots"],
+                        metadata = family or row
+                        reviewed = projected["families" if family else "operators"][row["family"]]
+                        row.update(mechanism=reviewed["mechanism"], structure=metadata["structure"], roots=metadata["roots"],
                                    lesson=_retirement_reason(family, original), best="{}")
+                        _seal_rebirth_failure(target, source, original, family)
                     _insert(target, table, row)
                     _seal(target, table, identity, {"row": row, "source_sha256": _value_sha(original)})
-            from .cards import CARDS_SQL
+            from .cards import CARDS_SQL, card_sha
             for statement in CARDS_SQL:
                 target.execute(statement)
-            for row in _rows(source, "family_cards"):
+            for original in _rows(source, "family_cards"):
+                row = dict(original)
+                card = projected["cards"][row["family"]]
+                row.update(card=_canonical(card), sha=card_sha(card))
                 _insert(target, "family_cards", row)
-                _seal(target, "family_card", row["family"], {"sha": row["sha"], "source_sha256": _value_sha(row)})
+                _seal(target, "family_card", row["family"], {
+                    "source_identity_sha": original["sha"], "source_card_sha256": _value_sha(_json(original["card"])),
+                    "source_sha256": _value_sha(original), "projected_content_sha256": _value_sha(card),
+                    "projected_row_sha256": _value_sha(row)})
             for original in _rows(source, "card_evidence"):
                 row = dict(original)
                 detail = _json(row["detail"])
@@ -936,6 +1143,8 @@ def import_snapshot(snapshot_root, fresh_root, *, runtime_scope: str, expected_e
                        "source_database_sha256": manifest["database_sha256"], "runtime_scope": runtime_scope,
                        "runtime_ownership_token": uuid.uuid4().hex, "original_evaluator": manifest["original_evaluator"],
                        "evaluator": asdict(actual), "export_review_sha256": _value_sha(asdict(approval)),
+                       "source_metadata_sha256": approval.metadata_sha256,
+                       "safe_metadata_sha256": approval.safe_metadata_sha256,
                        "research_only": True, "sealed_payloads_mounted": False, "financial_authority": False}
             _insert(target, "kv", {"key": "research_evaluator", "value": _canonical(asdict(actual))})
             _insert(target, "kv", {"key": "program_lineages_indexed", "value": "true"})
@@ -1049,7 +1258,8 @@ def assert_isolated_state(root, *, runtime_scope: str, expected_evaluator: Artif
                     raise ResearchStateError("historical retirement, refusal or audit evidence changed")
             elif kind == "family_card":
                 row = connection.execute("SELECT * FROM family_cards WHERE family=?", (baseline["identity"],)).fetchone()
-                if row is None or _value_sha(dict(row)) != value["source_sha256"]:
+                if (row is None or _value_sha(dict(row)) != value["projected_row_sha256"]
+                        or _value_sha(_json(row["card"])) != value["projected_content_sha256"]):
                     raise ResearchStateError("historical family card changed")
             elif kind == "card_evidence":
                 row = connection.execute("SELECT * FROM card_evidence WHERE seq=?", (baseline["identity"],)).fetchone()

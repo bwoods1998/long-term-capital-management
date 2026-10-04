@@ -5,6 +5,7 @@ families, mechanisms and lessons only."""
 from __future__ import annotations
 
 import copy
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -392,3 +393,98 @@ class TheArchitect(Case):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class IsolatedProjection(Case):
+    def setUp(self):
+        super().setUp()
+        self.store.close()
+        self.base = Path(self.dir.name)
+        self.source = self.base / "source"
+        self.store = SwarmStore(self.source, clock=self.clock)
+        self.addCleanup(self.store.close)
+
+    def projected_store(self):
+        from league.swarm.research_state import ArtifactIdentity, ExportApproval, artifact_identity, capture_snapshot, import_snapshot
+        from league.tests.test_research_state import reviewed_fixture_projection
+        from dataclasses import asdict
+        old = ArtifactIdentity("synthetic-old", "synthetic-bundle", "a"*64)
+        self.store.put("research_evaluator", asdict(old))
+        repo = Path(__file__).resolve().parents[2]
+        actual = artifact_identity("synthetic-reviewed-checkpoint", repo)
+        archive, target = self.base/"audit", self.base/"working"
+        manifest = capture_snapshot(self.source, archive, snapshot_id="synthetic-card-projection", original_evaluator=old)
+        projection = reviewed_fixture_projection(archive)
+        approval = ExportApproval(manifest["snapshot_id"], manifest["manifest_sha256"], manifest["metadata_sha256"], (), (),
+                                  "Explicit synthetic card/failure/parameter fixture review", projection.sha256)
+        import_snapshot(archive, target, runtime_scope="synthetic-cards", expected_evaluator=actual, artifact_root=repo,
+                        approval=approval, metadata_projection=projection)
+        working = SwarmStore(target, clock=self.clock)
+        self.addCleanup(working.close)
+        return working
+
+    def test_projected_card_content_hash_is_distinct_and_fork_retains_original_identity(self):
+        card = cards.validate(CARD)[0]
+        fid = self.store.add_family(proposal("parent") | {"id": "parent", "card_sha": cards.card_sha(card)}, origin="test")["id"]
+        original = cards.put(self.store, fid, card, "debit_vertical")
+        self.store.add_family({**self.store.family(fid)["spec"], "id": "child"}, origin="fork", parent=fid)
+        working = self.projected_store()
+        own, fork = cards.card_of(working, fid), cards.card_of(working, "child")
+        self.assertEqual((own["sha"], fork["sha"], fork["own"], fork["family"]), (original, original, False, fid))
+        self.assertTrue(own["isolation_projected"])
+        self.assertEqual(own["source_identity_sha"], original)
+        self.assertNotEqual(working._one("SELECT sha FROM family_cards WHERE family=?", (fid,))["sha"], original)
+        self.assertEqual(own["projected_content_sha256"][:24], cards.card_sha(own["card"]))
+        self.assertEqual(cards.card_of(self.store, fid)["card"], card)
+        before, after = cards.cell_yields(self.store, self.settings, "2000-01-01"), cards.cell_yields(working, self.settings, "2000-01-01")
+        self.assertEqual(after, before, "original card identity still supplies the inherited fork cell")
+
+    def test_original_undeclared_inputs_match_and_historical_rebirth_is_not_waived_by_redaction(self):
+        card = cards.validate(CARD)[0]
+        fid = self.bury("dead", card, reason=mechanism.MARK + ": synthetic negative result", mechanism=MECH + " IV skew")
+        birth = {**card, "rebirth": {"row": fid, "different": "Synthetic original birth difference", "evidence": "Synthetic original birth evidence"}}
+        self.store.add_family({"id": "prior-birth", "mechanism": MECH, "structure": "debit_vertical", "roots": ["SPY"], "dte": [0,5],
+                               "card_sha": cards.card_sha(birth)}, origin="test")
+        cards.put(self.store, "prior-birth", birth, "debit_vertical")
+        original = cards.RebirthIndex(self.store)
+        working = self.projected_store()
+        index = cards.RebirthIndex(working)
+        self.assertEqual(index.by_id[fid]["key"], original.by_id[fid]["key"])
+        self.assertIn("iv_skew", index.by_id[fid]["inputs"])
+        self.assertEqual(index.backed, original.backed)
+        self.assertEqual(index.cell_births, original.cell_births)
+        proposal_card = {**card, "inputs": ["iv_skew", "cross_asset"]}
+        rejected = index.check(proposal_card, "debit_vertical", "Synthetic new hypothesis")
+        self.assertFalse(rejected["ok"])
+        self.assertIn(fid, rejected["matched"])
+        proposed_rebirth = {**proposal_card, "rebirth": {"row": fid, "different": "Distinct cross asset mechanism evidence",
+                                                       "evidence": "cross_asset synthetic evidence"}}
+        self.assertIn("host-only prose", index.check(proposed_rebirth, "debit_vertical", "Synthetic new hypothesis")["reason"])
+
+    def test_inherited_original_card_alias_uses_original_age_order_after_projection(self):
+        card = cards.validate(CARD)[0]
+        sha = cards.card_sha(card)
+        for fid in ("z-first", "a-later"):
+            self.store.add_family({"id": fid, "mechanism": MECH, "structure": "debit_vertical", "roots": ["SPY"],
+                                   "dte": [0,5], "card_sha": sha}, origin="synthetic")
+            cards.put(self.store, fid, card, "debit_vertical")
+            self.clock.advance(1)
+        self.store.add_family({"id": "fork", "mechanism": MECH, "structure": "debit_vertical", "roots": ["SPY"],
+                               "dte": [0,5], "card_sha": sha}, origin="fork", parent="z-first")
+        original = cards.card_of(self.store, "fork")
+        projected = cards.card_of(self.projected_store(), "fork")
+        self.assertEqual((projected["sha"], projected["family"]), (original["sha"], original["family"]))
+        self.assertEqual(projected["family"], "z-first")
+
+    def test_unknown_original_cell_holds_only_affected_structure_and_known_inputs(self):
+        fid = self.bury("unclassified", reason=mechanism.MARK + ": synthetic negative result", structure="iron_condor",
+                        mechanism="Unclassified hypothesis reads implied volatility")
+        working = self.projected_store()
+        index = cards.RebirthIndex(working)
+        card = cards.validate(CARD)[0]
+        self.assertTrue(index.check(card, "debit_vertical", "Synthetic new hypothesis")["ok"])
+        self.assertTrue(index.check({**card, "inputs": ["cross_asset"]}, "iron_condor", "Synthetic new hypothesis")["ok"])
+        refusal = index.check({**card, "inputs": ["implied_vol"]}, "iron_condor", "Synthetic new hypothesis")
+        self.assertFalse(refusal["ok"])
+        self.assertEqual(refusal["row"], fid)
+        self.assertIn("unresolved", refusal["reason"])

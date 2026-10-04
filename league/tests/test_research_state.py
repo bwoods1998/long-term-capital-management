@@ -17,7 +17,7 @@ from unittest import mock
 
 from league.swarm import cards
 from league.swarm.research_state import (
-    ArtifactIdentity, CaptureSelection, ExportApproval, ResearchStateError, MANIFEST, WORKING_MANIFEST,
+    ArtifactIdentity, CaptureSelection, ExportApproval, SafeMetadataProjection, ResearchStateError, MANIFEST, WORKING_MANIFEST,
     artifact_identity, capture_snapshot, import_snapshot, assert_isolated_state, guard_tournament,
 )
 from league.swarm.store import SwarmStore
@@ -27,6 +27,37 @@ from league.tests.test_swarm_store import SPEC
 CODE = "NEEDS = {'roots': ['SPY']}\nPARAMS = {'signal_on': 1}\ndef decide(ctx):\n    return []\n"
 SEALED = "SEALED_RESULT_VALUE_987654.321"
 PRODUCTION_BOX = "sb_PRODUCTION_HANDLE_DO_NOT_ADOPT"
+
+
+def reviewed_fixture_projection(archive):
+    """TEST ONLY: explicit synthetic descriptions, plus exact fixture control/parameter values.
+
+    This does not review arbitrary exports. Each use below is a synthetic fixture
+    declaration; the production API has no automatic projection or approval path.
+    """
+    from league.swarm import research_state as state
+    with closing(state._connect(Path(archive)/"swarm.sqlite")) as connection:
+        source = state._metadata(connection)
+    mechanisms = "Synthetic development hypothesis; original selection descriptions remain in host-only audit."
+    families = []
+    for row in source["families"]:
+        spec = {k: v for k, v in json.loads(row["spec"]).items() if k in state._SPEC_KEYS}
+        if "mechanism" in spec:
+            spec["mechanism"] = mechanisms
+        families.append({"id": row["id"], "mechanism": mechanisms, "spec": spec})
+    projected_cards = []
+    for row in source["cards"]:
+        card = json.loads(row["card"])
+        card.update(hypothesis=mechanisms, falsification="Synthetic predeclared negative result; original historical conclusion stays host-only.")
+        card["cost"]["why"] = "Synthetic development spread and fee assumption, unchanged cost control."
+        if "rebirth" in card:
+            card["rebirth"].update(different="Synthetic development difference, original claim prose stays host-only.",
+                                   evidence="Synthetic development evidence; original claim prose stays host-only.")
+        projected_cards.append({"family": row["family"], "card": card})
+    return SafeMetadataProjection(state._value_sha(source), tuple(families),
+        tuple({"family": row["family"], "mechanism": mechanisms, "structure": row["structure"], "roots": json.loads(row["roots"])} for row in source["operators"]), tuple(projected_cards),
+        tuple({**row, "params": json.loads(row["params"])} for row in source["versions"]),
+        "Explicit synthetic fixture metadata review; no actual source export approval")
 
 
 class ResearchState(unittest.TestCase):
@@ -96,15 +127,16 @@ class ResearchState(unittest.TestCase):
         for name in (".env", "swarm.pid", "provider.sqlite", "swarm.json", "gym-forward.json"):
             (self.source / name).write_text("FULL_PROVIDER_SECRET")
         self.snapshot = capture_snapshot(self.source, self.audit, snapshot_id="synthetic-snapshot-1", original_evaluator=self.old)
+        self.projection = reviewed_fixture_projection(self.audit)
         self.approval = ExportApproval(self.snapshot["snapshot_id"], self.snapshot["manifest_sha256"],
                                        self.snapshot["metadata_sha256"],
                                        tuple(sorted({r["sha"] for r in self.store._all("SELECT sha FROM versions")})),
-                                       (self.train["run_id"],), "synthetic host review; these bytes contain only approved development data")
+                                       (self.train["run_id"],), "synthetic host review; these bytes contain only approved development data", self.projection.sha256)
 
     def import_state(self, *, fresh=None, approval=None, expected=None, artifact_root=None):
         return import_snapshot(self.audit, fresh or self.fresh, runtime_scope="synthetic-research-1",
                                expected_evaluator=expected or self.actual, artifact_root=artifact_root or self.repo,
-                               approval=approval or self.approval)
+                               approval=approval or self.approval, metadata_projection=self.projection)
 
     def check(self, *, expected=None, artifact_root=None):
         return assert_isolated_state(self.fresh, runtime_scope="synthetic-research-1", expected_evaluator=expected or self.actual,
@@ -114,6 +146,112 @@ class ResearchState(unittest.TestCase):
         store = SwarmStore(self.fresh, clock=self.clock)
         self.addCleanup(store.close)
         return store
+
+    def recapture_reviewed_fixture(self, name):
+        """A new synthetic source fixture requires a new explicit metadata projection and certificate."""
+        self.audit = self.base/name
+        self.snapshot = capture_snapshot(self.source, self.audit, snapshot_id=name, original_evaluator=self.old)
+        self.projection = reviewed_fixture_projection(self.audit)
+        self.approval = replace(self.approval, snapshot_id=name, manifest_sha256=self.snapshot["manifest_sha256"],
+                                metadata_sha256=self.snapshot["metadata_sha256"], safe_metadata_sha256=self.projection.sha256)
+
+    def test_embedded_evaluation_descriptions_stay_host_only_with_both_hashes_bound(self):
+        from league.tests.test_swarm_cards import CARD, MECH
+        original_card = cards.validate(CARD)[0]
+        original_card["hypothesis"] += " " + SEALED
+        original_card["cost"]["why"] += " " + SEALED
+        original_card["falsification"] += " " + SEALED
+        original_card["rebirth"] = {"row": "other", "different": SEALED, "evidence": SEALED}
+        original_sha = cards.put(self.store, "parent", original_card, self.store.family("parent")["structure"])
+        spec = {**self.store.family("parent")["spec"], "mechanism": MECH + " " + SEALED,
+                "card_sha": original_sha, "lessons": SEALED}
+        self.store.update_family("parent", mechanism=MECH + " " + SEALED, spec=spec)
+        self.store.update_family("child", spec={**self.store.family("child")["spec"], "card_sha": original_sha})
+        self.store._exec("INSERT INTO graveyard(family,at,mechanism,structure,roots,lesson,best) VALUES(?,?,?,?,?,?,?)",
+            ("op-safe-projection-fixture", self.store.now(), MECH + " " + SEALED, "debit_vertical", '["SPY"]', SEALED, "{}"))
+        self.recapture_reviewed_fixture("synthetic-prose-projection")
+        receipt = self.import_state()
+        working = self.working_store()
+        self.assertEqual(receipt["source_metadata_sha256"], self.snapshot["metadata_sha256"])
+        self.assertEqual(receipt["safe_metadata_sha256"], self.projection.sha256)
+        self.assertNotEqual(receipt["source_metadata_sha256"], receipt["safe_metadata_sha256"])
+        self.assertIn(SEALED.encode(), (self.audit/"swarm.sqlite").read_bytes())
+        self.assertNotIn(SEALED.encode(), (self.fresh/"swarm.sqlite").read_bytes())
+        original_row = self.store._one("SELECT * FROM family_cards WHERE family='parent'")
+        baseline = json.loads(working._one("SELECT payload FROM research_baseline WHERE kind='family_card' AND identity='parent'")["payload"])
+        from league.swarm.research_state import _value_sha
+        self.assertEqual(baseline["source_sha256"], _value_sha(original_row))
+        self.assertEqual(baseline["source_identity_sha"], original_sha)
+        self.assertEqual(working.family("child")["spec"]["card_sha"], original_sha)
+        self.assertFalse(working.family("parent")["state"]["validation_verdicts"]["1"]["passed"])
+        self.assertEqual(working.lineage_trials("child"), self.store.lineage_trials("child"))
+        self.assertEqual(working.lineage_looks("child", include_inflight=True), self.store.lineage_looks("child", include_inflight=True))
+        self.check()
+
+    def test_projection_missing_wrong_source_and_changed_bytes_require_new_review(self):
+        for projection in (None, replace(self.projection, source_metadata_sha256="0"*64),
+                           replace(self.projection, provenance="different unapproved review")):
+            with self.subTest(projection=projection is None), self.assertRaises(ResearchStateError):
+                import_snapshot(self.audit, self.fresh, runtime_scope="synthetic-research-1", expected_evaluator=self.actual,
+                                artifact_root=self.repo, approval=self.approval, metadata_projection=projection)
+            self.assertFalse(self.fresh.exists())
+
+    def test_even_signed_projection_cannot_omit_or_add_history_or_change_controls(self):
+        changes = [replace(self.projection, families=self.projection.families[:-1]),
+                   replace(self.projection, families=self.projection.families + (self.projection.families[0],)),
+                   replace(self.projection, version_params=self.projection.version_params[:-1])]
+        for field, value in (("unreviewed_field", SEALED), ("roots", ["QQQ"]), ("prior_lineage", "fake-reset-lineage")):
+            rows = copy.deepcopy(self.projection.families)
+            rows[0]["spec"][field] = value
+            changes.append(replace(self.projection, families=rows))
+        rows = copy.deepcopy(self.projection.version_params)
+        rows[0]["params"] = {"injected": SEALED}
+        changes.append(replace(self.projection, version_params=rows))
+        for index, projection in enumerate(changes):
+            approval = replace(self.approval, safe_metadata_sha256=projection.sha256)
+            with self.subTest(index=index), self.assertRaises(ResearchStateError):
+                import_snapshot(self.audit, self.fresh, runtime_scope="synthetic-research-1", expected_evaluator=self.actual,
+                                artifact_root=self.repo, approval=approval, metadata_projection=projection)
+            self.assertFalse(self.fresh.exists())
+
+    def test_approved_projection_contents_are_captured_once_before_caller_mutation(self):
+        from league.swarm import research_state
+        original = research_state._approved_projection
+        approved_sha = self.projection.sha256
+        def race(*args):
+            reviewed = original(*args)
+            self.projection.families[0]["mechanism"] = SEALED
+            return reviewed
+        with mock.patch.object(research_state, "_approved_projection", side_effect=race):
+            receipt = self.import_state()
+        self.assertEqual(receipt["safe_metadata_sha256"], approved_sha)
+        self.assertNotIn(SEALED.encode(), (self.fresh/"swarm.sqlite").read_bytes())
+        self.check()
+
+    def test_safe_card_projection_cannot_change_original_hash_controls_or_rebirth_identity(self):
+        from league.tests.test_swarm_cards import CARD
+        original = cards.validate(CARD)[0]
+        original["rebirth"] = {"row": "other", "different": "Synthetic original difference", "evidence": "Synthetic original evidence"}
+        sha = cards.put(self.store, "parent", original, self.store.family("parent")["structure"])
+        self.store.update_family("parent", spec={**self.store.family("parent")["spec"], "card_sha": sha})
+        self.recapture_reviewed_fixture("synthetic-card-control")
+        for field, value in (("inputs", ["cross_asset"]), ("holding", "intraday"), ("unapproved", SEALED),
+                             ("ablation", {"flat": True}), ("comparison", "Changed original comparison"), ("rebirth", {"row": "child", "different": "safe", "evidence": "safe"})):
+            rows = copy.deepcopy(self.projection.cards)
+            rows[0]["card"][field] = value
+            projection = replace(self.projection, cards=rows)
+            with self.subTest(field=field), self.assertRaises(ResearchStateError):
+                import_snapshot(self.audit, self.fresh, runtime_scope="synthetic-research-1", expected_evaluator=self.actual,
+                                artifact_root=self.repo, approval=replace(self.approval, safe_metadata_sha256=projection.sha256),
+                                metadata_projection=projection)
+            self.assertFalse(self.fresh.exists())
+        self.import_state()
+        working = self.working_store()
+        with self.assertRaises(sqlite3.IntegrityError):
+            working._exec("UPDATE research_baseline SET payload='{}' WHERE kind='card_matching'")
+        with self.assertRaises(sqlite3.IntegrityError):
+            working._exec("INSERT INTO research_baseline VALUES('rebirth_failure','invented','{}')")
+        self.check()
 
     def test_coherent_backup_captures_wal_rows_and_does_not_copy_runtime_files(self):
         with closing(sqlite3.connect(self.audit / "swarm.sqlite")) as snapshot:
@@ -151,9 +289,9 @@ class ResearchState(unittest.TestCase):
         self.assertTrue(all(row["kind"] != "run" for row in snapshot["artifacts"].values()))
         self.assertIn("incubator-bars-owed.json", snapshot["artifacts"])
         approval = ExportApproval(snapshot["snapshot_id"], snapshot["manifest_sha256"], snapshot["metadata_sha256"],
-                                  (program["sha"],), (), "explicit synthetic development metadata/code review only")
+                                  (program["sha"],), (), "explicit synthetic development metadata/code review only", self.projection.sha256)
         import_snapshot(archive, self.fresh, runtime_scope="synthetic-research-1", expected_evaluator=self.actual,
-                        artifact_root=self.repo, approval=approval)
+                        artifact_root=self.repo, metadata_projection=self.projection, approval=approval)
         working = self.working_store()
         for fid in ("parent", "child", "other"):
             self.assertEqual(working.lineages(fid), self.store.lineages(fid))
@@ -180,16 +318,16 @@ class ResearchState(unittest.TestCase):
         self.assertFalse((archive/self.validation["path"]).exists())
         self.assertFalse((archive/self.holdout["path"]).exists())
         approval = ExportApproval(snapshot["snapshot_id"], snapshot["manifest_sha256"], snapshot["metadata_sha256"],
-                                  (program["sha"],), (self.train["run_id"],), "separate synthetic exact bytes review")
+                                  (program["sha"],), (self.train["run_id"],), "separate synthetic exact bytes review", self.projection.sha256)
         with self.assertRaises(ResearchStateError):
             import_snapshot(archive, self.fresh, runtime_scope="synthetic-research-1", expected_evaluator=self.actual,
-                            artifact_root=self.repo, approval=replace(approval, train_run_ids=(self.validation["run_id"],)))
+                            artifact_root=self.repo, metadata_projection=self.projection, approval=replace(approval, train_run_ids=(self.validation["run_id"],)))
         self.assertFalse(self.fresh.exists())
         with self.assertRaises(ResearchStateError):
             import_snapshot(archive, self.fresh, runtime_scope="synthetic-research-1", expected_evaluator=self.actual,
-                            artifact_root=self.repo, approval=replace(approval, program_sha256s=(self.store.version("other", 1)["sha"],)))
+                            artifact_root=self.repo, metadata_projection=self.projection, approval=replace(approval, program_sha256s=(self.store.version("other", 1)["sha"],)))
         import_snapshot(archive, self.fresh, runtime_scope="synthetic-research-1", expected_evaluator=self.actual,
-                        artifact_root=self.repo, approval=approval)
+                        artifact_root=self.repo, metadata_projection=self.projection, approval=approval)
         self.assertEqual(self.working_store().run_result(self.train["run_id"])["approved_train_value"], "TRAIN_VISIBLE")
 
     def test_empty_artifact_selection_still_preserves_history_and_does_not_grant_export(self):
@@ -200,12 +338,12 @@ class ResearchState(unittest.TestCase):
         self.assertEqual(snapshot["metadata_sha256"], self.snapshot["metadata_sha256"])
         self.assertNotIn("export_approval", snapshot)
         approval = ExportApproval(snapshot["snapshot_id"], snapshot["manifest_sha256"], snapshot["metadata_sha256"],
-                                  (), (), "explicit synthetic metadata-only review, no program or Train export")
+                                  (), (), "explicit synthetic metadata-only review, no program or Train export", self.projection.sha256)
         with self.assertRaises(ResearchStateError):
             import_snapshot(archive, self.fresh, runtime_scope="synthetic-research-1", expected_evaluator=self.actual,
-                            artifact_root=self.repo, approval=replace(approval, program_sha256s=(self.store.version("parent", 1)["sha"],)))
+                            artifact_root=self.repo, metadata_projection=self.projection, approval=replace(approval, program_sha256s=(self.store.version("parent", 1)["sha"],)))
         import_snapshot(archive, self.fresh, runtime_scope="synthetic-research-1", expected_evaluator=self.actual,
-                        artifact_root=self.repo, approval=approval)
+                        artifact_root=self.repo, metadata_projection=self.projection, approval=approval)
         working = self.working_store()
         self.assertEqual(working.totals()["trials"], self.store.totals()["trials"])
         self.assertEqual(working.lineage_trials("child"), self.store.lineage_trials("child"))
@@ -376,7 +514,7 @@ class ResearchState(unittest.TestCase):
     def test_explicit_export_approval_is_required_and_cannot_expose_sealed_windows(self):
         with self.assertRaises(ResearchStateError):
             import_snapshot(self.audit, self.fresh, runtime_scope="synthetic-research-1", expected_evaluator=self.actual,
-                            artifact_root=self.repo, approval=None)
+                            artifact_root=self.repo, metadata_projection=self.projection, approval=None)
         for run in (self.validation, self.holdout):
             with self.assertRaises(ResearchStateError):
                 self.import_state(approval=replace(self.approval, train_run_ids=(run["run_id"],)))
@@ -404,7 +542,7 @@ class ResearchState(unittest.TestCase):
                 code.write_text(code.read_text() + "# modified\n")
             with self.assertRaises(ResearchStateError):
                 import_snapshot(snapshot, self.fresh, runtime_scope="synthetic-research-1", expected_evaluator=self.actual,
-                                artifact_root=self.repo, approval=self.approval)
+                                artifact_root=self.repo, metadata_projection=self.projection, approval=self.approval)
             self.assertFalse(self.fresh.exists())
 
     def test_capture_does_not_accept_a_forged_original_evaluator(self):
@@ -485,8 +623,9 @@ class ResearchState(unittest.TestCase):
                               "at": self.store.now(), "evaluator": asdict(self.old)} for number in range(1, historical_versions + 1)})
         self.audit = self.base / "historical-validation-audit"
         self.snapshot = capture_snapshot(self.source, self.audit, snapshot_id="synthetic-validation-rerun", original_evaluator=self.old)
+        self.projection = reviewed_fixture_projection(self.audit)
         self.approval = ExportApproval(self.snapshot["snapshot_id"], self.snapshot["manifest_sha256"],
-            self.snapshot["metadata_sha256"], self.approval.program_sha256s, self.approval.train_run_ids, "synthetic exact review")
+            self.snapshot["metadata_sha256"], self.approval.program_sha256s, self.approval.train_run_ids, "synthetic exact review", self.projection.sha256)
         self.import_state()
         working = self.working_store()
         self.check()
@@ -616,7 +755,7 @@ class ResearchState(unittest.TestCase):
                                metadata_sha256=snapshot["metadata_sha256"])
             target = self.base / f"bar-working-{index}"
             import_snapshot(audit, target, runtime_scope="synthetic-research-1", expected_evaluator=self.actual,
-                            artifact_root=self.repo, approval=approval)
+                            artifact_root=self.repo, metadata_projection=self.projection, approval=approval)
             store = SwarmStore(target, clock=self.clock)
             self.addCleanup(store.close)
             imported = store.family("child")["state"]
@@ -639,7 +778,7 @@ class ResearchState(unittest.TestCase):
         approval = replace(self.approval, snapshot_id=snapshot["snapshot_id"], manifest_sha256=snapshot["manifest_sha256"],
                            metadata_sha256=snapshot["metadata_sha256"])
         import_snapshot(self.base / "owed-audit", self.fresh, runtime_scope="synthetic-research-1", expected_evaluator=self.actual,
-                        artifact_root=self.repo, approval=approval)
+                        artifact_root=self.repo, metadata_projection=self.projection, approval=approval)
         working = self.working_store()
         for fid, sha in (("child", child_sha), ("other", other_sha), ("parent", parent_sha)):
             self.assertIn(sha, working.family(fid)["state"]["incubator_barred"])
@@ -656,7 +795,7 @@ class ResearchState(unittest.TestCase):
         approval = replace(self.approval, snapshot_id=snapshot["snapshot_id"], manifest_sha256=snapshot["manifest_sha256"],
                            metadata_sha256=snapshot["metadata_sha256"])
         import_snapshot(self.base / "unreadable-owed-audit", self.fresh, runtime_scope="synthetic-research-1", expected_evaluator=self.actual,
-                        artifact_root=self.repo, approval=approval)
+                        artifact_root=self.repo, metadata_projection=self.projection, approval=approval)
         working = self.working_store()
         for family in working.families():
             self.assertIsNotNone(family_bar(family["state"]))
@@ -696,7 +835,7 @@ class ResearchState(unittest.TestCase):
         approval = replace(self.approval, snapshot_id=snapshot["snapshot_id"], manifest_sha256=snapshot["manifest_sha256"],
                            metadata_sha256=snapshot["metadata_sha256"])
         import_snapshot(self.base / "mechanism-audit", self.fresh, runtime_scope="synthetic-research-1",
-                        expected_evaluator=self.actual, artifact_root=self.repo, approval=approval)
+                        expected_evaluator=self.actual, artifact_root=self.repo, metadata_projection=self.projection, approval=approval)
         working = self.working_store()
         family = working.family("other")
         graveyard = working._one("SELECT * FROM graveyard WHERE family='other'")
@@ -711,10 +850,11 @@ class ResearchState(unittest.TestCase):
                          ("op-premium-refutation", self.store.now(), "Volatility risk premium compensates selling index condors.",
                           "iron_condor", '["SPY"]', SEALED, json.dumps({"sealed": SEALED})))
         snapshot = capture_snapshot(self.source, self.base / "operator-audit", snapshot_id="operator-retirement", original_evaluator=self.old)
+        self.projection = reviewed_fixture_projection(self.base / "operator-audit")
         approval = replace(self.approval, snapshot_id=snapshot["snapshot_id"], manifest_sha256=snapshot["manifest_sha256"],
-                           metadata_sha256=snapshot["metadata_sha256"])
+                           metadata_sha256=snapshot["metadata_sha256"], safe_metadata_sha256=self.projection.sha256)
         import_snapshot(self.base / "operator-audit", self.fresh, runtime_scope="synthetic-research-1",
-                        expected_evaluator=self.actual, artifact_root=self.repo, approval=approval)
+                        expected_evaluator=self.actual, artifact_root=self.repo, metadata_projection=self.projection, approval=approval)
         working = self.working_store()
         self.assertIsNone(working.family("op-premium-refutation"))
         row = working._one("SELECT * FROM graveyard WHERE family='op-premium-refutation'")
@@ -722,6 +862,28 @@ class ResearchState(unittest.TestCase):
         self.assertNotIn(SEALED, row["lesson"])
         self.assertEqual(row["best"], "{}")
         self.assertIn("op-premium-refutation", cards.RebirthIndex(working).by_id)
+        self.check()
+
+    def test_legacy_operator_structure_cells_stay_exact_and_cannot_be_remapped_by_projection(self):
+        from league.swarm.research_state import _LEGACY_OPERATOR_STRUCTURES
+        from league.swarm import mechanism
+        for index, structure in enumerate(sorted(_LEGACY_OPERATOR_STRUCTURES)):
+            self.store._exec("INSERT INTO graveyard(family,at,mechanism,structure,roots,lesson,best) VALUES(?,?,?,?,?,?,?)",
+                (f"op-legacy-{index}", self.store.now(), "Volatility risk premium from implied variance", structure,
+                 '["SPY"]', mechanism.MARK + ": " + SEALED, "{}"))
+        original = cards.RebirthIndex(self.store)
+        self.recapture_reviewed_fixture("synthetic-legacy-operator")
+        rows = copy.deepcopy(self.projection.operators)
+        rows[0]["structure"] = "iron_condor"
+        changed = replace(self.projection, operators=rows)
+        with self.assertRaises(ResearchStateError):
+            import_snapshot(self.audit, self.fresh, runtime_scope="synthetic-research-1", expected_evaluator=self.actual,
+                artifact_root=self.repo, approval=replace(self.approval, safe_metadata_sha256=changed.sha256), metadata_projection=changed)
+        self.assertFalse(self.fresh.exists())
+        self.import_state()
+        projected = cards.RebirthIndex(self.working_store())
+        for fid in original.by_id:
+            self.assertEqual(projected.by_id[fid]["key"], original.by_id[fid]["key"])
         self.check()
 
     def test_stock_research_mutations_and_normal_train_pruning_remain_usable(self):

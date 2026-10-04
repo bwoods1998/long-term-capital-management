@@ -367,7 +367,10 @@ def put(store: Any, fid: str, card: Mapping[str, Any], structure: Any) -> str:
 
 
 def card_of(store: Any, fid: str) -> dict[str, Any] | None:
-    """The family's card: its own row, else (a fork) the card its spec's `card_sha` names. {card, sha, key, own} or None."""
+    """Own or inherited card, or None. Isolated projections explicitly distinguish
+    original `sha`/source_identity_sha from the displayed projected_content_sha256;
+    the stored DB sha continues to hash its actual displayed card bytes.
+    """
     if not _tables(store):
         return None
     row = store._one("SELECT family, sha, card, key FROM family_cards WHERE family=?", (fid,))
@@ -378,11 +381,56 @@ def card_of(store: Any, fid: str) -> dict[str, Any] | None:
             sha = (json.loads(fam["spec"]) or {}).get("card_sha") if fam else None
         except (TypeError, ValueError):
             sha = None
-        row = store._one("SELECT family, sha, card, key FROM family_cards WHERE sha=? ORDER BY at LIMIT 1", (sha,)) if sha else None
+        if sha and _isolated(store):
+            row = store._one("SELECT c.family,c.sha,c.card,c.key FROM family_cards c JOIN research_baseline b "
+                             "ON b.kind='family_card' AND b.identity=c.family "
+                             "WHERE json_extract(b.payload,'$.source_identity_sha')=? ORDER BY c.at,c.rowid LIMIT 1", (sha,))
+        if row is None and sha:
+            row = store._one("SELECT family, sha, card, key FROM family_cards WHERE sha=? ORDER BY at LIMIT 1", (sha,))
     if row is None:
         return None
-    return {"card": json.loads(row["card"]), "sha": row["sha"], "key": json.loads(row["key"]), "own": own,
-            "family": row["family"]}
+    out = {"card": json.loads(row["card"]), "sha": row["sha"], "key": json.loads(row["key"]), "own": own,
+           "family": row["family"]}
+    if _isolated(store):
+        baseline = store._one("SELECT payload FROM research_baseline WHERE kind='family_card' AND identity=?", (row["family"],))
+        if baseline:
+            projection = json.loads(baseline["payload"])
+            content_sha = hashlib.sha256(canonical(out["card"]).encode()).hexdigest()
+            if content_sha != projection["projected_content_sha256"] or row["sha"] != card_sha(out["card"]):
+                raise ValueError("isolated card projection content changed")
+            # `sha` is the inherited original evidence identity. The changed
+            # display bytes have their own explicit content hash and DB sha.
+            out.update(sha=projection["source_identity_sha"], source_identity_sha=projection["source_identity_sha"],
+                       projected_content_sha256=content_sha, isolation_projected=True)
+    return out
+
+
+def _isolated(store: Any) -> bool:
+    return store._one("SELECT 1 AS ok FROM kv WHERE key='isolated_research_state'") is not None
+
+
+def family_match_keys(store: Any, fid: str, entry: Mapping[str, Any], structure: Any,
+                      mechanism: Any = "", dte: Any = None) -> list[dict[str, Any]]:
+    """Original controlled matching for an imported card; ordinary research uses its current words."""
+    if _isolated(store):
+        row = store._one("SELECT payload FROM research_baseline WHERE kind='card_matching' AND identity=?", (fid,))
+        if row:
+            authority = json.loads(row["payload"])
+            if authority["source_card_sha"] != entry["sha"] or authority["keys"] is None:
+                raise ValueError("isolated original card matching identity is unresolved")
+            return authority["keys"]
+        if entry.get("isolation_projected") is True:
+            # A new fork still inherits its original card's input authority;
+            # safe display prose cannot make those historical inputs disappear.
+            row = store._one("SELECT payload FROM research_baseline WHERE kind='card_matching' AND identity=?", (entry["family"],))
+            authority = json.loads(row["payload"]) if row else None
+            if not authority or authority["source_card_sha"] != entry["sha"] or not authority["keys"]:
+                raise ValueError("isolated inherited card matching identity is unresolved")
+            current, _ = match_keys(entry["card"], structure, mechanism, dte)
+            inputs = sorted(set(current[0]["inputs"]) | set(authority["keys"][0]["inputs"]))
+            classes = list(dict.fromkeys(key["class"] for key in current + authority["keys"]))
+            return [{**current[0], "class": cls, "inputs": inputs} for cls in classes]
+    return match_keys(entry["card"], structure, mechanism, dte)[0]
 
 
 def add_evidence(store: Any, fid: str, sha: str, version: int | None, kind: str, verdict: str, detail: Mapping[str, Any]) -> int:
@@ -637,11 +685,14 @@ def cell_yields(store: Any, settings: Mapping[str, Any] | None, since: str) -> d
     screen = drift_settings(settings or {}) or (evidence_mod.DRIFT_MIN_T, None)
     own: dict[str, dict[str, Any]] = {}
     by_sha: dict[str, dict[str, Any]] = {}
+    original = ({row["identity"]: json.loads(row["payload"]) for row in store._all(
+        "SELECT identity,payload FROM research_baseline WHERE kind='card_matching'")} if _isolated(store) else {})
     if _tables(store):
         for r in store._all("SELECT family, sha, key FROM family_cards ORDER BY at, family"):
             key = json.loads(r["key"])
             own[r["family"]] = key
-            by_sha.setdefault(r["sha"], key)
+            identity = (original.get(r["family"]) or {}).get("source_card_sha") or r["sha"]
+            by_sha.setdefault(identity, key)
     cell_by: dict[str, tuple[str, str, str]] = {}
     alive: set[str] = set()
     for f in store._all("SELECT id, retired_at, mechanism, structure, spec FROM families WHERE born_at >= ? "
@@ -652,7 +703,9 @@ def cell_yields(store: Any, settings: Mapping[str, Any] | None, since: str) -> d
             spec = {}
         spec = spec if isinstance(spec, Mapping) else {}
         key = own.get(f["id"]) or (by_sha.get(str(spec.get("card_sha"))) if spec.get("card_sha") else None)
-        if key is None:
+        if f["id"] in original:
+            key = original[f["id"]]["cell_key"]
+        elif key is None:
             key = infer_key(f["mechanism"], f["structure"], spec.get("dte"))
         if key is None:
             continue
@@ -730,8 +783,19 @@ class RebirthIndex:
             for r in store._all("SELECT family, card, key, at FROM family_cards ORDER BY at, family"):
                 cards[r["family"]] = {"key": json.loads(r["key"]), "card": json.loads(r["card"]), "at": r["at"]}
         families = {f["id"]: f for f in store._all("SELECT id, lineage, retire_reason, spec FROM families")}
+        authority = ({r["identity"]: json.loads(r["payload"]) for r in store._all(
+            "SELECT identity,payload FROM research_baseline WHERE kind='rebirth_failure'")} if _isolated(store) else {})
+        self.unknown_historical: list[dict[str, Any]] = []
         self.rows: list[dict[str, Any]] = []
         for g in store._all("SELECT family, at, mechanism, structure, roots, lesson FROM graveyard ORDER BY at, family"):
+            original = authority.get(g["family"])
+            if original is not None:
+                if original["key"] is None:
+                    self.unknown_historical.append(original)
+                else:
+                    self.rows.append({**original, "mechanism": _text(g["mechanism"])[:300],
+                                      "lesson": lesson_view(g["lesson"])[:400], "isolation_projected": True})
+                continue
             fam = families.get(g["family"])
             tag = tag_of(g, fam)
             if tag not in MECHANISM_VERDICTS:
@@ -826,7 +890,7 @@ class RebirthIndex:
     def needs_claim(self, row: Mapping[str, Any]) -> bool:
         """Does a matched row by itself need a rebirth claim: every mechanism-verdict row while `architect.cell_yield` is
         off; with it on, every row of an exhausted cell and, in an open cell, every row but the `YIELD_EXCUSED`."""
-        return row["tag"] not in YIELD_EXCUSED or self.exhausted(cell_of(row["key"]))
+        return row.get("isolation_projected") is True or row["tag"] not in YIELD_EXCUSED or self.exhausted(cell_of(row["key"]))
 
     def yield_view(self) -> dict[str, Any] | None:
         """THE CELL'S YIELD for a pass's event (Train figures only): the settings, and each cell with a birth in the
@@ -893,6 +957,13 @@ class RebirthIndex:
         lesson}. ok with no match; ok with a match only through a valid `rebirth` (the module docstring). THE CELL'S
         YIELD: ok with "open" when every matched row is one an open cell excuses; "dropped" (why) when the card's claim
         there did not hold and must be stripped before the card is stored."""
+        keys, _ = match_keys(card, structure, mechanism, dte)
+        unknown = [row for row in self.unknown_historical if any(
+            key["family"] == row["structure_family"] and (
+                not row["inputs"] or not key.get("inputs") or set(row["inputs"]) & set(key["inputs"])) for key in keys)]
+        if unknown:
+            return {"ok": False, "matched": [row["row"] for row in unknown][-12:], "row": unknown[-1]["row"],
+                    "reason": "historical failure cell is unresolved for these structure/inputs; original evidence remains host-only"}
         hit, text_class = self.matched(card, structure, mechanism, dte)
         if not hit:
             return {"ok": True, "matched": []}
@@ -941,6 +1012,9 @@ class RebirthIndex:
                              f"({', '.join(ids[-6:])})")
             return out
         out.update(row=row["row"], lesson=row["lesson"], tag=row["tag"])
+        if row.get("isolation_projected") is True:
+            out["reason"] = "historical rebirth requires its original host-only prose comparison; a safe display projection grants no waiver"
+            return out
         roots = {str(r).lower() for r in ((self.settings.get("gym") or {}).get("roots") or ())}
         different = _content(reb.get("different")) - _content(row["mechanism"]) - {_stem(w) for w in _SURFACE | roots}
         if len(different) < 3:
@@ -1012,5 +1086,5 @@ class RebirthIndex:
 __all__ = ["MECHANISM_CLASSES", "INPUTS", "HOLDING", "STRUCTURE_FAMILIES", "FLAT_REFUSED", "MECHANISM_VERDICTS", "DEFAULT_ABLATION",
            "validate", "canonical", "card_sha", "structure_family", "flat_allowed", "key_of", "key_text", "ensure", "put",
            "card_of", "add_evidence", "evidence", "vocabulary_text", "brief_text", "infer_key", "infer_inputs", "match_inputs",
-           "match_keys", "matches", "cell_of", "RebirthIndex", "YIELD_EXCUSED", "CELL_YIELD_DEFAULTS", "WILSON_Z",
+           "match_keys", "family_match_keys", "matches", "cell_of", "RebirthIndex", "YIELD_EXCUSED", "CELL_YIELD_DEFAULTS", "WILSON_Z",
            "wilson_upper", "cell_yield_settings", "cell_yields"]

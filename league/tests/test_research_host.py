@@ -25,7 +25,7 @@ from league.swarm import research_host as host
 from league.swarm import research_sandbox as sandbox
 from league.swarm.daily_compute import (DailyBudget, DayCostEvidence, InventoryEvidence,
                                        ResourceBound, TariffEvidence)
-from league.swarm.research_state import (ExportApproval, artifact_identity, capture_snapshot, import_snapshot)
+from league.swarm.research_state import (ExportApproval, SafeMetadataProjection, artifact_identity, capture_snapshot, import_snapshot)
 from league.swarm.research_transport import (ModelCapability, ModelPolicy, ModelReply, ResearchPolicy)
 from league.swarm.store import SwarmStore
 from league.tests.test_research_transport import FakeProvider, FakeDriver, BOX, CODE
@@ -65,10 +65,12 @@ class ResearchHost(unittest.TestCase):
         store.put("research_evaluator", asdict(identity)); store.close()
         archive = self.base/"host-only-snapshot"
         snapshot = capture_snapshot(source, archive, snapshot_id="synthetic-host-source", original_evaluator=identity)
+        projection = SafeMetadataProjection(snapshot["metadata_sha256"], (), (), (), (),
+                                             "Reviewed synthetic empty metadata: zero families, versions, cards, operators")
         approval = ExportApproval(snapshot["snapshot_id"], snapshot["manifest_sha256"], snapshot["metadata_sha256"], (), (),
-                                  "synthetic empty source fixture, no real programs or market evidence")
+                                  "synthetic empty source fixture, no real programs or market evidence", projection.sha256)
         import_snapshot(archive, self.state, runtime_scope="synthetic-host", expected_evaluator=identity,
-                        artifact_root=self.artifact, approval=approval)
+                        artifact_root=self.artifact, approval=approval, metadata_projection=projection)
         self.now = time.time()
         day = dt.datetime.fromtimestamp(self.now, dt.timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
         self.bound = ResourceBound("synthetic-reviewed", "gym", 1, "1", "1", "0", "0.01", "synthetic hard resource ceilings")
@@ -326,11 +328,13 @@ class ResearchHost(unittest.TestCase):
         store.close()
         archive = self.base/"nonempty-archive"
         snapshot = capture_snapshot(source, archive, snapshot_id="synthetic-survivor-source", original_evaluator=identity)
+        from league.tests.test_research_state import reviewed_fixture_projection
+        projection = reviewed_fixture_projection(archive)
         approval = ExportApproval(snapshot["snapshot_id"], snapshot["manifest_sha256"], snapshot["metadata_sha256"],
-                                  (version["sha"],), (), "synthetic source/program and inherited counters, no market data")
+                                  (version["sha"],), (), "synthetic source/program and inherited counters, no market data", projection.sha256)
         state = self.base/"nonempty-isolated"
         import_snapshot(archive, state, runtime_scope=self.policy.scope, expected_evaluator=identity,
-                        artifact_root=self.artifact, approval=approval)
+                        artifact_root=self.artifact, approval=approval, metadata_projection=projection)
         imported = SwarmStore(state, readonly=True)
         try:
             self.assertEqual(imported.lineage_trials(family["id"]), 7)

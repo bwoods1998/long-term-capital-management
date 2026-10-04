@@ -123,10 +123,14 @@ class ResearchController:
         return chosen
 
     def _funnel(self, now: float):
+        if self.store._one("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='research_baseline'") is None:
+            raise ResearchControllerError("daily research funnel requires the immutable imported-run baseline")
         start = dt.datetime.fromtimestamp(now, dt.timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
         since = start.strftime("%Y-%m-%dT%H:%M:%SZ")
-        rows = self.store._all("SELECT window,status,COUNT(*) AS runs,SUM(trials) AS trials FROM runs "
-                               "WHERE at>=? GROUP BY window,status", (since,))
+        until = (start + dt.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        rows = self.store._all("SELECT window,status,COUNT(*) AS runs,SUM(trials) AS trials FROM runs r "
+                               "WHERE at>=? AND at<? AND NOT EXISTS (SELECT 1 FROM research_baseline b "
+                               "WHERE b.kind='run' AND b.identity=r.run_id) GROUP BY window,status", (since, until))
         families = self.store.families()
         return {"utc_day": start.date().isoformat(), "families": len(families),
                 "alive": sum(not f.get("retired_at") for f in families),

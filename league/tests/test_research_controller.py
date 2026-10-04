@@ -46,6 +46,10 @@ class ResearchControllerTest(unittest.TestCase):
         self.now = 1791158400.0
         self.store = SwarmStore(Path(self.temp.name), clock=lambda: self.now)
         self.addCleanup(self.store.close)
+        # Explicit empty synthetic import history; production build_controller
+        # requires the complete guarded import receipt via assert_isolated_state.
+        from league.swarm.research_state import _BASELINE_SQL
+        self.store._db.executescript(_BASELINE_SQL)
         self.broker, self.researcher, self.tournament, self.architect = Broker(), Actor(), Actor(), Actor()
         self.state_checks = []
         self.controller = ResearchController(self.store, self.broker, ControllerConfig("private-research"),
@@ -74,6 +78,47 @@ class ResearchControllerTest(unittest.TestCase):
         self.assertEqual(self.state_checks, [True])
         self.assertEqual(row["funnel"]["unseen_evaluations_by_controller"], 0)
         self.assertEqual(self.store.totals(), before)
+
+    def test_daily_funnel_excludes_same_day_imported_history_but_preserves_lineage_trials(self):
+        from dataclasses import asdict
+        from league.swarm.research_state import ArtifactIdentity, ExportApproval, artifact_identity, capture_snapshot, import_snapshot
+        from league.tests.test_research_state import reviewed_fixture_projection
+        from league.tests.swarm_fakes import result
+        old = ArtifactIdentity("synthetic-old-image", "synthetic-old-bundle", "a"*64)
+        self.store.put("research_evaluator", asdict(old))
+        family = self.family("same-day-survivor")
+        version = self.store.add_version(family, "NEEDS = {'roots': ['SPY']}\nPARAMS = {}\ndef decide(ctx):\n    return []\n", {}, author="synthetic")
+        for window in ("train", "validation", "holdout"):
+            row = result("historic-same-day-" + window)
+            row["trials"] = 7
+            self.store.add_run(family, version["n"], row, window=window, stress=1, purpose=window, prune=False)
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        base = Path(temporary.name)
+        repo = Path(__file__).resolve().parents[2]
+        actual = artifact_identity("synthetic-reviewed-checkpoint", repo)
+        snapshot = capture_snapshot(Path(self.temp.name), base/"audit", snapshot_id="same-day-source", original_evaluator=old)
+        projection = reviewed_fixture_projection(base/"audit")
+        approval = ExportApproval(snapshot["snapshot_id"], snapshot["manifest_sha256"], snapshot["metadata_sha256"], (), (),
+                                  "Explicit synthetic same-day history and safe development metadata review", projection.sha256)
+        import_snapshot(base/"audit", base/"working", runtime_scope="private-research", expected_evaluator=actual,
+                        artifact_root=repo, approval=approval, metadata_projection=projection)
+        working = SwarmStore(base/"working", clock=lambda: self.now)
+        self.addCleanup(working.close)
+        self.controller.store = working
+        self.assertEqual(self.controller._funnel(self.now)["runs"], [])
+        self.assertEqual(working.lineage_trials(family), self.store.lineage_trials(family))
+        new = result("new-isolated-train")
+        new["trials"] = 3
+        working.add_run(family, version["n"], new, window="train", stress=1, purpose="train", prune=False)
+        self.assertEqual(self.controller._funnel(self.now)["runs"], [{"window": "train", "status": "ok", "runs": 1, "trials": 3}])
+        self.assertEqual(working._one("SELECT count(*) n FROM runs")["n"], 4)
+        self.assertEqual(working.lineage_trials(family), self.store.lineage_trials(family) + 3)
+
+    def test_daily_funnel_refuses_missing_baseline_instead_of_claiming_copied_runs_are_fresh(self):
+        self.store._exec("DROP TABLE research_baseline")
+        with self.assertRaisesRegex(ResearchControllerError, "immutable imported-run baseline"):
+            self.controller._funnel(self.now)
 
     def test_no_budget_room_or_wrong_scope_consumes_no_cycles_trials_or_actor_calls(self):
         self.family("survivor")

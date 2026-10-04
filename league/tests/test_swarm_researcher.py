@@ -666,3 +666,83 @@ class LiteratureHistory(unittest.TestCase):
         self.assertEqual(out[4]["content"], "next")
         self.assertIn('"arXiv:1602.00865v1"', out[5]["content"], "a call at the end of the history is said too")
         self.assertEqual(sanitize(items[:1] + items[2:3] + items[4:6]), [items[0], items[2], items[4], items[5]], "no literature: unchanged")
+
+
+class ProjectedMechanismInheritance(unittest.TestCase):
+    def projected_pair(self, *, historical_pass=False):
+        from dataclasses import asdict
+        from league.swarm import cards
+        from league.swarm.research_state import ArtifactIdentity, ExportApproval, artifact_identity, capture_snapshot, import_snapshot
+        from league.tests.test_research_state import reviewed_fixture_projection
+        from league.tests.test_swarm_cards import CARD, MECH
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        base, clock = Path(temp.name), Clock()
+        source = SwarmStore(base/'source', clock=clock)
+        self.addCleanup(source.close)
+        old = ArtifactIdentity('synthetic-old-image', 'synthetic-old-bundle', 'a'*64)
+        source.put('research_evaluator', asdict(old))
+        card = cards.validate(CARD)[0]
+        # Original words add an input absent from the declared card. Sanitized
+        # display words must not erase this matching authority.
+        mechanism = MECH + ' implied volatility skew wings smile skew wings skew smile'
+        spec = {'id': 'parent', 'mechanism': mechanism, 'structure': 'debit_vertical', 'roots': ['SPY'],
+                'dte': [0,5], 'card_sha': cards.card_sha(card)}
+        source.add_family(spec, origin='synthetic')
+        cards.put(source, 'parent', card, 'debit_vertical')
+        code = "NEEDS = {'roots': ['SPY']}\nPARAMS = {'signal_on': 1}\ndef decide(ctx):\n    return []\n"
+        source.add_version('parent', code, {}, author='synthetic')
+        source.add_family({**spec, 'id': 'child'}, origin='fork', parent='parent')
+        source.add_version('child', code, {}, author='synthetic')
+        cards.add_evidence(source, 'parent', spec['card_sha'], 1, 'mechanism_test', 'failed', {'below_base': True})
+        cards.add_evidence(source, 'child', spec['card_sha'], 1, 'mechanism_test', 'failed', {'below_base': True})
+        if historical_pass:
+            cards.add_evidence(source, 'parent', spec['card_sha'], 2, 'mechanism_test', 'passed', {})
+        source.add_run('parent', 1, result('exposed-historical-train'), window='train', stress=1, purpose='train')
+        repo = Path(__file__).resolve().parents[2]
+        actual = artifact_identity('synthetic-reviewed-checkpoint', repo)
+        snapshot = capture_snapshot(base/'source', base/'audit', snapshot_id='synthetic-projected-lineage', original_evaluator=old)
+        projection = reviewed_fixture_projection(base/'audit')
+        approval = ExportApproval(snapshot['snapshot_id'], snapshot['manifest_sha256'], snapshot['metadata_sha256'], (), (),
+                                  'Explicit synthetic original cards, parameters and safe descriptions review', projection.sha256)
+        import_snapshot(base/'audit', base/'working', runtime_scope='synthetic-lineage', expected_evaluator=actual,
+                        artifact_root=repo, approval=approval, metadata_projection=projection)
+        working = SwarmStore(base/'working', clock=clock)
+        self.addCleanup(working.close)
+        settings = copy.deepcopy(S.DEFAULTS)
+        original = Researcher(source, None, None, settings, clock=clock, background=False)
+        projected = Researcher(working, None, None, settings, clock=clock, background=False)
+        return source, working, original, projected
+
+    def test_same_card_and_fork_inherit_exact_original_hard_and_related_failures(self):
+        from league.swarm import cards
+        source, working, original, projected = self.projected_pair()
+        for family in ('parent', 'child'):
+            with self.subTest(family=family):
+                before, after = original.mechanism_lineage(family), projected.mechanism_lineage(family)
+                self.assertEqual(after, before)
+                self.assertEqual((after['failed'], after['hard']), (2,2))
+                self.assertEqual(cards.card_of(working, family)['sha'], cards.card_of(source, family)['sha'])
+                self.assertIn('iv_skew', cards.family_match_keys(working, family, cards.card_of(working, family), 'debit_vertical')[0]['inputs'])
+        working.add_family({**working.family('child')['spec'], 'id': 'new-fork'}, origin='fork', parent='child')
+        new_lineage = projected.mechanism_lineage('new-fork')
+        self.assertEqual((new_lineage['failed'], new_lineage['hard']), (2,2))
+        self.assertIn('iv_skew', cards.family_match_keys(working, 'new-fork', cards.card_of(working, 'new-fork'), 'debit_vertical')[0]['inputs'])
+        original_classes = {key['class'] for key in cards.family_match_keys(working, 'child', cards.card_of(working, 'child'), 'debit_vertical')}
+        inherited_classes = {key['class'] for key in cards.family_match_keys(working, 'new-fork', cards.card_of(working, 'new-fork'), 'debit_vertical')}
+        self.assertTrue(original_classes <= inherited_classes)
+        working._exec('DROP TRIGGER research_baseline_no_update')
+        working._exec("UPDATE research_baseline SET payload='{}' WHERE kind='card_matching' AND identity='child'")
+        with self.assertRaises((ValueError, KeyError)):
+            projected.mechanism_lineage('child')
+
+    def test_historical_broad_is_exposure_without_current_pass_or_qualification(self):
+        _, working, _, projected = self.projected_pair(historical_pass=True)
+        lineage = projected.mechanism_lineage('child')
+        self.assertTrue(lineage['broad'], 'original broad exposure prevents a falsely blind experiment')
+        self.assertFalse(lineage['passed'], 'historical positive mechanism evidence is not a current pass')
+        family = working.family('child')
+        self.assertEqual(family['band'], 'gym')
+        self.assertIsNone(family['validated_version'])
+        self.assertIsNone(family['best_validation'])
+        self.assertFalse(family['state']['gate_ready'])

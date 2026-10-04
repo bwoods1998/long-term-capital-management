@@ -2519,34 +2519,22 @@ class Researcher:
                                tuple(lines))
         ids = [f["id"] for f in fams]
         marks = ",".join("?" * len(ids))
-        own = {r["family"]: r for r in self.store._all(f"SELECT family, sha, card FROM family_cards WHERE family IN ({marks})",
-                                                        tuple(ids))}
-        by_sha: dict[str, Any] = {}
         me = next((f for f in fams if f["id"] == fid), None)
         try:
             dte = (json.loads(me["spec"] or "{}") or {}).get("dte") if me else None
         except (TypeError, ValueError):
             dte = None
-        keys, _ = cards.match_keys(entry["card"], me["structure"] if me else None, (me or {}).get("mechanism") or "", dte)
+        keys = cards.family_match_keys(self.store, fid, entry, me["structure"] if me else None,
+                                       (me or {}).get("mechanism") or "", dte)
         cell = cards.cell_of(entry["key"])
         mine: dict[str, tuple[str | None, bool, tuple[str, str, str] | None]] = {}  # family -> (card sha, same hypothesis, cell)
         for f in fams:
-            row = own.get(f["id"])
-            if row is not None:
-                sha, card = row["sha"], json.loads(row["card"])
-            else:
-                try:
-                    sha = (json.loads(f["spec"] or "{}") or {}).get("card_sha")
-                except (TypeError, ValueError):
-                    sha = None
-                if sha and sha not in by_sha:
-                    found = self.store._one("SELECT card FROM family_cards WHERE sha=? ORDER BY at LIMIT 1", (sha,))
-                    by_sha[sha] = json.loads(found["card"]) if found else None
-                card = by_sha.get(sha) if sha else None
-            if card:
+            other = cards.card_of(self.store, f["id"])
+            sha = other["sha"] if other else None
+            if other:
                 # Their inputs are read as ours are (`cards.match_inputs`: declared, and named by their own words), as the
                 # rebirth refusal reads a dead carded row.
-                theirs = {**cards.key_of(card, f["structure"]), "inputs": cards.match_inputs(card, f["mechanism"])}
+                theirs = cards.family_match_keys(self.store, f["id"], other, f["structure"], f["mechanism"])[0]
                 mine[f["id"]] = (sha, any(cards.matches(k, theirs) for k in keys), cards.cell_of(theirs))
             else:
                 mine[f["id"]] = (sha, False, None)
