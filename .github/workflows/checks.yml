@@ -76,6 +76,12 @@ jobs:
         # of the repository is standard library only. Nothing to install on a tree without the file.
         run: |
           if [ -f requirements-gym.txt ]; then python3 -m pip install --disable-pip-version-check -r requirements-gym.txt; fi
+      - name: Install the isolated research controller's namespace runtime
+        if: ${{ hashFiles('league/swarm/research_sandbox.py') != '' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes bubblewrap
+          /usr/bin/bwrap --unshare-all --die-with-parent --ro-bind / / --proc /proc --dev /dev /usr/bin/true
       - name: Run the first run's runtime tests
         # Both suites run until the full prune (Wave 2b) deletes ltcm/ and its tests.
         run: python3 -m unittest discover -s ltcm/tests -t .
