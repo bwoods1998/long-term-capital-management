@@ -310,6 +310,24 @@ class Mirror(HookCase):
         self.assertEqual(step.unknown_kinds, {}, "skipped as private diagnostics, not as unknown kinds")
         self.assertEqual([r.kind for r in ledger.iter()], ["swarm.note"])
 
+    def test_isolated_authority_journals_stay_private_and_preserve_the_mirror_cursor(self):
+        private = ("swarm.daily_budget", "swarm.research_broker", "swarm.research_adapter",
+                   "swarm.isolated_validation", "swarm.isolated_controller", "swarm.research_host")
+        store = SwarmStore(self.root)
+        family = store.add_family(SPEC, origin="seed")
+        for kind in private:
+            store.event(kind, None, {"private_receipt": "synthetic-only", "pid": 42})
+        last = store.event("swarm.note", family["id"], {"text": "condors pay on quiet days"})
+        store.close()
+        ledger = Ledger(self.root / "ledger.sqlite")
+        self.addCleanup(ledger.close)
+        step = self.step()
+        self.assertEqual(step.mirror(ledger), len(private) + 1)
+        self.assertEqual(step.unknown_kinds, {})
+        self.assertEqual([row.kind for row in ledger.iter()], ["swarm.note"])
+        self.assertEqual(json.loads((self.root / "swarm-mirror.json").read_text())["seq"], last)
+        self.assertEqual(step.mirror(ledger), 0)
+
     def test_every_kind_the_swarm_writes_is_a_ledger_kind_or_skipped(self):
         """The mirror no longer stalls on a new kind, but a new kind should still be decided: public, private, or kept in
         the swarm's table. This catches the next one in CI instead of in the House's tick."""
