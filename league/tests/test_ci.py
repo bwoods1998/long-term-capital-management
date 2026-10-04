@@ -7,6 +7,31 @@ from league import ci
 
 
 class GuardTest(unittest.TestCase):
+    def test_compute_commitments_and_dispatch_cannot_be_changed_or_shadowed_automatically(self):
+        for module in ("compute", "daily_compute", "pool"):
+            for path in (f"league/swarm/{module}.py", f"league/swarm/{module}/__init__.py",
+                         f"League/Swarm/{module}.PY", f"league/swarm/{module}.so"):
+                for role in (*ci.ROLE_PATHS, None, "engineer/data", "engineer/research"):
+                    self.assertTrue(ci.guard([path], role), (path, role))
+
+        # The running release must refuse new aliases too: they need not modify
+        # the protected .py at all to replace the next process's budget code.
+        from league.updater import protected_changes
+
+        with tempfile.TemporaryDirectory() as tmp:
+            running, incoming = Path(tmp) / "running", Path(tmp) / "incoming"
+            protected = []
+            for module in ("compute", "daily_compute", "pool"):
+                for rel in (f"league/swarm/{module}/__init__.py", f"league/swarm/{module}.so"):
+                    target = incoming / rel
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(b"candidate budget override")
+                    protected.append(rel)
+            ordinary = incoming / "league/swarm/library.py"
+            ordinary.write_text("VALUE = 1\n")
+            self.assertEqual(sorted(p.split(":")[0] for p in protected_changes(incoming, running)), sorted(protected))
+        self.assertEqual(ci.guard(["league/swarm/computex.py", "league/swarm/library.py"], None), [])
+
     def test_each_role_has_its_own_paths(self):
         self.assertEqual(ci.guard(["league/strategies/new.py", "league/strategies/registry.json"], "architect"), [])
         self.assertEqual(ci.guard(["league/tools/vwap.py", "league/tests/test_tool_vwap.py"], "toolsmith"), [])
@@ -47,8 +72,8 @@ class GuardTest(unittest.TestCase):
                 (root / "league" / "swarm").mkdir(parents=True)
                 (root / "league" / "ops" / "budget.py").write_text(text)
                 (root / "league" / "ops" / "jobs.py").write_text(text)
-                (root / "league" / "swarm" / "pool.py").write_text(text)
-            # The research-class file beside them (league/swarm/pool.py) changed too, and is not the owner's deploy.
+                (root / "league" / "swarm" / "library.py").write_text(text)
+            # The research-class file beside them (league/swarm/library.py) changed too, and is not the owner's deploy.
             self.assertEqual([p.split(":")[0] for p in protected_changes(incoming, running)],
                              ["league/ops/budget.py", "league/ops/jobs.py"])
 
@@ -84,7 +109,7 @@ class GuardTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             running, incoming = Path(tmp) / "running", Path(tmp) / "incoming"
             for root, text in ((running, "X = 1\n"), (incoming, "X = 2\n")):
-                for rel in ("league/swarm/bands.py", "ltcm/data/us_equity_session.py", "league/swarm/pool.py"):
+                for rel in ("league/swarm/bands.py", "ltcm/data/us_equity_session.py", "league/swarm/library.py"):
                     (root / rel).parent.mkdir(parents=True, exist_ok=True)
                     (root / rel).write_text(text)
             self.assertEqual([p.split(":")[0] for p in protected_changes(incoming, running)],
@@ -377,7 +402,7 @@ class TheEngineersLanes(unittest.TestCase):
             (root / "league" / "swarm").mkdir(parents=True)
             (root / "league" / "tests").mkdir()
             (root / "league" / "swarm" / "loop.py").write_text("A = 1\n")
-            (root / "league" / "swarm" / "pool.py").write_text("B = 1\n")
+            (root / "league" / "swarm" / "library.py").write_text("B = 1\n")
             (root / "league" / "swarm" / "models.py").write_text("C = 1\n")
             git("add", "-A")
             git("commit", "-q", "-m", "base")
@@ -392,10 +417,10 @@ class TheEngineersLanes(unittest.TestCase):
                               f"({', '.join((*self.SURFACES['research'], ci.ENGINEER_TESTS))})"])
             self.assertEqual(ci.guard_branch(base, "HEAD", "engineer/faster-loop-0123abcd", root=root),
                              [f"engineer/faster-loop-0123abcd: not a branch name of the form {ci.BRANCH_FORMS}"])
-            (root / "league" / "swarm" / "pool.py").write_text("B = 2\n")
+            (root / "league" / "swarm" / "library.py").write_text("B = 2\n")
             git("commit", "-q", "-am", "outside")
             self.assertEqual(ci.guard_branch(base, "HEAD", "engineer/scheduler/faster-loop-0123abcd", root=root),
-                             [f"league/swarm/pool.py: outside what the engineer/scheduler may change "
+                             [f"league/swarm/library.py: outside what the engineer/scheduler may change "
                               f"(league/swarm/loop.py, {ci.ENGINEER_TESTS})"])
             # A path that feeds or enforces the budget is no lane's at all (FORBIDDEN, V3-A integration).
             (root / "league" / "swarm" / "models.py").write_text("C = 2\n")

@@ -1113,7 +1113,7 @@ def protected_changes(incoming: Path, running: Path) -> list[str]:
     configuration (`ci.MERGE_ONLY`, whose dials only the running release's checks let through here). Only the release
     trees are compared: `gateway/` and `.github/` never reach the box as files (the workflows are pinned by
     `TRUSTED_WORKFLOWS_SHA256`)."""
-    from .ci import FORBIDDEN
+    from .ci import guard
 
     def files(root: Path) -> dict[str, Path]:
         out = {}
@@ -1124,8 +1124,7 @@ def protected_changes(incoming: Path, running: Path) -> list[str]:
         return out
 
     def guarded(name: str) -> bool:
-        lowered = name.lower()
-        return any(lowered == f.lower() or (f.endswith("/") and lowered.startswith(f.lower())) for f in FORBIDDEN)
+        return bool(guard([name], None))
 
     mine, theirs = files(Path(running)), files(Path(incoming))
     changed = []

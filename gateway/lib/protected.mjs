@@ -31,6 +31,8 @@ export const MERGE_FORBIDDEN = Object.freeze([
   // What feeds and enforces the budget rule (V3-A integration): the Sail guard, the model router's Claude room, the
   // job context and the close economics (the budget's p30, the public Net; V3-A review). The settings' overlay is below.
   'league/swarm/guard.py', 'league/swarm/models.py', 'league/ops/context.py', 'league/ops/economics.py',
+  // Resource commitments and their dispatch path enforce the research ceiling too.
+  'league/swarm/compute.py', 'league/swarm/daily_compute.py', 'league/swarm/pool.py',
   // And the framework that schedules and runs the House's jobs, and computes the realized p30 the budget is funded
   // from: the whole tree, after its named files so that a refusal names the file.
   'league/ops/',
