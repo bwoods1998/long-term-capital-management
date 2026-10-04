@@ -63,6 +63,22 @@ def usd(value: Any) -> str | None:
     return None if value is None else format(c2(D(value)), ".2f")
 
 
+def priced(value: Any) -> Decimal | None:
+    """A recorded cost, or unknown; a missing price is never a zero-dollar bill."""
+    if value in (None, ""):
+        return None
+    try:
+        amount = Decimal(str(value))
+        return amount if amount.is_finite() else None
+    except ArithmeticError:
+        return None
+
+
+def cost_sum(values: Any) -> Decimal | None:
+    amounts = list(values)
+    return None if any(value is None for value in amounts) else sum(amounts, ZERO)
+
+
 def ep(text: Any) -> float:
     return dt.datetime.fromisoformat(str(text).replace("Z", "+00:00")).timestamp()
 
@@ -633,8 +649,9 @@ def library(house: Mapping[str, Any], boxes: Mapping[str, Any], app: str, extern
 
 
 # ------------------------------------------------------------------------------------------------ the report
-def box_totals(row: Mapping[str, Any]) -> tuple[Decimal, Decimal]:
-    return D(row.get("finalized_cost_usd_nanos")) / Decimal(10 ** 9), D(row.get("estimated_active_cost_usd_nanos")) / Decimal(10 ** 9)
+def box_totals(row: Mapping[str, Any]) -> tuple[Decimal | None, Decimal | None]:
+    values = [priced(row.get(key)) for key in ("finalized_cost_usd_nanos", "estimated_active_cost_usd_nanos")]
+    return tuple(None if value is None else value / Decimal(10 ** 9) for value in values)
 
 
 def unposted_regulatory(reg: Mapping[str, Any], cutoff_day: str) -> tuple[Decimal, list]:
@@ -787,39 +804,52 @@ def render(H: Mapping[str, Any], L: Mapping[str, Any], sail: Mapping[str, Any], 
     g = H["costs"]["gateway_health"]
     after = {r["kind"]: D(r["usd"]) for r in H["costs"]["swarm_spend_after_cutoff"]}
     box_fin, box_active = box_totals(sail["t0-cutoff"])
-    sail_models = D(inp["sail_model"]["usd"])
-    sail_receipts = sail_models + box_fin + box_active
-    meter_now = D(H["costs"]["guard_meter_now"].get("metered_spent"))
+    sail_models = priced(inp["sail_model"]["usd"])
+    sail_settled = cost_sum((sail_models, box_fin))
+    sail_receipts = cost_sum((sail_settled, box_active))
+    meter_now = priced(H["costs"]["guard_meter_now"].get("metered_spent"))
     pre_fin, pre_active = box_totals(sail["pre-meter"])
     aft_fin, aft_active = box_totals(sail["after-cutoff"])
-    after_models = D(H["costs"]["sail_requests_after_cutoff"].get("usd"))
-    sail_meter = meter_now + pre_fin + pre_active - (after_models + aft_fin + aft_active)
-    sail_used = max(sail_receipts, sail_meter)
-    claude_gateway = D((g.get("claude") or {}).get("spent_usd")) + D((g.get("claude") or {}).get("inflight_usd")) - after.get("claude", ZERO)
-    claude_swarm = D(inp["claude"]["usd"])
-    claude_used = max(claude_gateway, claude_swarm)
-    openai_settled, openai_booked = D(inp["openai"]["usd"]), D(inp["openai"]["booked_usd"])
+    after_models = priced(H["costs"]["sail_requests_after_cutoff"].get("usd"))
+    before_meter = cost_sum((meter_now, pre_fin, pre_active))
+    after_meter = cost_sum((after_models, aft_fin, aft_active))
+    sail_meter = None if before_meter is None or after_meter is None else before_meter - after_meter
+    # The balance meter is a comparison, not evidence that an unread model bill is zero.
+    sail_used = None if sail_receipts is None else max(value for value in (sail_receipts, sail_meter) if value is not None)
+    claude = g.get("claude") or {}
+    spent, held = priced(claude.get("spent_usd")), priced(claude.get("inflight_usd"))
+    # Gateway spent already includes active holds (gateway/lib/gate.mjs claudeStatus).
+    claude_gateway = None if spent is None else spent - after.get("claude", ZERO)
+    settled = priced(claude.get("settled_usd"))
+    if settled is None and spent is not None and held is not None:
+        settled = max(ZERO, spent - held)
+    claude_settled = None if settled is None else settled - after.get("claude", ZERO)
+    claude_swarm = priced(inp["claude"]["usd"])
+    claude_bases = [value for value in (claude_gateway, claude_swarm) if value is not None]
+    claude_used = max(claude_bases) if claude_bases else None
+    openai_settled, openai_booked = priced(inp["openai"]["usd"]), priced(inp["openai"]["booked_usd"])
     openai_holds = D(inp["openai"]["included_hold_usd"])
     openai_hold_count = ((L["reservations_and_provider_comparison"].get("booked_model_holds") or {}).get("openai") or {}).get("count")
     fr = g.get("frontier") or {}
     swarm_frontier = sum((D(v) for k, v in (fr.get("by_agent") or {}).items() if k.startswith("swarm-")), ZERO)
-    typesafe_now = D((g.get("typesafe") or {}).get("spent_usd"))
-    typesafe_bound = max(ZERO, typesafe_now - typesafe_before)
-    theta, mdata = D(inp["thetadata_usd"]["usd"]), D(inp["market_data_usd"]["usd"])
+    typesafe_now = priced((g.get("typesafe") or {}).get("spent_usd"))
+    typesafe_bound = None if typesafe_now is None else max(ZERO, typesafe_now - typesafe_before)
+    theta, mdata = priced(inp["thetadata_usd"]["usd"]), priced(inp["market_data_usd"]["usd"])
     declared = ZERO
     declared_rows = []
     if external:
         for item in external.get("items") or []:
-            declared += D(item.get("usd"))
             declared_rows.append({k: item.get(k) for k in ("name", "usd", "basis")})
+        declared = cost_sum(priced(item.get("usd")) for item in declared_rows)
     costs = [
-        {"service": "Sail (models + boxes)", "usd": usd(sail_used), "settled_usd": usd(sail_receipts),
-         "basis": (f"billed: settled Sail model requests {usd(sail_models)} + app-scoped finalized box billing {usd(box_fin)} (+{usd(box_active)} active) "
+        {"service": "Sail (models + boxes)", "usd": usd(sail_used), "settled_usd": usd(sail_settled),
+         "estimated_active_usd": usd(box_active),
+         "basis": (f"settled Sail model requests {usd(sail_models)} + app-scoped finalized box billing {usd(box_fin)} + active accrued estimate {usd(box_active)} "
                    f"= {usd(sail_receipts)}; metered: the Sail balance meter since the burst start + the pre-meter window, less Sail spend after the cutoff = "
                    f"{usd(sail_meter)}; the larger is used. Comparison only, never added: the Gym's booked box estimate "
                    f"{usd((L.get('comparison_only') or {}).get('booked_gym_box_estimate_usd'))} and the swarm's model booking {usd(inp['sail_model'].get('booked_usd'))}")},
-        {"service": "Claude (Anthropic via the gateway)", "usd": usd(claude_used), "settled_usd": usd(claude_gateway),
-         "basis": (f"the gateway's metering: spent {usd((g.get('claude') or {}).get('spent_usd'))} + in flight {usd((g.get('claude') or {}).get('inflight_usd'))}, "
+        {"service": "Claude (Anthropic via the gateway)", "usd": usd(claude_used), "settled_usd": usd(claude_settled),
+         "basis": (f"the gateway's metering: spent {usd(spent)} (already including {usd(held)} in flight), "
                    f"less swarm Claude calls after the cutoff {usd(after.get('claude', ZERO))}; the swarm's own record {usd(claude_swarm)}; Anthropic's invoice not reconciled")},
         {"service": "OpenAI", "usd": usd(openai_booked), "settled_usd": usd(openai_settled),
          "basis": (f"the swarm's record since T0: {usd(openai_settled)} settled + {usd(openai_holds)} in {openai_hold_count} "
@@ -836,30 +866,38 @@ def render(H: Mapping[str, Any], L: Mapping[str, Any], sail: Mapping[str, Any], 
     if declared_rows:
         costs.append({"service": "Owner-declared external costs", "usd": usd(declared), "settled_usd": usd(declared),
                       "basis": f"declared by {external.get('declared_by')} at {external.get('declared_at')}: " + "; ".join(f"{r['name']} {r['usd']}" for r in declared_rows)})
-    total_costs = sum((D(x["usd"]) for x in costs), ZERO)
-    total_settled = sum((D(x["settled_usd"]) for x in costs), ZERO)
+    known_subtotal = sum((priced(x["usd"]) for x in costs if priced(x["usd"]) is not None), ZERO)
+    missing_costs = [x["service"] for x in costs if priced(x["usd"]) is None]
+    total_costs = cost_sum(priced(x["usd"]) for x in costs)
+    total_settled = cost_sum(priced(x["settled_usd"]) for x in costs)
 
     # ---------------------------------------------------------------- burn
-    s24 = {r["kind"]: D(r["usd"]) for r in H["costs"]["swarm_spend_24h"]}
-    s4 = {r["kind"]: D(r["usd"]) for r in H["costs"]["swarm_spend_4h"]}
+    s24 = {r["kind"]: priced(r["usd"]) for r in H["costs"]["swarm_spend_24h"]}
+    s4 = {r["kind"]: priced(r["usd"]) for r in H["costs"]["swarm_spend_4h"]}
     b24f, b24a = box_totals(sail["last24h"])
     b4f, b4a = box_totals(sail["last4h"])
-    per_day_theta = D(inp["thetadata_usd"]["monthly_usd"]) * 12 / Decimal("365.25")
-    per_day_mdata = D(inp["market_data_usd"]["monthly_usd"]) * 12 / Decimal("365.25")
+    theta_month, mdata_month = priced(inp["thetadata_usd"]["monthly_usd"]), priced(inp["market_data_usd"]["monthly_usd"])
+    per_day_theta = None if theta_month is None else theta_month * 12 / Decimal("365.25")
+    per_day_mdata = None if mdata_month is None else mdata_month * 12 / Decimal("365.25")
+    sail24, sail4 = priced(H["costs"]["sail_requests_24h"]["usd"]), priced(H["costs"]["sail_requests_4h"]["usd"])
+    box24, box4 = cost_sum((b24f, b24a)), cost_sum((b4f, b4a))
+    def pace(kind: str) -> Decimal | None:
+        amount = s4.get(kind, ZERO)
+        return None if amount is None else amount * 6
     burn = [
-        {"service": "Claude", "last24h": s24.get("claude", ZERO), "last4h_per_day": s4.get("claude", ZERO) * 6},
-        {"service": "Sail models", "last24h": D(H["costs"]["sail_requests_24h"]["usd"]), "last4h_per_day": D(H["costs"]["sail_requests_4h"]["usd"]) * 6},
-        {"service": "Sail boxes (billed)", "last24h": b24f + b24a, "last4h_per_day": (b4f + b4a) * 6},
-        {"service": "OpenAI", "last24h": s24.get("openai", ZERO), "last4h_per_day": s4.get("openai", ZERO) * 6},
+        {"service": "Claude", "last24h": s24.get("claude", ZERO), "last4h_per_day": pace("claude")},
+        {"service": "Sail models", "last24h": sail24, "last4h_per_day": None if sail4 is None else sail4 * 6},
+        {"service": "Sail boxes (finalized + active accrued estimate)", "last24h": box24, "last4h_per_day": None if box4 is None else box4 * 6},
+        {"service": "OpenAI", "last24h": s24.get("openai", ZERO), "last4h_per_day": pace("openai")},
         {"service": "ThetaData (pro-rata)", "last24h": per_day_theta, "last4h_per_day": per_day_theta},
         {"service": "Alpaca market data (pro-rata)", "last24h": per_day_mdata, "last4h_per_day": per_day_mdata},
     ]
-    burn_total24 = sum((x["last24h"] for x in burn), ZERO)
-    burn_total4 = sum((x["last4h_per_day"] for x in burn), ZERO)
+    burn_total24 = cost_sum(x["last24h"] for x in burn)
+    burn_total4 = cost_sum(x["last4h_per_day"] for x in burn)
 
     # ---------------------------------------------------------------- net
-    net = realized - total_costs
-    net_open = net + unrealized
+    net = None if total_costs is None else realized - total_costs
+    net_open = None if net is None else net + unrealized
     unknowns = []
     if not (external and external.get("complete") is True):
         unknowns += [f"{name}: not declared by the owner (not zero)" for name in UNKNOWN_EXTERNAL]
@@ -870,6 +908,9 @@ def render(H: Mapping[str, Any], L: Mapping[str, Any], sail: Mapping[str, Any], 
         f"Sail: the provider invoice itself is not seen; receipts {usd(sail_receipts)} vs balance meter {usd(sail_meter)}",
         "Later-posted broker fees can revise the realized figure by cents (the unposted-fee estimate is included)",
     ]
+    unknowns += [f"{name}: input cost was not read (unknown, not zero)" for name in missing_costs]
+    unknowns += [str(item) for item in L.get("unresolved") or []]
+    accounting_complete = bool(not unknowns and L.get("complete") is True and not missing_costs)
     return {
         "schema": "ltcm-econ-close-1", "cutoff": cutoff, "cost_start": T0, "financial_start": FS, "days_since_t0": format(days_since_t0.quantize(Decimal("0.001")), "f"),
         "collected_at": H["collected_at"], "house_release": H["release"],
@@ -887,12 +928,15 @@ def render(H: Mapping[str, Any], L: Mapping[str, Any], sail: Mapping[str, Any], 
                            "cost_with_fees_usd": usd(open_cost)},
         "positions": positions_out,
         "costs": costs, "total_costs_usd": usd(total_costs), "total_costs_settled_basis_usd": usd(total_settled),
+        "known_input_cost_subtotal_usd": usd(known_subtotal), "cost_accounting_complete": accounting_complete,
         "net": {"net_usd": usd(net), "definition": "realized options P&L since T0 (all routes, fees in) - all input costs since T0 (conservative basis)",
-                "net_settled_basis_usd": usd(realized - total_settled),
+                "net_settled_basis_usd": usd(None if total_settled is None else realized - total_settled),
                 "net_with_open_at_conservative_marks_usd": usd(net_open),
-                "net_with_open_and_other_account_activity_usd": usd(net_open + sum(other.values(), ZERO)),
-                "gap_to_break_even_usd": usd(max(ZERO, -net)), "gap_including_open_positions_usd": usd(max(ZERO, -net_open)),
-                "criterion_5_met": bool(net > 0 and net_open > 0 and recon["reconciled"] and external and external.get("complete") is True)},
+                "net_with_open_and_other_account_activity_usd": usd(None if net_open is None else net_open + sum(other.values(), ZERO)),
+                "gap_to_break_even_usd": usd(None if net is None else max(ZERO, -net)),
+                "gap_including_open_positions_usd": usd(None if net_open is None else max(ZERO, -net_open)),
+                "criterion_5_met": bool(accounting_complete and net is not None and net_open is not None
+                                        and net > 0 and net_open > 0 and recon["reconciled"])},
         "burn_per_day": {"rows": [{"service": x["service"], "last24h_usd": usd(x["last24h"]), "last4h_pace_per_day_usd": usd(x["last4h_per_day"])} for x in burn],
                          "total_last24h_usd": usd(burn_total24), "total_last4h_pace_per_day_usd": usd(burn_total4),
                          "gateway_sail_meter_24h_usd": usd((g.get("sail") or {}).get("spend_usd")),
@@ -932,6 +976,10 @@ def markdown(s: Mapping[str, Any]) -> str:
              f"| Net with open positions at conservative marks | {n['net_with_open_at_conservative_marks_usd']} |",
              f"| Gap to break even (realized profit still needed) | {n['gap_to_break_even_usd']} |",
              f"| Gap including open positions | {n['gap_including_open_positions_usd']} |", ""]
+    if s.get("cost_accounting_complete") is not True:
+        lines += ["Cost accounting is incomplete: numeric Net uses priced inputs and estimates only. Missing costs and a Net "
+                  "that depends on them remain unknown (null); invoice and reconciliation gaps are listed below.",
+                  f"Known input-cost subtotal: {s.get('known_input_cost_subtotal_usd')} USD.", ""]
     if s.get("p30"):
         lines += [f"Trailing {s['p30']['days']}-day realized options P&L ({s['p30']['from_day']} to {s['p30']['to_day']}): "
                   f"{s['p30']['usd']} over {s['p30']['closed_positions']} closed positions.", ""]
@@ -977,7 +1025,8 @@ def markdown(s: Mapping[str, Any]) -> str:
     bp = s["burn_per_day"]
     f = s["funding_now"]
     lines += [f"| **Total** | **{bp['total_last24h_usd']}** | **{bp['total_last4h_pace_per_day_usd']}** |", "",
-              f"The gateway's own Sail meter reads {bp['gateway_sail_meter_24h_usd']} for the 24 h to {bp['gateway_sail_meter_checked_at']}. "
+              f"The gateway's own Sail meter reads {bp['gateway_sail_meter_24h_usd']} for the provider's reported 24 h range at {bp['gateway_sail_meter_checked_at']} "
+              "(its billing window may round to whole hours). "
               f"Funding at {f['read_at']}: Sail balance {f['sail_balance_usd']} (run-out {f['sail_run_out_at']}), Claude room {f['claude_remaining_usd']} "
               f"of {f['claude_cap_usd']}, OpenAI month {f['openai_month']} cap {f['openai_month_cap_usd']}.", ""]
     rc = s["reconciliation"]

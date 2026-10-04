@@ -43,11 +43,12 @@ import json
 import math
 import re
 import sqlite3
+import tempfile
 import threading
 import time
 import zlib
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from . import DB_NAME, PROGRAMS_DIR, RUNS_DIR
 from .evidence import drift_numbers
@@ -357,6 +358,14 @@ def code_sha(code: str) -> str:
     return hashlib.sha256(str(code).encode("utf-8")).hexdigest()
 
 
+def _finished_run(result: Mapping[str, Any]) -> bool:
+    """A completed worker result, including its stress twin when present. A deterministic normal hash can first
+    arrive with an interrupted stress twin, then with the complete retry; only the latter is a reusable answer."""
+    finished = ("ok", "disqualified", "no_data")
+    twin = result.get("stress_1.5")
+    return result.get("status") in finished and (not isinstance(twin, Mapping) or twin.get("status") in finished)
+
+
 class SwarmStore:
     """The swarm's durable state (the module docstring)."""
 
@@ -597,8 +606,12 @@ class SwarmStore:
             self.event("swarm.retired", fid, {"cause": reason if public_reason is None else public_reason, "band_from": fam["band"]})
             return True
 
-    def retire_gym(self, fid: str, reason: Any, *, floor: int, source: str) -> dict[str, Any]:
-        """One Gym retirement across researcher/tournament connections; evidence and look reservations survive."""
+    def retire_gym(self, fid: str, reason: Any, *, floor: int, source: str,
+                   counts: Callable[[Mapping[str, Any]], bool] | None = None) -> dict[str, Any]:
+        """One Gym retirement across researcher/tournament connections; evidence and look reservations survive.
+        `counts` (F1, THE FLOOR COUNTS RESEARCH: `researcher.floor_counts`): which living families `floor` counts. A
+        family it does not count (a dead slot) retires whatever the count; any other is refused when the counted
+        families number `floor` or fewer. None: every living family counts, as before."""
         if not isinstance(reason, str) or not reason.strip():
             return {"status": "refused", "reason": "retirement needs a nonempty reason string"}
         reason = reason.strip()[:2000]
@@ -620,8 +633,11 @@ class SwarmStore:
                 return {"status": "refused", "deferred": "gate_hold",
                         "reason": "the operator holds this family's validated version at the gate; it retires only once the "
                                   "hold is cleared"}
-            alive = self._one("SELECT COUNT(*) AS n FROM families WHERE retired_at IS NULL")["n"]
-            if int(alive) <= max(0, int(floor)):
+            if counts is None:
+                alive, counted = self._one("SELECT COUNT(*) AS n FROM families WHERE retired_at IS NULL")["n"], True
+            else:
+                alive, counted = sum(1 for f in self.families(alive=True) if counts(f)), bool(counts(fam))
+            if counted and int(alive) <= max(0, int(floor)):
                 return {"status": "refused", "deferred": "population_floor",
                         "reason": "the population is at its minimum; retirement was not applied"}
             state = fam.get("state") or {}
@@ -724,11 +740,15 @@ class SwarmStore:
                     seen.add(marker["sha"])
         return len(seen)
 
-    def lineage_validated(self, fid: str) -> tuple[int, list[float]]:
+    def lineage_validated(self, fid: str, *, plus: tuple[int, Mapping[str, Any]] | None = None) -> tuple[int, list[float]]:
         """(N, Sharpes) for the deflated Sharpe (the owner's decision D2b, Sept 26): N = the distinct program versions
         validated across the family's lineage set (`lineages`: ancestors, siblings, descendants and prior slices, so
         inherited ones count), and each one's traded-day Sharpe (`t_daily / sqrt(days_traded)`) from its latest
-        validation at the normal spread."""
+        validation at the normal spread. The count is of (family, version) validations: a verdict a family read from
+        another's validation of the same program (F1, `Tournament.known_validation`: its own copy of the record, a row
+        with no trial whose summary says `inherited`) counts like one the Gym made for it, so inheriting never lowers N.
+        `plus` ((version, a validation summary)): the answer as it would be once this family's version had that
+        validation as its latest (the tournament asks before it inherits a verdict)."""
         from .evidence import traded_sharpe
 
         lines = self.lineages(fid)
@@ -736,9 +756,15 @@ class SwarmStore:
             return 0, []
         rows = self._all(f"SELECT r.family, r.version, r.summary FROM runs r JOIN families f ON f.id=r.family "
                          f"WHERE f.lineage IN ({','.join('?' * len(lines))}) AND r.window='validation' AND r.stress=1.0 "
-                         "AND r.trials>0 AND r.version IS NOT NULL ORDER BY r.at DESC, r.rowid DESC", tuple(lines))
+                         "AND (r.trials>0 OR (json_valid(r.summary) AND json_extract(r.summary,'$.inherited') IS NOT NULL)) "
+                         "AND r.version IS NOT NULL ORDER BY r.at DESC, r.rowid DESC", tuple(lines))
         seen: set[tuple[str, int]] = set()
         sharpes = []
+        if plus is not None:
+            seen.add((fid, int(plus[0])))
+            value = traded_sharpe(dict(plus[1] or {}))
+            if value is not None:
+                sharpes.append(value)
         for r in rows:
             key = (r["family"], int(r["version"]))
             if key in seen:
@@ -918,16 +944,37 @@ class SwarmStore:
                     run_id = f"{run_id[:31]}-{scope[:32]}"
                     existing = self._one("SELECT * FROM runs WHERE run_id=? AND family=?", (run_id, fid))
             if existing is not None:
-                if trials:
-                    self._exec("UPDATE runs SET trials=trials+?, program_years=program_years+? WHERE run_id=?",
-                               (trials, float(program_years), existing["run_id"]))
-                    self.bump(fid, trials=trials, since_val_trials=trials)
-                old = loads(existing["summary"], {}) or {}
-                if key:
-                    new = {**old, **{k: summary[k] for k in ("train_score", "train_eligible") if k in summary and k not in old},
-                           **{k: summary[k] for k in ("eval_key", "fill_model", "gym_image", "gym_bundle") if k in summary}}
-                    if new != old:
-                        self._exec("UPDATE runs SET summary=? WHERE run_id=?", (dumps(new), existing["run_id"]))
+                with self.atomic():
+                    if trials:
+                        self._exec("UPDATE runs SET trials=trials+?, program_years=program_years+? WHERE run_id=?",
+                                   (trials, float(program_years), existing["run_id"]))
+                        self.bump(fid, trials=trials, since_val_trials=trials)
+                    old = loads(existing["summary"], {}) or {}
+                    if window == "validation" and _finished_run(result):
+                        previous_result = self.run_result(existing["run_id"])
+                        if previous_result is not None and not _finished_run(previous_result):
+                            # Keep the interrupted file immutable: a failed DB commit must leave its original payload
+                            # and status together. The completion receipt may be orphaned, then reused on the retry.
+                            payload = dumps(result)
+                            path = self.runs_dir / f"{existing['run_id']}-complete-{code_sha(payload)[:32]}.json.gz"
+                            if not path.exists():
+                                staging = None
+                                try:
+                                    with tempfile.NamedTemporaryFile(dir=path.parent, prefix=f".{path.name}-", delete=False) as receipt:
+                                        staging = Path(receipt.name)
+                                        receipt.write(gzip.compress(payload.encode("utf-8"), compresslevel=5))
+                                    staging.replace(path)
+                                finally:
+                                    if staging is not None:
+                                        staging.unlink(missing_ok=True)
+                            self._exec("UPDATE runs SET status=?, summary=?, path=? WHERE run_id=?",
+                                       (status, dumps(summary), str(path.relative_to(self.root)), existing["run_id"]))
+                            old = summary
+                    if key:
+                        new = {**old, **{k: summary[k] for k in ("train_score", "train_eligible") if k in summary and k not in old},
+                               **{k: summary[k] for k in ("eval_key", "fill_model", "gym_image", "gym_bundle") if k in summary}}
+                        if new != old:
+                            self._exec("UPDATE runs SET summary=? WHERE run_id=?", (dumps(new), existing["run_id"]))
                 return self._one("SELECT * FROM runs WHERE run_id=?", (existing["run_id"],))  # type: ignore[return-value]
             if self._one("SELECT 1 FROM runs WHERE run_id=?", (run_id,)) is not None:
                 run_id = mine
@@ -1023,6 +1070,114 @@ class SwarmStore:
             r["summary"] = loads(r["summary"], {})
         return rows
 
+    def repair_interrupted_validation(self, fid: str, *, apply: bool = False) -> dict[str, Any]:
+        """Preview, or explicitly correct, a proven first zero-trial Validation interruption marked completed by an
+        old harness. This is never a startup migration. Extra history, unreadable evidence and any gate/incubator/live
+        activity require review instead. The original family and receipt identities survive in an append-only audit;
+        raw runs, lineage N, trials and retirement stay unchanged. Dormancy is left as recorded: its earlier clock
+        cannot be reconstructed. No counter or clock is inferred from an incomplete historical sequence."""
+        def preview() -> dict[str, Any]:
+            def refused(reason: str) -> dict[str, Any]:
+                return {"family": fid, "eligible": False, "applied": False, "reason": reason}
+
+            fam = self.family(fid)
+            if fam is None:
+                return refused("no such family")
+            if fam.get("retired_at") or fam.get("band") != "gym":
+                return refused("only an active Gym family can be corrected")
+            state = fam.get("state") or {}
+            if not isinstance(state, Mapping):
+                return refused("the family state is unreadable")
+            n = fam.get("validated_version")
+            candidate = fam.get("best_version") or state.get("best_train_version")
+            marker = state.get("validation_version")
+            if any(not isinstance(value, int) or isinstance(value, bool) for value in (n, candidate, marker)) \
+                    or n != candidate or marker != n:
+                return refused("the active candidate has no matching completion marker")
+            if fam.get("validations") != 1 or fam.get("best_validation") is not None:
+                return refused("the previous completion count or best cannot be reconstructed")
+            protected = ("gate", "review", "unit_wait", "extension_hold", "extension_versions", "train_passed", "forward", "forward_replay")
+            prefixes = ("gate_", "gated_", "look_", "incubator_", "banded_")
+            if any(state.get(k) for k in protected) or any(v for k, v in state.items() if k.startswith(prefixes)):
+                return refused("gate, incubator or extension activity is present")
+            for table in ("looks", "refusals", "look_holds", "forward"):
+                if self._one(f"SELECT 1 FROM {table} WHERE family=? LIMIT 1", (fid,)):
+                    return refused("gate, look or forward records are present")
+            if self._one("SELECT 1 FROM events WHERE family=? AND kind='swarm.band' LIMIT 1", (fid,)):
+                return refused("a historical band move is present")
+            verdicts = state.get("validation_verdicts")
+            if not isinstance(verdicts, Mapping) or set(verdicts) != {str(n)} \
+                    or not isinstance(verdicts[str(n)], Mapping) or verdicts[str(n)].get("passed") is not False \
+                    or not isinstance(state.get("validation_line"), Mapping) or state["validation_line"].get("passed") is not False:
+                return refused("a sole interrupted failure marker is not established")
+            rows = self._all("SELECT * FROM runs WHERE family=? AND window='validation' ORDER BY at,rowid", (fid,))
+            normal = [row for row in rows if row["stress"] == 1.0]
+            if len(normal) != 1 or any(row["version"] != n or row["trials"] != 0 or row["status"] not in ("error", "refused")
+                                      for row in rows):
+                return refused("completed, observed or extra Validation history is present")
+            row = normal[0]
+            result = self.run_result(row["run_id"])
+            if not isinstance(result, Mapping) or result.get("status") != row["status"] \
+                    or isinstance(result.get("trials"), bool) or result.get("trials") != 0 \
+                    or result.get("summary") not in ({}, None):
+                return refused("the original zero-trial interruption receipt is missing or ambiguous")
+            identity = tuple(state.get(k) for k in ("validation_image", "validation_bundle"))
+            if any(not isinstance(value, str) or not value for value in identity) \
+                    or identity != tuple(result.get(k) for k in ("gym_image", "gym_bundle")) \
+                    or verdicts[str(n)].get("at") != row["at"]:
+                return refused("the receipt does not prove this completion marker's identity and time")
+            twin = result.get("stress_1.5")
+            stress = [r for r in rows if r["stress"] != 1.0]
+            if twin is None:
+                if stress:
+                    return refused("extra stress history is present")
+            elif not isinstance(twin, Mapping) or twin.get("status") not in ("error", "refused") \
+                    or len(stress) != 1 or stress[0]["stress"] != 1.5 or stress[0]["run_id"] != f"{row['run_id']}-s15" \
+                    or stress[0]["status"] != twin.get("status") or stress[0]["at"] != row["at"]:
+                return refused("the stress history is ambiguous")
+            else:
+                stress_result = self.run_result(stress[0]["run_id"])
+                if not isinstance(stress_result, Mapping) or stress_result.get("status") != twin.get("status") \
+                        or isinstance(stress_result.get("trials"), bool) or stress_result.get("trials") != 0 \
+                        or stress_result.get("summary") != twin:
+                    return refused("the original stress interruption receipt is missing or disagrees")
+                for key in ("gym_image", "gym_bundle"):
+                    if key in stress_result and stress_result[key] != result[key]:
+                        return refused("the stress receipt has a different evaluator identity")
+            numbers = state.get("validation_numbers")
+            if not isinstance(numbers, Mapping) or any(value is not None for value in numbers.values()) \
+                    or state.get("validation_inherited") is not None or state.get("typical_max_loss_usd") is not None \
+                    or state.get("typical_by_version") not in (None, {}):
+                return refused("inherited or measured Validation state is present")
+            clear = ("validation_version", "validation_view", "validation_line", "validation_image", "validation_bundle",
+                     "validation_numbers", "validation_inherited", "typical_max_loss_usd", "typical_by_version",
+                     "validated_trials", "validated_cycles")
+            after_state = {k: v for k, v in state.items() if k not in clear}
+            after_state["validation_verdicts"] = {}
+            return {"family": fid, "eligible": True, "applied": False, "version": n,
+                    "runs": [{k: r[k] for k in ("run_id", "path", "at", "status", "trials")} for r in rows],
+                    "before": fam, "after": {"validated_version": None, "validations": 0, "state": after_state}}
+
+        if not apply:
+            with self._lock:
+                outer = not self._db.in_transaction
+                if outer:
+                    self._db.execute("BEGIN")  # a coherent, read-only-compatible snapshot
+                try:
+                    return preview()
+                finally:
+                    if outer:
+                        self._db.rollback()
+        if self.readonly:
+            raise ValueError("a readonly store cannot apply a Validation correction")
+        with self.atomic():
+            report = preview()
+            if report["eligible"]:
+                self.update_family(fid, **report["after"])
+                report["applied"] = True
+                self.event("swarm.validation_interruption_repaired", fid, report)
+            return report
+
     def totals(self) -> dict[str, Any]:
         row = self._one("SELECT COALESCE(SUM(trials),0) AS trials, COALESCE(SUM(program_years),0) AS years, COUNT(*) AS runs FROM runs")
         alive = self._one("SELECT COUNT(*) AS n FROM families WHERE retired_at IS NULL")
@@ -1073,6 +1228,12 @@ class SwarmStore:
         for r in rows:
             r["detail"] = loads(r["detail"], {})
         return rows
+
+    def looks_made(self) -> int:
+        """How many holdout looks are on record: the count alone, for a reader that may know how many looks the gate
+        made and nothing any of them found (`researcher.power_bar`: no p-value, no verdict leaves this call)."""
+        row = self._one("SELECT COUNT(*) AS n FROM looks")
+        return int(row["n"]) if row else 0
 
     def looked(self, run_sha: str) -> bool:
         return self._one("SELECT 1 FROM looks WHERE run_sha=?", (run_sha,)) is not None
@@ -1150,10 +1311,13 @@ class SwarmStore:
             r["payload"] = loads(r["payload"], {})
         return rows
 
-    def add_spend(self, kind: str, usd: float, *, family: str | None = None, detail: Mapping[str, Any] | None = None) -> None:
+    def add_spend(self, kind: str, usd: float, *, family: str | None = None, detail: Mapping[str, Any] | None = None,
+                  at: float | None = None) -> None:
+        """Book a cost at its incurred epoch (the recording clock by default). An interval split across UTC days can
+        supply each slice's epoch so a delayed receipt does not charge all of yesterday's work to today's meter."""
         if not usd:
             return
-        now = self.clock()
+        now = self.clock() if at is None else float(at)
         self._exec("INSERT INTO spend(at, epoch, kind, family, usd, detail) VALUES(?,?,?,?,?,?)",
                    (iso(now), now, kind, family, float(usd), dumps(detail or {})))
         if family:

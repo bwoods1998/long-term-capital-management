@@ -416,7 +416,7 @@ class Repairs(StrategistCase):
             self.clock.advance(200)
             return {"route": "claude", "primed": True, "primed_at": at}
 
-        Swarm.architect_pass(SimpleNamespace(architect=architect, strategist=SimpleNamespace(due=lambda: True, run=repaired),
+        Swarm.architect_pass(SimpleNamespace(root=self.store.root, architect=architect, strategist=SimpleNamespace(due=lambda: True, run=repaired),
                                              clock=self.clock))
         self.assertEqual(seen, [True], "400 s after the pass began, 200 s after the repair read the entry")
 
@@ -442,7 +442,7 @@ class RealRouter(RouteCase):
         digest = GraveyardDigest(self.store, self.settings, clock=self.clock)
         architect = Architect(self.store, router, self.settings, clock=self.clock, digest=digest)
         strategist = Strategist(self.store, router, self.settings, digest=digest, clock=self.clock, architect=architect)
-        ns = SimpleNamespace(architect=architect, strategist=strategist, clock=self.clock)
+        ns = SimpleNamespace(root=self.store.root, architect=architect, strategist=strategist, clock=self.clock)
         out = Swarm.architect_pass(ns)
         self.assertEqual(out["strategist"]["accepted"], True, out)
         self.assertTrue(out["strategist"]["primed"])
@@ -490,7 +490,18 @@ class RealRouter(RouteCase):
 
 class Pass(StrategistCase):
     def ns(self, strategist, architect):
-        return SimpleNamespace(architect=architect, strategist=strategist, clock=self.clock)
+        return SimpleNamespace(root=self.store.root, architect=architect, strategist=strategist, clock=self.clock)
+
+    def test_the_fake_swarm_uses_its_real_private_root_and_obeys_owner_deny(self):
+        path = self.store.root / "research-dispatch.json"
+        path.write_text('{"schema":1,"ordinary_allowed":false}\n')
+        path.chmod(0o600)
+        seen = []
+        architect = SimpleNamespace(want=lambda: 3, closed=lambda: None,
+                                    run=lambda **kw: seen.append("architect"))
+        strategist = SimpleNamespace(due=lambda: True, run=lambda **kw: seen.append("strategist"))
+        self.assertEqual(Swarm.architect_pass(self.ns(strategist, architect)), {"skipped": "research_fenced"})
+        self.assertEqual(seen, [], "the synthetic root is the authority; neither ordinary actor runs")
 
     def test_the_strategist_runs_only_when_due_and_the_architect_has_room(self):
         seen = []
@@ -641,7 +652,7 @@ class Library(StrategistCase):
 
         architect = SimpleNamespace(want=lambda: 3, run=lambda paired=False, library=None: seen.append(("architect", paired, library)) or {"born": []})
         self.store.put(AGENDA_KEY, {"text": "x", "library_queries": ["variance risk premium"]})
-        ns = SimpleNamespace(architect=architect, strategist=SimpleNamespace(due=lambda: True, run=strategist_run), clock=self.clock,
+        ns = SimpleNamespace(root=self.store.root, architect=architect, strategist=SimpleNamespace(due=lambda: True, run=strategist_run), clock=self.clock,
                              library=FakeLibrary(), store=self.store)
         Swarm.architect_pass(ns)
         self.assertEqual([s[0] for s in seen], ["queries", "retrieve", "strategist", "architect"])

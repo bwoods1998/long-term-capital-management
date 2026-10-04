@@ -14,7 +14,7 @@ from league.swarm import architect as arch
 from league.swarm import public
 from league.swarm.architect import SEAL_KEY, GraveyardDigest, parse_lesson, tag_of
 from league.swarm.researcher import (IDLE_CAUSE, SCREENED, SELF_REFUTED, VERDICT_WORDS, extension_held, idle_cause, idle_dead,
-                                     train_record)
+                                     thin_cause, train_record)
 from league.swarm.store import SwarmStore, dumps
 from league.swarm.strategist import Strategist
 from league.swarm.tournament import Tournament
@@ -179,8 +179,9 @@ class TheStrategistReadsTheScreen(RoundCase):
 
 
 class HoldOffer(ResearcherCase):
-    """THE HOLD OFFER: three holds in a row with an eligible Train run or ten trials behind the family offer `retire` on its
-    REVISE turn, down to `population.floor`; its lesson is SELF-REFUTED."""
+    """THE HOLD OFFER: three holds in a row offer `retire` on the family's REVISE turn, whatever its trial count (F1; with
+    `researcher.retire_hold_untested` false, only with an eligible Train run or ten trials behind it, as before), down to
+    `population.floor`; its lesson is SELF-REFUTED."""
 
     def setUp(self):
         super().setUp()
@@ -196,7 +197,32 @@ class HoldOffer(ResearcherCase):
             self.store.update_family(self.fid, trials=trials)
         return self.store.family(self.fid)
 
+    def test_offered_after_three_holds_whatever_the_trial_count(self):
+        """F1 (Oct 3): six of the eight living families had 3 to 9 trials, no eligible Train run and notes that said
+        "holding for retirement"; the offer no longer asks for the Train record."""
+        self.assertIs(self.settings["researcher"]["retire_hold_untested"], True, "the default")
+        self.researcher().cycle(self.fid)  # the starter: one ineligible run
+        r = self.researcher()
+        self.assertFalse(r.hold_offer(self.held(2, trials=40)), "two holds")
+        self.assertTrue(r.hold_offer(self.held(3, trials=1)), "three holds, one trial, no eligible run: offered")
+        self.assertTrue(r.can_retire(self.store.family(self.fid)))
+        self.settings["researcher"]["retire_hold_cycles"] = 0
+        self.assertFalse(r.hold_offer(self.store.family(self.fid)), "0 turns it off")
+        self.settings["researcher"]["retire_hold_cycles"] = 3
+        self.store.set_state(self.fid, validation_version=1, extension_hold={"version": 1, "checks": "6/8", "at": "x"})
+        self.assertFalse(r.hold_offer(self.store.family(self.fid)), "a near-miss waits for its extension result")
+        self.store.set_state(self.fid, extension_hold=None)
+        self.store.update_family(self.fid, band="candidate")
+        self.assertFalse(r.hold_offer(self.store.family(self.fid)), "the Gym band only")
+        self.store.update_family(self.fid, band="gym")
+        self.steps = [{"calls": [("retire", {"reason": "The Gym's data cannot locate the signal: nothing to test."})]}]
+        out = self.researcher().cycle(self.fid)
+        self.assertEqual([t["name"] for t in self.sail.bodies[-1]["tools"]], ["gym_run", "gym_sweep", "retire"])
+        self.assertIn("held 3 cycles in a row. If your notes say", self.sail.bodies[-1]["input"][-1]["content"])
+        self.assertTrue(out["retired"], "the retire it asked for is honoured")
+
     def test_offered_after_three_holds_with_ten_trials_or_an_eligible_run(self):
+        self.settings["researcher"]["retire_hold_untested"] = False  # the offer as it was before F1
         self.researcher().cycle(self.fid)  # the starter: one ineligible run
         r = self.researcher()
         self.assertFalse(r.hold_offer(self.held(2, trials=40)), "two holds")
@@ -219,13 +245,17 @@ class HoldOffer(ResearcherCase):
 
     def test_the_revise_turn_offers_retire_and_the_lesson_is_self_refuted(self):
         self.researcher().cycle(self.fid)
+        # A family with evidence behind its verdict: an eligible Train version and twelve trials (F1, R3: with either
+        # missing its retirement is thin, filed by its Train record: `test_a_thin_retirement_is_filed_by_its_train_record`).
+        train_row(self.store, self.fid, 1, trades=90, eligible=True)
         self.held(3, trials=12)
         reason = "Refuted: the signal never beat the drift in any year."
         self.steps = [{"calls": [("retire", {"reason": reason})]}, {"text": "done"}]
         out = self.researcher().cycle(self.fid)
         tools = [t["name"] for t in self.sail.bodies[-1]["tools"]]
         self.assertEqual(tools, ["gym_run", "gym_sweep", "retire"], "REVISE offers retire to a holding family")
-        self.assertIn("held 3 cycles in a row with a Train record behind it", self.sail.bodies[-1]["input"][-1]["content"])
+        self.assertIn("held 3 cycles in a row. If your notes say its mechanism is refuted or exhausted",
+                      self.sail.bodies[-1]["input"][-1]["content"])
         self.assertTrue(out["retired"])
         self.assertEqual(self.cancelled, [self.fid])
         fam = self.store.family(self.fid)
@@ -233,6 +263,22 @@ class HoldOffer(ResearcherCase):
         [row] = GraveyardDigest(self.store, self.settings).rows()
         self.assertEqual(row["tag"], "SELF-REFUTED")
         self.assertIn("never beat the drift", self.store.graveyard()[0]["lesson"])
+
+    def test_a_thin_retirement_is_filed_by_its_train_record(self):
+        """F1 (R3). Twelve trials and never an eligible Train version: the offer is made and honoured, and the row is the
+        idle rule's verdict of its Train record (THIN), not SELF-REFUTED: a refuting row would close its cell on its
+        researcher's word alone."""
+        self.researcher().cycle(self.fid)
+        self.held(3, trials=12)
+        reason = "Refuted: the signal never beat the drift in any year."
+        self.steps = [{"calls": [("retire", {"reason": reason})]}, {"text": "done"}]
+        out = self.researcher().cycle(self.fid)
+        self.assertEqual((out["retired"], out["retire_thin"]), (True, "thin"))
+        fam = self.store.family(self.fid)
+        self.assertEqual(fam["retire_reason"], thin_cause("thin", reason))
+        [row] = GraveyardDigest(self.store, self.settings).rows()
+        self.assertEqual(row["tag"], "THIN")
+        self.assertIn("never beat the drift", self.store.graveyard()[0]["lesson"], "its researcher's reason is still its lesson")
 
     def test_without_the_offer_the_revise_turn_stays_a_revision(self):
         self.researcher().cycle(self.fid)

@@ -691,15 +691,54 @@ CONSTITUTION: dict[str, Any] = {
     #   the current equity (else shadow-only, the reason recorded). `max_loss_share` a structure, `open_per_family`
     #   structures, `family_share` in all; `floor_usd`: one contract whose maximum loss is at most this, whatever the
     #   percentages, so a small account can still trade (and the family's own total may reach it).
+    #   THE FAST LANE (release F1, Oct 3, 2026; the owner's rule 2 of that day): the gate's held-out look is the route
+    #   here (`league/swarm/gate.py` `SEALED_LOOKS`). A passed look makes a Candidate at once, this row makes it a Probe
+    #   at the live path's next families pass, and it trades from the next session's open: no session is counted
+    #   between. No row of this table was changed for it.
     # - `sized`: a forward record (nightly + shadow + real) of at least `min_trades` trades with a mean return on maximum
     #   loss above zero and its `confidence` one-sided lower bound above zero: `kelly_fraction` of Kelly on the LOWER
     #   bound, a structure at most `max_loss_share`, the family at most `family_share`. Only a Probe with at least
     #   `min_probe_real_trades` real trades and `min_probe_sessions` whole sessions at Probe (the review of #362).
+    #   EVIDENCE V3 (the owner's D2, Oct 2, 2026): Sized is judged on the Probe's REAL fills alone (at least 20 real
+    #   trades, their mean above zero and their 80% lower bound above zero, after at least 5 whole sessions at Probe),
+    #   and Kelly sizes on that real lower bound (`league/live/money.py`). Under the fast lane this row, with the
+    #   forward record's rule (a record negative over 20 trades returns the band), STANDS IN for the ladder on sizing
+    #   up and demotion until a later release makes the ladder decide them (it needs `league/live` code).
+    # - `ladder`: THE FORWARD LADDER (evidence v3, the owner's D2 of Oct 2, 2026; `league/live/ladder.py`). WHILE
+    #   `binding` IS FALSE THE LADDER RECORDS, AND THE ROUTE TO PROBE IS THE GATE'S HELD-OUT LOOK (the fast lane, the
+    #   `probe` note above): the ladder judges every practice cohort by this row, writes its receipts beside the look,
+    #   blocks nothing and promotes nothing. This row is the ladder's own rule, what it would promote on if it bound:
+    #   a practice cohort's own forward record (shadow on live quotes, its immutable version, the current
+    #   practice evaluator), judged for promotion only at its CHECKPOINTS, each at most once: `checkpoints` (the first
+    #   at the first session's end with that many sessions practised; the last, which is `max_sessions`, when its
+    #   practice window ends, with whatever it has practised), each at its own nominal level in `alphas`. At a
+    #   checkpoint: at least `min_sessions` sessions and `min_closes` program closes; the TILTED day-block bootstrap's
+    #   p-value of the mean P&L per dollar of maximum loss (`draws` resamples of its session days, reweighted to a mean
+    #   of zero) at or under the checkpoint's alpha, AND the percentile day-block bootstrap's one-sided `confidence`
+    #   lower bound above zero; positive in at least `windows_positive` of `windows` equal sub-windows; the DRIFT
+    #   CONTROL (the same tilted p-value on P&L net of the entry delta times the underlying's move over the holding
+    #   period, at or under the same alpha, on the closes whose figures are known when they are at least
+    #   `drift_known_share` of its closes); Benjamini-Hochberg at `fdr_q` over every practice entrant of the trailing
+    #   `fdr_days` days, each at the p-value of its latest judged checkpoint (1 before its first, or without a full
+    #   record); the Validation line; and the 2026 holdout read once as a free pre-filter (net P&L not negative AND its
+    #   moving-block bootstrap p-value at or under `prefilter_p`). A checkpoint's verdict is final and waits at most
+    #   `answer_sessions` sessions for its answers. A ladder Probe goes back to the Gym when its forward record is
+    #   negative over 20 trades or the `demote_confidence` lower bound of its trailing `demote_sessions` sessions is
+    #   below zero. The alphas are nominal (the tilted test is not studentized). `binding` false: the ladder records
+    #   its decisions and promotes nothing; it is set true only on the verdict of the ladder's pre-registered
+    #   confirmation run of its benchmark. `binding` true BESIDE THE LOOK promotes nothing either: while the gate's
+    #   sealed look is the route the gate makes no pre-filter read (one reader of the holdout) and the ladder's belt
+    #   refuses every program (`league/swarm/bands.py` `ladder_refusal`), so the ladder's turn takes a release that
+    #   switches the look off as well. `league/live/ladder.py`'s docstring states the rule in full, as the House's
+    #   session end and the gate apply it.
     # - `book_share`: every real structure's open maximum loss together. `daily_stop_share`: the day's realized plus
     #   marked loss against start-of-day equity: no new real entry that day. `drawdown_stop_share`: from the peak since
     #   the reset: real money paused (exits go on, the owner told, the Gym keeps running) until the owner releases it.
     # - `tuition`: 1-lot real orders from validation-passing families before their holdout, only to measure real
-    #   multi-leg fills, never evidence: at most this much maximum loss a day and a week.
+    #   multi-leg fills, never evidence: at most this much maximum loss a day and a week. RETIRED, and kept retired by
+    #   the fast lane (`league/swarm/bands.py` `TUITION_ROWS` False: the live path is given no Gym-band row, so no order
+    #   reaches this row): it was real money before the unseen-market test. The row is left as it was (changing it
+    #   would move the digests for nothing).
     # - `order_path`: the House's own order governor (under the venue's professional-customer line and rate limits);
     #   `gateway`: the caps the Cloudflare gateway enforces from its own reading of the account (repeated here so the
     #   House refuses first and says why).
@@ -731,7 +770,9 @@ CONSTITUTION: dict[str, Any] = {
     #   trades under the current evaluator, passing only with decision coverage at least `min_coverage` and realized
     #   practice P&L above $0 over program closes, over all closes, and over all closes plus the open mark; a failed
     #   first look is final. Incubator orders are real P&L (Profit) and NEVER strategy evidence: never a forward row,
-    #   never a band move, never a promotion. D2 is the only route to Probe and Sized. Expected value is negative until
+    #   never a band move, never a promotion. D2 is the only route to Probe and Sized. Under the fast lane this is the
+    #   ONE route where one-lot real money comes before the unseen-market test: the owner's own row and switch
+    #   (`live.incubator` in the state's swarm.json), left exactly as it was. Expected value is negative until
     #   a family has a real edge: at most about $650 a month on average ($750 in a five-week month) plus residuals.
     #   Setting `max_open`, `week_loss_usd` or `max_loss_usd` to 0 stops the route (a tightening: a new digest and a
     #   ratification).
@@ -750,7 +791,11 @@ CONSTITUTION: dict[str, Any] = {
         "credit_min_equity_usd": "2000",
         "probe": {"max_loss_share": "0.05", "open_per_family": 3, "family_share": "0.15", "floor_usd": "100"},
         "sized": {"min_trades": 20, "confidence": "0.80", "kelly_fraction": "0.25", "max_loss_share": "0.10",
-                  "family_share": "0.30", "min_probe_real_trades": 5, "min_probe_sessions": 1},
+                  "family_share": "0.30", "min_probe_real_trades": 20, "min_probe_sessions": 5},
+        "ladder": {"binding": False, "min_sessions": 20, "min_closes": 30, "confidence": "0.95", "draws": 10000,
+                   "windows": 4, "windows_positive": 3, "fdr_q": "0.10", "fdr_days": 90, "max_sessions": 60,
+                   "checkpoints": [40, 60], "alphas": ["0.004", "0.05"], "prefilter_p": "0.02", "answer_sessions": 5,
+                   "drift_known_share": "0.90", "demote_sessions": 20, "demote_confidence": "0.80"},
         "book_share": "0.90",
         "daily_stop_share": "0.35",
         "drawdown_stop_share": "0.60",
@@ -813,6 +858,29 @@ OPTIONS_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
     # program version and this many whole sessions at Probe. A tightening of the plan's row; loosening is the owner's.
     "sized.min_probe_real_trades": ("5", "50"),
     "sized.min_probe_sessions": ("1", "20"),
+    # THE FORWARD LADDER (evidence v3, Oct 2, 2026; `league/live/ladder.py`): each row's range only TIGHTENS the line the
+    # plan states (more sessions and closes, a higher confidence, more positive sub-windows, a lower false-discovery
+    # rate over a longer window, a stricter pre-filter, a shorter wait for a checkpoint's answers, a stricter drift
+    # control, a demotion at a higher confidence); loosening one is the owner's. The practice window is fixed (its last
+    # checkpoint), and so are the resamples (`draws`: another count is another resample stream and another floor on
+    # the p-values, 1 / (draws + 1), which decides how large a family Benjamini-Hochberg can still reject in; it is
+    # another rule than the one confirmed). `demote_sessions` may only shorten: a demotion judged over fewer sessions
+    # comes earlier, which is not always the stricter bound. `binding` (a JSON boolean) and the two lists
+    # (`checkpoints`, fixed, and `alphas`, each at or under `OPTIONS_LADDER_ALPHAS`) are checked apart.
+    "ladder.min_sessions": ("20", "250"),
+    "ladder.min_closes": ("30", "5000"),
+    "ladder.confidence": ("0.95", "0.999"),
+    "ladder.draws": ("10000", "10000"),
+    "ladder.windows": ("4", "4"),
+    "ladder.windows_positive": ("3", "4"),
+    "ladder.fdr_q": ("0.01", "0.10"),
+    "ladder.fdr_days": ("90", "365"),
+    "ladder.max_sessions": ("60", "60"),
+    "ladder.prefilter_p": ("0", "0.02"),
+    "ladder.answer_sessions": ("1", "5"),
+    "ladder.drift_known_share": ("0.90", "1.0"),
+    "ladder.demote_sessions": ("5", "20"),
+    "ladder.demote_confidence": ("0.80", "0.99"),
     "book_share": ("0.50", "0.90"),
     "daily_stop_share": ("0.15", "0.35"),
     "drawdown_stop_share": ("0.40", "0.60"),
@@ -864,7 +932,13 @@ OPTIONS_CREDIT_TYPES = ("credit_vertical", "iron_condor", "iron_butterfly")
 _OPTIONS_COUNTS = ("probe.open_per_family", "sized.min_trades", "sized.min_probe_real_trades", "sized.min_probe_sessions", "order_path.max_orders_day", "order_path.max_requests_minute",
                    "order_path.expiry_close_lead_minutes", "gateway.max_day_orders", "gateway.max_day_open_orders",
                    "house_test.open", "house_test.sessions", "house_test.round_trips", "incubator.contracts",
-                   "incubator.max_open", "incubator.min_sessions", "incubator.min_trades")
+                   "incubator.max_open", "incubator.min_sessions", "incubator.min_trades", "ladder.min_sessions",
+                   "ladder.min_closes", "ladder.draws", "ladder.windows", "ladder.windows_positive", "ladder.fdr_days",
+                   "ladder.max_sessions", "ladder.answer_sessions", "ladder.demote_sessions")
+#: THE FORWARD LADDER's checkpoints (sessions practised; the last is its practice window, `ladder.max_sessions`): fixed.
+#: And the highest nominal level each may be judged at: an alpha may only go down.
+OPTIONS_LADDER_CHECKPOINTS = (40, 60)
+OPTIONS_LADDER_ALPHAS = ("0.004", "0.05")
 
 
 def options_money_problems(constitution: dict[str, Any] | None = None) -> list[str]:
@@ -904,6 +978,47 @@ def options_money_problems(constitution: dict[str, Any] | None = None) -> list[s
             problems.append("options_money.gateway.max_day_open_orders must leave exits room under max_day_orders")
     except (TypeError, ValueError):
         pass
+    ladder = table.get("ladder") if isinstance(table.get("ladder"), dict) else {}
+    if not isinstance(ladder.get("binding"), bool):
+        problems.append(f"options_money.ladder.binding is a JSON boolean: {ladder.get('binding')!r}")
+    try:
+        if int(ladder.get("max_sessions", 0)) < int(ladder.get("min_sessions", 0)):
+            problems.append("options_money.ladder.max_sessions must be at least ladder.min_sessions")
+        if int(ladder.get("windows_positive", 0)) > int(ladder.get("windows", 0)):
+            problems.append("options_money.ladder.windows_positive must be at most ladder.windows")
+    except (TypeError, ValueError):
+        pass
+    # The checkpoints and their alphas are lists, so they are read apart from the scalar rows above.
+    points, alphas = ladder.get("checkpoints"), ladder.get("alphas")
+    if not isinstance(points, list) or not points or any(isinstance(x, bool) or not isinstance(x, int) for x in points):
+        problems.append(f"options_money.ladder.checkpoints is a list of whole session counts: {points!r}")
+        points = None
+    else:
+        if any(later <= earlier for earlier, later in zip(points, points[1:])):
+            problems.append(f"options_money.ladder.checkpoints must increase: {points!r}")
+        try:
+            window = int(ladder.get("max_sessions"))
+        except (TypeError, ValueError):
+            window = None
+        if points[-1] != window:
+            problems.append(f"options_money.ladder.checkpoints must end at ladder.max_sessions (the practice window): "
+                            f"{points!r}")
+        if points != list(OPTIONS_LADDER_CHECKPOINTS):
+            problems.append(f"options_money.ladder.checkpoints is exactly {list(OPTIONS_LADDER_CHECKPOINTS)}: {points!r}")
+    if not isinstance(alphas, list) or not alphas:
+        problems.append(f"options_money.ladder.alphas is a list of levels, one a checkpoint: {alphas!r}")
+        alphas = []
+    elif points is None or len(alphas) != len(points) or len(alphas) != len(OPTIONS_LADDER_ALPHAS):
+        problems.append(f"options_money.ladder.alphas must hold one level for each of ladder.checkpoints: {alphas!r}")
+    for node, high in zip(alphas, OPTIONS_LADDER_ALPHAS):
+        try:
+            value = None if isinstance(node, bool) or node is None else Decimal(str(node))
+        except (InvalidOperation, ValueError):
+            value = None
+        if value is None or not value.is_finite():
+            problems.append(f"options_money.ladder.alphas: {node!r} is not a number")
+        elif not Decimal("0") <= value <= Decimal(high):
+            problems.append(f"options_money.ladder.alphas: {node!r} is outside [0, {high}]")
     return problems
 
 #: The gateway's `wrangler.jsonc` vars that repeat the money table: `league.ci` requires them equal.
@@ -927,4 +1042,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '595228a68a0a0e146901ba08185dfa7b39bcb2952a2abc1ae0cf16f19193d102'
+PINNED_DIGEST = 'fc02cf44908a6b49a0880a65867fa4b3da3fd58d07b2bbe3334db2142d78f20f'

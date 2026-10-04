@@ -47,11 +47,10 @@ The walls, in the order they are asked, each one fail-closed (no deploy, a warni
      the House (its `promote` row in `deploys.jsonl`); a rolled-back attempt counts, a canary
      refusal (the House never restarted) does not;
    - *the US session*: no launch on a day the House's session calendar (`ltcm.data.
-     us_equity_session`, the function `league/house.py` imports) calls a trading day, from 30
-     minutes before 13:25Z to 20:05Z (the session's own open less five minutes to its close plus
-     five when that is wider: 14:25-21:05Z in winter). The 30-minute lead is the deploy itself: the
-     canary took 2.2-4.0 minutes from launch to restart on Sept 24-25, then the watch is ten
-     minutes, and a rollback restarts the House again inside it;
+     us_equity_session`, the function `league/house.py` imports) calls a trading day, during the
+     session or in the owner's 90-minute preopen exclusion. The existing conservative floor and
+     five-minute padding stay: the hold begins at 11:55Z and ends at 20:05Z, or five minutes after
+     the calendar's close when later (21:05Z in winter);
    - *a recent start*: none within 30 minutes of the ledger's last `ops.started`, read read-only.
    Measured: the House restarted 26 times in the 24 hours to 04:23Z Sept 25 (24-37 a day Sept
    20-24), seven of them inside the Sept 24 US session, and every restart kills the research and
@@ -168,10 +167,9 @@ RESTART_QUIET_SECONDS = 30 * 60
 #: five minutes when that is wider (EST, 14:30-21:00Z).
 SESSION_WINDOW_UTC = (clock_time(13, 25), clock_time(20, 5))
 SESSION_PAD_SECONDS = 5 * 60
-#: How long before the window a launch is already too late: the canary took 2.2-4.0 minutes from
-#: launch to restart on Sept 24-25, 2026 (six updater deploys), the watch is ten minutes, and a
-#: rollback restarts the House a second time inside it.
-DEPLOY_LEAD_SECONDS = 30 * 60
+#: The owner's minimum preopen exclusion. It precedes the padded session window, preserving the
+#: existing conservative UTC floor and five-minute margin as well as the calendar's own hours.
+DEPLOY_LEAD_SECONDS = 90 * 60
 #: While a launch waits for the nightly daemon to stop, the next look comes this soon (the House's tick
 #: is 30 s; the daemon polls its stop every 30 s).
 NIGHTLY_POLL_SECONDS = 20
@@ -427,6 +425,16 @@ def train_hours(trusted: str | Path | None = None) -> float:
     return min(float(high), max(float(low), value))
 
 
+def _attempt_token(row: Mapping[str, Any]) -> str | None:
+    value = row.get("attempt")
+    return value if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{32}", value) else None
+
+
+def _timing_deferred(row: Mapping[str, Any]) -> bool:
+    return (row.get("stage") == "verdict" and row.get("verdict") == "refused"
+            and row.get("unjudged") is True and row.get("deferred") in ("session", "calendar"))
+
+
 def updater_ships(history: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
     """The updater's deploys that restarted the House, oldest first, from `deploys.jsonl`.
 
@@ -435,12 +443,15 @@ def updater_ships(history: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
     its `promote` row, whatever its verdict: a rolled-back attempt restarted it twice. One with no
     verdict yet is in flight and counts from its `start`. One refused before promotion (the canary)
     never restarted anything and does not count."""
-    deploys: dict[str, dict[str, Any]] = {}
+    deploys: dict[tuple[str, str], dict[str, Any]] = {}
     for row in history:
         key, sha = row.get("deploy"), row.get("sha")
         if not key or not sha:
             continue
-        seen = deploys.setdefault(str(key), {"deploy": str(key), "release": row.get("release"), "sha": sha})
+        attempt = _attempt_token(row)
+        grouped = ("attempt", attempt) if attempt else ("legacy", str(key))
+        seen = deploys.setdefault(grouped, {"deploy": str(key), "release": row.get("release"), "sha": sha,
+                                           **({"attempt": attempt} if attempt else {})})
         stage, ts = row.get("stage"), _row_ts(row)
         if stage == "start":
             seen["started_ts"] = ts
@@ -474,7 +485,7 @@ def last_start(state_dir: str | Path) -> tuple[float | None, str | None]:
 
 def session_window(moment: float) -> dict[str, Any] | None:
     """The no-release window of `moment`'s UTC day, or None on a day the House's calendar calls
-    closed (a weekend, an NYSE holiday). The window lies inside one UTC day, 12:55Z at its earliest
+    closed (a weekend, an NYSE holiday). The window lies inside one UTC day, 11:55Z at its earliest
     with the lead to 21:05Z at its latest, where New York's date is the same day."""
     day = datetime.fromtimestamp(float(moment), tz=timezone.utc).date()
     floor_open = datetime.combine(day, SESSION_WINDOW_UTC[0], timezone.utc).timestamp()
@@ -525,9 +536,9 @@ def schedule(base: str | Path, now: float, *, history: list[Mapping[str, Any]] |
     if window is not None and window["starts"] <= now < window["closes"]:
         holds.append({"hold": "session", "until": _stamp(window["closes"]), "until_ts": window["closes"],
                       "why": (f"the US session: {window['day']} is a trading day on the House's calendar (the session {window['session']}); "
-                              f"no updater release from {_stamp(window['starts'])} to {_stamp(window['closes'])}: the window opens at "
-                              f"{_stamp(window['opens'])[11:16]}Z, and a release's canary, promotion and ten-minute watch take up to "
-                              f"{DEPLOY_LEAD_SECONDS // 60} minutes")})
+                              f"no updater release from {_stamp(window['starts'])} to {_stamp(window['closes'])}: the owner's "
+                              f"{DEPLOY_LEAD_SECONDS // 60}-minute preopen exclusion precedes the conservative padded window "
+                              f"that opens at {_stamp(window['opens'])[11:16]}Z")})
     # The earliest moment no hold stands: past the train and the quiet, then out of any session window
     # that moment falls in (a window's end is never inside the next day's).
     moment = max([now] + [h["until_ts"] for h in holds if h["hold"] != "session"])
@@ -694,6 +705,8 @@ class Updater:
         commit retired on one of those was retired for good, with no retry and no expiry, silently:
         a floor that rewrites itself would have dropped its own improvements one at a time.
 
+        Nor is an attempt finally deferred by the watchdog's deployment timing check: its unique attempt token
+        excludes only that attempt's rows, preserving any earlier real verdict for the same release.
         Nor is a row marked `unjudged`: a head not yet (or not) attested by GitHub, or one refused
         for workflows that are not part of the tree, or one the release train held. Those verdicts
         belong to a commit or a moment, and the same tree must still be deployable later.
@@ -712,7 +725,22 @@ class Updater:
         verdicts: dict[str, list[str]] = {}
         starts: dict[str, int] = {}
         backed_out: set[str] = set()
-        for row in self.releases.history():
+        history = self.releases.history()
+        attempts: dict[str, list[Mapping[str, Any]]] = {}
+        for row in history:
+            token = _attempt_token(row)
+            if token is not None:
+                attempts.setdefault(token, []).append(row)
+        deferred_attempts = set()
+        for token, rows in attempts.items():
+            verdict_rows = [row for row in rows if row.get("stage") == "verdict"]
+            if (verdict_rows and _timing_deferred(verdict_rows[-1])
+                    and not any(row.get("stage") in ("promote", "rollback")
+                                or (row.get("stage") == "verdict" and not _timing_deferred(row)) for row in rows)):
+                deferred_attempts.add(token)
+        for row in history:
+            if _attempt_token(row) in deferred_attempts:
+                continue
             if row.get("stage") == "rollback" and row.get("ok") is not False:
                 backed_out.add(str(row.get("from") or row.get("release")))
             release = row.get("release")
@@ -1113,7 +1141,7 @@ def protected_changes(incoming: Path, running: Path) -> list[str]:
     configuration (`ci.MERGE_ONLY`, whose dials only the running release's checks let through here). Only the release
     trees are compared: `gateway/` and `.github/` never reach the box as files (the workflows are pinned by
     `TRUSTED_WORKFLOWS_SHA256`)."""
-    from .ci import FORBIDDEN
+    from .ci import guard
 
     def files(root: Path) -> dict[str, Path]:
         out = {}
@@ -1124,8 +1152,7 @@ def protected_changes(incoming: Path, running: Path) -> list[str]:
         return out
 
     def guarded(name: str) -> bool:
-        lowered = name.lower()
-        return any(lowered == f.lower() or (f.endswith("/") and lowered.startswith(f.lower())) for f in FORBIDDEN)
+        return bool(guard([name], None))
 
     mine, theirs = files(Path(running)), files(Path(incoming))
     changed = []

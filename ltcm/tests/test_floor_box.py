@@ -32,6 +32,8 @@ REPO_ROOT = Path(ltcm.__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "scripts" / "floor_box.py"
 PYTHON = "/workspace/.venv/bin/python"
 RELEASE_ID = re.compile(r"^\d{8}T\d{6}Z-[0-9a-f]{12}$")
+# 2026-09-21T22:00:00Z: after the deployment exclusion, including room for fake waits.
+FIXTURE_START = 1_790_028_000.0
 #: The first run's remains on the box. Nothing the script does for the league may name them.
 HISTORY = ("rm -rf /workspace/ltcm", "/workspace/.data", "/workspace/.archive", "/workspace/ltcm.log",
            "/workspace/ltcm/", "/workspace/ltcm ")
@@ -51,7 +53,7 @@ floor_box_client = floor_box.client
 class FakeTime:
     """`time`, as the script uses it, with a clock that only moves when the script sleeps."""
 
-    def __init__(self, start: float = 1_790_000_000.0):
+    def __init__(self, start: float = FIXTURE_START):
         self.now = start
         self.slept: list[float] = []
 
@@ -846,7 +848,7 @@ class DeployTests(BoxCase):
         [(_, target, blob, mode)] = [c for c in self.box.calls if c[0] == "upload" and c[1].endswith(".tgz")]
         self.assertEqual((target, mode), (f"/workspace/.upload/release-{release}.tgz", 0o600))
         self.assertEqual(release.rpartition("-")[2], hashlib.sha256(blob).hexdigest()[:12])
-        self.assertTrue(release.startswith(real_time.strftime("%Y%m%dT%H%M%SZ", real_time.gmtime(1_790_000_000))))
+        self.assertTrue(release.startswith(real_time.strftime("%Y%m%dT%H%M%SZ", real_time.gmtime(FIXTURE_START))))
         with tarfile.open(fileobj=io.BytesIO(blob)) as archive:
             self.assertEqual(sorted(archive.getnames()), ["deploy/README.md", "league/__main__.py", "league/config.json"])
         [unpack] = [text for text in self.box.execs() if "tar -xzf" in text]

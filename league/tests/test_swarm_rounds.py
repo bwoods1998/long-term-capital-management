@@ -9,7 +9,10 @@ import random
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from league.swarm import bands as B
+from league.swarm import gate as G
 from league.swarm import settings as S
 from league.swarm.architect import Architect
 from league.swarm.gate import Gate
@@ -22,6 +25,9 @@ from league.tests.swarm_fakes import Clock, FakeFrontier, FakeMonth, provider, r
 
 SPEC = {"id": "condor-vrp", "mechanism": "Index options price more movement than follows: sell an iron condor.",
         "structure": "iron_condor", "roots": ["SPY"], "dte": [0, 2]}
+#: The two route switches as the tree ships them, read at import (before any test's patch): THE FAST LANE (release F1,
+#: Oct 3, 2026) runs the sealed look and keeps execution tuition retired.
+SHIPPED = {"league.swarm.gate.SEALED_LOOKS": G.SEALED_LOOKS, "league.swarm.bands.TUITION_ROWS": B.TUITION_ROWS}
 
 
 def review_failure(reason):
@@ -80,8 +86,23 @@ def weak(job):
     return result(job.name, daily=daily, window=job.window, pnl=sum(daily), mean=-0.01, t=-0.5, quarters="1/4")
 
 
+class RetiredTuition:
+    """EXECUTION TUITION's own tests (a mixin, first among a case's bases): `bands.TUITION_ROWS` switched on for the
+    case, so `bands.read` gives the retired Gym-band rows these tests are about. Tuition stays retired as shipped; every
+    other case runs the tree's own switches."""
+
+    def setUp(self):
+        retired = patch("league.swarm.bands.TUITION_ROWS", True)
+        retired.start()
+        self.addCleanup(retired.stop)
+        super().setUp()
+
+
 class RoundCase(unittest.TestCase):
     def setUp(self):
+        # The tree's own switches, as shipped (`SHIPPED`: the sealed look runs, tuition is retired): this case patches
+        # neither. The tuition tests switch the retired rows on in their own classes (`RetiredTuition`); evidence v3's own
+        # gate is reached with `Gate(sealed_looks=False)` (`league/tests/test_swarm_gate_prefilter.py`).
         self.dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
         self.clock = Clock()
@@ -120,6 +141,19 @@ class RoundCase(unittest.TestCase):
                                    author="seed")
         self.store.update_family(fam["id"], best_version=v["n"])
         return self.store.family(fam["id"])
+
+
+class TheShippedSwitches(RoundCase):
+    def test_the_round_case_patches_neither_switch(self):
+        """Every suite built on `RoundCase` runs the pair the tree ships: the sealed look on, tuition off."""
+        self.assertEqual(SHIPPED, {"league.swarm.gate.SEALED_LOOKS": True, "league.swarm.bands.TUITION_ROWS": False})
+        self.assertEqual((G.SEALED_LOOKS, B.TUITION_ROWS), (True, False), "inside a test: as at import")
+        self.assertIs(Gate(self.store, self.pool, self.router, self.settings).sealed_looks, True)
+        self.family("a")
+        Tournament(self.store, self.pool, self.settings).validate(self.store.families(alive=True))
+        self.replies = [{"text": json.dumps({"verdict": "pass", "reasons": []})}] * 2
+        out = Gate(self.store, self.pool, self.router, self.settings).run()
+        self.assertEqual((out["looked"], out["practice"]), ([{"family": "a", "passed": True}], []), "the look is the route")
 
 
 class TournamentTests(RoundCase):
@@ -622,6 +656,83 @@ class GateTests(RoundCase):
         fam = self.store.family("a")
         self.assertEqual((fam["band"], fam["state"]["gate"]), ("gym", "fail"))
 
+    def test_a_look_in_flight_in_another_family_counts_as_a_failed_one_when_a_look_is_judged(self):
+        """Holm across every look made AND every look in flight in another family, as THE POWER HOLD counted them when it
+        let the look through (release F1): the level a look faces never depends on which of two looks lands first."""
+        self.ready("a")
+        self.ready("b")
+        self.pool.slow.update({"a", "b"})
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}] * 4
+        gate = Gate(self.store, self.pool, self.router, self.settings, clock=self.clock)
+        gate.run()
+        (job_a, late_a), (job_b, late_b) = self.pool.landing
+        self.assertEqual((job_a.family, job_b.family, self.store.looks()), ("a", "b", []), "both looks are out")
+        late_a(strong(job_a))                                  # a's lands while b's is still in flight
+        [look_a] = self.store.looks()
+        numbers = look_a["detail"]["numbers"]
+        self.assertEqual((numbers["looks_before"], numbers["holm_threshold"]), (1, 0.025),
+                         "judged as the second of two looks: 0.05 / 2, not 0.05")
+        [event] = [e["payload"] for e in self.store.events_after(0) if e["payload"].get("action") == "look"]
+        self.assertEqual(event["_inflight_elsewhere"], 1)
+        late_b(strong(job_b))                                  # b's lands after it: one look made, none in flight
+        look_b = self.store.looks()[1]
+        self.assertEqual((look_b["family"], look_b["detail"]["numbers"]["looks_before"]), ("b", 1))
+        # The family's own newer look in flight is not another family's: it is not counted (as the power hold's rule).
+        self.assertEqual([e["payload"]["_inflight_elsewhere"] for e in self.store.events_after(0)
+                          if e["payload"].get("action") == "look"], [1, 0])
+
+    def test_a_dead_processs_marker_is_no_look_in_flight_when_a_look_is_judged(self):
+        """Really in flight (`Gate.flying_elsewhere`). After a restart a family the round has not reached yet may still
+        hold the dead process's marker, and one whose look never came back holds its own until the round owes it. Neither
+        is a look: counted as a failed one it would judge this look at a stricter level than the looks made warrant, and
+        a look's verdict is final."""
+        self.ready("a")
+        self.family("z")                                       # born after a: the round reaches it after a's look landed
+        self.store.set_state("z", look_inflight={"sha": "f" * 64, "n": 1, "at": self.clock() - 5.0, "token": "dead"})
+        self.clock.advance(600)
+        gate = Gate(self.store, self.pool, self.router, self.settings, clock=self.clock)   # a new process
+        self.assertEqual((gate.flying_elsewhere("a"), [f for f, _ in self.store.looks_inflight()]), ([], ["z"]))
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}] * 2
+        self.assertEqual(gate.run()["looked"], [{"family": "a", "passed": True}])
+        [event] = [e["payload"] for e in self.store.events_after(0) if e["payload"].get("action") == "look"]
+        numbers = event["_line"]["numbers"]
+        self.assertEqual((event["_inflight_elsewhere"], numbers["looks_before"], numbers["holm_threshold"]), (0, 0, 0.05),
+                         "the first look ever made is judged at 0.05, not at 0.05 / 2")
+        self.assertIsNone(self.store.family("z")["state"].get("look_inflight"), "and the same round drops the dead marker")
+        # A marker this process set, older than a look is given (the run timeout and twenty minutes): no look either.
+        self.store.set_state("z", look_inflight={"sha": "f" * 64, "n": 1, "at": self.clock(), "token": "lost"})
+        self.assertEqual(gate.flying_elsewhere("a"), ["z"], "in flight while it can still land")
+        self.clock.advance(S.run_timeout(self.settings) + 1201)
+        self.assertEqual(gate.flying_elsewhere("a"), [])
+
+    def test_the_unreachable_level_alert_counts_the_looks_in_flight_too(self):
+        """The owner's alert that the bootstrap can no longer reach the Holm level names the looks it was judged across:
+        every look made, every look in flight in another family, and this one."""
+        from league.swarm import evidence
+
+        for i, fid in enumerate(("x", "y", "w")):              # three looks other lineages made (no version: never validated)
+            self.store.add_family({**SPEC, "id": fid}, origin="seed")
+            self.store.add_look(fid, 1, f"earlier-{i}", passed=False, p_value=0.5, detail={})
+        self.ready("a")
+        self.ready("b")
+        self.pool.slow.update({"a", "b"})
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}] * 4
+        Gate(self.store, self.pool, self.router, self.settings, clock=self.clock).run()
+        (job_a, late_a), (job_b, _) = self.pool.landing
+        self.assertEqual((job_a.family, job_b.family, len(self.store.looks())), ("a", "b", 3), "both looks are out")
+        line = evidence.holdout_line
+
+        def unreachable(result, **kw):
+            out = line(result, **kw)
+            out["numbers"]["holm_reachable"] = False  # as past 10,000 looks: the smallest p the bootstrap gives is over the level
+            return out
+
+        with patch.object(evidence, "holdout_line", unreachable):
+            late_a(strong(job_a))                              # three looks made, b's in flight, and this one
+        [alert] = [e["payload"] for e in self.store.events_after(0) if e["payload"].get("action") == "holm_unreachable"]
+        look = self.store.looks()[-1]
+        self.assertEqual((alert["looks"], look["family"], look["detail"]["numbers"]["looks_before"]), (5, "a", 4))
+
     def test_three_looks_a_lineage(self):
         self.ready()
         for i in range(3):  # three looks this lineage already made on the slice (the ration is counted from the looks)
@@ -640,8 +751,8 @@ class GateTests(RoundCase):
         self.assertTrue(self.store.get("leakage_alarm"))
         self.assertEqual(self.sail.bodies, [])
 
-    def test_no_gate_image_no_look_but_the_review_runs_and_is_kept(self):
-        from league.swarm import bands
+    def reviewed_and_waiting(self):
+        """`a` validated on a named Gym, its review and audit passed, waiting for the gate image: the round's answer."""
         from league.gym.driver import build_bundle
 
         self.pool.image = lambda kind: "sbcp_synthetic_gym"
@@ -655,7 +766,11 @@ class GateTests(RoundCase):
         out = Gate(self.store, self.pool, self.router, self.settings).run()
         self.assertEqual(out["waiting"], ["a"])
         self.assertEqual(self.store.looks(), [])
-        self.assertEqual([r["family"] for r in bands.read(self.root)], ["a"], "reviewed and waiting: tuition may run it")
+        return out
+
+    def test_no_gate_image_no_look_but_the_review_runs_and_is_kept(self):
+        self.reviewed_and_waiting()
+        self.assertEqual(B.read(self.root), [], "reviewed and waiting: no real order before its look (tuition is retired)")
         self.settings["gym"]["gate_checkpoint"] = "sbcp_gate"
         Gate(self.store, self.pool, self.router, self.settings).run()
         self.assertEqual(len(self.sail.bodies), 2, "the review and the audit, neither asked twice")
@@ -729,6 +844,17 @@ class GateTests(RoundCase):
         self.store.add_forward("a", "shadow", [{"id": f"t{i}", "day": "d", "pnl": 10.0, "max_loss": 50.0} for i in range(30)])
         self.assertIsNone(Gate(self.store, self.pool, self.router, self.settings).judge_forward("a"))
         self.assertEqual(self.store.family("a")["band"], "candidate")
+
+
+class TuitionTests(RetiredTuition, RoundCase):
+    """The retired execution tuition's row (`bands.read` with `TUITION_ROWS` on): the tuition tests' own class."""
+
+    ready, reviewed_and_waiting = GateTests.ready, GateTests.reviewed_and_waiting
+
+    def test_a_reviewed_version_waiting_for_its_look_had_a_tuition_row(self):
+        self.reviewed_and_waiting()
+        self.assertEqual([(r["family"], r["band"]) for r in B.read(self.root)], [("a", "gym")],
+                         "reviewed and waiting: on the retired route, tuition ran it")
 
 
 class ArchitectTests(RoundCase):

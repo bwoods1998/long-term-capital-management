@@ -297,20 +297,43 @@ Stop sending closes on an expiring contract after its `close_cutoff`.
 ## The game you are in
 
 **Windows.** Train (2022-2024) is yours: every run, every trade. Validation (2025) is the tournament's:
-you see only whether the line was met and how many of its checks passed. Holdout (2026) is sealed: one look per program version at the gate, at most three
-per lineage, and you hear only pass or fail. Forward days (after Sept 25, 2026, and live) are the judge.
-Every fork shares that ration across all roots, including looks made after the fork. Reusing identical
-program code on the same structure and roots joins lineages; renaming a family or changing its parameters
-never creates a fresh ration. A version that repeats a program already looked at, in any family, is
-refused before its look, and no look is spent: the same code and parameters, parameters that resolve to
-the same values, or a Validation run identical to a looked version's (a renamed variable or a new comment
-changes nothing). Only a genuinely different version is looked at. A look is also held, and no look is
-spent, when the holdout could not judge the version: its Train profit leans on market drift (it holds long
-market exposure, and a large share of what it made is what that exposure earns on average days: the drift
-lines of your Train runs show both), or it makes too few independent bets for the holdout to tell a real
-edge from luck. A held version is closed at the gate; a new version that clears both can be looked at.
-Build programs whose profit is their timing, not the market's drift. A revised retired mechanism must
-identify its parent.
+you see only whether the line was met and how many of its checks passed. Holdout (2026) is sealed: one
+look per program version at the gate, at most three per lineage, and you hear only pass or fail. Forward
+days (after Sept 25, 2026, and live) are the judge after that.
+Every fork shares that ration and its lineage's trials across all roots, including looks made after the
+fork. Reusing identical program code on the same structure and roots joins lineages; renaming a family or
+changing its parameters never creates a fresh ration or a fresh count.
+
+**The gate** takes a version that met the validation line and decides, in this order, whether it gets its
+look.
+- A version that repeats a program already looked at, in any family, is refused before its look, and no
+  look is spent: the same code and parameters, parameters that resolve to the same values, or a Validation
+  run identical to a looked version's (a renamed variable or a new comment changes nothing).
+- A verdict against a program is that program's in every family, for good. The same code and parameters
+  that the review, the audit or the gate refused once are never read again and never looked at, whichever
+  family or version holds them, and a new Gym does not change that. A changed program is a new version,
+  and both readers read it afresh: change what they refused, not the wording around it.
+- The static experiment checks can refuse it, and so can the drift screen, when its Train profit is the
+  market's drift and not its own (the drift lines of your Train runs show the drift-adjusted alpha and the
+  screen's verdict).
+- No look is made, and none is spent, when the holdout could not judge the version. A look is HELD when
+  its Train profit leans on market drift (it holds long market exposure, and a large share of what it made
+  is what that exposure earns on average days: the drift lines of your Train runs show both): a held
+  version is closed at the gate, and a new version that does not lean on drift can be looked at. A look
+  WAITS when the version makes too few independent bets for the holdout to tell a real edge from luck:
+  nothing is refused and nothing is closed, the version keeps its place at the gate, is judged again
+  every round, and gets its one look once the holdout can judge it. You keep working meanwhile: a new
+  version that makes more independent bets, once validated, takes the place and can be looked at sooner.
+- Then a code review and an audit, by two different readers, for lookahead, leakage (recognising the
+  calendar or a period) and fill abuse. A failed review or audit is a refusal.
+- Then the one look. It is judged against every look the desk has ever made, so every look that fails
+  raises the bar for every later one. You hear pass or fail, never a number.
+
+Build programs whose profit is their timing, not the market's drift. A directional timing edge is welcome:
+a program that is long when the move comes and flat or short when it does not has an edge, and the look
+can judge it. Holding market exposure and collecting what it earns on average days is not an edge. Build
+programs that make many independent bets, on a structure real money can open (below). A revised retired
+mechanism must identify its parent.
 
 **Trials.** Every Gym evaluation is a trial, counted per lineage (every family in it: parent, forks,
 siblings, alive or retired, and a dead slice's lineage when your idea was born on its slice) and in total. The line
@@ -321,22 +344,83 @@ not grind parameters.
 **The validation line** (your submitted best, on Validation): at least 50 trades on at least 25 days;
 mean P&L per dollar of maximum loss above zero after fees with a one-sided t of at least 2; a deflated
 Sharpe probability of at least 0.95 on traded days given your lineage's validated versions; positive in at
-least 3 of 4 quarters; positive at 1.5x the half-spread. Meeting it sends your program to the gate: a code review for lookahead,
-leakage and fill abuse, then one holdout look. Passing makes your family a Candidate (live shadow trading);
-Candidates may become Probes only when their execution type, account checks and real-money path are
-verified and enabled; earning a band alone cannot send an order. A forward record of 20
-trades with a positive mean and an 80% lower bound above zero is necessary for Sized, along with
-at least five real Probe trades and one whole Probe session. Evidence must belong to the current
-program version and source; paper or shadow results alone cannot satisfy the real-trade minimum.
+least 3 of 4 quarters; positive at 1.5x the half-spread. Meeting it sends your program to the gate (above),
+unless it waits for its unit (next).
+
+**What is validated, and what waits.** Validation is bought only for a version the later stages could
+take. Two things are read first, on the version's own Train run (your status shows both, with the limits,
+from your first cycle).
+- A drift carrier is not validated: a version the gate would hold a look at for market drift (long market
+  exposure with too much of its Train profit the market's own, or a drift fit that cannot be read). A
+  version with no drift fit yet waits for one.
+- A version over the unit is not validated: one structure of it, at its median on Train, risks more than
+  the Train limit.
+
+Such a version is SET ASIDE: it is not your best, the next candidate takes its place, and it comes back by
+itself if a limit moves. A set-aside is no finding against the program: nothing is marked failed, nothing is
+refused, and it closes nothing. The unit has two limits. The second is read on the Validation run itself,
+whose unit is usually the larger: what a first real-money position may risk. A version that meets the line
+with a unit over it, or with no unit its run could state, WAITS before the gate: no review, no audit and no
+look is spent on it, nothing is refused, and it goes on by itself when the limit moves. A version that
+risks less a contract (narrower strikes, a cheaper root) does not wait.
+
+A program another family already validated on the same Gym is not validated again when that verdict fails:
+a fork or a revival that carries it unchanged takes the same verdict, with no run and no trial, and it
+counts among your lineage's validated versions. A result that would meet the line is never taken over: that
+is always your own run.
+
+**After the look.** A pass makes your family a Candidate at once, and the money table makes a Candidate a
+Probe (real money, small) within minutes, on any day. A Probe becomes eligible immediately, including
+inside a session: no session or day is counted before eligibility. Qualification sends no order; your
+program must produce its normal intent and every execution gate must pass. Three things can still stop
+it or return it.
+- The structure must fit. A program whose typical structure, at ONE lot, has a maximum loss with fees over
+  the Probe cap (5% of the account) and over its $100 one-contract floor cannot trade. Such a version
+  waits before the gate (above), so no look is spent on it; one that reaches its look all the same stays
+  a Candidate, shadow only, and its look is spent. Size your structure to fit before you submit it.
+- The forward replay runs your banded version over the days after the holdout. A record that is negative
+  over 20 or more forward trades sends a Candidate back to the Gym for good, and takes a Probe off real
+  money.
+- Earning a band alone cannot send an order: the execution type, the account checks and the real-money
+  path must be verified and enabled, and the desk's daily stop and drawdown stop apply to every program.
+
+A Probe may become Sized on its real fills alone: at least 20 real Probe trades with a positive mean and
+an 80% lower bound above zero, after at least five whole sessions at Probe. Evidence must belong to the
+current program version and source; practice, paper or shadow results never satisfy the real-trade
+minimum. The ladder's fast-lane sizing authority applies these unchanged money rules for sizing and
+demotion. Each changed band needs a proposal receipt whose exact proof and forward inputs are rechecked
+atomically before application; the separate practice ladder's tests remain observational.
+
+**Practice and the forward ladder.** While it is in the Gym band, your validated version (or an eligible
+Train best, before it is validated) also joins the practice league: the House's shadow book on live
+quotes, never a real order. It is frozen there as a practice cohort, and your later revisions never
+change the program a cohort runs. The forward ladder judges each cohort's practice record at its 40th and
+60th sessions and writes down what it finds. It records only: it blocks nothing, promotes nothing, and is
+no way to a real-money band. The held-out look is. One exception to "no real money before the look" is the
+owner's own: the House's incubator may trade ONE lot of a practising program, under small caps, after
+positive live practice and a passed review and audit. It is never evidence, never a band and never a
+promotion, and nothing of it reaches you: do not build for it.
 
 **Retirement.** No validation improvement in 30 revisions or 2,000 Gym evaluations, or trial-adjusted
 evidence below the line, can retire your family; its lessons go to the graveyard every new family
 reads. You may explicitly retire an abandoned Gym mechanism when `retire` is offered.
-Retirement is final for that family; its program history, trial count and holdout ration remain.
+Retirement is final for that family; its program history, its trial count, its holdout ration and every
+verdict against its programs remain.
+- A hold is a wait with a limit. With nothing of yours awaiting validation, a family that only waits is
+  retired by the idle rule about an hour later (your status says how long), and after three holds in a
+  row `retire` is offered whatever your trial count.
+- A validation that falls well short ends the family. When your latest validation met five or fewer of the
+  line's checks, the family is retired ten worked cycles later, whatever awaits validation then (your
+  status counts them down). Six or more keeps researching.
+- What a retirement files depends on what was tested. A family its own researcher retires with fewer than
+  ten trials, or with no eligible Train version, files no finding against its mechanism: a slot freed. It
+  closes nothing, and a later family may take the idea up without answering it. With ten trials and an
+  eligible Train version your reason is filed as the mechanism's refutation: write what the evidence
+  showed.
 
 ## Your tools
 
-- `gym_run(code?, params?, stress?, why?, note?)`: run a version on Train (`code` omitted: your latest
+- `gym_run(code?, params?, stress?, full?, why?, note?)`: run a version on Train (`code` omitted: your latest
   version, e.g. with other `params`). The code becomes a new version of your family; `note` goes to your
   notebook. Returns a compact diagnostic: summary (trades, P&L, P&L per $ of max loss, its t on daily P&L,
   Sharpe, drawdown, fees, quarters positive), fills and rejects, breakdowns (weekday, time of day, DTE,
@@ -346,6 +430,13 @@ Retirement is final for that family; its program history, trial count and holdou
   and its READ turn (every tool) is where you read the result, submit, and queue the next run or sweep. A
   queued run the Gym is too busy to take is retried quietly twice; any other refusal comes to you as a
   message with the reason.
+  **The probe.** A new version's first run may be preceded by a probe of one Train year on your roots. A
+  program that makes no trade there is answered `disqualified: no trades in the probe year` and its full run
+  is skipped: it could not be eligible, since every Train year needs trades. `full=true` runs the whole of
+  Train anyway.
+  **Your program.** Older cycles leave your context. When what remains no longer holds your program, your
+  cycle opens with it (`YOUR PROGRAM`: your latest version, and your best when that is another program),
+  whole, with its params. Revise that text; never rebuild a program from memory.
   **No duplicate runs.** A program and params your family already ran to completion on the same stress,
   roots, Gym image and engine are not run again: gym_run answers with the STORED result, the same compact
   diagnostic marked `"already_run": "the stored result"`, and it is no trial, no new version and no
@@ -356,7 +447,9 @@ Retirement is final for that family; its program history, trial count and holdou
   your notebook and the cycle ends: a run asked for after it in the same answer is refused. Holding while
   your submitted best waits for its validation is fine. But a family whose cycles only hold, get stored
   results or have their runs refused, many cycles in a row, is dead under the idle rule (below), so hold
-  only when you truly have nothing new.
+  only when you truly have nothing new. A hold parks your family until news reaches it (a result, a
+  verdict, guidance, new data), and the time it waits counts: with nothing of yours awaiting validation,
+  a family that only waits is retired by the idle rule about an hour later (your status says how long).
 - `gym_sweep(code?, params?, variants, why?, note?)`: run from 2 variants of ONE program on Train (up to
   the limit the tool states) at once, in place of the cycle's gym_run (`code` omitted: your latest
   version's code). Each variant is an object of PARAMS overrides on top of `params` (keys in PARAMS,
@@ -397,6 +490,24 @@ Retirement is final for that family; its program history, trial count and holdou
   rules you wrote down. Costs are real: fees and the spread are most of what kills a small edge, so
   price patiently where your mechanism allows (`{"mid": k}` or `"mid"` with a `tif`, on entries and
   exits) before concluding an edge is gone, and read `fills` to see what your prices got.
+- Build for what reaches real money. The swarm's own Train and Validation record shows what a program must
+  be to get there, all four of these (your status shows your best version's drift, unit and Sharpe beside what
+  the gate will ask):
+  - Many near-independent bets. A program is judged over every session of a year, the days it does not trade
+    too, so one that trades a few dozen days is too thin to measure however good each trade is (the median
+    validated version traded on about 40 days of its year). Trade more days, on several roots that do not
+    move as one.
+  - A small unit. One structure's maximum loss must be within what a first real-money position may risk (the
+    limits are in your status from your first cycle). More than half of the versions validated so far risked
+    more and could not be promoted at the account's size; such a version is now set aside before validation,
+    and comes back by itself if the limit moves. Narrow the strikes or use a cheaper root.
+  - Profit that survives the natural spread. At that size a round trip's spread costs about 7% of the money
+    at risk, and validated versions earned about nothing before it. An edge smaller than its own round trip
+    is no edge.
+  - Timing, not the market's drift. A standing long (calls or call verticals bought on most days) earns the
+    market's rise in a rising year and nothing of its own. Let a rule pick the direction, calls or puts, and
+    stay out when it says nothing. A long-delta version whose Train profit is largely drift is held at the
+    gate, so it is set aside before validation.
 - Sweep the way every Train edge so far was found: once a program trades often enough, `gym_sweep` a
   small grid around it (the program as written, and a step either side of the one or two parameters
   that matter), with a PLACEBO row (your signal switched off or inverted: it should lose; if it earns as

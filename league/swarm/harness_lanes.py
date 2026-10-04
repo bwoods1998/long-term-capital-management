@@ -124,6 +124,8 @@ PROTECTED: tuple[tuple[str, str], ...] = (
     ("league/swarm/benchmarks.py", "objective"), ("league/swarm/long_single_benchmarks.py", "objective"),
     ("league/swarm/evidence.py", "objective"), ("league/stats.py", "objective"), ("docs/goals/*", "objective"),
     ("docs/benchmarks/*", "objective"), ("league/tests/*", "objective"),
+    # the forward ladder's benchmark and the frozen judge that alone says whether the ladder may bind (evidence v3)
+    ("league/swarm/forward_benchmarks.py", "objective"), ("scripts/ladder_judge.py", "objective"),
     # sealed evaluation data, the evaluator and what a researcher may see of Validation (D2a)
     ("league/gym/*", "sealed"), ("league/swarm/gate.py", "sealed"), ("league/swarm/bands.py", "sealed"),
     ("league/swarm/evaluator.py", "sealed"), ("league/swarm/settings.py", "sealed"), ("league/swarm/diagnostics.py", "sealed"),
@@ -146,6 +148,10 @@ PROTECTED: tuple[tuple[str, str], ...] = (
     # writes, the live state; paper orders at the venue
     ("league/live/real.py", "capital"), ("league/live/venue.py", "capital"), ("league/live/state.py", "capital"),
     ("league/live/paper.py", "capital"),
+    # the forward ladder: its own route from practice to a Probe (evidence v3; as shipped it records beside the gate's
+    # held-out look, the route to Probe: release F1); and the swarm's own read of its cohorts (their window with the
+    # window hold, their own record: what the cohort keep holds a family alive for)
+    ("league/live/ladder.py", "capital"), ("league/swarm/practice.py", "capital"),
     # the release train
     ("deploy/*", "release"), (".github/*", "release"), ("league/updater.py", "release"), ("league/watchdog.py", "release"),
     ("scripts/floor_box.py", "release"), ("CHANGELOG.md", "release"),
@@ -222,8 +228,8 @@ STORE_WRITES = frozenset({"put", "update_family", "bump", "set_state", "compare_
 #: Store reads of the holdout, Validation and forward evidence (D2a): a candidate may not start reading them, called or
 #: held as a reference. `runs` (its `window="validation"` rows), `run` and `run_result` return a Validation run's row or
 #: its full result as readily as a Train one's (the fourth review), so any new use of them counts.
-SEALED_READS = frozenset({"looks", "looked", "lineage_looks", "lineage_validated", "lineage_trial_sharpes", "forward",
-                          "version_runs", "runs", "run", "run_result"})
+SEALED_READS = frozenset({"looks", "looked", "looks_made", "lineage_looks", "lineage_validated", "lineage_trial_sharpes",
+                          "forward", "version_runs", "runs", "run", "run_result"})
 #: Store writers and sealed readers with everyday names: counted on ANY object (an over-approximation, defense in depth),
 #: so a new `runner.run(...)` or `result.note` is refused too. The brief tells the author.
 GENERIC_SEALED = frozenset({"run", "runs", "note", "put", "event", "refuse", "retire", "bump", "forward"}) & (
@@ -264,12 +270,13 @@ FORBIDDEN_IMPORTS = ("league.swarm.guard", "league.swarm.funding", "league.budge
                      "league.swarm.improvement", "league.swarm.harness_lanes", "league.swarm.harness_judges")
 #: Release classes (D8 and the evidence rules, GOAL.md section 3 and 4).
 DEPLOY_RULES = {
-    "research": "research-side: may deploy in session only with an adversarial review, green CI and on-box verification, "
-                "never 15:30-16:00 New York while the House test runs, and never while a calibration order works",
+    "research": "research-side: deploy only outside the US session and its 90-minute preopen exclusion, with an "
+                "adversarial review, green CI and on-box verification; never while a calibration order works",
     "money_path": "money path (a module the live path loads): deploy only after the close (20:05Z until Nov 1), two "
-                  "adversarial money-path reviews, green CI",
+                  "adversarial money-path reviews, green CI; outside the US session and its 90-minute preopen exclusion",
     "evidence_reset": "evidence reset (league/gym, league/live or the fingerprint's files): a PLANNED release between "
-                      "evidence windows only; log the reset in the run record; two money-path reviews",
+                      "evidence windows only; outside the US session and its 90-minute preopen exclusion; "
+                      "log the reset in the run record; two money-path reviews",
 }
 
 
@@ -1086,6 +1093,19 @@ FROZEN_SYMBOLS: dict[str, tuple[str, ...]] = {
         "_epoch", "_plain_int", "record_verdict",
         "Researcher.drift_blocks", "Researcher._demote", "Researcher._terminal", "Researcher.cycle",
         "Researcher._count_dormancy", "Researcher._count_holds",
+        # THE TURNOVER (F1, Oct 3): the depth rule's clause of the idle rule and the families the population floor counts.
+        "RETIRE_SHORT_CHECKS", "RETIRE_SHORT_CYCLES", "VALIDATED_CYCLES_KEY", "short_dead", "dead_slot", "floor_counts",
+        "kept_families", "Researcher.floor_counts", "Researcher.floor_room",
+        # The depth rule's count of worked cycles, a thin retirement's filing (R3) and the extension hold's age limit.
+        "WORKED_CYCLES_KEY", "worked_cycles", "Researcher._count_worked", "THIN_RETIRED", "thin_cause", "thin_evidence",
+        "EXTENSION_HOLD_DAYS", "extension_days", "lapse_extension",
+        # GATE-READY AT TRAIN (F1, Oct 3): what may be a family's best, and so be validated: the gate's drift rule and the
+        # one-lot unit read on Train, the set-aside and its way back, and the bar the status prints.
+        "MAX_UNIT_USD", "SET_ASIDE_KEY", "SET_ASIDE_KEPT", "UNIT_WAIT_KEY", "max_unit", "carrier_share", "drift_held", "train_row",
+        "version_unit", "_number", "train_gate", "set_aside", "_restore_aside", "power_bar", "Researcher.gate_blocks",
+        "Researcher._aside_key", "MAX_UNIT_TRAIN_USD", "_unit_setting", "max_unit_train", "gate_looks",
+        # Release F1's join: the one reading of the unit wait every route asks (the gate, the evaluator, the incubator).
+        "unit_waiting",
         # A program's path from the model's tool call to the Gym: the arguments a tool call carries, the program text
         # and its parameters, variants and roots. A change here could rewrite the program the Gym evaluates (wrap its
         # decide in try/except, so a runtime error never reaches the Gym's disqualification rule).
@@ -1912,7 +1932,12 @@ LANES: dict[str, Lane] = {
         judge="execution", protocol="execution-recovery-v2", judge_zero=("invalid_accepted",),
         judge_no_worse=("valid_rejected", "restart_divergences"), judge_cost="cpu_seconds", judge_cost_rule="ratio",
         regressions=("league.tests.test_shadow_restart", "league.tests.test_live_practice", "league.tests.test_live_paper",
-                     "league.tests.test_live_observe"),
+                     "league.tests.test_live_observe",
+                     # The practice record is the forward ladder's evidence (`league/live/observe.py` keeps its cohorts,
+                     # its entrants and its receipts): the ladder's rule and its session's end, the cohorts' lifecycle,
+                     # the re-entry rule, and the benchmark and the judge that measure the rule.
+                     "league.tests.test_live_ladder", "league.tests.test_live_cohorts", "league.tests.test_live_reentry",
+                     "league.tests.test_swarm_forward_benchmarks", "league.tests.test_ladder_judge"),
         # Five trading sessions of practice after the planned release: a calendar week of wall-clock time.
         canary={"mode": "window", "unit": "family", "observe_seconds": 7 * 86400, "min_units_per_arm": 8,
                 "planned_release": True},

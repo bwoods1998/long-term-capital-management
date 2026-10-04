@@ -473,10 +473,11 @@ class TheSwarmsStore(unittest.TestCase):
         self.add("gym-b", t=2.5, versions=2)
         self.add("never", validated=False)
         self.add("cand")
-        from league.tests.evaluator_fakes import band_proof
+        from league.tests.evaluator_fakes import band_proof, passed_look
 
         self.store.set_state("cand", banded_version=1, banded_evaluator=band_proof(self.store.version("cand", 1)))
         self.store.set_band("cand", "candidate", reason="passed")
+        passed_look(self.store, "cand", self.store.version("cand", 1))  # the look its band stands on (`bands.read`)
         self.add("dead")
         self.store.retire_gym("dead", "finished", floor=0, source="test")
         rows = bands.observe(self.root)

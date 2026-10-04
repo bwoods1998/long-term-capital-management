@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 """Verify the swarm ON THE HOUSE BOX after a deploy (read-only; standard library only).
 
-    python3 scripts/verify_swarm.py --root /workspace/state [--since-minutes 60] [--floor 16]
+    python3 scripts/verify_swarm.py --root /workspace/state [--since-minutes 60] [--floor 16] [--birth-hours 6]
 
 Checks, each PASS / FAIL / WAIT with its numbers, as one JSON document (exit 0 when nothing FAILs):
 
 - process     the swarm's heartbeat is fresh (< 60 s), its pid is alive, it runs the House's release;
-- population  at least the population floor alive (`population.floor` in effect: <root>/swarm.json over the
-              release's policy.json, else 16; the plan:
-              48 at the start, a ceiling of 96, a floor of 16) and at most the ceiling; below the start the
-              architect refills hourly (WAIT when it is refilling);
+- population  at most the ceiling alive (`population` in effect: <root>/swarm.json over the release's
+              policy.json; the plan: 48 at the start, a ceiling of 96, a floor of 16); below the start the
+              architect refills hourly (WAIT when it is refilling). The floor counts the families that research
+              (F1: dead slots may leave below it, a WAIT while the architect bears: a family was born, or the
+              swarm started, within `--birth-hours`); fewer alive than the floor with no birth for that long is
+              a FAIL (the population collapsed and nothing refills it; the check names the architect's last
+              passes and why each was skipped). With `population.floor_researching` false the floor counts
+              every living family, and fewer alive than the floor is a FAIL at once, as before;
 - cycles      every living family has completed at least one model cycle (a cycle with a model call and no
               error), and the median cycle is under 180 s; the slowest and the error count are reported;
 - gym         Gym boxes ready or busy, batches run, program-years, trials in total;
@@ -25,6 +29,7 @@ It never writes: the stores are opened read-only.
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
 import sqlite3
@@ -50,14 +55,25 @@ def alive(pid: int | None) -> bool:
         return False
 
 
+def epoch(text: object) -> float | None:
+    """An ISO time of the store ("2026-10-03T14:38:00Z") in seconds, or None."""
+    try:
+        return datetime.datetime.fromisoformat(str(text).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default="/workspace/state")
     parser.add_argument("--since-minutes", type=float, default=60.0)
     parser.add_argument("--floor", type=int, default=None, help="the population floor (default: swarm.json's, else 16)")
+    parser.add_argument("--birth-hours", type=float, default=6.0,
+                        help="below the floor, FAIL when no family was born (and the swarm did not start) within this long")
+    parser.add_argument("--now", type=float, default=None, help=argparse.SUPPRESS)  # a store copy read at its own time
     args = parser.parse_args(argv)
     root = Path(args.root)
-    now = time.time()
+    now = time.time() if args.now is None else float(args.now)
     since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - args.since_minutes * 60))
     out: dict = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)), "root": str(root), "checks": {}}
     checks = out["checks"]
@@ -96,10 +112,36 @@ def main(argv: list[str] | None = None) -> int:
             pop = {}
     start, ceiling = int(pop.get("start", 48)), int(pop.get("ceiling", 96))
     floor = args.floor if args.floor is not None else int(pop.get("floor", 16))
-    verdict = "FAIL" if not floor <= len(living) <= ceiling else ("WAIT" if len(living) < start else "PASS")
+    # THE FLOOR COUNTS RESEARCH (F1): the floor holds the families that research, so dead slots may leave below it and
+    # the architect refills (WAIT); with `population.floor_researching` false it counts every living family, as before.
+    below = len(living) < floor and pop.get("floor_researching", True) is False
+    # A population below the floor is refilling only while the architect bears: with no birth (and no swarm start) for
+    # `--birth-hours` it has collapsed, and waiting will not mend it (a FAIL, with the architect's last passes).
+    born = epoch(db.execute("SELECT MAX(born_at) AS at FROM families").fetchone()["at"])
+    try:
+        started = float((beat or {}).get("started_at"))
+    except (TypeError, ValueError):
+        started = None
+    marks = [t for t in (born, started) if t is not None]
+    quiet = now - max(marks) if marks else None
+    collapsed = len(living) < floor and quiet is not None and quiet > args.birth_hours * 3600.0
+    passes = []
+    for r in db.execute("SELECT at, payload FROM events WHERE kind='swarm.architect' ORDER BY seq DESC LIMIT 6"):
+        try:
+            made = json.loads(r["payload"])
+        except ValueError:
+            continue
+        passes.append({"at": r["at"], "born": len(made.get("born") or []), "skipped": made.get("skipped"),
+                       "error": bool(made.get("error"))})
+    verdict = "FAIL" if below or collapsed or len(living) > ceiling else ("WAIT" if len(living) < start else "PASS")
     checks["population"] = {"result": verdict, "alive": len(living), "floor": floor, "start": start, "ceiling": ceiling,
                             "retired": len(fams) - len(living),
-                            "bands": {b: sum(1 for f in fams if f["band"] == b) for b in ("gym", "candidate", "probe", "sized", "retired")}}
+                            "bands": {b: sum(1 for f in fams if f["band"] == b) for b in ("gym", "candidate", "probe", "sized", "retired")},
+                            "hours_since_a_birth_or_the_start": None if quiet is None else round(quiet / 3600.0, 2),
+                            "architect_passes": passes}
+    if collapsed:
+        checks["population"]["why"] = (f"{len(living)} alive, under the floor of {floor}, and no family was born in the last "
+                                       f"{args.birth_hours:g} hours: the architect is not refilling it")
 
     cycles = [json.loads(r["payload"]) for r in db.execute("SELECT payload FROM events WHERE kind='swarm.cycle'")]
     model = [c for c in cycles if int(c.get("model_calls") or 0) > 0 and not c.get("error")]

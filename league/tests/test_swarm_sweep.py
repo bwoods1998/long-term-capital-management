@@ -6,6 +6,7 @@ parameters and results only (a fake Gym)."""
 from __future__ import annotations
 
 import copy
+from dataclasses import asdict
 import json
 import tempfile
 import threading
@@ -14,14 +15,30 @@ import unittest
 from pathlib import Path
 
 from league.swarm import settings as S
+from league.swarm import compute
 from league.swarm.pool import Box, GymJob, GymPool, PoolError
 from league.swarm.researcher import Researcher, params_of, sweep_tool, sweep_variants
 from league.swarm.seeds import SEEDS, family_spec, program_for
 from league.swarm.store import SwarmStore
-from league.tests.swarm_fakes import Clock, FakeDriver, FakeSail, result
+from league.tests.swarm_fakes import Clock, FakeDriver, FakeSail, compute_budget_fixture, result
 from league.tests.test_swarm_researcher import ResearcherCase, calls_in
 
 YEARS = ("y1", "y2", "y3")  # the Train years of a synthetic result (labels only)
+
+
+def admit_fake_box(store, settings, box, now):
+    """An invented finite synchronous contract, admitted before this test's manually installed fake box runs."""
+    compute_budget_fixture(store.root, now)
+    settings["budget"] = {"source": "synthetic", "sail_usd_day": 15.0, "claude_usd_day": 10.0}
+    bound = compute.ComputeBound(box.version, 0.20, 0.0, 3600, 0, 0, 4102444800.0,
+                                 "synthetic synchronous fake provider contract")
+    settings["gym"]["compute_bounds"] = {box.version: asdict(bound)}
+    key = f"fixture-{box.id}"
+    compute.reserve(store, settings, key, bound, kind=box.kind, now=now)
+    compute.attach(store, key, box.id)
+    store.upsert_box(box.id, kind=box.kind, version=box.version, state="ready",
+                     detail={"cost_cursor": {"awake": True, "booked_at": now, "estimate": True}})
+    box.booked_at = now
 
 
 def by_year(t: float, *, trades: int = 60, days: int = 30) -> dict:
@@ -128,6 +145,7 @@ class Pool(unittest.TestCase):
         self.assertEqual(pool.queued(), 4, "three variants and another family's run")
         box = Box("sb_00000001-ffff-ffff-ffff-ffffffffffff", "gym", "sbcp_11111111-aaaa", "ready",
                   driver=FakeDriver(None, "x"), roots=("SPY",), last_used=self.clock())
+        admit_fake_box(self.store, self.settings, box, self.clock())
         pool.boxes[box.id] = box
         self.clock.advance(9)
         self.assertEqual(len(pool._take(box)), 4, "they ride one batch")
@@ -165,6 +183,7 @@ class RealPool(SweepCase):
         self.addCleanup(self.pool.stop, join_seconds=1)
         box = Box("sb_00000001-ffff-ffff-ffff-ffffffffffff", "gym", "sbcp_11111111-aaaa", "ready",
                   driver=Driver(None, "x", answer=answer, calls=calls), roots=("SPY", "QQQ"), last_used=self.clock())
+        admit_fake_box(self.store, self.settings, box, self.clock())
         self.pool.boxes[box.id] = box
         self.pool._spawn(box)  # its dispatcher: a short batch waits for company on the frozen clock, a full one goes
         return calls
@@ -209,9 +228,14 @@ class RealPool(SweepCase):
 
     def test_a_sweep_that_outlives_its_wait_lands_late_and_its_retry_runs_only_the_rest(self):
         gate = threading.Event()
-        calls = self.real_pool(batch=2, block=gate, run_timeout_seconds=-119.5)  # the researcher waits 0.5 s a variant
+        calls = self.real_pool(batch=2, block=gate, run_timeout_seconds=900)
         grid = [{"vrp_min": v} for v in (1.2, 1.3, 1.4, 1.5)]
-        view, out = self.sweep(grid, code=self.code)
+        wait = self.pool.wait
+        self.pool.wait = lambda job, timeout=None, **kw: wait(job, min(timeout, 0.5), **kw)
+        try:  # shorten only the caller's wait; the fake execution keeps its positive bounded runtime.
+            view, out = self.sweep(grid, code=self.code)
+        finally:
+            self.pool.wait = wait
         self.assertEqual(view["status"], "gym_error", view)
         self.assertIn("did not answer", view["error"])
         self.assertEqual(self.pool.queued(), 0, "the two variants still queued were abandoned: nothing is left behind")

@@ -34,12 +34,13 @@ class ConstitutionTest(unittest.TestCase):
                           "min_sessions": 3, "min_trades": 10, "min_coverage": "0.80"})
 
     def test_the_incubator_row_moved_the_money_digest_to_the_one_the_owner_ratifies(self):
-        """Release B's money digest (a3e2aa7c before it) and the full digest (fcf8d735 before it): the grant is ratified
-        again on this one right after the deploy."""
+        """Evidence v3's money digest (the forward ladder's `options_money.ladder`, with its checkpoints, their alphas,
+        the pre-filter's line and the answer sessions, and the Sized rows; 42c4a3af before it, release B's) and the
+        full digest (595228a6 before it): the grant is ratified again on this one right after the deploy."""
         from league.constitution import money_digest
 
-        self.assertEqual(money_digest(), "42c4a3af2b5c7d1c83e720650ac0596bebf69e0bc77556601347b589f759643a")
-        self.assertEqual(PINNED_DIGEST, "595228a68a0a0e146901ba08185dfa7b39bcb2952a2abc1ae0cf16f19193d102")
+        self.assertEqual(money_digest(), "70331234f18dee37b983e4f62204ce2f0237961b5d9ccce5dbea161e577606c1")
+        self.assertEqual(PINNED_DIGEST, "fc02cf44908a6b49a0880a65867fa4b3da3fd58d07b2bbe3334db2142d78f20f")
 
     def test_the_incubator_row_may_only_tighten(self):
         import copy

@@ -411,6 +411,16 @@ class TournamentAllocates(RoundCase):
         fams = self.store.families(alive=True)
         self.assertTrue(A.gate_spent(self.store, next(f for f in fams if f["id"] == "failed")), "a look made is spent")
         self.assertFalse(A.gate_spent(self.store, next(f for f in fams if f["id"] == "open")))
+        # `Tournament.gate_spent`'s rule since F1: a refusal on a verdict stands whatever an adoption cleared (a new Gym
+        # clears `gated_sha` and `gate_outcome`; the refusal row is for good). The "gym" refusal is the gate box's failure.
+        t = Tournament(self.store, None, self.settings, clock=self.clock)
+        n = self.store.family("refused")["best_version"]
+        for stage, spent in (("gym", False), ("review", True)):
+            self.store.refuse("refused", n, stage, "a synthetic refusal")
+            self.store.set_state("refused", gated_sha=None, gate_outcome=None)
+            fam = self.store.family("refused")
+            self.assertEqual((A.gate_spent(self.store, fam), t.gate_spent("refused", n, fam["state"])), (spent, spent), stage)
+        self.store.set_state("refused", gated_sha=sha, gate_outcome={"sha": sha, "result": "refused"})
         shares = Tournament(self.store, None, self.settings, clock=self.clock).allocate(fams)
         unvalidated = sum(shares[f"new{i}"] for i in range(40)) / 40
         for fid in ("refused", "failed"):

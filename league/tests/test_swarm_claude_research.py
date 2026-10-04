@@ -110,7 +110,7 @@ class ClaudeCase(ResearcherCase):
     def setUp(self):
         super().setUp()
         # THE BUDGET is not what these tests judge: a line well above the researcher's own lines (no block is the floor).
-        self.settings["budget"] = {"source": "test", "sail_usd_day": 1000.0, "claude_usd_day": 1000.0}
+        self.settings["budget"] = swarm_fakes.unbound_budget(self)
         self.claude_script: list = []
         self.requests: list = []
         self.meter = FakeClaudeMeter(100)

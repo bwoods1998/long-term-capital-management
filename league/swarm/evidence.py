@@ -54,6 +54,11 @@ THE HOLDOUT LINE (one look per program version, at most three per lineage; the g
   - holdout Sharpe at least half of the validation Sharpe.
   The researcher is told pass or fail, never the numbers.
 
+THE PRE-FILTER'S LINE (`prefilter_line`; evidence v3, the forward ladder's L6, `league/live/ladder.py`): the gate's free
+read of a practised program's holdout passes only when its net P&L after fees is not negative AND the moving-block
+bootstrap of its daily P&L over all its days (`block_bootstrap`: block 5, 2,000 draws) has a p-value (the share of
+resampled means at or below zero) at or under the constitution's `options_money.ladder.prefilter_p`. No Holm, no look.
+
 THE LOOK HOLDS (L6(b) and L6(c), approved by the owner on Oct 2, 2026 as a TIGHTENING; the gate's
 `Gate.look_hold`). Every look raises the Holm bar of every later one, so the gate does not spend one on a version
 the holdout cannot judge. It HOLDS the look (no look, no review, no sealed read) when:
@@ -462,6 +467,18 @@ def holdout_line(result: Mapping[str, Any], *, validation_sharpe: float | None, 
                         "validation_sharpe_daily": validation_sharpe, "days": len(daily)}}
 
 
+def prefilter_line(result: Mapping[str, Any], *, level: float, seed: str) -> dict[str, Any]:
+    """THE PRE-FILTER'S LINE (the module docstring): {passed, pnl, p, level} of a holdout read. `pnl` is its net P&L
+    after fees; `p` the moving-block bootstrap's p-value of its daily P&L over all its days (block `BOOTSTRAP_BLOCK`,
+    `BOOTSTRAP_DRAWS` draws, deterministic for `seed`; None under two days); it passes when `pnl` is not negative AND
+    `p` is at or under `level`. A read with no P&L or no p-value does not pass."""
+    pnl = _num((result.get("summary") or {}).get("pnl"))
+    boot = block_bootstrap(daily_pnl(result), block=BOOTSTRAP_BLOCK, draws=BOOTSTRAP_DRAWS, seed=seed)
+    p = boot["p"] if boot else None
+    return {"passed": pnl is not None and pnl >= 0 and p is not None and p <= float(level), "pnl": pnl, "p": p,
+            "level": float(level)}
+
+
 def leakage_alarm(looks: int, passes: int) -> bool:
     """Stop the gate: at least 10 holdout looks and more than 30% of them passed."""
     return looks >= ALARM_MIN_LOOKS and passes > ALARM_PASS_SHARE * looks
@@ -647,7 +664,8 @@ def _allocate(draws: Mapping[str, float], total: float, out: dict[str, float]) -
         out[key] = total * (n - i) / denom
 
 
-__all__ = ["validation_line", "holdout_line", "block_bootstrap", "holm_passes", "leakage_alarm", "forward_record", "thompson",
+__all__ = ["validation_line", "holdout_line", "prefilter_line", "block_bootstrap", "holm_passes", "leakage_alarm",
+           "forward_record", "thompson",
            "train_score", "years_of", "robustness_view", "traded_sharpe", "checks_passed", "quarters_positive", "daily_pnl",
            "one_record", "MIN_TRADES", "MIN_DAYS", "MIN_T", "MIN_DSR", "STRESS", "LOOKS_PER_LINEAGE", "TRAIN_YEAR_MIN_TRADES",
            "TRAIN_YEAR_MIN_DAYS", "drift_numbers", "drift_screen", "DRIFT_MIN_T", "EXPLOIT_PER_POSITIVE", "drift_lean",

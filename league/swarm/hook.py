@@ -59,7 +59,9 @@ PUBLIC_KINDS = ("swarm.born", "swarm.retired", "swarm.band", "swarm.note")
 #: stop reason and a version's evidence, which the swarm's store keeps.
 #: The strategist's runs (Sept 29, 2026) carry its section, evidence and cost: private, like the diagnostician's.
 #: THE LIBRARY's calls (Sept 29, 2026: a query and the ids served, a few hundred a day) stay in the swarm's table too.
-SKIPPED_KINDS = ("swarm.cycle", "swarm.pool", "swarm.diagnostician", "swarm.robustness", "swarm.strategist", "swarm.research")
+#: Explicit interruption corrections retain the full original family and receipt identities in that private table.
+SKIPPED_KINDS = ("swarm.cycle", "swarm.pool", "swarm.diagnostician", "swarm.robustness", "swarm.strategist", "swarm.research",
+                 "swarm.validation_interruption_repaired")
 MIRROR_CURSOR = "swarm-mirror.json"
 #: The run of failed mirrors in a row (its folded error, since when, how many, whether the House heard it). Kept on disk so
 #: a restart (a deploy) neither forgets a run nor dates it from the new process: the alert's `began_at` is the run's first

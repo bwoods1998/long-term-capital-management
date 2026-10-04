@@ -1054,6 +1054,14 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     rolls it back if the House goes bad. This script moves no link and restarts nothing itself.
     Exit 0 only for `promoted`; 2 refused, 3 rolled back, 4 failed, 1 no verdict seen.
     """
+    from league.watchdog import deployment_timing
+
+    def check_time() -> None:
+        timing = deployment_timing(time.time())
+        if not timing["allowed"]:
+            raise SystemExit(f"nothing launched: {timing['reason']}")
+
+    check_time()  # before opening a client or writing anything on the box
     state = read_state()
     box = require_box(state)
     api = client()
@@ -1094,6 +1102,7 @@ def cmd_deploy(args: argparse.Namespace) -> int:
 
     # run.sh names the interpreter and restart.sh is what the watchdog calls, so both are in
     # place before it starts. A supervisor that is already up keeps the run.sh it started with.
+    check_time()  # probes and structure reads may have crossed into the hold before the first remote mutation
     write_scripts(api, box, python)
 
     # A supervisor between two Houses (its 30 s delay) still counts: it starts the next one from
@@ -1102,6 +1111,7 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     say(f"release {release_id}: {len(files)} files, {len(blob):,} bytes compressed -> {box}")
     target = push_release(api, box, release_id, blob)
     say(f"  unpacked into {target}")
+    check_time()  # an upload may have crossed into the hold; the trusted watchdog checks again on the box
 
     entry = {"id": release_id, "sha256": sha256, "files": len(files), "bytes": len(blob),
              "at": _now(), "replaces": current, "watched": watch, "verdict": "pending", "reasons": []}
@@ -1115,6 +1125,7 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     else:
         why = "there is no current release" if current is None else "the loop is not running"
         say(f"  starting the watchdog with --watch-seconds 0 ({why}): canary, then promote")
+    check_time()  # local bookkeeping must not make the post-upload permission stale
     api.exec(box, watchdog_launch(python, release_id, watch=watch), timeout=60, background=True,
              on_output=None)
     if args.no_wait:

@@ -3,23 +3,34 @@
     from league.swarm import bands
     rows = bands.read(root)        # never raises, never waits more than a second ([] when it cannot read)
 
-One row per family the live path may run: every family in the Candidate, Probe or Sized band, and every
-family in the Gym band whose validated version met the validation line AND passed the gate's review and audit,
-and whose holdout look (or forward record) has not failed, was not refused and was not held (THE LOOK HOLDS, Oct 2,
-2026: a held look ends the version's tuition as a failed one does) (execution tuition: 1-lot real orders that measure
-multi-leg fills and are never evidence). Each row:
+One row per family the live path may run: every family in the Candidate, Probe or Sized band whose banded version's
+proof is current (`current_banded_evaluator`) and stands on its record: A HOLDOUT LOOK's (THE FAST LANE, release F1,
+Oct 3, 2026: the gate's sealed look is the route to Probe, `league/swarm/gate.py`), only with its PASSED row in the
+`looks` table for the same family, version and program (NO BAND ROW WITHOUT ITS LOOK: a band or a proof any other
+writer put in the store never trades); or THE FORWARD LADDER's (evidence v3, Oct 2, 2026:
+`league/live/ladder.py`, route "ladder"), only with its practice receipt (which only a ladder that binds writes), and
+NEVER WHILE THE LOOK IS THE ROUTE (`gate.SEALED_LOOKS`; one route to real money at a time: as shipped the ladder records
+and promotes nothing, `ladder_promotes`, so a ladder proof, whoever wrote it and whatever receipt it names, gives no
+row). EXECUTION TUITION (every family in the Gym band whose validated version met the validation line AND passed the
+gate's review and audit, and whose holdout look had not failed, was not refused, was not held and was not waiting for
+the look's bar (`gate.waiting`): 1-lot real orders that measured multi-leg fills, never evidence) STAYS RETIRED on its own ground (it was real money before the
+unseen-market test, and its fill measurements are the House's calibration's now): `read` gives no Gym-band row
+(`TUITION_ROWS`; `read(tuition=True)` is the retired route's own read). Each row:
 
     family                the family's id
     band                  gym | candidate | probe | sized
     structure, roots      its DECLARED structure type and roots (`long_single` too: the live path reads it through
                           `league.live.money.order_types`, real only while both singles are real types)
-    holdout_passed        it passed its holdout look (Candidate or better)
+    holdout_passed        it holds a live band (Candidate or better) by a current proof: a holdout look's (with
+                          its passed `looks` row), or THE FORWARD LADDER's (its practice receipt, after the
+                          pre-filter's read of the holdout passed its line; no sealed look was taken)
     validation_passed     its validated version met the validation line
     version, code, params, run_sha
-                          the program the row stands for: the version that holds the band (holdout passed),
-                          else the version that met the validation line
+                          the program the row stands for: the version that holds the band, else the version that met
+                          the validation line
     typical_max_loss_usd  the median maximum loss of ONE structure in that version's validation run (None when
-                          it opened none; a `long_single`'s calls and puts together): the Probe fit only, since each
+                          it opened none; a `long_single`'s calls and puts together), or, for a version the ladder
+                          promoted, the median one-lot unit of its practice closes: the Probe fit only, since each
                           real order is sized by its own unit
     seed_era              the program was written by a model that knows 2024-2026 (every program in this swarm
                           is): it needs a forward record before it is Sized
@@ -54,6 +65,7 @@ what the live path admits a pinned instance's shadow opens against.
 THE INCUBATOR'S FACTS (release B, Oct 1, 2026; `league/live/incubator.py`): `incubator(root, family=f, version=n)` -> one
 row, or [], saying whether version `n` of `f` may trade the incubator route (one lot of real money after positive live
 practice; never evidence, never a promotion): `f` is alive and in the Gym band, `n` was not demoted (1.5x or drift),
+its exact program has no current-Gym Train drift-carrier set-aside in any family (a temporary hold, no permanent bar),
 `n` carries a Train-and-drift pass (`state.train_passed[str(n)]`) made under the CURRENT research evaluator and Train
 objective (the store's `research_evaluator` and `train_objective`, both known: adoption clears alive families only, so a
 retired and revived family's stale mark never passes) and showing a positive 1.5x Train P&L and the drift screen's
@@ -75,9 +87,23 @@ live path then takes no new incubator pin and refuses incubator opens; exits are
 Gym bundle's version is built once per `BUNDLE_TTL` seconds a process, not once per call (it reads and hashes every file
 of the Gym's code).
 
-OWNERSHIP OF THE BANDS. The swarm moves gym <-> candidate (the gate's holdout pass; a Candidate whose forward
-record turns negative over 20 trades goes back to the Gym) and retires families. The LIVE PATH alone moves
-candidate <-> probe <-> sized by the Money table, writing through `SwarmStore(root).set_band(fid, band,
+THE LADDER'S BELT (`ladder_refusal`, evidence v3): before the forward ladder promotes a practised program, the family is
+alive in the Gym band, the store's version is that very program, the version met THE VALIDATION LINE (`validation_passed`:
+its latest validation ON THE GYM IN FORCE, the same image and bundle, whatever execution fingerprint it was judged
+under; a Train-tier entrant never validated is refused), it was not demoted (by the Gym, or by the ladder itself), and
+THE READER'S BELT finds no bar, failed review or audit, refusal, failed holdout look or bad gate outcome on the program
+in any family (fail-closed). And, last, THE LOOK IS THE ROUTE (release F1, `BELT_LOOK_ROUTE`): while the gate's sealed
+look is the route to Probe (`gate.SEALED_LOOKS`), the belt refuses every program, so the ladder promotes nothing beside
+the look even if its table is set to bind. A ladder Probe's proof is taken only with its receipt (`ladder_receipt`):
+`read` gives no row for a family whose ladder proof names no `promote` receipt of the House's practice record
+(`<root>/observe.sqlite`, `ladder_decisions`) for the same family, version and program, so a proof copied into the
+store by any other writer never trades. And `read` gives no row for ANY ladder proof while the look is the route: the
+switch that makes the belt refuse the promotion refuses its row too.
+
+OWNERSHIP OF THE BANDS. The swarm moves gym <-> candidate (the gate's holdout pass, the route to Probe; a Candidate
+whose forward record turns negative over 20 trades goes back to the Gym) and retires families. The LIVE PATH alone moves
+candidate <-> probe <-> sized by the Money table, and gym -> probe when THE FORWARD LADDER promotes (only while it
+binds and the look is not the route; its demotion back to the Gym), writing through `SwarmStore(root).set_band(fid, band,
 reason=...)`, and records its trades with `SwarmStore(root).add_forward(fid, "shadow" | "real", trades)` (ids
 unique per family). A Probe or Sized family whose forward record turns negative is flagged here
 (`forward.negative`) for the live path to demote.
@@ -104,7 +130,9 @@ LIVE_BANDS = ("candidate", "probe", "sized")
 #: The gate's outcomes (`gate_outcome.result` naming the program) that end its execution tuition (`read`) and refuse it
 #: the incubator (`program_refusal`; `incubator.BAD_OUTCOMES` is this tuple): refused, failed (its holdout look), demoted,
 #: and held (THE LOOK HOLDS, Oct 2, 2026: the owner approved them as a tightening, so a held look stops every real order
-#: the look it replaces would have stopped, at whatever stage the hold lands, a passed review and audit included).
+#: the look it replaces would have stopped, at whatever stage the hold lands, a passed review and audit included). A
+#: version that WAITS for the look's bar (the power hold, release F1: `gate.Gate.wait_look`) has no outcome and is not
+#: here: nothing is closed for it, and `read` gives it no tuition row while it waits (`gate.waiting`).
 BAD_OUTCOMES = ("refused", "failed", "demoted", "held")
 #: Seconds a process reuses the Gym bundle's version (`_bundle`).
 BUNDLE_TTL = 300.0
@@ -123,10 +151,15 @@ def current_banded_evaluator(state: dict[str, Any], sha: str) -> bool:
     from .evaluator import execution_fingerprint
 
     proof = state.get("banded_evaluator") or {}
-    return (proof.get("engine") == ENGINE_VERSION and proof.get("parameter_contract") == CONTRACT_VERSION and
-            proof.get("execution_sha256") == execution_fingerprint() and
-            proof.get("run_sha") == sha and bool(proof.get("holdout_bundle")) and
-            str(proof["holdout_bundle"]).startswith(ENGINE_VERSION + "-") and
+    if not (proof.get("engine") == ENGINE_VERSION and proof.get("parameter_contract") == CONTRACT_VERSION and
+            proof.get("execution_sha256") == execution_fingerprint() and proof.get("run_sha") == sha):
+        return False
+    if proof.get("route") == "ladder":
+        # THE FORWARD LADDER's proof (evidence v3, `league/live/ladder.py`): its practice receipt, made under this very
+        # execution fingerprint and naming this exact program; the practice record itself is the evidence.
+        receipt = proof.get("receipt")
+        return isinstance(receipt, int) and not isinstance(receipt, bool) and receipt > 0
+    return (bool(proof.get("holdout_bundle")) and str(proof["holdout_bundle"]).startswith(ENGINE_VERSION + "-") and
             proof.get("validation_bundle") == proof.get("holdout_bundle"))
 
 
@@ -157,9 +190,19 @@ def _families(db: sqlite3.Connection, family: str | None, *, gym_only: bool = Fa
                                         f"families WHERE {where} ORDER BY id", (() if family is None else (str(family),)))]
 
 
-def read(root: str | Path, *, family: str | None = None) -> list[dict[str, Any]]:
+#: EXECUTION TUITION's Gym-band rows (`read`): retired by evidence v3 (the owner's D2 of Oct 2, 2026), and they STAY
+#: retired under THE FAST LANE (release F1, Oct 3, 2026), where the sealed look is the route again: tuition is real money
+#: before the unseen-market test, which the owner's rule excludes, and its job (measuring multi-leg fills) is the
+#: House's calibration's. So `read` gives no Gym-band row and the live path makes no `:t` instance: the only real
+#: instance a Gym-band family can get is the incubator's (`incubator`, the owner's own switch and row).
+#: `read(tuition=True)` is the retired route's own read.
+TUITION_ROWS = False
+
+
+def read(root: str | Path, *, family: str | None = None, tuition: bool | None = None) -> list[dict[str, Any]]:
     """The rows (the module docstring); `family`: that family's row only. [] when there is no store or it cannot be read
-    within a second."""
+    within a second. `tuition` (default `TUITION_ROWS`, off): the retired execution tuition's Gym-band rows too."""
+    tuition = TUITION_ROWS if tuition is None else bool(tuition)
     path = Path(root) / DB_NAME
     if not path.exists():
         return []
@@ -176,7 +219,8 @@ def read(root: str | Path, *, family: str | None = None) -> list[dict[str, Any]]
                 fam["state"] = state
                 if fam["band"] in LIVE_BANDS and state.get("banded_version"):
                     wanted[fam["id"]] = int(state["banded_version"])
-                elif fam["band"] == "gym" and (state.get("validation_line") or {}).get("passed") and state.get("validation_version"):
+                elif (tuition and fam["band"] == "gym" and (state.get("validation_line") or {}).get("passed")
+                      and state.get("validation_version")):
                     wanted[fam["id"]] = int(state["validation_version"])  # tuition: checked against its review below
             versions = {}
             for fid, n in wanted.items():
@@ -184,6 +228,10 @@ def read(root: str | Path, *, family: str | None = None) -> list[dict[str, Any]]
                                  (fid, n)).fetchone()
                 if row is not None:
                     versions[fid] = dict(row)
+            # NO BAND ROW WITHOUT ITS LOOK: the passed looks, in the same read as the bands they must stand behind.
+            passed = {(str(r["family"]), int(r["version"]), str(r["run_sha"])) for r in db.execute(
+                "SELECT family, version, run_sha FROM looks WHERE passed=1")} if any(
+                    f["band"] in LIVE_BANDS for f in fams) else set()
         finally:
             db.close()
     except sqlite3.Error:
@@ -199,11 +247,22 @@ def read(root: str | Path, *, family: str | None = None) -> list[dict[str, Any]]
             continue
         state = fam["state"]
         params = loads(v["params"], {}) or {}
+        from . import gate
         from .gate import run_sha
 
         sha = run_sha({"sha": v["sha"], "params": params})
         if fam["band"] in LIVE_BANDS and not current_banded_evaluator(state, sha):
             continue  # preserved historical band/positions, but no new entry under unqualified semantics
+        if fam["band"] in LIVE_BANDS and (state.get("banded_evaluator") or {}).get("route") == "ladder" and \
+                gate.SEALED_LOOKS:  # the gate's switch, read at the call
+            continue  # THE LOOK IS THE ROUTE: the ladder promotes nothing beside it, so no ladder proof gives a row
+        if fam["band"] in LIVE_BANDS and (state.get("banded_evaluator") or {}).get("route") == "ladder" and \
+                not ladder_receipt(root, family=fam["id"], version=int(v["n"]), run_sha=sha,
+                                   receipt=state["banded_evaluator"].get("receipt")):
+            continue  # a ladder proof without its practice receipt: no entry (`ladder_receipt`)
+        if fam["band"] in LIVE_BANDS and (state.get("banded_evaluator") or {}).get("route") != "ladder" and \
+                (str(fam["id"]), int(v["n"]), sha) not in passed:
+            continue  # NO BAND ROW WITHOUT ITS LOOK: a look's proof without its passed `looks` row: no entry
         if fam["band"] == "gym":
             if not image or state.get("validation_image") != image or not bundle or state.get("validation_bundle") != bundle:
                 continue
@@ -220,6 +279,10 @@ def read(root: str | Path, *, family: str | None = None) -> list[dict[str, Any]]
             if review.get("contract_sha") != review_contract()["sha256"] or (review.get("audit") or {}).get("contract_sha") != review_contract()["sha256"]:
                 continue
             if outcome.get("sha") == sha and outcome.get("result") in BAD_OUTCOMES:
+                continue
+            # THE POWER HOLD IS A WAIT (release F1, `gate.waiting`): a version that waits at the gate for the look's bar
+            # is not held and not barred, and no look is coming while it waits: no real order goes on it meanwhile.
+            if (gate.waiting(state) or {}).get("sha") == sha:
                 continue
         validated = state.get("validation_version") == v["n"] and bool((state.get("validation_line") or {}).get("passed"))
         out.append({
@@ -317,7 +380,8 @@ def observe(root: str | Path, *, family: str | None = None, version: int | None 
     family; with `version`, that family's version `version` (a pinned one) instead of its current one. [] when there is no
     store. A store that cannot be read within a second RAISES (`sqlite3.Error`), unlike `read`: the live path then keeps
     the observe instances and pins it has, rather than taking an unreadable store for an empty band and pinning afresh in
-    the middle of a session."""
+    the middle of a session. One family's gate record (`review`, `gate_outcome`) that is there and is no mapping is not
+    that: the family has no row (fail-closed), and every other family's row stands."""
     path = Path(root) / DB_NAME
     if not path.exists() or (version is not None and family is None):
         return []
@@ -362,6 +426,11 @@ def observe(root: str | Path, *, family: str | None = None, version: int | None 
         params = loads(v["params"], {}) or {}
         sha = run_sha({"sha": v["sha"], "params": params})
         review, outcome = state.get("review") or {}, state.get("gate_outcome") or {}
+        if not isinstance(review, Mapping) or not isinstance(outcome, Mapping):
+            # A gate record that is there and cannot be read (a damaged store, a hand edit; a league/live-only adoption
+            # keeps such a review as it is, `evaluator.review_stands`): no row for THIS family (fail-closed: its
+            # program's verdict cannot be read), and never an error that takes every other family's row with it.
+            continue
         if (review.get("sha") == sha and review.get("verdict") == "fail") or (
                 outcome.get("sha") == sha and outcome.get("result") == "refused"):
             continue  # this exact version's program review failed, or the gate refused it: not even shadow
@@ -441,6 +510,45 @@ def incubator_refusal(state: Any, sha: str) -> str | None:
     if state.get("robust_failed") is not None and not isinstance(state.get("robust_failed"), list):
         return "its robust_failed cannot be read"
     return program_refusal(state, sha)
+
+
+def carrier_wait(state: Any, version: int, evaluator: Any) -> str | None:
+    """A temporary Train carrier hold, separate from the program's permanent verdicts.
+
+    Clearing the set-aside restores eligibility without changing any review or bar. A marker from
+    another Gym is not evidence about the current Gym; a live-only adoption preserves Gym evidence.
+    """
+    if not isinstance(state, Mapping):
+        return "the family's carrier record cannot be read"
+    marks = state.get("set_aside")
+    if marks is None:
+        return None
+    if not isinstance(marks, Mapping):
+        return "the family's carrier record cannot be read"
+    mark = marks.get(str(version))
+    if mark is None:
+        return None
+    if not isinstance(mark, Mapping):
+        return "the version's carrier record cannot be read"
+    from .evaluator import on_gym_in_force
+
+    if mark.get("kind") == "drift" and on_gym_in_force(mark.get("evaluator"), evaluator):
+        return "its Train version is set aside as a drift carrier"
+    return None
+
+
+def _carrier_program_wait(db: sqlite3.Connection, code_sha: str, sha: str, evaluator: Any) -> str | None:
+    """Read current carrier holds for the same code and parameters, including other families."""
+    from .gate import run_sha
+
+    for row in db.execute("SELECT v.n, v.sha, v.params, f.state FROM versions v "
+                          "JOIN families f ON f.id=v.family WHERE v.sha=?", (code_sha,)):
+        if run_sha({"sha": row["sha"], "params": loads(row["params"], {}) or {}}) != sha:
+            continue
+        why = carrier_wait(loads(row["state"], _UNREADABLE), int(row["n"]), evaluator)
+        if why is not None:
+            return why
+    return None
 
 
 def program_refusal(state: Any, sha: str) -> str | None:
@@ -532,10 +640,11 @@ def incubator(root: str | Path, *, family: str, version: int) -> list[dict[str, 
         # (the same code and params, the same run_sha) at any stage in any family, or a holdout look on it failed; and
         # every other family holding the program, whose verdicts on it are this program's too.
         ruled, others = _program_rows(db, str(fam["id"]), str(row["sha"]), sha)
+        carrier = _carrier_program_wait(db, str(row["sha"]), sha, kv.get("research_evaluator"))
         failed = db.execute("SELECT 1 FROM looks WHERE run_sha=? AND passed=0 LIMIT 1", (sha,)).fetchone()
     finally:
         db.close()
-    if fam["band"] != "gym" or ruled is not None or failed is not None:
+    if fam["band"] != "gym" or ruled is not None or carrier is not None or failed is not None:
         return []
     state = loads(fam["state"], _UNREADABLE)
     state = {} if state is None else state
@@ -569,5 +678,201 @@ def incubator(root: str | Path, *, family: str, version: int) -> list[dict[str, 
              "observe": False, "holdout_passed": False, "validation_passed": False}]
 
 
+def validation_passed(state: Mapping[str, Any], n: int, current: Any) -> bool | None:
+    """THE VALIDATION LINE as the forward ladder reads it, its L0 (evidence v3: Train -> Validation, its line unchanged ->
+    Practice -> the pre-filter): whether version `n`'s latest validation ON THE GYM IN FORCE met the line: True, False,
+    or None when it has none on it (never validated: a Train-tier entrant). `current` is the store's `research_evaluator`
+    (None in a store that never adopted one).
+
+    ON THE GYM IN FORCE (Oct 3, 2026). A validation is Gym evidence: the same Gym image and bundle answer the same,
+    whatever the live path's code. So a verdict judged under `current`, or under an identity that differs from it by
+    the execution fingerprint alone (`evaluator.on_gym_in_force`), is the version's verdict; one judged on another image
+    or bundle is none. An adoption that changes the Gym clears the family's line, and L0 waits for a validation on the
+    new Gym. An adoption of league/live alone keeps the line (and the restoration gives back one that an earlier such
+    adoption cleared: `evaluator.adopt`), and it satisfies L0 as it did before. That grants no promotion by itself: the
+    ladder's forward lines read a practice cohort under the NEW practice evaluator, which names the new fingerprint (a
+    release that changes league/live ends every cohort: `league/live/observe.py`), its receipt is that cohort's, and
+    the pre-filter's answer is asked for at its checkpoint.
+
+    Read from the tournament's record of each version's latest verdict (`validation_verdicts`, which no adoption
+    clears) when that was judged on the Gym in force, a failure as much as a pass; else from the family's own line when
+    it judged `n` and names the image and bundle in force (`validation_image`, `validation_bundle`: what every other
+    reader of the line asks, `read` and the gate among them).
+
+    ONE CORNER, STATED (`league/tests/test_live_ladder_adoption.py` pins what the code does; the reading is open to a
+    stricter ruling). "L0 waits for a validation on the new Gym" means a validation on the image and bundle in force,
+    whenever it was made. A Gym that comes BACK (image and bundle A, then another, then A again: two adoptions that
+    change the Gym, each clearing the family's line) finds the record of the verdicts judged on A, and they are read:
+    on the other Gym L0 waited, and back on A it does not wait for a new validation. That is the swarm's own rule for
+    Gym evidence (the same image and bundle answer the same: the tournament judges a validation recorded on the image
+    and bundle in use from its stored result, with no Gym run and no new trial, `Tournament.recorded_validation`), and
+    it grants nothing by itself, as above. A family that holds its line alone, with no record, waits: the line was
+    cleared. (The stricter reading, L0 waiting after EVERY adoption that changes the Gym, would count a record only
+    when it is newer than the family's newest such adoption.)"""
+    if not isinstance(state, Mapping):
+        return None
+    from .evaluator import on_gym_in_force
+
+    records = state.get("validation_verdicts")
+    record = records.get(str(int(n))) if isinstance(records, Mapping) else None
+    if isinstance(record, Mapping) and on_gym_in_force(record.get("evaluator"), current) and \
+            isinstance(record.get("passed"), bool):
+        return record["passed"]
+    line = state.get("validation_line")
+    if _count(state.get("validation_version")) == int(n) and isinstance(line, Mapping) and \
+            isinstance(line.get("passed"), bool) and _line_in_force(state, current):
+        return line["passed"]
+    return None
+
+
+def _line_in_force(state: Mapping[str, Any], current: Any) -> bool:
+    """The family's own validation line was judged on the Gym in force: it names the image and the bundle of `current`
+    (the store's `research_evaluator`). A store that never adopted an identity (`current` None: the identity-less test
+    pools) has no Gym to compare with, and its line stands; an identity that cannot be read answers for no line."""
+    if current is None:
+        return True
+    if not isinstance(current, Mapping) or not current.get("image") or not current.get("bundle"):
+        return False
+    return state.get("validation_image") == current["image"] and state.get("validation_bundle") == current["bundle"]
+
+
+def ladder_receipt(root: str | Path, *, family: str, version: int, run_sha: str, receipt: Any) -> bool:
+    """A ladder proof's practice receipt (evidence v3, `league/live/ladder.py`): True only when `receipt` is a
+    `ladder_decisions` row of the House's practice record (`<root>/observe.sqlite`) with the verdict "promote" naming this
+    family, version and program (`run_sha`). Read-only (`mode=ro`, a one-second timeout), never raising: False when the
+    record cannot be read (fail-closed: no entry on an unread receipt)."""
+    if not isinstance(receipt, int) or isinstance(receipt, bool) or receipt <= 0:
+        return False
+    path = Path(root) / "observe.sqlite"
+    if not path.exists():
+        return False
+    try:
+        db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1.0)
+        try:
+            row = db.execute("SELECT family, version, run_sha, verdict FROM ladder_decisions WHERE id=?",
+                             (int(receipt),)).fetchone()
+        finally:
+            db.close()
+    except sqlite3.Error:
+        return False
+    return (row is not None and str(row[0]) == str(family) and _count(row[1]) == _count(version)
+            and row[2] == run_sha and row[3] == "promote")
+
+
+#: THE LADDER'S BELT's reasons that are a failed READ (the swarm's store, the gate's owed bars), never a verdict on the
+#: program: the ladder promotes nothing on one and fails no cohort for one; it reads the belt again at its next session's
+#: end (`league/live/ladder.py`).
+BELT_STORE_UNREAD = "the swarm's store cannot be read"
+BELT_BARS_UNREAD = "the gate's owed bars cannot be read"
+BELT_UNREAD = (BELT_STORE_UNREAD, BELT_BARS_UNREAD)
+#: THE LADDER'S BELT's last reason (release F1, Oct 3, 2026): THE LOOK IS THE ROUTE. While the gate's sealed look is the
+#: route to Probe (`gate.SEALED_LOOKS`), the forward ladder promotes nothing, whatever its table's `binding` says: one
+#: route to real money at a time, and one reader of the holdout.
+BELT_LOOK_ROUTE = ("the held-out look is the route to Probe (gate.SEALED_LOOKS): the forward ladder records beside it and "
+                   "promotes nothing")
+
+
+def ladder_promotes(constitution: Mapping[str, Any] | None = None) -> bool:
+    """Whether THE FORWARD LADDER can promote at all (release F1, Oct 3, 2026): its table binds
+    (`options_money.ladder.binding` true) AND the gate's sealed look is not the route (`gate.SEALED_LOOKS` False). As
+    shipped neither holds: the look is the route and the ladder records. `binding` true beside the look promotes nothing
+    either (THE LADDER'S BELT refuses: `BELT_LOOK_ROUTE`), so the ladder's turn needs a release that switches both.
+    False on a money table that is refused."""
+    from . import gate
+
+    if gate.SEALED_LOOKS:
+        return False
+    from ..live.ladder import Rules
+
+    try:
+        return Rules.from_constitution(constitution).binding
+    except ValueError:
+        return False
+
+
+def ladder_refusal(root: str | Path, *, family: str, version: int, run_sha: str) -> str | None:
+    """THE LADDER'S BELT (evidence v3, `league/live/ladder.py`): why the forward ladder may not promote version `version`
+    of `family`, practised as program `run_sha`, now; None when it may. Read-only (`mode=ro`, a one-second timeout) and
+    FAIL-CLOSED: a store that is missing or cannot be read, or a record the belt reads that cannot be read, is a reason
+    (one of `BELT_UNREAD` when it is the store itself, or the gate's owed bars, that could not be read).
+    In order: the family alive and in the Gym band; the version in the store and the very program practised (its run
+    sha); THE VALIDATION LINE met (`validation_passed`: on the Gym in force, the store's research evaluator's image
+    and bundle, so a line an adoption of league/live alone kept or gave back still meets it); not demoted (a
+    loss at 1.5x, or the drift screen failed; nor by the ladder itself, `ladder_demoted`); THE READER'S BELT
+    (`incubator_refusal`: no bar, no review or audit that did not pass, no refused, failed, demoted or held gate outcome,
+    in this family or any other holding the same program); no gate refusal of the program in any family; no holdout
+    look on the program that failed (the `looks` row itself, kept for good, as the incubator's reader reads it: a
+    failed look whose bar or gate outcome is no longer in a family's state still refuses); no bar owed (`owed_bars`);
+    and, last, THE LOOK IS THE ROUTE (`BELT_LOOK_ROUTE`): while the gate's sealed look is the route to Probe, every
+    program is refused, so a table set to bind beside the look still promotes nothing."""
+    path = Path(root) / DB_NAME
+    n = _count(version)
+    if not path.exists() or n is None or not family:
+        return BELT_STORE_UNREAD
+    from .gate import run_sha as sha_of
+
+    try:
+        db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1.0)
+        db.row_factory = sqlite3.Row
+        try:
+            fam = db.execute("SELECT id, band, retired_at, state FROM families WHERE id=?", (str(family),)).fetchone()
+            row = db.execute("SELECT n, sha, params FROM versions WHERE family=? AND n=?", (str(family), n)).fetchone()
+            current = db.execute("SELECT value FROM kv WHERE key='research_evaluator'").fetchone()
+            ruled, others = (None, []) if row is None else _program_rows(db, str(family), str(row["sha"]), str(run_sha))
+            looked = db.execute("SELECT 1 FROM looks WHERE run_sha=? AND passed=0 LIMIT 1", (str(run_sha),)).fetchone()
+        finally:
+            db.close()
+    except sqlite3.Error:
+        return BELT_STORE_UNREAD
+    if fam is None:
+        return "the family is not in the swarm's store"
+    if fam["retired_at"]:
+        return "the family retired"
+    if fam["band"] != "gym":
+        return f"the family is at {fam['band']}, not in the Gym band"
+    if row is None or sha_of({"sha": row["sha"], "params": loads(row["params"], {}) or {}}) != run_sha:
+        return "the store's version is not the practised program"
+    state = loads(fam["state"], _UNREADABLE)
+    state = {} if state is None else state
+    if not isinstance(state, Mapping):
+        return "the family's state cannot be read"
+    if state.get("robust_failed") is not None and not isinstance(state.get("robust_failed"), list):
+        return "its robust_failed cannot be read"
+    if state.get("drift_failed") is not None and not isinstance(state.get("drift_failed"), Mapping):
+        return "its drift_failed cannot be read"
+    if validation_passed(state, n, None if current is None else loads(current["value"], None)) is not True:
+        return "its version has not met the Validation line on the Gym in force"
+    if demoted(state, n):
+        return "its version was demoted (a loss at 1.5x, or the drift screen failed)"
+    ladder_demoted = state.get("ladder_demoted")
+    if ladder_demoted is not None and not isinstance(ladder_demoted, Mapping):
+        return "its ladder_demoted cannot be read"
+    if _count((ladder_demoted or {}).get("version")) == n:
+        return "the forward ladder demoted this version"
+    why = incubator_refusal(state, run_sha)
+    if why:
+        return why
+    if ruled is not None:
+        return ruled
+    if looked is not None:
+        return "a holdout look on its program failed"
+    for other, other_state in others:
+        why = program_refusal({} if other_state is None else other_state, run_sha)
+        if why:
+            return f"{why} (in {other})"
+    owed = owed_bars(root)
+    if owed is None:
+        return BELT_BARS_UNREAD
+    if any(bar.get("sha") == run_sha for bar in owed):
+        return "the gate owes the store a bar on its program"
+    from . import gate
+
+    if gate.SEALED_LOOKS:
+        return BELT_LOOK_ROUTE  # one route to real money at a time: the ladder records beside the look
+    return None
+
+
 __all__ = ["read", "observe", "incubator", "incubator_refusal", "program_refusal", "owed_bars", "priority", "practice_tier",
-           "demoted", "LIVE_BANDS", "TIERS", "BUNDLE_TTL", "BELT_RECORDS", "BARS_OWED_FILE", "BAD_OUTCOMES"]
+           "demoted", "ladder_refusal", "ladder_promotes", "validation_passed", "ladder_receipt", "LIVE_BANDS", "TIERS",
+           "BUNDLE_TTL", "BELT_RECORDS", "BELT_UNREAD", "BELT_STORE_UNREAD", "BELT_BARS_UNREAD", "BELT_LOOK_ROUTE",
+           "BARS_OWED_FILE", "BAD_OUTCOMES", "TUITION_ROWS"]

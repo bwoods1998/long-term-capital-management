@@ -2,7 +2,9 @@
 
 - SAIL (`ModelRouter.sail`): the Responses API through `ltcm.provider.Provider` (durable request rows,
   reservations before dispatch, settled costs, a per-family daily cap and a floor cap). Its own request
-  file in the state root, `swarm-provider.sqlite`. Each family's calls carry its own `prompt_cache_key`,
+  file in the state root, `swarm-provider.sqlite`. A second durable hold in the swarm's spend ledger admits each model
+  call under THE BUDGET's Sail research line, including other model holds and booked Gym time; non-gate roles leave
+  its gate reserve. This caps model admissions, not unbooked time of an already busy Gym box. Each family's calls carry its own `prompt_cache_key`,
   so its history is read from the cache on every turn. A one-shot answer cut short on Sail says so (`ask`: `truncated`,
   `incomplete_reason`, `usage`).
 - OPENAI (`ModelRouter.ask`): GPT-6 through the gateway (`league.frontier.Frontier`), used only when the
@@ -14,9 +16,10 @@
   the architect, the gate's audit, the diagnostician, the researchers' top band and the strategist), first among the
   paid routes while the gateway's funded total has room above `claude.reserve_usd` and the swarm's own Claude spend is
   under `claude.usd_cap` and, LTCM v3, under THE BUDGET's paid-model dollars today (league/ops/budget.py
-  `paid_model_room`: the settings' `budget` block's Claude dollars less today's Claude and OpenAI spend; spent, a call
-  takes its next route as for a role's own line, kind "line", and OpenAI is refused by the same line, so Sail is
-  next). The architect rotates only
+  `paid_model_room`: the settings' `budget` block's Claude dollars less today's Claude and OpenAI spend, and less the
+  holds the rule keeps in the line for the gate, by stage: the review leaves the audit's, every other role both;
+  spent, a call takes its next route as for a role's own line, kind "line", and OpenAI is refused by the same line, so
+  Sail is next). The architect rotates only
   while `architect.openai_model` names a model: then every other pass asks GPT-6 Astra first. Claude capped, erring or
   unconfigured falls to OpenAI, then Sail, exactly as before. Every role's call asks for Claude (Sept 29, 2026: the
   researcher's stall rewrite and the gate's review too), so `claude.roles` alone decides who gets it: adding "rewrite"
@@ -61,11 +64,13 @@ import re
 import secrets
 import threading
 import time
+from functools import wraps
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Callable, Mapping, Sequence
 
-from .store import SwarmStore
+from .store import SwarmStore, iso
+from . import research_permission
 
 
 class ModelError(RuntimeError):
@@ -85,6 +90,17 @@ class ModelError(RuntimeError):
         self.status = status
         self.usage = dict(usage or {})
         self.overrun_usd = float(overrun_usd)
+
+
+def _research_dispatch(method: Callable[..., Any]) -> Callable[..., Any]:
+    @wraps(method)
+    def guarded(self: Any, *args: Any, **kwargs: Any) -> Any:
+        try:
+            with research_permission.dispatch(getattr(self.store, "root", None), role=kwargs.get("role")):
+                return method(self, *args, **kwargs)
+        except research_permission.ResearchDispatchDenied as exc:
+            raise ModelError(str(exc), kind="research_fenced") from None
+    return research_permission.protected(guarded)
 
 
 @dataclass(frozen=True)
@@ -228,14 +244,66 @@ class ModelRouter:
     # ------------------------------------------------------------------ Sail
     def sail(self, profile: str, items: Sequence[Any], *, family: str, key: str, tools: Sequence[Mapping[str, Any]] | None = None,
              effort: str = "low", max_output: int = 8000, cache_key: str | None = None, tool_choice: str = "auto",
-             cap_usd_day: float | None = None, kind: str = "sail_model") -> Any:
+             cap_usd_day: float | None = None, kind: str = "sail_model", role: str | None = None) -> Any:
+        # A known terminal Provider row is a local read, even under the fence. Calling respond on an unknown row
+        # could dispatch, so free recovery bypasses respond entirely and never creates a replacement request.
+        cached = self.cached_sail(key, family=family, kind=kind, profile=profile)
+        if cached is not None:
+            return cached
+        return self._sail_dispatch(profile, items, family=family, key=key, tools=tools, effort=effort,
+                                   max_output=max_output, cache_key=cache_key, tool_choice=tool_choice,
+                                   cap_usd_day=cap_usd_day, kind=kind, role=role)
+
+    def cached_sail(self, key: str, *, family: str, kind: str = "sail_model", profile: str = "") -> Any:
+        """Read and account a real Provider's terminal receipt; no model dispatch or guessed zero cost."""
+        from ltcm.provider import Provider, TERMINAL
+        self._require_committed_store()
+        if not isinstance(self.provider, Provider):
+            return None
+        try:
+            row = self.provider.record(key[:200])
+        except Exception:
+            raise ModelError("Sail original request record cannot be read", kind="line") from None
+        if row is None or row.get("status") not in TERMINAL:
+            return None
+        response = self.provider._response_from_row(row)
+        try:
+            cost = float(response.cost_usd)
+        except (TypeError, ValueError, OverflowError):
+            cost = math.nan
+        if not math.isfinite(cost) or cost < 0:
+            raise ModelError("cached Sail answer has no known charge; its hold remains booked", kind="unknown")
+        self._account_sail(key, cost, kind=kind, family=family.split(":", 1)[0], settled=True,
+                           detail={"profile": profile, "key": key[:120], "desk": family, "cached": True})
+        return response
+
+    @_research_dispatch
+    def _sail_dispatch(self, profile: str, items: Sequence[Any], *, family: str, key: str, tools: Sequence[Mapping[str, Any]] | None = None,
+                       effort: str = "low", max_output: int = 8000, cache_key: str | None = None, tool_choice: str = "auto",
+                       cap_usd_day: float | None = None, kind: str = "sail_model", role: str | None = None) -> Any:
         """One Sail call, deduped on `key` (a crash-retry re-reads the stored response). Raises the
-        Provider's errors (`BudgetExceeded` when a cap would be breached)."""
+        Provider's errors (`BudgetExceeded` when a cap would be breached). THE BUDGET's Sail model hold is committed
+        before dispatch, against booked models, holds and Gym time together. Non-gate roles leave the gate's reserve.
+        The hold and its true-ups belong to its original UTC day, including an answer after midnight. Busy Gym time
+        not yet booked is still the pool's separate billing limitation; this is a model admission cap."""
+        self._require_committed_store()
+        items, tools = list(items), list(tools) if tools else None
+        # Price exactly the readable input/tools that Provider._admit prices, using its pure request builder. A model
+        # without a known conservative price, or an invalid body, fails before a hold or any dispatch.
+        from ltcm.provider import Provider, canonical, reservation_usd
+
+        body = Provider.build_body(Provider.__new__(Provider), profile, items, tools=tools, reasoning_effort=effort,
+                                   max_output_tokens=int(max_output), cache_key=(cache_key or family)[:128],
+                                   tool_choice=tool_choice)
+        readable = {"input": body.get("input", []), "tools": body.get("tools", [])}
+        required = float(reservation_usd(profile, len(canonical(readable).encode("utf-8")), int(max_output)))
+        self._sail_admit(key, required, kind=kind, family=family.split(":", 1)[0], profile=profile, role=role)
         cap = cap_usd_day if cap_usd_day is not None else float(self.settings.get("researcher", {}).get("family_usd_day", 2.0))
         attempt = 0
         while True:
             try:
-                response = self.provider.respond(profile, list(items), tools=list(tools) if tools else None, desk_id=family,
+                research_permission.require(getattr(self.store, "root", None), role=role)
+                response = self.provider.respond(profile, items, tools=tools, desk_id=family,
                                                  session_id=family, request_key=key[:200], reasoning_effort=effort,
                                                  max_output_tokens=int(max_output), desk_cap_usd_per_day=str(cap),
                                                  cache_key=(cache_key or family)[:128], tool_choice=tool_choice)
@@ -247,20 +315,105 @@ class ModelRouter:
                     raise
                 attempt += 1
                 self.sleep(float(getattr(exc, "retry_after", None) or 5 * 3 ** attempt))
-        cost = float(response.cost_usd or 0)
+        try:
+            cost = float(response.cost_usd)
+        except (TypeError, ValueError, OverflowError):
+            cost = math.nan
+        if not math.isfinite(cost) or cost < 0:
+            raise ModelError("Sail answer has no known charge; its conservative hold remains booked",
+                             kind="unknown", held_usd=required)
         self._account_sail(key, cost, kind=kind, family=family.split(":", 1)[0], settled=True,
                            detail={"profile": profile, "key": key[:120], "desk": family})
         return response
 
+    def _sail_admit(self, key: str, required: float, *, kind: str, family: str | None, profile: str,
+                    role: str | None) -> None:
+        """Atomic, durable model admission under the current Sail research cap. Existing holds/cached responses are
+        already charged and reserve nothing again; a released request can be admitted again only on its original day.
+        The root's current budget also tightens a stale settings snapshot. Missing pricing/room is no dispatch."""
+        from ..ops import budget as B
+        from ltcm.provider import Provider, TERMINAL
+
+        from .compute import remaining as compute_remaining, valid_timestamp
+
+        try:
+            priced = not isinstance(required, bool) and isinstance(required, (int, float)) and math.isfinite(required) and required >= 0
+        except OverflowError:
+            priced = False
+        if not priced:
+            raise ModelError("Sail request has no conservative price", kind="line")
+        key = key[:200]
+        with self.store.atomic():
+            row = self.store._one("SELECT booked_usd, settled FROM model_costs WHERE request_key=?", (key,))
+            holds = self.store.get("unsettled") or {}
+            real_provider = isinstance(self.provider, Provider)
+            prior = self._row(key, read_required=True) if real_provider else None
+            if row and row["settled"]:
+                # A settled swarm charge is a free retry only while the real Provider still has its terminal row.
+                # Losing/truncating that cache must not turn a paid dispatch into an uncharged one.
+                if real_provider and (prior is None or prior["status"] not in TERMINAL):
+                    raise ModelError("Sail cached response has no terminal Provider record", kind="line")
+                return
+            now = self.store.clock()
+            if not valid_timestamp(now):
+                raise ModelError("Sail admission clock is invalid", kind="line")
+            midnight = now - now % 86400
+            compute_held = compute_remaining(self.store, since=midnight, now=now)
+            if not math.isfinite(compute_held):
+                raise ModelError("Sail compute commitments are unreadable or unresolved", kind="line")
+            original_required = None
+            if prior is not None and prior["status"] not in TERMINAL:
+                # Provider replays its durable body on this key, including an abandoned request's readmission.
+                # Pricing a smaller replacement body must never under-reserve that original dispatch.
+                try:
+                    original_required = float(prior["reserved_usd"])
+                except (TypeError, ValueError, OverflowError):
+                    original_required = math.nan
+                if not math.isfinite(original_required) or original_required < 0:
+                    raise ModelError("Sail original request has no conservative price", kind="line")
+                required = max(required, original_required)
+            if row and key in holds:
+                if not real_provider or (prior is not None and
+                                         (original_required is None or float(row["booked_usd"]) >= original_required)):
+                    return  # the Provider has the original body/hold; retries cannot change its charge
+                # A crash before Provider committed its request permits a changed body; an underpriced durable
+                # hold must cover its original body. Charge any extra room below before either can dispatch.
+            if row:
+                origin = self.store._one("SELECT epoch FROM spend WHERE kind=? AND "
+                                         "json_extract(detail, '$.budget_key')=? ORDER BY seq LIMIT 1", (kind, key))
+                if origin is None or float(origin["epoch"]) < midnight:
+                    raise ModelError("Sail released request has no admission on this UTC budget day", kind="line")
+            root = getattr(self.store, "root", None)
+            caps = B.sail_caps(self.settings, root, now)
+            if root is not None:
+                current = B.sail_caps({"guard": self.settings.get("guard", {})}, root, now)
+                caps = {**caps, "research": min(caps["research"], current["research"]),
+                        "read": caps["read"] and current["read"]}
+            reserve = 0.0 if role in ("review", "audit") else B.gate_reserve(caps["research"])
+            spent = self.store.spent(B.SAIL_KINDS, since=midnight)
+            if not math.isfinite(spent) or spent < 0:
+                raise ModelError("Sail spend ledger is unreadable", kind="line")
+            spent += compute_held
+            room = max(0.0, caps["research"] - reserve - spent)
+            already = max(0.0, float(row["booked_usd"])) if row else 0.0
+            additional = max(0.0, required - already)
+            if caps["read"] is not True or additional > room:
+                raise ModelError(f"Sail research budget has ${room:.6f} left; this call needs ${additional:.6f} more reserved", kind="line")
+            self._account_sail(key, max(required, already), kind=kind, family=family, settled=False,
+                               detail={"profile": profile, "key": key[:120], "budget_key": key,
+                                       "budget_admission": True, "role": role})
+
     #: Errors after which Sail may have run (and billed) a call whose answer never came back.
     UNCONFIRMED = ("provider_poll_timeout", "provider_transport_timeout", "provider_transport_unconfirmed")
 
-    def _row(self, key: str) -> Any:
+    def _row(self, key: str, *, read_required: bool = False) -> Any:
         try:
             with self.provider._lock:
                 return self.provider._db.execute("SELECT status, reserved_usd, cost_usd, response_id FROM requests WHERE request_key=?",
                                                  (key[:200],)).fetchone()
-        except Exception:  # noqa: BLE001 - a fake Provider: nothing known
+        except Exception as exc:  # noqa: BLE001 - a fake Provider: nothing known
+            if read_required:
+                raise ModelError("Sail original request record cannot be read", kind="line") from exc
             return None
 
     def _account_sail(self, key: str, usd: float, *, kind: str, family: str | None,
@@ -274,17 +427,29 @@ class ModelRouter:
                 return False
             # Upgrade an existing pre-stage-3 hold without booking it again.
             booked = float(row["booked_usd"] if row else (holds.get(key) or {}).get("usd") or 0)
+            origin = (holds.get(key) or {}).get("at")
+            if origin is None and row:
+                first = self.store._one("SELECT epoch FROM spend WHERE kind=? AND "
+                                        "json_extract(detail, '$.budget_key')=? ORDER BY seq LIMIT 1", (kind, key))
+                origin = first["epoch"] if first else None
+            origin = float(self.store.clock() if origin is None else origin)
             if settled:
                 holds.pop(key, None)
             else:
-                holds[key] = {"usd": usd, "kind": kind, "family": family, "at": time.time()}
+                holds[key] = {"usd": usd, "kind": kind, "family": family, "at": origin}
             self.store.put("unsettled", holds)
             self.store._exec("INSERT INTO model_costs(request_key, booked_usd, settled) VALUES(?,?,?) "
                              "ON CONFLICT(request_key) DO UPDATE SET booked_usd=excluded.booked_usd, settled=excluded.settled",
                              (key, usd, int(settled and not released)))
             if usd != booked:
-                self.store.add_spend(kind, usd - booked, family=family,
-                                     detail={**detail, **({"replaces_hold": round(booked, 6)} if booked else {})})
+                facts = {**detail, **({"replaces_hold": round(booked, 6)} if booked else {}),
+                         "accounted_at": float(self.store.clock())}
+                # A true-up after midnight must not release yesterday's hold into today's room. The spend ledger
+                # keeps its original accounting epoch; accounted_at says when this append actually happened.
+                self.store._exec("INSERT INTO spend(at, epoch, kind, family, usd, detail) VALUES(?,?,?,?,?,?)",
+                                 (iso(origin), origin, kind, family, usd - booked, json.dumps(facts, sort_keys=True)))
+                if family:
+                    self.store.bump(family, spent_usd=usd - booked)
             return True
 
     def _book_unsettled(self, kind: str, profile: str, family: str, key: str, exc: BaseException) -> None:
@@ -294,8 +459,24 @@ class ModelRouter:
         releases is reversed. A call the venue refused, or an HTTP error with nothing accepted, costs nothing."""
         row = self._row(key)
         code = str(getattr(exc, "code", "") or "")
-        if row is None or row["status"] == "abandoned" or (not row["response_id"] and code not in self.UNCONFIRMED):
+        if row is None:
+            # The real Provider commits its request before sending it. Prove absence through a readable request
+            # store before releasing our pre-dispatch hold; an unreadable store or a fake's unknown bill retains it.
+            try:
+                with self.provider._lock:
+                    absent = self.provider._db.execute("SELECT 1 FROM requests WHERE request_key=?", (key[:200],)).fetchone() is None
+            except Exception:  # noqa: BLE001 - no proof that the call was never sent
+                absent = False
+            if absent:
+                self._account_sail(key, 0.0, kind=kind, family=family.split(":", 1)[0], settled=True, released=True,
+                                   detail={"key": key[:120], "unaccepted": True})
             return
+        if row["status"] == "abandoned" and row["cost_usd"] is None:
+            self._account_sail(key, 0.0, kind=kind, family=family.split(":", 1)[0], settled=True, released=True,
+                               detail={"key": key[:120], "unaccepted": True})
+            return
+        if not row["response_id"] and code not in self.UNCONFIRMED and row["cost_usd"] is None:
+            return  # unknown acceptance: the existing conservative admission hold stays booked
         usd = float(row["cost_usd"] if row["cost_usd"] is not None else row["reserved_usd"] or 0)
         if usd <= 0:
             return
@@ -420,11 +601,14 @@ class ModelRouter:
         budget = self.claude_budget_room()
         return 0.0 if budget is None else min(room, budget)
 
-    def claude_budget_room(self) -> float:
+    def claude_budget_room(self, role: str | None = None) -> float:
         """THE BUDGET's paid-model dollars left this UTC day (league/ops/budget.py `paid_model_room`, the protected rule;
         the settings' `budget` block, set by every `settings.load` with a state root): `claude_usd_day` less the swarm's
         Claude spend today and its OpenAI spend today, holds included (`claude_spent`, `openai_spent`: a call counts on
         the day its hold was booked, and each model's spend is floored at 0 on its own, so no release lifts the line).
+        For a call of `role` (an admission), also less THE GATE'S HOLDS the rule keeps inside the line for the gate's
+        review and audit, by stage (`budget.paid_model_reserve`: none for the audit, the audit's for the review, both for
+        every other role; with no role, the line itself).
         Settings with no `budget` block are the router's own read of its store root's budget.json (`budget.effective`: the
         floor when it gives none), as the Sail guard reads them: settings handed in without the block never lift the
         budget. 0 for a block that is not a budget, or a rule that cannot be read (FAIL CLOSED). OpenAI's admission reads
@@ -439,7 +623,7 @@ class ModelRouter:
                 block = budget_mod.effective(root, now) if root is not None else budget_mod.floor_block("no budget block")
             midnight = now - now % 86400
             room = budget_mod.paid_model_room(block, self.claude_spent(since=midnight),
-                                              self.openai_spent(since=midnight))
+                                              self.openai_spent(since=midnight), role=role)
         except Exception:  # noqa: BLE001 - no rule, no paid research
             return 0.0
         return 0.0 if room is None else room
@@ -608,7 +792,7 @@ class ModelRouter:
         `family_line` is given, and the room above `claude.reserve_usd` and `claude.usd_cap`, less `keep_usd` (room this
         caller leaves to the other roles)."""
         request_id = re.sub(r"[^A-Za-z0-9:._-]+", "-", key)[:150] + ":" + secrets.token_hex(4)
-        budget = self.claude_budget_room()  # THE BUDGET's Claude dollars left today: a line, not a funding cliff
+        budget = self.claude_budget_room(role)  # THE BUDGET's Claude dollars left today: a line, not a funding cliff
         if budget is None or budget < required:  # no reading is no room, never "no line" (FAIL CLOSED)
             errors.append(f"claude: the research budget's Claude line for today has no room (${budget or 0.0:.2f} left; "
                           f"this call may cost ${required:.2f})")
@@ -632,7 +816,7 @@ class ModelRouter:
         admitted = False
         with self.store.atomic():
             # Every line is read again inside the write transaction: a concurrent call's committed hold counts.
-            budget = self.claude_budget_room()
+            budget = self.claude_budget_room(role)
             if budget is None or budget < required:
                 errors.append("claude: the research budget's Claude line for today has no room")
                 return None, "line"
@@ -660,6 +844,7 @@ class ModelRouter:
             return None, "no_room"
         return request_id, None
 
+    @_research_dispatch
     def _ask_claude(self, *, role: str, system: str, user: str, family: str | None, key: str, need_usd: float,
                     schema: Mapping[str, Any] | None, errors: list[str], billed: list[dict[str, Any]],
                     effort: str | None = None, prefix: Sequence[Mapping[str, Any]] | None = None,
@@ -696,6 +881,7 @@ class ModelRouter:
         try:
             client = self.claude_factory(model)  # type: ignore[misc]
             hour = {"allow_hour": True} if self._claude_hour() else {}
+            research_permission.require(getattr(self.store, "root", None), role=role)
             answer = client.ask(self.claude_system_blocks(system, prefix), user, agent=f"swarm-{role}", role=role,
                                 max_tokens=body["max_tokens"], effort=body["output_config"]["effort"], schema=schema, cache=True,
                                 request_id=request_id, stream=body.get("stream") is True, **hour)
@@ -743,6 +929,7 @@ class ModelRouter:
                 self.note_fallback(role, exc.kind, "sail", str(exc))
             raise
 
+    @_research_dispatch
     def _claude_turn_once(self, *, role: str, family: str | None, key: str, system: Any, tools: Sequence[Mapping[str, Any]],
                           messages: Sequence[Mapping[str, Any]], effort: str = "medium", max_tokens: int = 16000,
                           timeout: float | None = None, family_usd_day: float | None = None, keep_usd: float = 0.0,
@@ -778,6 +965,7 @@ class ModelRouter:
         hold = _ClaudeHold(self.store, request_id=request_id, usd=required, role=role, family=family, model=model, key=key)
         try:
             client = self.claude_factory(model)  # type: ignore[misc]
+            research_permission.require(getattr(self.store, "root", None), role=role)
             answer = client.messages(system, messages, tools, agent=f"swarm-{role}", role=role, max_tokens=body["max_tokens"],
                                      effort=effort, tool_choice=tool_choice, request_id=request_id, stream=stream, timeout=timeout)
         except ClaudeError as exc:
@@ -861,6 +1049,7 @@ class ModelRouter:
         except Exception:  # noqa: BLE001 - an unreadable counter keeps the primary order
             return 0
 
+    @_research_dispatch
     def ask(self, *, role: str, system: str, user: str, family: str | None, key: str, openai_model: str | None,
             sail_profile: str | None, max_output: int = 8000, effort: str = "medium", need_usd: float = 1.0,
             desk: str | None = None, cap_usd_day: float | None = None, claude: bool = False, rotate: bool = False,
@@ -933,11 +1122,11 @@ class ModelRouter:
                              cache_key=f"swarm-{role}", tool_choice="auto",
                              cap_usd_day=float(cap_usd_day if cap_usd_day is not None else
                                                self.settings.get("researcher", {}).get("floor_usd_day", 60.0)),
-                             kind="sail_model")
+                             kind="sail_model", role=role)
 
         def failed(exc: BaseException) -> ModelError:
             return ModelError("; ".join(errors + [f"sail: {type(exc).__name__}: {getattr(exc, 'code', '') or str(exc)[:160]}"]),
-                              billed=billed)
+                              billed=billed, kind=getattr(exc, "kind", "error"), held_usd=getattr(exc, "held_usd", 0.0))
 
         # THE WINDOW FALLBACK (`sail_fallback`): a profile outside the asap window goes straight to its asap fallback while
         # its window is flagged stalled, and a poll timeout on it flags the window and retries once there.
@@ -1037,6 +1226,7 @@ class ModelRouter:
                          "again")})
         return fresh
 
+    @_research_dispatch
     def _ask_openai(self, *, role: str, system: str, user: str, family: str | None, key: str, openai_model: str,
                     max_output: int, effort: str, need_usd: float, errors: list[str]) -> dict[str, Any] | None:
         """The OpenAI route (#380): None when it has no room, refused or erred (the reason is in `errors`)."""
@@ -1051,7 +1241,7 @@ class ModelRouter:
             body = request_body(openai_model, [{"role": "system", "content": system}, {"role": "user", "content": user}],
                                 max_output_tokens=max_output, effort=effort, service_tier=tier, role=role)
             required = float(max(need, reservation_ceiling(body)))
-            budget = self.claude_budget_room()  # THE BUDGET's paid-model dollars today: OpenAI is under them too
+            budget = self.claude_budget_room(role)  # THE BUDGET's paid-model dollars today: OpenAI is under them too
             if budget is None or budget < required:  # no reading is no room, never "no line" (FAIL CLOSED)
                 errors.append(f"openai: the research budget's paid-model line for today has no room (${budget or 0.0:.2f} "
                               f"left; this call may cost ${required:.2f})")
@@ -1060,7 +1250,7 @@ class ModelRouter:
             if room >= required:
                 admitted = False
                 with self.store.atomic():
-                    budget = self.claude_budget_room()  # read again inside the write transaction
+                    budget = self.claude_budget_room(role)  # read again inside the write transaction
                     if budget is not None and budget >= required and min(room, self._openai_cap_room()) >= required:
                         self.store.add_spend("openai", required, family=family,
                                              detail={"role": role, "hold": key[:120], "service_tier_requested": tier,
@@ -1073,6 +1263,7 @@ class ModelRouter:
         if hold is not None:
             try:
                 frontier = self.frontier_factory(openai_model)  # type: ignore[misc]
+                research_permission.require(getattr(self.store, "root", None), role=role)
                 answer = frontier.ask(system=system, user=user, agent=f"swarm-{role}", max_output_tokens=body["max_output_tokens"],
                                       effort=effort, role=role, service_tier=tier)
                 verified = getattr(answer, "cost_verified", False) is True and getattr(answer, "model", None) == openai_model

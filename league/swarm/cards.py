@@ -58,6 +58,27 @@ fewer than `architect.max_rebirths_per_cell` (3) rebirths in the last `architect
 rows multiply never refills its own budget. A false match costs a justification and a budget slot, never an idea
 outright. The check is deterministic and makes no model call.
 
+THE CELLS A BIRTH MAY LAND IN (F1, Oct 3, 2026; `RebirthIndex.grid`, `bearable`, `cells(families=...)`). While
+`architect.structures` names the types a birth may be, the request lists every cell of those types' structure families
+(for debit verticals and long singles, the 44 directional cells: 11 mechanism classes by 4 holdings), each with its rows,
+its rebirth room and the rows a claim may name, the cells with room first, then the cells no row is in (a card there
+needs no rebirth), then the cells at room 0; no line goes to a structure type no birth may be. A cell can bear a birth
+when no row of it needs a claim, when every row that needs one is carded and some input is read by none of them (a card
+reading only such inputs matches no row, so it needs no claim), or when it has rebirth room and a row that has backed
+fewer than `architect.max_rebirths_per_row` rebirths; a pass with no such cell asks no model (`Architect.closed`).
+
+THE CELLS' PACE (F1, Oct 3, 2026; `architect.pace_births`, on in policy.json; `RebirthIndex.wait`, `hour_room`). The cell budget is a
+quota over `architect.rebirth_window_days`, and at the refill cadence the architect could spend all of it in about three
+days and then bear nothing until the window moved; and a birth that needed no claim spent no budget at all, so a cell
+with no refuting row could bear the same idea again and again. So EVERY carded birth counts, claimed or not: a cell
+bears one birth each window / `architect.max_rebirths_per_cell` (14 hours at 12 in 7 days), which keeps it inside its
+budget with no day it cannot bear in, and the swarm bears at most the cells' whole budget spread evenly, in any hour
+(the cells of the request by the budget over the window's hours, rounded down, at least 1: 3 an hour for 44 cells).
+A birth in a cell that bore one inside that time is refused with the wait, the request ranks such a cell last and says
+so, and a pass in an hour that is spent asks no model. Only JSON true switches it on: with the key absent or anything
+else it is off (the budget alone, as before), so the memory lane's judge, which runs the card check at the code's
+defaults on batches born in one instant, is unchanged.
+
 THE CELL'S YIELD (`architect.cell_yield`, H2 of the Oct 1 edge study; off by default: null, every mechanism-verdict row
 needs a claim, as above). A SELF-REFUTED row (its own researcher retired it, since release A at a median of under an
 hour) or a DRIFT row (the idle rule's Train record failed the drift screen) is a family's outcome, not a test of the
@@ -89,7 +110,7 @@ import hashlib
 import json
 import math
 import re
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 from . import evidence as evidence_mod
 
@@ -716,6 +737,7 @@ class RebirthIndex:
     def __init__(self, store: Any, settings: Mapping[str, Any] | None = None, *,
                  yields: dict[tuple[str, str, str], dict[str, int]] | None = None):
         from .architect import lesson_view, tag_of  # a local import: the architect imports this module
+        from .researcher import THIN_RETIRED
 
         self.store = store
         self.settings = settings or {}
@@ -733,6 +755,11 @@ class RebirthIndex:
         self.rows: list[dict[str, Any]] = []
         for g in store._all("SELECT family, at, mechanism, structure, roots, lesson FROM graveyard ORDER BY at, family"):
             fam = families.get(g["family"])
+            # R3: a thin retirement frees a slot without refuting its cell. Earlier F1 rows could carry a DRIFT or
+            # STRESS tag after this explicit marker; keep their history, but never inherit that false cell closure.
+            reason = str((fam or {}).get("retire_reason") or "")
+            if reason.startswith(THIN_RETIRED) or (fam is None and THIN_RETIRED in str(g.get("lesson") or "")):
+                continue
             tag = tag_of(g, fam)
             if tag not in MECHANISM_VERDICTS:
                 continue
@@ -755,20 +782,29 @@ class RebirthIndex:
         self.by_id = {r["row"]: r for r in self.rows}
         # The rebirths born so far: by the row each named (for ever) and by that row's cell (within the window).
         cutoff = None
-        now = _parse_at(store.now()) if hasattr(store, "now") else None
+        now = self.now = _parse_at(store.now()) if hasattr(store, "now") else None
         if now is not None:
             cutoff = now - dt.timedelta(days=self.window_days)
         self.backed: dict[str, int] = {}
         self.cell_births: dict[tuple[str, str, str], int] = {}
+        # THE CELLS' PACE: every carded birth, claimed or not: each cell's newest, and the swarm's in the last hour.
+        self.last_birth: dict[tuple[str, str, str], dt.datetime] = {}
+        self.hour_births = 0
         for c in cards.values():
+            at = _parse_at(c.get("at"))
             reb = c["card"].get("rebirth") if isinstance(c["card"], Mapping) else None
-            if not (isinstance(reb, Mapping) and reb.get("row")):
+            claimed = isinstance(reb, Mapping) and bool(reb.get("row"))
+            cell = self._cell_of_rebirth(str(reb["row"]), c["key"]) if claimed else cell_of(c["key"])
+            if at is not None:
+                if cell not in self.last_birth or at > self.last_birth[cell]:
+                    self.last_birth[cell] = at
+                if now is not None and now - dt.timedelta(hours=1) < at <= now:
+                    self.hour_births += 1
+            if not claimed:
                 continue
             row = str(reb["row"])
             self.backed[row] = self.backed.get(row, 0) + 1
-            at = _parse_at(c.get("at"))
             if cutoff is None or (at is not None and at >= cutoff):
-                cell = self._cell_of_rebirth(row, c["key"])
                 self.cell_births[cell] = self.cell_births.get(cell, 0) + 1
 
     def _setting(self, name: str, default: int) -> int:
@@ -789,6 +825,43 @@ class RebirthIndex:
     @property
     def window_days(self) -> int:
         return max(1, self._setting("rebirth_window_days", 7))
+
+    @property
+    def pace_seconds(self) -> float | None:
+        """THE CELLS' PACE: the time between one cell's births (the window over `architect.max_rebirths_per_cell`), or
+        None unless `architect.pace_births` is JSON true, and while the cell budget is 0 or the store has no clock."""
+        if self.cfg.get("pace_births") is not True or self.per_cell <= 0 or self.now is None:
+            return None
+        return self.window_days * 86400.0 / self.per_cell
+
+    def wait(self, cell: Any) -> float:
+        """THE CELLS' PACE: the seconds until `cell` may bear its next birth (0.0: it may now)."""
+        gap, last = self.pace_seconds, self.last_birth.get(tuple(cell))
+        if gap is None or last is None:
+            return 0.0
+        return max(0.0, gap - (self.now - last).total_seconds())
+
+    def hour_cap(self, cells: int) -> int | None:
+        """THE CELLS' PACE: the most births the swarm bears in an hour over `cells` cells (their whole budget spread
+        evenly over the window, rounded down, at least 1), or None while the pace is off."""
+        gap = self.pace_seconds
+        return None if gap is None else max(1, int(max(0, int(cells)) * 3600.0 / gap))
+
+    def hour_room(self, cells: int) -> int | None:
+        """THE CELLS' PACE: the births the last hour still allows (`hour_cap` less those born in it), or None (no pace)."""
+        cap = self.hour_cap(cells)
+        return None if cap is None else max(0, cap - self.hour_births)
+
+    def _paced(self, cell: tuple[str, str, str], card: Mapping[str, Any], structure: Any) -> dict[str, Any] | None:
+        """THE CELLS' PACE's refusal of a birth that counts against `cell`, or None (the cell may bear now)."""
+        wait = self.wait(cell)
+        if wait <= 0:
+            return None
+        gap = float(self.pace_seconds or 0.0)
+        return {"ok": False, "matched": [], "paced": True, "key": key_text(key_of(card, structure)),
+                "reason": (f"the cell {' / '.join(cell)} bore a birth {max(0.0, gap - wait) / 3600.0:.1f} hours ago and bears "
+                           f"its next in {wait / 3600.0:.1f} hours (a cell bears one birth each {gap / 3600.0:g} hours, "
+                           "claimed or not): look in another cell")}
 
     @property
     def yields(self) -> dict[tuple[str, str, str], dict[str, int]] | None:
@@ -894,8 +967,9 @@ class RebirthIndex:
         YIELD: ok with "open" when every matched row is one an open cell excuses; "dropped" (why) when the card's claim
         there did not hold and must be stripped before the card is stored."""
         hit, text_class = self.matched(card, structure, mechanism, dte)
+        own = cell_of(key_of(card, structure))  # THE CELLS' PACE: the cell a birth with no claim counts against
         if not hit:
-            return {"ok": True, "matched": []}
+            return self._paced(own, card, structure) or {"ok": True, "matched": []}
         need = [r for r in hit if self.needs_claim(r)]
         if not need:
             # THE CELL'S YIELD: only an open cell's self-refuted and drift rows matched, and they need no claim. A claim
@@ -910,7 +984,7 @@ class RebirthIndex:
                 if claim["ok"]:
                     return {**claim, "open": True}
                 out["dropped"] = claim["reason"]
-            return out
+            return self._paced(own, card, structure) or out
         return self._claim(card, structure, hit, text_class, need if len(need) < len(hit) else None)
 
     def _claim(self, card: Mapping[str, Any], structure: Any, hit: list[dict[str, Any]], text_class: str | None,
@@ -966,47 +1040,128 @@ class RebirthIndex:
             out["reason"] = (f"the cell {' / '.join(cell)} has had {self.cell_births[cell]} rebirth(s) in the last "
                              f"{self.window_days} days (the most a cell may): look in another cell")
             return out
+        paced = self._paced(cell, card, structure)
+        if paced is not None:
+            out.update(reason=paced["reason"], paced=True)
+            return out
         return {"ok": True, "matched": ids[-12:], "count": len(hit), "row": row["row"], "rebirth": True,
                 "new_inputs": sorted(new_inputs), **({"text_class": text_class} if text_class else {})}
 
     def note_birth(self, card: Mapping[str, Any], structure: Any = None) -> None:
-        """Count a rebirth born in this pass against its row and its row's cell (the caps bind within a pass too)."""
+        """Count a birth of this pass: a rebirth against its row and its row's cell (the caps bind within a pass too),
+        and every birth, claimed or not, against its cell's pace and the hour's (THE CELLS' PACE)."""
         reb = card.get("rebirth") if isinstance(card, Mapping) else None
         if isinstance(reb, Mapping) and reb.get("row"):
             row = str(reb["row"])
             self.backed[row] = self.backed.get(row, 0) + 1
             cell = self._cell_of_rebirth(row, key_of(card, structure))
             self.cell_births[cell] = self.cell_births.get(cell, 0) + 1
+        else:
+            cell = cell_of(key_of(card, structure))
+        if self.now is not None:
+            self.last_birth[cell] = self.now
+        self.hour_births += 1
 
-    def cells(self, limit: int = 40, claimable: int = 0) -> list[str]:
+    def grid(self, families: Iterable[str]) -> list[tuple[tuple[str, str, str], list[dict[str, Any]]]]:
+        """THE CELLS A BIRTH MAY LAND IN (F1): every cell (mechanism class, structure family, holding) of the structure
+        families `families`, each with its mechanism-verdict rows (oldest first; [] for a cell no row is in). The cells
+        with rebirth room first (most rows first), then the cells with no row, then the cells at rebirth room 0, then
+        the cells that bore a birth too lately to bear another now (THE CELLS' PACE)."""
+        groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+        for r in self.rows:
+            groups.setdefault(cell_of(r["key"]), []).append(r)
+        wanted = [f for f in dict.fromkeys(STRUCTURE_FAMILIES.values()) if f in set(families)]
+        cells = [(c, f, h) for f in wanted for c in MECHANISM_CLASSES for h in HOLDING]
+        order = {cell: i for i, cell in enumerate(cells)}
+
+        def rank(cell: tuple[str, str, str]) -> tuple[int, int, int]:
+            rows = groups.get(cell, [])
+            stage = 3 if self.wait(cell) > 0 else 1 if not rows else 0 if self.room(cell) > 0 else 2
+            return (stage, -len(rows), order[cell])
+
+        return [(cell, groups.get(cell, [])) for cell in sorted(cells, key=rank)]
+
+    def room(self, cell: Any) -> int:
+        """The rebirths `cell` may still bear in the window (`architect.max_rebirths_per_cell` less those born)."""
+        return max(0, self.per_cell - self.cell_births.get(tuple(cell), 0))
+
+    def unread(self, rows: list[dict[str, Any]]) -> list[str]:
+        """The inputs none of `rows` read, when every one of them is carded: a card that reads only those (declared, and
+        named by its own words) matches none of the rows (`matches`: a carded row matches on overlapping inputs), so it
+        needs no claim. [] when a row is legacy (it matches whatever a card reads) or every input is read."""
+        if not rows or any(r["legacy"] for r in rows):
+            return []
+        read = {name for r in rows for name in r["inputs"]}
+        return [name for name in INPUTS if name not in read]
+
+    def bearable(self, cell: Any, rows: list[dict[str, Any]]) -> bool:
+        """Can a birth land in `cell` now (`rows`: its mechanism-verdict rows): never while THE CELLS' PACE holds it
+        (`wait`); else when no row needs a claim there (an empty cell, or THE CELL'S YIELD's open one), when every row
+        that needs one is carded and leaves an input unread (`unread`: a card reading only such inputs is born without a
+        claim), or when it has rebirth room and a row a claim may still name (one that has backed fewer than
+        `architect.max_rebirths_per_row` rebirths)."""
+        if self.wait(cell) > 0:
+            return False
+        need = [r for r in rows if self.needs_claim(r)]
+        if not need or self.unread(need):
+            return True
+        return self.room(cell) > 0 and any(self.backed.get(r["row"], 0) < self.per_row for r in rows)
+
+    def cells(self, limit: int = 40, claimable: int = 0, families: Iterable[str] | None = None,
+              chars: int | None = None) -> list[str]:
         """The refuted cells, most rows first: one line each for the architect's request (with the cell's rebirth room).
         With `architect.cell_yield` on, each says whether it is open (and how many of its rows need a claim) or exhausted.
         `claimable` (`architect.claimable_rows`, 0: off) adds, for a cell with rebirth room where a claim can be needed, up
         to that many of its rows a claim may name (rows that have backed fewer than `max_rebirths_per_row` rebirths, newest
         first), each with the inputs it read, which a claim must add to; a carded row is matched only when the card's
-        inputs overlap those. Ids and input names only: no figure."""
-        groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
-        for r in self.rows:
-            groups.setdefault(cell_of(r["key"]), []).append(r)
-        ranked = sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))[:limit]
-        out = []
+        inputs overlap those, so, with `families`, a cell whose rows that need a claim are all carded names the inputs
+        none of them read (`unread`: a card reading only those needs no rebirth). A cell THE CELLS' PACE holds says how
+        long (`wait`) and names no row. Ids and input names only: no figure. `families` (F1: the structure families a birth may be
+        now, while `architect.structures` leaves any type out): every cell of those families and no other (`grid`: the
+        ones with rebirth room first, then the ones no row is in, then the ones at room 0), whatever `limit` says; a
+        cell no row is in says a card there needs no rebirth. `chars` (with `families`): the most characters the lines
+        may run to; past it the last cells of the list give up their claimable rows, never their line."""
+        if families is not None:
+            ranked = self.grid(families)
+        else:
+            groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+            for r in self.rows:
+                groups.setdefault(cell_of(r["key"]), []).append(r)
+            ranked = sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))[:limit]
+        out: list[list[str]] = []  # each cell's line and its claimable rows' words ("" when it names none)
         for cell, rows in ranked:
+            wait = self.wait(cell)
+            paced = f"; paced: it bore a birth lately, none here for {wait / 3600.0:.1f} more hours" if wait > 0 else ""
+            if not rows:
+                out.append([f"{' / '.join(cell)}: no row: a card here needs no rebirth{paced}", ""])
+                continue
             carded = sum(1 for r in rows if not r["legacy"])
-            room = max(0, self.per_cell - self.cell_births.get(cell, 0))
+            room = self.room(cell)
             line = (f"{' / '.join(cell)}: {len(rows)} rows ({carded} carded), rebirth room {room}, newest "
                     f"{', '.join(r['row'] for r in rows[-3:])}")
-            need = sum(1 for r in rows if self.needs_claim(r))
+            needing = [r for r in rows if self.needs_claim(r)]
+            need = len(needing)
             if self.yield_cfg is not None:
                 line += ("; exhausted: every row needs a claim" if self.exhausted(cell)
                          else f"; open: {need} of its rows need a claim" if need else "; open: no row needs a claim")
-            if claimable > 0 and room > 0 and need:
+            unread = self.unread(needing) if families is not None else []
+            if unread:  # every row that needs a claim is carded: a card that reads none of their inputs matches none
+                line += f"; a card that reads only {', '.join(unread)} needs no rebirth"
+            line += paced
+            named = []
+            if claimable > 0 and room > 0 and need and not paced:
                 named = [r for r in reversed(rows) if self.backed.get(r["row"], 0) < self.per_row][:claimable]
-                if named:
-                    line += "; claimable: " + ", ".join(
-                        f"{r['row']} (read {'+'.join(r['inputs']) or 'nothing named'}{'' if r['legacy'] else ', carded'})"
-                        for r in named)
-            out.append(line)
-        return out
+            out.append([line, "; claimable: " + ", ".join(
+                f"{r['row']} (read {'+'.join(r['inputs']) or 'nothing named'}{'' if r['legacy'] else ', carded'})"
+                for r in named) if named else ""])
+        if families is not None and chars is not None:
+            size = sum(len(line) + len(more) + 1 for line, more in out)
+            for item in reversed(out):
+                if size <= chars:
+                    break
+                size -= len(item[1])
+                item[1] = ""
+        return [line + more for line, more in out]
 
 
 __all__ = ["MECHANISM_CLASSES", "INPUTS", "HOLDING", "STRUCTURE_FAMILIES", "FLAT_REFUSED", "MECHANISM_VERDICTS", "DEFAULT_ABLATION",

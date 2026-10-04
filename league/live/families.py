@@ -147,12 +147,15 @@ class SwarmFamilies:
             self._db().set_band(family, band, reason=reason)
 
     def confirm_band(self, expected: Mapping[str, Any], band: str, reason: str,
-                     forward: Sequence[Mapping[str, Any]], *, at: float | None = None) -> bool:
+                     forward: Sequence[Mapping[str, Any]], *, at: float | None = None,
+                     receipt: int | None = None) -> bool:
         """Commit a decision only while its identity, eligibility and exact evidence snapshot still hold.
 
         The gate uses another SQLite connection and can demote, retire or replace this version while the House
         calculates its money band. The immediate transaction excludes those writers through the final band write.
-        Even an unchanged Probe/Sized band requires confirmation before scheduling a real instance.
+        Even an unchanged Probe/Sized band requires confirmation before scheduling a real instance. A band THE FORWARD
+        LADDER gave (its proof's `route` "ladder") confirms only with its practice receipt in the House's own record
+        (`bands.ladder_receipt`): a proof any other writer copied into the store never schedules real money.
         """
         from ..swarm.gate import run_sha
 
@@ -169,9 +172,25 @@ class SwarmFamilies:
                 selected = store.version(fam["id"], version)
                 if selected is None or run_sha(selected) != expected.get("run_sha"):
                     return False
-                from ..swarm.bands import current_banded_evaluator
+                from ..swarm.bands import current_banded_evaluator, ladder_receipt
 
                 if not current_banded_evaluator(state, run_sha(selected)):
+                    return False
+                proof = state.get("banded_evaluator") or {}
+                if proof.get("route") == "ladder" and not ladder_receipt(
+                        self.root, family=fam["id"], version=version, run_sha=run_sha(selected),
+                        receipt=proof.get("receipt")):
+                    return False  # THE FORWARD LADDER's proof only with its practice receipt (`bands.ladder_receipt`)
+                if proof.get("route") != "ladder" and not any(
+                        look["family"] == fam["id"] and look["version"] == version
+                        and look["run_sha"] == run_sha(selected) and look["passed"] for look in store.looks()):
+                    return False  # the sealed pass must still exist inside the band-write transaction
+                from ..swarm.gate import SEALED_LOOKS
+                from .ladder import fast_lane_receipt
+
+                fast_move = (SEALED_LOOKS and proof.get("route") != "ladder"
+                             and fam["band"] in ("probe", "sized") and band != fam["band"])
+                if fast_move and not fast_lane_receipt(self.root, receipt, expected, band, forward):
                     return False
                 typical = (state.get("typical_by_version") or {}).get(str(version),
                     state.get("typical_max_loss_usd") if state.get("validation_version") == version else None)
@@ -179,11 +198,18 @@ class SwarmFamilies:
                         or state.get("forward") != expected.get("forward")
                         or store.forward(fam["id"]) != list(forward)):
                     return False
+                if fast_move and next(iter(self.read(fam["id"])), None) != dict(expected):
+                    # BEGIN IMMEDIATE holds every other swarm writer out while this read checks creation/selection
+                    # clocks, structure, roots and the complete qualified row, not just program identity.
+                    return False
                 if band != fam["band"]:
                     if store.set_band(fam["id"], band, reason=reason) != fam["band"]:
                         return False
                     if fam["band"] == "candidate" and band in ("probe", "sized"):
                         store.set_state(fam["id"], live_promoted_at=float(store.clock() if at is None else at))
+                    if fast_move:
+                        store.set_state(fam["id"], fast_lane_ladder={"receipt": receipt, "from": fam["band"],
+                                        "to": band, "at": float(store.clock() if at is None else at)})
                 return True
 
     def promoted_at(self, family: str) -> float | None:
@@ -294,7 +320,8 @@ class MemoryFamilies:
                 self.moves.append((family, band, reason))
 
     def confirm_band(self, expected: Mapping[str, Any], band: str, reason: str,
-                     forward: Sequence[Mapping[str, Any]], *, at: float | None = None) -> bool:
+                     forward: Sequence[Mapping[str, Any]], *, at: float | None = None,
+                     receipt: int | None = None) -> bool:
         with self.lock:
             family = str(expected["family"])
             current = self.rows.get(family)

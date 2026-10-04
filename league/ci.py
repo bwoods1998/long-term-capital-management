@@ -110,6 +110,10 @@ FORBIDDEN: tuple[str, ...] = (
     # budget's p30 and the public Net come from (V3-A integration review): the rule takes the smaller of its p30 and the
     # live book's own read, so it could only cut, and it is the owner's deploy's to change all the same.
     "league/swarm/settings.py", "league/swarm/guard.py", "league/swarm/models.py", "league/ops/context.py",
+    # Provider commitments and dispatch now enforce the same research ceiling; changing them could evade it.
+    "league/swarm/compute.py", "league/swarm/daily_compute.py", "league/swarm/pool.py",
+    # The owner's ordinary research fence cannot be lifted by an automated House update.
+    "league/swarm/research_permission.py",
     "league/ops/economics.py",
     # The evaluator's identity and the evidence it reads (WP6/WP8): the Gym, the gate, the bands, the evaluator and the
     # swarm's store (`set_band(..., "probe")` promotes to real money); the data layer and its builders, which carry the
@@ -139,6 +143,14 @@ FORBIDDEN: tuple[str, ...] = (
     "league/swarm/canary.py", "league/swarm/benchmarks.py", "league/swarm/long_single_benchmarks.py",
     "league/swarm/evidence.py", "league/swarm/diagnostics.py", "league/swarm/tournament.py", "scripts/harness_improve.py",
     "playbooks/harness-improvement.md", "docs/goals/", "docs/benchmarks/",
+    # The forward ladder's benchmark and its judge (evidence v3): the desks that measure the ladder's rule against the
+    # sealed look, and the frozen script that alone says whether the ladder may bind. The rule itself is under
+    # league/live/ (`league/live/ladder.py`).
+    "league/swarm/forward_benchmarks.py", "scripts/ladder_judge.py",
+    # The swarm's own read of the ladder's cohorts (evidence v3): each cohort's window with THE WINDOW HOLD and its
+    # record by THE COHORT'S OWN RECORD (the House's rules, `league/live/observe.py`, held on the swarm's side), which
+    # decide the families THE COHORT KEEP holds alive for the ladder to judge.
+    "league/swarm/practice.py",
     # How the House is deployed and the House itself (its tick calls the updater).
     "scripts/floor_box.py", "league/house.py", "CHANGELOG.md",
 )
@@ -190,6 +202,24 @@ def _allows(entry: str, path: str) -> bool:
     return path == entry or (entry.endswith(("/", "_")) and path.startswith(entry))
 
 
+def _forbidden(path: str) -> bool:
+    """Protect source and Python's alternative loaders for the same module name.
+
+    A package wins over its sibling .py, and a native extension can win over
+    source. Match the gateway's protected-module aliases as well as its paths.
+    Read FORBIDDEN at call time: the running updater owns this policy.
+    """
+    lowered = path.lower()
+    for entry in FORBIDDEN:
+        entry = entry.lower()
+        if lowered == entry or (entry.endswith("/") and lowered.startswith(entry)):
+            return True
+        stem = entry[:-1] if entry.endswith("/") else entry[:-3] if entry.endswith(".py") else None
+        if stem and lowered.startswith((stem + "/", stem + ".")):
+            return True
+    return False
+
+
 def guard(paths: Iterable[str], role: str | None) -> list[str]:
     """Why these paths may not be changed by this role. Empty means they may."""
     problems = []
@@ -198,8 +228,7 @@ def guard(paths: Iterable[str], role: str | None) -> list[str]:
         if clean.startswith(("../", "/")) or clean != path:
             problems.append(f"{path}: not a plain repository path")
             continue
-        lowered = clean.lower()
-        if any(lowered == f.lower() or (f.endswith("/") and lowered.startswith(f.lower())) for f in FORBIDDEN):
+        if _forbidden(clean):
             problems.append(f"{path}: no role may change this file")
         elif role is not None:
             allowed = ROLE_PATHS[role]

@@ -4,13 +4,13 @@ import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
-from league.swarm.architect import Architect
+from league.swarm.architect import Architect, tag_of
 from league.swarm.gate import Gate
 from league.swarm import bands
 from league.swarm.evaluator import KEY, adopt, identity
-from league.swarm.researcher import (RETIRE_GUARD_DAYS, RETIRE_IDLE_EVALUATIONS, SCREENED, SELF_REFUTED, TOOLS, VERDICTS_KEY,
-                                     Researcher, awaiting_validation, idle_cause, idle_dead, idle_evaluations, idle_limit,
-                                     record_verdict, retire_guard, validated_at)
+from league.swarm.researcher import (RETIRE_GUARD_DAYS, RETIRE_IDLE_EVALUATIONS, SCREENED, SELF_REFUTED, THIN_RETIRED, TOOLS,
+                                     VERDICTS_KEY, Researcher, awaiting_validation, dead_slot, idle_cause, idle_dead,
+                                     idle_evaluations, idle_limit, record_verdict, retire_guard, thin_cause, validated_at)
 from league.swarm.seeds import family_spec
 from league.swarm.store import SwarmStore
 from league.swarm.tournament import IDLE_CAUSE, Tournament
@@ -319,10 +319,17 @@ class ResearcherIdleRetirement(ResearcherCase):
         [lesson] = self.store.graveyard()
         self.assertIn(reason, lesson["lesson"])
         self.assertIn("Tried 2 versions", lesson["lesson"])
-        self.assertIn(f"Retired by researcher: {SELF_REFUTED}: {reason}", self.store.notebook(self.fam["id"])[-1]["text"],
-                      "its own researcher's retirement is SELF-REFUTED in the graveyard (R11-1)")
+        # F1 (R3): two trials and no eligible Train version is a THIN RETIREMENT. Its researcher's word is no test of the
+        # mechanism, so it is filed as the idle rule files this family's death (THIN: it traded, never eligibly), not
+        # SELF-REFUTED (R11-1 stands for a family with ten trials and an eligible version: test_swarm_verdicts.HoldOffer).
+        self.assertIn(f"Retired by researcher: {thin_cause('thin', reason)}", self.store.notebook(self.fam["id"])[-1]["text"])
+        self.assertEqual(out["retire_thin"], "thin")
+        gone = self.store.family(self.fam["id"])
+        self.assertEqual(tag_of({"family": gone["id"], "lesson": ""}, gone), "THIN", "no refuting row: it closes no cell")
+        self.assertFalse(gone["retire_reason"].startswith(SELF_REFUTED))
         [event] = [e for e in self.store.events_after(0) if e["kind"] == "swarm.retired"]
-        self.assertEqual(event["payload"]["cause"], "Condors on this root are dead.", "a figure never reaches the public cause")
+        self.assertEqual(event["payload"]["cause"], f"{THIN_RETIRED}. Condors on this root are dead.",
+                         "a figure never reaches the public cause")
 
     def test_below_the_idle_count_the_old_rule_still_applies(self):
         self.researcher().cycle(self.fam["id"])
@@ -429,8 +436,32 @@ class ResearcherIdleRetirement(ResearcherCase):
         self.store.set_state(self.fam["id"], look_inflight=None)
         self.assertIn("below zero", idle_dead(self.store.family(self.fam["id"]), self.settings), "the gate refused it: dead")
 
-    def test_the_floor_still_holds_for_a_dead_family(self):
+    def test_a_dead_family_retires_at_the_floor_and_a_researching_one_does_not(self):
+        """THE FLOOR COUNTS RESEARCH (F1): the floor counts the families that are researching, so a dead slot leaves at the
+        floor and a family that is not dead still may not."""
+        self.assertTrue(self.settings["population"]["floor_researching"], "the default")
         self.settings["population"]["floor"] = 1
+        self.researcher().cycle(self.fam["id"])
+        self.store.update_family(self.fam["id"], trials=20)  # tested (ten counted trials), not dead: the floor's one
+        out = self.read_turn(("retire", {"reason": "Costs defeated the mechanism."}))
+        self.assertFalse(self.offered(), "a researching family at the floor: not offered")
+        self.assertTrue(out["retire_refused"])
+        r = self.researcher()
+        r.can_retire = lambda fam: True  # a stale read: the store's own count still refuses a family the floor counts
+        out = self.read_turn(("retire", {"reason": "Costs."}), researcher=r, params={"vrp_min": 1.4})
+        self.assertTrue(out["retire_refused"])
+        self.assertIsNone(self.store.family(self.fam["id"])["retired_at"])
+        self.idle(150)  # dead by the idle rule: the floor does not count it
+        self.assertFalse(dead_slot({**self.store.family(self.fam["id"]), "since_val_trials": 100}, self.settings))
+        self.assertTrue(dead_slot(self.store.family(self.fam["id"]), self.settings))
+        out = self.read_turn(("retire", {"reason": "The mechanism is dead."}), params={"vrp_min": 1.5})
+        self.assertTrue(self.offered(), "a dead slot is offered retire at the floor")
+        self.assertIn("eligible Train version in", self.status())
+        self.assertTrue(out["retired"])
+        self.assertEqual(self.store.families(alive=True), [], "the floor never holds a dead family for its own sake")
+
+    def test_the_floor_still_holds_for_a_dead_family_while_it_counts_every_family(self):
+        self.settings["population"].update(floor=1, floor_researching=False)  # the switch: every living family counts
         self.researcher().cycle(self.fam["id"])
         self.idle(150)
         out = self.read_turn(("retire", {"reason": "The mechanism is dead."}))
@@ -448,8 +479,9 @@ class ResearcherIdleRetirement(ResearcherCase):
         self.assertEqual(self.store.graveyard(), [])
 
     def test_a_dead_familys_retirement_goes_below_the_start_down_to_the_floor_only(self):
+        """With the floor counting every family (`population.floor_researching` false), as before F1."""
         other = self.store.add_family({**family_spec(self.spec), "id": "other-dead"}, origin="seed")
-        self.settings["population"].update(start=2, floor=1)
+        self.settings["population"].update(start=2, floor=1, floor_researching=False)
         self.researcher().cycle(self.fam["id"])
         self.idle(150)
         self.idle(150, fid=other["id"])
@@ -458,6 +490,28 @@ class ResearcherIdleRetirement(ResearcherCase):
         self.assertTrue(out["retired"])
         self.assertEqual(len(self.store.families(alive=True)), 1, "below the start (2), at the floor (1)")
         self.assertFalse(self.researcher().can_retire(self.store.family(other["id"])), "the floor holds the last one")
+
+    def test_dead_families_retire_below_the_start_and_the_floor_holds_only_the_living(self):
+        """THE FLOOR COUNTS RESEARCH (F1): two dead families and one that researches, a floor of 1. Both dead ones may
+        retire; the one that researches is the floor's."""
+        other = self.store.add_family({**family_spec(self.spec), "id": "other-dead"}, origin="seed")
+        living = self.store.add_family({**family_spec(self.spec), "id": "living"}, origin="seed")
+        self.settings["population"].update(start=3, floor=1)
+        self.researcher().cycle(self.fam["id"])
+        self.idle(150)
+        self.idle(150, fid=other["id"])
+        self.store.update_family(living["id"], trials=20)
+        r = self.researcher()
+        self.assertTrue(r.can_retire(self.store.family(other["id"])))
+        self.assertFalse(r.can_retire(self.store.family(living["id"])), "one family researches: it is the floor")
+        out = self.read_turn(("retire", {"reason": "The mechanism is dead."}))
+        self.assertTrue(out["retired"])
+        self.assertTrue(r.can_retire(self.store.family(other["id"])), "the second dead slot is not held either")
+        self.assertEqual(self.store.retire_gym(other["id"], "Dead.", floor=1, source="researcher",
+                                               counts=r.floor_counts())["status"], "retired")
+        refused = self.store.retire_gym(living["id"], "Costs.", floor=1, source="researcher", counts=r.floor_counts())
+        self.assertEqual((refused["status"], refused["deferred"]), ("refused", "population_floor"))
+        self.assertEqual([f["id"] for f in self.store.families(alive=True)], ["living"])
 
 
 class TournamentIdleRetirement(RoundCase):
@@ -471,7 +525,7 @@ class TournamentIdleRetirement(RoundCase):
     def test_dead_families_retire_at_the_start_down_to_the_floor_and_the_rest_stay(self):
         for i in range(7):
             self.family(f"f{i}")
-        self.settings["population"].update(start=7, floor=4)
+        self.settings["population"].update(start=7, floor=4, floor_researching=False)  # every family counts, as before F1
         for fid in ("f0", "f2", "f3", "f4", "f6"):
             self.store.update_family(fid, since_val_trials=150)
         self.store.update_family("f1", since_val_trials=450, best_train=-0.3)  # dead: below zero for three times the limit
@@ -499,6 +553,13 @@ class TournamentIdleRetirement(RoundCase):
         self.assertIsNotNone(idle_dead(self.store.family("f4"), self.settings))
         self.assertEqual(t.retirements(self.store.families(alive=True)), [])
         self.assertEqual(len(self.store.families(alive=True)), 4)
+        # THE FLOOR COUNTS RESEARCH (F1, the default): the dead f4 is not one of the floor's four, so it leaves too, and
+        # the three that are not dead stay, at any floor.
+        self.settings["population"].update(floor_researching=True)
+        self.assertEqual([r["family"] for r in t.retirements(self.store.families(alive=True))], ["f4"])
+        self.settings["population"].update(floor=7)
+        self.assertEqual(t.retirements(self.store.families(alive=True)), [])
+        self.assertEqual(sorted(f["id"] for f in self.store.families(alive=True)), ["f3", "f5", "f6"])
 
     def test_a_counted_validation_restarts_the_idle_count(self):
         self.answer = weak  # the line fails: nothing awaits the gate

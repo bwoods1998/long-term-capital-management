@@ -96,6 +96,10 @@ TEST_POOLS = {
 
 
 def commit(repo: Path, message: str) -> str:
+    # These repositories are disposable. Background Git maintenance can keep
+    # writing .git after commit returns and race TemporaryDirectory cleanup.
+    labmod.git(repo, "config", "gc.auto", "0")
+    labmod.git(repo, "config", "maintenance.auto", "false")
     labmod.git(repo, "add", ".")
     labmod.git(repo, "-c", "user.name=Harness Test", "-c", "user.email=harness@example.invalid", "commit", "-qm", message)
     return labmod.git(repo, "rev-parse", "HEAD")
@@ -151,6 +155,23 @@ class Boundary(unittest.TestCase):
         for path in ("league/live/real.py", "league/live/venue.py", "league/live/state.py", "league/live/paper.py"):
             self.assertEqual(lanes.protected_reason(path), "capital", "the real-money order path and the real book")
             self.assertNotIn(path, lanes.LANES["execution"].surface)
+        # The forward ladder (evidence v3): the one route from practice to a Probe is capital; the benchmark that
+        # measures its rule and the frozen judge of its binding are the objective. The execution lane, whose surface
+        # holds the practice record the ladder reads, runs the ladder's own tests as regressions.
+        self.assertEqual(lanes.protected_reason("league/live/ladder.py"), "capital")
+        for path in ("league/swarm/forward_benchmarks.py", "scripts/ladder_judge.py"):
+            self.assertEqual(lanes.protected_reason(path), "objective", path)
+        # The swarm's own read of the ladder's cohorts (their window, their own record) is the ladder's too.
+        self.assertEqual(lanes.protected_reason("league/swarm/practice.py"), "capital")
+        for lane in lanes.LANES.values():
+            for path in ("league/live/ladder.py", "league/swarm/forward_benchmarks.py", "scripts/ladder_judge.py",
+                         "league/swarm/practice.py"):
+                self.assertNotIn(path, lane.surface, lane.id)
+        self.assertIn("league/live/observe.py", lanes.LANES["execution"].surface)
+        for module in ("test_live_ladder", "test_live_cohorts", "test_live_reentry", "test_swarm_forward_benchmarks",
+                       "test_ladder_judge"):
+            self.assertIn(f"league.tests.{module}", lanes.LANES["execution"].regressions)
+            self.assertTrue((Path(lanes.__file__).resolve().parents[1] / "tests" / f"{module}.py").is_file(), module)
         self.assertNotIn("league/CONTRACT.md", lanes.LANES["research"].surface, "prose cannot be gated per family")
         self.assertNotIn("league/swarm/pool.py", lanes.LANES["data"].surface, "the pool writes the data lane's own metric")
         with self.assertRaisesRegex(labmod.ImprovementError, "protected"):

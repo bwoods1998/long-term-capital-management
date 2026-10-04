@@ -51,6 +51,7 @@ import errno
 import fcntl
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -60,6 +61,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -927,6 +929,7 @@ class Watchdog:
         clock: Callable[[], float] = time.time,
         sleep: Callable[[float], Any] = time.sleep,
         log: Callable[[str], Any] | None = None,
+        deployment_session: Callable[[float], Mapping[str, Any] | None] | None = None,
     ):
         self.releases = releases
         self.run_canary = run_canary
@@ -935,6 +938,7 @@ class Watchdog:
         self.clock = clock
         self.sleep = sleep
         self.log = log
+        self.deployment_session = deployment_session
 
     # ---------------------------------------------------------------- helpers
     def _say(self, text: str) -> None:
@@ -974,24 +978,26 @@ class Watchdog:
         came from (`league/updater.py`). It is written into the deploy's first row, every row of the
         deploy carries its sha, and a staged tree whose digest is not the attested one is refused:
         what runs must be what was attested. The owner's own deploy (`floor_box.py`) has none."""
+        attempt = uuid.uuid4().hex
         try:
             with self.releases.lock():
                 return self._deploy(Path(source), release_id, max(1, int(canary_ticks)), max(0, int(watch_seconds)), max(1, int(watch_every)),
-                                    dict(attestation) if attestation else None)
+                                    dict(attestation) if attestation else None, attempt)
         except DeployBusy as exc:
             started = self.clock()
             # `busy` marks a refusal that says nothing about the release: the lock was held, the
             # code was never unpacked, let alone judged. `Updater.tried` must not retire a commit
             # on one of these (see there: the promotion's own restart makes the race the norm).
-            row = self.releases.record({"deploy": f"{release_id}@{int(started)}", "release": release_id, "stage": "verdict",
+            row = self.releases.record({"deploy": f"{release_id}@{int(started)}", "attempt": attempt,
+                                        "release": release_id, "stage": "verdict",
                                         "verdict": "refused", "busy": True, "reasons": [str(exc)]})
             return {"deploy": row["deploy"], "release": release_id, "verdict": "refused", "busy": True, "reasons": [str(exc)], "current": self.releases.current(),
                     "previous": self.releases.previous(), "started_at": iso(started), "finished_at": iso(started), "readings": 0, "stages": [row]}
 
     def _deploy(self, source: Path, release_id: str, canary_ticks: int, watch_seconds: int, watch_every: int,
-                attestation: dict[str, Any] | None = None) -> dict[str, Any]:
+                attestation: dict[str, Any] | None = None, attempt: str | None = None) -> dict[str, Any]:
         started = self.clock()
-        base = {"deploy": f"{release_id}@{int(started)}", "release": release_id}
+        base = {"deploy": f"{release_id}@{int(started)}", "attempt": attempt or uuid.uuid4().hex, "release": release_id}
         if attestation and attestation.get("sha"):
             base["sha"] = str(attestation["sha"])
         stages: list[dict[str, Any]] = []
@@ -1002,11 +1008,23 @@ class Watchdog:
             stages.append(entry)
             return entry
 
-        def verdict(name: str, reasons: Sequence[str]) -> dict[str, Any]:
-            note(stage="verdict", verdict=name, reasons=list(reasons), current=self.releases.current(), previous=self.releases.previous())
+        def verdict(name: str, reasons: Sequence[str], **extra: Any) -> dict[str, Any]:
+            note(stage="verdict", verdict=name, reasons=list(reasons), current=self.releases.current(), previous=self.releases.previous(), **extra)
             self._say(f"{release_id}: {name}" + (f" ({'; '.join(reasons)})" if reasons else ""))
             return {**base, "verdict": name, "reasons": list(reasons), "current": self.releases.current(), "previous": self.releases.previous(),
-                    "started_at": iso(started), "finished_at": iso(self.clock()), "readings": readings, "stages": stages}
+                    "started_at": iso(started), "finished_at": iso(self.clock()), "readings": readings, "stages": stages, **extra}
+
+        def timing_refusal() -> dict[str, Any] | None:
+            timing = deployment_timing(self.clock(), session=self.deployment_session)
+            if timing["allowed"]:
+                return None
+            return verdict("refused", [timing["reason"]], unjudged=True, deferred=timing["deferred"],
+                           next_eligible_at=timing["next_eligible_at"], next_eligible_ts=timing["next_eligible_ts"])
+
+        # Under the deploy lock, before staging or any canary work. This protects direct and owner deployments too.
+        held = timing_refusal()
+        if held is not None:
+            return held
 
         was_current = self.releases.current()
         note(stage="start", source=str(source), current=was_current, previous=self.releases.previous(),
@@ -1045,6 +1063,10 @@ class Watchdog:
         #    old release, and it is where the reader's baselines (living agents, ledger seq) start.
         before = self._read_house()
         note(stage="house_before", ok=before.ok, reasons=list(before.reasons), detail=before.detail)
+        # Staging, the canary and the health reader can cross into the hold. Recheck at the link-change boundary.
+        held = timing_refusal()
+        if held is not None:
+            return held
         try:
             self.releases.promote(release_id)
         except (ReleaseError, OSError) as exc:
@@ -1337,6 +1359,37 @@ def _drill_session(now: float) -> dict[str, Any] | None:
     from .updater import session_window
 
     return session_window(now)
+
+
+def deployment_timing(now: float, *, session: Callable[[float], Mapping[str, Any] | None] | None = None) -> dict[str, Any]:
+    """The trusted calendar's deployment hold, shared by watchdog and owner entry points.
+
+    The default reader imports the updater lazily, avoiding its import of this module. Unknown or malformed
+    calendar answers hold the deployment; recovery rollback does not ask this deployment-only helper.
+    """
+    try:
+        if isinstance(now, bool) or not math.isfinite(now):
+            raise ValueError("deployment time is not finite")
+        iso(now)  # a finite float outside datetime's range is still an unreadable deployment time
+        window = (session or _drill_session)(now)
+        if window is None:
+            return {"allowed": True}
+        if not isinstance(window, Mapping):
+            raise ValueError("session window is not an object")
+        starts, closes = window["starts"], window["closes"]
+        if isinstance(starts, bool) or isinstance(closes, bool):
+            raise ValueError("session window has boolean boundaries")
+        starts, closes = float(starts), float(closes)
+        if not math.isfinite(starts) or not math.isfinite(closes) or starts >= closes:
+            raise ValueError("session window has invalid boundaries")
+        began, after = iso(starts), iso(closes)
+        if starts <= now < closes:
+            return {"allowed": False, "deferred": "session", "next_eligible_ts": closes, "next_eligible_at": after,
+                    "reason": f"inside the deployment exclusion ({began} to {after}); no deployment before {after}"}
+        return {"allowed": True}
+    except Exception as exc:  # noqa: BLE001 - no readable, valid calendar means no permission to deploy
+        return {"allowed": False, "deferred": "calendar", "next_eligible_ts": None, "next_eligible_at": None,
+                "reason": f"the deployment calendar could not be read ({type(exc).__name__}: {str(exc)[:160]})"}
 
 
 def drill_rollback(dog: Watchdog, *, state: str | Path | None = None, session: Callable[[float], Mapping[str, Any] | None] | None = None,

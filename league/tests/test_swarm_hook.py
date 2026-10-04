@@ -17,7 +17,7 @@ from league.swarm import bands, sitefeed
 from league.swarm.hook import SKIPPED_KINDS, SwarmStep, attach
 from league.swarm.store import SwarmStore
 from league.tests.swarm_fakes import Clock, gym_bundle_version, result
-from league.tests.evaluator_fakes import band_proof, reviewed
+from league.tests.evaluator_fakes import band_proof, passed_look, reviewed
 from league.tests.test_options_house import BuildCase
 
 SPEC = {"id": "condor-vrp", "mechanism": "Index options price more movement than follows: sell an iron condor.",
@@ -600,6 +600,11 @@ class Mirror(HookCase):
 class Reads(HookCase):
     def setUp(self):
         super().setUp()
+        # EVIDENCE V3 (Oct 2, 2026) retired execution tuition (`bands.TUITION_ROWS` False): these tests read the retired
+        # route explicitly; `test_the_default_read_gives_no_tuition_row` reads it as the House does now.
+        retired = patch("league.swarm.bands.TUITION_ROWS", True)
+        retired.start()
+        self.addCleanup(retired.stop)
         self.bundle = gym_bundle_version()
         (self.root / "swarm.json").write_text(json.dumps({"gym": {"image_checkpoint": "synthetic-image"}}))
 
@@ -613,6 +618,7 @@ class Reads(HookCase):
         store.set_state(a["id"], banded_version=1, banded_evaluator=band_proof(store.version(a["id"], 1)),
                         validation_version=1, validation_line={"passed": True}, typical_max_loss_usd=60.0)
         store.set_band(a["id"], "candidate", reason="passed")
+        passed_look(store, a["id"], store.version(a["id"], 1))  # the look its band stands on (no band row without it)
         from league.swarm.gate import run_sha
 
         store.set_state(b["id"], validation_version=1, validation_image="synthetic-image", validation_bundle=self.bundle,
@@ -662,6 +668,7 @@ class Reads(HookCase):
                         gate_outcome={"sha": cases["demoted"], "result": "demoted"})
         store.close()
         self.assertEqual([r["family"] for r in bands.read(self.root)], ["reviewed"])
+        self.assertEqual(bands.read(self.root, tuition=False), [], "evidence v3: the House reads no tuition row")
 
     def test_bands_read_never_raises(self):
         self.assertEqual(bands.read(self.root / "nowhere"), [])

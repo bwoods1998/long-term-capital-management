@@ -25,6 +25,7 @@ import storelib as sl  # noqa: E402
 
 from league.gym import events as EV  # noqa: E402 - standard library only
 from league.swarm import evidence  # noqa: E402
+from league.swarm import compute  # noqa: E402
 from league.swarm import settings as S  # noqa: E402
 from league.swarm.pool import ROBUSTNESS_PRIORITY  # noqa: E402
 from league.swarm.researcher import (CORE_SPAN, OBJECTIVE, drift_verdict, idle_dead, idle_evaluations,  # noqa: E402
@@ -1071,9 +1072,13 @@ class OffStartPath(PoolCase):
 
     def test_off_adopted_box_without_recorded_train_first(self):
         self.store.put("train_objective", OBJECTIVE)
-        self.store.upsert_box("sb_00000001-0000-0000-0000-000000000000", kind="gym", version="sbcp_11111111-aaaa", state="asleep",
-                              detail={"roots": ["SPY", "QQQ", "IWM", "XSP", "SPXW"], "name": "x"})
         pool = self.mk("2022-01-03")
+        bound = compute.bound_for(pool.settings, "sbcp_11111111-aaaa")
+        compute.reserve(self.store, pool.settings, "fixture-adopted", bound, kind="gym", now=self.clock())
+        compute.attach(self.store, "fixture-adopted", "sb_00000001-0000-0000-0000-000000000000")
+        self.store.upsert_box("sb_00000001-0000-0000-0000-000000000000", kind="gym", version="sbcp_11111111-aaaa", state="asleep",
+                              detail={"roots": ["SPY", "QQQ", "IWM", "XSP", "SPXW"], "name": "x",
+                                      "cost_cursor": {"awake": False, "booked_at": self.clock(), "estimate": True}})
         self.assertEqual(pool.adopt(), 1)
         box = pool.boxes["sb_00000001-0000-0000-0000-000000000000"]
         self.assertIsNone(box.train_first)

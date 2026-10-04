@@ -587,13 +587,19 @@ class Holds(unittest.TestCase):
         self.router.settle_holds()
         self.assertAlmostEqual(self.store.spent(["sail_model"]), 0.0, places=9)
 
-    def test_a_server_error_nothing_accepted_books_nothing(self):
+    def test_a_server_error_without_an_acceptance_record_keeps_its_admission_hold(self):
         from ltcm.provider import ProviderError
 
         self.fail_code = "provider_http_503"
         with self.assertRaises(ProviderError):
             self.ask()
-        self.assertEqual(self.store.spent(["sail_model"]), 0.0)
+        # A 503 alone is no proof that nothing ran: the pre-dispatch hold stays until the Provider settles or
+        # reconciles the request. A transient outage cannot open extra research room before that accounting.
+        hold = float(self.prov._db.execute("SELECT reserved_usd FROM requests").fetchone()[0])
+        self.assertAlmostEqual(self.store.spent(["sail_model"]), hold, places=9)
+        self.prov.reconcile_stale(now=time.time() + 3600)
+        self.router.settle_holds()
+        self.assertAlmostEqual(self.store.spent(["sail_model"]), 0.0, places=9)
 
 
 class Compaction(ResearcherCase):

@@ -36,6 +36,30 @@ class Clock:
         self.t += seconds
 
 
+def unbound_budget(case: Any, usd_day: float = 1000.0) -> dict[str, Any]:
+    """The settings' `budget` block for a test that does not judge THE BUDGET: `usd_day` dollars a day on each meter, far
+    over anything the test spends. The Sail guard and the router hold every block to the owner's ceiling, however it
+    reached them (league/ops/budget.py `sail_caps`, `paid_model_room`), so the ceiling is lifted over the block for the
+    life of `case` (a `unittest.TestCase`). No block at all is the floor."""
+    from unittest import mock
+
+    from league.ops import budget
+
+    lifted = mock.patch.object(budget, "CEILING_USD_DAY", float(usd_day) / min(budget.SPLIT.values()))
+    lifted.start()
+    case.addCleanup(lifted.stop)
+    return {"source": "test", "sail_usd_day": float(usd_day), "claude_usd_day": float(usd_day)}
+
+
+def compute_budget_fixture(root: Any, now: float) -> None:
+    """A valid temporary budget for invented bounded-provider pool tests, within the actual $25 ceiling."""
+    from league.ops import budget
+
+    budget._write_json(root / "budget.json", budget.compute({"p30_usd": 0, "edge": {"stop": False}, "meters": {
+        "sail": {"balance_usd": 500, "fixed_usd_day": 1, "reserve_usd": 37},
+        "claude": {"balance_usd": 500, "fixed_usd_day": 0}}}, now=now))
+
+
 def summary(trades: int = 150, days: int = 120, pnl: float = 500.0, mean: float = 0.05, t: float = 2.5, sharpe_daily: float = 0.2,
             quarters: str = "4/4") -> dict[str, Any]:
     return {"trades": trades, "days": 250, "days_traded": days, "pnl": pnl, "pnl_per_max_loss": mean, "mean_return_on_max_loss": mean,
@@ -132,34 +156,40 @@ class FakeSail:
         self.resumed: list[str] = []
         self.terminated: list[str] = []
         self.names: dict[str, str] = {}
+        self.states: dict[str, str] = {}
         self.sealed = sealed
         self.extra: list[dict] = []  # boxes Sail has that were not made by from_checkpoint here
 
-    def from_checkpoint(self, checkpoint: str, *, name: str, timeout: float = 900.0) -> dict:
+    def from_checkpoint(self, checkpoint: str, *, name: str, timeout: float = 900.0, max_lifetime_seconds: int | None = None) -> dict:
         with self.lock:
             box = f"sb_{len(self.forks) + 1:08d}-0000-0000-0000-000000000000"
             self.forks.append((checkpoint, box))
             self.names[box] = name
+            self.states[box] = "running"
         return {"sailbox_id": box, "checkpoint_id": checkpoint, "status": "running"}
 
     def egress(self, box: str) -> dict:
         return {"document": {"no_network": True}} if self.sealed else {"document": {"allowlist": ["mdds-01.thetadata.us"]}}
 
     def list_boxes(self, **kw) -> list[dict]:
-        rows = [{"sailbox_id": b, "name": n, "status": "terminated" if b in self.terminated else "running"} for b, n in self.names.items()]
+        rows = [{"sailbox_id": b, "name": n, "status": "terminated" if b in self.terminated else self.states.get(b, "running")}
+                for b, n in self.names.items()]
         return rows + [r for r in self.extra if r["sailbox_id"] not in self.terminated]
 
     def sleep(self, box: str, **kw: Any) -> dict:
         self.slept.append(box)
-        return {}
+        self.states[box] = "sleeping"
+        return {"sailbox_id": box, "status": "sleeping"}
 
     def resume(self, box: str, **kw: Any) -> dict:
         self.resumed.append(box)
-        return {}
+        self.states[box] = "running"
+        return {"sailbox_id": box, "status": "running"}
 
     def terminate(self, box: str) -> dict:
         self.terminated.append(box)
-        return {}
+        self.states[box] = "terminated"
+        return {"sailbox_id": box, "status": "terminated"}
 
 
 def response_payload(model: str, *, text: str = "", calls: list[tuple[str, dict]] | None = None, input_tokens: int = 4000,

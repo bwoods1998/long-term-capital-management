@@ -32,16 +32,20 @@ def comparable(summary):
         cost.pop("basis", None)
     out.pop("unknowns", None)
     out.pop("p30", None)
+    out.pop("known_input_cost_subtotal_usd", None)
+    out.pop("cost_accounting_complete", None)
+    for cost in out["costs"]:
+        cost.pop("estimated_active_usd", None)
     out["library_report"].pop("snapshot", None)
     return out
 
 
 class Render(unittest.TestCase):
-    def test_the_house_reproduces_the_laptop_scripts_numbers_on_the_same_receipts(self):
+    def test_the_saved_receipts_have_the_expected_accounting_with_holds_counted_once(self):
         summary = E.render(load("house.json"), load("library.json"), load("sail.json"), load("external.json"),
                            lib_meta={"snapshot": None, "idempotent": True}, typesafe_before_t0=TYPESAFE_BEFORE_T0)
         self.assertEqual(comparable(summary), load("expected-summary.json"))
-        self.assertEqual(summary["net"]["net_usd"], "-165.66")
+        self.assertEqual(summary["net"]["net_usd"], "-165.41")
 
     def test_the_rules_are_the_reporters(self):
         self.assertEqual((E.T0, E.FS), (PE.T0, PE.FINANCIAL_START))
@@ -71,8 +75,62 @@ class Render(unittest.TestCase):
                            lib_meta={"snapshot": None, "idempotent": True}, typesafe_before_t0=TYPESAFE_BEFORE_T0)
         summary["p30"] = E.p30(summary)
         text = E.markdown(summary)
-        self.assertIn("**Net = realized - costs** | **-165.66**", text)
+        self.assertIn("**Net = realized - costs** | **-165.41**", text)
         self.assertIn("Trailing 30-day realized options P&L", text)
+
+    def test_claude_gateway_holds_are_counted_once_and_not_called_settled(self):
+        house, library = load("house.json"), load("library.json")
+        house["costs"]["gateway_health"]["claude"].update(spent_usd="10", settled_usd="8", inflight_usd="2")
+        house["costs"]["swarm_spend_after_cutoff"] = []
+        library["inputs"]["claude"]["usd"] = "8"
+        summary = E.render(house, library, load("sail.json"), load("external.json"), lib_meta={})
+        cost = next(c for c in summary["costs"] if c["service"].startswith("Claude"))
+        self.assertEqual((cost["usd"], cost["settled_usd"]), ("10.00", "8.00"))
+
+    def test_active_box_estimates_are_accrued_but_never_settled(self):
+        sail = load("sail.json")
+        sail["t0-cutoff"]["estimated_active_cost_usd_nanos"] = "7000000000"
+        summary = E.render(load("house.json"), load("library.json"), sail, load("external.json"), lib_meta={})
+        cost = next(c for c in summary["costs"] if c["service"].startswith("Sail"))
+        self.assertEqual((cost["settled_usd"], cost["estimated_active_usd"]), ("50.62", "7.00"))
+        self.assertGreaterEqual(E.D(cost["usd"]), E.D(cost["settled_usd"]) + E.D(cost["estimated_active_usd"]))
+
+    def test_unread_model_cost_stays_unknown_and_net_cannot_be_claimed(self):
+        house, library, sail = load("house.json"), load("library.json"), load("sail.json")
+        library["inputs"]["sail_model"]["usd"] = None
+        library["complete"] = False
+        library["unresolved"] = ["provider settlement unread"]
+        house["costs"]["guard_meter_now"]["metered_spent"] = "0"
+        house["costs"]["sail_requests_after_cutoff"]["usd"] = "0"
+        for row in sail.values():
+            row["finalized_cost_usd_nanos"] = "0"
+            row["estimated_active_cost_usd_nanos"] = "0"
+        summary = E.render(house, library, sail, load("external.json"), lib_meta={})
+        cost = next(c for c in summary["costs"] if c["service"].startswith("Sail"))
+        self.assertIsNone(cost["usd"])
+        self.assertIsNone(summary["total_costs_usd"])
+        self.assertIsNone(summary["net"]["net_usd"])
+        self.assertIsNotNone(summary["known_input_cost_subtotal_usd"])
+        self.assertFalse(summary["cost_accounting_complete"])
+        self.assertFalse(summary["net"]["criterion_5_met"])
+        self.assertIn("Sail (models + boxes): input cost was not read (unknown, not zero)", summary["unknowns"])
+
+    def test_missing_box_price_is_unknown_even_with_zero_model_spend(self):
+        sail = load("sail.json")
+        sail["t0-cutoff"].pop("estimated_active_cost_usd_nanos")
+        summary = E.render(load("house.json"), load("library.json"), sail, load("external.json"), lib_meta={})
+        cost = next(c for c in summary["costs"] if c["service"].startswith("Sail"))
+        self.assertIsNone(cost["usd"])
+        self.assertIsNone(summary["total_costs_usd"])
+
+    def test_missing_daily_cost_is_unknown_and_does_not_lower_the_daily_total(self):
+        house = load("house.json")
+        house["costs"]["sail_requests_24h"]["usd"] = None
+        summary = E.render(house, load("library.json"), load("sail.json"), load("external.json"), lib_meta={})
+        row = next(c for c in summary["burn_per_day"]["rows"] if c["service"] == "Sail models")
+        self.assertIsNone(row["last24h_usd"])
+        self.assertIsNone(summary["burn_per_day"]["total_last24h_usd"])
+        self.assertIsNotNone(summary["burn_per_day"]["total_last4h_pace_per_day_usd"])
 
 
 class Gateway:

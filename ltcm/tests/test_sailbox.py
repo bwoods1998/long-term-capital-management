@@ -564,6 +564,25 @@ class LifecycleTests(unittest.TestCase):
             {"checkpoint_id": CHECKPOINT, "name": "fork-1"},
         )
 
+    def test_create_and_fork_send_supported_lifetimes_without_inheriting_a_deadline(self):
+        transport = FakeTransport({("POST", "/sailboxes"): {"sailbox_id": BOX, "status": "running"},
+                                   ("POST", "/sailboxes/from_checkpoint"): {"sailbox_id": BOX, "status": "running",
+                                                                            "checkpoint_id": CHECKPOINT}})
+        api = SailboxClient(transport)
+        api.create(app=APP, name="limited", max_lifetime_seconds=1)
+        self.assertEqual(transport.last("POST", "/sailboxes")["body"]["max_lifetime_seconds"], 1)
+        api.from_checkpoint(CHECKPOINT, name="limited-fork", max_lifetime_seconds=4294967295)
+        self.assertEqual(transport.last("POST", "/sailboxes/from_checkpoint")["body"]["max_lifetime_seconds"], 4294967295)
+
+    def test_malformed_lifetime_refuses_before_any_transport_call(self):
+        transport = FakeTransport()
+        api = SailboxClient(transport)
+        for value in (0, -1, True, 1.0, "30", float("nan"), float("inf"), 4294967296):
+            with self.subTest(value=value):
+                with self.assertRaises(SailboxError): api.create(app=APP, name="limited", max_lifetime_seconds=value)
+                with self.assertRaises(SailboxError): api.from_checkpoint(CHECKPOINT, name="fork", max_lifetime_seconds=value)
+        self.assertEqual(transport.calls, [])
+
     def test_sleep_carries_a_wake_time_when_one_is_given(self):
         transport = FakeTransport({("POST", f"/sailboxes/{BOX}/sleep"): {"status": "sleeping"}})
         api = SailboxClient(transport)

@@ -15,7 +15,7 @@ import unittest
 from pathlib import Path
 
 from league.tests.test_live_step import HAVE, LiveCase
-from league.tests.evaluator_fakes import band_proof, seed_current_run
+from league.tests.evaluator_fakes import band_proof, passed_look, seed_current_run
 
 if HAVE:
     from league.live.decider import BudgetSpent, InlineDecider
@@ -114,6 +114,7 @@ class Eligibility(unittest.TestCase):
             seed_current_run(self.store, fid, n + 1, window="validation" if validated is not None else "train")
         if state.get("banded_version"):
             state["banded_evaluator"] = band_proof(self.store.version(fid, state["banded_version"]))
+            passed_look(self.store, fid, self.store.version(fid, state["banded_version"]))  # the look its band stands on
         if validated is not None:
             state.update(validation_version=validated, validation_line={"passed": False}, validation_numbers={"t": t})
         if best_train_version is not None:
@@ -515,18 +516,17 @@ class Accounting(PracticeCase):
 
 # -------------------------------------------------------------------------------------------------------- embargo
 class Embargo(LiveCase):
-    """The forward embargo: a Sized move also needs the forward record of sessions after the version was written."""
+    """The forward embargo: a Sized move also needs the forward record of sessions after the version was written. Sized
+    reads the Probe's REAL fills alone (evidence v3): the record here is real fills, on the days of September."""
 
     RETURNS = [0.30, 0.10, 0.20, -0.10, 0.25] * 5
 
     def probe(self, created, *, returns=None, real=True):
         live = self.make([dict(family("vert", VERTICAL, band="probe"), version_created_at=created)])
-        self.families.add_forward("vert", "shadow", [{"id": f"s{i}", "day": f"2026-09-{i % 25 + 1:02d}", "pnl": r * 100.0,
-                                                       "max_loss": 100.0} for i, r in enumerate(returns or self.RETURNS)])
-        if real:
-            self.families.add_forward("vert", "real", [{"id": f"r{i}", "day": f"2026-08-{i + 1:02d}", "pnl": 6.0,
-                                                        "max_loss": 50.0} for i in range(5)])
-        live.state.put("band_moves", {"vert": {"band": "probe", "at": at(MONDAY, 9, 0) - 7 * 86400}})
+        self.families.add_forward("vert", "real" if real else "shadow",
+                                  [{"id": f"s{i}", "day": f"2026-09-{i % 25 + 1:02d}", "pnl": r * 100.0, "max_loss": 100.0}
+                                   for i, r in enumerate(returns or self.RETURNS)])
+        live.state.put("band_moves", {"vert": {"band": "probe", "at": at(MONDAY, 9, 0) - 9 * 86400}})
         return live
 
     def test_sized_needs_the_record_after_the_version_was_written_too(self):

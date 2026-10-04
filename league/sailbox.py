@@ -537,6 +537,7 @@ class SailboxClient:
         memory_limit_gib: int | None = None,
         state_disk_limit_gib: int | None = None,
         idempotency_key: str | None = None,
+        max_lifetime_seconds: int | None = None,
         timeout: float = 900.0,
         policy_field: str = "auto",
     ) -> dict[str, Any]:
@@ -556,6 +557,10 @@ class SailboxClient:
             "image": dict(image or {"base": "BASE_IMAGE_DEBIAN"}),
             "visibility": visibility,
         }
+        if max_lifetime_seconds is not None:
+            if isinstance(max_lifetime_seconds, bool) or not isinstance(max_lifetime_seconds, int) or not 1 <= max_lifetime_seconds <= 4294967295:
+                raise SailboxError("max_lifetime_seconds must be an integer from 1 to 4294967295")
+            body["max_lifetime_seconds"] = max_lifetime_seconds
         if memory_limit_gib:
             body["memory_limit_gib"] = int(memory_limit_gib)
         if state_disk_limit_gib:
@@ -737,13 +742,21 @@ class SailboxClient:
         }
 
     def from_checkpoint(
-        self, checkpoint: str, *, name: str, timeout: float = 900.0
+        self, checkpoint: str, *, name: str, timeout: float = 900.0, max_lifetime_seconds: int | None = None
     ) -> dict[str, Any]:
-        """Start a second Sailbox from a checkpoint. It inherits the disk, memory and policy."""
+        """Start a second Sailbox. A supplied lifetime belongs to this fork, including sleep/capacity wait.
+
+        Omission means unlimited. Provider expiration is periodic, so TTL alone is no guaranteed stop deadline.
+        """
+        body = {"checkpoint_id": checkpoint_id(checkpoint), "name": name}
+        if max_lifetime_seconds is not None:
+            if isinstance(max_lifetime_seconds, bool) or not isinstance(max_lifetime_seconds, int) or not 1 <= max_lifetime_seconds <= 4294967295:
+                raise SailboxError("max_lifetime_seconds must be an integer from 1 to 4294967295")
+            body["max_lifetime_seconds"] = max_lifetime_seconds
         row = self.transport(
             "POST",
             "/sailboxes/from_checkpoint",
-            {"checkpoint_id": checkpoint_id(checkpoint), "name": name},
+            body,
             idempotency_key=f"ltcm-fork-{uuid.uuid4()}",
             timeout=timeout,
         )

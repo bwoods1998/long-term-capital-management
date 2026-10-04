@@ -6,9 +6,11 @@ own thread, once a minute, a few seconds after each minute of the New York sessi
 half day), so a slow House tick never delays a fill and a slow minute never delays the House:
 
 1. The families (`league/live/families.py`, every five minutes): which programs run live, as which instances. A
-   Candidate runs a SHADOW instance; a Probe or Sized family a shadow and a REAL instance; a family that passed
-   validation but not yet its holdout a real TUITION instance (1-lot orders only to measure fills; never evidence) while
-   real money is on. The live path moves candidate <-> probe <-> sized by the money table (`league/live/money.py`).
+   Candidate runs a SHADOW instance; a Probe or Sized family a shadow and a REAL instance (a family that passed
+   validation but not yet its holdout once ran a real TUITION instance: evidence v3 retired it with the sealed look, so
+   `bands.read` gives no such row). A confirmed sealed pass can enter Probe in the same session; the fast-lane
+   ladder decides subsequent size increases and demotion by the unchanged money table. The old practice route
+   keeps its next-session entry rule.
    A superseded or dropped shadow instance winds down (its positions closed at the natural); a real one goes to exits
    only until it is flat (its program stays in the live state so it can still close what it holds).
 2. The chains: each root's option chain through the gateway (one read a minute a root, filtered to the expiries and
@@ -25,9 +27,16 @@ half day), so a slow House tick never delays a fill and a slow minute never dela
 THE PRACTICE LEAGUE (the observe band: the sprint, B4, Sept 26, 2026; the league, Sept 29, 2026): every alive Gym-band
 family with a validated version, or an eligible Train version, runs a SHADOW instance `<family>@<version>:o`
 (`league.swarm.bands.observe`), switched by `live.observe` in `<state>/swarm.json` (read at runtime: no deploy). Its
-program is frozen in `observe.sqlite` before its first decision. A cohort survives research revision and retirement
-for at least three observed sessions and ten program closes while flat, with a ten-session maximum extended to fit
-its declared DTE horizon (at most sixty sessions). Restarts preserve snapshots and shadow accounts. ADMISSION walks the rows
+program is frozen in `observe.sqlite` before its first decision. A cohort survives research revision for its whole
+FORWARD LADDER window (evidence v3, `league/live/ladder.py`: sixty sessions, and past them only while a latched
+checkpoint waits for its answer or its last checkpoint is not judged yet) until the ladder promotes or fails
+it (its family's retirement fails it at the next session's end: no promotion can come of it); a cohort frozen before
+the ladder kept the old rule (it survived retirement too: three observed sessions and ten program closes while flat, a
+ten-session maximum extended to fit its declared DTE horizon). Restarts preserve snapshots and shadow accounts. A
+program whose cohort a release interrupted (the practice evaluator changed while it was inside its window with no
+final verdict: THE RE-ENTRY RULE, `league/live/observe.py`) is frozen again as a new cohort and a new entrant
+(`ObserveStore.freeze`); the account of its earlier cohort winds down (`_earlier_cohort`: its closes forced, never the
+new cohort's record) and, once flat, a new account is made for the new cohort. ADMISSION walks the rows
 in the league's order (validated by validation t, then Train by Train score, then id) under two caps: `live.observe_max`
 instances and `live.observe_roots_max` distinct roots (the binding one: every root is read every minute); a family whose
 roots would pass the roots cap is skipped and a later one on roots already read may still join. `live.observe_train`
@@ -48,8 +57,10 @@ reset a real one. Two guards hold the line (#427): `Instance.observe` is True on
 under a `:o` key (coerced, so a real instance, the House live test's included, is never an observe one, restored or
 not), and the order path (`_real_intent`) refuses, alerted, any instance that is not real. THE RECORD: every minute,
 each practice account's equity (at the engine's mark), open positions and decision coverage go to the private practice
-ledger (`league/live/observe.py`), its closed trades too; the swarm reads its summary as a research signal
-(`league/swarm/practice.py`) and the site shows its aggregates (`site_inputs`), never a forward row and never evidence.
+ledger (`league/live/observe.py`), its closed trades too (each with the underlying at its exit, THE DRIFT CONTROL's
+figure); the swarm reads its summary as a research signal (`league/swarm/practice.py`) and the site shows its aggregates
+(`site_inputs`), never a forward row. THE FORWARD LADDER (evidence v3, Oct 2, 2026; `league/live/ladder.py`) judges a
+ladder cohort's own record at its checkpoints, at the session's end (`_end_of_day`): the one route from practice to a Probe.
 
 THE FORWARD EMBARGO (Sept 29, 2026): practice feeds research, so forward-window days select among Gym programs. A Sized
 move (`_move_band`) therefore also needs the forward record of the sessions AFTER the banded version was written AND selected to
@@ -898,6 +909,12 @@ class OptionsLive:
         session = session_minutes(local.date())
         return session is not None and session[0] <= local.hour * 60 + local.minute < session[1]
 
+    def _session_over(self, now: float) -> bool:
+        """Today is a session day and its session has closed (THE RE-ENTRY RULE's count: `cohort_candidates`)."""
+        local = ny(now)
+        session = session_minutes(local.date())
+        return session is not None and local.hour * 60 + local.minute >= session[1]
+
     def _observe_repin_due(self, now: float) -> bool:
         """The session's first sync must pin the observe band (and take the incubator's first looks and pins) at once, not
         up to `FAMILIES_EVERY` later. Each asks once a session day (the observe band's, once a day it is on, so switching
@@ -937,6 +954,7 @@ class OptionsLive:
         in_session = self._in_session(now)
         try:
             current = self.observe_store.cohort_candidates(current, day=today, in_session=in_session,
+                session_over=self._session_over(now),
                 min_sessions=int(self.settings["observe_min_sessions"]), min_trades=int(self.settings["observe_min_trades"]),
                 max_sessions=int(self.settings["observe_max_sessions"]), keep=keep)
         except Exception as exc:  # noqa: BLE001 - a cohort must be durable before it can practise
@@ -966,8 +984,13 @@ class OptionsLive:
                 if int(row["version"]) != n:
                     row = next(iter(observe(fid, n)), None)
                 if row is not None:
-                    row = self.observe_store.freeze(row, day=str(day or today))
-                    by_family[fid] = row  # upgrade a pre-cohort session pin without changing its program
+                    try:
+                        row = self.observe_store.freeze(row, day=str(day or today))
+                        by_family[fid] = row  # upgrade a pre-cohort session pin without changing its program
+                    except ValueError:
+                        # The pinned version's cohort has ended and may never practise again (THE RE-ENTRY RULE), or
+                        # its row is no longer eligible: nothing is frozen, and its instance winds down (`_shadow_admit`).
+                        row = None
             if row is not None and int(row["version"]) == versions.get(fid) and row.get("tier"):
                 tiers[fid] = "validated" if "validated" in (row["tier"], tiers.get(fid)) else str(row["tier"])
             if fid not in roots:
@@ -1128,16 +1151,34 @@ class OptionsLive:
         grant = self._grant()
         if not self._real_on() or not grant or not grant.get("active") or equity is None:
             # No band moves while real money cannot trade (off, no active grant) or the account is unread: a move now
-            # would only be undone, and a Probe trades from the session after its move (`_real_eligible`).
+            # would only be undone. Qualification and entry remain separately confirmed (`_real_eligible`).
             return band
-        new, why = M.band_for(self.table, row, equity, fwd, probe_sessions=self._probe_sessions(fid, band))
+        from ..swarm.gate import SEALED_LOOKS
+
+        receipt = None
         embargoed = False
-        if new == "sized":
-            held = self._embargoed(row, forward)
-            if held:
-                new, why, embargoed = "probe", held, True
+        if SEALED_LOOKS and band in ("probe", "sized"):
+            from .ladder import Ladder
+
+            try:
+                held = self._embargoed(row, forward) if M.sized_ok(self.table, fwd) else None
+                new, why, receipt = Ladder(self).fast_lane_band(
+                    row, equity, forward, fwd, probe_sessions=self._probe_sessions(fid, band), embargo=held)
+                embargoed = bool(held)
+            except Exception as exc:  # noqa: BLE001 - no sizing authority on an unwritten decision
+                self.alert("warning", f"live: {fid}'s fast-lane ladder decision could not be recorded ({type(exc).__name__})")
+                self._families_at = float("-inf")
+                return "unavailable"
+        else:
+            new, why = M.band_for(self.table, row, equity, fwd, probe_sessions=self._probe_sessions(fid, band))
+            if new == "sized":
+                held = self._embargoed(row, forward)
+                if held:
+                    new, why, embargoed = "probe", held, True
+        if receipt is not None:
+            why = f"the fast-lane ladder: {why} (decision receipt {receipt})"
         try:
-            confirmed = self.families.confirm_band(row, new, why, forward, at=self.clock())
+            confirmed = self.families.confirm_band(row, new, why, forward, at=self.clock(), receipt=receipt)
         except Exception as exc:  # noqa: BLE001 - no real eligibility on an unconfirmed snapshot
             self.alert("warning", f"live: {fid}'s money band could not be confirmed ({type(exc).__name__})")
             confirmed = False
@@ -1146,10 +1187,11 @@ class OptionsLive:
             return "stale"
         if new != band:
             try:
-                self.record("live.band", {"family": fid, "from": band, "to": new, "why": why}, agent=fid)
+                self.record("live.band", {"family": fid, "from": band, "to": new, "why": why,
+                                          **({"receipt": receipt, "authority": "fast_lane"} if receipt is not None else {})}, agent=fid)
                 if band == "candidate" and new in ("probe", "sized"):
                     moves = dict(self.state.get("band_moves", {}) or {})
-                    moves[fid] = {"band": new, "at": self.clock()}   # onto real money: it trades from the next session
+                    moves[fid] = {"band": new, "at": self.clock()}   # durable Probe tenure for sizing
                     self.state.put("band_moves", moves)
             except Exception as exc:  # noqa: BLE001 - the band stays; tried again at the next refresh
                 self.alert("warning", f"live: {fid}'s band could not be moved to {new} ({type(exc).__name__})")
@@ -1217,8 +1259,23 @@ class OptionsLive:
         return count
 
     def _real_eligible(self, fid: str) -> bool:
-        """A family moved to Probe (or Sized) trades real money from the session AFTER its move (the plan's Probe row:
-        "real from its next session"): its move must precede the open of the current (or next) session."""
+        """A current confirmed sealed pass enters Probe immediately; the old practice route waits a session."""
+        from ..swarm.gate import SEALED_LOOKS
+
+        if SEALED_LOOKS:
+            try:
+                row = next((r for r in self.families.read(fid) if r["family"] == fid), None)
+                if (not row or row.get("band") not in ("probe", "sized") or not row.get("holdout_passed")
+                        or not row.get("validation_passed") or not row.get("run_sha")):
+                    return False
+                forward = self.families.forward_rows(fid)
+                meta = row.get("forward") or {}
+                fwd = M.forward_stats(forward, self.table.sized_confidence, version=row.get("version"),
+                                      negative=meta.get("negative") if isinstance(meta, Mapping) else None)
+                return not fwd.negative and self.families.confirm_band(
+                    row, str(row["band"]), "current sealed-pass entry", forward, at=self.clock())
+            except Exception:  # noqa: BLE001 - unreadable/stale qualification never gives entry authority
+                return False
         move = (self.state.get("band_moves", {}) or {}).get(fid)
         now = self.clock()
         try:
@@ -1273,6 +1330,16 @@ class OptionsLive:
             if key not in self.instances and acc.winding_down and not acc.positions and not acc.orders:
                 self._export_one(acc)
                 self.shadow.accounts.pop(key, None)
+        # A practice program frozen again (`ObserveStore.freeze`: THE RE-ENTRY RULE) whose instance still holds its
+        # earlier cohort's account: once that account is flat it leaves the book, and the program loads again
+        # (`_observe_loads`) with an account made for the new cohort.
+        for key, acc in list(self.shadow.accounts.items()):
+            inst = self.instances.get(key)
+            if (inst is not None and inst.observe and inst.mode == "live" and acc.winding_down and not acc.positions
+                    and not acc.orders and self._earlier_cohort(acc)):
+                self._export_one(acc)
+                self.shadow.accounts.pop(key, None)
+                inst.loaded = False
 
     # ------------------------------------------------------------------ chains
     def _roots(self, phase: str = "real") -> dict[str, tuple[int, int, float]]:
@@ -1665,6 +1732,10 @@ class OptionsLive:
             if _is_observe(key) != (phase == "observe"):
                 continue
             inst = self.instances.get(key)
+            if phase == "observe" and not acc.winding_down and self._earlier_cohort(acc):
+                # An earlier cohort's account: never the running cohort's record. It winds down; a program frozen again
+                # gets a new account once it is flat (`_retire_finished`).
+                acc.winding_down = True
             if acc.began_day != day.ordinal:
                 acc.begin_day(day)
                 acc.began_day = day.ordinal
@@ -1702,6 +1773,13 @@ class OptionsLive:
             elif missed is not None:
                 missed[key] = "missed_quotes"
         return due
+
+    def _earlier_cohort(self, acc: ShadowAccount) -> bool:
+        """A practice account of an EARLIER cohort of its program (`league/live/observe.py`, THE COHORT'S OWN RECORD):
+        one made under another practice evaluator, or one the practice record names among an earlier cohort's
+        (`ObserveStore.earlier_account`: an evaluator that came back finds the first cohort's account still there)."""
+        return (acc.practice_evaluator != self.observe_store.evaluator
+                or self.observe_store.earlier_account(acc.family, _version_of(acc.instance), getattr(acc, "nonce", "")))
 
     @staticmethod
     def _entry_identity(inst: Instance) -> dict[str, Any]:
@@ -2653,10 +2731,15 @@ class OptionsLive:
             # Never a forward row: the private practice record only (`league/live/observe.py`), each trade marked `forced`
             # when the House closed it winding the instance down. Offered again next minute if it cannot be written.
             wound = getattr(acc, "wound", set())
-            changed = (getattr(acc, "practice_evaluator", None) is not None
-                       and acc.practice_evaluator != self.observe_store.evaluator)
+            changed = getattr(acc, "practice_evaluator", None) is not None and self._earlier_cohort(acc)
+            # THE FORWARD LADDER's drift control (`league/live/ladder.py`) needs the underlying at the exit: read from the
+            # session's own grids now, while they hold the exit minute (None when they do not).
+            from .ladder import exit_spot
+
             marked = [dict(t, forced=changed or t.get("id") in wound, evaluator=self.observe_store.evaluator,
-                           cohort_evaluator=acc.practice_evaluator, evaluator_changed=changed) for t in trades]
+                           cohort_evaluator=acc.practice_evaluator, evaluator_changed=changed,
+                           exit_spot=t["exit_spot"] if t.get("exit_spot") is not None else exit_spot(t, self.day))
+                      for t in trades]
             if not self.observe_store.add(acc.instance, acc.family, _version_of(acc.instance), marked,
                                           account=getattr(acc, "nonce", "")):
                 acc.exported -= len(trades)
@@ -2673,6 +2756,14 @@ class OptionsLive:
     def _export_shadow(self) -> None:
         for acc in self.shadow.accounts.values():
             self._export_one(acc)
+
+    def practice_unexported(self) -> set[tuple[str, int]]:
+        """The practice programs whose running cohort's own account still holds closes the practice record could not
+        take (`_export_one` offers them again): the forward ladder leaves their checkpoint due."""
+        return {(acc.family, version) for acc in self.shadow.accounts.values()
+                if _is_observe(acc.instance) and acc.exported < len(acc.trades)
+                and (version := _version_of(acc.instance)) is not None
+                and not (getattr(acc, "practice_evaluator", None) is not None and self._earlier_cohort(acc))}
 
     def _export_real(self) -> None:
         if self.book is None:
@@ -2745,6 +2836,15 @@ class OptionsLive:
             self._end_volume(day)
         except Exception as exc:  # noqa: BLE001 - this optional input must not interrupt expiry bookkeeping
             out["volume_error"] = f"volume history: {type(exc).__name__}"
+        try:
+            # THE FORWARD LADDER (evidence v3, `league/live/ladder.py`): a ladder cohort at a checkpoint judged on its
+            # record through this session, a latched one's answer read, their receipts written, a promotion or a
+            # demotion made; never the session's bookkeeping.
+            from .ladder import end_of_day as ladder_end_of_day
+
+            out["ladder"] = ladder_end_of_day(self, day.day.isoformat())
+        except Exception as exc:  # noqa: BLE001 - judged again at the next session's end
+            self.alert("warning", f"live: the forward ladder's session end failed ({type(exc).__name__}: {str(exc)[:160]})")
         self.state.put("ended_day", day.day.isoformat())
         self.shadow.save()
         out["ended"] = day.day.isoformat()

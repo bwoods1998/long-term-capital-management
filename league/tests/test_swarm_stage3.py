@@ -396,7 +396,7 @@ class AccountingTests(unittest.TestCase):
 class PoolInventoryTests(P.PoolCase):
     def test_a_young_stray_counts_toward_capacity_before_reconciliation_may_end_it(self):
         pool = self.pool(start_boxes=1, max_boxes=1)
-        self.sail.extra.append({"sailbox_id": "sb_young", "name": pool.name_prefix("gym") + str(int(self.clock())) + "-9",
+        self.sail.extra.append({"sailbox_id": "sb_abc00001", "name": pool.name_prefix("gym") + str(int(self.clock())) + "-9",
                                 "created_at": self.clock(), "status": "running"})
         pool.submit(P.job("a"))
         out = pool.manage()
@@ -416,24 +416,24 @@ class PoolInventoryTests(P.PoolCase):
         pool = self.pool()
         pending = pool.name_prefix("gym") + str(int(self.clock())) + "-99"
         self.store.put("forking", {pending: self.clock()})
-        self.sail.names["sb_owned"] = pending
-        self.sail.names["sb_other"] = "ltcm-swarm-othertoken-gym-1-1"
+        self.sail.names["sb_abc00002"] = pending
+        self.sail.names["sb_abc00003"] = "ltcm-swarm-othertoken-gym-1-1"
         late = pool.name_prefix("gate") + str(int(self.clock())) + "-100"
         self.store.put("forking", {pending: self.clock(), late: self.clock()})
         out = cleanup_stopped(self.store.root, self.sail)
-        self.assertEqual(self.sail.terminated, ["sb_owned"])
+        self.assertEqual(self.sail.terminated, ["sb_abc00002"])
         self.assertEqual(out["confirmed"], 1)
         self.assertEqual(self.store.get("forking"), {late: self.clock()})
-        self.sail.names["sb_late"] = late
+        self.sail.names["sb_abc00004"] = late
         cleanup_stopped(self.store.root, self.sail)
-        self.assertEqual(self.sail.terminated, ["sb_owned", "sb_late"])
+        self.assertEqual(self.sail.terminated, ["sb_abc00002", "sb_abc00004"])
         self.assertEqual(self.store.get("forking"), {})
 
     def test_stopped_cleanup_refuses_to_touch_a_running_swarm(self):
         import fcntl
         from league.swarm.pool import cleanup_stopped
         pool = self.pool()
-        self.sail.names["sb_owned"] = pool.name_prefix("gym") + "1-1"
+        self.sail.names["sb_abc00002"] = pool.name_prefix("gym") + "1-1"
         with (self.store.root / "swarm.lock").open("a+") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             self.assertTrue(cleanup_stopped(self.store.root, self.sail)["active"])
@@ -458,18 +458,51 @@ class RefillTests(R.RoundCase):
         verify = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(verify)
         # The lines in effect (swarm.json over the release's policy.json): pinned here, whatever the policy holds.
-        (Path(self.root) / "swarm.json").write_text(json.dumps({"population": {"start": 48, "ceiling": 96, "floor": 16}}))
+        # With the floor counting every living family (`population.floor_researching` false, as before F1), fewer alive
+        # than the floor is a FAIL; counting research (F1, the default) it is a WAIT while the architect bears (dead slots
+        # left, and a family was born within `--birth-hours`), and a FAIL once none was: the population collapsed and
+        # nothing refills it.
+        lines = {"start": 48, "ceiling": 96, "floor": 16}
         for i in range(97):
             self.store.add_family({**R.SPEC, "id": f"f{i}"}, origin="seed")
-        for count, expected in ((44, "WAIT"), (48, "PASS"), (16, "WAIT"), (15, "FAIL"), (97, "FAIL")):
-            self.store._exec("UPDATE families SET retired_at='retired', band='retired'")
-            for i in range(count):
-                self.store.update_family(f"f{i}", retired_at=None, band="gym")
+        born = self.clock()  # the families' births, on the store's clock: the verifier reads the copy at its own time
+
+        def population(*args):
             stream = io.StringIO()
             # The configured lines alone: the budget's tighten-only ceiling is league/tests/test_ops_budget.py's.
             with contextlib.redirect_stdout(stream), patch.object(S, "budget_overlay", lambda out, root: out):
-                verify.main(["--root", str(self.root)])
-            self.assertEqual(json.loads(stream.getvalue())["checks"]["population"]["result"], expected)
+                verify.main(["--root", str(self.root), *args])
+            return json.loads(stream.getvalue())["checks"]["population"]
+
+        for researching, count, hours, expected in (
+                (False, 44, 1, "WAIT"), (False, 48, 1, "PASS"), (False, 16, 1, "WAIT"), (False, 15, 1, "FAIL"),
+                (False, 97, 1, "FAIL"), (True, 15, 1, "WAIT"), (True, 0, 1, "WAIT"), (True, 48, 1, "PASS"), (True, 97, 1, "FAIL"),
+                (True, 15, 5.9, "WAIT"), (True, 15, 6.1, "FAIL"), (True, 0, 72, "FAIL"), (True, 16, 72, "WAIT"),
+                (True, 48, 72, "PASS")):
+            (Path(self.root) / "swarm.json").write_text(json.dumps({"population": {**lines, "floor_researching": researching}}))
+            self.store._exec("UPDATE families SET retired_at='retired', band='retired'")
+            for i in range(count):
+                self.store.update_family(f"f{i}", retired_at=None, band="gym")
+            check = population("--now", str(born + hours * 3600))
+            self.assertEqual(check["result"], expected, (researching, count, hours))
+            self.assertEqual("why" in check, researching and count < 16 and hours > 6, (researching, count, hours))
+        # A collapse says why, and names the architect's last passes: the reader sees what stopped the births.
+        self.store._exec("UPDATE families SET retired_at='retired', band='retired'")
+        self.store.event("swarm.architect", None, {"born": [], "skipped": "no_cell", "why": "no cell"})
+        self.store.event("swarm.architect", None, {"born": ["f1", "f2"], "proposed": 6})
+        check = population("--now", str(born + 72 * 3600))
+        self.assertEqual(check["why"], "0 alive, under the floor of 16, and no family was born in the last 6 hours: the "
+                                       "architect is not refilling it")
+        self.assertEqual([(x["born"], x["skipped"]) for x in check["architect_passes"]], [(2, None), (0, "no_cell")])
+        self.assertEqual(check["hours_since_a_birth_or_the_start"], 72.0)
+        self.assertEqual(population("--now", str(born + 72 * 3600), "--birth-hours", "100")["result"], "WAIT")
+        # A swarm that has just started is given the same time to bear (its heartbeat says when it started).
+        (Path(self.root) / "swarm.heartbeat").write_text(json.dumps({"at": born + 71 * 3600, "pid": 1, "started_at": born + 70 * 3600}))
+        self.assertEqual(population("--now", str(born + 72 * 3600))["result"], "WAIT")
+        (Path(self.root) / "swarm.heartbeat").unlink()
+        # No key at all (the box's swarm.json holds only the owner's switches): the default counts research.
+        (Path(self.root) / "swarm.json").write_text(json.dumps({"population": lines}))
+        self.assertEqual(population("--now", str(born + 3600))["result"], "WAIT")
 
 
 class ReadyForwardTests(R.RoundCase):

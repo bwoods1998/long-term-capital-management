@@ -82,14 +82,25 @@ class KeepCase(unittest.TestCase):
         self.store.update_family(fid, since_val_trials=idle_limit(self.settings), trials=idle_limit(self.settings))
 
     def cohort(self, fid: str, *, version: int = 1, day: str = FIRST, tier: str = "train", best_train: float | None = 1.0,
-               validation_t: float | None = None, dte: int = 3, practised: bool = True, run_sha: str | None = None) -> dict:
+               validation_t: float | None = None, dte: int = 3, practised: bool = True, run_sha: str | None = None,
+               ladder: bool = False) -> dict:
         """A cohort frozen on `day`, practised by the House on each session from Oct 1 to Oct 5 unless `practised` is
-        False. Its snapshot's program is `run_sha` (default: one no version of the swarm's holds)."""
+        False. Its snapshot's program is `run_sha` (default: one no version of the swarm's holds). The keep (L1) is the
+        incubator's, read for cohorts frozen BEFORE the forward ladder (evidence v3): unless `ladder`, the cohort is made
+        one (no `ladder` mark, the window its declared DTE gave), so the old observation target and window govern it."""
         snap = self.ledger.freeze({"family": fid, "version": version, "observe": True, "band": "gym", "tier": tier,
                                    "code": CODE.replace("[0, 3]", f"[0, {dte}]"), "params": {"hold": 3},
                                    "structure": "debit_vertical", "roots": ["SPY"],
                                    "run_sha": run_sha or f"sha-{fid}-{version}",
                                    "best_train": best_train, "validation_t": validation_t}, day=day)
+        if not ladder:
+            import json
+            import math
+
+            snap = {k: v for k, v in snap.items() if k != "ladder"}
+            snap["practice_max_sessions"] = min(60, math.ceil(dte * 5 / 7) + 3)
+            self.ledger._connect().execute("UPDATE cohorts SET snapshot=? WHERE family=? AND version=?",
+                                           (json.dumps(snap, sort_keys=True), fid, version))
         if practised:
             self.practised(fid, version=version)
         return snap
@@ -176,6 +187,119 @@ class Spares(KeepCase):
         self.store.set_band("promoted", "candidate", reason="synthetic")
         self.store.retire_gym("gone", "The mechanism failed.", floor=0, source="researcher")
         self.assertEqual(self.tournament().incubator_keep(), frozenset({"next"}))
+
+
+# ------------------------------------------------------------------------------------------------ the ladder's cohorts
+def ladder_can_promote(case: unittest.TestCase) -> None:
+    """THE LADDER'S OWN MODE for a test: its table binds and the sealed look is not the route (`bands.ladder_promotes`).
+    As shipped neither holds (release F1: the look is the route, the ladder records)."""
+    from league.constitution import CONSTITUTION
+
+    for switch in (mock.patch("league.swarm.gate.SEALED_LOOKS", False),
+                   mock.patch.dict(CONSTITUTION["options_money"]["ladder"], binding=True)):
+        switch.start()
+        case.addCleanup(switch.stop)
+
+
+class LadderCohorts(KeepCase):
+    """THE LADDER'S COHORTS (evidence v3, the WP6 review), WHILE THE LADDER CAN PROMOTE (`ladder_can_promote`): a
+    forward-ladder cohort whose version met the Validation line is
+    kept for its whole window whatever its record so far, beside the incubator's cohorts and never cut by the cap; the
+    ladder judges it at its checkpoints, and it can be promoted only while its family is alive in the Gym band."""
+
+    def setUp(self):
+        super().setUp()
+        ladder_can_promote(self)
+        self.validated_ladder_cohorts()
+
+    def validated_ladder_cohorts(self):
+        for fid in ("val", "train", "failed", "other"):
+            self.family(fid)
+            self.dead(fid)
+        self.store.set_state("val", validation_version=1, validation_line={"passed": True})
+        self.store.set_state("failed", validation_version=1, validation_line={"passed": False})
+        self.store.set_state("other", validation_version=1, validation_line={"passed": True})
+        for fid in ("val", "train", "failed"):
+            self.cohort(fid, ladder=True)
+            self.sampled(fid, -5.0)                   # the incubator's sample met, its record so far negative
+        self.cohort("other")                          # a cohort frozen before the ladder: the incubator's rule
+        self.sampled("other", 3.0)
+
+    def test_a_validated_ladder_cohort_is_kept_past_a_negative_record_and_the_cap(self):
+        self.settings["tournament"]["incubator_keep_max"] = 1
+        t = self.tournament()
+        self.assertEqual(t.incubator_keep(), frozenset({"val"}), "the cap cuts only the rest")
+        self.assertEqual(self.store.get(practice.KEEP_KV)["ladder"], ["val"])
+        self.assertEqual([r["family"] for r in t.idle_pass()["retired"]], ["failed", "other", "train"])
+        self.assertEqual(self.alive(), ["val"])
+        self.assertEqual(t.keep_spared, {"val": "idle"})
+        self.assertEqual(t.keep_event()["ladder"], ["val"])
+
+    def test_the_rest_keep_the_incubators_rule(self):
+        self.settings["tournament"]["incubator_keep_max"] = 4
+        self.assertEqual(self.tournament().incubator_keep(), frozenset({"val", "other"}),
+                         "a ladder cohort not validated (or that failed the line) has no place of its own")
+
+    def test_a_validation_under_another_research_evaluator_keeps_nothing(self):
+        self.store.put("research_evaluator", "E2")
+        self.store.set_state("val", validation_line=None,
+                             validation_verdicts={"1": {"passed": True, "at": "x", "evaluator": "E1"}})
+        self.assertNotIn("val", self.tournament().incubator_keep())
+        self.store.set_state("val", validation_verdicts={"1": {"passed": True, "at": "x", "evaluator": "E2"}})
+        self.assertIn("val", self.tournament().incubator_keep())
+
+    def test_a_fresh_process_takes_the_saved_ladder_families_first(self):
+        self.settings["tournament"]["incubator_keep_max"] = 4
+        self.tournament().incubator_keep()
+        rows = self.tournament()._saved_keep(self.clock(), 1)[1]
+        self.assertEqual([(r["family"], r["ladder"]) for r in rows], [("val", True)], "never cut by the cap")
+
+
+class TheLadderRecordsOnly(KeepCase):
+    """THE FAST LANE (release F1, Oct 3, 2026), the tree's own switches: the held-out look is the route to Probe and the
+    forward ladder records beside it. A ladder that can promote nothing spares no cohort: kept for its sixty-session
+    window "whatever its record", a family whose validated version the look held, refused or failed would be a dead
+    end held alive. The same cohorts as `LadderCohorts`, which the ladder's own mode keeps."""
+
+    validated_ladder_cohorts = LadderCohorts.validated_ladder_cohorts
+
+    def setUp(self):
+        super().setUp()
+        self.validated_ladder_cohorts()
+        self.settings["tournament"]["incubator_keep_max"] = 4
+
+    def test_as_shipped_no_cohort_is_kept_for_the_ladder(self):
+        from league.swarm import gate
+        from league.swarm.tournament import ladder_held
+
+        self.assertEqual((gate.SEALED_LOOKS, bands.ladder_promotes()), (True, False), "the look is the route")
+        t = self.tournament()
+        self.assertEqual(t.incubator_keep(), frozenset({"other"}), "the keep's own rule alone: a record not negative")
+        self.assertNotIn("ladder", self.store.get(practice.KEEP_KV))
+        self.assertEqual([r["family"] for r in t.idle_pass()["retired"]], ["failed", "train", "val"],
+                         "the validated ladder cohort's dead family retires with the rest: no dead end is held alive")
+        self.assertEqual(self.alive(), ["other"])
+        rows = practice.cohort_status(self.root, today=practice.session_day(self.clock()))
+        fams = {f["id"]: f for f in self.store.families()}
+        self.assertEqual(ladder_held(rows, fams, None), frozenset())
+        self.assertEqual(ladder_held(rows, fams, None, promotes=True), frozenset({("val", 1)}), "what its own mode keeps")
+
+    def test_only_a_ladder_that_binds_while_the_look_is_not_the_route_keeps_its_cohorts(self):
+        from league.constitution import CONSTITUTION
+
+        binding = mock.patch.dict(CONSTITUTION["options_money"]["ladder"], binding=True)
+        unsealed = mock.patch("league.swarm.gate.SEALED_LOOKS", False)
+        with binding:
+            self.assertIs(bands.ladder_promotes(), False, "binding beside the look promotes nothing")
+            self.assertEqual(self.tournament().incubator_keep(), frozenset({"other"}))
+        with unsealed:
+            self.assertIs(bands.ladder_promotes(), False, "the ladder's own gate, recording: it promotes nothing either")
+            self.assertEqual(self.tournament().incubator_keep(), frozenset({"other"}))
+        with binding, unsealed:
+            self.assertIs(bands.ladder_promotes(), True)
+            self.assertEqual(self.tournament().incubator_keep(), frozenset({"val", "other"}))
+        with unsealed, mock.patch("league.live.ladder.Rules.from_constitution", side_effect=ValueError("refused")):
+            self.assertIs(bands.ladder_promotes(), False, "a refused money table promotes nothing")
 
 
 # ------------------------------------------------------------------------------------------------ the record it reads
@@ -336,6 +460,70 @@ class Record(KeepCase):
             day += dt.timedelta(days=1)
         self.assertEqual(iso, "2026-10-15")
 
+    @unittest.skipUnless(HAVE_NUMPY, "the House's cohort rule needs numpy (league.live.chains)")
+    def test_a_ladder_cohorts_window_is_the_same_on_both_sides(self):
+        """A forward-ladder cohort (evidence v3) has no observation target and a sixty-session window, with THE WINDOW
+        HOLD (`observe.ladder_window`): one whose latch still waits for its answer, or whose last checkpoint is not
+        judged yet, is kept the ladder's wait (five sessions) longer. The research side counts each out on exactly the
+        session the House completes it, and the keep holds a latched cohort's family until then."""
+        from league.live.ladder import sessions_between
+        from league.swarm.tournament import ladder_held
+
+        days = sessions_between(FIRST, "2027-01-29")
+        receipt = {"version": 1, "inputs": "x", "stats": {}, "p_value": 0.01, "binding": False}
+        for fid in ("unjudged", "judged", "latched", "answered"):
+            self.family(fid)
+            self.store.set_state(fid, validation_version=1, validation_line={"passed": True})
+            self.cohort(fid, ladder=True)
+            self.closed(fid, [(d, 1.0, 50.0, False) for d in PRACTISED for _ in range(4)])
+        self.ledger.cohort_candidates([], day="2026-10-06", in_session=True)
+        self.assertEqual(self.tournament().incubator_keep(), frozenset({"unjudged", "judged", "latched", "answered"}),
+                         "no observation target ends one")
+        self.ledger.add_decision({**receipt, "family": "judged", "day": days[59], "verdict": "fail", "checkpoint": 60})
+        self.ledger.add_decision({**receipt, "family": "latched", "day": days[59], "verdict": "await_prefilter",
+                                  "checkpoint": 60, "latch": "prefilter"})
+        self.ledger.add_decision({**receipt, "family": "answered", "day": days[39], "verdict": "await_prefilter",
+                                  "checkpoint": 40, "latch": "prefilter"})
+        self.ledger.add_answer({**receipt, "family": "answered", "day": days[40], "verdict": "would_promote"})
+        windows = {"unjudged": 65, "judged": 60, "latched": 65, "answered": 60}
+        ended: dict[str, str] = {}
+        for iso in days[58:]:                                # from the 59th session's pins on
+            rows = {r["family"]: r for r in practice.cohort_status(self.root, today=iso)}
+            for fid, row in rows.items():
+                self.assertEqual(row["window"], windows[fid], (fid, iso))
+            expired = {fid for fid in windows if fid not in ended and rows[fid]["elapsed"] >= rows[fid]["window"]}
+            fams = {f["id"]: f for f in self.store.families(alive=True)}
+            kept = {r["family"] for r in keep_order(list(rows.values()), set(fams), 12,
+                                                    ladder=ladder_held(list(rows.values()), fams, None, promotes=True))}
+            self.assertEqual(kept, set(rows) - expired, f"{iso}: the keep holds a family exactly while its window runs")
+            self.ledger.cohort_candidates([], day=iso, in_session=True)
+            left = {r["family"] for r in practice.cohort_status(self.root, today=iso)}
+            self.assertEqual(set(rows) - left, expired, iso)
+            ended.update({fid: iso for fid in expired})
+            if not left:
+                break
+        self.assertEqual(ended, {"judged": days[60], "answered": days[60], "unjudged": days[65], "latched": days[65]},
+                         "at the 61st session's pins, or the 66th's when held")
+        reasons = dict(self.ledger._connect().execute("SELECT family, reason FROM cohorts").fetchall())
+        self.assertEqual(reasons, {
+            "judged": "ladder: its practice window ended", "answered": "ladder: its practice window ended",
+            "unjudged": "ladder: its practice window ended and its last checkpoint was never judged",
+            "latched": "ladder: its latch had no answer within the sessions it may wait"})
+
+    @unittest.skipUnless(HAVE_NUMPY, "the House's cohort rule needs numpy (league.live.chains)")
+    def test_a_practice_record_from_before_the_checkpoints_holds_no_cohort(self):
+        """A record file with no `ladder_state` column (written before the ladder's checkpoints) is read as it was: a
+        sixty-session window."""
+        self.family("old")
+        self.cohort("old", ladder=True)
+        self.ledger.close()
+        db = sqlite3.connect(str(self.root / "observe.sqlite"))
+        db.execute("ALTER TABLE cohorts DROP COLUMN ladder_state")
+        db.commit()
+        db.close()
+        [row] = practice.cohort_status(self.root, today="2026-10-06")
+        self.assertEqual((row["family"], row["window"], row["elapsed"]), ("old", 60, 3))
+
     @unittest.skipUnless(HAVE_NUMPY, "the House's step defaults import numpy")
     def test_the_sample_and_the_window_are_the_houses_and_the_money_rows(self):
         from league.constitution import CONSTITUTION
@@ -361,7 +549,8 @@ class Record(KeepCase):
         [row] = practice.cohort_status(self.root, today="2026-10-06")
         self.assertEqual((db.stat().st_mtime_ns, db.read_bytes()), before, "read-only (SQLite's WAL reader may add its "
                                                                            "empty -shm/-wal sidecars, as practice_summary's)")
-        self.assertEqual(row, {"family": "a", "version": 1, "first_day": FIRST, "evaluator": EVAL, "tier": "train",
+        self.assertEqual(row, {"family": "a", "version": 1, "first_day": FIRST, "evaluator": EVAL, "ladder": False,
+                               "tier": "train",
                                "validation_t": None, "best_train": 1.0, "structure": "debit_vertical", "run_sha": "sha-a-1",
                                "window": 10, "elapsed": 3, "sessions": 3, "unpracticed": 0, "coverage": 1.0,
                                "closes_program": 1, "pnl_program": 12.0, "closes_all": 2, "pnl_all": 11.0,

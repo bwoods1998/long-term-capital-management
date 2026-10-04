@@ -20,7 +20,14 @@ plus the open mark. Recorded in the live state (`incubator_verdicts`, key `<fami
 fill model's version) and then, once the verdict is saved, a private `live.incubator` `first_look` event, WHETHER OR NOT
 the switch is on, so a first look is never taken again: a cohort with a `first_look` event under the running evaluator
 and no saved verdict is final as that event recorded it (`_recorded`, its cohort's `ended` event still ending it; never
-taken again, so a failed first look can never be retaken and pass). A failed first look is final. After a pass, each
+taken again, so a failed first look can never be retaken and pass). A failed first look is final. FINAL FOR THE
+PROGRAM, across cohorts and evaluators: the practice league freezes an interrupted cohort again after a release
+(`league/live/observe.py`, THE RE-ENTRY RULE: a new cohort of the same (family, version), under another evaluator or
+the same one come back), and the new cohort takes no first look when an earlier cohort of its program had one. That
+earlier verdict, pass or fail, is no verdict of the new cohort: the program is not incubated again under that version.
+An earlier cohort's look is one taken under another practice evaluator, or one whose record names another first day
+(`_earlier_look`); it is kept for good in `FINALS` when it leaves the verdicts, and read from the ledger's `first_look`
+events besides (`_recorded`, `_looked_before`). After a pass, each
 later session's first pass re-checks P3-P6 on the extended record; a failure ends the incubation for good (re-checks can
 only refuse). A zero-edge program passes roughly a third to a half of the time: the weekly envelope, not the screen,
 bounds the cost.
@@ -119,6 +126,9 @@ RECENT_DAYS = 7
 #: pass), deferred}), written at the START of each in-session families pass (`begin`), before any read that can fail.
 VERDICTS, PINS, KEEP, WEEK = "incubator_verdicts", "incubator_pins", "incubator_keep", "incubator_week"
 SESSION = "incubator_session"
+#: The first looks of EARLIER cohorts ({`<family>@<version>`: {evaluator, day, passed, first_day}}), written when one
+#: leaves `VERDICTS` (its evaluator changed, or its program was frozen again) and never removed: FINAL FOR THE PROGRAM.
+FINALS = "incubator_finals"
 YIELDED = "yielded: a D2 family's real order was refused on its contracts"
 #: The record's values a verdict keeps (never a price, a strike or code).
 RECORD_FIELDS = ("sessions", "decisions_due", "decisions_made", "coverage", "closes_program", "pnl_program", "closes_all",
@@ -353,9 +363,19 @@ class Incubator:
             return
         verdicts = self.verdicts()
         changed = False
+        finals = self._get(FINALS)
+        moved = False
+
+        def final(vk: str) -> None:
+            """An earlier cohort's look leaves the verdicts: kept in `FINALS`, the program's only one."""
+            old = verdicts.pop(vk)
+            finals.setdefault(vk, {"evaluator": old.get("evaluator"), "day": old.get("day"),
+                                   "passed": old.get("passed") is True,
+                                   "first_day": (old.get("record") or {}).get("first_day")})
+
         for vk in [k for k, v in verdicts.items() if v.get("evaluator") != evaluator]:
-            verdicts.pop(vk)                              # another evaluator's: its cohorts can never be traded again
-            changed = True
+            final(vk)                                     # another evaluator's: its cohorts can never be traded again
+            changed = moved = True
         fill_model = str(getattr(live.shadow.fill_model, "version", ""))
         cap = float(table.incubator_max_loss)
         # First looks that waited today for a record without today's values: never taken again before the next session.
@@ -371,6 +391,9 @@ class Incubator:
             f, n = c["family"], int(c["version"])
             vk = cohort_key(f, n)
             verdict = verdicts.get(vk)
+            if verdict is not None and self._earlier_look(verdict.get("record"), c):
+                final(vk)                                 # its program was frozen again: the look of its earlier cohort
+                verdict, changed, moved = None, True, True
             if c["status"] == "active":
                 checks["active"].add((f, n))
             if verdict is not None and c["status"] != "active" and self._unread(verdict, today):
@@ -405,7 +428,7 @@ class Incubator:
                         checks["first"].add((f, n))
                     self._said_unread(vk, f, today, "whether its first look was already recorded could not be read")
                     continue
-                if looked is not None:
+                if looked is not None and not self._earlier_look(looked, c):
                     # Taken and recorded, its verdict never saved: final as recorded, never taken again. A pass taken
                     # on an earlier day is re-checked today below, as its saved verdict would have been.
                     verdict = self._restored(looked, f, n, evaluator)
@@ -415,6 +438,12 @@ class Incubator:
                                     "why": "its first look was recorded but its verdict was not saved: final as "
                                            "recorded"}, f))
                 if verdict is None:
+                    if looked is not None or vk in finals or self._looked_before(vk, evaluator, ledger):
+                        # FINAL FOR THE PROGRAM: an earlier cohort of it had its first look. No look, no verdict.
+                        self._said(f"final:{vk}", {"final": vk, "day": today,
+                                                   "why": "an earlier cohort of its program had its first look: final, "
+                                                          "never taken again"}, f)
+                        continue
                     verdict = self._look(today, c, record, evaluator, fill_model, checks, waited, events)
                     if verdict is not None:
                         verdicts[vk] = verdict
@@ -453,6 +482,8 @@ class Incubator:
                                         **{k: record.get(k) for k in RECORD_FIELDS}}, f))
                 verdicts[vk] = verdict
                 changed = True
+        if moved:
+            live.state.put(FINALS, finals)                # before the verdicts leave the state: a look is never lost
         if changed:
             live.state.put(VERDICTS, verdicts)
         for payload, family in events:
@@ -516,6 +547,7 @@ class Incubator:
         if "looks" not in ledger:
             looks: dict[tuple[str, Any], dict] = {}
             ends: dict[str, dict] = {}
+            under: dict[str, set] = {}
             for row in self.live.state.rows("SELECT at, payload FROM events WHERE kind='live.incubator' AND (payload "
                                             "LIKE ? OR payload LIKE ?) ORDER BY seq", ('%"first_look":"%', '%"ended":"%')):
                 try:
@@ -526,14 +558,28 @@ class Incubator:
                     continue
                 if isinstance(payload.get("first_look"), str):
                     looks.setdefault((payload["first_look"], payload.get("evaluator")), dict(payload, at=row["at"]))
+                    under.setdefault(payload["first_look"], set()).add(payload.get("evaluator"))
                 if isinstance(payload.get("ended"), str):
                     ends.setdefault(payload["ended"], {"day": payload.get("day"), "why": payload.get("why")})
-            ledger["looks"], ledger["ends"] = looks, ends
+            ledger["looks"], ledger["ends"], ledger["under"] = looks, ends, under
         look = ledger["looks"].get((vk, evaluator)) or ledger["looks"].get((vk, None))
         if look is None:
             return None
         ended = ledger["ends"].get(vk)
         return dict(look, ended=ended) if ended is not None else look
+
+    @staticmethod
+    def _looked_before(vk: str, evaluator: str, ledger: Mapping[str, Any]) -> bool:
+        """FINAL FOR THE PROGRAM: whether a `first_look` event of cohort key `vk` was recorded under ANOTHER practice
+        evaluator (`_recorded`'s read of the ledger, taken first)."""
+        return bool(ledger["under"].get(vk, set()) - {evaluator, None})
+
+    @staticmethod
+    def _earlier_look(look: Mapping[str, Any] | None, cohort: Mapping[str, Any]) -> bool:
+        """FINAL FOR THE PROGRAM: whether a first look (its verdict's record, or its `first_look` event) is of an EARLIER
+        cohort of the program than `cohort`: it names another first day (a look that names none is this cohort's)."""
+        first = (look or {}).get("first_day")
+        return first is not None and str(first) != str(cohort["first_day"])
 
     @staticmethod
     def _restored(event: Mapping[str, Any], family: str, version: int, evaluator: str) -> dict:
@@ -996,5 +1042,6 @@ class Incubator:
                 "tally": tally, "week_stopped": stopped or None}
 
 
-__all__ = ["Incubator", "SUFFIX", "DAY_LEGS", "DAY_OPEN_SHARE", "MAX_PINS", "RETRIES", "INTRADAY", "VERDICTS", "PINS",
-           "KEEP", "WEEK", "SESSION", "YIELDED", "key_of", "cohort_key", "program_sha", "week_start_of", "is_incubator"]
+__all__ = ["Incubator", "SUFFIX", "DAY_LEGS", "DAY_OPEN_SHARE", "MAX_PINS", "RETRIES", "INTRADAY", "VERDICTS", "FINALS",
+           "PINS", "KEEP", "WEEK", "SESSION", "YIELDED", "key_of", "cohort_key", "program_sha", "week_start_of",
+           "is_incubator"]

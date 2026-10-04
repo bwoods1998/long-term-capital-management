@@ -119,7 +119,9 @@ class CalibrationCase(LiveCase):
 class RoundTrip(CalibrationCase):
     def test_a_round_trip_at_the_slot_at_the_mid_recorded_and_never_evidence(self):
         self.venue.fill = "limit"                                          # a resting order the market comes through
-        live = self.start([family("vert", VERTICAL, band="candidate")], real_money=True)
+        # This is a calibration-only fixture. A passed candidate now enters
+        # Probe immediately and its working SPY order correctly takes priority.
+        live = self.start([family("vert", VERTICAL, band="candidate", holdout=False)], real_money=True)
         self.run_to(10, 1)
         opened, closed = self.mine()
         self.assertEqual((opened["order_class"], opened["qty"], opened["time_in_force"]), ("mleg", "1", "day"))

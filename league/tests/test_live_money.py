@@ -23,7 +23,9 @@ def table(**changes):
 
 
 def fwd(returns, *, max_loss=100.0, negative=None, confidence=0.8):
-    return M.forward_stats([{"pnl": r * max_loss, "max_loss": max_loss} for r in returns], confidence, negative=negative)
+    """A record of REAL fills, one a day (evidence v3: Sized reads the real fills alone)."""
+    return M.forward_stats([{"day": f"d{i:04d}", "source": "real", "pnl": r * max_loss, "max_loss": max_loss}
+                            for i, r in enumerate(returns)], confidence, negative=negative)
 
 
 def row(**kw):
@@ -159,27 +161,38 @@ class Bands(unittest.TestCase):
     def test_a_candidate_becomes_a_probe_first_never_sized_at_once(self):
         good = [0.2, 0.1, 0.3, -0.1, 0.25] * 5
         self.assertEqual(M.band_for(self.t, row(band="candidate"), D("5000"), fwd(good), probe_sessions=5)[0], "probe")
-        self.assertEqual(M.band_for(self.t, row(band="probe"), D("5000"), fwd(good), probe_sessions=5)[0], "probe",
+        shadow = M.forward_stats([{"day": f"d{i:04d}", "source": "shadow", "pnl": r * 100.0, "max_loss": 100.0}
+                                  for i, r in enumerate(good)], 0.8)
+        self.assertEqual(M.band_for(self.t, row(band="probe"), D("5000"), shadow, probe_sessions=5)[0], "probe",
                          "no real Probe trade yet: the Probe stage is real, never a formality")
 
-    def test_sized_needs_real_probe_trades_and_a_full_session_at_probe(self):
+    def test_sized_needs_twenty_real_probe_trades_and_five_sessions_at_probe(self):
+        """Evidence v3 (the owner's D2, Oct 2, 2026): Sized reads the Probe's REAL fills alone: at least 20 of them, their
+        mean above zero and their 80% lower bound above zero, after at least 5 whole sessions at Probe. A winning shadow
+        or nightly record sizes nothing."""
         t = self.t
-        self.assertEqual((t.min_probe_real_trades, t.min_probe_sessions), (5, 1))
-        rows = [{"day": f"2026-09-{d:02d}", "source": "shadow", "pnl": 20.0, "max_loss": 100.0} for d in range(1, 21)]
-        rows += [{"day": f"2026-10-{d:02d}", "source": "real", "pnl": 3.0, "max_loss": 20.0} for d in range(1, 5)]
-        four = M.forward_stats(rows, 0.8)
-        self.assertEqual(M.band_for(t, row(band="probe"), D("5000"), four, probe_sessions=3)[0], "probe")
-        five = M.forward_stats(rows + [{"day": "2026-10-05", "source": "real", "pnl": 3.0, "max_loss": 20.0}], 0.8)
-        self.assertEqual(M.band_for(t, row(band="probe"), D("5000"), five, probe_sessions=0)[0], "probe")
-        self.assertEqual(M.band_for(t, row(band="probe"), D("5000"), five, probe_sessions=1)[0], "sized")
+        self.assertEqual((t.min_probe_real_trades, t.min_probe_sessions), (20, 5))
+        shadow = [{"day": f"2026-09-{d:02d}", "source": "shadow", "pnl": 20.0, "max_loss": 100.0} for d in range(1, 29)]
+        self.assertEqual(M.band_for(t, row(band="probe"), D("5000"), M.forward_stats(shadow, 0.8), probe_sessions=20)[0],
+                         "probe", "no real fill: never Sized")
+        real = [{"day": f"2026-10-{d:02d}", "source": "real", "pnl": 3.0 + d % 3, "max_loss": 20.0} for d in range(1, 20)]
+        nineteen = M.forward_stats(shadow + real, 0.8)
+        self.assertEqual(M.band_for(t, row(band="probe"), D("5000"), nineteen, probe_sessions=20)[0], "probe")
+        twenty = M.forward_stats(shadow + real + [{"day": "2026-10-20", "source": "real", "pnl": 3.0, "max_loss": 20.0}],
+                                 0.8)
+        self.assertEqual(twenty.real_n, 20)
+        self.assertEqual(M.band_for(t, row(band="probe"), D("5000"), twenty, probe_sessions=4)[0], "probe")
+        band, why = M.band_for(t, row(band="probe"), D("5000"), twenty, probe_sessions=5)
+        self.assertEqual(band, "sized")
+        self.assertIn("20 real Probe trades", why)
 
     def test_sized_needs_twenty_trades_a_positive_mean_and_a_positive_lower_bound(self):
         def real(returns):
             return M.forward_stats([{"day": f"2026-10-{i + 1:02d}", "source": "real", "pnl": r * 100.0, "max_loss": 100.0}
                                     for i, r in enumerate(returns)], 0.8)
         good = [0.2, 0.1, 0.3, -0.1, 0.25] * 4
-        self.assertEqual(M.band_for(self.t, row(band="probe"), D("5000"), real(good), probe_sessions=1)[0], "sized")
-        self.assertEqual(M.band_for(self.t, row(band="probe"), D("5000"), real(good[:19]), probe_sessions=1)[0], "probe")
+        self.assertEqual(M.band_for(self.t, row(band="probe"), D("5000"), real(good), probe_sessions=5)[0], "sized")
+        self.assertEqual(M.band_for(self.t, row(band="probe"), D("5000"), real(good[:19]), probe_sessions=5)[0], "probe")
         noisy = [1.0, -0.95] * 10 + [0.01]
         f = fwd(noisy)
         self.assertGreater(f.mean, 0)
@@ -213,12 +226,38 @@ class Bands(unittest.TestCase):
         rows += [{"day": f"2026-10-{d:02d}", "source": "real", "pnl": -1.0, "max_loss": 50.0} for d in range(1, 11)]
         rows += [{"day": f"2026-10-{d:02d}", "source": "shadow", "pnl": 30.0, "max_loss": 100.0} for d in range(11, 31)]
         f = M.forward_stats(rows, 0.8)
-        self.assertTrue(M.sized_ok(t, f))                   # the whole record would size it
-        self.assertTrue(f.real_bad)                         # but its 10 real trades lose
+        self.assertGreater(f.lcb, 0)                        # the whole record is positive
+        self.assertFalse(M.sized_ok(t, f))                  # but Sized reads the real fills alone (evidence v3)
+        self.assertTrue(f.real_bad)                         # and its 10 real trades lose
         self.assertEqual(M.band_for(t, row(band="probe"), D("5000"), f, probe_sessions=5)[0], "probe")
         band, why = M.band_for(t, row(band="sized"), D("5000"), f, probe_sessions=5)
         self.assertEqual(band, "probe")
         self.assertIn("real", why)
+
+    def test_sized_and_kelly_read_the_real_fills_alone(self):
+        rows = [{"day": f"2026-09-{d:02d}", "source": "shadow", "pnl": 30.0, "max_loss": 100.0} for d in range(1, 29)]
+        real = [{"day": f"2026-10-{d:02d}", "source": "real", "pnl": (0.3, 0.1, 0.2, 0.15, 0.25)[d % 5] * 100.0,
+                 "max_loss": 100.0} for d in range(1, 21)]
+        f = M.forward_stats(rows + real, 0.8)
+        alone = M.forward_stats(real, 0.8)
+        self.assertEqual((f.real_n, f.real_mean, f.real_lcb, f.real_sd), (alone.n, alone.mean, alone.lcb, alone.sd))
+        self.assertTrue(M.sized_ok(self.t, f))
+        self.assertEqual(M.kelly_cap(self.t, D("10000"), f), M.kelly_cap(self.t, D("10000"), alone),
+                         "Kelly on the real lower bound, whatever the shadow days add")
+        self.assertEqual(M.kelly_cap(self.t, D("10000"), M.forward_stats(rows, 0.8)), D(0), "no real fill: no Kelly stake")
+
+    def test_the_session_bound_reads_the_trailing_sessions(self):
+        rows = [{"day": f"2026-10-{d:02d}", "source": "real", "pnl": 10.0 if d % 2 else -2.0, "max_loss": 100.0,
+                 "version": 1} for d in range(1, 21)]
+        days, lcb = M.session_bound(rows, sessions=20, confidence=0.8, version=1)
+        self.assertEqual(days, 20)
+        self.assertGreater(lcb, 0)
+        self.assertEqual(M.session_bound(rows[:19], sessions=20, confidence=0.8, version=1), (19, None))
+        losing = [dict(r, pnl=-r["pnl"]) for r in rows]
+        self.assertLess(M.session_bound(losing, sessions=20, confidence=0.8, version=1)[1], 0)
+        self.assertEqual(M.session_bound(rows, sessions=20, confidence=0.8, version=2), (0, None), "its own version")
+        older = [dict(r, day=f"2026-09-{i + 1:02d}", pnl=-50.0) for i, r in enumerate(rows)]
+        self.assertGreater(M.session_bound(older + rows, sessions=20, confidence=0.8, version=1)[1], 0, "the trailing 20")
 
     def test_a_new_program_version_starts_its_own_record(self):
         rows = [{"day": f"2026-09-{d:02d}", "source": "shadow", "pnl": 30.0, "max_loss": 100.0, "version": 1} for d in range(1, 25)]
@@ -449,7 +488,7 @@ class TheSwarmsStore(unittest.TestCase):
         from league.live.families import SwarmFamilies
         from league.swarm.store import SwarmStore
         from league.tests.swarm_fakes import Clock as SwarmClock
-        from league.tests.evaluator_fakes import band_proof
+        from league.tests.evaluator_fakes import band_proof, passed_look
 
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
@@ -460,6 +499,7 @@ class TheSwarmsStore(unittest.TestCase):
             store.set_state("vert", banded_version=1, validation_version=1, validation_line={"passed": True},
                             typical_max_loss_usd=60.0, banded_evaluator=band_proof(store.version("vert", 1)))
             store.set_band("vert", "candidate", reason="passed the holdout")
+            passed_look(store, "vert", store.version("vert", 1))  # the look its band stands on (`bands.read`)
             store.close()
             families = SwarmFamilies(root)
             [row] = families.read()

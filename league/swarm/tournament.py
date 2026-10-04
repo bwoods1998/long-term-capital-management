@@ -6,11 +6,31 @@
    when it passes THE DRIFT SCREEN (`tournament.drift_screen`, Sept 27, `evidence.drift_screen`: its Train drift-adjusted
    alpha has a pooled t of at least `drift_min_t` and is positive in all Train years but one: a candidate that fails is
    demoted, `researcher.screen_best`, and the next candidate that passes is validated in its place; a version whose Train
-   run predates the figures waits until the researcher's robustness label "drift" has run it again). The Gym runs its
+   run predates the figures waits until the researcher's robustness label "drift" has run it again), and is GATE-READY AT
+   TRAIN (F1, Oct 3, 2026; `researcher.train_gate`): not a drift carrier by the gate's own rule and with a one-lot unit
+   within `researcher.max_unit_train_usd`, on its own Train run (a candidate that is not is set aside, never marked
+   failed, and the next takes its place; one with no drift fit yet waits; one already at the gate is left to the gate).
+   THE UNIT ON VALIDATION (`unit_over`, `release_unit`): a version that meets the line with a Validation unit over
+   `researcher.max_unit_usd` (the figure the money table fits the Probe to; larger than the Train run's in three runs
+   of four), or with none its run could state, waits before the gate, with no review, audit or look, until the limit
+   moves; a wait, never a bar. THE SCREENS DO NOT CHANGE N (the captain's ruling R9, Oct 3, 2026): the deflated
+   Sharpe's N (step 2) counts the versions whose Validation result was observed, and a version stopped before
+   validation on a property of its Train run adds no selection on Validation outcomes, so N is counted exactly as
+   before; the screens only make it grow more slowly. The objection on record: a Train property that correlates with
+   Validation results is still a selection step the count does not see. The Gym runs its
    1.5x-half-spread twin in the same batch (two trials, counted) and returns only the validation VIEW (no trades, dates
    or daily series). The
    researcher is told only whether the line was met and how many of its checks passed (D2a). A version runs on
-   its own NEEDS roots (a family's roots may have moved since).
+   its own NEEDS roots (a family's roots may have moved since). AN IDENTICAL PROGRAM IS VALIDATED ONCE (F1, Oct 3, 2026;
+   `tournament.reuse_validations`, `known_validation`): a version whose program (code, merged params and roots) another
+   family's version already validated on the Gym image and bundle in use (a revival or a fork that carries its parent's
+   program unchanged; the stored result's own roots, capital and fill model are what is compared) is judged from that
+   result by the line as it stands for its own lineage: no Gym job, no trial. INHERIT FAILURES ONLY (`inheritable`):
+   only a verdict that fails is read across, and it is one more validated version in the deflated Sharpe's count (N is
+   what the family's own validation would have faced); a result that would meet the line is never inherited, and that
+   version is validated by its own job. The family keeps its own copy of the record (rows with no trial that name the
+   source) and its state says where the verdict is from (`validation_inherited`); two such families in one round cost
+   one job when the verdict fails.
 2. THE LINE (`evidence.validation_line`, as the owner's decision D2 amended it): its deflated Sharpe is on traded
    days with N = the lineage's validated versions (`SwarmStore.lineage_validated`). A family that meets it goes to
    the gate's queue. Then THE INCUBATOR'S TRAIN AND DRIFT MARKS (`incubator.facts`, release B2, Sept 30, 2026): each
@@ -45,15 +65,22 @@
    RULE (`researcher.idle_dead`, R3: `researcher.retire_idle_evaluations` Gym evaluations since its birth or last
    validation without an eligible Train version, or three times as many with its best Train score below zero, or
    `researcher.dormant_cycles` cycles in a row with only stored results, holds and refused runs while its best does
-   not await validation; never while a validated version awaits the gate); never below the population floor, and by
+   not await validation; or, F1's DEPTH RULE, `researcher.retire_short_cycles` (10) worked cycles after a counted
+   validation that met at most `researcher.retire_short_checks` (5) of the line's checks, `researcher.short_dead`; never while a
+   validated version awaits the gate); never below the population floor, which counts the families that research (F1,
+   THE FLOOR COUNTS RESEARCH, `researcher.floor_counts`: a dead slot, dead by the idle rule or holding three cycles in
+   a row with nothing pending, is not counted and so is never held by it; `population.floor_researching` false counts
+   every living family, as before), and by
    no rule while the operator holds its validated version at the gate (`researcher.held_at_gate`). Each retiree's
    lesson goes to the graveyard (its mechanism, what it tried, its best numbers, its last notebook lines); an idle-rule
    lesson carries the verdict of its Train record (R11-1, `researcher.train_record`: DRIFT, STRESS, THIN or EXHAUSTED,
-   tested findings), and only an untested family's (it never traded on Train) says it was a time limit, not a
+   tested findings; UNRESOLVED for a family whose eligible versions were only set aside by GATE-READY AT TRAIN, no
+   finding), and only an untested family's (it never traded on Train) says it was a time limit, not a
    refutation. A validation that meets `researcher.extension_hold_checks` (6) of the line's checks sets the family's
    extension hold (R11-4's swarm rule, `researcher.judge_extension`); a validation of the held version below them ends
-   it. Each counted verdict records the family's trials (`validated_trials`), from which the idle rule counts, and
-   restarts its dormant cycles. Each verdict, counted or re-judged, is also kept per version with the evaluator it was
+   it, and so does its age (F1, `researcher.lapse_extension`: `researcher.extension_hold_days`, in the idle pass). Each
+   counted verdict records the family's trials (`validated_trials`), from which the idle rule counts, and its worked
+   cycles (`validated_cycles`, the depth rule's count), and restarts its dormant cycles. Each verdict, counted or re-judged, is also kept per version with the evaluator it was
    judged under (`validation_verdicts`, Oct 1): THE VALIDATED-FAMILY GUARD (`researcher.retire_guard`) reads it, so a
    researcher may not retire a family that holds a version whose latest verdict passed the line (archived by an
    adoption or not) unless a later validation of that version failed it. No rule here reads it. THE IDLE PASS (R4,
@@ -76,7 +103,18 @@
    sample (each group by return on risk, highest first), then those whose record so far is not negative, then the
    rest, each by the practice league's own order (`bands.priority`). The incubator's cohorts are never cut by the cap
    (at most `KEEP_CEILING`), so the keep never holds fewer families than the House can have pinned, and a pinned
-   family (retired, its incubation would go to exits only) is never dropped for a higher return. The swarm never reads
+   family (retired, its incubation would go to exits only) is never dropped for a higher return. THE LADDER'S COHORTS
+   (evidence v3, `ladder_held`), ONLY WHILE THE LADDER CAN PROMOTE (`bands.ladder_promotes`: its table binds and the
+   sealed look is not the route; release F1, Oct 3, 2026): an active FORWARD LADDER cohort (`league/live/ladder.py`)
+   whose version met the Validation line (`bands.validation_passed`, on the Gym in force: the only cohorts the ladder
+   can promote, and only while their family is alive in the Gym band) is kept for its whole window whatever its record
+   so far (the ladder judges it at its checkpoints, never on the incubator's sample), right after the incubator's
+   cohorts and, like them, never cut by the cap. While the ladder only records (as shipped: the held-out look is the
+   route to Probe, and a version that met the line is at the gate, where its family is spared the idle rule anyway)
+   no cohort is kept for the ladder: a ladder that can promote nothing would only hold dead-end families alive for
+   sixty sessions. Such a cohort is then kept, or not, by the keep's other rules above, like any cohort. Its window
+   is the House's own (`practice.cohort_status`): a cohort latched on a
+   checkpoint is kept past its sixtieth session until its answer is read or its wait runs out. The swarm never reads
    the House's live state, so it holds every cohort that could be pinned. It never spares a family from the
    deflated-Sharpe rule, its researcher's or the diagnostician's own retire, the population floor or the operator's
    gate hold. Research attention only: no trial count, look, validation, gate, band or money rule reads it. The keep
@@ -105,9 +143,10 @@ from typing import Any, Callable, Mapping
 from . import diagnostics, evidence, incubator, practice
 from .architect import allowed_structures
 from .pool import GymJob, PoolError
-from .researcher import (IDLE_CAUSE, MAX_ROOTS, drift_verdict, held_at_gate, idle_cause, idle_dead, judge_extension,
-                         needs_roots, record_verdict, robust_at_stress, screen_best, train_record, validation_drift_failed,
-                         with_roots)
+from .researcher import (IDLE_CAUSE, MAX_ROOTS, UNIT_WAIT_KEY, VALIDATED_CYCLES_KEY, drift_verdict, floor_counts, held_at_gate,
+                         idle_cause, idle_dead, judge_extension, kept_families, lapse_extension, max_unit, merged_key,
+                         needs_roots, params_of, record_verdict, robust_at_stress, screen_best, short_dead, train_gate,
+                         train_record, validation_drift_failed, with_roots, worked_cycles)
 from .store import CLOSEABLE, SwarmStore
 
 UNIVERSE_ROTATION = ("SPY", "QQQ", "IWM", "SPXW")
@@ -182,9 +221,38 @@ def incubator_held(root: Any, rows: list[Mapping[str, Any]],
     return frozenset(held)
 
 
+def ladder_held(rows: list[Mapping[str, Any]], fams: Mapping[str, Mapping[str, Any]],
+                current: Any, *, promotes: bool | None = None) -> frozenset[tuple[str, int]]:
+    """THE LADDER'S COHORTS in THE COHORT KEEP (the module docstring): the (family, version) of the active forward-ladder
+    cohorts `rows` (`ladder` True) whose family is one of `fams` (the living Gym families, by id, their states read) and
+    whose version met the Validation line on the Gym in force (`current`: the store's research evaluator, its image
+    and bundle). None while the ladder can promote nothing (`promotes`; default `bands.ladder_promotes()`: its table
+    binds and the sealed look is not the route): a cohort is spared for the ladder only when the ladder could still
+    promote it. Never raises."""
+    from .bands import ladder_promotes, validation_passed
+
+    try:
+        if not (ladder_promotes() if promotes is None else promotes):
+            return frozenset()
+    except Exception:  # noqa: BLE001 - a table that cannot be read promotes nothing
+        return frozenset()
+    out: set[tuple[str, int]] = set()
+    for r in rows:
+        try:
+            if not r.get("ladder") or r["family"] not in fams:
+                continue
+            key = (str(r["family"]), int(r["version"]))
+            if validation_passed(fams[key[0]].get("state") or {}, key[1], current) is True:
+                out.add(key)
+        except (KeyError, TypeError, ValueError):
+            continue
+    return frozenset(out)
+
+
 def keep_order(rows: list[Mapping[str, Any]], alive: Mapping[str, Any] | set[str] | frozenset[str],
                cap: int, *,
-               held: set[tuple[str, int]] | frozenset[tuple[str, int]] = frozenset()) -> list[dict[str, Any]]:
+               held: set[tuple[str, int]] | frozenset[tuple[str, int]] = frozenset(),
+               ladder: set[tuple[str, int]] | frozenset[tuple[str, int]] = frozenset()) -> list[dict[str, Any]]:
     """THE COHORT KEEP's choice (pure): of the active cohorts `rows` (`practice.cohort_status`, each record before today),
     each one whose family is in `alive` (the living Gym families), whose session window has not run out (`elapsed <
     window`), that the House is practising (`unpracticed < KEEP_UNPRACTICED`, unless it practises no active cohort at
@@ -192,12 +260,13 @@ def keep_order(rows: list[Mapping[str, Any]], alive: Mapping[str, Any] | set[str
     (`sessions` known), and that either has not met the incubator's sample (`KEEP_SAMPLE_SESSIONS` completed sessions and
     `KEEP_SAMPLE_TRADES` program closes) or has a record that is not negative (`pnl_program >= 0` and `pnl_all >= 0`, to
     the cent). Ordered: THE INCUBATOR'S COHORTS (`held`, (family, version) from `incubator_held`: the sample met), by
-    return on risk, highest first; then the rest that met the sample, the same way; then the rest whose record so far
+    return on risk, highest first; then THE LADDER'S COHORTS (`ladder`, from `ladder_held`: kept whatever their record
+    so far); then the rest that met the sample, the same way; then the rest whose record so far
     is not negative; then the rest; each then by the practice league's order (`bands.priority`), then by version. One
-    row a family (its first), at most `cap`, except that the incubator's cohorts are never cut by the cap (at most
-    `KEEP_CEILING`), so the keep never holds fewer families than the House's incubator can have pinned and a pinned
-    family is never dropped for a higher return; `cap` 0 or below keeps none. Each row gains `sample`, `negative` and
-    `held`."""
+    row a family (its first), at most `cap`, except that the incubator's and the ladder's cohorts are never cut by the
+    cap (at most `KEEP_CEILING`), so the keep never holds fewer families than the House's incubator can have pinned and a
+    pinned family is never dropped for a higher return; `cap` 0 or below keeps none. Each row gains `sample`,
+    `negative`, `held` and `ladder`."""
     from .bands import priority
 
     # The House practising no active cohort at all (down, or `live.observe` off) is an outage, not a cohort left out: the
@@ -211,23 +280,43 @@ def keep_order(rows: list[Mapping[str, Any]], alive: Mapping[str, Any] | set[str
             continue
         negative = _negative(r)
         sample = _sample_met(r)
-        if sample and negative:
+        key = (str(r["family"]), int(r["version"]))
+        on_ladder = key in ladder
+        if sample and negative and not on_ladder:
             continue
-        mine = sample and (str(r["family"]), int(r["version"])) in held
+        mine = sample and key in held
         ror = r.get("return_on_risk") if sample else None
-        head = (int(not mine), ror is None, -float(ror or 0.0)) if sample else (2 + int(negative), False, 0.0)
+        if mine:
+            head = (0, ror is None, -float(ror or 0.0))
+        elif on_ladder:
+            head = (1, False, 0.0)
+        elif sample:
+            head = (2, ror is None, -float(ror or 0.0))
+        else:
+            head = (3 + int(negative), False, 0.0)
         ranked.append((head + tuple(priority(r)) + (int(r["version"]),),
-                       {**dict(r), "sample": sample, "negative": negative, "held": mine}))
+                       {**dict(r), "sample": sample, "negative": negative, "held": mine,
+                        "ladder": on_ladder and not mine}))
     ranked.sort(key=lambda x: x[0])
     cap = max(0, int(cap))
     out: list[dict[str, Any]] = []
     for _, row in ranked:
-        # The incubator's cohorts come first, so the cap cuts only the rest.
-        if cap == 0 or len(out) >= (max(cap, KEEP_CEILING) if row["held"] else cap):
+        # The incubator's and the ladder's cohorts come first, so the cap cuts only the rest.
+        if cap == 0 or len(out) >= (max(cap, KEEP_CEILING) if row["held"] or row["ladder"] else cap):
             break
         if all(row["family"] != o["family"] for o in out):
             out.append(row)
     return out
+
+
+#: Private observation counts from a completed Validation round, not distinct programs or verdicts. Every family
+#: considered has one admission disposition; worker errors are a separate outcome of jobs already queued. These
+#: names carry no strategy text or evaluation figures and never decide an admission, trial or lineage count.
+VALIDATION_TELEMETRY_SCHEMA = 1
+VALIDATION_DISPOSITIONS = (
+    "inactive", "no_candidate", "current_train_wait", "robustness_wait", "already_validated", "drift_wait",
+    "drift_failed", "train_gate_wait", "missing_version", "recorded_result", "inherited_result", "twin_wait", "queued",
+)
 
 
 class Tournament:
@@ -253,6 +342,9 @@ class Tournament:
         self.keep_error: str | None = None  # why the last read failed ("stale" or "failed")
         self.keep_spared: dict[str, str] = {}
         self._keep_told = False
+        #: THE GATE'S RESERVE (league/swarm/guard.py): whether births are held for the rest of the day's Sail dollars (the
+        #: swarm hands its guard's answer in, `loop.Swarm`). A fork is a birth: held, this round forks nothing (`forks`).
+        self.births_held: Callable[[], bool] = lambda: False
 
     @property
     def cfg(self) -> Mapping[str, Any]:
@@ -275,24 +367,35 @@ class Tournament:
         jobs = []
         errors = {}
         judged = {}
+        inherited: dict[str, dict[str, Any]] = {}  # AN IDENTICAL PROGRAM IS VALIDATED ONCE (F1): verdicts read, not run
+        asked: set[tuple[str, str, tuple[str, ...]]] = set()  # this round's jobs by program: a twin reads the first's result
+        twins: list[tuple[dict[str, Any], int, dict[str, Any]]] = []
         waiting: list[str] = []
         drift: dict[str, list[str]] = {"waiting": [], "failed": []}
+        aside: dict[str, list[str]] = {"set": [], "waiting": []}  # GATE-READY AT TRAIN (F1): set aside; waiting for a fit
+        dispositions = dict.fromkeys(VALIDATION_DISPOSITIONS, 0)
         image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
         bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
         for fam in fams:
-            # THE DRIFT SCREEN first: a candidate whose figures fail is demoted and the next one that passes stands in its place.
-            drift["failed"] += [fam["id"]] * len(screen_best(self.store, fam["id"], self.settings, clock=self.clock))
+            # THE DRIFT SCREEN first: a candidate whose figures fail is demoted and the next one that passes stands in its
+            # place. Then GATE-READY AT TRAIN (F1): one the gate would hold or a Probe could not hold is set aside likewise.
+            screened = screen_best(self.store, fam["id"], self.settings, clock=self.clock)
+            drift["failed"] += [fam["id"] for row in screened if row.get("kind") == "screen"]
+            aside["set"] += [fam["id"] for row in screened if row.get("kind") != "screen"]
             current = self.store.family(fam["id"])
             if current is None or current.get("retired_at"):
+                dispositions["inactive"] += 1
                 continue
             fam = current
             n = self.candidate_version(fam)
             if n is None:
+                dispositions["no_candidate"] += 1
                 continue
             state = fam.get("state") or {}
             from .evaluator import KEY, row_matches
 
-            # A startup adoption clears cached bests. Defense in depth for an old submission
+            # A startup adoption of a new Gym clears cached bests (one of league/live alone keeps them, and may give
+            # back what an earlier one cleared: `evaluator.adopt`). Defense in depth for an old submission
             # restored or arriving late: no current validation is bought with stale Train evidence.
             current_evaluator = self.store.get(KEY)
             if current_evaluator is not None:
@@ -300,12 +403,16 @@ class Tournament:
                 eligible_train = any(row is not None and row.get("version") == n and row_matches(self.store, row, current_evaluator)
                                      for row in (self.store.run(str(rid)) for rid in run_ids if rid))
                 if not eligible_train:
+                    dispositions["current_train_wait"] += 1
                     waiting.append(fam["id"])
                     continue
             if self.cfg.get("require_robustness", True) and not robust_at_stress(state, n):
+                dispositions["robustness_wait"] += 1
                 waiting.append(fam["id"])  # its robustness run at 1.5x has not landed (or lost): not validated yet
                 continue
             if n == fam.get("validated_version") and state.get("validation_image") == image and state.get("validation_bundle") == bundle:
+                dispositions["already_validated"] += 1
+                self.release_unit(fam, n)  # THE UNIT ON VALIDATION (F1): a waiting version goes on once the limit has moved
                 continue
             screen = drift_verdict(self.store, fam, n, self.settings)
             if screen is not None and not screen["passed"]:
@@ -314,25 +421,102 @@ class Tournament:
                 # the image/engine reset below: a validated family owed re-validation keeps its gate_ready (its idle-rule
                 # exemption and the operator's hold) while its figures are made.
                 drift["failed" if screen["known"] else "waiting"].append(fam["id"])
+                dispositions["drift_failed" if screen["known"] else "drift_wait"] += 1
+                continue
+            if not (state.get("gate_ready") and state.get("validation_version") == n) \
+                    and not train_gate(self.store, fam, n, self.settings)["ready"]:
+                # GATE-READY AT TRAIN (F1, `researcher.train_gate`): no validation is bought for a version the gate would
+                # hold a look at, or a Probe could not hold. `screen_best` set such a candidate aside above, so this one
+                # waits for its drift fit (or the operator's hold kept it in place). One already at the gate is the gate's.
+                aside["waiting"].append(fam["id"])
+                dispositions["train_gate_wait"] += 1
                 continue
             if state.get("validation_image") != image or state.get("validation_bundle") != bundle:
                 self.store.compare_and_set_state(fam["id"], {"validation_image": state.get("validation_image"),
                                                            "validation_bundle": state.get("validation_bundle")}, gate_ready=False)
             version = self.store.version(fam["id"], n)
             if version is None or not version.get("code"):
+                dispositions["missing_version"] += 1
                 continue
             recorded = self.recorded_validation(fam["id"], n)
+            if recorded is not None and isinstance((recorded.get("summary") or {}).get("inherited"), Mapping) \
+                    and not self.inheritable(fam["id"], n, recorded):
+                recorded = None  # R7: an inherited copy that would meet the line now is no verdict: its own job is made
             if recorded is not None:  # validated before (a best submitted again): judged from its result, no new trial
                 row = self.judge(fam["id"], n, recorded, record=False)
                 if row is not None:
                     judged[fam["id"]] = row
+                dispositions["recorded_result"] += 1
                 continue
-            job = GymJob(family=fam["id"], version=n, code=version["code"], params=version["params"], window="validation",
-                         roots=needs_roots(version["code"], fam["roots"]), stress=1.0, purpose="validation", priority=1.0)
+            if self.reuse_validations():
+                # AN IDENTICAL PROGRAM IS VALIDATED ONCE (F1): a fork or a revival that carries its parent's program
+                # unchanged takes the verdict of the validation that program already had on this Gym; no job, no trial.
+                # INHERIT FAILURES ONLY (R7, `inheritable`): a result that would meet the line for this family is never
+                # read across; its own job is queued below, as for any version.
+                known = self.known_validation(fam, version)
+                if known is not None and self.inheritable(fam["id"], n, known[0]):
+                    row = self.judge(fam["id"], n, known[0], record=False, inherited=known[1])
+                    if row is not None:
+                        judged[fam["id"]] = row
+                        inherited[fam["id"]] = known[1]
+                    dispositions["inherited_result"] += 1
+                    continue
+                if known is None:
+                    program = self.program_key(fam, version)
+                    if program in asked:
+                        twins.append((fam, n, version))  # the same program is asked this round: it reads that result below
+                        continue
+                    asked.add(program)
             if (self.store.family(fam["id"]) or {}).get("retired_at"):
+                dispositions["inactive"] += 1
                 continue
-            jobs.append((fam, n, self.pool.submit(job)))
+            jobs.append((fam, n, self.pool.submit(self._validation_job(fam, n, version))))
+            dispositions["queued"] += 1
         deadline = self.clock() + timeout
+        self._wait_and_judge(jobs, deadline, judged, errors)
+        waiting_twin: list[str] = []
+        own: list[tuple[dict[str, Any], int, Any]] = []
+        for fam, n, version in twins:
+            # Its twin's job is back: the verdict is read from that result now. One that failed or is still out leaves
+            # this family for the next round (its twin's result, or its own job then). A result that would meet the
+            # line for this family is not read across (R7): its own job is made now, in this round.
+            known = self.known_validation(fam, version)
+            if known is not None and not self.inheritable(fam["id"], n, known[0]):
+                if not (self.store.family(fam["id"]) or {}).get("retired_at"):
+                    own.append((fam, n, self.pool.submit(self._validation_job(fam, n, version))))
+                    dispositions["queued"] += 1
+                else:
+                    dispositions["inactive"] += 1
+                continue
+            row = self.judge(fam["id"], n, known[0], record=False, inherited=known[1]) if known is not None else None
+            if row is None:
+                waiting_twin.append(fam["id"])
+                dispositions["twin_wait"] += 1
+                continue
+            judged[fam["id"]] = row
+            inherited[fam["id"]] = known[1]  # type: ignore[index]
+            dispositions["inherited_result"] += 1
+        self._wait_and_judge(own, deadline, judged, errors)
+        out = {"queued": len(jobs) + len(own), "judged": judged, "errors": errors, "waiting_robustness": waiting,
+               "waiting_drift": drift["waiting"], "failed_drift": sorted(set(drift["failed"])),
+               "pre_validation": {"schema": VALIDATION_TELEMETRY_SCHEMA, "considered": len(fams),
+                                  "dispositions": dispositions, "worker_errors": len(errors)}}
+        if inherited or waiting_twin:
+            out.update(inherited=inherited, waiting_twin=waiting_twin)
+        if aside["set"] or aside["waiting"]:
+            out.update(set_aside=sorted(set(aside["set"])), waiting_gate_ready=aside["waiting"])
+        return out
+
+    @staticmethod
+    def _validation_job(fam: Mapping[str, Any], n: int, version: Mapping[str, Any]) -> GymJob:
+        """Version `n`'s own Validation job (the Gym runs its 1.5x-stress twin in the same batch)."""
+        return GymJob(family=fam["id"], version=n, code=version["code"], params=version["params"], window="validation",
+                      roots=needs_roots(version["code"], fam["roots"]), stress=1.0, purpose="validation", priority=1.0)
+
+    def _wait_and_judge(self, jobs: list[tuple[dict[str, Any], int, Any]], deadline: float, judged: dict[str, Any],
+                        errors: dict[str, str]) -> None:
+        """Wait for each submitted validation job (until `deadline`) and judge its result into `judged`; a job the pool
+        fails or gives up on goes to `errors` (a result that lands later is still recorded and judged: `late`)."""
         for fam, n, job in jobs:
             try:
                 result = self.pool.wait(job, max(1.0, deadline - self.clock()),
@@ -341,10 +525,131 @@ class Tournament:
                 errors[fam["id"]] = str(exc)[:300]
                 continue
             row = self.judge(fam["id"], n, result)
-            if row is not None:
+            error = self.validation_error(result)
+            if error is not None:
+                errors[fam["id"]] = error[:300]
+            elif row is not None:
                 judged[fam["id"]] = row
-        return {"queued": len(jobs), "judged": judged, "errors": errors, "waiting_robustness": waiting,
-                "waiting_drift": drift["waiting"], "failed_drift": sorted(set(drift["failed"]))}
+
+    @staticmethod
+    def validation_error(result: Mapping[str, Any]) -> str | None:
+        """An unfinished or refused job is an experiment failure, not a failed mechanism verdict. Completed
+        disqualified/no-data runs still have verdicts; the normal run and its required stress twin must both finish."""
+        if result.get("status") in ("error", "refused"):
+            return str(result.get("reason") or f"Validation did not finish (status {result.get('status')})")
+        twin = result.get("stress_1.5")
+        if isinstance(twin, Mapping) and twin.get("status") in ("error", "refused"):
+            return str(twin.get("reason") or f"Validation stress twin did not finish (status {twin.get('status')})")
+        return None
+
+    def reuse_validations(self) -> bool:
+        """`tournament.reuse_validations` (true, F1): AN IDENTICAL PROGRAM IS VALIDATED ONCE; JSON false validates every
+        family's version by itself, as before."""
+        return self.cfg.get("reuse_validations", True) is not False
+
+    @staticmethod
+    def program_key(fam: Mapping[str, Any], version: Mapping[str, Any]) -> tuple[str, str, tuple[str, ...]]:
+        """A version's program as Validation runs it: its code (the sha), its merged params (`researcher.merged_key`: `{}`
+        and a default spelled out are one program) and the roots it runs on (`needs_roots`, sorted)."""
+        code = str(version.get("code") or "")
+        return (str(version.get("sha") or ""), merged_key(params_of(code) or {}, dict(version.get("params") or {})),
+                tuple(sorted(str(r).upper() for r in needs_roots(code, fam["roots"]))))
+
+    def known_validation(self, fam: Mapping[str, Any], version: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]] | None:
+        """AN IDENTICAL PROGRAM IS VALIDATED ONCE (F1, Oct 3, 2026: 136 of 742 Validation runs repeated a result already
+        known, and a fork and a revival reproduced their parents' results to the cent). (the full result, where it is
+        from) of a validation another family's version made of the same program (`program_key`: the same code, merged
+        params and roots) on the Gym image and bundle in use now, the newest that the Gym finished (status "ok") and
+        that is the evaluation this family's own job would be (`same_evaluation`: the result's own roots, capital and
+        fill model, never the other family's roots as they stand today); None when there is none. The same program
+        on the same data and engine answers the same, so the verdict is judged from that result by the line as it
+        stands for this family (`judge` with `inherited`: no Gym job and no trial; the family keeps its own copy of
+        the record, a row with no trial that counts in the lineage's validated versions like any validation, so the
+        gate and every later round read it as they read any validation). Another image or bundle is another Gym: that
+        result is not reused. Only a verdict that fails is read across (`inheritable`)."""
+        sha = str(version.get("sha") or "")
+        if not sha or not version.get("code"):
+            return None
+        image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
+        bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
+        want = self.program_key(fam, version)
+        for other in self.store._all("SELECT family, n FROM versions WHERE sha=? AND family!=? ORDER BY created_at DESC, family, n",
+                                     (sha, fam["id"])):
+            twin_family = self.store.family(other["family"])
+            twin = self.store.version(other["family"], other["n"])
+            if twin_family is None or twin is None or not twin.get("code") or self.program_key(twin_family, twin) != want:
+                continue
+            for row in self.store.version_runs(other["family"], int(other["n"]), window="validation", stress=1.0, limit=20):
+                if row.get("status") != "ok" or not row.get("path"):
+                    continue  # only a run the Gym finished is an answer; anything else is validated by itself
+                result = self.store.run_result(row["run_id"])
+                if result is not None and self.validation_error(result) is None \
+                        and result.get("gym_image") == image and result.get("gym_bundle") == bundle \
+                        and self.same_evaluation(result, want[2]):
+                    return result, {"family": other["family"], "version": int(other["n"]), "run": row["run_id"]}
+        return None
+
+    def same_evaluation(self, result: Mapping[str, Any], roots: tuple[str, ...]) -> bool:
+        """Is a stored Validation `result` the evaluation a job on `roots` would be now, by the result's OWN record (the
+        researcher's NO DUPLICATE RUNS key holds the same three): the roots it ran on (a program with no NEEDS roots
+        runs on its family's, and a family's roots can move after its validation), the capital it was run at
+        (`gym.capital`) and its fill model (the newest one the Gym returned: `fill_model_now`). A result that does not
+        say its roots is no answer; one that does not say its capital or fill model is not refused for that."""
+        ran = result.get("roots")
+        if not isinstance(ran, (list, tuple)) or tuple(sorted(str(r).upper() for r in ran)) != tuple(roots):
+            return False
+        capital = result.get("capital")
+        if isinstance(capital, (int, float)) and not isinstance(capital, bool) \
+                and float(capital) != float((self.settings.get("gym") or {}).get("capital", 10000.0)):
+            return False
+        model = result.get("fill_model")
+        now = self.fill_model_now() if model else None
+        return not (model and now and str(model) != now)
+
+    def fill_model_now(self) -> str | None:
+        """The fill model of the newest result the Gym returned (the newest of the last 500 run rows that names one: the
+        researcher keeps it on every keyed run), or None when none says. A model calibrated anew on a box, in place,
+        shows here."""
+        row = self.store._one("SELECT json_extract(summary,'$.fill_model') AS model FROM (SELECT rowid AS rid, summary FROM runs "
+                              "ORDER BY rowid DESC LIMIT 500) WHERE json_valid(summary) "
+                              "AND json_extract(summary,'$.fill_model') IS NOT NULL ORDER BY rid DESC LIMIT 1")
+        return str(row["model"]) if row and row["model"] else None
+
+    def inheritable(self, fid: str, n: int, result: Mapping[str, Any]) -> bool:
+        """INHERIT FAILURES ONLY (the captain's R7): would the verdict this family reads from `result` FAIL the line? It
+        is judged as `_verdict` would judge it once the family holds its copy: the lineage's validated versions with this
+        one counted (`SwarmStore.lineage_validated` with `plus`: an inherited verdict is one more validated version, so N
+        is never lower than the family's own validation would face). A pass is never inherited: that version is
+        validated on the running Gym by its own job, as `recorded_validation` demands of a family's own result."""
+        if self.validation_error(result) is not None:
+            return False
+        validated, sharpes = self.store.lineage_validated(fid, plus=(int(n), result.get("summary") or {}))
+        line = evidence.validation_line(result, evidence.stressed_of(result), validated_versions=validated,
+                                        version_sharpes=sharpes, lineage_trials=self.store.lineage_trials(fid))
+        return not line["passed"]
+
+    def unit_over(self, loss: Any) -> bool:
+        """THE UNIT ON VALIDATION (F1): is a Validation run's median one-lot unit (`typical_max_loss`, the figure the
+        money table fits to the Probe's cap) over `researcher.max_unit_usd`, or unknown (the money table keeps a version
+        with no known unit a Candidate, so the gate's spend on it could buy no Probe either)? Never while that setting
+        is null."""
+        limit = max_unit(self.settings)
+        if limit is None:
+            return False
+        return not isinstance(loss, (int, float)) or isinstance(loss, bool) or float(loss) > limit
+
+    def release_unit(self, fam: Mapping[str, Any], n: int) -> bool:
+        """THE UNIT ON VALIDATION (F1), the way on: a version that met the line while its Validation unit was over
+        `researcher.max_unit_usd` (`UNIT_WAIT_KEY`, set by `_verdict`) goes to the gate once the limit has moved above
+        that unit: a wait, never a bar. True when it did."""
+        state = fam.get("state") or {}
+        wait = state.get(UNIT_WAIT_KEY)
+        if not isinstance(wait, Mapping) or wait.get("version") != n or state.get("validation_version") != n \
+                or self.unit_over(state.get("typical_max_loss_usd")):
+            return False
+        ready = bool((state.get("validation_line") or {}).get("passed")) and not self.gate_spent(fam["id"], n, state)
+        return self.store.compare_and_set_state(fam["id"], {"validation_version": n, UNIT_WAIT_KEY: wait},
+                                                gate_ready=ready, **{UNIT_WAIT_KEY: None}) and ready
 
     def recorded_validation(self, fid: str, n: int) -> dict[str, Any] | None:
         """The full result of a validation this version already had on the Gym image in use now (the same program on the
@@ -354,35 +659,60 @@ class Tournament:
         for row in self.store.runs(fid, window="validation", limit=500):
             if row.get("version") == n and float(row.get("stress") or 1.0) == 1.0 and row.get("path"):
                 result = self.store.run_result(row["run_id"])
-                if result is not None and result.get("gym_image") == image and result.get("gym_bundle") == bundle:
+                if result is not None and self.validation_error(result) is None \
+                        and result.get("gym_image") == image and result.get("gym_bundle") == bundle:
                     return result
         return None
 
-    def judge(self, fid: str, n: int, result: Mapping[str, Any], *, record: bool = True) -> dict[str, Any] | None:
+    def judge(self, fid: str, n: int, result: Mapping[str, Any], *, record: bool = True,
+              inherited: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
         """Record a validation result (and its stress twin: two trials) and judge it by the line. Also called for a
         result that lands after the round stopped waiting: every evaluation counts. Its verdict is written only while
         `n` is still the family's candidate (the researcher's current best): a result for a version the family has
-        moved on from is stale, whatever its number. `record=False` re-judges a result already recorded."""
-        fam = self.store.family(fid)
-        if fam is None:
-            return None
-        if record:
-            years = float((result.get("summary") or {}).get("days") or 0) / 252.0 * max(1, len(fam["roots"]))
-            row = self.store.add_run(fid, n, result, window="validation", stress=1.0, purpose="validation", program_years=years)
-            if isinstance(result.get("stress_1.5"), dict):
-                twin = result["stress_1.5"]
-                self.store.add_run(fid, n, {"run_id": f"{row['run_id']}-s15", "status": twin.get("status") or "ok", "trials": 1,
-                                            "summary": dict(twin)}, window="validation", stress=evidence.STRESS, purpose="validation",
-                                   program_years=years)
-        with self.store.atomic():  # also exclude another connection retiring the family while this verdict writes
+        moved on from is stale, whatever its number. `record=False` re-judges a result already recorded. `inherited`
+        (F1, with `record=False`): the result is another family's validation of the same program (`known_validation`);
+        the verdict is this family's validation all the same (its count and its idle clocks), its state says where it
+        is from, and the result is kept as this family's own rows WITH NO TRIAL (it and its stress twin, their summaries
+        naming the source): nothing was evaluated, so no trial and no program-year moves, while the lineage's validated
+        versions gain this one (`SwarmStore.lineage_validated` counts the copy). Only a failing verdict is inherited
+        (`inheritable`, R7): for a result that would meet the line nothing is written and None is returned."""
+        # A completed normal payload is reusable, so its stress accounting and verdict must commit with it. Otherwise
+        # a crash between these writes would cache the answer while silently losing a trial or its completion count.
+        with self.store.atomic():  # also exclude another connection retiring the family while this result writes
+            fam = self.store.family(fid)
+            if fam is None:
+                return None
+            error = self.validation_error(result)
+            if inherited is not None and not record and (error is not None or not self.inheritable(fid, n, result)):
+                return None
+            if inherited is not None and not record:
+                copy = {**result, "trials": 0, "summary": {**(result.get("summary") or {}), "inherited": dict(inherited)}}
+                row = self.store.add_run(fid, n, copy, window="validation", stress=1.0, purpose="validation")
+                if isinstance(result.get("stress_1.5"), dict):
+                    twin = result["stress_1.5"]
+                    self.store.add_run(fid, n, {"run_id": f"{row['run_id']}-s15", "status": twin.get("status") or "ok", "trials": 0,
+                                                "summary": {**dict(twin), "inherited": dict(inherited)}}, window="validation",
+                                       stress=evidence.STRESS, purpose="validation")
+            if record:
+                years = float((result.get("summary") or {}).get("days") or 0) / 252.0 * max(1, len(fam["roots"]))
+                row = self.store.add_run(fid, n, result, window="validation", stress=1.0, purpose="validation", program_years=years)
+                if isinstance(result.get("stress_1.5"), dict):
+                    twin = result["stress_1.5"]
+                    self.store.add_run(fid, n, {"run_id": f"{row['run_id']}-s15", "status": twin.get("status") or "ok",
+                                                "trials": 0 if twin.get("status") in ("error", "refused") else 1,
+                                                "summary": dict(twin)}, window="validation", stress=evidence.STRESS, purpose="validation",
+                                       program_years=years)
+            if error is not None:
+                return None  # preserve actual trials, but no verdict, completion marker or idle-clock reset
             fam = self.store.family(fid) or fam
             image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
             bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
             if fam.get("retired_at") or self.candidate_version(fam) != int(n) or result.get("gym_image") != image or result.get("gym_bundle") != bundle:
                 return None  # stale: its trials count, its verdict does not
-            return self._verdict(fid, fam, n, result, counted=record)
+            return self._verdict(fid, fam, n, result, counted=record or inherited is not None, inherited=inherited)
 
-    def _verdict(self, fid: str, fam: Mapping[str, Any], n: int, result: Mapping[str, Any], *, counted: bool) -> dict[str, Any]:
+    def _verdict(self, fid: str, fam: Mapping[str, Any], n: int, result: Mapping[str, Any], *, counted: bool,
+                 inherited: Mapping[str, Any] | None = None) -> dict[str, Any]:
         stressed = evidence.stressed_of(result)
         validated, sharpes = self.store.lineage_validated(fid)
         line = evidence.validation_line(result, stressed, validated_versions=validated, version_sharpes=sharpes,
@@ -401,7 +731,9 @@ class Tournament:
             # The idle rule counts the Gym evaluations since the last validation from here (`researcher.idle_evaluations`);
             # `fam` was read after this validation's own trials were recorded. Its dormancy clause starts again too: a
             # verdict is news the researcher may act on (`researcher.dormant_count`).
-            self.store.set_state(fid, validated_trials=int(fam.get("trials") or 0), dormant_cycles=0)
+            # THE DEPTH RULE (F1, `researcher.short_dead`) counts the family's worked cycles from here too.
+            self.store.set_state(fid, validated_trials=int(fam.get("trials") or 0), dormant_cycles=0,
+                                 **{VALIDATED_CYCLES_KEY: worked_cycles(fam)})
         state = fam.get("state") or {}
         typical = dict(state.get("typical_by_version") or {})
         if state.get("validation_version") is not None and state.get("typical_max_loss_usd") is not None:
@@ -415,6 +747,13 @@ class Tournament:
         # it was judged under, kept across adoptions, so a version's pass archived by one is known refuted only by a
         # failure under the evaluator in force, even after another version's validation replaced the line below.
         verdicts = record_verdict(state, n, bool(line["passed"]), evaluator=self.store.get(KEY), at=self.store.now())
+        source = inherited if inherited is not None else summary.get("inherited")
+        # THE UNIT ON VALIDATION (F1): the money table fits the Probe to THIS run's unit, which is larger than the Train
+        # run's in three runs of four. A version that met the line with a unit over `researcher.max_unit_usd`, or with
+        # none its run could state, waits before the gate (no review, no audit, no look is spent on a program no Probe
+        # could hold) until the limit moves (`release_unit`); its line, its verdict and its validation count stand as
+        # for any version.
+        waits = bool(line["passed"]) and self.unit_over(loss)
         self.store.set_state(fid, validation_view=view, validation_line=line, validation_version=n,
                              validation_verdicts=verdicts,
                              validation_image=result.get("gym_image"),
@@ -422,8 +761,18 @@ class Tournament:
                              typical_max_loss_usd=loss, typical_by_version=typical,
                              validation_numbers={"mean": mean, "t": t, "sharpe_daily": summary.get("sharpe_daily"),
                                                  "quarters": summary.get("quarters_positive")},
-                             gate_ready=bool(line["passed"]) and not self.gate_spent(fid, n, state))
+                             # AN IDENTICAL PROGRAM IS VALIDATED ONCE (F1): whose validation this verdict was read from
+                             # (None for the family's own), for the version `validation_version` names; its own copy
+                             # of the record says so too, so a later re-judging keeps it.
+                             validation_inherited=dict(source) if isinstance(source, Mapping) else None,
+                             gate_ready=bool(line["passed"]) and not waits and not self.gate_spent(fid, n, state),
+                             **{UNIT_WAIT_KEY: {"version": n, "limit": max_unit(self.settings),
+                                                **({"unknown": True} if loss is None else {})} if waits else None})
         out = {"version": n, "passed": line["passed"], "mean": mean, "t": t}
+        if waits:
+            out["unit_wait"] = True
+        if inherited is not None:
+            out["inherited"] = dict(inherited)
         # THE EXTENSION HOLD (R11-4's swarm rule): a version that met `researcher.extension_hold_checks` of the line's checks
         # waits for its 2017-19 extension result, exempt from the dormancy clause, until the operator clears the flag. A
         # validation of the held version below the checks ends its hold (`judge_extension`); the verdict row says which.
@@ -437,14 +786,19 @@ class Tournament:
     def gate_spent(self, fid: str, n: int, state: Mapping[str, Any]) -> bool:
         """The gate is done with version `n` (R4, the verification of PR #402): its holdout look was made or the gate refused
         it (`gated_sha`), so the gate never takes it up again (`Gate.run` skips it). Validated again after a Gym deploy, it
-        does not go back to `gate_ready`, which would keep it from the idle rule with nothing ever to look at."""
-        from .gate import run_sha  # a local import: the tournament only reads the gate's mark
+        does not go back to `gate_ready`, which would keep it from the idle rule with nothing ever to look at.
+        THE PROGRAM BAR (F1, `gate.Gate.program_bar`): a refusal of this very version stands whatever an adoption
+        cleared (its refusal row is kept for good; `gated_sha` is cleared by an adoption that changes the Gym), so a
+        version the gate refused on a verdict is never readied again (`incubator.refused_version`). A program refused
+        in ANOTHER family or version is readied once: the gate refuses it there before anything is paid, with its
+        refusal row and the researcher told, and that row then keeps it out here."""
+        from .gate import run_sha  # a local import: the tournament only reads the gate's marks and rows
 
         version = self.store.version(fid, n)
         if version is None or not version.get("sha"):
             return False
         sha = run_sha(version)
-        return bool(self.store.looked(sha) or state.get("gated_sha") == sha)
+        return bool(self.store.looked(sha) or state.get("gated_sha") == sha or incubator.refused_version(self.store, fid, n))
 
     def incubator_facts(self) -> dict[str, Any]:
         """THE INCUBATOR'S TRAIN AND DRIFT MARKS (`incubator.facts`, step 2 of the round), never failing the round: an error
@@ -504,6 +858,8 @@ class Tournament:
 
     # ------------------------------------------------------------------ 4. forks
     def forks(self, fams: list[dict[str, Any]]) -> list[str]:
+        if self.births_held():
+            return []  # THE GATE'S RESERVE: this round goes on to the day's cap; a fork is a birth and waits with the births
         ceiling = int(self.settings.get("population", {}).get("ceiling", 96))
         alive = len(fams)
         if alive >= ceiling:
@@ -649,9 +1005,13 @@ class Tournament:
             error = error or "the practice record (observe.sqlite) could not be read"
         else:
             try:
-                alive = {f["id"] for f in self.store.families(alive=True) if f.get("band") == "gym"} if rows else set()
+                fams = {f["id"]: f for f in self.store.families(alive=True) if f.get("band") == "gym"} if rows else {}
+                alive = set(fams)
                 held = incubator_held(getattr(self.store, "root", None), rows, alive) if rows else frozenset()
-                chosen = keep_order(rows, alive, cap, held=held)
+                from .evaluator import KEY
+
+                ladder = ladder_held(rows, fams, self.store.get(KEY)) if rows else frozenset()
+                chosen = keep_order(rows, alive, cap, held=held, ladder=ladder)
             except Exception as exc:  # noqa: BLE001
                 error = f"the swarm's families could not be read or ordered ({type(exc).__name__})"
         if chosen is None:
@@ -677,9 +1037,9 @@ class Tournament:
         `KEEP_STALE_SECONDS` ago (or in the future), or it cannot be read. Only a good read saves a family (a failed or off
         read saves none), so its time is the last good read's. Its rows carry the family and version only (`sample`,
         `negative`, `sessions` and `closes_program` None: this process has not read the record; `held` True for a
-        family the saved keep names among the incubator's cohorts, its `held`). The incubator's cohorts' families
-        first (at most `KEEP_CEILING`, never cut by the cap, as `keep_order`), then at most `cap` in all (a cap lowered
-        since): the store keeps no order, so each by name. Never raises."""
+        family the saved keep names among the incubator's cohorts, its `held`; `ladder` True for one it names among the
+        ladder's, its `ladder`). Those families first (at most `KEEP_CEILING`, never cut by the cap, as `keep_order`),
+        then at most `cap` in all (a cap lowered since): the store keeps no order, so each by name. Never raises."""
         try:
             value = self.store.get(practice.KEEP_KV)
             if not isinstance(value, Mapping):
@@ -691,12 +1051,14 @@ class Tournament:
                 return None
             named = value.get("held")
             named = {f for f in named if isinstance(f, str)} if isinstance(named, list) else set()
+            laddered = value.get("ladder")
+            laddered = {f for f in laddered if isinstance(f, str)} if isinstance(laddered, list) else set()
             rows = [{"family": fid, "version": version, "sample": None, "negative": None, "sessions": None,
-                     "closes_program": None, "held": fid in named}
+                     "closes_program": None, "held": fid in named, "ladder": fid in laddered and fid not in named}
                     for fid, version in sorted(families.items())
                     if isinstance(fid, str) and isinstance(version, int) and not isinstance(version, bool)]
-            held = [r for r in rows if r["held"]][:KEEP_CEILING]
-            rows = held + [r for r in rows if not r["held"]][:max(0, cap - len(held))]
+            first = [r for r in rows if r["held"] or r["ladder"]][:KEEP_CEILING]
+            rows = first + [r for r in rows if not (r["held"] or r["ladder"])][:max(0, cap - len(first))]
         except Exception:  # noqa: BLE001 - a retirement pass never fails on the keep
             return None
         return (float(at), rows) if rows else None
@@ -709,6 +1071,9 @@ class Tournament:
         held = sorted(r["family"] for r in chosen if r.get("held"))
         if held:
             value["held"] = held
+        laddered = sorted(r["family"] for r in chosen if r.get("ladder"))
+        if laddered:
+            value["ladder"] = laddered
         try:
             self.store.put(practice.KEEP_KV, value)
         except Exception:  # noqa: BLE001 - the researchers' status line is a courtesy; the keep itself stands
@@ -717,7 +1082,8 @@ class Tournament:
     def keep_event(self) -> dict[str, Any] | None:
         """The round's one private `swarm.status` event of THE COHORT KEEP (action `incubator_keep`): the kept families in
         order (version, whether the sample is met, whether the record so far is negative, completed sessions, program
-        closes before today), the incubator's cohorts' families among them (`held`, when there are any), the rule each
+        closes before today), the incubator's cohorts' families among them (`held`, when there are any), the ladder's
+        (`ladder`, when there are any), the rule each
         family it spared since the last event would have retired it by (`spared`), the cap, how the record read and,
         when it did not, why (`error`). None when the keep is off, or keeps and spares nothing and read well. An
         unreadable record alerts once until it reads again."""
@@ -736,6 +1102,9 @@ class Tournament:
         held = [r["family"] for r in self.kept_rows if r.get("held") and r["family"] in alive]
         if held:
             payload["held"] = held
+        laddered = [r["family"] for r in self.kept_rows if r.get("ladder") and r["family"] in alive]
+        if laddered:
+            payload["ladder"] = laddered
         if self.keep_read != "ok" and self.keep_error:
             payload["error"] = self.keep_error
         if self.keep_read == "failed" and not self._keep_told:
@@ -773,8 +1142,12 @@ class Tournament:
             self.keep_spared[fam["id"]] = "idle"
             return None
         # THE IDLE RULE'S VERDICT (R11-1): the death is filed under what its Train record shows; only an untested family
-        # (it never traded on Train) is "a time limit, not a finding". Train figures only (D2).
-        return f"It {dead}. {idle_cause(train_record(self.store, fam)['screen'])}"
+        # (it never traded on Train) is "a time limit, not a finding". Train figures only (D2). THE DEPTH RULE's death
+        # (F1) of a family with a Train score says what ended it (D2a's count, no figure): still EXHAUSTED.
+        screen = train_record(self.store, fam)["screen"]
+        if screen == "scored" and dead == short_dead(fam, self.settings):
+            screen = "short"
+        return f"It {dead}. {idle_cause(screen)}"
 
     def _retire_if(self, fid: str, judge: Callable[[Mapping[str, Any]], str | None]) -> str | None:
         """Read the family, judge it and retire it in ONE store transaction (R4, the review of PR #402): a result landing
@@ -789,8 +1162,9 @@ class Tournament:
             why = judge(fam)
             if not why:
                 return None
+            # THE FLOOR COUNTS RESEARCH (F1): a dead slot is not held at the floor (`floor_counts`).
             result = self.store.retire_gym(fid, why, floor=int(self.settings.get("population", {}).get("floor", 16)),
-                                           source="tournament")
+                                           source="tournament", counts=self.floor_counts())
         if result["status"] != "retired" or result.get("already_retired"):
             return None
         try:
@@ -798,6 +1172,13 @@ class Tournament:
         except Exception:  # noqa: BLE001
             pass
         return why
+
+    def floor_counts(self) -> Callable[[Mapping[str, Any]], bool] | None:
+        """THE FLOOR COUNTS RESEARCH (F1, `researcher.floor_counts`): the living families `population.floor` counts, on
+        the Gym the pool runs now: every one but a dead slot, a family the saved cohort keep holds always counted. None
+        (every living family) while `population.floor_researching` is false."""
+        kept = kept_families(self.store, float(self.clock()))
+        return floor_counts(self.settings, current=self.identity(), kept=kept.__contains__)
 
     def idle_due(self) -> bool:
         """THE IDLE PASS is due: `tournament.retire_every_seconds` (300) since the last; 0, null, a boolean or not a finite
@@ -823,6 +1204,9 @@ class Tournament:
             if busy is not None and busy(fam["id"]):
                 skipped.append(fam["id"])
                 continue
+            # THE EXTENSION HOLD's age limit (F1, `researcher.lapse_extension`): a hold nobody cleared ends, and the
+            # idle rule reads its family like any other from then on.
+            lapse_extension(self.store, fam["id"], self.settings, clock=self.clock)
             why = self._retire_if(fam["id"], lambda fam: self.idle_why(fam, current=current, kept=kept))
             if why:
                 retired.append({"family": fam["id"], "why": why})
@@ -830,7 +1214,7 @@ class Tournament:
 
     def retire(self, fam: Mapping[str, Any], why: str) -> bool:
         result = self.store.retire_gym(fam["id"], why, floor=int(self.settings.get("population", {}).get("floor", 16)),
-                                       source="tournament")
+                                       source="tournament", counts=self.floor_counts())
         if result["status"] != "retired" or result.get("already_retired"):
             return False
         try:
@@ -916,5 +1300,5 @@ def json_safe(value: Any) -> str:
         return str(value)[:400]
 
 
-__all__ = ["Tournament", "IDLE_CAUSE", "keep_order", "incubator_held", "KEEP_MAX", "KEEP_CEILING", "KEEP_SAMPLE_SESSIONS",
-           "KEEP_SAMPLE_TRADES", "KEEP_UNPRACTICED", "KEEP_STALE_SECONDS"]
+__all__ = ["Tournament", "IDLE_CAUSE", "keep_order", "incubator_held", "ladder_held", "KEEP_MAX", "KEEP_CEILING",
+           "KEEP_SAMPLE_SESSIONS", "KEEP_SAMPLE_TRADES", "KEEP_UNPRACTICED", "KEEP_STALE_SECONDS"]

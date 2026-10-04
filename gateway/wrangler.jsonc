@@ -213,9 +213,13 @@
     // back to 30d for anything else, so "a day" is spelled 24h.
     "SAIL_USAGE_RANGE": "24h",
     // V3-A: the House's budget rule (league/ops/budget.py) keeps research inside the prefunded meters and sends its own
-    // `funding` notice, with the exact amount, when a meter's runway falls under 60 days. These absolute lines date from
-    // a $40+/day burn; at the floor they would mail a "low" warning (a top-up ask) while the rule still holds 60+ days of
-    // runway, so they sit under the rule's own Sail floor (its reserve plus 90 days of fixed cost). The runway lines stay.
+    // `funding` notice, with the exact amount. Under rule version 1 (the running House, V3-A part 1) that is when a
+    // meter's runway falls under 60 days; under rule version 2 (release F1) when a meter holds under 7 days of research
+    // at the owner's ceiling above its reserve. These absolute lines date from a $40+/day burn and would mail a "low"
+    // warning (a top-up ask) while the rule still holds its own runway, so they sit under the point where the rule's
+    // Sail research ends: under version 1 its reserve plus 90 days of fixed cost; under version 2 the Sail guard's
+    // release line plus 5 days of fixed cost ($42 at the configured burn), which is above the guard's own line ($32).
+    // The values are unchanged by F1. The runway lines stay.
     "LOW_BALANCE_USD": "25",
     "CRITICAL_BALANCE_USD": "12",
     "ALERT_EVERY_SECONDS": "21600",

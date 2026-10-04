@@ -1,12 +1,50 @@
 """The gate and the nightly forward replays: the only code that opens sealed days, on gate boxes only.
 
+THE FAST LANE (release F1, Oct 3, 2026; the owner's rule 2 of that day: a program trades real money at Probe size as
+soon as it passes Validation and the unseen-market test, with no session-count wait; the ladder records alongside).
+THE SEALED LOOK IS THE ROUTE TO PROBE (`SEALED_LOOKS` True): a validated version at the gate is reviewed, audited and
+looked at once (THE GATE, below), and a pass makes its family a Candidate in the same transaction. The live path's
+money table then makes a Candidate a Probe at its next families pass, nights and weekends included, and its first real
+order goes at the next session's open (`league/live/step.py`, `league/live/money.py`): no session or day is counted
+between the pass and that order. THE FORWARD LADDER (`league/live/ladder.py`) records beside the look and promotes
+nothing: its table does not bind (`options_money.ladder.binding` false), and while the look is the route it would
+promote nothing if it did (THE LADDER'S BELT refuses, `bands.ladder_refusal`; `bands.ladder_promotes`).
+
+EVIDENCE V3'S OWN GATE (release A2, built on the owner's D2 of Oct 2, 2026; `league/live/ladder.py`) is kept and is
+reached only by `Gate(sealed_looks=False)` (its own tests). There a validated version at the gate goes to PRACTICE
+(`_to_practice`): the experiment contract and the drift screen still refuse (a refusal, the program's incubator bar),
+and otherwise its gate place closes (`gated_sha`, `gate_ready` cleared) with the outcome "practice" and the researcher
+told the forward ladder judges it; no review, no audit, no look, no Holm, no look budget. THE PRE-FILTER
+(`prefilter_round`, the ladder's L6): the House asks (kv `ladder_prefilter_requests`) for one FREE read of a practised
+program's 2026 holdout on a gate box, once its cohort meets every other line; at most one read a round, judged on THE
+PRE-FILTER'S LINE (`evidence.prefilter_line`: its net P&L after fees not negative AND the moving-block bootstrap of its
+daily P&L, block 5 and 2,000 draws, seeded "prefilter:<run_sha>", with a p-value at or under the constitution's
+`options_money.ladder.prefilter_p`) and written to kv `ladder_prefilter:<run_sha>` {status, passed (both conditions),
+pnl, p, level (the line it was judged at), the Gym bundle asked for and the bundle and image it ran on}
+and kept private (the figures under `_figures` in the event): no look row, no Holm, no look budget, no `gated_sha`, no
+word to the researcher. A read the image cannot make (a root's holdout missing) waits without a try; three failed
+tries leave it "failed" (the ladder then promotes nothing on it). A record written before the line (done, with no
+`level`: only the sign of its P&L was read) is no answer: the read is made again. The read is one of the round's: the
+budget guard's brake, which stops the gate's round, stops it too, and so does the leakage alarm, which stops the whole
+gate (fail-closed).
+
+ONE HOLDOUT READ A PROGRAM. The look and the pre-filter read the same held-out months, so a program gets one or the
+other, never both. By the switch: a round makes pre-filter reads only while sealed looks are off (`run`), so as shipped
+the holdout has one reader and every read of it is a counted look under Holm. And by the records, whatever the switch
+says later: `prefilter_round` never reads a program that has a look row (its record is "failed" and says why) and
+waits while a look at it is in flight; and a version whose program's pre-filter record is done is HELD at the gate
+(`read_hold`, stage "look hold (holdout read)": the hold's row, the program's incubator bar, the outcome "held") with
+one `swarm.status` alert (`holdout_read_before_look`), in the round and again under the lock in `look()`.
+
 THE GATE (when a family's validated best meets the validation line):
 1. RATIONS: one holdout look per program version (code + parameters), at most three per LINEAGE (a fork
    inherits its parent's looks); the leakage alarm (>= 10 looks, > 30% passing) stops the gate. THE DUPLICATE LOOK
-   (H3a, Oct 1, 2026; `duplicate_look`) comes first: a look that would repeat an earlier one is refused. THE DRIFT SCREEN
+   (H3a, Oct 1, 2026; `duplicate_look`) comes first: a look that would repeat an earlier one is refused. THE PROGRAM
+   BAR (F1, Oct 3, 2026; `program_bar`) comes next: a program with a verdict on record is refused. THE DRIFT SCREEN
    (Sept 27, `evidence.drift_screen`) again, in depth: a version whose Train drift-adjusted alpha fails it is refused
    (stage "drift screen": no review is paid, no look is spent); one whose figures are owed waits. THE LOOK HOLDS (L6,
-   Oct 2, 2026; `look_hold`) come after the rations and before the review: a look the holdout cannot judge is held.
+   Oct 2, 2026; `look_hold`) come after the rations and before the review: a look the holdout cannot judge is held
+   (the drift hold, for good) or WAITS (the power hold, release F1: its gate place kept, judged again every round).
 2. THE REVIEW: GPT-6 Sol through the gateway when OpenAI has room (`review_openai_model`; null skips it), else
    DeepSeek-V4-Pro balanced on Sail (Claude first once "review" is in `claude.roles`, Sept 29), reads the program for
    lookahead, leakage (calendar recognition, hard-coded regimes) and fill abuse. A failed review is a recorded refusal
@@ -15,7 +53,11 @@ THE GATE (when a family's validated best meets the validation line):
    a different Sail model; a failed audit is a refusal too.
 3. ONE HOLDOUT LOOK on a gate box (a fork of the gate image; the Gym image has no holdout days), judged by
    the plan's holdout line (`evidence.holdout_line`, with Holm-Bonferroni across every look the swarm has
-   made). The researcher is told PASS or FAIL, never a number.
+   made, and every look in flight in another family counted as a failed one, as THE POWER HOLD counts it: a look
+   landing first never faces an easier level than the one it was let through at). IN FLIGHT means really in flight
+   (`flying_elsewhere`): a marker this process set, within the time a look can take. A marker a dead process left, or
+   one whose look never came back, is no look: the round owes it again (`run`), and it raises no one's level
+   meanwhile. The researcher is told PASS or FAIL, never a number.
 4. A pass makes the family a Candidate (live shadow). Candidate <-> Probe <-> Sized is the LIVE PATH's
    (the Money table), written through `SwarmStore.set_band`; the swarm never makes a Probe or a Sized.
 
@@ -37,11 +79,41 @@ closed (`gated_sha`), and one that repeats a look still in flight in another fam
 version compares with nothing and goes on as before. Tightening only: no threshold, no Holm or deflated-Sharpe rule,
 no forward rule moves.
 
+THE PROGRAM BAR ON THE LOOK ROUTE (F1, Oct 3, 2026; `program_bar`, `incubator.look_route_bar`). The review and the audit
+are the only screen against a program that recognises the held-out months, and every program is written by a model
+that may know them. Their verdict used to be read by the family and version it was made in: the same code and
+parameters in a revived or twin family, or in its own family after a new Gym cleared the gate's mark, was read and
+looked at afresh. Now a program with a failed review, a failed audit or a refusal on record ANYWHERE (a refusal row of
+any version of it in any family, alive or retired, at any stage but "gym"; a recorded bar whose words are a verdict's;
+a `review` or an incubator review that failed it) is never read again and never looked at, whatever family or version
+carries it now: right after THE DUPLICATE LOOK and before anything is asked or paid, it is refused as every gate
+refusal is (`refuse`, stage "program bar": the refusal row, the program's incubator bar, `gated_sha`, the outcome
+"refused"), plus one private `swarm.gate` event (`program_bar`) naming the earlier verdict; `look()` reads it again
+under the store's lock, and `_finish` a third time before it bands a pass (NO BAND ON A BARRED PROGRAM: a verdict
+that landed while the gate box ran, the incubator's audit of a twin say, leaves the look made and counted, its row
+and p-value kept, and the version refused at the bar with one `swarm.status` alert, `look_passed_barred`; no band is
+written). The researcher hears that the same program was refused before, never where or by which reader.
+`Tournament.gate_spent` agrees (and `allocation.gate_spent`, and the adoption's `evaluator._look_owed`): a version the
+gate refused is never made gate-ready again, whatever an adoption cleared. THE SAME PROGRAM is the same code and
+parameters, to the byte (`run_sha`): a copy with a comment added is another program, read by both readers as any new
+version is. A HOLD IS NO BAR: THE LOOK HOLDS judge a held program again when it comes back, and a program that WAITS
+for the look's bar (the power hold) is refused here like any other, every round it waits. Nor is the "gym" refusal
+(the gate box could not make its look three times: no one judged the program, and its tries, kept by program, park it
+again at its next failure; a look the guard's brake kept from a gate box is no try at all), nor a REVOCATION (a passed incubator review the sweep revoked because the program was held
+or barred elsewhere, which an adoption records as a bar: no reader judged the program then, and the verdict it was
+revoked for, if there is one, is read where it was made; `incubator.verdict_words`). All three still bar the program
+from the incubator. THE BAR WAITS ON A RECORD IT CANNOT READ (`program_unread`, `incubator.look_route_unread`): while
+the state of a family holding the program, or its `review`, `incubator_barred` or `incubator_reviews`, cannot be read,
+a verdict may sit there unseen. Nothing is refused on it (a refusal is for good) and nothing is read past it either:
+the round lists the version under `waiting` with one `swarm.status` alert (`program_bar_unread`, said again each day it
+still waits), pays no review or audit and makes no look; `look()` checks again under the lock. Tightening only.
+
 THE LOOK HOLDS (L6(b) and L6(c) of the edge study, approved by the owner on Oct 2, 2026 as a tightening; `look_hold`,
 `evidence.drift_lean`, `evidence.holdout_power`). Every look raises the Holm bar of every later one; the three looks since
 the Sept 26 reset were all long-delta programs, and all failed. So, after the experiment contract, the drift screen and
 the rations (each of which REFUSES, and a refusal bars the program from the incubator: a hold never takes a refusal's
-place) and before anything is paid (the review, the audit) or opened (the sealed read), the gate HOLDS the look at:
+place) and before anything is paid (the review, the audit) or opened (the sealed read), the gate HOLDS the look at (b),
+for good, and makes it WAIT at (c):
 - (b) THE DRIFT HOLD (stage "look hold (drift)"): a long-delta version (pooled Train beta above zero) whose Train drift
   share, |drift_usd| / (|alpha_usd| + |drift_usd|) of its own drift fit over the years the drift screen counts
   (`researcher.version_drift`, `evidence.drift_lean`), is at least `gate.look_holds.drift_share` (0.25). A version with
@@ -51,23 +123,52 @@ place) and before anything is paid (the review, the audit) or opened (the sealed
   day-block bootstrap, taken in the normal approximation: P(Z >= z(level) - S sqrt(N))), with S the version's Validation
   all-days daily Sharpe (`validation_numbers.sharpe_daily`, the figure the look's Sharpe check uses), N the holdout
   window's NYSE sessions (`holdout_sessions`) and the level the look would have to reach under Holm across every look
-  made (`evidence.holm_level`), a look in flight in another family counted as a failed one. Missing figures hold
-  (fail-closed). The approximation leaves out the line's other checks (which can only lower the pass chance); for
-  independent daily P&L the bootstrap passes a little more often than it says near the line, so the hold errs toward holding,
-  and for positively autocorrelated daily P&L (multi-day marks) toward looking (`evidence.holdout_power`).
-A held version is closed at the gate (`gated_sha`, `gate_ready` cleared, so the tournament never readies it again;
-`gate_outcome` "held"), with one `look_holds` row (`SwarmStore.hold_look`: its own table, never a `refusals` row) and
-one private `swarm.gate` event (`look_hold`, its figures under `_figures`); no look row, no try, no review, no audit, no
-sealed read. ON THE MONEY PATH A HOLD IS A FAILED LOOK (the owner approved the holds as a TIGHTENING, so a held program
-gets no real order that the look it replaces would have stopped): "held" is one of `bands.BAD_OUTCOMES`, so it ends the
-version's execution tuition (`bands.read`) and refuses its program the incubator (`bands.program_refusal`), and the hold
-is recorded as the program's incubator bar for good first (THE VERDICT FIRST, `_incubator_bar`, right after its hold row
-and before anything else, as a refusal's is). That matters because a hold can land after the review: a version reviewed
-and audited (a pass) that waits for the gate image or a holdout gap is held when a look landing elsewhere lowers its
-power, or when the holds are switched on; without the bar its tuition would never end (no look is coming). The
-researcher hears that the look is held and why, in words with no figure (D2a). A new version of the family is looked at
-once it clears both. `look()` checks again under the store's lock (a look landing meanwhile can lower the power). Each
-hold is switched off by its setting set to null (`look_holds` null: both); a misread value is its default.
+  made (`evidence.holm_level`), a look really in flight in another family (`flying_elsewhere`: never a stale marker)
+  counted as a failed one. Missing figures make no look either (fail-closed). The approximation leaves out the line's
+  other checks (which can only lower the pass chance); for independent daily P&L the bootstrap passes a little more
+  often than it says near the line, so the hold errs toward waiting, and for positively autocorrelated daily P&L
+  (multi-day marks) toward looking (`evidence.holdout_power`).
+A HELD version (the drift hold; the holdout-read hold of ONE HOLDOUT READ A PROGRAM) is closed at the gate (`gated_sha`,
+`gate_ready` cleared, so the tournament never readies it again; `gate_outcome` "held"), with one `look_holds` row
+(`SwarmStore.hold_look`: its own table, never a `refusals` row) and one private `swarm.gate` event (`look_hold`, its
+figures under `_figures`); no look row, no try, no review, no audit, no sealed read. ON THE MONEY PATH SUCH A HOLD IS A
+FAILED LOOK (the owner approved the holds as a TIGHTENING, so a held program gets no real order that the look it
+replaces would have stopped): "held" is one of `bands.BAD_OUTCOMES`, so it ends the version's execution tuition
+(`bands.read`) and refuses its program the incubator (`bands.program_refusal`), and the hold is recorded as the
+program's incubator bar for good first (THE VERDICT FIRST, `_incubator_bar`, right after its hold row and before
+anything else, as a refusal's is). That matters because a hold can land after the review: a version reviewed and
+audited (a pass) that waits for the gate image or a holdout gap is held when the holds are switched on; without the bar
+its tuition would never end (no look is coming). The researcher hears that the look is held and why, in words with no
+figure (D2a). A new version of the family is looked at once it clears both.
+
+THE POWER HOLD IS A WAIT, NOT A BAR (release F1, the captain's L4 of Oct 3, 2026; `wait_look`, `waiting`). The power
+hold's bar moves: the level a look must reach under Holm changes with the looks made and in flight, and an owner's
+deploy can change the rule itself. A hold computed on today's bar closed the version and barred its program from the
+incubator for good, for a bar that may not stand tomorrow. So a version held for POWER ALONE (the drift hold did not
+fire: that one stays final, and with both firing the hold is the drift hold's) WAITS: no `look_holds` row, no outcome,
+no incubator bar, no refusal row, no `gated_sha`, no look, no try, no review, no audit, no sealed read. Its gate place
+is kept under its own marker (`look_wait` in the family's state: the program, the version, the stage and when it first
+waited), with `gate_ready` cleared, because `gate_ready` is what gives a family the floor share alone and exempts it
+from every retirement rule: A WAITING VERSION BLOCKS NOTHING. Its family researches on as one whose look was held
+does (its share, the idle rule and the retirement rules are a Gym family's; a newer version it validates takes the
+place), and the gate's other families are untouched (a wait is no look in flight: it raises no one's level and
+reserves none of its lineage's rations). The gate judges it again EVERY ROUND, from the top: THE DUPLICATE LOOK, THE
+PROGRAM BAR, the experiment contract, the drift screen and the rations still refuse it, the drift hold still holds it
+for good, and when the power hold no longer fires (the level rose, the setting moved, or the rule did) its place is
+ready again (`gate_ready`) and it gets its review, its audit and its ONE look in that round. One private `swarm.gate`
+event (`look_wait`, its figures under `_figures`) the first time a version waits, so the daily funnel counts waits
+apart from the holds that bar; nothing is written in the rounds after. The researcher hears that the look waits and
+why, in words with no figure (D2a), and hears again when the wait is over. A version waits only while it is the one
+validated, its validation meets the line and the gate has not closed its program (`waiting`: one rule for the gate,
+the House's readers and the page). While it waits it gets no real order in its own family: tuition stays retired, and
+its retired read gives a waiting version no row (`bands.read`); the incubator's reader gives no row to a family whose
+validated version met the line; and the incubator pays no review for it (`incubator.due_reviews`: the gate's own
+review and audit serve when its look can be made). A wait is no verdict, so it is no bar on the PROGRAM: the same code
+and parameters in another family are the incubator's own to judge, as they are for any program at the gate (a held
+program was barred there too: the owner's Oct 2 tightening, which now covers the drift hold and the holdout-read hold).
+`look()` checks both holds again under the store's lock (a look landing meanwhile can lower the power): the next round
+then holds it or makes it wait. Each hold is switched off by its setting set to null (`look_holds` null: both); a
+misread value is its default.
 
 MISSING DATA IS THE GATE IMAGE'S, NOT THE PROGRAM'S (Oct 1, 2026). Before a look the gate checks that its image holds a
 holdout for every root the program needs (`holdout_gap`: the gate boxes' file-name listing and the Gym's own "missing
@@ -79,6 +180,14 @@ no "gym" refusal, no incubator bar. Any other failure counts a try; the third wr
 (`look_failed_three_times`) fires at every count from three on, so a fourth failure (the same program in a revived
 family: its tries are kept by program) is never a silent park. Sept 30: three looks failed on a five-root holdout and
 the third barred the program from the incubator for good, although no verdict was made.
+
+A BRAKED ROUND IS NOT A TRY EITHER (release F1, the captain's B11 of Oct 3, 2026; `braked`, `never_ran`). The budget
+guard's brake (the day's cap, the balance line, no good reading) stops every gate box: a look queued when it lands is
+never taken by a box, and its waiter gives up. That is the day's dollars, not the gate box and not the program. So a
+look, or the pre-filter's read, that never reached a box (no result, no late landing owed, no failed attempt) while
+the guard allows no gate box (the pool's own question, `allowed("gate")`) leaves its tries as they were: the look is
+owed again with its place kept, the `look_failed` event says `braked`, and no "gym" refusal can come of it. A job a
+box took and failed counts as before, and so does one that never ran while the guard allowed a box.
 
 THE NIGHTLY FORWARD: once a day (after `forward.after_hour_utc`), every Candidate, Probe and Sized family's
 banded version runs over the forward days the gate image holds; the trades are the family's `nightly`
@@ -141,7 +250,7 @@ from ..gym.safety import CodeRefused
 from . import evidence
 from . import settings as settings_mod
 from .pool import GymJob, PoolError
-from .researcher import drift_verdict, needs_roots, running_span, version_drift
+from .researcher import drift_verdict, needs_roots, running_span, unit_waiting, version_drift
 from .store import SwarmStore, dumps, structure_text
 
 REVIEW = """You review option-trading programs before they meet sealed data. A program is one Python file (NEEDS, PARAMS,
@@ -214,22 +323,122 @@ def duplicate_words(duplicate: Mapping[str, Any]) -> str:
             "raises the bar for every later look, so only a genuinely different version can be looked at")
 
 
+#: THE PROGRAM BAR's refusal stage, and what the researcher reads of it (D2a: no figure; never where the earlier verdict
+#: was made, nor by which reader: the private `program_bar` event holds that). The bar is on the same code and
+#: parameters; the words say what a changed program gets (both readers again), not that the gate judges the change.
+PROGRAM_BAR_STAGE = "program bar"
+PROGRAM_BAR_WORDS = ("the same program (its code and parameters) was refused before: a program the review, the audit or "
+                     "the gate refused is never read or looked at again, in any family. Change what was refused, not the "
+                     "wording around it: a changed program is a new version, and both readers read it afresh")
+
 #: THE LOOK HOLDS' stages (the module docstring).
 HOLD_DRIFT_STAGE = "look hold (drift)"
 HOLD_POWER_STAGE = "look hold (power)"
+#: ONE HOLDOUT READ A PROGRAM's stage (the module docstring): the pre-filter read its holdout already (`Gate.read_hold`).
+HOLD_READ_STAGE = "look hold (holdout read)"
 #: What the researcher reads of a hold (D2a: never a figure, of Train, Validation or the holdout).
 HOLD_WORDS = {
     HOLD_DRIFT_STAGE: ("the holdout look is held: the program's Train profit leans on market drift (it holds long market "
                        "exposure, and a large share of what it made is what that exposure earns on average days), so a "
                        "holdout pass would mostly measure the market, not the program. No look was spent; a new version "
                        "whose profit does not lean on drift can be looked at"),
-    HOLD_POWER_STAGE: ("the holdout look is held: the program makes too few independent bets for the holdout to judge it, "
-                       "so a look would most likely fail even if its edge were real, and every look raises the bar for "
-                       "every later one. No look was spent; a new version can be looked at once the holdout can judge it"),
+    # THE POWER HOLD IS A WAIT (`WAIT_STAGES`): what the researcher reads while its version waits.
+    HOLD_POWER_STAGE: ("the holdout look waits: the program makes too few independent bets for the holdout to judge it yet, "
+                       "so a look now would most likely fail even if its edge were real, and every look raises the bar for "
+                       "every later one. No look was spent, nothing was refused and the version keeps its place at the "
+                       "gate: it is judged again every round and looked at once the holdout can judge it. A new version "
+                       "that makes more independent bets can be looked at sooner"),
+    HOLD_READ_STAGE: ("the holdout look is held: this program's held-out months were already read once for the forward "
+                      "ladder, and a program gets one read of them. No look was spent; a new version can be looked at"),
 }
 #: The outcome a hold writes (`Gate.outcome`): one of `bands.BAD_OUTCOMES` (`incubator.BAD_OUTCOMES`), so, as a failed look's
-#: does, it ends the version's execution tuition and bars its program from the incubator.
+#: does, it ends the version's execution tuition and bars its program from the incubator. A wait writes none.
 HOLD_OUTCOME = "held"
+#: THE POWER HOLD IS A WAIT, NOT A BAR (release F1; the module docstring): the hold stages that close nothing. A version
+#: whose FIRST hold is one of these waits (`Gate.wait_look`); with the drift hold firing too the stage is the drift
+#: hold's, which stays final.
+WAIT_STAGES = frozenset({HOLD_POWER_STAGE})
+#: A waiting version's gate place, in its family's state: {"sha", "n", "stage", "at" (when it first waited)}. Kept as
+#: the record that the program waited (one event a version); whether it waits NOW is `waiting`'s to say.
+LOOK_WAIT = "look_wait"
+#: What the researcher reads when its version's wait is over (D2a: no figure).
+WAIT_OVER_WORDS = "waiting (the holdout can judge it now: its review, its audit and its one holdout look come next)"
+
+#: THE FAST LANE (release F1, the module docstring): the sealed holdout look is the route to Probe. False is evidence
+#: v3's own gate (a validated version goes to practice, and the pre-filter reads for the ladder), reached by
+#: `Gate(sealed_looks=False)` in its own tests. A money route's switch: code in a protected file, never a setting.
+SEALED_LOOKS = True
+#: A validated version's gate place under evidence v3's own gate: closed to practice (`_to_practice`).
+PRACTICE_OUTCOME = "practice"
+PRACTICE_WORDS = ("validated: the forward ladder judges it now on its live practice record (no holdout look is made); "
+                  "its practice cohort, once frozen, is its program for good")
+#: THE PRE-FILTER's key-values (the House writes the requests, the gate the results; `league/live/ladder.py`).
+PREFILTER_REQUESTS = "ladder_prefilter_requests"
+PREFILTER_KEY = "ladder_prefilter:"
+PREFILTER_TRIES = 3
+#: The seed of the pre-filter's bootstrap: this, then the program's run sha.
+PREFILTER_SEED = "prefilter:"
+#: ONE HOLDOUT READ A PROGRAM: what the pre-filter's record says of a program the gate looked at, or is looking at.
+PREFILTER_LOOKED = "the gate looked at this program (its one holdout look): the pre-filter never reads its holdout again"
+PREFILTER_LOOKING = "a holdout look at this program is in flight: no second read of its holdout is made beside it"
+
+
+def prefilter_level() -> float | None:
+    """THE PRE-FILTER'S LINE's level: the constitution's `options_money.ladder.prefilter_p`, as the ladder reads its
+    table (`league.live.ladder.Rules`); None on a money table that is refused (no read is made for a ladder that
+    judges nothing)."""
+    from ..live.ladder import Rules
+
+    try:
+        return Rules.from_constitution().prefilter_p
+    except ValueError:
+        return None
+
+
+def prefilter_judged(record: Mapping[str, Any]) -> bool:
+    """A pre-filter record that answers on THE PRE-FILTER'S LINE: done, naming the level it was judged at."""
+    return record.get("status") == "done" and evidence._num(record.get("level")) is not None
+
+
+def marker_stale(marker: Mapping[str, Any], *, started_at: float, now: float, settings: Mapping[str, Any] | None) -> bool:
+    """A look's marker (`look_inflight`) whose look is not coming: set before the swarm's process started (`started_at`: no
+    Gym job survives its process), or longer ago than a look is given (the run timeout and twenty minutes, at `now`), or
+    at a time that cannot be read. Never raises. ONE RULE for the gate (`Gate.stale`) and for a reader outside the
+    swarm's process (the daily funnel, `league/ops/scoreboard.py` `flying`, which takes the swarm's start from its
+    heartbeat), so the level a page says the next look faces is the level THE POWER HOLD applies."""
+    at = evidence._num(marker.get("at")) or 0.0
+    return at < started_at or now - at > settings_mod.run_timeout(settings) + 1200
+
+
+def waiting(state: Any) -> dict[str, Any] | None:
+    """THE WAIT's marker (`LOOK_WAIT`) while the family's validated version waits at the gate NOW, else None. It waits
+    while the marker names the version validated (`validation_version`), that validation meets the line (a version
+    validated again and found short of it holds no place), the gate has not closed its program (`gated_sha`), no look
+    at it is in flight and its place is not ready (`gate_ready`: the wait is over, or the tournament readied it again,
+    and the gate's round takes it up as any ready version). Never raises. ONE RULE for the gate's round (`Gate.run`),
+    the House's readers (`bands.read`), the incubator's reviews (`incubator.due_reviews`) and the daily funnel's page
+    (`league/ops/scoreboard.py`), so none of them takes a marker that outlived its wait for a version at the gate.
+
+    A VERSION THAT WAITS BEFORE THE GATE FOR ITS UNIT HOLDS NO PLACE AT IT (release F1, where the two waits meet;
+    `researcher.unit_waiting`, THE UNIT ON VALIDATION): a version that waited here for the look's bar and was then
+    validated again with a one-lot unit over what a Probe may hold (or with none stated) waits there, with the
+    tournament, until the limit moves; its marker here is kept (one `look_wait` event a version) and names no place
+    meanwhile, so no round of the gate judges it, pays for it or readies it past that wait. Of two waits the earlier
+    stage's holds."""
+    if not isinstance(state, Mapping):
+        return None
+    wait, line, n = state.get(LOOK_WAIT), state.get("validation_line"), state.get("validation_version")
+    if not isinstance(wait, Mapping) or not isinstance(wait.get("sha"), str) or not wait["sha"]:
+        return None
+    if n is None or isinstance(n, bool) or isinstance(wait.get("n"), bool) or wait.get("n") != n:
+        return None
+    if state.get("gate_ready") or state.get("look_inflight") or state.get("gated_sha") == wait["sha"]:
+        return None
+    if unit_waiting(state) is not None:
+        return None
+    if not isinstance(line, Mapping) or line.get("passed") is not True:
+        return None
+    return dict(wait)
 
 
 def look_hold_settings(settings: Mapping[str, Any]) -> tuple[float | None, float | None]:
@@ -320,12 +529,14 @@ def incubator_stage(stage: str, fid: str, *, incubator: bool = False) -> tuple[s
 
 class Gate:
     def __init__(self, store: SwarmStore, pool: Any, router: Any, settings: Mapping[str, Any], *,
-                 clock: Callable[[], float] = time.time):
+                 clock: Callable[[], float] = time.time, sealed_looks: bool | None = None):
         self.store = store
         self.pool = pool
         self.router = router
         self.settings = settings
         self.clock = clock
+        #: The sealed look is the route (`SEALED_LOOKS`): only evidence v3's own gate's tests switch it off.
+        self.sealed_looks = SEALED_LOOKS if sealed_looks is None else bool(sealed_looks)
         #: The incubator's reads that came back without a final verdict this process, by program: when, so that the
         #: next round reads the others first (one version's repeated error never holds a round's places).
         self.incubator_tried: dict[str, float] = {}
@@ -501,12 +712,104 @@ class Gate:
                                                    "of_look": duplicate.get("seq"), "of_family": duplicate.get("family"),
                                                    "of_version": duplicate.get("version"), "match": duplicate.get("match")})
 
+    # ------------------------------------------------------------------ THE PROGRAM BAR (F1)
+    def program_bar(self, fam: Mapping[str, Any], n: Any, sha: str) -> str | None:
+        """THE PROGRAM BAR ON THE LOOK ROUTE (the module docstring): the verdict on record against the program of version
+        `n` of `fam` (program `sha`), in any family and version, or None: `incubator.look_route_bar` (the refusal rows,
+        the recorded bars, the reviews), and a verdict's bar this gate still owes the store (`bars_owed`: an error kept
+        it out). A held look and the "gym" refusal are none. Operator-only words: the researcher hears
+        `PROGRAM_BAR_WORDS`."""
+        from . import incubator
+
+        for (_, owed_sha), (_, why) in self.bars_owed.items():
+            if owed_sha == sha and incubator.verdict_words(why):
+                return str(why)
+        return incubator.look_route_bar(self.store, str(fam["id"]), int(n), sha)
+
+    def refuse_barred(self, fam: Mapping[str, Any], n: int, sha: str, why: str, out: dict[str, Any]) -> None:
+        """THE PROGRAM BAR's refusal, recorded as every gate refusal is (`refuse`, stage "program bar"), then one private
+        `swarm.gate` event naming the earlier verdict. No look row, no try, no review, no audit, no sealed read."""
+        self.refuse(fam, n, sha, PROGRAM_BAR_STAGE, [PROGRAM_BAR_WORDS], out)
+        self.store.event("swarm.gate", fam["id"], {"action": "program_bar", "version": n, "sha": sha[:12], "bar": why})
+
+    def program_unread(self, fam: Mapping[str, Any], n: Any) -> str | None:
+        """THE BAR WAITS ON A RECORD IT CANNOT READ (the module docstring): why the gate cannot tell whether a verdict is
+        on record against the program of version `n` of `fam`, or None (`incubator.look_route_unread`: the state, or
+        the verdict records, of a family holding it). Asked after `program_bar`: a verdict that can be read refuses."""
+        from . import incubator
+
+        return incubator.look_route_unread(self.store, str(fam["id"]), int(n))
+
+    def wait_unread(self, fam: Mapping[str, Any], n: int, sha: str, why: str, out: dict[str, Any]) -> None:
+        """A version that waits at the gate on a record the program bar cannot read: listed under `waiting`, nothing
+        paid, nothing opened, nothing refused, its gate place kept. One `swarm.status` alert per program and reason (kv
+        `gate_unread:<sha>`), never one a round; said again each day it still waits."""
+        out["waiting"].append(fam["id"])
+        seen = self.store.get(f"gate_unread:{sha}")
+        if isinstance(seen, Mapping) and seen.get("why") == why and \
+                self.clock() - (evidence._num(seen.get("at")) or 0.0) < 86400.0:
+            return
+        self.store.put(f"gate_unread:{sha}", {"why": why, "at": self.clock()})
+        self.store.event("swarm.status", fam["id"], {
+            "action": "program_bar_unread", "alert": True, "version": n, "sha": sha[:12], "why": why,
+            "text": (f"{fam['id']} v{n} is at the gate and {why}: a verdict against its program may be on that record, "
+                     "so the gate reads nothing and makes no look for it until the record reads again. Nothing was "
+                     "refused and its gate place is kept. Repair the record (the family's state in swarm.sqlite)")})
+
+    # ------------------------------------------------------------------ A BRAKED ROUND IS NOT A TRY (B11)
+    def braked(self) -> bool:
+        """THE GUARD'S BRAKE as the pool asks it for a gate box (`pool.GymPool.allowed`, which the swarm wires to
+        `guard.SailGuard.allows`): True while the guard allows none (the day's cap, the balance line, no good reading).
+        False for a pool with no such question, or one that fails to answer: a try is then counted, as before."""
+        allowed = getattr(self.pool, "allowed", None)
+        if not callable(allowed):
+            return False
+        try:
+            return not allowed("gate")
+        except Exception:  # noqa: BLE001 - no answer is no brake
+            return False
+
+    def never_ran(self, job: Any) -> bool:
+        """A BRAKED ROUND IS NOT A TRY (the module docstring): gate job `job` never reached a box (no result, no late
+        landing owed, no failed attempt on a box) and the guard allows no gate box now. Its failure is the day's
+        dollars', not the gate box's and not the program's."""
+        return bool(getattr(job, "result", None) is None and getattr(job, "late", None) is None
+                    and not int(getattr(job, "attempts", 0) or 0) and self.braked())
+
+    # ------------------------------------------------------------------ looks really in flight
+    def stale(self, marker: Mapping[str, Any]) -> bool:
+        """A look's marker (`look_inflight`) whose look is not coming: set before this process started (no Gym job
+        survives its process), or longer ago than a look is given (the run timeout and twenty minutes), or at a time
+        that cannot be read (never raising: a look is judged while other families' markers are read). The round owes
+        such a look again (`run`). The rule itself is `marker_stale`, which the daily funnel's page reads too."""
+        return marker_stale(marker, started_at=self.started_at, now=self.clock(), settings=self.settings)
+
+    def flying_elsewhere(self, fid: Any) -> list[str]:
+        """The families other than `fid` with a holdout look REALLY in flight (the module docstring, THE GATE 3): the
+        looks THE POWER HOLD and the Holm count take as failed ones. A stale marker (`stale`) is no look: counted, it
+        would judge a look at a stricter level than the looks made warrant, and a look's verdict is final."""
+        return [other for other, marker in self.store.looks_inflight() if other != str(fid) and not self.stale(marker)]
+
+    # ------------------------------------------------------------------ ONE HOLDOUT READ A PROGRAM (F1)
+    def read_hold(self, sha: str) -> dict[str, Any] | None:
+        """ONE HOLDOUT READ A PROGRAM (the module docstring): the hold on a look at program `sha` whose holdout the
+        pre-filter already read (its `ladder_prefilter:<sha>` record is done, whatever line or bundle it was judged on),
+        as `look_hold` gives one, or None. No setting switches it off."""
+        record = self.store.get(PREFILTER_KEY + str(sha))
+        if not isinstance(record, Mapping) or record.get("status") != "done":
+            return None
+        return {"stage": HOLD_READ_STAGE, "holds": [HOLD_READ_STAGE],
+                "figures": {"prefilter": {"at": record.get("at"), "bundle": record.get("ran_bundle") or record.get("bundle"),
+                                          "image": record.get("image"), "held": True}}}
+
     # ------------------------------------------------------------------ THE LOOK HOLDS (L6)
     def look_hold(self, fam: Mapping[str, Any], n: Any) -> dict[str, Any] | None:
         """THE LOOK HOLDS (the module docstring) on version `n` of `fam` (its state as read: `validation_numbers` must be
-        version `n`'s): {"stage", "holds" (every hold that fired, the drift hold first), "figures"} when a look at it is
-        held, else None. "figures" are operator-only: the drift fit's beta, alpha, drift and share, and the power with
-        its Sharpe, sessions, Holm level and looks counted. Each hold is skipped while its setting is null."""
+        version `n`'s): {"stage", "holds" (every hold that fired, the drift hold first), "figures"} when no look at it
+        is made now, else None: held for good when the stage is the drift hold's, a WAIT when it is the power hold's
+        (`WAIT_STAGES`: the power hold alone fired). "figures" are operator-only: the drift fit's beta, alpha, drift and
+        share, and the power with its Sharpe, sessions, Holm level and looks counted. Each hold is skipped while its
+        setting is null."""
         drift_share, min_power = look_hold_settings(self.settings)
         if drift_share is None and min_power is None:
             return None
@@ -525,7 +828,7 @@ class Gate:
             sharpe = (state.get("validation_numbers") or {}).get("sharpe_daily") if state.get("validation_version") == n \
                 else None
             previous = [x["p_value"] for x in self.store.looks() if x["p_value"] is not None]
-            flying = [other for other, _ in self.store.looks_inflight() if other != str(fam["id"])]
+            flying = self.flying_elsewhere(fam["id"])
             level = evidence.holm_level(previous + [1.0] * len(flying))  # a look in flight elsewhere: a failed one
             sessions = holdout_sessions()
             power = evidence.holdout_power(sharpe, sessions, level)
@@ -553,6 +856,14 @@ class Gate:
         self.store.event("swarm.gate", fid, {"action": "look_hold", "version": n, "sha": sha[:12], "stage": stage,
                                              "holds": list(hold.get("holds") or [stage]),
                                              "_figures": hold.get("figures")})  # the figures stay private (underscore)
+        if stage == HOLD_READ_STAGE:
+            # It should never happen while the sealed look is the route (no pre-filter read is made then): the owner's.
+            self.store.event("swarm.status", fid, {
+                "action": "holdout_read_before_look", "alert": True, "version": n, "sha": sha[:12],
+                "text": (f"{fid} v{n} came to the gate for its holdout look, and the pre-filter already read its program's "
+                         f"holdout for the forward ladder (kv {PREFILTER_KEY}{sha[:12]}...): a program gets one read of the "
+                         "holdout, so no look is made and the version is held. Find what ran the pre-filter while the "
+                         "sealed look is the route (gate.SEALED_LOOKS)")})
         if not self.store.compare_and_set_state(fid, {"validation_version": n}, gated_sha=sha, gate_ready=False,
                                                 dormant_cycles=0):
             return
@@ -560,10 +871,40 @@ class Gate:
         self.tell(fid, words, verdict=True)
         out["look_held"].append(fid)
 
+    def wait_look(self, fam: Mapping[str, Any], n: int, sha: str, hold: Mapping[str, Any], out: dict[str, Any]) -> None:
+        """THE POWER HOLD IS A WAIT, NOT A BAR (the module docstring): version `n` of `fam` (program `sha`), held for
+        power alone, keeps its gate place and is judged again next round. Nothing a hold writes is written: no
+        `look_holds` row, no outcome, no incubator bar, no refusal row, no `gated_sha`; no look, no try, no review, no
+        audit, no sealed read. The first time the version waits, and only if it is still the one validated: its marker
+        (`LOOK_WAIT`) with `gate_ready` cleared (the family's share and its retirement rules are a Gym family's while
+        it waits; the dormant count restarts with the place, as a hold's does), one private `swarm.gate` event
+        (`look_wait`, the figures under `_figures`) and the researcher's status line. A version that waited last round
+        too writes nothing. One the tournament readied again while it waits (a validation judged again) has its
+        `gate_ready` cleared again and is told again, with no second event."""
+        fid, stage = str(fam["id"]), str(hold["stage"])
+        state = fam.get("state") or {}
+        marker = state.get(LOOK_WAIT)
+        known = isinstance(marker, Mapping) and marker.get("sha") == sha and marker.get("n") == n
+        if known and not state.get("gate_ready"):
+            out["look_waiting"].append(fid)
+            return  # it waited last round too: judged again, nothing written
+        values: dict[str, Any] = {"gate_ready": False, "dormant_cycles": 0}
+        if not known:
+            values[LOOK_WAIT] = {"sha": sha, "n": n, "stage": stage, "at": self.clock()}
+        if not self.store.compare_and_set_state(fid, {"validation_version": n}, **values):
+            return  # a newer validation landed meanwhile: this version holds no place
+        out["look_waiting"].append(fid)
+        if not known:
+            self.store.event("swarm.gate", fid, {"action": "look_wait", "version": n, "sha": sha[:12], "stage": stage,
+                                                 "holds": list(hold.get("holds") or [stage]),
+                                                 "_figures": hold.get("figures")})  # the figures stay private (underscore)
+        self.tell(fid, HOLD_WORDS[stage], verdict=True)
+
     # ------------------------------------------------------------------ one round
     def run(self) -> dict[str, Any]:
         self.store.put("gate_at", self.clock())
-        out: dict[str, Any] = {"looked": [], "refused": [], "waiting": [], "held": [], "look_held": []}
+        out: dict[str, Any] = {"looked": [], "refused": [], "waiting": [], "held": [], "look_held": [], "look_waiting": [],
+                               "practice": []}
         self._incubator_owed()  # a verdict an error kept from its bar last round: recorded first
         self._incubator_sweep()  # a look that landed, or a demotion, since the last round: its mark goes first
         if self.alarm():
@@ -573,13 +914,11 @@ class Gate:
                                                       "passes": sum(1 for x in self.store.looks() if x["passed"])})
             out["alarm"] = True
             return out
-        limit = settings_mod.run_timeout(self.settings) + 1200
         for fam in self.store.families():
             state = fam.get("state") or {}
             inflight = state.get("look_inflight") or {}
             if inflight.get("sha"):
-                at = float(inflight.get("at") or 0)
-                if at < self.started_at or self.clock() - at > limit:
+                if self.stale(inflight):
                     # Its job died with a process (no Gym job survives one), or never came back: the look is owed again,
                     # if its version is still the one validated (`owe`); a superseded version's marker is just dropped.
                     self.owe(fam["id"], int(inflight.get("n") or 0), str(inflight["sha"]), marker=inflight)
@@ -587,7 +926,15 @@ class Gate:
                     state = fam.get("state") or {}
             if state.get("look_inflight"):
                 continue  # one look per family in flight; its reservation must survive until it resolves
-            if fam.get("retired_at") or fam["band"] != "gym" or not state.get("gate_ready"):
+            # THE POWER HOLD IS A WAIT: a waiting version keeps its place under its own marker, with `gate_ready` cleared
+            # (`wait_look`), and is judged again here every round, from the top.
+            wait = waiting(state)
+            if fam.get("retired_at") or fam["band"] != "gym" or not (state.get("gate_ready") or wait is not None):
+                continue
+            if unit_waiting(state) is not None:
+                # THE UNIT ON VALIDATION (`researcher.unit_waiting`): it waits BEFORE the gate, the tournament's to send on
+                # when the limit moves (`Tournament.release_unit` clears the mark as it readies the place). A belt: no
+                # writer leaves a ready place beside that mark, and no review, audit or look is spent on one that did.
                 continue
             if state.get("gate_hold"):
                 # THE OPERATOR'S HOLD (`SwarmStore.hold_gate`): nothing of it is looked at (no review, audit or look), and
@@ -607,6 +954,11 @@ class Gate:
                 continue  # the gate is done with it (its look landed, or it was refused)
             if (state.get("look_inflight") or {}).get("sha") == sha:
                 continue  # its look is in flight
+            if wait is not None and wait.get("sha") != sha:
+                continue  # a marker that names another program than the version validated: no place (a belt)
+            if not self.sealed_looks:
+                self._to_practice(fam, int(n), version, sha, out)  # EVIDENCE V3: the forward ladder judges it
+                continue
             duplicate = self.duplicate_look(fam, n, sha)
             if duplicate is not None:  # THE DUPLICATE LOOK, before anything is asked of the version
                 if duplicate["inflight"]:
@@ -616,6 +968,20 @@ class Gate:
                     self.store.compare_and_set_state(fam["id"], {"validation_version": n}, gated_sha=sha, gate_ready=False)
                 else:
                     self.refuse_duplicate(fam, n, sha, duplicate, out)
+                continue
+            # THE PROGRAM BAR: a verdict on record anywhere, before anything is asked or paid. The family's own failed
+            # review of this very program under the current contract (a verdict the gate holds and has not refused on
+            # yet: an operator's hold landed between its stages) refuses it below, at its own stage, with its reasons.
+            held = state.get("review")
+            own = (isinstance(held, Mapping) and held.get("sha") == sha and held.get("verdict") != "pass"
+                   and held.get("contract_sha") == review_contract()["sha256"])
+            barred = None if own else self.program_bar(fam, n, sha)
+            if barred is not None:
+                self.refuse_barred(fam, int(n), sha, barred, out)
+                continue
+            unread = None if own else self.program_unread(fam, n)
+            if unread is not None:  # a holder's record cannot be read: no refusal, and nothing read past it
+                self.wait_unread(fam, int(n), sha, unread, out)
                 continue
             try:
                 check_experiment(version["code"], version.get("params") or {})
@@ -635,10 +1001,28 @@ class Gate:
                 else:
                     out["waiting"].append(fam["id"])
                 continue
-            hold = self.look_hold(fam, n)
-            if hold is not None:  # THE LOOK HOLDS: after every free check that refuses, before anything is paid or opened
-                self.hold_look(fam, int(n), sha, hold, out)
+            # ONE HOLDOUT READ A PROGRAM, then THE LOOK HOLDS: after every free check that refuses, before anything is
+            # paid or opened.
+            hold = self.read_hold(sha) or self.look_hold(fam, n)
+            if hold is not None:
+                if hold["stage"] in WAIT_STAGES:
+                    self.wait_look(fam, int(n), sha, hold, out)  # THE POWER HOLD IS A WAIT, NOT A BAR: judged again next round
+                else:
+                    self.hold_look(fam, int(n), sha, hold, out)
                 continue
+            if wait is not None:
+                # THE WAIT IS OVER: the power hold no longer fires on it (and nothing above refused or held it). Its place
+                # is ready again, and its review, its audit and its one look follow in this round. Under the store's
+                # lock, and only while it still waits as it was read: a validation judged again meanwhile and found
+                # short of the line (the tournament's round runs beside this one) leaves it no place to make ready.
+                with self.store.atomic():
+                    current = (self.store.family(fam["id"]) or {}).get("state") or {}
+                    ready = waiting(current) == wait and self.store.compare_and_set_state(
+                        fam["id"], {"validation_version": n}, gate_ready=True)
+                if not ready:
+                    continue
+                self.tell(fam["id"], WAIT_OVER_WORDS)
+                state = {**state, "gate_ready": True}
             cached = state.get("review") or {}
             review = cached if cached.get("sha") == sha and cached.get("contract_sha") == review_contract()["sha256"] else None
             if review is None:  # the review, once a version (kept, so an audit asked again does not redo it)
@@ -724,6 +1108,10 @@ class Gate:
                 out["looked"].append({"family": fam["id"], "passed": look})
             if self.alarm():
                 break
+        if not self.sealed_looks and not self.alarm():
+            read = self.prefilter_round()  # THE PRE-FILTER: at most one free holdout read a round
+            if read:
+                out["prefilter"] = read
         self._incubator_owed()  # before any incubator read: a program owed a bar is never read or passed meanwhile
         if not self.alarm():  # the alarm stops the gate: no review of any kind starts
             incubated = self._incubator_round()
@@ -732,6 +1120,119 @@ class Gate:
         else:
             self._incubator_sweep()  # never a read: the round's verdicts still take their marks by its end
         return out
+
+    # ------------------------------------------------------------------ EVIDENCE V3: practice and the pre-filter
+    def _to_practice(self, fam: Mapping[str, Any], n: int, version: Mapping[str, Any], sha: str,
+                     out: dict[str, Any]) -> None:
+        """A validated version's gate place under evidence v3 (the module docstring): the experiment contract and the
+        drift screen refuse as before (`refuse`: the row, the incubator bar, the outcome, the researcher told); otherwise
+        the place closes to practice, only if the version is still the one validated. No review, audit or look."""
+        try:
+            check_experiment(version["code"], version.get("params") or {})
+        except CodeRefused as exc:
+            self.refuse(fam, n, sha, "experiment contract", [str(exc)], out)
+            return
+        screen = drift_verdict(self.store, fam, n, self.settings)
+        if screen is not None and not screen["passed"]:
+            if screen["known"]:
+                self.refuse(fam, n, sha, "drift screen", [screen["why"]], out)
+            else:
+                out["waiting"].append(fam["id"])  # figures owed: it waits, as before
+            return
+        if not self.store.compare_and_set_state(fam["id"], {"validation_version": n}, gated_sha=sha, gate_ready=False,
+                                                dormant_cycles=0):
+            return
+        self.outcome(fam["id"], sha, PRACTICE_OUTCOME)
+        self.tell(fam["id"], PRACTICE_WORDS, verdict=True)
+        self.store.event("swarm.gate", fam["id"], {"action": "to_practice", "version": n, "sha": sha[:12]})
+        out["practice"].append(fam["id"])
+
+    def prefilter_round(self) -> dict[str, Any] | None:
+        """THE PRE-FILTER (the module docstring): the House's open requests, oldest first; one that cannot be read now
+        is recorded as waiting (or failed) and the next is tried; the first that can is read once on a gate box and its
+        result written for the ladder. At most one read a round; None when nothing was asked or changed."""
+        requests = self.store.get(PREFILTER_REQUESTS) or {}
+        if not isinstance(requests, Mapping) or not requests:
+            return None
+        level = prefilter_level()
+        if level is None:
+            return None
+        image = str(self.settings.get("gym", {}).get("gate_checkpoint") or "")
+        bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
+        noted: dict[str, Any] | None = None
+        for sha, ask in sorted(requests.items(), key=lambda kv: (str((kv[1] or {}).get("day") or ""), kv[0])):
+            if not isinstance(ask, Mapping):
+                continue
+            done = self.store.get(PREFILTER_KEY + str(sha)) or {}
+            if done.get("bundle") == ask.get("bundle") and (done.get("status") == "failed" or prefilter_judged(done)):
+                continue  # answered on the line, on the bundle asked for (or out of tries on it)
+            fid, n = str(ask.get("family") or ""), ask.get("version")
+            fam = self.store.family(fid)
+            version = self.store.version(fid, n) if fam is not None else None
+            why = None
+            status = "waiting"
+            if self.store.looked(str(sha)):
+                status, why = "failed", PREFILTER_LOOKED  # ONE HOLDOUT READ A PROGRAM: the look was it, in any family
+            elif any(marker.get("sha") == sha for _, marker in self.store.looks_inflight()):
+                why = PREFILTER_LOOKING
+            elif fam is None or version is None or not version.get("code") or run_sha(version) != sha:
+                status, why = "failed", "the store holds no version of this program to read"
+            elif not image:
+                why = "the gate image is not ready yet"
+            elif bundle is not None and ask.get("bundle") != bundle:
+                why = "the gate runs another Gym bundle than the House asked for"
+            elif self.holdout_gap(fam, version, sha):
+                why = "the gate image lacks a root's holdout"
+            if why is not None:
+                noted = self._prefilter_write(sha, ask, done, status=status, why=why) or noted
+                continue
+            job = GymJob(family=fid, version=int(n), code=version["code"], params=version.get("params") or {},
+                         window="holdout", roots=needs_roots(version["code"], fam["roots"]),
+                         gate=f"pre-filter {fid} v{n}", purpose="prefilter", priority=8.0)
+            try:
+                result = self.pool.run(job, timeout=settings_mod.run_timeout(self.settings) + 600)
+            except PoolError as exc:
+                missing = getattr(job, "missing", None)
+                if not missing and self.never_ran(job):  # A BRAKED ROUND IS NOT A TRY: it waits, its tries as they were
+                    return self._prefilter_write(sha, ask, done, status="waiting",
+                                                 why="the budget guard allowed no gate box") or noted
+                return self._prefilter_write(sha, ask, done, status="waiting", tried=not missing,
+                                             why=f"the gate box could not read it ({str(exc)[:160]})") or noted
+            if result.get("status") != "ok":
+                return self._prefilter_write(sha, ask, done, status="waiting", tried=True,
+                                             why=f"the read ended {result.get('status')}") or noted
+            self.store.add_run(fid, int(n), result, window="holdout", stress=1.0, purpose="prefilter")
+            line = evidence.prefilter_line(result, level=level, seed=PREFILTER_SEED + str(sha))
+            return self._prefilter_write(sha, ask, done, status="done", line=line,
+                                         ran_bundle=result.get("gym_bundle"), ran_image=result.get("gym_image"))
+        return noted
+
+    def _prefilter_write(self, sha: str, ask: Mapping[str, Any], done: Mapping[str, Any], *, status: str,
+                         why: str | None = None, tried: bool = False, line: Mapping[str, Any] | None = None,
+                         ran_bundle: Any = None, ran_image: Any = None) -> dict[str, Any] | None:
+        """The pre-filter's record for the ladder (the gate is its only writer) and one private `swarm.gate` event; None
+        (nothing written) when a waiting record would say again what it says. `line`: a done read's verdict on THE
+        PRE-FILTER'S LINE (`evidence.prefilter_line`)."""
+        same = done.get("bundle") == ask.get("bundle")
+        tries = (int(done.get("tries") or 0) if same else 0) + int(bool(tried))
+        if status == "waiting" and tries >= PREFILTER_TRIES:
+            status = "failed"
+        if status != "done" and same and done.get("status") == status and done.get("why") == why \
+                and int(done.get("tries") or 0) == tries:
+            return None
+        record = {"status": status, "family": ask.get("family"), "version": ask.get("version"), "bundle": ask.get("bundle"),
+                  "ran_bundle": ran_bundle, "image": ran_image, "tries": tries, "why": why, "at": self.clock()}
+        line = dict(line or {})
+        passed = line.get("passed") is True
+        if status == "done":
+            record.update(passed=passed, pnl=line.get("pnl"), p=line.get("p"), level=line.get("level"))
+        self.store.put(PREFILTER_KEY + str(sha), record)
+        self.store.event("swarm.gate", ask.get("family"), {
+            "action": "prefilter", "version": ask.get("version"), "sha": str(sha)[:12], "status": status,
+            **({"passed": passed} if status == "done" else {"why": why}),
+            # the figures stay private (underscore)
+            "_figures": {"pnl": line.get("pnl"), "p": line.get("p")} if status == "done" else None})
+        return {"sha": str(sha)[:12], "status": status, **({"passed": passed} if status == "done" else {})}
 
     # ------------------------------------------------------------------ the incubator's review and audit
     def _incubator_bar(self, fid: str, n: int | None, sha: str, *, why: str | None = None,
@@ -979,10 +1480,15 @@ class Gate:
             current = self.store.family(fam["id"]) or {}
             if current.get("retired_at") or (current.get("state") or {}).get("gate_hold") or self.store.looked(sha) or \
                     self.store.lineage_looks(fam["id"], include_inflight=True) >= evidence.LOOKS_PER_LINEAGE or \
-                    self.duplicate_look(current, n, sha) is not None or self.look_hold(current, n) is not None:
+                    self.duplicate_look(current, n, sha) is not None or self.program_bar(current, n, sha) is not None or \
+                    self.program_unread(current, n) is not None or \
+                    self.read_hold(sha) is not None or self.look_hold(current, n) is not None:
                 # (held by the operator meanwhile: no look is spent, gate_ready stays; a look it would repeat landed or went
-                # out meanwhile: THE DUPLICATE LOOK refuses it next round, or waits for it; a look that landed or went out
-                # meanwhile lowered its power: THE LOOK HOLDS hold it next round)
+                # out meanwhile: THE DUPLICATE LOOK refuses it next round, or waits for it; a verdict against its program
+                # landed meanwhile, in any family: THE PROGRAM BAR refuses it next round; a holder's record stopped
+                # reading meanwhile: it waits next round, with the alert; its holdout was read by the pre-filter: held
+                # next round, with the alert; a look that landed or went out meanwhile lowered its power: THE LOOK
+                # HOLDS make it wait next round, with its place kept)
                 return None
             if not self.store.compare_and_set_state(fam["id"], {"validation_version": n, "validation_image": image, "validation_bundle": bundle,
                                                                "look_inflight": None}, gate_ready=False, look_inflight=marker):
@@ -998,10 +1504,12 @@ class Gate:
                                                                   missing=getattr(job, "missing", None)))
         except PoolError as exc:
             missing = getattr(job, "missing", None)
+            braked = not missing and self.never_ran(job)  # A BRAKED ROUND IS NOT A TRY: the guard allowed no gate box
             self.store.event("swarm.gate", fam["id"], {"action": "look_failed", "version": n, "error": str(exc)[:300],
-                                                       **({"missing_data": list(missing)} if missing else {})})
+                                                       **({"missing_data": list(missing)} if missing else {}),
+                                                       **({"braked": True} if braked else {})})
             if job.result is None and job.late is None:  # it never ran (or the Gym failed it): the look is still owed
-                self.owe(fam["id"], n, sha, marker=marker, missing=missing)
+                self.owe(fam["id"], n, sha, marker=marker, missing=missing, braked=braked)
             return None
         return self.finish(fam["id"], version, sha, result, validation_sharpe=vsharpe, validation_image=image,
                            validation_bundle=bundle, marker=marker)
@@ -1014,19 +1522,20 @@ class Gate:
         return self.store.compare_and_set_state(fid, {"look_inflight": marker}, look_inflight=None)
 
     def owe(self, fid: str, n: int, sha: str, *, marker: Mapping[str, Any] | None = None,
-            missing: Any = None) -> None:
+            missing: Any = None, braked: bool = False) -> None:
         """The look did not happen. Its marker goes; if the version is still the one validated it is owed one again, three
         tries, and after the third it is refused as the Gym could not look (one refusal, never forgotten, and an alert at
         that try and every one after it). A failure for MISSING DATA (`missing`: the roots the gate image lacked) counts no
-        try and is never refused: the image's fault, not the program's (one alert, `holdout_gap`'s). A superseded version
-        is owed nothing: no try is counted, nothing is refused."""
+        try and is never refused: the image's fault, not the program's (one alert, `holdout_gap`'s). Nor does a look
+        the guard's brake kept from a gate box (`braked`: A BRAKED ROUND IS NOT A TRY): its tries stay as they were and
+        its place is ready again. A superseded version is owed nothing: no try is counted, nothing is refused."""
         with self.store.atomic():
             state = (self.store.family(fid) or {}).get("state") or {}
             if marker is not None and state.get("look_inflight") != marker:
                 return  # an old attempt's callback cannot cancel or count a newer attempt
-            self._owe(fid, n, sha, missing=missing)
+            self._owe(fid, n, sha, missing=missing, braked=braked)
 
-    def _owe(self, fid: str, n: int, sha: str, *, missing: Any = None) -> None:
+    def _owe(self, fid: str, n: int, sha: str, *, missing: Any = None, braked: bool = False) -> None:
         self.clear_marker(fid, sha)
         if self.store.looked(sha):
             return
@@ -1036,6 +1545,9 @@ class Gate:
         if missing:
             self.store.compare_and_set_state(fid, {"validation_version": n}, gated_sha=None, gate_ready=True)
             self._missing_alert(fid, n, sha, list(missing), "a look failed for missing data")
+            return
+        if braked:  # A BRAKED ROUND IS NOT A TRY: the place is ready again, the tries count as it was, nothing refused
+            self.store.compare_and_set_state(fid, {"validation_version": n}, gated_sha=None, gate_ready=True)
             return
         tries = int(self.store.get(f"look_tries:{sha}", 0)) + 1
         self.store.put(f"look_tries:{sha}", tries)
@@ -1054,6 +1566,19 @@ class Gate:
                 "text": "the gate box could not make a holdout look three times" if tries == 3 else
                         (f"the gate box could not make this program's holdout look ({tries} tries): the version is parked; "
                          "its program was refused at the third try. Fix the gate, then reset look_tries for it")})
+
+    def holdout_base(self) -> str | None:
+        """THE NAMED GATE BASE (the captain's L6 of Oct 3, 2026): the gate image the owner's `swarm.json` names, which
+        the nightly chain extends. `gym.gate_checkpoint` moves every night: it is the chain's newest checkpoint while
+        the nightly's ready file stands for the named gate (`settings.load`, THE CHAIN'S RULE: `forward.ready`, whose
+        `base_checkpoint` is that named image), and the named image itself otherwise. So "the same holdout" across
+        nights is this name, never the checkpoint id. None when no gate image is set, or for a ready file from before
+        the nightly wrote its base (its chain is proven by data/images.json, which the settings do not carry)."""
+        checkpoint = (self.settings.get("gym") or {}).get("gate_checkpoint")
+        ready = (self.settings.get("forward") or {}).get("ready")
+        if isinstance(ready, Mapping) and ready.get("gate_checkpoint") == checkpoint:
+            return str(ready["base_checkpoint"]) if ready.get("base_checkpoint") else None
+        return str(checkpoint) if checkpoint else None
 
     def holdout_gap(self, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str) -> list[str]:
         """The roots program `version` needs (its NEEDS, as its look would run) that the gate image is known to lack a
@@ -1116,16 +1641,37 @@ class Gate:
         years = float((result.get("summary") or {}).get("days") or 0) / 252.0 * max(1, len(fam["roots"]))
         self.store.add_run(fid, n, result, window="holdout", stress=1.0, purpose="holdout", program_years=years)
         previous = [x["p_value"] for x in self.store.looks() if x["p_value"] is not None]
-        line = evidence.holdout_line(result, validation_sharpe=validation_sharpe, previous_ps=previous, seed=sha)
+        # A look in flight in another family counts as a failed one, as THE POWER HOLD counted it when it let this look
+        # through (`look_hold`): the level this look faces never depends on which of two looks lands first. Really in
+        # flight (`flying_elsewhere`): a dead process's marker is no look.
+        flying = self.flying_elsewhere(fid)
+        line = evidence.holdout_line(result, validation_sharpe=validation_sharpe,
+                                     previous_ps=previous + [1.0] * len(flying), seed=sha)
         self.store.add_look(fid, n, sha, passed=line["passed"], p_value=line["p"], detail=line)
         self.clear_marker(fid, sha)  # only its own: a newer version's look may be in flight
         self.store.compare_and_set_state(fid, {"validation_version": n}, gated_sha=sha)
         self.store.event("swarm.gate", fid, {"action": "look", "version": n, "passed": line["passed"],
-                                             "_line": line})  # the numbers stay private (underscore)
+                                             "_line": line,  # the numbers stay private (underscore)
+                                             "_inflight_elsewhere": len(flying)})
         if not line["numbers"].get("holm_reachable", True):
-            self.store.event("swarm.status", None, {"action": "holm_unreachable", "looks": len(previous) + 1})
-        self.tell(fid, "pass" if line["passed"] else "fail", verdict=True)
-        self.outcome(fid, sha, "passed" if line["passed"] else "failed")
+            self.store.event("swarm.status", None, {"action": "holm_unreachable",
+                                                    "looks": len(previous) + len(flying) + 1})
+        # NO BAND ON A BARRED PROGRAM (the module docstring): `look()` read the bar under the lock before the job went
+        # out; a verdict against the program that landed while the gate box ran is read here, before a pass is banded.
+        # The look is made and counted; its version is refused at the bar, as the round refuses one, and the owner is
+        # told a look was spent on it. (A record that cannot be READ stops no band here: a refusal is never made on one,
+        # and `look()` waited on it before the job went out.)
+        barred = self.program_bar(fam, n, sha) if line["passed"] else None
+        if barred is not None:
+            self.refuse_barred(fam, n, sha, barred, {"refused": []})
+            self.store.event("swarm.status", fid, {
+                "action": "look_passed_barred", "alert": True, "version": n, "sha": sha[:12], "bar": barred,
+                "text": (f"{fid} v{n} passed its holdout look, and a verdict against its program landed while the gate "
+                         f"box ran ({barred}): no band is written and the version is refused at the program bar. The "
+                         "look is made and counted")})
+        else:
+            self.tell(fid, "pass" if line["passed"] else "fail", verdict=True)
+            self.outcome(fid, sha, "passed" if line["passed"] else "failed")
         has_image = callable(getattr(self.pool, "image", None))
         has_bundle = callable(getattr(self.pool, "bundle", None))
         image = self.pool.image("gym") if has_image else None
@@ -1135,8 +1681,8 @@ class Gate:
         # actually produced by the current gate data and engine can promote. Identity-less pools exist in tests only.
         current_holdout = ((not has_image or (gate_image is not None and result.get("gym_image") == gate_image))
                            and (not has_bundle or (bundle is not None and result.get("gym_bundle") == bundle)))
-        if line["passed"] and fam["band"] == "gym" and not fam.get("retired_at") and validation_image == image \
-                and validation_bundle == bundle and current_holdout:
+        if line["passed"] and barred is None and fam["band"] == "gym" and not fam.get("retired_at") \
+                and validation_image == image and validation_bundle == bundle and current_holdout:
             from ..gym import ENGINE_VERSION
             from ..gym.experiment import CONTRACT_VERSION
             from .evaluator import execution_fingerprint
@@ -1145,7 +1691,10 @@ class Gate:
                                  banded_evaluator={"engine": ENGINE_VERSION, "parameter_contract": CONTRACT_VERSION,
                                                    "execution_sha256": execution_fingerprint(),
                                                    "run_sha": sha, "validation_bundle": bundle,
-                                                   "holdout_bundle": result.get("gym_bundle"), "holdout_image": result.get("gym_image")})
+                                                   "holdout_bundle": result.get("gym_bundle"), "holdout_image": result.get("gym_image"),
+                                                   # THE NAMED GATE BASE the look ran on (`current_holdout`: its image is
+                                                   # the gate's now): the checkpoint id above moves every night.
+                                                   "holdout_base": self.holdout_base()})
             self.store.set_band(fid, "candidate", reason="passed its holdout look")
         return bool(line["passed"])
 
@@ -1344,5 +1893,9 @@ class Gate:
 
 
 __all__ = ["Gate", "run_sha", "incubator_stage", "REVIEW", "DUPLICATE_STAGE", "VALIDATION_IDENTITY", "validation_identity",
-           "duplicate_words", "HOLD_DRIFT_STAGE", "HOLD_POWER_STAGE", "HOLD_WORDS", "HOLD_OUTCOME", "look_hold_settings",
-           "holdout_sessions", "sessions_between", "reader", "same_reader"]
+           "duplicate_words", "PROGRAM_BAR_STAGE", "PROGRAM_BAR_WORDS", "HOLD_DRIFT_STAGE", "HOLD_POWER_STAGE",
+           "HOLD_READ_STAGE", "HOLD_WORDS", "HOLD_OUTCOME", "WAIT_STAGES", "LOOK_WAIT", "WAIT_OVER_WORDS", "waiting",
+           "look_hold_settings", "marker_stale",
+           "holdout_sessions", "sessions_between", "reader", "same_reader", "SEALED_LOOKS", "PRACTICE_OUTCOME",
+           "PRACTICE_WORDS", "PREFILTER_REQUESTS", "PREFILTER_KEY", "PREFILTER_TRIES", "PREFILTER_SEED", "PREFILTER_LOOKED",
+           "PREFILTER_LOOKING", "prefilter_level", "prefilter_judged"]

@@ -21,7 +21,7 @@ from league.swarm.gate import Gate
 from league.swarm.models import ModelError, ModelRouter
 from league.swarm.settings import DEFAULTS
 from league.swarm.store import SwarmStore
-from league.tests.swarm_fakes import Clock, FakeMonth
+from league.tests.swarm_fakes import Clock, FakeMonth, unbound_budget
 from league.tests.test_claude import FakeStream, events, message
 from league.tests.test_frontier import GATEWAY, FakeOpener, FakeResponse, ok
 
@@ -54,7 +54,7 @@ class ClaudeRouting(unittest.TestCase):
         self.settings = copy.deepcopy(DEFAULTS)
         # THE BUDGET is not what these tests judge: a paid-model line well above the holds asked here (no block is the
         # floor, and a call that falls from Claude to OpenAI is admitted under that line too).
-        self.settings["budget"] = {"source": "test", "sail_usd_day": 1000.0, "claude_usd_day": 1000.0}
+        self.settings["budget"] = unbound_budget(self)
         self.month = FakeMonth(1000)
         self.meter = FakeClaudeMeter(100)
         self.sail_calls = []

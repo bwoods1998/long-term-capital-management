@@ -9,8 +9,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from league.ops import budget as B
 from league.swarm import settings as S
-from league.swarm.guard import BUDGET_CAUSES, CAUSES, SailGuard, causes_of
+from league.swarm.guard import BUDGET_CAUSES, CAUSES, RESEARCH_KINDS, SailGuard, causes_of, house_line
 from league.swarm.store import SwarmStore
 from league.tests.swarm_fakes import Clock
 
@@ -26,8 +27,9 @@ class GuardCase(unittest.TestCase):
         self.addCleanup(self.store.close)
         self.reading = (118.79, 34.0)
         self.settings = copy.deepcopy(S.DEFAULTS)
-        # A budget too large to bind, so each test meets only the line it is about (the Budget tests set their own).
-        self.settings["budget"] = {"source": "budget.json", "sail_usd_day": 10_000.0, "claude_usd_day": 0.0,
+        # The largest budget there is (the owner's ceiling: a block that says more is held to it), and nothing booked
+        # today, so each test meets only the line it is about (the Budget tests set their own).
+        self.settings["budget"] = {"source": "budget.json", "sail_usd_day": B.ceiling_usd_day("sail"), "claude_usd_day": 0.0,
                                    "fixed_sail_usd_day": None}
 
     def guard(self):
@@ -44,6 +46,33 @@ class Defaults(GuardCase):
         self.reading = (31.0, 31.0)
         g.check()
         self.assertFalse(g.allows())
+
+    def test_the_line_and_its_release_are_one_arithmetic(self):
+        """`house_line`: what `check` brakes and releases by, and what THE BUDGET's Sail reserve is read from
+        (league/ops/budget.py), so the rule's zero point cannot drift from the guard's line."""
+        self.assertEqual(house_line(S.DEFAULTS["guard"]), {"house": 1.0, "line": 32.0, "release": 37.0})
+        self.assertEqual(house_line({}), {"house": 1.0, "line": 32.0, "release": 37.0}, "the guard's own defaults")
+        self.assertEqual(house_line(None), house_line({}))
+        self.assertEqual(house_line({"house_burn_usd_day": 2.0, "margin_usd": 10.0, "release_margin_usd": 1.0}, 34.0),
+                         {"house": 34.0, "line": 78.0, "release": 79.0}, "a measured burn over the configured one")
+        self.assertEqual(house_line({"house_burn_usd_day": 2.0}, 0.5)["house"], 2.0, "never below the configured burn")
+        # (Each line is over the last one's release line: the balance only rises, so Sail's meter books nothing.)
+        for cfg, reading in (({"margin_usd": 12.0, "release_margin_usd": 3.0}, 5.0), ({}, 5.0),
+                             ({"measured_burn": True, "house_burn_usd_day": 2.0}, 34.0)):
+            self.settings["guard"] = {**S.DEFAULTS["guard"], **cfg}
+            lines = house_line(self.settings["guard"], reading if cfg.get("measured_burn") else 0.0)
+            self.reading = (lines["line"] - 0.01, reading)
+            g = self.guard()
+            out = g.check()
+            self.assertEqual((out["line"], g.causes), (round(lines["line"], 2), ["under_line"]), cfg)
+            self.reading = (lines["release"] - 0.01, reading)
+            self.clock.advance(180)
+            g.check()
+            self.assertEqual(g.causes, ["under_line"], "over the line and under the release line: a braked guard stays")
+            self.reading = (lines["release"], reading)
+            self.clock.advance(180)
+            g.check()
+            self.assertEqual((g.allows(), g.causes), (True, []), cfg)
 
 
 class Guard(GuardCase):
@@ -70,7 +99,9 @@ class Guard(GuardCase):
         self.assertEqual(events[-1]["payload"]["action"], "brake")
 
     def test_the_swarms_own_burn_does_not_count_as_the_houses(self):
+        self.clock.t = T - 16 * 3600  # in the trailing 24 hours and before 00:00 UTC: none of today's budget
         self.store.add_spend("sail_model", 30.0)
+        self.clock.t = T
         self.reading = (80.0, 34.0)
         g = self.guard()
         out = g.check()
@@ -276,6 +307,321 @@ class Budget(GuardCase):
         out = g.check()
         self.assertEqual(out["metered_spent"], 200.0)
         self.assertIsNotNone(self.store.get("burst_started_at"))
+
+
+class Reserve(GuardCase):
+    """THE GATE NEVER WAITS FOR MIDNIGHT: the last tenth of the day's Sail research dollars (at least $0.50) is kept for
+    the tournament's validation round, the gate round and the nightly forward. Researcher cycles, births and the
+    architect stop at the line under it (a hold, no brake); those three go on to the day's cap."""
+
+    #: What `Swarm` asks the guard for: its rounds and the Gym's boxes by the default kind and the box kinds, new research
+    #: by `RESEARCH_KINDS`.
+    GATE = ("any", "gym", "gate", "tournament", "forward")
+
+    def budget(self, sail, fixed=None):
+        self.settings["budget"] = {"source": "budget.json", "sail_usd_day": sail, "claude_usd_day": 2.0,
+                                   "fixed_sail_usd_day": fixed}
+
+    def allowed(self, g):
+        """(the gate's kinds allowed, the research kinds allowed): each all or none."""
+        gate, research = {g.allows(kind) for kind in self.GATE}, {g.allows(kind) for kind in RESEARCH_KINDS}
+        self.assertEqual((len(gate), len(research)), (1, 1))
+        self.assertEqual(g.allows(), g.allows("any"))
+        return gate.pop(), research.pop()
+
+    def actions(self):
+        return [e["payload"]["action"] for e in self.store.events_after(0) if e["kind"] == "swarm.guard"]
+
+    def test_the_reserve_is_a_tenth_of_the_day_and_at_least_fifty_cents(self):
+        from league.ops import budget as B
+
+        self.assertEqual((B.GATE_RESERVE_SHARE, B.GATE_RESERVE_MIN_USD), (0.10, 0.50))
+        self.assertEqual([B.gate_reserve(usd) for usd in (15.0, 7.2, 5.0, 3.0, 0.6, 0.5, 0.4, 0.0)],
+                         [1.5, 0.72, 0.5, 0.5, 0.5, 0.5, 0.4, 0.0], "never more than the day's own dollars")
+        self.assertEqual([B.gate_reserve(bad) for bad in ("lots", None, -1, float("nan"), True)], [0.0] * 5)
+        self.assertEqual(RESEARCH_KINDS, ("research", "architect", "birth", "diagnostician"))
+
+    def test_research_stops_at_ninety_percent_and_the_gate_goes_on_to_the_cap(self):
+        self.budget(15.0)  # the owner's ceiling on Sail: the last $1.50 is the gate's
+        self.reading = (5000.0, 5.0)
+        g = self.guard()
+        self.store.add_spend("gym_box", 9.0)
+        self.store.add_spend("sail_model", 4.49)
+        out = g.check()
+        self.assertEqual((out["gate_reserve_usd"], out["research_held"], out["held"]), (1.5, False, ""))
+        self.assertEqual(self.allowed(g), (True, True), "13.49 of 15.00: everything runs")
+        self.store.add_spend("sail_model", 0.01)
+        self.clock.advance(180)
+        out = g.check()
+        self.assertEqual(self.allowed(g), (True, False), "13.50 of 15.00: no new research, and the gate goes on")
+        self.assertEqual((g.braked, g.reason, g.causes), (False, "", []), "a hold is no brake: no cause, no reason")
+        self.assertEqual(out["held"], "today's Sail research is at its line (13.50 of 15.00): the last 1.50 is kept for "
+                                      "validation, the gate and the nightly forward")
+        saved = self.store.get("guard")
+        self.assertEqual((saved["braked"], saved["research_held"], saved["held"]), (False, True, out["held"]))
+        self.store.add_spend("gym_box", 1.49)  # validation, the look and the forward spend inside the reserve
+        self.clock.advance(180)
+        g.check()
+        self.assertEqual(self.allowed(g), (True, False), "14.99 of 15.00: the gate still runs")
+        self.store.add_spend("gym_box", 0.01)
+        self.clock.advance(180)
+        g.check()
+        self.assertEqual(self.allowed(g), (False, False), "the day's cap: everything stops until 00:00 UTC")
+        self.assertEqual(g.causes, ["research_budget"])
+        self.clock.advance(86400)  # a new UTC day: its own budget and its own reserve
+        g.check()
+        self.assertEqual(self.allowed(g), (True, True))
+        self.assertEqual((g.research_held, g.held), (False, ""))
+        self.assertEqual(self.actions(), ["release", "research_hold", "brake", "release", "research_release"],
+                         "each change is said: the first reading, the hold, the cap, the new day and its hold's end")
+
+    def test_sails_own_meter_holds_research_at_the_same_reserve(self):
+        self.budget(6.0, fixed=2.5)  # the account cap is 8.50; the reserve of a $6 day is $0.60
+        self.reading = (5000.0, 5.0)
+        g = self.guard()
+        g.check()
+        self.reading = (4992.5, 5.0)  # $7.50 metered by Sail today, none of it booked by the swarm
+        self.clock.advance(180)
+        g.check()
+        self.assertEqual(self.allowed(g), (True, True), "7.50 of 8.50: under the line at 7.90")
+        self.reading = (4992.0, 5.0)
+        self.clock.advance(180)
+        out = g.check()
+        self.assertEqual(self.allowed(g), (True, False), "8.00 of 8.50: inside the reserve by Sail's meter")
+        self.assertIn("by Sail's meter (8.00 of 8.50 for the account)", out["held"])
+        self.reading = (4991.5, 5.0)
+        self.clock.advance(180)
+        g.check()
+        self.assertEqual(self.allowed(g), (False, False))
+        self.assertEqual(g.causes, ["account_budget"])
+
+    def test_a_small_day_is_the_gates_first(self):
+        """Under a dollar a day the reserve's fifty cents are most of it; under fifty cents all of it: the research that
+        is left to do is the gate's."""
+        self.reading = (5000.0, 5.0)
+        self.budget(0.6)
+        g = self.guard()
+        g.check()
+        self.assertEqual(self.allowed(g), (True, True))
+        self.store.add_spend("sail_model", 0.10)
+        self.clock.advance(180)
+        g.check()
+        self.assertEqual(self.allowed(g), (True, False), "0.10 of 0.60: the last 0.50 is the gate's")
+        self.budget(0.4)
+        self.clock.advance(86400)
+        out = g.check()
+        self.assertEqual((out["gate_reserve_usd"], self.allowed(g)), (0.4, (True, False)), "nothing spent: all of it is the gate's")
+        self.budget(0.0)
+        self.clock.advance(180)
+        g.check()
+        self.assertEqual((self.allowed(g), g.causes), ((False, False), ["research_budget"]), "no dollars brake at once, as ever")
+
+    def test_a_low_or_unreadable_balance_still_stops_everything(self):
+        self.budget(15.0)
+        self.reading = (40.0, 5.0)  # over the House's line of 32 (and the 37 a braked guard releases at)
+        g = self.guard()
+        self.store.add_spend("gym_box", 14.0)
+        g.check()
+        self.assertEqual(self.allowed(g), (True, False), "inside the reserve: the gate runs")
+        for reading, cause in (((31.5, 5.0), "under_line"), ((None, None), "balance_unreadable")):
+            self.reading = reading
+            self.clock.advance(180)
+            g.check()
+            self.assertEqual((self.allowed(g), g.causes), ((False, False), [cause]), "the House at risk: the gate stops too")
+            self.assertTrue(g.research_held, "the hold stands under the brake: it is the brake that answers")
+            self.reading = (40.0, 5.0)
+            self.clock.advance(180)
+            g.check()
+            self.assertEqual(self.allowed(g), (True, False))
+        # A reading gone stale and a full disk are the same: nothing is allowed, reserve or not.
+        self.clock.advance(float(self.settings["guard"].get("stale_seconds", 600)) + 1)
+        self.assertEqual(self.allowed(g), (False, False))
+        low = SailGuard(self.store, self.settings, lambda: self.reading, clock=self.clock, disk_free=lambda: 1.0 * 2 ** 30)
+        low.check()
+        self.assertEqual((self.allowed(low), low.causes), ((False, False), ["disk"]))
+
+    def test_a_raise_ends_the_hold_and_a_restart_keeps_it(self):
+        self.budget(6.0)
+        self.reading = (5000.0, 5.0)
+        g = self.guard()
+        self.store.add_spend("sail_model", 5.5)
+        g.check()
+        self.assertEqual(self.allowed(g), (True, False), "5.50 of 6.00 with 0.60 kept")
+        again = self.guard()  # a restarted swarm reads the record before its first check
+        self.assertEqual((again.braked, again.research_held, again.held), (False, True, g.held))
+        self.budget(9.0)  # the next settings.load carries a raise: 5.50 of 9.00 with 0.90 kept
+        self.clock.advance(180)
+        g.check()
+        self.assertEqual(self.allowed(g), (True, True))
+        self.assertEqual(self.actions(), ["release", "research_hold", "research_release"],
+                         "the first reading releases the guard and finds the hold in the same check")
+
+    def test_caps_that_are_no_reading_of_the_rule_keep_nothing_and_brake(self):
+        self.reading = (5000.0, 5.0)
+        self.settings["budget"] = {"sail_usd_day": "lots"}
+        g = self.guard()
+        out = g.check()
+        self.assertEqual((out["gate_reserve_usd"], out["research_held"], g.causes), (0.0, False, ["budget_unreadable"]))
+        self.assertEqual(self.allowed(g), (False, False))
+
+    def job(self, balance, previous=None, paid=None):
+        """One run of the budget job's rule on a Sail balance (its reserve the guard's own release line, as the job reads
+        it; `paid`: what the meter has paid since 00:00 UTC, which the day's first run adds back), and the `budget` block
+        the next `settings.load` carries."""
+        sail = {"balance_usd": balance, "fixed_usd_day": 1.0, "need_usd": 0.0,
+                "reserve_usd": house_line(self.settings["guard"])["release"]}
+        if paid is not None:
+            sail["paid_today_usd"] = paid
+        doc = B.compute({"p30_usd": 0.0, "p30_source": "test", "edge": {"stop": False, "why": "test"}, "meters": {
+            "sail": sail, "claude": {"balance_usd": 500.0, "fixed_usd_day": 0.0, "need_usd": 0.0}}}, now=self.clock(),
+            previous=previous)
+        self.budget(doc["meters"]["sail"]["research_usd_day"], fixed=1.0)
+        return doc
+
+    def paid_today(self):
+        """What Sail's meter has paid since 00:00 UTC as the budget job reads it from this guard's own store: its meter
+        of the day beside its last good reading, and the day's booked research (league/ops/budget.py, the job's own
+        readers)."""
+        now = self.clock()
+        reads = B._swarm_reads(Path(self.dir.name), now, [])
+        _, read_at, _ = B._guard_reading(reads["guard"], now)
+        return B._sail_paid_today(reads, read_at, now, 1.0)[0]
+
+    def test_the_jobs_second_run_of_the_day_leaves_the_gate_its_reserve(self):
+        """The budget job runs at 00:30 UTC and again after the close economics, on a balance that has paid for the
+        day's research. On a taper day a cap recomputed from that reading lands under what the day has booked, and the
+        guard would brake the gate with everything else until 00:00 UTC. The day's figure is set once
+        (league/ops/budget.py): the cap stands, and the gate goes on to it."""
+        self.clock.t = T - T % 86400 + 1800  # 00:30 UTC
+        self.reading = (100.0, 5.0)
+        morning = self.job(100.0)
+        g = self.guard()
+        g.check()
+        self.assertEqual((morning["meters"]["sail"]["research_usd_day"], self.allowed(g)), (11.6, (True, True)),
+                         "(100 - 37 - 5 x 1) / 5: a taper day")
+        self.clock.advance(19 * 3600 + 2400)  # 20:10 UTC, after the close economics
+        self.store.add_spend("gym_box", 6.0)
+        self.store.add_spend("sail_model", 4.0)  # 10.00 booked: 86% of the day's cap, under its hold line at 10.44
+        self.reading = (100.0 - 10.0 - 0.85, 5.0)
+        g.check()
+        self.assertEqual(self.allowed(g), (True, True))
+        evening = self.job(self.reading[0], previous=morning)
+        sail = evening["meters"]["sail"]
+        self.assertEqual((sail["research_usd_day"], sail["would_set_usd_day"]), (11.6, 9.43),
+                         "this reading alone would set (89.15 - 42) / 5: under the 10.00 the day has booked")
+        self.clock.advance(180)
+        g.check()
+        self.assertEqual((self.allowed(g), g.braked, g.causes), ((True, True), False, []), "the day's cap stands")
+        self.store.add_spend("gym_box", 0.5)
+        self.reading = (self.reading[0] - 0.5, 5.0)
+        self.clock.advance(180)
+        g.check()
+        self.assertEqual(self.allowed(g), (True, False), "10.50 of 11.60: the hold, and the gate goes on to the cap")
+        # The control: the same reading computed alone (no earlier run today, nothing the day paid added back) is the cap
+        # the old rule set here. A real first run this late adds the day back: the test below.
+        naive = self.job(self.reading[0])
+        self.assertLess(naive["meters"]["sail"]["research_usd_day"], 10.5)
+        self.clock.advance(180)
+        g.check()
+        self.assertEqual((self.allowed(g), g.causes), ((False, False), ["research_budget"]))
+
+    def test_a_late_first_run_of_the_day_leaves_the_gate_its_reserve(self):
+        """The 00:30 UTC run was missed, and the day's first run is the one after the close: its reading has paid for the
+        day's research so far. Computed from that reading alone the day's cap lands under what the day has booked and
+        the guard brakes everything until 00:00 UTC. The day's first run adds back what the meter has paid since
+        midnight (league/ops/budget.py), so it sets the cap a run at 00:30 would have, and nothing stops."""
+        midnight = T - T % 86400
+        self.clock.t = midnight - 180  # 23:57 UTC the day before
+        self.budget(12.0, fixed=1.0)  # yesterday's file is in force until the day's first run
+        self.reading = (100.0, 5.0)
+        g = self.guard()
+        g.check()
+        self.assertEqual(self.allowed(g), (True, True))
+        self.clock.t = midnight + 20 * 3600 + 420  # 20:07 UTC
+        self.store.add_spend("gym_box", 6.0)  # booked box time is an estimate above the provider's bill: 4.00 billed
+        self.store.add_spend("sail_model", 4.0)
+        self.reading = (100.0 - 4.0 - 4.0 - 0.84, 5.0)  # the research as billed, and the day's fixed cost so far
+        g.check()
+        self.assertEqual((self.allowed(g), g.last["metered_today"]), ((True, True), 8.84), "10.00 of 12.00 booked")
+        self.clock.advance(180)  # 20:10 UTC: the day's first run
+        early = B.compute({"p30_usd": 0.0, "edge": {"stop": False}, "meters": {
+            "sail": {"balance_usd": 100.0, "fixed_usd_day": 1.0, "reserve_usd": house_line(self.settings["guard"])["release"]},
+            "claude": {"balance_usd": 500.0, "fixed_usd_day": 0.0}}}, now=midnight + 1800)["meters"]["sail"]["research_usd_day"]
+        self.assertEqual((self.paid_today(), early), (8.84, 11.6), "the guard's own meter of the day; (100 - 37 - 5) / 5")
+        late = self.job(self.reading[0], paid=self.paid_today())
+        self.assertEqual((late["meters"]["sail"]["research_usd_day"], late["meters"]["sail"]["added_back_usd"]), (early, 8.84),
+                         "the cap a first run at 00:30 UTC would have set")
+        self.clock.advance(180)
+        g.check()
+        self.assertEqual((self.allowed(g), g.braked, g.causes), ((True, True), False, []),
+                         "10.00 of 11.60: under the cap and under its hold line at 10.44")
+        self.store.add_spend("gym_box", 0.5)
+        self.reading = (self.reading[0] - 0.4, 5.0)
+        self.clock.advance(180)
+        g.check()
+        self.assertEqual(self.allowed(g), (True, False), "10.50 of 11.60: the hold, and the gate goes on to the cap")
+        # The control: the same reading with nothing added back is a cap under what the day has booked, and the brake.
+        naive = self.job(self.reading[0])
+        self.assertLess(naive["meters"]["sail"]["research_usd_day"], 10.0)
+        self.clock.advance(180)
+        g.check()
+        self.assertEqual((self.allowed(g), g.causes), ((False, False), ["research_budget"]))
+
+    def test_a_guard_that_did_not_read_across_midnight_adds_back_no_more_than_the_day_booked(self):
+        """The guard's meter of the day counts every fall of the balance between two good readings on the later one's
+        day: a swarm stopped across midnight meters the hours before it into today. What the day's first run adds back
+        is held to the day's own booked research and a day of fixed cost, so the day before never lifts today's cap."""
+        midnight = T - T % 86400
+        self.clock.t = midnight - 12 * 3600  # noon the day before: the last reading before the swarm stopped
+        self.reading = (120.0, 5.0)
+        g = self.guard()
+        g.check()
+        self.clock.t = midnight + 6 * 3600  # 06:00 UTC: started again; 20.00 fell while it was stopped
+        self.store.add_spend("sail_model", 0.7)
+        self.reading = (100.0, 5.0)
+        g.check()
+        self.assertEqual(g.last["metered_today"], 20.0, "all of it on today's meter")
+        self.assertEqual(self.paid_today(), 1.7, "0.70 booked today and 1.00 of fixed cost")
+        doc = self.job(100.0, paid=self.paid_today())
+        self.assertEqual(doc["meters"]["sail"]["research_usd_day"], 11.94, "(100 + 1.70 - 42) / 5, not (100 + 20 - 42) / 5")
+        # A reading from before 00:00 UTC has paid for nothing of today: 23:50 UTC, read at 00:10 UTC the next day.
+        self.clock.t = midnight + 86400 - 600
+        self.store.add_spend("gym_box", 3.0)
+        self.reading = (96.0, 5.0)
+        g.check()
+        self.assertEqual(self.paid_today(), 4.7, "23:50 UTC: 3.70 booked today and 1.00 of fixed cost")
+        self.clock.t = midnight + 86400 + 600
+        self.assertEqual(self.paid_today(), 0.0, "yesterday's reading and yesterday's meter")
+
+    def test_the_taper_never_meets_the_houses_line(self):
+        """A prefund left alone, each day spent whole: the guard stops each day at the day's cap (the budget's own
+        designed stop) and releases the next morning, down to a day with no research at all. The balance is then still
+        over the line a braked guard releases at: research never drains the meter until the House's line stops the gate."""
+        lines = house_line(self.settings["guard"])
+        self.clock.t = T - T % 86400 + 1800  # 00:30 UTC
+        balance, days, g = 150.0, 0, None
+        while True:
+            research = self.job(balance)["meters"]["sail"]["research_usd_day"]  # each day's first run
+            self.reading = (balance, 5.0)
+            g = g or self.guard()
+            g.check()
+            if research == 0.0:
+                break
+            # (A day of under fifty cents is all the gate's: `test_a_small_day_is_the_gates_first`.)
+            self.assertEqual((self.allowed(g), g.causes), ((True, research > B.gate_reserve(research)), []), (days, balance))
+            self.store.add_spend("gym_box", research)
+            balance -= research + 1.0
+            self.reading = (balance, 5.0)
+            self.clock.advance(23 * 3600)
+            g.check()
+            self.assertEqual(g.causes, ["research_budget"], f"day {days}: the day's cap, never the House's line")
+            self.clock.advance(3600)
+            days += 1
+            self.assertLess(days, 100)
+        self.assertEqual(g.causes, ["research_budget"], "no research dollars: the budget's own stop, not the House at risk")
+        self.assertGreater(days, 10)
+        self.assertGreater(balance, lines["release"])
+        self.assertGreater(lines["release"], lines["line"])
 
 
 class Causes(GuardCase):

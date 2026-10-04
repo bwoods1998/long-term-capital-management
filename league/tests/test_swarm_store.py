@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from league.swarm.store import SwarmStore, graveyard_words
 from league.tests.swarm_fakes import Clock, result
@@ -99,6 +101,48 @@ class Versions(StoreCase):
 
 
 class Runs(StoreCase):
+    def test_a_completed_validation_retry_replaces_only_an_unfinished_payload(self):
+        fam = self.store.add_family(SPEC, origin="seed")
+        done = {**result("synthetic-retry", window="validation"), "run_id": "synthetic-stable-worker-id"}
+        broken = {**done, "status": "error", "trials": 0, "summary": {}, "stress_1.5": {"status": "error"}}
+        first = self.store.add_run(fam["id"], 1, broken, window="validation", stress=1.0, purpose="validation")
+        retry = self.store.add_run(fam["id"], 1, done, window="validation", stress=1.0, purpose="validation", program_years=1.0)
+        self.assertEqual(retry["run_id"], first["run_id"], "the worker identity stays")
+        self.assertNotEqual(retry["path"], first["path"], "the interrupted receipt stays immutable")
+        self.assertEqual((retry["status"], retry["trials"], retry["program_years"]), ("ok", 1, 1.0))
+        self.assertEqual(json.loads(retry["summary"]), done["summary"])
+        self.assertEqual(self.store.run_result(retry["run_id"]), done)
+        self.assertEqual(self.store.lineage_validated(fam["id"])[0], 1, "the retry is the same program version")
+        later_error = self.store.add_run(fam["id"], 1, broken, window="validation", stress=1.0, purpose="validation")
+        self.assertEqual((later_error["status"], later_error["trials"], self.store.family(fam["id"])["trials"]), ("ok", 1, 1))
+        self.assertEqual(self.store.run_result(retry["run_id"]), done, "a later interruption cannot erase completed evidence")
+
+    def test_a_failed_completion_commit_keeps_the_old_receipt_and_can_retry(self):
+        fam = self.store.add_family(SPEC, origin="seed")
+        done = {**result("synthetic-rollback", window="validation"), "run_id": "synthetic-rollback-worker-id"}
+        broken = {**done, "status": "error", "trials": 0, "summary": {}, "stress_1.5": {"status": "error"}}
+        first = self.store.add_run(fam["id"], 1, broken, window="validation", stress=1.0, purpose="validation")
+        execute = self.store._exec
+        def fail_completion(sql, params=()):
+            answer = execute(sql, params)
+            if sql.startswith("UPDATE runs SET status="):
+                raise sqlite3.OperationalError("synthetic failure after receipt update")
+            return answer
+        with mock.patch.object(self.store, "_exec", side_effect=fail_completion):
+            with self.assertRaisesRegex(sqlite3.OperationalError, "synthetic failure"):
+                self.store.add_run(fam["id"], 1, done, window="validation", stress=1.0, purpose="validation", program_years=1.0)
+        current = self.store.run(first["run_id"])
+        self.assertEqual((current["status"], current["path"], current["trials"], current["program_years"]),
+                         ("error", first["path"], 0, 0.0), "receipt update and trial counters roll back together")
+        self.assertEqual(self.store.family(fam["id"])["trials"], 0)
+        self.assertEqual(self.store.run_result(first["run_id"]), broken, "the original payload was never replaced")
+        self.assertEqual(self.store.lineage_validated(fam["id"])[0], 0)
+        retry = self.store.add_run(fam["id"], 1, done, window="validation", stress=1.0, purpose="validation", program_years=1.0)
+        self.assertEqual((retry["run_id"], retry["status"], retry["trials"], retry["program_years"]),
+                         (first["run_id"], "ok", 1, 1.0))
+        self.assertEqual(self.store.run_result(retry["run_id"]), done)
+        self.assertEqual(self.store.lineage_validated(fam["id"])[0], 1)
+
     def test_every_evaluation_is_a_trial_and_a_refusal_is_not(self):
         fam = self.store.add_family(SPEC, origin="seed")
         self.store.add_run(fam["id"], 1, result("a"), window="train", stress=1.0, purpose="train", program_years=1.0)

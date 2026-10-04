@@ -4,9 +4,10 @@
     "claimable_rows": 4,
     "every_seconds": 7200,
     "max_output_tokens": 32000,
-    "max_rebirths_per_cell": 6,
+    "max_rebirths_per_cell": 12,
     "max_refill": 6,
     "openai_model": null,
+    "pace_births": true,
     "refill_seconds": 1200,
     "sail_effort": "high",
     "sail_profile": "pro_asap",
@@ -26,7 +27,7 @@
     },
     "role_usd_day": {
       "architect": 0,
-      "diagnostician": 6,
+      "diagnostician": 0,
       "researcher": 0,
       "review": 5,
       "rewrite": 0,
@@ -59,7 +60,7 @@
     "enabled": true,
     "gate_checkpoint": "sbcp_a5e975a5-b087-4223-8412-2360bb68d87b",
     "image_checkpoint": "sbcp_13c5a61d-e7e1-453d-8fad-8d3f997ac970",
-    "max_boxes": 1,
+    "max_boxes": 5,
     "roots": [
       "SPY",
       "QQQ",
@@ -94,15 +95,26 @@
   "population": {
     "ceiling": 96,
     "floor": 8,
+    "floor_researching": true,
     "start": 16
   },
   "researcher": {
+    "carrier_screen": true,
     "claude_top": 0,
     "dormant_cycles": 12,
+    "extension_hold_days": 7,
+    "max_unit_train_usd": 80,
+    "max_unit_usd": 100,
+    "parked_dormancy": true,
+    "probe_year": 2022,
+    "retire_hold_untested": true,
     "retire_idle_evaluations": 500,
+    "retire_short_checks": 5,
+    "retire_short_cycles": 10,
     "rewrite_min_hours": 6,
     "rewrites_per_day": 1,
     "sail_usd_per_hour": 0.25,
+    "show_program": true,
     "stall_revisions": 10000,
     "top_families": 0,
     "top_profile": "pro_asap",
@@ -111,11 +123,13 @@
   "strategist": {
     "enabled": true,
     "every_seconds": 86400,
+    "gym_roots_only": true,
     "max_chars": 2000
   },
   "tournament": {
     "fork_top": 0,
     "retire_evaluations": 4000,
-    "retire_revisions": 200
+    "retire_revisions": 100,
+    "reuse_validations": true
   }
 }

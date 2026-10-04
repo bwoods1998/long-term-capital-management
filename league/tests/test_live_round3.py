@@ -326,12 +326,13 @@ class BandRace(LiveCase):
         store.add_family({"id": "vert", "mechanism": "An invented mechanism for concurrency tests.", "structure": "debit_vertical",
                           "roots": ["SPY"], "dte": [0, 2]}, origin="test")
         version = store.add_version("vert", VERTICAL, {"hold": 600}, author="test")
-        from league.tests.evaluator_fakes import band_proof
+        from league.tests.evaluator_fakes import band_proof, passed_look
 
         store.set_state("vert", banded_version=1, banded_sha=version["sha"], banded_evaluator=band_proof(version), typical_by_version={"1": 50},
                         forward={"negative": False},
                         live_promoted_at=at(MONDAY - dt.timedelta(days=3), 16, 1) if band == "probe" else None)
         store.set_band("vert", band, reason="synthetic pass")
+        passed_look(store, "vert", version)  # the look its band stands on (`bands.read`: no band row without it)
         live.families = SwarmFamilies(self.root)
         self.addCleanup(lambda: live.families._store.close() if live.families._store is not None else None)
         live.account_row = self.venue.account()
@@ -341,6 +342,12 @@ class BandRace(LiveCase):
         import json
         from league.gym.driver import build_bundle
         from league.swarm.gate import run_sha
+
+        # EVIDENCE V3 (Oct 2, 2026) retired execution tuition (`bands.TUITION_ROWS` False): these races are the retired
+        # route's, read explicitly here.
+        retired = patch("league.swarm.bands.TUITION_ROWS", True)
+        retired.start()
+        self.addCleanup(retired.stop)
 
         live, store, other = self.swarm_live("gym")
         (self.root / "swarm.json").write_text(json.dumps({"gym": {"image_checkpoint": "synthetic-image"},
@@ -576,7 +583,8 @@ class BandRace(LiveCase):
             live.sync_families(self.clock(), force=True)
         self.assertNotIn("vert@1:r", live.instances)
 
-    def test_promotion_wait_survives_a_crash_before_the_local_move_record(self):
+    @patch("league.swarm.gate.SEALED_LOOKS", False)
+    def test_old_route_promotion_wait_survives_a_crash_before_the_local_move_record(self):
         from league.live.families import SwarmFamilies
 
         live, store, other = self.swarm_live()
@@ -592,6 +600,7 @@ class BandRace(LiveCase):
         self.clock.set(at(MONDAY + dt.timedelta(days=1), 9, 31))
         self.assertTrue(again._real_eligible("vert"))
 
+    @patch("league.swarm.gate.SEALED_LOOKS", False)
     def test_missing_legacy_promotion_time_waits_a_session_and_persists_first_sight(self):
         live, store, other = self.swarm_live("probe")
         other.set_state("vert", live_promoted_at=None)
@@ -607,7 +616,7 @@ class BandRace(LiveCase):
         live, store, other = self.swarm_live("probe")
         live.state.put("band_moves", {"vert": {"band": "probe", "at": at(MONDAY - dt.timedelta(days=7), 9, 0)}})
         other.set_state("vert", live_promoted_at=self.clock())  # new promotion committed before the local write crashed
-        self.assertFalse(live._real_eligible("vert"))
+        self.assertTrue(live._real_eligible("vert"), "the confirmed pass has no session-count entry wait")
         self.assertEqual(live._probe_sessions("vert", "probe"), 0)
         self.clock.set(at(MONDAY + dt.timedelta(days=1), 16, 0))
         self.assertEqual(live._probe_sessions("vert", "probe"), 1)

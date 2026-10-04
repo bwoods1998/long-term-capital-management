@@ -35,7 +35,9 @@
 - COST. Every awake second of a box (starting, ready and idle, busy, resuming) is booked at `box_usd_hour`
   as `gym_box` spend, at least every `book_seconds` and whenever it sleeps or ends (an estimate: Sail bills
   boxes on measured use, about $0.12-0.20 an hour for a busy l box; Sail's meter is the record, and the
-  guard reads the balance itself). A sleeping box books nothing.
+  guard reads the balance itself). A sleeping box books nothing. Bookings carry their interval, split at
+  UTC midnight, and an atomic durable cursor preserves observed awake time over a process restart.
+  Legacy rows without a cursor report an unknown accounting gap rather than inventing their past cost.
 - NAMES. Every box is `ltcm-swarm-<token>-<kind>-<epoch>-<n>`; the token is the store's own (kv
   `pool_token`), so a pool sweeps (`reconcile`) only its own strays, never another state root's (a laptop
   trial's) boxes, and never one forked in the last `reconcile_grace_seconds`. Stage 1 (Sept 26, 10:22Z) named
@@ -61,6 +63,8 @@ Standard library only.
 
 from __future__ import annotations
 
+from . import research_permission
+
 import datetime as dt
 import itertools
 import json
@@ -76,6 +80,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 from . import settings as settings_mod
 from .store import SwarmStore
+from . import compute
 
 _IDS = itertools.count(1)
 #: Below every other job's (a researcher's run carries its family's share, 0 to 1; validation 1; the gate 5 and 10).
@@ -170,20 +175,22 @@ class Box:
     id: str
     kind: str                         # gym | gate
     version: str                      # the image checkpoint it was forked from
-    state: str = "starting"           # starting | ready | busy | asleep | terminated | failed
+    state: str = "starting"           # starting | ready | busy | asleep | sleeping | stopping | terminated | failed
     driver: Any = None
     roots: tuple[str, ...] = ()       # roots its store holds for the train/validation windows
     last_used: float = 0.0
-    booked_at: float = 0.0
+    booked_at: float | None = None
+    cost_awake: bool | None = None   # durable accounting state; None: infer from the in-memory state
     thread: threading.Thread | None = None
     failures: int = 0
     train_first: str | None = None    # its image's first Train day (the Gym's data check says; None: not known)
     holdout: tuple[str, ...] | None = None  # a gate box's roots with holdout days (its listing; None: not listed)
+    compute_retry_at: float = 0.0      # monotonic dispatcher backoff; peer notifications cannot remove it
 
 
 AWAKE = ("starting", "ready", "busy")
-#: Sail statuses of a box that is gone or going (it bills nothing more).
-GONE = ("terminated", "terminating", "failed", "create_failed")
+#: Documented terminated runtime state; failure labels do not prove stopped compute or a priced vendor invoice.
+GONE = ("terminated",)
 #: The most boxes one read of Sail's list asks for; a list this long may be cut short.
 LIST_LIMIT = 1000
 #: A box name from before the per-store token (the stage-1 release): ours, whichever store made it.
@@ -236,6 +243,7 @@ class GymPool:
         self._span_alerts: set[tuple[Any, ...]] = set()
         #: True once `adopt` has taken back the store's boxes: only then is a live row this pool does not hold stale.
         self._adopted = False
+        self._compute_deferred: dict[str, str] = {}
         self.token = str(store.get("pool_token") or "")
         if not self.token:
             self.token = secrets.token_hex(3)
@@ -390,12 +398,14 @@ class GymPool:
 
     # ------------------------------------------------------------------ boxes
     def _driver(self, box_id: str) -> Any:
+        box = self.boxes.get(box_id)
+        client = research_permission.GymClient(self.client, self.store.root, box.kind if box is not None else "gym")
         if self.driver_factory is not None:
-            return self.driver_factory(self.client, box_id)
+            return self.driver_factory(client, box_id)
         from ..gym.driver import GymDriver
 
         g = self.gym
-        return GymDriver(self.client, box_id, remote_root=str(g.get("remote_root", "/workspace/gym")),
+        return GymDriver(client, box_id, remote_root=str(g.get("remote_root", "/workspace/gym")),
                          store_root=str(g.get("store_root", "/data/store")), python=str(g.get("python", "python3")))
 
     def name_prefix(self, kind: str) -> str:
@@ -404,7 +414,15 @@ class GymPool:
         stray of ours can be found and ended by its name alone."""
         return f"{NAME_PREFIX}{self.token}-{kind}-"
 
+    @research_permission.protected
     def _start_box(self, kind: str) -> None:
+        try:
+            with research_permission.dispatch(self.store.root, kind=kind):
+                return self._start_box_permitted(kind)
+        except research_permission.ResearchDispatchDenied as exc:
+            self.store.event("swarm.pool", None, {"action": "research_fenced", "kind": kind, "reason": str(exc)})
+
+    def _start_box_permitted(self, kind: str) -> None:
         """Fork one box from its image, check its seal, make it ready (runs on its own thread). Its start-up time is booked;
         a failure backs the next fork off; the box is recorded as 'forking' before the POST, so a fork whose answer is
         lost is found by name and ended (`reconcile`)."""
@@ -413,15 +431,43 @@ class GymPool:
         name = f"{self.name_prefix(kind)}{int(self.clock())}-{n}"
         placeholder = f"pending-{kind}-{n}"
         began = self.clock()
+        try:
+            bound = compute.bound_for(self.settings, str(image))
+            admission = compute.reserve(self.store, self.settings, name, bound, kind=kind, now=began)
+            began = admission["at"]
+        except compute.ComputeAdmissionError as exc:
+            self._defer_compute(kind, str(exc))
+            return
         with self._lock:
             if self._stopping:
+                compute.cancel_unsent(self.store, name)
                 return
             self.boxes[placeholder] = Box(placeholder, kind, str(image), "starting")
             self.forking[name] = began  # a fork in flight: `reconcile` never takes it for a stray
             self.store.put("forking", dict(self.forking))
         try:
-            row = self.client.from_checkpoint(image, name=name)
-            box_id = str(row.get("sailbox_id"))
+            dispatch = self.clock()
+            if not math.isfinite(dispatch) or dispatch < began:
+                raise compute.ComputeAdmissionError("compute dispatch clock is invalid or rolled back")
+            lifetime = bound.max_lifetime_seconds - math.ceil(dispatch - began)
+            if lifetime < 1:
+                raise compute.ComputeAdmissionError("reserved lifetime elapsed before dispatch")
+        except compute.ComputeAdmissionError as exc:
+            compute.cancel_unsent(self.store, name)
+            with self._lock:
+                self.boxes.pop(placeholder, None)
+                self.forking.pop(name, None)
+                self.store.put("forking", dict(self.forking))
+            self._defer_compute(kind, str(exc))
+            return
+        try:
+            research_permission.require(self.store.root, kind=kind)
+            lifetime = min(lifetime, compute.mark_dispatched(self.store, name))
+            research_permission.require(self.store.root, kind=kind)
+            row = self.client.from_checkpoint(image, name=name, max_lifetime_seconds=lifetime)
+            from ..sailbox import box_id as validated_box_id
+            box_id = validated_box_id(row.get("sailbox_id") if isinstance(row, Mapping) else None)
+            compute.attach(self.store, name, box_id)
         except Exception as exc:  # noqa: BLE001
             with self._lock:
                 self.boxes.pop(placeholder, None)
@@ -429,13 +475,16 @@ class GymPool:
                 self.store.put("forking", dict(self.forking))
             self._failed_fork(kind, f"the fork failed: {str(exc)[:200]}")
             self.store.event("swarm.pool", None, {"action": "fork_failed", "kind": kind, "image": image, "error": str(exc)[:300]})
+            self.store.event("swarm.pool", None, {"action": "compute_creation_unresolved", "key": name, "usd": None,
+                                                  "reason": "fork request may have created a billable box"})
             self.reconciled_at = float("-inf")  # the POST may have created a box: reconcile before another fork
             return
         box = Box(box_id, kind, str(image), "starting", last_used=self.clock(), booked_at=began)
         with self._lock:
             self.boxes.pop(placeholder, None)
             self.boxes[box_id] = box
-            self.store.upsert_box(box_id, kind=kind, version=str(image), state="starting", detail={"name": name})
+            self.store.upsert_box(box_id, kind=kind, version=str(image), state="starting",
+                                  detail={"name": name, "cost_cursor": {"booked_at": began, "awake": True, "estimate": True}})
             self.forking.pop(name, None)
             self.store.put("forking", dict(self.forking))
         try:
@@ -443,6 +492,7 @@ class GymPool:
                 self.store.event("swarm.pool", None, {"action": "unsealed", "box": box_id, "kind": kind, "image": image})
                 raise RuntimeError(f"the fork of {image} is not sealed (no_network): refused")
             box.driver = self._driver(box_id)
+            research_permission.require(self.store.root, kind=kind)
             box.driver.ensure_code()
             roots = [r for r in self.gym.get("roots", [])]
             window = "holdout" if kind == "gate" else "train"
@@ -470,22 +520,31 @@ class GymPool:
             self.store.event("swarm.pool", None, {"action": "box_failed", "box": box_id, "kind": kind, "error": str(exc)[:400]})
             self._end_failed(box_id)
             with self._lock:
-                self.boxes.pop(box_id, None)
+                if box.state == "terminated":
+                    self.boxes.pop(box_id, None)
             if isinstance(exc, HoldoutMissing):
                 self._no_holdout(str(image), box_id, str(exc))
             return
         self._accrue(box)
         with self._wake:
-            box.state = "ready"
+            # Keep publication under the same pool -> store lock order as accrual. A manager may have booked newer
+            # time since the startup accrual; preserve its durable cursor when adding the ready metadata.
+            published_state = box.state if box.state in ("asleep", "sleeping", "stopping", "failed", "terminated") else "ready"
+            if box.cost_awake is False and published_state == "ready":
+                published_state = "asleep"
+            with self.store.atomic():
+                stored = self.store._one("SELECT detail FROM boxes WHERE id=?", (box_id,))
+                detail = json.loads(stored["detail"]) if stored is not None else {}
+                detail.update({"name": name, "roots": list(box.roots), "bundle": getattr(box.driver, "version", None),
+                               "train_first": box.train_first,
+                               "holdout_roots": None if box.holdout is None else list(box.holdout)})
+                self.store.upsert_box(box_id, kind=kind, version=str(image), state=published_state, detail=detail)
+            box.state = published_state
             box.last_used = self.clock()
             self.fork_failures[kind] = 0
             self._wake.notify_all()
-        self.store.upsert_box(box_id, kind=kind, version=str(image), state="ready", detail={"name": name, "roots": list(box.roots),
-                                                                                           "bundle": getattr(box.driver, "version", None),
-                                                                                           "train_first": box.train_first,
-                                                                                           "holdout_roots": None if box.holdout is None
-                                                                                           else list(box.holdout)})
-        self.store.event("swarm.pool", None, {"action": "box_ready", "box": box_id, "kind": kind, "roots": list(box.roots),
+        self.store.event("swarm.pool", None, {"action": "box_ready", "box": box_id, "kind": kind,
+                                              "state": published_state, "roots": list(box.roots),
                                               **({} if box.holdout is None else {"holdout_roots": list(box.holdout)})})
         if box.holdout is not None:
             try:
@@ -619,19 +678,129 @@ class GymPool:
     def unavailable(self, kind: str = "gym") -> bool:
         return self.fork_failures.get(kind, 0) >= int(self.gym.get("unavailable_after", 3))
 
-    def _end_failed(self, box_id: str) -> None:
-        """End a box that failed (its row is already `failed`): the row becomes `terminated` once Sail accepts the
-        terminate call. A call that fails leaves the row `failed`, and `reconcile` settles it against Sail's list."""
+    def _defer_compute(self, key: str, why: str) -> None:
+        if self._compute_deferred.get(key) != why:
+            self._compute_deferred[key] = why
+            self.store.event("swarm.pool", None, {"action": "compute_deferred", "key": key,
+                                                  "reason": why, "provider_dispatched": False})
+
+    def _tracked_row(self, row: Mapping[str, Any]) -> Box:
+        with self._lock:
+            existing = self.boxes.get(row["id"])
+            if existing is not None:
+                return existing
+            cursor = (row.get("detail") or {}).get("cost_cursor")
+            valid = (isinstance(cursor, Mapping) and isinstance(cursor.get("awake"), bool)
+                     and isinstance(cursor.get("booked_at"), (int, float)) and not isinstance(cursor["booked_at"], bool)
+                     and math.isfinite(cursor["booked_at"]) and cursor["booked_at"] >= 0)
+            box = Box(row["id"], row["kind"], row["version"], str(row["state"]),
+                      booked_at=cursor["booked_at"] if valid else self.clock(),
+                      cost_awake=cursor["awake"] if valid else row["state"] != "asleep")
+            if not valid and box.cost_awake:
+                self.store.event("swarm.pool", None, {"action": "accounting_gap", "box": box.id,
+                                                      "until": self.clock(), "usd": None,
+                                                      "reason": "no valid durable cursor for unresolved stop"})
+            self.boxes[box.id] = box
+            return box
+
+    def _track_inventory(self, row: Mapping[str, Any]) -> Box:
+        """Bind a recovered exact-name fork once and durably track every owned resource's unknown bill."""
+        from ..sailbox import box_id as validated_box_id
+
+        box_id = validated_box_id(row.get("sailbox_id") or row.get("id"))
+        name = str(row.get("name") or "")
+        now = self.clock()
+        with self.store.atomic():
+            reservation = compute._holds(self.store).get(name)
+            covered = reservation is not None and reservation.get("box_id") in (None, box_id)
+            if covered and reservation.get("box_id") is None:
+                compute.attach(self.store, name, box_id)
+            elif reservation is not None and not covered:
+                self.store.event("swarm.pool", None, {"action": "compute_alias_conflict", "key": name,
+                                                      "box": box_id, "bound_box": reservation.get("box_id"), "usd": None})
+            if self.store._one("SELECT id FROM boxes WHERE id=?", (box_id,)) is None:
+                kind = reservation["kind"] if covered else ("gate" if "-gate-" in name else "gym")
+                detail = {"name": name, "cost_cursor": {"booked_at": now, "awake": str(row.get("status")) != "sleeping",
+                          "estimate": True, "unresolved_billing_interval": {"start": None, "end": now, "usd": None,
+                              "reason": "billing before recovered inventory observation is unpriced"}}}
+                self.store.upsert_box(box_id, kind=kind, version=reservation["checkpoint"] if covered else "unknown",
+                                      state="stopping", detail=detail)
+            compute.mark_uncovered(self.store, box_id)
+        stored = next(r for r in self.store.boxes(live=False) if r["id"] == box_id)
+        return self._tracked_row(stored)
+
+    def _confirmed_stop(self, box: Box, *, operation: str, status: str) -> None:
+        compute.mark_uncovered(self.store, box.id)
+        observed = self.clock()
+        row = self.store._one("SELECT state,detail FROM boxes WHERE id=?", (box.id,))
+        cursor = (json.loads(row["detail"]).get("cost_cursor") or {}) if row else {}
+        target = "asleep" if operation == "sleep" else "terminated"
+        if row and row["state"] == target and cursor.get("runtime_stop_confirmed") is True and cursor.get("awake") is False:
+            if operation == "terminate":
+                compute.confirm_stopped(self.store, box.id, now=observed)
+            return  # keep the original closed runtime interval when the same stopped resource is seen again
+        interval = dict(cursor.get("unresolved_billing_interval") or {"start": observed, "usd": None})
+        interval.update(end=observed, usd=None, reason="runtime stop observed; vendor billing interval remains unpriced")
+        self._accrue(box, next_awake=False, state="asleep" if operation == "sleep" else "terminated",
+                     cursor_note={"runtime_stop_confirmed": True, "billing_stop_confirmed": False, "stop_observed_at": observed,
+                                  "provider_status": status, "vendor_bill_reconciled": False,
+                                  "unresolved_billing_interval": interval})
+        if operation == "terminate":
+            compute.confirm_stopped(self.store, box.id, now=observed)
+        self.store.event("swarm.pool", None, {"action": "stop_confirmed", "box": box.id, "operation": operation,
+                                              "provider_status": status, "runtime_stopped": True,
+                                              "vendor_bill_reconciled": False, "unresolved_billing_interval": interval})
+
+    def _stop_pending(self, box: Box, *, operation: str) -> dict[str, Any]:
+        """Persist stop intent and the continuing cursor before a request or an uncertain inventory observation."""
+        requested = self.clock()
+        if self.store._one("SELECT id FROM boxes WHERE id=?", (box.id,)) is None:
+            self.store.upsert_box(box.id, kind=box.kind, version=box.version, state=box.state,
+                                  detail={"cost_cursor": {"booked_at": box.booked_at if box.booked_at is not None else requested,
+                                                          "awake": box.cost_awake if box.cost_awake is not None else box.state in AWAKE,
+                                                          "estimate": True}})
+        stored = self.store._one("SELECT detail FROM boxes WHERE id=?", (box.id,))
+        cursor = (json.loads(stored["detail"]).get("cost_cursor") or {}) if stored else {}
+        previous = cursor.get("unresolved_billing_interval")
+        gap = (dict(previous) if isinstance(previous, Mapping) and previous.get("end") is None else
+               {"start": requested, "end": None, "usd": None, "reason": "stop request has no confirmed runtime-stop time"})
+        self._accrue(box, state="sleeping" if operation == "sleep" else "stopping",
+                     cursor_note={"stop_operation": operation, "stop_requested_at": requested,
+                                  "runtime_stop_confirmed": False, "billing_stop_confirmed": False, "unresolved_billing_interval": gap})
+        return gap
+
+    def _request_stop(self, box: Box, *, operation: str, why: str, raise_errors: bool = False) -> bool:
+        gap = self._stop_pending(box, operation=operation)
         try:
-            self.client.terminate(box_id)
-        except Exception:  # noqa: BLE001
-            return
-        self.store.set_box_state(box_id, "terminated")
+            response = getattr(self.client, operation)(box.id)
+        except Exception as exc:  # noqa: BLE001 - billing may continue despite the failed control request
+            self._accrue(box)
+            self.store.event("swarm.pool", None, {"action": f"{operation}_failed", "box": box.id,
+                                                  "runtime_stopped": False, "unresolved_billing_interval": gap,
+                                                  "error": str(exc)[:200]})
+            if raise_errors:
+                raise
+            return False
+        self._accrue(box, cursor_note={"stop_accepted_at": self.clock()})
+        status = str(response.get("status")) if isinstance(response, Mapping) else "unknown"
+        response_matches = isinstance(response, Mapping) and response.get("sailbox_id") == box.id
+        if response_matches and (status in GONE or (operation == "sleep" and status == "sleeping")):
+            self._confirmed_stop(box, operation="terminate" if status in GONE else operation, status=status)
+            return True
+        self.store.event("swarm.pool", None, {"action": f"{operation}_accepted", "box": box.id, "why": why,
+                                              "provider_status": status, "runtime_stopped": False,
+                                              "billing_stop_confirmed": False, "unresolved_billing_interval": gap})
+        return False
+
+    def _end_failed(self, box_id: str) -> None:
+        rows = [row for row in self.store.boxes(live=False) if row["id"] == box_id]
+        if rows:
+            self._request_stop(self._tracked_row(rows[0]), operation="terminate", why="box failed")
 
     def reconcile(self) -> int:
         """End every box on the account named like ours (`ltcm-swarm-`) that this pool does not know: a fork whose
         answer was lost, or one a process that died left behind; and settle the store's own rows against Sail's list
-        (THE ROWS, `_settle_rows`). Returns how many boxes were ended."""
+        (THE ROWS, `_settle_rows`). Returns only stops whose terminal runtime state was confirmed."""
         lister = getattr(self.client, "list_boxes", None)
         if lister is None:
             return 0
@@ -648,32 +817,40 @@ class GymPool:
             n = self._settle_rows(rows, grace=grace)
         except Exception:  # noqa: BLE001 - the rows wait for the next pass; the stray sweep still runs
             n = 0
+        with self._lock:
+            known |= set(self.boxes) | {r["id"] for r in self.store.boxes(live=False)}
         for row in rows:
-            box_id, name = str(row.get("sailbox_id") or row.get("id") or ""), str(row.get("name") or "")
+            raw_id, name = row.get("sailbox_id") or row.get("id"), str(row.get("name") or "")
             if name in in_flight:
                 continue  # its POST has not returned: ours, not a stray
-            if not (name.startswith(mine) or LEGACY_NAME.match(name)) or box_id in known or str(row.get("status")) in ("terminated", "terminating",
-                                                                                            "failed", "create_failed"):
+            if not (name.startswith(mine) or LEGACY_NAME.match(name)) or (isinstance(raw_id, str) and raw_id in known):
                 continue
             born = forked_at(row)
-            if born is None or self.clock() - born < grace:
+            if born is None or not math.isfinite(born) or born < 0 or self.clock() - born < grace:
                 continue  # made minutes ago (or cannot say when): a fork whose answer may still be on its way
             try:
-                self.client.terminate(box_id)
-                n += 1
-                self.store.event("swarm.pool", None, {"action": "stray_terminated", "box": box_id, "name": name})
-            except Exception:  # noqa: BLE001
-                pass
+                tracked = self._track_inventory(row)
+                box_id = tracked.id
+                if str(row.get("status")) in GONE:
+                    self._confirmed_stop(tracked, operation="terminate", status=str(row["status"]))
+                    confirmed = True
+                else:
+                    confirmed = self._request_stop(tracked, operation="terminate", why="owned stray")
+                n += int(confirmed)
+                self.store.event("swarm.pool", None, {"action": "stray_stop_requested", "box": box_id, "name": name,
+                                                      "runtime_stop_confirmed": confirmed, "vendor_bill_reconciled": False})
+            except Exception as exc:  # noqa: BLE001 - retain the commitment and retry reconciliation later
+                self.store.event("swarm.pool", None, {"action": "stray_stop_unresolved", "box": raw_id, "name": name,
+                                                      "usd": None, "error": str(exc)[:200]})
         self.reconciled_at = self.clock()
         return n
 
     def _settle_rows(self, listed: Sequence[Mapping[str, Any]], *, grace: float) -> int:
-        """THE ROWS (Oct 2, 2026: six `failed` rows sat in the pool table for days, their boxes long gone). Each `failed`
-        row, and each STALE row (a live state the store records for a box this pool does not hold after `adopt`, older
-        than `grace`: one adopt could not take back), is read against Sail's list: a box Sail lists as terminal or no
-        longer lists becomes `terminated`; a box Sail still runs is ended, and its row becomes `terminated` once Sail
-        accepts the call. A list that may be cut short (`LIST_LIMIT` rows) proves nothing absent. Returns how many boxes
-        were ended."""
+        """Confirm terminal runtime states for failed, stopping/sleeping or unadopted stale resources.
+
+        Missing inventory and accepted/transitional stop responses do not prove termination. Keep their state and
+        accounting cursor unresolved; no runtime observation supplies a bill. Return confirmed termination count.
+        """
         by_id = {str(r.get("sailbox_id") or r.get("id") or ""): r for r in listed}
         complete = len(listed) < LIST_LIMIT
         now = self.clock()
@@ -686,7 +863,7 @@ class GymPool:
             state = str(row.get("state"))
             if state == "terminated":
                 continue
-            if state != "failed":
+            if state not in ("failed", "stopping", "sleeping"):
                 name = (row.get("detail") or {}).get("name")
                 if not adopted or row["id"] in held or name in in_flight:
                     continue
@@ -697,19 +874,32 @@ class GymPool:
             if listing is None and not complete:
                 continue
             status = None if listing is None else str(listing.get("status"))
-            if listing is None or status in GONE:
-                self.store.set_box_state(row["id"], "terminated")
+            if status in GONE:
+                self._confirmed_stop(self._tracked_row(row), operation="terminate", status=status)
                 self.store.event("swarm.pool", None, {"action": "row_settled", "box": row["id"], "kind": row.get("kind"),
                                                       "was": state, "sail": status or "absent"})
                 continue
-            try:
-                self.client.terminate(row["id"])
-            except Exception:  # noqa: BLE001 - the row stays as it is: the next pass tries again
+            box = self._tracked_row(row)
+            if listing is None or status == "terminating":
+                interval = ((row.get("detail") or {}).get("cost_cursor") or {}).get("unresolved_billing_interval")
+                if not isinstance(interval, Mapping) or interval.get("end") is not None:
+                    interval = {"start": self.clock(), "end": None, "usd": None,
+                                "reason": "inventory does not confirm a terminal runtime state"}
+                self._accrue(box, state="stopping", cursor_note={"runtime_stop_confirmed": False,
+                             "billing_stop_confirmed": False, "unresolved_billing_interval": dict(interval)})
                 continue
-            ended += 1
-            self.store.set_box_state(row["id"], "terminated")
-            self.store.event("swarm.pool", None, {"action": "row_box_ended", "box": row["id"], "kind": row.get("kind"),
-                                                  "was": state, "sail": status})
+            cursor = (row.get("detail") or {}).get("cost_cursor") or {}
+            if state == "sleeping" and cursor.get("stop_operation") == "sleep":
+                if status == "sleeping":
+                    self._confirmed_stop(box, operation="sleep", status=status)
+                else:
+                    self._accrue(box)
+                continue
+            confirmed = self._request_stop(box, operation="terminate", why="reconcile unresolved box")
+            ended += int(confirmed)
+            self.store.event("swarm.pool", None, {"action": "row_box_ended" if confirmed else "row_stop_requested",
+                                                  "box": row["id"], "kind": row.get("kind"), "was": state,
+                                                  "sail": status, "runtime_stop_confirmed": confirmed})
         return ended
 
     def _spawn(self, box: Box) -> None:
@@ -722,16 +912,38 @@ class GymPool:
         while True:
             with self._wake:
                 while True:
-                    if self._stopping or box.state in ("terminated", "failed"):
+                    if self._stopping or box.state in ("terminated", "failed", "stopping", "sleeping"):
                         return
-                    if box.state in ("ready", "asleep") and self.allowed(box.kind):
+                    delay = box.compute_retry_at - time.monotonic()
+                    if delay > 0:
+                        self._wake.wait(delay)
+                        continue
+                    if box.state in ("ready", "asleep") and self._dispatch_allowed(box.kind):
                         batch = self._take(box)
                         if batch:
                             break
                     self._wake.wait(1.0)
-            self.run_batch(box, batch)
+            if self.run_batch(box, batch) is False:
+                with self._wake:
+                    box.compute_retry_at = time.monotonic() + 1.0
 
-    def run_batch(self, box: Box, batch: list[GymJob]) -> None:
+    @research_permission.protected
+    def run_batch(self, box: Box, batch: list[GymJob]) -> bool | None:
+        try:
+            with research_permission.dispatch(self.store.root, kind=box.kind):
+                return self._run_batch_permitted(box, batch)
+        except research_permission.ResearchDispatchDenied as exc:
+            # The jobs never ran. Keep their identities, callbacks, attempts and trial accounting intact.
+            with self._wake:
+                self.queue.extend(job for job in batch if job not in self.queue)
+                self._wake.notify_all()
+            self.store.event("swarm.pool", None, {"action": "research_fenced", "kind": box.kind, "reason": str(exc)})
+            return False
+
+    def _dispatch_allowed(self, kind: str) -> bool:
+        return self.allowed(kind) and (kind == "gate" or research_permission.ordinary_allowed(self.store.root))
+
+    def _run_batch_permitted(self, box: Box, batch: list[GymJob]) -> bool | None:
         """Run one batch on one box and deliver its results (also called directly by tests)."""
         runnable, missing = [], []
         for job in batch:
@@ -749,20 +961,38 @@ class GymPool:
         if span and box.train_first and box.train_first != span:
             self._span_refused(box, span, box.train_first, batch)  # nothing runs: the image covers another Train span
             return
+        span_day = dt.date.fromisoformat(batch[0].start) if batch[0].window == "train" and batch[0].start else None
+        timeout = int(settings_mod.run_timeout(self.settings, span_day))
+        if not compute.runnable(self.store, box.id, now=self.clock(), seconds=timeout):
+            self._defer_compute(box.id, "no bounded compute commitment covers this batch and its lifetime")
+            with self._wake:
+                self.queue.extend(job for job in batch if job not in self.queue)
+                self._wake.notify_all()
+            return False  # never ran; no trial or retry is consumed
         if box.state == "asleep":
-            resuming = self.clock()
+            # Persist the start before the request: a crash or uncertain response must not erase its time.
+            self._accrue(box, next_awake=True, cursor_note={"runtime_stop_confirmed": False,
+                                                          "billing_stop_confirmed": False})
             try:
+                research_permission.require(self.store.root, kind=box.kind)
                 self.client.resume(box.id)
+            except research_permission.ResearchDispatchDenied:
+                raise
             except Exception as exc:  # noqa: BLE001
                 self._requeue(batch, f"resuming {box.id} failed: {exc}")
-                box.booked_at = resuming
                 self._accrue(box, awake=True)
                 box.state = "failed"
                 self.store.set_box_state(box.id, "failed")
                 self.store.event("swarm.pool", None, {"action": "resume_failed", "box": box.id, "error": str(exc)[:300]})
                 self._end_failed(box.id)
                 return
-            box.booked_at = resuming  # the resume is awake time
+            if not compute.runnable(self.store, box.id, now=self.clock(), seconds=timeout):
+                self._accrue(box, state="ready")
+                self._defer_compute(box.id, "resume latency exhausted the bounded batch lifetime")
+                with self._wake:
+                    self.queue.extend(job for job in batch if job not in self.queue)
+                    self._wake.notify_all()
+                return False
         box.state = "busy"
         self.store.set_box_state(box.id, "busy")
         head = batch[0]
@@ -775,17 +1005,28 @@ class GymPool:
         programs = {job.name: (job.code, dict(job.params or {})) for job in batch}
         began = self.clock()
         try:
+            research_permission.require(self.store.root, kind=box.kind)
             doc = box.driver.run(programs, window=head.window, roots=roots, workers=int(self.gym.get("workers", 8)), split=split,
                                  stress=float(head.stress), capital=float(self.gym.get("capital", 10000.0)), detail=head.detail,
                                  start=head.start, end=head.end, gate_reason=head.gate,
-                                 timeout=int(settings_mod.run_timeout(self.settings, span_day)))
+                                 timeout=timeout)
+        except research_permission.ResearchDispatchDenied:
+            self._accrue(box, state=box.state if box.state in ("sleeping", "stopping", "asleep", "terminated") else "ready")
+            raise
         except Exception as exc:  # noqa: BLE001
+            if research_permission.is_denial(exc):
+                self._accrue(box, state=box.state if box.state in ("sleeping", "stopping", "asleep", "terminated") else "ready")
+                raise research_permission.ResearchDispatchDenied("ordinary Gym driver dispatch is fenced") from exc
             elapsed = self.clock() - began
             self._accrue(box, jobs=len(batch))
-            box.failures += 1
-            box.state = "ready" if box.failures < 3 else "failed"
-            self.store.box_used(box.id, elapsed, jobs=0)
-            self.store.set_box_state(box.id, box.state)
+            with self._lock:
+                failures = box.failures + 1
+                following = box.state if box.state in ("sleeping", "stopping", "asleep", "terminated") else (
+                    "ready" if failures < 3 else "failed")
+                with self.store.atomic():
+                    self.store.box_used(box.id, elapsed, jobs=0)
+                    self.store.set_box_state(box.id, following)
+                box.failures, box.state = failures, following
             self.store.event("swarm.pool", None, {"action": "batch_failed", "box": box.id, "jobs": len(batch),
                                                   "error": f"{type(exc).__name__}: {str(exc)[:300]}"})
             if type(exc).__name__ == "GymDataMissing":
@@ -805,11 +1046,12 @@ class GymPool:
             return
         elapsed = self.clock() - began
         self._accrue(box, jobs=len(batch))
-        box.failures = 0
-        box.last_used = self.clock()
-        box.state = "ready"
-        self.store.box_used(box.id, elapsed, jobs=len(batch))
-        self.store.set_box_state(box.id, "ready")
+        with self._lock:
+            following = box.state if box.state in ("sleeping", "stopping", "asleep", "terminated") else "ready"
+            with self.store.atomic():
+                self.store.box_used(box.id, elapsed, jobs=len(batch))
+                self.store.set_box_state(box.id, following)
+            box.failures, box.last_used, box.state = 0, self.clock(), following
         by_name = {str(r.get("program")): r for r in (doc.get("results") or []) if isinstance(r, Mapping)}
         info = dict(doc.get("batch") or {})
         covered = info.get("train_first") if head.window == "train" else None
@@ -847,22 +1089,59 @@ class GymPool:
             self.stats["program_years"] += years
             self.stats["seconds"] += elapsed
 
-    def _accrue(self, box: Box, *, jobs: int = 0, awake: bool | None = None) -> None:
-        """Book a box's awake seconds since it was last booked (none while it sleeps) and start its next stretch."""
-        now = self.clock()
-        with self._lock:
-            was_awake = box.state in AWAKE if awake is None else awake
-            seconds = now - box.booked_at if box.booked_at else 0.0
-            box.booked_at = now
-        if was_awake and seconds > 0 and not box.id.startswith("pending-"):
-            self._book(box, seconds, jobs)
+    def _accrue(self, box: Box, *, jobs: int = 0, awake: bool | None = None,
+                next_awake: bool | None = None, state: str | None = None,
+                cursor_note: Mapping[str, Any] | None = None) -> None:
+        """Book an estimated awake interval and its next cursor atomically, retaining the cursor on a failed write.
 
-    def _book(self, box: Box, seconds: float, jobs: int) -> None:
-        """Box time as `gym_box` spend at `box_usd_hour` (Sail bills measured use: a busy l box is about $0.12-0.20
-        an hour, measured Sept 26)."""
-        rate = float(self.gym.get("box_usd_hour", 0.20)) / 3600.0
-        if seconds > 0:
-            self.store.add_spend("gym_box", seconds * rate, detail={"box": box.id, "seconds": round(seconds, 1), "jobs": jobs})
+        `next_awake` changes the estimated accounting state only after this interval; `state` commits an accepted
+        lifecycle transition with the cursor. A backward clock never moves the cursor back and rebooks the same time.
+        """
+        with self._lock:
+            was_awake = (box.state in AWAKE if box.cost_awake is None else box.cost_awake) if awake is None else awake
+            began = box.booked_at
+            current = self.clock()
+            if not math.isfinite(current) or (began is not None and (not math.isfinite(began) or began < 0)):
+                raise PoolError("invalid awake-cost clock or cursor: cost is unknown")
+            now = max(current, began) if began is not None else current
+            following = was_awake if next_awake is None else next_awake
+            with self.store.atomic():
+                if was_awake and began is not None and now > began and not box.id.startswith("pending-"):
+                    self._book(box, began, now, jobs)
+                row = self.store._one("SELECT detail FROM boxes WHERE id=?", (box.id,))
+                if row is not None:
+                    detail = json.loads(row["detail"])
+                    old_cursor = detail.get("cost_cursor")
+                    cursor = dict(old_cursor) if isinstance(old_cursor, Mapping) else {}
+                    cursor.update({"booked_at": now, "awake": bool(following), "estimate": True})
+                    cursor.update(cursor_note or {})
+                    detail["cost_cursor"] = cursor
+                    self.store._exec("UPDATE boxes SET detail=? WHERE id=?", (json.dumps(detail, sort_keys=True), box.id))
+                    if state is not None:
+                        self.store.set_box_state(box.id, state)
+            box.booked_at = now
+            box.cost_awake = bool(following)
+            if state is not None:
+                box.state = state
+
+    def _book(self, box: Box, began: float, ended: float, jobs: int) -> None:
+        """Estimated box time at the configured rate, charged to the UTC day when it accrued, never vendor actuals."""
+        configured = self.gym.get("box_usd_hour", 0.20)
+        try:
+            rate = float(configured) / 3600.0
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise PoolError("invalid box_usd_hour: awake cost is unknown") from exc
+        if isinstance(configured, bool) or not math.isfinite(rate) or rate <= 0:
+            raise PoolError("invalid box_usd_hour: awake cost is unknown")
+        while began < ended:
+            midnight = (math.floor(began / 86400.0) + 1) * 86400.0
+            finish = min(ended, midnight)
+            seconds = finish - began
+            self.store.add_spend("gym_box", seconds * rate, at=began,
+                                 detail={"box": box.id, "seconds": seconds, "jobs": jobs, "estimate": True,
+                                         "usd_hour": rate * 3600.0, "interval_start": began, "interval_end": finish})
+            compute.book(self.store, box.id, seconds * rate)
+            began, jobs = finish, 0
 
     def _requeue(self, batch: Sequence[GymJob], why: str) -> None:
         with self._wake:
@@ -874,15 +1153,8 @@ class GymPool:
                     self.queue.append(job)
             self._wake.notify_all()
 
-    def _retire_box(self, box: Box, why: str) -> None:
-        self._accrue(box)
-        box.state = "terminated"
-        try:
-            self.client.terminate(box.id)
-        except Exception:  # noqa: BLE001
-            pass
-        self.store.set_box_state(box.id, "terminated")
-        self.store.event("swarm.pool", None, {"action": "terminated", "box": box.id, "kind": box.kind, "why": why})
+    def _retire_box(self, box: Box, why: str) -> bool:
+        return self._request_stop(box, operation="terminate", why=why)
 
     # ------------------------------------------------------------------ the manager (the loop calls it)
     def awake(self, kind: str | None = None) -> list[Box]:
@@ -895,23 +1167,40 @@ class GymPool:
         g = self.gym
         out: dict[str, Any] = {"started": 0, "slept": 0, "terminated": 0}
         with self._lock:
-            for dead in [k for k, b in self.boxes.items() if b.state in ("terminated", "failed")]:
+            for dead in [k for k, b in self.boxes.items() if b.state == "terminated"
+                         or (b.state == "failed" and b.cost_awake is False)]:
                 self.boxes.pop(dead, None)  # nothing kept of a box that is gone
             boxes = list(self.boxes.values())
         for box in boxes:  # idle awake time is paid for too
-            if box.state in AWAKE and box.booked_at and now - box.booked_at >= float(g.get("book_seconds", 300)):
+            if (box.state in AWAKE or box.cost_awake is True) and box.booked_at is not None \
+                    and now - box.booked_at >= float(g.get("book_seconds", 300)):
                 self._accrue(box)
         if now - self.reconciled_at >= float(g.get("reconcile_seconds", 600)):
             out["strays"] = self.reconcile()
+        # Expired idle leases cannot serve another batch. Stop them through the durable lifecycle path before
+        # counting available capacity; neither a stop request nor its terminal observation refunds their bill.
+        try:
+            holds = compute._holds(self.store)
+        except compute.ComputeAdmissionError:
+            holds = {}  # unknown obligations have no invented deadline and still block admission
+        for box in boxes:
+            if box.state not in ("ready", "asleep"):
+                continue
+            deadlines = [r.get("work_until") for r in holds.values() if r.get("box_id") == box.id]
+            if deadlines and all(isinstance(t, (int, float)) and not isinstance(t, bool)
+                                 and math.isfinite(t) and now >= t for t in deadlines):
+                confirmed = self._retire_box(box, "its admitted compute lease expired")
+                out["terminated"] += int(confirmed)
+                self.store.event("swarm.pool", None, {"action": "compute_lease_expired", "box": box.id,
+                                                      "runtime_stop_confirmed": confirmed, "vendor_bill_reconciled": False})
         for kind in ("gym", "gate"):
             image = self.image(kind)
-            allowed = bool(g.get("enabled")) and bool(image) and self.allowed(kind)
+            allowed = bool(g.get("enabled")) and bool(image) and self._dispatch_allowed(kind)
             mine = [b for b in boxes if b.kind == kind and b.state not in ("terminated", "failed") and not b.id.startswith("pending-")]
             for box in mine:
                 if box.version != str(image):
                     if box.state != "busy":
-                        self._retire_box(box, "the image changed")
-                        out["terminated"] += 1
+                        out["terminated"] += int(self._retire_box(box, "the image changed"))
                     continue
                 if box.state != "ready":
                     continue
@@ -919,8 +1208,7 @@ class GymPool:
                 limit = float(g.get("idle_sleep_seconds", 600)) if kind == "gym" else float(
                     self.settings.get("gate", {}).get("gate_box_idle_sleep_seconds", 300))
                 if not allowed or (idle >= limit and not self.queued(kind, robustness=False)):
-                    self._sleep(box)
-                    out["slept"] += 1
+                    out["slept"] += int(self._sleep(box))
             if not allowed:
                 continue
             demand = self.queued(kind, robustness=False)  # robustness runs fill the boxes other work keeps; they start none
@@ -954,7 +1242,7 @@ class GymPool:
                     for row in listed:
                         name = str(row.get("name") or "")
                         if (name.startswith(self.name_prefix(kind)) or name.startswith(f"{NAME_PREFIX}{kind}-")) and \
-                                str(row.get("status")) not in ("terminated", "terminating", "failed", "create_failed"):
+                                str(row.get("status")) not in GONE:
                             live.add(str(row.get("sailbox_id") or row.get("id")))
             if now < self.fork_after.get(kind, 0.0):
                 out["fork_backoff"] = round(self.fork_after[kind] - now)
@@ -977,38 +1265,45 @@ class GymPool:
         out.update(self.status())
         return out
 
-    def _sleep(self, box: Box) -> None:
-        self._accrue(box)
-        try:
-            self.client.sleep(box.id)
-            box.state = "asleep"
-            self.store.set_box_state(box.id, "asleep")
-        except Exception as exc:  # noqa: BLE001
-            self.store.event("swarm.pool", None, {"action": "sleep_failed", "box": box.id, "error": str(exc)[:200]})
+    def _sleep(self, box: Box) -> bool:
+        return self._request_stop(box, operation="sleep", why="idle or guard brake")
 
     def adopt(self) -> int:
         """After a restart: take back the boxes the store says are ours (asleep or awake), so a restart never forks a
         second pool; end a box of an old image, one that is no longer sealed, and every stray named like ours."""
         n = 0
-        for row in self.store.boxes():
+        for row in self.store.boxes(live=False):
+            if row["state"] == "terminated":
+                continue
+            if row["state"] in ("stopping", "sleeping", "failed"):
+                self._tracked_row(row)
+                continue
             if not self.sealed(row["id"]):
-                try:
-                    self.client.terminate(row["id"])
-                except Exception:  # noqa: BLE001
-                    pass
-                self.store.set_box_state(row["id"], "terminated")
+                self._request_stop(self._tracked_row(row), operation="terminate", why="unsealed box")
                 self.store.event("swarm.pool", None, {"action": "unsealed", "box": row["id"], "kind": row["kind"]})
                 continue
             kind = row["kind"]
             if row["version"] != str(self.image(kind)):
-                try:
-                    self.client.terminate(row["id"])
-                except Exception:  # noqa: BLE001
-                    pass
-                self.store.set_box_state(row["id"], "terminated")
+                self._request_stop(self._tracked_row(row), operation="terminate", why="stale image")
                 continue
-            box = Box(row["id"], kind, row["version"], "asleep" if row["state"] == "asleep" else "ready",
-                      last_used=self.clock(), booked_at=self.clock())
+            cursor = (row.get("detail") or {}).get("cost_cursor")
+            try:
+                cursor_at = float(cursor["booked_at"]) if isinstance(cursor, Mapping) else None
+                valid_cursor = (isinstance(cursor, Mapping) and isinstance(cursor.get("awake"), bool)
+                                and isinstance(cursor.get("booked_at"), (int, float))
+                                and not isinstance(cursor["booked_at"], bool) and math.isfinite(cursor_at) and cursor_at >= 0)
+            except (TypeError, ValueError, OverflowError, KeyError):
+                cursor_at, valid_cursor = None, False
+            now = self.clock()
+            state = "asleep" if row["state"] == "asleep" else "ready"
+            box = Box(row["id"], kind, row["version"], state, last_used=now,
+                      booked_at=cursor_at if valid_cursor else now,
+                      cost_awake=bool(cursor["awake"]) if valid_cursor else state in AWAKE)
+            if not valid_cursor and state in AWAKE:
+                self.store.event("swarm.pool", None, {"action": "accounting_gap", "box": box.id, "kind": kind,
+                                                      "until": now, "usd": None,
+                                                      "reason": ("invalid durable awake-cost cursor" if cursor is not None
+                                                                 else "no durable awake-cost cursor")})
             try:
                 box.driver = self._driver(box.id)
                 box.roots = tuple((row.get("detail") or {}).get("roots") or ())
@@ -1019,6 +1314,7 @@ class GymPool:
                 continue
             with self._lock:
                 self.boxes[box.id] = box
+            self._accrue(box)
             self._spawn(box)
             n += 1
         with self._lock:
@@ -1034,8 +1330,7 @@ class GymPool:
             boxes = [b for b in self.boxes.values() if b.state in (("ready", "starting", "busy") if busy else ("ready", "starting"))]
         for box in boxes:
             if not box.id.startswith("pending-"):
-                self._sleep(box)
-                n += 1
+                n += int(self._sleep(box))
         if n:
             self.store.event("swarm.pool", None, {"action": "scaled_to_zero", "boxes": n, "why": why})
         return n
@@ -1060,12 +1355,14 @@ class GymPool:
                                                                  for k, v in self.stats.items()}}
 
 
-def cleanup_stopped(root: str | Path, client: Any, *, limit: int = 100) -> dict[str, Any]:
+def cleanup_stopped(root: str | Path, client: Any, *, limit: int = 100,
+                    clock: Callable[[], float] = time.time) -> dict[str, Any]:
     """Bounded House-side cleanup after a stopped process, including forks whose POST returned after it died.
 
     Only this store's recorded IDs, pending names and exact pool token are owned. Keep unresolved names until a
-    later inventory confirms termination; a submitted fork may not appear in Sail's list yet. The process lock
-    prevents a replacement swarm from adopting a box while this function terminates it.
+    later inventory confirms termination; a submitted fork may not appear in Sail's list yet. Persist stop intent,
+    alias binding and the continuing cost cursor using the main pool's lifecycle helpers before provider control.
+    Runtime termination never reconciles a bill. The process lock excludes a replacement swarm while cleaning.
     """
     import fcntl
 
@@ -1081,43 +1378,82 @@ def cleanup_stopped(root: str | Path, client: Any, *, limit: int = 100) -> dict[
         except OSError:
             out["active"] = True
             return out
-        store = SwarmStore(root)
+        store = SwarmStore(root, clock=clock)
         try:
             token = str(store.get("pool_token") or "")
             pending = dict(store.get("forking") or {})
-            known = {r["id"] for r in store.boxes(live=False)}
+            stored_rows = store.boxes(live=False)
+            known = {r["id"] for r in stored_rows}
             def owned(row):
-                return (str(row.get("sailbox_id") or row.get("id") or "") in known or row.get("name") in pending or
-                        bool(token and str(row.get("name") or "").startswith(f"{NAME_PREFIX}{token}-")))
+                box_id, name = row.get("sailbox_id") or row.get("id"), row.get("name")
+                return ((isinstance(box_id, str) and box_id in known) or
+                        (isinstance(name, str) and (name in pending or bool(token and name.startswith(f"{NAME_PREFIX}{token}-")))))
+            # This instance has no dispatchers, jobs or adoption: only its tracked stop/book helpers are used.
+            pool = GymPool(store, client, settings_mod.load(root), clock=clock, threaded=False, allowed=lambda _: False)
+            maximum = max(0, int(limit))
+
+            def keep_pending(missing, room):
+                for row in missing[:max(0, room)]:
+                    out["inspected"] += 1
+                    try:
+                        compute.mark_uncovered(store, row["id"])
+                        pool._stop_pending(pool._tracked_row(row), operation="terminate")
+                    except Exception as exc:  # noqa: BLE001
+                        out["errors"].append(f"{row['id']}: {type(exc).__name__}: {str(exc)[:160]}")
+
             try:
                 rows = client.list_boxes(limit=1000)
             except Exception as exc:  # noqa: BLE001
                 out["errors"].append(f"inventory: {type(exc).__name__}: {str(exc)[:160]}")
+                keep_pending([r for r in stored_rows if r["state"] != "terminated"], maximum)
                 out["pending"] = len(pending)
                 return out
-            terminal = ("terminated", "failed", "create_failed")
-            for row in [r for r in rows if owned(r)][:max(0, int(limit))]:
-                out["inspected"] += 1
-                box_id = str(row.get("sailbox_id") or row.get("id") or "")
-                if str(row.get("status")) in terminal or str(row.get("status")) == "terminating":
+            inspected: set[str] = set()
+            ended: set[str] = set()
+            for row in [r for r in rows if isinstance(r, Mapping) and owned(r)][:maximum]:
+                if isinstance(row.get("sailbox_id") or row.get("id"), str) and (row.get("sailbox_id") or row.get("id")) in inspected:
                     continue
+                out["inspected"] += 1
                 try:
-                    client.terminate(box_id)
+                    box = pool._track_inventory(row)
+                    inspected.add(box.id)
+                    status = str(row.get("status"))
+                    if status in GONE:
+                        pool._confirmed_stop(box, operation="terminate", status=status)
+                        ended.add(box.id)
+                        pending.pop(str(row.get("name") or ""), None)
+                        continue
+                    if status == "terminating":
+                        pool._stop_pending(box, operation="terminate")
+                        continue
+                    if pool._request_stop(box, operation="terminate", why="stopped-process cleanup", raise_errors=True):
+                        ended.add(box.id)
+                        pending.pop(str(row.get("name") or ""), None)
                     out["requested"] += 1
                 except Exception as exc:  # noqa: BLE001
-                    out["errors"].append(f"{box_id}: {type(exc).__name__}: {str(exc)[:160]}")
+                    out["errors"].append(f"{row.get('sailbox_id') or row.get('id')}: {type(exc).__name__}: {str(exc)[:160]}")
+            # An absent listing never proves termination and must not make a restart resume a stopped workload.
+            missing = [r for r in stored_rows if r["id"] not in inspected and r["state"] != "terminated"]
+            keep_pending(missing, maximum-out["inspected"])
             try:
                 confirmed = client.list_boxes(limit=1000) if out["requested"] else rows
             except Exception as exc:  # noqa: BLE001
                 out["errors"].append(f"confirmation: {type(exc).__name__}: {str(exc)[:160]}")
                 confirmed = []
             for row in confirmed:
-                if owned(row) and str(row.get("status")) in terminal:
-                    box_id = str(row.get("sailbox_id") or row.get("id") or "")
-                    store.set_box_state(box_id, "terminated")
-                    pending.pop(str(row.get("name") or ""), None)
-                    out["confirmed"] += 1
+                if not isinstance(row, Mapping):
+                    continue
+                box_id = row.get("sailbox_id") or row.get("id")
+                if isinstance(box_id, str) and box_id in inspected-ended and str(row.get("status")) in GONE:
+                    try:
+                        box = pool._track_inventory(row)
+                        pool._confirmed_stop(box, operation="terminate", status=str(row["status"]))
+                        ended.add(box.id)
+                        pending.pop(str(row.get("name") or ""), None)
+                    except Exception as exc:  # noqa: BLE001
+                        out["errors"].append(f"confirmation {row.get('sailbox_id') or row.get('id')}: {type(exc).__name__}: {str(exc)[:160]}")
             store.put("forking", pending)
+            out["confirmed"] = len(ended)
             out["pending"] = len(pending)
             return out
         finally:

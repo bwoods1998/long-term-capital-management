@@ -74,6 +74,31 @@ additional floor. Gate work in flight, gate-ready versions, extension/operator h
 (THE VALIDATION WAIT, below) are protected. Retirement preserves the program, lineage, trials, results and explanation.
 It never turns a research decision into an order.
 
+THE TURNOVER (F1, Oct 3, 2026). Research stood still from 01:35Z that day: the eight living families were all parked
+until news, eight was `population.floor`, so no rule could retire one, and six of them (3 to 9 trials, no eligible Train
+run) had asked for a retire they were never offered. Four rules, each with its switch:
+- THE HOLD OFFER, whatever the trial count (`researcher.retire_hold_untested`, true): three holds in a row offer
+  `retire` (`Researcher.hold_offer`); false asks for the Train record or the trials as before. A THIN RETIREMENT
+  (`thin_evidence`, THIN_RETIRED: fewer than `researcher.retire_hold_trials` trials, or no eligible Train version) is
+  filed with its Train record, never SELF-REFUTED or a mechanism verdict: a slot freed is no finding and closes no cell.
+- PARKED DORMANCY (`researcher.parked_dormancy`, true; `loop.Scheduler.count_parked`): a family parked until news gets
+  no cycle, so its dormant cycles never advanced and the dormancy clause never fired. A park now counts one dormant cycle
+  each `researcher.hold_idle_seconds` it lasts (the wait the timer gave a held family), no model asked, up to
+  `researcher.dormant_cycles`: a dead slot leaves by the idle rule with `researcher.hold_until_news` left true. The
+  status says what a hold costs (`park_minutes`), and a park the harness owes a run is not counted.
+- THE FLOOR COUNTS RESEARCH (`population.floor_researching`, true; `dead_slot`, `floor_counts`): `population.floor`
+  counts the living families that are researching. A dead slot (a Gym family the idle rule finds dead, or one whose
+  researcher held its last `researcher.retire_hold_cycles` cycles with nothing pending) does not count, so it may always
+  retire; any other retirement is refused, as before, when it would leave fewer than the floor counted. The architect
+  bears up to the ceiling whatever the floor says, so the slot is refilled.
+- THE DEPTH RULE (`researcher.retire_short_checks` 5 and `researcher.retire_short_cycles` 10; `short_dead`, a clause of
+  the idle rule): a family whose latest counted validation met at most 5 of the line's checks is dead 10 worked cycles
+  (`worked_cycles`: a model call and no error) after it; one that met 6 or more keeps researching (the extension
+  hold's own bar, which ends by its age when nobody clears it: `lapse_extension`, `researcher.extension_hold_days`).
+  Since Sept 26 the validated families spent 81% of their model dollars after their first validation; on that record
+  (the one the rule was chosen on) it keeps every validation that met the line, or every check of it but the deflated
+  Sharpe.
+
 THE VALIDATED-FAMILY GUARD (Oct 1). On Sept 30 the swarm's only D2-tuition family (8 of 8 checks on Validation, review
 and audit passed, tuition traded) was retired by its own researcher 17 seconds after an evaluator adoption, because "the
 evaluator changed" and its validated version "must be re-evaluated". An evaluator change re-evaluates; it never refutes.
@@ -81,7 +106,8 @@ So `retire` is refused (`retire_guard`, a plain refusal that says why and, for a
 program to re-run) while the family holds a version that passed the validation line, last validated within
 `researcher.retire_guard_days` (14) days, unless the family's latest validation of that version under the current
 evaluator failed the line (`validation_refuted`: the tournament's record of each version's latest verdict and the
-evaluator it was judged under, `VERDICTS_KEY`, else the family's own validation line, which an adoption clears). A pass
+evaluator it was judged under, `VERDICTS_KEY`, else the family's own validation line, which an adoption of a new Gym
+clears; one of league/live alone keeps the line, judged on the Gym still in force: `evaluator.adopt`). A pass
 counts wherever it is held: the family's line, any passed verdict of `VERDICTS_KEY` (which no adoption clears and no
 other version's validation replaces), the selection the latest adoption archived (`previous_evaluator_selection`), and
 the selection every adoption within the window archived (its append-only `evaluator_adopted` event), so a second
@@ -157,12 +183,46 @@ more as a robustness run labelled "drift" (`robust_labels`; its row's purpose is
 day instead of waving the old bests through, the run costs one trial, and a version whose drift run fails three times is
 demoted.
 
+GATE-READY AT TRAIN (F1, Oct 3, 2026; `train_gate`, `screen_best`). On the store of that day 54% of the validated
+real-type versions risked more a contract than a Probe can hold, so no verdict could have promoted them, and the
+long-delta versions whose Train profit was mostly the market's drift made 12 of the 16 Validation results at t >= 2,
+which the gate holds. Both were learned after the validation, and sometimes the review and the audit, were paid for.
+So a version is the family's best, and is validated, only while its own Train run shows neither:
+- A DRIFT CARRIER by the gate's own rule (`drift_held`: THE DRIFT HOLD of league/swarm/gate.py, read from
+  `gate.look_holds.drift_share`; off with it, with `researcher.carrier_screen` false, or while the gate makes no
+  sealed look, `gate_looks`): its Train drift fit (`evidence.drift_lean`) is long delta with a drift share at or above
+  the gate's, or cannot be read. A version with no fit yet waits for one (its "drift" robustness run), as at the gate;
+- A UNIT OVER THE TRAIN LIMIT (`researcher.max_unit_train_usd`, 80; null turns it off): the median maximum loss of one
+  structure in its Train run (`version_unit`: the Gym's own figure) is above the limit. The figure the money table
+  fits to the Probe's cap is the VALIDATION run's, which is larger than the Train run's in three runs of four, so the
+  Train limit sits under the Probe's floor by a margin and is an approximation both ways: it stops a few versions a
+  Probe could have held and lets through a few it could not. The tournament therefore reads the unit again on the
+  Validation run (`Tournament.unit_over`, `researcher.max_unit_usd`, 100: the Probe's floor itself): a version that
+  meets the line with a unit over it, or with none the run could state, waits before the gate (`UNIT_WAIT_KEY`), a
+  wait and never a bar.
+Such a version is SET ASIDE (`demote_version` with `lasting` false: out of the candidates and the best, the next
+candidate in its place; recorded in the state's `set_aside`), never marked failed: neither is a finding against the
+program, and the limit moves with the account, so it gets its place back by itself once it would pass
+(`_restore_aside`). A version already waiting at the gate is left to the gate. An idle-rule death of a family whose
+eligible versions were all set aside is filed by what set them aside, as no finding (`train_record`: "carrier" or
+"unit", both UNRESOLVED). The status shows the best's figures beside what the gate will ask (`Researcher.gate_text`).
+No Train t threshold is added.
+
+THE PROGRAM IN SIGHT (F1; `Researcher.program_items`, `researcher.show_program`). A history keeps two to four cycles, so
+a researcher that changed only params, held, or was born with its parent's program (a fork, a revival) could not see the
+program it was asked to improve. Before the status, the harness shows the family's latest version (and its best, when
+that is another program) whole, with its params, whenever the history the call carries does not already hold that code
+(its own `gym_run` call, or an earlier showing): once, not every cycle.
+
 THE ZERO-TRADE PROBE (R11-6, `researcher.probe_year`, off by default; 2022 switches it on). A new version's first Train
-run at the normal spread is preceded by a run of it over that one year on the family's first root (`_probe`). A probe
-with no trade is the answer ("disqualified: no trades in the probe year", one trial, a "probe" row the Train score never
-reads) and the five-year run is skipped; the same program asked again is answered from that row. A probe that trades,
-fails or times out says nothing and the full run follows. `gym_run` with full=true skips it (a program that trades only in
-other years or on other roots); sweeps are never probed.
+run at the normal spread is preceded by a run of it over that one year on the roots the full run would trade (`_probe`;
+F1: all the family's roots, since on the Oct 3 store 18% of the multi-root runs that traded made no trade on the
+family's first root, two of them eligible). A probe with no trade is the answer ("disqualified: no trades in the probe
+year", one trial, a "probe" row the Train score never reads) and the five-year run is skipped; the same program asked
+again is answered from that row. Nothing eligible is lost by it: the Train score asks 40 trades on 20 days in EVERY
+Train year, the probe year among them, on those same roots. A probe that trades, fails or times out says nothing and
+the full run follows. `gym_run` with full=true skips it (the whole of Train anyway, for the diagnostic of a program that
+trades only in other years); sweeps are never probed.
 
 THE MECHANISM TEST (release B, league/swarm/mechanism.py). A family born with a card (league/swarm/cards.py) takes it
 before a broad Train run, at any stress (`_mechanism_test`): its program with the signal on and with its card's ablation
@@ -330,9 +390,10 @@ TOOLS: list[dict[str, Any]] = [
          "hold": {"type": "boolean", "description": "true, with no code and no params: skip this cycle honestly because you "
                                                     "have nothing new to run (say why in `note`)"},
          "full": {"type": "boolean", "description": "true runs the whole of Train at once. When the probe is on, a new "
-                                                    "version's first run is preceded by a one-year, one-root probe, and a "
-                                                    "probe with no trade skips the full run: pass full=true for a program "
-                                                    "that trades only in other years or on other roots"},
+                                                    "version's first run is preceded by a probe of one Train year on your "
+                                                    "roots, and a probe with no trade skips the full run (such a program "
+                                                    "cannot be eligible: every Train year needs trades): pass full=true to "
+                                                    "see the whole of Train anyway"},
          "why": {"type": "string", "description": "one sentence: what this version changes and why it should help"},
          "note": {"type": "string", "description": "optional: what you learned from your last run, appended to your notebook. "
                                                    "PUBLIC: it may appear on the public site, so describe the mechanism and "
@@ -807,6 +868,20 @@ def dormant_limit(settings: Mapping[str, Any]) -> int:
     return _count_setting(settings, "dormant_cycles", DORMANT_CYCLES)
 
 
+def park_minutes(settings: Mapping[str, Any]) -> int | None:
+    """PARKED DORMANCY as the status says it: about how many minutes a park with nothing pending lasts before the
+    dormancy clause finds its family dead (`loop.Scheduler.count_parked`: `researcher.dormant_cycles` waits of
+    `researcher.hold_idle_seconds`, 300 s when that is unset, 0 or misread). None while a park does not count: under the
+    legacy timer, with `researcher.parked_dormancy` false, or with the clause off."""
+    cfg = settings.get("researcher") or {}
+    limit = dormant_limit(settings)
+    if cfg.get("hold_until_news", True) is False or cfg.get("parked_dormancy", True) is False or limit <= 0:
+        return None
+    raw = cfg.get("hold_idle_seconds", 300.0)
+    every = float(raw) if isinstance(raw, (int, float)) and not isinstance(raw, bool) and math.isfinite(raw) and raw > 0 else 300.0
+    return max(1, round(limit * every / 60.0))
+
+
 def dormant_count(fam: Mapping[str, Any]) -> int:
     """The family's dormant cycles in a row (its state's `dormant_cycles`; 0 when absent or not a count)."""
     raw = (fam.get("state") or {}).get("dormant_cycles")
@@ -816,6 +891,17 @@ def dormant_count(fam: Mapping[str, Any]) -> int:
 def hold_streak(fam: Mapping[str, Any]) -> int:
     """The family's cycles in a row that held (its state's `hold_streak`; 0 when absent or not a count)."""
     raw = (fam.get("state") or {}).get("hold_streak")
+    return max(0, int(raw)) if isinstance(raw, int) and not isinstance(raw, bool) else 0
+
+
+#: The family state's count of the cycles its researcher WORKED (F1, THE DEPTH RULE): a model call and no error
+#: (`Researcher._count_worked`). The family's `cycles` column counts every cycle, a failed one too.
+WORKED_CYCLES_KEY = "worked_cycles"
+
+
+def worked_cycles(fam: Mapping[str, Any]) -> int:
+    """The cycles the family's researcher worked (its state's `worked_cycles`; 0 when absent or not a count)."""
+    raw = (fam.get("state") or {}).get(WORKED_CYCLES_KEY)
     return max(0, int(raw)) if isinstance(raw, int) and not isinstance(raw, bool) else 0
 
 
@@ -859,7 +945,7 @@ def holding(args: Any) -> bool:
 
 #: The marks that restart the idle count (`idle_evaluations`), each the family's trials when it was set, with the words the
 #: idle rule's clause gives it (`_idle_since`): `migrate_objective` sets the first when Train's span changes, and
-#: `evaluator.adopt` the second when the evaluator does.
+#: `evaluator.adopt` the second when the evaluator's Gym does (`evaluator.gym_changed`: never for league/live alone).
 IDLE_RESTARTS = (("span_trials", "Train's span changed"), ("evaluator_trials", "the evaluator changed"))
 
 
@@ -874,8 +960,8 @@ def idle_evaluations(fam: Mapping[str, Any]) -> int:
     A change of Train's span (the 2020-21 switch: `migrate_objective` records the trials then as `span_trials`) starts
     the count again: every best was chosen anew over the new span, most of them empty, and evaluations over the old span
     say nothing about whether the family can make an eligible version over the new one. So does a change of the
-    evaluator (`evaluator.adopt` records the trials then as `evaluator_trials`): its selection was cleared, and is owed
-    again under the current Gym."""
+    evaluator's Gym (`evaluator.adopt` records the trials then as `evaluator_trials`): its selection was cleared, and is
+    owed again under the current Gym. A league/live-only adoption keeps the selection, so the count goes on."""
     since = int(fam.get("since_val_trials") or 0)
     state = fam.get("state") or {}
     trials = int(fam.get("trials") or 0)
@@ -937,16 +1023,23 @@ def idle_dead(fam: Mapping[str, Any], settings: Mapping[str, Any], *, current: t
     version awaits the gate (`gate_ready`)
     or a holdout look is out (`look_inflight`). Returns a clause saying which ("made no eligible Train version in 157 Gym
     evaluations since its birth"), or None. A dead family may retire at `population.start` (only `population.floor`
-    holds it); the tournament retires one that does not. Train figures only: nothing Validation or the holdout measured
-    (D2). Its words carry the verdict of the family's Train record (`train_record`, `idle_cause`, R11-1): only an
-    untested family's death is a time limit, not a finding.
+    holds it); the tournament retires one that does not. These two clauses and the dormancy clause read Train figures
+    only; THE DEPTH RULE below (F1, a change of this rule) reads D2a's count of a Validation verdict as well: how many of
+    the line's checks it met, never a figure Validation or the holdout measured (D2). Its words carry the verdict of the
+    family's Train record (`train_record`, `idle_cause`, R11-1): only an untested family's death is a time limit, not a
+    finding.
 
     DORMANCY (R3, NO DUPLICATE RUNS): a family is dead too, whatever its best, when its last `researcher.dormant_cycles`
     cycles in a row made no new Gym evaluation, only stored results, holds and refused runs (`dormant_count`, counted in
-    the Gym band only), unless its best awaits validation (`awaiting_validation`). The same exemptions, floor and wording
-    as above."""
+    the Gym band only; a park until news counts a cycle each `researcher.hold_idle_seconds`, F1:
+    `loop.Scheduler.count_parked`), unless its best awaits validation (`awaiting_validation`). The same exemptions, floor
+    and wording as above.
+
+    THE DEPTH RULE (F1, `short_dead`): dead as well `researcher.retire_short_cycles` worked cycles after a counted
+    validation that met at most `researcher.retire_short_checks` of the line's checks. Its clause carries D2a's count
+    (the verdict and how many checks, which the researcher already reads), never a figure Validation measured."""
     limit, dormant = idle_limit(settings), dormant_limit(settings)
-    if (limit <= 0 and dormant <= 0) or fam.get("band") != "gym" or fam.get("retired_at"):
+    if fam.get("band") != "gym" or fam.get("retired_at"):
         return None
     state = fam.get("state") or {}
     # Nor while a validation that passed is owed again on the Gym running now (`revalidation_owed`, R4).
@@ -963,15 +1056,103 @@ def idle_dead(fam: Mapping[str, Any], settings: Mapping[str, Any], *, current: t
     cycles = dormant_count(fam)
     if dormant > 0 and cycles >= dormant and not awaiting_validation(fam) and not extension_held(fam):
         return f"made no new Gym evaluation in its last {cycles} cycles (only stored results, holds and refused runs)"
-    return None
+    return short_dead(fam, settings)
+
+
+def short_dead(fam: Mapping[str, Any], settings: Mapping[str, Any]) -> str | None:
+    """THE DEPTH RULE (F1, a clause of the idle rule): a living Gym family is dead once it has worked
+    `researcher.retire_short_cycles` (10) cycles since its latest counted validation (`VALIDATED_CYCLES_KEY`) when that
+    validation met at most `researcher.retire_short_checks` (5) of the line's checks. Only a cycle its researcher worked
+    counts (`worked_cycles`: a model call and no error): a cycle that failed before or in the model (an outage, a
+    budget refusal) spends none of the ten. One that met more keeps researching (6 of 8 is the
+    extension hold's bar), and so does one never validated, or validated before the mark was kept. A new best that
+    awaits validation does not spare it: a later version of a family that fell short is the depth the rule stops paying
+    for. The idle rule's own exemptions stand (`idle_dead` asks this last: never at the gate, with a look out or with a
+    passing validation owed again), and the tournament's cohort keep and the operator's gate hold as for every clause.
+    0 or null in either setting turns the rule off. Its words name the verdict and the count, which D2a lets a
+    researcher read, and no figure Validation measured."""
+    most = _count_setting(settings, "retire_short_checks", RETIRE_SHORT_CHECKS)
+    cycles = _count_setting(settings, "retire_short_cycles", RETIRE_SHORT_CYCLES)
+    if most <= 0 or cycles <= 0 or fam.get("band") != "gym" or fam.get("retired_at"):
+        return None
+    state = fam.get("state") or {}
+    line = state.get("validation_line")
+    mark = _plain_int(state.get(VALIDATED_CYCLES_KEY))
+    met, total = checks_met(line)
+    if mark is None or total <= 0 or met > most or (isinstance(line, Mapping) and line.get("passed")):
+        return None
+    since = worked_cycles(fam) - mark
+    if since < cycles:
+        return None
+    return f"kept researching for {since} cycles after a validation that met {met} of the line's {total} checks"
+
+
+def short_left(fam: Mapping[str, Any], settings: Mapping[str, Any]) -> int | None:
+    """THE DEPTH RULE's countdown for the status: the worked cycles a family whose latest counted validation fell short
+    (`short_dead`) still has, at least 0; None for a family the rule does not count."""
+    most = _count_setting(settings, "retire_short_checks", RETIRE_SHORT_CHECKS)
+    cycles = _count_setting(settings, "retire_short_cycles", RETIRE_SHORT_CYCLES)
+    state = fam.get("state") or {}
+    line = state.get("validation_line")
+    mark = _plain_int(state.get(VALIDATED_CYCLES_KEY))
+    met, total = checks_met(line)
+    if most <= 0 or cycles <= 0 or fam.get("band") != "gym" or mark is None or total <= 0 or met > most \
+            or (isinstance(line, Mapping) and line.get("passed")):
+        return None
+    return max(0, cycles - (worked_cycles(fam) - mark))
+
+
+def dead_slot(fam: Mapping[str, Any], settings: Mapping[str, Any], *, current: tuple[Any, Any] | None = None) -> bool:
+    """A DEAD SLOT (F1, THE TURNOVER in the module docstring): a living Gym family that is not researching. The idle rule
+    finds it dead (`idle_dead`, the depth rule and the parked dormancy among its clauses), or its researcher held its
+    last `researcher.retire_hold_cycles` cycles in a row (`hold_streak`: the hold offer's own count) with nothing
+    pending: no version at the gate, no look out, no operator's gate hold, no extension hold, no best that awaits
+    validation and no passing validation owed again on the Gym running now (`current`). A family in another band is
+    never one. Train figures and D2a's count only."""
+    if fam.get("band") != "gym" or fam.get("retired_at"):
+        return False
+    if idle_dead(fam, settings, current=current) is not None:
+        return True
+    need = _count_setting(settings, "retire_hold_cycles", RETIRE_HOLD_CYCLES)
+    if need <= 0 or hold_streak(fam) < need:
+        return False
+    state = fam.get("state") or {}
+    return not (held_at_gate(fam) or state.get("gate_ready") or state.get("look_inflight") or extension_held(fam)
+                or awaiting_validation(fam) or revalidation_owed(fam, current))
+
+
+def floor_counts(settings: Mapping[str, Any], *, current: tuple[Any, Any] | None = None,
+                 kept: Callable[[str], bool] | None = None) -> Callable[[Mapping[str, Any]], bool] | None:
+    """THE FLOOR COUNTS RESEARCH (F1): which living families `population.floor` counts, for `SwarmStore.retire_gym`'s
+    `counts`: every one but a dead slot (`dead_slot`). A family THE COHORT KEEP holds (`kept`: its id is kept; the
+    tournament's saved keep, `practice.kept_version`) always counts: it practises for the ladder, which is not a dead
+    slot's work, so at the floor it stays, as before. None (every living family, as before) while
+    `population.floor_researching` is JSON false."""
+    if (settings.get("population") or {}).get("floor_researching", True) is False:
+        return None
+    return lambda fam: bool(kept is not None and kept(str(fam.get("id")))) or not dead_slot(fam, settings, current=current)
+
+
+def kept_families(store: SwarmStore, now: float) -> frozenset[str]:
+    """The families the tournament's saved cohort keep holds now (`practice.KEEP_KV`, read once; each by
+    `practice.kept_version`'s own rule, so a keep too old to trust names none). Never raises."""
+    from .practice import KEEP_KV, kept_version
+
+    try:
+        saved = store.get(KEEP_KV) or {}
+        names = list(saved.get("families") or {}) if isinstance(saved, Mapping) else []
+    except Exception:  # noqa: BLE001 - no keep read: no family is counted for it
+        return frozenset()
+    return frozenset(str(fid) for fid in names if kept_version(store, str(fid), now=now) is not None)
 
 
 # ------------------------------------------------------------------------------------------ THE IDLE RULE'S VERDICT (R11-1)
 #: The screens a family's Train record can show (`train_record`), and the tag each gives an idle-rule death: only a family
 #: that never traded on Train (or never ran) is untested and keeps IDLE. Sept 29: 99% of the dormancy deaths filed as "a
 #: time limit, not a finding" had been screened on Train, and the strategist read them as untested.
-SCREENS = ("drift", "stress", "thin", "scored", "unresolved", "untested")
-IDLE_VERDICTS = {"drift": "DRIFT", "stress": "STRESS", "thin": "THIN", "scored": "EXHAUSTED", "unresolved": "UNRESOLVED", "untested": "IDLE"}
+SCREENS = ("drift", "stress", "thin", "scored", "unresolved", "carrier", "unit", "untested")
+IDLE_VERDICTS = {"drift": "DRIFT", "stress": "STRESS", "thin": "THIN", "scored": "EXHAUSTED", "unresolved": "UNRESOLVED",
+                 "carrier": "UNRESOLVED", "unit": "UNRESOLVED", "untested": "IDLE"}
 #: The words of an untested idle-rule death (the store publishes only a reason's sentences without a figure, and this one
 #: has none). The architect and researchers read the graveyard as refutations; an untested family's death is a clock.
 IDLE_CAUSE = ("Retired by the idle rule, a limit on how long a family may research without an eligible Train version, "
@@ -988,17 +1169,59 @@ VERDICT_WORDS = {
                "evaluation, or a best that stayed below zero)"),
     "unresolved": ("Idle verdict UNRESOLVED: required robustness evidence failed to complete or its outcome is unknown; "
                    "this is an experiment failure, not evidence of an unprofitable mechanism"),
+    # GATE-READY AT TRAIN's deaths (F1, `train_record`): every eligible version was set aside, for the gate's drift rule
+    # or for its one-lot unit. A set-aside is no finding against the program (each such version had passed the drift
+    # screen's own alpha test), so both are filed UNRESOLVED (they close no cell), each in its own words.
+    "carrier": ("Idle verdict UNRESOLVED: its eligible Train versions were set aside before validation by the gate's rule "
+                "on market exposure (long delta with too much of the Train profit the market's own move, or a fit the "
+                "gate cannot read), so none could be validated; set aside, not refuted: this is not evidence of an "
+                "unprofitable mechanism"),
+    "unit": ("Idle verdict UNRESOLVED: its eligible Train versions each risked more a contract than a first real-money "
+             "position may, so none could be validated; a limit on size, not evidence of an unprofitable mechanism"),
+    # THE DEPTH RULE's death (F1, `short_dead`) of a family with a Train score: EXHAUSTED, in its own words (the
+    # tournament files it so, `Tournament.idle_why`; `train_record` never returns this key).
+    "short": ("Idle verdict EXHAUSTED, a tested finding: it reached a Train score and was validated, its latest validation "
+              "fell short of the line by more than a near miss, and the cycles it was given after it are spent"),
 }
 #: The verdict's mark in a retirement reason or lesson (`architect.tag_of` reads it).
 VERDICT_TAG = re.compile(r"\bIdle verdict (DRIFT|STRESS|THIN|EXHAUSTED|UNRESOLVED)\b")
 #: A retirement its own researcher called (`retire`): the reason's head, so the graveyard tags it SELF-REFUTED.
 SELF_REFUTED = "Self-refuted by its researcher"
+#: A THIN RETIREMENT (F1, the captain's R3): a family its own researcher retired with fewer than
+#: `researcher.retire_hold_trials` trials or with no eligible Train version behind it. Its researcher's word is no test of
+#: the mechanism, so the row keeps its Train record as context (`thin_cause`), never SELF-REFUTED or a mechanism
+#: verdict: a slot freed closes no cell. Oct 3: 124 of the 312 SELF-REFUTED rows on record were this
+#: thin, and one such row turns a cell with none into one where every birth needs a claim.
+THIN_RETIRED = "Retired by its researcher before the evidence could refute it"
 
 
 def idle_cause(screen: str) -> str:
     """The idle rule's words for a death whose Train record shows `screen` (`train_record`): IDLE_CAUSE for an untested
     family, else SCREENED and the verdict."""
     return f"{SCREENED}. {VERDICT_WORDS[screen]}" if screen in VERDICT_WORDS else IDLE_CAUSE
+
+
+def thin_cause(screen: str, reason: str) -> str:
+    """A THIN RETIREMENT's reason: a non-mechanism tag, its Train record, then its researcher's own reason. A drift or
+    stress screen remains context; fewer than the required trials cannot turn that context into a refuting row."""
+    verdict = VERDICT_WORDS.get(screen) or ("it never traded on Train; a slot freed, not a finding that the mechanism has "
+                                            "no edge")
+    if screen in ("drift", "stress"):
+        verdict = ("Idle verdict THIN: fewer than the required trials or no eligible Train version; a slot freed, "
+                   f"not a finding against the mechanism. Train record: {verdict}")
+    return f"{THIN_RETIRED}. {verdict[0].upper()}{verdict[1:]}. Its researcher's reason: {reason.strip()}"
+
+
+def thin_evidence(store: SwarmStore, fam: Mapping[str, Any], settings: Mapping[str, Any]) -> str | None:
+    """Is a retirement of `fam` by its own researcher a THIN RETIREMENT: the Train record's screen it is filed under
+    (`train_record`), or None when the family has both `researcher.retire_hold_trials` (10) trials of its own and an
+    eligible Train version behind it (then its researcher's verdict stands: SELF-REFUTED). 0 trials in the setting
+    leaves the eligible version alone. Train figures only."""
+    record = train_record(store, fam)
+    need = _count_setting(settings, "retire_hold_trials", RETIRE_HOLD_TRIALS)
+    if record["eligible"] and int(fam.get("trials") or 0) >= need:
+        return None
+    return str(record["screen"])
 
 
 def _run_record(store: SwarmStore, fid: str) -> tuple[bool, bool]:
@@ -1025,11 +1248,17 @@ def train_record(store: SwarmStore, fam: Mapping[str, Any]) -> dict[str, Any]:
     - "drift": its eligible versions were demoted by the drift screen (`drift_failed`, or a `robust_why` that says so);
     - "stress": they lost at 1.5x the half-spread (`robust_failed` for any other reason), when those outnumber the drift
       demotions;
+    - "carrier", "unit": they were only SET ASIDE by GATE-READY AT TRAIN (F1: `set_aside`, the marks of the evaluator in
+      force), as drift carriers by the gate's rule (or for a fit the gate cannot read) or for a one-lot unit over
+      `researcher.max_unit_train_usd`, and nothing else stands against them (filed UNRESOLVED: a set-aside version had
+      passed the drift screen, so this is no finding about the mechanism; the kind with more marks names it);
     - "thin": no eligible version stands, but a Train run traded (never 40 trades on 20 days in every Train year of the
       running span);
     - "untested": no Train run traded, or none ran.
-    `eligible`: it ever made an eligible Train version (a best, a candidate, a demotion, or a row the Train score found
-    eligible). The runs are read only when the family's state does not already say."""
+    `eligible`: it ever made an eligible Train version (a best, a candidate, a demotion, a set-aside, or a row the
+    Train score found eligible). The runs are read only when the family's state does not already say."""
+    from .evaluator import KEY
+
     state = fam.get("state") or {}
     marks = state.get("drift_failed")
     whys = state.get("robust_why") if isinstance(state.get("robust_why"), Mapping) else {}
@@ -1037,13 +1266,18 @@ def train_record(store: SwarmStore, fam: Mapping[str, Any]) -> dict[str, Any]:
     failed = [v for v in (state.get("robust_failed") or []) if isinstance(v, int) and not isinstance(v, bool)]
     drift |= {str(v) for v in failed if str(whys.get(str(v)) or "").startswith("fails the drift screen")}
     stress = [v for v in failed if str(v) not in drift and "lost money on Train at 1.5x" in str(whys.get(str(v)) or "")]
-    known = fam.get("best_train") is not None or bool(drift or failed) or bool(state.get("train_candidates"))
+    aside = set_aside(fam, store.get(KEY))
+    carriers = {k for k, mark in aside.items() if mark.get("kind") == "drift"}
+    sized = {k for k, mark in aside.items() if mark.get("kind") == "unit"}
+    known = fam.get("best_train") is not None or bool(drift or failed or carriers or sized) or bool(state.get("train_candidates"))
     if fam.get("best_train") is not None:
         screen = "scored"
     elif drift or stress:
         screen = "drift" if len(drift) >= len(stress) else "stress"
     elif failed:
         screen = "unresolved"
+    elif carriers or sized:
+        screen = "carrier" if len(carriers) >= len(sized) else "unit"
     else:
         eligible, traded = _run_record(store, str(fam["id"]))
         return {"screen": "thin" if traded else "untested", "eligible": known or eligible}
@@ -1055,6 +1289,16 @@ def train_record(store: SwarmStore, fam: Mapping[str, Any]) -> dict[str, Any]:
 #: "exhausted" or "waiting for the retire tool", a hold streak of 58 minutes (median) before the clock retired them.
 RETIRE_HOLD_CYCLES = 3
 RETIRE_HOLD_TRIALS = 10
+#: THE DEPTH RULE's defaults (F1; `short_dead`): the most checks of the line a "short" validation met, and the cycles a
+#: family is given after one. Chosen on the Oct 3 store and scored on the same runs (an in-sample fit; the swarm's
+#: validation runs since Sept 26): the rule would have cut most of the validation runs that followed a family's first,
+#: none of the runs that met the line and none that met every check but the deflated Sharpe; it does cut 15 later runs
+#: that met six of the eight checks (each failed t and the deflated Sharpe).
+RETIRE_SHORT_CHECKS = 5
+RETIRE_SHORT_CYCLES = 10
+#: The family state's mark for it: its worked cycles (`worked_cycles`) when its latest counted validation was judged
+#: (`Tournament._verdict`).
+VALIDATED_CYCLES_KEY = "validated_cycles"
 
 
 # ------------------------------------------------------------------------------------ THE VALIDATED-FAMILY GUARD (Oct 1)
@@ -1106,8 +1350,9 @@ def _epoch(text: Any) -> float | None:
 def validation_refuted(state: Mapping[str, Any], n: int, current: Any) -> bool:
     """Version `n`'s latest validation under the current evaluator (`current`: `evaluator.KEY`'s value, None in a store
     that never adopted one) failed the line: the tournament's record of its latest verdict (`VERDICTS_KEY`) when that was
-    judged under `current`, else the family's own validation line when it judged `n` (an adoption clears that line, so a
-    line there was judged under the evaluator in force since, and so is a family's born after the adoption)."""
+    judged under `current`, else the family's own validation line when it judged `n` (an adoption of a new Gym clears
+    that line, and one of league/live alone keeps it, so a line there was judged on the Gym in force, and so is a
+    family's born after the adoption)."""
     records = state.get(VERDICTS_KEY)
     record = records.get(str(n)) if isinstance(records, Mapping) else None
     if isinstance(record, Mapping) and record.get("evaluator") == current:
@@ -1129,7 +1374,9 @@ def validated_at(store: SwarmStore, fid: str, n: int, state: Mapping[str, Any]) 
 
 #: The action of the event an adoption writes for each family (`evaluator.adopt`), whose `_previous_selection` keeps the
 #: selection it archived. The events are append-only, so each adoption's archive outlives the next adoption, which
-#: replaces the family's `previous_evaluator_selection` with the selection the first one already cleared.
+#: replaces the family's `previous_evaluator_selection` with the selection the first one already cleared. A league/live-only
+#: adoption clears no selection: its event archives only what it clears (the live route's facts, never a validation
+#: line), and it leaves `previous_evaluator_selection` as it is.
 ADOPTED_ACTION = "evaluator_adopted"
 
 
@@ -1182,18 +1429,21 @@ def retire_guard(store: SwarmStore, fam: Mapping[str, Any], settings: Mapping[st
     selection each adoption within the window archived (`adoption_archives`, newest first: a pass recorded before the
     verdicts were kept, which a second adoption replaced in the state). An archived pass counts only while it is still
     that version's latest verdict: the tournament writes a version's record with each of its verdicts, so a record is
-    newer than any archive of that version, and an adoption clears the family's line, so each archive's line is newer
+    newer than any archive of that version, and an adoption that archives a line clears it, so each archive's line is newer
     than every older archive's. A version with a record, or one a newer archive judged failed, is never guarded by an
     older archive: a failed validation under an in-between evaluator (googl's case: passed under E1, re-run and failed
     under E2, then E3 adopted) refutes it as a failure under the current one does. A version whose validation time is
     unknown is guarded only from an adoption's archive, counted from that adoption (a validation precedes the adoption
     that archived it); never without a limit. A version validated only by a failed line never protects
     (`validated_version` alone records any validation, passed or failed). Returns {"version", "archived", "days"};
-    `archived` says the pass was judged under an earlier evaluator."""
+    `archived` says the pass is read from an adoption's archive, or was recorded on an earlier Gym (another image or
+    bundle): it is owed again, `guard_words` says so and the retire tool's refusal hands back its program. A recorded
+    pass judged before a league/live-only adoption was judged on the Gym in force (`evaluator.on_gym_in_force`): that
+    adoption archived nothing and nothing is owed again, so it is a standing pass, not an archived one."""
     days = retire_guard_days(settings)
     if days <= 0:
         return None
-    from .evaluator import KEY
+    from .evaluator import KEY, on_gym_in_force
 
     fid = str(fam["id"])
     state = fam.get("state") or {}
@@ -1225,7 +1475,7 @@ def retire_guard(store: SwarmStore, fam: Mapping[str, Any], settings: Mapping[st
     for _, k, record in passes:
         if not current:
             current.append(store.get(KEY))
-        guard = check(int(str(k)) if str(k).isdigit() else None, record.get("evaluator") != current[0])
+        guard = check(int(str(k)) if str(k).isdigit() else None, not on_gym_in_force(record.get("evaluator"), current[0]))
         if guard:
             return guard
     archive = state.get("previous_evaluator_selection")
@@ -1333,6 +1583,55 @@ def judge_extension(store: SwarmStore, fid: str, n: int, line: Any, settings: Ma
     store.set_state(fid, extension_hold={"version": int(n), "checks": f"{met}/{total}", "at": at},
                     extension_versions=(seen + [int(n)])[-20:])
     return "held"
+
+
+#: `researcher.extension_hold_days`' default (F1): how long an extension hold nobody cleared stands.
+EXTENSION_HOLD_DAYS = 7.0
+
+
+def extension_days(settings: Mapping[str, Any]) -> float:
+    """`researcher.extension_hold_days` (7); 0 (no age limit, as before F1) when it is 0, null, negative, a boolean or not
+    a finite number (a misread setting never ends a hold)."""
+    raw = (settings.get("researcher") or {}).get("extension_hold_days", EXTENSION_HOLD_DAYS)
+    if raw is None or isinstance(raw, bool) or not isinstance(raw, (int, float)) or not math.isfinite(raw) or raw <= 0:
+        return 0.0
+    return float(raw)
+
+
+def lapse_extension(store: SwarmStore, fid: str, settings: Mapping[str, Any], *, clock: Callable[[], float] = time.time) -> bool:
+    """THE EXTENSION HOLD's age limit (F1, Oct 3, 2026). A hold stood until the operator cleared it, and no rule could
+    retire its family meanwhile (never dead by dormancy, never a dead slot, never offered retire), so on a desk nobody
+    tends, held families that only wait would fill the population. A hold older than `researcher.extension_hold_days`
+    ends here: the family is an ordinary one again (the state keeps the hold as `extension_lapsed`, why "age"; its
+    version stays in `extension_versions`, so the same Gym does not hold it again). Never while the version is at the
+    gate (its place ready, or kept under the gate's own marker while it waits there for the look's bar: `gate.waiting`,
+    release F1), has a look out or waits before the gate for its unit (`UNIT_WAIT_KEY`): each of those waits is the
+    hold's to keep. True when it ended one; one private `swarm.status` event."""
+    days = extension_days(settings)
+    if days <= 0:
+        return False
+    with store.atomic():
+        fam = store.family(fid)
+        if fam is None or fam.get("retired_at") or not extension_held(fam):
+            return False
+        state = fam.get("state") or {}
+        hold = dict(state["extension_hold"])
+        since = _epoch(hold.get("at"))
+        if since is None or clock() - since < days * 86400.0:
+            return False
+        if state.get("gate_ready") or state.get("look_inflight") or isinstance(state.get(UNIT_WAIT_KEY), Mapping):
+            return False
+        from .gate import waiting  # a local import: the gate imports this module
+
+        if waiting(state) is not None:
+            # Release F1, where this meets the fast lane (THE POWER HOLD IS A WAIT): a version that waits AT the gate
+            # for the look's bar holds its place there under the gate's own marker, with `gate_ready` cleared. It is
+            # at the gate all the same, so its hold is the wait's to keep, as it is a unit wait's.
+            return False
+        at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(clock()))
+        store.set_state(fid, extension_hold=None, extension_lapsed={**hold, "lapsed_at": at, "why": "age"})
+    store.event("swarm.status", fid, {"action": "extension_lapsed", "version": hold.get("version"), "why": "age", "days": days})
+    return True
 
 
 def mark_extension(store: SwarmStore, fid: str, n: int, line: Any, settings: Mapping[str, Any], *,
@@ -1450,18 +1749,252 @@ def validation_drift_failed(fam: Mapping[str, Any]) -> bool:
     return drift_failed(fam, (fam.get("state") or {}).get("validation_version")) is not None
 
 
+# ------------------------------------------------------------------------------------ GATE-READY AT TRAIN (F1, Oct 3)
+#: `researcher.max_unit_usd`'s default: the Probe's one-contract floor (the constitution's `options_money.probe.floor_usd`),
+#: which is what a first real-money position may risk while 5% of the account's equity is less than it. THE UNIT ON
+#: VALIDATION reads it: the money table fits the Probe to the Validation run's unit.
+MAX_UNIT_USD = 100.0
+#: `researcher.max_unit_train_usd`'s default (the captain's R1): the Train screen's limit, under the Probe's floor by a
+#: margin, because the unit the money table reads is the Validation run's and that is larger than the Train run's in
+#: three runs of four (median ratio 1.14, Oct 3). At 100 on Train 24 of 127 kept runs had a Validation unit over the
+#: floor; at 80, 4, for 10 stopped that a Probe could have held. A cheap first filter, an approximation both ways.
+MAX_UNIT_TRAIN_USD = 80.0
+#: The family state's record of the versions GATE-READY AT TRAIN set aside: {str(n): {"kind": "drift" | "unit", "why",
+#: "run", "evaluator", "under": [the gate's drift share, the unit limit] it was judged by}}, the newest `SET_ASIDE_KEPT`.
+#: A record for the status, the idle rule's verdict and the way back; the rule itself is judged from the version's
+#: figures and the settings (`train_gate`).
+SET_ASIDE_KEY = "set_aside"
+SET_ASIDE_KEPT = 24
+#: The family state's mark of THE UNIT ON VALIDATION (`tournament.Tournament._verdict`): {"version", "limit"} while the
+#: version that met the line waits before the gate for a Validation unit over `researcher.max_unit_usd` (or unknown).
+UNIT_WAIT_KEY = "unit_wait"
+
+
+def unit_waiting(state: Any) -> dict[str, Any] | None:
+    """THE UNIT ON VALIDATION's mark (`UNIT_WAIT_KEY`) while the family's validated version waits BEFORE the gate now,
+    else None: the mark names the version validated (`validation_version`; a mark that outlived its validation, as
+    after an adoption of a new Gym, names nothing). Never raises. ONE RULE for every reader that would otherwise take
+    such a version up (release F1, where this meets the fast lane): the gate's own wait (`gate.waiting`: a version that
+    waits before the gate holds no place AT it, whatever marker of the gate's it carries), a selection given back
+    (`evaluator._look_owed`), the incubator's reviews (`incubator.due_reviews`: no review of any kind is paid for it)
+    and the daily funnel's page (counted apart from held)."""
+    if not isinstance(state, Mapping):
+        return None
+    wait, n = state.get(UNIT_WAIT_KEY), state.get("validation_version")
+    if not isinstance(wait, Mapping) or n is None or isinstance(n, bool) or isinstance(wait.get("version"), bool) \
+            or wait.get("version") != n:
+        return None
+    return dict(wait)
+
+
+def _unit_setting(settings: Mapping[str, Any], name: str, default: float) -> float | None:
+    """`researcher.<name>` as a dollar limit: JSON null is off (None); any other value that is not a positive finite
+    number is `default` (a brake is never misread as off)."""
+    cfg = settings.get("researcher") or {}
+    raw = cfg.get(name, default) if isinstance(cfg, Mapping) else default
+    if raw is None:
+        return None
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)) or not math.isfinite(raw) or raw <= 0:
+        return default
+    return float(raw)
+
+
+def max_unit(settings: Mapping[str, Any]) -> float | None:
+    """`researcher.max_unit_usd` (100): the most one structure of a version may risk at its median over the VALIDATION
+    year for a line pass to go to the gate (THE UNIT ON VALIDATION: the money table's own reading of the Probe's fit).
+    JSON null turns that wait off; any other value that is not a positive finite number is the default."""
+    return _unit_setting(settings, "max_unit_usd", MAX_UNIT_USD)
+
+
+def max_unit_train(settings: Mapping[str, Any]) -> float | None:
+    """`researcher.max_unit_train_usd` (80): the most one structure of a version may risk at its median on TRAIN for the
+    version to be validated (GATE-READY AT TRAIN's unit screen: the Validation limit less a margin, MAX_UNIT_TRAIN_USD).
+    JSON null turns the Train screen off; any other value that is not a positive finite number is the default."""
+    return _unit_setting(settings, "max_unit_train_usd", MAX_UNIT_TRAIN_USD)
+
+
+def gate_looks() -> bool:
+    """Does the gate in this tree make the sealed look (`gate.SEALED_LOOKS`)? THE DRIFT HOLD and THE POWER HOLD are holds
+    on that look, so the screens and words that mirror them (`carrier_share`, `power_bar`) follow the gate: while it
+    makes no look they are off, and no researcher is told of a rule that does not run."""
+    from . import gate  # a local import: the gate imports this module
+
+    return bool(getattr(gate, "SEALED_LOOKS", True))
+
+
+def carrier_share(settings: Mapping[str, Any]) -> float | None:
+    """The drift share at which the gate holds a look (`gate.look_hold_settings`, the gate's own reading of
+    `gate.look_holds.drift_share`: 0.25), or None while that hold is off, the gate makes no sealed look (`gate_looks`) or
+    `researcher.carrier_screen` is JSON false: then no version is set aside as a drift carrier."""
+    cfg = settings.get("researcher") or {}
+    if (isinstance(cfg, Mapping) and cfg.get("carrier_screen", True) is False) or not gate_looks():
+        return None
+    from .gate import look_hold_settings  # a local import: the gate imports this module
+
+    return look_hold_settings(settings)[0]
+
+
+def drift_held(lean: Mapping[str, Any], share: float) -> bool:
+    """THE DRIFT HOLD's rule, as `gate.Gate.look_hold` writes it, on a version's `evidence.drift_lean`: no usable fit,
+    or long delta with a drift share that is unknown or at least `share`."""
+    return bool(not lean["known"] or (lean["long_delta"] and (lean["share"] is None or lean["share"] >= share)))
+
+
+def train_row(store: SwarmStore, fam: Mapping[str, Any], n: Any) -> dict[str, Any] | None:
+    """Version `n`'s completed Train run at the normal spread, over the running span and on the evaluator in force: its
+    best or submitted run, else its newest (the rows `version_drift` reads). None when it has none."""
+    if n is None or isinstance(n, bool):
+        return None
+    n = int(n)
+    from .evaluator import KEY, row_matches
+
+    evaluator = store.get(KEY)
+    span = running_span(store)
+    state = fam.get("state") or {}
+
+    def mine(row: Mapping[str, Any] | None) -> bool:
+        return (isinstance(row, Mapping) and row.get("version") == n and row.get("window") == "train" and row.get("status") == "ok"
+                and row.get("stress") is not None and float(row["stress"]) == 1.0 and row.get("purpose") in DRIFT_PURPOSES
+                and row_span(row) == span and row_matches(store, row, evaluator))
+
+    for key, of in (("best_train_run", state.get("best_train_version")), ("submitted_run", fam.get("best_version"))):
+        if state.get(key) and of == n:
+            row = store.run(str(state[key]))
+            if mine(row):
+                return row
+    return next((row for row in store.version_runs(fam["id"], n, window="train", stress=1.0, limit=20) if mine(row)), None)
+
+
+def version_unit(store: SwarmStore, fam: Mapping[str, Any], n: Any) -> float | None:
+    """Version `n`'s one-lot unit on Train: the median maximum loss of ONE structure in its Train run (`train_row`), the
+    Gym's own `median_max_loss_per_structure`. It is the figure the tournament keeps of a version's Validation run
+    (`typical_max_loss_usd`) and the money table fits to the Probe's cap (`league.live.money.band_for`), read one window
+    earlier. None when its run carries none (it opened no structure, or predates the figure)."""
+    value = _number(((train_row(store, fam, n) or {}).get("summary") or {}).get("median_max_loss_per_structure"))
+    return value if value is not None and value > 0 else None
+
+
+def _number(value: Any) -> float | None:
+    """A finite number (never a boolean), else None."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return None
+    return float(value)
+
+
+def train_gate(store: SwarmStore, fam: Mapping[str, Any], n: Any, settings: Mapping[str, Any]) -> dict[str, Any]:
+    """GATE-READY AT TRAIN (the module docstring) on version `n`, from its own Train run and the settings as they are
+    now: {ready, kind, why, lean, unit, limit, under}. `kind`: None (ready), "fit" (no Train drift fit yet: it waits for
+    one, and is not set aside), "drift" (THE DRIFT HOLD would hold its look: `drift_held`) or "unit" (its one-lot unit
+    is over `researcher.max_unit_train_usd`). `why` continues "this version ..." and carries no limit of the gate's (a share
+    printed beside its line invites a version tuned to sit just under it). `lean` and `unit` are the figures read
+    (None for a screen that is off), `under` the two limits it was judged by. Train figures only."""
+    share, limit = carrier_share(settings), max_unit_train(settings)
+    out: dict[str, Any] = {"ready": True, "kind": None, "why": None, "lean": None, "unit": None, "limit": limit,
+                           "under": [share, limit]}
+    if share is not None:
+        numbers = version_drift(store, fam, n)
+        if numbers is None:
+            return {**out, "ready": False, "kind": "fit", "why": "has no Train drift fit yet, and the gate holds a look without one"}
+        lean = out["lean"] = evidence.drift_lean(numbers, first_year=int(running_span(store)[:4]))
+        if drift_held(lean, share):
+            if not lean["known"]:
+                why = f"has a Train drift fit the gate cannot read ({lean['why']})"
+            else:
+                part = "an unmeasured share" if lean["share"] is None else f"{round(100 * lean['share'])}%"
+                why = f"is a drift carrier by the gate's rule (long delta, {part} of its Train profit the market's drift)"
+            return {**out, "ready": False, "kind": "drift", "why": why}
+    if limit is not None:
+        unit = out["unit"] = version_unit(store, fam, n)
+        if unit is not None and unit > limit:
+            return {**out, "ready": False, "kind": "unit",
+                    "why": f"risks ${unit:,.2f} a contract at its median on Train, over the ${limit:,.2f} a version may risk "
+                           "there to be validated"}
+    return out
+
+
+def set_aside(fam: Mapping[str, Any], evaluator: Any = None) -> dict[str, dict[str, Any]]:
+    """The versions GATE-READY AT TRAIN set aside (`SET_ASIDE_KEY`), {str(n): its record}; with `evaluator`, only those
+    judged on its Gym (a live-only adoption keeps Train evidence; a new Gym leaves the old marks behind)."""
+    from .evaluator import on_gym_in_force
+
+    marks = (fam.get("state") or {}).get(SET_ASIDE_KEY)
+    if not isinstance(marks, Mapping):
+        return {}
+    return {str(k): dict(v) for k, v in marks.items() if isinstance(v, Mapping)
+            and (evaluator is None or on_gym_in_force(v.get("evaluator"), evaluator))}
+
+
+def _restore_aside(store: SwarmStore, fid: str, settings: Mapping[str, Any], *,
+                   include_retired: bool = False) -> list[dict[str, Any]]:
+    """A SET-ASIDE version's way back (under the caller's transaction): a mark judged under other limits than today's
+    (the unit limit or the gate's share moved, or a screen was switched off) is judged again, and a version that is
+    ready now returns to the candidates with the Train score its run recorded, the best again when it beats the best.
+    A mark of another evaluator, of a version since demoted, or whose run no longer counts is dropped.
+    `include_retired` re-screens historical marks for program-wide temporary holds; it never restores a retired
+    family's candidates, best or population slot."""
+    from .evaluator import KEY, on_gym_in_force
+
+    fam = store.family(fid)
+    if fam is None or (fam.get("retired_at") and not include_retired):
+        return []
+    marks = set_aside(fam)
+    under, evaluator = [carrier_share(settings), max_unit_train(settings)], store.get(KEY)
+    out: list[dict[str, Any]] = []
+    for key in sorted(marks, key=int):
+        mark, n = marks[key], int(key)
+        current = on_gym_in_force(mark.get("evaluator"), evaluator)
+        if current and mark.get("under") == under:
+            continue
+        fam = store.family(fid) or fam
+        state = fam.get("state") or {}
+        kept = {k: v for k, v in set_aside(fam).items() if k != key}
+        row = train_row(store, fam, n) if current else None
+        summary = (row or {}).get("summary") or {}
+        score = _number(summary.get("train_score")) if summary.get("train_eligible") is True else None
+        if row is None or score is None or n in (state.get("robust_failed") or []) or drift_failed(fam, n) is not None:
+            store.set_state(fid, **{SET_ASIDE_KEY: kept})
+            continue
+        gate = train_gate(store, fam, n, settings)
+        if not gate["ready"] and gate["kind"] != "fit":  # still held, under today's limits (one owed its fit waits as a best)
+            store.set_state(fid, **{SET_ASIDE_KEY: {**kept, key: {**mark, "kind": gate["kind"], "why": gate["why"], "under": under}}})
+            continue
+        if fam.get("retired_at"):
+            store.set_state(fid, **{SET_ASIDE_KEY: kept})
+            continue
+        values: dict[str, Any] = {SET_ASIDE_KEY: kept,
+                                  "train_candidates": candidates_with(state.get("train_candidates"), score, n, str(row["run_id"]))}
+        if fam.get("best_train") is None or score > float(fam["best_train"]):
+            store.update_family(fid, best_train=score)
+            values.update(best_train_run=str(row["run_id"]), best_train_version=n)
+        store.set_state(fid, **values)
+        out.append({"version": n, "action": "restored", "why": f"it is no longer set aside (it {mark.get('why')})", "next": None})
+    return out
+
+
 def screen_best(store: SwarmStore, fid: str, settings: Mapping[str, Any], *, clock: Callable[[], float] = time.time) -> list[dict[str, Any]]:
     """THE DRIFT SCREEN on the family's candidate for Validation (its submitted best, else its best by Train score), again
     and again: while the candidate's figures are known and fail, it is marked (`drift_failed`) and demoted like a loss at
     1.5x (`demote_version`: never the best again; the next eligible candidate takes its place), so a failing best never
     sits in front of one that passes, and a family left with none has no eligible Train version (the idle rule). One whose
     figures are owed stays (it waits for them), and so does a family the operator holds at the gate (`gate_hold`, with or
-    without its gate_ready: the hold spares it, and the gate refuses a failing version once the hold is cleared). Returns
-    the demotions; nothing while the screen is off."""
-    if drift_settings(settings) is None:
+    without its gate_ready: the hold spares it, and the gate refuses a failing version once the hold is cleared).
+
+    Then GATE-READY AT TRAIN (F1, `train_gate`), on the candidate that passed: a drift carrier by the gate's own rule,
+    or a version whose one-lot unit is over `researcher.max_unit_train_usd`, is SET ASIDE (`demote_version` with `lasting`
+    false) and the next candidate is judged in its place; one that only waits for its drift fit stays, and so does a
+    version already waiting at the gate (`gate_ready`: the gate holds it by its own rule and keeps its own record).
+    Before any of it, a version set aside under limits that have since moved is judged again (`_restore_aside`).
+
+    Returns the demotions and the set-asides (each row's `kind`: "screen" for the drift screen's, else `train_gate`'s);
+    nothing while every screen is off."""
+    screening = drift_settings(settings) is not None
+    if not screening and carrier_share(settings) is None and max_unit_train(settings) is None \
+            and not set_aside(store.family(fid) or {}):
         return []
     out: list[dict[str, Any]] = []
+    restored: list[dict[str, Any]] = []
     with store.atomic():
+        restored = _restore_aside(store, fid, settings)
         for _ in range(CANDIDATES + 2):
             fam = store.family(fid)
             if fam is None or fam.get("retired_at") or (fam.get("state") or {}).get("gate_hold"):
@@ -1472,37 +2005,59 @@ def screen_best(store: SwarmStore, fid: str, settings: Mapping[str, Any], *, clo
             n = fam.get("best_version") or state.get("best_train_version")
             if n is None:
                 break
-            verdict = drift_verdict(store, fam, n, settings)
-            if verdict is None or not verdict["known"] or verdict["passed"]:
+            verdict = drift_verdict(store, fam, n, settings) if screening else None
+            if verdict is not None and verdict["known"] and not verdict["passed"]:
+                why = f"fails the drift screen: {verdict['why']}"
+                marks = {**(state.get("drift_failed") or {}), str(int(n)): str(verdict["why"])[:DRIFT_WHY_CHARS]}
+                store.set_state(fid, drift_failed={k: marks[k] for k in sorted(marks, key=lambda k: int(k))[-DRIFT_FAILED_KEPT:]})
+                nxt = demote_version(store, store.family(fid) or fam, int(n), why=why, clock=clock)
+                out.append({"version": int(n), "why": why, "next": nxt.get("version"), "kind": "screen", "action": "demoted"})
+                continue
+            gate = train_gate(store, fam, n, settings)
+            if gate["ready"] or gate["kind"] == "fit" or (state.get("gate_ready") and state.get("validation_version") == n):
                 break
-            why = f"fails the drift screen: {verdict['why']}"
-            marks = {**(state.get("drift_failed") or {}), str(int(n)): str(verdict["why"])[:DRIFT_WHY_CHARS]}
-            store.set_state(fid, drift_failed={k: marks[k] for k in sorted(marks, key=lambda k: int(k))[-DRIFT_FAILED_KEPT:]})
-            nxt = demote_version(store, store.family(fid) or fam, int(n), why=why, clock=clock)
-            out.append({"version": int(n), "why": why, "next": nxt.get("version")})
-    for row in out:
-        store.event("swarm.robustness", fid, {"version": row["version"], "action": "demoted", "why": row["why"], "next": row["next"]})
+            nxt = demote_version(store, fam, int(n), why=str(gate["why"]), clock=clock, lasting=False, kind=gate["kind"],
+                                 under=gate["under"])
+            out.append({"version": int(n), "why": gate["why"], "next": nxt.get("version"), "kind": gate["kind"],
+                        "action": "set_aside"})
+    for row in restored + out:
+        store.event("swarm.robustness", fid, {"version": row["version"], "action": row["action"], "why": row["why"], "next": row["next"]})
     return out
 
 
 def demote_version(store: SwarmStore, fam: Mapping[str, Any], n: int, *, why: str = "lost money on Train at 1.5x the half-spread",
-               clock: Callable[[], float] = time.time) -> dict[str, Any]:
+               clock: Callable[[], float] = time.time, lasting: bool = True, kind: str | None = None, run: str | None = None,
+               under: Any = None) -> dict[str, Any]:
     """Version `n` lost at 1.5x, its 1.5x or drift run failed every attempt, or it fails the drift screen: never the best
     again; the family's next eligible candidate becomes its best (under the store's transaction). `robust_why` keeps the
-    reason for the status. Its Train and drift mark for the incubator (`train_passed`, `incubator.facts`) goes too."""
+    reason for the status. Its Train and drift mark for the incubator (`train_passed`, `incubator.facts`) goes too.
+
+    `lasting` false SETS IT ASIDE instead (GATE-READY AT TRAIN, F1): it leaves the candidates and the best in the same
+    way, but it is not marked failed (no `robust_failed`, its incubator mark and whatever it holds at the gate stand):
+    `SET_ASIDE_KEY` records why (`kind`, `why`), its Train run (`run`, else the one its candidate row or the best
+    names) and the limits it was judged by (`under`), and `_restore_aside` gives it its place back once it would pass."""
     fid = fam["id"]
     state = fam.get("state") or {}
     failed = list(state.get("robust_failed") or [])
-    if n not in failed:
+    if lasting and n not in failed:
         failed.append(int(n))
-    whys = {**(state.get("robust_why") or {}), str(n): why}
-    rest = [c for c in (state.get("train_candidates") or []) if int(c[1]) not in failed]
+    rest = [c for c in (state.get("train_candidates") or []) if int(c[1]) not in failed and (lasting or int(c[1]) != int(n))]
     fields: dict[str, Any] = {}
-    values: dict[str, Any] = {"robust_failed": failed[-50:], "robust_why": {k: v for k, v in whys.items() if int(k) in failed[-50:]},
-                              "train_candidates": rest}
-    marks = state.get("train_passed")
-    if isinstance(marks, Mapping) and str(int(n)) in marks:
-        values["train_passed"] = {k: v for k, v in marks.items() if k != str(int(n))}
+    values: dict[str, Any] = {"train_candidates": rest}
+    if lasting:
+        whys = {**(state.get("robust_why") or {}), str(n): why}
+        values.update(robust_failed=failed[-50:], robust_why={k: v for k, v in whys.items() if int(k) in failed[-50:]})
+        marks = state.get("train_passed")
+        if isinstance(marks, Mapping) and str(int(n)) in marks:
+            values["train_passed"] = {k: v for k, v in marks.items() if k != str(int(n))}
+    else:
+        from .evaluator import KEY
+
+        entry = next((c for c in (state.get("train_candidates") or []) if int(c[1]) == int(n)), None)
+        run = run or (entry[2] if entry else state.get("best_train_run") if state.get("best_train_version") == n
+                      else state.get("submitted_run") if fam.get("best_version") == n else None)
+        aside = {**set_aside(fam), str(int(n)): {"kind": kind, "why": why, "run": run, "evaluator": store.get(KEY), "under": under}}
+        values[SET_ASIDE_KEY] = {k: aside[k] for k in sorted(aside, key=int)[-SET_ASIDE_KEPT:]}
     nxt: dict[str, Any] = {"version": None}
     if state.get("best_train_version") == n:
         if rest:
@@ -1515,7 +2070,7 @@ def demote_version(store: SwarmStore, fam: Mapping[str, Any], n: int, *, why: st
             values.update(best_train_version=None, best_train_run=None)
     if fam.get("best_version") == n:
         fields.update(best_version=None)  # the tournament validates the best by Train score instead
-    if state.get("validation_version") == n:
+    if lasting and state.get("validation_version") == n:
         # Validated before its 1.5x robustness run landed: it leaves the gate's queue, and live tuition (`bands.read`)
         # refuses a version whose gate outcome is "demoted".
         from .gate import run_sha
@@ -1528,6 +2083,61 @@ def demote_version(store: SwarmStore, fam: Mapping[str, Any], n: int, *, why: st
         store.update_family(fid, **fields)
     store.set_state(fid, **values)
     return nxt
+
+
+def power_bar(store: SwarmStore, settings: Mapping[str, Any]) -> dict[str, Any] | None:
+    """THE POWER HOLD's bar as a researcher may read it: the least all-days daily Sharpe a version's Validation year must
+    show for `evidence.holdout_power` to reach `gate.look_holds.min_power` over the holdout's sessions at the STRICTEST
+    level the next look can face: Holm's level as if every look made so far, and every look in flight, had failed
+    (`evidence.holm_level` on that many ones: alpha over their count plus one). It reads HOW MANY looks the gate made
+    (`SwarmStore.looks_made`, `looks_inflight`) and nothing any of them found, no p-value and no verdict (the evidence
+    rule: a prompt carries Train and Validation evidence only). So the figure moves when a look is made, never with
+    what it found; it is one number for every family; and the gate's own bar (`gate.Gate.look_hold`, which does read the
+    looks' p-values) is this or lower: a version that reaches it is looked at. Found by bisection on `holdout_power`
+    itself, so no figure of it is written down here. {sharpe, level, looks, sessions, min_power}; None while the hold
+    is off, the gate makes no sealed look (`gate_looks`) or a figure is missing."""
+    from .gate import holdout_sessions, look_hold_settings
+
+    min_power = look_hold_settings(settings)[1]
+    if min_power is None or not gate_looks():
+        return None
+    sessions = holdout_sessions()
+    looks = store.looks_made() + len(store.looks_inflight())
+    level = evidence.holm_level([1.0] * looks)
+    low, high = -1.0, 1.0  # a daily Sharpe far outside what any program shows, either way
+    reach = evidence.holdout_power(high, sessions, level)
+    if reach is None or reach < min_power or (evidence.holdout_power(low, sessions, level) or 0.0) >= min_power:
+        return None
+    for _ in range(60):
+        mid = (low + high) / 2.0
+        if (evidence.holdout_power(mid, sessions, level) or 0.0) >= min_power:
+            high = mid
+        else:
+            low = mid
+    return {"sharpe": high, "level": level, "looks": looks, "sessions": sessions, "min_power": min_power}
+
+
+#: THE PROGRAM IN SIGHT (F1): how a message that shows a program opens (`Researcher.program_items`); `Researcher.trim`
+#: never shortens such a message, so a program shown once stays whole while its cycle is in the history.
+PROGRAM_HEAD = "YOUR PROGRAM"
+
+
+def in_sight(items: Sequence[Mapping[str, Any]], code: str) -> bool:
+    """Does the history a call carries already hold this program whole: as the `code` of one of its own run calls, or in
+    a message (the starter's, a rewrite's, an earlier showing)?"""
+    for item in items:
+        if item.get("type") == "function_call" and item.get("name") in RUNS:
+            args = item.get("arguments")
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except ValueError:
+                    continue
+            if isinstance(args, Mapping) and args.get("code") == code:
+                return True
+        elif item.get("role") == "user" and code in str(item.get("content") or ""):
+            return True
+    return False
 
 
 class Researcher:
@@ -1635,6 +2245,23 @@ class Researcher:
         if line and state.get("validation_version") is not None:
             # D2a: pass or fail and a count, never a number Validation measured nor which checks failed.
             parts.append(f"Validation of version {state['validation_version']}: it {diagnostics.validation_words(line)}.")
+            wait = state.get(UNIT_WAIT_KEY)
+            if isinstance(wait, Mapping) and wait.get("version") == state["validation_version"]:
+                # THE UNIT ON VALIDATION (F1): no figure Validation measured, only that the unit is over the limit (D2a).
+                if wait.get("unknown"):
+                    parts.append("It waits before the gate: its Validation run states no unit for one structure of it, and "
+                                 "a first real-money position is sized from that unit, so no review and no look is spent "
+                                 "on it until a validation states one.")
+                else:
+                    parts.append("It waits before the gate: over the Validation year one structure of it risks more than a "
+                                 "first real-money position may, so no review and no look is spent on it until the limit "
+                                 "moves. A version that risks less a contract (narrower strikes, a cheaper root) would not "
+                                 "wait.")
+            left = short_left(fam, self.settings)
+            if left:  # THE DEPTH RULE (F1): the count D2a already shows decides how long the family goes on
+                parts.append(f"That is fewer than the checks a near miss meets, so the idle rule retires your family {left} "
+                             "cycles from now, whatever awaits validation then. Spend them on the one change most likely "
+                             "to matter, and leave what you learned in your notes: they become its lesson.")
         operator = self.operator_text(fam)  # THE OPERATOR'S RUN: a revival is run unchanged first, and its evidence decides
         if operator:
             parts.append(operator)
@@ -1644,6 +2271,9 @@ class Researcher:
         drift = self.drift_text(fam)
         if drift:
             parts.append(drift)
+        ready = self.gate_text(fam)  # GATE-READY AT TRAIN (F1): what the gate and the money table will ask, on Train figures
+        if ready:
+            parts.append(ready)
         tested = self.mechanism_text(fam)
         if tested:
             parts.append(tested)
@@ -1686,11 +2316,17 @@ class Researcher:
             parts.append(f"Your family {dead}. If its mechanism is dead, call retire with your reason when the tool is offered "
                          "rather than re-running a placeholder: its slot goes to a new idea.")
         elif may_retire and self.hold_offer(fam):
-            parts.append(f"Your family has held {hold_streak(fam)} cycles in a row with a Train record behind it. If your notes "
-                         "say its mechanism is refuted or exhausted, call retire with your reason (it is offered now) rather "
-                         "than holding again: its slot goes to a new idea.")
+            parts.append(f"Your family has held {hold_streak(fam)} cycles in a row. If your notes say its mechanism is "
+                         "refuted or exhausted, or that the Gym's data cannot test it, call retire with your reason (it is "
+                         "offered now) rather than holding again: its slot goes to a new idea.")
         retire_hint = " If you abandon the entire mechanism, call retire with your reason." if may_retire else ""
         hold_hint = " With nothing new to run, call gym_run with hold=true and say why in its note."
+        minutes = park_minutes(self.settings)
+        if minutes is not None and fam.get("band") == "gym":
+            # PARKED DORMANCY (F1): "until news" is bounded, and the researcher that chooses a hold is told so.
+            hold_hint += (" A hold parks your family until news reaches it (a result, a verdict, guidance, new data); with "
+                          f"nothing of yours awaiting validation, a family that only waits is retired by the idle rule after "
+                          f"about {minutes} minutes.")
         fit = min(self.sweep_room(), self.max_variants)
         if self.sweeps and fit >= 2:
             parts.append("Now: if a run just came back, read it (submit it if it is your best) and queue your next gym_run or "
@@ -1882,6 +2518,107 @@ class Researcher:
         return (f"{head}: {figures}: it FAILS ({verdict['why']}), so it is not validated. Improve the timing, or submit a "
                 "version that passes.")
 
+    def gate_text(self, fam: Mapping[str, Any]) -> str:
+        """GATE-READY AT TRAIN in the status (F1; Train figures and the gate's own settings, never a figure Validation
+        or the holdout measured): of the version the tournament validates next, its Train drift share and lean with the
+        gate's answer in words (its line is not printed: a share beside its limit invites a version tuned to sit just
+        under it), its median one-lot unit beside the two unit limits (`researcher.max_unit_train_usd` on Train,
+        `researcher.max_unit_usd` on Validation), and its Train all-days daily Sharpe beside the most THE POWER HOLD can
+        ask of its Validation year (`power_bar`: from the count of looks made, never from what one found). A family
+        with no such version yet reads the unit limits alone, so its first program is built to them. Then the versions
+        set aside, newest first, and what would be validated instead. "" for a family outside the Gym band or with
+        every screen off."""
+        if fam.get("band") != "gym":
+            return ""
+        state = fam.get("state") or {}
+        n = fam.get("best_version") or state.get("best_train_version")
+        parts: list[str] = []
+        if n is None:
+            train_limit, limit = max_unit_train(self.settings), max_unit(self.settings)
+            if train_limit is not None or limit is not None:
+                on_train = (f"is validated only while one structure of it risks at most ${train_limit:,.2f} at its median on "
+                            "Train (its maximum loss a contract)") if train_limit is not None else None
+                on_val = (f"goes to the gate only while that is at most ${limit:,.2f} over the Validation year (what a first "
+                          "real-money position may risk a contract; the Validation year's is usually the larger)"
+                          ) if limit is not None else None
+                parts.append("The unit: a version " + ", and ".join(x for x in (on_train, on_val) if x) + ".")
+        if n is not None:
+            gate = train_gate(self.store, fam, n, self.settings)
+            lean, said = gate["lean"], []
+            if gate["kind"] == "fit":
+                said.append("it has no Train drift fit yet, so it waits for one before it is validated (the gate holds a look "
+                            "without one)")
+            elif lean is not None and lean["known"]:
+                share = "an unmeasured share" if lean["share"] is None else f"{round(100 * lean['share'])}%"
+                held = drift_held(lean, float(gate["under"][0]))
+                said.append(f"{share} of its Train profit is the market's drift and it is "
+                            f"{'long' if lean['long_delta'] else 'short or flat'} delta: "
+                            + ("a drift carrier by the gate's rule, which holds a look at one" if held else
+                               "not a drift carrier by the gate's rule (it holds a look at a long-delta version whose profit "
+                               "is too much the market's drift)"))
+            if gate["limit"] is not None:
+                real = max_unit(self.settings)
+                later = (f" (the Validation year's is usually the larger, and a first real-money position may risk "
+                         f"${real:,.2f} a contract there)") if real is not None else ""
+                if gate["unit"] is not None:
+                    said.append(f"its median one-lot unit on Train is ${gate['unit']:,.2f}; a version is validated while that "
+                                f"is at most ${gate['limit']:,.2f}{later}"
+                                + (", so it is over" if gate["unit"] > gate["limit"] else ""))
+                else:
+                    said.append(f"its Train run states no one-lot unit yet; a version is validated while that is at most "
+                                f"${gate['limit']:,.2f}{later}")
+            bar = power_bar(self.store, self.settings)
+            sharpe = _number(((train_row(self.store, fam, n) or {}).get("summary") or {}).get("sharpe_daily"))
+            if bar is not None and sharpe is not None:
+                # The evidence rule: the bar is computed from how many looks the gate has made, never from what one found.
+                said.append(f"its all-days daily Sharpe on Train is {sharpe:.3f}; the gate looks at a version whose all-days "
+                            f"daily Sharpe over the Validation year reaches {bar['sharpe']:.3f} (the most it asks after the "
+                            "looks it has made so far, whatever they found; every further look raises it)")
+            if said:
+                parts.append(f"What the gate will ask of version {n}, on its Train figures: " + "; ".join(said) + ".")
+        marks = set_aside(fam, self._aside_key())
+        if marks:
+            newest = sorted(marks, key=int, reverse=True)[:4]
+            parts.append("Set aside, not validated while this stands (no finding against the program; a version comes back "
+                         "by itself if the limit moves): " + "; ".join(f"version {k} {marks[k].get('why')}" for k in newest)
+                         + ". A version whose profit is its timing, in structures that risk less a contract (narrower "
+                           "strikes, a cheaper root), would be validated.")
+        return " ".join(parts)
+
+    # ------------------------------------------------------------------ THE PROGRAM IN SIGHT (F1)
+    def program_items(self, fam: Mapping[str, Any], history: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+        """THE PROGRAM IN SIGHT (the module docstring): the messages that show the family its latest version's program
+        (what `gym_run` reruns with no `code`, and what `params` alone or a code-less `gym_sweep` runs) and its best
+        version's, when that is another program, each whole with its params, unless `history` (the items this cycle's
+        call carries) already holds that code. A version written for the family (a fork's or a revival's first: its
+        parent's program) says whose it is. Nothing while `researcher.show_program` is JSON false."""
+        if self.cfg.get("show_program", True) is False:
+            return []
+        fid = str(fam["id"])
+        latest = self.store.latest_version(fid)
+        if latest is None or not latest.get("code"):
+            return []
+        shown = [(latest, "your latest version: what gym_run reruns with no `code`, and what `params` alone or a gym_sweep "
+                          "without `code` runs")]
+        best = fam.get("best_version") or (fam.get("state") or {}).get("best_train_version")
+        if best and int(best) != int(latest["n"]):
+            version = self.store.version(fid, int(best))
+            if version and version.get("code") and version["code"] != latest["code"]:
+                shown.append((version, "your best version, another program than your latest"))
+        out = []
+        for version, whose in shown:
+            if in_sight(history, version["code"]):
+                continue
+            author = str(version.get("author") or "")
+            handed = ""
+            if fam.get("parent") and (author.startswith("fork of ") or author in OPERATOR_AUTHORS):
+                handed = (f" It is {fam['parent']}'s program, handed to you whole ({str(version.get('note') or author)[:200]}): "
+                          "revise it; you need not rebuild it.")
+            out.append({"role": "user", "content": (
+                f"{PROGRAM_HEAD} (version {version['n']}, {whose}), whole, as the Gym has it. Its params: "
+                f"{json.dumps(version.get('params') or {}, sort_keys=True, default=str)}.{handed}\n```python\n{version['code']}\n```")})
+        return out
+
     # ------------------------------------------------------------------ retirement, the top ten
     def dead(self, fam: Mapping[str, Any]) -> str | None:
         """`idle_dead` against the Gym the pool runs now (a passing validation owed again is never dead)."""
@@ -1889,14 +2626,19 @@ class Researcher:
 
     def hold_offer(self, fam: Mapping[str, Any]) -> bool:
         """THE HOLD OFFER (R11-1): a Gym family that held its last `researcher.retire_hold_cycles` (3) cycles in a row
-        (`hold_streak`) with an eligible Train run behind it (`train_record`) or `researcher.retire_hold_trials` (10) trials
-        of its own. Its researcher has usually declared the mechanism refuted and waits for a retire it was never offered
-        (Sept 29: a median 58-minute hold streak before the dormancy clause retired it). 0 cycles turns it off; 0 trials
-        leaves the eligible run alone. Never for a family under the extension hold (`extension_held`): its near-miss waits
-        for its 2017-19 extension result, which its own holds must not pre-empt."""
+        (`hold_streak`), whatever its trial count (F1, `researcher.retire_hold_untested`, true: on Oct 3 six of the eight
+        living families had 3 to 9 trials, no eligible Train run and notes that said "holding for retirement"). With
+        that setting false it also needs an eligible Train run behind it (`train_record`) or
+        `researcher.retire_hold_trials` (10) trials of its own, as before F1. Its researcher has usually declared the
+        mechanism refuted and waits for a retire it was never offered (Sept 29: a median 58-minute hold streak before
+        the dormancy clause retired it). 0 cycles turns it off; 0 trials leaves the eligible run alone. Never for a
+        family under the extension hold (`extension_held`): its near-miss waits for its 2017-19 extension result, which
+        its own holds must not pre-empt."""
         need = _count_setting(self.settings, "retire_hold_cycles", RETIRE_HOLD_CYCLES)
         if need <= 0 or fam.get("band") != "gym" or hold_streak(fam) < need or extension_held(fam):
             return False
+        if self.cfg.get("retire_hold_untested", True) is not False:
+            return True  # F1: whatever its trial count (a family that fails fast never reached ten trials)
         trials = _count_setting(self.settings, "retire_hold_trials", RETIRE_HOLD_TRIALS)
         if trials > 0 and int(fam.get("trials") or 0) >= trials:
             return True
@@ -1909,12 +2651,28 @@ class Researcher:
 
         ``start`` is a refill target, never a second floor: start == ceiling made normal retirement unreachable.
         A counted trial threshold offers retirement before an exhausted family has to buy hold calls to unlock it.
+        The floor is THE FLOOR COUNTS RESEARCH's (F1, `floor_room`): a dead slot is offered it at the floor too.
         """
-        pop = self.settings.get("population", {})
-        alive = len(self.store.families(alive=True))
         need = _count_setting(self.settings, "retire_min_trials", 10)
         tested = int(fam.get("validations") or 0) >= 2 or (need > 0 and int(fam.get("trials") or 0) >= need)
-        return alive > int(pop.get("floor", 16)) and bool(tested or self.dead(fam) or self.hold_offer(fam))
+        return self.floor_room(fam) and bool(tested or self.dead(fam) or self.hold_offer(fam))
+
+    def floor_counts(self) -> Callable[[Mapping[str, Any]], bool] | None:
+        """`floor_counts` against the Gym the pool runs now and the tournament's saved cohort keep: which living families
+        the floor counts (None: every one)."""
+        kept = kept_families(self.store, float(self.clock()))
+        return floor_counts(self.settings, current=self._gym_identity(), kept=kept.__contains__)
+
+    def floor_room(self, fam: Mapping[str, Any]) -> bool:
+        """Would the population floor let this family retire now (`SwarmStore.retire_gym` decides it again, atomically):
+        the living families the floor counts number more than `population.floor`, or this one is a dead slot the floor
+        does not count (THE FLOOR COUNTS RESEARCH, F1)."""
+        floor = self.retire_floor(fam)
+        alive = self.store.families(alive=True)
+        counts = self.floor_counts()
+        if counts is None:
+            return len(alive) > floor
+        return not counts(fam) or sum(1 for f in alive if counts(f)) > floor
 
     def can_retire(self, fam: Mapping[str, Any]) -> bool:
         """An evidence-backed abandonment (`retire_earned`) may use the atomic population floor, including on REVISE.
@@ -2418,13 +3176,14 @@ class Researcher:
 
     def _probe_view(self, run: Mapping[str, Any], n: int, year: int, root: str, *, stored: bool = False) -> dict[str, Any]:
         """The answer to a run whose probe made no trade: disqualified, the full Train run skipped (its runtime messages
-        when the program erred)."""
+        when the program erred). `root`: the roots the probe ran on, as the family's roots are written."""
         view: dict[str, Any] = {"status": "disqualified", "reason": f"disqualified: no trades in the probe year ({year} on {root})",
                                 "version": n, "run_id": run["run_id"], "window": "train",
                                 "probe": {"year": year, "root": root, "trades": 0},
-                                "next": "the full Train run was skipped. Revise the program so it trades, or call gym_run with "
-                                        "full=true to run the whole of Train anyway (a program that trades only in other years "
-                                        "or on other roots)"}
+                                "next": "the full Train run was skipped: the Train score needs trades in every Train year, this "
+                                        "one among them, so this program could not be eligible as it is. Revise the program so "
+                                        "it trades, or call gym_run with full=true to run the whole of Train anyway (the "
+                                        "diagnostic of a program that trades only in other years)"}
         full = self.store.run_result(run["run_id"])
         messages = ((full or {}).get("runtime") or {}).get("messages") or []
         if messages:
@@ -2438,10 +3197,14 @@ class Researcher:
     def _probe(self, fam: Mapping[str, Any], n: int, code: str, params: Mapping[str, Any], *, stress: float, full: bool,
                out: dict[str, Any]) -> dict[str, Any] | None:
         """THE ZERO-TRADE PROBE (R11-6), while `researcher.probe_year` is on: a version's first Train run at the normal
-        spread is preceded by a run of it over that one year on the family's first root. A probe that makes no trade is the
+        spread is preceded by a run of it over that one year on the roots the full run would trade (F1: all the family's
+        roots, not its first alone; a program that trades only its second root, or reads one root to trade another, made
+        no trade on the first, and its full run was skipped). A probe that makes no trade is the
         answer (disqualified, recorded as one trial in a "probe" row, never a Train row, so no score, no best and no drift
         figure is ever read from it), and the full run is skipped; the same program asked again is answered from that row
-        (NO DUPLICATE RUNS). A probe that trades, fails or does not answer in `researcher.probe_timeout_seconds` says
+        (NO DUPLICATE RUNS). No eligible version is lost by it: the Train score asks 40 trades on 20 days in every Train
+        year on those roots, the probe year among them. A probe that trades, fails or does not answer in
+        `researcher.probe_timeout_seconds` says
         nothing: the full run goes ahead and the probe is not recorded (the full run's sample holds its). `full` (the
         researcher's `full=true`), a 1.5x run, and a version that already ran are never probed. None: run the full job."""
         year = self.probe_year()
@@ -2450,8 +3213,9 @@ class Researcher:
         if full:
             out["probe"] = {"skipped": "full=true"}
             return None
-        fid, root = fam["id"], str(fam["roots"][0])
-        key = self.eval_key(code, params, stress=1.0, window=f"probe:{year}", roots=(root,))
+        fid, roots = fam["id"], tuple(str(r) for r in fam["roots"])
+        root = ", ".join(roots)
+        key = self.eval_key(code, params, stress=1.0, window=f"probe:{year}", roots=roots)
         stored = self._stored_probe(fid, key) if self.reuse else None
         if stored is not None:
             out["stored"] = out.get("stored", 0) + 1
@@ -2459,7 +3223,7 @@ class Researcher:
         if self.store._one("SELECT 1 AS ran FROM runs WHERE family=? AND version=? AND window IN ('train', 'probe') LIMIT 1",
                            (fid, int(n))):
             return None  # not a new version's first run (a mechanism test's rows are not a Train run)
-        job = GymJob(family=fid, version=n, code=code, params=dict(params or {}), window="train", roots=(root,), stress=1.0,
+        job = GymJob(family=fid, version=n, code=code, params=dict(params or {}), window="train", roots=roots, stress=1.0,
                      purpose="probe", priority=float(fam.get("weight") or 0.0), start=f"{year}-01-01", end=f"{year}-12-31")
         began = self.clock()
         out["gym_asked"] = True
@@ -2481,7 +3245,8 @@ class Researcher:
             if self._terminal(fid, out):
                 return {"status": "retired", "reason": "the family is retired; the probe is not recorded"}
             run = self.store.add_run(fid, n, {**result, "summary": {**summary, "probe_year": year, "probe_root": root}},
-                                     window="probe", stress=1.0, purpose="probe", program_years=days / 252.0, key=key)
+                                     window="probe", stress=1.0, purpose="probe", program_years=days / 252.0 * max(1, len(roots)),
+                                     key=key)
         self._restart_dormancy(fid, result)
         out["run_id"] = run["run_id"]
         out["trials"] = out.get("trials", 0) + int(result.get("trials", 0) or 0)
@@ -2995,7 +3760,9 @@ class Researcher:
         view; returns the score when it is eligible (None otherwise). Idempotent: a stored result read again changes
         nothing its run already changed. A version whose drift figures fail the screen is not eligible (`drift_blocks`). A
         run over another Train span than the running swarm's (a job queued before a switch, an image adopted early) is
-        shown but never enters the candidates or the best."""
+        shown but never enters the candidates or the best. Nor does a version GATE-READY AT TRAIN holds back (F1,
+        `gate_blocks`: a drift carrier by the gate's rule, a one-lot unit over the limit): it is set aside, and its view
+        says why."""
         from .evaluator import identity, row_matches
 
         old_evaluator = not row_matches(self.store, self.store.run(run_id), identity(*self._gym_identity()))
@@ -3003,12 +3770,14 @@ class Researcher:
         score = (robust["score"] if robust is not None and robust["eligible"] and robust["score"] is not None and not other
                  else None)
         blocked = self.drift_blocks(fam["id"], n, version_drift(self.store, fam, n)) if score is not None else None
+        demoted = n in (((self.store.family(fam["id"]) or {}).get("state") or {}).get("robust_failed") or [])
+        aside = self.gate_blocks(fam["id"], n, run_id) if score is not None and not blocked and not demoted else None
         best = failed = False
         with self.store.atomic():
             current = self.store.family(fam["id"]) or {}
             state = current.get("state") or {}
             failed = n in (state.get("robust_failed") or [])
-            if not current.get("retired_at") and score is not None and not failed and not blocked:
+            if not current.get("retired_at") and score is not None and not failed and not blocked and not aside:
                 candidates = candidates_with(state.get("train_candidates"), score, n, run_id)
                 if candidates != state.get("train_candidates"):
                     self.store.set_state(fam["id"], train_candidates=candidates)
@@ -3019,7 +3788,8 @@ class Researcher:
                     out["improved"] = True
                     best = True
         if robust is not None:
-            view["train_score"] = {"score": robust["score"], "eligible": bool(robust["eligible"]) and not failed and not blocked,
+            view["train_score"] = {"score": robust["score"],
+                                   "eligible": bool(robust["eligible"]) and not failed and not blocked and not aside,
                                    "worst_year": robust.get("worst_year"), "quarters_positive": robust.get("quarters"),
                                    "by_year": robust.get("years")}
             if old_evaluator:
@@ -3036,9 +3806,11 @@ class Researcher:
                 view["train_score"]["why_not_eligible"] = f"this version {failed_why(state, n)}"
             elif blocked:
                 view["train_score"]["why_not_eligible"] = f"this version fails the drift screen: {blocked}"
+            elif aside:
+                view["train_score"]["why_not_eligible"] = f"this version {aside}, so it is not validated"
         if best:
             self.queue_robustness(fam["id"], n, code, params, needs_roots(code, fam["roots"]))
-        return None if blocked else score
+        return None if blocked or aside else score
 
     def _stored_run(self, fam: Mapping[str, Any], run: Mapping[str, Any], out: dict[str, Any], *, code: str,
                     stress: float) -> dict[str, Any]:
@@ -3335,13 +4107,19 @@ class Researcher:
 
         blocked = {int(r["job"].version or 0): why for r in rows if r["status"] == "ok" and r["eligible"] and r["evaluator_current"]
                    for why in [self.drift_blocks(fid, int(r["job"].version or 0), r.get("figures"))] if why}
+        # GATE-READY AT TRAIN (F1): a row that is a drift carrier by the gate's rule, or over the one-lot unit, is set aside.
+        aside = {int(r["job"].version or 0): why for r in rows
+                 if r["status"] == "ok" and r["eligible"] and r["score"] is not None and r["evaluator_current"]
+                 and int(r["job"].version or 0) not in blocked and int(r["job"].version or 0) not in demoted
+                 and self._counts_now(r["span"])
+                 for why in [self.gate_blocks(fid, int(r["job"].version or 0), r["run_id"])] if why}
 
         def counts(row: Mapping[str, Any]) -> bool:
-            """Completed, eligible, not demoted, not failing the drift screen and over the running Train span: only such a
-            row may be the best or head the table."""
+            """Completed, eligible, not demoted, not failing the drift screen, not set aside (GATE-READY AT TRAIN) and
+            over the running Train span: only such a row may be the best or head the table."""
             version = int(row["job"].version or 0)
             return row["status"] == "ok" and row["eligible"] and row["score"] is not None and version not in demoted \
-                and version not in blocked and self._counts_now(row["span"]) and row["evaluator_current"]
+                and version not in blocked and version not in aside and self._counts_now(row["span"]) and row["evaluator_current"]
 
         rows.sort(key=lambda r: (r["status"] != "ok", not counts(r), -(r["score"] if r["score"] is not None else -math.inf),
                                  r["job"].id))
@@ -3388,6 +4166,7 @@ class Researcher:
             elif r["eligible"] and r["status"] == "ok" and not ok:
                 version = int(job.version or 0)
                 row["why_not"] = (f"this version fails the drift screen: {blocked[version]}" if version in blocked
+                                  else f"this version {aside[version]}, so it is not validated" if version in aside
                                   else f"this version {failed_why(state, version)}")
             elif not ok:
                 row["why_not"] = str(r["why"] or "")[:160]
@@ -3460,14 +4239,20 @@ class Researcher:
                     return {"status": "refused", "reason": "retire is not available to your family now (it needs at least two "
                                                            "validations or enough counted trials and a population above its floor, or many Gym "
                                                            "evaluations without an eligible Train version, or many cycles "
-                                                           "of only holds and stored results, or a few holds in a row with "
-                                                           "a Train record behind them): keep researching"}
+                                                           "of only holds and stored results, or a few holds in a row): "
+                                                           "keep researching"}
                 # The store checks the population floor atomically; start is the architect's refill target. Its own
                 # researcher's verdict: the graveyard tags it SELF-REFUTED (R11-1), its reason and last notes after.
+                # A THIN RETIREMENT (F1, R3: under `researcher.retire_hold_trials` trials, or no eligible Train version)
+                # is filed by its Train record instead, as the idle rule would file it: a slot freed closes no cell.
                 reason = args.get("reason")
                 if isinstance(reason, str) and reason.strip():
-                    reason = f"{SELF_REFUTED}: {reason.strip()}"
-                result = self.store.retire_gym(fam["id"], reason, floor=self.retire_floor(current), source="researcher")
+                    thin = thin_evidence(self.store, current, self.settings)
+                    if thin is not None:
+                        out["retire_thin"] = thin
+                    reason = f"{SELF_REFUTED}: {reason.strip()}" if thin is None else thin_cause(thin, reason)
+                result = self.store.retire_gym(fam["id"], reason, floor=self.retire_floor(current), source="researcher",
+                                               counts=self.floor_counts())
             if result["status"] == "retired":
                 out["retired"] = True
                 try:
@@ -3552,6 +4337,9 @@ class Researcher:
         verdict = drift_verdict(self.store, current, run["version"], self.settings)
         if verdict is not None and verdict["known"] and not verdict["passed"]:
             return False, f"its version fails the drift screen: {verdict['why']}"
+        gate = train_gate(self.store, current, run["version"], self.settings)  # GATE-READY AT TRAIN (F1)
+        if not gate["ready"] and gate["kind"] != "fit":
+            return False, f"its version {gate['why']}, so it is not validated"
         summary = run.get("summary") or {}
         # Its row says the span it was scored on (a row from before the 2020-21 switch: 2022-01-03); a row recorded
         # late, without a score, has it in its kept result.
@@ -3592,6 +4380,38 @@ class Researcher:
                 self.store.set_state(fid, drift_failed={k: marks[k] for k in keep})
         return verdict["why"]
 
+    def _aside_key(self) -> Any:
+        """The evaluator a set-aside mark is recorded under (`demote_version`): the store's adopted one."""
+        from .evaluator import KEY
+
+        return self.store.get(KEY)
+
+    def gate_blocks(self, fid: str, n: int, run_id: str | None = None) -> str | None:
+        """GATE-READY AT TRAIN (F1) on a version whose Train run just scored: why it may not be the family's best now
+        (`train_gate`: a drift carrier by the gate's rule, or a one-lot unit over `researcher.max_unit_train_usd`), having set
+        it aside (`demote_version` with `lasting` false: out of the candidates and the best, recorded in the state's
+        `set_aside`), or None (it is ready, or it only waits for its drift fit). A version waiting at the gate is the
+        gate's (`screen_best`)."""
+        fam = self.store.family(fid)
+        if fam is None or fam.get("retired_at"):
+            return None
+        gate = train_gate(self.store, fam, n, self.settings)
+        if gate["ready"] or gate["kind"] == "fit":
+            return None
+        with self.store.atomic():
+            fam = self.store.family(fid) or fam
+            state = fam.get("state") or {}
+            if state.get("gate_ready") and state.get("validation_version") == n:
+                return None
+            mark = set_aside(fam).get(str(int(n))) or {}
+            held = fam.get("best_version") == n or state.get("best_train_version") == n or any(
+                int(c[1]) == int(n) for c in (state.get("train_candidates") or []))
+            same = (mark.get("kind"), mark.get("under"), mark.get("evaluator")) == (gate["kind"], gate["under"], self._aside_key())
+            if held or not same:  # a stored result read again changes nothing its run already recorded
+                demote_version(self.store, fam, int(n), why=str(gate["why"]), clock=self.clock, lasting=False, kind=gate["kind"],
+                               run=run_id, under=gate["under"])
+        return str(gate["why"])
+
     def drift_words(self, fam: Mapping[str, Any], n: Any) -> str:
         """The drift screen's verdict on version `n`, in words (`submit` reports it)."""
         cfg = drift_settings(self.settings)
@@ -3610,7 +4430,8 @@ class Researcher:
         """The robustness runs version `n` needs: at 1.5x the half-spread and at the mid; and "drift", its Train run once
         more at the normal spread, while the drift screen is on and no run of it carries the drift figures (a version whose
         Train run predates them, Sept 27: the screen binds, so it is made again rather than waved through)."""
-        if drift_settings(self.settings) is not None and version_drift(self.store, fam, n) is None:
+        owed = drift_settings(self.settings) is not None or carrier_share(self.settings) is not None  # F1: the gate's rule too
+        if owed and version_drift(self.store, fam, n) is None:
             return ("stress_1.5", "mid", "drift")
         return ("stress_1.5", "mid")
 
@@ -3626,8 +4447,9 @@ class Researcher:
         if submit is None:
             return False
         self.screen(fid)  # a candidate whose drift figures fail is demoted first: it needs no robustness run
-        if int(n) in (((self.store.family(fid) or {}).get("state") or {}).get("robust_failed") or []):
-            return False
+        screened = self.store.family(fid) or {}
+        if int(n) in ((screened.get("state") or {}).get("robust_failed") or []) or str(int(n)) in set_aside(screened, self._aside_key()):
+            return False  # nor does one GATE-READY AT TRAIN set aside (F1): it is not validated while that stands
         labels = self.robust_labels(self.store.family(fid) or {"id": fid}, int(n))
         with self.store.atomic():
             fam = self.store.family(fid) or {}
@@ -3973,6 +4795,7 @@ class Researcher:
         self.store.bump(fid, cycles=1)
         self._count_dormancy(fid, out)
         self._count_holds(fid, out)
+        self._count_worked(fid, out)
         self.store.event("swarm.cycle", fid, out)
         self._public_note(fid, out)
         return out
@@ -4018,6 +4841,19 @@ class Researcher:
             new = count + 1 if out.get("hold") else 0
             if new != count:
                 self.store.set_state(fid, hold_streak=new)
+
+    def _count_worked(self, fid: str, out: dict[str, Any]) -> None:
+        """The family's WORKED CYCLES (`worked_cycles` in its state; THE DEPTH RULE counts them, `short_dead`): one more
+        for a cycle its researcher worked, a model call and no error. A cycle that failed (an outage, a budget refusal,
+        an error before or in the model) or made no model call adds none, so no family is retired for turns it never
+        had."""
+        if not out.get("model_calls") or out.get("error"):
+            return
+        with self.store.atomic():
+            fam = self.store.family(fid)
+            if fam is None or fam.get("retired_at"):
+                return
+            self.store.set_state(fid, **{WORKED_CYCLES_KEY: worked_cycles(fam) + 1})
 
     def _first_cycle(self, fam: Mapping[str, Any], out: dict[str, Any]) -> None:
         code, params = self.starter({**(fam.get("spec") or {}), "id": fam["id"], "mechanism": fam["mechanism"],  # type: ignore[misc]
@@ -4125,6 +4961,8 @@ class Researcher:
             pending = None  # run, or superseded by the rewrite (its call was answered "queued" last cycle)
         if int(fam.get("stall") or 0) >= int(self.cfg.get("stall_revisions", 5)):
             self.request_rewrite(fam, out)
+        # THE PROGRAM IN SIGHT (F1): the program this turn revises, when the history it carries does not hold it.
+        current.extend(self.program_items(fam, sanitize([i for c in cycles for i in c.get("items", [])] + current)))
         current.append({"role": "user", "content": self.status(fam)})
         max_calls = int(self.cfg.get("max_model_calls", 3))
         max_tools = int(self.cfg.get("max_tool_calls", 8))
@@ -4307,7 +5145,8 @@ class Researcher:
                 for item in cycle.get("items", []):
                     if item.get("type") == "function_call_output" and len(str(item.get("output") or "")) > limit:
                         item = {**item, "output": str(item["output"])[:limit] + " ...(shortened; read_run has it)"}
-                    elif item.get("role") == "user" and len(str(item.get("content") or "")) > 2 * limit:
+                    elif item.get("role") == "user" and len(str(item.get("content") or "")) > 2 * limit \
+                            and not str(item["content"]).startswith(PROGRAM_HEAD):  # THE PROGRAM IN SIGHT stays whole
                         item = {**item, "content": str(item["content"])[:2 * limit] + " ...(shortened)"}
                     items.append(item)
                 cycle = {**cycle, "items": items}
@@ -4559,4 +5398,8 @@ __all__ = ["Researcher", "TOOLS", "TOOLS_READ", "TOOLS_REVISE", "RUNS", "needs_o
            "revalidation_owed",
            "objective_for", "span_of", "CORE_SPAN", "RETIRE_GUARD_DAYS", "VERDICTS_KEY", "retire_guard", "retire_guard_days",
            "record_verdict", "validation_refuted", "validated_at", "guard_words", "adoption_archives",
-           "ADOPTED_ACTION"]
+           "ADOPTED_ACTION",
+           "short_dead", "short_left", "dead_slot", "floor_counts", "kept_families", "RETIRE_SHORT_CHECKS",
+           "RETIRE_SHORT_CYCLES", "VALIDATED_CYCLES_KEY", "WORKED_CYCLES_KEY", "worked_cycles", "THIN_RETIRED", "thin_cause",
+           "thin_evidence", "park_minutes", "max_unit", "max_unit_train", "MAX_UNIT_USD", "MAX_UNIT_TRAIN_USD", "gate_looks",
+           "extension_days", "lapse_extension", "EXTENSION_HOLD_DAYS", "UNIT_WAIT_KEY", "unit_waiting"]

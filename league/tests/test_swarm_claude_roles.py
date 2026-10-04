@@ -27,7 +27,7 @@ from league.swarm.gate import Gate
 from league.swarm.models import ModelRouter
 from league.swarm.settings import DEFAULTS
 from league.swarm.store import SwarmStore
-from league.tests.swarm_fakes import Clock, FakeMonth
+from league.tests.swarm_fakes import Clock, FakeMonth, unbound_budget
 from league.tests.test_claude import message
 from league.swarm.tournament import Tournament
 from league.tests.test_frontier import GATEWAY, FakeOpener, FakeResponse, ok
@@ -56,7 +56,7 @@ class RouterCase(unittest.TestCase):
         self.addCleanup(self.store.close)
         self.settings = copy.deepcopy(DEFAULTS)
         # THE BUDGET is not what these tests judge: a line well above every role's own (no block is the floor).
-        self.settings["budget"] = {"source": "test", "sail_usd_day": 1000.0, "claude_usd_day": 1000.0}
+        self.settings["budget"] = unbound_budget(self)
         self.month = FakeMonth(1000)
         self.meter = FakeClaudeMeter(100)
         self.sail_calls = []
@@ -235,6 +235,9 @@ class ArchitectWithoutOpenAI(RouterCase):
 class RewriteThroughTheResearcher(ResearcherCase):
     def setUp(self):
         super().setUp()
+        # THE BUDGET is not what these tests judge: a line well above the rewrite's hold (no block is the floor, whose $2
+        # of Claude less the holds it keeps for the gate's review and audit leaves a rewrite no room).
+        self.settings["budget"] = unbound_budget(self)
         self.claude = FakeOpener()
         self.router.claude_factory = lambda model: Claude(GATEWAY, lambda: "synthetic", model=model, opener=self.claude)
         self.router.claude_meter = FakeClaudeMeter(100)

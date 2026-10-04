@@ -108,6 +108,34 @@ class HoldoutLine(unittest.TestCase):
         self.assertGreater(neg["p"], 0.9)
         self.assertIsNone(E.block_bootstrap([1.0], seed="x"))
 
+    def test_the_prefilters_line_needs_a_pnl_that_is_not_negative_and_a_p_at_or_under_its_level(self):
+        rng = random.Random(4)
+        strong = [rng.gauss(6.0, 10.0) for _ in range(180)]
+        boot = E.block_bootstrap(strong, block=5, draws=2000, seed="prefilter:sha")
+        out = E.prefilter_line(result("h", daily=strong, pnl=sum(strong)), level=0.02, seed="prefilter:sha")
+        self.assertEqual(out, {"passed": True, "pnl": sum(strong), "p": boot["p"], "level": 0.02})
+        self.assertEqual(out, E.prefilter_line(result("h", daily=strong, pnl=sum(strong)), level=0.02, seed="prefilter:sha"),
+                         "deterministic for a seed")
+        self.assertEqual(E.prefilter_line(result("h", daily=strong, pnl=0.0), level=0.02, seed="s")["passed"], True,
+                         "a net P&L of zero is not negative")
+        on_pnl = E.prefilter_line(result("h", daily=strong, pnl=-0.01), level=0.02, seed="prefilter:sha")
+        self.assertEqual((on_pnl["passed"], on_pnl["p"]), (False, boot["p"]), "its days pass and its net P&L does not")
+        rng = random.Random(5)
+        weak = [rng.gauss(0.4, 10.0) for _ in range(180)]
+        on_p = E.prefilter_line(result("h", daily=weak, pnl=sum(weak)), level=0.02, seed="prefilter:sha")
+        self.assertEqual((on_p["passed"], on_p["pnl"] > 0, on_p["p"] > 0.02), (False, True, True))
+        self.assertTrue(E.prefilter_line(result("h", daily=weak, pnl=sum(weak)), level=on_p["p"], seed="prefilter:sha")
+                        ["passed"], "at its level")
+        self.assertFalse(E.prefilter_line(result("h", daily=weak, pnl=sum(weak)), level=on_p["p"] - 1e-9,
+                                          seed="prefilter:sha")["passed"])
+        one_day = E.prefilter_line(result("h", daily=[5.0], pnl=5.0), level=0.02, seed="s")
+        self.assertEqual((one_day["passed"], one_day["p"]), (False, None), "no p-value under two days: no pass")
+        no_pnl = result("h", daily=strong)
+        no_pnl["summary"].pop("pnl")
+        self.assertEqual(E.prefilter_line(no_pnl, level=0.02, seed="s")["passed"], False)
+        self.assertEqual(E.prefilter_line(result("h", daily=strong, pnl=1.0), level=0.0, seed="s")["passed"], False,
+                         "a level of zero passes nothing")
+
     def test_holm_steps_down_across_every_look(self):
         self.assertTrue(E.holm_passes(0.01, [])[0])
         self.assertFalse(E.holm_passes(0.06, [])[0])

@@ -2279,6 +2279,127 @@ class L2PrimeThirdVerification(Base):
 
 
 @unittest.skipUnless(HAVE, "numpy not installed")
+class FinalForTheProgram(Base):
+    """THE FIRST LOOK IS FINAL FOR THE PROGRAM: a release freezes an interrupted practice cohort again
+    (`league/live/observe.py`, THE RE-ENTRY RULE), a new cohort and never a new first look. A look an earlier cohort of
+    the program had, pass or fail, leaves the new cohort with no look and no verdict, under another evaluator or the
+    same one come back."""
+
+    first_looks = L2PrimeThirdVerification.first_looks
+    NEXT = "the-next-evaluator"
+    #: The new cohort's sessions: frozen a day after the first one, three sessions before TUESDAY.
+    LATER = ("2026-09-24", "2026-09-25", "2026-09-28")
+
+    def frozen_again(self, evaluator=NEXT, **kw):
+        """The release: the practice evaluator moves (`evaluator`; None: the same one came back), and the program is a
+        new cohort whose own record (ten winning closes on three sessions before today) would pass a first look."""
+        store = self.live.observe_store
+        if evaluator is not None:
+            store.evaluator = evaluator
+        db = store._connect()
+        for table in ("cohorts", "practice", "trades"):
+            db.execute(f"DELETE FROM {table}")
+        self.cohort(first_day=self.LATER[0], last_day=self.LATER[-1], trades=winning(10, days=self.LATER), **kw)
+        record = practice_record(self.live.root, "fam", 1, before="2026-09-29", evaluator=store.evaluator)
+        self.assertEqual(record["first_day"], self.LATER[0])
+        self.assertTrue(M.practice_ok(self.live.table, record)[0], "a look taken on the new cohort's record would pass")
+
+    def finals(self):
+        return self.live.state.get(INC.FINALS) or {}
+
+    def said_final(self):
+        return [p for p, _ in self.ledger.of("live.incubator") if p.get("final") == "fam@1"]
+
+    def test_a_failed_first_look_is_not_retaken_under_the_next_evaluator(self):
+        self.first(trades=winning(10, pnl=-1.0))
+        old = self.live.observe_store.evaluator
+        self.run_to(9, 31)
+        self.assertFalse(self.verdicts()["fam@1"]["passed"])
+        self.assertEqual(self.finals(), {})
+        self.frozen_again()
+        self.clock.set(at(TUESDAY, 9, 31))
+        self.run_to(9, 36)
+        self.assertEqual(self.verdicts(), {}, "the earlier evaluator's verdict is no verdict here, and no look is taken")
+        final = {"fam@1": {"evaluator": old, "day": "2026-09-28", "passed": False, "first_day": DAYS[0]}}
+        self.assertEqual(self.finals(), final)
+        self.assertEqual([e["evaluator"] for e in self.first_looks()], [old], "never taken again")
+        self.assertEqual((self.pins()["order"], len(self.said_final())), ([], 1))
+        # Either record of the earlier look is enough: the state's without the ledger's event, the event without the state.
+        self.live.state.put(INC.FINALS, {})
+        self.clock.set(at(TUESDAY + dt.timedelta(days=1), 9, 31))
+        self.run_to(9, 31)
+        self.assertEqual((self.verdicts(), len(self.first_looks())), ({}, 1), "the ledger's event alone")
+        self.live.state.put(INC.FINALS, final)
+        self.live.state.execute("DELETE FROM events WHERE kind='live.incubator'")
+        self.clock.set(at(TUESDAY + dt.timedelta(days=2), 9, 31))
+        self.run_to(9, 31)
+        self.assertEqual(self.verdicts(), {}, "the state's record alone")
+        self.assertEqual(self.pins()["order"], [])
+
+    def test_a_passed_first_look_grants_nothing_under_the_next_evaluator(self):
+        self.first()
+        old = self.live.observe_store.evaluator
+        self.run_to(9, 31)
+        self.assertTrue(self.verdicts()["fam@1"]["passed"])
+        self.assertEqual(self.pins()["order"], ["fam@1:i"])
+        self.frozen_again()
+        self.clock.set(at(TUESDAY, 9, 31))
+        self.run_to(9, 36)
+        self.assertEqual(self.verdicts(), {}, "its pass was another cohort's record under another evaluator")
+        self.assertEqual(self.finals(), {"fam@1": {"evaluator": old, "day": "2026-09-28", "passed": True,
+                                                   "first_day": DAYS[0]}})
+        self.assertEqual((self.pins()["order"], len(self.first_looks()), len(self.said_final())), ([], 1, 1))
+
+    def test_the_same_evaluator_come_back_grants_the_new_cohort_nothing_of_the_first_ones_look(self):
+        """A rollback and the same release again: the program is a new cohort under the very evaluator its first cohort
+        was looked at under. Its saved verdict and its recorded look are the first cohort's (another first day)."""
+        for passed in (True, False):
+            self.first(trades=winning(10, pnl=5.0 if passed else -1.0))
+            evaluator = self.live.observe_store.evaluator
+            self.run_to(9, 31)
+            self.assertEqual(self.verdicts()["fam@1"]["passed"], passed)
+            self.frozen_again(evaluator=None)
+            self.assertEqual(self.live.observe_store.evaluator, evaluator)
+            self.clock.set(at(TUESDAY, 9, 31))
+            self.run_to(9, 36)
+            self.assertEqual(self.verdicts(), {}, "the saved verdict is the first cohort's: none of this one's")
+            self.assertEqual(self.finals(), {"fam@1": {"evaluator": evaluator, "day": "2026-09-28", "passed": passed,
+                                                       "first_day": DAYS[0]}})
+            self.assertEqual((self.pins()["order"], len(self.first_looks()), len(self.said_final())), ([], 1, 1), passed)
+            # The ledger's event alone (the state's records lost): a look of another first day is never restored.
+            self.live.state.put(INC.FINALS, {})
+            self.clock.set(at(TUESDAY + dt.timedelta(days=1), 9, 31))
+            self.run_to(9, 31)
+            self.assertEqual((self.verdicts(), len(self.first_looks()), self.pins()["order"]), ({}, 1, []), passed)
+            self.live.state.close()
+            self.setUp()
+
+    def test_a_look_of_this_very_cohort_is_still_restored_as_recorded(self):
+        """The rule binds a look to its cohort by its first day: the cohort's own recorded look, its verdict lost, is
+        final as recorded (never read as an earlier cohort's)."""
+        self.first()
+        self.run_to(9, 31)
+        self.live.state.put(INC.VERDICTS, {})
+        self.clock.set(at(TUESDAY, 9, 31))
+        self.run_to(9, 31)
+        verdict = self.verdicts()["fam@1"]
+        self.assertEqual((verdict["passed"], verdict.get("restored"), verdict["record"]["first_day"]), (True, True, DAYS[0]))
+        self.assertEqual((self.finals(), self.said_final(), self.pins()["order"]), ({}, [], ["fam@1:i"]))
+
+    def test_a_program_never_looked_at_takes_its_one_look_under_the_next_evaluator(self):
+        self.first(trades=winning(9))                             # nine closes: no look under the first evaluator
+        self.run_to(9, 31)
+        self.assertEqual(self.verdicts(), {})
+        self.frozen_again()
+        self.cohort("fam", 2)                                     # and another version, never looked at either
+        self.clock.set(at(TUESDAY, 9, 31))
+        self.run_to(9, 31)
+        self.assertEqual({k: (v["passed"], v["evaluator"]) for k, v in self.verdicts().items()},
+                         {"fam@1": (True, self.NEXT), "fam@2": (True, self.NEXT)})
+        self.assertEqual((self.finals(), self.said_final()), ({}, []))
+
+
+@unittest.skipUnless(HAVE, "numpy not installed")
 class TheObserveRetry(Base):
     """With the observe band on (production), unreadable bands at the session's first pass are read again
     `FAMILIES_EVERY` later, not every minute."""

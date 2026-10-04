@@ -1,10 +1,14 @@
 """The `hygiene` job (daily 02:00Z, never inside a session): the operator's sweeps as code.
 
 1. Practice cohorts: an ACTIVE cohort whose program the swarm barred from the incubator (`incubator_barred[run_sha]`
-   in its family's state) is ended through the observe store's own `fail_cohort`, reason "hygiene: ...". A cohort
-   whose research family retired is listed, and ended only when `ops.json` `hygiene.end_retired_cohorts` is true:
-   the practice record is designed to outlive its family (`league/live/observe.py`), and the forward ladder counts
-   every entrant's whole record.
+   in its family's state) is ended through the observe store's own `fail_cohort`, reason "hygiene: ..." (which fails
+   an active cohort only: one that ended since it was read here keeps its own ending and is not listed). A cohort
+   whose research family retired is listed (`retired_family_kept`), and ended HERE only when `ops.json`
+   `hygiene.end_retired_cohorts` is true. Left to itself it does not outlive its family for long: the forward ladder
+   ends a retired family's cohort itself, `failed`, at the next session's end (`league/live/ladder.py` `_reconcile`: no
+   promotion can come of it); only a cohort frozen before the ladder practised on after its family retired. Whoever
+   ends it, its entrant stays a trial of the ladder's false-discovery family for its trailing window, and a failed
+   cohort never practises again under its version (`league/live/observe.py`, THE RE-ENTRY RULE).
 2. The Gym pool's `failed` box rows: marked `terminated` when Sail lists the box terminal or no longer knows it.
 3. Families past the idle rule: the tournament's own idle pass (`Tournament.idle_pass`: the same rule, reasons,
    lessons and cohort keep), never below `population.floor` (`SwarmStore.retire_gym`), sparing a family in a
@@ -115,8 +119,8 @@ def end_cohorts(ctx: Any, day: str, *, end_retired: bool, store: Any = None) -> 
                 from ..live.observe import ObserveStore
 
                 store = ObserveStore(ctx.root)
-            _attempt(store.fail_cohort, row["family"], row["version"], day=day, reason=reason)
-            ended.append({"cohort": f"{row['family']}@{row['version']}", "reason": reason})
+            if _attempt(store.fail_cohort, row["family"], row["version"], day=day, reason=reason) is not False:
+                ended.append({"cohort": f"{row['family']}@{row['version']}", "reason": reason})
     return {"active": len(rows), "ended": ended, "retired_family_kept": retired_kept}
 
 

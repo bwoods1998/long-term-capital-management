@@ -29,8 +29,12 @@ the researchers' turn order (`loop.py`), Gym Train-job priority (`researcher.py`
 the order retirements are considered in (`tournament.py`), the Claude top band (`researcher.is_top`) and the leaderboard
 share. It is never read by the tournament's choice of the version to validate (Train score), the validation line, the
 drift screen, the gate, the holdout, `bands.read` or `bands.observe`, the live path, the money table, tuition, Profit or
-the grant. Promotion to real money stays D2 exactly: Validation plus the holdout, then the money table (and the forward
-embargo on Sized, `OptionsLive._move_band`). A test holds each of these (`league/tests/test_swarm_practice.py`).
+the grant. Promotion to real money is the gate's held-out look's (THE FAST LANE, release F1, Oct 3, 2026:
+`league/swarm/gate.py`; the review, the audit and one sealed look of a version that met the Validation line), then the
+money table (and the forward embargo on Sized, `OptionsLive._move_band`). THE FORWARD LADDER (evidence v3,
+`league/live/ladder.py`: a practice cohort's own record at its checkpoints) records beside the look and promotes
+nothing while its table does not bind; it reads the House's practice record, never a weight. A test holds each of
+these (`league/tests/test_swarm_practice.py`).
 THE COHORT KEEP (L1, release B, Sept 30) is research attention only, too: `cohort_status` reads the House's active practice
 cohorts and their records before today, and the tournament spares at most `tournament.incubator_keep_max` (12) Gym
 families with an active cohort (whatever its record before the incubator's sample, and a record that is not negative
@@ -333,12 +337,14 @@ COHORT_WINDOW = 10
 COHORT_WINDOW_MAX = 60
 COHORT_WINDOW_MIN = 3
 NEW_YORK = ZoneInfo("America/New_York")
-#: THE COHORT KEEP's store key (L1): the tournament's last keep, {"at": epoch, "families": {family: version}, and "held":
-#: [family] when any of them hold the incubator's cohorts (`tournament.incubator_held`)}, written at each read
+#: THE COHORT KEEP's store key (L1): the tournament's last keep, {"at": epoch, "families": {family: version}, "held":
+#: [family] when any of them hold the incubator's cohorts (`tournament.incubator_held`), and "ladder": [family] when any
+#: hold the forward ladder's (`tournament.ladder_held`)}, written at each read
 #: (`Tournament.incubator_keep`) and read by a researcher's status (`kept_version`) so that a family the keep holds is
 #: not urged to retire for being idle. A value older than `KEEP_KV_SECONDS` reads as no keep. A fresh swarm process whose
 #: first practice read fails takes it as its last good keep while it is at most an hour old
-#: (`tournament.KEEP_STALE_SECONDS`, `Tournament._saved_keep`: the "held" families first, never cut by the cap).
+#: (`tournament.KEEP_STALE_SECONDS`, `Tournament._saved_keep`: the "held" and "ladder" families first, never cut by the
+#: cap).
 KEEP_KV = "cohort_keep"  # not the House's own `incubator_keep` (L2', in its live state)
 KEEP_KV_SECONDS = 7200.0
 
@@ -373,8 +379,12 @@ def cohort_status(root: str | Path | None, *, today: str | None = None) -> list[
 
         family, version, first_day                   the cohort (`first_day`: the session it was frozen in)
         evaluator, tier, validation_t, best_train,   from its snapshot (`tier`, `validation_t`, `best_train`: what
-        structure, run_sha                           `bands.priority` orders by)
-        window     its bounded session window (the House's rule, `COHORT_WINDOW`)
+        structure, run_sha, ladder                   `bands.priority` orders by; `ladder`: a forward-ladder cohort,
+                                                     evidence v3)
+        window     its bounded session window (the House's rule, `COHORT_WINDOW`); for a forward-ladder cohort, with THE
+                   WINDOW HOLD (`observe.ladder_window`, the House's own rule: a latch that still waits for its answer
+                   holds it until the constitution's `answer_sessions` sessions have passed since its checkpoint's
+                   day, and a last checkpoint not judged yet holds it that many sessions past its window)
         elapsed    session days on the calendar from its first day to before `today`, counted up to `window` (the House
                    completes it at the first session at which `elapsed >= window`)
         sessions   its practice row's completed sessions before `today`; None when that row predates the cohort (the
@@ -385,6 +395,10 @@ def cohort_status(root: str | Path | None, *, today: str | None = None) -> list[
         closes_program, pnl_program      program closes (not forced) under its evaluator before `today`, and their P&L
         closes_all, pnl_all, max_loss_all   every close under its evaluator before `today`, forced ones included
         return_on_risk   pnl_all / max_loss_all (None without a maximum loss)
+
+    A cohort's closes are its OWN alone (the House's rule, `observe.own_closes`): from its own first day, and never a
+    close of an earlier cohort's account (a program frozen again after a release: that account's wind-down is the
+    earlier cohort's).
 
     P&L is the engine's after its fees under the House's shadow fill model, in dollars to the cent, realized only: the
     open mark is left to the incubator's own first look (it starts below zero at every open, the entry's fees and spread
@@ -408,14 +422,19 @@ def cohort_status(root: str | Path | None, *, today: str | None = None) -> list[
 
 
 def _cohorts(db: sqlite3.Connection, today: str) -> list[dict[str, Any]]:
+    from ..live.observe import own_closes
+
     tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if "cohorts" not in tables:
         return []
     columns = {r[1] for r in db.execute("PRAGMA table_info(trades)")} if "trades" in tables else set()
     has_trades = {"evaluator", "forced", "exit_day", "pnl", "max_loss"} <= columns
+    # THE WINDOW HOLD's state (a file from before the ladder's checkpoints has no such column: no cohort is held).
+    state = "ladder_state" if "ladder_state" in {r[1] for r in db.execute("PRAGMA table_info(cohorts)")} else "NULL"
+    hold: int | None = None
     out = []
-    for family, version, first, snapshot in db.execute(
-            "SELECT family, version, first_day, snapshot FROM cohorts WHERE status='active' "
+    for family, version, first, snapshot, latched in db.execute(
+            f"SELECT family, version, first_day, snapshot, {state} FROM cohorts WHERE status='active' "
             "ORDER BY admitted_at, family, version").fetchall():
         try:
             snap = json.loads(snapshot)
@@ -429,15 +448,22 @@ def _cohorts(db: sqlite3.Connection, today: str) -> list[dict[str, Any]]:
         horizon = snap.get("practice_max_sessions")
         horizon = int(horizon) if isinstance(horizon, int) and not isinstance(horizon, bool) else COHORT_WINDOW
         window = max(COHORT_WINDOW_MIN, min(COHORT_WINDOW_MAX, max(COHORT_WINDOW, horizon)))
+        if snap.get("ladder") and state != "NULL":
+            from ..live.observe import answer_sessions, ladder_window
+
+            hold = answer_sessions() if hold is None else hold
+            window = ladder_window(window, latched, answer_sessions=hold, sessions_through=lambda d: _sessions_between(
+                first_date, (dt.date.fromisoformat(d) + dt.timedelta(days=1)).isoformat(), 10 ** 6))[0]
         closes_all = closes = 0
         pnl_all = pnl = max_loss = 0.0
         if has_trades:
+            own, accounts = own_closes(db, str(family), version)
             row = db.execute(
                 "SELECT COUNT(*), COALESCE(SUM(pnl), 0), COALESCE(SUM(max_loss), 0), "
                 "COALESCE(SUM(CASE WHEN COALESCE(forced, 0) = 0 THEN 1 ELSE 0 END), 0), "
                 "COALESCE(SUM(CASE WHEN COALESCE(forced, 0) = 0 THEN pnl ELSE 0 END), 0) "
-                "FROM trades WHERE family=? AND version=? AND evaluator=? AND exit_day IS NOT NULL AND exit_day<?",
-                (family, version, evaluator, today)).fetchone()
+                "FROM trades WHERE family=? AND version=? AND evaluator=? AND exit_day IS NOT NULL AND exit_day>=? "
+                f"AND exit_day<?{own}", (family, version, evaluator, str(first), today, *accounts)).fetchone()
             closes_all, pnl_all, max_loss, closes, pnl = (int(row[0]), float(row[1]), float(row[2]), int(row[3]),
                                                           float(row[4]))
         live = (db.execute("SELECT first_day, last_day, sessions, decisions_due, decisions_made FROM practice "
@@ -456,6 +482,7 @@ def _cohorts(db: sqlite3.Connection, today: str) -> list[dict[str, Any]]:
                     pass
             coverage = round(int(live[4]) / int(live[3]), 4) if int(live[3] or 0) > 0 else None
         out.append({"family": str(family), "version": version, "first_day": str(first), "evaluator": evaluator,
+                    "ladder": bool(snap.get("ladder")),
                     "tier": snap.get("tier") or "validated", "validation_t": snap.get("validation_t"),
                     "best_train": snap.get("best_train"), "structure": snap.get("structure"), "run_sha": snap.get("run_sha"),
                     "window": window, "elapsed": _sessions_between(first_date, today, window),

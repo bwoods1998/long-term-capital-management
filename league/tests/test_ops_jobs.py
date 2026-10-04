@@ -153,6 +153,25 @@ class Hygiene(Base):
         self.assertEqual(self.statuses()["retired"], ("failed", "hygiene: its research family retired"))
         self.assertEqual(self.statuses()["alive"][0], "active")
 
+    def test_a_cohort_that_ended_since_it_was_read_keeps_its_own_ending(self):
+        """The sweep reads the active cohorts and writes later, on another connection than the House's: a cohort the
+        ladder promoted (or that ended) in between is not failed over it, and is not listed as ended."""
+        from unittest import mock
+
+        read = HY.cohorts(self.root)
+        self.assertEqual(sorted(r["family"] for r in read), ["alive", "barred", "retired"])
+        db = self.observe._connect()
+        db.execute("UPDATE cohorts SET status='promoted', completed_day='2026-10-05', reason='ladder: promoted to Probe "
+                   "(receipt 7)' WHERE family='barred'")
+        db.execute("UPDATE cohorts SET status='complete', completed_day='2026-10-05', reason='ladder: its practice window "
+                   "ended' WHERE family='retired'")
+        with mock.patch.object(HY, "cohorts", return_value=read):
+            out = HY.end_cohorts(self.ctx("hygiene"), "2026-10-06", end_retired=True, store=self.observe)
+        self.assertEqual(out["ended"], [])
+        self.assertEqual(self.statuses(), {"barred": ("promoted", "ladder: promoted to Probe (receipt 7)"),
+                                           "retired": ("complete", "ladder: its practice window ended"),
+                                           "alive": ("active", None)})
+
     def test_failed_pool_rows_become_terminated_only_when_sail_says_the_box_is_gone(self):
         for box in ("sb_00000001", "sb_00000002", "sb_00000003", "sb_00000004"):
             self.store.upsert_box(box, kind="gym", version="v", state="failed")
@@ -179,9 +198,12 @@ class Hygiene(Base):
         out = HY.retire_idle(self.ctx("hygiene"), store=self.store, settings=settings)
         self.assertEqual(out["retired"], ["dormant-a"])
         self.assertEqual(out["busy"], 1)
-        settings["population"]["floor"] = 100
+        settings["population"].update(floor=100, floor_researching=False)  # the floor counting every family, as before F1
         self.now += 3600
         self.assertEqual(HY.retire_idle(self.ctx("hygiene"), store=self.store, settings=settings)["retired"], [])
+        # THE FLOOR COUNTS RESEARCH (F1, the default): a dormant family is a dead slot, which no floor holds.
+        settings["population"]["floor_researching"] = True
+        self.assertEqual(HY.retire_idle(self.ctx("hygiene"), store=self.store, settings=settings)["retired"], ["dormant-b"])
 
     def test_a_family_the_swarms_heartbeat_names_in_a_cycle_is_spared_until_the_heartbeat_is_stale(self):
         from league.swarm import HEARTBEAT, settings as swarm_settings
@@ -248,12 +270,19 @@ class Scoreboard(Base):
                         deploys={"self_promoted": 3, "self_rolled_back": 1}, budget={"state": "no forward edge; research at floor",
                         "direction": "cut", "meters": {"sail": {"research_usd_day": "3.00", "balance_usd": "999"}},
                         "next_card_action": {"sail": "2027-01-04"}},
-                        ladder={"entrants": "n/a", "in_practice": 12, "promoted": "n/a", "bh_family_size": "n/a"},
+                        ladder={"binding": False, "entrants": 61, "in_practice": 12, "would_promote": 2, "promoted": 0,
+                                "demoted": 0, "failed": 7},
                         jobs={"ok": 5, "missed": 1}, written_at="23:30Z")
         self.assertEqual(SB.public_problems(text), [])
-        self.assertIn("**Net (realized - costs)** | **-165.66**", text)
+        self.assertIn("The ladder is RECORDING", text)
+        self.assertIn("It promotes nothing.", text)
+        self.assertIn("| 61 | 12 | 2 | 0 | 0 | 7 |", text)
+        self.assertIn("**Net on priced inputs (incomplete)** | **-165.41**", text)
         self.assertIn("| Realized options P&L, trailing 30 days | 4.67 |", text)
-        self.assertIn("| sail | 3.00 | 2027-01-04 |", text)
+        # THE BUDGET IN WORDS (release F1): a meter's research cap is never printed (the rule's constants are public, so
+        # a tapered cap gives its balance); its state is said in words (a file that names none: n/a) beside its dates.
+        self.assertIn("| sail | n/a | n/a | 2027-01-04 |", text)
+        self.assertNotIn("3.00", text[text.index("## Budget"):text.index("## Releases")])
         self.assertIn("Self-deployed releases since T0: 3", text)
         self.assertNotIn("999", text)
         self.assertNotIn("SPY2610", text)
@@ -288,24 +317,72 @@ class Scoreboard(Base):
         self.assertEqual((got["drill_rolled_back"], got["drill_promoted"]), (1, 0))
         self.assertEqual((got["owner_promoted"], got["owner_rolled_back"], got["self_rolled_back"]), (1, 0, 0))
         text = SB.build(day="2026-10-10", release="r", economics=None, deploys=got, budget=None,
-                        ladder={"entrants": "n/a", "in_practice": "n/a", "promoted": "n/a", "bh_family_size": "n/a"},
+                        ladder={"binding": "n/a", **{key: "n/a" for key in SB.LADDER_COUNTS}},
                         jobs={"ok": 0, "failed": 0, "missed": 0, "skipped": 0}, written_at="2026-10-10T23:30:00Z")
         self.assertIn("Owner deploys: 1 promoted, 0 rolled back. Rollback drills: 1 rolled back as intended, 0 not caught.", text)
         self.assertEqual(SB.public_problems(text), [])
 
     def test_ladder_counts_are_na_until_the_ladder_tables_exist(self):
-        self.assertEqual(SB.ladder_counts(self.root, self.now)["entrants"], "n/a")
-        db = sqlite3.connect(self.root / "observe.sqlite")
+        from league.live.ladder import Rules
+
+        na = {"binding": Rules.from_constitution().binding, **{key: "n/a" for key in SB.LADDER_COUNTS}}
+        self.assertEqual(SB.ladder_counts(self.root, self.now), na, "no practice record: the table's boolean alone")
+        db = sqlite3.connect(self.root / "observe.sqlite")       # a record from before the ladder: cohorts, no entrants
         db.execute("CREATE TABLE cohorts (family TEXT, version INTEGER, status TEXT)")
         db.execute("INSERT INTO cohorts VALUES ('a', 1, 'active'), ('b', 1, 'failed')")
-        db.execute("CREATE TABLE entrants (family TEXT, entered_at REAL)")
-        db.executemany("INSERT INTO entrants VALUES (?, ?)", [("a", self.now - 86400), ("b", self.now - 200 * 86400)])
-        db.execute("CREATE TABLE ladder_decisions (family TEXT, verdict TEXT)")
-        db.execute("INSERT INTO ladder_decisions VALUES ('a', 'hold'), ('a', 'promote')")
         db.commit()
         db.close()
-        self.assertEqual(SB.ladder_counts(self.root, self.now),
-                         {"entrants": 2, "in_practice": 1, "promoted": 1, "bh_family_size": 1})
+        self.assertEqual(SB.ladder_counts(self.root, self.now), na, "its cohorts are no ladder cohorts")
+        with sqlite3.connect(self.root / "observe.sqlite") as db: # tables the ladder's own read cannot read: n/a, never a guess
+            db.execute("CREATE TABLE entrants (family TEXT, entered_at REAL)")
+        self.assertEqual(SB.ladder_counts(self.root, self.now), na)
+
+    def test_the_ladders_own_counts_are_read_from_its_record(self):
+        """`league.live.ladder.counts` through the practice record's own store: one entrant a cohort inside the trailing
+        90 days, the cohorts practising, what it would promote, a promotion by its receipt (a pending one is none), a
+        demotion and a failure. Counts only."""
+        from league.live import ladder as L
+        from league.live.observe import ObserveStore
+
+        store = ObserveStore(self.root, clock=lambda: self.now)
+        self.addCleanup(store.close)
+        store.evaluator = "bundle:fills:exec"
+        for fid in ("fx-up", "fx-down", "fx-would", "fx-out", "fx-busy", "fx-pending", "fx-long-ago"):
+            store.freeze({"family": fid, "version": 1, "band": "gym", "observe": True, "tier": "validated", "lineage": fid,
+                          "code": "NEEDS = {'roots': ['SPY'], 'dte': [0, 3]}\n", "params": {}, "run_sha": f"sha-{fid}"},
+                         day="2026-09-21")
+        store._connect().execute("UPDATE entrants SET entered_day='2026-06-01' WHERE family='fx-long-ago'")
+        receipt = {"day": "2026-10-02", "version": 1, "inputs": "x", "stats": {}, "binding": True}
+        for fid in ("fx-up", "fx-down"):
+            store.settle_answer(store.add_decision({**receipt, "family": fid, "verdict": L.PROMOTE_PENDING}), "promote",
+                                day="2026-10-02", close="promoted", reason="ladder: promoted to Probe")
+        store.close_cohort("fx-down", 1, status="demoted", day="2026-10-05", reason="ladder: its forward record",
+                           was=("promoted",))
+        store.add_decision({**receipt, "family": "fx-pending", "verdict": L.PROMOTE_PENDING})
+        store.add_decision({**receipt, "family": "fx-would", "verdict": "would_promote", "binding": False})
+        store.fail_cohort("fx-out", 1, day="2026-10-02", reason="ladder: its family retired")
+        counts = SB.ladder_counts(self.root, self.now)
+        self.assertEqual(counts, {"binding": L.Rules.from_constitution().binding, "entrants": 6, "in_practice": 4,
+                                  "would_promote": 1, "promoted": 2, "demoted": 1, "failed": 1})
+        text = "\n".join(SB.ladder_lines(counts))
+        self.assertIn("| 6 | 4 | 1 | 2 | 1 | 1 |", text)
+        self.assertEqual(SB.public_problems(text), [])
+        for name in ("fx-", "sha-", "bundle"):
+            self.assertNotIn(name, text)
+
+    def test_the_page_says_whether_the_ladder_binds_or_only_records(self):
+        counts = {key: 0 for key in SB.LADDER_COUNTS}
+        recording = SB.ladder_lines({"binding": False, **counts})
+        binding = SB.ladder_lines({"binding": True, **counts})
+        unread = SB.ladder_lines({"binding": "n/a", **counts})
+        self.assertTrue(recording[0].startswith("The ladder is RECORDING"))
+        self.assertTrue(binding[0].startswith("The ladder BINDS"))
+        self.assertEqual(unread[0], "Whether the ladder binds could not be read.")
+        self.assertEqual(len({recording[0], binding[0], unread[0]}), 3)
+        for lines in (recording, binding, unread):
+            self.assertEqual(lines[1:], recording[1:], "the same counts under each")
+            self.assertEqual(SB.public_problems("\n".join(lines)), [])
+        self.assertEqual(SB.ladder_lines({})[-1], "| n/a | n/a | n/a | n/a | n/a | n/a |")
 
     def write_economics(self):
         folder = self.root / "economics" / "20261006-close"

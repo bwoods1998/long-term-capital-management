@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from decimal import Decimal as D
 from pathlib import Path
+from unittest.mock import patch
 
 try:
     import numpy as np
@@ -146,7 +147,8 @@ class RoundTrip(LiveCase):
         self.assertEqual(self.families.rows["vert"]["band"], "candidate")   # no band moves without real money
         self.assertEqual(self.venue.sent, [])
 
-    def test_a_family_promoted_in_the_session_trades_real_money_from_the_next_session(self):
+    @patch("league.swarm.gate.SEALED_LOOKS", False)
+    def test_the_old_route_waits_until_the_next_session_for_a_promoted_family(self):
         live = self.make([family("vert", VERTICAL, band="candidate", params={"hold": 3, "opens": 5})])
         self.run_to(9, 40)
         self.assertEqual(self.families.rows["vert"]["band"], "probe")
@@ -309,11 +311,10 @@ class Sized(LiveCase):
     def test_a_probe_that_earns_it_is_sized_by_quarter_kelly_on_its_lower_bound(self):
         live = self.make([family("vert", VERTICAL, band="probe")])
         returns = [0.30, 0.10, 0.20, -0.10, 0.25] * 5
-        self.families.add_forward("vert", "shadow", [{"id": f"s{i}", "day": f"2026-09-{i % 25 + 1:02d}", "pnl": r * 100.0,
-                                                       "max_loss": 100.0} for i, r in enumerate(returns)])
-        self.families.add_forward("vert", "real", [{"id": f"r{i}", "day": f"2026-08-{i + 1:02d}", "pnl": 6.0, "max_loss": 50.0}
-                                                   for i in range(5)])
-        live.state.put("band_moves", {"vert": {"band": "probe", "at": at(MONDAY, 9, 0) - 7 * 86400}})
+        # Evidence v3: Sized reads the Probe's real fills alone (20 or more), after 5 whole sessions at Probe.
+        self.families.add_forward("vert", "real", [{"id": f"s{i}", "day": f"2026-09-{i % 25 + 1:02d}", "pnl": r * 100.0,
+                                                     "max_loss": 100.0} for i, r in enumerate(returns)])
+        live.state.put("band_moves", {"vert": {"band": "probe", "at": at(MONDAY, 9, 0) - 9 * 86400}})
         self.run_to(9, 31)
         self.assertEqual(self.families.rows["vert"]["band"], "sized")
         [pos] = live.book.positions.values()
@@ -788,7 +789,8 @@ class VerificationRound(LiveCase):
         self.run_to(9, 33)
         self.assertEqual(self.venue.cancels, [order.venue_id])
 
-    def test_an_exit_only_instance_promoted_again_waits_for_the_next_session(self):
+    @patch("league.swarm.gate.SEALED_LOOKS", False)
+    def test_the_old_route_waits_a_session_before_repromoting_an_exit_only_instance(self):
         live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 600})])
         self.run_to(9, 31)
         self.families.rows["vert"]["forward"] = {"trades": 25, "negative": True}

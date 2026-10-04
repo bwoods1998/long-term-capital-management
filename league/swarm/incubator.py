@@ -47,10 +47,11 @@ family's state. Each is bound to the evaluator it was made under, so no stale fa
      a `review` that is not a mapping or names no program, an `incubator_barred` or `incubator_reviews` that is not a
      mapping). The latter bars every program of the family while it stays so, and is never recorded or revoked.
    Nothing here is ever cleared: the rows are kept, and so is `incubator_barred`, which an evaluator adoption keeps
-   too (it clears `gate_outcome`, `review`, the marks and the incubator's reviews, never a bar), after first recording
-   there every verdict that only what it clears holds, and every bar the gate owes (`adoption_bars`, `load_owed`). A
-   bar is as durable as a refusal row: a program whose review or audit failed never trades the incubator, under any
-   later evaluator.
+   too (every adoption clears the marks, the incubator's reviews and a gate `review` that passed; one of a new Gym
+   clears `gate_outcome` and a gate `review` that did not pass as well, and one of league/live alone keeps both:
+   `evaluator.adopt`; none clears a bar), after first recording there every verdict that what it clears or keeps
+   holds, and every bar the gate owes (`adoption_bars`, `load_owed`). A bar is as durable as a refusal row: a program
+   whose review or audit failed never trades the incubator, under any later evaluator.
 
    THE PROGRAM (Oct 1, 2026). A verdict is on the program, its `gate.run_sha` (the code and the params), not on the
    family it was made in: the store links the lineages of identical code (`SwarmStore._link_code`), and the gate's and
@@ -65,6 +66,15 @@ family's state. Each is bound to the evaluator it was made under, so no stale fa
    is paid for a program the reader would refuse). Such a bar is never recorded and never revokes a review
    (`program_only` leaves it out): it lifts when that family's audit lands, and lasts while a retired family's stays
    owed. In the family's own `review`, a pass whose audit is owed still bars nothing (the gate is still reading it).
+
+   THE LOOK ROUTE READS THE SAME RECORDS (release F1, Oct 3, 2026; `look_route_bar`, the gate's THE PROGRAM BAR). With
+   the held-out look the route to Probe again, a program with a failed review, a failed audit or a refusal on record in
+   any family is never read again and never looked at: its refusal rows and the verdicts recorded here are for good on
+   that route too. Three entries here are no verdict on the program and bar the incubator only: a held look's (THE LOOK
+   HOLDS judge it again), the "gym" refusal's, and a revocation's (a passed incubator review the sweep revoked for a bar
+   found elsewhere: the verdict, if there is one, is read where it was made; `verdict_words`). A holder's record that
+   cannot be read is no verdict either, and the gate WAITS on it (`look_route_unread`: nothing read, nothing looked at,
+   nothing refused, until it reads again).
 
    THE BACKFILL (`backfill`, at every swarm start before the evaluator adoption). Before the verdict-first bar (release B
    and earlier), a failed review or audit whose compare-and-set lost to a newer validation was written only to the
@@ -123,7 +133,7 @@ from typing import Any, Callable, Mapping
 # BAD_OUTCOMES: the gate's outcomes that bar a program, the House's reader's own list (`bands.BAD_OUTCOMES`), so the two can
 # never disagree: refused, failed, demoted and held (THE LOOK HOLDS, Oct 2, 2026).
 from .bands import BAD_OUTCOMES, demoted
-from .researcher import drift_settings, drift_verdict, robust_at_stress, row_span, running_span
+from .researcher import drift_settings, drift_verdict, robust_at_stress, row_span, running_span, unit_waiting
 from .store import SwarmStore, dumps, loads
 
 #: Marks and incubator reviews kept per family (the newest versions' marks; the newest reviews by time). The gate's bars
@@ -171,6 +181,36 @@ def current_mark(mark: Any, evaluator: Any, objective: Any) -> bool:
             and mark.get("evaluator") == evaluator and mark.get("objective") == objective)
 
 
+def carrier_wait(store: SwarmStore, fam: Mapping[str, Any], n: int) -> str | None:
+    """A Train carrier set-aside holds its program temporarily in every family, without a bar."""
+    from .bands import carrier_wait as recorded_wait
+    from .evaluator import KEY
+
+    evaluator = store.get(KEY)
+    for other, version in twins(store, str(fam["id"]), int(n)) or [(str(fam["id"]), int(n))]:
+        current = store.family(other)
+        if current is None:
+            continue
+        why = recorded_wait(current.get("state"), version, evaluator)
+        if why is not None:
+            return why
+    return None
+
+
+def refresh_carrier_holds(store: SwarmStore, fid: str, n: int, settings: Mapping[str, Any]) -> None:
+    """Re-screen changed-policy holds in every exact-program twin, including retired families.
+
+    Retirement cannot bypass a current hold, and an obsolete retired mark cannot make a temporary hold permanent.
+    """
+    from .researcher import _restore_aside, set_aside
+
+    with store.atomic():
+        for other, version in twins(store, fid, n):
+            fam = store.family(other) or {}
+            if (set_aside(fam).get(str(version)) or {}).get("kind") == "drift":
+                _restore_aside(store, other, settings, include_retired=True)
+
+
 def final_review(state: Mapping[str, Any], sha: str) -> dict[str, Any] | None:
     """The FINAL review of program `sha` under the current review contract, or None: the gate's (`review`) or the
     incubator's (`incubator_reviews`), when it failed or its audit was made. A review that passed with its audit still
@@ -186,13 +226,19 @@ def final_review(state: Mapping[str, Any], sha: str) -> dict[str, Any] | None:
     return None
 
 
+#: What a REVOKED review says of its program (`_audit_bar`: a passed incubator review the sweep turned into verdict "fail",
+#: stage "gate", for a bar found elsewhere), after its reader's name. It bars the program from the incubator and is no
+#: verdict of its own (`verdict_words`).
+REVOKED_WORDS = "review of it was revoked (the gate barred it)"
+
+
 def _audit_bar(record: Mapping[str, Any], whose: str) -> str | None:
     """A review record's verdict and audit read fail-closed (`gate_review_bar`, `incubator_review_bar`)."""
     verdict = record.get("verdict")
     if verdict == "fail":
         stage = record.get("stage")
         if stage == "gate":
-            return f"{whose} review of it was revoked (the gate barred it)"
+            return f"{whose} {REVOKED_WORDS}"
         return f"{whose} audit failed it" if stage == "audit" else f"{whose} reviewer failed it"
     if verdict != "pass":
         return f"{whose} review of it cannot be read"
@@ -361,6 +407,137 @@ def program_bar(store: SwarmStore, fid: str, n: int, sha: str, *, program_only: 
     return None
 
 
+# ------------------------------------------------------------------------------- THE PROGRAM BAR ON THE LOOK ROUTE
+#: The refusal stage that is no verdict on the program (`look_route_bar`): "gym", the gate box could not make its holdout
+#: look three times (`gate.Gate._owe`). No one read the program and no look was made; its tries are kept by program, so
+#: its next failure parks it again at once, with an alert. It still bars the program from the incubator.
+UNJUDGED_STAGES = ("gym",)
+#: A recorded bar's words that are no verdict on the program either (`verdict_words`): a held look's (THE LOOK HOLDS judge
+#: the program again whenever it comes back to the gate: `gate.Gate.look_hold`), the "gym" refusal's, and A REVOCATION's
+#: (`REVOKED_WORDS`).
+_HELD_WORDS = ("the gate held its holdout look", "the gate's outcome for it was held", "the gate's outcome for it is held")
+_UNJUDGED_WORDS = tuple(f"the gate refused it (the {stage})" for stage in UNJUDGED_STAGES)
+
+
+def verdict_words(why: Any) -> bool:
+    """Whether a recorded bar's words (`incubator_barred[sha]["why"]`, or a bar the gate still owes) are a VERDICT on
+    the program for THE PROGRAM BAR ON THE LOOK ROUTE (`look_route_bar`): a failed review or audit, a refusal, a failed
+    look or a demotion. A held look's words and the "gym" refusal's are not (`_HELD_WORDS`, `_UNJUDGED_WORDS`).
+
+    A REVOCATION IS NO VERDICT OF ITS OWN (`REVOKED_WORDS`). The sweep revokes a passed incubator review for any bar on
+    its program, in its own family or another (`_swept`: a held look and the "gym" refusal among them), and the next
+    evaluator adoption records the revoked review in `incubator_barred` in these words (`adoption_bars`). No reader
+    judged the program then: the verdict it was revoked for, when there is one, is read where it was made (the refusal
+    row, or the bar or review of the family that holds it: `look_route_bar` visits every holder). Read as a verdict,
+    a hold in one family became a bar for good on the same program in every family at the next adoption.
+
+    Words that cannot be read are a verdict (fail-closed: an entry in `incubator_barred` bars its program even when it
+    cannot be read)."""
+    return not (isinstance(why, str) and (why.startswith(_HELD_WORDS) or why in _UNJUDGED_WORDS
+                                          or why.endswith(REVOKED_WORDS)))
+
+
+def state_verdict(state: Mapping[str, Any], sha: str) -> str | None:
+    """A verdict against program `sha` in one family's state, for `look_route_bar`, or None: its recorded bar when the
+    words are a verdict's (`verdict_words`); the gate's `review` failing it, or unreadable for it (`gate_review_bar`); the
+    incubator's own review failing it, whatever its contract, unless that record is only the sweep's revocation for a
+    bar read above (stage "gate"); the `gate_outcome` naming it refused. A pass whose audit is still owed is none."""
+    recorded = state.get("incubator_barred")
+    if isinstance(recorded, Mapping) and sha in recorded:
+        entry = recorded[sha]
+        why = entry.get("why") if isinstance(entry, Mapping) else None
+        if verdict_words(why):
+            return str(why or "the gate barred it")
+    why = gate_review_bar(state.get("review"), sha)
+    if why is not None:
+        return why
+    reviews = state.get("incubator_reviews")
+    record = reviews.get(sha) if isinstance(reviews, Mapping) else None
+    if isinstance(record, Mapping) and record.get("sha") == sha and record.get("stage") != "gate":
+        why = _audit_bar(record, "the incubator's")
+        if why is not None:
+            return why
+    outcome = state.get("gate_outcome")
+    if isinstance(outcome, Mapping) and outcome.get("sha") == sha and outcome.get("result") == "refused":
+        return "the gate's outcome for it is refused"
+    return None
+
+
+def look_route_bar(store: SwarmStore, fid: str, n: int, sha: str) -> str | None:
+    """THE PROGRAM BAR ON THE LOOK ROUTE (release F1, Oct 3, 2026; `gate.Gate.program_bar`): why program `sha` (version
+    `n` of family `fid`) is never read by the gate's reviewer or auditor again and never looked at, whatever family or
+    version carries it now, or None. The review and the audit are the only screen against a program that recognises
+    the held-out months, so a verdict of theirs is on the PROGRAM for good, as it already is for the incubator
+    (`program_bar`): a revive, a twin family, a version submitted again or a new Gym gives it no second reading.
+
+    A VERDICT ON RECORD ANYWHERE:
+    - a refusal row of any version of the program (`twins`: the same code and params), this one included, in any family,
+      alive or retired, at any stage but "gym" (`UNJUDGED_STAGES`);
+    - in any family holding the program, this one included, what `state_verdict` reads: a recorded bar whose words are
+      a verdict's (THE VERDICT FIRST records every failed review and audit there, the gate's and the incubator's, also
+      when the gate's own write-back lost to a newer validation), a `review` or an incubator review that failed it, a
+      `gate_outcome` naming it refused.
+    A HOLD IS NO BAR: a held look's row, bar and outcome are left to THE LOOK HOLDS, which judge the program again when it
+    comes back to the gate. Nor is the "gym" refusal (no one judged the program), nor a revocation (`verdict_words`). A
+    family whose state cannot be read says nothing here (its rows still do): a refusal is for good, so it is never made
+    on a record that cannot be read. The gate waits on such a record instead (`look_route_unread`). Read-only."""
+    versions = twins(store, fid, n) or [(str(fid), int(n))]
+    for other, m in versions:
+        for row in store._all("SELECT stage FROM refusals WHERE family=? AND version=? ORDER BY seq", (other, m)):
+            if row["stage"] not in UNJUDGED_STAGES:
+                return f"the gate refused it in {other}@{m} (the {row['stage']})"
+    for other in _holders(versions):
+        row = store._one("SELECT state FROM families WHERE id=?", (other,))
+        state = loads(row["state"], None) if row is not None else None
+        if not isinstance(state, Mapping):
+            continue
+        why = state_verdict(state, sha)
+        if why is not None:
+            return why if other == str(fid) else f"{why} (in {other}, which holds the same program)"
+    return None
+
+
+def _holders(versions: list[tuple[str, int]]) -> list[str]:
+    """The families of `versions` (`twins`), each once, in their order."""
+    return list(dict.fromkeys(other for other, _ in versions))
+
+
+def look_route_unread(store: SwarmStore, fid: str, n: int) -> str | None:
+    """THE PROGRAM BAR WAITS ON A RECORD IT CANNOT READ (release F1, Oct 3, 2026; `gate.Gate.program_unread`): why the
+    look route cannot tell whether a verdict is on record against the program of version `n` of family `fid`, or None.
+    A family holding the program (`twins`: this one included, alive or retired) whose state cannot be read, or whose
+    records that would name a program cannot (`family_bar`, the incubator's own fail-closed read: a gate `review` that
+    is not a mapping or names no program, an `incubator_barred` or `incubator_reviews` that is not a mapping).
+
+    Such a record may hold the program's only verdict (the incubator's failed audit, a failed review whose write-back
+    lost: THE VERDICT FIRST keeps both in `incubator_barred` alone). `look_route_bar` refuses nothing on it, because a
+    refusal is for good; the gate must not read on either, because the look is the route to real money. So it WAITS:
+    no review or audit is paid, no look is made, nothing is refused, and the version keeps its gate place until the
+    record reads again. A verdict that CAN be read still refuses first (`look_route_bar` is asked before this).
+    Read-only."""
+    for other in _holders(twins(store, fid, n) or [(str(fid), int(n))]):
+        row = store._one("SELECT state FROM families WHERE id=?", (other,))
+        if row is None:
+            continue
+        state = loads(row["state"], None)
+        mine = other == str(fid)
+        if not isinstance(state, Mapping):
+            return "its state cannot be read" if mine else (f"the state of {other}, which holds the same program, "
+                                                            "cannot be read")
+        why = family_bar(state)
+        if why is not None:
+            return why if mine else f"{why} (in {other}, which holds the same program)"
+    return None
+
+
+def refused_version(store: SwarmStore, fid: str, n: int) -> bool:
+    """Whether the gate refused this very version on a verdict (a refusal row of its own at any stage but "gym"): the
+    row is kept for good, where the gate's mark (`gated_sha`) is cleared by an adoption that changes the Gym, so
+    `Tournament.gate_spent` never readies a refused version again."""
+    return any(row["stage"] not in UNJUDGED_STAGES for row in store._all(
+        "SELECT stage FROM refusals WHERE family=? AND version=?", (str(fid), int(n))))
+
+
 def unrecorded_bars(state: Mapping[str, Any]) -> dict[str, str]:
     """The gate's verdicts against a program that `incubator_barred` does not hold yet, {sha: why}: the family's
     `gate_outcome` naming it refused, failed, demoted or held, and the gate's `review` barring it (`gate_review_bar`). Each
@@ -383,9 +560,11 @@ def unrecorded_bars(state: Mapping[str, Any]) -> dict[str, str]:
 
 def adoption_bars(state: Mapping[str, Any]) -> dict[str, str]:
     """What an evaluator adoption must record in `incubator_barred` before it clears the selection (`evaluator.adopt`),
-    {sha: why}: `unrecorded_bars` (the gate's `review` and `gate_outcome`, which the adoption clears) and every incubator
-    review that fails its program whatever its contract (`incubator_reviews`, cleared too). {} while `incubator_barred`
-    cannot be read (it is left alone, and `family_bar` bars the whole family)."""
+    {sha: why}: `unrecorded_bars` (the gate's `review` and its `gate_outcome`, both of which one of a new Gym clears) and
+    every incubator review that fails its program whatever its contract (`incubator_reviews`, cleared by every
+    adoption). A league/live-only adoption keeps `gate_outcome`, and a `review` that did not pass
+    (`evaluator.review_stands`), and records their bars all the same. {} while `incubator_barred` cannot be read (it is
+    left alone, and `family_bar` bars the whole family)."""
     recorded = state.get("incubator_barred")
     if recorded is not None and not isinstance(recorded, Mapping):
         return {}
@@ -552,9 +731,11 @@ def record_bar(store: SwarmStore, fid: str, sha: str, why: str, *, version: int 
     """THE VERDICT FIRST (the module docstring, 1): record a verdict against program `sha` in family `fid`'s
     `incubator_barred[sha]` and, in the same transaction, take the program's marks and revoke its passed incubator
     review (`sweep`'s work for this family), whatever the caller then writes or fails to write. The first entry for a
-    program is kept. An `incubator_barred` that cannot be read is never written over (`family_bar` bars every program
-    of the family while it stays so; the marks still go). Returns {removed, barred, revoked} as `sweep` does; anything
-    done is one private `swarm.gate` event (`incubator_bar`), written after the transaction."""
+    program is kept, except that a verdict takes the place of an entry that was none, a held look's, the "gym" refusal's
+    or a revocation's (`_record_bar`: the look route reads the words). An `incubator_barred` that cannot be read is
+    never written over (`family_bar` bars every program of the family while it stays so; the marks still go). Returns
+    {removed, barred, revoked} as `sweep` does; anything done is one private `swarm.gate` event (`incubator_bar`),
+    written after the transaction."""
     with store.atomic():
         done, why_of = _record_bar(store, fid, sha, why, version, clock)
     _bar_event(store, fid, sha, why, version, done, why_of)
@@ -570,11 +751,19 @@ def _record_bar(store: SwarmStore, fid: str, sha: str, why: str, version: int | 
     state = fam.get("state") or {}
     recorded = state.get("incubator_barred")
     view, values = fam, {}
-    added = (recorded is None or isinstance(recorded, Mapping)) and sha not in (recorded or {})
+    # The first entry for a program is kept, with one exception (F1, THE PROGRAM BAR ON THE LOOK ROUTE reads the words:
+    # `look_route_bar`): a VERDICT (a failed review or audit, a refusal) takes the place of an entry that was none (a
+    # held look's, the "gym" refusal's, a revocation's: `verdict_words`) and keeps it as `was`, so a verdict the gate
+    # could write nowhere else is never hidden behind an earlier hold.
+    earlier = recorded.get(sha) if isinstance(recorded, Mapping) else None
+    upgrade = (isinstance(earlier, Mapping) and not verdict_words(earlier.get("why")) and verdict_words(why))
+    added = (recorded is None or isinstance(recorded, Mapping)) and (sha not in (recorded or {}) or upgrade)
     if added:
         entry: dict[str, Any] = {"why": str(why), "at": float(clock())}
         if version is not None:
             entry["version"] = int(version)
+        if upgrade:
+            entry["was"] = dict(earlier)
         values["incubator_barred"] = {**dict(recorded or {}), sha: entry}
         view = {**fam, "state": {**state, "incubator_barred": values["incubator_barred"]}}
     # The sweep's work for this family, on the view that holds the new entry (its own record of `unrecorded_bars`
@@ -612,7 +801,9 @@ def practice_cohorts(root: str | Path, *, research: Mapping[str, Any] | None, be
         family, version, first_day, run_sha (the snapshot's program), evaluator (the cohort's practice evaluator)
         sessions         completed sessions (`practice.sessions`, less today's); None when there is no practice row or it
                          is older than the cohort (a record from before the cohort is not the cohort's)
-        closes_program   program-closed trades (not forced) under the cohort's evaluator that closed before `before`
+        closes_program   program-closed trades (not forced) under the cohort's evaluator that closed before `before`,
+                         the cohort's OWN alone (the House's rule, `_earlier_accounts`: from its own first day, never
+                         a close of an earlier cohort's account)
         pnl_program      their P&L (the engine's, after its fees)
     """
     path = Path(root) / OBSERVE_FILE
@@ -651,13 +842,33 @@ def _cohorts(db: sqlite3.Connection, research: Mapping[str, Any] | None, before:
         sessions = None
         if live is not None and str(live[0]) >= str(first_day):
             sessions = int(live[2] or 0) - int(str(live[1]) == before)
+        earlier = _earlier_accounts(db, str(family), int(version))
+        own = "".join(" AND account != ?" for _ in earlier)
         closes, pnl = db.execute("SELECT COUNT(*), COALESCE(SUM(pnl), 0) FROM trades WHERE family=? AND version=? "
-                                 "AND evaluator=? AND forced=0 AND exit_day < ?",
-                                 (family, version, evaluator, before)).fetchone()
+                                 f"AND evaluator=? AND forced=0 AND exit_day >= ? AND exit_day < ?{own}",
+                                 (family, version, evaluator, str(first_day), before, *earlier)).fetchone()
         out.append({"family": str(family), "version": int(version), "first_day": str(first_day),
                     "run_sha": snap.get("run_sha"), "evaluator": evaluator, "sessions": sessions,
                     "closes_program": int(closes or 0), "pnl_program": float(pnl or 0.0)})
     return out
+
+
+def _earlier_accounts(db: sqlite3.Connection, family: str, version: int) -> list[str]:
+    """The practice accounts of the EARLIER cohorts of (family, version), as the House's record archives them
+    (`cohort_archive.accounts`: a program frozen again after a release; the House's own read is its `observe.py`
+    `earlier_accounts`, and a test holds the two equal: this module reads the record's file and never imports the live
+    path). [] for a program never frozen again, and on a file without the archive or from before it kept them."""
+    if "accounts" not in {row[1] for row in db.execute("PRAGMA table_info(cohort_archive)")}:
+        return []
+    found: set[str] = set()
+    for row in db.execute("SELECT accounts FROM cohort_archive WHERE family=? AND version=?", (family, version)):
+        try:
+            value = json.loads(row[0]) if row[0] else []
+        except (TypeError, ValueError):
+            value = []
+        if isinstance(value, list):
+            found.update(str(a) for a in value)
+    return sorted(found)
 
 
 # ---------------------------------------------------------------------------------------------------- 1. the mark
@@ -682,6 +893,9 @@ def mark_of(store: SwarmStore, fam: Mapping[str, Any], n: int, settings: Mapping
     loss at 1.5x, a known failed drift screen, the gate's bar) or the drift screen is off. Figures only owed never drop
     a mark."""
     state = fam.get("state") or {}
+    carrier = carrier_wait(store, fam, n)
+    if carrier is not None:
+        return None, carrier, True
     if demoted(state, n):
         return None, "demoted (a loss at 1.5x or a failed drift screen)", True
     robust = robust_at_stress(state, n)
@@ -796,7 +1010,9 @@ def _swept(store: SwarmStore, fam: Mapping[str, Any], screen_on: bool, looks: li
         if not str(key).isdigit():
             continue
         n = int(key)
-        if demoted(state, n):
+        if carrier_wait(store, fam, n) is not None:
+            why = "its program has a temporary Train carrier hold"
+        elif demoted(state, n):
             why = "demoted (a loss at 1.5x or a failed drift screen)"
         elif robust_at_stress(state, n) is False:
             why = "its 1.5x Train run lost money"
@@ -841,6 +1057,7 @@ def facts(store: SwarmStore, settings: Mapping[str, Any], root: str | Path | Non
     out["cohorts"] = len(cohorts)
     for cohort in cohorts:
         fid, n = cohort["family"], int(cohort["version"])
+        refresh_carrier_holds(store, fid, n, settings)
         fam = store.family(fid)
         if fam is None or fam.get("retired_at") or fam.get("band") != "gym":
             continue
@@ -865,7 +1082,7 @@ def facts(store: SwarmStore, settings: Mapping[str, Any], root: str | Path | Non
             now = store.family(fid) or {}
             if now.get("retired_at") or now.get("band") != "gym":
                 continue
-            if changed == "written" and gate_bar(store, now, n) is not None:
+            if changed == "written" and (gate_bar(store, now, n) is not None or carrier_wait(store, now, n) is not None):
                 continue  # a verdict against it landed since `mark_of` read the family (a row, `review`, a recorded bar)
             done = store.compare_and_set_state(fid, expect, train_passed=_kept(marks))
         if done:
@@ -882,7 +1099,7 @@ def due_reviews(store: SwarmStore, settings: Mapping[str, Any], root: str | Path
     sessions, closes}]. [] without a research evaluator and Train objective, without a current mark on any alive Gym
     family (the practice record is not read then), or without a readable practice record."""
     from .evaluator import KEY
-    from .gate import run_sha
+    from .gate import run_sha, waiting
 
     evaluator, objective = store.get(KEY), store.get("train_objective")
     if not isinstance(evaluator, Mapping) or objective is None:
@@ -898,7 +1115,7 @@ def due_reviews(store: SwarmStore, settings: Mapping[str, Any], root: str | Path
         if fam is None:
             continue
         n, state = int(cohort["version"]), fam.get("state") or {}
-        if state.get("gate_hold") or demoted(state, n):
+        if state.get("gate_hold") or demoted(state, n) or carrier_wait(store, fam, n) is not None:
             continue  # the operator holds it (no paid stage), or it failed for good
         if not current_mark((state.get("train_passed") or {}).get(str(n)), evaluator, objective):
             continue
@@ -913,8 +1130,13 @@ def due_reviews(store: SwarmStore, settings: Mapping[str, Any], root: str | Path
             continue  # the cohort practises another program than this version's
         if final_review(state, sha) is not None or gate_bar(store, fam, n, sha=sha, looks=looks) is not None:
             continue  # final for its program; the gate's bar too (the live side never admits it: no review is paid)
-        if state.get("gate_ready") and state.get("validation_version") == n:
-            continue  # the gate is reviewing this very version now: its review and audit serve
+        if (state.get("gate_ready") or waiting(state) is not None or unit_waiting(state) is not None) \
+                and state.get("validation_version") == n:
+            # The gate is reviewing this very version now, or holds its place while it waits for the look's bar (THE
+            # POWER HOLD IS A WAIT, `gate.waiting`): its own review and audit serve. Or it met the line and waits
+            # before the gate for its unit (THE UNIT ON VALIDATION, `researcher.unit_waiting`): no review of any kind
+            # is paid for it meanwhile (its reader gives a family whose version met the line no row anyway).
+            continue
         out.append({"family": fam["id"], "version": n, "sha": sha, "sessions": sessions, "closes": closes,
                     "first_day": cohort["first_day"]})
     out.sort(key=lambda r: (r["first_day"], r["family"], r["version"]))
@@ -924,15 +1146,18 @@ def due_reviews(store: SwarmStore, settings: Mapping[str, Any], root: str | Path
 def reviewable(store: SwarmStore, fid: str, n: int, sha: str) -> bool:
     """Before each paid stage: the family is alive in the Gym band, not held by the operator, version `n` is not demoted,
     its mark is current, its program is still `sha`, the gate has not barred it, and the gate is not reviewing this very
-    version (its own review and audit then serve)."""
+    version, nor holding its place while it waits for the look's bar (its own review and audit then serve), nor does
+    the version wait before the gate for its unit (`researcher.unit_waiting`)."""
     from .evaluator import KEY
-    from .gate import run_sha
+    from .gate import run_sha, waiting
 
     fam = store.family(fid) or {}
     state = fam.get("state") or {}
-    if fam.get("retired_at") or fam.get("band") != "gym" or state.get("gate_hold") or demoted(state, n):
+    if fam.get("retired_at") or fam.get("band") != "gym" or state.get("gate_hold") or demoted(state, n) \
+            or carrier_wait(store, fam, n) is not None:
         return False
-    if state.get("gate_ready") and state.get("validation_version") == n:
+    if (state.get("gate_ready") or waiting(state) is not None or unit_waiting(state) is not None) \
+            and state.get("validation_version") == n:
         return False
     if not current_mark((state.get("train_passed") or {}).get(str(n)), store.get(KEY), store.get("train_objective")):
         return False
@@ -972,6 +1197,8 @@ def put_review(store: SwarmStore, fid: str, sha: str, record: Mapping[str, Any],
 __all__ = ["facts", "sweep", "due_reviews", "practice_cohorts", "practice_current", "current_mark", "final_review",
            "mark_of", "gate_bar", "gate_review_bar", "incubator_review_bar", "family_bar", "unrecorded_bars", "verdict_bar",
            "record_verdict", "record_bar", "BAD_OUTCOMES", "twins", "program_bar", "owed_audit_bar", "adoption_bars",
+           "look_route_bar", "look_route_unread", "state_verdict", "verdict_words", "refused_version", "UNJUDGED_STAGES",
+           "REVOKED_WORDS",
            "save_owed", "load_owed", "backfill", "BACKFILL_KEY",
            "eligible_train_run", "reviewable", "put_review", "reviews_per_round", "session_day", "MARKS_KEPT",
            "REVIEWS_KEPT", "REVIEW_MIN_SESSIONS", "REVIEW_MIN_CLOSES", "REVIEWS_PER_ROUND", "REVIEWS_CEILING", "OBSERVE_FILE"]

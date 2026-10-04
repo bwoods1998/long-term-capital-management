@@ -689,11 +689,13 @@ class TheReleaseTrain(unittest.TestCase):
         self.assertEqual(updater.check()["action"], "deploying")
 
     def test_a_launch_that_would_restart_the_house_inside_the_session_waits_too(self):
-        # The canary took 2.2-4.0 minutes from launch to restart on Sept 24-25, then a ten-minute
-        # watch that may roll back: a launch at 13:00Z restarts the House inside the session.
+        # The owner's 90-minute exclusion keeps a launch at 13:00Z or 12:54Z out; the existing
+        # five-minute padded floor makes the guard start at 11:55Z.
         self.at("2026-09-24T13:00Z")
         self.assertEqual(self.updater().check()["holds"], ["session"])
         self.at("2026-09-24T12:54Z")
+        self.assertEqual(self.updater().check()["holds"], ["session"])
+        self.at("2026-09-24T11:54Z")
         self.assertEqual(self.updater().check()["action"], "deploying")
 
     def test_the_winter_session_is_the_calendars_own_hours(self):
@@ -779,7 +781,7 @@ class TheReleaseTrain(unittest.TestCase):
         self.shipped("main-000000000001")
         self.at("2026-09-24T12:00Z")
         out = self.updater().check()
-        self.assertEqual((out["holds"], out["next_eligible_at"]), (["train"], "2026-09-24T20:05:00Z"))
+        self.assertEqual((sorted(out["holds"]), out["next_eligible_at"]), (["session", "train"], "2026-09-24T20:05:00Z"))
         self.at("2026-09-24T14:00Z")
         self.started()
         self.at("2026-09-24T14:10Z")
@@ -1149,11 +1151,11 @@ class TheNightlyDaemonStopsFirst(unittest.TestCase):
         self.assertIsNone(self.stop())
 
     def test_a_session_that_begins_while_the_daemon_stops_holds_the_launch(self):
-        self.clock.now = utc("2026-09-28T12:46Z")  # a Monday, 9 minutes before the session's lead begins
+        self.clock.now = utc("2026-09-28T11:46Z")  # a Monday, 9 minutes before the widened session lead begins
         self.hold_lock()
         updater = self.updater()
         self.assertEqual(updater.check()["action"], "stopping_nightly")
-        self.clock.now = utc("2026-09-28T12:56Z")
+        self.clock.now = utc("2026-09-28T11:56Z")
         self.release_lock()
         out = updater.check()
         self.assertEqual((out["action"], out["holds"], self.launched), ("held", ["session"], []))
@@ -1488,4 +1490,3 @@ class TheDrillRequest(unittest.TestCase):
         updater.check()
         self.assertEqual(self.started, [])
         self.assertEqual([r["outcome"] for r in self.releases.history() if r.get("stage") == "drill"], ["dropped", "dropped"])
-

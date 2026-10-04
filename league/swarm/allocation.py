@@ -361,8 +361,11 @@ def row_of(fam: Mapping[str, Any], *, cls: str, looks_spent: bool, gate_done: bo
 def gate_spent(store: Any, fam: Mapping[str, Any]) -> bool:
     """The gate is done with the family's validated version (`Tournament.gate_spent`'s rule, R4): its holdout look was
     made (`store.looked`) or the gate refused it (`gated_sha`, the review's refusals and a failed look's mark alike), so
-    it never goes back to `gate_ready`."""
-    from .gate import run_sha  # a local import: the allocation only reads the gate's mark
+    it never goes back to `gate_ready`. As that rule reads it since F1 (THE PROGRAM BAR): a version the gate refused on
+    a verdict stays spent whatever an adoption cleared (`incubator.refused_version`: its refusal row is for good, where
+    a new Gym clears `gated_sha`), so its Validation t, judged again on the new Gym, is not counted as alive."""
+    from .gate import run_sha  # a local import: the allocation only reads the gate's mark and its rows
+    from .incubator import refused_version
 
     state = fam.get("state") or {}
     n = state.get("validation_version")
@@ -372,7 +375,7 @@ def gate_spent(store: Any, fam: Mapping[str, Any]) -> bool:
     if version is None or not version.get("sha"):
         return False
     sha = run_sha(version)
-    return bool(state.get("gated_sha") == sha or store.looked(sha))
+    return bool(state.get("gated_sha") == sha or store.looked(sha) or refused_version(store, str(fam["id"]), n))
 
 
 def value_of(row: Mapping[str, Any], post: Posterior, c: Mapping[str, Any]) -> dict[str, Any]:

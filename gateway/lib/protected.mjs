@@ -11,9 +11,10 @@
 // dials alone the updater lets through): league/tests/test_ci.py fails while the two lists differ by anything else. It
 // holds the judges and the money rules, the evaluator's identity, the data the evidence is computed from, every module
 // outside league/live/ and league/gym/ that those trees import or seal into the decider's runtime, the swarm's spend
-// limits and settings, the harness loop's own objective (`harness_lanes.PROTECTED` but the candidate tests), and the
-// House's job framework. test/merge.test.mjs reads each of those sources from the repository, FORBIDDEN among them, and
-// fails while any entry is missing here. A name ending in "/" is a tree. Compared without case, as `league.ci` compares.
+// limits and settings, the harness loop's own objective (`harness_lanes.PROTECTED` but the candidate tests), the
+// forward ladder's benchmark, the frozen judge of its binding and the swarm's own read of its cohorts, and the House's
+// job framework. test/merge.test.mjs reads each of those sources from the repository, FORBIDDEN among them, and fails
+// while any entry is missing here. A name ending in "/" is a tree. Compared without case, as `league.ci` compares.
 
 export const MERGE_FORBIDDEN = Object.freeze([
   // league/ci.py FORBIDDEN, in its order.
@@ -31,6 +32,10 @@ export const MERGE_FORBIDDEN = Object.freeze([
   // What feeds and enforces the budget rule (V3-A integration): the Sail guard, the model router's Claude room, the
   // job context and the close economics (the budget's p30, the public Net; V3-A review). The settings' overlay is below.
   'league/swarm/guard.py', 'league/swarm/models.py', 'league/ops/context.py', 'league/ops/economics.py',
+  // Resource commitments and their dispatch path enforce the research ceiling too.
+  'league/swarm/compute.py', 'league/swarm/daily_compute.py', 'league/swarm/pool.py',
+  // The owner's ordinary research fence, including alternative Python loaders of its name.
+  'league/swarm/research_permission.py',
   // And the framework that schedules and runs the House's jobs, and computes the realized p30 the budget is funded
   // from: the whole tree, after its named files so that a refusal names the file.
   'league/ops/',
@@ -58,6 +63,13 @@ export const MERGE_FORBIDDEN = Object.freeze([
   'league/swarm/canary.py', 'league/swarm/benchmarks.py', 'league/swarm/long_single_benchmarks.py',
   'league/swarm/evidence.py', 'league/swarm/diagnostics.py', 'league/swarm/tournament.py', 'scripts/harness_improve.py',
   'playbooks/harness-improvement.md', 'docs/goals/', 'docs/benchmarks/',
+  // The forward ladder's benchmark and its judge (evidence v3): the desks that measure the ladder's rule against the
+  // sealed look, and the frozen script that alone says whether the ladder may bind. The rule itself is under
+  // league/live/.
+  'league/swarm/forward_benchmarks.py', 'scripts/ladder_judge.py',
+  // The swarm's own read of the ladder's cohorts: each cohort's window (the window hold) and its own record, which
+  // decide the families the cohort keep holds alive for the ladder to judge.
+  'league/swarm/practice.py',
   // How the House is deployed, the House itself (its tick calls the updater), and the House's configuration.
   'deploy/', 'scripts/floor_box.py', 'league/house.py', 'league/config.json', 'CHANGELOG.md',
 ]);

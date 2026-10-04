@@ -22,7 +22,7 @@ from league.swarm import bands
 from league.swarm import evaluator as E
 from league.swarm import incubator as I
 from league.swarm.bands import demoted
-from league.swarm.gate import Gate, incubator_stage, run_sha
+from league.swarm.gate import PROGRAM_BAR_STAGE, PROGRAM_BAR_WORDS, Gate, incubator_stage, run_sha
 from league.swarm.researcher import demote_version, screen_best
 from league.swarm.settings import DEFAULTS
 from league.swarm.store import SwarmStore
@@ -738,7 +738,7 @@ class GateUnchanged(GateCase):
     def test_the_incubators_reads_have_their_own_keys_and_fuse_and_never_answer_the_gate_from_cache(self):
         n, sha = self.ready()
         self.settings["gym"]["gate_checkpoint"] = None  # the gate reviews and waits: no look here
-        self.replies = [PASS, fail_reply("the audit's synthetic finding")]
+        self.replies = [PASS, PASS]
         self.gate().run()
         incubator = self.requests()
         self.assertEqual(len(incubator), 2)
@@ -752,7 +752,32 @@ class GateUnchanged(GateCase):
         self.assertEqual({d for _, d in gate}, {"a:review"})
         self.assertEqual(len(self.sail.bodies), 4)
         review = self.state("a")["review"]
-        self.assertEqual((review["verdict"], review["audit"]["verdict"]), ("pass", "pass"), "the incubator's failed audit is not the gate's")
+        self.assertEqual((review["verdict"], review["audit"]["verdict"]), ("pass", "pass"),
+                         "the gate's own reading: the incubator's passed one never answers it from its cache")
+
+    def test_a_program_the_incubators_audit_failed_is_never_read_again_at_the_gate(self):
+        """THE PROGRAM BAR ON THE LOOK ROUTE (release F1, Oct 3, 2026). Before it, the incubator's failed audit was not the
+        gate's: the gate asked its own review and audit of the same program, and a second reading could pass what the
+        first one failed. Now a failed review or audit on record, the incubator's too, is on the PROGRAM for good: the
+        gate refuses it unread, and no look is made."""
+        n, sha = self.ready()
+        self.settings["gym"]["gate_checkpoint"] = None
+        self.replies = [PASS, fail_reply("the audit's synthetic finding")]
+        self.gate().run()
+        self.assertEqual([k.split(":")[3] for k, _ in self.requests()], ["incubator_review", "incubator_audit"])
+        self.assertEqual(self.state("a")["incubator_barred"][sha]["why"], "the incubator's audit failed it")
+        self.d2_ready("a", n)
+        self.replies = [PASS, PASS]  # a second reading would pass it: none is made
+        out = self.gate().run()
+        self.assertEqual((out["refused"], out["looked"], len(self.requests()), len(self.sail.bodies)), (["a"], [], 2, 2),
+                         "refused unread: no review, no audit, no look")
+        [refusal] = self.store.refusals("a")
+        self.assertEqual((refusal["stage"], refusal["reason"]), (PROGRAM_BAR_STAGE, PROGRAM_BAR_WORDS))
+        state = self.state("a")
+        self.assertEqual((state.get("review"), state["gated_sha"], state["gate_ready"], state["gate_outcome"]["result"]),
+                         (None, sha, False, "refused"))
+        [event] = [e["payload"] for e in self.store.events_after(0) if e["payload"].get("action") == "program_bar"]
+        self.assertEqual(event["bar"], "the incubator's audit failed it", "the earlier verdict, in the private event only")
 
     def test_a_version_whose_read_keeps_erring_never_holds_the_rounds_places(self):
         self.ready("a")
@@ -1718,6 +1743,104 @@ class TheProgramAndTheAdoption(BarCase):
     def test_the_swarm_start_backfills_before_the_adoption(self):
         text = (REPO / "league" / "swarm" / "loop.py").read_text(encoding="utf-8")
         self.assertLess(text.index("backfill(self.store)"), text.index("adopt(self.store, evaluator)"))
+
+
+class CarrierHold(Case):
+    """A temporary Train carrier hold cannot be bypassed by stale facts or a duplicate family."""
+
+    def ready_row(self, fid="a"):
+        n = self.eligible(fid)
+        self.facts()
+        sha = self.sha(fid, n)
+        contract = review_contract()["sha256"]
+        self.store.set_state(fid, incubator_reviews={sha: {
+            "sha": sha, "verdict": "pass", "contract_sha": contract,
+            "audit": {"verdict": "pass", "contract_sha": contract}}})
+        self.assertEqual(len(live_rows(self.root, fid, n)), 1)
+        return n
+
+    def hold(self, fid, n, evaluator=EVALUATOR):
+        from league.swarm.researcher import carrier_share, max_unit_train
+
+        self.store.set_state(fid, set_aside={str(n): {"kind": "drift", "evaluator": evaluator,
+                                                   "under": [carrier_share(self.settings), max_unit_train(self.settings)]}})
+
+    def test_changed_policy_releases_a_retired_twin_without_reviving_it(self):
+        self.settings["gate"]["look_holds"] = {"drift_share": 0.25, "min_power": 0.30}
+        n = self.ready_row()
+        self.family("b")
+        source = self.store.version("a", n)
+        twin = self.store.add_version("b", source["code"], source["params"], author="test")
+        row = self.train("b", twin["n"], drift=drift_block(alpha_usd=100.0, drift_usd=60.0))
+        summary = {**self.store.run(row["run_id"])["summary"], "train_score": 1.0, "train_eligible": True}
+        self.store._exec("UPDATE runs SET summary=? WHERE run_id=?", (json.dumps(summary), row["run_id"]))
+        self.store.update_family("b", best_train=1.0)
+        self.store.set_state("b", best_train_version=twin["n"], best_train_run=row["run_id"],
+                             train_candidates=[[1.0, twin["n"], row["run_id"]]])
+        self.assertEqual(screen_best(self.store, "b", self.settings)[0]["kind"], "drift")
+        self.store.update_family("b", retired_at="2026-10-05T20:00:00Z")
+        self.assertEqual(live_rows(self.root, "a", n), [])
+        self.facts()
+        self.assertEqual(live_rows(self.root, "a", n), [])
+        self.settings["gate"]["look_holds"]["drift_share"] = 0.50
+        self.facts()
+        self.assertEqual(len(live_rows(self.root, "a", n)), 1)
+        retired = self.store.family("b")
+        self.assertEqual(retired["retired_at"], "2026-10-05T20:00:00Z")
+        self.assertIsNone(retired["best_train"])
+        self.assertFalse(retired["state"].get("train_candidates"))
+        self.assertFalse(retired["state"].get("set_aside"))
+
+    def test_stale_facts_are_denied_immediately_and_clear_without_a_permanent_bar(self):
+        n = self.ready_row()
+        review = self.state("a")["incubator_reviews"]
+        self.hold("a", n)
+        self.assertEqual(live_rows(self.root, "a", n), [])
+        self.assertFalse(I.reviewable(self.store, "a", n, self.sha("a", n)))
+        out = self.facts()
+        self.assertIn("a@1", out["removed"])
+        self.assertFalse(self.state("a").get("incubator_barred"))
+        self.assertEqual(self.state("a")["incubator_reviews"], review)
+        self.store.set_state("a", set_aside={})
+        self.facts()
+        self.assertEqual(len(live_rows(self.root, "a", n)), 1)
+
+    def test_same_program_in_another_family_holds_the_row_but_other_params_do_not(self):
+        n = self.ready_row()
+        self.family("b")
+        source = self.store.version("a", n)
+        twin = self.store.add_version("b", source["code"], source["params"], author="test")
+        self.hold("b", twin["n"])
+        self.assertEqual(live_rows(self.root, "a", n), [])
+        self.assertIsNotNone(I.carrier_wait(self.store, self.store.family("a"), n))
+        self.store.set_state("b", set_aside={})
+        different = self.store.add_version("b", source["code"], {"hold": 17}, author="test")
+        self.hold("b", different["n"])
+        self.assertEqual(len(live_rows(self.root, "a", n)), 1)
+
+    def test_old_gym_marker_does_not_hold_current_gym_but_live_only_change_does(self):
+        n = self.ready_row()
+        self.hold("a", n, {**EVALUATOR, "image": "sbcp_another_gym"})
+        self.assertEqual(len(live_rows(self.root, "a", n)), 1)
+        self.hold("a", n, {**EVALUATOR, "execution": "f" * 64})
+        self.assertEqual(live_rows(self.root, "a", n), [])
+        self.facts()
+        self.assertEqual(live_rows(self.root, "a", n), [])
+        self.assertIn(str(n), self.state("a")["set_aside"])
+
+    def test_a_held_program_buys_no_incubator_review(self):
+        n = self.eligible("a")
+        self.facts()
+        self.practised("a", n, [(d, 5.0, False) for d in SESSIONS for _ in range(2)])
+        self.assertEqual(len(I.due_reviews(self.store, self.settings, self.root, clock=self.clock)), 1)
+        self.hold("a", n)
+        self.assertEqual(I.due_reviews(self.store, self.settings, self.root, clock=self.clock), [])
+
+    def test_unreadable_hold_is_fail_closed(self):
+        n = self.ready_row()
+        self.store.set_state("a", set_aside=["damaged"])
+        self.assertEqual(live_rows(self.root, "a", n), [])
+        self.assertIsNotNone(I.carrier_wait(self.store, self.store.family("a"), n))
 
 
 # ---------------------------------------------------------------------------------------------------- never evidence

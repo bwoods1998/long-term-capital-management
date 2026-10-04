@@ -13,13 +13,14 @@ import types
 import unittest
 from pathlib import Path
 
+from league.swarm import bands
 from league.swarm import settings as S
 from league.swarm.gate import Gate, run_sha
 from league.swarm.pool import HOLDOUT_FIRST, HOLDOUT_LAST, PoolError
 from league.swarm.store import SwarmStore
 from league.swarm.tournament import Tournament
 from league.tests.test_swarm_pool import PoolCase, job
-from league.tests.test_swarm_rounds import FakeGymPool, RoundCase
+from league.tests.test_swarm_rounds import FakeGymPool, RoundCase, strong
 from league.tests.swarm_fakes import FakeSail
 
 NAMED = "sbcp_gate25"
@@ -366,6 +367,73 @@ class GateMissingData(RoundCase):
         [alert] = self.alerts("look_failed_three_times")
         self.assertEqual(alert["tries"], 4, "a fourth failure is never silent")
         self.assertEqual(self.store.refusals("a"), [], "its program was refused at the third try, not again")
+
+
+class TheProofNamesItsGateBase(RoundCase):
+    """L6 (release F1, Oct 3, 2026; `Gate.holdout_base`, `Gate._finish`): the nightly chain moves `gym.gate_checkpoint`
+    every night, so the checkpoint a look ran on says nothing of WHICH holdout it read once a night has passed. The
+    banded proof of a passed look therefore names the gate image the owner's `swarm.json` names, which the chain
+    extends: a later release can prove "the same holdout" by that name. Nothing in this release reads it."""
+
+    def loaded(self, ready=None, images=None, *, named=NAMED):
+        (self.root / "swarm.json").write_text(json.dumps({"gym": {"gate_checkpoint": named, "roots": ROOTS}}))
+        if ready is not None:
+            (self.root / "gym-forward.json").write_text(json.dumps(ready))
+        if images is not None:
+            (self.root / "data").mkdir(exist_ok=True)
+            (self.root / "data" / "images.json").write_text(json.dumps(images))
+        return S.load(self.root, config={})
+
+    def base(self, settings):
+        return Gate(self.store, self.pool, self.router, settings, clock=self.clock).holdout_base()
+
+    def test_the_base_is_the_named_gate_whichever_checkpoint_of_its_chain_is_in_force(self):
+        self.assertEqual(self.base(self.loaded()), NAMED, "no chain: the named gate itself is the gate")
+        chain = self.loaded({**READY, "base_checkpoint": NAMED, "holdout_roots": ROOTS})
+        self.assertEqual((chain["gym"]["gate_checkpoint"], self.base(chain)), ("sbcp_chain29", NAMED),
+                         "the chain's newest checkpoint is the gate, and its base is the named image")
+        tonight = self.loaded({**READY, "day": "2026-09-30", "ready_at": "2026-10-01T06:12:32+00:00",
+                               "gate_checkpoint": "sbcp_chain30", "base_checkpoint": NAMED, "holdout_roots": ROOTS})
+        self.assertEqual((tonight["gym"]["gate_checkpoint"], self.base(tonight)), ("sbcp_chain30", NAMED),
+                         "a night later the checkpoint moved and the base did not")
+        other = self.loaded({**READY, "base_checkpoint": "sbcp_core5", "holdout_roots": ROOTS})
+        self.assertEqual((other["gym"]["gate_checkpoint"], self.base(other)), (NAMED, NAMED),
+                         "a chain on another image is ignored: the named gate is the gate")
+
+    def test_a_base_the_settings_cannot_name_is_none(self):
+        legacy = self.loaded(dict(READY), rebased())  # a ready file from before the nightly wrote its base, which stands
+        self.assertEqual(legacy["gym"]["gate_checkpoint"], "sbcp_chain29")
+        self.assertIsNone(self.base(legacy), "its chain is proven by data/images.json, which the settings do not carry")
+        self.assertIsNone(self.base({"gym": {"gate_checkpoint": None}, "forward": {}}), "no gate image")
+        self.assertIsNone(self.base({}))
+        self.assertEqual(self.base({"gym": {"gate_checkpoint": "sbcp_x"}, "forward": {"ready": "not a mapping"}}), "sbcp_x")
+
+    def test_a_passed_looks_proof_names_the_base_beside_the_checkpoint_it_ran_on(self):
+        bundle = bands._bundle()
+        images = {"gym": "sbcp_gym", "gate": "sbcp_chain29"}
+        self.settings["gym"].update(image_checkpoint=images["gym"], gate_checkpoint=images["gate"])
+        self.settings["forward"]["ready"] = {**READY, "base_checkpoint": NAMED, "holdout_roots": ROOTS}
+        self.pool.image = lambda kind="gym": images["gate" if kind == "gate" else "gym"]
+        self.pool.bundle = lambda: bundle
+        self.answer = lambda job: {**strong(job), "gym_bundle": bundle,
+                                   "gym_image": images["gate" if job.window == "holdout" else "gym"]}
+        self.family("a")
+        Tournament(self.store, self.pool, self.settings).validate(self.store.families(alive=True))
+        self.replies = [{"text": json.dumps({"verdict": "pass", "reasons": []})}] * 2
+        gate = Gate(self.store, self.pool, self.router, self.settings, clock=self.clock)
+        self.assertEqual(gate.run()["looked"], [{"family": "a", "passed": True}])
+        fam = self.store.family("a")
+        proof = fam["state"]["banded_evaluator"]
+        self.assertEqual((fam["band"], proof["holdout_image"], proof["holdout_base"]), ("candidate", "sbcp_chain29", NAMED))
+        self.assertTrue(bands.current_banded_evaluator(fam["state"], run_sha(self.store.version("a", 1))),
+                        "and the proof is current, as before")
+        # The next night: the chain's checkpoint moved. The proof's checkpoint is no longer the gate; its base still is.
+        images["gate"] = "sbcp_chain30"
+        self.settings["gym"]["gate_checkpoint"] = "sbcp_chain30"
+        self.settings["forward"]["ready"] = {**self.settings["forward"]["ready"], "day": "2026-09-30",
+                                             "gate_checkpoint": "sbcp_chain30"}
+        self.assertNotEqual(proof["holdout_image"], self.settings["gym"]["gate_checkpoint"])
+        self.assertEqual(proof["holdout_base"], gate.holdout_base(), "the same holdout, by its named base")
 
 
 if __name__ == "__main__":

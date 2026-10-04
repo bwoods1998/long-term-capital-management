@@ -16,7 +16,7 @@
    {
     "last24h_usd": "2.40",
     "last4h_pace_per_day_usd": "3.00",
-    "service": "Sail boxes (billed)"
+    "service": "Sail boxes (finalized + active accrued estimate)"
    },
    {
     "last24h_usd": "0.00",
@@ -43,13 +43,13 @@
  "costs": [
   {
    "service": "Sail (models + boxes)",
-   "settled_usd": "51.37",
+   "settled_usd": "50.62",
    "usd": "59.08"
   },
   {
    "service": "Claude (Anthropic via the gateway)",
-   "settled_usd": "40.45",
-   "usd": "40.45"
+   "settled_usd": "39.95",
+   "usd": "40.20"
   },
   {
    "service": "OpenAI",
@@ -105,12 +105,12 @@
  "net": {
   "criterion_5_met": false,
   "definition": "realized options P&L since T0 (all routes, fees in) - all input costs since T0 (conservative basis)",
-  "gap_including_open_positions_usd": "65.93",
-  "gap_to_break_even_usd": "165.66",
-  "net_settled_basis_usd": "-154.55",
-  "net_usd": "-165.66",
-  "net_with_open_and_other_account_activity_usd": "-65.92",
-  "net_with_open_at_conservative_marks_usd": "-65.93"
+  "gap_including_open_positions_usd": "65.68",
+  "gap_to_break_even_usd": "165.41",
+  "net_settled_basis_usd": "-153.30",
+  "net_usd": "-165.41",
+  "net_with_open_and_other_account_activity_usd": "-65.67",
+  "net_with_open_at_conservative_marks_usd": "-65.68"
  },
  "open_positions": {
   "cost_with_fees_usd": "-210.14",
@@ -376,6 +376,6 @@
   "unreconciled_usd": "0.00"
  },
  "schema": "ltcm-econ-close-1",
- "total_costs_settled_basis_usd": "159.22",
- "total_costs_usd": "170.33"
+ "total_costs_settled_basis_usd": "157.97",
+ "total_costs_usd": "170.08"
 }

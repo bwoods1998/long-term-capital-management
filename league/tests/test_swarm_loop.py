@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import ast
 import copy
+from dataclasses import asdict
 import importlib.util
 import json
 import re
@@ -16,12 +17,14 @@ import unittest
 from pathlib import Path
 
 from league.swarm import settings as S
+from league.swarm import compute
+from league.swarm.guard import RESEARCH_KINDS
 from league.swarm.loop import Scheduler, Swarm
 from league.swarm.models import ModelRouter
 from league.swarm.pool import GymPool
 from league.swarm.seeds import SEEDS, family_spec, program_for
 from league.swarm.store import CLOSEABLE, STRUCTURES, SwarmStore
-from league.tests.swarm_fakes import Clock, FakeDriver, FakeSail, provider
+from league.tests.swarm_fakes import Clock, FakeDriver, FakeSail, compute_budget_fixture, provider
 
 GYM = importlib.util.find_spec("league.gym") is not None
 
@@ -30,11 +33,15 @@ class Guard:
     def __init__(self):
         self.braked = False
         self.reason = ""
+        self.research_held = False  # THE GATE'S RESERVE: new research is held, the gate's rounds go on (`SailGuard.allows`)
+        self.held = ""
         self.last = {}
         self.checks = 0
+        self.asked: list[str] = []
 
     def allows(self, kind="any"):
-        return not self.braked
+        self.asked.append(kind)
+        return not self.braked and not (self.research_held and kind in RESEARCH_KINDS)
 
     def due(self):
         return True
@@ -47,8 +54,14 @@ class Guard:
 def settings():
     s = copy.deepcopy(S.DEFAULTS)
     s["enabled"] = True
+    s["budget"] = {"source": "synthetic", "sail_usd_day": 15.0, "claude_usd_day": 10.0}
     s["gym"].update({"enabled": True, "image_checkpoint": "sbcp_gym", "gate_checkpoint": "sbcp_gate", "batch_wait_seconds": 0.2,
                      "start_boxes": 4, "max_boxes": 8})
+    # Invented synchronous provider guarantees, only for these fake Sail/driver tests.
+    s["gym"]["compute_bounds"] = {
+        image: asdict(compute.ComputeBound(image, 0.20, 0.0, 3600, 0, 0, 4102444800.0,
+                                          "synthetic synchronous fake provider contract"))
+        for image in (s["gym"]["image_checkpoint"], s["gym"]["gate_checkpoint"])}
     s["researcher"]["idle_seconds"] = 0
     return s
 
@@ -65,6 +78,7 @@ class LoopCase(unittest.TestCase):
                                                           "researcher": {"idle_seconds": 0}}))
         self.store = SwarmStore(self.root)
         self.addCleanup(self.store.close)
+        compute_budget_fixture(self.root, self.store.clock())
         self.provider, self.sail = provider(self.root / "p.sqlite", self.script)
         self.addCleanup(self.provider.close)
         self.router = ModelRouter(self.store, self.provider, settings=self.settings)
@@ -130,16 +144,29 @@ class Process(LoopCase):
 
         m = threading.Thread(target=manage, daemon=True)
         m.start()
-        began = time.time()
-        for fam in self.store.families(alive=True):
-            t = threading.Thread(target=one, args=(fam["id"],))
-            t.start()
-            threads.append(t)
-        for t in threads:
-            t.join(60)
-        manager_stop.set()
-        elapsed = time.time() - began
-        m.join(30)  # its pass in flight writes to the store too: it ends before the fixture closes it
+        began = time.monotonic()
+        deadline = began + 60
+        families = self.store.families(alive=True)
+        try:
+            for fam in families:
+                t = threading.Thread(target=one, args=(fam["id"],), name=f"research-{fam['id']}", daemon=True)
+                t.start()
+                threads.append(t)
+            for t in threads:
+                t.join(max(0.0, deadline - time.monotonic()))
+        finally:
+            manager_stop.set()
+            m.join(30)  # its pass in flight writes to the store too: it ends before the fixture closes it
+        unfinished = [t.name for t in threads if t.is_alive()]
+        if unfinished:
+            # A broken admission fixture must fail within one deadline, not 48 successive minute-long waits.
+            for fam in families:
+                self.pool.cancel_family(fam["id"])
+            cleanup_deadline = time.monotonic() + 10
+            for t in threads:
+                t.join(max(0.0, cleanup_deadline - time.monotonic()))
+        elapsed = time.monotonic() - began
+        self.assertEqual(unfinished, [], "research cycles did not finish within the shared 60 s deadline")
         self.assertEqual(len(results), 48)
         errors = {k: v.get("error") for k, v in results.items() if v.get("error")}
         self.assertEqual(errors, {})
@@ -150,6 +177,9 @@ class Process(LoopCase):
         self.assertEqual(research, 48, "one run a family; robustness runs of new bests fill the idle boxes besides")
         self.assertLessEqual(len(self.box_sail.forks), 8)
         self.assertGreaterEqual(len(self.box_sail.forks), 4)
+        holds = compute._holds(self.store)
+        self.assertEqual({row["box_id"] for row in holds.values()}, {box for _, box in self.box_sail.forks})
+        self.assertTrue(all(row["bound"]["max_lifetime_seconds"] == 3600 for row in holds.values()))
 
     def test_a_step_checks_the_guard_manages_the_pool_starts_rounds_and_beats(self):
         sw = self.swarm()
@@ -184,6 +214,86 @@ class Process(LoopCase):
         worker.join(10)
         self.assertEqual([e for e in self.store.events_after(0) if e["kind"] == "swarm.cycle"], [], "no researcher cycles")
         self.assertEqual(self.box_sail.forks, [])
+
+    def test_at_the_gates_reserve_new_research_stops_and_the_gates_rounds_go_on(self):
+        """THE GATE NEVER WAITS FOR MIDNIGHT: with the day's Sail research at its line (the guard's hold, no brake), the
+        tournament's validation round, the gate round and the nightly forward still start; the architect, a reseed, the
+        diagnostician and the researchers' cycles do not, and the Gym is not scaled to zero."""
+        self.settings["population"]["reseed_max"] = 4
+        (self.root / "swarm.json").write_text(json.dumps({"enabled": True, "gym": self.settings["gym"],
+                                                          "researcher": {"idle_seconds": 0}, "population": {"reseed_max": 4}}))
+        sw = self.swarm()
+        sw.seed()
+        for fam in self.store.families(alive=True)[:40]:  # 8 alive: under the start, so the architect would refill
+            self.store.retire(fam["id"], "test")
+        ran: list[str] = []
+        sw.gate.forward_due = lambda: True
+        sw.gate.forward = lambda: ran.append("forward") or {"ran": True}
+        sw.architect_pass = lambda: ran.append("architect") or {}
+        sw.reseed = lambda: ran.append("reseed") or []
+        sw.diagnostician.due = lambda: True
+        sw.diagnostician.run = lambda: ran.append("diagnostician") or {}
+        scaled: list[str] = []
+        self.pool.scale_to_zero = lambda why, **kw: scaled.append(why)
+        self.store.put("tournament_at", 0.0)
+        self.store.put("architect_at", 0.0)
+        self.guard.research_held = True
+        self.guard.held = "today's Sail research is at its line (13.50 of 15.00)"
+        sw.step()
+        for t in list(sw.rounds.values()):
+            t.join(30)
+        self.assertEqual(set(sw.rounds), {"tournament", "gate", "forward"}, "those three go on to the day's cap")
+        self.assertEqual(ran, ["forward"], "no architect pass, no reseed, no diagnostician")
+        self.assertEqual(scaled, [], "a hold is no brake: validation and the look need the Gym")
+        self.assertIn("research", self.guard.asked, "the births ask for research")
+        self.assertFalse(json.loads((self.root / "swarm.heartbeat").read_text())["status"]["braked"], "the heartbeat says no brake")
+        # The hold over (a new day, or a raise): the same pass starts the architect again.
+        sw.stop.clear()
+        self.guard.research_held = False
+        self.store.put("architect_at", 0.0)
+        sw.step()
+        for t in list(sw.rounds.values()):
+            t.join(30)
+        self.assertIn("architect", sw.rounds)
+        self.assertEqual(ran.count("architect"), 1)
+        # And under the brake nothing starts, the gate's rounds included (a low or unreadable balance, the cap itself).
+        sw.rounds.clear()
+        ran.clear()
+        self.store.put("tournament_at", 0.0)
+        self.guard.braked = True
+        sw.step()
+        self.assertEqual((sw.rounds, ran), ({}, []))
+        self.assertEqual(len(scaled), 1, "and the brake scales the Gym to zero, as ever")
+
+    def worker_cycles(self, sw, seconds=0.4):
+        """The families one researcher worker starts a cycle on in `seconds` (the cycle itself stubbed: what is judged is
+        whether the worker starts one), and what it asked the guard for."""
+        cycles: list[str] = []
+        sw.researcher.cycle = lambda fid: cycles.append(fid) or {}
+        self.guard.asked.clear()
+        sw.stop.clear()
+        worker = threading.Thread(target=sw._worker, args=(0,), daemon=True)
+        worker.start()
+        time.sleep(seconds)
+        sw.stop.set()
+        worker.join(10)
+        self.assertFalse(worker.is_alive(), "the worker left when asked")
+        return cycles, set(self.guard.asked)
+
+    def test_at_the_gates_reserve_a_researcher_starts_no_cycle(self):
+        """A researcher's cycle is new research (most of the day's Sail spend): under the guard's hold the worker starts
+        none, and with the hold over the same worker takes a family (the control: the hold alone was what stopped it)."""
+        sw = self.swarm()
+        sw.seed()
+        self.guard.research_held = True
+        cycles, asked = self.worker_cycles(sw)
+        self.assertEqual((cycles, asked), ([], {"research"}), "held: no cycle, and the worker asks for research by name")
+        self.guard.research_held = False
+        cycles, asked = self.worker_cycles(sw)
+        self.assertTrue(cycles, "not held: the worker takes a family")
+        self.assertEqual(asked, {"research"})
+        self.guard.braked = True
+        self.assertEqual(self.worker_cycles(sw)[0], [], "and under the brake none, as ever")
 
     def test_researchers_hold_while_the_last_hours_spend_is_at_the_pace(self):
         sw = self.swarm()
@@ -256,10 +366,12 @@ class Process(LoopCase):
                     self.assertIn(f"invalid researcher.{key}", pace["reason"])
 
     def test_the_architect_grows_the_population_only_under_the_pace_but_always_refills_it(self):
-        # THE BUDGET holds population.start to its ceiling (league/ops/budget.py), and with no budget.json that is the
-        # floor's: a budget whose ceiling is over the 48 founders, so the refill under the start is what is judged here.
-        (self.root / "budget.json").write_text(json.dumps({"schema": 1, "at": time.time(), "meters": {
-            "sail": {"research_usd_day": 60.0}, "claude": {"research_usd_day": 40.0}}}))
+        # THE BUDGET holds population.start to its ceiling (league/ops/budget.py): at the owner's ceiling of $25 a day
+        # that is 25 families, so the 48 founders are over the start and the refill is judged under it.
+        from league.ops import budget as B
+
+        (self.root / "budget.json").write_text(json.dumps({"schema": B.SCHEMA, "at": time.time(), "meters": {
+            "sail": {"research_usd_day": B.ceiling_usd_day("sail")}, "claude": {"research_usd_day": B.ceiling_usd_day("claude")}}}))
         sw = self.swarm()
         sw.seed()
         self.store.add_spend("sail_model", float(self.settings["researcher"]["usd_per_hour"]) + 0.5)  # the hour's spend is past the pace
@@ -268,13 +380,14 @@ class Process(LoopCase):
         sw.step()
         for t in list(sw.rounds.values()):
             t.join(30)
+        self.assertEqual((sw.settings["population"]["ceiling"], sw.settings["population"]["start"]), (25, 25))
         self.assertNotIn("architect", sw.rounds, "48 alive: no growth while the money is spent")
-        for fam in self.store.families(alive=True)[:10]:
+        for fam in self.store.families(alive=True)[:28]:
             self.store.retire(fam["id"], "test")
         sw.step()
         for t in list(sw.rounds.values()):
             t.join(30)
-        self.assertIn("architect", sw.rounds, "38 alive: it refills whatever the pace")
+        self.assertIn("architect", sw.rounds, "20 alive under the start of 25: it refills whatever the pace")
 
     def test_it_leaves_on_a_stop_file_or_a_new_release(self):
         sw = self.swarm()
@@ -330,6 +443,33 @@ class Process(LoopCase):
         self.assertEqual(sw.run(once=True), 0)
         kinds = [e["payload"].get("action") for e in self.store.events_after(0) if e["kind"] == "swarm.status"]
         self.assertEqual(kinds.count("train_objective"), 1)
+
+    def test_the_start_line_says_which_kind_of_evaluator_adoption_it_was(self):
+        """A new Gym owes fresh evidence; a release that changes league/live alone keeps the research selection
+        (`evaluator.adopt`, Oct 3, 2026), and the swarm's log says which, once each."""
+        import contextlib
+        import io
+
+        from league.swarm.evaluator import KEY, identity
+
+        def start_lines():
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(self.swarm().run(once=True), 0)
+            return [line.split("  ", 1)[1] for line in out.getvalue().splitlines() if "evaluator adopted" in line]
+
+        self.pool.bundle = lambda: "gym-engine-4-test"  # the swarm knows its Gym: its image and its bundle
+        self.assertEqual(start_lines(), ["evaluator adopted: 48 families owe fresh evidence"], "no identity before it")
+        current = self.store.get(KEY)
+        self.assertEqual(current, identity("sbcp_gym", "gym-engine-4-test"))
+        self.assertEqual(start_lines(), [], "a restart under the same identity adopts nothing")
+        self.store.put(KEY, {**current, "execution": "the release before's league/live"})
+        self.assertEqual(start_lines(), ["evaluator adopted (league/live only, the Gym did not change): 48 families keep their "
+                                         "research selection, 0 with a best"])
+        events = [e["payload"] for e in self.store.events_after(0, limit=5000) if e["payload"].get("action") == "evaluator_adopted"]
+        self.assertEqual([e["gym_changed"] for e in events], [True] * 48 + [False] * 48)
+        self.store.put(KEY, {**current, "image": "sbcp_older"})
+        self.assertEqual(start_lines(), ["evaluator adopted: 48 families owe fresh evidence"], "a new image is a new Gym")
 
 
 class Scheduling(LoopCase):
