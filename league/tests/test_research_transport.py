@@ -473,6 +473,32 @@ class ResearchTransport(unittest.TestCase):
         self.assertEqual(self.budget.summary()["total_upper_nanos"], before)
         self.assertFalse(self.call("stop_gym")["vendor_actual"])
 
+    def test_stock_minimal_effort_requires_explicit_review_and_keeps_token_bounds(self):
+        from league.swarm.settings import DEFAULTS
+        effort = DEFAULTS["researcher"]["reasoning_effort"]
+        self.assertEqual(effort, "minimal")
+        with self.assertRaises(ResearchCapabilityError):
+            self.model(effort=effort)
+        self.assertEqual(self.model_calls, [])
+        self.assertEqual(self.budget._load()["inference"], {})
+        reviewed = replace(self.model_policy, allowed_efforts=("low", effort))
+        broker = self.make_broker(capability=ModelCapability(reviewed, self.tokens, self.send))
+        result = self.call("evaluate", {"profile": "reviewed", "items": [{"role": "user", "content": "stock effort"}],
+                                      "key": "minimal-reviewed", "effort": effort}, broker=broker)
+        self.assertEqual(result["cost_usd"], "0.0005")
+        self.assertEqual(self.model_calls[0]["reasoning_effort"], effort)
+        self.assertEqual(self.model_calls[0]["max_output_tokens"], self.model_policy.max_output_tokens)
+        self.assertEqual(len(self.budget._load()["inference"]), 1)
+        with self.assertRaises(ResearchCapabilityError):
+            self.call("evaluate", {"profile": "reviewed", "items": [{"role": "user", "content": "too much"}],
+                                   "key": "over-output", "effort": effort, "max_output": reviewed.max_output_tokens + 1}, broker=broker)
+        self.assertEqual(len(self.model_calls), 1)
+
+    def test_minimal_syntax_does_not_accept_unknown_reviewed_efforts(self):
+        for value in ("MINIMAL", "minimal ", "invented", None, True):
+            with self.subTest(value=value), self.assertRaises(ResearchCapabilityError):
+                replace(self.model_policy, allowed_efforts=(value,))
+
     def test_model_quote_includes_reviewed_tools_and_host_bounded_output(self):
         result = self.model(tools=[TOOL], max_output=100, cache_key="reviewed-cache")
         self.assertEqual(result["cost_usd"], "0.0005")

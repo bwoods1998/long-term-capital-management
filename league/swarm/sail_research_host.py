@@ -29,7 +29,7 @@ from urllib.request import build_opener
 
 from ..sailbox import SailboxClient, Transport as BoxTransport
 from ..gym.driver import GymDriver, build_bundle
-from .daily_compute import DailyBudget, InventoryEvidence, ResourceBound, TariffEvidence
+from .daily_compute import DailyAdmissionError, DailyBudget, InventoryEvidence, ResourceBound, TariffEvidence
 from .research_host import HostAdapters, HostConfig, ReviewedFile
 from .research_sandbox import HostContextEvidence, _host_context, _verify_artifact
 from .research_state import artifact_identity
@@ -495,15 +495,27 @@ class SailResearchProvider:
                 return {"outcome_known":False,"vendor_actual":False}
             budget=DailyBudget(store,b.config.tariff,b.config.inventory)
             daily_key="model-"+hashlib.sha256((b.policy.scope+":"+key).encode()).hexdigest()
+            expected=int((Decimal(bill["actual_usd"])*1000000000).to_integral_value(rounding=ROUND_CEILING))
+            settlement_error=None
             with store.atomic():
-                existing=budget._load()["inference"][daily_key]["receipt"]
+                liability=budget._load()["inference"][daily_key]
+                existing=liability["receipt"]
                 if existing is None:
-                    budget.settle_inference(daily_key,actual_usd=bill["actual_usd"],accrued_day=bill["accrued_day"],provenance=bill["provenance"])
+                    try:
+                        budget.settle_inference(daily_key,actual_usd=bill["actual_usd"],accrued_day=bill["accrued_day"],provenance=bill["provenance"])
+                    except DailyAdmissionError as exc:
+                        # The nested settlement records a breach before raising.
+                        # Commit it here; an escaping error would roll it back and
+                        # leave later paid requests able to dispatch.
+                        if expected <= liability["max_nanos"] or not budget._load()["breached"]:
+                            raise
+                        settlement_error=exc
                 else:
                     day=(dt.date.fromisoformat(bill["accrued_day"])-dt.date(1970,1,1)).days
-                    expected=int((Decimal(bill["actual_usd"])*1000000000).to_integral_value(rounding=ROUND_CEILING))
                     _require(existing["accrued_day"]==day and existing["actual_nanos"]==expected,
                              "late bill contradicts original settled liability")
+            if settlement_error is not None:
+                raise settlement_error
             return {"outcome_known":True,"vendor_actual":True,"actual_usd":bill["actual_usd"],"accrued_day":bill["accrued_day"]}
         finally:
             store.close()

@@ -21,7 +21,7 @@ from league.swarm.sail_research_host import SailBridgeInputs, build_sail_host_ad
 from league.swarm.research_host import ReviewedFile
 from league.swarm.research_transport import (ResearchBroker, ResearchCapabilityError, ResearchJob, ModelPolicy,
                                             IsolationProof, ISOLATION_FACTS, NAMESPACE_FACTS, _digest)
-from league.swarm.daily_compute import DailyBudget, ResourceBound
+from league.swarm.daily_compute import DailyAdmissionError, DailyBudget, ResourceBound
 from league.swarm.research_sandbox import HostContextEvidence
 from league.swarm.store import SwarmStore
 from league.tests import test_research_host as host_fixtures
@@ -270,6 +270,34 @@ class SailResearchHost(unittest.TestCase):
         self.assertEqual(next(iter(self.budget._load()["inference"].values()))["receipt"]["actual_nanos"],1)
         self.assertEqual(self.model_call(),original,"immutable original unknown-cost reply remains unchanged")
         self.assertEqual(len(self.posts("/v1/responses")),1)
+
+    def test_late_over_bound_bill_commits_breach_before_raising_and_cannot_dispatch(self):
+        original = self.model_call()
+        hold = next(iter(self.budget._load()["inference"].values()))
+        intent = self.adapters.provider.bridge.journal("intent", "model:model-fixture")
+        self.actual_bill = self.rewrite("late-over-bound-bill.json", {
+            "schema": 1, "scope": self.f.policy.scope, "request_key": "model-fixture",
+            "response_id": "resp_fixture-1", "model": self.model.model,
+            "body_sha256": intent["body_sha256"], "actual_usd": "1",
+            "accrued_day": dt.datetime.now(dt.timezone.utc).date().isoformat(), "final": True,
+            "provenance": "SYNTHETIC authoritative original invoice above admitted ceiling"})
+        for _ in range(2):
+            with self.assertRaises(DailyAdmissionError):
+                self.adapters.provider.reconcile_model_bill("model-fixture")
+            state = self.budget._load()
+            self.assertTrue(state["breached"], "outer transaction must not erase the breach")
+            self.assertEqual(next(iter(state["inference"].values())), hold)
+        # A fresh bridge/store sees the durable breach, while the original immutable
+        # controller reply and unknown-cost hold remain unchanged.
+        with self.assertRaises(DailyAdmissionError):
+            self.build()
+        self.assertTrue(self.budget._load()["breached"])
+        self.assertEqual(self.model_call(), original)
+        with self.assertRaises(DailyAdmissionError):
+            self.model_call("new-refused-request")
+        bill = self.adapters.provider.bridge.journal("bill", "model:model-fixture")
+        self.assertEqual(bill["actual_usd"], "1")
+        self.assertEqual(len(self.posts("/v1/responses")), 1)
 
     def test_wrong_model_nonterminal_and_url_response_never_qualify_or_release_liability(self):
         for i,changes in enumerate(({"model":"moonshotai/Kimi-K3"},{"status":"queued"},{"id":"https://example.com/response"})):

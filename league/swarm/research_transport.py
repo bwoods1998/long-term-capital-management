@@ -240,7 +240,7 @@ class ModelPolicy:
         _require(all(type(v) is int and 0 < v <= 1000000 for v in (self.max_input_tokens, self.max_output_tokens)), "invalid host token ceilings")
         _require(_time(self.valid_from) < _time(self.valid_until), "invalid host price interval")
         _require(isinstance(self.allowed_efforts, tuple) and bool(self.allowed_efforts)
-                 and all(v in ("none", "low", "medium", "high") for v in self.allowed_efforts), "invalid reviewed model efforts")
+                 and all(v in ("none", "minimal", "low", "medium", "high") for v in self.allowed_efforts), "invalid reviewed model efforts")
         _require(isinstance(self.allowed_tools, tuple) and all(isinstance(t, dict) and t.get("type") == "function"
                  for t in self.allowed_tools), "reviewed local function tools are required")
         _json(self.allowed_tools)
