@@ -117,6 +117,7 @@ FORBIDDEN: tuple[str, ...] = (
     "league/swarm/research_state.py", "league/swarm/research_transport.py", "league/swarm/research_adapters.py",
     "league/swarm/research_ipc.py", "league/swarm/research_controller.py", "league/swarm/research_sandbox.py",
     "league/swarm/research_host.py",
+    "scripts/research_release.py",
     "league/ops/economics.py",
     # The evaluator's identity and the evidence it reads (WP6/WP8): the Gym, the gate, the bands, the evaluator and the
     # swarm's store (`set_band(..., "probe")` promotes to real money); the data layer and its builders, which carry the

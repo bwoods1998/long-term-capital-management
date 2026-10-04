@@ -24,6 +24,13 @@ class GuardTest(unittest.TestCase):
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_bytes(b"unreviewed isolated authority")
                     forbidden.append(rel)
+            for rel in ("scripts/research_release.py", "scripts/research_release/__init__.py"):
+                for role in (*ci.ROLE_PATHS, None, "engineer/data", "engineer/research"):
+                    self.assertTrue(ci.guard([rel], role), (rel, role))
+                target = incoming / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(b"unreviewed artifact export authority")
+                forbidden.append(rel)
             control = incoming / "league/swarm/library.py"
             control.write_text("VALUE = 1\n")
             self.assertEqual(sorted(p.split(":")[0] for p in protected_changes(incoming, running)), sorted(forbidden))
