@@ -71,22 +71,79 @@ jobs:
           else
             echo "the tests' scratch: the runner's temp directory (/dev/shm is not usable here)"
           fi
-      - name: Install the Gym's dependencies when the tree pins them
-        # The Gym (league/gym/, Wave 3 of the options overhaul, Sept 26, 2026) needs numpy, pyarrow and polars; the rest
-        # of the repository is standard library only. Nothing to install on a tree without the file.
-        run: |
-          if [ -f requirements-gym.txt ]; then python3 -m pip install --disable-pip-version-check -r requirements-gym.txt; fi
-      - name: Install the isolated research controller's namespace runtime
-        if: ${{ hashFiles('league/swarm/research_sandbox.py') != '' }}
+      - name: Install the isolated checks' namespace runtime
         run: |
           sudo apt-get update
-          sudo apt-get install --yes bubblewrap
+          sudo apt-get install --yes bubblewrap patchelf
           # Only this disposable hosted runner: Ubuntu's default AppArmor
           # restriction otherwise denies the sandbox's namespace capabilities.
           if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
           /usr/bin/bwrap --unshare-all --die-with-parent --ro-bind / / --proc /proc --dev /dev /usr/bin/true
+      - name: Keep the selected Python inside the existing sandbox mounts
+        env:
+          LTCM_EXPECTED_PYTHON: ${{ matrix.python }}
+        run: |
+          python3 - <<'PYTHON'
+          import json, os, pathlib, subprocess, sys
+
+          expected = os.environ["LTCM_EXPECTED_PYTHON"]
+          assert f"{sys.version_info.major}.{sys.version_info.minor}" == expected
+          selected_version = sys.version
+          selected_root = pathlib.Path(sys.base_prefix).resolve()
+          selected_binary = pathlib.Path(sys.executable).resolve().relative_to(selected_root)
+          runtime = pathlib.Path("/usr/local/lib/ltcm-checks-python")
+          venv = pathlib.Path(os.environ["RUNNER_TEMP"]) / "ltcm-checks-venv"
+          assert not runtime.exists() and not venv.exists(), "fresh disposable runtime destinations required"
+          # Copy the exact setup-python runtime, including stdlib and shared libraries.
+          # /usr is already mounted read-only by ImprovementLab; /opt is not exposed.
+          subprocess.run(["sudo", "cp", "-a", str(selected_root), str(runtime)], check=True)
+          subprocess.run([str(runtime / selected_binary), "-m", "venv", "--copies", str(venv)], check=True)
+          # setup-python supplies LD_LIBRARY_PATH, but sandbox --clearenv removes it.
+          # Patch only the disposable venv copies' loader metadata: their CPython
+          # code and the copied canonical runtime stay the selected version.
+          for name in ("python", "python3", f"python{expected}"):
+              binary = venv / "bin" / name
+              assert binary.is_file() and not binary.is_symlink(), "venv interpreter must be a real copy"
+              old = subprocess.check_output(["patchelf", "--print-rpath", str(binary)], text=True).strip()
+              search = str(runtime / "lib") + (":" + old if old else "")
+              subprocess.run(["patchelf", "--set-rpath", search, str(binary)], check=True)
+          probe = "import ctypes,json,sqlite3,ssl,sys; print(json.dumps({'version':sys.version,'base_prefix':sys.base_prefix}))"
+          result = json.loads(subprocess.check_output([str(venv / "bin" / "python3"), "-I", "-c", probe],
+                              env={"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"}, text=True))
+          assert result == {"version": selected_version, "base_prefix": str(runtime)}, result
+          receipt = pathlib.Path(os.environ["RUNNER_TEMP"]) / "ltcm-checks-runtime.json"
+          receipt.write_text(json.dumps(result))
+          with open(os.environ["GITHUB_PATH"], "a") as handle:
+              handle.write(str(venv / "bin") + "\n")
+          print(json.dumps({"selected_python": expected, **result, "venv": str(venv)}, sort_keys=True))
+          PYTHON
+      - name: Install the Gym's dependencies when the tree pins them
+        # Install into the copied venv that the actual ImprovementLab sandbox mounts.
+        run: |
+          if [ -f requirements-gym.txt ]; then python3 -m pip install --disable-pip-version-check -r requirements-gym.txt; fi
+      - name: Prove the selected Python in the actual isolated evaluator
+        run: |
+          python3 - <<'PYTHON'
+          import json, os, pathlib, sys, tempfile
+          from league.swarm.improvement import sandbox
+
+          expected = json.loads((pathlib.Path(os.environ["RUNNER_TEMP"]) / "ltcm-checks-runtime.json").read_text())
+          code = "import ctypes,json,sqlite3,ssl,sys; "
+          if pathlib.Path("requirements-gym.txt").is_file():
+              code += "import numpy,pyarrow,polars; "
+          code += "observed={'version':sys.version,'base_prefix':sys.base_prefix}; "
+          code += "assert observed==" + repr(expected) + ", observed; print(json.dumps(observed))"
+          with tempfile.TemporaryDirectory(prefix="checks-python-namespace-") as directory:
+              base = pathlib.Path(directory)
+              tree, judge = base / "tree", base / "judge"
+              tree.mkdir(); judge.mkdir()
+              result = sandbox(tree, judge, ["-I", "-c", code], python=pathlib.Path(sys.executable), timeout=60)
+          assert result["exit"] == 0, result
+          assert json.loads(result["stdout"]) == expected, result
+          print(result["stdout"].strip())
+          PYTHON
       - name: Run the first run's runtime tests
         # Both suites run until the full prune (Wave 2b) deletes ltcm/ and its tests.
         run: python3 -m unittest discover -s ltcm/tests -t .
