@@ -149,7 +149,7 @@ FAILED = ("failure", "timed_out", "action_required", "startup_failure", "stale")
 #: what a green check run means, so a candidate that changes them is refused here and reaches the
 #: box only as the owner's deploy. The test suite fails on GitHub when this pin and the files
 #: disagree, so a workflow edit that forgets the pin cannot pass its own checks either.
-TRUSTED_WORKFLOWS_SHA256 = "9aa3c732c6b55a8acdfd6777207f290dec08718809d6fbbbfb64a69386c10a9b"
+TRUSTED_WORKFLOWS_SHA256 = "d18239dccc55896f7f9878690da04df2351c5bbff349a45bbf17ed8652f0cb08"
 #: How long main's head may sit with no completed required checks before the owner is told.
 PENDING_ALERT_SECONDS = 2 * 3600
 EGRESS_HINT = ("api.github.com is not on the box's egress allowlist; the owner adds it with "

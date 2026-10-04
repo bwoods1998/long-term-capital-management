@@ -2,9 +2,12 @@
 
 This is a source candidate for independent owner review. It was assembled on
 public base `ee806cf22b2dcc2a7dd154d748f007285563154d`, without importing the
-private F1 commit history. The existing House uploader's complete runtime file
-set matches reviewed reference `b2d16a71f925f80c897d8893b4b7bca5795bdfba`
-byte for byte. Its required regression tests are retained. Private historical
+private F1 commit history. The initial source snapshot
+`4f06ccb7b68a1f7bc23222d04c0d5d2de60b78c3` matches reviewed reference
+`b2d16a71f925f80c897d8893b4b7bca5795bdfba` byte for byte across the complete
+House uploader file set. The subsequent CI environment repair changes only the
+updater's workflow digest in that runtime set, to trust the reviewed hosted
+Python namespace setup. Its required regression tests are retained. Private historical
 report updates were omitted; already published base documents are unchanged.
 
 These statements concern source equivalence and offline verification. Owner
