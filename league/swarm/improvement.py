@@ -421,7 +421,11 @@ def sandbox(tree: Path, judge: Path, command: list[str], *, python: Path, timeou
              "--proc", "/proc", "--dev", "/dev", "--chdir", "/work", "--setenv", "PYTHONPATH", "/work",
              "--setenv", JUDGE_MARKER, "1",
              "--setenv", "PYTHONDONTWRITEBYTECODE", "1", "--setenv", "OPENBLAS_NUM_THREADS", "1",
-             "--setenv", "OMP_NUM_THREADS", "1", "--setenv", "PATH", "/usr/bin:/bin", "--", interpreter, *command]
+             "--setenv", "OMP_NUM_THREADS", "1",
+             # Older glibc reserves up to 64 MiB per allocator arena. Bound those reservations so all 48
+             # concurrent regressions fit the existing memory ceiling; neither concurrency nor the ceiling changes.
+             "--setenv", "MALLOC_ARENA_MAX", "2",
+             "--setenv", "PATH", "/usr/bin:/bin", "--", interpreter, *command]
     def limits():
         resource.setrlimit(resource.RLIMIT_CPU, (240, 240))
         resource.setrlimit(resource.RLIMIT_AS, (2 * 1024 ** 3, 2 * 1024 ** 3))
