@@ -96,6 +96,10 @@ TEST_POOLS = {
 
 
 def commit(repo: Path, message: str) -> str:
+    # These repositories are disposable. Background Git maintenance can keep
+    # writing .git after commit returns and race TemporaryDirectory cleanup.
+    labmod.git(repo, "config", "gc.auto", "0")
+    labmod.git(repo, "config", "maintenance.auto", "false")
     labmod.git(repo, "add", ".")
     labmod.git(repo, "-c", "user.name=Harness Test", "-c", "user.email=harness@example.invalid", "commit", "-qm", message)
     return labmod.git(repo, "rev-parse", "HEAD")
