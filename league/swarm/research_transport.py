@@ -39,6 +39,7 @@ _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
 _BOX = re.compile(r"^sb_[0-9a-fA-F-]{8,64}$")
 _CHECKPOINT = re.compile(r"^sbcp_[0-9a-fA-F-]{8,64}$")
 _SHA = re.compile(r"^[0-9a-f]{64}$")
+_MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}(?:/[A-Za-z0-9][A-Za-z0-9_.-]{0,119})?\Z")
 _ROOT = re.compile(r"^[A-Z][A-Z0-9.]{0,9}$")
 ISOLATION_FACTS = frozenset((
     "broker_private_ledger", "controller_credentials_absent", "production_mounts_absent",
@@ -232,7 +233,8 @@ class ModelPolicy:
     timeout_seconds: int = 300
 
     def __post_init__(self):
-        _require(_identity(self.model) and isinstance(self.provenance, str) and bool(self.provenance.strip()), "documented host model policy is required")
+        _require(isinstance(self.model, str) and bool(_MODEL.fullmatch(self.model))
+                 and isinstance(self.provenance, str) and bool(self.provenance.strip()), "documented host model policy is required")
         for value in (self.input_usd_million, self.output_usd_million, self.fixed_usd):
             _money(value)
         _require(all(type(v) is int and 0 < v <= 1000000 for v in (self.max_input_tokens, self.max_output_tokens)), "invalid host token ceilings")

@@ -88,6 +88,18 @@ class FakeDriver:
 
 
 class ResearchTransport(unittest.TestCase):
+    def test_documented_model_namespace_ids_keep_profiles_resources_and_urls_strict(self):
+        for model in ("zai-org/GLM-5.3", "deepseek-ai/DeepSeek-V4-Pro-0813", "moonshotai/Kimi-K3", "openai/gpt-oss-120b"):
+            with self.subTest(model=model):
+                value = ModelPolicy(model, "1", "2", "0", 100, 100, 1, 200,
+                                    "synthetic reviewed model profile")
+                self.assertEqual(value.model, model)
+        for model in ("https://example.com/model", "a/b/c", "a/../b", "a\\nb", "a\nb", "a/b?x", "a/b#x", "a/%2e", " a/b", "a/b ", None):
+            with self.subTest(model=model), self.assertRaises(ResearchCapabilityError):
+                ModelPolicy(model, "1", "2", "0", 100, 100, 1, 200, "synthetic reviewed model profile")
+        from league.swarm.research_transport import _identity
+        self.assertFalse(_identity("zai-org/GLM-5.3"), "profile/request/resource IDs are not broadened")
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
