@@ -10,6 +10,14 @@ updater's workflow digest in that runtime set, to trust the reviewed hosted
 Python namespace setup. Its required regression tests are retained. Private historical
 report updates were omitted; already published base documents are unchanged.
 
+The next harness repair adds a second runtime-file difference from that reference:
+the isolated improvement judge sets `MALLOC_ARENA_MAX=2`. This bounds allocator
+reservations while retaining the 2 GiB memory limit and all 48 concurrent
+researchers. The regression guard exercises all 48 native allocators together.
+Controlled tests with the hosted Python builds on Ubuntu passed after reproducing
+the earlier allocation failure. The revised source still requires fresh full
+checks on its exact commit.
+
 These statements concern source equivalence and offline verification. Owner
 installation, financial activation, hosted exact-head approval, production
 preopen and rollback rehearsal have not been performed for this candidate.
