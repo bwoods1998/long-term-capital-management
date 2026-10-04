@@ -409,6 +409,69 @@ class ResearchState(unittest.TestCase):
             path.write_bytes(body)
         self.assertFalse(target.exists())
 
+    def test_complete_history_database_is_not_buffered_as_a_result_artifact(self):
+        from league.swarm import research_state as state
+        original_bytes, original_artifact = Path.read_bytes, state._read_file
+
+        def bounded_artifact(root, relative, namespace=None):
+            if relative == "swarm.sqlite":
+                raise AssertionError("the history database is not a bounded result artifact")
+            return original_artifact(root, relative, namespace)
+
+        def no_database_buffer(path):
+            if path.name == "swarm.sqlite":
+                raise AssertionError("the complete history must be hashed in chunks")
+            return original_bytes(path)
+
+        archive = self.base / "streamed-audit"
+        with mock.patch.object(Path, "read_bytes", autospec=True, side_effect=no_database_buffer), \
+                mock.patch.object(state, "_read_file", side_effect=bounded_artifact):
+            snapshot = capture_snapshot(self.source, archive, snapshot_id="streamed-audit", original_evaluator=self.old)
+            projection = reviewed_fixture_projection(archive)
+            approval = replace(self.approval, snapshot_id=snapshot["snapshot_id"],
+                               manifest_sha256=snapshot["manifest_sha256"], safe_metadata_sha256=projection.sha256)
+            import_snapshot(archive, self.fresh, runtime_scope="synthetic-research-1", expected_evaluator=self.actual,
+                            artifact_root=self.repo, approval=approval, metadata_projection=projection)
+            self.check()
+        working = self.working_store()
+        self.assertEqual(working.totals()["trials"], self.store.totals()["trials"])
+        self.assertEqual(len(working._all("SELECT * FROM runs")), len(self.store._all("SELECT * FROM runs")))
+
+    def test_streamed_database_replacement_is_refused_even_when_bytes_match(self):
+        from league.swarm import research_state as state
+        path = self.audit / "swarm.sqlite"
+        original_fdopen = state.os.fdopen
+        replaced = False
+
+        class ReplacingReader:
+            def __init__(self, handle):
+                self.handle = handle
+
+            def __enter__(self):
+                self.handle.__enter__()
+                return self
+
+            def __exit__(self, *args):
+                return self.handle.__exit__(*args)
+
+            def fileno(self):
+                return self.handle.fileno()
+
+            def read(self, size):
+                nonlocal replaced
+                body = self.handle.read(size)
+                if not replaced:
+                    replacement = path.parent / "replacement.sqlite"
+                    shutil.copyfile(path, replacement)
+                    replacement.replace(path)
+                    replaced = True
+                return body
+
+        with mock.patch.object(state.os, "fdopen", side_effect=lambda *a, **k: ReplacingReader(original_fdopen(*a, **k))):
+            with self.assertRaisesRegex(ResearchStateError, "changed during hashing"):
+                state._database_sha(self.audit)
+        self.assertTrue(replaced)
+
     def test_source_state_and_artifacts_remain_unchanged_by_import(self):
         before = {table: self.store._all(f"SELECT * FROM {table}") for table in ("families", "runs", "looks", "boxes", "kv")}
         files = {p.relative_to(self.source): p.read_bytes() for p in self.source.rglob("*.py")}

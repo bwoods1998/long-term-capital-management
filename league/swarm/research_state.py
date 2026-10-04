@@ -145,6 +145,38 @@ def _read_file(root, relative, namespace=None):
         raise ResearchStateError("referenced artifact is unavailable") from exc
 
 
+def _database_sha(root):
+    """Hash the complete coherent history without the small result-artifact buffer.
+
+    The independently reviewed manifest binds this whole database. Stream its
+    original observed size and reject growth, mutation or replacement during the
+    read; never truncate history to fit a result-file or memory limit.
+    """
+    path = _file(root, DB_NAME)
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        with os.fdopen(os.open(path, flags), "rb") as handle:
+            before = os.fstat(handle.fileno())
+            if not stat.S_ISREG(before.st_mode) or before.st_size <= 0:
+                raise ResearchStateError("snapshot database is not a regular file")
+            digest = hashlib.sha256()
+            read = 0
+            while body := handle.read(1024 * 1024):
+                read += len(body)
+                if read > before.st_size:
+                    raise ResearchStateError("snapshot database changed during hashing")
+                digest.update(body)
+            after = os.fstat(handle.fileno())
+            current = path.lstat()
+        identity = lambda info: (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+        if (read != before.st_size or not stat.S_ISREG(current.st_mode)
+                or identity(before) != identity(after) or identity(before) != identity(current)):
+            raise ResearchStateError("snapshot database changed during hashing")
+        return digest.hexdigest()
+    except OSError as exc:
+        raise ResearchStateError("snapshot database is unavailable") from exc
+
+
 def _write_file(root, relative, body):
     path = _file(root, relative)
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -461,7 +493,7 @@ def capture_snapshot(source_root, archive_root, *, snapshot_id: str, original_ev
             raise ResearchStateError("source failure reservations changed during coherent capture")
         manifest = {"schema": 1, "snapshot_id": snapshot_id, "captured_at": time.time(),
                     "source_root": str(source.resolve()),
-                    "database_sha256": _digest((archive / DB_NAME).read_bytes()), "metadata_sha256": metadata,
+                    "database_sha256": _database_sha(archive), "metadata_sha256": metadata,
                     "original_evaluator": original, "artifacts": artifacts, "host_only": True}
         if selection is not None:
             manifest["artifact_selection"] = asdict(selection)
@@ -480,7 +512,7 @@ def _validated_snapshot(snapshot, approval):
             or manifest.get("snapshot_id") != approval.snapshot_id or _digest(body) != approval.manifest_sha256
             or manifest.get("metadata_sha256") != approval.metadata_sha256):
         raise ResearchStateError("snapshot/export approval identity mismatch")
-    if _digest(_read_file(snapshot, DB_NAME)) != manifest["database_sha256"]:
+    if _database_sha(snapshot) != manifest["database_sha256"]:
         raise ResearchStateError("coherent snapshot database changed")
     for path, record in manifest["artifacts"].items():
         if _digest(_read_file(snapshot, path)) != record["sha256"]:
