@@ -177,7 +177,7 @@ test('the engineer\'s surface is the harness lanes\' surfaces, less the protecte
 
 test('the isolated research authority and its loader aliases cannot enter an automatic House release', () => {
   for (const module of ['research_state', 'research_transport', 'research_adapters', 'research_ipc',
-    'research_controller', 'research_sandbox', 'research_host']) {
+    'research_controller', 'research_sandbox', 'research_host', 'sail_research_host']) {
     for (const path of [`league/swarm/${module}.py`, `league/swarm/${module}/__init__.py`,
       `league/swarm/${module}.cpython-314-x86_64-linux-gnu.so`]) {
       assert.match(protectedRefusal(path), /^protected \(/, path);

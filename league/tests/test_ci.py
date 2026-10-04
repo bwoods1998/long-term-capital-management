@@ -11,7 +11,7 @@ class GuardTest(unittest.TestCase):
         from league.updater import protected_changes
 
         modules = ("research_state", "research_transport", "research_adapters", "research_ipc",
-                   "research_controller", "research_sandbox", "research_host")
+                   "research_controller", "research_sandbox", "research_host", "sail_research_host")
         with tempfile.TemporaryDirectory() as tmp:
             running, incoming = Path(tmp) / "running", Path(tmp) / "incoming"
             forbidden = []

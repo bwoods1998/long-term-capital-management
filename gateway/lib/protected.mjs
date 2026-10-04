@@ -36,7 +36,7 @@ export const MERGE_FORBIDDEN = Object.freeze([
   // The separate research host has its own reviewed deployment and cannot enter the House's release train.
   'league/swarm/research_state.py', 'league/swarm/research_transport.py', 'league/swarm/research_adapters.py',
   'league/swarm/research_ipc.py', 'league/swarm/research_controller.py', 'league/swarm/research_sandbox.py',
-  'league/swarm/research_host.py',
+  'league/swarm/research_host.py', 'league/swarm/sail_research_host.py',
   'scripts/research_release.py',
   // And the framework that schedules and runs the House's jobs, and computes the realized p30 the budget is funded
   // from: the whole tree, after its named files so that a refusal names the file.
