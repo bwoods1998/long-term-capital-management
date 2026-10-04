@@ -72,6 +72,30 @@ class ResearchRelease(unittest.TestCase):
         self.assertEqual(self.verify_release(self.root / "first/release.json"), result)
         self.assertEqual(result["provider_calls"], 0)
 
+    def test_git_commit_and_blob_replacements_cannot_substitute_exact_requested_source(self):
+        original_blob = self.git("rev-parse", self.first + ":league/gym/program.py").strip()
+        self.file("league/gym/program.py", "# replacement source must not leak\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "synthetic replacement source")
+        replacement = self.git("rev-parse", "HEAD").strip()
+        replacement_blob = self.git("rev-parse", replacement + ":league/gym/program.py").strip()
+        for kind, original, substitute in (("commit", self.first, replacement),
+                                           ("blob", original_blob, replacement_blob)):
+            with self.subTest(kind=kind):
+                self.git("replace", original, substitute)
+                try:
+                    # Prove the fixture has an active replacement, then verify the
+                    # exporter uses the original object for every Git operation.
+                    changed = self.git("show", self.first + ":league/gym/program.py")
+                    self.assertEqual(changed, "# replacement source must not leak\n")
+                    result = self.packed("replacement-" + kind, self.first)
+                    artifact = Path(result["artifact"])
+                    self.assertEqual(result["head"], self.first)
+                    self.assertEqual((artifact / "league/gym/program.py").read_text(), "# evaluator bytes\n")
+                    self.assertEqual(self.verify_release(self.root / ("replacement-" + kind) / "release.json"), result)
+                finally:
+                    self.git("replace", "-d", original)
+
     def test_manifest_rejects_modified_extra_missing_and_symlinked_artifact_bytes(self):
         for kind in ("modified", "extra", "missing", "symlink"):
             with self.subTest(kind=kind):
@@ -101,12 +125,26 @@ class ResearchRelease(unittest.TestCase):
         self.assertFalse((self.root / "bad").exists())
 
     def test_private_configuration_and_inside_checkout_output_are_refused(self):
-        for key in ("gateway_token", "token", "authorization", "credential", "credentials", "auth"):
-            with self.subTest(key=key), self.assertRaisesRegex(release.ResearchReleaseError, "credential"):
-                release.pack(self.repo, self.first, self.root / "private-config", config={"swarm": {key: "fixture"}}, policy={})
+        for key in ("gateway_token", "token", "authorization", "credential", "credentials", "auth",
+                    "apiKey", "APIKey", "api-key", "api_key", "accessToken", "access-token", "access_token",
+                    "privateKey", "private-key", "private_key", "proxyAuthorization", "proxy-authorization",
+                    "proxy_authorization"):
+            for document in ("config", "policy"):
+                with self.subTest(key=key, document=document), self.assertRaisesRegex(release.ResearchReleaseError, "credential"):
+                    documents = {"config": {}, "policy": {}}
+                    documents[document] = {"swarm": {"options": [{key: "fixture"}]}}
+                    release.pack(self.repo, self.first, self.root / "private-config", **documents)
         with self.assertRaisesRegex(release.ResearchReleaseError, "outside"):
             release.pack(self.repo, self.first, self.repo / "artifact", config={}, policy={})
         self.assertFalse((self.root / "private-config").exists())
+
+    def test_noncredential_model_token_limits_remain_exportable(self):
+        config = {"swarm": {"model_options": {"max_output_tokens": 1234, "maxOutputTokens": 1234}}}
+        result = release.pack(self.repo, self.first, self.root / "token-limits", config=config, policy={})
+        artifact = Path(result["artifact"])
+        self.assertEqual(json.loads((artifact / "research-config.json").read_text()), config)
+        self.assertEqual(release.verify_release(self.root / "token-limits/release.json",
+                                                approved_sha256=result["receipt_sha256"]), result)
 
     def test_rewritten_head_or_self_manifest_cannot_replace_the_approved_receipt(self):
         self.packed("first")

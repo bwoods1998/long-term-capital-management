@@ -21,7 +21,7 @@ class ResearchReleaseError(RuntimeError):
 
 
 def _git(repo, *args):
-    result = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, check=True)
+    result = subprocess.run(["git", "--no-replace-objects", "-C", str(repo), *args], capture_output=True, check=True)
     return result.stdout
 
 
@@ -36,7 +36,11 @@ def _json(value):
 def _configuration(value):
     if isinstance(value, dict):
         for key, item in value.items():
-            if (not isinstance(key, str) or re.search(r"(?:^|_)(?:api_key|api_secret|password|private_key|token|secret|credentials?|authorization|auth|league_env)$", key, re.I)):
+            if not isinstance(key, str):
+                raise ResearchReleaseError("controller configuration contains a credential capability")
+            normalized = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", key)
+            normalized = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", normalized).replace("-", "_").lower()
+            if re.search(r"(?:^|_)(?:api_key|api_secret|password|private_key|token|secret|credentials?|authorization|auth|league_env)$", normalized):
                 raise ResearchReleaseError("controller configuration contains a credential capability")
             _configuration(item)
     elif isinstance(value, list):
