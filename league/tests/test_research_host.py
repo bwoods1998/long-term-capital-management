@@ -367,15 +367,45 @@ class ResearchHost(unittest.TestCase):
         original_driver = FakeDriver.run
         def gym(driver, programs, **options):
             document = original_driver(driver, programs, **options)
+            # Exercise a reply that outlives the old fixed three-second stop.
+            # Dispatch is observable before its result and trial are durable.
+            if len(self.driver_calls) == 3:
+                time.sleep(3.25)
             row = synthetic_result("fixture-"+str(len(self.driver_calls)), window=options["window"], roots=tuple(options["roots"]), t=4)
             row["stress"] = options["stress"]
             document["results"] = [row]
             return document
         runtime = self.runtime(config=config, adapters=replace(self.adapters,
             models={"reviewed": ModelCapability(model_policy, lambda body: 100, model)}))
+        def completed_cycle():
+            working = SwarmStore(state, readonly=True)
+            try:
+                working._db.execute("BEGIN")
+                heartbeat = working.get("isolated_controller_heartbeat") or {}
+                actions = [action.get("result", {}) for action in heartbeat.get("actions", [])
+                           if action.get("kind") == "research"]
+                receipts = working.get("research_adapter_receipts_v1") or {}
+                gym_receipts = [row for identity, row in receipts.items() if identity.startswith("gym:")]
+                count = sum(row["trials"] for row in working.runs(family["id"])
+                            if row["run_id"] not in historical_ids)
+                return (heartbeat.get("status") == "running"
+                        and any(result.get("tool_calls") == 1 and result.get("trials", 0) >= 1
+                                and "error" not in result for result in actions)
+                        and len(calls) >= 2 and len(gym_receipts) >= 3
+                        and all(row["result"] is not None for row in gym_receipts)
+                        and count == len(self.driver_calls)), {"heartbeat": heartbeat, "trials": count,
+                            "model_calls": len(calls), "gym_calls": len(self.driver_calls),
+                            "completed_gym_receipts": sum(row["result"] is not None for row in gym_receipts)}
+            finally:
+                working.close()
         with mock.patch.object(FakeDriver, "run", gym):
             runtime.start()
-            runtime.serve(max_seconds=3)
+            deadline = time.monotonic()+15
+            complete, observation = completed_cycle()
+            while not complete and time.monotonic() < deadline:
+                runtime.serve(max_seconds=0.1)
+                complete, observation = completed_cycle()
+            self.assertTrue(complete, observation)
         captured = runtime.process
         self.assertTrue(captured.peer_births)
         runtime.shutdown()
