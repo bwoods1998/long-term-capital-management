@@ -326,6 +326,9 @@ TOOLS: list[dict[str, Any]] = [
          "code": {"type": "string", "description": "the complete program: NEEDS, PARAMS, decide(ctx)"},
          "params": {"type": "object", "description": "PARAMS overrides for this run (keys must exist in PARAMS); they replace "
                                                      "the version's params ({} is the program as written)"},
+         "development_card": {"type": "object", "description": "Optional predeclared developmental mechanism: card, "
+             "parent_version, parent_sha and exact parent_params. Requires development_cards enabled. Immutable, bound to "
+             "new source and exact overrides; legacy cards and lineage counts remain, with fresh mechanism admission."},
          "stress": {"type": "number", "description": "half-spread multiplier, 1.0 (default) or 1.5 (the gate's stress)"},
          "hold": {"type": "boolean", "description": "true, with no code and no params: skip this cycle honestly because you "
                                                     "have nothing new to run (say why in `note`)"},
@@ -1608,7 +1611,7 @@ class Researcher:
         if lessons:
             lines.append("Lessons from the graveyard when you were born:")
             lines += [f"- {diagnostics.scrub(x)}" for x in lessons[:3]]
-        card = cards.brief_text(cards.card_of(self.store, str(fam["id"])))  # "" for a family born before cards
+        card = cards.brief_text(self._research_card(str(fam["id"])))  # "" for a family born before cards
         if card:
             lines.append(card)
         literature = [x for x in spec.get("literature") or [] if isinstance(x, dict) and x.get("id")]
@@ -2302,7 +2305,16 @@ class Researcher:
         # THE MECHANISM TEST (release B): a carded family whose hypothesis has not passed takes it before this broad run, at
         # any stress. In gate mode a program that cannot take it (no ablation switch, ...) is refused here, before any version;
         # in shadow mode the test waits for a run that can take it, and this run goes on.
-        plan = self._mechanism_plan(fam, code, params)
+        try:
+            entry = cards.prepare_development(self.store, str(fam["id"]), code, params, args.get("development_card"))
+        except (ValueError, TypeError) as exc:
+            return self._refusal(out, {"status": "refused", "stage": "development_card", "reason": str(exc)[:600]})
+        if entry is not None:
+            reason = self._development_guard(fam)
+            if reason is not None:
+                return self._refusal(out, {"status": "refused", "stage": "development_card", "reason": reason})
+            cards.ensure(self.store)  # pre-card families need ordinary evidence storage too
+        plan = self._mechanism_plan(fam, code, params, entry=entry)
         if plan is not None and plan.get("refused"):
             if plan["gate"]:
                 return self._refusal(out, plan["refused"])
@@ -2318,6 +2330,15 @@ class Researcher:
         with self.store.atomic():
             if self._terminal(fam["id"], out):
                 return {"status": "retired", "reason": "the family is retired; no run started"}
+            if entry is not None:
+                current = self.store.family(str(fam["id"])) or fam
+                reason = self._development_guard(current)
+                if reason is not None:
+                    return self._refusal(out, {"status": "refused", "stage": "development_card", "reason": reason})
+                try:
+                    entry = cards.prepare_development(self.store, str(fam["id"]), code, params, args.get("development_card"))
+                except (ValueError, TypeError) as exc:
+                    return self._refusal(out, {"status": "refused", "stage": "development_card", "reason": str(exc)[:600]})
             if change:  # a new version on other roots of the admitted list: the family's slice follows it
                 self.store.update_family(fam["id"], roots=roots)
                 self.store.note(fam["id"], f"Roots changed from {', '.join(fam['roots'])} to {', '.join(roots)}.")
@@ -2326,6 +2347,11 @@ class Researcher:
             stored = self._reusable(self.store.evaluated(fam["id"], key), stress=stress) if self.reuse else None
             if stored is None:
                 version = self.store.add_version(fam["id"], code, params, author=author, note=str(args.get("why") or "")[:300])
+                if entry is not None and entry.get("version") is None:
+                    cards.put_development(self.store, entry, int(version["n"]))
+                if entry is not None:
+                    out["development_card"] = {"sha": entry["sha"], "card_content_sha": entry["card_content_sha"],
+                                               "version": int(version["n"]), "qualification_transferred": False}
         if stored is not None:
             return self._stored_run(fam, stored, out, code=code, stress=stress)
         tested_view = None
@@ -2491,6 +2517,27 @@ class Researcher:
         return self._probe_view(run, n, year, root)
 
     # ------------------------------------------------------------------ THE MECHANISM TEST (release B)
+    def _development_guard(self, fam: Mapping[str, Any]) -> str | None:
+        if self.cfg.get("development_cards") is not True:
+            return "developmental card admission is not enabled"
+        cfg = mechanism.config(self.settings)
+        if not cfg["enabled"] or cfg["mode"] != "gate":
+            return "developmental cards require the ordinary mechanism test enabled in gate mode"
+        state = fam.get("state") or {}
+        if state.get("gate_hold") or state.get("gate_ready") or state.get("look_inflight") or state.get("extension_hold"):
+            return "the family's existing gate, unseen, or extension hold remains; no developmental registration"
+        if awaiting_validation(fam):
+            return "the family's existing best awaits Validation; no developmental registration"
+        return None
+
+    def _research_card(self, fid: str) -> dict[str, Any] | None:
+        version = self.store.latest_version(fid)
+        if version and version.get("code"):
+            entry = cards.development_of(self.store, fid, version["code"], version.get("params") or {})
+            if entry is not None:
+                return entry
+        return cards.card_of(self.store, fid)
+
     def mechanism_record(self, fam: Mapping[str, Any]) -> dict[str, Any]:
         """The family's own test record (its state's `mechanism`): {passed: {...} or absent, failed: [versions], untestable:
         [versions], last: {...}}. The hypothesis's record across its lineage is `mechanism_lineage`."""
@@ -2508,7 +2555,9 @@ class Researcher:
           read the same card): what counts toward a MECHANISM retirement;
         - "passed": a family with the same card passed its test; "broad": such a family has broad Train runs;
         - "own": the family's own test verdicts."""
-        entry = entry or cards.card_of(self.store, fid)
+        entry = entry or self._research_card(fid)
+        if entry is not None and entry.get("development"):
+            return cards.development_lineage(self.store, fid, entry)
         empty = {"failed": 0, "hard": 0, "passed": False, "broad": False, "own": 0}
         if entry is None:
             return empty
@@ -2570,7 +2619,8 @@ class Researcher:
         lineage = self.mechanism_lineage(str(fam["id"]))
         return bool(lineage["passed"] or lineage["broad"])
 
-    def _mechanism_plan(self, fam: Mapping[str, Any], code: str, params: Mapping[str, Any]) -> dict[str, Any] | None:
+    def _mechanism_plan(self, fam: Mapping[str, Any], code: str, params: Mapping[str, Any], *,
+                        entry: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
         """None when no mechanism test comes before this broad run: the test is off, a family outside the Gym band, one born
         before cards; in gate mode a hypothesis that passed (or was broadly replayed); in shadow a family outside the
         `sample` share, with a verdict of its own (one blind test a family) or EXPOSED: it, or a family of its lineage with
@@ -2587,7 +2637,7 @@ class Researcher:
         fam = self.store.family(str(fam["id"])) or fam  # a pass earlier in this cycle counts
         if fam.get("band") != "gym":
             return None
-        entry = cards.card_of(self.store, str(fam["id"]))
+        entry = entry or cards.development_of(self.store, str(fam["id"]), code, params) or cards.card_of(self.store, str(fam["id"]))
         if entry is None:
             return None
         gate = cfg["mode"] == "gate"
@@ -2660,7 +2710,8 @@ class Researcher:
         roots = tuple(fam["roots"])
         arms = {"on": dict(params or {})} if plan["flat"] else {"on": dict(params or {}), "off": dict(plan["off_params"])}
         ablation = {"flat": True} if plan["flat"] else {"param": plan["param"], "off": plan["off"]}
-        test_key = hashlib.sha256(json.dumps({arm: self.eval_key(code, p, stress=1.0, window=f"mechanism:{wid}:{holding}", roots=roots)
+        card_identity = f":development:{entry['sha']}" if entry.get("development") else ""
+        test_key = hashlib.sha256(json.dumps({arm: self.eval_key(code, p, stress=1.0, window=f"mechanism:{wid}:{holding}{card_identity}", roots=roots)
                                               for arm, p in arms.items()}, sort_keys=True).encode()).hexdigest()[:32]
         for row in reversed(cards.evidence(self.store, fid, kind="mechanism_test")):
             if row["detail"].get("test_key") == test_key and row["verdict"] in mechanism.VERDICTS:
@@ -2701,7 +2752,7 @@ class Researcher:
             jobs: list[tuple[str, str, str, str, GymJob]] = []
             for arm, p in arms.items():
                 for start, end in stage:
-                    key = self.eval_key(code, p, stress=1.0, window=f"mechanism:{start}:{end}", roots=roots)
+                    key = self.eval_key(code, p, stress=1.0, window=f"mechanism:{start}:{end}{card_identity}", roots=roots)
                     stored = self._stored_mechanism(fid, key) if self.reuse else None
                     if stored is not None:
                         results[(arm, start)] = stored
@@ -2843,7 +2894,9 @@ class Researcher:
             # EXPOSED (review of #446, P1/P2): the family, or a family of its lineage with its card, had broad Train runs when
             # the test began (the plan skips that in shadow) or by now (one that landed while the arms ran). Such a test is
             # not the gate's first test of an unfitted program, so `mechanism.calibration_rows` never counts it.
-            detail["exposed"] = bool(plan["lineage"].get("broad") or self.mechanism_lineage(fid, entry)["broad"])
+            after_lineage = self.mechanism_lineage(fid, entry)
+            detail["exposed"] = bool(plan["lineage"].get("broad") or plan["lineage"].get("exposed")
+                                     or after_lineage.get("broad") or after_lineage.get("exposed"))
             cards.add_evidence(self.store, fid, entry["sha"], n, "mechanism_test", name, detail)
             self._mechanism_state(fid, n, name, detail, test_key)
         # The cycle's event (the operator's record, never the researcher's) carries the verdict in both modes.
@@ -2946,7 +2999,7 @@ class Researcher:
         cfg = mechanism.config(self.settings)
         if not cfg["enabled"] or fam.get("band") != "gym":
             return ""
-        entry = cards.card_of(self.store, str(fam["id"]))
+        entry = self._research_card(str(fam["id"]))
         if entry is None:
             return ""
         days = "about 250 pre-registered Train sessions in four windows (2022-2024)"
@@ -3139,6 +3192,9 @@ class Researcher:
                    advisories: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         """`gym_sweep` (the module docstring, SWEEPS and SWEEP LOAD): the variants of one program on Train at once, each its
         own version and its own run and trial; a table sorted by the Train score."""
+        if cards.development_exists(self.store, str(fam["id"])):
+            return self._refusal(out, {"status": "refused", "stage": "development_card",
+                "reason": "developmental variants need an exact source/override-bound card; use normal gym_run"})
         fid = fam["id"]
         if self._terminal(fid, out):
             return {"status": "retired", "reason": "the family is retired; no run started"}

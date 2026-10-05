@@ -171,6 +171,8 @@ DEFAULTS: dict[str, Any] = {
         # the family already evaluated (program, merged params, stress, window, roots, Gym image and engine) is answered
         # from the store, no job and no trial; false runs it again. A REVISE turn may hold (gym_run hold=true) instead.
         "reuse_results": True,
+        # Explicit enablement, fresh ordinary gate tests, immutable exact-program cards.
+        "development_cards": False,
         # The idle rule's dormancy clause: a family whose last this-many cycles made no new Gym evaluation (only stored
         # results and holds) is dead, unless its best awaits validation; 0 or null turns the clause off.
         "dormant_cycles": 40,

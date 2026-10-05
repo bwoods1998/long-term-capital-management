@@ -405,6 +405,131 @@ def card_of(store: Any, fid: str) -> dict[str, Any] | None:
     return out
 
 
+# Development cards bind an unqualified new program to a predeclared hypothesis.
+# The immutable birth card remains in family_cards. Exact source and overrides,
+# parent version, and card bytes jointly identify this append-only record.
+DEVELOPMENT_SQL = (
+    "CREATE TABLE IF NOT EXISTS development_cards (family TEXT NOT NULL, code_sha TEXT NOT NULL, "
+    "params TEXT NOT NULL, version INTEGER NOT NULL, sha TEXT NOT NULL, binding TEXT NOT NULL, "
+    "at TEXT NOT NULL, PRIMARY KEY(family,code_sha,params))",
+    "CREATE TRIGGER IF NOT EXISTS development_cards_no_update BEFORE UPDATE ON development_cards "
+    "BEGIN SELECT RAISE(ABORT, 'development cards are immutable'); END",
+    "CREATE TRIGGER IF NOT EXISTS development_cards_no_delete BEFORE DELETE ON development_cards "
+    "BEGIN SELECT RAISE(ABORT, 'development cards are immutable'); END",
+)
+
+
+def development_exists(store: Any, fid: str) -> bool:
+    if not store._one("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='development_cards'"):
+        return False
+    return bool(store._one("SELECT 1 AS ok FROM development_cards WHERE family=? LIMIT 1", (fid,)))
+
+
+def _development_entry(binding: Mapping[str, Any], *, version: int | None = None) -> dict[str, Any]:
+    body = dict(binding)
+    return {"card": body["card"], "sha": hashlib.sha256(canonical(body).encode()).hexdigest(),
+            "card_content_sha": card_sha(body["card"]), "key": key_of(body["card"], body["structure"]),
+            "family": body["family"], "own": True, "development": True, "binding": body, "version": version}
+
+
+def development_of(store: Any, fid: str, code: str, params: Mapping[str, Any]) -> dict[str, Any] | None:
+    if not development_exists(store, fid):
+        return None
+    sha = hashlib.sha256(str(code).encode()).hexdigest()
+    row = store._one("SELECT version,sha,binding FROM development_cards WHERE family=? AND code_sha=? AND params=?",
+                     (fid, sha, canonical(dict(params))))
+    if row is None:
+        return None
+    entry = _development_entry(json.loads(row["binding"]), version=int(row["version"]))
+    if entry["sha"] != row["sha"]:
+        raise ValueError("development card binding changed")
+    return entry
+
+
+def prepare_development(store: Any, fid: str, code: str, params: Mapping[str, Any], declaration: Any = None) -> dict[str, Any] | None:
+    """Validate before registration or replay. Exact retries retain their original parent.
+    An enrolled family needs a declaration for every new source; no legacy-card fallback.
+    This does not grant any qualification or lower any lineage counter.
+    """
+    existing = development_of(store, fid, code, params)
+    if declaration is None:
+        if existing is None and development_exists(store, fid):
+            raise ValueError("this developmental family needs an exact code/override-bound card for this program; use gym_run")
+        return existing
+    fields = {"card", "parent_version", "parent_sha", "parent_params"}
+    if not isinstance(declaration, Mapping) or set(declaration) != fields:
+        raise ValueError("development_card needs exactly card, parent_version, parent_sha, parent_params")
+    fam = store.family(fid)
+    if fam is None or fam.get("band") != "gym":
+        raise ValueError("development cards require an existing Gym family")
+    card, errors = validate(declaration["card"], fam["structure"])
+    if errors:
+        raise ValueError("development card: " + "; ".join(errors))
+    if isinstance(declaration["parent_version"], bool) or not isinstance(declaration["parent_version"], int):
+        raise ValueError("parent_version must be an integer")
+    if not isinstance(declaration["parent_params"], dict):
+        raise ValueError("parent_params must be the exact parent overrides")
+    code_sha = hashlib.sha256(str(code).encode()).hexdigest()
+    binding = {"family": fid, "lineage": fam["lineage"], "structure": fam["structure"],
+               "code_sha": code_sha, "params": dict(params), "parent_version": declaration["parent_version"],
+               "parent_sha": declaration["parent_sha"], "parent_params": declaration["parent_params"], "card": card}
+    entry = _development_entry(binding)
+    if existing is not None:
+        if existing["sha"] != entry["sha"]:
+            raise ValueError("this exact source and overrides already have an immutable developmental card")
+        return existing
+    parent = store.latest_version(fid)
+    if not parent or parent["n"] != binding["parent_version"] or parent["sha"] != binding["parent_sha"]:
+        raise ValueError("development card parent must match the actual latest version and source")
+    if not parent.get("code") or hashlib.sha256(parent["code"].encode()).hexdigest() != parent["sha"]:
+        raise ValueError("development card parent source bytes do not match the actual source hash")
+    if parent["params"] != binding["parent_params"] or dict(params) != parent["params"]:
+        raise ValueError("development admission must carry the exact latest parent overrides")
+    if store._one("SELECT 1 AS ok FROM versions WHERE family=? AND sha=? LIMIT 1", (fid, code_sha)):
+        raise ValueError("a developmental card requires new source; existing-source qualification cannot transfer")
+    return entry
+
+
+def put_development(store: Any, entry: Mapping[str, Any], version: int) -> None:
+    """Called by normal gym_run inside its registration transaction, after parent recheck."""
+    body = entry["binding"]
+    for statement in DEVELOPMENT_SQL:
+        store._exec(statement)
+    store._exec("INSERT INTO development_cards(family,code_sha,params,version,sha,binding,at) VALUES(?,?,?,?,?,?,?)",
+                (body["family"], body["code_sha"], canonical(body["params"]), int(version), entry["sha"],
+                 canonical(body), store.now()))
+
+
+def development_lineage(store: Any, fid: str, entry: Mapping[str, Any]) -> dict[str, Any]:
+    """No legacy pass, broad replay, or unrelated-card verdict qualifies this binding.
+    All recorded failed mechanism tests in the connected lineage still raise its bound;
+    its own historical failures still count toward retirement. No result payload is read.
+    """
+    lines = store.lineages(fid)
+    if not lines:
+        return {"failed": 0, "hard": 0, "passed": False, "broad": False, "own": 0}
+    families = store._all(f"SELECT id,state FROM families WHERE lineage IN ({','.join('?' * len(lines))})", tuple(lines))
+    ids = [r["id"] for r in families]
+    marks = ','.join('?' * len(ids))
+    rows = store._all(f"SELECT family,version,card_sha,verdict, "
+                      "CASE WHEN json_valid(detail) THEN COALESCE(json_extract(detail,'$.below_base'),1) ELSE 1 END AS below_base "
+                      "FROM card_evidence WHERE kind='mechanism_test' "
+                      f"AND family IN ({marks})", tuple(ids))
+    failures = {(r["family"], r["version"]) for r in rows if r["verdict"] in ("failed", "historical-failed")}
+    for family in families:
+        rec = (json.loads(family["state"] or "{}") or {}).get("mechanism") or {}
+        if isinstance(rec, Mapping):
+            failures.update((family["id"], version) for version in rec.get("failed") or []
+                            if isinstance(version, int) and not isinstance(version, bool))
+    # Unknown/redacted historical verdicts stay unknown and are never promoted to pass.
+    own = [r for r in rows if r["family"] == fid and r["card_sha"] == entry["sha"]]
+    hard = {(r["family"], r["version"]) for r in rows if r["family"] == fid and r["verdict"] in ("failed", "historical-failed") and r["below_base"]}
+    exposed = bool(store._one(f"SELECT 1 AS ran FROM runs WHERE family IN ({marks}) "
+                              "AND window='train' AND purpose='train' LIMIT 1", tuple(ids)))
+    return {"failed": len(failures), "hard": len(hard), "passed": any(r["verdict"] == "passed" for r in own),
+            "broad": False, "exposed": exposed, "own": len(own)}
+
+
 def _isolated(store: Any) -> bool:
     return store._one("SELECT 1 AS ok FROM kv WHERE key='isolated_research_state'") is not None
 
@@ -479,7 +604,9 @@ def brief_text(entry: Mapping[str, Any] | None) -> str:
                   "signal's condition and keep the structure, tenor, strikes, entry time, sizing and exits, so the program still "
                   f"trades (the test checks that both arms trade the same structure, tenor, strikes, time and hold). Declare "
                   f"{ab['param']!r} in PARAMS (default on) and read it in decide.")
-    lines = ["YOUR FAMILY CARD (fixed at birth; you research and are judged under it):",
+    heading = ("YOUR DEVELOPMENTAL PROGRAM CARD (immutable exact source and overrides; birth card remains historical):"
+               if entry.get("development") else "YOUR FAMILY CARD (fixed at birth; you research and are judged under it):")
+    lines = [heading,
              f"- Hypothesis: {c.get('hypothesis')}",
              f"- Mechanism class: {c.get('mechanism_class')}. Inputs: {', '.join(c.get('inputs') or [])}. Holding: "
              f"{c.get('holding')} ({HOLDING.get(str(c.get('holding')), '')}).",
