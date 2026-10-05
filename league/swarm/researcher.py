@@ -3958,6 +3958,8 @@ class Researcher:
             else:
                 self._model_cycle(fam, out)
         except Exception as exc:  # noqa: BLE001 - a failed cycle is recorded, never raised into the loop
+            from .research_adapters import record_research_failure
+            record_research_failure(out, exc)
             out["error"] = f"{type(exc).__name__}: {getattr(exc, 'code', '') or str(exc)[:300]}"
         out["seconds"] = round(self.clock() - began, 2)
         self.store.bump(fid, cycles=1)
@@ -4165,7 +4167,11 @@ class Researcher:
                                             tool_choice="required" if revise else "auto")
             author = response.model if via == "claude" else profile
             out["model_calls"] += 1
-            out["cost_usd"] = round(out["cost_usd"] + float(response.cost_usd or 0), 6)
+            if hasattr(response, "cost_upper_usd"):
+                from .research_adapters import record_research_cost
+                record_research_cost(out, response)
+            else:
+                out["cost_usd"] = round(out["cost_usd"] + float(response.cost_usd or 0), 6)
             out["profile"] = author
             produced = [i for i in (response.output_items or []) if i.get("type") in ("message", "function_call")]
             current.extend(produced)
@@ -4350,6 +4356,9 @@ class Researcher:
                 answer = self.router.ask(role="rewrite", system=self.prompt(), user=user, family=fid, key=key, openai_model=None,
                                          sail_profile=profile, max_output=12000, effort="medium", desk=f"{fid}:rewrite",
                                          cap_usd_day=float(self.cfg.get("rewrite_usd_day", 1.0)), need_usd=0.0, claude=True)
+                if "cost_upper_usd" in answer and "cost_status" in answer:
+                    self.store.event("swarm.research", fid, {"action": "rewrite_cost", "counted": False, "request_key": key,
+                                     **{k: answer.get(k) for k in ("cost_usd", "cost_upper_usd", "cost_status")}})
                 match = CODE_BLOCK.search(answer.get("text") or "")
                 if match:
                     # The author is who wrote it: the Sail profile, or the paid model that answered first.
@@ -4363,6 +4372,12 @@ class Researcher:
                 else:
                     self.store.set_state(fid, rewrite_error="the rewrite carried no program")
             except Exception as exc:  # noqa: BLE001 - a failed rewrite is recorded; the family goes on
+                from .research_adapters import record_research_failure
+                cost_evidence = {}
+                record_research_failure(cost_evidence, exc)
+                if cost_evidence:
+                    self.store.event("swarm.research", fid, {"action": "rewrite_cost", "counted": False,
+                                     "request_key": key, **cost_evidence})
                 self.store.set_state(fid, rewrite_error=f"{type(exc).__name__}: {str(exc)[:200]}")
             finally:
                 self._rewriting.pop(fid, None)

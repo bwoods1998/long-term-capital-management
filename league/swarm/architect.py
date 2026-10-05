@@ -1810,6 +1810,7 @@ class Architect:
             self.digest.record_call(info["sha"], info["ttl"], called)
         return {"born_ids": born, "born": len(born), "proposed": len(rows) if isinstance(rows, list) else 0, "effort": "medium",
                 "route": answer.get("route"), "cost_usd": answer.get("cost_usd"), "truncated": cut,
+                **{k: answer[k] for k in ("cost_upper_usd", "cost_status") if k in answer},
                 **({"recovered": recovered} if recovered else {})}
 
     def run(self, *, paired: bool = False, library: Any = None) -> dict[str, Any]:
@@ -1844,6 +1845,8 @@ class Architect:
                                      **extra)  # Claude first; Astra every other pass if openai_model
         except Exception as exc:  # noqa: BLE001
             out = {"born": [], "error": str(exc)[:300]}
+            from .research_adapters import record_research_failure
+            record_research_failure(out, exc)
             self.pass_quota = None
             if info is not None:
                 out["digest"] = info
@@ -1866,6 +1869,7 @@ class Architect:
         refused_cards = list(getattr(self, "card_refused", []) or [])
         out = {"born": born, "proposed": proposed, "route": answer.get("route"),
                "model": answer.get("model"), "cost_usd": answer.get("cost_usd"), "seconds": round(self.clock() - began, 1)}
+        out.update({k: answer[k] for k in ("cost_upper_usd", "cost_status") if k in answer})
         if lenient:
             out["lenient"] = True  # the families were read without the answer's stray trailing commas
         if recovered:

@@ -574,10 +574,63 @@ class ResearchTransport(unittest.TestCase):
         result = self.model()
         self.assertIsNone(result["cost_usd"])
         self.assertIsNone(result["accrued_day"])
+        self.assertEqual((result["cost_upper_usd"], result["cost_status"]), ("0.022", "unknown"))
         held = self.budget.summary()["inference_upper_nanos"]
         self.assertGreater(held, 0)
         self.clock.advance(86400)
         self.assertEqual(self.budget.summary()["inference_upper_nanos"], held)
+        again = self.make_broker()
+        self.assertEqual(self.call("cached_result", {"key": "model-1"}, broker=again), result)
+        self.assertEqual(self.model(), result)
+        self.assertEqual(len(self.model_calls), 1)
+
+    def test_unknown_terminal_cache_remains_free_after_original_price_and_inventory_expire(self):
+        self.reply = replace(self.reply, actual_usd=None, accrued_day=None, provenance=None)
+        result = self.model()
+        original = self.budget._load()
+        self.clock.advance(31 * 86400)
+        again = self.make_broker()
+        self.assertEqual(self.call("cached_result", {"key": "model-1"}, broker=again), result)
+        self.assertEqual(self.model(), result)
+        with self.assertRaises(DailyAdmissionError):
+            self.model(key="fresh-expired-refused")
+        self.assertEqual(self.budget._load(), original)
+        self.assertEqual(len(self.model_calls), 1)
+
+    def test_sub_nanodollar_quote_reports_the_original_rounded_reservation_in_fresh_and_cached_reply(self):
+        self.reply = replace(self.reply, actual_usd=None, accrued_day=None, provenance=None)
+        policy = replace(self.model_policy, input_usd_million="0.00000001", output_usd_million="0.00000002")
+        broker = self.make_broker(capability=ModelCapability(policy, self.tokens, self.send))
+        result = self.call("evaluate", {"profile": "reviewed", "items": [{"role": "user", "content": "x"}],
+                                       "key": "fractional-ceiling"}, broker=broker)
+        self.assertEqual(result["cost_upper_usd"], "0.000000001")
+        self.assertEqual(next(iter(self.budget._load()["inference"].values()))["max_nanos"], 1)
+        self.assertEqual(self.call("cached_result", {"key": "fractional-ceiling"}, broker=broker), result)
+        self.assertEqual(len(self.model_calls), 1)
+
+    def test_legacy_unknown_terminal_cache_derives_original_hold_without_rewriting_or_repricing(self):
+        self.call("open_runtime")
+        key = "legacy-unknown"
+        daily_key = "model-" + hashlib.sha256((self.policy.scope + ":" + key).encode()).hexdigest()
+        body = {"model": self.model_policy.model, "input": [{"role": "user", "content": "synthetic request"}],
+                "tools": [], "tool_choice": "auto", "reasoning_effort": "low", "max_output_tokens": 1000,
+                "cache_key": None, "request_key": key, "timeout_seconds": self.model_policy.timeout_seconds}
+        from league.swarm.research_transport import _digest
+        self.budget.reserve_inference(daily_key, "0.022", provenance="SYNTHETIC original admitted maximum")
+        self.budget.dispatch(daily_key)
+        self.broker._record("request_started", key=key, kind="model", fingerprint=_digest(body))
+        legacy = {"status": "completed", "profile": "reviewed", "request_key": key, "output": [],
+                  "cost_usd": None, "accrued_day": None}
+        reference = self.broker._write_reply(legacy)
+        self.broker._record("request_finished", key=key, result=reference)
+        original_state = self.budget._load()
+        again = self.make_broker()
+        result = self.call("cached_result", {"key": key}, broker=again)
+        self.assertEqual(result, {**legacy, "cost_upper_usd": "0.022", "cost_status": "unknown"})
+        self.assertEqual(self.broker._result(reference), legacy)
+        self.assertEqual(self.call("evaluate", {"profile": "reviewed", "items": body["input"], "key": key}, broker=again), result)
+        self.assertEqual(self.budget._load(), original_state)
+        self.assertEqual(self.model_calls, [])
 
     def test_terminal_cached_model_recovers_without_provider_calls_and_conflicting_key_refuses(self):
         result = self.model()

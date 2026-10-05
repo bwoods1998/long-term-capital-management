@@ -14,7 +14,9 @@ import json
 import math
 import re
 import threading
+from dataclasses import dataclass
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any, Mapping, Sequence
 
 from .models import ModelError, extract_json
@@ -205,6 +207,56 @@ def reviewed_tools(tools):
     return result
 
 
+@dataclass(frozen=True)
+class ResearchModelResponse:
+    """Stock response fields plus an explicitly separate reserved cost ceiling."""
+    response: Any
+    cost_upper_usd: Decimal | None
+    cost_status: str
+
+    def __getattr__(self, name):
+        return getattr(self.response, name)
+
+
+def record_research_cost(out, response):
+    """Report unknown actuals without booking a reservation as vendor spending."""
+    previous = Decimal(str(out.get("cost_actual_known_usd", out.get("cost_usd") or 0)))
+    upper = Decimal(str(out.get("cost_upper_usd", previous)))
+    actual = response.cost_usd
+    bound = response.cost_upper_usd
+    known = previous + (actual if actual is not None else Decimal(0))
+    out["cost_actual_known_usd"] = format(known, "f")
+    out["cost_upper_usd"] = format(upper + (bound if bound is not None else actual), "f")
+    unknown = out.get("cost_usd") is None or actual is None
+    out["cost_usd"] = None if unknown else round(float(known), 6)
+    out["cost_status"] = "unknown" if unknown else "vendor_actual"
+
+
+def record_research_failure(out, exc):
+    """Retain isolated terminal cost evidence in actor error reports only."""
+    if not isinstance(exc, ModelError):
+        return
+    for row in exc.billed:
+        if (not isinstance(row, dict) or row.get("route") != "sail" or "cost_upper_usd" not in row
+                or row.get("cost_status") not in ("unknown", "vendor_actual")):
+            continue
+        try:
+            upper = Decimal(row["cost_upper_usd"]) if row["cost_upper_usd"] is not None else None
+            actual = Decimal(str(row["cost_usd"])) if row.get("cost_usd") is not None else None
+            if (upper is not None and (not upper.is_finite() or not 0 < upper <= 25) or actual is None and upper is None
+                    or actual is not None and (not actual.is_finite() or not 0 <= actual <= 25
+                                               or upper is not None and actual > upper)
+                    or row["cost_status"] != ("unknown" if actual is None else "vendor_actual")):
+                continue
+        except (ValueError, TypeError, ArithmeticError):
+            continue
+        out.setdefault("cost_usd", 0.0)
+        record_research_cost(out, SimpleNamespace(cost_usd=actual, cost_upper_usd=upper))
+        if "model_calls" in out:
+            out["model_calls"] += 1
+        out.setdefault("billed", []).append(dict(row))
+
+
 class ResearchModelRouter:
     """Stock research .sail/.ask interface; every paid route belongs to the broker."""
 
@@ -230,19 +282,32 @@ class ResearchModelRouter:
             if result.get("status") not in ("completed", "succeeded", "incomplete", "failed", "cancelled"):
                 raise ValueError("model result is not terminal")
             value = result.get("cost_usd")
-            if not isinstance(value, str):
-                raise ValueError("model terminal cost is unknown")
-            cost = Decimal(value)
-            if not cost.is_finite() or cost < 0 or cost > 25:
+            cost = Decimal(value) if isinstance(value, str) else None
+            if value is not None and cost is None:
+                raise ValueError("invalid model cost evidence")
+            if cost is not None and (not cost.is_finite() or cost < 0 or cost > 25):
                 raise ValueError("model cost is outside the unified ceiling")
+            upper_value = result.get("cost_upper_usd")
+            upper = Decimal(upper_value) if isinstance(upper_value, str) else None
+            if (upper_value is not None and upper is None or upper is not None
+                    and (not upper.is_finite() or not 0 < upper <= 25 or cost is not None and cost > upper)):
+                raise ValueError("invalid original model reservation")
+            cost_status = "unknown" if cost is None else "vendor_actual"
+            if result.get("cost_status", cost_status) != cost_status:
+                raise ValueError("model cost evidence status differs")
             day = result.get("accrued_day")
-            date = dt.date.fromisoformat(day)
-            if day != date.isoformat():
-                raise ValueError("model receipt has no exact accrual day")
-            at = dt.datetime.combine(date, dt.time(), dt.timezone.utc).timestamp()
-            now = self.store.clock()
-            if not isinstance(now, (int, float)) or isinstance(now, bool) or not math.isfinite(now) or not 0 <= at <= now:
-                raise ValueError("model receipt accrual day is invalid")
+            at = None
+            if cost is None:
+                if upper is None or day is not None:
+                    raise ValueError("unknown model invoice needs its original reservation and no invented accrual day")
+            else:
+                date = dt.date.fromisoformat(day)
+                if day != date.isoformat():
+                    raise ValueError("model receipt has no exact accrual day")
+                at = dt.datetime.combine(date, dt.time(), dt.timezone.utc).timestamp()
+                now = self.store.clock()
+                if not isinstance(now, (int, float)) or isinstance(now, bool) or not math.isfinite(now) or not 0 <= at <= now:
+                    raise ValueError("model receipt accrual day is invalid")
             booked_family = family.split(":", 1)[0]
             if self.store.family(booked_family) is None:
                 booked_family = None
@@ -251,13 +316,23 @@ class ResearchModelRouter:
             # Exception text comes from an injected host/client: never expose credentials or raw HTTP bodies.
             raise ModelError("isolated broker model request unresolved or refused", kind="line") from None
         from ltcm.provider import ProviderResponse, function_calls_of, output_items_of, output_text_of, reasoning_summaries_of
+        billed = [{"route": "sail", "cost_usd": format(cost, "f") if cost is not None else None,
+                   "cost_upper_usd": format(upper, "f") if upper is not None else None,
+                   "cost_status": cost_status, "request_key": key, "status": result["status"]}]
         if result["status"] in ("failed", "cancelled"):
-            raise ModelError("isolated model terminal request failed", billed=[{"route": "sail", "cost_usd": float(cost)}])
-        reason = (result.get("incomplete_details") or {}).get("reason")
-        status = "completed" if result["status"] == "succeeded" else result["status"]
-        return ProviderResponse(key, result.get("id"), status, output_text_of(result), function_calls_of(result),
-                                reasoning_summaries_of(result), output_items_of(result), dict(result.get("usage") or {}),
-                                cost, result["status"] == "incomplete", reason if isinstance(reason, str) else None)
+            raise ModelError("isolated model terminal request failed", billed=billed)
+        try:
+            details, usage = result.get("incomplete_details"), result.get("usage")
+            if details is not None and not isinstance(details, dict) or usage is not None and not isinstance(usage, dict):
+                raise ValueError("invalid terminal model fields")
+            reason = (details or {}).get("reason")
+            status = "completed" if result["status"] == "succeeded" else result["status"]
+            response = ProviderResponse(key, result.get("id"), status, output_text_of(result), function_calls_of(result),
+                                        reasoning_summaries_of(result), output_items_of(result), dict(usage or {}),
+                                        cost, result["status"] == "incomplete", reason if isinstance(reason, str) else None)
+        except Exception:
+            raise ModelError("isolated model terminal fields refused", billed=billed, kind="line") from None
+        return ResearchModelResponse(response, upper, cost_status)
 
     def ask(self, *, role, system, user, family, key, openai_model=None, sail_profile=None, max_output=8000,
             effort="medium", desk=None, **kwargs):
@@ -267,7 +342,9 @@ class ResearchModelRouter:
                              family=desk or family or "swarm", key=key, effort=effort, max_output=max_output,
                              cache_key=f"swarm-{role}")
         return {"text": response.output_text, "json": extract_json(response.output_text), "route": "sail",
-                "model": sail_profile, "cost_usd": float(response.cost_usd), "fallback_reasons": [],
+                "model": sail_profile, "cost_usd": float(response.cost_usd) if response.cost_usd is not None else None,
+                "cost_upper_usd": format(response.cost_upper_usd, "f") if response.cost_upper_usd is not None else None,
+                "cost_status": response.cost_status, "fallback_reasons": [],
                 "truncated": response.incomplete, "incomplete_reason": response.incomplete_reason, "usage": response.usage}
 
     def claude_enabled(self, role):

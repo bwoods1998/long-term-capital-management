@@ -24,6 +24,8 @@ from league.swarm.research_transport import (ResearchBroker, ResearchCapabilityE
 from league.swarm.daily_compute import DailyAdmissionError, DailyBudget, ResourceBound
 from league.swarm.research_sandbox import HostContextEvidence
 from league.swarm.store import SwarmStore
+from league.swarm.research_adapters import ResearchModelRouter, _load as adapter_receipts
+from league.swarm.models import ModelError
 from league.tests import test_research_host as host_fixtures
 from league.tests.test_research_transport import BOX, PRODUCTION, CODE
 
@@ -243,6 +245,60 @@ class SailResearchHost(unittest.TestCase):
         self.assertEqual(held["max_nanos"],120000,"whole10000 input cap, not observed10 input tokens")
         self.assertEqual(self.model_call(),result)
         self.assertEqual(len(self.posts("/v1/responses")),1)
+
+    def test_actual_bridge_terminal_without_invoice_reaches_router_and_recovers_without_post(self):
+        controller = SwarmStore(self.f.base / "terminal-controller")
+        self.addCleanup(controller.close)
+        router = ResearchModelRouter(controller, self.broker, settings={})
+        def call():
+            self.peer()
+            return router.sail("reviewed", [{"role": "user", "content": "hello"}], family="swarm",
+                               key="router-terminal", max_output=1000)
+        response = call()
+        self.assertIsNone(response.cost_usd)
+        self.assertEqual(str(response.cost_upper_usd), "0.00012")
+        self.assertEqual(response.cost_status, "unknown")
+        self.assertEqual(response.status, "completed")
+        self.assertEqual(response.usage["output_tokens_details"]["reasoning_tokens"], 1)
+        original_hold = self.budget._load()["inference"]
+        self.assertIsNone(next(iter(original_hold.values()))["receipt"])
+        self.assertEqual(controller.spent(["sail_model"]), 0)
+        self.assertIsNone(adapter_receipts(controller)["model:router-terminal"]["result"]["accrued_day"])
+        self.adapters = self.build()
+        self.broker = self.make_broker()
+        router = ResearchModelRouter(controller, self.broker, settings={})
+        again = call()
+        self.assertEqual((again.cost_usd, again.cost_upper_usd, again.status),
+                         (response.cost_usd, response.cost_upper_usd, response.status))
+        self.assertEqual(self.budget._load()["inference"], original_hold)
+        self.assertEqual(len(self.posts("/v1/responses")), 1)
+
+    def test_unknown_invoice_incomplete_and_failed_terminals_preserve_status_and_never_repost(self):
+        controller = SwarmStore(self.f.base / "terminal-status-controller")
+        self.addCleanup(controller.close)
+        router = ResearchModelRouter(controller, self.broker, settings={})
+        for status in ("incomplete", "failed", "cancelled"):
+            self.transport.model_reply = {"id": "resp_fixture-" + status, "model": self.model.model,
+                                          "status": status, "output": [], "usage": {},
+                                          "incomplete_details": {"reason": "max_output_tokens"}}
+            for _ in range(2):
+                self.peer()
+                if status == "incomplete":
+                    response = router.sail("reviewed", [{"role": "user", "content": status}], family="swarm",
+                                           key="terminal-" + status, max_output=1000)
+                    self.assertTrue(response.incomplete)
+                    self.assertEqual(response.incomplete_reason, "max_output_tokens")
+                    self.assertIsNone(response.cost_usd)
+                else:
+                    with self.assertRaises(ModelError) as found:
+                        router.sail("reviewed", [{"role": "user", "content": status}], family="swarm",
+                                    key="terminal-" + status, max_output=1000)
+                    self.assertIsNone(found.exception.billed[0]["cost_usd"])
+                    self.assertEqual(found.exception.billed[0]["cost_status"], "unknown")
+                    self.assertEqual(found.exception.billed[0]["cost_upper_usd"], "0.00012")
+            self.assertEqual(len(self.posts("/v1/responses")), ("incomplete", "failed", "cancelled").index(status) + 1)
+        self.assertEqual(controller.spent(["sail_model"]), 0)
+        self.assertTrue(all(row["receipt"] is None for row in self.budget._load()["inference"].values()))
 
     def test_linked_terminal_actual_bill_settles_exact_utc_day(self):
         def bill(key,response):

@@ -9,12 +9,14 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from decimal import Decimal
 from unittest import mock
 
 from league.swarm import settings as S
 from league.swarm.models import ModelError
 from league.swarm.pool import GymJob, PoolError
-from league.swarm.research_adapters import ResearchGymPool, ResearchModelRouter, reviewed_tools, _STATE, _load
+from league.swarm.research_adapters import (ResearchGymPool, ResearchModelRouter, ResearchModelResponse,
+                                           record_research_cost, reviewed_tools, _STATE, _load)
 from league.swarm.researcher import Researcher
 from league.swarm.seeds import SEEDS, family_spec, program_for
 from league.swarm.store import SwarmStore
@@ -29,6 +31,7 @@ class Broker:
         self.cache = {}
         self.lost_model = self.lost_gym = False
         self.unknown_cost = False
+        self.terminal_status = "completed"
         self.responses = []
         self.entered, self.release = threading.Event(), None
         self.image, self.bundle = "sbcp_synthetic_train", "gym-engine-synthetic"
@@ -43,8 +46,11 @@ class Broker:
             raise TimeoutError("synthetic credential-looking provider body MUST NOT ESCAPE")
         output = self.responses.pop(0) if self.responses else [
             {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": '{"families": []}'}]}]
-        answer = {"status": "completed", "output": output, "usage": {}, "profile": profile, "request_key": key,
-                  "cost_usd": None if self.unknown_cost else "0.001", "accrued_day": "2026-10-04"}
+        answer = {"status": self.terminal_status, "output": output, "usage": {}, "profile": profile, "request_key": key,
+                  "cost_usd": None if self.unknown_cost else "0.001",
+                  "accrued_day": None if self.unknown_cost else "2026-10-04"}
+        if self.unknown_cost:
+            answer.update(cost_upper_usd="0.02", cost_status="unknown")
         self.cache["model", key] = answer
         return copy.deepcopy(answer)
 
@@ -186,12 +192,140 @@ class ResearchAdapters(unittest.TestCase):
         self.assertEqual(len(self.broker.model_calls), 1)
         self.assertEqual(self.store.spent(["sail_model"]), 0.001)
 
-    def test_unknown_terminal_cost_is_never_returned_as_free_model_response(self):
+    def test_unknown_terminal_invoice_returns_output_and_bound_without_actual_spend_or_replay(self):
         self.broker.unknown_cost = True
         for _ in range(2):
-            with self.assertRaises(ModelError): self.model()
+            response = self.model()
+            self.assertIsNone(response.cost_usd)
+            self.assertEqual(response.cost_upper_usd, Decimal("0.02"))
+            self.assertEqual(response.cost_status, "unknown")
+            self.assertEqual(response.output_text, '{"families": []}')
         self.assertEqual(len(self.broker.model_calls), 1)
         self.assertEqual(self.store.spent(["sail_model"]), 0)
+        self.assertEqual(self.store.family(self.family["id"])["spent_usd"], 0)
+        receipt = _load(self.store)["model:model"]["result"]
+        self.assertIsNone(receipt["cost_usd"])
+        self.assertIsNone(receipt["accrued_day"])
+
+    def test_unknown_invoice_requires_finite_positive_original_reservation_and_no_fake_day(self):
+        self.broker.unknown_cost = True
+        original = self.broker.evaluate
+        variants = [{"cost_upper_usd": value} for value in (None, "0", "-1", "NaN", "Infinity", "25.000000001", 1)]
+        variants += [{"accrued_day": "2026-10-04"}, {"cost_status": "vendor_actual"}]
+        for index, variant in enumerate(variants):
+            def changed(*args, **kwargs):
+                return {**original(*args, **kwargs), **variant}
+            self.broker.evaluate = changed
+            with self.subTest(variant=variant), self.assertRaises(ModelError):
+                self.model(key=f"invalid-upper-{index}")
+        self.assertEqual(self.store.spent(["sail_model"]), 0)
+
+    def test_unknown_invoice_ask_and_stock_hold_report_actual_null_and_preserve_trials(self):
+        self.broker.unknown_cost = True
+        answer = self.router.ask(role="architect", system="s", user="u", family=None, key="unknown-ask",
+                                 sail_profile="flash_asap")
+        self.assertIsNone(answer["cost_usd"])
+        self.assertEqual((answer["cost_upper_usd"], answer["cost_status"]), ("0.02", "unknown"))
+        self.assertEqual(answer["json"], {"families": []})
+        researcher = Researcher(self.store, self.router, self.pool, self.settings, clock=self.clock,
+                                starter=program_for, background=False)
+        researcher.cycle(self.family["id"])
+        for job, _, _ in list(self.pool._jobs.values()):
+            self.pool.wait(job, 2)
+        before = self.store.family(self.family["id"])["trials"]
+        gym_before = len(self.broker.gym_calls)
+        self.broker.responses = [[{"type": "function_call", "name": "gym_run", "call_id": "hold1",
+                                  "arguments": json.dumps({"hold": True, "note": "No fresh evidence in this synthetic fixture."})}]]
+        row = researcher.cycle(self.family["id"])
+        self.assertNotIn("error", row, row)
+        self.assertTrue(row["hold"], row)
+        self.assertIsNone(row["cost_usd"])
+        self.assertEqual((row["cost_upper_usd"], row["cost_status"]), ("0.02", "unknown"))
+        self.assertEqual(Decimal(row["cost_actual_known_usd"]), Decimal(0))
+        self.assertEqual(self.store.family(self.family["id"])["trials"], before)
+        self.assertEqual(len(self.broker.gym_calls), gym_before)
+        self.assertEqual(self.store.spent(["sail_model"]), 0)
+
+    def test_mixed_known_unknown_turns_keep_actual_total_unknown_and_reservations_separate(self):
+        from ltcm.provider import ProviderResponse
+        out = {"cost_usd": 0.0}
+        for actual in (Decimal("0.001"), None, Decimal("0.002")):
+            stock = ProviderResponse("k", "r", "completed", "", [], [], [], {}, actual, False)
+            record_research_cost(out, ResearchModelResponse(stock, Decimal("0.02"), "unknown" if actual is None else "vendor_actual"))
+        self.assertIsNone(out["cost_usd"])
+        self.assertEqual(Decimal(out["cost_actual_known_usd"]), Decimal("0.003"))
+        self.assertEqual(Decimal(out["cost_upper_usd"]), Decimal("0.06"))
+        self.assertEqual(out["cost_status"], "unknown")
+
+    def test_stock_failed_terminal_actors_report_unknown_actual_and_retained_bound(self):
+        from league.swarm.architect import Architect
+        self.broker.unknown_cost = True
+        self.store.add_version(self.family["id"], self.code, self.params, author="synthetic")
+        researcher = Researcher(self.store, self.router, self.pool, self.settings, clock=self.clock,
+                                background=False)
+        architect = Architect(self.store, self.router, self.settings, clock=self.clock)
+        for status in ("failed", "cancelled"):
+            self.broker.terminal_status = status
+            self.clock.advance(1)
+            cycle = researcher.cycle(self.family["id"])
+            pass_result = architect.run()
+            for row in (cycle, pass_result):
+                self.assertIn("error", row, row)
+                self.assertIsNone(row["cost_usd"])
+                self.assertEqual((row["cost_upper_usd"], row["cost_status"]), ("0.02", "unknown"))
+                self.assertEqual(row["billed"][0]["status"], status)
+            self.assertEqual(cycle["model_calls"], 1)
+        self.assertEqual(self.store.spent(["sail_model"]), 0)
+        self.assertEqual(self.store.family(self.family["id"])["spent_usd"], 0)
+
+    def test_stock_architect_usable_unknown_terminal_keeps_cost_evidence(self):
+        from league.swarm.architect import Architect
+        self.broker.unknown_cost = True
+        out = Architect(self.store, self.router, self.settings, clock=self.clock).run()
+        self.assertNotIn("error", out, out)
+        self.assertIsNone(out["cost_usd"])
+        self.assertEqual((out["cost_upper_usd"], out["cost_status"]), ("0.02", "unknown"))
+        self.assertEqual(out["born"], [])
+
+    def test_stock_actor_legacy_known_failure_reports_actual_without_inventing_original_reservation(self):
+        self.broker.terminal_status = "failed"
+        self.store.add_version(self.family["id"], self.code, self.params, author="synthetic")
+        researcher = Researcher(self.store, self.router, self.pool, self.settings, clock=self.clock, background=False)
+        row = researcher.cycle(self.family["id"])
+        self.assertEqual(row["cost_usd"], 0.001)
+        self.assertEqual(row["cost_status"], "vendor_actual")
+        self.assertIsNone(row["billed"][0]["cost_upper_usd"])
+        self.assertEqual(self.store.spent(["sail_model"]), 0.001)
+
+    def test_malformed_unknown_terminal_fields_still_report_reservation_in_actor_error(self):
+        self.broker.unknown_cost = True
+        self.store.add_version(self.family["id"], self.code, self.params, author="synthetic")
+        original = self.broker.evaluate
+        self.broker.evaluate = lambda *args, **kwargs: {**original(*args, **kwargs), "incomplete_details": "bad"}
+        researcher = Researcher(self.store, self.router, self.pool, self.settings, clock=self.clock, background=False)
+        row = researcher.cycle(self.family["id"])
+        self.assertIn("error", row)
+        self.assertIsNone(row["cost_usd"])
+        self.assertEqual((row["cost_upper_usd"], row["cost_status"]), ("0.02", "unknown"))
+        self.assertEqual(self.store.spent(["sail_model"]), 0)
+
+    def test_async_rewrite_cost_is_recorded_separately_from_calling_cycle(self):
+        self.broker.unknown_cost = True
+        self.settings["researcher"]["rewrites_per_day"] = 1
+        self.broker.responses = [[{"type": "message", "content": [{"type": "output_text", "text": "```python\n" + self.code + "```"}]}]]
+        researcher = Researcher(self.store, self.router, self.pool, self.settings, clock=self.clock, background=False)
+        cycle = {"model_calls": 0, "tool_calls": 0, "cost_usd": 0.0}
+        self.assertTrue(researcher.request_rewrite(self.family, cycle))
+        self.assertEqual(cycle["cost_usd"], 0.0, "asynchronous rewrite is a separate cost receipt")
+        costs = [e["payload"] for e in self.store.events_after(0)
+                 if e["kind"] == "swarm.research" and e["payload"].get("action") == "rewrite_cost"]
+        self.assertEqual(len(costs), 1)
+        self.assertIsNone(costs[0]["cost_usd"])
+        self.assertEqual((costs[0]["cost_upper_usd"], costs[0]["cost_status"]), ("0.02", "unknown"))
+        self.assertFalse(costs[0]["counted"], "a cost receipt is no literature request")
+        from league.swarm.library import Library
+        self.assertEqual(Library(self.store, None, self.settings, clock=self.clock).used(), (0, {}))
+        self.assertIn("rewrite_ready", self.store.family(self.family["id"])["state"])
 
     def test_gateway_routes_and_role_without_profile_are_denied(self):
         self.assertFalse(self.router.claude_enabled("researcher"))

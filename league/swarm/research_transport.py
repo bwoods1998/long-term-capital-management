@@ -29,7 +29,7 @@ from decimal import Decimal, InvalidOperation, ROUND_CEILING
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from .daily_compute import DailyBudget, ResourceBound
+from .daily_compute import DailyBudget, ResourceBound, NANOS
 
 EVENT_KIND = "swarm.research_broker"
 STATE_KEY = "research_broker_v1"
@@ -517,7 +517,29 @@ class ResearchBroker:
             state = self._load()
             row = state["requests"].get(key) if state else None
             _require(row is None or row["kind"] == kind, "cached request kind differs")
-            return self._result(row["result"]) if row and row["result"] is not None else None
+            if not row or row["result"] is None:
+                return None
+            result = self._result(row["result"])
+            return self._model_cost_view(key, result) if kind == "model" else result
+
+    def _model_cost_view(self, key, result):
+        """Expose the original reservation, including for older immutable replies.
+
+        Cache recovery does not reprice, settle, admit or rewrite the original reply.
+        A later invoice belongs to the budget ledger; it does not change what was
+        known when this terminal response was captured.
+        """
+        daily_key = "model-" + hashlib.sha256((self.policy.scope + ":" + key).encode()).hexdigest()
+        state = self.budget._load()
+        hold = state["inference"].get(daily_key) if state else None
+        _require(hold is not None and hold["dispatch_at"] is not None and not hold["canceled"],
+                 "cached model response has no original dispatched reservation")
+        upper = Decimal(hold["max_nanos"]) / NANOS
+        if "cost_upper_usd" in result:
+            _require(_money(result["cost_upper_usd"]) == upper, "model response changed its original reservation")
+        status = "unknown" if result.get("cost_usd") is None else "vendor_actual"
+        _require(result.get("cost_status", status) == status, "model response changed its cost evidence status")
+        return {**result, "cost_upper_usd": result.get("cost_upper_usd", format(upper, "f")), "cost_status": status}
 
     def _prior_request(self, key, kind, fingerprint):
         _require(_identity(key), "invalid research request identity")
@@ -527,7 +549,8 @@ class ResearchBroker:
             if row:
                 _require(row["kind"] == kind and row["fingerprint"] == fingerprint, "request key was reused for different work")
                 _require(row["result"] is not None, "previous request outcome is unresolved; no redispatch")
-                return self._result(row["result"])
+                result = self._result(row["result"])
+                return self._model_cost_view(key, result) if kind == "model" else result
         return None
 
     def _resource(self):
@@ -794,13 +817,16 @@ class ResearchBroker:
                  and reply.result.get("status") in ("completed", "succeeded", "incomplete", "failed", "cancelled"), "model response is not known terminal")
         public = {field: reply.result[field] for field in ("id", "status", "output", "usage", "model", "incomplete_details",
                                                         "created_at", "completed_at", "object") if field in reply.result}
-        result = {**public, "profile": profile, "request_key": key, "cost_usd": None, "accrued_day": None}
+        result = {**public, "profile": profile, "request_key": key, "cost_usd": None, "accrued_day": None,
+                  "cost_status": "unknown"}
         if reply.actual_usd is not None:
             _money(reply.actual_usd)
             _date(reply.accrued_day)
             _require(isinstance(reply.provenance, str) and bool(reply.provenance.strip()), "authoritative model cost provenance is required")
             self.budget.settle_inference(daily_key, actual_usd=reply.actual_usd, accrued_day=reply.accrued_day, provenance=reply.provenance)
-            result.update(cost_usd=format(_money(reply.actual_usd), "f"), accrued_day=reply.accrued_day)
+            result.update(cost_usd=format(_money(reply.actual_usd), "f"), accrued_day=reply.accrued_day,
+                          cost_status="vendor_actual")
+        result = self._model_cost_view(key, result)
         reference = self._write_reply(result)
         with self.store.atomic():
             self._record("request_finished", key=key, result=reference)

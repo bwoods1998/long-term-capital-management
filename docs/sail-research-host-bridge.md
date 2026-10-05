@@ -111,6 +111,24 @@ The model sends exactly one foreground Responses POST with a stable idempotency
 key and a timeout bounded by the model policy. Provider redirects are refused by
 the existing transport. A lost or nonterminal reply keeps the original intent and
 hold. Terminal replies with unknown cost remain usable but do not release money.
+The broker terminal receipt records `cost_usd: null`, `accrued_day: null` and a separate
+`cost_upper_usd` from the original dispatched reservation, with `cost_status:
+unknown`. The research router, researcher and architect reports preserve actual
+cost and reservation as separate fields, including
+failed or cancelled terminal requests. Unknown invoices create no vendor-actual
+spend row. Cached replies never submit another request, reprice the original
+reservation or rewrite the captured response; older replies obtain a read-only
+cost view from their original durable reservation. An asynchronous rewrite records
+its own cost event instead of adding its charge to the calling cycle.
+
+The [published Responses schema](https://docs.sailresearch.com/openapi.json)
+provides token usage rather than a final per-request USD invoice. Published
+[usage endpoints](https://docs.sailresearch.com/usage-endpoints) provide delayed
+aggregate metered spending and per-task token counts. A usable terminal response
+therefore does not require a per-request invoice that the standard API has not
+documented. Aggregate usage alone does not settle an individual request or release
+its reservation.
+
 The host can call `adapters.provider.reconcile_model_bill(original_key)` after a
 later reviewed actual invoice arrives. This performs no provider POST, settles
 the same DailyBudget once and preserves the immutable original controller reply.
