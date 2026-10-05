@@ -55,6 +55,7 @@ APPS_BASE = f"https://{APPS_HOST}/v1"
 
 _RAW_DOWNLOAD_LIMIT = 256_000_000
 _MAX_RAW_DOWNLOAD_LIMIT = 1_000_000_000
+_CHECKPOINT_METADATA_LIMIT = 1_000_000
 
 
 def _download_limit(value: int | None) -> int:
@@ -186,6 +187,44 @@ def checkpoint_id(value: Any) -> str:
     if not isinstance(value, str) or not _CHECKPOINT_ID.match(value):
         raise SailboxError("not a checkpoint id")
     return value
+
+
+def _checkpoint_filters(sailbox: str | None, app: str | None, name: str | None) -> dict[str, str]:
+    filters = {}
+    for key, value, pattern in (("sailbox_id", sailbox, _BOX_ID), ("app_id", app, _APP_ID)):
+        if value is not None:
+            if not isinstance(value, str) or not pattern.fullmatch(value):
+                raise SailboxError("invalid checkpoint source/app filter")
+            filters[key] = value
+    if name is not None:
+        if not isinstance(name, str) or len(name) > 128 or any(ord(c) < 32 or ord(c) == 127 for c in name):
+            raise SailboxError("invalid exact checkpoint name filter")
+        filters["name"] = name
+    return filters
+
+
+def _checkpoint_metadata(row: Any, filters: Mapping[str, str], expected_id: str | None = None) -> dict[str, Any]:
+    """Metadata identity only, never operation success, clean data or billing proof."""
+    if not isinstance(row, dict):
+        raise SailboxError("checkpoint metadata is not an object")
+    cid = row.get("checkpoint_id")
+    if not isinstance(cid, str) or not _CHECKPOINT_ID.fullmatch(cid) or (expected_id is not None and cid != expected_id):
+        raise SailboxError("checkpoint metadata has a different or invalid identity")
+    for key, pattern in (("sailbox_id", _BOX_ID), ("app_id", _APP_ID)):
+        if not isinstance(row.get(key), str) or not pattern.fullmatch(row[key]):
+            raise SailboxError("checkpoint metadata has no valid source/app identity")
+    if "name" not in row or (row["name"] is not None and not isinstance(row["name"], str)):
+        raise SailboxError("checkpoint metadata has no valid name")
+    if type(row.get("checkpoint_generation")) is not int or row["checkpoint_generation"] < 0:
+        raise SailboxError("checkpoint metadata has no valid generation")
+    if not isinstance(row.get("created_at"), str) or not row["created_at"] or "expires_at" not in row:
+        raise SailboxError("checkpoint metadata has incomplete timestamps")
+    if row["expires_at"] is not None and (not isinstance(row["expires_at"], str) or not row["expires_at"]):
+        raise SailboxError("checkpoint metadata has no valid expiry")
+    if any(row.get(key) != value for key, value in filters.items()):
+        raise SailboxError("checkpoint metadata does not match exact source/app/name filters")
+    # The native response's status/future fields remain an open set, unmodified.
+    return dict(row)
 
 
 def remote_path(value: str) -> str:
@@ -376,6 +415,10 @@ class Transport:
             return method == "GET"
         if path == "/sailboxes":
             return method in ("POST", "GET")
+        if path == "/sailbox-checkpoints":
+            return method == "GET"
+        if path.startswith("/sailbox-checkpoints/"):
+            return method == "GET" and bool(_CHECKPOINT_ID.fullmatch(path[len("/sailbox-checkpoints/"):]))
         if path in ("/sailboxes/from_checkpoint", "/sailboxes/spend"):
             return method == ("POST" if path.endswith("from_checkpoint") else "GET")
         if not path.startswith("/sailboxes/sb_"):
@@ -416,6 +459,9 @@ class Transport:
     ) -> Any:
         if not self.allowed(method, path):
             raise SailboxError(f"route not on this client's allowlist: {method} {path}")
+        checkpoint_metadata = path == "/sailbox-checkpoints" or path.startswith("/sailbox-checkpoints/")
+        if checkpoint_metadata and (body is not None or data is not None or stream or raw or raw_limit is not None):
+            raise SailboxError("checkpoint metadata GET requires a bounded JSON response and no request body")
         if raw_limit is not None and not (raw and not stream and method == "GET" and path.endswith("/files")):
             raise SailboxError("an explicit download bound applies only to raw file GETs")
         limit = _download_limit(raw_limit)
@@ -462,6 +508,21 @@ class Transport:
                     if length is not None and len(downloaded) != length:
                         raise SailboxTransportError("IncompleteRead", transient=True)
                     return downloaded
+            if checkpoint_metadata:
+                with response:
+                    length = getattr(response, "headers", {}).get("Content-Length")
+                    if length is not None:
+                        if not isinstance(length, str) or not length.strip().isascii() or not length.strip().isdigit():
+                            raise SailboxError("checkpoint metadata has an invalid Content-Length")
+                        text_length = length.strip().lstrip("0") or "0"
+                        if len(text_length) > 7 or int(text_length) > _CHECKPOINT_METADATA_LIMIT:
+                            raise SailboxError("checkpoint metadata exceeds its byte bound", kind="checkpoint_metadata_too_large")
+                        length = int(text_length)
+                    body_bytes = response.read(_CHECKPOINT_METADATA_LIMIT + 1)
+                    if len(body_bytes) > _CHECKPOINT_METADATA_LIMIT:
+                        raise SailboxError("checkpoint metadata exceeds its byte bound", kind="checkpoint_metadata_too_large")
+                    if length is not None and len(body_bytes) != length:
+                        raise SailboxTransportError("IncompleteRead", transient=True)
         except HTTPError as error:
             raise _error(error.code, error.read(200_000)) from None
         except IncompleteRead:
@@ -470,8 +531,9 @@ class Transport:
             raise SailboxTransportError(type(error).__name__, transient=_transient_transport(error)) from None
         if stream:
             return _ndjson(response)
-        with response:
-            body_bytes = response.read(20_000_000)
+        if not checkpoint_metadata:
+            with response:
+                body_bytes = response.read(20_000_000)
         if not body_bytes:
             return {}
         try:
@@ -756,11 +818,10 @@ class SailboxClient:
         return row
 
     def checkpoints(self, sailbox: str, *, recorded: Sequence[Mapping[str, Any]] = ()) -> dict[str, Any]:
-        """What is known about this box's checkpoints.
+        """Legacy operator records joined to live box counters; call shape unchanged.
 
-        The API has no list endpoint -- `POST /sailboxes/{id}/checkpoint` and
-        `POST /sailboxes/from_checkpoint` are the whole surface -- so the ids come from the
-        operator's own record (`.data/ltcm/box.json`) and the counters come from the live row.
+        This does not query the native checkpoint inventory. Use list_checkpoints
+        or checkpoint_info for the documented GET routes; their errors stay unknown.
         """
         row = self.get(sailbox)
         return {
@@ -769,6 +830,63 @@ class SailboxClient:
             "last_checkpointed_at": row.get("last_checkpointed_at"),
             "recorded": [dict(entry) for entry in recorded],
         }
+
+    def checkpoint_info(
+        self, checkpoint: str, *, sailbox: str | None = None, app: str | None = None, name: str | None = None
+    ) -> dict[str, Any]:
+        """Native checkpoint GET, optionally bound to exact source/app/name.
+
+        A 404 propagates; it is not proof of deletion or a failed original POST.
+        This never creates, restores, wakes or downloads from a Sailbox.
+        """
+        if not isinstance(checkpoint, str) or not _CHECKPOINT_ID.fullmatch(checkpoint):
+            raise SailboxError("not a checkpoint id")
+        filters = _checkpoint_filters(sailbox, app, name)
+        row = self.transport("GET", f"/sailbox-checkpoints/{checkpoint}")
+        return _checkpoint_metadata(row, filters, checkpoint)
+
+    def list_checkpoints(
+        self, *, sailbox: str | None = None, app: str | None = None, name: str | None = None,
+        limit: int = 100, offset: int = 0, max_pages: int = 10
+    ) -> dict[str, Any]:
+        """Bounded native GET pages with exact filters and explicit continuation.
+
+        limit is the native page size (1..100); max_pages is a local bound
+        (1..50). has_more/next_offset remain explicit if that bound stops the
+        read. The inventory is not an atomic snapshot or original-POST proof.
+        Native errors propagate without a legacy endpoint or mutation fallback.
+        """
+        filters = _checkpoint_filters(sailbox, app, name)
+        for value, lo, hi in ((limit, 1, 100), (offset, 0, 100000), (max_pages, 1, 50)):
+            if type(value) is not int or not lo <= value <= hi:
+                raise SailboxError("checkpoint pagination is outside its documented/local bounds")
+        rows, pages, seen = [], [], set()
+        start = offset
+        for _ in range(max_pages):
+            page = self.transport("GET", "/sailbox-checkpoints", query={
+                "sailbox_id": filters.get("sailbox_id"), "app": filters.get("app_id"),
+                "name": filters.get("name"), "limit": limit, "offset": offset,
+            })
+            if (not isinstance(page, dict) or not isinstance(page.get("data"), list)
+                    or type(page.get("limit")) is not int or page["limit"] != limit
+                    or type(page.get("offset")) is not int or page["offset"] != offset
+                    or type(page.get("has_more")) is not bool or len(page["data"]) > limit
+                    or (page["has_more"] and not page["data"])):
+                raise SailboxError("checkpoint page is malformed or pagination did not progress")
+            items = [_checkpoint_metadata(row, filters) for row in page["data"]]
+            for row in items:
+                if row["checkpoint_id"] in seen:
+                    raise SailboxError("checkpoint pagination repeated an identity; inventory changed")
+                seen.add(row["checkpoint_id"])
+            rows.extend(items)
+            pages.append(dict(page))
+            offset += len(items)
+            if not page["has_more"]:
+                break
+            if offset > 100000:
+                raise SailboxError("checkpoint pagination exceeds the native offset bound")
+        return {"data": rows, "limit": limit, "offset": start, "has_more": page["has_more"],
+                "next_offset": offset if page["has_more"] else None, "pages": pages}
 
     def from_checkpoint(
         self, checkpoint: str, *, name: str, timeout: float = 900.0
