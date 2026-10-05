@@ -1,9 +1,11 @@
 """Offline daily obligations that do not rely on a maximum provider stop delay.
 
-Every unresolved creation and every nonterminated resource reserves its full 24-hour
-ceiling on each UTC day, indefinitely. An uncertain creation fee and an unresolved
-inference request also carry into every possible future charge day. Runtime estimates,
-sleep, elapsed TTLs, lost replies, and missing inventory rows never release a hold.
+Every unresolved creation and every resource without completed native pause evidence
+reserves its full 24-hour ceiling on each UTC day. A paused resource retains its
+unsettled accrued capacity bound; only an exact native GET and a reviewed exclusive
+resume-writer fence can remove future running time. Finite fence expiry is reserved
+before it happens. Uncertain fees and inference requests keep their original holds.
+Runtime estimates, sleep, elapsed TTLs and lost replies never prove a completed pause.
 
 This module performs no provider operations and has no production pricing defaults.
 Evidence objects are explicit trusted inputs, not verification of a provider contract.
@@ -17,12 +19,16 @@ evidence. Vendor costs, reporting estimates, and these upper bounds stay distinc
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import math
+import re
 import sqlite3
 from dataclasses import asdict, dataclass
 from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_FLOOR
+from fractions import Fraction
 from typing import Any
+from urllib.parse import quote
 
 NANOS = 1_000_000_000
 DAY_SECONDS = 86400
@@ -202,6 +208,120 @@ class InventoryEvidence:
         _provenance(self.provenance)
 
 
+@dataclass(frozen=True)
+class NativePausedEvidence:
+    """Trusted collector's exact native resource GET, not a pause POST acceptance.
+
+    The caller must retain and review the authentic transport capture. Hash/route
+    binding detects different bytes; it does not authenticate a fabricated capture.
+    This object performs no network operation and gives no new paid allowance.
+    """
+
+    scope: str
+    resource_id: str
+    method: str
+    url: str
+    started_at: float
+    received_at: float
+    http_status: int
+    document_json: str
+    document_sha256: str
+    provenance: str
+
+    def __post_init__(self):
+        if not _identity(self.scope) or not _identity(self.resource_id):
+            raise DailyAdmissionError("native paused GET needs original scope and resource")
+        expected = "https://sailbox-api.sailresearch.com/v1/sailboxes/" + quote(self.resource_id, safe="")
+        if (self.method != "GET" or self.url != expected or isinstance(self.http_status, bool)
+                or self.http_status != 200 or _time(self.started_at) > _time(self.received_at)):
+            raise DailyAdmissionError("completed pause needs an exact successful native resource GET")
+        if (not isinstance(self.document_json, str) or len(self.document_json.encode("utf-8")) > 1024 * 1024
+                or not isinstance(self.document_sha256, str)
+                or hashlib.sha256(self.document_json.encode("utf-8")).hexdigest() != self.document_sha256):
+            raise DailyAdmissionError("native paused GET bytes differ from retained capture")
+        document = _json(self.document_json)
+        if (not isinstance(document, dict) or document.get("sailbox_id") != self.resource_id
+                or document.get("status") != "paused"):
+            raise DailyAdmissionError("native GET does not prove the original resource is paused")
+        _native_dimensions(document)
+        if not isinstance(document.get("volume_mounts"), list):
+            raise DailyAdmissionError("native paused GET omits mounted storage inventory")
+        _provenance(self.provenance)
+
+
+@dataclass(frozen=True)
+class ResumeFenceEvidence:
+    """Reviewed enforcement across every explicit-resume writer and pending request.
+
+    A local JSON declaration is insufficient production evidence. The caller must
+    review actual writer privileges/controls and drain old resume requests. A finite
+    review interval never promises that the native pause cannot be resumed forever.
+    """
+
+    scope: str
+    resource_id: str
+    fence_id: str
+    writer_ids: tuple[str, ...]
+    complete: bool
+    exclusive_writer: bool
+    pending_resume_requests: tuple[str, ...]
+    effective_at: float
+    valid_until: float
+    enforcement_sha256: str
+    provenance: str
+
+    def __post_init__(self):
+        if any(not _identity(v) for v in (self.scope, self.resource_id, self.fence_id)):
+            raise DailyAdmissionError("resume fence needs original scope, resource and enforcement identity")
+        for name in ("writer_ids", "pending_resume_requests"):
+            values = getattr(self, name)
+            if (not isinstance(values, tuple) or any(not _identity(v) for v in values)
+                    or len(set(values)) != len(values)):
+                raise DailyAdmissionError("resume fence writer/request identities must be unique tuples")
+        if (not self.writer_ids or self.complete is not True or self.exclusive_writer is not True
+                or self.pending_resume_requests or _time(self.effective_at) >= _time(self.valid_until)
+                or not isinstance(self.enforcement_sha256, str)
+                or re.fullmatch(r"[0-9a-f]{64}", self.enforcement_sha256) is None):
+            raise DailyAdmissionError("resume writers or in-flight requests are not demonstrably fenced")
+        _provenance(self.provenance)
+
+
+def _native_dimensions(document):
+    values = [document.get(name) for name in ("vcpu_count", "memory_mib", "state_disk_size_gib")]
+    if any(isinstance(v, bool) or not isinstance(v, int) or v <= 0 for v in values):
+        raise DailyAdmissionError("native paused GET has unknown resource ceilings")
+    return values[0], Decimal(values[1]) / 1024, Decimal(values[2])
+
+
+def _interval_nanos(bound, tariff, start, end):
+    """Capacity upper bound, not sampled usage or an exact provider shutdown promise."""
+    seconds = max(Fraction(0), Fraction(str(_time(end))) - Fraction(str(_time(start))))
+    total = 0
+    for capacity, rate in ((bound.vcpu, tariff.vcpu_usd_hour), (bound.memory_gib, tariff.memory_gib_usd_hour),
+                           (bound.disk_gib, tariff.disk_gib_usd_hour)):
+        exact = seconds * Fraction(_decimal(capacity)) * Fraction(_decimal(rate)) * NANOS / 3600
+        total += (exact.numerator + exact.denominator - 1) // exact.denominator
+    return total
+
+
+def _higher_rates(tariff, earlier):
+    # Do not let a later cheaper observation erase an unresolved earlier bill.
+    return TariffEvidence(**{**asdict(tariff), **{
+        name: format(max(_decimal(getattr(tariff, name)), _decimal(getattr(earlier, name))), "f")
+        for name in ("vcpu_usd_hour", "memory_gib_usd_hour", "disk_gib_usd_hour", "volume_gib_usd_hour")}})
+
+
+def _pause_fence(value):
+    if not isinstance(value, dict):
+        raise DailyAdmissionError("unreadable original resume fence")
+    if any(not isinstance(value.get(name), (list, tuple)) for name in ("writer_ids", "pending_resume_requests")):
+        raise DailyAdmissionError("unreadable original resume writer/request inventory")
+    # Immutable JSON history represents tuple identities as arrays.
+    value = {**value, "writer_ids": tuple(value.get("writer_ids", ())),
+             "pending_resume_requests": tuple(value.get("pending_resume_requests", ()))}
+    return ResumeFenceEvidence(**value)
+
+
 def _pairs(items):
     result = {}
     for key, value in items:
@@ -255,7 +375,8 @@ def _apply(state, receipt):
         raise DailyAdmissionError("daily obligation identity is required")
     resources, inference = state["resources"], state["inference"]
     if action in ("resource_reserved", "inference_reserved"):
-        if key in resources or key in inference:
+        if key in resources or key in inference or any(
+                key in r.get("native_pause", {}).get("resumes", {}) for r in resources.values()):
             raise DailyAdmissionError("daily obligation identity was already used")
         if action == "resource_reserved":
             _fields(receipt, "action at key bound tariff")
@@ -308,6 +429,80 @@ def _apply(state, receipt):
             raise DailyAdmissionError("sleep, expiry, and transitional states do not terminate obligations")
         _provenance(receipt["provenance"])
         row["terminal_at"] = observed
+    elif action == "native_paused":
+        _fields(receipt, "action at key observation fence tariff retained_usage_nanos usage_provenance")
+        row = resources.get(key)
+        observation, fence = NativePausedEvidence(**receipt["observation"]), _pause_fence(receipt["fence"])
+        tariff, retained = TariffEvidence(**receipt["tariff"]), receipt["retained_usage_nanos"]
+        if (row is None or row["canceled"] or row["dispatch_at"] is None or row["resource_id"] is None
+                or row["terminal_at"] is not None or row["bound"]["kind"] == "volume"
+                or observation.scope != state["scope"] or fence.scope != state["scope"]
+                or observation.resource_id != row["resource_id"] or fence.resource_id != row["resource_id"]
+                or not row["created_at"] <= observation.started_at <= observation.received_at <= at
+                or fence.effective_at > observation.started_at or fence.valid_until <= at
+                or tariff.scope != state["scope"]):
+            raise DailyAdmissionError("native paused receipt or resume fence escaped the original admission")
+        bound, document = ResourceBound(**row["bound"]), _json(observation.document_json)
+        actual = _native_dimensions(document)
+        if any(size > _decimal(getattr(bound, name)) for size, name in
+               zip(actual, ("vcpu", "memory_gib", "disk_gib"))):
+            raise DailyAdmissionError("native paused resource exceeds original admitted ceilings")
+        volumes = {r["resource_id"] for r in resources.values()
+                   if r["bound"]["kind"] == "volume" and r["resource_id"] and r["terminal_at"] is None}
+        if any(not isinstance(v, dict) or v.get("volume_id") not in volumes for v in document["volume_mounts"]):
+            raise DailyAdmissionError("native paused resource has unaccounted persistent storage")
+        previous = row.get("native_pause")
+        if previous and previous["resume"] and previous["resume"]["dispatch_at"] is None:
+            raise DailyAdmissionError("cancel the original unsent resume reservation before renewing pause evidence")
+        if previous and (observation.started_at < previous["observation"]["received_at"]
+                         or observation.received_at <= previous["observation"]["received_at"]):
+            raise DailyAdmissionError("native paused readback precedes its original completed observation")
+        start = row["dispatch_at"] if previous is None else (
+            previous["resume"]["at"] if previous["resume"] else previous["fence"]["valid_until"])
+        if observation.received_at > start and not tariff.valid_from <= start < observation.received_at <= tariff.valid_until:
+            raise DailyAdmissionError("retained paused usage has an unpriced running interval")
+        earlier = TariffEvidence(**(previous["resume"]["tariff"] if previous and previous["resume"]
+                                   else previous["tariff"] if previous else row["tariff"]))
+        priced = _higher_rates(tariff, earlier)
+        minimum = (previous["retained_usage_nanos"] if previous else 0) + _interval_nanos(
+            bound, priced, start, observation.received_at)
+        if isinstance(retained, bool) or not isinstance(retained, int) or retained < minimum:
+            raise DailyAdmissionError("paused accounting would erase accrued or lagging usage")
+        _provenance(receipt["usage_provenance"])
+        row["native_pause"] = {"observation": asdict(observation), "fence": asdict(fence),
+                               "tariff": asdict(tariff), "retained_usage_nanos": retained,
+                               "usage_provenance": receipt["usage_provenance"], "resume": None,
+                               "resumes": previous["resumes"] if previous else {}}
+    elif action == "resume_reserved":
+        _fields(receipt, "action at key resume_key tariff provenance")
+        row, resume_key = resources.get(key), receipt["resume_key"]
+        tariff = TariffEvidence(**receipt["tariff"])
+        if (row is None or row["terminal_at"] is not None or not row.get("native_pause")
+                or row["native_pause"]["resume"] is not None or not _identity(resume_key)
+                or resume_key in resources or resume_key in inference
+                or any(resume_key in r.get("native_pause", {}).get("resumes", {}) for r in resources.values())):
+            raise DailyAdmissionError("resume needs an unused identity on the original paused resource")
+        if tariff.scope != state["scope"] or not tariff.covers_day(int(at // DAY_SECONDS)):
+            raise DailyAdmissionError("resume has no original-scope day tariff")
+        _provenance(receipt["provenance"])
+        resume = {"key": resume_key, "at": at, "dispatch_at": None, "canceled": False, "tariff": asdict(tariff)}
+        row["native_pause"]["resume"] = resume
+        row["native_pause"]["resumes"][resume_key] = dict(resume)
+    elif action in ("resume_dispatched", "resume_canceled_unsent"):
+        _fields(receipt, "action at key resume_key")
+        row = resources.get(key)
+        pause = row.get("native_pause") if row else None
+        resume = pause["resume"] if pause else None
+        if (resume is None or resume["key"] != receipt["resume_key"] or resume["canceled"]
+                or resume["dispatch_at"] is not None):
+            raise DailyAdmissionError("resume has no matching unused original dispatch slot")
+        if action == "resume_dispatched":
+            resume["dispatch_at"] = at
+            pause["resumes"][resume["key"]] = dict(resume)
+        else:
+            resume["canceled"] = True
+            pause["resumes"][resume["key"]] = dict(resume)
+            pause["resume"] = None
     elif action == "inference_settled":
         _fields(receipt, "action at key accrued_day actual_nanos provenance")
         row, day, actual = inference.get(key), receipt["accrued_day"], receipt["actual_nanos"]
@@ -377,6 +572,10 @@ class DailyBudget:
             raise DailyAdmissionError("inventory contains an uncovered resource or inference obligation")
         if not self.tariff.covers_day(int(now // DAY_SECONDS)):
             raise DailyAdmissionError("tariff evidence does not cover this full UTC day")
+        if any(r.get("native_pause") and r["terminal_at"] is None
+               and r["native_pause"]["resume"] is None
+               and now >= r["native_pause"]["fence"]["valid_until"] for r in state["resources"].values()):
+            raise DailyAdmissionError("paused resume-writer fence expired; reconcile before further paid work")
 
     def _write(self, state, receipt):
         state = _apply(state, receipt)
@@ -410,7 +609,32 @@ class DailyBudget:
             if row["canceled"] or int(row["at"] // DAY_SECONDS) > day:
                 continue
             bound = ResourceBound(**row["bound"])
-            if row["terminal_at"] is None or day <= int(row["terminal_at"] // DAY_SECONDS):
+            pause = row.get("native_pause")
+            if pause:
+                # These unresolved native usage charges carry into every possible
+                # charge day; a pause is not an invoice or debt cancellation.
+                resource_nanos += pause["retained_usage_nanos"]
+                resume = pause["resume"]
+                if resume:
+                    priced = _higher_rates(self.tariff, TariffEvidence(**resume["tariff"]))
+                    if row["terminal_at"] is None:
+                        # Admit the full current day before an explicit-resume POST.
+                        resource_nanos += bound.daily_nanos(self.tariff)
+                        resource_nanos += _interval_nanos(bound, priced, resume["at"], day * DAY_SECONDS)
+                    else:
+                        # A terminal readback ends future compute but does not
+                        # settle any usage accrued after the admitted resume.
+                        resource_nanos += _interval_nanos(bound, priced, resume["at"], row["terminal_at"])
+                elif row["terminal_at"] is None:
+                    # Price possible running time after finite enforcement
+                    # expiry now, rather than discovering the liability later.
+                    end = max(_time(self.store.clock()), (day + 1) * DAY_SECONDS)
+                    priced = _higher_rates(self.tariff, TariffEvidence(**pause["tariff"]))
+                    resource_nanos += _interval_nanos(bound, priced, pause["fence"]["valid_until"], end)
+                else:
+                    priced = _higher_rates(self.tariff, TariffEvidence(**pause["tariff"]))
+                    resource_nanos += _interval_nanos(bound, priced, pause["fence"]["valid_until"], row["terminal_at"])
+            elif row["terminal_at"] is None or day <= int(row["terminal_at"] // DAY_SECONDS):
                 resource_nanos += bound.daily_nanos(self.tariff)
             # An unconfirmed POST may create later. Its one-time fee has an unknown day.
             if row["created_at"] is None or day == int(row["created_at"] // DAY_SECONDS):
@@ -503,6 +727,55 @@ class DailyBudget:
     def terminal_observed(self, key: str, resource_id: str, *, observed_at: float, status: str, provenance: str):
         self._transition({"action": "terminal_observed", "key": key, "resource_id": resource_id,
                           "observed_at": observed_at, "status": status, "provenance": provenance})
+
+    def paused_observed(self, key: str, *, observation: NativePausedEvidence, fence: ResumeFenceEvidence,
+                        retained_native_usage_upper_usd, usage_provenance: str):
+        """Record a genuine paused GET and reviewed fence, preserving unsettled usage.
+
+        The retained amount is the whole original resource's unsettled usage upper
+        bound, including any larger sampling/billing uncertainty. It must cover the
+        entire possible running interval and can never decrease on a later pause.
+        Reconciliation does not dispatch, settle an invoice, or open a new scope.
+        """
+        if not isinstance(observation, NativePausedEvidence) or not isinstance(fence, ResumeFenceEvidence):
+            raise DailyAdmissionError("native paused GET and explicit resume enforcement evidence are required")
+        receipt = {"action": "native_paused", "key": key, "observation": asdict(observation),
+                   "fence": asdict(fence), "tariff": asdict(self.tariff),
+                   "retained_usage_nanos": _nanos(retained_native_usage_upper_usd),
+                   "usage_provenance": usage_provenance}
+        breached = False
+        with self.store.atomic():
+            state, now = self._load(), _time(self.store.clock())
+            if now < state["last_at"]:
+                raise DailyAdmissionError("daily reconciliation clock rolled back")
+            row = state["resources"].get(key)
+            if row is not None and observation.scope == state["scope"] and observation.resource_id == row["resource_id"]:
+                document, bound = _json(observation.document_json), ResourceBound(**row["bound"])
+                volumes = {r["resource_id"] for r in state["resources"].values()
+                           if r["bound"]["kind"] == "volume" and r["resource_id"] and r["terminal_at"] is None}
+                breached = any(size > _decimal(getattr(bound, name)) for size, name in
+                               zip(_native_dimensions(document), ("vcpu", "memory_gib", "disk_gib"))) or any(
+                    not isinstance(v, dict) or v.get("volume_id") not in volumes for v in document["volume_mounts"])
+            if breached:
+                self._write(state, {"action": "scope_breached", "at": now, "key": key,
+                                    "reason": "native paused GET contradicts original resource/storage obligations",
+                                    "provenance": observation.provenance})
+            else:
+                self._write(state, {**receipt, "at": now})
+        if breached:
+            raise DailyAdmissionError("native resource or storage exceeds original obligations; paid scope closed")
+
+    def reserve_resume(self, key: str, resume_key: str, *, provenance: str):
+        """Reserve on the same original resource before allowing an explicit resume."""
+        self._admit({"action": "resume_reserved", "key": key, "resume_key": resume_key,
+                     "tariff": asdict(self.tariff), "provenance": provenance})
+
+    def dispatch_resume(self, key: str, resume_key: str):
+        """Consume exactly one resume slot before POST; a lost reply retains the hold."""
+        self._transition({"action": "resume_dispatched", "key": key, "resume_key": resume_key}, admission=True)
+
+    def cancel_resume_unsent(self, key: str, resume_key: str):
+        self._transition({"action": "resume_canceled_unsent", "key": key, "resume_key": resume_key})
 
     def settle_inference(self, key: str, *, accrued_day: str, actual_usd, provenance: str):
         day = _day(accrued_day)
