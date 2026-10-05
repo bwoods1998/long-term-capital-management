@@ -29,7 +29,7 @@ from decimal import Decimal, InvalidOperation, ROUND_CEILING
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from .daily_compute import DailyBudget, ResourceBound, NANOS
+from .daily_compute import DailyAdmissionError, DailyBudget, ResourceBound, NANOS
 
 EVENT_KIND = "swarm.research_broker"
 STATE_KEY = "research_broker_v1"
@@ -265,6 +265,8 @@ class ModelCapability:
     policy: ModelPolicy
     count_tokens: Callable[[Mapping[str, Any]], int]
     send: Callable[[Mapping[str, Any]], ModelReply]
+    # Host-only passive recovery of an already dispatched original request.
+    recover: Callable[[Mapping[str, Any]], ModelReply] | None = None
 
 
 class ResearchBroker:
@@ -276,10 +278,11 @@ class ResearchBroker:
                  and budget.tariff.scope == policy.scope, "one host-private store and shared dollar authority are required")
         _require(callable(driver_factory) and callable(verify_isolation) and isinstance(model_adapters, Mapping), "explicit reviewed host adapters are required")
         _require(all(_identity(k) and isinstance(v, ModelCapability) and callable(v.count_tokens) and callable(v.send)
-                     and isinstance(v.policy, ModelPolicy) for k, v in model_adapters.items()), "invalid host model capabilities")
+                     and isinstance(v.policy, ModelPolicy) and (v.recover is None or callable(v.recover))
+                     for k, v in model_adapters.items()), "invalid host model capabilities")
         self.store, self.budget, self.policy = store, budget, copy.deepcopy(policy)
         self._provider, self._driver_factory = provider, driver_factory
-        self._models = {k: ModelCapability(copy.deepcopy(v.policy), v.count_tokens, v.send) for k, v in model_adapters.items()}
+        self._models = {k: ModelCapability(copy.deepcopy(v.policy), v.count_tokens, v.send, v.recover) for k, v in model_adapters.items()}
         self._verify = verify_isolation
         self._peer = threading.local()
         self._lock = threading.RLock()
@@ -757,7 +760,93 @@ class ResearchBroker:
                 self._record("request_finished", key=key, result=reference)
             return result
 
-    def evaluate(self, profile, items, *, key, tools=None, tool_choice="auto", effort="low", max_output=None, cache_key=None):
+    def _recover_model(self, profile, body, capability):
+        """Only an exact original request can use a trusted passive recovery callback.
+
+        This does not count/reprice inputs, refresh paid admission, reserve, dispatch
+        or reopen the scope. The callback must retrieve original accepted evidence,
+        never send another model request. Legacy capabilities have no callback.
+        """
+        key = body["request_key"]
+        _require(_identity(key), "invalid research request identity")
+        with self.store.atomic():
+            state = self._load()
+            row = state["requests"].get(key) if state else None
+            if row is None:
+                return None
+            _require(row["kind"] == "model" and row["fingerprint"] == _digest(body),
+                     "request key was reused for different work")
+            if row["result"] is not None:
+                result = self._result(row["result"])
+                _require(result.get("profile") == profile, "original model profile changed")
+                return self._model_cost_view(key, result)
+            _require(callable(capability.recover), "previous request outcome is unresolved; no redispatch")
+            self._model_cost_view(key, {"cost_usd": None})  # Original dispatched, uncanceled hold must exist.
+        self._scope()  # Authenticate passive retrieval without opening paid admission.
+        reply = capability.recover(body)
+        return self._finish_model(profile, body, reply)
+
+    def _finish_model(self, profile, body, reply):
+        key = body["request_key"]
+        with self.store.atomic():
+            state = self._load()
+            row = state["requests"].get(key) if state else None
+            _require(row is not None and row["kind"] == "model" and row["fingerprint"] == _digest(body),
+                     "terminal model result lost its original request")
+            if row["result"] is not None:
+                return self._model_cost_view(key, self._result(row["result"]))
+            self._model_cost_view(key, {"cost_usd": None})
+        _require(isinstance(reply, ModelReply) and isinstance(reply.result, dict)
+                 and reply.result.get("status") in ("completed", "succeeded", "incomplete", "failed", "cancelled"), "model response is not known terminal")
+        public = {field: reply.result[field] for field in ("id", "status", "output", "usage", "model", "incomplete_details",
+                                                        "created_at", "completed_at", "object") if field in reply.result}
+        result = {**public, "profile": profile, "request_key": key, "cost_usd": None, "accrued_day": None,
+                  "cost_status": "unknown"}
+        daily_key = "model-" + hashlib.sha256((self.policy.scope + ":" + key).encode()).hexdigest()
+        settlement_error = None
+        with self.store.atomic():
+            # Two passive pollers may finish together; only the first immutable reply wins.
+            state = self._load(); row = state["requests"][key]
+            if row["result"] is not None:
+                return self._model_cost_view(key, self._result(row["result"]))
+            if reply.actual_usd is not None:
+                _money(reply.actual_usd)
+                _date(reply.accrued_day)
+                _require(isinstance(reply.provenance, str) and bool(reply.provenance.strip()), "authoritative model cost provenance is required")
+                amount = _money(reply.actual_usd)
+                expected = int((amount * NANOS).to_integral_value(rounding=ROUND_CEILING))
+                hold = self.budget._load()["inference"][daily_key]
+                if hold["receipt"] is None:
+                    try:
+                        self.budget.settle_inference(daily_key, actual_usd=reply.actual_usd,
+                                                     accrued_day=reply.accrued_day, provenance=reply.provenance)
+                    except DailyAdmissionError as exc:
+                        # Commit an authoritative over-bound breach before raising;
+                        # an outer rollback must not reopen paid work.
+                        if expected <= hold["max_nanos"] or not self.budget._load()["breached"]:
+                            raise
+                        settlement_error = exc
+                else:
+                    day = (dt.date.fromisoformat(reply.accrued_day) - dt.date(1970, 1, 1)).days
+                    _require(hold["receipt"]["actual_nanos"] == expected and hold["receipt"]["accrued_day"] == day,
+                             "terminal model invoice contradicts its original settlement")
+                result.update(cost_usd=format(amount, "f"), accrued_day=reply.accrued_day,
+                              cost_status="vendor_actual")
+            if settlement_error is None:
+                result = self._model_cost_view(key, result)
+                reference = self._write_reply(result)
+                self._record("request_finished", key=key, result=reference)
+        if settlement_error is not None:
+            raise settlement_error
+        return result
+
+    def recover_evaluation(self, profile, items, *, key, tools=None, tool_choice="auto", effort="low", max_output=None, cache_key=None):
+        """Retrieve only an original accepted model request; never admit new work."""
+        return self.evaluate(profile, items, key=key, tools=tools, tool_choice=tool_choice,
+                             effort=effort, max_output=max_output, cache_key=cache_key, _recovery_only=True)
+
+    def evaluate(self, profile, items, *, key, tools=None, tool_choice="auto", effort="low", max_output=None, cache_key=None,
+                 _recovery_only=False):
         _require(isinstance(profile, str) and profile in self._models and isinstance(items, (list, tuple)) and bool(items), "unapproved model profile or input")
         capability = self._models[profile]
         policy = capability.policy
@@ -796,9 +885,10 @@ class ResearchBroker:
                 "timeout_seconds": policy.timeout_seconds}
         _json(body)
         fingerprint = _digest(body)
-        prior = self._prior_request(key, "model", fingerprint)
+        prior = self._recover_model(profile, body, capability)
         if prior is not None:
             return prior
+        _require(not _recovery_only, "original model request is absent; recovery cannot dispatch")
         tokens = capability.count_tokens(body)
         _require(type(tokens) is int and 0 < tokens <= policy.max_input_tokens, "full model payload exceeds its host input ceiling")
         ceiling = (_money(policy.input_usd_million) * tokens + _money(policy.output_usd_million) * output) / Decimal(1000000) + _money(policy.fixed_usd)
@@ -818,24 +908,7 @@ class ResearchBroker:
             self.budget.dispatch(daily_key)
             self._record("request_started", key=key, kind="model", fingerprint=fingerprint)
         reply = capability.send(body)  # no automatic retry, fallback or model-supplied price/cost authority
-        _require(isinstance(reply, ModelReply) and isinstance(reply.result, dict)
-                 and reply.result.get("status") in ("completed", "succeeded", "incomplete", "failed", "cancelled"), "model response is not known terminal")
-        public = {field: reply.result[field] for field in ("id", "status", "output", "usage", "model", "incomplete_details",
-                                                        "created_at", "completed_at", "object") if field in reply.result}
-        result = {**public, "profile": profile, "request_key": key, "cost_usd": None, "accrued_day": None,
-                  "cost_status": "unknown"}
-        if reply.actual_usd is not None:
-            _money(reply.actual_usd)
-            _date(reply.accrued_day)
-            _require(isinstance(reply.provenance, str) and bool(reply.provenance.strip()), "authoritative model cost provenance is required")
-            self.budget.settle_inference(daily_key, actual_usd=reply.actual_usd, accrued_day=reply.accrued_day, provenance=reply.provenance)
-            result.update(cost_usd=format(_money(reply.actual_usd), "f"), accrued_day=reply.accrued_day,
-                          cost_status="vendor_actual")
-        result = self._model_cost_view(key, result)
-        reference = self._write_reply(result)
-        with self.store.atomic():
-            self._record("request_finished", key=key, result=reference)
-        return result
+        return self._finish_model(profile, body, reply)
 
     def _stop(self, operation):
         self._scope()
@@ -883,10 +956,10 @@ class ResearchBroker:
             if operation == "run_gym":
                 _require(set(payload) == {"job", "key"}, "invalid Gym capability fields")
                 return self.run_gym(**payload)
-            if operation == "evaluate":
+            if operation in ("evaluate", "recover_evaluation"):
                 _require({"profile", "items", "key"} <= set(payload) <= {"profile", "items", "key", "tools", "tool_choice", "effort", "max_output", "cache_key"},
                          "invalid model capability fields")
-                return self.evaluate(**payload)
+                return getattr(self, operation)(**payload)
             raise ResearchCapabilityError("unknown capability operation")
         except _ReplyIntegrityError:
             self._closed_reply("immutable terminal reply is missing or changed")

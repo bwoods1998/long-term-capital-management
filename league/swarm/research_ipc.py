@@ -22,7 +22,7 @@ VERSION = 1
 REQUEST_LIMIT = 4 * 1024 * 1024
 RESPONSE_LIMIT = 32 * 1024 * 1024
 OPERATIONS = frozenset(("open_runtime", "summary", "evaluate", "run_gym",
-                        "recover_gym", "sleep_gym", "stop_gym", "cached_result"))
+                        "recover_gym", "sleep_gym", "stop_gym", "cached_result", "recover_evaluation"))
 
 
 class ResearchIPCError(RuntimeError):
@@ -192,6 +192,9 @@ class BrokerClient:
 
     def evaluate(self, profile, items, *, key, **options):
         return self.request("evaluate", {"profile": profile, "items": list(items), "key": key, **options})
+
+    def recover_evaluation(self, profile, items, *, key, **options):
+        return self.request("recover_evaluation", {"profile": profile, "items": list(items), "key": key, **options})
 
     def run_gym(self, job, *, key):
         return self.request("run_gym", {"job": dict(job), "key": key})

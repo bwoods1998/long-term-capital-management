@@ -143,8 +143,12 @@ class _Bridge:
             _require(type(row["max_request_bytes"]) is int and 0 < row["max_request_bytes"] <= 4*1024*1024
                      and type(row["billable_input_ceiling"]) is int
                      and row["billable_input_ceiling"] == policy.max_input_tokens
-                     and row["completion_window"] == "asap",
-                     "whole-input billable ceiling and foreground asap route required")
+                     and row["completion_window"] in ("asap", "balanced"),
+                     "whole-input billable ceiling and reviewed asap/balanced route required")
+            from ltcm.provider import PROFILES
+            if name in PROFILES:
+                _require((policy.model, row["completion_window"]) == PROFILES[name][:2],
+                         "stock Sail profile/model/completion window changed")
             self.agreement(row["agreement"], model=True)
             self.model_policies[name] = policy
         self.policy_digest = _digest({"research": asdict(self.policy),
@@ -570,16 +574,93 @@ class _ExactGymDriver(GymDriver):
 
 
 class _SailModel:
-    def __init__(self, bridge, profile, transport):
+    def __init__(self, bridge, profile, transport, *, monotonic=time.monotonic, sleep=time.sleep):
         self.bridge, self.profile, self.transport = bridge, profile, transport
         self.row = bridge.profile_receipt["profiles"][profile]
         self.policy = bridge.model_policies[profile]
+        self.monotonic, self.sleep = monotonic, sleep
 
     def count(self, body):
         _require(len(_json(body).encode("utf-8")) <= self.row["max_request_bytes"], "Sail full input exceeds reviewed byte ceiling")
-        # Reserve the entire independently reviewed billable input maximum, including
-        # formatting/tools/history. No bytes-per-token heuristic is a monetary bound.
         return self.row["billable_input_ceiling"]
+
+    def _wire(self, body):
+        window = self.row["completion_window"]
+        wire = {"model": self.policy.model, "input": body["input"], "tools": body["tools"],
+                "tool_choice": body["tool_choice"], "reasoning": {"effort": body["reasoning_effort"]},
+                "max_output_tokens": body["max_output_tokens"], "background": window == "balanced", "stream": False,
+                "truncation": "disabled", "metadata": {"completion_window": window}}
+        if body["cache_key"] is not None:
+            wire["prompt_cache_key"] = body["cache_key"]
+        return wire
+
+    def _original(self, body, *, sending):
+        b = self.bridge; key = body["request_key"]
+        store = b.store()
+        try:
+            state = b.state(store); slot = state["requests"].get(key)
+            _require(slot is not None and slot["kind"] == "model" and slot["fingerprint"] == _digest(body)
+                     and slot["result"] is None and (not sending or not state["closed"]),
+                     "model lacks the immutable original broker request")
+            # Passive recovery uses the original journal and hold even after expiry/withdrawal.
+            tariff, inventory = b.billing() if sending else (b.config.tariff, b.config.inventory)
+            budget = DailyBudget(store, tariff, inventory)
+            if sending:
+                _require(budget.summary()["within_cap"], "model lacks shared admitted budget")
+            daily_key = "model-"+hashlib.sha256((b.policy.scope+":"+key).encode()).hexdigest()
+            held = budget._load()["inference"].get(daily_key)
+            _require(held is not None and held["dispatch_at"] is not None and not held["canceled"]
+                     and (not sending or held["receipt"] is None), "model lacks original dispatched reservation")
+        finally:
+            store.close()
+        wire = self._wire(body)
+        intent = {"body_sha256": _digest(body), "profile": self.profile,
+                  "completion_window": self.row["completion_window"], "wire_sha256": _digest(wire)}
+        return key, wire, intent
+
+    def _observe(self, key, reply, body, *, response_id=None):
+        b = self.bridge
+        if isinstance(reply, dict):
+            b.journal("observation", "model:"+key+":"+_digest(reply), reply)
+            if response_id is None and self.row["completion_window"] == "asap":
+                # Preserve the legacy one-shot raw reply, including refusals.
+                # Balanced pending observations use separate immutable receipts
+                # so they never occupy the eventual terminal-result slot.
+                b.journal("result", "model:"+key, reply)
+        seen = reply.get("id") if isinstance(reply, dict) else None
+        _require(isinstance(seen, str) and _RESPONSE.fullmatch(seen), "Sail response has no original accepted handle; keep hold")
+        if response_id is None:
+            # Acceptance precedes model/status validation: even an invalid answer can owe money.
+            b.journal("accepted", "model:"+key, {"response_id": seen, "model": reply.get("model"),
+                "status": reply.get("status"), "body_sha256": _digest(body), "profile": self.profile,
+                "completion_window": self.row["completion_window"], "wire_sha256": _digest(self._wire(body)),
+                "observation_sha256": _digest(reply)})
+        _require(response_id is None or seen == response_id, "Sail accepted response handle changed; keep original hold")
+        _require(reply.get("model") == self.policy.model and reply.get("status") in
+                 ("queued", "in_progress", "completed", "incomplete", "failed", "cancelled"),
+                 "Sail response model/status is mismatched; keep original hold")
+        return seen
+
+    def _finish(self, key, body, reply):
+        self.bridge.journal("result", "model:"+key, reply)
+        bill = self.bridge.terminal_bill(key, reply["id"], self.policy.model, _digest(body))
+        if bill is None:
+            return ModelReply(reply)
+        return ModelReply(reply, bill["actual_usd"], bill["accrued_day"], bill["provenance"])
+
+    def _poll(self, key, body, response_id, deadline):
+        # Local patience is not cancellation, an invoice or permission to release the hold.
+        # A final in-flight GET may take its already bounded transport timeout.
+        for _ in range(math.ceil(self.policy.timeout_seconds / 2) + 1):
+            _require(_time(self.monotonic()) < deadline, "Sail accepted response remains pending; original hold retained")
+            reply = self.transport("GET", "/v1/responses/"+response_id)
+            self._observe(key, reply, body, response_id=response_id)
+            if reply["status"] not in ("queued", "in_progress"):
+                return self._finish(key, body, reply)
+            remaining = deadline - _time(self.monotonic())
+            _require(remaining > 0, "Sail accepted response remains pending; original hold retained")
+            self.sleep(min(2, remaining))
+        raise ResearchCapabilityError("Sail accepted response remains pending; original hold retained")
 
     def send(self, body):
         b = self.bridge; b.fresh(); self.count(body)
@@ -588,45 +669,44 @@ class _SailModel:
         now = _time(b.clock())
         _require(self.policy.valid_from <= now and now+self.policy.timeout_seconds < self.policy.valid_until,
                  "Sail accepted-request price evidence is expired")
-        key = body["request_key"]
-        store = b.store()
-        try:
-            state = b.state(store); slot = state["requests"].get(key)
-            _require(not state["closed"] and slot is not None and slot["kind"] == "model"
-                     and slot["fingerprint"] == _digest(body) and slot["result"] is None,
-                     "model send lacks the immutable original broker request")
-            tariff, inventory = b.billing()
-            budget = DailyBudget(store, tariff, inventory)
-            _require(budget.summary()["within_cap"], "model lacks shared admitted budget")
-            daily_key = "model-"+hashlib.sha256((b.policy.scope+":"+key).encode()).hexdigest()
-            held = budget._load()["inference"].get(daily_key)
-            _require(held is not None and held["dispatch_at"] is not None and not held["canceled"] and held["receipt"] is None,
-                     "model lacks original shared-dollar dispatched reservation")
-        finally:
-            store.close()
-        b.intent("model:"+key, {"body_sha256": _digest(body), "profile": self.profile})
-        wire = {"model": self.policy.model, "input": body["input"], "tools": body["tools"],
-                "tool_choice": body["tool_choice"], "reasoning": {"effort": body["reasoning_effort"]},
-                "max_output_tokens": body["max_output_tokens"], "background": False, "stream": False,
-                "truncation": "disabled", "metadata": {"completion_window": "asap"}}
-        if body["cache_key"] is not None:
-            wire["prompt_cache_key"] = body["cache_key"]
+        key, wire, intent = self._original(body, sending=True)
+        b.intent("model:"+key, intent)
+        deadline = _time(self.monotonic()) + self.policy.timeout_seconds
         reply = self.transport("POST", "/v1/responses", wire,
-                               idempotency_key="ltcm-isolated-"+hashlib.sha256((b.policy.scope+":"+key).encode()).hexdigest())
-        if isinstance(reply, dict):
-            b.journal("result", "model:"+key, reply)  # Archive even mismatched/nonterminal provider evidence privately.
-        _require(isinstance(reply, dict) and reply.get("model") == self.policy.model
-                 and isinstance(reply.get("id"), str) and _RESPONSE.fullmatch(reply["id"])
-                 and reply.get("status") in ("completed", "incomplete", "failed", "cancelled"),
-                 "Sail response identity/model is mismatched or nonterminal; keep original hold")
-        bill = b.terminal_bill(key,reply["id"],self.policy.model,_digest(body))
-        if bill is None:
-            return ModelReply(reply)  # Token counts/current rate observations are not the actual invoice.
-        return ModelReply(reply, bill["actual_usd"], bill["accrued_day"], bill["provenance"])
+                 idempotency_key="ltcm-isolated-"+hashlib.sha256((b.policy.scope+":"+key).encode()).hexdigest())
+        response_id = self._observe(key, reply, body)
+        if reply["status"] not in ("queued", "in_progress"):
+            return self._finish(key, body, reply)
+        _require(self.row["completion_window"] == "balanced", "foreground ASAP response is nonterminal; keep original hold")
+        return self._poll(key, body, response_id, deadline)
+
+    def recover(self, body):
+        _require(self.row["completion_window"] == "balanced", "only reviewed balanced original handles are recoverable")
+        key, wire, intent = self._original(body, sending=False)
+        _require(self.bridge.journal("intent", "model:"+key) == intent, "original model profile/window/wire changed")
+        accepted = self.bridge.journal("accepted", "model:"+key)
+        _require(isinstance(accepted, dict) and set(accepted) == {"response_id", "model", "status", "observation_sha256", *intent}
+                 and all(accepted[field] == value for field,value in intent.items())
+                 and isinstance(accepted["response_id"], str) and _RESPONSE.fullmatch(accepted["response_id"])
+                 and accepted["model"] == self.policy.model and accepted["status"] in
+                 ("queued", "in_progress", "completed", "incomplete", "failed", "cancelled"),
+                 "original accepted response handle is absent or mismatched; no redispatch")
+        observed = self.bridge.journal("observation", "model:"+key+":"+str(accepted["observation_sha256"]))
+        _require(isinstance(accepted["observation_sha256"], str) and _SHA.fullmatch(accepted["observation_sha256"])
+                 and isinstance(observed, dict) and _digest(observed) == accepted["observation_sha256"]
+                 and all(observed.get(field) == accepted[field if field != "id" else "response_id"]
+                         for field in ("id", "model", "status")),
+                 "accepted handle differs from its original durable native observation")
+        reply = self.bridge.journal("result", "model:"+key)
+        if reply is not None:
+            self._observe(key, reply, body, response_id=accepted["response_id"])
+            return self._finish(key, body, reply)
+        return self._poll(key, body, accepted["response_id"], _time(self.monotonic())+self.policy.timeout_seconds)
 
 
 def build_sail_host_adapters(config: HostConfig, *, inputs: SailBridgeInputs, key_source: Callable[[], str],
-                             box_transport=None, inference_transport=None, clock=time.time, cleanup_only=False) -> HostAdapters:
+                             box_transport=None, inference_transport=None, clock=time.time, cleanup_only=False,
+                             poll_monotonic=time.monotonic, poll_sleep=time.sleep) -> HostAdapters:
     """Called only by an explicitly reviewed private operator factory, never at import.
 
     Supplied transports support offline fixtures. Production defaults are the existing
@@ -650,8 +730,9 @@ def build_sail_host_adapters(config: HostConfig, *, inputs: SailBridgeInputs, ke
                 def open(self, request, *, timeout):
                     return self.opener.open(request, timeout=min(timeout, self.maximum))
             transport = Transport(key_source=key_source, opener=BoundedOpener(policy.timeout_seconds))
-        adapter = _SailModel(bridge, name, transport)
-        models[name] = ModelCapability(policy, adapter.count, adapter.send)
+        adapter = _SailModel(bridge, name, transport, monotonic=poll_monotonic, sleep=poll_sleep)
+        models[name] = ModelCapability(policy, adapter.count, adapter.send,
+                                       adapter.recover if adapter.row["completion_window"] == "balanced" else None)
     def driver_factory(p, resource_id):
         _require(p is provider, "Gym provider capability changed")
         bridge.resource(resource_id)

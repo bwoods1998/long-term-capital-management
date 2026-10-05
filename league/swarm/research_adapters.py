@@ -274,9 +274,13 @@ class ResearchModelRouter:
                              "tool_choice": tool_choice})
             identity, sha, result, fresh = _claim(self.store, "model", key, payload)
             if result is None:
-                result = (self.broker.evaluate(profile, payload["items"], key=key, tools=payload["tools"],
-                                               effort=effort, max_output=max_output, cache_key=cache_key,
-                                               tool_choice=tool_choice) if fresh else _recover(self.broker, key, "model"))
+                recovery = getattr(self.broker, "recover_evaluation", None)
+                if not fresh and not callable(recovery):
+                    result = _recover(self.broker, key, "model")  # Legacy cache-only refusal.
+                else:
+                    call = self.broker.evaluate if fresh else recovery
+                    result = call(profile, payload["items"], key=key, tools=payload["tools"], effort=effort,
+                                  max_output=max_output, cache_key=cache_key, tool_choice=tool_choice)
             if not isinstance(result, dict) or result.get("profile") != profile or result.get("request_key") != key:
                 raise ValueError("model receipt does not match its scoped request")
             if result.get("status") not in ("completed", "succeeded", "incomplete", "failed", "cancelled"):
