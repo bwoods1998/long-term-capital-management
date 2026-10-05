@@ -286,6 +286,94 @@ class ResumeFenceEvidence:
         _provenance(self.provenance)
 
 
+@dataclass(frozen=True)
+class NativeUsageSettlementEvidence:
+    """Reviewed completed-usage allocation, not a provider API response schema.
+
+    The host must retain the authentic completed source document and verify this
+    complete resource/interval allocation against it. Hashes bind those reviewed
+    bytes; a local projection or sampled spend does not authenticate finality.
+    A native finalized-spend statement may support completed compute when its
+    original resource and interval are fully reconciled; it is not an all-in tax
+    invoice. Creation fees, volumes and other resources stay outside this line.
+    """
+
+    document_json: str
+    document_sha256: str
+    source_document: str
+    provenance: str
+
+    def __post_init__(self):
+        if (not isinstance(self.document_json, str) or len(self.document_json.encode("utf-8")) > 1024 * 1024
+                or hashlib.sha256(self.document_json.encode("utf-8")).hexdigest() != self.document_sha256):
+            raise DailyAdmissionError("final native allocation differs from retained reviewed bytes")
+        value = _json(self.document_json)
+        _fields(value, "schema kind scope resource_id invoice_id source_document_sha256 interval_start interval_end "
+                "final complete includes_creation_fees includes_volume_storage charges")
+        if (type(value["schema"]) is not int or value["schema"] != 1
+                or value["kind"] != "native_compute_usage_final_allocation"
+                or any(not _identity(value[name]) for name in ("scope", "resource_id", "invoice_id"))
+                or not isinstance(value["source_document_sha256"], str)
+                or re.fullmatch(r"[0-9a-f]{64}", value["source_document_sha256"]) is None
+                or value["final"] is not True or value["complete"] is not True
+                or value["includes_creation_fees"] is not False or value["includes_volume_storage"] is not False
+                or _time(value["interval_start"]) >= _time(value["interval_end"])):
+            raise DailyAdmissionError("complete final original-resource compute allocation is required")
+        if (not isinstance(self.source_document, str) or not self.source_document
+                or len(self.source_document.encode("utf-8")) > 1024 * 1024
+                or hashlib.sha256(self.source_document.encode("utf-8")).hexdigest() != value["source_document_sha256"]):
+            raise DailyAdmissionError("native allocation differs from retained authentic source-document bytes")
+        charges = value["charges"]
+        if not isinstance(charges, list) or not charges or len(charges) > 36600:
+            raise DailyAdmissionError("final native allocation needs explicit accrued UTC-day costs")
+        days = set()
+        for charge in charges:
+            _fields(charge, "utc_day actual_usd")
+            day = _day(charge["utc_day"])
+            if (day in days or not isinstance(charge["actual_usd"], str)
+                    or (day + 1) * DAY_SECONDS <= value["interval_start"]
+                    or day * DAY_SECONDS >= value["interval_end"]):
+                raise DailyAdmissionError("native allocation has duplicated or out-of-interval accrual days")
+            _nanos(charge["actual_usd"])
+            days.add(day)
+        first = int(value["interval_start"] // DAY_SECONDS)
+        last = (Fraction(str(value["interval_end"])) / DAY_SECONDS).__ceil__()
+        if last - first > 36600 or days != set(range(first, last)):
+            raise DailyAdmissionError("final native allocation omits an accrued UTC day, including explicit zero days")
+        _provenance(self.provenance)
+
+
+def _native_usage_prefix(state, key, evidence, tariff):
+    """Bind final complete prefix and compute its still-unsettled original upper."""
+    row = state["resources"].get(key)
+    value = _json(evidence.document_json)
+    pause = row.get("native_pause") if row else None
+    if (pause is None or value["scope"] != state["scope"] or value["resource_id"] != row["resource_id"]
+            or tariff.scope != state["scope"]):
+        raise DailyAdmissionError("final native usage escaped the original admitted resource and scope")
+    settled = row.get("native_usage")
+    start = settled["settled_through"] if settled else row["dispatch_at"]
+    end = row["terminal_at"] if row["terminal_at"] is not None else pause["observation"]["received_at"]
+    if value["interval_start"] != start or value["interval_end"] != end:
+        raise DailyAdmissionError("final native usage must cover exactly the next complete closed prefix")
+    if settled and any(item["invoice_id"] == value["invoice_id"] for item in settled["settlements"]):
+        raise DailyAdmissionError("final native invoice identity was already consumed for this resource")
+    upper = pause["retained_usage_nanos"]
+    if row["terminal_at"] is not None:
+        resume = pause["resume"]
+        possible_start = resume["at"] if resume else pause["fence"]["valid_until"]
+        if end > possible_start:
+            if not tariff.valid_from <= possible_start < end <= tariff.valid_until:
+                raise DailyAdmissionError("terminal native usage has an unpriced original interval")
+            earlier = TariffEvidence(**(resume["tariff"] if resume else pause["tariff"]))
+            upper += _interval_nanos(ResourceBound(**row["bound"]), _higher_rates(tariff, earlier), possible_start, end)
+    retired = settled["retired_upper_nanos"] if settled else 0
+    if upper < retired:
+        raise DailyAdmissionError("native usage settlement lost its original retained prefix")
+    actual = sum(_nanos(charge["actual_usd"]) for charge in value["charges"])
+    return row, value, upper, upper - retired, actual
+
+
 def _native_dimensions(document):
     values = [document.get(name) for name in ("vcpu_count", "memory_mib", "state_disk_size_gib")]
     if any(isinstance(v, bool) or not isinstance(v, int) or v <= 0 for v in values):
@@ -503,6 +591,24 @@ def _apply(state, receipt):
             resume["canceled"] = True
             pause["resumes"][resume["key"]] = dict(resume)
             pause["resume"] = None
+    elif action == "native_usage_settled":
+        _fields(receipt, "action at key evidence tariff")
+        evidence = NativeUsageSettlementEvidence(**receipt["evidence"])
+        row, value, upper, pending, actual = _native_usage_prefix(
+            state, key, evidence, TariffEvidence(**receipt["tariff"]))
+        if value["interval_end"] > at or (actual > pending and not state["breached"]):
+            raise DailyAdmissionError("final native invoice exceeds or precedes its original retained liability")
+        settled = row.get("native_usage")
+        records = settled["settlements"] if settled else []
+        row["native_usage"] = {"settled_through": value["interval_end"], "retired_upper_nanos": upper,
+                               "settlements": [*records, {"invoice_id": value["invoice_id"],
+                                   "source_document_sha256": value["source_document_sha256"],
+                                   "interval_start": value["interval_start"], "interval_end": value["interval_end"],
+                                   "document_json": evidence.document_json, "document_sha256": evidence.document_sha256,
+                                   "source_document": evidence.source_document,
+                                   "provenance": evidence.provenance,
+                                   "charges": [{"day": _day(c["utc_day"]), "actual_nanos": _nanos(c["actual_usd"])}
+                                               for c in value["charges"]]}]}
     elif action == "inference_settled":
         _fields(receipt, "action at key accrued_day actual_nanos provenance")
         row, day, actual = inference.get(key), receipt["accrued_day"], receipt["actual_nanos"]
@@ -613,9 +719,17 @@ class DailyBudget:
             if pause:
                 # These unresolved native usage charges carry into every possible
                 # charge day; a pause is not an invoice or debt cancellation.
-                resource_nanos += pause["retained_usage_nanos"]
+                settled = row.get("native_usage")
+                retired = settled["retired_upper_nanos"] if settled else 0
+                resource_nanos += max(0, pause["retained_usage_nanos"] - retired)
+                if settled:
+                    resource_nanos += sum(c["actual_nanos"] for item in settled["settlements"]
+                                          for c in item["charges"] if c["day"] == day)
+                terminal_settled = settled and row["terminal_at"] is not None and settled["settled_through"] == row["terminal_at"]
                 resume = pause["resume"]
-                if resume:
+                if terminal_settled:
+                    pass  # Actual complete final usage is booked only to its genuine UTC accrual days.
+                elif resume:
                     priced = _higher_rates(self.tariff, TariffEvidence(**resume["tariff"]))
                     if row["terminal_at"] is None:
                         # Admit the full current day before an explicit-resume POST.
@@ -732,9 +846,10 @@ class DailyBudget:
                         retained_native_usage_upper_usd, usage_provenance: str):
         """Record a genuine paused GET and reviewed fence, preserving unsettled usage.
 
-        The retained amount is the whole original resource's unsettled usage upper
-        bound, including any larger sampling/billing uncertainty. It must cover the
-        entire possible running interval and can never decrease on a later pause.
+        The retained amount is the original cumulative usage upper bound, including
+        any larger sampling/billing uncertainty and previously retired prefixes.
+        It cannot decrease on a later pause. A separate final native settlement may
+        retire a closed prefix and book its actual cost to genuine UTC accrual days.
         Reconciliation does not dispatch, settle an invoice, or open a new scope.
         """
         if not isinstance(observation, NativePausedEvidence) or not isinstance(fence, ResumeFenceEvidence):
@@ -776,6 +891,36 @@ class DailyBudget:
 
     def cancel_resume_unsent(self, key: str, resume_key: str):
         self._transition({"action": "resume_canceled_unsent", "key": key, "resume_key": resume_key})
+
+    def settle_native_usage(self, key: str, *, evidence: NativeUsageSettlementEvidence):
+        """Host-reviewed final complete prefix only; never a sampled spend estimate.
+
+        Reconciliation is allowed while paid dispatch is withdrawn. A greater real
+        invoice durably closes the scope, preserving every original liability.
+        This method does not obtain, authenticate or fabricate a native invoice.
+        """
+        if not isinstance(evidence, NativeUsageSettlementEvidence):
+            raise DailyAdmissionError("reviewed final native usage evidence is required")
+        breached = False
+        with self.store.atomic():
+            state, now = self._load(), _time(self.store.clock())
+            if now < state["last_at"]:
+                raise DailyAdmissionError("daily reconciliation clock rolled back")
+            row, value, upper, pending, actual = _native_usage_prefix(state, key, evidence, self.tariff)
+            if value["interval_end"] > now:
+                raise DailyAdmissionError("native final allocation is ahead of original reconciliation")
+            if actual > pending:
+                breached = True
+                self._write(state, {"action": "scope_breached", "at": now, "key": key,
+                                    "reason": "final native invoice exceeds original retained compute upper; "
+                                              + value["invoice_id"] + ":" + evidence.document_sha256,
+                                    "provenance": evidence.provenance})
+            # A genuinely final larger invoice is still booked to its actual
+            # accrual days. The immutable breach keeps every paid route closed.
+            self._write(state, {"action": "native_usage_settled", "at": now, "key": key,
+                                "evidence": asdict(evidence), "tariff": asdict(self.tariff)})
+        if breached:
+            raise DailyAdmissionError("final native compute exceeds original retained bound; paid scope closed")
 
     def settle_inference(self, key: str, *, accrued_day: str, actual_usd, provenance: str):
         day = _day(accrued_day)
