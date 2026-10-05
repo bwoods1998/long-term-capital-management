@@ -185,7 +185,10 @@ class _Bridge:
                          (self.config.artifact_root, self.config.state_root)), "agreement must be host private")
         approved.read()  # Its interpretation is independently reviewed, not inferred from a rate GET.
 
-    def billing(self):
+    def billing(self, *, initialization_preflight=False):
+        _require(type(initialization_preflight) is bool
+                 and (not initialization_preflight or self.cleanup_only),
+                 "first-admission billing preflight is restricted to a passive bridge")
         b = self.receipt(self.inputs.billing())
         _require(set(b) == {"schema", "scope", "observed_at", "valid_until", "tariff", "inventory", "agreement", "provenance"}
                  and b["schema"] == 1 and b["scope"] == self.policy.scope,
@@ -197,10 +200,31 @@ class _Bridge:
         tariff = TariffEvidence(**b["tariff"])
         inventory = InventoryEvidence(**{**b["inventory"], "resource_ids": tuple(b["inventory"]["resource_ids"]),
                                          "model_keys": tuple(b["inventory"]["model_keys"])})
-        _require(tariff.scope == inventory.scope == self.policy.scope and tariff.covers_day(int(now//86400))
+        _require(tariff.scope == inventory.scope == self.policy.scope
                  and inventory.observed_at <= now <= inventory.valid_until <= inventory.observed_at+300
                  and inventory.complete and inventory.exclusive_writer and not inventory.unknown_obligations,
-                 "guaranteed full-day prices and fresh complete exclusive inventory required")
+                 "fresh complete exclusive billing inventory required")
+        # A provider-free initializer validates billing before it creates the
+        # original allowance. This explicit preflight conveys no model-only or
+        # paid authority, needs the full compute day, and never opens SQLite.
+        if initialization_preflight:
+            _require(tariff.covers_day(int(now//86400)),
+                     "first-admission preflight requires full-day compute prices")
+            return tariff, inventory
+        # Normal admission requires existing replay-checked history. Read it
+        # without schema creation/migration; absent or corrupt history refuses.
+        from . import DB_NAME
+        database = self.config.broker_root/DB_NAME
+        _require(database.is_file() and not database.is_symlink(),
+                 "billing requires the intact original ledger")
+        store = SwarmStore(self.config.broker_root, clock=self.clock, readonly=True)
+        try:
+            store._exec("BEGIN")
+            ledger = DailyBudget(store, tariff, inventory)._load()
+            _require(not ledger["resources"] or tariff.covers_day(int(now//86400)),
+                     "resource history requires guaranteed full-day compute prices")
+        finally:
+            store.close()
         return tariff, inventory
 
     def context(self, digest):

@@ -300,6 +300,7 @@ class DailyComputeBudget(unittest.TestCase):
                                     provenance="synthetic permanent terminal evidence")
 
     def test_tariff_does_not_cover_whole_day_when_only_part_day_is_certified(self):
+        self.budget.reserve_resource("gym", self.gym)
         tariff = replace(self.tariff, valid_from=self.start + 1)
         with self.assertRaises(DailyAdmissionError): self.make_budget(tariff=tariff).summary()
 

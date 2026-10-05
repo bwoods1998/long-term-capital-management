@@ -9,8 +9,10 @@ Runtime estimates, sleep, elapsed TTLs and lost replies never prove a completed 
 
 This module performs no provider operations and has no production pricing defaults.
 Evidence objects are explicit trusted inputs, not verification of a provider contract.
-A tariff must cover the whole requested UTC day. Future-day prices remain conditional
-until such evidence exists. All resource/model dispatchers must share this gate and
+A resource tariff must cover the whole requested UTC day. A ledger with no resource
+history needs no compute price interval; inference keeps its independently admitted
+charge ceiling. Future-day resource prices remain conditional until evidence exists.
+All resource/model dispatchers must share this gate and
 the same durable store; a copied database or an outside writer invalidates the scope.
 Existing unpriced resources are refused; migration needs separate authoritative cost
 evidence. Vendor costs, reporting estimates, and these upper bounds stay distinct.
@@ -676,7 +678,11 @@ class DailyBudget:
         pending_models = {key for key, row in state["inference"].items() if not row["canceled"] and row["receipt"] is None}
         if set(evidence.resource_ids) - covered or set(evidence.model_keys) - pending_models:
             raise DailyAdmissionError("inventory contains an uncovered resource or inference obligation")
-        if not self.tariff.covers_day(int(now // DAY_SECONDS)):
+        # Compute prices do not price model holds. Inspect original history rather
+        # than just current inventory: even canceled or terminal resource rows
+        # retain the conservative resource-tariff gate. A first resource admission
+        # independently requires full-day coverage in _apply(resource_reserved).
+        if state["resources"] and not self.tariff.covers_day(int(now // DAY_SECONDS)):
             raise DailyAdmissionError("tariff evidence does not cover this full UTC day")
         if any(r.get("native_pause") and r["terminal_at"] is None
                and r["native_pause"]["resume"] is None

@@ -55,15 +55,26 @@ absolute owner-private paths and the independently approved content hash.
   The real creation response and subsequent GET must match its app/image/name,
   checkpoint generation and capacities. Volumes are refused by this adapter.
 * Models: `profiles`, each containing exact `ModelPolicy` dataclass fields,
-  `max_request_bytes`, `billable_input_ceiling`, `completion_window: "asap"`,
+  `max_request_bytes`, `billable_input_ceiling`, `completion_window: "asap"` or `"balanced"`,
   `agreement`. The input ceiling equals the policy's maximum and covers all
   formatting, histories, tools and other billable input. The entire maximum is
   reserved for every request. A heuristic such as bytes divided by three is not
   used. Output has an explicit wire cap; there are no server tools or fallback.
 * Billing: `observed_at`, `valid_until`, exact `tariff` and `inventory` dataclass
   fields, `agreement`. Observation and inventory freshness are at most five
-  minutes; maximum rates cover the whole UTC day. The existing DailyBudget must
-  already contain the complete current-day baseline and all unresolved liabilities.
+  minutes. Compute maximum rates cover the whole UTC day when the original
+  DailyBudget has any resource history, including canceled and terminal rows.
+  A ledger with only model obligations needs no unrelated compute-day price
+  interval; model charge and accepted-liability evidence remain required. First
+  resource admission independently requires the full-day compute tariff. The
+  existing DailyBudget must already contain the complete current-day baseline
+  and all unresolved liabilities; an empty current inventory never resets it.
+  Normal billing reads the existing journal/cache without creating or migrating
+  SQLite. The provider-free initializer may explicitly request passive
+  `initialization_preflight=True` billing before creating its original allowance;
+  that path opens no database and retains the full-day compute requirement. It
+  conveys no model-only or paid authority. The initializer must reject retained
+  initialization/OPEN markers or ledger artifacts when the database is missing.
   Every in-scope paid writer, key, application and relevant Gate/audit/forward
   research fee must be jointly accounted or have separately guaranteed bounded
   inclusion. An ordinary research fence alone does not prove this scope exclusive.
@@ -145,6 +156,6 @@ reservation from a shutdown, sleep or control request.
 The published [pricing](https://docs.sailresearch.com/pricing),
 [Sailbox schemas](https://docs.sailresearch.com/sailbox-openapi.json) and
 [Responses schemas](https://docs.sailresearch.com/openapi.json) define the transport
-shapes. [Terms 7.2–7.3](https://sail.systems/terms) allow prospective price changes
+shapes. [Terms 7.2–7.3](https://www.sailresearch.com/terms) allow prospective price changes
 and additional taxes. Current observed rates and prepaid exhaustion do not alone
 establish the required inclusive daily maximum-charge guarantee.
