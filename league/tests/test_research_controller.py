@@ -270,6 +270,42 @@ class ResearchControllerTest(unittest.TestCase):
         with self.assertRaisesRegex(ResearchControllerError, "escapes the artifact"):
             research_harness_identity(first)
 
+    def test_contract_guidance_changes_wake_a_durable_hold_once(self):
+        from league.swarm.research_controller import research_harness_identity
+        fid = self.family("needs-api-guidance")
+        artifact = self.store.root / "synthetic-artifact"
+        source = artifact / "league" / "swarm" / "researcher.py"
+        source.parent.mkdir(parents=True)
+        source.write_text("# unchanged synthetic runtime\n")
+        contract = artifact / "league" / "CONTRACT.md"
+        contract.write_text("Synthetic original API guidance.\n")
+        first = research_harness_identity(artifact)
+        self.controller.harness_identity = first
+        self.hold(fid)
+        contract.write_text("Synthetic corrected API guidance.\n")
+        second = research_harness_identity(artifact)
+        self.assertNotEqual(first, second)
+        self.controller = ResearchController(self.store, self.broker, ControllerConfig("private-research"),
+            researcher=self.researcher, tournament=self.tournament, architect=self.architect,
+            verify_state=lambda: None, clock=lambda: self.now, harness_identity=second)
+        self.controller.step()
+        self.assertEqual(self.researcher.calls, [fid, fid])
+        self.now += 86400
+        self.controller.step()
+        self.assertEqual(self.researcher.calls, [fid, fid])
+
+    def test_harness_digest_rejects_a_symlinked_contract(self):
+        from league.swarm.research_controller import research_harness_identity
+        artifact = self.store.root / "synthetic-artifact"
+        source = artifact / "league" / "swarm" / "researcher.py"
+        source.parent.mkdir(parents=True)
+        source.write_text("# synthetic runtime\n")
+        outside = self.store.root / "outside-contract.md"
+        outside.write_text("Synthetic escaped guidance.\n")
+        (artifact / "league" / "CONTRACT.md").symlink_to(outside)
+        with self.assertRaisesRegex(ResearchControllerError, "escapes the artifact"):
+            research_harness_identity(artifact)
+
     def test_funnel_counts_evidence_waits_without_counting_pending_or_sealed_work(self):
         fid = self.family("survivor")
         self.hold(fid)

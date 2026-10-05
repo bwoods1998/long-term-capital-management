@@ -82,17 +82,20 @@ def _verify_train_objective(store, expected: str) -> None:
 def research_harness_identity(artifact_root: Path) -> str:
     """Bind holds to the actual runtime source, separately from the Gym evaluator.
 
-    Source paths and bytes determine this identity; release directory names,
+    Runtime source and the researcher's cached contract determine this identity; release directory names,
     tests, credentials, state files and wall-clock time do not. This reads code
     without importing House, Gate, providers, or their financial collaborators.
     """
     root = Path(artifact_root).resolve()
-    files = sorted(path for path in (root / "league").rglob("*.py")
-                   if "tests" not in path.relative_to(root / "league").parts)
+    files = [path for path in (root / "league").rglob("*.py")
+             if "tests" not in path.relative_to(root / "league").parts]
     if not files:
         raise ResearchControllerError("research artifact has no runtime source")
+    contract = root / "league" / "CONTRACT.md"
+    if contract.exists() or contract.is_symlink():
+        files.append(contract)
     digest = hashlib.sha256()
-    for path in files:
+    for path in sorted(files):
         if path.is_symlink() or not path.resolve().is_relative_to(root):
             raise ResearchControllerError("research runtime source escapes the artifact")
         digest.update(path.relative_to(root).as_posix().encode() + b"\0" + path.read_bytes() + b"\0")

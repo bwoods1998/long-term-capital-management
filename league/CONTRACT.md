@@ -207,6 +207,46 @@ quoted expiry at or after it), and exactly one selector: `id`, `strike` (nearest
 `rel` is that leg's position in `legs`). Size: `qty`, or `max_loss` dollars (the most whole structures
 whose maximum loss plus fees fits; none if one does not fit: widen the budget or narrow the wings).
 
+### Debit-vertical legs
+
+For a debit call vertical, the long call has the lower strike and the short call has
+the higher strike. For a debit put vertical, the long put has the higher strike and
+the short put has the lower strike. Both legs share an expiry and have ratio 1.
+`rel` is a zero-based position in the `legs` list; `offset` is a signed dollar
+distance from that referenced leg's strike. It does not mean distance in the
+direction of the trade. A short call above the long uses a positive offset; a short
+put below the long uses a negative offset.
+
+These are syntax examples for a fabricated chain with adjacent strikes one dollar
+apart. They do not establish that contracts are available or that an experiment
+should trade. A bullish call debit uses:
+
+```python
+{"open": "debit_vertical", "root": "SPY",
+ "legs": [{"side": "long", "right": "C", "dte": 1, "atm": 0},
+          {"side": "short", "right": "C", "rel": 0, "offset": 1.0}],
+ "qty": 1, "limit": "natural", "tif": 10,
+ "tag": "syntax-call", "note": "test the debit-call leg selectors"}
+```
+
+A bearish put debit uses:
+
+```python
+{"open": "debit_vertical", "root": "SPY",
+ "legs": [{"side": "long", "right": "P", "dte": 1, "atm": 0},
+          {"side": "short", "right": "P", "rel": 0, "offset": -1.0}],
+ "qty": 1, "limit": "natural", "tif": 10,
+ "tag": "syntax-put", "note": "test the debit-put leg selectors"}
+```
+
+Selectors choose available quoted strikes, so inspect the resolved legs and
+`ctx.rejects`: an offset may resolve to the same strike when a neighboring contract
+is missing. Reversing either pair makes a credit vertical, which is refused under
+`debit_vertical`; changing the label changes the experiment and is not an API fix.
+Repair a structural refusal before treating zero fills as evidence about the
+mechanism. Accepted leg syntax establishes only structural validity, not
+profitability, Train eligibility, Validation, or an unseen-market pass.
+
 **Close**: `{"close": position_id, "limit": "natural", "qty": 1 (default all), "tif": ...}`.
 **Cancel**: `{"cancel": order_id}`. Up to 12 intents a call, 60 orders a day.
 
