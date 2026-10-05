@@ -12,6 +12,7 @@ import argparse
 from dataclasses import dataclass
 import datetime as dt
 from decimal import Decimal, InvalidOperation
+import hashlib
 import json
 import math
 import os
@@ -78,18 +79,42 @@ def _verify_train_objective(store, expected: str) -> None:
             raise ResearchControllerError("a living family has an unfinished Train objective migration")
 
 
+def research_harness_identity(artifact_root: Path) -> str:
+    """Bind holds to the actual runtime source, separately from the Gym evaluator.
+
+    Source paths and bytes determine this identity; release directory names,
+    tests, credentials, state files and wall-clock time do not. This reads code
+    without importing House, Gate, providers, or their financial collaborators.
+    """
+    root = Path(artifact_root).resolve()
+    files = sorted(path for path in (root / "league").rglob("*.py")
+                   if "tests" not in path.relative_to(root / "league").parts)
+    if not files:
+        raise ResearchControllerError("research artifact has no runtime source")
+    digest = hashlib.sha256()
+    for path in files:
+        if path.is_symlink() or not path.resolve().is_relative_to(root):
+            raise ResearchControllerError("research runtime source escapes the artifact")
+        digest.update(path.relative_to(root).as_posix().encode() + b"\0" + path.read_bytes() + b"\0")
+    return digest.hexdigest()
+
+
 class ResearchController:
     """Schedules actual research components and emits private funnel receipts."""
 
     def __init__(self, store, broker, config: ControllerConfig, *, researcher, tournament, architect,
                  verify_state: Callable[[], Any], clock: Callable[[], float] = time.time,
                  expected_evaluation: Mapping[str, Any] | None = None,
-                 expected_train_objective: str | None = None):
+                 expected_train_objective: str | None = None,
+                 research_settings: Mapping[str, Any] | None = None,
+                 harness_identity: str | None = None):
         self.store, self.broker, self.config = store, broker, config
         self.researcher, self.tournament, self.architect = researcher, tournament, architect
         self.verify_state, self.clock = verify_state, clock
         self.expected_evaluation = dict(expected_evaluation) if expected_evaluation is not None else None
         self.expected_train_objective = expected_train_objective
+        self.research_settings = research_settings if research_settings is not None else getattr(researcher, "settings", {})
+        self.harness_identity = harness_identity
         self.last_cycle = float("-inf")
         self.last_family: str | None = None
         self.stop = threading.Event()
@@ -123,12 +148,49 @@ class ResearchController:
             raise ResearchControllerError("the shared daily authority has no verified room for research")
         return result
 
+    def _evidence(self, family, *, scan=None, ignore_notes=()):
+        from .research_wait import evidence_key
+        return evidence_key(self.store, family, self.research_settings,
+                            release={"harness": self.harness_identity,
+                                     "evaluation": self.expected_evaluation or {"runtime_scope": self.config.runtime_scope}},
+                            scan=scan, ignore_notes=ignore_notes)
+
+    def _pending(self, family):
+        # A saved tool call or completed rewrite is owed work even when a wait's
+        # other evidence is unchanged. Inspect only this private research store.
+        return bool((family.get("state") or {}).get("rewrite_ready") or self.store.convo(family["id"])[1])
+
+    def _holding(self, family, *, scan=None):
+        wait = (family.get("state") or {}).get("research_wait")
+        return (isinstance(wait, Mapping) and wait.get("format") == 1 and not self._pending(family)
+                and wait.get("evidence") == self._evidence(family, scan=scan))
+
+    def _remember_result(self, fid, result, began):
+        """Record a hold against final evidence without swallowing mid-cycle news."""
+        result = result if isinstance(result, Mapping) else {}
+        with self.store.atomic():
+            family = self.store.family(fid)
+            if family is None or family.get("retired_at"):
+                return
+            wait = None
+            owned = result.get("notebook_note_seqs") or ()
+            owned = tuple(seq for seq in owned if type(seq) is int and seq > 0)
+            if (result.get("hold") and not any(result.get(key) for key in
+                    ("trials", "pending_run", "retired", "error", "gym_error", "gym_asked"))
+                    and not self._pending(family)
+                    and self._evidence(family, ignore_notes=owned) == began):
+                wait = {"format": 1, "since": self.clock(), "evidence": self._evidence(family)}
+            if wait is not None or (family.get("state") or {}).get("research_wait") is not None:
+                self.store.set_state(fid, research_wait=wait)
+
     def _family(self):
         alive = self.store.families(alive=True)
         # A lineage waiting for its unseen test retains its record. Continuing
         # development must not silently spend/reopen a historical look.
+        scan: dict[str, Any] = {}
         eligible = [f for f in alive if f.get("band") == "gym" and not any(
-            (f.get("state") or {}).get(k) for k in ("gate_ready", "look_inflight", "gate_hold"))]
+            (f.get("state") or {}).get(k) for k in ("gate_ready", "look_inflight", "gate_hold"))
+                    and not self._holding(f, scan=scan)]
         eligible.sort(key=lambda f: (str(f.get("id"))))
         if not eligible:
             return None
@@ -147,9 +209,13 @@ class ResearchController:
                                "WHERE at>=? AND at<? AND NOT EXISTS (SELECT 1 FROM research_baseline b "
                                "WHERE b.kind='run' AND b.identity=r.run_id) GROUP BY window,status", (since, until))
         families = self.store.families()
+        scan: dict[str, Any] = {}
         return {"utc_day": start.date().isoformat(), "families": len(families),
                 "alive": sum(not f.get("retired_at") for f in families),
                 "awaiting_unseen": sum(bool((f.get("state") or {}).get("gate_ready")) for f in families),
+                "waiting_for_evidence": sum(not f.get("retired_at") and f.get("band") == "gym"
+                    and not any((f.get("state") or {}).get(key) for key in ("gate_ready", "look_inflight", "gate_hold"))
+                    and self._holding(f, scan=scan) for f in families),
                 "runs": [{"window": r["window"], "status": r["status"], "runs": int(r["runs"]),
                           "trials": int(r["trials"] or 0)} for r in rows],
                 "unseen_evaluations_by_controller": 0, "financial_execution_by_controller": 0}
@@ -184,7 +250,9 @@ class ResearchController:
                 family = self._family()
                 if family is not None:
                     try:
+                        began = self._evidence(family)
                         result = self.researcher.cycle(family["id"])
+                        self._remember_result(family["id"], result, began)
                         row["actions"].append({"kind": "research", "family": family["id"], "result": result})
                     except Exception as exc:
                         row["actions"].append({"kind": "research", "family": family["id"], "error": type(exc).__name__})
@@ -231,6 +299,7 @@ def build_controller(root: Path, broker, config: ControllerConfig, *, image: str
     verify = lambda: assert_isolated_state(root, runtime_scope=config.runtime_scope,
                                           expected_evaluator=identity, artifact_root=artifact_root)
     verify()  # fail before opening a writable store or constructing any paid collaborator
+    harness = research_harness_identity(artifact_root)
     store = SwarmStore(root)
     try:
         settings = explicit_settings(config_document, policy_document, checkpoint=image, roots=roots)
@@ -280,7 +349,7 @@ def build_controller(root: Path, broker, config: ControllerConfig, *, image: str
     architect = Architect(store, router, settings)
     return ResearchController(store, broker, config, researcher=researcher, tournament=tournament,
                               architect=architect, verify_state=verify, expected_evaluation=expected,
-                              expected_train_objective=objective)
+                              expected_train_objective=objective, research_settings=settings, harness_identity=harness)
 
 
 def main(argv=None):

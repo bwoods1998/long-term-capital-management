@@ -3075,7 +3075,8 @@ class Researcher:
         with self.store.atomic():
             if self._terminal(fam["id"], out):
                 return {"status": "retired", "reason": "the family is retired; nothing to hold"}
-            self.store.note(fam["id"], f"Held a cycle (no run): {why or 'nothing new to run'}")
+            seq = self.store.note(fam["id"], f"Held a cycle (no run): {why or 'nothing new to run'}")
+            out.setdefault("notebook_note_seqs", []).append(seq)
         if why:
             out["note"] = why
         out["hold"] = True
@@ -3497,7 +3498,8 @@ class Researcher:
                 text = str(args.get("text") or "").strip()
                 if not text:
                     return {"error": "append needs text"}
-                self.store.note(fam["id"], text)
+                seq = self.store.note(fam["id"], text)
+                out.setdefault("notebook_note_seqs", []).append(seq)
                 out["note"] = text
                 return {"ok": True}
             return {"notebook": [diagnostics.scrub(n["text"]) for n in self.store.notebook(fam["id"], limit=12)]}

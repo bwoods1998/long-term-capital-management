@@ -41,6 +41,7 @@ import ssl
 import stat
 import time
 import uuid
+from http.client import IncompleteRead
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
 from urllib.error import HTTPError, URLError
@@ -51,6 +52,17 @@ API_HOST = "sailbox-api.sailresearch.com"
 API_BASE = f"https://{API_HOST}/v1"
 APPS_HOST = "api.sailresearch.com"
 APPS_BASE = f"https://{APPS_HOST}/v1"
+
+_RAW_DOWNLOAD_LIMIT = 256_000_000
+_MAX_RAW_DOWNLOAD_LIMIT = 1_000_000_000
+
+
+def _download_limit(value: int | None) -> int:
+    if value is None:
+        return _RAW_DOWNLOAD_LIMIT
+    if type(value) is not int or not 1 <= value <= _MAX_RAW_DOWNLOAD_LIMIT:
+        raise SailboxError("download bound must be an integer from 1 through 1000000000")
+    return value
 
 #: Where the floor's code, logs and data live on the box.
 REMOTE_ROOT = "/workspace"
@@ -332,7 +344,7 @@ class Transport:
     One call shape covers everything the client needs:
 
         transport(method, path, body=None, data=None, query=None, idempotency_key=None,
-                  stream=False, raw=False, timeout=None)
+                  stream=False, raw=False, raw_limit=None, timeout=None)
 
     and it returns a parsed JSON object, or raw `bytes` for a file download, or an iterator of
     decoded NDJSON events for a streamed exec.
@@ -399,10 +411,14 @@ class Transport:
         idempotency_key: str | None = None,
         stream: bool = False,
         raw: bool = False,
+        raw_limit: int | None = None,
         timeout: float = 60.0,
     ) -> Any:
         if not self.allowed(method, path):
             raise SailboxError(f"route not on this client's allowlist: {method} {path}")
+        if raw_limit is not None and not (raw and not stream and method == "GET" and path.endswith("/files")):
+            raise SailboxError("an explicit download bound applies only to raw file GETs")
+        limit = _download_limit(raw_limit)
         base = self.apps_url if path.startswith("/apps/") else self.base_url
         url = base + path
         if query:
@@ -429,9 +445,27 @@ class Transport:
             # same sanitized boundary; exec streams and mutation response handling stay as-is.
             if raw and not stream:
                 with response:
-                    return response.read(256_000_000)
+                    length = getattr(response, "headers", {}).get("Content-Length")
+                    if length is not None:
+                        if not isinstance(length, str) or not length.strip().isascii() or not length.strip().isdigit():
+                            raise SailboxError("file download has an invalid Content-Length")
+                        decimal_length = length.strip().lstrip("0") or "0"
+                        if len(decimal_length) > 10:
+                            raise SailboxError("file download exceeds its byte bound", kind="download_too_large")
+                        length = int(decimal_length)
+                        if length > limit:
+                            raise SailboxError("file download exceeds its byte bound", kind="download_too_large")
+                    # Read one extra byte: reaching the limit is not evidence of EOF.
+                    downloaded = response.read(limit + 1)
+                    if len(downloaded) > limit:
+                        raise SailboxError("file download exceeds its byte bound", kind="download_too_large")
+                    if length is not None and len(downloaded) != length:
+                        raise SailboxTransportError("IncompleteRead", transient=True)
+                    return downloaded
         except HTTPError as error:
             raise _error(error.code, error.read(200_000)) from None
+        except IncompleteRead:
+            raise SailboxTransportError("IncompleteRead", transient=True) from None
         except (URLError, TimeoutError, OSError) as error:
             raise SailboxTransportError(type(error).__name__, transient=_transient_transport(error)) from None
         if stream:
@@ -781,13 +815,21 @@ class SailboxClient:
             timeout=timeout,
         )
 
-    def download(self, sailbox: str, path: str, *, timeout: float = 300.0) -> bytes:
+    def download(self, sailbox: str, path: str, *, timeout: float = 300.0, max_bytes: int | None = None) -> bytes:
+        """Return a complete bounded file, refusing an oversized or incomplete read.
+
+        The default bound is 256 MB. Larger approved snapshots may explicitly
+        request a bound up to 1 GB; ordinary download call shapes stay unchanged.
+        """
+        _download_limit(max_bytes)  # Refuse bad bounds before invoking any transport.
+        options = {} if max_bytes is None else {"raw_limit": max_bytes}
         return self.transport(
             "GET",
             f"/sailboxes/{box_id(sailbox)}/files",
             query={"path": remote_path(path)},
             raw=True,
             timeout=timeout,
+            **options,
         )
 
     # ------------------------------------------------------------------ exec

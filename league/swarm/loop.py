@@ -31,7 +31,6 @@ Standard library only (the Gym's driver is imported when a box starts).
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import os
@@ -166,29 +165,10 @@ class Scheduler:
         release, or explicit ``research_wake`` token also gives a parked family something new to work with.
         No validation numbers or holdout observations are exposed to the model by this scheduling key.
         """
-        state, gym = fam.get("state") or {}, self.settings.get("gym") or {}
-        notes = self.store.notebook(str(fam["id"]), limit=1)
-        # A population scan shares only its agenda read. The next scan starts fresh, while
-        # direct calls and release's atomic hold baseline always read their own current value.
-        # Read lazily so legacy holds and scans without event waits add no store dependency.
-        if scan is None:
-            agenda = self.store.get("architect_agenda_section") or {}
-        else:
-            if "agenda" not in scan:
-                scan["agenda"] = self.store.get("architect_agenda_section") or {}
-            agenda = scan["agenda"]
+        from .research_wait import evidence_key
         from .practice import feedback_revision
-        body = {
-            "family": {key: fam.get(key) for key in ("trials", "band", "revisions", "best_version", "validated_version", "validations")},
-            "state": {key: state.get(key) for key in ("gate_ready", "gate_hold", "look_inflight", "gated_sha", "rewrite_ready",
-                       "extension_hold", "research_wake", "research_feedback_revision")},
-            "note": notes[-1]["seq"] if notes else None,
-            "agenda": agenda.get("text") if isinstance(agenda, Mapping) else agenda,
-            "gym": {key: gym.get(key) for key in ("image_checkpoint", "gate_checkpoint", "train_from")},
-            "release": str(CODE_DIR),
-            "practice": feedback_revision(self.store, self.settings, str(fam["id"])),
-        }
-        return hashlib.sha256(json.dumps(body, sort_keys=True, default=str).encode()).hexdigest()
+        return evidence_key(self.store, fam, self.settings, release=str(CODE_DIR), scan=scan,
+                            practice=feedback_revision(self.store, self.settings, str(fam["id"])))
 
     @staticmethod
     def seen(fam: Mapping[str, Any]) -> tuple[int, bool, Any]:

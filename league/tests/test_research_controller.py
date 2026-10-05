@@ -170,6 +170,213 @@ class ResearchControllerTest(unittest.TestCase):
         self.controller.step()
         self.assertEqual(self.researcher.calls, [fids[0], fids[1], fids[0]])
 
+    def hold(self, fid):
+        def cycle(family):
+            self.researcher.calls.append(family)
+            return {"hold": True}
+        self.researcher.cycle = cycle
+        self.assertEqual(self.controller.step()["actions"][-1]["family"], fid)
+        self.assertIsNotNone(self.store.family(fid)["state"].get("research_wait"))
+        self.now += 60
+
+    def test_unchanged_hold_survives_time_weights_spend_and_controller_restart(self):
+        fid = self.family("survivor")
+        self.hold(fid)
+        before = self.store.family(fid)
+        for elapsed in (60, 3600, 86400, -1800):
+            self.now += elapsed
+            self.controller = ResearchController(self.store, self.broker, ControllerConfig("private-research"),
+                researcher=self.researcher, tournament=self.tournament, architect=self.architect,
+                verify_state=lambda: None, clock=lambda: self.now)
+            self.store.update_family(fid, weight=0.75)
+            self.store.add_spend("sail_model", 0.01)
+            self.controller.step()
+        self.assertEqual(self.researcher.calls, [fid])
+        self.assertEqual(self.store.family(fid)["cycles"], before["cycles"])
+        self.assertEqual(self.store.family(fid)["trials"], before["trials"])
+        self.assertEqual(self.store.family(fid)["state"], before["state"])
+
+    def test_actionable_evidence_wakes_once_then_a_new_hold_waits_for_new_evidence(self):
+        fid = self.family("survivor")
+        self.controller.research_settings = {"gym": {"image_checkpoint": "synthetic-admitted-data"}}
+        events = [lambda: self.store.bump(fid, trials=1),
+                  lambda: self.store.note(fid, "The registered counterfactual is available."),
+                  lambda: self.store.put("architect_agenda_section", {"text": "Test the funding mechanism."}),
+                  lambda: self.controller.research_settings["gym"].update(image_checkpoint="synthetic-new-data"),
+                  lambda: self.store.set_state(fid, research_wake="new-evidence-1"),
+                  lambda: self.store.set_state(fid, research_feedback_revision="reviewed-feedback-1")]
+        self.hold(fid)
+        for event in events:
+            event()
+            calls = len(self.researcher.calls)
+            self.controller.step()
+            self.assertEqual(len(self.researcher.calls), calls + 1)
+            self.now += 86400
+            self.controller.step()
+            self.assertEqual(len(self.researcher.calls), calls + 1)
+
+    def test_held_family_does_not_starve_another_survivor(self):
+        first, second = self.family("a"), self.family("b")
+        self.hold(first)
+        self.controller.step()
+        self.now += 60
+        self.controller.step()
+        self.assertEqual(self.researcher.calls, [first, second])
+
+    def test_changed_harness_with_the_same_evaluator_wakes_a_durable_hold_once(self):
+        from league.swarm.research_controller import research_harness_identity
+        fid = self.family("survivor")
+        artifact = self.store.root / "synthetic-artifact"
+        source = artifact / "league" / "swarm" / "researcher.py"
+        source.parent.mkdir(parents=True)
+        source.write_text("def new_hypothesis():\n    return 'synthetic first harness'\n")
+        first = research_harness_identity(artifact)
+        self.controller.harness_identity = first
+        self.controller.expected_evaluation = {"capital": "5000", "image": "sbcp_test", "required_split": 5}
+        self.hold(fid)
+        self.controller = ResearchController(self.store, self.broker, ControllerConfig("private-research"),
+            researcher=self.researcher, tournament=self.tournament, architect=self.architect,
+            verify_state=lambda: None, clock=lambda: self.now, expected_evaluation=self.controller.expected_evaluation,
+            harness_identity=research_harness_identity(artifact))
+        self.controller.step()
+        self.assertEqual(self.researcher.calls, [fid], "the same actual source preserves the hold")
+        source.write_text("def new_hypothesis():\n    return 'synthetic improved harness'\n")
+        second = research_harness_identity(artifact)
+        self.assertNotEqual(first, second)
+        same_evaluator = self.controller.expected_evaluation
+        self.controller = ResearchController(self.store, self.broker, ControllerConfig("private-research"),
+            researcher=self.researcher, tournament=self.tournament, architect=self.architect,
+            verify_state=lambda: None, clock=lambda: self.now, expected_evaluation=same_evaluator,
+            harness_identity=second)
+        self.controller.step()
+        self.assertEqual(self.researcher.calls, [fid, fid])
+        self.now += 86400
+        self.controller.step()
+        self.assertEqual(self.researcher.calls, [fid, fid], "unchanged new source cannot wake it twice")
+
+    def test_harness_digest_ignores_test_and_directory_changes_and_rejects_symlinks(self):
+        from league.swarm.research_controller import research_harness_identity
+        first = self.store.root / "first-artifact"
+        second = self.store.root / "renamed-artifact"
+        for root in (first, second):
+            (root / "league" / "swarm").mkdir(parents=True)
+            (root / "league" / "swarm" / "researcher.py").write_text("# identical synthetic runtime\n")
+        self.assertEqual(research_harness_identity(first), research_harness_identity(second))
+        (first / "league" / "tests").mkdir()
+        test = first / "league" / "tests" / "test_synthetic.py"
+        test.write_text("# synthetic test repair\n")
+        self.assertEqual(research_harness_identity(first), research_harness_identity(second))
+        (first / "league" / "swarm" / "unexpected.py").symlink_to(test)
+        with self.assertRaisesRegex(ResearchControllerError, "escapes the artifact"):
+            research_harness_identity(first)
+
+    def test_funnel_counts_evidence_waits_without_counting_pending_or_sealed_work(self):
+        fid = self.family("survivor")
+        self.hold(fid)
+        self.assertEqual(self.controller._funnel(self.now)["waiting_for_evidence"], 1)
+        self.family("sealed", gate_ready=True)
+        self.assertEqual(self.controller._funnel(self.now)["waiting_for_evidence"], 1)
+        self.store.save_convo(fid, [], {"name": "gym_run", "arguments": {}})
+        self.assertEqual(self.controller._funnel(self.now)["waiting_for_evidence"], 0)
+
+    def test_durable_queued_work_and_completed_rewrite_bypass_an_unchanged_hold(self):
+        fid = self.family("survivor")
+        self.hold(fid)
+        self.store.save_convo(fid, [], {"name": "gym_run", "arguments": {"params": {"signal": 2}}})
+        self.controller.step()
+        self.assertEqual(self.researcher.calls, [fid, fid])
+        self.assertIsNone(self.store.family(fid)["state"].get("research_wait"))
+        self.store.save_convo(fid, [], None)
+        self.now += 60
+        self.controller.step()
+        self.assertIsNotNone(self.store.family(fid)["state"].get("research_wait"))
+        self.store.set_state(fid, rewrite_ready={"code": "a completed synthetic rewrite"})
+        self.now += 60
+        self.controller.step()
+        self.assertEqual(self.researcher.calls, [fid, fid, fid, fid])
+        self.assertIsNone(self.store.family(fid)["state"].get("research_wait"))
+
+    def test_pending_work_never_bypasses_a_sealed_look_or_gate_reservation(self):
+        for flag in ("gate_ready", "look_inflight", "gate_hold"):
+            fid = self.family(flag, **{flag: True})
+            self.store.save_convo(fid, [], {"name": "gym_run", "arguments": {}})
+        self.controller.step()
+        self.assertEqual(self.researcher.calls, [])
+
+    def test_midcycle_trials_guidance_and_agenda_changes_are_not_swallowed_by_a_hold(self):
+        fid = self.family("survivor")
+        events = [lambda: self.store.bump(fid, trials=1),
+                  lambda: self.store.note(fid, "Independent evidence arrived while the model was working."),
+                  lambda: self.store.put("architect_agenda_section", {"text": "A genuinely new direction."})]
+        for event in events:
+            def cycle(family):
+                self.researcher.calls.append(family)
+                event()
+                return {"hold": True}
+            self.researcher.cycle = cycle
+            self.controller.step()
+            self.assertIsNone(self.store.family(fid)["state"].get("research_wait"))
+            self.now += 60
+        self.assertEqual(self.researcher.calls, [fid] * len(events))
+
+    def test_external_guidance_before_a_cycles_own_hold_note_still_wakes_it(self):
+        fid = self.family("survivor")
+        def cycle(family):
+            self.researcher.calls.append(family)
+            self.store.note(family, "External guidance arrived during this cycle.")
+            own = self.store.note(family, "Held a cycle (no run): no new input was read.")
+            return {"hold": True, "notebook_note_seqs": [own]}
+        self.researcher.cycle = cycle
+        self.controller.step()
+        self.assertIsNone(self.store.family(fid)["state"].get("research_wait"))
+        self.now += 60
+        self.controller.step()
+        self.assertEqual(self.researcher.calls, [fid, fid])
+        self.assertEqual(len(self.store.notebook(fid)), 4)
+
+    def test_new_train_trial_with_a_hold_is_recorded_and_can_continue_research(self):
+        from league.tests.swarm_fakes import result
+        fid = self.family("survivor")
+        version = self.store.add_version(fid, "def decide(ctx):\n    return []\n", {}, author="synthetic")
+        def cycle(family):
+            self.researcher.calls.append(family)
+            run = result("synthetic-new-train-" + str(len(self.researcher.calls)))
+            run["trials"] = 2
+            self.store.add_run(family, version["n"], run, window="train", stress=1, purpose="train", prune=False)
+            return {"hold": True, "trials": 2}
+        self.researcher.cycle = cycle
+        self.controller.step()
+        self.assertIsNone(self.store.family(fid)["state"].get("research_wait"))
+        self.now += 60
+        self.controller.step()
+        self.assertEqual(self.researcher.calls, [fid, fid])
+        self.assertEqual(self.store.lineage_trials(fid), 4)
+        self.assertEqual(self.controller._funnel(self.now)["runs"],
+                         [{"window": "train", "status": "ok", "runs": 2, "trials": 4}])
+
+    def test_errors_and_unfinished_gym_work_are_never_parked(self):
+        fid = self.family("survivor")
+        for addition in ({"pending_run": True}, {"gym_asked": True},
+                         {"gym_error": "synthetic busy worker"}, {"error": "synthetic model failure"}):
+            def cycle(family):
+                self.researcher.calls.append(family)
+                return {"hold": True, **addition}
+            self.researcher.cycle = cycle
+            self.controller.step()
+            self.assertIsNone(self.store.family(fid)["state"].get("research_wait"))
+            self.now += 60
+        self.assertEqual(self.researcher.calls, [fid] * 4)
+
+    def test_shared_evidence_helper_has_no_house_loop_provider_or_practice_import(self):
+        import subprocess
+        import sys
+        check = ("import sys; from league.swarm.research_wait import evidence_key; "
+                 "assert not any(name in sys.modules for name in "
+                 "('league.house', 'league.swarm.loop', 'league.swarm.gate', "
+                 "'league.swarm.practice', 'league.provider'))")
+        subprocess.run([sys.executable, "-B", "-c", check], check=True,
+                       cwd=Path(__file__).resolve().parents[2], env={"PATH": "/usr/bin:/bin"})
+
     def test_explicit_settings_never_reads_state_env_or_sealed_image(self):
         with mock.patch("league.swarm.settings.read_policy", side_effect=AssertionError("implicit policy reader")):
             config = explicit_settings({"swarm": {"gate": {"enabled": True}, "forward": {"enabled": True}}}, {},
@@ -351,6 +558,11 @@ class GuardedObjectiveBootstrap(unittest.TestCase):
         self.assertEqual(replacement.store._all("SELECT * FROM events WHERE kind='swarm.status'"), objective_events)
         self.assertEqual(self.history(), before)
         replacement.verify_state()
+        # The real Researcher writes its own notebook entry for a hold. That
+        # entry must become the baseline, rather than buy another model turn.
+        replacement.step()
+        self.assertEqual(len(self.model_requests), 1)
+        replacement.verify_state()
         self.assertTrue(replacement.close())
         self.config_document = {"swarm": {"gym": {"train_from": "unreadable-synthetic-setting"}}}
         unchanged_span = self.build()
@@ -358,6 +570,38 @@ class GuardedObjectiveBootstrap(unittest.TestCase):
         self.assertEqual(unchanged_span.researcher.pool.train_first, "2020-01-02")
         self.assertEqual(unchanged_span.researcher.settings["gym"]["train_from"], "2020-01-02")
         self.assertEqual(unchanged_span.store._all("SELECT * FROM events WHERE kind='swarm.status'"), objective_events)
+
+    def test_real_researcher_paid_hold_stays_durable_and_new_guidance_wakes_once(self):
+        import time
+        controller = self.build()
+        now = time.time()
+        controller.clock = lambda: now
+        controller.store.put("architect_at", now)
+        controller.store.put("tournament_at", now)
+        before = self.history()
+        row = controller.step()
+        self.assertEqual(row["actions"][0]["family"], "child")
+        self.assertTrue(row["actions"][0]["result"]["hold"])
+        self.assertTrue(row["actions"][0]["result"]["notebook_note_seqs"])
+        self.assertEqual(len(self.model_requests), 1)
+        after_cycle = controller.store.family("child")["cycles"]
+        for _ in range(24):
+            now += 3600
+            controller.step()
+        self.assertEqual(len(self.model_requests), 1)
+        self.assertEqual(controller.store.family("child")["cycles"], after_cycle)
+        self.assertEqual(self.history(), before)
+        controller.verify_state()
+        controller.store.note("child", "Independent Train counterfactual evidence is available.")
+        now += 60
+        row = controller.step()
+        self.assertEqual(row["actions"][0]["family"], "child")
+        self.assertEqual(len(self.model_requests), 2)
+        now += 60
+        controller.step()
+        self.assertEqual(len(self.model_requests), 2)
+        self.assertEqual(self.history(), before)
+        controller.verify_state()
 
     def test_missing_changed_or_unfinished_objective_holds_before_broker_or_actors(self):
         controller = self.build()

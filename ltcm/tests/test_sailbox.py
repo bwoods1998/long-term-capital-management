@@ -8,7 +8,10 @@ expensive to get wrong against a live API that creates billable machines.
 from __future__ import annotations
 
 import base64
+import io
 import unittest
+from http.client import IncompleteRead
+from unittest.mock import patch
 
 from ltcm import sailbox
 from ltcm.sailbox import (
@@ -239,6 +242,107 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(error.kind, "conflict_error")
         self.assertIn("already exists", str(error))
         self.assertNotIn("Bearer", str(error))
+
+
+class FileDownloadBoundaryTests(unittest.TestCase):
+    """Exercise actual HTTP reads without a socket or a large fixture allocation."""
+
+    def client(self, body=b"", *, length=None, failure=None):
+        class Response(io.BytesIO):
+            def __init__(self):
+                super().__init__(body)
+                self.headers = {} if length is None else {"Content-Length": length}
+                self.read_sizes = []
+
+            def read(self, size=-1):
+                self.read_sizes.append(size)
+                if failure is not None:
+                    raise failure
+                return super().read(size)
+
+        response = Response()
+
+        class Opener:
+            calls = []
+
+            def open(self, request, timeout):
+                self.calls.append((request.get_method(), request.full_url, timeout))
+                return response
+
+        opener = Opener()
+        transport = Transport(key_source=lambda: "synthetic-download-key", opener=opener)
+        return SailboxClient(transport), response, opener
+
+    def test_default_bound_refuses_an_extra_byte_instead_of_returning_a_prefix(self):
+        client, response, opener = self.client(b"1234567")
+        with patch.object(sailbox, "_RAW_DOWNLOAD_LIMIT", 6), self.assertRaises(SailboxError) as caught:
+            client.download(BOX, "/workspace/state/swarm.sqlite")
+        self.assertEqual(caught.exception.kind, "download_too_large")
+        self.assertEqual(response.read_sizes, [7])
+        self.assertTrue(response.closed)
+        self.assertEqual(len(opener.calls), 1)
+
+    def test_exact_bound_and_empty_files_are_complete(self):
+        for body in (b"", b"123456"):
+            for length in (None, str(len(body))):
+                with self.subTest(body=body, length=length):
+                    client, response, _ = self.client(body, length=length)
+                    with patch.object(sailbox, "_RAW_DOWNLOAD_LIMIT", 6):
+                        self.assertEqual(client.download(BOX, "/workspace/state/swarm.sqlite"), body)
+                    self.assertTrue(response.closed)
+
+    def test_a_larger_explicit_bound_returns_the_complete_snapshot(self):
+        client, response, opener = self.client(b"1234567", length="7")
+        with patch.object(sailbox, "_RAW_DOWNLOAD_LIMIT", 6):
+            self.assertEqual(client.download(BOX, "/workspace/state/swarm.sqlite", max_bytes=8), b"1234567")
+        self.assertEqual(response.read_sizes, [9])
+        self.assertEqual(len(opener.calls), 1)
+        self.assertTrue(response.closed)
+
+    def test_declared_oversize_is_refused_before_reading_the_body(self):
+        client, response, _ = self.client(b"1234567", length="7")
+        with patch.object(sailbox, "_RAW_DOWNLOAD_LIMIT", 6), self.assertRaises(SailboxError) as caught:
+            client.download(BOX, "/workspace/state/swarm.sqlite")
+        self.assertEqual(caught.exception.kind, "download_too_large")
+        self.assertEqual(response.read_sizes, [])
+        self.assertTrue(response.closed)
+
+    def test_short_or_interrupted_reads_keep_a_sanitized_retryable_error(self):
+        for failure in (None, IncompleteRead(b"synthetic-private-file-content", 6)):
+            with self.subTest(failure=type(failure).__name__):
+                client, response, _ = self.client(b"12345", length="6", failure=failure)
+                with self.assertRaises(sailbox.SailboxTransportError) as caught:
+                    client.download(BOX, "/workspace/state/swarm.sqlite", max_bytes=8)
+                self.assertTrue(caught.exception.transient)
+                self.assertIn("IncompleteRead", str(caught.exception))
+                self.assertNotIn("private-file-content", str(caught.exception))
+                self.assertNotIn("synthetic-download-key", str(caught.exception))
+                self.assertTrue(response.closed)
+
+    def test_invalid_bounds_are_refused_before_any_transport_or_key_read(self):
+        def forbidden(*args, **kwargs):
+            raise AssertionError("invalid bound must not invoke a transport or credential reader")
+
+        client = SailboxClient(forbidden)
+        transport = Transport(key_source=forbidden, opener=object())
+        for value in (True, 0, -1, 1.0, "8", 1_000_000_001):
+            with self.subTest(value=value):
+                with self.assertRaises(SailboxError):
+                    client.download(BOX, "/workspace/state/swarm.sqlite", max_bytes=value)
+                with self.assertRaises(SailboxError):
+                    transport("GET", f"/sailboxes/{BOX}/files", raw=True, raw_limit=value)
+        for options in ({"raw": False}, {"raw": True, "stream": True}):
+            with self.subTest(options=options), self.assertRaises(SailboxError):
+                transport("GET", f"/sailboxes/{BOX}/files", raw_limit=8, **options)
+
+    def test_invalid_declared_length_is_refused_without_reading_content(self):
+        for length in ("-1", "", "not-a-size", "1.5", "１２", "9" * 5000):
+            with self.subTest(length=length):
+                client, response, _ = self.client(b"123", length=length)
+                with self.assertRaises(SailboxError):
+                    client.download(BOX, "/workspace/state/swarm.sqlite")
+                self.assertEqual(response.read_sizes, [])
+                self.assertTrue(response.closed)
 
 
 class CreateTests(unittest.TestCase):
