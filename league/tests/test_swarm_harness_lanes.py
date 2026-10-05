@@ -2786,7 +2786,10 @@ class Judges(unittest.TestCase):
     def test_data_judge_faults_and_their_labels(self):
         dev = self.judge("data")
         self.assertEqual(dev["retried_permanent"], 0)
-        self.assertGreaterEqual(dev["failed_transient"], 1, "the truncated read the Sept 30 judge found is a dev case")
+        self.assertEqual(dev["cases"], 13, "all public fault and permanent-control scenarios must run")
+        self.assertEqual(dev["failed_transient"], 0,
+                         "the real transport now classifies the public IncompleteRead fault for the driver's retry")
+        self.assertEqual(dev["requests"], 23, "transient faults retry, permanent controls stop immediately")
         held = self.judge("data", "heldout", "s1")
         self.assertEqual(held["retried_permanent"], 0)
         self.assertGreater(held["failed_transient"], 0, "an HTTP 599 is not retried by the Sept 30 driver")
