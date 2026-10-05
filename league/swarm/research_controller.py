@@ -67,16 +67,29 @@ def explicit_settings(config: Mapping[str, Any], policy: Mapping[str, Any], *, c
     return out
 
 
+def _verify_train_objective(store, expected: str) -> None:
+    if store.get("train_objective") != expected:
+        raise ResearchControllerError("the private Train objective is unresolved or changed")
+    for family in store.families(alive=True):
+        state = family.get("state") or {}
+        migrated = state.get("objective_migrated")
+        # A family born after the completed pass has no migration marker yet.
+        if migrated not in (None, expected):
+            raise ResearchControllerError("a living family has an unfinished Train objective migration")
+
+
 class ResearchController:
     """Schedules actual research components and emits private funnel receipts."""
 
     def __init__(self, store, broker, config: ControllerConfig, *, researcher, tournament, architect,
                  verify_state: Callable[[], Any], clock: Callable[[], float] = time.time,
-                 expected_evaluation: Mapping[str, Any] | None = None):
+                 expected_evaluation: Mapping[str, Any] | None = None,
+                 expected_train_objective: str | None = None):
         self.store, self.broker, self.config = store, broker, config
         self.researcher, self.tournament, self.architect = researcher, tournament, architect
         self.verify_state, self.clock = verify_state, clock
         self.expected_evaluation = dict(expected_evaluation) if expected_evaluation is not None else None
+        self.expected_train_objective = expected_train_objective
         self.last_cycle = float("-inf")
         self.last_family: str | None = None
         self.stop = threading.Event()
@@ -85,6 +98,8 @@ class ResearchController:
     def _preflight(self):
         _no_credentials(os.environ)
         self.verify_state()
+        if self.expected_train_objective is not None:
+            _verify_train_objective(self.store, self.expected_train_objective)
         pool = getattr(self.researcher, "pool", None)
         if pool is not None and callable(getattr(pool, "recover", None)):
             # A free terminal receipt is still owed when new paid work is held.
@@ -207,7 +222,7 @@ def build_controller(root: Path, broker, config: ControllerConfig, *, image: str
     from .research_state import artifact_identity, assert_isolated_state, guard_tournament
     from .research_adapters import ResearchModelRouter, ResearchGymPool
     from .store import SwarmStore
-    from .researcher import Researcher
+    from .researcher import Researcher, migrate_objective, objective_for
     from .tournament import Tournament
     from .architect import Architect
 
@@ -217,29 +232,55 @@ def build_controller(root: Path, broker, config: ControllerConfig, *, image: str
                                           expected_evaluator=identity, artifact_root=artifact_root)
     verify()  # fail before opening a writable store or constructing any paid collaborator
     store = SwarmStore(root)
-    settings = explicit_settings(config_document, policy_document, checkpoint=image, roots=roots)
-    from . import settings as settings_mod
-    capital_value = settings["gym"].get("capital", 5000)
     try:
-        capital = Decimal(str(capital_value))
-        if not capital.is_finite() or capital <= 0 or isinstance(capital_value, bool):
-            raise InvalidOperation
-    except InvalidOperation as exc:
+        settings = explicit_settings(config_document, policy_document, checkpoint=image, roots=roots)
+        from . import settings as settings_mod
+        capital_value = settings["gym"].get("capital", 5000)
+        try:
+            capital = Decimal(str(capital_value))
+            if not capital.is_finite() or capital <= 0 or isinstance(capital_value, bool):
+                raise InvalidOperation
+        except InvalidOperation as exc:
+            raise ResearchControllerError("explicit finite simulation capital is required") from exc
+        with store.atomic():
+            previous = store.get("train_objective")
+            running = settings_mod.objective_span(previous)
+            if previous is not None and previous != objective_for(None, running):
+                raise ResearchControllerError("the stored Train objective is unreadable")
+            selected = settings_mod.train_from(settings, running)
+            objective = objective_for(settings, running)
+            span_floors = {family["id"]: (family.get("state") or {}).get("span_trials", 0)
+                           for family in store.families(alive=True)}
+            # Stock migration reports per-family failures instead of raising.
+            # One outer transaction prevents a partial pass from becoming paid state.
+            migration = migrate_objective(store, settings=settings)
+            if not isinstance(migration, Mapping) or type(migration.get("failed")) is not int or migration["failed"] != 0:
+                raise ResearchControllerError("the Train objective migration did not complete")
+            _verify_train_objective(store, objective)
+            for family_id, floor in span_floors.items():
+                if ((store.family(family_id) or {}).get("state") or {}).get("span_trials", 0) < floor:
+                    raise ResearchControllerError("the Train migration lowered a historical span trial baseline")
+        verify()  # The independent guard connection sees only committed changes.
+        # Missing or invalid settings retain the migrated running span. Bind every
+        # actor's manifest to that effective span without changing supplied documents.
+        settings["gym"]["train_from"] = selected.isoformat()
+        expected = {"image": image, "bundle": identity.bundle, "execution": identity.execution, "roots": list(roots),
+                    "capital": format(capital.normalize(), "f"), "workers": settings["gym"].get("workers", 8),
+                    "train_first": selected.isoformat(),
+                    "required_split": settings_mod.train_split(settings, selected)}
+    except BaseException:
         store.close()
-        raise ResearchControllerError("explicit finite simulation capital is required") from exc
-    expected = {"image": image, "bundle": identity.bundle, "execution": identity.execution, "roots": list(roots),
-                "capital": format(capital.normalize(), "f"), "workers": settings["gym"].get("workers", 8),
-                "train_first": settings_mod.train_from(settings).isoformat(),
-                "required_split": settings_mod.train_split(settings)}
+        raise
     router = ResearchModelRouter(store, broker, settings=settings)
     pool = ResearchGymPool(store, broker, checkpoint=image, bundle=identity.bundle,
-                           execution=identity.execution, train_first=settings_mod.train_from(settings).isoformat(),
+                           execution=identity.execution, train_first=selected.isoformat(),
                            roots=roots, settings=settings)
     researcher = Researcher(store, router, pool, settings, background=False)
     tournament = guard_tournament(Tournament(store, pool, settings), identity)
     architect = Architect(store, router, settings)
     return ResearchController(store, broker, config, researcher=researcher, tournament=tournament,
-                              architect=architect, verify_state=verify, expected_evaluation=expected)
+                              architect=architect, verify_state=verify, expected_evaluation=expected,
+                              expected_train_objective=objective)
 
 
 def main(argv=None):

@@ -1,3 +1,5 @@
+from contextlib import closing
+import datetime as dt
 import os
 from pathlib import Path
 import tempfile
@@ -5,7 +7,7 @@ import unittest
 from unittest import mock
 
 from league.swarm.research_controller import (ControllerConfig, ResearchController,
-                                             ResearchControllerError, explicit_settings, main)
+                                             ResearchControllerError, build_controller, explicit_settings, main)
 from league.swarm.store import SwarmStore
 
 
@@ -235,3 +237,226 @@ class ResearchControllerTest(unittest.TestCase):
             self.broker.evaluation = {"capital": "5000", "image": "sbcp_test", "max_split": 5, **changes}
             self.assertEqual(self.controller.step()["status"], "held", changes)
         self.assertEqual(self.researcher.calls + self.architect.calls + self.tournament.calls, [])
+
+
+class GuardedObjectiveBootstrap(unittest.TestCase):
+    """Actual guarded imports and research actors; every broker answer is synthetic."""
+
+    def setUp(self):
+        from league.swarm.research_state import artifact_identity
+        from league.tests.test_research_state import ResearchState
+
+        self.environment = mock.patch.dict(os.environ, {"PATH": "/usr/bin:/bin"}, clear=True)
+        self.environment.start()
+        self.addCleanup(self.environment.stop)
+        self.fixture = ResearchState("runTest")
+        self.fixture.repo = Path(__file__).resolve().parents[2]
+        self.fixture.actual = artifact_identity("synthetic-bootstrap-checkpoint", self.fixture.repo)
+        self.fixture.setUp()
+        self.addCleanup(self.fixture.doCleanups)
+        self.fixture.import_state()
+        self.root, self.identity = self.fixture.fresh, self.fixture.actual
+        self.config_document = {"swarm": {"gym": {"train_from": "2020-01-02"}}}
+        self.policy_document = {}
+        self.broker = Broker()
+        self.broker.scope = "synthetic-research-1"
+        self.broker.evaluation = {"image": self.identity.image, "bundle": self.identity.bundle,
+            "execution": self.identity.execution, "roots": ["SPY", "QQQ"], "capital": "10000",
+            "workers": 8, "train_first": "2020-01-02", "max_split": 16}
+        self.model_requests = []
+        self.broker.evaluate = self.synthetic_model
+
+    def synthetic_model(self, profile, items, *, key, **options):
+        import json
+        self.model_requests.append({"profile": profile, "items": items, "key": key, **options})
+        return {"request_key": key, "profile": profile, "id": "resp_synthetic_bootstrap",
+                "model": "synthetic/" + profile, "status": "completed", "cost_usd": "0",
+                "accrued_day": dt.datetime.now(dt.timezone.utc).date().isoformat(),
+                "output": [{"type": "function_call", "name": "gym_run", "call_id": "synthetic_hold",
+                            "arguments": json.dumps({"hold": True, "why": "Synthetic startup; no Gym dispatch"})}]}
+
+    def build(self):
+        controller = build_controller(self.root, self.broker, ControllerConfig(self.broker.scope),
+            image=self.identity.image, artifact_root=self.fixture.repo,
+            config_document=self.config_document, policy_document=self.policy_document, roots=("SPY", "QQQ"))
+        self.addCleanup(controller.close)
+        return controller
+
+    def history(self):
+        with closing(SwarmStore(self.root, readonly=True)) as store:
+            parent = store.family("parent")["state"]
+            return {"baseline": store._all("SELECT * FROM research_baseline ORDER BY kind,identity"),
+                "versions": store._all("SELECT * FROM versions ORDER BY family,n"),
+                "runs": store._all("SELECT * FROM runs ORDER BY run_id"),
+                "looks": store._all("SELECT * FROM looks ORDER BY seq"),
+                "retired": store.family("other"), "N": store.lineage_trials("child"),
+                "look_count": store.lineage_looks("child", include_inflight=True),
+                "failed": {key: parent.get(key) for key in ("validation_verdicts", "mechanism", "incubator_barred",
+                                                           "look_inflight", "gate_hold", "extension_hold")}}
+
+    def test_constructor_initializes_real_import_objective_before_actors_and_keeps_history(self):
+        from league.swarm import settings
+        from league.swarm.architect import Architect
+        from league.swarm.researcher import Researcher, running_span
+        from league.swarm.tournament import Tournament
+
+        before = self.history()
+        controller = self.build()
+        self.assertEqual(controller.store.get("train_objective"), "worst-train-year-v1@2020-01-02")
+        self.assertIsInstance(controller.researcher, Researcher)
+        self.assertIsInstance(controller.tournament, Tournament)
+        self.assertIsInstance(controller.architect, Architect)
+        self.assertEqual(running_span(controller.store), "2020-01-02")
+        self.assertEqual(controller.researcher.pool.train_first, "2020-01-02")
+        self.assertEqual(controller.expected_evaluation["required_split"], 16)
+        self.assertEqual(controller.researcher.run_timeout(), 1500)
+        self.assertEqual(settings.train_split(controller.researcher.settings, dt.date(2020, 1, 2)), 16)
+        self.assertEqual(self.broker.calls, 0)
+        self.assertEqual(self.model_requests, [])
+        self.assertEqual(self.history(), before)
+        controller.verify_state()  # Real SQL guards and scoped failure floors after migration.
+
+    def test_actual_start_holds_when_host_split_cannot_cover_selected_span(self):
+        controller = self.build()
+        self.broker.evaluation["max_split"] = 8
+        before = self.history()
+        row = controller.step()
+        self.assertEqual(row["status"], "held")
+        self.assertEqual(self.model_requests, [])
+        self.assertEqual(self.history(), before)
+
+    def test_real_start_and_restart_preserve_migration_and_original_failure_history(self):
+        import time
+        controller = self.build()
+        before = self.history()
+        # Recent fixture timestamps leave the unchanged ordinary cadence intact.
+        controller.store.put("architect_at", time.time())
+        controller.store.put("tournament_at", time.time())
+        row = controller.step()
+        self.assertEqual(row["status"], "running")
+        self.assertEqual(len(self.model_requests), 1)
+        self.assertEqual(row["actions"][0]["family"], "child")
+        self.assertTrue(row["actions"][0]["result"].get("hold"))
+        self.assertEqual(self.history(), before)
+        objective_events = controller.store._all("SELECT * FROM events WHERE kind='swarm.status'")
+        self.assertTrue(controller.close())
+        # A missing train_from setting keeps the completed stock objective.
+        self.config_document = {"swarm": {"gym": {}}}
+        replacement = self.build()
+        self.assertEqual(replacement.store.get("train_objective"), "worst-train-year-v1@2020-01-02")
+        self.assertEqual(replacement.expected_evaluation["train_first"], "2020-01-02")
+        self.assertEqual(replacement.expected_evaluation["required_split"], 16)
+        self.assertEqual(replacement.researcher.pool.train_first, "2020-01-02")
+        self.assertEqual(replacement.researcher.settings["gym"]["train_from"], "2020-01-02")
+        self.assertEqual(replacement.store._all("SELECT * FROM events WHERE kind='swarm.status'"), objective_events)
+        self.assertEqual(self.history(), before)
+        replacement.verify_state()
+        self.assertTrue(replacement.close())
+        self.config_document = {"swarm": {"gym": {"train_from": "unreadable-synthetic-setting"}}}
+        unchanged_span = self.build()
+        self.assertEqual(unchanged_span.expected_evaluation["train_first"], "2020-01-02")
+        self.assertEqual(unchanged_span.researcher.pool.train_first, "2020-01-02")
+        self.assertEqual(unchanged_span.researcher.settings["gym"]["train_from"], "2020-01-02")
+        self.assertEqual(unchanged_span.store._all("SELECT * FROM events WHERE kind='swarm.status'"), objective_events)
+
+    def test_missing_changed_or_unfinished_objective_holds_before_broker_or_actors(self):
+        controller = self.build()
+        objective = controller.store.get("train_objective")
+        with mock.patch.object(controller.researcher.pool, "recover") as recover:
+            for value in (None, "worst-train-year-v1", "unreadable@2020-01-02"):
+                controller.store.put("train_objective", value)
+                self.assertEqual(controller.step()["status"], "held")
+            controller.store.put("train_objective", objective)
+            controller.store.set_state("child", objective_migrated="worst-train-year-v1")
+            self.assertEqual(controller.step()["status"], "held")
+            recover.assert_not_called()
+        self.assertEqual(self.broker.calls, 0)
+        self.assertEqual(self.model_requests, [])
+
+    def test_actual_architect_newborn_can_research_and_restart_without_a_migration_marker(self):
+        import time
+        from league.tests.test_swarm_cards import proposal
+
+        controller = self.build()
+        before = self.history()
+        born = controller.architect.admit([proposal("a-newborn")])
+        self.assertEqual(born, ["a-newborn"])
+        self.assertIsNone(controller.store.family(born[0])["state"].get("objective_migrated"))
+        controller.store.put("architect_at", time.time())
+        controller.store.put("tournament_at", time.time())
+        row = controller.step()
+        self.assertEqual(row["status"], "running")
+        self.assertEqual(row["actions"][0]["family"], born[0])
+        self.assertTrue(row["actions"][0]["result"].get("hold"))
+        self.assertEqual(len(self.model_requests), 1)
+        self.assertEqual(self.history(), before)
+        events = controller.store._all("SELECT * FROM events WHERE kind='swarm.status'")
+        self.assertTrue(controller.close())
+        replacement = self.build()
+        self.assertEqual(replacement.store._all("SELECT * FROM events WHERE kind='swarm.status'"), events)
+        self.assertIsNone(replacement.store.family(born[0])["state"].get("objective_migrated"))
+        replacement.verify_state()
+
+    def test_failed_or_unresolved_bootstrap_rolls_back_before_collaborators_exist(self):
+        from league.swarm import researcher
+        before = self.history()
+        def contents():
+            with closing(SwarmStore(self.root, readonly=True)) as store:
+                return {table: store._all(f"SELECT * FROM {table} ORDER BY rowid")
+                        for table in ("families", "events", "notebook", "kv")}
+        unchanged = contents()
+        original = researcher.migrate_objective
+        def failed(store, **kwargs):
+            runs = store.runs
+            def broken_family(family, **options):
+                if family == "child":
+                    raise ValueError("Synthetic per-family migration failure")
+                return runs(family, **options)
+            with mock.patch.object(store, "runs", side_effect=broken_family):
+                return original(store, **kwargs)
+        for callback in (failed, lambda *a, **k: {"migrated": 0, "with_best": 0, "failed": 0}):
+            with mock.patch.object(researcher, "migrate_objective", side_effect=callback), \
+                    mock.patch("league.swarm.research_adapters.ResearchGymPool") as pool:
+                with self.assertRaises(ResearchControllerError):
+                    self.build()
+                pool.assert_not_called()
+            with closing(SwarmStore(self.root, readonly=True)) as store:
+                self.assertIsNone(store.get("train_objective"))
+            self.assertEqual(self.history(), before)
+            self.assertEqual(contents(), unchanged)
+        self.assertEqual(self.broker.calls, 0)
+        self.assertEqual(self.model_requests, [])
+
+    def test_allowed_import_span_floor_cannot_be_lowered_by_a_later_stock_migration(self):
+        self.fixture.store.set_state("parent", span_trials=99)
+        self.fixture.recapture_reviewed_fixture("synthetic-large-span-floor")
+        self.root = self.fixture.base / "span-floor-working"
+        self.fixture.import_state(fresh=self.root)
+        controller = self.build()
+        self.assertEqual(controller.store.family("parent")["state"]["span_trials"], 99)
+        controller.verify_state()
+        before = self.history()
+        families = controller.store.families()
+        events = controller.store._all("SELECT * FROM events ORDER BY seq")
+        self.assertTrue(controller.close())
+        self.config_document = {"swarm": {"gym": {"train_from": "2022-01-03"}}}
+        with mock.patch("league.swarm.research_adapters.ResearchGymPool") as pool:
+            with self.assertRaisesRegex(ResearchControllerError, "historical span trial baseline"):
+                self.build()
+            pool.assert_not_called()
+        with closing(SwarmStore(self.root, readonly=True)) as store:
+            self.assertEqual(store.get("train_objective"), "worst-train-year-v1@2020-01-02")
+            self.assertEqual(store.families(), families)
+            self.assertEqual(store._all("SELECT * FROM events ORDER BY seq"), events)
+        self.assertEqual(self.history(), before)
+        self.assertEqual(self.broker.calls, 0)
+        self.assertEqual(self.model_requests, [])
+
+    def test_unreadable_existing_objective_is_not_silently_reinterpreted(self):
+        with closing(SwarmStore(self.root)) as store:
+            store.put("train_objective", "different-objective@2020-01-02")
+        with self.assertRaisesRegex(ResearchControllerError, "objective"):
+            self.build()
+        with closing(SwarmStore(self.root, readonly=True)) as store:
+            self.assertEqual(store.get("train_objective"), "different-objective@2020-01-02")
+        self.assertEqual(self.broker.calls, 0)
