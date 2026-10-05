@@ -237,7 +237,12 @@ class ModelPolicy:
                  and isinstance(self.provenance, str) and bool(self.provenance.strip()), "documented host model policy is required")
         for value in (self.input_usd_million, self.output_usd_million, self.fixed_usd):
             _money(value)
-        _require(all(type(v) is int and 0 < v <= 1000000 for v in (self.max_input_tokens, self.max_output_tokens)), "invalid host token ceilings")
+        # A host may reserve the whole published 1M input window conservatively
+        # as 1,048,576 tokens. That billing ceiling is not an exact prompt count
+        # or permission to exceed the provider's native input+output context.
+        _require(type(self.max_input_tokens) is int and 0 < self.max_input_tokens <= 1048576
+                 and type(self.max_output_tokens) is int and 0 < self.max_output_tokens <= 1000000,
+                 "invalid host token ceilings")
         _require(_time(self.valid_from) < _time(self.valid_until), "invalid host price interval")
         _require(isinstance(self.allowed_efforts, tuple) and bool(self.allowed_efforts)
                  and all(v in ("none", "minimal", "low", "medium", "high") for v in self.allowed_efforts), "invalid reviewed model efforts")
