@@ -575,17 +575,19 @@ class Holds(unittest.TestCase):
         self.assertAlmostEqual(self.store.spent(["sail_model"]), costs, places=6)
         self.assertEqual(self.store.get("unsettled") or {}, {})
 
-    def test_a_released_hold_is_reversed(self):
+    def test_a_lost_post_reply_keeps_both_provider_and_research_holds(self):
         from ltcm.provider import ProviderError
 
         self.fail_code = "provider_transport_timeout"  # the POST's answer was lost: Sail may or may not have it
         with self.assertRaises(ProviderError):
             self.ask()
-        self.assertGreater(self.store.spent(["sail_model"]), 0)
-        self.prov.reconcile_stale(now=time.time() + 3600)  # never accepted: the Provider releases its hold
-        self.assertEqual(self.prov._db.execute("SELECT status FROM requests").fetchone()[0], "abandoned")
+        hold = self.store.spent(["sail_model"])
+        self.assertGreater(hold, 0)
+        self.prov.reconcile_stale(now=time.time() + 3600)  # no ID does not establish a rejection
+        self.assertEqual(self.prov._db.execute("SELECT status FROM requests").fetchone()[0], "prepared")
         self.router.settle_holds()
-        self.assertAlmostEqual(self.store.spent(["sail_model"]), 0.0, places=9)
+        self.assertAlmostEqual(self.store.spent(["sail_model"]), hold, places=9)
+        self.assertAlmostEqual(float(self.prov.spent_today()), hold, places=9)
 
     def test_a_server_error_without_an_acceptance_record_keeps_its_admission_hold(self):
         from ltcm.provider import ProviderError
@@ -593,13 +595,14 @@ class Holds(unittest.TestCase):
         self.fail_code = "provider_http_503"
         with self.assertRaises(ProviderError):
             self.ask()
-        # A 503 alone is no proof that nothing ran: the pre-dispatch hold stays until the Provider settles or
-        # reconciles the request. A transient outage cannot open extra research room before that accounting.
+        # A 503 or an elapsed poll deadline is no proof that nothing ran. A transient
+        # outage cannot open extra research room before authoritative reconciliation.
         hold = float(self.prov._db.execute("SELECT reserved_usd FROM requests").fetchone()[0])
         self.assertAlmostEqual(self.store.spent(["sail_model"]), hold, places=9)
         self.prov.reconcile_stale(now=time.time() + 3600)
         self.router.settle_holds()
-        self.assertAlmostEqual(self.store.spent(["sail_model"]), 0.0, places=9)
+        self.assertAlmostEqual(self.store.spent(["sail_model"]), hold, places=9)
+        self.assertAlmostEqual(float(self.prov.spent_today()), hold, places=9)
 
 
 class Compaction(ResearcherCase):

@@ -327,7 +327,7 @@ class BudgetTests(ProviderCase):
 
 
 class StaleReservationTests(ProviderCase):
-    """A request the venue refused, or a process died on, must not hold its reservation forever."""
+    """Explicit refusals release holds; lost replies retain them until reconciled."""
 
     def test_a_rejected_post_releases_its_reservation_at_once(self):
         transport = FakeTransport(TransportError("provider_http_400"))
@@ -363,21 +363,114 @@ class StaleReservationTests(ProviderCase):
             self.respond(provider, profile="pro_asap")
         self.assertGreater(provider.spent_today("earnings-01"), Decimal("0"))
 
-    def test_a_request_a_dead_process_left_prepared_is_released_after_the_poll_deadline(self):
+    def test_a_request_a_dead_process_left_prepared_keeps_its_hold_after_the_poll_deadline(self):
         transport = FakeTransport(RuntimeError("the process died mid-POST"))
         provider = self.provider(transport, poll_timeout=900.0)
         with self.assertRaises(TransportError):
             self.respond(provider, profile="pro_asap")
         held = provider.spent_today("earnings-01")
-        self.assertGreater(held, Decimal("0"), "an unconfirmed POST keeps its hold for now")
+        self.assertGreater(held, Decimal("0"), "an unconfirmed POST may have been accepted")
         self.time[0] += 901
         outcome = provider.reconcile_stale()
-        self.assertEqual(outcome, {"settled": 0, "released": 1})
-        self.assertEqual(provider.spent_today("earnings-01"), Decimal("0"))
+        self.assertEqual(outcome, {"settled": 0, "released": 0})
+        self.assertEqual(provider.spent_today("earnings-01"), held)
         row = provider._db.execute("SELECT status FROM requests").fetchone()
-        self.assertEqual(row["status"], "abandoned")
-        # Idempotent: a second pass finds nothing.
+        self.assertEqual(row["status"], "prepared")
+        # Repeating the sweep neither releases the hold nor retries the POST.
         self.assertEqual(provider.reconcile_stale(), {"settled": 0, "released": 0})
+        self.assertEqual(len(transport.posts), 1)
+
+    def test_server_error_rate_limit_and_missing_id_never_prove_zero_cost(self):
+        for i, failure in enumerate((TransportError("provider_http_502"),
+                                     TransportError("provider_http_429"),
+                                     {"status": "completed", "usage": {"input_tokens": 10, "output_tokens": 20}})):
+            with self.subTest(failure=failure):
+                transport = FakeTransport(failure)
+                provider = self.provider(transport)
+                with self.assertRaises(ProviderError):
+                    self.respond(provider, profile="pro_asap", key=f"missing:{i}")
+                rows = [dict(r) for r in provider._db.execute("SELECT * FROM requests ORDER BY id")]
+                held = provider.spent_today()
+                self.time[0] += 901
+                self.assertEqual(provider.reconcile_stale(), {"settled": 0, "released": 0})
+                self.assertEqual(provider.spent_today(), held)
+                self.assertEqual([dict(r) for r in provider._db.execute("SELECT * FROM requests ORDER BY id")], rows)
+                self.assertEqual(len(transport.calls), 1)
+
+    def test_a_restart_preserves_the_original_unconfirmed_request_and_counter(self):
+        provider = self.provider(FakeTransport(RuntimeError("reply lost after acceptance")))
+        with self.assertRaises(TransportError):
+            self.respond(provider, profile="pro_asap")
+        row = dict(provider._db.execute("SELECT * FROM requests").fetchone())
+        original = Decimal(row["reserved_usd"])
+        provider.close()
+        self.time[0] += 901
+        transport = FakeTransport()
+        restarted = self.provider(transport)
+        self.assertEqual(restarted.spent_today(), original)
+        self.assertEqual(dict(restarted._db.execute("SELECT * FROM requests").fetchone()), row)
+        self.assertEqual(transport.calls, [])
+
+    def test_unconfirmed_reservation_still_blocks_a_second_request_at_the_cap(self):
+        transport = FakeTransport(RuntimeError("POST reply lost"))
+        provider = self.provider(transport)
+        with self.assertRaises(TransportError):
+            self.respond(provider, profile="pro_asap")
+        held = provider.spent_today()
+        provider.floor_cap = held
+        self.time[0] += 901
+        provider.reconcile_stale()
+        with self.assertRaisesRegex(BudgetExceeded, "provider_floor_cap_exceeded"):
+            self.respond(provider, profile="pro_asap", key="new-request")
+        self.assertEqual(len(transport.posts), 1)
+        self.assertEqual(provider.spent_today(), held)
+
+    def test_another_connection_cannot_release_an_inflight_foreground_request(self):
+        observer = self.provider(FakeTransport())
+        provider = None
+
+        def delayed(*_args, **_kwargs):
+            self.time[0] += 901
+            self.assertEqual(observer._active, {})
+            self.assertEqual(observer.reconcile_stale(), {"settled": 0, "released": 0})
+            row = observer._db.execute("SELECT status,reserved_usd FROM requests").fetchone()
+            self.assertEqual(row["status"], "prepared")
+            self.assertEqual(observer.spent_today(), Decimal(row["reserved_usd"]))
+            return response()
+
+        provider = self.provider(delayed)
+        out = self.respond(provider, profile="pro_asap")
+        self.assertEqual(observer.spent_today(), out.cost_usd)
+
+    def test_late_acceptance_after_sweeps_settles_the_retained_hold_once(self):
+        provider = self.provider(FakeTransport(RuntimeError("reply lost"), response()))
+        with self.assertRaises(TransportError):
+            self.respond(provider, profile="pro_asap")
+        row = dict(provider._db.execute("SELECT * FROM requests").fetchone())
+        self.time[0] += 901
+        provider.reconcile_stale()
+        provider._accept_response(row["id"], "resp_one")
+        provider._accept_response(row["id"], "resp_one")
+        self.assertEqual(provider.spent_today(), Decimal(row["reserved_usd"]))
+        self.time[0] += 901
+        self.assertEqual(provider.reconcile_stale(), {"settled": 1, "released": 0})
+        final = dict(provider._db.execute("SELECT * FROM requests").fetchone())
+        self.assertEqual(provider.spent_today(), Decimal(final["cost_usd"]))
+        self.assertEqual(provider.reconcile_stale(), {"settled": 0, "released": 0})
+
+    def test_budget_counter_rebuild_preserves_an_unconfirmed_hold_after_sweeps(self):
+        provider = self.provider(FakeTransport(RuntimeError("unknown POST outcome")))
+        with self.assertRaises(TransportError):
+            self.respond(provider, profile="pro_asap")
+        held = provider.spent_today()
+        self.time[0] += 901
+        provider.reconcile_stale()
+        provider._db.execute("UPDATE budget_days SET spent_usd='0'")
+        plan = provider.reconcile_budget_days()
+        self.assertEqual(Decimal(plan["after_usd"]), held)
+        self.assertEqual(provider.spent_today(), Decimal(0), "dry run does not repair the counter")
+        provider.reconcile_budget_days(apply=True)
+        self.assertEqual(provider.spent_today(), held)
 
     def test_a_dispatched_request_the_venue_finished_is_settled_from_the_venue(self):
         transport = FakeTransport(
@@ -396,9 +489,11 @@ class StaleReservationTests(ProviderCase):
         self.assertEqual(provider.spent_today("earnings-01"), Decimal(row["cost_usd"]))
 
     def test_the_stale_sweep_reads_the_open_requests_by_index_in_the_table_s_order(self):
-        """Sept 24, 2026 (R6-perf): the House runs this sweep every tick, and on the box it was a full scan of
-        a 1.73 GB table (5.0-5.9 s) to find one request. It now reads `requests_open`, and finds exactly the
-        rows the full scan found, in the same order (rowid), whatever order the index holds them in."""
+        """Keep the indexed sweep and table order, without loading unknown-POST bodies.
+
+        Missing response IDs cannot be recovered by GET; their holds stay in the ledger.
+        Filtering those rows also avoids repeatedly loading their potentially large bodies.
+        """
         from ltcm.provider import STALE_REQUESTS_SQL
 
         provider = self.provider(FakeTransport())
@@ -415,22 +510,28 @@ class StaleReservationTests(ProviderCase):
                 " created_at, updated_at) VALUES (?, 'd', 's', 'pro_flex', ?, '{}', ?, ?, '0.10', ?, ?)",
                 (f"req-{9 - i}", f"k{i}", status, "resp_x" if status == "dispatched" else None, updated, updated))
         cutoff = "2026-09-24T17:30:48"
-        full_scan = [dict(r) for r in provider._db.execute(  # the query as it was, and the table scan it ran
-            "SELECT * FROM requests NOT INDEXED WHERE status IN ('prepared', 'dispatched') AND updated_at < ?", (cutoff,))]
-        self.assertEqual([r["request_key"] for r in full_scan], ["k1", "k2", "k3", "k5", "k7"])
+        full_scan = [dict(r) for r in provider._db.execute(
+            "SELECT * FROM requests NOT INDEXED WHERE status IN ('prepared', 'dispatched') AND updated_at < ? "
+            "AND response_id IS NOT NULL", (cutoff,))]
+        self.assertEqual([r["request_key"] for r in full_scan], ["k2", "k5"])
         self.assertEqual([dict(r) for r in provider._db.execute(STALE_REQUESTS_SQL, (cutoff,))], full_scan)
         plan = " | ".join(str(step[-1]) for step in provider._db.execute("EXPLAIN QUERY PLAN " + STALE_REQUESTS_SQL, (cutoff,)))
         self.assertNotRegex(plan, r"\bSCAN (TABLE )?requests\b")
         self.assertIn("requests_open", plan)
 
     def test_spent_today_reconciles_at_most_once_a_minute(self):
+        from unittest import mock
+
         transport = FakeTransport(RuntimeError("died"))
         provider = self.provider(transport, poll_timeout=900.0)
         with self.assertRaises(TransportError):
             self.respond(provider, profile="pro_asap")
         self.time[0] += 901
-        provider.spent_today()  # reconciles: the hold is released
-        self.assertEqual(provider.spent_today("earnings-01"), Decimal("0"))
+        with mock.patch.object(provider, "reconcile_stale", wraps=provider.reconcile_stale) as sweep:
+            held = provider.spent_today()
+            self.assertGreater(held, 0)
+            self.assertEqual(provider.spent_today("earnings-01"), held)
+            self.assertEqual(sweep.call_count, 1)
         self.assertEqual(provider._last_reconcile, self.time[0])
 
 

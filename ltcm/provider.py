@@ -146,7 +146,8 @@ FOREGROUND_TIMEOUT = 1500  # a long asap turn is awaited inline, patiently; the 
 MAX_BODY_BYTES = 8_000_000
 PLACES = Decimal("0.00000001")
 ZERO = Decimal(0)
-#: The requests `reconcile_stale` looks at: prepared or dispatched, untouched since the cutoff, in the
+#: The requests `reconcile_stale` can recover: prepared or dispatched with an accepted response ID,
+#: untouched since the cutoff, in the
 #: order the table holds them (rowid), which is the order the full scan it replaces returned them in.
 #: Read through `requests_open` (status, updated_at). Measured on the House box, Sept 24, 2026: the
 #: league's `provider.sqlite` held 11,461 requests in 1.73 GB (bodies and responses are kept), the
@@ -155,7 +156,7 @@ ZERO = Decimal(0)
 #: the tick's `schedule` step: 17-52 s that hour) to find one request (dispatched Sept 19).
 STALE_REQUESTS_SQL = (
     "SELECT * FROM requests WHERE rowid IN (SELECT rowid FROM requests WHERE status IN ('prepared', 'dispatched') "
-    "AND updated_at < ?) ORDER BY rowid"
+    "AND updated_at < ? AND response_id IS NOT NULL) ORDER BY rowid"
 )
 
 SCHEMA = """
@@ -790,20 +791,22 @@ class Provider:
 
     # ------------------------------------------------------------------ budgets
     def reconcile_stale(self, now: float | None = None) -> dict[str, int]:
-        """Settle or release requests a dead process left behind.
+        """Recover accepted requests a stopped process left behind, using GET only.
 
-        A request is reserved before it is sent and the reservation is released when the
-        response settles. A process that dies mid-request, or a POST the venue rejected, leaves
-        the row `prepared` or `dispatched` with the reservation still counted against the desk
-        and the floor -- forever, which inflated today's spend and the desk fuse on the first
-        evening. Once a row is older than the poll deadline: a dispatched row with a response id
-        is read back and settled if the venue finished it; a row with no response id was never
-        accepted (a rejected POST, or a process that died before the answer) and its
-        reservation is released, the row marked `abandoned` so the ledger still shows it.
+        A missing response ID does not prove that the provider rejected a POST. Its
+        reply may have been lost, or another process may still be waiting for it.
+        Those requests keep their original reservation, status and error until
+        authoritative reconciliation. Age is never zero-cost evidence. Confirmed
+        immediate refusals are handled separately by the dispatch path.
+
+        Requests with an accepted ID are polled after the local patience deadline.
+        A terminal reply with usable usage replaces the hold with its actual cost;
+        unavailable replies and unknown usage retain the reservation. Historical
+        abandoned rows are not retroactively settled by this sweep.
         """
         now_seconds = float(self.clock() if now is None else now)
         cutoff = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(now_seconds - self.poll_timeout))
-        settled = released = 0
+        settled = 0
         with self._lock:
             rows = [
                 dict(r)
@@ -824,16 +827,14 @@ class Provider:
                     except Exception:
                         continue
                 continue
-            if self._abandon(row, stale_before=cutoff):
-                released += 1
         self._last_reconcile = now_seconds
-        return {"settled": settled, "released": released}
+        return {"settled": settled, "released": 0}
 
     def spent_today(self, desk_id: str | None = None) -> Decimal:
         """Committed USD today: settled costs plus every outstanding reservation.
 
-        Reservations older than the poll deadline are reconciled first, at most once a minute,
-        so a request a dead process left behind does not count against today forever.
+        Accepted requests older than the poll deadline are reconciled first, at most
+        once a minute. An unconfirmed POST keeps its reservation even after that deadline.
         """
         last = getattr(self, "_last_reconcile", None)
         if last is None or float(self.clock()) - float(last) >= 60.0:
