@@ -5,7 +5,6 @@ other routes keep for Probe opens. Every figure is invented."""
 
 from __future__ import annotations
 
-import copy
 import datetime as dt
 import json
 import random
@@ -23,7 +22,7 @@ from league.swarm.gate import DUPLICATE_STAGE, Gate, look_hold_settings
 from league.swarm.researcher import drift_settings
 from league.swarm.tournament import Tournament
 from league.tests import REAL_POLICY_PATH
-from league.tests.swarm_fakes import drift_block, result
+from league.tests.swarm_fakes import result
 from league.tests.test_live_step import HAVE, LiveCase
 from league.tests.test_swarm_look_holds import PASS, HoldCase, lean
 from league.tests.test_swarm_rounds import RoundCase
