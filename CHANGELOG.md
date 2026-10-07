@@ -36,6 +36,19 @@ Both are under `league/ops/`, so both are an owner deploy. Off without a deploy:
 `{"engineer": {"enabled": false}}`; ops.json `{"jobs": {"postmortem": {"enabled": false}}}`. Detail: operations,
 **The improvers**.
 
+### The self-running release, the stall alarm and the funnel (`release/self-running`; built, not deployed)
+
+The owner's goal of Oct 7, items 3 and 6. A new House job `stall` (`league/ops/stall.py`, every 30 minutes at :20 and
+:50, read-only) names a stall by its cause: no birth in 12 h under the population ceiling, fewer than 10 Gym runs in
+6 h, no Validation run in 24 h while a Train best waits, the Sail guard braked 12 of 24 h, a meter under 3 days of
+research at the ceiling, or main's head waiting for the owner's deploy. Each cause is one `stall` mail (the numbers, how
+long, what the House is doing, the owner step or that nothing needs the owner) and one House warning, at most once per
+cause per 12 h; it never acts. The daily page gains the Funnel table (last 24 h and since the release:
+`league/ops/funnel.py`). The gateway composes the new `stall` kind on `/v1/notify` and dedupes it by cause for 12 h
+inside the day's cap: deploy the gateway first (an older gateway answers 400, which the job records and warns of).
+Owner deploy (`league/ops/`); off without one: ops.json `{"jobs": {"stall": {"enabled": false}}}`. Detail: operations,
+**The stall alarm and the funnel**.
+
 The running House release is `20261002T112610Z-e11710692569` (main `e3d0111f`, 11:26Z Oct 2, below), and the box's
 updater is off. Until PR #489 merges, main is ahead of it by docs, by comment-only edits (the Oct 2 pause refresh: no
 behaviour change, verified by an AST comparison) and by a prune of dead files from the Kalshi era and the first run
