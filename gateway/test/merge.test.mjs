@@ -145,7 +145,17 @@ test('the engineer\'s surface is the harness lanes\' surfaces, less the protecte
   }
   for (const path of surface) {
     if (path === newTest) continue;
-    assert.ok(github.ENGINEER_SURFACE.only.includes(path) || protectedRefusal(path) !== null, `the lanes' ${path} is neither in the engineer's surface nor protected`);
+    assert.ok(github.ENGINEER_SURFACE.only.includes(path) || github.ENGINEER_HELD.includes(path) || protectedRefusal(path) !== null,
+      `the lanes' ${path} is neither in the engineer's surface, nor held, nor protected`);
+  }
+  // A held path is one the lanes declare and the lane table lists, unprotected, and never in the surface: it is held for
+  // what the live path loads (ENGINEER_HELD), not for want of a declaration.
+  for (const path of github.ENGINEER_HELD) {
+    assert.ok(surface.has(path), path);
+    assert.ok(laneOf(path), path);
+    assert.equal(protectedRefusal(path), null, path);
+    assert.equal(github.ENGINEER_SURFACE.only.includes(path), false, path);
+    assert.ok(repoHas(path), `${path} exists`);
   }
   // The lane table (league/ci.py ENGINEER_LANES) is written no wider than the lanes declare: a path of its that no
   // harness lane's surface holds is refused to its own lane.
@@ -220,7 +230,10 @@ test('the engineer opens engineer/<lane>/ branches inside its lane and never on 
 });
 
 test('the engineer opens engineer/ branches inside its lanes\' surfaces only, through the proposal route', () => {
-  for (const [lane, path] of [['research', 'league/swarm/researcher.py'], ['research', 'league/swarm/preflight.py'],
+  for (const path of github.ENGINEER_HELD) {
+    assert.match(github.pathRefusal('engineer', path, github.ROLES, 'research'), /held from the engineer in this release/, path);
+  }
+  for (const [lane, path] of [['research', 'league/swarm/preflight.py'],
     ['memory', 'league/swarm/architect.py'], ['data', 'league/sailbox.py'], ['scheduler', 'league/tests/test_harness_candidate_screen.py']]) {
     assert.equal(github.pathRefusal('engineer', path, github.ROLES, lane), null, path);
   }
@@ -436,7 +449,7 @@ test('every changed file, by its name and its name before a rename, is inside th
   assert.equal((await mergeIt(gate, hub)).body.refused, 'protected_path');
   // Each lane merges its own surface and the new tests, a rename inside it included.
   for (const [lane, files] of Object.entries({
-    research: ['league/swarm/researcher.py', 'league/swarm/preflight.py', 'league/swarm/claude_research.py'],
+    research: ['league/swarm/preflight.py'],
     memory: ['league/swarm/architect.py', 'league/swarm/strategist.py', 'league/swarm/diagnostician.py', 'league/swarm/seeds.py'],
     data: ['league/sailbox.py', 'league/data_job.py'],
   })) {
@@ -457,6 +470,19 @@ test('every changed file, by its name and its name before a rename, is inside th
     const elsewhere = gateAt();
     await approve(elsewhere, other);
     assert.equal((await mergeIt(elsewhere, other)).body.refused, 'lane_path', lane);
+  }
+  // The research lane's held files (github.ENGINEER_HELD: the live path loads them) do not merge, on its own branch too.
+  for (const filename of github.ENGINEER_HELD) {
+    const held = fakeHub();
+    held.files.set(77, [{ filename, status: 'modified' }]);
+    held.pulls.set(77, enginePull({ changed_files: 1, head: { ...enginePull().head, ref: 'engineer/research/lane-change-0f0f0f0f' } }));
+    const at = gateAt();
+    await approve(at, held);
+    const kept = await mergeIt(at, held);
+    assert.equal(kept.response.status, 403, filename);
+    assert.equal(kept.body.refused, 'outside_surface');
+    assert.match(kept.body.error, /held from the engineer in this release/);
+    assert.equal(writes(held).length, 0);
   }
   // The memory lane's table names league/swarm/mechanisms.py (league/ci.py ENGINEER_LANES); no harness lane's surface
   // does (github.ENGINEER_SURFACE), so its own lane's branch does not merge it until harness_lanes.py declares it.
@@ -537,7 +563,7 @@ test('a pull request changing anything outside the engineer\'s lane surfaces, or
     { filename: 'README.md', status: 'modified' },
   ]) {
     const hub = fakeHub();
-    hub.files.set(77, [{ filename: 'league/swarm/researcher.py', status: 'modified' }, file]);
+    hub.files.set(77, [{ filename: 'league/swarm/preflight.py', status: 'modified' }, file]);
     const gate = gateAt();
     await approve(gate, hub);
     const refused = await mergeIt(gate, hub);
@@ -676,7 +702,7 @@ test('a 5xx on the merge is no answer: the place stays taken, so a third merge c
   // Another pull request takes the second place, and a third is refused before GitHub hears of it.
   for (const [number, sha] of [[78, '1'.repeat(40)], [79, '2'.repeat(40)]]) {
     hub.pulls.set(number, enginePull({ number, head: { ...enginePull().head, sha } }));
-    hub.files.set(number, [{ filename: 'league/swarm/researcher.py', status: 'modified' }]);
+    hub.files.set(number, [{ filename: 'league/swarm/preflight.py', status: 'modified' }]);
     hub.pulls.get(number).changed_files = 1;
     hub.runs.push(passedRun(sha, { id: 9000 + number }));
     hub.jobs.set(9000 + number, passedJobs());

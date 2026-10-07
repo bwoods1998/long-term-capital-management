@@ -73,12 +73,12 @@ export const ROLES = {
 //: changes the `Scheduler` class's body alone (`patch_guard`); a whole-file write here would also reach the `Swarm`
 //: class beside it, where the Sail guard's brake is called.
 //: test/merge.test.mjs reads LANES from the repository and fails while this list is wider than they are, misses an
-//: unprotected path of theirs or names a path outside ENGINEER_LANES. A new lane, or a wider one, is a change to
-//: harness_lanes.py and to this list, both owner deploys.
+//: unprotected path of theirs that ENGINEER_HELD does not hold, or names a path outside ENGINEER_LANES. A new lane, or a
+//: wider one, is a change to harness_lanes.py and to this list, both owner deploys.
 export const ENGINEER_SURFACE = Object.freeze({
   only: Object.freeze([
-    // research: the researcher's workflow, its preflight screens, its Claude path
-    'league/swarm/researcher.py', 'league/swarm/preflight.py', 'league/swarm/claude_research.py',
+    // research: the researcher's preflight screens (its workflow and its Claude path are ENGINEER_HELD)
+    'league/swarm/preflight.py',
     // memory: the architect's, the strategist's and the diagnostician's prompts and retrieval, the seeds
     'league/swarm/architect.py', 'league/swarm/strategist.py', 'league/swarm/diagnostician.py', 'league/swarm/seeds.py',
     // data: the Sail box client and the data job (the data builders under scripts/data/ are protected)
@@ -87,12 +87,23 @@ export const ENGINEER_SURFACE = Object.freeze({
   tests: ENGINEER_TEST,
 });
 
+//: The research lane's files the live path loads (league/swarm/harness_lanes.py `classify` calls them money_path on
+//: this tree, and league/ops/engineer.py RELEASE_CLASSES holds them on the House: the author's tools refuse them and a
+//: candidate that touches one is closed before its pull request). The self-running release (Oct 7, 2026) holds them
+//: here too, so the money path's hold is two walls, not one: no engineer proposal opens on them and no engineer pull
+//: request merges them, though they are in a harness lane's surface and in ENGINEER_LANES (league/ci.py judges a
+//: branch by the lane table alone). Opening one is an owner deploy of this list and of RELEASE_CLASSES.
+export const ENGINEER_HELD = Object.freeze(['league/swarm/researcher.py', 'league/swarm/claude_research.py']);
+
 /** Whether `path` is the engineer's own new test file (ENGINEER_TEST), which may only be added. */
 export const engineerTest = path => typeof path === 'string' && ENGINEER_TEST.test(path);
 
-/** Why `path` is in no harness lane's surface (ENGINEER_SURFACE), or null when it is one of them or a new test. */
-export const surfaceRefusal = path => (ENGINEER_SURFACE.only.includes(path) || engineerTest(path) ? null
-  : `outside the engineer's lane surfaces (${[...ENGINEER_SURFACE.only, ENGINEER_TEST_GLOB].join(', ')})`);
+/** Why `path` is held (ENGINEER_HELD) or in no harness lane's surface (ENGINEER_SURFACE), or null when it is one of them
+ * or a new test. */
+export const surfaceRefusal = path => (ENGINEER_HELD.includes(path)
+  ? 'held from the engineer in this release: the live path loads it, so it is the owner\'s deploy (ENGINEER_HELD)'
+  : ENGINEER_SURFACE.only.includes(path) || engineerTest(path) ? null
+    : `outside the engineer's lane surfaces (${[...ENGINEER_SURFACE.only, ENGINEER_TEST_GLOB].join(', ')})`);
 
 //: The branch prefix of the engineer's pull requests (lib/merge.mjs merges only these).
 export const ENGINEER_PREFIX = 'engineer/';
