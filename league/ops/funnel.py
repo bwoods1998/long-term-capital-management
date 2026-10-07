@@ -7,8 +7,9 @@ Each count comes from the record that is the event itself, never from a summary 
 - births: the swarm's `swarm.born` events (every birth: the founders, the architect's, a reseed, a fork);
 - versions: the program versions the researchers wrote (`versions.created_at`);
 - Gym runs: the `runs` rows by window (`train`, `validation`, `holdout`, `forward`, `probe`, `mechanism`), counted as
-  run when the Gym evaluated the program (status not `refused` or `error`; those are counted apart as `not_run`). A
-  validation is two rows (its 1.5x stress twin is a second trial);
+  run when the Gym evaluated the program: a row with a trial whose status is not `refused` or `error` (those are
+  counted apart as `not_run`; the rows with no trial that a verdict read from an identical program's validation writes,
+  F1, apart as `no_trial`). A validation is two rows (its 1.5x stress twin is a second trial);
 - validations judged and passed: the tournament rounds' verdicts (`swarm.tournament` events, `validation.judged`), a
   verdict read from an identical program's validation included (F1: no Gym run);
 - looks and passes: the `looks` table (the holdout ration);
@@ -49,7 +50,7 @@ def _count(db: sqlite3.Connection, sql: str, params: tuple = ()) -> int:
     return int(value[0] or 0) if value else 0
 
 
-def _json_rows(db: sqlite3.Connection, kind: str, path: str, start: str, end: str) -> list[Any]:
+def json_rows(db: sqlite3.Connection, kind: str, path: str, start: str, end: str) -> list[Any]:
     """The value at JSON `path` of every `kind` event in `[start, end)`, parsed. SQLite's JSON1 reads it in place (a
     tournament's payload carries its whole board); without JSON1 the payloads are read and parsed one by one."""
     try:
@@ -84,12 +85,14 @@ def swarm_counts(db: sqlite3.Connection, start: float, end: float) -> dict[str, 
     out["births"] = _count(db, "SELECT count(*) FROM events WHERE kind='swarm.born' AND at>=? AND at<?", (a, b))
     out["versions"] = _count(db, "SELECT count(*) FROM versions WHERE created_at>=? AND created_at<?", (a, b))
     runs = {w: 0 for w in WINDOWS}
-    other = not_run = 0
-    for row in guard.rows(db, 'SELECT "window" AS w, status, count(*) AS n FROM runs WHERE at>=? AND at<? '
-                              'GROUP BY "window", status', (a, b)):
+    other = not_run = no_trial = 0
+    for row in guard.rows(db, 'SELECT "window" AS w, status, trials > 0 AS trial, count(*) AS n FROM runs WHERE at>=? AND '
+                              'at<? GROUP BY "window", status, trials > 0', (a, b)):
         n = int(row["n"] or 0)
         if row["status"] in NOT_RUN:
             not_run += n
+        elif not row["trial"]:
+            no_trial += n  # nothing evaluated: an F1 verdict's own copy of an identical program's validation
         elif row["w"] in runs:
             runs[row["w"]] += n
         else:
@@ -97,8 +100,9 @@ def swarm_counts(db: sqlite3.Connection, start: float, end: float) -> dict[str, 
     out["gym_runs"] = {**runs, "other": other}
     out["gym_runs_total"] = sum(runs.values()) + other
     out["gym_not_run"] = not_run
+    out["gym_no_trial"] = no_trial
     judged = passed = 0
-    for verdicts in _json_rows(db, "swarm.tournament", "$.validation.judged", a, b):
+    for verdicts in json_rows(db, "swarm.tournament", "$.validation.judged", a, b):
         if isinstance(verdicts, Mapping):
             for verdict in verdicts.values():
                 judged += 1
@@ -107,7 +111,7 @@ def swarm_counts(db: sqlite3.Connection, start: float, end: float) -> dict[str, 
     looks = guard.rows(db, "SELECT count(*) AS n, coalesce(sum(passed), 0) AS passed FROM looks WHERE at>=? AND at<?", (a, b))
     out["looks"] = {"taken": int(looks[0]["n"] or 0), "passed": int(looks[0]["passed"] or 0)}
     moves = {band: 0 for band in BANDS}
-    for to in _json_rows(db, "swarm.band", "$.band_to", a, b):
+    for to in json_rows(db, "swarm.band", "$.band_to", a, b):
         if to in moves:
             moves[to] += 1
     out["band_moves"] = moves
@@ -265,5 +269,5 @@ def read(root: str | Path, base: str | Path, release: str, now: float) -> dict[s
     return out
 
 
-__all__ = ["swarm_counts", "bands_now", "guard_hours", "book_counts", "release_start", "window", "read", "WINDOWS",
+__all__ = ["swarm_counts", "json_rows", "bands_now", "guard_hours", "book_counts", "release_start", "window", "read", "WINDOWS",
            "NOT_RUN", "BANDS", "METER_KINDS", "HOUSE_ROUTES", "AGENT_ROUTES", "SWARM_DB", "LIVE_DB"]

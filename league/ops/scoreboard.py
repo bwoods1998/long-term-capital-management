@@ -175,9 +175,9 @@ def engineer_lines(engineer: Mapping[str, Any] | None) -> list[str]:
              f"{_cell(engineer.get('claude_usd'))} |", ""]
     lines.append(f"In flight: {engineer.get('in_flight') or 'none'}.")
     leftover = [n for n in engineer.get("leftover_prs") or [] if isinstance(n, int) and not isinstance(n, bool)]
-    if leftover:  # the gateway closes no pull request: the owner does
-        lines += ["", "Engineer pull requests left open (superseded or unmerged; the owner closes them): "
-                      + ", ".join(f"#{n}" for n in leftover[-20:]) + "."]
+    if leftover:  # the gateway would not close them, or a revert that did not merge: the owner's
+        lines += ["", "Engineer pull requests left open for the owner (the gateway would not close them, or a revert did "
+                      "not merge): " + ", ".join(f"#{n}" for n in leftover[-20:]) + "."]
     return lines
 
 
@@ -221,6 +221,7 @@ def funnel_lines(funnel: Mapping[str, Any] | None, stalls: Mapping[str, Any] | N
     if any(_dig(w, "gym_runs", "other") for w in (day, rel) if isinstance(w, Mapping)):
         rows.append(("Gym runs: other windows", cells("gym_runs", "other")))
     rows += [("Gym runs refused or failed", cells("gym_not_run")),
+             ("Rows copied from an identical program's verdict (no Gym run)", cells("gym_no_trial")),
              ("Validations judged (passed)", cells("validations", "judged", pair=("validations", "passed"))),
              ("Looks taken (passed)", cells("looks", "taken", pair=("looks", "passed"))),
              ("Moves to Candidate", cells("band_moves", "candidate")), ("Moves to Probe", cells("band_moves", "probe")),

@@ -66,10 +66,13 @@ JOBS: tuple[Job, ...] = (
         what="the public-safe daily scoreboard and its funnel, committed through the gateway"),
     # Every half hour, round the clock (the owner's goal of Oct 7, 2026, item 6), at :20 and :50, off the grant's :05 and
     # the engineer's :40. Read-only and a few seconds: it runs in session like the grant, and its grace outlasts the
-    # longest job's wall, so an occurrence behind a long job waits and runs rather than being `missed`.
+    # longest job's wall, so an occurrence behind a long job waits and runs rather than being `missed`. It runs in a
+    # maintenance pause too (read-only, like preopen and clock), so a pause left on is itself an owner step it reports.
     Job("stall", "league.ops.stall", (S.hourly(20), S.hourly(50)), grace=70 * MINUTE, cpu=120, wall=300, owner="self-running",
-        what="the stall alarm: births, Gym runs, Validations, the guard's brake, the budget's runway, an owner deploy "
-             "waiting; one stall notice a cause every 12 h"),
+        in_pause=True,
+        what="the stall alarm: births, Gym runs, Validations, the guard's brake, the budget's runway, an owner deploy, a "
+             "pause, a refused grant or the kill switch waiting; one stall notice listing them all, an owner step's at "
+             "once and every 12 h, the rest every 24 h"),
     # Twice: 15:00Z runs the drills and requests the rollback drill last (the updater launches it); 17:00Z checks its verdict (and runs any drill
     # the first could not reach). A drill done this month is never run again (`league/ops/drills.py`).
     Job("drills", "league.ops.drills", (S.monthly_first(5, 15, 0), S.monthly_first(5, 17, 0)), grace=6 * HOUR, cpu=1800, wall=3600, owner="WP1/WP3",

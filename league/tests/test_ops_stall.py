@@ -1,6 +1,7 @@
 """The self-running release, build A (the owner's goal of Oct 7, 2026, items 3 and 6): the stall alarm (`league/ops/stall.py`)
-names each cause from the House's own records, tells the owner through the gateway at most once a cause every 12 hours
-and never acts; the funnel (`league/ops/funnel.py`) counts what the swarm did in a window, and the daily page carries it."""
+names each cause from the House's own records, tells the owner through the gateway in one notice listing them all (an
+owner step at once and every 12 hours, a stall needing nothing every 24 hours) and never acts; the funnel
+(`league/ops/funnel.py`) counts what the swarm did in a window, and the daily page carries it."""
 import json
 import os
 import sqlite3
@@ -41,8 +42,13 @@ class Notify:
             raise self.answer
         return self.answer
 
-    def causes(self):
-        return [c["cause"] for c in self.calls]
+    def causes(self, call=-1):
+        """The causes one notice told (the last by default)."""
+        return [c["cause"] for c in self.calls[call]["causes"]] if self.calls else []
+
+    def entry(self, cause):
+        """`cause` as the latest notice that told it said it."""
+        return next(c for call in reversed(self.calls) for c in call["causes"] if c["cause"] == cause)
 
 
 class Base(unittest.TestCase):
@@ -126,7 +132,7 @@ class Causes(Base):
         self.assertEqual(self.notify.calls, [])
         out, _ = self.run_at(now=NOW + 14.1 * HOUR)
         self.assertIn("births", out["stalled"])
-        facts = next(c for c in self.notify.calls if c["cause"] == "births")
+        facts = self.notify.entry("births")
         self.assertEqual((facts["since"], facts["hours"]), ("2026-10-06T22:26:00Z", "26.0"))
 
     def test_births_the_architects_passes_are_what_the_house_is_doing(self):
@@ -136,7 +142,7 @@ class Causes(Base):
         self.store.event("swarm.architect", None, {"born": [], "error": "Claude said no"})
         self.store.event("swarm.architect", None, {"born": [], "proposed": 4, "route": "claude"})
         self.assertTrue(self.check("births")["stalled"])
-        doing = next(c for c in self.notify.calls if c["cause"] == "births")["doing"]
+        doing = self.notify.entry("births")["doing"]
         self.assertIn("The architect passed 4 times in the last 12 h: 1 found no cell a birth may land in, 1 met the ceiling, "
                       "1 failed, 1 asked a model and proposed 4 families (0 born)", doing)
 
@@ -166,21 +172,82 @@ class Causes(Base):
         self.assertFalse(self.check("validations")["stalled"])  # a Validation run 23.9 h ago
         validations = self.check("validations", now=NOW + 1.3 * HOUR)
         self.assertTrue(validations["stalled"])
-        self.assertEqual((validations["numbers"]["awaiting_validation"], validations["numbers"]["last_validation_at"]),
+        self.assertEqual((validations["numbers"]["owed_validation"], validations["numbers"]["last_validation_at"]),
                          (1, "2026-10-06T10:26:00Z"))
         # Every best validated: no Validation is owed, so none in 24 h is no stall.
         self.store.update_family("waiting", validated_version=2)
         self.assertFalse(self.check("validations", now=NOW + 1.3 * HOUR)["stalled"])
 
-    def test_validations_the_last_tournament_round_is_what_the_house_is_doing(self):
-        self.family("waiting", best_version=1, best_train=0.5)
+    def test_validations_the_train_best_the_researcher_picked_by_score_is_owed_too(self):
+        """The candidate the tournament validates (`Tournament.candidate_version`) is the submitted best, else the Train
+        best the researcher picked by score (`state.best_train_version`): the path Claude researchers always take."""
+        self.ago(30)
+        self.family("picked")
+        self.store.set_state("picked", best_train_version=2)
+        validations = self.check("validations")
+        self.assertTrue(validations["stalled"])
+        self.assertEqual((validations["numbers"]["train_bests"], validations["numbers"]["owed_validation"]), (1, 1))
+        # A robustness failure clears `best_version`; the picked best is still the candidate. Validated, none is owed.
+        self.store.update_family("picked", validated_version=2)
+        self.assertFalse(self.check("validations")["stalled"])
+        self.store.set_state("picked", best_train_version=3)
+        self.assertTrue(self.check("validations")["stalled"], "a newer best is owed its own Validation")
+        self.assertEqual((ST.candidate(None, '{"best_train_version": 4}'), ST.candidate(5, '{"best_train_version": 4}'),
+                          ST.candidate(None, "{}"), ST.candidate(None, "not json"), ST.candidate(0, None)), (4, 5, None, None, None))
+
+    def test_validations_a_family_waiting_on_its_robustness_run_or_the_drift_screen_is_not_owed(self):
+        self.family("robust", best_version=1, best_train=0.5)
+        self.family("drift", best_version=1, best_train=0.5)
         self.ago(1)
         self.store.event("swarm.tournament", None, {"validation": {"queued": 0, "judged": {}, "errors": {},
-                                                                    "waiting_robustness": ["waiting"], "waiting_drift": []}})
+                                                                    "waiting_robustness": ["robust"], "waiting_drift": ["drift"]}})
+        validations = self.check("validations")
+        self.assertFalse(validations["stalled"])
+        self.assertEqual({k: validations["numbers"][k] for k in ("owed_validation", "waiting_robustness", "waiting_drift")},
+                         {"owed_validation": 0, "waiting_robustness": 1, "waiting_drift": 1})
+        # One more family is owed and not waiting: the round's own words are what the House is doing.
+        self.family("owed", best_version=1, best_train=0.5)
         out, _ = self.run_at()
         self.assertIn("validations", out["stalled"])
-        doing = next(c for c in self.notify.calls if c["cause"] == "validations")["doing"]
-        self.assertIn("queued 0 and judged 0; 1 wait on their 1.5x robustness run, 0 on the drift screen, 0 failed", doing)
+        self.assertEqual(out["checks"]["validations"]["numbers"]["owed_validation"], 1)
+        doing = out["checks"]["validations"]["doing"]
+        self.assertIn("queued 0 and judged 0; 1 wait on their 1.5x robustness run, 1 on the drift screen, 0 failed", doing)
+        # A round older than the window says nothing of now: every family without a verdict is owed.
+        self.assertEqual(self.check("validations", now=NOW + 24 * HOUR)["numbers"]["owed_validation"], 3)
+
+    def test_validations_a_verdict_read_from_an_identical_program_or_judged_in_a_round_is_a_verdict(self):
+        self.family("twin", best_version=1, best_train=0.5)
+        self.ago(3)
+        # F1: an inherited verdict writes rows with no trial; it is no Gym run, but it is a verdict.
+        self.store.add_run("twin", 1, {"run_id": "inherited-1", "status": "ok", "trials": 0}, window="validation", stress=1.0,
+                           purpose="validation", prune=False)
+        validations = self.check("validations")
+        self.assertFalse(validations["stalled"])
+        self.assertEqual((validations["numbers"]["validation_runs_24h"], validations["numbers"]["verdicts_inherited_rows_24h"]), (0, 1))
+        self.assertEqual(self.check("gym_runs")["numbers"]["gym_runs_6h"], 0, "nothing was evaluated")
+        # A verdict a round judged from a recorded result (no row of its own) is one too.
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        store = SwarmStore(Path(tmp.name), clock=lambda: NOW - 2 * HOUR)
+        self.addCleanup(store.close)
+        store.add_family({**SPEC, "id": "judged"}, origin="seed")
+        store.update_family("judged", best_version=2)
+        store.event("swarm.tournament", None, {"validation": {"queued": 0, "judged": {"judged": {"passed": False}}}})
+        from league.ops import guard
+
+        facts = guard.read(Path(tmp.name) / "swarm.sqlite", lambda db: ST.swarm_facts(db, NOW))
+        self.assertEqual((facts["judged"], facts["awaiting_ids"]), (1, ["judged"]))
+        found = ST.checks(facts, now=NOW, ceiling=None, budget=None, deploy=None, heartbeat=None)
+        self.assertFalse(found["validations"]["stalled"])
+
+    def test_refused_failed_and_no_trial_validation_rows_are_no_validation_run(self):
+        self.family("broken", best_version=1, best_train=0.5)
+        self.runs(2, window="validation", status="refused", fid="broken", hours=2)
+        self.runs(2, window="validation", status="error", fid="broken", hours=2)
+        validations = self.check("validations")
+        self.assertTrue(validations["stalled"], "the Gym refused or failed every Validation: none ran")
+        self.assertEqual(validations["numbers"]["validation_runs_24h"], 0)
+        self.assertIsNone(validations["numbers"]["last_validation_at"])
 
     def test_braked_twelve_of_the_last_24_hours(self):
         self.healthy()
@@ -233,7 +300,7 @@ class Causes(Base):
         out, _ = self.run_at(now=NOW + 0.5 * HOUR)
         self.assertIn("gym_runs", out["stalled"])
         self.assertIn("top up Sail", out["checks"]["gym_runs"]["owner_step"])
-        self.assertIn("the Sail guard is braked (under_line)", next(c for c in self.notify.calls if c["cause"] == "gym_runs")["doing"])
+        self.assertIn("the Sail guard is braked (under_line)", self.notify.entry("gym_runs")["doing"])
 
     def budget(self, sail_days, *, at_=NOW - HOUR):
         meters = {"sail": {"card_runway_days": sail_days, "runway_days": 5.0, "research_usd_day": 9.6, "ceiling_usd_day": 15.0,
@@ -249,8 +316,9 @@ class Causes(Base):
         self.assertEqual(out["stalled"], ["runway_sail"])
         step = out["checks"]["runway_sail"]["owner_step"]
         self.assertEqual(step, "top up Sail: about $112.00 buys 7 more days of research at the ceiling (the taper starts 2026-10-05)")
-        facts = self.notify.calls[0]
-        self.assertEqual((facts["cause"], facts["owner_step"], facts["numbers"]["runway_days_at_ceiling"]), ("runway_sail", step, 2.4))
+        facts = self.notify.entry("runway_sail")
+        self.assertEqual((facts["owner_step"], facts["numbers"]["runway_days_at_ceiling"]), (step, 2.4))
+        self.assertEqual(self.notify.calls[0]["notice_id"], "stall:owner:runway_sail")
         self.assertFalse(out["checks"]["runway_claude"]["stalled"])
 
     def test_runway_three_days_is_no_stall_and_a_stale_budget_is_not_read(self):
@@ -277,9 +345,11 @@ class Causes(Base):
         self.assertEqual(out["stalled"], ["owner_deploy"])
         check = out["checks"]["owner_deploy"]
         self.assertEqual(check["numbers"]["sha"], "b" * 12)
-        self.assertIn("deploy main at bbbbbbbbbbbb yourself (scripts/floor_box.py deploy): it changes league/ops/stall.py, "
-                      ".github/workflows", check["owner_step"])
-        self.assertEqual(self.notify.calls[0]["since"], "2026-10-06T21:00:00Z")
+        # Which side is ahead is not in the record: the step names both ways out, neither as the default.
+        self.assertEqual(check["owner_step"], "main's head bbbbbbbbbbbb and the running release differ in league/ops/stall.py, "
+                                              ".github/workflows: if main is ahead, deploy it yourself (scripts/floor_box.py "
+                                              "deploy); if the running release is ahead, merge it to main instead")
+        self.assertEqual(self.notify.entry("owner_deploy")["since"], "2026-10-06T21:00:00Z")
         # The owner deployed: a promotion after the refusals clears it. A refusal for another reason is no owner step.
         self.deploys({"at": "2026-10-06T21:00:00.000Z", "stage": "vet", "verdict": "refused", "sha": "a" * 40, "reasons": [owner]},
                      {"at": "2026-10-07T02:00:00.000Z", "stage": "verdict", "verdict": "promoted", "release": "r2"},
@@ -290,54 +360,103 @@ class Causes(Base):
 
 
 class Telling(Base):
-    """One notice and one House warning a cause at most every 12 hours; a cause is told only once the gateway SENT it."""
+    """One notice a run at most, listing every cause standing: an owner step at once (a new one at once again) and at
+    most every 12 hours, a stall needing nothing from the owner at most every 24 hours; a notice is told only once the
+    gateway SENT it; one House warning a cause at most every 12 hours."""
 
     def stalled_store(self):
         self.ago(20)  # no birth, no run, nothing for a day: births and gym_runs stall
         self.family("lonely")
 
-    def test_one_notice_a_cause_every_12_hours(self):
+    def short_sail(self, days=2.4):
+        meters = {"sail": {"card_runway_days": days, "runway_days": 5.0, "research_usd_day": 9.6, "ceiling_usd_day": 15.0,
+                           "topup_usd": 112.0, "card_date": "2026-10-05"}}
+        (self.root / "budget.json").write_text(json.dumps({"at": NOW + 30 * HOUR, "meters": meters}))
+
+    def test_one_notice_lists_every_cause_and_one_that_needs_nothing_is_told_once_a_day(self):
         self.stalled_store()
         out, ctx = self.run_at()
-        self.assertEqual(sorted(self.notify.causes()), ["births", "gym_runs"])
+        self.assertEqual(len(self.notify.calls), 1)
+        self.assertEqual(self.notify.causes(), ["births", "gym_runs"])
+        facts = self.notify.calls[0]
+        self.assertEqual((facts["kind"], facts["notice_id"]), ("stall", "stall:info"))
+        self.assertEqual(sorted(facts), ["at", "causes", "kind", "notice_id"])
+        self.assertEqual(sorted(facts["causes"][0]), sorted(["cause", "what", "numbers", "since", "hours", "doing", "owner_step"]))
         self.assertEqual(len(ctx.alerts), 2)
         self.assertTrue(all(a["level"] == "warning" and a["text"].startswith("stall: ") for a in ctx.alerts))
-        facts = self.notify.calls[0]
-        self.assertEqual((facts["kind"], facts["notice_id"]), ("stall", f"stall:{facts['cause']}"))
-        self.assertEqual(sorted(facts), sorted(["kind", "notice_id", "cause", "what", "numbers", "since", "hours", "doing",
-                                                "owner_step", "at"]))
-        for later in (0.5, 6, 11.9):
+        self.assertTrue(out["notice"]["sent"])
+        for later in (0.5, 6, 12, 23.9):
             out, ctx = self.run_at(now=NOW + later * HOUR)
+            self.assertEqual(len(self.notify.calls), 1, later)
+            self.assertFalse(out["notice"]["sent"])
+            self.assertIn("the rest at most every 24 h", out["notice"]["why"])
+            self.assertEqual(len(ctx.alerts), 2 if later == 12 else 0, f"one warning a cause every 12 h ({later})")
+        self.run_at(now=NOW + 24 * HOUR)
+        self.assertEqual(len(self.notify.calls), 2)
+
+    def test_an_owner_step_is_told_at_once_with_every_other_cause_then_every_12_hours(self):
+        self.stalled_store()
+        self.run_at()  # births and gym_runs: told, needing nothing
+        self.short_sail()
+        out, _ = self.run_at(now=NOW + HOUR)  # the runway is short: an owner step, told at once though a notice went an hour ago
+        self.assertEqual(len(self.notify.calls), 2)
+        facts = self.notify.calls[1]
+        self.assertEqual(facts["notice_id"], "stall:owner:runway_sail")
+        self.assertEqual(self.notify.causes(), ["runway_sail", "births", "gym_runs"], "owner steps first, then the rest")
+        for later in (1.5, 7, 12.9):
+            self.run_at(now=NOW + later * HOUR)
             self.assertEqual(len(self.notify.calls), 2, later)
-            self.assertEqual(ctx.alerts, [], later)
-            self.assertTrue(all("at most once every 12 h" in n["why"] for n in out["notices"]), later)
-        out, ctx = self.run_at(now=NOW + 12 * HOUR)
-        self.assertEqual(len(self.notify.calls), 4)
-        self.assertEqual(len(ctx.alerts), 2)
+        self.run_at(now=NOW + 13 * HOUR)
+        self.assertEqual(len(self.notify.calls), 3, "twelve hours on, the same owner step again")
+
+    def test_a_new_owner_cause_is_told_at_once_and_one_told_is_not_told_again_inside_12_hours(self):
+        self.stalled_store()
+        self.short_sail()
+        self.run_at()
+        self.assertEqual(self.notify.calls[0]["notice_id"], "stall:owner:runway_sail")
+        self.deploys_refused()
+        self.run_at(now=NOW + HOUR)
+        self.assertEqual(self.notify.calls[1]["notice_id"], "stall:owner:owner_deploy+runway_sail")
+        state = json.loads((self.root / ST.STATE_FILE).read_text())
+        self.assertEqual(state["mail"]["owner_causes"], ["owner_deploy", "runway_sail"])
+        # The runway clears and comes back inside 12 h: it was told, so it waits for the 12 h.
+        self.short_sail(5.0)
+        self.run_at(now=NOW + 2 * HOUR)
+        self.short_sail(2.0)
+        out, _ = self.run_at(now=NOW + 3 * HOUR)
+        self.assertIn("runway_sail", out["stalled"])
+        self.assertEqual(len(self.notify.calls), 2)
+        self.run_at(now=NOW + 13 * HOUR)
+        self.assertEqual(len(self.notify.calls), 3)
+
+    def deploys_refused(self):
+        owner = "league/ops/stall.py: this one is the owner's deploy (scripts/floor_box.py deploy)"
+        (self.base / "deploys.jsonl").write_text(json.dumps({"at": "2026-10-07T09:00:00.000Z", "stage": "vet", "verdict": "refused",
+                                                             "sha": "b" * 40, "reasons": [owner]}) + "\n")
 
     def test_a_duplicate_answer_is_not_told_and_is_tried_at_the_next_run(self):
         self.stalled_store()
         self.notify.answer = {"sent": True, "duplicate": True}
         out, ctx = self.run_at()
-        self.assertEqual(len(self.notify.calls), 2)
-        self.assertFalse(any(n["sent"] for n in out["notices"]))
-        self.assertEqual(out["errors"], [])  # the gateway's own 12 h: no fault
+        self.assertEqual(len(self.notify.calls), 1)
+        self.assertFalse(out["notice"]["sent"])
+        self.assertEqual(out["errors"], [])  # the gateway's own window: no fault
         self.notify.answer = {"sent": True}
         out, ctx = self.run_at(now=NOW + 0.5 * HOUR)
-        self.assertEqual(len(self.notify.calls), 4)
-        self.assertTrue(all(n["sent"] for n in out["notices"]))
+        self.assertEqual(len(self.notify.calls), 2)
+        self.assertTrue(out["notice"]["sent"])
         self.assertEqual(ctx.alerts, [], "warned once, at the first run")
 
     def test_a_failed_notice_is_an_error_in_the_warning_and_is_tried_again(self):
         self.stalled_store()
         self.notify.answer = OSError("the gateway did not answer")
         out, ctx = self.run_at()
-        self.assertEqual(len(out["errors"]), 2)
+        self.assertEqual(out["errors"], ["stall notice not sent: the notice failed (OSError)"])
         self.assertTrue(all("(notice: the notice failed (OSError))" in a["text"] for a in ctx.alerts))
         self.notify.answer = {"sent": False, "reason": "no mail binding"}
         out, _ = self.run_at(now=NOW + 0.5 * HOUR)
-        self.assertEqual(len(self.notify.calls), 4)
-        self.assertIn("stall notice for births not sent: no mail binding", out["errors"])
+        self.assertEqual(len(self.notify.calls), 2)
+        self.assertIn("stall notice not sent: no mail binding", out["errors"])
 
     def test_no_gateway_is_said_and_nothing_breaks(self):
         self.stalled_store()
@@ -345,10 +464,11 @@ class Telling(Base):
         ctx.notify = None
         ctx._config = {}  # no gateway_url, no token
         out = ST.run(ctx)
-        self.assertIn("stall notice for births not sent: no gateway", out["errors"])
+        self.assertIn("stall notice not sent: no gateway", out["errors"])
         self.assertTrue(all("(notice: no gateway to notify through)" in a["text"] for a in ctx.alerts))
+        self.assertEqual(out["checks"]["kill_on"]["numbers"]["kill_switch"], "unknown", "no health read: no kill cause")
 
-    def test_a_cause_that_clears_is_named_and_a_recurrence_inside_12_hours_is_not_mailed_again(self):
+    def test_a_cause_that_clears_is_named_and_its_time_starts_again(self):
         self.stalled_store()
         self.run_at()
         self.t = NOW + HOUR
@@ -360,22 +480,32 @@ class Telling(Base):
         self.assertEqual(sorted(out["cleared"]), ["births", "gym_runs"])
         state = json.loads((self.root / ST.STATE_FILE).read_text())
         self.assertFalse(state["causes"]["births"]["standing"])
-        calls = len(self.notify.calls)
-        out, _ = self.run_at(now=NOW + 11 * HOUR)  # gym_runs stalls again inside 12 h of its notice: not mailed again
+        out, _ = self.run_at(now=NOW + 11 * HOUR)  # gym_runs stalls again
         self.assertIn("gym_runs", out["stalled"])
-        self.assertEqual(len(self.notify.calls), calls)
         state = json.loads((self.root / ST.STATE_FILE).read_text())
         self.assertEqual(state["causes"]["gym_runs"]["seen_at"], "2026-10-07T21:20:00Z", "its time starts again")
-        out, _ = self.run_at(now=NOW + 13.5 * HOUR)  # births too, past 12 h: both are told
-        self.assertEqual(sorted(self.notify.causes()[calls:]), ["births", "gym_runs"])
+        self.assertEqual(len(self.notify.calls), 1, "a stall needing nothing: at most one notice a day")
 
-    def test_the_gateway_record_alone_keeps_the_12_hours_when_the_state_file_is_lost(self):
+    def test_the_gateway_record_alone_keeps_the_pace_when_the_state_file_is_lost(self):
         self.stalled_store()
         self.run_at()
         (self.root / ST.STATE_FILE).unlink()
         self.notify.answer = {"sent": True, "duplicate": True}
         out, _ = self.run_at(now=NOW + HOUR)
-        self.assertFalse(any(n["sent"] for n in out["notices"]))
+        self.assertFalse(out["notice"]["sent"])
+
+    def test_the_pace_is_pure(self):
+        mail = {"owner_at": ST.S.iso(NOW), "owner_causes": ["runway_sail"], "info_at": ST.S.iso(NOW - HOUR)}
+        self.assertIsNone(ST.due_notice([], [], {}, NOW))
+        self.assertEqual(ST.due_notice(["births"], [], {}, NOW), "info")
+        self.assertIsNone(ST.due_notice(["births"], [], mail, NOW + 23 * HOUR), "an owner notice counts for the info pace too")
+        self.assertEqual(ST.due_notice(["births"], [], mail, NOW + 24 * HOUR), "info")
+        self.assertIsNone(ST.due_notice(["runway_sail"], ["runway_sail"], mail, NOW + 11.9 * HOUR))
+        self.assertEqual(ST.due_notice(["runway_sail"], ["runway_sail"], mail, NOW + 12 * HOUR), "owner")
+        self.assertEqual(ST.due_notice(["kill_on", "runway_sail"], ["kill_on", "runway_sail"], mail, NOW + HOUR), "owner")
+        self.assertEqual(ST.due_notice(["runway_sail"], ["runway_sail"], mail, NOW - HOUR), "owner", "a clock that went back")
+        self.assertEqual(ST.notice_id(["runway_sail", "kill_on"]), "stall:owner:kill_on+runway_sail")
+        self.assertEqual(ST.notice_id([]), "stall:info")
 
     def test_never_acts_it_writes_only_its_own_state_file(self):
         self.stalled_store()
@@ -398,12 +528,89 @@ class Telling(Base):
         self.assertEqual(ST.run(ctx)["status"], "skipped")
 
 
+class OwnerSteps(Base):
+    """What only the owner can do that is no shortfall of research: a pause left on, a grant that refused, the kill switch."""
+
+    def test_a_pause_stops_the_research_causes_and_one_left_on_six_hours_is_the_owners_step(self):
+        self.ago(20)
+        self.family("lonely")  # births and gym_runs would stall
+        pause = self.root / "PAUSE"
+        pause.write_text("moving the box")
+        os.utime(pause, (NOW - 2 * HOUR, NOW - 2 * HOUR))
+        out, _ = self.run_at()
+        self.assertEqual(out["stalled"], [], "a pause stops research by design")
+        self.assertEqual(self.notify.calls, [])
+        self.assertTrue(out["checks"]["paused"]["numbers"]["maintenance_pause"])
+        out, _ = self.run_at(now=NOW + 4 * HOUR)
+        self.assertEqual(out["stalled"], ["paused"])
+        facts = self.notify.entry("paused")
+        self.assertEqual(facts["owner_step"], "lift the maintenance pause once its work is done (scripts/floor_box.py maintenance off)")
+        self.assertEqual((facts["since"], facts["hours"]), ("2026-10-07T08:20:00Z", "6.0"))
+        self.assertNotIn("moving the box", json.dumps(self.notify.calls), "the pause's own words stay on the box")
+        # The swarm stopped by its file, too; both lifted, the research causes come back.
+        (self.root / "swarm.stop").write_text("")
+        os.utime(self.root / "swarm.stop", (NOW, NOW))
+        self.assertIn("remove state/swarm.stop", self.check("paused", now=NOW + 7 * HOUR)["owner_step"])
+        pause.unlink()
+        (self.root / "swarm.stop").unlink()
+        out, _ = self.run_at(now=NOW + 8 * HOUR)
+        self.assertEqual(sorted(out["stalled"]), ["births", "gym_runs"])
+        self.assertEqual(out["cleared"], ["paused"])
+
+    def grant_rows(self, *rows):
+        from league.ops.store import OpsStore
+
+        ops = OpsStore(self.root)
+        for due, status, error in rows:
+            ops.record("grant", due, status, due, error=error)
+        ops.close()
+
+    def test_a_grant_that_refused_since_its_last_good_run_is_the_owners_step(self):
+        self.healthy()
+        refused = ("GrantRefused: standing grant refused: the money digest moved with no owner release on record (grant 3, "
+                   "triggers digest, policy abc)")
+        self.grant_rows(("2026-10-07T06:05:00Z", "ok", None), ("2026-10-07T07:05:00Z", "failed", refused),
+                        ("2026-10-07T08:05:00Z", "failed", "GrantRefused: standing grant none: the account's funding cannot be read"),
+                        ("2026-10-07T09:05:00Z", "failed", refused), ("2026-10-07T10:05:00Z", "skipped", None))
+        out, _ = self.run_at()
+        self.assertEqual(out["stalled"], ["grant_refused"])
+        check = out["checks"]["grant_refused"]
+        self.assertEqual(check["numbers"]["grant_refusals"], 2)
+        self.assertEqual(check["owner_step"], "ratify the grant by hand on the box once you have read why it refused (python3 "
+                                              "scripts/live_trading.py --ratify): the money digest moved with no owner release on record")
+        self.assertEqual(self.notify.entry("grant_refused")["since"], "2026-10-07T07:05:00Z")
+        # A good run clears it; a failure to read is no refusal.
+        self.grant_rows(("2026-10-07T11:05:00Z", "ok", None), ("2026-10-07T12:05:00Z", "failed", "GrantRefused: standing grant none: x"))
+        self.assertFalse(self.check("grant_refused", now=NOW + 2 * HOUR)["stalled"])
+
+    def test_the_kill_switch_on_is_the_owners_step_and_research_that_needs_claude_names_it(self):
+        self.ago(20)
+        self.family("lonely")
+        ctx = self.ctx()
+        ctx.health = {"kill_switch": True, "admin_log": {"last": [{"at": "2026-10-07T09:00:00.000Z", "caller": "owner",
+                                                                    "action": "kill"},
+                                                                   {"at": "2026-10-06T09:00:00.000Z", "action": "unkill"}]}}
+        out = ST.run(ctx)
+        self.assertIn("kill_on", out["stalled"])
+        self.assertEqual(out["checks"]["kill_on"]["owner_step"], ST.KILL_STEP)
+        self.assertEqual(out["checks"]["gym_runs"]["owner_step"], ST.KILL_STEP)
+        self.assertEqual(self.notify.entry("kill_on")["since"], "2026-10-07T09:00:00Z")
+        self.assertEqual(self.notify.calls[0]["notice_id"], "stall:owner:births+gym_runs+kill_on")
+        ctx = self.ctx(now=NOW + HOUR)
+        ctx.health = lambda: {"kill_switch": False}
+        out = ST.run(ctx)
+        self.assertIn("kill_on", out["cleared"])
+        self.assertIsNone(out["checks"]["gym_runs"]["owner_step"])
+        self.assertIsNone(ST.kill_facts({"kill_switch": "yes"}))
+        self.assertIsNone(ST.kill_facts(None))
+
+
 class Wiring(Base):
-    def test_registered_every_half_hour_round_the_clock_off_in_a_pause_and_unpaid(self):
+    def test_registered_every_half_hour_round_the_clock_in_a_pause_too_and_unpaid(self):
         job = by_name()["stall"]
         self.assertEqual(job.module, "league.ops.stall")
         self.assertEqual(sorted((t.kind, t.minute) for t in job.triggers), [("hourly", 20), ("hourly", 50)])
-        self.assertFalse(job.in_pause)
+        self.assertTrue(job.in_pause, "read-only like preopen and clock: a pause left on is itself reported")
         self.assertFalse(job.paid)
         self.assertGreaterEqual(job.grace, 3600 + 5 * 60, "an occurrence behind the longest job waits and runs")
 
@@ -490,6 +697,18 @@ class Funnel(Base):
         longer = FN.window(self.root, NOW - 48 * HOUR, NOW)
         self.assertEqual((longer["births"], longer["versions"], longer["spend_usd"]["sail"]), (2, 3, 1.75))
         self.assertEqual((longer["book"]["orders"]["agent"], longer["book"]["closes"]["agent"]), (3, 2))
+
+    def test_rows_with_no_trial_are_counted_apart_never_as_gym_runs(self):
+        fid = self.family("twin")
+        self.ago(2)
+        for i, (status, trials) in enumerate((("ok", 1), ("ok", 0), ("ok", 0), ("refused", 0))):
+            self.store.add_run(fid, 1, {"run_id": f"v{i}", "status": status, "trials": trials}, window="validation", stress=1.0,
+                               purpose="validation", prune=False)
+        day = FN.window(self.root, NOW - 24 * HOUR, NOW)
+        self.assertEqual((day["gym_runs"]["validation"], day["gym_no_trial"], day["gym_not_run"], day["gym_runs_total"]),
+                         (1, 2, 1, 1))
+        self.assertIn("| Rows copied from an identical program's verdict (no Gym run) | 2 | n/a |",
+                      self.page(FN.read(self.root, self.base, "r9", NOW)))
 
     def test_an_unreadable_store_is_an_error_never_a_zero(self):
         empty = self.base / "nothing"
