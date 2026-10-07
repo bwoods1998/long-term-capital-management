@@ -372,6 +372,7 @@ def forward_stats(rows: Sequence[Mapping[str, Any]], confidence: float, *, negat
     """The forward record's statistics (`one_record`: the version's own, one source a day). A trade without a positive
     maximum loss is not a return and is left out of the returns (it still counts in the P&L). Negative: the swarm's own
     verdict OR this record's (at least 20 trades and a mean return below zero)."""
+    rows = list(rows)  # read twice: the record, and D5's own rows below
     record = one_record(rows, version=version)
     returns, pnl = _returns(record)
     n = len(returns)
