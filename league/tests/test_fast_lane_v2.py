@@ -472,5 +472,197 @@ class TheDemotionLive(LiveCase):
         self.assertEqual(len(store.forward("vert")), 4, "the record keeps its rows: failures are never erased")
 
 
+# ================================================================================ D2: direction, reported only
+class TheDirection(unittest.TestCase):
+    def test_the_same_risk_buy_and_hold_is_n_sigma_p_mu_over_sigma_b(self):
+        from league.ops import direction as DIR
+
+        market = {"by_day": {"d1": 0.01, "d2": -0.005, "d3": 0.02, "d4": None, "d5": 0.0}, "roots": ["SPY"], "proxy": {}}
+        known = [0.01, -0.005, 0.02, 0.0]
+        import statistics
+
+        expect = 4 * 30.0 * statistics.fmean(known) / statistics.stdev(known)
+        out = DIR.same_risk_bh(30.0, market)
+        self.assertAlmostEqual(out["usd"], round(expect, 2))
+        self.assertEqual((out["days"], out["missing_days"], out["sd_program"]), (4, 1, 30.0))
+        self.assertAlmostEqual(sum(30.0 / statistics.stdev(known) * r for r in known), expect,
+                               msg="a long position sized to the program's own daily volatility, held every session")
+
+    def test_the_daily_fit_recovers_a_planted_beta(self):
+        from league.ops import direction as DIR
+
+        rng = random.Random(7)
+        days = [f"d{i:03d}" for i in range(250)]
+        r = {d: rng.gauss(0.0005, 0.01) for d in days}
+        pnl = {d: 50.0 * r[d] + rng.gauss(0.0, 0.05) for d in days}
+        fit = DIR.daily_fit(pnl, {"by_day": r})
+        self.assertAlmostEqual(fit["beta"], 50.0, delta=1.0)
+        self.assertAlmostEqual(fit["drift_usd"], fit["beta"] * sum(r.values()))
+        self.assertAlmostEqual(fit["alpha_usd"] + fit["drift_usd"], sum(pnl.values()))
+        self.assertEqual(fit["basis"], "daily-close")
+        self.assertIsNone(DIR.daily_fit({"d000": 1.0}, {"by_day": r})["beta"])
+
+    def test_index_roots_read_spy_and_a_missing_file_says_why(self):
+        from league.ops import direction as DIR
+
+        closes = {"SPY": {"2026-01-02": 100.0, "2026-01-05": 101.0}, "QQQ": {"2026-01-02": 50.0, "2026-01-05": 49.0}}
+        market = DIR.market_returns(closes, ["XSP", "SPXW", "QQQ"], ["2026-01-02", "2026-01-05"])
+        self.assertEqual((market["symbols"], market["proxy"]), (["QQQ", "SPY"], {"XSP": "SPY", "SPXW": "SPY"}))
+        self.assertIsNone(market["by_day"]["2026-01-02"], "no previous close")
+        self.assertAlmostEqual(market["by_day"]["2026-01-05"], (0.01 - 0.02) / 2)
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(DIR.load_closes(Path(tmp) / "absent.json"), {})
+        none = DIR.same_risk_bh(25.0, DIR.market_returns({}, ["SPY"], ["2026-01-05"]))
+        self.assertIsNone(none["usd"])
+        self.assertIn("direction job", none["why"])
+
+
+class TheDirectionJob(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        (self.root / "swarm.json").write_text(json.dumps({"gym": {"roots": ["SPY", "XSP", "QQQ"]}}))
+
+    def ctx(self, gateway):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(root=self.root, now=lambda: at(MONDAY, 21, 0) if HAVE else 1790800000.0, gateway=gateway)
+
+    def test_it_writes_the_closes_of_every_page_and_the_proxy(self):
+        from league.ops import direction as DIR
+
+        calls = []
+        pages = [{"bars": {"SPY": [{"t": "2025-01-02T05:00:00Z", "c": 590.0}], "QQQ": [{"t": "2025-01-02T05:00:00Z", "c": 510.0}]},
+                  "next_page_token": "p2"},
+                 {"bars": {"SPY": [{"t": "2025-01-03T05:00:00Z", "c": 595.0}]}, "next_page_token": None}]
+
+        class Gateway:
+            def get(self, path, params=None):
+                calls.append((path, dict(params or {})))
+                return pages[len(calls) - 1]
+
+        out = DIR.run(self.ctx(Gateway()))
+        self.assertTrue(out["ok"], out)
+        doc = json.loads((self.root / DIR.FILE).read_text())
+        self.assertEqual((doc["schema"], doc["feed"], doc["adjustment"], doc["proxy"]), (1, "sip", "split", {"XSP": "SPY"}))
+        self.assertEqual(doc["closes"], {"QQQ": {"2025-01-02": 510.0}, "SPY": {"2025-01-02": 590.0, "2025-01-03": 595.0}})
+        (path, first), (_, second) = calls
+        self.assertEqual(path, "/v1/alpaca/v2/stocks/bars")
+        self.assertEqual((first["symbols"], first["timeframe"], first["start"], first["feed"], first["adjustment"]),
+                         ("QQQ,SPY", "1Day", "2024-12-31", "sip", "split"))
+        self.assertNotIn("page_token", first)
+        self.assertEqual(second["page_token"], "p2")
+
+    def test_a_gateway_error_writes_nothing(self):
+        from league.ops import direction as DIR
+        from league.ops.context import GatewayError
+
+        class Gateway:
+            def get(self, path, params=None):
+                raise GatewayError("gateway 503: unavailable", status=503)
+
+        out = DIR.run(self.ctx(Gateway()))
+        self.assertEqual(out["ok"], False)
+        self.assertIn("unavailable", out["why"])
+        self.assertFalse((self.root / DIR.FILE).exists())
+
+    def test_the_registry_runs_it_at_start_and_daily_outside_the_sessions(self):
+        from league.ops.registry import JOBS, by_name
+
+        self.assertEqual([j.name for j in JOBS].count("direction"), 1)
+        job = by_name()["direction"]
+        self.assertEqual((job.module, job.in_pause, job.paid), ("league.ops.direction", True, False))
+        self.assertEqual([t.kind for t in job.triggers], ["start", "daily"])
+
+
+class ReportedOnly(RoundCase):
+    """The drift fit and the same-risk buy-and-hold are reported, never a bar: no module of the swarm or the live path
+    reads them, and the tournament's and the gate's verdicts are the same with or without the closes file and the report."""
+
+    def test_no_swarm_or_live_module_reads_the_direction_figures(self):
+        repo = Path(__file__).resolve().parents[2]
+        paths = [p for tree in ("league/swarm", "league/live", "league/gym") for p in (repo / tree).rglob("*.py")]
+        paths += [repo / "league" / "house.py", repo / "league" / "constitution.py"]
+        for path in paths:
+            text = path.read_text(encoding="utf-8")
+            for needle in ("ops.direction", "ops import direction", "direction-closes", "same_risk_bh", "daily_fit("):
+                self.assertNotIn(needle, text, f"{path.relative_to(repo)} reads {needle}")
+
+    def outcome(self, *, closes: bool, report: bool) -> dict:
+        case = RoundCase("run")
+        case.setUp()
+        try:
+            case.replies = [PASS] * 8
+            if closes:
+                (case.root / "direction-closes.json").write_text(json.dumps({
+                    "schema": 1, "closes": {"SPY": {f"2026-01-{d:02d}": 600.0 + d for d in range(2, 30)}}}))
+            case.family("a")
+            case.family("b", id="b")
+            Tournament(case.store, case.pool, case.settings).validate(case.store.families(alive=True))
+            if report:
+                import importlib.util
+
+                spec = importlib.util.spec_from_file_location(
+                    "fast_lane_report", Path(__file__).resolve().parents[2] / "scripts" / "fast_lane_report.py")
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                out = module.report(case.root, None, case.root / "direction-closes.json", today="2026-10-07")
+                self.assertTrue(out["screen"], "the report has rows to read")
+            gate = Gate(case.store, case.pool, case.router, case.settings, clock=case.clock).run()
+            return {"gate": {k: v for k, v in gate.items()},
+                    "looks": [(x["family"], x["version"], x["passed"], x["p_value"]) for x in case.store.looks()],
+                    "lines": {f["id"]: (f["state"].get("validation_line") or {}).get("checks") for f in case.store.families()},
+                    "refusals": [(r["family"], r["stage"]) for r in case.store.refusals()]}
+        finally:
+            case.doCleanups()
+
+    @unittest.skipUnless(HAVE, "numpy not installed")
+    def test_the_report_prints_the_screen_the_bands_and_the_probe_budget(self):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "fast_lane_report", Path(__file__).resolve().parents[2] / "scripts" / "fast_lane_report.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.replies = [PASS] * 8
+        self.family("a")
+        Tournament(self.store, self.pool, self.settings).validate(self.store.families(alive=True))
+        Gate(self.store, self.pool, self.router, self.settings, clock=self.clock).run()
+        self.store.set_state("a", banded_version=1, live_promoted_at=at(MONDAY, 9, 31) if HAVE else 1790602260.0)
+        self.store.set_band("a", "candidate", reason="synthetic pass")
+        self.store.add_forward("a", "real", [{"id": "r1", "day": "2026-09-28", "pnl": -12.5, "max_loss": 40.0, "version": 1}])
+        days = {f"2024-01-{d:02d}": 470.0 + d for d in range(1, 29)}
+        (self.root / "direction-closes.json").write_text(json.dumps({"schema": 1, "closes": {"SPY": days}}))
+        live = LiveState(self.root / "live-copy.sqlite")
+        live.upsert("positions", {"pid": 1, "instance": "a@1:r", "family": "a", "type": "debit_vertical", "root": "SPY",
+                                  "legs": "[]", "qty": 0, "opened_qty": 1, "entry": 0.4, "max_loss_share": 0.4,
+                                  "collateral": 0.0, "fees": 1.0, "cash": -12.5, "opened_at": 1.0, "opened_day": "2026-09-28",
+                                  "opened_minute": 1, "status": "closed", "closed_at": 2.0, "tuition": 0, "info": "{}"}, "pid")
+        live.close()
+        out = module.report(self.root, self.root / "live-copy.sqlite", self.root / "direction-closes.json",
+                            today="2026-09-30")
+        windows = sorted({r["window"] for r in out["screen"]})
+        self.assertEqual(windows, ["holdout", "validation"])
+        look = next(r for r in out["screen"] if r["window"] == "holdout")
+        self.assertEqual((look["level"], look["rule"]), (0.10, "flat"))
+        self.assertEqual(look["tail"]["from"], "2026-07-01")
+        self.assertEqual(look["drift_window"]["basis"], "daily-close")
+        self.assertIn("usd", look["bh"])
+        self.assertEqual(look["drift_train"]["basis"], "train-held-hours")
+        [band] = out["bands"]
+        self.assertEqual((band["family"], band["band"], band["live"]["realized_usd"], band["live"]["trades"]),
+                         ("a", "candidate", -12.5, 1))
+        self.assertIsNone(band["d5"]["demoted"])
+        self.assertEqual(out["probe_budget"], {"realized_usd": "12.50", "at_risk_usd": "0.00", "open": 0, "max_open": 3,
+                                               "budget_usd": "400", "room_usd": "387.50"})
+        self.assertTrue(out["reported_only"])
+
+    def test_the_verdicts_are_the_same_with_and_without_the_figures(self):
+        plain = self.outcome(closes=False, report=False)
+        self.assertTrue(plain["looks"])
+        self.assertEqual(self.outcome(closes=True, report=True), plain)
+
+
 if __name__ == "__main__":
     unittest.main()

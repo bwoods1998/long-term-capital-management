@@ -74,6 +74,10 @@ JOBS: tuple[Job, ...] = (
         paid=True, what="the strategist's daily agenda"),
     Job("engineer", "league.ops.engineer", (S.daily(4, 0),), grace=6 * HOUR, cpu=1800, wall=3600, owner="Phase 4",
         paid=True, what="the engineer's daily harness change", retry=False),
+    Job("direction", "league.ops.direction", (S.at_start(), S.daily(1, 0)), grace=3 * HOUR, cpu=120, wall=600,
+        in_pause=True, owner="fast lane v2",
+        what="the roots' daily closes for the same-risk buy-and-hold beside each screen result and band row (reported, "
+             "never a bar)"),
 )
 
 

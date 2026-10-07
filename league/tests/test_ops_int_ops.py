@@ -181,7 +181,7 @@ class RunnerHolds(unittest.TestCase):
 
     def test_the_registry_marks_what_runs_in_a_pause(self):
         jobs = by_name()
-        self.assertEqual({j.name for j in JOBS if j.in_pause}, {"budget", "clock", "preopen", "economics"})
+        self.assertEqual({j.name for j in JOBS if j.in_pause}, {"budget", "clock", "preopen", "economics", "direction"})
         self.assertEqual({j.name for j in JOBS if j.paid}, {"postmortem", "agenda", "engineer"})
         longest = max(j.wall for j in JOBS)
         self.assertGreaterEqual(jobs["grant"].grace, longest + 5 * 60, "an hourly grant waits behind the longest job, never missed")
