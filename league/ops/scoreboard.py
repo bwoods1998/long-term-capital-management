@@ -5,7 +5,12 @@ Built from the House's own records only: the latest close economics (`economics.
 record and, when the forward ladder's tables exist, its counts. It says: the running release; self-deploys and
 self-rollbacks; real closes and realized options P&L (since T0 and trailing 30 days); input costs by service since T0;
 the one Net; how many lots are open and what they are worth at conservative marks; the budget's state and the next
-card action date per meter; the ladder's counts; the day's jobs.
+card action date per meter; the ladder's counts; the day's jobs; and THE FUNNEL (the owner's goal of Oct 7, 2026, item
+3), the last 24 hours beside the time since the running release began (`league/ops/funnel.py`): births, program versions,
+Gym runs by window, validations judged and passed, looks taken and passed, moves to Candidate, Probe and Sized and the
+bands now, real orders and closes by route (the agents' against the House's), research spend by meter, the hours the
+Sail guard braked, and the stalls the `stall` job finds standing (`<state>/stall.json`, causes only). Every funnel figure
+is a count or a spend, never a Validation or holdout figure.
 
 PUBLIC: the page is built from an allowlist of figures (`build`), never from free text the House holds, and then
 checked by `public_problems` (no account equity or balance, no quote, contract symbol, strike, box id, parameter or
@@ -21,6 +26,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+from . import funnel as FN
 from . import guard
 from . import schedule as S
 from .context import GatewayError, read_json, write_text
@@ -175,10 +181,76 @@ def engineer_lines(engineer: Mapping[str, Any] | None) -> list[str]:
     return lines
 
 
+def _pair(a: Any, b: Any) -> str:
+    """`a (b)`, or n/a when `a` is unknown."""
+    return "n/a" if a is None else f"{a} ({_cell(b)})"
+
+
+def _dig(value: Any, *keys: str) -> Any:
+    for key in keys:
+        value = value.get(key) if isinstance(value, Mapping) else None
+    return value
+
+
+def funnel_lines(funnel: Mapping[str, Any] | None, stalls: Mapping[str, Any] | None = None) -> list[str]:
+    """THE FUNNEL's section (`funnel.read`'s shape): counts and spend only, the last 24 hours beside the time since the
+    release began; a window that could not be read is n/a. `stalls` is `<state>/stall.json`: its standing causes."""
+    lines = ["## Funnel (last 24 h / since the release)", ""]
+    if not isinstance(funnel, Mapping) or not isinstance(funnel.get("day"), Mapping):
+        return lines + ["The funnel could not be read.", ""]
+    day, rel = funnel["day"], funnel.get("release")
+    lines.append(f"Since the release: from {funnel['since']}." if funnel.get("since") and isinstance(rel, Mapping)
+                 else "The running release's start is not on record: its column is n/a.")
+    lines.append("")
+
+    def cells(*keys: str, pair: tuple[str, ...] | None = None) -> str:
+        out = []
+        for window in (day, rel):
+            if not isinstance(window, Mapping):
+                out.append("n/a")
+            elif pair is not None:
+                out.append(_pair(_dig(window, *keys), _dig(window, *pair)))
+            else:
+                out.append(_cell(_dig(window, *keys)))
+        return " | ".join(out)
+
+    rows = [("Births", cells("births")), ("Program versions written", cells("versions"))]
+    labels = {"train": "train", "validation": "validations (two a program: the 1.5x twin)", "holdout": "looks",
+              "forward": "forward", "probe": "probe", "mechanism": "mechanism"}
+    rows += [(f"Gym runs: {labels[w]}", cells("gym_runs", w)) for w in FN.WINDOWS]
+    if any(_dig(w, "gym_runs", "other") for w in (day, rel) if isinstance(w, Mapping)):
+        rows.append(("Gym runs: other windows", cells("gym_runs", "other")))
+    rows += [("Gym runs refused or failed", cells("gym_not_run")),
+             ("Validations judged (passed)", cells("validations", "judged", pair=("validations", "passed"))),
+             ("Looks taken (passed)", cells("looks", "taken", pair=("looks", "passed"))),
+             ("Moves to Candidate", cells("band_moves", "candidate")), ("Moves to Probe", cells("band_moves", "probe")),
+             ("Moves to Sized", cells("band_moves", "sized")),
+             ("Real orders, agent routes (filled)", cells("book", "orders", "agent", pair=("book", "filled", "agent"))),
+             ("Real orders, House routes (filled)", cells("book", "orders", "house", pair=("book", "filled", "house"))),
+             ("Real closes, agent routes", cells("book", "closes", "agent")),
+             ("Real closes, House routes", cells("book", "closes", "house")),
+             ("Research spend, Sail (USD)", cells("spend_usd", "sail")),
+             ("Research spend, Claude (USD)", cells("spend_usd", "claude")),
+             ("Research spend, OpenAI (USD)", cells("spend_usd", "openai")),
+             ("Hours the Sail guard braked", cells("braked", "hours"))]
+    lines += ["| Measure | Last 24 h | Since the release |", "|---|---:|---:|", *[f"| {name} | {value} |" for name, value in rows], ""]
+    now = funnel.get("bands_now")
+    if isinstance(now, Mapping):
+        lines += [f"Bands now: Candidate {now.get('candidate', 0)}, Probe {now.get('probe', 0)}, Sized {now.get('sized', 0)} "
+                  f"(of {now.get('alive', 0)} living families).", ""]
+    causes = _dig(stalls, "causes")
+    if isinstance(causes, Mapping):
+        standing = [f"{name} (since {_cell(_dig(rec, 'seen_at'))})" for name, rec in sorted(causes.items())
+                    if isinstance(rec, Mapping) and rec.get("standing") and re.fullmatch(r"[a-z_]{1,40}", str(name))]
+        lines += [f"Stalls standing now: {', '.join(standing) if standing else 'none'}.", ""]
+    return lines
+
+
 def build(*, day: str, release: str, economics: Mapping[str, Any] | None, deploys: Mapping[str, Any],
           budget: Mapping[str, Any] | None, ladder: Mapping[str, Any], jobs: Mapping[str, int], written_at: str,
-          engineer: Mapping[str, Any] | None = None) -> str:
-    """The page, from an allowlist of figures."""
+          engineer: Mapping[str, Any] | None = None, funnel: Mapping[str, Any] | None = None,
+          stalls: Mapping[str, Any] | None = None) -> str:
+    """The page, from an allowlist of figures (the funnel's section only when `funnel` is given)."""
     lines = [f"# Desk scoreboard, {day}", "",
              f"Written by the House at {written_at} from its own records (release `{release}`). Money figures run from the "
              "Sept 26, 2026 reset (T0) to the latest close economics' cutoff; deposits are never profit.", ""]
@@ -215,6 +287,8 @@ def build(*, day: str, release: str, economics: Mapping[str, Any] | None, deploy
               "## The engineer (harness changes)", "", *engineer_lines(engineer), "",
               "## The House's jobs today", "",
               f"Ran: {jobs.get('ok', 0)}; failed: {jobs.get('failed', 0)}; missed: {jobs.get('missed', 0)}; skipped: {jobs.get('skipped', 0)}.", ""]
+    if funnel is not None:
+        lines += funnel_lines(funnel, stalls)
     return "\n".join(lines)
 
 
@@ -229,9 +303,15 @@ def run(ctx: Any) -> dict[str, Any]:
         engineer = public_summary(ctx.root)
     except Exception:  # noqa: BLE001 - the page is written whatever the engineer's journal holds
         engineer = None
-    text = build(day=day, release=Path(ctx.release).name, economics=latest(ctx.root), deploys=deploy_counts(ctx.base, day=day),
+    release = Path(ctx.release).name
+    try:
+        funnel: Mapping[str, Any] | None = FN.read(ctx.root, ctx.base, release, now)
+    except Exception:  # noqa: BLE001 - the page says the funnel could not be read; the rest still goes out
+        funnel = {}
+    text = build(day=day, release=release, economics=latest(ctx.root), deploys=deploy_counts(ctx.base, day=day),
                  budget=read_json(ctx.root / "budget.json", None), ladder=ladder_counts(ctx.root, now),
-                 jobs=job_counts(ctx.root, day), written_at=S.iso(now)[11:16] + "Z", engineer=engineer)
+                 jobs=job_counts(ctx.root, day), written_at=S.iso(now)[11:16] + "Z", engineer=engineer, funnel=funnel,
+                 stalls=read_json(ctx.root / "stall.json", None))
     problems = public_problems(text)
     local = write_text(ctx.root / "scoreboard" / f"{day}.md", text)
     if problems:
