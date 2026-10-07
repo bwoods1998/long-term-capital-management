@@ -1673,12 +1673,14 @@ class Job(unittest.TestCase):
         edge = self.doc()["inputs"]["edge"]
         self.assertEqual((edge["anchor"], edge["stop"]), ("2026-10-05", True))
         store = SwarmStore(self.root, clock=Clock(at(2026, 12, 1, 15, 0)))
+        # A move that names the ladder counts only with the ladder's own settled receipt (`ladder_receipts`); this
+        # release has no ladder record, so it lifts nothing either.
         store.event("swarm.band", "f3", {"band_from": "gym", "band_to": "probe",
                                          "reason": "the forward ladder promoted it (practice receipt 12)"})
         store.close()
         B.run(self.ctx(now=at(2026, 12, 29, 21, 30)))
         edge = self.doc()["inputs"]["edge"]
-        self.assertEqual((edge["anchor"], edge["stop"]), ("2026-12-02", False))
+        self.assertEqual((edge["anchor"], edge["stop"]), ("2026-10-05", True))
 
     def test_a_ladder_decision_to_promote_counts_too(self):
         import sqlite3
