@@ -53,7 +53,8 @@
   },
   "gate": {
     "audit_openai_model": null,
-    "review_openai_model": null
+    "review_openai_model": null,
+    "look_holds": null
   },
   "gym": {
     "enabled": true,
@@ -123,6 +124,7 @@
     "fork_top": 0,
     "retire_evaluations": 4000,
     "retire_revisions": 100,
-    "reuse_validations": true
+    "reuse_validations": true,
+    "drift_screen": false
   }
 }

@@ -215,6 +215,22 @@ class TheCommittedPolicy(L.LoopCase):
         self.assertLessEqual(population["floor"], population["start"])
         self.assertLessEqual(population["start"], population["ceiling"])
 
+    def test_fast_lane_v2_switches_the_drift_screen_and_the_look_holds_off(self):
+        """FAST LANE V2 (Oct 7, 2026; D2, direction counts): the committed policy turns the drift screen's refusal off and
+        both look holds off (`gate.look_holds` null), and the House reads them so."""
+        from league.swarm.gate import look_hold_settings
+        from league.swarm.researcher import drift_settings
+
+        layer, status = S.read_policy()
+        self.assertEqual(status["state"], "ok")
+        self.assertIs(layer["tournament"]["drift_screen"], False)
+        self.assertIsNone(layer["gate"]["look_holds"])
+        loaded = S.load(self.root)
+        self.assertIsNone(loaded["gate"]["look_holds"])
+        self.assertIs(loaded["tournament"]["drift_screen"], False)
+        self.assertEqual(look_hold_settings(loaded), (None, None))
+        self.assertIsNone(drift_settings(loaded))
+
     def test_it_sets_no_budget_and_loosens_no_line_of_the_guard(self):
         layer, _ = S.read_policy()
         self.assertNotIn("budget", layer, "THE BUDGET is never a setting: settings without a state root would carry it")
