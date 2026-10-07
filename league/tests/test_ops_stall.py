@@ -213,6 +213,9 @@ class Causes(Base):
         hours = guard.read(Path(self.tmp2.name) / "swarm.sqlite", lambda db: FN.guard_hours(db, NOW - 24 * HOUR, NOW))
         self.assertEqual((hours["hours"], hours["by_cause"], hours["braked_now"]), (14.0, {"under_line": 14.0}, False))
         self.assertTrue(hours["known"])
+        # Still braked: the brake's own start is when it began, though only the window's part is counted.
+        still = guard.read(Path(self.tmp2.name) / "swarm.sqlite", lambda db: FN.guard_hours(db, NOW - 24 * HOUR, NOW - 12 * HOUR))
+        self.assertEqual((still["hours"], still["braked_now"], still["braked_since"]), (12.0, True, "2026-10-06T04:20:00Z"))
 
     def test_braked_under_the_line_names_the_top_up(self):
         self.healthy()

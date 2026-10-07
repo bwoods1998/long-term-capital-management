@@ -159,7 +159,8 @@ def guard_hours(db: sqlite3.Connection, start: float, end: float) -> dict[str, A
                               (a, b)))
     braked, causes = (before[0][1] == "brake", before[0][2]) if before else (False, ["unknown"])
     known = bool(before) or bool(inside)
-    t, seconds, by_cause, since = float(start), 0.0, {}, (float(start) if braked else None)
+    # A brake that began before the window: its stretch counts from the window's start, its `braked_since` from the brake.
+    t, seconds, by_cause, since = float(start), 0.0, {}, (before[0][0] if braked else None)
 
     def add(until: float) -> None:
         nonlocal seconds
