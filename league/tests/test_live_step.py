@@ -110,14 +110,14 @@ class RoundTrip(LiveCase):
         out = self.run_to(9, 31)
         self.assertEqual(out["state"], "session")
         self.assertEqual(sorted(live.instances), ["vert@1:r", "vert@1:s"])
-        # The real open: sized by maximum loss (5% of the lower of equity 5,481.65 and the grant's 5,500), not by the
-        # program's qty of 2.
+        # The real open: one structure within the Probe's cap (THE FAST LANE, Oct 7, 2026: 10% of the lower of equity
+        # 5,481.65 and the grant's 5,500), not the program's qty of 2.
         [sent] = [b for b in self.venue.sent]
         self.assertEqual(sent["order_class"], "mleg")
         real = next(iter(live.book.positions.values()))
         unit = real.max_loss_share * 100 + 2 * (real.fees / real.qty)
-        self.assertEqual(real.qty, int(D("274.0825") // D(str(round(unit, 2)))))
-        self.assertGreater(real.qty, 2)
+        self.assertLessEqual(D(str(round(unit, 2))), D("548.165"))
+        self.assertEqual(real.qty, 1)
         [(buy, agent)] = self.ledger.of("book.fill")
         self.assertEqual((agent, buy["side"], buy["real_money"], buy["source"]), ("vert", "buy", True, "venue"))
         self.assertTrue(buy["instrument"]["market_id"].startswith("debit_vertical|+1SPY"))
@@ -146,16 +146,17 @@ class RoundTrip(LiveCase):
         self.assertEqual(self.families.rows["vert"]["band"], "candidate")   # no band moves without real money
         self.assertEqual(self.venue.sent, [])
 
-    def test_a_family_promoted_in_the_session_trades_real_money_from_the_next_session(self):
+    def test_a_family_promoted_in_the_session_trades_real_money_from_the_next_live_minute(self):
+        """THE FAST LANE (D3, Oct 7, 2026): a Candidate the live path moves to Probe has its real instance in the same
+        families pass and may open from the next live minute: no session wait."""
         live = self.make([family("vert", VERTICAL, band="candidate", params={"hold": 3, "opens": 5})])
-        self.run_to(9, 40)
+        self.run_to(9, 31)
         self.assertEqual(self.families.rows["vert"]["band"], "probe")
-        self.assertEqual(sorted(live.instances), ["vert@1:s"], "no real instance the session it was promoted")
-        self.assertEqual(self.venue.sent, [])
-        self.clock.set(at(MONDAY + dt.timedelta(days=1), 9, 31))
-        live.minute()
-        self.assertIn("vert@1:r", live.instances)
-        self.assertEqual(len(self.venue.sent), 1)
+        self.assertEqual(sorted(live.instances), ["vert@1:r", "vert@1:s"], "the real instance the session it was promoted")
+        self.assertEqual(live.instances["vert@1:r"].mode, "live")
+        self.run_to(9, 40)
+        real = [b for b in self.venue.sent if b.get("legs") and b["legs"][0]["position_intent"] == "buy_to_open"]
+        self.assertGreaterEqual(len(real), 1, "a real open the session of its move")
 
     def test_a_candidate_whose_typical_loss_is_unknown_stays_shadow_only_and_says_why_once_a_day(self):
         live = self.make([family("vert", VERTICAL, band="candidate", typical=None)])
@@ -788,7 +789,9 @@ class VerificationRound(LiveCase):
         self.run_to(9, 33)
         self.assertEqual(self.venue.cancels, [order.venue_id])
 
-    def test_an_exit_only_instance_promoted_again_waits_for_the_next_session(self):
+    def test_an_exit_only_instance_promoted_again_is_live_from_the_next_minute(self):
+        """THE FAST LANE (D3, Oct 7, 2026): a family the live path confirms onto Probe again trades from the next live
+        minute (before it, from the next session)."""
         live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 600})])
         self.run_to(9, 31)
         self.families.rows["vert"]["forward"] = {"trades": 25, "negative": True}
@@ -799,11 +802,7 @@ class VerificationRound(LiveCase):
         live._families_at = float("-inf")
         self.run_to(9, 33)
         self.assertEqual(self.families.rows["vert"]["band"], "probe")
-        self.assertEqual(live.instances["vert@1:r"].mode, "exit_only", "real money from the next session")
-        self.clock.set(at(MONDAY + dt.timedelta(days=1), 9, 31))
-        live._families_at = float("-inf")
-        live.minute()
-        self.assertEqual(live.instances["vert@1:r"].mode, "live")
+        self.assertEqual(live.instances["vert@1:r"].mode, "live", "real money from the next live minute")
 
     def test_an_option_event_from_before_the_reset_is_not_this_runs(self):
         self.venue.activity_rows.append({"id": "old1", "activity_type": "OPASN", "symbol": "SPY260925C00600000", "qty": "1",

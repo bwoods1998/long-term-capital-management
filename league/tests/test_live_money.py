@@ -43,7 +43,10 @@ class TheTable(unittest.TestCase):
         t = M.Table.from_constitution()
         self.assertEqual(t.real_types, ("debit_vertical", "long_butterfly", "long_call", "long_put"))
         self.assertEqual(t.credit_types, ("credit_vertical", "iron_condor", "iron_butterfly"))
-        self.assertEqual((t.probe_share, t.probe_open, t.probe_family_share, t.probe_floor), (D("0.05"), 3, D("0.15"), D("100")))
+        # THE FAST LANE (Oct 7, 2026; the owner's goal item 4): one structure within 10% of E, no floor, at most 3 Probe
+        # positions at once, a $400 Probe loss budget.
+        self.assertEqual((t.probe_share, t.probe_open, t.probe_family_share, t.probe_floor), (D("0.10"), 3, D("0.15"), D("0")))
+        self.assertEqual((t.probe_contracts, t.probe_max_open, t.probe_loss_budget), (1, 3, D("400")))
         self.assertEqual((t.sized_min_trades, t.sized_confidence, t.kelly_fraction), (20, 0.8, 0.25))
         self.assertEqual((t.sized_share, t.sized_family_share, t.book_share), (D("0.10"), D("0.30"), D("0.90")))
         self.assertEqual((t.daily_stop_share, t.drawdown_stop_share), (D("0.35"), D("0.60")))
@@ -56,19 +59,25 @@ class TheTable(unittest.TestCase):
                          (D("1000"), D("0.25"), D("1.0"), 300))
         self.assertEqual(t.credit_min_equity, D("2000"))
         self.assertEqual(options_money_problems(), [])
-        # A $100 Probe fits the gateway's per-order cap at the account's $481.63: 25% of it is $120.40.
-        self.assertGreaterEqual(t.gateway_order_share * D("481.63"), t.probe_floor)
+        # The Probe's 10% cap fits the gateway's per-order cap, min($1,000, 25% of E), at every equity to $10,000.
+        for equity in ("481.63", "1288.40", "10000"):
+            self.assertLessEqual(M.probe_cap(t, D(equity)), min(t.gateway_order_max_loss, t.gateway_order_share * D(equity)))
+        # N = 3 at 10% is 30% of E: inside the 35% daily stop and the 60% drawdown stop.
+        self.assertLess(t.probe_max_open * t.probe_share, t.daily_stop_share)
 
     def test_every_d4_row_is_at_the_bold_end_and_inside_the_plans_range(self):
         c = CONSTITUTION["options_money"]
-        for path, value in (("probe.max_loss_share", "0.05"), ("probe.floor_usd", "100"), ("probe.family_share", "0.15"),
+        self.assertEqual(c["probe"]["floor_usd"], "0", "the fast lane: no one-contract floor")
+        self.assertEqual(OPTIONS_MONEY_BOUNDS["probe.max_loss_share"], ("0.02", "0.10"), "the goal's 10%")
+        for path, value in (("probe.max_loss_share", "0.10"), ("probe.family_share", "0.15"),
+                            ("probe.max_open", 3), ("probe.loss_budget_usd", "400"),
                             ("book_share", "0.90"), ("daily_stop_share", "0.35"), ("drawdown_stop_share", "0.60"),
                             ("tuition.day_usd", "200"), ("calibration.day_usd", "50")):
             node = c
             for key in path.split("."):
                 node = node[key]
             self.assertEqual(node, value, path)
-            self.assertEqual(D(OPTIONS_MONEY_BOUNDS[path][1]), D(value), f"{path} is the bold end of its range")
+            self.assertEqual(D(OPTIONS_MONEY_BOUNDS[path][1]), D(str(value)), f"{path} is the bold end of its range")
         self.assertEqual(OPTIONS_MONEY_BOUNDS["gateway.order_equity_share"], ("0", "0.25"))
 
     def test_every_row_outside_its_range_is_refused(self):
@@ -125,11 +134,12 @@ class Bands(unittest.TestCase):
 
     def test_a_candidate_that_passed_the_holdout_and_fits_is_a_probe(self):
         self.assertEqual(M.band_for(self.t, row(typical_max_loss_usd=150.0), D("5481.65"), fwd([]))[0], "probe")
-        # 5% of 5,000 is 250.00: at the line, and a cent over is not a Probe (and not under the $100 floor).
-        self.assertEqual(M.band_for(self.t, row(typical_max_loss_usd="250.00"), D("5000"), fwd([]))[0], "probe")
-        band, why = M.band_for(self.t, row(typical_max_loss_usd="250.01"), D("5000"), fwd([]))
+        # 10% of 5,000 is 500.00: at the line, and a cent over is not a Probe.
+        self.assertEqual(M.band_for(self.t, row(typical_max_loss_usd="500.00"), D("5000"), fwd([]))[0], "probe")
+        band, why = M.band_for(self.t, row(typical_max_loss_usd="500.01"), D("5000"), fwd([]))
         self.assertEqual(band, "candidate")
-        self.assertIn("over the Probe's cap of $250.00", why)
+        self.assertIn("over the Probe's cap of $500.00", why)
+        self.assertNotIn("floor", why, "the fast lane: no one-contract floor")
 
     def test_an_unknown_typical_loss_keeps_a_candidate_shadow_only(self):
         band, why = M.band_for(self.t, row(typical_max_loss_usd=None), D("5481.65"), fwd([]))
@@ -140,11 +150,14 @@ class Bands(unittest.TestCase):
         band, _ = M.band_for(self.t, row(band="probe", typical_max_loss_usd=None), D("5481.65"), fwd([]))
         self.assertEqual(band, "probe")
 
-    def test_the_floor_lets_a_small_account_probe_one_contract(self):
-        self.assertEqual(M.band_for(self.t, row(typical_max_loss_usd=100.0), D("481.65"), fwd([]))[0], "probe")
-        self.assertEqual(M.band_for(self.t, row(typical_max_loss_usd=100.01), D("481.65"), fwd([]))[0], "candidate")
+    def test_no_floor_a_small_account_probes_within_ten_percent_only(self):
+        """THE FAST LANE (Oct 7, 2026): 10% of E replaces 5% and the $100 floor; under E $1,000 it is tighter than the floor."""
+        self.assertEqual(M.band_for(self.t, row(typical_max_loss_usd="48.16"), D("481.65"), fwd([]))[0], "probe")
+        self.assertEqual(M.band_for(self.t, row(typical_max_loss_usd="48.17"), D("481.65"), fwd([]))[0], "candidate")
         self.assertEqual(M.band_for(self.t, row(structure="long_put", typical_max_loss_usd=95.0), D("481.63"), fwd([]))[0],
-                         "probe", "a long put under the floor is a Probe at the account's $481.63")
+                         "candidate", "a $95 long put is over 10% of $481.63: no floor lets it in")
+        self.assertEqual(M.band_for(self.t, row(typical_max_loss_usd="128.84"), D("1288.40"), fwd([]))[0], "probe")
+        self.assertEqual(M.band_for(self.t, row(typical_max_loss_usd="128.85"), D("1288.40"), fwd([]))[0], "candidate")
 
     def test_what_keeps_a_family_shadow_only(self):
         self.assertIn("holdout", M.band_for(self.t, row(holdout_passed=False), D("5000"), fwd([]))[1])
@@ -242,55 +255,60 @@ class Sizing(unittest.TestCase):
         return M.plan_open(self.t, band=band, tuition=tuition, equity=D(equity), unit=D(str(unit)), fwd=fwd_,
                            exposure=M.Exposure(**{k: (D(str(v)) if k not in ("family_open",) else v) for k, v in exposure.items()}))
 
-    def test_a_probe_is_sized_by_maximum_loss(self):
-        # 5% of 5,481.65 = 274.0825: two structures of $137.00 (with fees) fit, three do not.
-        self.assertEqual(self.plan(137.00).qty, 2)
-        self.assertEqual(self.plan(137.05).qty, 1)
-        self.assertEqual(self.plan(274.08).qty, 1)
-        self.assertEqual(self.plan(91.36).qty, 3)
-        refused = self.plan(274.09)
+    def test_a_probe_is_one_structure_within_ten_percent(self):
+        # THE FAST LANE: 10% of 5,481.65 = 548.165: one structure whatever its size under the cap, never more.
+        self.assertEqual(self.plan(137.00).qty, 1)
+        self.assertEqual(self.plan(10.00).qty, 1)
+        self.assertEqual(self.plan(400.00).qty, 1)
+        self.assertIn("probe: the loss budget", self.plan(548.16).reason, "under the cap, over the $400 budget")
+        self.assertIn("one structure ($137.00 of maximum loss within $548.16)", self.plan(137.00).reason)
+        refused = self.plan(548.17)
         self.assertEqual(refused.qty, 0)
-        self.assertIn("over its cap of $274.08", refused.reason)
+        self.assertIn("over the Probe's cap of $548.16", refused.reason)
 
-    def test_the_floor_is_one_contract_of_at_most_a_hundred_dollars(self):
-        self.assertEqual(self.plan(100.00, equity="481.65").qty, 1)
-        self.assertEqual(self.plan(100.01, equity="481.65").qty, 0)
-        self.assertEqual(self.plan(24.00, equity="481.65").qty, 1)    # 5% of 481.65 is 24.08: one by the share
-        self.assertEqual(self.plan(12.00, equity="481.65").qty, 2)
-        # At the account's $481.63 a $100 floor contract fits every cap: the gateway's 25% is $120.40.
-        self.assertEqual(self.plan(100.00, equity="481.63").qty, 1)
+    def test_no_floor_a_structure_over_ten_percent_of_a_small_account_is_refused(self):
+        self.assertEqual(self.plan(48.16, equity="481.65").qty, 1)    # 10% of 481.65 is 48.165
+        self.assertEqual(self.plan(48.17, equity="481.65").qty, 0)
+        self.assertEqual(self.plan(100.00, equity="481.63").qty, 0, "the old $100 floor is gone")
+        self.assertEqual(self.plan(40.00, equity="1288.40").qty, 1)
+        self.assertEqual(self.plan(130.00, equity="1288.40").qty, 0, "over $128.84")
 
     def test_three_open_structures_a_probe_family(self):
-        self.assertEqual(self.plan(50, family_open=2).qty, 5)
+        self.assertEqual(self.plan(50, family_open=2).qty, 1)
         self.assertIn("the most a Probe family holds is 3", self.plan(50, family_open=3).reason)
 
     def test_the_family_total(self):
-        # 15% of 5,481.65 = 822.2475; 770 open leaves 52.24: one $50 structure, not two.
+        # 15% of 5,481.65 = 822.2475; 770 open leaves 52.24: one $50 structure fits, then none.
         self.assertEqual(self.plan(50, family_loss="770").qty, 1)
         self.assertEqual(self.plan(50, family_loss="822.25").qty, 0)
-        # The floor: a small account's family may hold one floor contract (15% of 481.65 is 72.25 < 100).
-        self.assertEqual(self.plan(99.00, equity="481.65").qty, 1)
-        self.assertEqual(self.plan(99.00, equity="481.65", family_loss="99").qty, 0)
+        # A small account: 15% of 481.65 is 72.25, so one $48 structure fits and a second does not.
+        self.assertEqual(self.plan(48.00, equity="481.65").qty, 1)
+        self.assertEqual(self.plan(48.00, equity="481.65", family_loss="48").qty, 0)
 
-    def test_sized_is_quarter_kelly_on_the_lower_bound_between_the_probe_and_ten_percent(self):
+    def test_sized_is_quarter_kelly_on_the_lower_bound_at_most_ten_percent(self):
         f = fwd([0.3, 0.1, 0.2, 0.15, 0.25] * 4)
         cap = M.structure_cap(self.t, "sized", D("10000"), f)
         self.assertLessEqual(cap, D("1000"))           # 10%
-        self.assertGreaterEqual(cap, D("500"))         # never below the Probe's 5%
-        import league.stats as S
         expect = min(0.10, 0.25 * f.lcb / f.variance) * 10000
-        self.assertAlmostEqual(float(cap), max(500.0, expect), places=6)
+        self.assertAlmostEqual(float(cap), expect, places=6)
+        self.assertEqual(M.structure_cap(self.t, "probe", D("10000"), f), M.probe_cap(self.t, D("10000")))
         self.assertEqual(self.plan(100, band="sized", equity="10000", fwd_=f, family_loss="2950").qty, 0)  # 30% family
 
-    def test_a_sized_family_whose_kelly_is_under_the_probes_cap_keeps_the_probes_limits(self):
-        weak = fwd([0.44, -0.28] * 10)                 # mean 0.08, sd 0.37: LCB barely positive, quarter-Kelly under 5%
+    def test_a_sized_family_whose_kelly_buys_no_whole_structure_keeps_the_probes_one_structure_and_limits(self):
+        """C3 restated for the fast lane's one-structure Probe (Oct 7, 2026): Kelly under the unit, the Probe's limits."""
+        weak = fwd([0.44, -0.28] * 10)                 # mean 0.08, sd 0.37: LCB barely positive, quarter-Kelly about $105
         self.assertTrue(M.sized_ok(self.t, weak))
-        self.assertLess(M.kelly_cap(self.t, D("5481.65"), weak), M.probe_cap(self.t, D("5481.65")))
-        self.assertEqual(M.sizing_band(self.t, "sized", D("5481.65"), weak), "probe")
-        self.assertEqual(M.structure_cap(self.t, "sized", D("5481.65"), weak), M.probe_cap(self.t, D("5481.65")))
+        kelly = M.kelly_cap(self.t, D("5481.65"), weak)
+        self.assertLess(kelly, D("200"))
+        self.assertEqual(M.sizing_band(self.t, "sized", D("5481.65"), weak, D("10")), "sized", "Kelly buys ten")
+        self.assertEqual(M.sizing_band(self.t, "sized", D("5481.65"), weak, D("200")), "probe", "Kelly buys none")
+        self.assertEqual(M.structure_cap(self.t, "probe", D("5481.65"), weak), M.probe_cap(self.t, D("5481.65")))
+        self.assertEqual(self.plan(200, band="sized", fwd_=weak).qty, 1, "never smaller than a Probe: one structure")
         # Sized at a Probe-sized stake never gets the Sized family limits: three open, 15%.
-        self.assertIn("the most a Probe family holds is 3", self.plan(10, band="sized", fwd_=weak, family_open=3).reason)
-        self.assertEqual(self.plan(10, band="sized", fwd_=weak, family_loss="815").qty, 0)
+        self.assertIn("the most a Probe family holds is 3", self.plan(200, band="sized", fwd_=weak, family_open=3).reason)
+        self.assertEqual(self.plan(200, band="sized", fwd_=weak, family_loss="815").qty, 0)
+        # Kelly buys structures: Sized limits and Kelly's count (floor(kelly / unit)), whatever the Probe's count.
+        self.assertEqual(self.plan(10, band="sized", fwd_=weak, family_open=3).qty, int(kelly / D("10")))
 
     def test_the_book_and_the_gateways_caps(self):
         self.assertIn("the book's open maximum loss", self.plan(50, book_loss="4933.49").reason)   # 90% = 4933.485

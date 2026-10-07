@@ -20,7 +20,7 @@ if HAVE:
 REPO = Path(__file__).resolve().parents[2]
 #: The money digest the grant is pinned to: `long_single` is no money rule and must not move it. R10's (Sept 29, 2026)
 #: was a3e2aa7c; the incubator's row (release B, Oct 1, 2026: `options_money.incubator`) moved it to this one.
-MONEY_DIGEST = "42c4a3af2b5c7d1c83e720650ac0596bebf69e0bc77556601347b589f759643a"
+MONEY_DIGEST = "da5c7542d7b78f967c12c3b2d98140153026c98b5fea9de27b6cf912eff85694"  # fast lane v2 (42c4a3af before it)
 
 #: One program, two sides: a long call first, then (once the call is held) a long put. The side rule here is a clock so the
 #: numbers are by hand; a family's own rule is its mechanism's.
@@ -142,7 +142,10 @@ class RealEligibility(unittest.TestCase):
         put = M.plan_open(t, band="probe", tuition=False, equity=equity, unit=D("130.00"), fwd=fwd,
                           exposure=M.Exposure(family_open=1, family_loss=D("240.00"), book_loss=D("240.00"),
                                               day_opened=D("240.00")))
-        self.assertEqual((call.qty, put.qty), (4, 2), "274.08 of cap: 4 calls at 60, 2 puts at 130")
+        # THE FAST LANE (Oct 7, 2026): a Probe position is one structure within 10% of E ($548.16 here), whatever its unit.
+        self.assertEqual((call.qty, put.qty), (1, 1), "one call at 60, one put at 130: each its own unit, one structure")
+        self.assertIn("$60.00 of maximum loss within $548.16", call.reason)
+        self.assertIn("$130.00 of maximum loss within $548.16", put.reason)
 
 
 @unittest.skipUnless(HAVE, "numpy not installed")
@@ -162,10 +165,12 @@ class OnTheLivePath(LiveCase):
         positions = sorted(live.book.positions.values(), key=lambda p: p.type)
         self.assertEqual([p.type for p in positions], ["long_call", "long_put"], "each real position keeps its concrete type")
         self.assertTrue(all(p.type in SINGLE_TYPES for p in positions))
-        # Each sized by its own maximum loss: 5% of $5,481.65 = $274.08 of premium and fees a structure.
+        # Each sized by its own maximum loss: one structure within 10% of $5,481.65 ($548.16) of premium and fees (THE FAST
+        # LANE, Oct 7, 2026: a Probe position is one structure).
         for pos in positions:
             unit = D(str(round(pos.entry * 100 + 2 * pos.fees / pos.qty, 2)))
-            self.assertEqual(pos.qty, int(D("274.0825") // unit), pos.type)
+            self.assertLessEqual(unit, D("548.165"), pos.type)
+            self.assertEqual(pos.qty, 1, pos.type)
         orders = live.book.state.rows("SELECT type FROM orders WHERE action='open' ORDER BY oid")
         self.assertEqual([o["type"] for o in orders], ["long_call", "long_put"])
         # The site's open structures show each position's own type, never the declared one.

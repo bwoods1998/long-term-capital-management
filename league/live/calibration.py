@@ -59,8 +59,9 @@ orders of the minute, so it takes only what they left):
 WHAT IT LEAVES THE FAMILIES (the review of #407): every dispatched open, filled or cancelled, counts its whole maximum
 loss toward the account-wide day cap (`gateway.day_equity_share` x sizing equity, the lower of the account's equity and
 the grant's capital: $481.63 on Sept 28, 2026), and six slots can dispatch twelve opens of $35-50. So a calibration
-open (the re-price too) goes only while it leaves `FAMILY_ROOM_PROBES` Probe floors (`probe.floor_usd`, $200) of that
-cap for the families' opens. And no round trip starts once the calibration's own legs today (orders and cancels, as
+open (the re-price too) goes only while it leaves the families' Probe room (`money.probe_room`: `probe.max_open` x
+`probe.max_loss_share` x E, $386.52 at E $1,288.40 since THE FAST LANE of Oct 7, 2026; two $100 Probe floors before it)
+of that cap for the families' opens. And no round trip starts once the calibration's own legs today (orders and cancels, as
 the House counts them: `day_legs`) reach `DAY_LEGS` (80): a round trip is 4 legs when both mids fill and about 30 at
 its slowest (the open and its cancel, the re-price, six close attempts and their cancels), so the calibration takes at
 most about 110 of the day's 250 legs before the House's own backstop, usually 20-50. At the gateway it is at most 12
@@ -151,10 +152,10 @@ CANDIDATES = 4
 CLOSE_ATTEMPTS_DAY = 6
 REJECT_BACKOFF_MINUTES = 5.0
 #: What a calibration open leaves the families of the account-wide day cap (`gateway.day_equity_share` x sizing
-#: equity, which every dispatched open fills by its whole maximum loss, filled or not): this many Probe floors
-#: (`probe.floor_usd`; 2 x $100). The review of #407: six slots' opens could otherwise take $430 of the $481.63 cap on
-#: a heavy day.
-FAMILY_ROOM_PROBES = 2
+#: equity, which every dispatched open fills by its whole maximum loss, filled or not): the Probe room
+#: (`money.probe_room`, `probe.max_open` x `probe.max_loss_share` x E; THE FAST LANE, Oct 7, 2026, in place of two $100
+#: Probe floors). The review of #407: six slots' opens could otherwise take $430 of the $481.63 cap on a heavy day.
+FAMILY_ROOM_RULE = "probe.max_open x probe.max_loss_share x E"
 #: No new round trip once the calibration's own legs today (its orders and their cancels, as the House counts the day's
 #: 250) reach this: a round trip is 4 legs when both mids fill and about 30 at its slowest, so the day stays under about
 #: 110 of the 250 (the review of #407; before the House's own backstop closes).
@@ -731,10 +732,10 @@ class Calibration:
             return f"the book's cap: ${M.cents(exposure.book_loss)} open of ${M.cents(table.book_share * equity)}"
         if loss > min(table.gateway_order_max_loss, table.gateway_order_share * equity):
             return "the gateway's per-order cap"
-        # The account-wide day cap, less the room kept for the families' opens (`FAMILY_ROOM_PROBES`): the calibration
-        # takes only what leaves them that much.
+        # The account-wide day cap, less the room kept for the families' Probe opens (`money.probe_room`): the
+        # calibration takes only what leaves them that much.
         day_cap = table.gateway_day_share * equity
-        room = FAMILY_ROOM_PROBES * table.probe_floor
+        room = M.probe_room(table, equity)
         if exposure.day_opened + loss + room > day_cap:
             return (f"the gateway's day cap: ${M.cents(exposure.day_opened)} of ${M.cents(day_cap)} opened today, and "
                     f"${M.cents(room)} is kept for the families' opens")
@@ -918,7 +919,7 @@ def plan() -> dict:
             "last_resort_from_et": hm(960 - LAST_RESORT_MINUTES), "repriced_as": dict(REPRICE),
             "works_minutes": {"open": {k: v + 1 for k, v in OPEN_TIF.items()},
                               "close": {k: v + 1 for k, v in CLOSE_TIF.items()}},
-            "leaves_families": {"day_cap_probe_floors": FAMILY_ROOM_PROBES, "no_new_trip_from_legs": DAY_LEGS},
+            "leaves_families": {"day_cap_probe_room": FAMILY_ROOM_RULE, "no_new_trip_from_legs": DAY_LEGS},
             "counted": list(COUNTED)}
 
 

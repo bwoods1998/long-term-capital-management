@@ -593,19 +593,22 @@ class TheCaps(unittest.TestCase):
         self.assertEqual(M.plan_incubator(t, unit=D("50"), equity=E, tally=full(), exposure=M.Exposure(),
                                           room=D("300")).qty, 1)
 
-    def test_room_is_kept_for_probe_floors_and_the_house_test(self):
-        """At E = $1,465: the book cap $1,318.50 and the day cap $1,465 each keep $300 (two $100 Probe floors and the House
-        test's $100 structure) after the incubator's open."""
+    def test_room_is_kept_for_the_probe_room_and_the_house_test(self):
+        """At E = $1,465: the book cap $1,318.50 and the day cap $1,465 each keep the families' Probe room (THE FAST LANE,
+        Oct 7, 2026: 3 x 10% x E = $439.50; two $100 floors before it) and the House test's $100 structure, $539.50, after
+        the incubator's open (`Incubator.room`)."""
         E = D("1465")
+        room = M.probe_room(self.table, E) + self.table.house_test_structure
+        self.assertEqual(room, D("539.5"))
         book = self.table.book_share * E
-        at_edge = M.Exposure(book_loss=book - D("300") - D("30"))
-        self.assertEqual(self.plan("30", exposure=at_edge, E=E).qty, 1)
-        self.assertEqual(self.plan("30.01", exposure=at_edge, E=E).qty, 0)
+        at_edge = M.Exposure(book_loss=book - room - D("30"))
+        self.assertEqual(self.plan("30", exposure=at_edge, E=E, room=room).qty, 1)
+        self.assertEqual(self.plan("30.01", exposure=at_edge, E=E, room=room).qty, 0)
         after = at_edge.book_loss + D("30")
-        self.assertGreaterEqual(book - after, D("300"), "a Probe floor and the House test's $100 still fit")
-        day = M.Exposure(day_opened=E - D("300") - D("30"))
-        self.assertEqual(self.plan("30", exposure=day, E=E).qty, 1)
-        self.assertEqual(self.plan("30.01", exposure=day, E=E).qty, 0)
+        self.assertGreaterEqual(book - after, room, "three Probe positions and the House test's $100 still fit")
+        day = M.Exposure(day_opened=E - room - D("30"))
+        self.assertEqual(self.plan("30", exposure=day, E=E, room=room).qty, 1)
+        self.assertEqual(self.plan("30.01", exposure=day, E=E, room=room).qty, 0)
 
     # -------------------------------------------------------------- the property
     def test_the_invariants_hold_at_every_admitted_open_over_random_sequences(self):

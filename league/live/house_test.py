@@ -37,8 +37,8 @@ this order, fail-closed, `HouseTest.plan`):
   zero), H every held position's maximum loss and fees twice, W every working or unresolved open's (a lost one of
   today's whole): the test can never lose more than that;
 - the gateway's per-order cap, as any open; and both the book's cap and the account-wide day cap less the room the
-  calibration leaves the families of the day cap (`calibration.FAMILY_ROOM_PROBES` Probe floors): the test never takes
-  the families' last room in either.
+  calibration leaves the families of the day cap (the Probe room, `money.probe_room`: `probe.max_open` x
+  `probe.max_loss_share` x E since THE FAST LANE, Oct 7, 2026): the test never takes the families' last room in either.
 
 It yields to the families: their real intents of each minute are applied before its own, the order path refuses its
 open on a contract a family order works, and while its open works a family's real order refused on one of that open's
@@ -470,7 +470,7 @@ class HouseTest:
         if t["possible"] + unit > table.house_test_envelope:
             return M.Plan(0, cap, f"house test: ${M.cents(t['possible'])} could already be lost (realized, held and "
                                   f"working) and this risks ${M.cents(unit)}, over its ${table.house_test_envelope}")
-        room = C.FAMILY_ROOM_PROBES * table.probe_floor
+        room = M.probe_room(table, equity)
         book = table.book_share * equity
         if exposure.book_loss + unit + room > book:
             return M.Plan(0, cap, f"the book's cap: ${M.cents(exposure.book_loss)} of ${M.cents(book)} open maximum "

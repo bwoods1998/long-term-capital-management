@@ -61,6 +61,9 @@ from .venue import TERMINAL, WORKING, Account, Submitted, dec, occ_parts
 PREFIX = "lv-"
 #: The incubator's instances (`<family>@<version>:i`, `league/live/incubator.py`): real, tuition-size, never evidence.
 INCUBATOR_SUFFIX = ":i"
+#: A family's real-money instances (`<family>@<version>:r`): Probe and Sized. THE FAST LANE's Probe limits count them
+#: (`probe_tally`).
+REAL_SUFFIX = ":r"
 #: The real types that are one contract bought to open (the sprint, B4): single-leg orders, not `mleg`.
 SINGLE_TYPES = ("long_call", "long_put")
 #: The Brokerage Account's legacy crypto dust, below the venue's minimum order: a known holding outside P&L.
@@ -146,6 +149,39 @@ def incubator_tally(rows: Callable[..., list], *, day: str, week_start: str, fam
     return M.IncubatorTally(realized_loss=realized, held=held, working=working, family_held=fam_held,
                             family_working=fam_working, open_n=open_n, legs_today=legs, opened_today=opened,
                             week_peak_loss=peak)
+
+
+def probe_tally(rows: Callable[..., list], *, week_start: str) -> tuple[int, Decimal, Decimal]:
+    """THE FAST LANE's Probe figures (D3, D4, Oct 7, 2026; `money.plan_open`): (open_n, realized_loss, at_risk) from the
+    live state's own rows, selected by the instance suffix `:r` and `tuition = 0` only, so a restart reads the same numbers
+    (`rows(sql, params)` returns dicts, as `incubator_tally`'s). realized_loss: max(0, -the net cash of every closed `:r`
+    position), so a Probe gain offsets a Probe loss (the book's fee estimate until the broker's post); "since this
+    release" is every `:r` row ever, since none existed before it. at_risk: each position not closed (held, expiring or
+    unpriced: its `opened_qty` units when unpriced) at its maximum loss with its fees twice, or what its cash already lost
+    when that is more; and each pending, working or unknown open at its maximum loss with its fees twice for what may
+    still fill, a lost open dated this ISO week (on or after `week_start`) whole. open_n: positions not closed, and those
+    orders without a position. Positions carry no band, so a Sized position counts too (a tightening)."""
+    like = REAL_SUFFIX                       # substr(instance, -2): exact and case-sensitive (LIKE is neither)
+    at_risk = M.ZERO
+    cash_closed = M.ZERO
+    open_n = 0
+    for r in rows("SELECT qty, opened_qty, max_loss_share, fees, cash, status FROM positions "
+                  "WHERE substr(instance, -2)=? AND tuition=0", (like,)):
+        if r["status"] == "closed":
+            cash_closed += M.D(r["cash"])
+            continue
+        units = int(r["opened_qty"]) if r["status"] == "unpriced_close" else max(0, int(r["qty"]))
+        at_risk += max(M.D(r["max_loss_share"]) * V.MULTIPLIER * units + 2 * M.D(r["fees"]), -M.D(r["cash"]))
+        open_n += 1
+    for r in rows("SELECT qty, filled_qty, status, max_loss, fees_est, day, pid FROM orders WHERE action='open' "
+                  "AND substr(instance, -2)=? AND tuition=0 AND status IN ('pending', 'working', 'unknown', 'lost')", (like,)):
+        if r["status"] == "lost" and not str(r["day"] or "") >= week_start:
+            continue
+        remaining = int(r["qty"]) if r["status"] == "lost" else max(0, int(r["qty"]) - int(r["filled_qty"]))
+        at_risk += (M.D(r["max_loss"]) + 2 * M.D(r["fees_est"])) * M.D(remaining) / max(1, int(r["qty"]))
+        if r["pid"] is None:
+            open_n += 1
+    return open_n, max(M.ZERO, -cash_closed), at_risk
 
 
 def client_id(oid: int, family: str, *, nonce: str = "") -> str:
@@ -482,8 +518,10 @@ class RealBook:
                 tuition_week += loss
                 if r["day"] == day:
                     tuition_day += loss
+        probe_open, probe_realized, probe_at_risk = probe_tally(self.state.rows, week_start=week_start)
         return M.Exposure(family_open=fam_open, family_loss=M.D(round(fam_loss, 2)), book_loss=M.D(round(book, 2)),
-                          day_opened=day_opened, tuition_day=tuition_day, tuition_week=tuition_week)
+                          day_opened=day_opened, tuition_day=tuition_day, tuition_week=tuition_week,
+                          probe_open=probe_open, probe_realized=probe_realized, probe_at_risk=probe_at_risk)
 
     def incubator_tally(self, *, day: str, week_start: str, family: str | None = None) -> M.IncubatorTally:
         """The incubator's numbers from the live state's rows, read afresh (`incubator_tally`)."""
@@ -1133,4 +1171,4 @@ def real_legs(order: L.Order, chain: Any) -> list[RLeg]:
 
 __all__ = ["RealBook", "RLeg", "RPosition", "ROrder", "mleg_body", "single_leg_body", "single_body", "order_body", "is_single",
            "limit_price", "client_id", "structure_fill", "real_legs", "leg_fees", "PREFIX", "KNOWN_DUST", "SINGLE_TYPES",
-           "INCUBATOR_SUFFIX", "is_incubator", "incubator_tally"]
+           "INCUBATOR_SUFFIX", "is_incubator", "incubator_tally", "REAL_SUFFIX", "probe_tally"]

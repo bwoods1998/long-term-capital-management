@@ -8,8 +8,9 @@ half day), so a slow House tick never delays a fill and a slow minute never dela
 1. The families (`league/live/families.py`, every five minutes): which programs run live, as which instances. A
    Candidate runs a SHADOW instance; a Probe or Sized family a shadow and a REAL instance; a family that passed
    validation but not yet its holdout a real TUITION instance (1-lot orders only to measure fills; never evidence) while
-   real money is on. The live path moves candidate <-> probe <-> sized by the money table (`league/live/money.py`).
-   A superseded or dropped shadow instance winds down (its positions closed at the natural); a real one goes to exits
+   real money is on. The live path moves candidate <-> probe <-> sized by the money table (`league/live/money.py`); a
+   family it confirms onto Probe trades real money from the next live minute (THE FAST LANE, Oct 7, 2026: no session
+   wait; `_real_eligible`). A superseded or dropped shadow instance winds down (its positions closed at the natural); a real one goes to exits
    only until it is flat (its program stays in the live state so it can still close what it holds).
 2. The chains: each root's option chain through the gateway (one read a minute a root, filtered to the expiries and
    strikes the live programs need), the underlying (stock snapshots; XSP and SPXW from put-call parity), into the day's
@@ -1128,7 +1129,7 @@ class OptionsLive:
         grant = self._grant()
         if not self._real_on() or not grant or not grant.get("active") or equity is None:
             # No band moves while real money cannot trade (off, no active grant) or the account is unread: a move now
-            # would only be undone, and a Probe trades from the session after its move (`_real_eligible`).
+            # would only be undone (since THE FAST LANE a confirmed Probe trades from the next live minute, `_real_eligible`).
             return band
         new, why = M.band_for(self.table, row, equity, fwd, probe_sessions=self._probe_sessions(fid, band))
         embargoed = False
@@ -1149,7 +1150,7 @@ class OptionsLive:
                 self.record("live.band", {"family": fid, "from": band, "to": new, "why": why}, agent=fid)
                 if band == "candidate" and new in ("probe", "sized"):
                     moves = dict(self.state.get("band_moves", {}) or {})
-                    moves[fid] = {"band": new, "at": self.clock()}   # onto real money: it trades from the next session
+                    moves[fid] = {"band": new, "at": self.clock()}   # onto real money: it trades from the next live minute
                     self.state.put("band_moves", moves)
             except Exception as exc:  # noqa: BLE001 - the band stays; tried again at the next refresh
                 self.alert("warning", f"live: {fid}'s band could not be moved to {new} ({type(exc).__name__})")
@@ -1217,8 +1218,10 @@ class OptionsLive:
         return count
 
     def _real_eligible(self, fid: str) -> bool:
-        """A family moved to Probe (or Sized) trades real money from the session AFTER its move (the plan's Probe row:
-        "real from its next session"): its move must precede the open of the current (or next) session."""
+        """THE FAST LANE (D3, Oct 7, 2026; the owner's goal item 4: no calendar waits): a family the live path confirmed
+        onto real money (its move in `band_moves`, or the swarm's `live_promoted_at` that `confirm_band` wrote) trades from
+        the next live minute. A Probe with neither (legacy or missing promotion metadata) still trades only from the
+        session after it was first seen (before the fast lane every family did: "real from its next session")."""
         move = (self.state.get("band_moves", {}) or {}).get(fid)
         now = self.clock()
         try:
@@ -1226,6 +1229,10 @@ class OptionsLive:
         except Exception:
             return False
         stamps = ([float(move["at"])] if move else []) + ([promoted] if promoted is not None else [])
+        if stamps:
+            # THE FAST LANE (D3, Oct 7, 2026): a family the live path confirmed onto real money (its move, or the swarm's
+            # live_promoted_at that confirm_band wrote) trades from the next live minute: no session wait.
+            return True
         if not stamps:
             # Legacy/missing promotion metadata never confers same-session entry authority. Persist first sight so
             # restart keeps the waiting period, while an existing position retains its exit-only program.
@@ -2597,6 +2604,8 @@ class OptionsLive:
         else:
             plan = M.plan_open(self.table, band=inst.band, tuition=inst.tuition, equity=sizing, unit=unit, fwd=fwd,
                                exposure=exposure)
+            if plan.qty < 1 and plan.reason.startswith("probe: the loss budget"):
+                self._probe_budget_told()
         if plan.qty < 1:
             return plan.reason
         qty = plan.qty
@@ -2643,6 +2652,19 @@ class OptionsLive:
         out.setdefault("orders", []).append({"oid": sent.oid, "family": inst.family, "action": "open", "qty": qty,
                                              "status": sent.status, "sizing": plan.reason})
         return None if sent.status in ("working", "filled", "unknown") else f"{sent.status}: {sent.answer.get('error')}"
+
+    def _probe_budget_told(self) -> None:
+        """THE PROBE LOSS BUDGET's alarm (fast lane v2, D4; the goal's item 6 note): once a New York day (state kv
+        `probe_budget_told`), when a Probe open is refused because the budget is spent."""
+        today = ny(self.clock()).date().isoformat()
+        try:
+            if self.state.get("probe_budget_told") == today:
+                return
+            self.state.put("probe_budget_told", today)
+        except Exception:  # noqa: BLE001 - the refusal stands either way; the alarm is told at the next refusal
+            return
+        self.alert("warning", f"live: the Probe loss budget (${self.table.probe_loss_budget}) is spent: no new Probe open; "
+                              "exits go on. Raising it is the owner's decision")
 
     # ------------------------------------------------------------------ forward records
     def _export_one(self, acc: ShadowAccount) -> None:

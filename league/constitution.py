@@ -744,11 +744,25 @@ CONSTITUTION: dict[str, Any] = {
     # NOT real types now: they return (with the gateway's list, in one deploy) only once a deposit takes equity to $2,000
     # and the grant is ratified again. The gateway's per-order equity share is 25% so a $100 Probe fits at $481.63 of
     # equity (its $1,000 absolute cap unchanged; never above funded money).
+    #
+    # THE FAST LANE (Oct 7, 2026; the owner's goal of Oct 7, item 4: "You may set Probe sizing up to 10% of equity at risk
+    # per position and a Probe loss budget up to $400 in total"): a Probe position is ONE structure (`contracts` 1) whose
+    # maximum loss with its open and close fees fits `max_loss_share` (10%) of the sizing equity E, replacing 5% and the
+    # $100 one-contract floor (`floor_usd` 0). At most `max_open` (3) Probe positions held or working at once, and a
+    # Probe loss budget of `loss_budget_usd` ($400) in total: realized Probe losses since this release (net: a Probe gain
+    # offsets a Probe loss) plus the maximum loss of every open Probe position (held or working); an open that would
+    # breach it is refused, and exits go on (`league/live/money.py` `plan_open`, `league/live/real.py` `probe_tally`).
+    # Why N = 3: 3 x 10% = 30% of E, inside the 35% daily stop and the 60% drawdown stop; each 10% position fits the
+    # gateway's per-order cap, min($1,000, 25% of E), and its day cap (100% of E). At E = $1,288.40: the Probe cap $128.84,
+    # 3 x $128.84 = $386.52 <= $400, the per-order cap $322.10, the day cap $1,288.40, the book cap $1,159.56, the daily
+    # stop $450.94. Setting `max_open` or `loss_budget_usd` to 0 stops Probe opens. The kill switch, the daily stop and
+    # the drawdown stop are never loosened by it; Sized rules are unchanged.
     "options_money": {
         "real_types": ["debit_vertical", "long_butterfly", "long_call", "long_put"],
         "credit_types": ["credit_vertical", "iron_condor", "iron_butterfly"],
         "credit_min_equity_usd": "2000",
-        "probe": {"max_loss_share": "0.05", "open_per_family": 3, "family_share": "0.15", "floor_usd": "100"},
+        "probe": {"max_loss_share": "0.10", "contracts": 1, "open_per_family": 3, "family_share": "0.15", "floor_usd": "0",
+                  "max_open": 3, "loss_budget_usd": "400"},
         "sized": {"min_trades": 20, "confidence": "0.80", "kelly_fraction": "0.25", "max_loss_share": "0.10",
                   "family_share": "0.30", "min_probe_real_trades": 5, "min_probe_sessions": 1},
         "book_share": "0.90",
@@ -800,7 +814,12 @@ def money_digest(constitution: dict[str, Any] | None = None) -> str:
 #: rows that are not tunable at all: `(low, high)` inclusive. Loosening a row past its range is the owner's decision,
 #: in this file. `league.ci` refuses a constitution outside them (`options_money_problems`).
 OPTIONS_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
-    "probe.max_loss_share": ("0.02", "0.05"),
+    # THE FAST LANE (Oct 7, 2026): the owner's goal item 4 allows up to 10% of equity at risk per Probe position (a
+    # loosening from 5%, reported with its cost) and a Probe loss budget up to $400; one structure a Probe position.
+    "probe.max_loss_share": ("0.02", "0.10"),
+    "probe.contracts": ("1", "1"),
+    "probe.max_open": ("0", "3"),
+    "probe.loss_budget_usd": ("0", "400"),
     "probe.open_per_family": ("1", "5"),
     "probe.family_share": ("0.08", "0.15"),
     "probe.floor_usd": ("0", "100"),
@@ -861,7 +880,7 @@ OPTIONS_REAL_TYPES = ("debit_vertical", "credit_vertical", "iron_condor", "iron_
 OPTIONS_SINGLE_TYPES = ("long_call", "long_put")
 OPTIONS_CREDIT_TYPES = ("credit_vertical", "iron_condor", "iron_butterfly")
 #: Rows read as whole counts.
-_OPTIONS_COUNTS = ("probe.open_per_family", "sized.min_trades", "sized.min_probe_real_trades", "sized.min_probe_sessions", "order_path.max_orders_day", "order_path.max_requests_minute",
+_OPTIONS_COUNTS = ("probe.open_per_family", "probe.contracts", "probe.max_open", "sized.min_trades", "sized.min_probe_real_trades", "sized.min_probe_sessions", "order_path.max_orders_day", "order_path.max_requests_minute",
                    "order_path.expiry_close_lead_minutes", "gateway.max_day_orders", "gateway.max_day_open_orders",
                    "house_test.open", "house_test.sessions", "house_test.round_trips", "incubator.contracts",
                    "incubator.max_open", "incubator.min_sessions", "incubator.min_trades")
@@ -927,4 +946,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '595228a68a0a0e146901ba08185dfa7b39bcb2952a2abc1ae0cf16f19193d102'
+PINNED_DIGEST = '5edc8956aba636624599cd97d20f85edeb33f344dcb83c4df194f0cbf8c6acb7'
