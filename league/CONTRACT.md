@@ -194,11 +194,13 @@ A multi-leg example using the same intent interface:
 Types: `long_call`, `long_put`, `debit_vertical`, `credit_vertical`, `iron_condor`, `iron_butterfly`,
 `long_butterfly` (body `"ratio": 2`), `long_straddle`, `long_strangle`, `calendar`, `diagonal` (equity
 roots only; the short leg expires first). Every structure is defined-risk; no naked short. All 11
-types are valid research choices. **The current real adapter is limited to five spread types:**
-debit and credit verticals, iron condors, iron butterflies, long butterflies. That is a current
-implementation boundary, not a reason to favor them in research or a claim about all Alpaca
-capabilities. Other implemented types can earn a Candidate band; broader paper/production routes
-must be completed separately. Current production trading is off.
+types run in the Gym, but **real money opens only four types: `debit_vertical`, `long_butterfly`,
+`long_call` and `long_put`.** Credit types (credit verticals, iron condors, iron butterflies) need
+$2,000 of account equity and the account holds about $1,300, so a program built on them cannot trade
+real money now; calendars, diagonals, straddles and strangles have no real-money route. A program that
+means to earn money is written in the four. **Real-money trading is on**: a program that passes the
+screen trades one real contract at Probe size, whose maximum loss with fees must fit the Probe's share
+of equity (about $100-125 a position).
 
 A leg: `side` long/short, `right` "C"/"P", `ratio` (1, or 2 for a butterfly's body), `dte` (the nearest
 quoted expiry at or after it), and exactly one selector: `id`, `strike` (nearest), `delta` (nearest
