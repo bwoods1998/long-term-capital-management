@@ -121,14 +121,19 @@ export const NOTICE_KINDS = ['trade', 'settled', 'test', 'disk_low', 'live_stop'
 export const STALL_CAUSES = {
   births: 'no births',
   gym_runs: 'too few Gym runs',
-  validations: 'no Validation runs',
+  validations: 'no Validation verdicts',
   braked: 'the Sail guard braked most of the day',
   runway_sail: 'Sail research runway short',
   runway_claude: 'Claude research runway short',
   owner_deploy: 'an owner deploy is waiting',
+  paused: 'the floor is paused',
+  grant_refused: 'the standing grant refused to re-ratify',
+  kill_on: 'the kill switch is on',
 };
-//: The most figures a stall notice lists, and the shape of a figure's name.
+//: The most figures a stall notice lists for one cause, and the shape of a figure's name.
 const STALL_NUMBERS = 16;
+//: The most characters of an owner step the mail carries.
+const STALL_STEP_CHARS = 400;
 const FIGURE_NAME = /^[a-z][a-z0-9_]{0,39}$/;
 const TOKEN = /^[a-z0-9_.,:-]{1,80}$/;
 //: The meters a funding notice may name (league/ops/budget.py): Sail's prefund and the Anthropic account.
@@ -159,6 +164,38 @@ const figure = value => {
   return 'unknown';
 };
 const price = value => (typeof value === 'string' && value ? `$${value}` : 'unknown');
+
+/**
+ * A stall notice's causes (league/ops/stall.py `notice_facts`: `causes`, each `cause_facts`), each with its owner step
+ * cut to one line (`step`, '' when none), or null when the list is not one to compose: not a list, empty, longer than
+ * STALL_CAUSES, an entry that is not an object, a cause STALL_CAUSES does not name, or a cause named twice.
+ */
+export function stallEntries(facts = {}) {
+  const causes = facts?.causes;
+  if (!Array.isArray(causes) || causes.length < 1 || causes.length > Object.keys(STALL_CAUSES).length) return null;
+  const seen = new Set();
+  const out = [];
+  for (const entry of causes) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+    if (typeof entry.cause !== 'string' || !Object.hasOwn(STALL_CAUSES, entry.cause) || seen.has(entry.cause)) return null;
+    seen.add(entry.cause);
+    out.push({ entry, cause: entry.cause, step: sentence(entry.owner_step, STALL_STEP_CHARS) });
+  }
+  return out;
+}
+
+/**
+ * The dedupe key of a stall notice, whatever id the House sent (the router's; the Gate keeps it STALL_NOTICE_MS or
+ * STALL_INFO_MS): `stall:owner:<the owner causes, sorted, joined by +>` when some cause carries an owner step, so a
+ * new one is mailed at once and the same ones at most every 12 hours; `stall:info` when none does, at most every 24
+ * hours. Null when the notice is not one to compose.
+ */
+export function stallKey(facts = {}) {
+  const entries = stallEntries(facts);
+  if (!entries) return null;
+  const owner = entries.filter(item => item.step).map(item => item.cause).sort();
+  return owner.length ? `stall:owner:${owner.join('+')}` : 'stall:info';
+}
 
 /**
  * `{ subject, text }` for a trade notice posted by the floor, or null for a kind this does not
@@ -287,29 +324,39 @@ export function composeNotice(facts = {}) {
     }
     case 'stall': {
       // A stall (the owner's goal of Oct 7, 2026, item 6): the House's `stall` job (league/ops/stall.py `notice_facts`)
-      // found the floor not improving itself for one cause and says it once per cause per 12 hours (the router keys the
-      // dedupe on the cause, whatever id the House sends). The subject is this file's words for the cause; the body
-      // carries the House's sentence for it, its figures (each name a lower-case word, each value a decimal, a date, yes or
-      // no or a short token, else unknown), how long, what the House is doing about it, and the owner step when there is
-      // one. With none, the mail says nothing needs the owner.
-      if (!Object.hasOwn(STALL_CAUSES, facts.cause)) return null;
-      subject = `LTCM: stalled: ${STALL_CAUSES[facts.cause]}`;
-      const numbers = facts.numbers && typeof facts.numbers === 'object' && !Array.isArray(facts.numbers)
-        ? Object.entries(facts.numbers).filter(([name]) => FIGURE_NAME.test(name)).slice(0, STALL_NUMBERS) : [];
-      const hours = decimal(facts.hours);
-      const since = typeof facts.since === 'string' && DATE.test(facts.since) ? facts.since : null;
-      const step = sentence(facts.owner_step, 300);
-      lines.push(
-        sentence(facts.what, 400) || `The floor is stalled: ${STALL_CAUSES[facts.cause]}.`,
-        '',
-        ...(numbers.length ? ['The numbers:', ...numbers.map(([name, value]) => `- ${name}: ${figure(value)}`), ''] : []),
-        hours === null ? 'How long: unknown.' : `How long: ${Number(hours)} hours${since ? `, since ${since}` : ''}.`,
-        `What the House is doing: ${sentence(facts.doing, 700) || 'it did not say.'}`,
-        step
-          ? `Only you can do this: ${step.replace(/\.$/, '')}. The House keeps working around it meanwhile.`
-          : 'Nothing here needs you: the House keeps working around it, and says so again in 12 hours if it still stands.',
-        `At: ${clip(facts.at, 40) || 'an unknown time'}.`,
-      );
+      // found the floor not improving itself and lists every cause standing in one mail. The subject is this file's
+      // words for the causes: "needs you" and the causes with an owner step when there is one, else "stalled" and every
+      // cause. The body opens with the owner steps (or says nothing needs the owner), then each cause: its words, the
+      // House's sentence for it, its figures (each name a lower-case word, each value a decimal, a date or time, yes or
+      // no or a short token, else unknown), how long, what the House is doing about it, and its owner step. The router
+      // keys the dedupe on the owner causes (`stallKey`), whatever id the House sends.
+      const entries = stallEntries(facts);
+      if (!entries) return null;
+      const owner = entries.filter(item => item.step);
+      const named = list => {
+        const words = list.map(item => STALL_CAUSES[item.cause]);
+        return words.length > 3 ? `${words.slice(0, 3).join(', ')} and ${words.length - 3} more` : words.join(', ');
+      };
+      subject = owner.length ? `LTCM: needs you: ${named(owner)}` : `LTCM: stalled: ${named(entries)}`;
+      lines.push(...(owner.length
+        ? ['Only you can do this; the House keeps working around it meanwhile:', ...owner.map(item => `- ${item.step.replace(/\.$/, '')}.`)]
+        : ['Nothing here needs you: the House keeps working around it, and says so again in 24 hours if it still stands.']), '');
+      for (const { entry, cause, step } of entries) {
+        const numbers = entry.numbers && typeof entry.numbers === 'object' && !Array.isArray(entry.numbers)
+          ? Object.entries(entry.numbers).filter(([name]) => FIGURE_NAME.test(name)).slice(0, STALL_NUMBERS) : [];
+        const hours = decimal(entry.hours);
+        const since = typeof entry.since === 'string' && DATE.test(entry.since) ? entry.since : null;
+        lines.push(
+          `Stalled: ${STALL_CAUSES[cause]}.`,
+          sentence(entry.what, 400) || null,
+          ...(numbers.length ? ['The numbers:', ...numbers.map(([name, value]) => `- ${name}: ${figure(value)}`)] : []),
+          hours === null ? 'How long: unknown.' : `How long: ${Number(hours)} hours${since ? `, since ${since}` : ''}.`,
+          `What the House is doing: ${sentence(entry.doing, 700) || 'it did not say.'}`,
+          step ? `Only you can do this: ${step.replace(/\.$/, '')}.` : null,
+          '',
+        );
+      }
+      lines.push(`At: ${clip(facts.at, 40) || 'an unknown time'}.`);
       break;
     }
     case 'test':

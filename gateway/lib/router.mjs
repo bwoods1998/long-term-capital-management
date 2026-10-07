@@ -13,7 +13,8 @@
 //                                            its option orders are held to defined-risk shapes
 //   GET             /v1/kalshi/ws-auth       handshake headers for the Kalshi WebSocket, 30 s of life
 //   POST            /v1/notify               one notice mailed to the owner (a trade, a stop, a funding cliff, a stall),
-//                                            capped per day; a stall at most once per cause per 12 hours
+//                                            capped per day; a stall at most every 12 hours for the same owner
+//                                            steps, every 24 hours when it needs nothing from the owner
 //   GET             /v1/frontier/models      the model ids the OpenAI key can reach, and which are priced
 //   POST            /v1/frontier/responses   one frontier call, reserved and settled against the month
 //   GET             /v1/claude/models        the Claude model ids the Anthropic key can reach, and which are priced
@@ -63,7 +64,7 @@
 // the same router works against both.
 
 import { json, fail, authorized, readBody } from './http.mjs';
-import { composeNotice, NOTICE_KINDS, FROM, TO } from './email.mjs';
+import { composeNotice, NOTICE_KINDS, FROM, TO, stallKey } from './email.mjs';
 import {
   createsOrder, notional, PURPOSE_HEADER, allowedVenuePath, isOptionSymbol, alpacaShapeError,
   admittedStructures, isMultiLegOrder, structureNotional, practiceOrderError, closeLegsHeldError, closedLegRows,
@@ -189,9 +190,10 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
     const message = composeNotice(facts);
     if (!message) return fail('The notice could not be composed.', 400);
     const cap = Number(env.NOTIFY_MAX_PER_DAY || 40);
-    // A stall is deduped by its cause (`stall:<cause>`, kept 12 hours by the Gate), whatever id the House sent: one cause
-    // is mailed at most once every 12 hours even when the House's own record of it is lost.
-    const noticeId = facts.kind === 'stall' ? `stall:${facts.cause}`
+    // A stall is deduped by its own key (email.stallKey: `stall:owner:<the owner causes>` kept 12 hours by the Gate,
+    // `stall:info` 24 hours), whatever id the House sent: the same owner causes are mailed at most once every 12 hours
+    // and a stall that needs nothing from the owner at most once a day, even when the House's own record is lost.
+    const noticeId = facts.kind === 'stall' ? stallKey(facts)
       : typeof facts.notice_id === 'string' && /^[a-zA-Z0-9:_-]{1,160}$/.test(facts.notice_id) ? facts.notice_id : null;
     if (noticeId && await gate.noticeDelivered(noticeId, now())) return json({ sent: true, duplicate: true });
     if (await gate.noticesToday(now()) >= cap) return fail('The day\'s notice cap is reached.', 429, { 'Retry-After': '3600' });

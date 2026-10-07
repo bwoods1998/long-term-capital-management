@@ -58,12 +58,14 @@ const ADMIN_KEPT = 50;
 //: The admin log's entries /v1/health shows.
 export const ADMIN_SHOWN = 20;
 //: A funding notice's id is remembered this long (the House sends one per meter per ISO week; the gateway dedupes it
-//: for a week and a day), a stall's (`stall:<cause>`, the router's own id) 12 hours, every other notice's 48 hours.
+//: for a week and a day); a stall's (the router's own key, email.stallKey) 12 hours when it tells an owner step
+//: (`stall:owner:<causes>`) and 24 hours when it tells none (`stall:info`); every other notice's 48 hours.
 const FUNDING_NOTICE_MS = 8 * 24 * 3600000;
 export const STALL_NOTICE_MS = 12 * 3600000;
+export const STALL_INFO_MS = 24 * 3600000;
 const NOTICE_MS = 48 * 3600000;
 const noticeKept = id => (typeof id !== 'string' ? NOTICE_MS
-  : /^funding/.test(id) ? FUNDING_NOTICE_MS : /^stall:/.test(id) ? STALL_NOTICE_MS : NOTICE_MS);
+  : /^funding/.test(id) ? FUNDING_NOTICE_MS : id === 'stall:info' ? STALL_INFO_MS : /^stall:/.test(id) ? STALL_NOTICE_MS : NOTICE_MS);
 
 const read = (store, key, fallback) => {
   const raw = store.get(key);
