@@ -572,7 +572,7 @@ read-only and names a stall by its cause:
 | `validations` | no Validation run in the last 24 h while a living family holds a Train best never validated (its best version is not its validated version; with every best validated none is owed) | as `births` |
 | `braked` | the Sail guard braked 12 or more of the last 24 h, whatever the cause (the budget's daily stop reached by noon keeps research from running round the clock as surely as a low balance) | "top up Sail" for `under_line`, "free disk" for `disk`; none for the budget's own stop |
 | `runway_sail`, `runway_claude` | the meter's days of research left at the ceiling (`budget.json` `card_runway_days`, the figure the funding notice reads) under 3; a `budget.json` older than 36 h is not read | "top up Sail" or "top up Claude (Anthropic)", with the budget's own amount for 7 more days |
-| `owner_deploy` | the updater refused main's head as the owner's deploy (a `deploys.jsonl` `vet` refusal naming a protected file, the workflows or `real_money`) and no release was promoted since | "deploy main at `<sha>` yourself (`scripts/floor_box.py deploy`)", naming the files |
+| `owner_deploy` | the updater refused main's head as the owner's deploy (a `deploys.jsonl` `vet` refusal naming a protected file, the workflows or `real_money`) and no release was promoted since | "deploy main at `<sha>` yourself (`scripts/floor_box.py deploy`)", naming the files, or merge the running release to main when main is behind it |
 
 For each cause standing it posts one `POST /v1/notify` kind `stall` through the budget's own gateway client: the
 subject `LTCM: stalled: <cause>`; the body the House's sentence, the numbers, how long (from the record when it says:

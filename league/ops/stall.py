@@ -344,7 +344,7 @@ def checks(swarm: Mapping[str, Any], *, now: float, ceiling: int | None, budget:
         "owner_step": None if not deploy else (
             f"deploy main at {deploy.get('sha') or 'its head'} yourself (scripts/floor_box.py deploy): it changes "
             f"{', '.join((deploy.get('files') or [])[:3])}{' and more' if len(deploy.get('files') or []) > 3 else ''}, "
-            "which the updater never deploys"),
+            "which the updater never deploys; or, if the running release is ahead of main, merge it to main"),
         "onset": None if not deploy else deploy.get("first_at")}
     return out
 
