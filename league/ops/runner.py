@@ -8,7 +8,8 @@ all), and the earliest one still inside its grace is started as `python -m leagu
 CPU bounded, a scrubbed environment, its own process group); (3) every `RECEIPTS_EVERY` seconds refreshes the private
 receipts file (`league/ops/receipts.py`) on the House's background lane.
 
-One child at a time: a job due while another runs waits, inside its own grace. A child the House's own restart left
+One child at a time: a job due while another runs waits, inside its own grace. Occurrences due at the same instant start
+in the registry's order, so at a House start the grant goes first. A child the House's own restart left
 behind is killed at the next start and its row marked `interrupted`; it is started again while its grace allows. A run
 that failed (a gateway or Sail blip, a raising job, a child killed at its wall time) is started again `store.RETRY_AFTER`
 after it ended while it can still start inside its grace, unless its job says it may not be repeated (`Job.retry`); an
@@ -153,7 +154,10 @@ class Ops:
                 else:
                     kind = "run"
                 out.append((due_at, job, kind))
-        out.sort(key=lambda item: (item[0], item[1].name))
+        # Occurrences due at the same instant start in the registry's order (fast lane v2's review, Oct 7, 2026): the
+        # grant, first in it, re-ratifies at a House start before any other job that start made due (`direction`).
+        order = {job.name: i for i, job in enumerate(self.jobs)}
+        out.sort(key=lambda item: (item[0], order.get(item[1].name, len(order)), item[1].name))
         return out
 
     def _instants(self, job: Job, start: float, now: float) -> list[float]:

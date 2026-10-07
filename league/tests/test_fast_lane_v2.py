@@ -291,6 +291,14 @@ class TheProbe(unittest.TestCase):
         self.assertLessEqual(M.probe_room(self.t, E), self.t.probe_loss_budget)
         self.assertLess(M.probe_room(self.t, E), self.t.daily_stop_share * E)
         self.assertEqual(M.probe_room(self.t, None), M.ZERO)
+        # The grant's smallest real stake stays $100 with the floor at $0 (the review: the floor's move loosened a grant
+        # refusal): the standing grant still refuses under $100 of capital.
+        from league.live_trading import policy, smallest_stake
+
+        self.assertEqual(smallest_stake(), D("100"))
+        self.assertEqual((policy("1288.40", "5500")["stake_usd"], policy("1288.40", "5500")["max_agents"]), ("100", 12))
+        with self.assertRaises(ValueError):
+            policy("99.99", "5500")
 
     def test_one_structure_within_ten_percent(self):
         self.assertEqual(self.plan(40).qty, 1)
@@ -315,19 +323,26 @@ class TheProbe(unittest.TestCase):
         self.assertEqual(self.plan(40, probe_at_risk="380").qty, 0, "held and working count whole")
 
     def test_sized_kelly_sizing_and_c3(self):
-        fwd = M.forward_stats([{"pnl": r * 100.0, "max_loss": 100.0} for r in [0.44, -0.28] * 10], 0.8)
-        kelly = M.kelly_cap(self.t, D("5481.65"), fwd)
+        weak = M.forward_stats([{"pnl": r * 100.0, "max_loss": 100.0} for r in [0.44, -0.28] * 10], 0.8)
+        kelly = M.kelly_cap(self.t, D("5481.65"), weak)
         self.assertGreater(kelly, D("20"))
-        sized = self.plan(10, band="sized", equity="5481.65", fwd=fwd)
-        self.assertEqual(sized.qty, int(kelly / D("10")), "Kelly buys structures: floor(kelly / unit), Sized limits")
-        self.assertTrue(sized.reason.startswith("sized:"), sized.reason)
-        under = self.plan(kelly + 1, band="sized", equity="5481.65", fwd=fwd)
-        self.assertEqual(under.qty, 1, "Kelly buys none: the Probe's one structure, never smaller")
+        self.assertLess(kelly, M.probe_cap(self.t, D("5481.65")))
+        # C3 (kept by the fast lane's review): Kelly under the Probe's cap is sized under the Probe's limits, one structure.
+        under = self.plan(10, band="sized", equity="5481.65", fwd=weak)
+        self.assertEqual(under.qty, 1, "a Probe-sized stake: the Probe's one structure")
         self.assertTrue(under.reason.startswith("sized: one structure"), under.reason)
+        self.assertFalse(under.probe)
+        self.assertEqual(self.plan(kelly + 1, band="sized", equity="5481.65", fwd=weak).qty, 1, "never smaller than a Probe")
+        # Kelly at its 10% cap: Kelly buys structures, floor(kelly / unit), under the Sized limits.
+        strong = M.forward_stats([{"pnl": r * 100.0, "max_loss": 100.0} for r in [0.9, 0.8, 1.0, 0.7] * 5], 0.8)
+        sized = self.plan(10, band="sized", equity="5481.65", fwd=strong)
+        self.assertEqual(sized.qty, 54, "floor(548.165 / 10)")
+        self.assertTrue(sized.reason.startswith("sized:"), sized.reason)
         # A Sized open is never refused by the Probe budget or the Probe count.
-        spent = self.plan(10, band="sized", equity="5481.65", fwd=fwd, probe_open=3, probe_realized="400",
-                          probe_at_risk="100")
-        self.assertEqual(spent.qty, int(kelly / D("10")))
+        for fwd, qty in ((strong, 54), (weak, 1)):
+            spent = self.plan(10, band="sized", equity="5481.65", fwd=fwd, probe_open=3, probe_realized="400",
+                              probe_at_risk="100")
+            self.assertEqual(spent.qty, qty)
 
 
 class TheTally(unittest.TestCase):
@@ -340,7 +355,8 @@ class TheTally(unittest.TestCase):
         self.state = LiveState(self.path)
         self.oid = self.pid = 0
 
-    def position(self, instance, *, share, fees=1.0, status="open", cash=None, qty=1, tuition=0):
+    def position(self, instance, *, share, fees=1.0, status="open", cash=None, qty=1, tuition=0, probe=True):
+        """A position row; `probe`: opened by a Probe family (the mark `money.Plan.probe` sets, via its order)."""
         self.pid += 1
         self.state.upsert("positions", {"pid": self.pid, "instance": instance, "family": instance.split("@")[0],
                                         "type": "debit_vertical", "root": "SPY", "legs": "[]",
@@ -349,36 +365,73 @@ class TheTally(unittest.TestCase):
                                         "cash": cash if cash is not None else -(share * 100 + fees), "opened_at": 1.0,
                                         "opened_day": "2026-10-05", "opened_minute": 1, "status": status,
                                         "closed_at": 2.0 if status == "closed" else None, "tuition": tuition,
-                                        "info": "{}"}, "pid")
+                                        "info": json.dumps({"order": self.pid, **({"probe": True} if probe else {})})},
+                          "pid")
 
     def order(self, instance, *, max_loss, qty=1, filled=0, fees=1.0, status="working", day="2026-10-07", pid=None,
-              tuition=0):
+              tuition=0, expiry="2026-10-09"):
         self.oid += 1
+        legs = json.dumps([{"symbol": "SPY261009C00600000", "side": 1, "ratio": 1, "is_call": True, "strike": 600.0,
+                            "expiry": expiry, "key": 0}])
         self.state.upsert("orders", {"oid": self.oid, "client_id": f"lv-{self.oid}", "instance": instance,
                                      "family": instance.split("@")[0], "action": "open", "type": "debit_vertical",
-                                     "root": "SPY", "legs": "[]", "qty": qty, "limit_value": 0.3, "limit_price": "0.30",
+                                     "root": "SPY", "legs": legs, "qty": qty, "limit_value": 0.3, "limit_price": "0.30",
                                      "placed_at": 1.0, "day": day, "placed_minute": 1, "status": status, "pid": pid,
                                      "filled_qty": filled, "max_loss": max_loss, "fees_est": fees, "tuition": tuition,
                                      "answer": json.dumps({"dispatched": True}), "updated_at": 1.0}, "oid")
 
     def tally(self, state=None):
-        return probe_tally((state or self.state).rows, week_start="2026-10-05")
+        return probe_tally((state or self.state).rows, day="2026-10-07")
 
     def test_it_counts_real_positions_and_orders_only(self):
-        self.position("a@1:r", share=0.40, status="closed", cash=-50.0)       # a loss of $50
-        self.position("b@1:r", share=0.40, status="closed", cash=20.0)        # a gain offsets it: realized $30
+        self.position("a@1:r", share=0.40, status="closed", cash=-50.0)       # a Probe loss of $50
+        self.position("b@1:r", share=0.40, status="closed", cash=20.0)        # a Probe gain offsets nothing: still $50
+        self.position("s@1:r", share=0.40, status="closed", cash=500.0, probe=False)  # a Sized gain: never counted
+        self.position("o@1:r", share=0.40, status="closed", cash=-70.0, probe=False)  # unmarked: not a Probe's (Sized)
         self.position("a@1:r", share=0.40, fees=1.0, cash=-41.0)              # held: 40 + 2 x 1 = 42
-        self.position("b@2:r", share=0.40, fees=1.0, cash=-60.0)              # a broken structure lost more: 60
+        self.position("b@2:r", share=0.40, fees=1.0, cash=-60.0, probe=False)  # held, Sized: counts at risk too: 60
         self.order("c@1:r", max_loss=80.0, qty=2, filled=1)                   # working: (80 + 2) x 1 / 2 = 41
-        self.order("c@1:r", max_loss=30.0, status="lost")                     # lost this week: whole, 32
-        self.order("c@1:r", max_loss=30.0, status="lost", day="2026-09-30")   # lost last week: not counted
+        self.order("c@1:r", max_loss=30.0, status="lost")                     # lost this week: whole, 32, a slot
+        self.order("c@1:r", max_loss=30.0, status="lost", day="2026-09-30")   # lost last week: whole too, a slot
+        self.order("c@1:r", max_loss=30.0, status="lost", day="2026-09-28", expiry="2026-10-02")  # expired: 32, no slot
         self.order("c@1:r", max_loss=30.0, status="filled")                   # done: its position counts
         for other in ("t@1:t", "i@1:i", "house:rebound-live@1:h"):            # tuition, incubator, the House test
             self.position(other, share=0.90, status="closed", cash=-90.0)
             self.position(other, share=0.90)
             self.order(other, max_loss=90.0)
         open_n, realized, at_risk = self.tally()
-        self.assertEqual((open_n, realized, at_risk), (4, D("30"), D("42") + D("60") + D("41") + D("32")))
+        self.assertEqual((open_n, realized, at_risk), (5, D("50"), D("42") + D("60") + D("41") + 3 * D("32")))
+
+    def test_a_sized_gain_never_refills_the_probe_budget(self):
+        """The review's reproduction (Oct 7, 2026): a closed Sized position at +$500 and five closed Probe positions at
+        -$121 each. The net figure read $105 and let the next $121 Probe open go (gross losses could reach about $900);
+        the gross figure reads $605, and the next Probe open is refused."""
+        self.position("sized@1:r", share=1.0, status="closed", cash=500.0, probe=False)
+        for i in range(5):
+            self.position(f"p{i}@1:r", share=1.20, status="closed", cash=-121.0)
+        open_n, realized, at_risk = self.tally()
+        self.assertEqual((open_n, realized, at_risk), (0, D("605"), M.ZERO))
+        t = M.Table.from_constitution()
+        plan = M.plan_open(t, band="probe", tuition=False, equity=E, unit=D("121"), fwd=None,
+                           exposure=M.Exposure(probe_open=open_n, probe_realized=realized, probe_at_risk=at_risk))
+        self.assertEqual(plan.qty, 0)
+        self.assertTrue(plan.reason.startswith("probe: the loss budget"), plan.reason)
+        # One Probe position's gain never offsets another's loss either.
+        self.position("p9@1:r", share=1.0, status="closed", cash=300.0)
+        self.assertEqual(self.tally()[1], D("605"))
+
+    def test_a_lost_open_counts_until_it_is_found_whatever_its_week(self):
+        """The review (Oct 7, 2026): the Probe budget is a running total, so a lost open from an earlier week still counts
+        whole (it may have filled); it holds a slot until its first leg has expired."""
+        self.order("c@1:r", max_loss=100.0, status="lost", day="2026-09-21", expiry="2026-10-16")
+        self.assertEqual(self.tally(), (1, M.ZERO, D("102")))
+        self.order("d@1:r", max_loss=100.0, status="lost", day="2026-09-21", expiry="2026-09-25")
+        self.assertEqual(self.tally(), (1, M.ZERO, D("204")), "expired: its slot is free, its maximum loss still counts")
+        # Found at the venue (`RealBook.ingest` takes it back): it counts as the working order it is.
+        self.state.db.execute("UPDATE orders SET status='working' WHERE oid=1")
+        self.assertEqual(self.tally(), (1, M.ZERO, D("204")))
+        self.state.db.execute("UPDATE orders SET status='cancelled' WHERE oid=1")
+        self.assertEqual(self.tally(), (0, M.ZERO, D("102")))
 
     def test_it_survives_a_restart(self):
         self.position("a@1:r", share=0.40, status="closed", cash=-50.0)
@@ -387,7 +440,7 @@ class TheTally(unittest.TestCase):
         self.state.close()
         again = LiveState(self.path)
         self.addCleanup(again.close)
-        self.assertEqual(probe_tally(again.rows, week_start="2026-10-05"), before)
+        self.assertEqual(probe_tally(again.rows, day="2026-10-07"), before)
 
     def tearDown(self):
         try:
@@ -407,7 +460,8 @@ class TheLivePath(LiveCase):
                                         "root": "SPY", "legs": "[]", "qty": 0, "opened_qty": 1, "entry": 4.0,
                                         "max_loss_share": 4.0, "collateral": 0.0, "fees": 1.0, "cash": -400.0,
                                         "opened_at": 1.0, "opened_day": "2026-09-25", "opened_minute": 1,
-                                        "status": "closed", "closed_at": 2.0, "tuition": 0, "info": "{}"}, "pid")
+                                        "status": "closed", "closed_at": 2.0, "tuition": 0,
+                                        "info": json.dumps({"order": 900, "probe": True})}, "pid")
 
     def test_a_candidate_moved_to_probe_opens_from_the_next_minute(self):
         live = self.make([family("vert", VERTICAL, band="candidate", params={"hold": 600})])
@@ -418,6 +472,27 @@ class TheLivePath(LiveCase):
         opens = [b for b in self.venue.sent if b.get("legs") and b["legs"][0]["position_intent"] == "buy_to_open"]
         self.assertEqual(len(opens), 1)
         self.assertEqual(opens[0]["qty"], "1", "one structure")
+        # A Probe family's open is marked, and so is its position: the Probe loss budget counts its realized loss.
+        [order] = live.state.rows("SELECT answer, pid FROM orders WHERE action='open'")
+        self.assertIs(json.loads(order["answer"]).get("probe"), True)
+        [position] = live.state.rows("SELECT info FROM positions WHERE pid=?", (order["pid"],))
+        self.assertIs(json.loads(position["info"]).get("probe"), True)
+        self.assertNotIn("probe", self.venue.sent[0], "the mark never reaches the venue")
+
+    def test_a_sized_familys_open_is_not_marked(self):
+        live = self.make([family("vert", VERTICAL, band="probe")])
+        returns = [0.30, 0.10, 0.20, -0.10, 0.25] * 5
+        self.families.add_forward("vert", "shadow", [{"id": f"s{i}", "day": f"2026-09-{i % 25 + 1:02d}", "pnl": r * 100.0,
+                                                       "max_loss": 100.0} for i, r in enumerate(returns)])
+        self.families.add_forward("vert", "real", [{"id": f"r{i}", "day": f"2026-08-{i + 1:02d}", "pnl": 6.0, "max_loss": 50.0}
+                                                   for i in range(5)])
+        live.state.put("band_moves", {"vert": {"band": "probe", "at": at(MONDAY, 9, 0) - 7 * 86400}})
+        self.run_to(9, 31)
+        self.assertEqual(self.families.rows["vert"]["band"], "sized")
+        [order] = live.state.rows("SELECT answer, pid FROM orders WHERE action='open'")
+        self.assertNotIn("probe", json.loads(order["answer"]))
+        [position] = live.state.rows("SELECT info FROM positions WHERE pid=?", (order["pid"],))
+        self.assertNotIn("probe", json.loads(position["info"]))
 
     def test_a_probe_with_no_promotion_record_still_waits_a_session(self):
         row = family("vert", VERTICAL, band="probe")
@@ -671,9 +746,28 @@ class TheDirectionJob(unittest.TestCase):
                 raise GatewayError("gateway 503: unavailable", status=503)
 
         out = DIR.run(self.ctx(Gateway()))
-        self.assertEqual(out["ok"], False)
-        self.assertIn("unavailable", out["why"])
+        self.assertEqual((out["status"], out["ok"]), ("failed", False))
+        self.assertIn("unavailable", out["error"])
         self.assertFalse((self.root / DIR.FILE).exists())
+
+    def test_a_failure_is_a_failed_receipt(self):
+        """The review (Oct 7, 2026): a gateway error or a swarm with no roots was an "ok" receipt, so it was never a House
+        warning and never retried inside its grace. `run_job` now records it failed, with its reason."""
+        from league.ops import direction as DIR
+        from league.ops.__main__ import run_job
+        from league.ops.context import GatewayError
+
+        class Gateway:
+            def get(self, path, params=None):
+                raise GatewayError("gateway 503: unavailable", status=503)
+
+        ctx = self.ctx(Gateway())
+        ctx.alerts = []
+        out = run_job("direction", root=self.root, due_at=0.0, ctx=ctx)
+        self.assertEqual(out["status"], "failed")
+        self.assertIn("unavailable", out["error"])
+        (self.root / "swarm.json").write_text(json.dumps({"gym": {"roots": []}}))
+        self.assertEqual(DIR.run(self.ctx(Gateway()))["status"], "failed", "no roots: failed too")
 
     def test_the_registry_runs_it_at_start_and_daily_outside_the_sessions(self):
         from league.ops.registry import JOBS, by_name
@@ -682,6 +776,60 @@ class TheDirectionJob(unittest.TestCase):
         job = by_name()["direction"]
         self.assertEqual((job.module, job.in_pause, job.paid), ("league.ops.direction", True, False))
         self.assertEqual([t.kind for t in job.triggers], ["start", "daily"])
+        report = by_name()["fast_lane"]
+        self.assertEqual((report.module, report.in_pause, report.paid), ("league.ops.fast_lane", True, False))
+        self.assertEqual([(t.kind, t.job) for t in report.triggers], [("after", "direction")])
+
+    def test_at_a_house_start_the_grant_runs_before_the_direction_job(self):
+        """The review (Oct 7, 2026): due at the same instant, the runner ordered by name, so `direction` (its gateway reads,
+        up to 600 s) ran before the grant re-ratified the moved money digest, and no real order could go out meanwhile.
+        Occurrences due at the same instant now start in the registry's order: the grant first."""
+        from league.ops.runner import Ops
+
+        repo = Path(__file__).resolve().parents[2]
+        now = 1790800000.0
+        ops = Ops(self.root / "ops-state", release=repo, clock=lambda: now, spawn=lambda a, j: None,
+                  kill=lambda p, s: None, proc=lambda pid: None, present=lambda name: True)
+        self.addCleanup(ops.close)
+        due = [(job.name, kind) for _, job, kind in ops.due(now, {})]
+        self.assertEqual(due[:2], [("grant", "run"), ("direction", "run")])
+
+
+class TheFastLaneJob(RoundCase):
+    """`league/ops/fast_lane.py`'s job (the review, Oct 7, 2026: D2's figures existed only in a script run by hand): after
+    each `direction` run it writes the report, read-only, to `<state>/fast-lane-report.json`."""
+
+    @unittest.skipUnless(HAVE, "numpy not installed")
+    def test_it_writes_the_report_read_only_and_warns_of_a_probe_without_its_buy_and_hold(self):
+        from types import SimpleNamespace
+
+        from league.ops import fast_lane as FL
+
+        self.replies = [PASS] * 8
+        self.family("a")
+        Tournament(self.store, self.pool, self.settings).validate(self.store.families(alive=True))
+        Gate(self.store, self.pool, self.router, self.settings, clock=self.clock).run()
+        self.store.set_state("a", banded_version=1, live_promoted_at=at(MONDAY, 9, 31))
+        self.store.set_band("a", "probe", reason="synthetic pass")
+        live = LiveState(self.root / "live.sqlite")
+        live.upsert("positions", {"pid": 1, "instance": "a@1:r", "family": "a", "type": "debit_vertical", "root": "SPY",
+                                  "legs": "[]", "qty": 0, "opened_qty": 1, "entry": 0.4, "max_loss_share": 0.4,
+                                  "collateral": 0.0, "fees": 1.0, "cash": -20.0, "opened_at": 1.0, "opened_day": "2026-09-28",
+                                  "opened_minute": 1, "status": "closed", "closed_at": 2.0, "tuition": 0,
+                                  "info": json.dumps({"order": 1, "probe": True})}, "pid")
+        live.close()
+        alerts = []
+        ctx = SimpleNamespace(root=self.root, now=lambda: at(MONDAY, 21, 0), alert=lambda level, text: alerts.append((level, text)))
+        out = FL.run(ctx)                    # inside `guard.readonly()`: a writable SQLite open would raise
+        self.assertEqual((out["ok"], out["bands"], out["without_bh"]), (True, 1, 1))
+        doc = json.loads((self.root / FL.FILE).read_text())
+        self.assertEqual((doc["window_days"], doc["reported_only"]), (FL.JOB_DAYS, True))
+        self.assertEqual(doc["probe_budget"]["realized_usd"], "20.00")
+        self.assertEqual({r["window"] for r in doc["screen"]}, {"validation", "holdout"})
+        self.assertIn("contamination", doc)
+        [(level, text)] = alerts
+        self.assertEqual(level, "warning")
+        self.assertIn("1 Probe or Sized families have no same-risk buy-and-hold", text)
 
 
 class ReportedOnly(RoundCase):
@@ -694,7 +842,8 @@ class ReportedOnly(RoundCase):
         paths += [repo / "league" / "house.py", repo / "league" / "constitution.py"]
         for path in paths:
             text = path.read_text(encoding="utf-8")
-            for needle in ("ops.direction", "ops import direction", "direction-closes", "same_risk_bh", "daily_fit("):
+            for needle in ("ops.direction", "ops import direction", "direction-closes", "same_risk_bh", "daily_fit(",
+                           "ops.fast_lane", "ops import fast_lane", "fast-lane-report", "pooled_contamination"):
                 self.assertNotIn(needle, text, f"{path.relative_to(repo)} reads {needle}")
 
     def outcome(self, *, closes: bool, report: bool) -> dict:
@@ -727,43 +876,96 @@ class ReportedOnly(RoundCase):
 
     @unittest.skipUnless(HAVE, "numpy not installed")
     def test_the_report_prints_the_screen_the_bands_and_the_probe_budget(self):
+        """Every figure on real days (the review, Oct 7, 2026: closes dated outside the windows let the report test pass
+        on the "no market closes" path): Validation in 2025, the holdout look Jan 2 - Sep 25 2026, live from Sep 28."""
         import importlib.util
+
+        from league.ops import direction as DIR
 
         spec = importlib.util.spec_from_file_location(
             "fast_lane_report", Path(__file__).resolve().parents[2] / "scripts" / "fast_lane_report.py")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
+        holdout_days = DIR.sessions("2026-01-02", "2026-09-25")
+        rng = random.Random(3)
+        draws = {fid: random.Random(fid) for fid in ("a", "b")}
+        series = {fid: [draws[fid].gauss(4.0, 10.0) for _ in holdout_days] for fid in ("a", "b")}
+        holdout = series["a"]
+
+        def answer(job):
+            from league.tests.test_swarm_rounds import strong
+
+            out = strong(job)
+            if job.window == "holdout":
+                out["daily"] = [[d, x, 10000.0 + x] for d, x in zip(holdout_days, series[job.family])]
+                out["summary"]["pnl_per_max_loss"] = 0.08
+            return out
+
+        self.answer = answer
         self.replies = [PASS] * 8
         self.family("a")
+        self.family("b")
         Tournament(self.store, self.pool, self.settings).validate(self.store.families(alive=True))
+        self.store.set_state("b", validation_verdicts={})          # a verdict the map no longer keeps (pruned)
         Gate(self.store, self.pool, self.router, self.settings, clock=self.clock).run()
-        self.store.set_state("a", banded_version=1, live_promoted_at=at(MONDAY, 9, 31) if HAVE else 1790602260.0)
+        self.store.set_state("a", banded_version=1, live_promoted_at=at(MONDAY, 9, 31))
         self.store.set_band("a", "candidate", reason="synthetic pass")
         self.store.add_forward("a", "real", [{"id": "r1", "day": "2026-09-28", "pnl": -12.5, "max_loss": 40.0, "version": 1}])
-        days = {f"2024-01-{d:02d}": 470.0 + d for d in range(1, 29)}
-        (self.root / "direction-closes.json").write_text(json.dumps({"schema": 1, "closes": {"SPY": days}}))
+        walk, closes = 580.0, {}
+        for day in DIR.sessions("2024-12-31", "2026-09-30"):
+            walk *= 1.0 + rng.gauss(0.0004, 0.01)
+            closes[day] = round(walk, 2)
+        (self.root / "direction-closes.json").write_text(json.dumps({"schema": 1, "closes": {"SPY": closes}}))
         live = LiveState(self.root / "live-copy.sqlite")
-        live.upsert("positions", {"pid": 1, "instance": "a@1:r", "family": "a", "type": "debit_vertical", "root": "SPY",
-                                  "legs": "[]", "qty": 0, "opened_qty": 1, "entry": 0.4, "max_loss_share": 0.4,
-                                  "collateral": 0.0, "fees": 1.0, "cash": -12.5, "opened_at": 1.0, "opened_day": "2026-09-28",
-                                  "opened_minute": 1, "status": "closed", "closed_at": 2.0, "tuition": 0, "info": "{}"}, "pid")
+        base = {"type": "debit_vertical", "root": "SPY", "legs": "[]", "qty": 0, "opened_qty": 1, "entry": 0.4,
+                "max_loss_share": 0.4, "collateral": 0.0, "fees": 1.0, "opened_at": 1.0, "opened_day": "2026-09-28",
+                "opened_minute": 1, "status": "closed", "closed_at": 2.0, "tuition": 0}
+        live.upsert("positions", {**base, "pid": 1, "instance": "a@1:r", "family": "a", "cash": -12.5,
+                                  "info": json.dumps({"order": 1, "probe": True})}, "pid")
+        live.upsert("positions", {**base, "pid": 2, "instance": "s@1:r", "family": "s", "cash": 100.0,
+                                  "info": json.dumps({"order": 2})}, "pid")        # a Sized gain: never in the budget
         live.close()
         out = module.report(self.root, self.root / "live-copy.sqlite", self.root / "direction-closes.json",
                             today="2026-09-30")
         windows = sorted({r["window"] for r in out["screen"]})
         self.assertEqual(windows, ["holdout", "validation"])
-        look = next(r for r in out["screen"] if r["window"] == "holdout")
+        # Validation rows come from the store's run rows: a version whose verdict the map dropped still has its row.
+        rows = {r["family"]: r for r in out["screen"] if r["window"] == "validation"}
+        self.assertEqual((rows["a"]["passed"], rows["a"]["verdict_kept"]), (True, True))
+        self.assertEqual((rows["b"]["passed"], rows["b"]["verdict_kept"]), (None, False))
+        self.assertIsInstance(rows["a"]["bh"]["usd"], float, rows["a"]["bh"])
+        self.assertEqual(rows["a"]["bh"]["days"], 250, "every 2025 session with a market return")
+        look = next(r for r in out["screen"] if r["window"] == "holdout" and r["family"] == "a")
         self.assertEqual((look["level"], look["rule"]), (0.10, "flat"))
         self.assertEqual(look["tail"]["from"], "2026-07-01")
-        self.assertEqual(look["drift_window"]["basis"], "daily-close")
-        self.assertIn("usd", look["bh"])
+        self.assertIsInstance(look["bh"]["usd"], float, look["bh"])
+        self.assertEqual(look["bh"]["days"], len(holdout_days))
+        self.assertIsInstance(look["drift_window"]["beta"], float, look["drift_window"])
+        self.assertEqual(look["drift_window"]["days"], len(holdout_days))
         self.assertEqual(look["drift_train"]["basis"], "train-held-hours")
-        [band] = out["bands"]
+        # Contamination, measured: the in-training head and the after-cutoff tail of the look's own daily series.
+        head = [x for d, x in zip(holdout_days, holdout) if d < "2026-07-01"]
+        tail = [x for d, x in zip(holdout_days, holdout) if d >= "2026-07-01"]
+        c = look["contamination"]
+        self.assertEqual((c["head"]["days"], c["tail"]["days"]), (len(head), len(tail)))
+        self.assertEqual((len(head), len(tail)), (123, 61), "the holdout's 184 sessions: 123 inside Opus 5.5's training")
+        self.assertAlmostEqual(c["head"]["pnl"], round(sum(head), 2))
+        self.assertAlmostEqual(c["sharpe_gap"], c["head"]["sharpe_daily"] - c["tail"]["sharpe_daily"])
+        pooled = out["contamination"]
+        self.assertEqual((pooled["looks"], pooled["with_gap"], pooled["reported_only"]), (2, 2, True))
+        self.assertIsNotNone(pooled["t"])
+        band = next(b for b in out["bands"] if b["family"] == "a")
         self.assertEqual((band["family"], band["band"], band["live"]["realized_usd"], band["live"]["trades"]),
                          ("a", "candidate", -12.5, 1))
+        self.assertEqual(band["live"]["sessions"], 3)
+        self.assertIsInstance(band["live"]["bh"]["usd"], float, band["live"]["bh"])
+        self.assertIsInstance(band["live"]["drift_window"]["beta"], float, band["live"]["drift_window"])
+        self.assertEqual(band["live_vs_holdout"]["live_pnl_per_max_loss"], -12.5 / 40.0)
+        self.assertEqual(band["live_vs_holdout"]["holdout_pnl_per_max_loss"], 0.08)
         self.assertIsNone(band["d5"]["demoted"])
-        self.assertEqual(out["probe_budget"], {"realized_usd": "12.50", "at_risk_usd": "0.00", "open": 0, "max_open": 3,
-                                               "budget_usd": "400", "room_usd": "387.50"})
+        self.assertEqual(out["probe_budget"], {"realized_usd": "12.50", "realized_basis": "gross: each closed Probe position's own loss",
+                                               "at_risk_usd": "0.00", "open": 0, "max_open": 3, "budget_usd": "400",
+                                               "room_usd": "387.50"})
         self.assertTrue(out["reported_only"])
 
     def test_the_verdicts_are_the_same_with_and_without_the_figures(self):

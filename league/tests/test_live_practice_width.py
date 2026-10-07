@@ -498,27 +498,24 @@ class PracticeCaps(PracticeCase):
         self.run_to(9, 36)
         acc = self.live.shadow.accounts["big@1:o"]
         reasons = self.rejected("big")
-        # Since THE FAST LANE (Oct 7, 2026) the practice caps read the Probe's 10% ($1,000 of the $10,000 notional) and the
-        # family's 15% ($1,500): later opens stop at the count or at the family's room, never at their own size.
-        self.assertTrue(all(r.startswith(("practice cap: 3 structures open or working", "practice cap: "))
-                            and "over the Probe's" not in r for r in reasons),
-                        ("sized smaller: never refused for its size", reasons))
+        self.assertTrue(all(r.startswith("practice cap: 3 structures open or working") for r in reasons),
+                        ("a Probe would send it smaller: never refused for its size", reasons))
         [first, *_] = self.orders("big")
         order = first["order"]["order"]
         self.assertEqual(first["practice_sized"], {"asked": 40, "qty": order["qty"]})
         qty, unit = order["qty"], order["max_loss_share"] * 100 + 2 * order["fees"] / order["qty"]
-        self.assertTrue(1 <= qty < 40 and qty * unit <= 1000.0 + 1e-6 < (qty + 1) * unit, (qty, unit))
+        self.assertTrue(1 <= qty < 40 and qty * unit <= 500.0 + 1e-6 < (qty + 1) * unit, (qty, unit))
         self.assertGreaterEqual(acc.counts["opens"], 1)
 
     def test_an_open_whose_one_structure_is_over_the_probes_cap_is_refused(self):
         self.build(observed=[opener("wide", width=10.0)])
-        self.live.settings["shadow_capital"] = 1000.0                       # $100 a structure (10%), no floor
+        self.live.settings["shadow_capital"] = 1000.0                       # $50 a structure, the $100 floor
         self.run_to(9, 36)
         acc = self.live.shadow.accounts["wide@1:o"]
         self.assertEqual((len(acc.positions), acc.counts["opens"], acc.orders_today), (0, 0, 0))
         [first, *_] = self.rejected("wide")
-        self.assertRegex(first, r"^practice cap: one structure risks [0-9.]+ with fees, over the Probe's 100\.00 a "
-                                r"structure and its 0\.00 floor$")
+        self.assertRegex(first, r"^practice cap: one structure risks [0-9.]+ with fees, over the Probe's 50\.00 a "
+                                r"structure and its 100\.00 floor$")
         self.assertFalse(any(self.decisions_in_error("wide")), "a cap's refusal is never the program's error")
 
     def test_a_candidate_shadow_keeps_the_engines_rules(self):
@@ -533,10 +530,8 @@ class PracticeCaps(PracticeCase):
 
 @unittest.skipUnless(HAVE, "numpy not installed")
 class CapArithmetic(unittest.TestCase):
-    """`ShadowAccount._practice_cap` on held structures and working opens (shadow capital $10,000: $1,000 an open (THE FAST
-    LANE's 10%, Oct 7, 2026; $500 before it), three structures, $1,500 at risk at the constitution's Probe rows). The
-    practice caps size by the share (several structures an open), as the Probe did before the fast lane: practice returns
-    are per dollar of maximum loss, so scale-free; the real Probe is one structure (`money.plan_open`)."""
+    """`ShadowAccount._practice_cap` on held structures and working opens (shadow capital $10,000: $500 an open, three
+    structures, $1,500 at risk at the constitution's Probe rows)."""
 
     def account(self, instance="fam@1:o", capital=10000.0):
         needs = {"roots": ["SPY"], "dte": [0, 3], "band": 0.03, "cadence": 1, "history": 0, "start": 571, "end": 958}
@@ -560,28 +555,31 @@ class CapArithmetic(unittest.TestCase):
 
         probe = CONSTITUTION["options_money"]["probe"]
         (share, floor), open_max, family = S._probe_caps()
-        self.assertEqual((share, floor, open_max, family), (float(probe["max_loss_share"]), float(probe["floor_usd"]),
-                                                           int(probe["open_per_family"]), float(probe["family_share"])))
+        self.assertEqual((open_max, family), (int(probe["open_per_family"]), float(probe["family_share"])))
+        # THE FAST LANE (Oct 7, 2026) moved the real Probe to one structure within 10% and no floor; practice keeps the
+        # Probe's 5% and $100 from before it, so practice evidence does not move with the money row (its review, D6).
+        self.assertEqual((share, floor), (0.05, 100.0))
+        self.assertNotEqual(share, float(probe["max_loss_share"]))
 
     def test_per_open_with_fees(self):
         acc = self.account()
-        self.assertEqual(acc._practice_cap([self.working(9, 9.90, fees=5.0)]), ({9: 1}, None), "990, 10 of fees: 1,000")
-        sizes, why = acc._practice_cap([self.working(9, 9.90, fees=5.01)])
+        self.assertEqual(acc._practice_cap([self.working(9, 4.90, fees=5.0)]), ({9: 1}, None), "490, 10 of fees: 500")
+        sizes, why = acc._practice_cap([self.working(9, 4.90, fees=5.01)])
         self.assertEqual(sizes, {})
-        self.assertEqual(why, "practice cap: one structure risks 1000.02 with fees, over the Probe's 1000.00 a structure "
-                              "and its 0.00 floor")
+        self.assertEqual(why, "practice cap: one structure risks 500.02 with fees, over the Probe's 500.00 a structure "
+                              "and its 100.00 floor")
 
-    def test_an_open_is_sized_by_the_probes_share(self):
+    def test_an_open_is_sized_as_plan_open_sizes_a_probes(self):
         acc = self.account()
-        # 12 asked of a $99 + $1 structure: floor(1,000 / 100) = 10 (the share; the real Probe sends one structure).
-        self.assertEqual(acc._practice_cap([self.working(9, 0.99, qty=12, fees=6.0)]), ({9: 10}, None))
+        # 10 asked of a $99 + $1 structure: floor(500 / 100) = 5, as a Probe sends it.
+        self.assertEqual(acc._practice_cap([self.working(9, 0.99, qty=10, fees=5.0)]), ({9: 5}, None))
         # Never more than the program asked.
         self.assertEqual(acc._practice_cap([self.working(9, 0.99, qty=2, fees=1.0)]), ({9: 2}, None))
-        # The unit's fees are one structure's at the decision's quotes, never the whole order's: 49 + 2 x 0.50 = 50.
-        self.assertEqual(acc._practice_cap([self.working(9, 0.49, qty=40, fees=20.0)]), ({9: 20}, None))
+        # The unit's fees are one structure's at the decision's quotes, never the whole order's.
+        self.assertEqual(acc._practice_cap([self.working(9, 0.49, qty=40, fees=20.0)]), ({9: 10}, None))
 
     def test_the_floor_buys_one_structure_over_the_share(self):
-        acc = self.account(capital=1000.0)                                  # $100 a structure (10%); no floor
+        acc = self.account(capital=1000.0)                                  # $50 a structure; the $100 floor
         self.assertEqual(acc._practice_cap([self.working(9, 0.90, qty=3, fees=15.0)]), ({9: 1}, None), "90 + 10: one")
         sizes, why = acc._practice_cap([self.working(9, 0.91, qty=3, fees=15.0)])
         self.assertTrue(why.startswith("practice cap: one structure risks 101.00"), why)

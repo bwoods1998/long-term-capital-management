@@ -260,9 +260,7 @@ class TheRule(StandingCase):
     def test_a_refusal_carries_no_figures(self):
         grant = self.enabled()
         landed = [deposit(self.clock() - 60)]
-        # Under the smallest real stake: since the fast lane's Probe floor is $0 (Oct 7, 2026), `live_trading.smallest_stake`
-        # is the allocator's $25 bunt stake (it was the $100 floor).
-        low = self.standing(grant, equity="17.42", funding=landed)
+        low = self.standing(grant, equity="42.17", funding=landed)
         self.assertEqual(low["action"], "refused")
         self.assertEqual(low["why"], "standing: capital does not cover the smallest real stake")
         high = self.standing(grant, equity="20000", top="10000.01", funding=landed, rows=owner_deploy(self.clock() - 30))
@@ -435,12 +433,12 @@ class TheJob(StandingCase):
 
     def test_a_refused_occurrence_carries_no_figures(self):
         self.enabled()
-        ctx, calls = self.ctx(_funding=[deposit(self.clock() - 60, amount="1234.56")], _equity="17.42")
+        ctx, calls = self.ctx(_funding=[deposit(self.clock() - 60, amount="1234.56")], _equity="42.17")
         with self.assertRaises(job.GrantRefused) as caught:
             job.run(ctx)
         text = str(caught.exception) + json.dumps(calls.alerts)
         self.assertIn("smallest real stake", text)
-        for figure in ("17.42", "1234.56", "5500", "700"):
+        for figure in ("42.17", "1234.56", "5500", "700"):
             self.assertNotIn(figure, text)
 
     def test_unreadable_reads_fail_closed(self):

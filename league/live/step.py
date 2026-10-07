@@ -2639,9 +2639,12 @@ class OptionsLive:
         why = HT.OPEN_WHY if house else str(intent.get("note") or intent.get("tag") or "")[:200]
         with admit as allowed:
             if allowed:
+                # A Probe family's open is marked so (`money.Plan.probe`): THE PROBE LOSS BUDGET counts its position's realized
+                # loss (`real.probe_tally`), never a Sized one's.
                 sent = book.new_order(instance=inst.key, family=inst.family, action="open", type_=order.type, root=root, legs=legs,
                                       qty=qty, limit_value=order.limit, tif=tif, day=today, minute=mi, reserve=reserve,
-                                      max_loss=max_loss, fees_est=fees, tuition=inst.tuition, why=why)
+                                      max_loss=max_loss, fees_est=fees, tuition=inst.tuition, why=why,
+                                      probe=bool(getattr(plan, "probe", False)))
         if not allowed:
             inst.mode = "exit_only"
             self._persist_instance(inst)

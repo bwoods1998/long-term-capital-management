@@ -74,10 +74,15 @@ JOBS: tuple[Job, ...] = (
         paid=True, what="the strategist's daily agenda"),
     Job("engineer", "league.ops.engineer", (S.daily(4, 0),), grace=6 * HOUR, cpu=1800, wall=3600, owner="Phase 4",
         paid=True, what="the engineer's daily harness change", retry=False),
+    # At a House start the grant goes first (occurrences due at the same instant start in this order, `runner.due`).
     Job("direction", "league.ops.direction", (S.at_start(), S.daily(1, 0)), grace=3 * HOUR, cpu=120, wall=600,
         in_pause=True, owner="fast lane v2",
         what="the roots' daily closes for the same-risk buy-and-hold beside each screen result and band row (reported, "
              "never a bar)"),
+    Job("fast_lane", "league.ops.fast_lane", (S.after("direction"),), grace=3 * HOUR, cpu=600, wall=1200,
+        in_pause=True, owner="fast lane v2",
+        what="the fast lane's report (read-only): the buy-and-hold and the drift fit beside each screen result and band "
+             "row, the contamination measures, D5 and the Probe budget, into <state>/fast-lane-report.json"),
 )
 
 

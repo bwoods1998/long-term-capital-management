@@ -749,9 +749,11 @@ CONSTITUTION: dict[str, Any] = {
     # per position and a Probe loss budget up to $400 in total"): a Probe position is ONE structure (`contracts` 1) whose
     # maximum loss with its open and close fees fits `max_loss_share` (10%) of the sizing equity E, replacing 5% and the
     # $100 one-contract floor (`floor_usd` 0). At most `max_open` (3) Probe positions held or working at once, and a
-    # Probe loss budget of `loss_budget_usd` ($400) in total: realized Probe losses since this release (net: a Probe gain
-    # offsets a Probe loss) plus the maximum loss of every open Probe position (held or working); an open that would
-    # breach it is refused, and exits go on (`league/live/money.py` `plan_open`, `league/live/real.py` `probe_tally`).
+    # Probe loss budget of `loss_budget_usd` ($400) in total: realized Probe losses since this release, GROSS (each closed
+    # position a Probe family opened counts its own loss; no gain, Probe or Sized, offsets it) plus the maximum loss of
+    # every real position held or working (a Sized one too: a tightening); an open that would breach it is refused, and
+    # exits go on (`league/live/money.py` `plan_open`, `league/live/real.py` `probe_tally`). A tuition structure is held
+    # within the Probe's cap too (code, `plan_open`); tuition stays outside the count and the budget, at its own caps.
     # Why N = 3: 3 x 10% = 30% of E, inside the 35% daily stop and the 60% drawdown stop; each 10% position fits the
     # gateway's per-order cap, min($1,000, 25% of E), and its day cap (100% of E). At E = $1,288.40: the Probe cap $128.84,
     # 3 x $128.84 = $386.52 <= $400, the per-order cap $322.10, the day cap $1,288.40, the book cap $1,159.56, the daily

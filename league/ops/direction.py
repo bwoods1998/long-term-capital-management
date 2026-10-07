@@ -6,12 +6,14 @@ pass the screen and trade at Probe. So every screen result and every band row ca
 (1) the drift fit (beta, alpha_usd, drift_usd, share) and (2) the SAME-RISK BUY-AND-HOLD: a long position in the
 program's own roots held every session of the window, sized to the program's own daily P&L standard deviation (same
 risk = the same daily volatility). Nothing in the tournament, the gate, the bands or the money table reads these figures
-(`league/tests/test_fast_lane_v2.py` pins that); `scripts/fast_lane_report.py` prints them for the captain's funnel.
+(`league/tests/test_fast_lane_v2.py` pins that); the `fast_lane` job (`league/ops/fast_lane.py`) writes them daily into
+`<state>/fast-lane-report.json`, and `scripts/fast_lane_report.py` prints them from copies for the captain's funnel.
 
 THE JOB (`run`): the swarm's Gym roots (`league.swarm.settings.load`), the index roots through `PROXY` (XSP and SPXW have
 no stock bars: SPY stands in), their daily split-adjusted SIP closes from 2024-12-31 to today through the gateway
 (`/v1/alpaca/v2/stocks/bars`, GET only, paginated; the route is already allowed, `gateway/lib/caps.mjs`), written
-atomically to `<state>/direction-closes.json`. A gateway error writes nothing and answers {"ok": false, "why"}.
+atomically to `<state>/direction-closes.json`. A gateway error writes nothing and answers {"status": "failed",
+"error"}: a failed receipt, a House warning and a retry inside its grace (`league/ops/__main__.run_job`).
 
 THE ARITHMETIC (standard library only; the report script and the tests call it):
 - `market_returns(closes, roots, days)`: each day's equal-weighted close-to-close return of the roots' symbols (after
@@ -86,12 +88,12 @@ def run(ctx: Any) -> dict[str, Any]:
     roots = (swarm_settings.load(ctx.root).get("gym") or {}).get("roots") or []
     symbols, proxy = symbols_of(roots)
     if not symbols:
-        return {"ok": False, "why": "the swarm names no Gym roots"}
+        return {"status": "failed", "ok": False, "error": "the swarm names no Gym roots"}
     today = datetime.fromtimestamp(ctx.now(), NEW_YORK).date().isoformat()
     try:
         closes = fetch(ctx.gateway, symbols, FIRST_DAY, today)
-    except Exception as exc:  # noqa: BLE001 - a gateway error writes nothing
-        return {"ok": False, "why": f"{type(exc).__name__}: {str(exc)[:200]}"}
+    except Exception as exc:  # noqa: BLE001 - a gateway error writes nothing: a failed receipt, retried in its grace
+        return {"status": "failed", "ok": False, "error": f"{type(exc).__name__}: {str(exc)[:200]}"}
     doc = {"schema": SCHEMA, "at": datetime.fromtimestamp(ctx.now(), NEW_YORK).isoformat(), "feed": "sip",
            "adjustment": "split", "proxy": proxy, "closes": {s: dict(sorted(v.items())) for s, v in sorted(closes.items())}}
     write_json(Path(ctx.root) / FILE, doc)

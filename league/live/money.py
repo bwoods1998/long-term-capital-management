@@ -41,17 +41,25 @@ by their own unit):
   the cap `probe.max_loss_share x E` (10%); a structure over it is refused (the old $100 one-contract floor is $0). At
   most `probe.open_per_family` open structures, the family's open maximum loss at most `probe.family_share x E`. At
   most `probe.max_open` (3) Probe positions held or working at once across the account, and THE PROBE LOSS BUDGET:
-  realized Probe losses since this release (net: a Probe gain offsets a Probe loss) plus the maximum loss of every
-  Probe position held or working (`real.probe_tally`, every ":r" row: a Sized position counts too) plus the new open at
-  most `probe.loss_budget_usd` ($400); an open that would breach it is refused and exits go on. These two refuse a
-  Probe family's open only, never a Sized one, and come after the kill switch, the stops, the grant and reconciliation
-  (`step._real_intent` asks `real_block` first). `probe_room` is the room the other routes leave for Probe opens.
+  realized Probe losses since this release, GROSS (each closed position a Probe family opened, marked so at its open:
+  `Plan.probe`, the order's and the position's `probe` mark; its loss, never offset by a gain of another position, and
+  never a Sized position's) plus the maximum loss of every real position held or working (`real.probe_tally`, every
+  ":r" row: a Sized position counts here too, a tightening) plus the new open at most `probe.loss_budget_usd` ($400);
+  an open that would breach it is refused and exits go on. These two refuse a Probe family's open only, never a Sized
+  one, and come after the kill switch, the stops, the grant and reconciliation (`step._real_intent` asks `real_block`
+  first). `probe_room` is the room the other routes leave for Probe opens.
 - Sized: `sized.kelly_fraction` of Kelly on the LOWER bound (`stats.quarter_kelly`: fraction x lcb / variance of the
   per-trade return on maximum loss) of `E` a structure, never above `sized.max_loss_share x E`; the family at most
-  `sized.family_share x E`. C3, restated for the one-structure Probe: a Sized family whose Kelly stake buys no whole
-  structure (`kelly_cap` under its unit) keeps the Probe's one structure under the Probe's limits (`sizing_band`); it
-  never trades smaller than a Probe. Sized rules are otherwise unchanged.
-- Tuition: exactly one structure, only while the day's and the week's tuition maximum loss has room.
+  `sized.family_share x E`. C3 (the review of #362), unchanged by the fast lane: a Sized family whose Kelly stake is
+  under the Probe's cap, or buys no whole structure, is sized under the Probe's limits (`sizing_band`: the Probe's one
+  structure within its cap, `probe.open_per_family` open, `probe.family_share` the family): the Sized family and count
+  limits never apply at a Probe-sized stake, and it never trades smaller than a Probe. Its open is not a Probe
+  family's: neither the Probe count nor the budget refuses it, and it is not marked a Probe open.
+- Tuition: exactly one structure, only while the day's and the week's tuition maximum loss has room, and (since the
+  fast lane review, Oct 7, 2026) only a structure within the Probe's cap (`probe.max_loss_share x E`): tuition never
+  risks more on one structure than a Probe does. Tuition is a route of its own: real 1-lots of a program that passed
+  Validation only (never the screen), outside the Probe count and the Probe loss budget, at most the tuition day's and
+  week's maximum loss.
 - The House live test (`league/live/house_test.py`, not a family): one structure of at most `house_test.structure_usd`,
   at most `house_test.open` held or working, its realized loss plus what is held or working at most
   `house_test.envelope_usd`, no new open once its realized loss reaches `house_test.stop_usd`, after `house_test.sessions`
@@ -503,8 +511,9 @@ class Exposure:
     day_opened: Decimal = ZERO       # today's opening maximum loss sent (the gateway's day cap counts it)
     tuition_day: Decimal = ZERO      # tuition maximum loss opened today / this week
     tuition_week: Decimal = ZERO
-    # THE FAST LANE (D3, D4; `real.probe_tally`): the real (":r") positions held or working, their realized net loss since
-    # this release, and what they could still lose (held and working maximum loss with fees)
+    # THE FAST LANE (D3, D4; `real.probe_tally`): the real (":r") positions held or working, the gross realized loss of the
+    # closed ones a Probe family opened (since this release: only its opens are marked), and what the held and working
+    # ones could still lose (maximum loss with fees)
     probe_open: int = 0
     probe_realized: Decimal = ZERO
     probe_at_risk: Decimal = ZERO
@@ -515,6 +524,9 @@ class Plan:
     qty: int
     cap: Decimal                     # the per-structure cap it was sized against
     reason: str                      # why this size (or why none)
+    #: A Probe family's open (`plan_open`, band "probe"): the order and its position are marked so, and THE PROBE LOSS
+    #: BUDGET counts the position's realized loss (`real.probe_tally`). Never a Sized open, tuition or another route's.
+    probe: bool = False
 
 
 def kelly_cap(table: Table, equity: Decimal, fwd: Forward | None) -> Decimal:
@@ -527,12 +539,16 @@ def kelly_cap(table: Table, equity: Decimal, fwd: Forward | None) -> Decimal:
 
 
 def sizing_band(table: Table, band: str, equity: Decimal, fwd: Forward | None, unit: Decimal) -> str:
-    """The limits a real open is sized under (the review of #362, C3, restated for the fast lane's one-structure Probe,
-    Oct 7, 2026): a Sized family whose Kelly stake buys no whole structure (`kelly_cap` under `unit`) keeps the Probe's
-    one structure and the Probe's limits (its cap, its open count, its family share); it never trades smaller than a
+    """The limits a real open is sized under (the review of #362, C3): a Sized family whose Kelly stake is under the
+    Probe's cap keeps the Probe's limits (its share a structure, its open count, its family share): the Sized family and
+    count limits never apply at a Probe-sized stake. The fast lane (Oct 7, 2026) keeps that trigger (its review: a
+    trigger on the unit alone gave a small Kelly stake the Sized limits, a loosening of Sized) and adds one: a Kelly stake
+    that buys no whole structure keeps the Probe's one structure too, so a Sized family never trades smaller than a
     Probe. Otherwise Sized keeps its Kelly sizing and its own limits (Sized rules unchanged)."""
-    if band == "sized" and kelly_cap(table, equity, fwd) < unit:
-        return "probe"
+    if band == "sized":
+        kelly = kelly_cap(table, equity, fwd)
+        if kelly < probe_cap(table, equity) or kelly < unit:
+            return "probe"
     return band
 
 
@@ -558,15 +574,21 @@ def plan_open(table: Table, *, band: str, tuition: bool, equity: Decimal, unit: 
     if unit <= 0:
         return Plan(0, ZERO, "the structure's maximum loss is not positive")
     if tuition:
-        cap = unit
+        # Never more on one structure than a Probe risks (the fast lane review, Oct 7, 2026: tuition reaches programs
+        # that passed Validation only, so its one structure stays within the Probe's cap).
+        cap = probe_cap(table, equity)
+        if unit > cap:
+            return Plan(0, cap, f"tuition: one structure risks ${cents(unit)} with fees, over the Probe's cap of "
+                                f"${cents(cap)} ({table.probe_share:%} of ${cents(equity)})")
         if exposure.tuition_day + unit > table.tuition_day:
             return Plan(0, cap, f"tuition: ${cents(unit)} would pass the day's ${table.tuition_day} "
                                 f"(${cents(exposure.tuition_day)} used)")
         if exposure.tuition_week + unit > table.tuition_week:
             return Plan(0, cap, f"tuition: ${cents(unit)} would pass the week's ${table.tuition_week} "
                                 f"(${cents(exposure.tuition_week)} used)")
-        qty, why = 1, "tuition: one structure, to measure the venue's fills"
+        qty, why, probe = 1, "tuition: one structure, to measure the venue's fills", False
     elif band in BANDS_REAL:
+        probe = band == "probe"              # a Probe family's open: counted by the Probe count and the loss budget
         limits = sizing_band(table, band, equity, fwd, unit)
         cap = structure_cap(table, limits, equity, fwd)
         if limits == "probe":
@@ -580,7 +602,7 @@ def plan_open(table: Table, *, band: str, tuition: bool, equity: Decimal, unit: 
         else:
             qty = int((cap / unit).to_integral_value(rounding=ROUND_FLOOR))
             why = f"sized: ${cents(cap)} of maximum loss a structure"
-        if band == "probe":
+        if probe:
             # THE FAST LANE's Probe limits (D3, D4): a Probe family's open only; a Sized open is never refused here.
             if exposure.probe_open >= table.probe_max_open:
                 return Plan(0, cap, f"probe: {exposure.probe_open} Probe positions held or working; the most at once is "
@@ -615,7 +637,7 @@ def plan_open(table: Table, *, band: str, tuition: bool, equity: Decimal, unit: 
     if qty < 1:
         return Plan(0, cap, f"today's opening maximum loss ${cents(exposure.day_opened)} leaves no room under the "
                             f"gateway's day cap ${cents(day_cap)}")
-    return Plan(qty, cap, why)
+    return Plan(qty, cap, why, probe=probe)
 
 
 # ---------------------------------------------------------------------------------------------------- the incubator
