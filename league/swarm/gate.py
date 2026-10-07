@@ -44,12 +44,14 @@ the Gym's image or the execution fingerprint, `evaluator.adopt`) clears the gate
 the gate refused at its review or audit, never looked at, would be validated again, reviewed again (the audit's request
 id is new each time) and could pass on a second roll. Right after THE DUPLICATE LOOK, a version whose PROGRAM (`run_sha`:
 in this family or any family holding the same code and parameters, `incubator.twins`) has a kept refusal at the stage
-"review" or "audit", or a kept bar (`incubator_barred`) from a paid review or audit, the gate's or the incubator's, that
-failed it or could not be read, is closed as a version whose look already landed is (`gated_sha`, `gate_ready`
+"review" or "audit", or a kept bar (`incubator_barred`) recording that the GATE's own review or audit failed it, is
+closed as a version whose look already landed is (`gated_sha`, `gate_ready`
 cleared), its outcome "refused", the researcher told so, and one private `swarm.gate` event (`paid_verdict`) names the
 earlier verdict: no new review, no look. A refusal at a FREE stage (the experiment contract, the drift screen, the
 rations, a duplicate look, a look hold) does not bind here: those are judged again by their own rules, which this
-release changed (the drift screen and the holds are off). Tightening only.
+release changed (the drift screen and the holds are off). Nor do the incubator's own reads (its failed review or audit
+bars the incubator route only, as before: the gate asks its own questions), nor a record that merely could not be read
+(no verdict was given). Tightening only.
 
 THE LOOK HOLDS (L6(b) and L6(c) of the edge study, approved by the owner on Oct 2, 2026 as a tightening; `look_hold`,
 `evidence.drift_lean`, `evidence.holdout_power`). OFF SINCE FAST LANE V2 (Oct 7, 2026; the owner's goal item 4: direction
@@ -188,9 +190,10 @@ def run_sha(version: Mapping[str, Any]) -> str:
 
 
 #: A PAID VERDICT BINDS (the module docstring): the refusal stages a paid reader wrote, and the words of a kept bar
-#: (`incubator._audit_bar`, the gate's and the incubator's own) that a paid reader's failing or unreadable verdict wrote.
+#: (`incubator._audit_bar` with "the gate's") that the gate's own failing review or audit wrote. The incubator's own reads
+#: ("the incubator's ...") bar the incubator route only.
 PAID_STAGES = ("review", "audit")
-PAID_BAR_WORDS = ("reviewer failed it", "audit failed it", "review of it cannot be read", "audit of it cannot be read")
+PAID_BAR_WORDS = ("the gate's reviewer failed it", "the gate's audit failed it")
 #: THE DUPLICATE LOOK's refusal stage (the module docstring).
 DUPLICATE_STAGE = "duplicate look"
 #: A Validation run's evaluation and outcome, as the Gym's validation view carries them: two runs that agree on all of
@@ -524,8 +527,8 @@ class Gate:
     def paid_verdict(self, fam: Mapping[str, Any], n: Any, sha: str) -> str | None:
         """Why an earlier paid review or audit binds version `n` of `fam` (program `sha`), or None (the module
         docstring): a kept refusal of the program's version, in this family or a twin's, at the stage "review" or
-        "audit", or a kept bar of the program (`incubator_barred[sha]`) whose words are a paid reader's failing or
-        unreadable verdict (`PAID_BAR_WORDS`). Reads the refusal rows and the families' states, never a model."""
+        "audit", or a kept bar of the program (`incubator_barred[sha]`) whose words are the gate's own failing review or
+        audit (`PAID_BAR_WORDS`). Reads the refusal rows and the families' states, never a model."""
         from . import incubator
 
         fid, n = str(fam["id"]), int(n)
@@ -540,7 +543,7 @@ class Gate:
             recorded = state.get("incubator_barred")
             entry = recorded.get(sha) if isinstance(recorded, Mapping) else None
             why = str(entry.get("why") or "") if isinstance(entry, Mapping) else ""
-            if any(words in why for words in PAID_BAR_WORDS):
+            if why.startswith(PAID_BAR_WORDS):
                 where = "" if other == fid else f" (the same program in {other})"
                 return f"{why}{where}"
         return None

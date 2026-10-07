@@ -64,8 +64,9 @@ has run it since 16:03Z Oct 7, release `20261007T160204Z`). It ships only by the
   day's $200 and week's $300). It stays outside the Probe count and the Probe budget (below, its reach).
 - **A paid verdict binds (`Gate.paid_verdict`).** The deploy's adoption clears the gate's `review` and `gated_sha`; a
   version whose program a paid review or audit failed (a kept refusal at the stage "review" or "audit", in any family
-  holding the same program, or a kept bar from such a verdict) is closed before anything is paid: no second review, no
-  look. Refusals at free stages (the drift screen, the rations, the holds) are judged again by their own rules.
+  holding the same program, or a kept bar recording the gate's own failed review or audit) is closed before anything is
+  paid: no second review, no look. Refusals at free stages (the drift screen, the rations, the holds) are judged again by
+  their own rules, and the incubator's own failed reads still bar only the incubator route (the gate asks its own).
 
 **Identities.** Constitution digest `595228a6` -> `5edc8956`; money digest `42c4a3af` -> `da5c7542` (the grant
 re-ratifies by itself at the House's start on the owner's deploy: `league/ops/grant.py`, the digest moved with an owner
@@ -76,8 +77,10 @@ deploy row); the execution fingerprint `ba60c473` -> `b4c34031` (league/live cha
 **What the deploy resets** (the adoption at the House's start, `SELECTION_KEYS`): every alive family's bests, Train
 candidates, submissions, robustness (with `robust_failed` and `drift_failed`), validation line and numbers, review,
 `gated_sha`, `gate_outcome`, `train_passed` and incubator reviews. No family is banded, so no band is lost. Looks,
-trials, refusals, incubator bars, forward rows and extension holds are kept. Recorded validations are re-judged under
-the new line without a new trial; each pass costs a paid review and audit before its look (a burst, inside the roles'
+trials, refusals, incubator bars, forward rows and extension holds are kept. The adoption clears every family's bests,
+so the tournament validates a family again only once its researcher has re-run Train under the new evaluator and
+resubmitted (the first fast-lane looks wait for those Train reruns); a version validated before is then re-judged under
+the new line from its recorded result, without a new trial; each pass costs a paid review and audit before its look (a burst, inside the roles'
 daily caps): every program the old line, Holm or the holds kept from a look gets one now, except a program a paid
 review or audit already failed (closed unpaid, `Gate.paid_verdict`). Practice cohorts reset.
 

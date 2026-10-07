@@ -218,6 +218,20 @@ class APaidVerdictBinds(RoundCase):
         self.assertEqual(self.paid(), paid)
         self.assertEqual(self.events("a")[0]["earlier"], "the gate's reviewer failed it")
 
+    def test_the_incubators_own_failed_read_does_not_bind_the_gate(self):
+        """The incubator's reads bar the incubator route only (`league/swarm/incubator.py`; the gate asks its own
+        questions, `test_swarm_incubator.GateUnchanged`): its failed audit in the bars does not close the gate's look."""
+        from league.swarm.gate import run_sha
+
+        self.family("a")
+        sha = run_sha(self.store.version("a", 1))
+        self.store.set_state("a", incubator_barred={sha: {"why": "the incubator's audit failed it", "at": 1.0}})
+        self.replies = [PASS] * 8
+        self.validate()
+        out = self.gate().run()
+        self.assertEqual([x["family"] for x in out["looked"]], ["a"])
+        self.assertEqual(self.events("a"), [])
+
     def test_a_free_refusal_does_not_bind(self):
         """A refusal at a free stage (here the drift screen, which this release switches off) is judged again by its own
         rule: the version is reviewed, audited and looked at."""
