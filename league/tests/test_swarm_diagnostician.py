@@ -18,7 +18,7 @@ from league.tests.test_claude import message
 from league.tests.test_frontier import GATEWAY, FakeOpener
 from league.tests.test_swarm_loop import LoopCase
 from league.tests.test_swarm_researcher import GYM, ResearcherCase
-from league.tests.swarm_fakes import result
+from league.tests.swarm_fakes import result, unbound_budget
 
 #: Validation's figures and check names: none of them may reach the diagnostician.
 SECRET_T, SECRET_MEAN, SECRET_DSR = 3.14159, 0.0123456, 0.271828
@@ -43,7 +43,7 @@ class DiagnosticianCase(ResearcherCase):
     def setUp(self):
         super().setUp()
         # THE BUDGET is not what these tests judge: a line well above the diagnostician's own day (no block is the floor).
-        self.settings["budget"] = {"source": "test", "sail_usd_day": 1000.0, "claude_usd_day": 1000.0}
+        self.settings["budget"] = unbound_budget(self)
         self.claude = FakeOpener()
         self.meter = FakeClaudeMeter(100)
         self.router.claude_factory = lambda model: Claude(GATEWAY, lambda: "synthetic", model=model, opener=self.claude)

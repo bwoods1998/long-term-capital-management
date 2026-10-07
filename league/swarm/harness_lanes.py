@@ -1086,6 +1086,9 @@ FROZEN_SYMBOLS: dict[str, tuple[str, ...]] = {
         "_epoch", "_plain_int", "record_verdict",
         "Researcher.drift_blocks", "Researcher._demote", "Researcher._terminal", "Researcher.cycle",
         "Researcher._count_dormancy", "Researcher._count_holds",
+        # THE TURNOVER (F1, Oct 3): the depth rule's clause of the idle rule and the families the population floor counts.
+        "RETIRE_SHORT_CHECKS", "RETIRE_SHORT_CYCLES", "VALIDATED_CYCLES_KEY", "short_dead", "dead_slot", "floor_counts",
+        "kept_families", "Researcher.floor_counts", "Researcher.floor_room",
         # A program's path from the model's tool call to the Gym: the arguments a tool call carries, the program text
         # and its parameters, variants and roots. A change here could rewrite the program the Gym evaluates (wrap its
         # decide in try/except, so a runtime error never reaches the Gym's disqualification rule).

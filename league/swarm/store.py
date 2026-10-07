@@ -47,7 +47,7 @@ import threading
 import time
 import zlib
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from . import DB_NAME, PROGRAMS_DIR, RUNS_DIR
 from .evidence import drift_numbers
@@ -597,8 +597,12 @@ class SwarmStore:
             self.event("swarm.retired", fid, {"cause": reason if public_reason is None else public_reason, "band_from": fam["band"]})
             return True
 
-    def retire_gym(self, fid: str, reason: Any, *, floor: int, source: str) -> dict[str, Any]:
-        """One Gym retirement across researcher/tournament connections; evidence and look reservations survive."""
+    def retire_gym(self, fid: str, reason: Any, *, floor: int, source: str,
+                   counts: Callable[[Mapping[str, Any]], bool] | None = None) -> dict[str, Any]:
+        """One Gym retirement across researcher/tournament connections; evidence and look reservations survive.
+        `counts` (F1, THE FLOOR COUNTS RESEARCH: `researcher.floor_counts`): which living families `floor` counts. A
+        family it does not count (a dead slot) retires whatever the count; any other is refused when the counted
+        families number `floor` or fewer. None: every living family counts, as before."""
         if not isinstance(reason, str) or not reason.strip():
             return {"status": "refused", "reason": "retirement needs a nonempty reason string"}
         reason = reason.strip()[:2000]
@@ -620,8 +624,11 @@ class SwarmStore:
                 return {"status": "refused", "deferred": "gate_hold",
                         "reason": "the operator holds this family's validated version at the gate; it retires only once the "
                                   "hold is cleared"}
-            alive = self._one("SELECT COUNT(*) AS n FROM families WHERE retired_at IS NULL")["n"]
-            if int(alive) <= max(0, int(floor)):
+            if counts is None:
+                alive, counted = self._one("SELECT COUNT(*) AS n FROM families WHERE retired_at IS NULL")["n"], True
+            else:
+                alive, counted = sum(1 for f in self.families(alive=True) if counts(f)), bool(counts(fam))
+            if counted and int(alive) <= max(0, int(floor)):
                 return {"status": "refused", "deferred": "population_floor",
                         "reason": "the population is at its minimum; retirement was not applied"}
             state = fam.get("state") or {}

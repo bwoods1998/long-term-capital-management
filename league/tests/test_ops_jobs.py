@@ -179,9 +179,12 @@ class Hygiene(Base):
         out = HY.retire_idle(self.ctx("hygiene"), store=self.store, settings=settings)
         self.assertEqual(out["retired"], ["dormant-a"])
         self.assertEqual(out["busy"], 1)
-        settings["population"]["floor"] = 100
+        settings["population"].update(floor=100, floor_researching=False)  # the floor counting every family, as before F1
         self.now += 3600
         self.assertEqual(HY.retire_idle(self.ctx("hygiene"), store=self.store, settings=settings)["retired"], [])
+        # THE FLOOR COUNTS RESEARCH (F1, the default): a dormant family is a dead slot, which no floor holds.
+        settings["population"]["floor_researching"] = True
+        self.assertEqual(HY.retire_idle(self.ctx("hygiene"), store=self.store, settings=settings)["retired"], ["dormant-b"])
 
     def test_a_family_the_swarms_heartbeat_names_in_a_cycle_is_spared_until_the_heartbeat_is_stale(self):
         from league.swarm import HEARTBEAT, settings as swarm_settings

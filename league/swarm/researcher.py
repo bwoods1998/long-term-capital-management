@@ -74,6 +74,26 @@ additional floor. Gate work in flight, gate-ready versions, extension/operator h
 (THE VALIDATION WAIT, below) are protected. Retirement preserves the program, lineage, trials, results and explanation.
 It never turns a research decision into an order.
 
+THE TURNOVER (F1, Oct 3, 2026). Research stood still from 01:35Z that day: the eight living families were all parked
+until news, eight was `population.floor`, so no rule could retire one, and six of them (3 to 9 trials, no eligible Train
+run) had asked for a retire they were never offered. Four rules, each with its switch:
+- THE HOLD OFFER, whatever the trial count (`researcher.retire_hold_untested`, true): three holds in a row offer
+  `retire` (`Researcher.hold_offer`); false asks for the Train record or the trials as before.
+- PARKED DORMANCY (`researcher.parked_dormancy`, true; `loop.Scheduler.count_parked`): a family parked until news gets
+  no cycle, so its dormant cycles never advanced and the dormancy clause never fired. A park now counts one dormant cycle
+  each `researcher.hold_idle_seconds` it lasts (the wait the timer gave a held family), no model asked, up to
+  `researcher.dormant_cycles`: a dead slot leaves by the idle rule with `researcher.hold_until_news` left true.
+- THE FLOOR COUNTS RESEARCH (`population.floor_researching`, true; `dead_slot`, `floor_counts`): `population.floor`
+  counts the living families that are researching. A dead slot (a Gym family the idle rule finds dead, or one whose
+  researcher held its last `researcher.retire_hold_cycles` cycles with nothing pending) does not count, so it may always
+  retire; any other retirement is refused, as before, when it would leave fewer than the floor counted. The architect
+  bears up to the ceiling whatever the floor says, so the slot is refilled.
+- THE DEPTH RULE (`researcher.retire_short_checks` 5 and `researcher.retire_short_cycles` 10; `short_dead`, a clause of
+  the idle rule): a family whose latest counted validation met at most 5 of the line's checks is dead 10 cycles after
+  it; one that met 6 or more keeps researching (the extension hold's own bar). Since Sept 26 the validated families
+  spent 81% of their model dollars after their first validation; on that record the rule keeps every validation that
+  met the line, or every check of it but the deflated Sharpe.
+
 THE VALIDATED-FAMILY GUARD (Oct 1). On Sept 30 the swarm's only D2-tuition family (8 of 8 checks on Validation, review
 and audit passed, tuition traded) was retired by its own researcher 17 seconds after an evaluator adoption, because "the
 evaluator changed" and its validated version "must be re-evaluated". An evaluator change re-evaluates; it never refutes.
@@ -943,10 +963,15 @@ def idle_dead(fam: Mapping[str, Any], settings: Mapping[str, Any], *, current: t
 
     DORMANCY (R3, NO DUPLICATE RUNS): a family is dead too, whatever its best, when its last `researcher.dormant_cycles`
     cycles in a row made no new Gym evaluation, only stored results, holds and refused runs (`dormant_count`, counted in
-    the Gym band only), unless its best awaits validation (`awaiting_validation`). The same exemptions, floor and wording
-    as above."""
+    the Gym band only; a park until news counts a cycle each `researcher.hold_idle_seconds`, F1:
+    `loop.Scheduler.count_parked`), unless its best awaits validation (`awaiting_validation`). The same exemptions, floor
+    and wording as above.
+
+    THE DEPTH RULE (F1, `short_dead`): dead as well `researcher.retire_short_cycles` cycles after a counted validation
+    that met at most `researcher.retire_short_checks` of the line's checks. Its clause carries D2a's count (the verdict
+    and how many checks, which the researcher already reads), never a figure Validation measured."""
     limit, dormant = idle_limit(settings), dormant_limit(settings)
-    if (limit <= 0 and dormant <= 0) or fam.get("band") != "gym" or fam.get("retired_at"):
+    if fam.get("band") != "gym" or fam.get("retired_at"):
         return None
     state = fam.get("state") or {}
     # Nor while a validation that passed is owed again on the Gym running now (`revalidation_owed`, R4).
@@ -963,7 +988,92 @@ def idle_dead(fam: Mapping[str, Any], settings: Mapping[str, Any], *, current: t
     cycles = dormant_count(fam)
     if dormant > 0 and cycles >= dormant and not awaiting_validation(fam) and not extension_held(fam):
         return f"made no new Gym evaluation in its last {cycles} cycles (only stored results, holds and refused runs)"
-    return None
+    return short_dead(fam, settings)
+
+
+def short_dead(fam: Mapping[str, Any], settings: Mapping[str, Any]) -> str | None:
+    """THE DEPTH RULE (F1, a clause of the idle rule): a living Gym family is dead once `researcher.retire_short_cycles`
+    (10) cycles have passed since its latest counted validation (`VALIDATED_CYCLES_KEY`) when that validation met at most
+    `researcher.retire_short_checks` (5) of the line's checks. One that met more keeps researching (6 of 8 is the
+    extension hold's bar), and so does one never validated, or validated before the mark was kept. A new best that
+    awaits validation does not spare it: a later version of a family that fell short is the depth the rule stops paying
+    for. The idle rule's own exemptions stand (`idle_dead` asks this last: never at the gate, with a look out or with a
+    passing validation owed again), and the tournament's cohort keep and the operator's gate hold as for every clause.
+    0 or null in either setting turns the rule off. Its words name the verdict and the count, which D2a lets a
+    researcher read, and no figure Validation measured."""
+    most = _count_setting(settings, "retire_short_checks", RETIRE_SHORT_CHECKS)
+    cycles = _count_setting(settings, "retire_short_cycles", RETIRE_SHORT_CYCLES)
+    if most <= 0 or cycles <= 0 or fam.get("band") != "gym" or fam.get("retired_at"):
+        return None
+    state = fam.get("state") or {}
+    line = state.get("validation_line")
+    mark = _plain_int(state.get(VALIDATED_CYCLES_KEY))
+    met, total = checks_met(line)
+    if mark is None or total <= 0 or met > most or (isinstance(line, Mapping) and line.get("passed")):
+        return None
+    since = int(fam.get("cycles") or 0) - mark
+    if since < cycles:
+        return None
+    return f"kept researching for {since} cycles after a validation that met {met} of the line's {total} checks"
+
+
+def short_left(fam: Mapping[str, Any], settings: Mapping[str, Any]) -> int | None:
+    """THE DEPTH RULE's countdown for the status: the cycles a family whose latest counted validation fell short
+    (`short_dead`) still has, at least 0; None for a family the rule does not count."""
+    most = _count_setting(settings, "retire_short_checks", RETIRE_SHORT_CHECKS)
+    cycles = _count_setting(settings, "retire_short_cycles", RETIRE_SHORT_CYCLES)
+    state = fam.get("state") or {}
+    line = state.get("validation_line")
+    mark = _plain_int(state.get(VALIDATED_CYCLES_KEY))
+    met, total = checks_met(line)
+    if most <= 0 or cycles <= 0 or fam.get("band") != "gym" or mark is None or total <= 0 or met > most \
+            or (isinstance(line, Mapping) and line.get("passed")):
+        return None
+    return max(0, cycles - (int(fam.get("cycles") or 0) - mark))
+
+
+def dead_slot(fam: Mapping[str, Any], settings: Mapping[str, Any], *, current: tuple[Any, Any] | None = None) -> bool:
+    """A DEAD SLOT (F1, THE TURNOVER in the module docstring): a living Gym family that is not researching. The idle rule
+    finds it dead (`idle_dead`, the depth rule and the parked dormancy among its clauses), or its researcher held its
+    last `researcher.retire_hold_cycles` cycles in a row (`hold_streak`: the hold offer's own count) with nothing
+    pending: no version at the gate, no look out, no operator's gate hold, no extension hold, no best that awaits
+    validation and no passing validation owed again on the Gym running now (`current`). A family in another band is
+    never one. Train figures and D2a's count only."""
+    if fam.get("band") != "gym" or fam.get("retired_at"):
+        return False
+    if idle_dead(fam, settings, current=current) is not None:
+        return True
+    need = _count_setting(settings, "retire_hold_cycles", RETIRE_HOLD_CYCLES)
+    if need <= 0 or hold_streak(fam) < need:
+        return False
+    state = fam.get("state") or {}
+    return not (held_at_gate(fam) or state.get("gate_ready") or state.get("look_inflight") or extension_held(fam)
+                or awaiting_validation(fam) or revalidation_owed(fam, current))
+
+
+def floor_counts(settings: Mapping[str, Any], *, current: tuple[Any, Any] | None = None,
+                 kept: Callable[[str], bool] | None = None) -> Callable[[Mapping[str, Any]], bool] | None:
+    """THE FLOOR COUNTS RESEARCH (F1): which living families `population.floor` counts, for `SwarmStore.retire_gym`'s
+    `counts`: every one but a dead slot (`dead_slot`). A family THE COHORT KEEP holds (`kept`: its id is kept; the
+    tournament's saved keep, `practice.kept_version`) always counts: it practises for the ladder, which is not a dead
+    slot's work, so at the floor it stays, as before. None (every living family, as before) while
+    `population.floor_researching` is JSON false."""
+    if (settings.get("population") or {}).get("floor_researching", True) is False:
+        return None
+    return lambda fam: bool(kept is not None and kept(str(fam.get("id")))) or not dead_slot(fam, settings, current=current)
+
+
+def kept_families(store: SwarmStore, now: float) -> frozenset[str]:
+    """The families the tournament's saved cohort keep holds now (`practice.KEEP_KV`, read once; each by
+    `practice.kept_version`'s own rule, so a keep too old to trust names none). Never raises."""
+    from .practice import KEEP_KV, kept_version
+
+    try:
+        saved = store.get(KEEP_KV) or {}
+        names = list(saved.get("families") or {}) if isinstance(saved, Mapping) else []
+    except Exception:  # noqa: BLE001 - no keep read: no family is counted for it
+        return frozenset()
+    return frozenset(str(fid) for fid in names if kept_version(store, str(fid), now=now) is not None)
 
 
 # ------------------------------------------------------------------------------------------ THE IDLE RULE'S VERDICT (R11-1)
@@ -988,6 +1098,10 @@ VERDICT_WORDS = {
                "evaluation, or a best that stayed below zero)"),
     "unresolved": ("Idle verdict UNRESOLVED: required robustness evidence failed to complete or its outcome is unknown; "
                    "this is an experiment failure, not evidence of an unprofitable mechanism"),
+    # THE DEPTH RULE's death (F1, `short_dead`) of a family with a Train score: EXHAUSTED, in its own words (the
+    # tournament files it so, `Tournament.idle_why`; `train_record` never returns this key).
+    "short": ("Idle verdict EXHAUSTED, a tested finding: it reached a Train score and was validated, its latest validation "
+              "fell short of the line by more than a near miss, and the cycles it was given after it are spent"),
 }
 #: The verdict's mark in a retirement reason or lesson (`architect.tag_of` reads it).
 VERDICT_TAG = re.compile(r"\bIdle verdict (DRIFT|STRESS|THIN|EXHAUSTED|UNRESOLVED)\b")
@@ -1055,6 +1169,13 @@ def train_record(store: SwarmStore, fam: Mapping[str, Any]) -> dict[str, Any]:
 #: "exhausted" or "waiting for the retire tool", a hold streak of 58 minutes (median) before the clock retired them.
 RETIRE_HOLD_CYCLES = 3
 RETIRE_HOLD_TRIALS = 10
+#: THE DEPTH RULE's defaults (F1; `short_dead`): the most checks of the line a "short" validation met, and the cycles a
+#: family is given after one. Measured on the Oct 3 store (the swarm's validation runs since Sept 26): the rule would have
+#: cut most of the validation runs that followed a family's first, and none of those that met the line or six checks.
+RETIRE_SHORT_CHECKS = 5
+RETIRE_SHORT_CYCLES = 10
+#: The family state's mark for it: its cycles when its latest counted validation was judged (`Tournament._verdict`).
+VALIDATED_CYCLES_KEY = "validated_cycles"
 
 
 # ------------------------------------------------------------------------------------ THE VALIDATED-FAMILY GUARD (Oct 1)
@@ -1635,6 +1756,11 @@ class Researcher:
         if line and state.get("validation_version") is not None:
             # D2a: pass or fail and a count, never a number Validation measured nor which checks failed.
             parts.append(f"Validation of version {state['validation_version']}: it {diagnostics.validation_words(line)}.")
+            left = short_left(fam, self.settings)
+            if left:  # THE DEPTH RULE (F1): the count D2a already shows decides how long the family goes on
+                parts.append(f"That is fewer than the checks a near miss meets, so the idle rule retires your family {left} "
+                             "cycles from now, whatever awaits validation then. Spend them on the one change most likely "
+                             "to matter, and leave what you learned in your notes: they become its lesson.")
         operator = self.operator_text(fam)  # THE OPERATOR'S RUN: a revival is run unchanged first, and its evidence decides
         if operator:
             parts.append(operator)
@@ -1686,9 +1812,9 @@ class Researcher:
             parts.append(f"Your family {dead}. If its mechanism is dead, call retire with your reason when the tool is offered "
                          "rather than re-running a placeholder: its slot goes to a new idea.")
         elif may_retire and self.hold_offer(fam):
-            parts.append(f"Your family has held {hold_streak(fam)} cycles in a row with a Train record behind it. If your notes "
-                         "say its mechanism is refuted or exhausted, call retire with your reason (it is offered now) rather "
-                         "than holding again: its slot goes to a new idea.")
+            parts.append(f"Your family has held {hold_streak(fam)} cycles in a row. If your notes say its mechanism is "
+                         "refuted or exhausted, or that the Gym's data cannot test it, call retire with your reason (it is "
+                         "offered now) rather than holding again: its slot goes to a new idea.")
         retire_hint = " If you abandon the entire mechanism, call retire with your reason." if may_retire else ""
         hold_hint = " With nothing new to run, call gym_run with hold=true and say why in its note."
         fit = min(self.sweep_room(), self.max_variants)
@@ -1889,14 +2015,19 @@ class Researcher:
 
     def hold_offer(self, fam: Mapping[str, Any]) -> bool:
         """THE HOLD OFFER (R11-1): a Gym family that held its last `researcher.retire_hold_cycles` (3) cycles in a row
-        (`hold_streak`) with an eligible Train run behind it (`train_record`) or `researcher.retire_hold_trials` (10) trials
-        of its own. Its researcher has usually declared the mechanism refuted and waits for a retire it was never offered
-        (Sept 29: a median 58-minute hold streak before the dormancy clause retired it). 0 cycles turns it off; 0 trials
-        leaves the eligible run alone. Never for a family under the extension hold (`extension_held`): its near-miss waits
-        for its 2017-19 extension result, which its own holds must not pre-empt."""
+        (`hold_streak`), whatever its trial count (F1, `researcher.retire_hold_untested`, true: on Oct 3 six of the eight
+        living families had 3 to 9 trials, no eligible Train run and notes that said "holding for retirement"). With
+        that setting false it also needs an eligible Train run behind it (`train_record`) or
+        `researcher.retire_hold_trials` (10) trials of its own, as before F1. Its researcher has usually declared the
+        mechanism refuted and waits for a retire it was never offered (Sept 29: a median 58-minute hold streak before
+        the dormancy clause retired it). 0 cycles turns it off; 0 trials leaves the eligible run alone. Never for a
+        family under the extension hold (`extension_held`): its near-miss waits for its 2017-19 extension result, which
+        its own holds must not pre-empt."""
         need = _count_setting(self.settings, "retire_hold_cycles", RETIRE_HOLD_CYCLES)
         if need <= 0 or fam.get("band") != "gym" or hold_streak(fam) < need or extension_held(fam):
             return False
+        if self.cfg.get("retire_hold_untested", True) is not False:
+            return True  # F1: whatever its trial count (a family that fails fast never reached ten trials)
         trials = _count_setting(self.settings, "retire_hold_trials", RETIRE_HOLD_TRIALS)
         if trials > 0 and int(fam.get("trials") or 0) >= trials:
             return True
@@ -1909,12 +2040,28 @@ class Researcher:
 
         ``start`` is a refill target, never a second floor: start == ceiling made normal retirement unreachable.
         A counted trial threshold offers retirement before an exhausted family has to buy hold calls to unlock it.
+        The floor is THE FLOOR COUNTS RESEARCH's (F1, `floor_room`): a dead slot is offered it at the floor too.
         """
-        pop = self.settings.get("population", {})
-        alive = len(self.store.families(alive=True))
         need = _count_setting(self.settings, "retire_min_trials", 10)
         tested = int(fam.get("validations") or 0) >= 2 or (need > 0 and int(fam.get("trials") or 0) >= need)
-        return alive > int(pop.get("floor", 16)) and bool(tested or self.dead(fam) or self.hold_offer(fam))
+        return self.floor_room(fam) and bool(tested or self.dead(fam) or self.hold_offer(fam))
+
+    def floor_counts(self) -> Callable[[Mapping[str, Any]], bool] | None:
+        """`floor_counts` against the Gym the pool runs now and the tournament's saved cohort keep: which living families
+        the floor counts (None: every one)."""
+        kept = kept_families(self.store, float(self.clock()))
+        return floor_counts(self.settings, current=self._gym_identity(), kept=kept.__contains__)
+
+    def floor_room(self, fam: Mapping[str, Any]) -> bool:
+        """Would the population floor let this family retire now (`SwarmStore.retire_gym` decides it again, atomically):
+        the living families the floor counts number more than `population.floor`, or this one is a dead slot the floor
+        does not count (THE FLOOR COUNTS RESEARCH, F1)."""
+        floor = self.retire_floor(fam)
+        alive = self.store.families(alive=True)
+        counts = self.floor_counts()
+        if counts is None:
+            return len(alive) > floor
+        return not counts(fam) or sum(1 for f in alive if counts(f)) > floor
 
     def can_retire(self, fam: Mapping[str, Any]) -> bool:
         """An evidence-backed abandonment (`retire_earned`) may use the atomic population floor, including on REVISE.
@@ -3460,14 +3607,15 @@ class Researcher:
                     return {"status": "refused", "reason": "retire is not available to your family now (it needs at least two "
                                                            "validations or enough counted trials and a population above its floor, or many Gym "
                                                            "evaluations without an eligible Train version, or many cycles "
-                                                           "of only holds and stored results, or a few holds in a row with "
-                                                           "a Train record behind them): keep researching"}
+                                                           "of only holds and stored results, or a few holds in a row): "
+                                                           "keep researching"}
                 # The store checks the population floor atomically; start is the architect's refill target. Its own
                 # researcher's verdict: the graveyard tags it SELF-REFUTED (R11-1), its reason and last notes after.
                 reason = args.get("reason")
                 if isinstance(reason, str) and reason.strip():
                     reason = f"{SELF_REFUTED}: {reason.strip()}"
-                result = self.store.retire_gym(fam["id"], reason, floor=self.retire_floor(current), source="researcher")
+                result = self.store.retire_gym(fam["id"], reason, floor=self.retire_floor(current), source="researcher",
+                                               counts=self.floor_counts())
             if result["status"] == "retired":
                 out["retired"] = True
                 try:
@@ -4559,4 +4707,6 @@ __all__ = ["Researcher", "TOOLS", "TOOLS_READ", "TOOLS_REVISE", "RUNS", "needs_o
            "revalidation_owed",
            "objective_for", "span_of", "CORE_SPAN", "RETIRE_GUARD_DAYS", "VERDICTS_KEY", "retire_guard", "retire_guard_days",
            "record_verdict", "validation_refuted", "validated_at", "guard_words", "adoption_archives",
-           "ADOPTED_ACTION"]
+           "ADOPTED_ACTION",
+           "short_dead", "short_left", "dead_slot", "floor_counts", "kept_families", "RETIRE_SHORT_CHECKS",
+           "RETIRE_SHORT_CYCLES", "VALIDATED_CYCLES_KEY"]

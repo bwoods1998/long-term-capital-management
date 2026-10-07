@@ -179,8 +179,9 @@ class TheStrategistReadsTheScreen(RoundCase):
 
 
 class HoldOffer(ResearcherCase):
-    """THE HOLD OFFER: three holds in a row with an eligible Train run or ten trials behind the family offer `retire` on its
-    REVISE turn, down to `population.floor`; its lesson is SELF-REFUTED."""
+    """THE HOLD OFFER: three holds in a row offer `retire` on the family's REVISE turn, whatever its trial count (F1; with
+    `researcher.retire_hold_untested` false, only with an eligible Train run or ten trials behind it, as before), down to
+    `population.floor`; its lesson is SELF-REFUTED."""
 
     def setUp(self):
         super().setUp()
@@ -196,7 +197,32 @@ class HoldOffer(ResearcherCase):
             self.store.update_family(self.fid, trials=trials)
         return self.store.family(self.fid)
 
+    def test_offered_after_three_holds_whatever_the_trial_count(self):
+        """F1 (Oct 3): six of the eight living families had 3 to 9 trials, no eligible Train run and notes that said
+        "holding for retirement"; the offer no longer asks for the Train record."""
+        self.assertIs(self.settings["researcher"]["retire_hold_untested"], True, "the default")
+        self.researcher().cycle(self.fid)  # the starter: one ineligible run
+        r = self.researcher()
+        self.assertFalse(r.hold_offer(self.held(2, trials=40)), "two holds")
+        self.assertTrue(r.hold_offer(self.held(3, trials=1)), "three holds, one trial, no eligible run: offered")
+        self.assertTrue(r.can_retire(self.store.family(self.fid)))
+        self.settings["researcher"]["retire_hold_cycles"] = 0
+        self.assertFalse(r.hold_offer(self.store.family(self.fid)), "0 turns it off")
+        self.settings["researcher"]["retire_hold_cycles"] = 3
+        self.store.set_state(self.fid, validation_version=1, extension_hold={"version": 1, "checks": "6/8", "at": "x"})
+        self.assertFalse(r.hold_offer(self.store.family(self.fid)), "a near-miss waits for its extension result")
+        self.store.set_state(self.fid, extension_hold=None)
+        self.store.update_family(self.fid, band="candidate")
+        self.assertFalse(r.hold_offer(self.store.family(self.fid)), "the Gym band only")
+        self.store.update_family(self.fid, band="gym")
+        self.steps = [{"calls": [("retire", {"reason": "The Gym's data cannot locate the signal: nothing to test."})]}]
+        out = self.researcher().cycle(self.fid)
+        self.assertEqual([t["name"] for t in self.sail.bodies[-1]["tools"]], ["gym_run", "gym_sweep", "retire"])
+        self.assertIn("held 3 cycles in a row. If your notes say", self.sail.bodies[-1]["input"][-1]["content"])
+        self.assertTrue(out["retired"], "the retire it asked for is honoured")
+
     def test_offered_after_three_holds_with_ten_trials_or_an_eligible_run(self):
+        self.settings["researcher"]["retire_hold_untested"] = False  # the offer as it was before F1
         self.researcher().cycle(self.fid)  # the starter: one ineligible run
         r = self.researcher()
         self.assertFalse(r.hold_offer(self.held(2, trials=40)), "two holds")
@@ -225,7 +251,8 @@ class HoldOffer(ResearcherCase):
         out = self.researcher().cycle(self.fid)
         tools = [t["name"] for t in self.sail.bodies[-1]["tools"]]
         self.assertEqual(tools, ["gym_run", "gym_sweep", "retire"], "REVISE offers retire to a holding family")
-        self.assertIn("held 3 cycles in a row with a Train record behind it", self.sail.bodies[-1]["input"][-1]["content"])
+        self.assertIn("held 3 cycles in a row. If your notes say its mechanism is refuted or exhausted",
+                      self.sail.bodies[-1]["input"][-1]["content"])
         self.assertTrue(out["retired"])
         self.assertEqual(self.cancelled, [self.fid])
         fam = self.store.family(self.fid)

@@ -58,6 +58,14 @@ fewer than `architect.max_rebirths_per_cell` (3) rebirths in the last `architect
 rows multiply never refills its own budget. A false match costs a justification and a budget slot, never an idea
 outright. The check is deterministic and makes no model call.
 
+THE CELLS A BIRTH MAY LAND IN (F1, Oct 3, 2026; `RebirthIndex.grid`, `bearable`, `cells(families=...)`). While
+`architect.structures` names the types a birth may be, the request lists every cell of those types' structure families
+(for debit verticals and long singles, the 44 directional cells: 11 mechanism classes by 4 holdings), each with its rows,
+its rebirth room and the rows a claim may name, the cells with room first, then the cells no row is in (a card there
+needs no rebirth), then the cells at room 0; no line goes to a structure type no birth may be. A cell can bear a birth
+when no row of it needs a claim, or when it has rebirth room and a row that has backed fewer than
+`architect.max_rebirths_per_row` rebirths; a pass with no such cell asks no model (`Architect.closed`).
+
 THE CELL'S YIELD (`architect.cell_yield`, H2 of the Oct 1 edge study; off by default: null, every mechanism-verdict row
 needs a claim, as above). A SELF-REFUTED row (its own researcher retired it, since release A at a median of under an
 hour) or a DRIFT row (the idle rule's Train record failed the drift screen) is a family's outcome, not a test of the
@@ -89,7 +97,7 @@ import hashlib
 import json
 import math
 import re
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 from . import evidence as evidence_mod
 
@@ -978,35 +986,82 @@ class RebirthIndex:
             cell = self._cell_of_rebirth(row, key_of(card, structure))
             self.cell_births[cell] = self.cell_births.get(cell, 0) + 1
 
-    def cells(self, limit: int = 40, claimable: int = 0) -> list[str]:
+    def grid(self, families: Iterable[str]) -> list[tuple[tuple[str, str, str], list[dict[str, Any]]]]:
+        """THE CELLS A BIRTH MAY LAND IN (F1): every cell (mechanism class, structure family, holding) of the structure
+        families `families`, each with its mechanism-verdict rows (oldest first; [] for a cell no row is in). The cells
+        with rebirth room first (most rows first), then the cells with no row, then the cells at rebirth room 0."""
+        groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+        for r in self.rows:
+            groups.setdefault(cell_of(r["key"]), []).append(r)
+        wanted = [f for f in dict.fromkeys(STRUCTURE_FAMILIES.values()) if f in set(families)]
+        cells = [(c, f, h) for f in wanted for c in MECHANISM_CLASSES for h in HOLDING]
+        order = {cell: i for i, cell in enumerate(cells)}
+
+        def rank(cell: tuple[str, str, str]) -> tuple[int, int, int]:
+            rows = groups.get(cell, [])
+            stage = 1 if not rows else 0 if self.room(cell) > 0 else 2
+            return (stage, -len(rows), order[cell])
+
+        return [(cell, groups.get(cell, [])) for cell in sorted(cells, key=rank)]
+
+    def room(self, cell: Any) -> int:
+        """The rebirths `cell` may still bear in the window (`architect.max_rebirths_per_cell` less those born)."""
+        return max(0, self.per_cell - self.cell_births.get(tuple(cell), 0))
+
+    def bearable(self, cell: Any, rows: list[dict[str, Any]]) -> bool:
+        """Can a birth land in `cell` now (`rows`: its mechanism-verdict rows): no row needs a claim there (an empty cell,
+        or THE CELL'S YIELD's open one), or it has rebirth room and a row a claim may still name (one that has backed
+        fewer than `architect.max_rebirths_per_row` rebirths)."""
+        if not any(self.needs_claim(r) for r in rows):
+            return True
+        return self.room(cell) > 0 and any(self.backed.get(r["row"], 0) < self.per_row for r in rows)
+
+    def cells(self, limit: int = 40, claimable: int = 0, families: Iterable[str] | None = None,
+              chars: int | None = None) -> list[str]:
         """The refuted cells, most rows first: one line each for the architect's request (with the cell's rebirth room).
         With `architect.cell_yield` on, each says whether it is open (and how many of its rows need a claim) or exhausted.
         `claimable` (`architect.claimable_rows`, 0: off) adds, for a cell with rebirth room where a claim can be needed, up
         to that many of its rows a claim may name (rows that have backed fewer than `max_rebirths_per_row` rebirths, newest
         first), each with the inputs it read, which a claim must add to; a carded row is matched only when the card's
-        inputs overlap those. Ids and input names only: no figure."""
-        groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
-        for r in self.rows:
-            groups.setdefault(cell_of(r["key"]), []).append(r)
-        ranked = sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))[:limit]
-        out = []
+        inputs overlap those. Ids and input names only: no figure. `families` (F1: the structure families a birth may be
+        now, while `architect.structures` leaves any type out): every cell of those families and no other (`grid`: the
+        ones with rebirth room first, then the ones no row is in, then the ones at room 0), whatever `limit` says; a
+        cell no row is in says a card there needs no rebirth. `chars` (with `families`): the most characters the lines
+        may run to; past it the last cells of the list give up their claimable rows, never their line."""
+        if families is not None:
+            ranked = self.grid(families)
+        else:
+            groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+            for r in self.rows:
+                groups.setdefault(cell_of(r["key"]), []).append(r)
+            ranked = sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))[:limit]
+        out: list[list[str]] = []  # each cell's line and its claimable rows' words ("" when it names none)
         for cell, rows in ranked:
+            if not rows:
+                out.append([f"{' / '.join(cell)}: no row: a card here needs no rebirth", ""])
+                continue
             carded = sum(1 for r in rows if not r["legacy"])
-            room = max(0, self.per_cell - self.cell_births.get(cell, 0))
+            room = self.room(cell)
             line = (f"{' / '.join(cell)}: {len(rows)} rows ({carded} carded), rebirth room {room}, newest "
                     f"{', '.join(r['row'] for r in rows[-3:])}")
             need = sum(1 for r in rows if self.needs_claim(r))
             if self.yield_cfg is not None:
                 line += ("; exhausted: every row needs a claim" if self.exhausted(cell)
                          else f"; open: {need} of its rows need a claim" if need else "; open: no row needs a claim")
+            named = []
             if claimable > 0 and room > 0 and need:
                 named = [r for r in reversed(rows) if self.backed.get(r["row"], 0) < self.per_row][:claimable]
-                if named:
-                    line += "; claimable: " + ", ".join(
-                        f"{r['row']} (read {'+'.join(r['inputs']) or 'nothing named'}{'' if r['legacy'] else ', carded'})"
-                        for r in named)
-            out.append(line)
-        return out
+            out.append([line, "; claimable: " + ", ".join(
+                f"{r['row']} (read {'+'.join(r['inputs']) or 'nothing named'}{'' if r['legacy'] else ', carded'})"
+                for r in named) if named else ""])
+        if families is not None and chars is not None:
+            size = sum(len(line) + len(more) + 1 for line, more in out)
+            for item in reversed(out):
+                if size <= chars:
+                    break
+                size -= len(item[1])
+                item[1] = ""
+        return [line + more for line, more in out]
 
 
 __all__ = ["MECHANISM_CLASSES", "INPUTS", "HOLDING", "STRUCTURE_FAMILIES", "FLAT_REFUSED", "MECHANISM_VERDICTS", "DEFAULT_ABLATION",

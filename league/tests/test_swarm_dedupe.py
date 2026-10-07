@@ -423,6 +423,10 @@ class Dormancy(DedupeCase):
         fam = self.store.family(self.fid)
         self.assertEqual((fam["trials"], fam["revisions"]), (1, 1), "holds and stored results: no trial, no revision")
         self.assertIsNone(idle_dead(fam, self.settings), "39: not yet")
+        # Not dead, but F1's hold offer (three holds in a row, whatever the trial count) already offers retire; with
+        # `researcher.retire_hold_untested` false, as before F1, only the dormancy clause does.
+        self.assertTrue(self.researcher().can_retire(fam))
+        self.settings["researcher"]["retire_hold_untested"] = False
         self.assertFalse(self.researcher().can_retire(fam))
         self.hold()
         fam = self.store.family(self.fid)
@@ -470,10 +474,15 @@ class Dormancy(DedupeCase):
         self.assertIsNone(idle_dead(self.store.family(self.fid), self.settings), "a holdout look is out")
         self.store.set_state(self.fid, look_inflight=None)
         self.assertIsNotNone(idle_dead(self.store.family(self.fid), self.settings))
-        self.settings["population"]["floor"] = 1
+        self.settings["population"].update(floor=1, floor_researching=False)  # every living family counts, as before F1
         self.assertFalse(self.researcher().can_retire(self.store.family(self.fid)), "at the floor: not offered")
         self.assertEqual(Tournament(self.store, self.pool, self.settings).retirements(self.store.families(alive=True)), [])
         self.assertIsNone(self.store.family(self.fid)["retired_at"])
+        # THE FLOOR COUNTS RESEARCH (F1, the default): the floor is not held by a dead family.
+        self.settings["population"]["floor_researching"] = True
+        self.assertTrue(self.researcher().can_retire(self.store.family(self.fid)), "a dead slot at the floor: offered")
+        [row] = Tournament(self.store, self.pool, self.settings).retirements(self.store.families(alive=True))
+        self.assertEqual(row["family"], self.fid)
 
     def test_a_best_awaiting_validation_is_not_dead(self):
         self.pool.answer = lambda job: result(job.name, roots=job.roots)  # eligible: the starter is the family's best
