@@ -80,6 +80,12 @@ def _money(value: Any, what: str) -> Decimal:
     return amount.quantize(CENT, rounding=ROUND_DOWN)
 
 
+#: The options grant's smallest real stake (THE FAST LANE, Oct 7, 2026): the Probe's one-contract floor as it was before
+#: the floor went to $0. The standing grant refuses capital under it, and its policy's `stake_usd` and `max_agents`
+#: (capital // stake) read it, exactly as before the fast lane.
+OPTIONS_MIN_STAKE = Decimal("100")
+
+
 def smallest_stake(constitution: Mapping[str, Any] | None = None) -> Decimal:
     """The smallest real stake the money rules give the Brokerage Account: a grant must cover one,
     and its seat count (`max_agents`) is its capital over this. With the allocator on, the smallest
@@ -90,10 +96,11 @@ def smallest_stake(constitution: Mapping[str, Any] | None = None) -> Decimal:
     rules = constitution or CONSTITUTION
     options = rules.get("options_money")
     if isinstance(options, Mapping):
-        # The options swarm (Sept 26, 2026, Wave 5): the smallest real structure is the Probe's one-contract floor.
+        # The options swarm (Sept 26, 2026, Wave 5): the smallest real structure is the Probe's one-contract floor. Since
+        # THE FAST LANE (Oct 7, 2026) the floor is $0, and the grant keeps the $100 it had (`OPTIONS_MIN_STAKE`), so the
+        # floor's move loosens no grant refusal (its review): never under it, whatever the floor.
         floor = Decimal(str((options.get("probe") or {}).get("floor_usd") or 0))
-        if floor > 0:
-            return floor
+        return max(floor, OPTIONS_MIN_STAKE)
     allocator = rules.get("allocator") or {}
     if allocator.get("enabled"):
         stakes = [Decimal(str(v)) for table in ("bunt_usd", "probe_bunt_usd")

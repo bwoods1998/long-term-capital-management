@@ -170,8 +170,9 @@ SYSTEM = """You are the architect of a swarm of AI researchers that trade level-
 brokerage account. Each researcher owns one family: a mechanism, a structure type and a universe slice, and improves a
 program for it in a Gym of real recorded one-minute option quotes (Train 2022-2024; Validation 2025 by summary only; a
 sealed holdout at the gate). Propose NEW families that are likely to clear the validation line (>= 50 trades on >= 25
-days a year, mean P&L per dollar of max loss > 0 with t >= 2 after fees and the spread, a deflated Sharpe on traded days
-that survives the lineage's validated versions, 3 of 4 quarters positive, positive at 1.5x the half-spread). A family's
+days a year, mean P&L per dollar of max loss > 0 with t >= 1.65 after fees and the spread, a probabilistic Sharpe of at
+least 0.95 on traded days, 2 of 4 quarters positive, positive at 1.5x the half-spread; then one sealed holdout look per
+program at p <= 0.10). A family's
 Train score is its WORST Train year, so a mechanism must earn in 2022, 2023 and 2024 alike, with at least 40 trades on
 20 days in each. Prefer mechanisms with a reason to exist
 (a risk premium, a flow, a behavioral bias, a venue rule), horizons supported by the available data, and slices the

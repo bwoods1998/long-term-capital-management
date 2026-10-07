@@ -63,7 +63,16 @@ JOBS: tuple[Job, ...] = (
         in_pause=True,
         what="the one-cutoff close economics and the trailing 30-day realized options P&L"),
     Job("scoreboard", "league.ops.scoreboard", (S.daily(23, 30),), grace=2 * HOUR, cpu=120, wall=300,
-        what="the public-safe daily scoreboard, committed through the gateway"),
+        what="the public-safe daily scoreboard and its funnel, committed through the gateway"),
+    # Every half hour, round the clock (the owner's goal of Oct 7, 2026, item 6), at :20 and :50, off the grant's :05 and
+    # the engineer's :40. Read-only and a few seconds: it runs in session like the grant, and its grace outlasts the
+    # longest job's wall, so an occurrence behind a long job waits and runs rather than being `missed`. It runs in a
+    # maintenance pause too (read-only, like preopen and clock), so a pause left on is itself an owner step it reports.
+    Job("stall", "league.ops.stall", (S.hourly(20), S.hourly(50)), grace=70 * MINUTE, cpu=120, wall=300, owner="self-running",
+        in_pause=True,
+        what="the stall alarm: births, Gym runs, Validations, the guard's brake, the budget's runway, an owner deploy, a "
+             "pause, a refused grant or the kill switch waiting; one stall notice listing them all, an owner step's at "
+             "once and every 12 h, the rest every 24 h"),
     # Twice: 15:00Z runs the drills and requests the rollback drill last (the updater launches it); 17:00Z checks its verdict (and runs any drill
     # the first could not reach). A drill done this month is never run again (`league/ops/drills.py`).
     Job("drills", "league.ops.drills", (S.monthly_first(5, 15, 0), S.monthly_first(5, 17, 0)), grace=6 * HOUR, cpu=1800, wall=3600, owner="WP1/WP3",
@@ -72,8 +81,20 @@ JOBS: tuple[Job, ...] = (
         paid=True, what="the weekly post-mortem"),
     Job("agenda", "league.ops.agenda", (S.daily(3, 0),), grace=6 * HOUR, cpu=900, wall=1800, owner="Phase 2",
         paid=True, what="the strategist's daily agenda"),
-    Job("engineer", "league.ops.engineer", (S.daily(4, 0),), grace=6 * HOUR, cpu=1800, wall=3600, owner="Phase 4",
-        paid=True, what="the engineer's daily harness change", retry=False),
+    # Authoring at 04:00Z (after the scoreboard); every hour at :40 the candidate in flight moves on (CI, the review, the
+    # merge, the deploy, the canary, the decision, a revert) without waiting a day per step.
+    Job("engineer", "league.ops.engineer", (S.daily(4, 0), S.hourly(40)), grace=50 * MINUTE, cpu=1800, wall=3000,
+        owner="Phase 4", paid=True, what="the engineer's harness change: author daily, move the candidate along hourly",
+        retry=False),
+    # At a House start the grant goes first (occurrences due at the same instant start in this order, `runner.due`).
+    Job("direction", "league.ops.direction", (S.at_start(), S.daily(1, 0)), grace=3 * HOUR, cpu=120, wall=600,
+        in_pause=True, owner="fast lane v2",
+        what="the roots' daily closes for the same-risk buy-and-hold beside each screen result and band row (reported, "
+             "never a bar)"),
+    Job("fast_lane", "league.ops.fast_lane", (S.after("direction"),), grace=3 * HOUR, cpu=600, wall=1200,
+        in_pause=True, owner="fast lane v2",
+        what="the fast lane's report (read-only): the buy-and-hold and the drift fit beside each screen result and band "
+             "row, the contamination measures, D5 and the Probe budget, into <state>/fast-lane-report.json"),
 )
 
 

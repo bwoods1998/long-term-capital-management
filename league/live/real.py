@@ -61,6 +61,9 @@ from .venue import TERMINAL, WORKING, Account, Submitted, dec, occ_parts
 PREFIX = "lv-"
 #: The incubator's instances (`<family>@<version>:i`, `league/live/incubator.py`): real, tuition-size, never evidence.
 INCUBATOR_SUFFIX = ":i"
+#: A family's real-money instances (`<family>@<version>:r`): Probe and Sized. THE FAST LANE's Probe limits count them
+#: (`probe_tally`).
+REAL_SUFFIX = ":r"
 #: The real types that are one contract bought to open (the sprint, B4): single-leg orders, not `mleg`.
 SINGLE_TYPES = ("long_call", "long_put")
 #: The Brokerage Account's legacy crypto dust, below the venue's minimum order: a known holding outside P&L.
@@ -146,6 +149,54 @@ def incubator_tally(rows: Callable[..., list], *, day: str, week_start: str, fam
     return M.IncubatorTally(realized_loss=realized, held=held, working=working, family_held=fam_held,
                             family_working=fam_working, open_n=open_n, legs_today=legs, opened_today=opened,
                             week_peak_loss=peak)
+
+
+def probe_tally(rows: Callable[..., list], *, day: str) -> tuple[int, Decimal, Decimal]:
+    """THE FAST LANE's Probe figures (D3, D4, Oct 7, 2026; `money.plan_open`): (open_n, realized_loss, at_risk) from the
+    live state's own rows, selected by the instance suffix `:r` and `tuition = 0` only, so a restart reads the same numbers
+    (`rows(sql, params)` returns dicts, as `incubator_tally`'s). `day`: today (New York), ISO.
+
+    realized_loss: GROSS realized Probe losses, the sum of max(0, -cash) over every closed position a Probe family opened
+    (its info's `probe` mark, copied from its opening order's, which `money.Plan.probe` set): one position's gain never
+    offsets another's loss, and a Sized position's never counts (the fast lane's review, Oct 7, 2026: a net figure let a
+    Sized gain or a Probe gain refill the budget). Cash is the book's, fees included (their estimate until the broker's
+    post). "Since this release" is enforced by the mark: no order before this release carried one.
+
+    at_risk: each position not closed, Probe or Sized (a tightening: a Sized position fills the budget and a slot too),
+    held, expiring or unpriced (its `opened_qty` units when unpriced) at its maximum loss with its fees twice, or what its
+    cash already lost when that is more; and each pending, working or unknown open at its maximum loss with its fees twice
+    for what may still fill. A LOST open (its outcome unknown: the venue did not show it by its client id) counts whole,
+    whatever its age, until the book finds it at the venue (`ingest` takes it back): the budget is a running total, so a
+    lost open may have filled and lost. open_n: positions not closed, and pending, working or unknown opens without a
+    position; a lost open without a position holds its slot until its first leg's expiry has passed (after that it can
+    hold nothing; its maximum loss stays counted in at_risk)."""
+    like = REAL_SUFFIX                       # substr(instance, -2): exact and case-sensitive (LIKE is neither)
+    at_risk = M.ZERO
+    realized = M.ZERO
+    open_n = 0
+    for r in rows("SELECT qty, opened_qty, max_loss_share, fees, cash, status, info FROM positions "
+                  "WHERE substr(instance, -2)=? AND tuition=0", (like,)):
+        if r["status"] == "closed":
+            if (loads(r["info"], {}) or {}).get("probe") is True:
+                realized += max(M.ZERO, -M.D(r["cash"]))
+            continue
+        units = int(r["opened_qty"]) if r["status"] == "unpriced_close" else max(0, int(r["qty"]))
+        at_risk += max(M.D(r["max_loss_share"]) * V.MULTIPLIER * units + 2 * M.D(r["fees"]), -M.D(r["cash"]))
+        open_n += 1
+    for r in rows("SELECT qty, filled_qty, status, max_loss, fees_est, day, pid, legs FROM orders WHERE action='open' "
+                  "AND substr(instance, -2)=? AND tuition=0 AND status IN ('pending', 'working', 'unknown', 'lost')", (like,)):
+        lost = r["status"] == "lost"
+        remaining = int(r["qty"]) if lost else max(0, int(r["qty"]) - int(r["filled_qty"]))
+        at_risk += (M.D(r["max_loss"]) + 2 * M.D(r["fees_est"])) * M.D(remaining) / max(1, int(r["qty"]))
+        if r["pid"] is None and not (lost and _expired(r["legs"], day)):
+            open_n += 1
+    return open_n, realized, at_risk
+
+
+def _expired(legs: Any, day: str) -> bool:
+    """Whether an order's first leg expired before `day` (an unreadable leg list never has)."""
+    expiries = [str(x.get("expiry") or "") for x in (loads(legs, []) or []) if isinstance(x, Mapping)]
+    return bool(expiries) and all(expiries) and min(expiries) < str(day)
 
 
 def client_id(oid: int, family: str, *, nonce: str = "") -> str:
@@ -280,6 +331,7 @@ class ROrder:
     attempts: int = 0
     dispatched: bool = False     # reached the venue (the gateway reserved it)
     uneven: bool = False
+    probe: bool = False          # a Probe family's open (`money.Plan.probe`): kept in `answer`, copied to its position
 
     @property
     def working(self) -> bool:
@@ -297,6 +349,8 @@ class ROrder:
         answer = dict(self.answer)
         answer["dispatched"] = self.dispatched
         answer["uneven"] = self.uneven
+        if self.probe:
+            answer["probe"] = True
         return {"oid": self.oid, "client_id": self.client_id, "venue_id": self.venue_id, "instance": self.instance,
                 "family": self.family, "action": self.action, "type": self.type, "root": self.root,
                 "legs": legs_json(self.legs), "qty": self.qty, "limit_value": self.limit_value, "limit_price": self.limit_price,
@@ -315,7 +369,7 @@ class ROrder:
                    int(r["filled_qty"]), float(r["fill_value"]), r["pid"], bool(r["forced"]), float(r["reserve"]),
                    float(r["max_loss"]), float(r["fees_est"]), bool(r["tuition"]), r["why"] or "", answer,
                    float(r["updated_at"]), r["cancel_sent"], int(r["attempts"] or 0), bool(answer.get("dispatched")),
-                   bool(answer.get("uneven")))
+                   bool(answer.get("uneven")), probe=answer.get("probe") is True)
 
 
 def mleg_body(order: ROrder) -> dict[str, Any]:
@@ -482,8 +536,10 @@ class RealBook:
                 tuition_week += loss
                 if r["day"] == day:
                     tuition_day += loss
+        probe_open, probe_realized, probe_at_risk = probe_tally(self.state.rows, day=day)
         return M.Exposure(family_open=fam_open, family_loss=M.D(round(fam_loss, 2)), book_loss=M.D(round(book, 2)),
-                          day_opened=day_opened, tuition_day=tuition_day, tuition_week=tuition_week)
+                          day_opened=day_opened, tuition_day=tuition_day, tuition_week=tuition_week,
+                          probe_open=probe_open, probe_realized=probe_realized, probe_at_risk=probe_at_risk)
 
     def incubator_tally(self, *, day: str, week_start: str, family: str | None = None) -> M.IncubatorTally:
         """The incubator's numbers from the live state's rows, read afresh (`incubator_tally`)."""
@@ -620,7 +676,8 @@ class RealBook:
     # ------------------------------------------------------------------ sending
     def new_order(self, *, instance: str, family: str, action: str, type_: str, root: str, legs: list[RLeg], qty: int,
                   limit_value: float, tif: int | None, day: str, minute: int, pid: int | None = None, forced: bool = False,
-                  reserve: float = 0.0, max_loss: float = 0.0, fees_est: float = 0.0, tuition: bool = False, why: str = "") -> ROrder:
+                  reserve: float = 0.0, max_loss: float = 0.0, fees_est: float = 0.0, tuition: bool = False, why: str = "",
+                  probe: bool = False) -> ROrder:
         single = type_ in SINGLE_TYPES and action in ("open", "close") and len(legs) == 1
         with self.state.transaction():
             oid = self._next("orders", "oid")
@@ -631,7 +688,7 @@ class RealBook:
                            type_, root, list(legs), int(qty),
                            float(limit_value), price, tif, self.clock(), day, int(minute),
                            pid=pid, forced=forced, reserve=float(reserve), max_loss=float(max_loss), fees_est=float(fees_est),
-                           tuition=tuition, why=str(why)[:300])
+                           tuition=tuition, why=str(why)[:300], probe=bool(probe) and action == "open" and not tuition)
             order.updated_at = self.clock()
             self.state.upsert("orders", order.row(), "oid")
         self.orders[oid] = order
@@ -820,7 +877,7 @@ class RealBook:
                     pos = RPosition(pid, order.instance, order.family, order.type, order.root, list(order.legs), 0, 0, value,
                                     _loss_share(order.type, value, collateral), collateral, opened_at=now, opened_day=order.day,
                                     opened_minute=order.placed_minute, tag=order.why[:80], tuition=order.tuition,
-                                    info={"order": order.oid})
+                                    info={"order": order.oid, **({"probe": True} if order.probe else {})})
                     self.state.upsert("positions", pos.row(), "pid")
                 order.pid = pid
             total = pos.opened_qty + dq
@@ -1133,4 +1190,4 @@ def real_legs(order: L.Order, chain: Any) -> list[RLeg]:
 
 __all__ = ["RealBook", "RLeg", "RPosition", "ROrder", "mleg_body", "single_leg_body", "single_body", "order_body", "is_single",
            "limit_price", "client_id", "structure_fill", "real_legs", "leg_fees", "PREFIX", "KNOWN_DUST", "SINGLE_TYPES",
-           "INCUBATOR_SUFFIX", "is_incubator", "incubator_tally"]
+           "INCUBATOR_SUFFIX", "is_incubator", "incubator_tally", "REAL_SUFFIX", "probe_tally"]

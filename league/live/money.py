@@ -12,8 +12,10 @@ BANDS (the live path owns candidate <-> probe <-> sized; the swarm owns gym <-> 
 
 - PROBE: a Candidate that passed the holdout, whose structure is one of the real types (credit types only while credit
   opens are allowed), and whose typical maximum loss (one structure, with its round-trip fees) fits the Probe's cap at
-  `E`: `probe.max_loss_share x E`, or `probe.floor_usd` for one contract. Otherwise it stays a Candidate, shadow only,
-  with the reason recorded. A family's structure is what it DECLARED; `long_single` (Sept 29, 2026: one program whose
+  `E`: `probe.max_loss_share x E` (10% since THE FAST LANE, Oct 7, 2026; `probe.floor_usd` is $0 since). Otherwise it
+  stays a Candidate, shadow only, with the reason recorded. The move to Probe is the live path's (`band_for`, at the
+  families pass after the gate's "candidate"), and a family it confirmed trades real money from the next live minute
+  (`step._real_eligible`: no session wait since the fast lane). A family's structure is what it DECLARED; `long_single` (Sept 29, 2026: one program whose
   every open is a `long_call` or a `long_put`, the side chosen by its rule) is real only while BOTH are real types
   (`order_types`, `Table.family_allowed`). The table's `real_types` stay concrete types, and every real order is still
   checked by its own type (`Table.type_allowed`), at the real book and at the gateway.
@@ -24,20 +26,40 @@ BANDS (the live path owns candidate <-> probe <-> sized; the swarm owns gym <-> 
   Sized one goes back to Probe.
 - A Probe or Sized family whose forward record turns negative (the swarm's `forward.negative`, or this record's own:
   20 trades and a mean below zero) loses its band: back to Candidate, its real instance on exits only.
+- D5, DEMOTION BY LIVE RESULTS (fast lane v2, Oct 7, 2026; `demotion`, pre-registered bounds chosen, not measured): a
+  Candidate or Probe whose version's realized real P&L is below -`DEMOTE_LOSS_MULTIPLE` (3) x the mean maximum loss of
+  its real positions, or whose live fills ran below its nightly replay of the same days by more than `REPLAY_GAP_BOUND`
+  (0.20) a dollar of maximum loss over at least `REPLAY_GAP_MIN_TRADES` (5) real trades, is (or stays) a Candidate, its
+  real instance on exits only. Sticky: the version's real rows persist (a new version starts its own record), and the
+  record keeps it (the swarm's band event and `live.band` carry the reason). Sizing up is unchanged (Sized rules).
 
 SIZING a real open (`plan_open`), by maximum loss, never premium. `unit` is one structure's maximum loss at its limit
 plus its open and close fees, from the ORDER's own type and legs (a `long_single` family's call and put are each sized
 by their own unit):
 
-- Probe: the per-structure cap is `probe.max_loss_share x E`; quantity = floor(cap / unit); a structure that fits none
-  but whose unit is at most `probe.floor_usd` trades ONE (the floor). At most `probe.open_per_family` open structures,
-  and the family's open maximum loss at most max(`probe.family_share x E`, `probe.floor_usd`).
+- Probe (THE FAST LANE, Oct 7, 2026; the owner's goal item 4): ONE structure (`probe.contracts`) whose unit is at most
+  the cap `probe.max_loss_share x E` (10%); a structure over it is refused (the old $100 one-contract floor is $0). At
+  most `probe.open_per_family` open structures, the family's open maximum loss at most `probe.family_share x E`. At
+  most `probe.max_open` (3) Probe positions held or working at once across the account, and THE PROBE LOSS BUDGET:
+  realized Probe losses since this release, GROSS (each closed position a Probe family opened, marked so at its open:
+  `Plan.probe`, the order's and the position's `probe` mark; its loss, never offset by a gain of another position, and
+  never a Sized position's) plus the maximum loss of every real position held or working (`real.probe_tally`, every
+  ":r" row: a Sized position counts here too, a tightening) plus the new open at most `probe.loss_budget_usd` ($400);
+  an open that would breach it is refused and exits go on. These two refuse a Probe family's open only, never a Sized
+  one, and come after the kill switch, the stops, the grant and reconciliation (`step._real_intent` asks `real_block`
+  first). `probe_room` is the room the other routes leave for Probe opens.
 - Sized: `sized.kelly_fraction` of Kelly on the LOWER bound (`stats.quarter_kelly`: fraction x lcb / variance of the
   per-trade return on maximum loss) of `E` a structure, never above `sized.max_loss_share x E`; the family at most
-  `sized.family_share x E`. A Sized family whose Kelly stake is under the Probe's cap is sized under the Probe's limits
-  (`probe.max_loss_share` a structure, `probe.open_per_family` open, `probe.family_share` the family): Sized limits never
-  apply at a Probe-sized stake.
-- Tuition: exactly one structure, only while the day's and the week's tuition maximum loss has room.
+  `sized.family_share x E`. C3 (the review of #362), unchanged by the fast lane: a Sized family whose Kelly stake is
+  under the Probe's cap, or buys no whole structure, is sized under the Probe's limits (`sizing_band`: the Probe's one
+  structure within its cap, `probe.open_per_family` open, `probe.family_share` the family): the Sized family and count
+  limits never apply at a Probe-sized stake, and it never trades smaller than a Probe. Its open is not a Probe
+  family's: neither the Probe count nor the budget refuses it, and it is not marked a Probe open.
+- Tuition: exactly one structure, only while the day's and the week's tuition maximum loss has room, and (since the
+  fast lane review, Oct 7, 2026) only a structure within the Probe's cap (`probe.max_loss_share x E`): tuition never
+  risks more on one structure than a Probe does. Tuition is a route of its own: real 1-lots of a program that passed
+  Validation only (never the screen), outside the Probe count and the Probe loss budget, at most the tuition day's and
+  week's maximum loss.
 - The House live test (`league/live/house_test.py`, not a family): one structure of at most `house_test.structure_usd`,
   at most `house_test.open` held or working, its realized loss plus what is held or working at most
   `house_test.envelope_usd`, no new open once its realized loss reaches `house_test.stop_usd`, after `house_test.sessions`
@@ -49,7 +71,7 @@ by their own unit):
   new unit, at most `incubator.week_loss_usd`: once the week's net realized loss has reached it at any close, the route
   stops for the rest of the ISO week, a later gain notwithstanding); at most
   `INCUBATOR_DAY_LEGS` order legs a day and `INCUBATOR_DAY_OPEN_SHARE` of the gateway's day cap; and it keeps room in
-  the book's and the day's caps for the families' Probe floors and the House live test. Its eligibility is the practice
+  the book's and the day's caps for the families' Probe room (`probe_room`) and the House live test. Its eligibility is the practice
   rule (`practice_ok`: the first look, pre-registered). Never evidence, never a band, never a promotion.
 - Every open: the book's open maximum loss at most `book_share x E`; the gateway's caps (one order's maximum loss at
   most min(`gateway.order_max_loss_usd`, `gateway.order_equity_share x E`), today's opening maximum loss at most
@@ -130,6 +152,9 @@ class Table:
     probe_open: int
     probe_family_share: Decimal
     probe_floor: Decimal
+    probe_contracts: int
+    probe_max_open: int
+    probe_loss_budget: Decimal
     sized_min_trades: int
     sized_confidence: float
     kelly_fraction: float
@@ -183,6 +208,8 @@ class Table:
             credit_min_equity=D(t["credit_min_equity_usd"]),
             probe_share=D(probe["max_loss_share"]), probe_open=int(probe["open_per_family"]),
             probe_family_share=D(probe["family_share"]), probe_floor=D(probe["floor_usd"]),
+            probe_contracts=int(probe["contracts"]), probe_max_open=int(probe["max_open"]),
+            probe_loss_budget=D(probe["loss_budget_usd"]),
             sized_min_trades=int(sized["min_trades"]), sized_confidence=float(D(sized["confidence"])),
             kelly_fraction=float(D(sized["kelly_fraction"])), sized_share=D(sized["max_loss_share"]),
             sized_family_share=D(sized["family_share"]), min_probe_real_trades=int(sized["min_probe_real_trades"]),
@@ -249,6 +276,13 @@ class Table:
 #: The real subset of a forward record read on its own once it has this many trades: losing, it holds the family at
 #: Probe (never Sized) and takes a Sized family back to Probe.
 REAL_MIN_TRADES = 10
+#: DEMOTION BY LIVE RESULTS (D5, fast lane v2, Oct 7, 2026; `demotion`): pre-registered and chosen, not measured. They only
+#: ever stop opens. A Probe (or Candidate) program goes exit-only when its realized real P&L is below -3 x the mean
+#: maximum loss of its real positions, or when its live fills ran below its nightly replay of the same days by more than
+#: 0.20 a dollar of maximum loss over at least 5 real trades on days its replay also traded.
+DEMOTE_LOSS_MULTIPLE = 3
+REPLAY_GAP_BOUND = 0.20
+REPLAY_GAP_MIN_TRADES = 5
 #: Per market day, the one source counted: real fills first, then the live shadow book, then the nightly replay.
 SOURCE_ORDER = ("real", "shadow", "nightly")
 
@@ -265,6 +299,12 @@ class Forward:
     negative: bool
     real_n: int = 0
     real_mean: float | None = None
+    # D5 (fast lane v2): the version's own real rows' realized P&L and mean maximum loss, and its live fills against its
+    # nightly replay on the days both traded (`forward_stats`).
+    real_pnl: float = 0.0
+    real_max_loss: float | None = None
+    replay_gap: float | None = None
+    replay_n: int = 0
 
     @property
     def variance(self) -> float | None:
@@ -276,6 +316,28 @@ class Forward:
         return self.real_n >= REAL_MIN_TRADES and self.real_mean is not None and self.real_mean <= 0
 
 
+def _own(rows: Sequence[Mapping[str, Any]], version: Any) -> list[Mapping[str, Any]]:
+    """The program version's own rows (a new version starts its own record; rows written without a version count only
+    while no row carries one)."""
+    rows = list(rows)
+    if version is not None and any(r.get("version") is not None for r in rows):
+        rows = [r for r in rows if r.get("version") is not None and str(r.get("version")) == str(version)]
+    return rows
+
+
+def _sums(rows: Sequence[Mapping[str, Any]]) -> tuple[float, float]:
+    """(P&L, maximum loss) summed over rows with a finite P&L and a positive maximum loss."""
+    pnl = loss = 0.0
+    for row in rows:
+        try:
+            p, m = float(row["pnl"]), float(row.get("max_loss") or 0.0)
+        except (KeyError, TypeError, ValueError):
+            continue
+        if math.isfinite(p) and math.isfinite(m) and m > 0:
+            pnl, loss = pnl + p, loss + m
+    return pnl, loss
+
+
 def one_record(rows: Sequence[Mapping[str, Any]], *, version: Any = None) -> list[Mapping[str, Any]]:
     """The forward record the money table reads: the program version's own (a new version starts its own record;
     rows written without a version count only while no row carries one), and each market day counted ONCE, from one
@@ -284,9 +346,7 @@ def one_record(rows: Sequence[Mapping[str, Any]], *, version: Any = None) -> lis
     real losses are never hidden behind a winning shadow day. The swarm's `league/swarm/evidence.py` reads the same
     record by the same rule (the review of #362, Sept 26, 2026: one rule for both sides). Returns are per dollar of
     maximum loss, scale-free across the shadow's notional and the real stake."""
-    rows = list(rows)
-    if version is not None and any(r.get("version") is not None for r in rows):
-        rows = [r for r in rows if r.get("version") is not None and str(r.get("version")) == str(version)]
+    rows = _own(rows, version)
     by_day: dict[str, dict[str, list]] = {}
     for row in rows:
         by_day.setdefault(str(row.get("day") or ""), {}).setdefault(str(row.get("source") or ""), []).append(row)
@@ -320,6 +380,7 @@ def forward_stats(rows: Sequence[Mapping[str, Any]], confidence: float, *, negat
     """The forward record's statistics (`one_record`: the version's own, one source a day). A trade without a positive
     maximum loss is not a return and is left out of the returns (it still counts in the P&L). Negative: the swarm's own
     verdict OR this record's (at least 20 trades and a mean return below zero)."""
+    rows = list(rows)  # read twice: the record, and D5's own rows below
     record = one_record(rows, version=version)
     returns, pnl = _returns(record)
     n = len(returns)
@@ -327,9 +388,50 @@ def forward_stats(rows: Sequence[Mapping[str, Any]], confidence: float, *, negat
     mean = bounds["mean"] if bounds else (returns[0] if n == 1 else None)
     real, _ = _returns([r for r in record if str(r.get("source") or "") == "real"])
     own_negative = n >= 20 and mean is not None and mean < 0
+    # D5: the version's own real rows, and the days both its real fills and its nightly replay traded.
+    own = _own(rows, version)
+    real_rows = [r for r in own if str(r.get("source") or "") == "real"]
+    _, real_pnl = _returns(real_rows)
+    losses = [float(r["max_loss"]) for r in real_rows if _finite_positive(r.get("max_loss"))]
+    by_day: dict[str, dict[str, list]] = {}
+    for row in own:
+        by_day.setdefault(str(row.get("day") or ""), {}).setdefault(str(row.get("source") or ""), []).append(row)
+    both = [d for d, sources in by_day.items() if sources.get("real") and sources.get("nightly")]
+    replay_gap, replay_n = None, 0
+    if both:
+        nightly_pnl, nightly_loss = _sums([r for d in both for r in by_day[d]["nightly"]])
+        live_pnl, live_loss = _sums([r for d in both for r in by_day[d]["real"]])
+        replay_n = sum(len(by_day[d]["real"]) for d in both)
+        if nightly_loss > 0 and live_loss > 0:
+            replay_gap = nightly_pnl / nightly_loss - live_pnl / live_loss
     return Forward(n=n, mean=mean, sd=bounds["sd"] if bounds else None, lcb=bounds["lcb"] if bounds else None, pnl=pnl,
                    negative=bool(negative) or own_negative, real_n=len(real),
-                   real_mean=(sum(real) / len(real)) if real else None)
+                   real_mean=(sum(real) / len(real)) if real else None, real_pnl=real_pnl,
+                   real_max_loss=(sum(losses) / len(losses)) if losses else None, replay_gap=replay_gap,
+                   replay_n=replay_n)
+
+
+def _finite_positive(value: Any) -> bool:
+    try:
+        x = float(value)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(x) and x > 0
+
+
+def demotion(fwd: Forward) -> str | None:
+    """D5 (fast lane v2, Oct 7, 2026): why a Probe program's live results end its Probe, or None. Its realized real P&L
+    below -`DEMOTE_LOSS_MULTIPLE` x the mean maximum loss of its real positions, or its live fills below its nightly replay
+    of the same days by more than `REPLAY_GAP_BOUND` a dollar of maximum loss over at least `REPLAY_GAP_MIN_TRADES` real
+    trades. Sticky: the version's real rows persist, so a demoted version stays a Candidate (a new version starts its own
+    record). The bounds are pre-registered and chosen, not measured."""
+    if fwd.real_n and fwd.real_max_loss and fwd.real_pnl < -DEMOTE_LOSS_MULTIPLE * fwd.real_max_loss:
+        return (f"D5: its {fwd.real_n} real trades realized ${fwd.real_pnl:.2f}, below -{DEMOTE_LOSS_MULTIPLE} x its mean "
+                f"maximum loss ${fwd.real_max_loss:.2f}: exits only")
+    if fwd.replay_n >= REPLAY_GAP_MIN_TRADES and fwd.replay_gap is not None and fwd.replay_gap > REPLAY_GAP_BOUND:
+        return (f"D5: its live fills ran {fwd.replay_gap:.3f} a dollar of maximum loss below its replay of the same days "
+                f"over {fwd.replay_n} real trades (bound {REPLAY_GAP_BOUND}): exits only")
+    return None
 
 
 # --------------------------------------------------------------------------------------------------------- bands
@@ -341,6 +443,14 @@ def sized_ok(table: Table, fwd: Forward) -> bool:
 def probe_cap(table: Table, equity: Decimal) -> Decimal:
     """What one Probe structure may lose (the floor is separate: `fits_probe`)."""
     return table.probe_share * max(ZERO, equity)
+
+
+def probe_room(table: Table, equity: Decimal | None) -> Decimal:
+    """THE FAST LANE's room for the families' Probe opens (Oct 7, 2026): `probe.max_open` Probe positions at the Probe's
+    cap, `probe.max_open x probe.max_loss_share x E` ($386.52 at E $1,288.40). The routes that share the account's day
+    and book caps (the calibration, the incubator, the House live test) leave this much of them to the families; it
+    replaces two $100 Probe floors ($200), which the floor at $0 would make $0."""
+    return ZERO if equity is None else table.probe_max_open * probe_cap(table, equity)
 
 
 def fits_probe(table: Table, equity: Decimal, unit: Decimal) -> bool:
@@ -358,6 +468,11 @@ def band_for(table: Table, row: Mapping[str, Any], equity: Decimal, fwd: Forward
         return "candidate", "has not passed the holdout"
     if fwd.negative:
         return "candidate", f"its forward record turned negative ({fwd.n} trades, ${fwd.pnl:.2f})"
+    if band in ("candidate", "probe"):
+        # D5, DEMOTION BY LIVE RESULTS (fast lane v2): exits only, and sticky for the version (`demotion`).
+        why = demotion(fwd)
+        if why:
+            return "candidate", why
     why = table.family_allowed(str(row.get("structure") or ""), equity)
     if why:
         return "candidate", why
@@ -370,9 +485,9 @@ def band_for(table: Table, row: Mapping[str, Any], equity: Decimal, fwd: Forward
         # The plan's Probe needs its typical maximum loss to fit the cap: unknown, it cannot be shown to fit.
         return "candidate", "its typical maximum loss is unknown (no structure in the banded version's validation run)"
     if unit is not None and unit > 0 and not fits_probe(table, equity, unit):
+        floor = f" and the one-contract floor of ${table.probe_floor}" if table.probe_floor > 0 else ""
         return "candidate", (f"its typical structure risks ${cents(unit)}, over the Probe's cap of "
-                             f"${cents(probe_cap(table, equity))} ({table.probe_share:%} of ${cents(equity)}) and the "
-                             f"one-contract floor of ${table.probe_floor}")
+                             f"${cents(probe_cap(table, equity))} ({table.probe_share:%} of ${cents(equity)}){floor}")
     if band in ("probe", "sized") and fwd.real_bad:
         return "probe", (f"its {fwd.real_n} real trades lose (mean {fwd.real_mean:.4f} a dollar of maximum loss): held at "
                          "Probe")
@@ -396,6 +511,12 @@ class Exposure:
     day_opened: Decimal = ZERO       # today's opening maximum loss sent (the gateway's day cap counts it)
     tuition_day: Decimal = ZERO      # tuition maximum loss opened today / this week
     tuition_week: Decimal = ZERO
+    # THE FAST LANE (D3, D4; `real.probe_tally`): the real (":r") positions held or working, the gross realized loss of the
+    # closed ones a Probe family opened (since this release: only its opens are marked), and what the held and working
+    # ones could still lose (maximum loss with fees)
+    probe_open: int = 0
+    probe_realized: Decimal = ZERO
+    probe_at_risk: Decimal = ZERO
 
 
 @dataclass(frozen=True)
@@ -403,6 +524,9 @@ class Plan:
     qty: int
     cap: Decimal                     # the per-structure cap it was sized against
     reason: str                      # why this size (or why none)
+    #: A Probe family's open (`plan_open`, band "probe"): the order and its position are marked so, and THE PROBE LOSS
+    #: BUDGET counts the position's realized loss (`real.probe_tally`). Never a Sized open, tuition or another route's.
+    probe: bool = False
 
 
 def kelly_cap(table: Table, equity: Decimal, fwd: Forward | None) -> Decimal:
@@ -414,17 +538,23 @@ def kelly_cap(table: Table, equity: Decimal, fwd: Forward | None) -> Decimal:
     return min(share, table.sized_share) * max(ZERO, equity)
 
 
-def sizing_band(table: Table, band: str, equity: Decimal, fwd: Forward | None) -> str:
-    """The limits a real open is sized under: a Sized family whose Kelly stake is under the Probe's cap keeps the
-    Probe's limits (its share a structure, its open count, its family share): the Sized family and count limits never
-    apply at a Probe-sized stake (the review of #362, C3)."""
-    if band == "sized" and kelly_cap(table, equity, fwd) < probe_cap(table, equity):
-        return "probe"
+def sizing_band(table: Table, band: str, equity: Decimal, fwd: Forward | None, unit: Decimal) -> str:
+    """The limits a real open is sized under (the review of #362, C3): a Sized family whose Kelly stake is under the
+    Probe's cap keeps the Probe's limits (its share a structure, its open count, its family share): the Sized family and
+    count limits never apply at a Probe-sized stake. The fast lane (Oct 7, 2026) keeps that trigger (its review: a
+    trigger on the unit alone gave a small Kelly stake the Sized limits, a loosening of Sized) and adds one: a Kelly stake
+    that buys no whole structure keeps the Probe's one structure too, so a Sized family never trades smaller than a
+    Probe. Otherwise Sized keeps its Kelly sizing and its own limits (Sized rules unchanged)."""
+    if band == "sized":
+        kelly = kelly_cap(table, equity, fwd)
+        if kelly < probe_cap(table, equity) or kelly < unit:
+            return "probe"
     return band
 
 
-def structure_cap(table: Table, band: str, equity: Decimal, fwd: Forward | None) -> Decimal:
-    if sizing_band(table, band, equity, fwd) == "sized":
+def structure_cap(table: Table, limits: str, equity: Decimal, fwd: Forward | None) -> Decimal:
+    """The per-structure cap under `limits` (`sizing_band`'s answer): Kelly's for "sized", the Probe's otherwise."""
+    if limits == "sized":
         return kelly_cap(table, equity, fwd)
     return probe_cap(table, equity)
 
@@ -444,28 +574,45 @@ def plan_open(table: Table, *, band: str, tuition: bool, equity: Decimal, unit: 
     if unit <= 0:
         return Plan(0, ZERO, "the structure's maximum loss is not positive")
     if tuition:
-        cap = unit
+        # Never more on one structure than a Probe risks (the fast lane review, Oct 7, 2026: tuition reaches programs
+        # that passed Validation only, so its one structure stays within the Probe's cap).
+        cap = probe_cap(table, equity)
+        if unit > cap:
+            return Plan(0, cap, f"tuition: one structure risks ${cents(unit)} with fees, over the Probe's cap of "
+                                f"${cents(cap)} ({table.probe_share:%} of ${cents(equity)})")
         if exposure.tuition_day + unit > table.tuition_day:
             return Plan(0, cap, f"tuition: ${cents(unit)} would pass the day's ${table.tuition_day} "
                                 f"(${cents(exposure.tuition_day)} used)")
         if exposure.tuition_week + unit > table.tuition_week:
             return Plan(0, cap, f"tuition: ${cents(unit)} would pass the week's ${table.tuition_week} "
                                 f"(${cents(exposure.tuition_week)} used)")
-        qty, why = 1, "tuition: one structure, to measure the venue's fills"
+        qty, why, probe = 1, "tuition: one structure, to measure the venue's fills", False
     elif band in BANDS_REAL:
-        band = sizing_band(table, band, equity, fwd)
-        cap = structure_cap(table, band, equity, fwd)
-        qty = int((cap / unit).to_integral_value(rounding=ROUND_FLOOR))
-        why = f"{band}: ${cents(cap)} of maximum loss a structure"
-        if qty < 1 and band in BANDS_REAL and unit <= table.probe_floor:
-            qty, why = 1, f"{band}: one contract under the ${table.probe_floor} floor"
-        if qty < 1:
-            return Plan(0, cap, f"{band}: one structure risks ${cents(unit)}, over its cap of ${cents(cap)} and the "
-                                f"${table.probe_floor} floor")
-        if band == "probe":
-            room = table.probe_open - exposure.family_open
-            if room < 1:
+        probe = band == "probe"              # a Probe family's open: counted by the Probe count and the loss budget
+        limits = sizing_band(table, band, equity, fwd, unit)
+        cap = structure_cap(table, limits, equity, fwd)
+        if limits == "probe":
+            # THE FAST LANE (D3, Oct 7, 2026): a Probe position is one structure whose maximum loss with fees fits the cap.
+            if unit > cap:
+                return Plan(0, cap, f"{band}: one structure risks ${cents(unit)} with fees, over the Probe's cap of "
+                                    f"${cents(cap)} ({table.probe_share:%} of ${cents(equity)})")
+            qty, why = table.probe_contracts, f"{band}: one structure (${cents(unit)} of maximum loss within ${cents(cap)})"
+            if table.probe_open - exposure.family_open < 1:
                 return Plan(0, cap, f"probe: {exposure.family_open} structures open, the most a Probe family holds is {table.probe_open}")
+        else:
+            qty = int((cap / unit).to_integral_value(rounding=ROUND_FLOOR))
+            why = f"sized: ${cents(cap)} of maximum loss a structure"
+        if probe:
+            # THE FAST LANE's Probe limits (D3, D4): a Probe family's open only; a Sized open is never refused here.
+            if exposure.probe_open >= table.probe_max_open:
+                return Plan(0, cap, f"probe: {exposure.probe_open} Probe positions held or working; the most at once is "
+                                    f"{table.probe_max_open}")
+            possible = exposure.probe_realized + exposure.probe_at_risk
+            if possible + unit * qty > table.probe_loss_budget:
+                return Plan(0, cap, f"probe: the loss budget: ${cents(possible)} could already be lost (realized "
+                                    f"${cents(exposure.probe_realized)}, held or working ${cents(exposure.probe_at_risk)}) "
+                                    f"and this risks ${cents(unit * qty)}, over ${table.probe_loss_budget}")
+        band = limits
         fam = family_cap(table, band, equity)
         room_loss = fam - exposure.family_loss
         qty = min(qty, int((room_loss / unit).to_integral_value(rounding=ROUND_FLOOR)) if room_loss > 0 else 0)
@@ -490,7 +637,7 @@ def plan_open(table: Table, *, band: str, tuition: bool, equity: Decimal, unit: 
     if qty < 1:
         return Plan(0, cap, f"today's opening maximum loss ${cents(exposure.day_opened)} leaves no room under the "
                             f"gateway's day cap ${cents(day_cap)}")
-    return Plan(qty, cap, why)
+    return Plan(qty, cap, why, probe=probe)
 
 
 # ---------------------------------------------------------------------------------------------------- the incubator
@@ -597,7 +744,7 @@ def plan_incubator(table: Table, *, unit: Decimal, equity: Decimal | None, tally
     of these that fails refuses (the module docstring): (1) equity and unit, (2) the unit cap, (3) the family's held and
     working, (4) the open count, (5) the weekly envelope, (6) its day's legs, (7) its day's dispatch, (8) the book's cap
     less `room`, (9) the gateway's per-order cap, (10) the gateway's day cap less `room`. `room` is what it leaves the
-    families' Probe floors and the House live test."""
+    families' Probe room (`probe_room`) and the House live test."""
     cap = table.incubator_max_loss
     if equity is None or equity <= 0:
         return Plan(0, cap, "incubator: no sizing equity")
@@ -632,13 +779,13 @@ def plan_incubator(table: Table, *, unit: Decimal, equity: Decimal | None, tally
     book = table.book_share * equity
     if exposure.book_loss + unit + room > book:
         return Plan(0, cap, f"the book's cap: ${cents(exposure.book_loss)} of ${cents(book)} open maximum loss, and "
-                            f"${cents(room)} is kept for the families' Probe floors and the House live test")
+                            f"${cents(room)} is kept for the families' Probe room and the House live test")
     order_cap = min(table.gateway_order_max_loss, table.gateway_order_share * equity)
     if unit > order_cap:
         return Plan(0, cap, f"the gateway's per-order cap ${cents(order_cap)} is under one structure's ${cents(unit)}")
     if exposure.day_opened + unit + room > day_cap:
         return Plan(0, cap, f"the gateway's day cap: ${cents(exposure.day_opened)} of ${cents(day_cap)} opened today, and "
-                            f"${cents(room)} is kept for the families' Probe floors and the House live test")
+                            f"${cents(room)} is kept for the families' Probe room and the House live test")
     return Plan(table.incubator_contracts, cap, "incubator: one lot (never evidence)")
 
 
@@ -876,4 +1023,5 @@ class FlowBook:
 
 __all__ = ["Table", "DECLARED_TYPES", "order_types", "Forward", "forward_stats", "one_record", "kelly_cap", "sizing_band", "REAL_MIN_TRADES", "band_for", "fits_probe", "probe_cap", "structure_cap", "family_cap",
            "Exposure", "Plan", "plan_open", "Stops", "FlowBook", "D", "cents", "sized_ok", "IncubatorTally", "practice_ok",
-           "plan_incubator", "INCUBATOR_DAY_LEGS", "INCUBATOR_DAY_OPEN_SHARE"]
+           "plan_incubator", "INCUBATOR_DAY_LEGS", "INCUBATOR_DAY_OPEN_SHARE", "probe_room", "demotion",
+           "DEMOTE_LOSS_MULTIPLE", "REPLAY_GAP_BOUND", "REPLAY_GAP_MIN_TRADES"]

@@ -1774,7 +1774,8 @@ class Researcher:
         if tested:
             parts.append(tested)
         parts.append(f"The validation line requires at least {evidence.MIN_TRADES} trades on at least {evidence.MIN_DAYS} days, "
-                     "daily t >= 2, a deflated Sharpe probability >= 0.95 on traded days, 3 of 4 quarters positive, and positive "
+                     f"daily t >= {evidence.MIN_T:g}, a probabilistic Sharpe >= {evidence.MIN_DSR:g} on traded days, "
+                     f"{evidence.MIN_QUARTERS_POSITIVE} of 4 quarters positive, and positive "
                      "P&L at 1.5x spread. Seek mechanisms that produce enough independent opportunities to measure; never force "
                      "trades or weaken the evidence requirements.")
         if gate:

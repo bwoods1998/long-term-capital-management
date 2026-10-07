@@ -39,7 +39,7 @@ owner's `GATEWAY_ADMIN_TOKEN`; `/v1/kill` takes either (V3-A: stopping is never 
 | `GET /v1/github/pr/<n>/files?head_sha=`, `POST /v1/github/close` | the exact diff of a pull request at one head; close one engineer pull request at its head (V3-A, below) |
 | `POST /v1/github/docs` | commit one desk page `docs/runs/desk/<date>[-slug].md` to `main` (V3-A, below) |
 | `POST /v1/github/review`, `POST /v1/github/merge` | record the automated reviewer's verdict on an engineer pull request's exact head; squash-merge it inside the walls below (V3-A) |
-| `POST /v1/notify` | one notice to the owner: a `live_stop`, a `funding` cliff (V3-A), a `test` |
+| `POST /v1/notify` | one notice to the owner: a `live_stop`, a `funding` cliff (V3-A), a `stall` (the self-running release), a `test` |
 | `GET /v1/research/search?q=&cat=&max=` | the research library: up to `max` (1-10) arXiv papers posted before 2025 for plain keywords, each pinned to a version (below) |
 | `GET /v1/research/read?id=&start=&chars=` | one pinned version's metadata and a window (at most 10,000 characters) of its text |
 | `GET /v1/research/health` | the library's pace, lease and day's count (the same `library` block `/v1/health` carries) |
@@ -47,8 +47,9 @@ owner's `GATEWAY_ADMIN_TOKEN`; `/v1/kill` takes either (V3-A: stopping is never 
 Still in the code until the prune removes them (Wave 2b), and unused by the options House:
 `/v1/kalshi/*` and `/v1/kalshi/ws-auth`, `/v1/typesafe/systemone` (Jev), `/v1/web/fetch`,
 and the crypto and stock order paths (the close of an assignment's shares stays). `/v1/notify`
-mails the owner a `live_stop` notice when a real-money stop trips (Sept 26, 2026), and a `funding`
-notice when the budget rule finds a prefund under its card line (V3-A, below).
+mails the owner a `live_stop` notice when a real-money stop trips (Sept 26, 2026), a `funding`
+notice when the budget rule finds a prefund under its card line (V3-A, below), and a `stall` notice when
+the House's `stall` job finds the floor not improving itself (below).
 
 ## The caps
 
@@ -338,6 +339,22 @@ constant changes only by a gateway deploy):
   lasts at the held rate was not sent. The composer invents no figure: one that is not a decimal or a date reads
   `unknown`. `test: true` is marked a drill in the subject and the first line, its figures said to be the drill's. A
   `funding*` notice id is remembered eight days (others 48 hours); `NOTIFY_MAX_PER_DAY` is unchanged.
+- **`stall` notices** on `/v1/notify` (the owner's goal of Oct 7, 2026, item 6; `league/ops/stall.py` `notice_facts`):
+  one mail lists every cause standing (`causes`, each `cause_facts`), each one of `STALL_CAUSES` (`births`, `gym_runs`,
+  `validations`, `braked`, `runway_sail`, `runway_claude`, `owner_deploy`, `paused`, `grant_refused`, `kill_on`; any
+  other, an empty list, a repeated cause or more than ten is a 400). The subject is this gateway's own words: `LTCM:
+  needs you: <the causes with an owner step>` when there is one, else `LTCM: stalled: <the causes>` (three by name, then
+  how many more). The body opens with the owner steps ("Only you can do this", one line each, cut at 400 characters) or
+  says nothing needs the owner, then each cause: its words, the House's sentence (one line, cut at 400 characters), its
+  figures (at most 16, each name a lower-case word, each value a decimal, a date or time, yes or no or a short
+  lower-case token, else `unknown`), how long it has stood (`hours`, `since`) and what the House is doing about it. The
+  router keys the dedupe itself (`stallKey`), whatever id the House sends: `stall:owner:<the owner causes, sorted,
+  joined by +>`, remembered 12 hours, so a new owner step is mailed at once and the same ones at most every 12 hours;
+  `stall:info` when none needs the owner, remembered 24 hours. `NOTIFY_MAX_PER_DAY` holds for stalls too.
+- **`ENGINEER_HELD`** (`lib/github.mjs`, the self-running release): `league/swarm/researcher.py` and
+  `league/swarm/claude_research.py`, the research lane's files the live path loads, are refused to every engineer
+  proposal and merge (`outside_surface`, "held from the engineer in this release"), as the House's engineer holds them
+  (`league/ops/engineer.py` `RELEASE_CLASSES`). The research lane writes `league/swarm/preflight.py` and new tests.
 
 The token needs nothing new: Contents and Pull requests read/write already cover the docs commit and the merge, and the
 Actions runs and jobs it reads are public on this repository. A branch protection rule on `main` that requires pull

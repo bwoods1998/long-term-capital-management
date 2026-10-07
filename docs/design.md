@@ -10,13 +10,14 @@ disagree, the code is right and this page is fixed. How to operate it is in
 
 | Part | Code | State |
 |---|---|---|
-| The House, options only | `league/` | running `20261003T084912Z-be16b05904ff` (main `266e6861`: V3-A part 1; promoted 08:49:56Z Oct 3), with `20261002T112610Z-e11710692569` kept as the rollback target; real money on since Sept 27; the grant active on money digest `42c4a3af` (V3-A part 1 leaves the digest as it is; the standing grant ratified once at its first look, on a deposit trigger); evidence resets 1 (Release A, Sept 30), 2 (Release B, Oct 1) and 3 (V3-A part 1, Oct 3: its live-path fixes) |
-| Running unattended | `league/ops/`, `league/updater.py`, `league/swarm/policy.json`, `league/live_trading.py`, `gateway/` | live since Oct 3 (V3-A part 1, PR #489; gateway `e95a2d4a`): the House's own jobs with receipts, the budget rule, settings as code, the standing grant, self-deploy through the updater's walls (`auto_update` true), monthly failure drills, a daily public page; the post-mortem, the strategist's agenda and the engineer are registered as jobs and their modules are not in the release. At the deploy no self-deploy, self-rollback or drill had yet happened on the box |
+| The House, options only | `league/` | Oct 7: research restart `20261007T160204Z-31d63e37434e` (main `ab6c0c6a`: budget rule v2 at the owner's $25 a day and the F1 research fixes; promoted 16:03Z Oct 7), then this release (fast lane v2 and the self-running release, owner deploy, see the CHANGELOG); rollback targets in the CHANGELOG; real money on since Sept 27; evidence resets 1 (Release A, Sept 30), 2 (Release B, Oct 1), 3 (V3-A part 1, Oct 3) and 4 (fast lane v2's live-path change, Oct 7) |
+| Running unattended | `league/ops/`, `league/updater.py`, `league/swarm/policy.json`, `league/live_trading.py`, `gateway/` | live since Oct 3 (V3-A part 1, PR #489): the House's own jobs with receipts, the budget rule (v2 from Oct 7), settings as code, the standing grant, self-deploy through the updater's walls (`auto_update` true), monthly failure drills, a daily public page; from the Oct 7 self-running release also the stall alarm, the daily funnel, the weekly post-mortem and the engineer with its reviewer; the strategist's agenda job stays absent |
 | The data store and images | `scripts/data/` | the core five from 2020 and the 20 added names from 2022, 0-14 days to expiry, SPY/QQQ back months to 45; ThetaData Options Standard's history reaches 2016; Train from 2017 is released (R11a), and its image is still to be built; longer history arrives as private blocks (#413) |
 | The Gym | `league/gym/` | 25 roots, Train 2020-2024 on a sealed image adopted Sept 28 (2022-2024 for the added names); 11 types including long calls and puts; the honest fill model from Train samples; engine 4 and per-program batch failures from Release A; frozen since Release B (A1 does not change it) |
 | The swarm | `league/swarm/`, `league/CONTRACT.md` | 13 alive at the Oct 3 deploy (16 at the Oct 2 close), at a funded floor since Oct 2 evening (start 16, floor 8, one Gym box, the Sail researchers at $0.25 an hour, the architect every two hours); 3 holdout looks, 0 passes; births of debit verticals and two-sided singles only, under agenda v16c; the architect on Sail (DeepSeek-V4-Pro, asap queue); Claude at the gate and for the strategist; duplicate looks refused and the look holds on; automatic forks of validated lineages off. Since the A1 deploy (Oct 3) the budget rule tightens the floor further and closes OpenAI |
 | Paper and production paths | `league/live/`, `gateway/` | real money opens four debit types; both paper route proofs passed Sept 28; 23 D3 calibration round trips by the Oct 2 close; one exit-only tuition lot; the House live test armed, no order yet; the practice league (validated and Train tiers; capped as a Probe since A1, and empty since its evidence reset on Oct 3 until new versions qualify); the incubator on since Oct 1; no general agent paper book; covered strategies absent |
 | Built, not deployed | branches `v3/wp6`, `v3/wp7`, `v3/b1`, `v3/b23`, `v3/b4`, `v3/b5` | after V3-A part 1, each an owner deploy of its own: the forward ladder (its confirmation study is not run; as first specified it does not meet its benchmark rule) and credit types at $2,000 of equity (part 2), research v3, births from a mechanism library and the strategist's agenda, the weekly post-mortem, the engineer and reviewer ([run record](runs/2026-10-02-unattended-desk.md)) |
+| Fast lane v2 (Oct 7, 2026) | `release/fast-lane-v2` | built, not deployed (the owner's deploy): the screen (t 1.65, 2 of 4 quarters, N = 1, one flat look at p <= 0.10), direction counts (the drift screen's refusal and the look holds off by setting; the drift fit and the same-risk buy-and-hold reported), a one-structure Probe within 10% of E with at most 3 Probe positions and a $400 Probe loss budget (gross realized Probe losses, every real position at risk), same-minute entry, D5 demotion; after its review: tuition held within the Probe's cap, a paid review's or audit's failure binding across the deploy's adoption, the report written daily by the `fast_lane` job with contamination measured, C3, the practice caps and the grant's $100 smallest stake kept as they were. Money digest `42c4a3af` -> `da5c7542` (constitution `595228a6` -> `5edc8956`): the standing grant re-ratifies at the House's start on the owner's deploy; the execution fingerprint moves (league/live changed), so its deploy is an evidence reset (no family is banded) |
 | The public page | blakewoods.us/capital | the owner's (`personal-site`, revamped by the owner on Oct 2); the House's publisher feeds it |
 
 This is observed state, not completion of the design below. Broad universe discovery, covered strategies, the
@@ -43,6 +44,16 @@ operations are House jobs; one funding action a year, not one a week; an honest 
 - **The House's jobs** (`league/ops/`): the pre-open checks, the close economics, hygiene, the venue clock, the daily
   public scoreboard, the budget, the standing grant and the drills run on the House's own NYSE calendar as niced,
   bounded children with receipts; the operator reads a private receipts file without exec.
+- **The stall alarm and the funnel** (the self-running release, the owner's goal of Oct 7, items 3 and 6): every 30
+  minutes, a maintenance pause included, the `stall` job reads the House's records and names a stall by its cause (no
+  birth in 12 h under the population ceiling, fewer than 10 Gym runs in 6 h, no Validation verdict in 24 h while a
+  family is owed one, the Sail guard braked 12 of 24 h, a meter under 3 days of research at the ceiling, an owner
+  deploy waiting, a pause left on 6 h, a grant that refused to re-ratify, the kill switch on). One `stall` mail lists
+  every cause standing (the numbers, how long, what the House is doing, the owner step when only the owner can clear
+  it): at once and every 12 h while some cause needs the owner, else at most once a day; each cause is also a House
+  warning every 12 h. It never acts. The daily page carries the funnel: births, versions, Gym runs by window,
+  validations, looks, the bands, real orders and closes by route, research spend, braked hours, for the last 24 hours
+  and since the release.
 - **The budget rule (D4).** Research dollars a day per meter (Sail, Claude) = the floor (at most $5 a day in all, and
   only what a meter's balance sustains for 90 days) plus half the trailing 30-day realized options profit, capped so no
   meter falls under 60 days of runway; after 60 sessions from Oct 5 with no promotion by the forward ladder, the floor
@@ -80,9 +91,13 @@ operations are House jobs; one funding action a year, not one a week; an honest 
 - **Research v3 and births v3** (`v3/b1`, `v3/b23`): every family on Claude Sonnet 5.5, a cycle as a sweep of variants
   with a placebo row, a per-family ledger; births only from a curated library of documented premia, the Train kill
   tests as code, the strategist writing the whole agenda.
-- **The weekly post-mortem and the engineer** (`v3/b4`, `v3/b5`): the post-mortem and a monthly cost review as House
-  jobs; an engineer that proposes one lane change at a time, an automated reviewer, the gateway's merge, the updater's
-  canary, and retain or revert by a predeclared metric.
+- **The weekly post-mortem and the engineer** (`v3/b4`, `v3/b5`; ported to the self-running release, Oct 7): the
+  post-mortem and a monthly cost review as House jobs; an engineer that proposes one lane change at a time, an
+  automated reviewer, the gateway's merge, the updater's canary, and retain or revert by a predeclared metric. In that
+  release the engineer is on (`engineer.enabled` in `policy.json`), spends at most $4 a day inside budget rule v2's
+  Claude meter, and stays research-class: it never changes a module the live path loads (the House holds them, and the
+  gateway too, `ENGINEER_HELD`). It closes its own superseded and unmerged pull requests through the gateway. The
+  post-mortem reports and feeds no research role.
 
 ## The goal and the one number
 
@@ -410,8 +425,8 @@ Agent count and simulated years measure activity; passing unseen evidence measur
 | Gate | when a family meets the validation line | review: Claude when "review" is in `claude.roles` (live: Sonnet 5.5), else GPT-6 Sol while the OpenAI month has room and `gate.review_openai_model` names it (null live), else DeepSeek-V4-Pro on Sail; audit: Claude (live: Opus 5.5, `claude.role_model`), then GPT-6 Astra on the same terms (null live), then a second Sail model; the gate box | first, a look that would repeat an earlier one is refused (the duplicate look, H3a); a look the holdout cannot judge is held (the look holds, L6: a long-delta program whose Train profit leans on drift, or too little holdout power); then review for lookahead, leakage and fill abuse; the audit; one holdout look | a Candidate, a recorded refusal, or a held look |
 | Nightly forward | after 01:45 ET each trading night | the data box, the gate box | the new day goes to the gate image only; every Candidate is re-run on it | one unseen day a night for every Candidate |
 | Live | 09:30-16:00 ET | the House | the practice league (from Release A): every alive family's validated or eligible Train version in observe shadow (two caps: 48 instances, 24 roots); Candidates in live shadow; Probes and Sized on real money; the House's D3 calibration round trips and its live test; from Release B, the incubator (one real lot for a cohort whose practice passed its first look; never evidence); no general agent paper book yet | separate paper, shadow, practice and real records |
-| Post-mortem | after each close; weekly | the operator for now: the House's `postmortem` job is registered (Saturdays 14:00Z) and skipped while its module is not in the release (`v3/b4`, built, not deployed); it would run on Claude, whose `reserve_usd` is kept for it | compare captured executions with the Gym; diagnose gaps and propose repairs | private reports; calibration only through the recalibration protocol |
-| House jobs (V3-A part 1) | on the House's NYSE calendar: the grant at each start and hourly; the budget after the close economics and at 00:30Z; hygiene 02:00Z; the venue clock 11:00Z; pre-open checks an hour before the open; the close economics ten minutes after the close; the public page 23:30Z; drills on the first Saturday of the month | the House (`league/ops/`), one niced, bounded child at a time; no model call | the operator's daily scripts as code: checks, the one-cutoff economics, the research budget and funding notices, the standing grant, sweeps, failure drills, the daily page | a receipt per occurrence (`ops.sqlite`), a private receipts file every ten minutes, a public page a day in `docs/runs/desk/` |
+| Post-mortem | after each close; weekly | the operator until the self-running release is deployed; in it the House's `postmortem` job (Saturdays 14:00Z, ported from `v3/b4`) runs on Claude Opus 5.5 at most $1 a week inside budget rule v2's Claude meter; on the release that runs today the job is registered and skipped (its module is absent) | compare captured executions with the Gym; diagnose gaps and propose repairs | private reports; calibration only through the recalibration protocol |
+| House jobs (V3-A part 1) | on the House's NYSE calendar: the grant at each start and hourly; the budget after the close economics and at 00:30Z; hygiene 02:00Z; the venue clock 11:00Z; pre-open checks an hour before the open; the close economics ten minutes after the close; the public page 23:30Z; drills on the first Saturday of the month; the stall alarm every 30 minutes, the weekly post-mortem Saturdays 14:00Z and the engineer daily 04:00Z and hourly at :40 (the self-running release) | the House (`league/ops/`), one niced, bounded child at a time; no model call | the operator's daily scripts as code: checks, the one-cutoff economics, the research budget and funding notices, the standing grant, sweeps, failure drills, the daily page and its funnel, the stall alarm and its notices | a receipt per occurrence (`ops.sqlite`), a private receipts file every ten minutes, a public page a day in `docs/runs/desk/` |
 | Harness improvement | a measurement at least daily; each canary's registered window (6 hours to a week) | the operator agent through `scripts/harness_improve.py` (the House's supervised observer, once its policy is enabled, follows the scheduler lane, every canary's deploy receipts and writes the lanes' ranking); no model call inside the loop | five lanes (scheduler, research workflow, prompts/memory, data processing, execution reliability), each with a predeclared metric: a read-only House measurement ranks bottlenecks that repay a cycle; a candidate modifies or adds files only inside its lane's surface, never a protected path (the objective, sealed data, spend limits, capital permissions; the diff's file list, `git diff --no-renames --name-status`, checked by the controller); static guards (defense in depth, not a guarantee) refuse a new route to the store, evaluator, gate, bands, settings or constitution (an import, a re-export, a parent package, a star import) or to a process, file or loader module (directly, through another module that imports one, or through a module's `__builtins__`), a mutation of their state, and changes to the code that records trials, lineages and eligibility; an adversarial review of its exact patch and evaluated tree, recorded with the verdict approve, is required before the loop's deploy step issues the ticket it is deployed under, and a tree the watchdog shows on the House before either, more than two hours after its ticket, or in hours its release class forbids is voided at canary registration and rolled back (the protected paths, that review and the pinned base are the hard controls); capture, staging, the judges and the decision run from the pinned base commit's code (the candidate is judged as the base tree with only its staged files laid over it); a fixed judge scores it (gate forced open, and closed where it must equal the baseline) on a public dev split and a held-out split of private fault families the dev split never uses and no public text names (pools kept outside the repo, pinned by hash, burned by family, drawn after it is committed); research and memory gate it per family or mechanism (`league/swarm/canary.py`) against the concurrent control, motivating units excluded; data and execution compare the window after a release with a fresh control window before it (execution only as a planned release) | a retained, reverted or voided change with its receipts; a retained gate graduates into main (`playbooks/harness-improvement.md`) |
 
 **Models** (Sept 29, 2026; only Sail and Claude are topped up from now on). The inner loop runs on Sail's
@@ -509,21 +524,39 @@ diagnostician.
   verdict retires it with MECHANISM), which the rebirth refusal then reads. A thin, invalid or untestable verdict
   retires the family with the idle rule's words (IDLE, not a finding) once four of its own versions made one. A pass
   holds for the whole lineage on any later Gym.
+- **The screen (FAST LANE V2, Oct 7, 2026; the owner's goal of Oct 7, item 4)** is the Validation line plus one holdout
+  look a distinct program, both pre-registered; its false-positive rate is measured by the pre-registered benchmark
+  `scripts/screen_benchmark.py` (receipt `docs/benchmarks/fast_lane_screen_1.json`, result
+  [FAST_LANE_SCREEN_1.md](benchmarks/FAST_LANE_SCREEN_1.md); acceptance: the floor-eligible per-program rate's 95% upper
+  bound at most 2% in every null world). Accepted on Oct 7: 0.18-0.51% in the iid null worlds and 1.19% (upper 1.36%)
+  under AR(0.2) daily P&L, against 0.01-0.10% for the rule it replaces; power 8%, 40% and 78% at a yearly Sharpe of 1, 2
+  and 3 (that rule: 0.7%, 11%, 44%). A pass makes the family a Candidate, and the live path makes it a Probe at its
+  next families pass with real orders from the next live minute.
 - **The validation line** (a family's best program): at least 50 trades on at least 25 distinct
   days in Validation; mean P&L per dollar of maximum loss above zero after fees with a one-sided t of
-  at least 2; a deflated Sharpe probability of at least 0.95 on the traded-day Sharpe, against the
-  lineage's validated versions (inherited ones included); positive in at least 3 of Validation's 4
-  quarters; positive at 1.5x the half-spread. The owner's decision D2 (Sept 26, 2026) set these; it
-  also limits what a researcher sees of Validation to pass or fail and a count of checks passed.
-  A version reaches Validation only after its 1.5x-stress Train robustness run made a profit and it
-  passed the drift screen (its Train alpha net of the root's own move, pooled t at least 1, positive
-  in every Train year but one); the gate refuses a look at a version that fails the screen.
-- **The holdout line**, one look per program version and at most three per lineage: P&L after fees
-  positive; a day-block bootstrap one-sided 95% lower bound on mean daily P&L above zero, with a
-  Holm-Bonferroni correction across every holdout look the swarm has made; holdout Sharpe at least
-  half the validation Sharpe. **Researchers learn only pass or fail**, never the holdout's numbers.
+  at least 1.65; a probabilistic Sharpe of at least 0.95 on the traded-day Sharpe with N = 1, the program itself (the
+  deflated Sharpe against 0: a moments-adjusted t of about 1.645; before fast lane v2, N was the lineage's validated
+  versions); positive in at least 2 of Validation's 4 quarters; positive at 1.5x the half-spread. The owner's decision
+  D2 (Sept 26, 2026) set the frequency and what a researcher sees of Validation (pass or fail and a count of checks
+  passed); fast lane v2 set t 1.65 (was 2), 2 of 4 quarters (was 3) and N = 1. The allocator reads `evidence.MIN_T`, so
+  its line follows by itself. A version reaches Validation only after its 1.5x-stress Train robustness run made a
+  profit. The drift screen (its Train alpha net of the root's own move, pooled t at least 1, positive in every Train
+  year but one) is OFF since fast lane v2 (`tournament.drift_screen` false in `policy.json`; direction counts): no
+  version is refused or held for drift, and its drift fit and the same-risk buy-and-hold are reported beside every
+  screen result (`league/ops/direction.py`, `league/ops/fast_lane.py` daily into `<state>/fast-lane-report.json`, and
+  `scripts/fast_lane_report.py` on copies), never a bar.
+- **The holdout line**, one look per program and at most three per lineage: P&L after fees positive; a day-block
+  bootstrap one-sided p on mean daily P&L at most 0.10, FLAT (no Holm escalation across looks; since fast lane v2;
+  before it, a 95% lower bound above zero with Holm across every look made); holdout Sharpe at least half the
+  validation Sharpe. Every look carries its contamination tail from 2026-07-01 (61 of the 184 sessions are after Opus
+  5.5's training cutoff; the other authors' cutoffs are unknown), reported and never a check; the fast lane's report
+  measures contamination on the real looks (each look's in-training head against its after-cutoff tail, pooled over the
+  looks, and live against holdout per band), weakly. **Researchers learn only pass or fail**, never the holdout's
+  numbers. A program a paid review or audit failed is never reviewed again, even after an evaluator adoption clears the
+  gate's records (`Gate.paid_verdict`, fast lane v2's review).
 - **A look that repeats an earlier one is refused** (the duplicate look, H3a, Oct 1, 2026; `Gate.duplicate_look`). Every
-  look raises the Holm bar for every later one, and the three looks after the Sept 26 reset covered two programs. Before
+  look then raised the Holm bar for every later one (since fast lane v2 a look is flat and a program is still counted
+  once), and the three looks after the Sept 26 reset covered two programs. Before
   anything else is asked of a version, the gate compares it with every look the swarm has made, in any family and
   lineage. A repeat is the same program (`run_sha`), or a version whose Validation run says the same as a looked
   version's: the Gym's own run sha (the code with its parameters merged over the defaults), or the same evaluation (the
@@ -532,7 +565,7 @@ diagnostician.
   earlier look's number, never a figure. A version that repeats a look still in flight waits for it. This
   only tightens: no threshold, Holm or deflated-Sharpe rule moves.
 - **A look the holdout cannot judge is held** (the look holds, L6(b) and L6(c), approved by the owner on Oct 2, 2026 as
-  a tightening; `Gate.look_hold`). The three looks after the Sept 26 reset were all long-delta programs and all failed,
+  a tightening; `Gate.look_hold`). OFF since fast lane v2 (`gate.look_holds` null in `policy.json`); as they stood: The three looks after the Sept 26 reset were all long-delta programs and all failed,
   and a 2025 Validation pass has mostly measured long-market drift. After the free checks that refuse (the experiment
   contract, the drift screen, the rations) and before anything is paid or opened, the gate holds the look at: (b) a
   long-delta version (pooled Train beta above zero) whose own Train drift fit puts a quarter or more of its profit on
@@ -613,19 +646,22 @@ diagnostician.
 
 | Rule | Now (D4, Sept 26) | Allowed range |
 |---|---|---|
-| Probe: a Candidate that passed the holdout, has a verified/enabled execution type, and whose typical maximum loss fits the cap at current equity | real from its next session; real money opens four debit types | - |
+| Probe: a Candidate that passed the holdout, has a verified/enabled execution type, and whose typical maximum loss fits the cap at current equity | real from the next live minute (fast lane v2; from its next session before it); real money opens four debit types | - |
 | Credit structures on real money | only from $2,000 of equity, in one deploy with the gateway's list and a re-ratified grant (#393, the owner's decision; D3 of Oct 2 confirms it); built on `v3/wp7` with a paper proof per type, not deployed; debit types until then | - |
-| Probe max loss per structure | 5% of equity | 2-5% |
+| Probe position: one structure, max loss with fees per structure | 10% of equity (fast lane v2, the owner's goal item 4; 5% before it) | 2-10% |
 | Probe open structures per family | 3 | 1-5 |
 | Probe family total max loss | 15% of equity | 8-15% |
-| Probe floor for a small account | one contract when its max loss is at most $100 | $0-100 |
+| Probe floor for a small account | $0 since fast lane v2 (one contract at most $100 before it) | $0-100 |
+| Probe positions held or working at once, across the account | 3 (3 x 10% = 30% of E, inside the 35% daily stop) | 0-3 (0 stops Probe opens) |
+| The Probe loss budget: realized Probe losses since fast lane v2, gross (each position a Probe family opened, its own loss; no gain offsets one), plus the maximum loss of every real position held or working (Sized too) and of a lost open until it is found | $400 in total; an open that would breach it is refused, exits go on | $0-400 (0 stops Probe opens) |
+| D5, demotion by live results (code, pre-registered, chosen not measured) | a Probe goes exit-only, for good for its version, when its realized real P&L is below -3 x its mean maximum loss, or its live fills run below its nightly replay of the same days by more than 0.20 a dollar of maximum loss over 5 or more real trades | - |
 | Sized: current-version forward record of at least 20 trades, mean > 0 and 80% lower bound > 0, plus at least 5 real Probe trades and 1 whole Probe session | quarter-Kelly on the lower bound; paper/shadow alone cannot satisfy the real minimum | eighth- to half-Kelly |
 | Sized max loss per structure | 10% of equity | 5-15% |
 | Sized family total max loss | 30% of equity | 20-40% |
 | Book: open max loss, all families | 90% of equity | 50-90% |
 | Daily stop: the day's realized plus marked loss | 35% of start-of-day equity: no new entries that day | 15-35% |
 | Drawdown stop from the peak since the reset | 60%: real money paused, exits go on, the owner told, the Gym keeps running | 40-60% |
-| Execution tuition: 1-lot real orders before the holdout, to measure multi-leg fills (never evidence) | $200 max loss a day, $300 a week | $0-200 a day |
+| Execution tuition: 1-lot real orders before the holdout, to measure multi-leg fills (never evidence) | $200 max loss a day, $300 a week; since fast lane v2 one structure within the Probe's cap (10% of E) | $0-200 a day |
 | D3 calibration: the House's own 1-lot round trips on SPY, QQQ and IWM (never evidence) | $50 of possible loss a day | - |
 | The House live test: one frozen, pre-registered program as the House's own instance (never evidence) | a structure at most $100, 3 open, $300 at risk, no new open after a $150 loss, 20 sessions, 30 round trips | - |
 | The incubator (Release B): one lot of a real structure for a family that passed Train and the drift screen, the gate's review and audit, and a pre-registered first look at its live practice (3 sessions, 10 program closes, coverage 0.80, P&L above $0 three ways); never evidence, never a promotion | $50 max loss a structure, 4 held or working, stopped for the ISO week once its net realized loss reaches $150 | $0-50, 0-4, $0-150 (0 stops it) |
@@ -666,7 +702,8 @@ diagnostician.
 | Architect | Claude via the gateway, or Sail | `claude.model` (Sonnet 5.5 at $2 input, $10 output per million tokens; Opus 5.5 at $4 / $20); Sail as the fallback (`architect.sail_profile`: Kimi-K3 balanced by default, DeepSeek-V4-Pro asap live since Oct 2), and live since Sept 30 (the architect's Claude line $0), at `architect.sail_effort` (`medium` by default, `high` live) | inside Claude's funded total, or the Sail pace |
 | Gate audit | Claude via the gateway | `claude.role_model["audit"]` or `claude.model` (live: Opus 5.5); GPT-6 Astra while the September month has room (off live), then a second Sail model, as fallbacks | inside Claude's funded total |
 | Diagnostician | Claude via the gateway | `claude.model` | `diagnostician.usd_day`; off live since Sept 30 |
-| Weekly post-mortem | Claude via the gateway (built on `v3/b4`) | not deployed; the operator writes the post-mortem (V3-A part 1 registers the weekly House job, skipped while its module is absent) | inside the budget's Claude dollars |
+| Weekly post-mortem | Claude via the gateway (ported from `v3/b4` to the self-running release) | Opus 5.5, role `postmortem`, one call a week; until the self-running release is deployed the operator writes the post-mortem (the release that runs today skips the job: its module is absent) | at most $1 a week inside the budget's Claude dollars |
+| The engineer and its reviewer | Claude via the gateway (the self-running release) | Opus 5.5, roles `engineer` (at most $3 an attempt) and `reviewer` (at most $1); research-class lanes only | at most $4 a UTC day together (`engineer.usd_day`), inside the budget's Claude dollars |
 | The House's jobs | the House box | niced children (nice 19, 500 MB of address space over their start, CPU and wall limits) | inside the House's own box |
 | Gym | Sail boxes | 4-8 sealed size-l boxes by default; 2-6 live from Release A, 1 in `policy.json` since Oct 2, and the budget's box count when lower | $0.10-0.40 an hour each while busy; asleep when idle |
 | Data | Sail box + ThetaData | one size-l box, asleep when idle | $5-15 a day while running |

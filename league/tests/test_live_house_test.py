@@ -293,27 +293,30 @@ class Bounds(HouseCase):
         self.install(opens=0)
         live = self.start()
         self.run_to(9, 31)
+        # THE FAST LANE (Oct 7, 2026): the families' Probe room is 3 x 10% x E, $144.489 at $481.63 (two $100 floors
+        # before it): 481.63 - 250 - 144.489 = 87.141.
         exposure = M.Exposure(day_opened=D("250"))
-        self.assertEqual(self.plan("31.63", exposure=exposure, equity="481.63").qty, 1)
-        refused = self.plan("31.64", exposure=exposure, equity="481.63")
+        self.assertEqual(self.plan("87.14", exposure=exposure, equity="481.63").qty, 1)
+        refused = self.plan("87.15", exposure=exposure, equity="481.63")
         self.assertEqual(refused.qty, 0)
-        self.assertIn("$200.00 is kept for the families' opens", refused.reason)
+        self.assertIn("$144.48 is kept for the families' opens", refused.reason)
         del live
 
     def test_it_leaves_the_families_the_same_room_of_the_books_cap(self):
-        # Review of #411 (F2): the test's positions can be held for days, so the families keep two Probe floors of
-        # the book's cap (0.90 x E) as they do of the day cap.
+        # Review of #411 (F2): the test's positions can be held for days, so the families keep their Probe room of the
+        # book's cap (0.90 x E) as they do of the day cap (`money.probe_room`, 3 x 10% x E since the fast lane).
         self.install(opens=0)
         live = self.start()
         self.run_to(9, 31)
         book = live.table.book_share * D("481.63")                          # 433.467
-        exposure = M.Exposure(book_loss=D("180"))
-        self.assertEqual(self.plan("53.46", exposure=exposure, equity="481.63").qty, 1)
-        refused = self.plan("53.47", exposure=exposure, equity="481.63")
+        room = M.probe_room(live.table, D("481.63"))                        # 144.489
+        exposure = M.Exposure(book_loss=D("250"))
+        self.assertEqual(self.plan("38.97", exposure=exposure, equity="481.63").qty, 1)
+        refused = self.plan("38.98", exposure=exposure, equity="481.63")
         self.assertEqual(refused.qty, 0)
         self.assertIn("the book's cap", refused.reason)
-        self.assertIn("$200.00 is kept for the families' opens", refused.reason)
-        self.assertEqual(D("180") + D("53.46") + 2 * live.table.probe_floor <= book, True)
+        self.assertIn("$144.48 is kept for the families' opens", refused.reason)
+        self.assertEqual(D("250") + D("38.97") + room <= book, True)
 
     def test_the_stop_latches_at_150_for_good_and_its_exits_still_run(self):
         self.install(opens=2, hold=5)

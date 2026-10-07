@@ -8,6 +8,161 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## Fast lane v2 (Oct 7, 2026): built on `release/fast-lane-v2`, not deployed
+
+The owner's goal of Oct 7, item 4: "Real money is the forward test. A program trades at Probe size as soon as it passes a
+pre-registered screen whose false-positive rate you have measured." This tree carries it, based on PR #505 (the House
+has run it since 16:03Z Oct 7, release `20261007T160204Z`). It ships only by the owner's deploy. What it changes:
+
+- **The screen (D1).** The Validation line is t >= 1.65 on daily P&L (was 2), 2 of 4 quarters (was 3), and the deflated
+  Sharpe's N is the program (1), not the lineage's history; the rest is unchanged (50 trades on 25 days, mean above 0,
+  profit at 1.5x the half-spread, the probabilistic Sharpe at 0.95). One holdout look a distinct program at a FLAT
+  one-sided p <= 0.10 (`evidence.LOOK_LEVEL`): no Holm across looks, so the next look is no longer at 0.0125. Every look
+  carries its contamination tail from 2026-07-01 (`numbers.tail`), never a check. The experiment contract, the duplicate
+  look, the rations (3 a lineage), the paid review and audit and the leakage alarm are unchanged; a program a paid
+  review or audit failed stays failed across the deploy's evaluator adoption (`Gate.paid_verdict`, below). The false-positive
+  rate is measured by `scripts/screen_benchmark.py` against its frozen receipt
+  (`docs/benchmarks/fast_lane_screen_1.json`), ACCEPTED: the floor-eligible per-program rate is 0.18-0.51% in the iid
+  null worlds and 1.19% under AR(0.2) daily P&L (95% upper bound 1.36%, under the 2% cap); power 8%, 40% and 78% at a
+  yearly Sharpe of 1, 2 and 3 (today's rule: 0.7%, 11%, 44%). The figures are in
+  [FAST_LANE_SCREEN_1.md](benchmarks/FAST_LANE_SCREEN_1.md).
+- **Direction counts (D2).** `league/swarm/policy.json` sets `tournament.drift_screen` false and `gate.look_holds` null:
+  no version is demoted, refused or held for drift or power. The drift fit and the same-risk buy-and-hold are reported
+  beside every screen result and band row by two new jobs: `direction` (`league/ops/direction.py`: at the House's start,
+  after the grant, and daily 01:00Z, the Gym roots' daily SIP closes through the gateway's bars route into
+  `<state>/direction-closes.json`; XSP and SPXW read SPY; a gateway error is a failed receipt, a House warning and a
+  retry) and `fast_lane` (`league/ops/fast_lane.py`: after each `direction` run, read-only, the report into
+  `<state>/fast-lane-report.json`, with the last 7 days' Validation rows and every look, band row and the Probe budget;
+  a Probe or Sized family whose look has no buy-and-hold is a House warning). `scripts/fast_lane_report.py` is the same
+  report on copies with any window. Nothing that decides reads them.
+- **The Probe (D3).** One structure (`probe.contracts` 1) whose maximum loss with fees fits 10% of the sizing equity E
+  (`probe.max_loss_share` 0.10, bound 0.02-0.10), replacing 5% and the $100 floor (`floor_usd` 0); at most 3 Probe
+  positions held or working at once (`probe.max_open`). C3 is kept as it was: a Sized family whose Kelly stake is under
+  the Probe's cap (or buys no whole structure) is sized under the Probe's limits, now its one structure, 3 open and
+  15% the family; Sized limits apply only at a Kelly stake at its 10% cap. A family the live path confirms onto Probe trades from the next live
+  minute: no session wait (`step._real_eligible`; a legacy Probe with no promotion record still waits a session). The
+  calibration, the incubator and the House test keep `money.probe_room` (3 x 10% x E: $386.52 at E $1,288.40) of the
+  book's and the day's caps, in place of two $100 floors.
+- **The Probe loss budget (D4).** $400 (`probe.loss_budget_usd`): realized Probe losses, GROSS (each closed position a
+  Probe family opened counts its own loss; a gain, Probe or Sized, never offsets one), plus the maximum loss of every
+  real position held or working (`real.probe_tally`, from the live state's rows, restart-safe). A Probe family's open is
+  marked at its order (`money.Plan.probe`, kept in the order's `answer` and copied to its position's `info`), so "since
+  this release" is the mark itself: no order before it carries one, and a Sized position's result never touches the
+  realized figure. A LOST open (its outcome unknown) counts whole until the book finds it at the venue, whatever its
+  week, and holds its slot until its first leg expires. An open that would breach the budget is refused (`plan_open`),
+  exits go on, and one House warning a New York day says the budget is spent (raising it is the owner's). Sized
+  positions held or working count against it and against the 3 (a tightening); a Sized open is never refused by
+  either. The kill switch, the daily stop (35%), the drawdown stop (60%), the grant and
+  reconciliation still refuse first (`real_block`). At E $1,288.40: the Probe cap $128.84, 3 x $128.84 = $386.52, the
+  gateway's per-order cap $322.10 and day cap $1,288.40, the book cap $1,159.56, the daily stop $450.94.
+- **Demotion by live results (D5).** A Probe goes exit-only, for good for its version, when its realized real P&L falls
+  below -3 x the mean maximum loss of its real positions, or its live fills run below its nightly replay of the same days
+  by more than 0.20 a dollar of maximum loss over 5 or more matched real trades (`money.demotion`; chosen, not measured).
+  The `swarm.band` and `live.band` events carry the reason; the forward rows are kept. Sizing up (Sized) is unchanged.
+- **Tuition within the Probe's cap.** Tuition (`:t`, a real 1-lot of a program that passed Validation only) sends one
+  structure only when its maximum loss with fees fits the Probe's cap, 10% of E (`plan_open`; it had only the tuition
+  day's $200 and week's $300). It stays outside the Probe count and the Probe budget (below, its reach).
+- **A paid verdict binds (`Gate.paid_verdict`).** The deploy's adoption clears the gate's `review` and `gated_sha`; a
+  version whose program a paid review or audit failed (a kept refusal at the stage "review" or "audit", in any family
+  holding the same program, or a kept bar recording the gate's own failed review or audit) is closed before anything is
+  paid: no second review, no look. Refusals at free stages (the drift screen, the rations, the holds) are judged again by
+  their own rules, and the incubator's own failed reads still bar only the incubator route (the gate asks its own).
+
+**Identities.** Constitution digest `595228a6` -> `5edc8956`; money digest `42c4a3af` -> `da5c7542` (the grant
+re-ratifies by itself at the House's start on the owner's deploy: `league/ops/grant.py`, the digest moved with an owner
+deploy row); the execution fingerprint `ba60c473` -> `b4c34031` (league/live changed). Check a tree with
+`python3 -c "from league.constitution import digest, money_digest; print(digest(), money_digest())"` and
+`python3 -c "from league.swarm.evaluator import execution_fingerprint; print(execution_fingerprint())"`.
+
+**What the deploy resets** (the adoption at the House's start, `SELECTION_KEYS`): every alive family's bests, Train
+candidates, submissions, robustness (with `robust_failed` and `drift_failed`), validation line and numbers, review,
+`gated_sha`, `gate_outcome`, `train_passed` and incubator reviews. No family is banded, so no band is lost. Looks,
+trials, refusals, incubator bars, forward rows and extension holds are kept. The adoption clears every family's bests,
+so the tournament validates a family again only once its researcher has re-run Train under the new evaluator and
+resubmitted (the first fast-lane looks wait for those Train reruns); a version validated before is then re-judged under
+the new line from its recorded result, without a new trial; each pass costs a paid review and audit before its look (a burst, inside the roles'
+daily caps): every program the old line, Holm or the holds kept from a look gets one now, except a program a paid
+review or audit already failed (closed unpaid, `Gate.paid_verdict`). Practice cohorts reset.
+
+**The owner's deploy, in order.** (1) CI green on the exact head; rollback ready (`floor_box.py rollback` to
+`20261007T160204Z`); no order in flight. (2) At the House's start the grant re-ratifies on `da5c7542` and the adoption
+runs: verify the grant `active`, the adoption count and the policy layer's state "ok". (3) The box's `swarm.json`: keep
+`tournament.drift_screen` false (set since 15:53Z Oct 7); `gate.look_holds` must be ABSENT (a value there would override
+the policy's null). (4) The `direction` job ran at start, after the grant: `<state>/direction-closes.json` exists, and
+the `fast_lane` job after it: `<state>/fast-lane-report.json` exists. (5) Watch the first families pass after a passed
+look: Candidate -> Probe -> `:r` -> the first real order (its order's `answer` carries `"probe": true`); then the Probe
+budget in `<state>/fast-lane-report.json` (`probe_budget`), each band row's buy-and-hold and any D5 event.
+
+**Stated consequences.**
+- The incubator route stays off: with the drift screen off, `incubator.facts` never marks `train_passed`, so the route
+  (off since 15:53Z Oct 7 for this reason) has no candidate; restoring it needs a "drift does not refuse" switch, not
+  built here.
+- The practice caps (`:o`) keep the Probe's sizing from before the fast lane, 5% of the practice capital a structure
+  with the $100 one-structure floor (`shadow.PRACTICE_SHARE`, `PRACTICE_FLOOR_USD`); only their open count and family
+  share read the Probe row (unchanged at 3 and 15%). Practice evidence (sizes, how many opens run at once) does not move
+  with the real Probe's row (D6).
+- The grant's smallest real stake (`live_trading.smallest_stake`) stays $100 (`OPTIONS_MIN_STAKE`, the floor's old
+  value) with the floor at $0: the standing grant refuses under $100 of capital, its policy reads `stake_usd` 100 and
+  `max_agents` capital // 100, exactly as before. No grant refusal is loosened.
+- THE TUITION ROUTE'S REACH (an existing route the fast lane widens). Tuition sends real 1-lots, never evidence, for a
+  Gym family whose version passed Validation and has not passed its look (`step` "tuition", `:t`): real money BEFORE
+  the screen's look, outside the Probe count and the $400 budget. The looser Validation line (2.2-8.2% of no-edge
+  eligible programs pass it, FAST_LANE_SCREEN_1), the drift screen and the holds off, and the deploy's
+  re-judging of recorded validations all enlarge the set it reaches. Its bounds: one structure within the Probe's cap
+  (10% of E, $128.84 at E $1,288.40; new here), the tuition day's $200 and week's $300 of maximum loss. Cost: up to
+  $300 a week of real maximum loss on programs that passed Validation only; its losses are real money outside the
+  Probe budget, inside the daily and drawdown stops. Switching it off is `options_money.tuition` `day_usd` 0 (a money
+  row: the owner's deploy and a re-ratified grant).
+- A D5-demoted family stays a Candidate, shadow only, until a release: research acts on Gym families only, and the
+  swarm sends a Candidate back to the Gym only on a negative forward record (20 trades, a mean below zero) or an
+  evaluator adoption. So a family whose live fills lost while its shadow record stays positive is parked: never
+  researched or looked at again, its nightly replays still run (Gym compute). Not changed here (a swarm-side route back
+  to the Gym on D5 is the next release's).
+- Contamination is MEASURED, weakly, in the report (`league/ops/fast_lane.py`, reported only): each look's holdout
+  series split at 2026-07-01 into the 123 in-training sessions and the 61 after Opus 5.5's cutoff (days, P&L, daily
+  Sharpe, own bootstrap p, whether that part alone meets the level, the head-minus-tail Sharpe gap); pooled over the
+  looks, the mean gap with its t and the head-only against the tail-only pass share; and per live band, its live P&L per
+  dollar of maximum loss against its holdout's (live is after every author's training). With a handful of looks the
+  pooled measure has little power; DeepSeek-V4-Flash, which wrote most versions, has an unknown cutoff.
+- The public site's progress checklist for a Gym family states the quarters need as 3 only (the site's schema,
+  `capital/schema.js` `PROGRESS_LIMITS`), and one invalid agent fails the whole checkpoint. The publisher therefore
+  withholds a Gym family's checklist (null progress) while the line's need is 2 (`progress.SITE_QUARTERS`); widening the
+  site's limit to [2, 3] is the owner's (the site is his), and then `SITE_QUARTERS` follows.
+- After this release, any later league/live or league/gym change sends a live Candidate, Probe or Sized family back to
+  the Gym for good (its look is spent): the next release that touches either tree must carry F2 plan item 11 (keep a
+  live Probe across a release) or ship while no family is banded.
+- Loosened, with their measured costs (FAST_LANE_SCREEN_1): t 2 -> 1.65, 3/4 -> 2/4 quarters and N = 1 (Validation
+  alone passes 2.2-8.2% of no-edge eligible programs, 4.7% gaussian); Holm -> a flat 0.10 look (a no-edge look passes
+  7-15% given Validation; the whole screen 0.18-1.19%, against today's rule's 0.01-0.10%); per lineage with 3 looks
+  0.3-2.2%, and 3.8-12.5% for the largest (14-program) lineage; the Probe 5% + $100 floor -> 10% of E (below E $1,000
+  tighter than the floor); the drift screen's refusal and both holds off (the drift_only world, a program that only holds
+  a Sharpe-1 market factor, passes 2.14%); the next-session wait removed (real money within about 5 minutes of a passed
+  look, with no shadow session first); tuition's reach (above: up to $300 a week of real maximum loss on programs that
+  passed Validation only). Tightened: one structure a Probe position, 3 at once, the $400 budget (gross realized Probe
+  losses; every real position held or working, Sized too, counted at risk; a lost open counted until it is found), D5,
+  larger rooms kept for Probe opens, a tuition structure within the Probe's cap, a paid review's or audit's failure
+  binding across the adoption. Kept as they were: C3 (a Sized family at a Probe-sized stake under the Probe's limits),
+  the practice caps' sizing, the grant's $100 smallest stake.
+- ADAPTIVE SEARCH (the screen's rate is per program, not per lineage). The 0.18-1.19% is the rate for one no-edge
+  program drawn independently. A lineage that keeps validating versions pays nothing more for repeated Validation tries
+  (N = 1), so once it can reach Validation again and again the operative rate is the look's given Validation (7-15%,
+  by null world), and with its 3 looks a persistent no-edge lineage passes at least one with probability 1-(1-q)^3:
+  20% (skew), 22% (mid), 28% (gauss), 30% (t3), 38% (AR(0.2)). The per-lineage 0.3-2.2% (3.8-12.5% for the largest
+  lineage) replays the snapshot's past program counts as independent draws under the old regime: a historical floor,
+  not a bound. A new family the architect proposes on a failed mechanism starts a fresh lineage, with fresh looks. A
+  near-duplicate (a parameter tweak that changes one fill) is a new program with a new look; its bootstrap, reseeded by
+  its run sha over almost the same holdout P&L, has a Monte Carlo error of about 0.007 near p 0.10, so a borderline fail
+  can flip on bootstrap noise alone. Binding fixes (a within-lineage level, a near-duplicate rule in `duplicate_look`)
+  are the owner's call: D1 asks for a flat look a program.
+- The budget against the false-positive volume: 287 floor-eligible programs were validated in the snapshot's last 7
+  days; if all were no-edge, that is about 1.4 false Probes a week at the gaussian rate and 3.4 at AR(0.2). That volume
+  was measured while the drift screen still kept long-delta programs out of Validation, so with it off these are low
+  (a floor). A demoted Probe loses about 3 x its maximum loss ($120-375 for $40-125 tickets), so the $400 covers 1-3
+  demotions, and since the budget counts losses gross (a winning Probe never refills it), false positives alone can
+  spend it within one to two weeks. Raising it is the owner's decision.
+- The D5 replay bound (0.20 a dollar on 5 or more matched trades) is chosen, not measured: its false-demotion rate is
+  unknown until live and replay pairs exist; every demotion is reported with its numbers.
+
 ## Now (Oct 3, 2026): V3-A part 1 is live, on autopilot
 
 Production runs **V3-A part 1** (A1), the first release of LTCM v3 (the unattended desk), since 08:49:56Z Oct 3, 2026.
@@ -348,7 +503,7 @@ rule, the standing grant and the gateway's new routes. The code is the authority
 |---|---|---|---|
 | Owner deploy | any change to a protected path in the release trees (below), a `config.json` change beyond its operating dials, `real_money`, and every gateway change | `scripts/floor_box.py deploy` from `~/Work/ltcm-deploy`; the gateway by `npx wrangler@4.129.1 deploy` | the money path's window (20:05-13:25Z on a trading day; from 21:05Z in winter), except a rollback |
 | The updater | a change merged to `main` that touches the release trees (`league/`, `ltcm/`, `playbooks/`, `scripts/`, `deploy/`) and no protected path: the swarm's loop, researcher, architect, strategist and pool, the publisher, the House's service code. `league/config.json` only when the running release's checks find nothing but its bounded dials moved. A merge that changes nothing in those trees (docs, the CHANGELOG, `gateway/`) changes no release and holds nothing | the House by itself: it reads main's head every half hour, then the attested commit, the walls, the release train, the canary, promotion, the ten-minute watch, rollback | never inside its calendar hold (12:55Z to 20:05Z on a trading day, to 21:05Z in winter), never within 30 minutes of a House start, at most one release every `release_train_hours` (4) |
-| Engineer merges (the engineer is not in A1, so nothing calls these routes yet) | `engineer/<lane>/<slug>-<hash>` pull requests | the gateway's `POST /v1/github/merge`: green `checks.yml` on the exact head (its three jobs), a recorded approve and no reject for that commit, no protected path, only the branch's own lane and only what the harness lanes declare, new `league/tests/test_harness_candidate_*.py` files only ever added; at most 2 a New York day; never while the kill switch is on | a merge is then an updater release |
+| Engineer merges (the House's `engineer` job, from the self-running release; **The improvers**, below) | `engineer/<lane>/<slug>-<hash>` pull requests | the gateway's `POST /v1/github/merge`: green `checks.yml` on the exact head (its three jobs), a recorded approve and no reject for that commit, no protected path, only the branch's own lane and only what the harness lanes declare, new `league/tests/test_harness_candidate_*.py` files only ever added; at most 2 a New York day; never while the kill switch is on | a merge is then an updater release |
 
 **The protected paths.** `league/ci.py` `FORBIDDEN` lists 86 files and trees. No role's branch may change one, and the
 gateway's merge route refuses the same list plus `league/config.json` (`gateway/lib/protected.mjs`; a test on each
@@ -406,7 +561,9 @@ the stricter wall (`gateway/lib/github.mjs` `ENGINEER_SURFACE`): it opens and me
 themselves declare, so it refuses `league/swarm/loop.py` and `league/swarm/mechanisms.py`, to their own lanes too. The
 scheduler lane therefore admits new candidate tests only. Opening either path is an owner deploy (the path named in
 `league/swarm/harness_lanes.py` and in `ENGINEER_SURFACE`, both protected). The gateway is the only merge route;
-`league/ci.py`'s path guard alone would pass such a change only on a branch pushed by hand.
+`league/ci.py`'s path guard alone would pass such a change only on a branch pushed by hand. The House's engineer also
+holds every lane file the live path loads (on this tree `league/swarm/researcher.py` and `claude_research.py`): its
+research lane is `preflight.py` and new tests (**The improvers**, below).
 
 ### The settings layers
 
@@ -478,8 +635,9 @@ House's own loop stepping on it. The same module holds the House to never import
 
 ### The House's jobs
 
-`league/ops/`: the House's tick calls `_ops_step` once (never waiting); due jobs start as one child at a time
-(`python -m league.ops run <job>`: nice 19, memory bounded at what it holds plus 500 MB, CPU and wall limits, a
+`league/ops/`: the House's tick calls `_ops_step` once (never waiting); due jobs start as one child at a time, the
+earliest first and, among jobs due at the same instant (a House start's), in the registry's order, so the grant goes
+first (fast lane v2's review) (`python -m league.ops run <job>`: nice 19, memory bounded at what it holds plus 500 MB, CPU and wall limits, a
 scrubbed environment). Session triggers read the House's NYSE calendar (`ltcm.data.us_equity_session`), so they follow
 DST and early closes; the fixed daily, weekly and monthly UTC times sit outside every session in both seasons, and the
 hourly `grant` job also runs in session (a niced, bounded child like every other). Every occurrence gets one row in
@@ -487,7 +645,11 @@ hourly `grant` job also runs in session (a niced, bounded child like every other
 started again while its grace allows); a job not started within its grace is `missed` and a House warning; a failed run
 is retried after 15 minutes inside its grace (at most 3 attempts) unless the job may not repeat. Alerts a job raises
 reach the House at warning level at most, scrubbed of box ids and dollar figures (the full text stays in the private
-receipt). An occurrence older than the runner's first tick on the state, or than 8 days, is never reported.
+receipt). An occurrence older than the runner's first tick on the state, or than 8 days, is never reported; nor is one
+older than the first tick whose registry held its job and trigger (`first_seen` in the `ops.sqlite` kv), so a job or a
+trigger a release adds (`stall`, the engineer's hourly :40) starts from the deploy, never `missed` for the days before
+it. The first runner to keep `first_seen` on a state that already ran jobs reads the receipts: a trigger none of whose
+occurrences past its grace has a receipt was not in the old registry.
 
 | Job | When (UTC) | Grace | What | In a maintenance pause |
 |---|---|---|---|---|
@@ -497,17 +659,20 @@ receipt). An occurrence older than the runner's first tick on the state, or than
 | `clock` | daily 11:00 | 2 h | Alpaca's `/v2/clock` and `/v2/calendar` against the House's calendar for the next 10 sessions; a mismatch is a warning; writes `<state>/calendar.json` | runs |
 | `preopen` | trading days, open − 60 min (12:30 summer, 13:30 winter) | 40 min | the nine pre-open checks (release, grant, gateway caps, account and kill switch, swarm, bands, mirror, backup, compute), read-only; each FAIL a warning | runs |
 | `economics` | trading days, close + 10 min | 3 h | the one-cutoff close economics (realized options P&L from the Sept 26 basis, every cost from T0, open lots at conservative marks, one Net, deposits never counted) and `p30`; private, `<state>/economics/<YYYYMMDD>-close/` | runs |
-| `scoreboard` | daily 23:30 | 2 h | the public-safe daily page, committed to `docs/runs/desk/<date>.md` through the gateway | skipped |
+| `scoreboard` | daily 23:30 | 2 h | the public-safe daily page with its Funnel table (**The stall alarm and the funnel**), committed to `docs/runs/desk/<date>.md` through the gateway | skipped |
+| `stall` | every 30 minutes, at :20 and :50, round the clock | 70 min | the stall alarm (**The stall alarm and the funnel**, below): read-only; one `stall` notice listing every cause (an owner step at once and every 12 h, the rest every 24 h); a House warning per cause every 12 h | runs (a pause left on 6 h is one of its causes) |
 | `drills` | first Saturday of the month, 15:00 and 17:00 | 6 h | the failure drills (below); never retried | skipped |
-| `postmortem` | Saturdays 14:00 | 6 h | the weekly post-mortem (Phase 5) | skipped |
-| `agenda` | daily 03:00 | 6 h | the strategist's agenda (Phase 2) | skipped |
-| `engineer` | daily 04:00 | 6 h | the engineer's harness change (Phase 4); never retried | skipped |
+| `postmortem` | Saturdays 14:00 | 6 h | the weekly post-mortem, and the cost review on the month's first Saturday (Phase 5; **The improvers**) | skipped |
+| `agenda` | daily 03:00 | 6 h | the strategist's agenda (Phase 2); not in this release | skipped |
+| `engineer` | daily 04:00 (authors), hourly :40 (moves its candidate on) | 50 min | the engineer's harness change (Phase 4; **The improvers**); never retried | skipped |
+| `direction` | at each House start (after the grant: jobs due at the same instant start in the registry's order), and daily 01:00 (fast lane v2) | 3 h | the Gym roots' daily split-adjusted SIP closes from 2024-12-31 (XSP and SPXW read SPY) through the gateway's bars route into `<state>/direction-closes.json`, for the same-risk buy-and-hold beside each screen result and band row (reported, never a bar); a gateway error writes nothing and is a failed receipt (a House warning, retried inside its grace) | runs |
+| `fast_lane` | after each `direction` run (fast lane v2) | 3 h | the fast lane's report, read-only (`guard.readonly()`), into `<state>/fast-lane-report.json`: the last 7 days' Validation rows and every look, band row and the Probe budget, each with its drift fit and same-risk buy-and-hold, the contamination measures and D5 (`league/ops/fast_lane.py`; reported, never a bar); a Probe or Sized family whose look has no buy-and-hold is a House warning | runs |
 
 Every job is protected: the whole of `league/ops/` is on the list, so a new job or a changed one is the owner's deploy.
 
-`postmortem`, `agenda` and `engineer` are registered but their modules are not in V3-A part 1 (they are on `v3/b4`,
-`v3/b23` and `v3/b5`): each occurrence writes a `skipped` receipt that says so. Being paid, they are also skipped while
-the House has stopped buying work. The owner's private `<state>/ops.json` can switch a job off
+`agenda` is registered but its module is not in this release (it is on `v3/b23`): each occurrence writes a `skipped`
+receipt that says so. `postmortem` and `engineer` are in the self-running release, ported from `v3/b4` and `v3/b5`
+(**The improvers**, below). Being paid, the three are also skipped while the House has stopped buying work. The owner's private `<state>/ops.json` can switch a job off
 (`{"jobs": {"<name>": {"enabled": false}}}`) or every job (`{"enabled": false}`), and holds per-job settings: the
 economics' declared external costs (`economics.external`) and `hygiene.end_retired_cohorts`. `health.json` carries an
 `ops` block (the day's occurrences: due, late, failed, missed, and the job running now). The jobs' logs are
@@ -525,6 +690,128 @@ and fixed dollars while the swarm's booked research was under its cap. A brake f
 the line, an unreadable balance, a budget rule that could not be read, a full disk), or one that names no cause, is a
 FAIL; a FAIL's public warning never carries the guard's reason, which holds the account's numbers (the receipt keeps
 it). Check 6 counts the practice rows the swarm offers, not the cohorts the live path has pinned.
+
+### The improvers: the post-mortem and the engineer
+
+The self-running release (Oct 7, 2026) carries the two House jobs that report on the floor and improve it, ported from
+`v3/b4` and `v3/b5`. Both are protected (`league/ops/`), so they reach the House only by the owner's deploy. Both spend
+Claude through the swarm's router: every call is a `spend` row in `swarm.sqlite`, admitted inside budget rule v2's Claude
+meter (the day's Claude research dollars, $10 at the owner's ceiling, less the gate's two holds, $1.95).
+
+**The post-mortem** (`league/ops/postmortem.py`, Saturdays 14:00Z). Code reads the week's receipts, read-only: real
+orders by outcome and route with the rejection and refusal reasons; the calibration round trips' real fills against
+the mid beside the practice book's fills under the Gym's rules; demotions, promotions and retirements; the updater's
+self-deploys, the owner's deploys and the engineer's journal; the week's costs by service, its realized options P&L,
+the swarm's model spend and the jobs. On the month's first Saturday also the cost review: 30-day costs, the data
+vendor's share, research activity and universe, and a proposal for the owner's D6 by a fixed rule (a proposal only).
+One Claude Opus 5.5 call (role `postmortem`, its own $1 line, `max_tokens` 16,000, a worst case near $0.52, a
+model-safe prompt of aggregates) writes a headline, findings and at most three actions. Private:
+`<state>/postmortem/<date>.md` and `.json`. Public: `docs/runs/desk/<date>-postmortem.md` through the docs route, from an
+allowlist of counts and dollars and checked by the scoreboard's filter; the model's text joins it only when it passes.
+A week the model cannot be asked (no room in the line, the budget at the floor, an error) still gets its facts, with a
+warning. Cost: at most $1 a week. It runs once deployed; ops.json turns it off (`{"jobs": {"postmortem": {"enabled":
+false}}}`), keeps the facts but asks no model (`{"postmortem": {"model": false}}`), posts nothing
+(`{"postmortem": {"public": false}}`) or moves the cost review (`"cost_review": "always"` or `"never"`). Nothing in it
+feeds research: no swarm role reads the post-mortem.
+
+**The engineer** (`league/ops/engineer.py` with `author.py` and `reviewer.py`; daily 04:00Z it may author, hourly at
+:40 the candidate in flight moves on). One candidate at a time walks `playbooks/harness-improvement.md`: the top
+captured bottleneck of an engineer lane (`research`, `memory`, `data`) with its predeclared metric frozen; a change on
+the running release's commit, written by Claude Opus 5.5 (role `engineer`, at most $3 an attempt) through confined
+tools; the static guards; a pull request through the gateway's engineer role; green CI on the exact head; an
+adversarial review of the exact diff (role `reviewer`, at most $1), its verdict posted to `/v1/github/review` (a CI
+failure or a reject goes back once); the gateway's merge (at most 2 a New York day, never a protected path, never with
+the kill switch on); the updater's deploy at its train; the canary (an arm in `<state>/harness/canary.json`, or the data
+lane's window); retain or revert once by the predeclared metric, a revert being a pull request through the same route;
+then 20 sessions of the global guard on the promoted programs' forward record. The journal is
+`<state>/harness/engineer.sqlite`; the daily scoreboard counts authored, merged, retained, reverted, rejected and failed
+candidates and lists the engineer pull requests left for the owner: those the gateway would not close, and a revert that did not merge (the
+owner's revert by hand may be merging it). The engineer closes its own superseded and unmerged pull requests through
+`POST /v1/github/close` at their exact heads. It cannot
+change a protected path: the author's tools and static guards, the gateway's lane surface and protected list (on the
+pull request and again on the merge), `league/ci.py` `FORBIDDEN` in CI and the updater's own refusal each stop it.
+
+What the self-running release adds to `v3/b5`:
+- **One switch, on:** `engineer.enabled` in the swarm settings. The committed `league/swarm/policy.json` sets it true;
+  the box's `swarm.json` `{"engineer": {"enabled": false}}` wins over it with no deploy, and ops.json
+  `{"jobs": {"engineer": {"enabled": false}}}` stops the job. The job serves its own two roles (`engineer`, `reviewer`,
+  on Claude Opus 5.5 unless `claude.role_model` names one) in its copy of the settings, since the box's `swarm.json`
+  replaces `claude.roles` whole.
+- **$4 a UTC day** (`engineer.usd_day`): the engineer and the reviewer together, holds included. An attempt is capped at
+  what is left, and no attempt or review starts with less than its own cap: one attempt and its review a day, 40% of
+  the Claude meter at the ceiling. It authors at most once a UTC day (its 04:00Z occurrence's own day: 04:00Z is New
+  York's midnight in summer and 23:00 the day before in winter, so a New York day skipped one authoring a year) and
+  only with nothing in flight, so most days cost a review, a revision or nothing.
+- **Research-class only:** a lane file the live path loads is held (`RELEASE_CLASSES`; on this tree
+  `league/swarm/researcher.py` and `claude_research.py`): the tools refuse it, the brief names it held, and a candidate
+  whose tree classifies as money-path or evidence-reset is closed before its pull request. The gateway holds the same
+  two files (`gateway/lib/github.mjs` `ENGINEER_HELD`): no engineer pull request opens on them or merges them, so the
+  hold is two walls. `league/ci.py`'s lane table still lists them (a branch pushed by hand is the owner's). Opening the
+  money path to the engineer is a change to both: an owner deploy of the House and of the gateway.
+- **A base after an owner deploy:** an owner deploy carries no updater attestation. When no observer policy names the
+  running release either, main's head is the base if its release trees digest to the running tree, remembered for that
+  release. An owner deploy of anything but main's head leaves the engineer idle, its daily note saying why, until the
+  next updater release.
+
+What it needs, in place since V3-A: the gateway's engineer routes with `autonomy.engineer_pulls` in `/v1/health`, green
+`checks.yml` on main, and `auto_update` on (an engineer merge is an updater release: it deploys outside the updater's
+calendar hold, at most one a train).
+
+### The stall alarm and the funnel
+
+The owner's goal of Oct 7, 2026 (item 6: "raises an alarm when it stalls ... push me a short note when something only I
+can do is blocking"; item 3: "report the funnel daily"). From Oct 3 to Oct 7 research ran 1 to 13 Gym runs a day with
+no birth and nobody was told: the House's only alarm (a pre-open FAIL) went to a ledger row no mail carries.
+
+**The `stall` job** (`league/ops/stall.py`, every 30 minutes at :20 and :50, round the clock, a maintenance pause
+included: it is read-only like `preopen` and `clock`). It reads the swarm store, `budget.json`, the swarm's heartbeat,
+`deploys.jsonl`, the pause files, the `grant` job's receipts in `ops.sqlite` and the gateway's `/v1/health`, all
+read-only, and names a stall by its cause:
+
+| Cause | Raised when | The owner step it names |
+|---|---|---|
+| `births` | no `swarm.born` in the last 12 h while the living population is under `population.ceiling` (as the swarm loads its settings, the budget's tightening included) | none, unless the Sail guard is braked under its line or for disk, or the kill switch is on |
+| `gym_runs` | fewer than 10 Gym runs in the last 6 h (a run is a `runs` row the Gym evaluated: a row with a trial, neither `refused` nor `error`; those, and the rows with no trial an F1 verdict copies from an identical program, are counted apart) | as `births` |
+| `validations` | no Validation verdict in the last 24 h (no validation the Gym evaluated, no verdict read from an identical program, nothing a tournament round judged) while a living family is owed one: its candidate (the submitted best, else the Train best the researcher picked by score, `state.best_train_version`, as `Tournament.candidate_version` reads it) is not its validated version, and the last round within the 24 h did not leave it waiting on its 1.5x robustness run or the drift screen (those are counted apart) | as `births` |
+| `braked` | the Sail guard braked 12 or more of the last 24 h, whatever the cause (the budget's daily stop reached by noon keeps research from running round the clock as surely as a low balance) | "top up Sail" for `under_line`, "free disk" for `disk`; none for the budget's own stop |
+| `runway_sail`, `runway_claude` | the meter's days of research left at the ceiling (`budget.json` `card_runway_days`, the figure the funding notice reads) under 3; a `budget.json` older than 36 h is not read | "top up Sail" or "top up Claude (Anthropic)", with the budget's own amount for 7 more days |
+| `owner_deploy` | the updater refused main's head as the owner's deploy (a `deploys.jsonl` `vet` refusal naming a protected file, the workflows or `real_money`) and no release was promoted since: main's head and the running release differ in a file only the owner deploys | both ways out, since the record does not say which side is ahead: "if main is ahead, deploy it yourself (`scripts/floor_box.py deploy`); if the running release is ahead, merge it to main instead", naming the files |
+| `paused` | a maintenance pause (`<state>/PAUSE`) or a stopped swarm (`<state>/swarm.stop`) has stood 6 h or more (by the file's time). While either stands, `births`, `gym_runs`, `validations` and `braked` are not raised: a pause stops research by design | "lift the maintenance pause once its work is done (`scripts/floor_box.py maintenance off`)", or "remove state/swarm.stop" |
+| `grant_refused` | the standing grant refused to re-ratify since the `grant` job's last `ok` run (its receipts: `standing grant refused`; a failure to read the account is no refusal) | "ratify the grant by hand on the box (`python3 scripts/live_trading.py --ratify`)", with the grant's own reason |
+| `kill_on` | the gateway's kill switch is on (`/v1/health` `kill_switch`; since its latest `kill` in `admin_log`): no real order, no Claude call, no merge. An unreadable health is no cause | "lift the gateway's kill switch once its cause is fixed (`python3 scripts/gateway_admin.py unkill`, your admin token)" |
+
+**The notice.** One `POST /v1/notify` kind `stall` a run at most, through the budget's own gateway client, listing
+EVERY cause standing, owner steps first: the subject `LTCM: needs you: <the causes with an owner step>` or `LTCM: stalled:
+<the causes>`; the body opens with the owner steps (or "nothing here needs you"), then each cause with the House's
+sentence, its numbers, how long (from the record when it says: the last birth, the last Validation verdict, the start of
+the brake, the first refusal, the pause file, the kill; else from when the job first saw it) and what the House is doing
+about it (the architect's passes and why each made no birth, the researchers' cycles, the guard's state and the
+heartbeat's age, the tournament's last round and what waits on robustness or the drift screen, how the guard releases,
+the budget's taper, the updater keeping the running release, the grant job asking hourly). It is mailed:
+- while some cause has an owner step: at once when one of them was not in the last owner notice (a new top-up, a new
+  refusal), else at most once every 12 hours;
+- while none has: at most once every 24 hours after the last notice of either kind.
+
+The gateway holds the same pace by its own record, whatever id the House sends: it keys an owner notice on its owner
+causes (`stall:owner:<causes, sorted, joined by +>`, 12 hours) and one with none on `stall:info` (24 hours), inside
+`NOTIFY_MAX_PER_DAY`. A notice counts as told only when the gateway says it SENT it: a `duplicate` answer or a failure is
+tried at the next run. Each cause standing is also one House warning (`stall: <cause>: ...`, its dollar figures
+scrubbed) every 12 hours. `<state>/stall.json` (private) keeps each cause (since when it stands, when it was last warned
+of, when it cleared) and the notices (when the last owner notice and the last other notice were sent, which owner causes
+it told). A cause that clears is named in the receipt (`cleared`); the receipt carries every check with its numbers and
+what the House is doing. The job moves no money, changes no setting, and starts and stops nothing; it writes only
+`stall.json`. Switch it off like any job (`ops.json` `jobs.stall.enabled` false).
+
+**The funnel** (`league/ops/funnel.py`, read by the `scoreboard` job): the daily page gains **Funnel (last 24 h /
+since the release)**, the last 24 hours beside the time since the running release's latest `promoted` verdict in
+`deploys.jsonl` (n/a when the record has none): births (`swarm.born`), program versions written, Gym runs by window
+(train, validations, looks, forward, probe, mechanism; refused or failed apart), validations judged and passed (the
+tournament rounds' verdicts; rows copied from an identical program's verdict, F1, are their own row and no Gym run),
+looks taken and passed, moves to Candidate, Probe and Sized and the bands now, real orders
+(and of them filled) and real closes by route (the agents' routes against the House's, as the close economics routes
+them), research spend by meter (Sail, Claude, OpenAI) and the hours the Sail guard braked, then the stalls standing
+(causes and since when). Counts and spend only, never a Validation or holdout figure, and the page passes the public
+filter as before. A section that cannot be read is n/a, never a zero.
 
 ### Observing without exec
 
@@ -667,7 +954,8 @@ ratification on the trigger `deposit` at its first look, then `none`.
 `POST /v1/github/docs` (one page under `docs/runs/desk/`, at most 64 KB, at most 6 commits a New York day, message
 `desk: ...`); `POST /v1/github/pr` with role `engineer` (a lane, its own files only, at most 2 a New York day),
 `POST /v1/github/review` and `POST /v1/github/merge` (engineer pull requests only, above);
-`GET /v1/github/pr/<n>/files` and `POST /v1/github/close`; `funding` notices on `/v1/notify`; and the admin log (every
+`GET /v1/github/pr/<n>/files` and `POST /v1/github/close`; `funding` and `stall` notices on `/v1/notify` (one stall
+notice lists every cause: keyed on its owner causes, 12 hours, or `stall:info`, 24 hours); and the admin log (every
 kill, unkill and admin-token call, in `/v1/health` as `admin_log`, beside `autonomy`). The kill switch also stops
 merges, and `/v1/kill` now takes either token (stopping is never gated); `/v1/unkill` stays the owner's. The Sail
 balance mails (`LOW_BALANCE_USD`, `CRITICAL_BALANCE_USD`) are $25 and $12, under the budget rule's own floor, so the
@@ -839,7 +1127,8 @@ python3 scripts/floor_box.py maintenance off                 # resume on the nex
   job), but a swarm already running goes on, and the Gym trains through a pause. To stop the swarm,
   write `/workspace/state/swarm.stop`; the House starts it again once the file is gone and the House
   is not paused.
-- **The House's jobs and the updater under a pause** (from A1): `preopen`, `clock`, `economics` and `budget` run;
+- **The House's jobs and the updater under a pause** (from A1): `preopen`, `clock`, `economics` and `budget` run (and,
+  from the self-running release, `stall`, which reports a pause left on 6 hours as an owner step);
   `grant`, `hygiene`, `scoreboard`, `drills` and the paid jobs get a `skipped` receipt naming the pause, and the next
   occurrence after it runs. The updater is not paused: it still deploys main's head inside its walls.
 
@@ -1623,10 +1912,11 @@ and keeps an unfinished attempt's identity and owned contracts through restarts.
 the single-leg call) passed on Sept 28; a passed proof is not run again. Passing records paper execution evidence, never
 a family's evidence.
 
-**The money table (the sprint, owner decision D4, Sept 26, 2026)**: real types under $2,000 of equity are exactly
-`debit_vertical`, `long_butterfly`, `long_call`, `long_put` (the credit types come back only with a deposit to $2,000,
-in one deploy with the gateway, and a re-ratified grant); Probe 5% of equity a structure with a $100 one-contract floor,
-3 open, 15% the family; the book 90%; daily stop 35%, drawdown stop 60%; tuition $200 a day; the D3 calibration's day
+**The money table (the sprint, owner decision D4, Sept 26, 2026; the Probe rows since fast lane v2, Oct 7, 2026)**: real
+types under $2,000 of equity are exactly `debit_vertical`, `long_butterfly`, `long_call`, `long_put` (the credit types
+come back only with a deposit to $2,000, in one deploy with the gateway, and a re-ratified grant); a Probe position is
+one structure within 10% of equity (5% with a $100 one-contract floor before fast lane v2), 3 open a family, 15% the
+family, at most 3 Probe positions across the account and a $400 Probe loss budget; the book 90%; daily stop 35%, drawdown stop 60%; tuition $200 a day; the D3 calibration's day
 bounded at $50 of possible loss. The gateway's per-order cap is the lower of $1,000 and 25% of equity (at Sept 28's
 $1,473.11 of sizing equity: $368.27; 5% is $73.65, so a Probe's $100 floor applies; equity was $1,312.79 on Oct 2), 100%
 of equity opened a day, 250 of 300 orders open.
@@ -2172,7 +2462,9 @@ The swarm says each funding cliff ahead of time (`league/swarm/funding.py`, `Fun
 right after the Sail guard's reading). It changes no route, line, hold or guard decision. These are House alerts on
 hours of runway; from A1 the owner's mail about a card is the budget rule's `funding` notice, on 60 days (**The budget
 rule**, under **Running unattended**). Claude's cliff reads the funded room only: the budget's daily Claude line runs
-out every day by design and is not a cliff.
+out every day by design and is not a cliff. From the self-running release, research that stalls (no births, too few Gym
+runs, no Validation, a guard braked most of the day, a meter under three days of research, an owner deploy waiting, a
+pause left on, a refused grant, the kill switch on) is mailed too, as a `stall` notice (**The stall alarm and the funnel**, under **Running unattended**).
 
 | Cliff | Measured as | Leads: notice / warning / urgent |
 |---|---|---|
@@ -2278,7 +2570,7 @@ is installed (**The settings layers**, "The reduced `swarm.json`").
 | `researcher.claude_top`, `claude_effort`, `claude_max_tokens`, `claude_hold_every` | `swarm.json` on the box | 0 on the box (the band is off); defaults: 12, `medium`, 12000, 3 | the top band on Claude (PR #417): how many of the top families by allocation share, at what effort, each call's output ceiling (it sizes the hold), and how often Claude looks during a hold streak (1: every cycle) | edit `swarm.json` |
 | `researcher.claude_family_usd_day`, `claude_min_room_usd`, `claude_timeout_seconds`, `claude_breaker_failures`, `claude_breaker_window_seconds`, `claude_breaker_pause_seconds` | `swarm.json` on the box | defaults: $15, $25, 180, 3, 3600, 3600 | the band's fuses: one family's Claude a UTC day, the funded room left to the other roles, one call's limit, and the breaker (unknown bills in the window that pause the band, and for how long) | edit `swarm.json` |
 | `gate.review_openai_model`, `gate.audit_openai_model` | `swarm.json` on the box | null, null (since 04:53Z Sept 29) | the review's and the audit's OpenAI route; null skips it (defaults `gpt-6-sol`, `gpt-6-astra`) | edit `swarm.json` |
-| `gate.look_holds` (`drift_share`, `min_power`) | `swarm.json` on the box | default `{"drift_share": 0.25, "min_power": 0.30}` (the owner, Oct 2, 2026) | THE LOOK HOLDS: hold a holdout look at a long-delta version whose Train drift share is at least `drift_share`, or whose expected holdout power at the next look's Holm level is below `min_power` (the look holds, in the gate's section below). A key null turns that hold off, `look_holds` null both; a value that is not a number from 0 to 1 reads as its default | edit `swarm.json` |
+| `gate.look_holds` (`drift_share`, `min_power`) | `league/swarm/policy.json` (null since fast lane v2, Oct 7, 2026: both holds off); `swarm.json` on the box must not set it | default `{"drift_share": 0.25, "min_power": 0.30}` (the owner, Oct 2, 2026) | THE LOOK HOLDS: hold a holdout look at a long-delta version whose Train drift share is at least `drift_share`, or whose expected holdout power at the next look's Holm level is below `min_power` (the look holds, in the gate's section below). A key null turns that hold off, `look_holds` null both; a value that is not a number from 0 to 1 reads as its default | edit `swarm.json` |
 | `architect.openai_model`, `every_seconds`, `refill_seconds`, `max_refill`, `max_output_tokens` | `swarm.json` on the box | null, 7200 (since 17:04Z Oct 2; 1800 from 02:47Z Oct 1; 900 before; from A1 the budget rule makes it, and the refill, every 4 hours or slower at the floor), 1200, 6 (since about 14:00Z Oct 1; 12 from Release A, Sept 30), 32000 | the architect: null leaves it Claude first (its Sail profile, `architect.sail_profile`, as the fallback, and its route while `claude.role_usd_day.architect` is 0); its cadence, its refill below `population.start` and each pass's births (defaults `gpt-6-astra`, 14400, 3600, 12, 12000) | edit `swarm.json` |
 | `architect.sail_effort` | `swarm.json` on the box | `high` (since 12:54Z Oct 2; `medium` 11:38-12:54Z Oct 2; `high` from about 14:00Z Oct 1); default `medium` (Oct 1; before it, `high` was hard-coded) | the architect's reasoning effort on Sail (its `architect.sail_profile`) and OpenAI; Claude's is `claude.role_effort` / `claude.effort`. One of `minimal`, `low`, `medium`, `high`, `xhigh`; anything else reads as `medium`. At `high`, from 08:15Z Oct 1 every pass spent the whole 32,000-token output on reasoning and came back cut, most with no text; the same request at `medium` completed in 66 s with 12 carded families. A cut Sail answer is salvaged like a Claude one (its complete families born, fewer than 3 buy the one retry on Claude alone), and the pass's `swarm.architect` event says its `effort`, its `usage` (input, cached, output and reasoning tokens) and, when cut, its `incomplete_reason`. At `medium`, k3 sometimes writes stray trailing commas (`,}`, `,]`) into a complete answer; when the strict read finds no `families` array and the families object has such a comma, the architect reads it again without them, from the `{` that opens that object (`read_families`; the event says `lenient`), where before it read as no proposals (11:57Z Oct 1). A complete answer whose families array still does not parse whole (15:59Z Oct 1: a stray `}` after the fourth and the fifth of six families, and the pass read as no proposals) is read object by object, each family decoded from its own `{` and the stray closers and commas between the families skipped, never outside the array and nothing inside a family changed beyond the strip (`recover_families`: an object that does not decode whole is passed over, never entered or kept truncated; the event's `recovered` says how many and why, and `passed` the objects passed over). An answer with no readable family still reads as none (the CHANGELOG, Oct 1, has the history) | edit `swarm.json` |
 | `population.start`, `ceiling`, `floor` | `swarm.json` on the box | 16, 96, 8 (since 17:04Z Oct 2; 96, 96, 12 before); from A1 the budget rule caps the ceiling (a family a dollar a day, at least `floor` + 4) and holds the start to it | the refill target, the most alive, the fewest retirement may leave (defaults 48, 96, 16) | edit `swarm.json` |
@@ -2305,7 +2597,9 @@ is installed (**The settings layers**, "The reduced `swarm.json`").
 | `researcher.retire_guard_days` | `swarm.json` on the box | default 14 (Oct 1) | the validated-family guard: a researcher may not retire a family that holds a version which passed the validation line (in its state, in the tournament's verdict records, or archived by any evaluator adoption) last validated within this many days, unless a later validation of that version failed the line; a number at or below 0 turns it off; null, a boolean or a string reads as 14 | edit `swarm.json` |
 | `funding` (`enabled`, `every_seconds`, `lead_hours`, `repeat_hours`, `clear_factor`, `claude_out_usd`, `burn_window_hours`, `after_end_hours`, `fallback_every_seconds`, `fallback_flush_seconds`) | `swarm.json` on the box | defaults (Release A, #439): on, 300, per cliff, 12, 1.5, 2, 6, 48, 21600, 30 | the funding cliff alerts (**Funding cliffs and alerts**) | edit `swarm.json` |
 | `research.enabled`, `requests_day`, `family_requests_day`, `cycle_calls` | `swarm.json` on the box | defaults (Release B, #447): false, 300, 12, 2 | the research library on the House, and its lines: calls a UTC day for the floor, a family, a research cycle (**The research library**) | edit `swarm.json`; on only after the gateway and the House that carry it |
-| The money rules | `league/constitution.py` | the sprint's D4 table and the House live test's bounds (money `a3e2aa7c`); Release B adds the incubator's row (`42c4a3af`); V3-A part 1 leaves it as it is | what real money may do | owner deploy; the standing grant ratifies it when the House starts on it (`--ratify` if it refuses) |
+| The money rules | `league/constitution.py` | the sprint's D4 table and the House live test's bounds (money `a3e2aa7c`); Release B adds the incubator's row (`42c4a3af`); V3-A part 1 leaves it as it is; fast lane v2 moves the Probe row (`da5c7542`) | what real money may do | owner deploy; the standing grant ratifies it when the House starts on it (`--ratify` if it refuses) |
+| `options_money.probe` | `league/constitution.py` | from fast lane v2: `max_loss_share` 0.10, `contracts` 1, `open_per_family` 3, `family_share` 0.15, `floor_usd` 0, `max_open` 3, `loss_budget_usd` 400 | the Probe: one structure within 10% of E, at most 3 Probe positions at once, the $400 Probe loss budget (0 in `max_open` or `loss_budget_usd` stops Probe opens) | owner deploy; the standing grant re-ratifies at the House's start |
+| `tournament.drift_screen` | `league/swarm/policy.json` and `swarm.json` on the box | false (the box since 15:53Z Oct 7; the policy from fast lane v2) | THE DRIFT SCREEN's refusal (direction counts since fast lane v2; its fit is reported by the `direction` and `fast_lane` jobs into `<state>/fast-lane-report.json`, and by `scripts/fast_lane_report.py` on copies) | edit the file; true restores the screen |
 | `options_money.incubator` | `league/constitution.py` | from Release B: `max_loss_usd` 50, `contracts` 1, `max_open` 4, `week_loss_usd` 150, `min_sessions` 3, `min_trades` 10, `min_coverage` 0.80 | the incubator's caps and its pre-registered practice rule; each row may only tighten, and 0 in `max_open`, `week_loss_usd` or `max_loss_usd` stops the route | owner deploy, then `--ratify` (no evidence reset) |
 
 In the settings, `researcher.sail_usd_per_hour`, when set, is the researcher pace: the Sail models' spend over the

@@ -28,8 +28,10 @@ const gateAt = () => createGate({ store: memoryStore(), env: env(), now: () => N
 const sha1 = text => createHash('sha1').update(text).digest('hex');
 const reply = (status, data) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
 
-const RESEARCHER = 'league/swarm/researcher.py';
-const PREFLIGHT = 'league/swarm/preflight.py';
+// Two files of one lane's surface (the memory lane's): the research lane's researcher.py and claude_research.py are
+// held from the engineer (github.ENGINEER_HELD), which leaves that lane one file.
+const ARCHITECT = 'league/swarm/architect.py';
+const STRATEGIST = 'league/swarm/strategist.py';
 
 /**
  * A git small enough to read the way the base check reads it: nested trees (`GET /git/trees/<sha>` lists one
@@ -54,7 +56,7 @@ function gitHub() {
     dirs.set(sha, listing);
     return sha;
   };
-  let main = { [RESEARCHER]: 'researcher v1\n', [PREFLIGHT]: 'preflight v1\n', 'README.md': 'readme\n' };
+  let main = { [ARCHITECT]: 'architect v1\n', [STRATEGIST]: 'strategist v1\n', 'README.md': 'readme\n' };
   const commit = files => {
     const sha = sha1(`commit ${commits.size} ${JSON.stringify(files)}`);
     commits.set(sha, plant(files));
@@ -90,13 +92,13 @@ function gitHub() {
   return state;
 }
 
-const proposal = (base, files = [{ path: RESEARCHER, content: 'researcher v2\n' }]) =>
-  github.admit({ role: 'engineer', lane: 'research', slug: 'research-sweep', title: 'Sweeps by default', body: 'Measured.', base_sha: base, files });
+const proposal = (base, files = [{ path: ARCHITECT, content: 'architect v2\n' }]) =>
+  github.admit({ role: 'engineer', lane: 'memory', slug: 'memory-sweep', title: 'Sweeps by default', body: 'Measured.', base_sha: base, files });
 const open = (hub, admitted) => github.openPullRequest({ repo: GITHUB_REPO, token: GITHUB_TOKEN, proposal: admitted, fetcher: hub.fetcher });
 const posts = hub => hub.calls.filter(made => made.method !== 'GET').map(made => made.key);
 
 test('an engineer proposal must name its base commit; no other role names one', () => {
-  const missing = github.admit({ role: 'engineer', lane: 'research', slug: 'research-sweep', title: 't', files: [{ path: RESEARCHER, content: 'x' }] });
+  const missing = github.admit({ role: 'engineer', lane: 'memory', slug: 'memory-sweep', title: 't', files: [{ path: ARCHITECT, content: 'x' }] });
   assert.equal(missing.status, 400);
   assert.match(missing.error, /base_sha/);
   assert.equal(proposal('main').status, 400, 'a branch name is not a commit');
@@ -124,12 +126,12 @@ test('main moving elsewhere does not refuse a proposal; main changing one of its
 
   const fresh = gitHub();
   const old = fresh.refs.get('main');
-  fresh.land({ [RESEARCHER]: 'researcher v1 with the owner\'s fix\n' });
-  const moved = await open(fresh, proposal(old, [{ path: PREFLIGHT, content: 'preflight v2\n' }, { path: RESEARCHER, content: 'researcher v2\n' }]));
+  fresh.land({ [ARCHITECT]: 'architect v1 with the owner\'s fix\n' });
+  const moved = await open(fresh, proposal(old, [{ path: STRATEGIST, content: 'strategist v2\n' }, { path: ARCHITECT, content: 'architect v2\n' }]));
   assert.equal(moved.status, 409);
   assert.equal(moved.refused, 'base_moved');
-  assert.match(moved.error, /league\/swarm\/researcher\.py/);
-  assert.doesNotMatch(moved.error, /preflight/);
+  assert.match(moved.error, /league\/swarm\/architect\.py/);
+  assert.doesNotMatch(moved.error, /strategist/);
   assert.equal(moved.created, false, 'a refused base takes no place of the day');
   assert.deepEqual(posts(fresh), [], 'nothing is written to GitHub');
 
@@ -164,7 +166,7 @@ test('an engineer proposal that reached openPullRequest with no base is refused 
 const patchHub = () => {
   const hub = fakeHub();
   hub.files.set(77, [
-    { filename: RESEARCHER, status: 'modified', additions: 2, deletions: 1, changes: 3, patch: '@@ -1 +1,2 @@\n-a\n+b\n+c' },
+    { filename: ARCHITECT, status: 'modified', additions: 2, deletions: 1, changes: 3, patch: '@@ -1 +1,2 @@\n-a\n+b\n+c' },
     { filename: 'league/tests/test_harness_candidate_sweep.py', status: 'added', additions: 1, deletions: 0, changes: 1, patch: '@@ -0,0 +1 @@\n+x' },
   ]);
   return hub;
@@ -177,7 +179,7 @@ test('the reviewer reads the exact diff at one head, whole, behind the gateway t
   assert.equal(read.response.status, 200, JSON.stringify(read.body));
   assert.equal(read.body.complete, true);
   assert.equal(read.body.head, HEAD);
-  assert.deepEqual(read.body.files.map(file => [file.filename, file.patch_truncated]), [[RESEARCHER, false], ['league/tests/test_harness_candidate_sweep.py', false]]);
+  assert.deepEqual(read.body.files.map(file => [file.filename, file.patch_truncated]), [[ARCHITECT, false], ['league/tests/test_harness_candidate_sweep.py', false]]);
   assert.equal(read.body.files[0].patch, '@@ -1 +1,2 @@\n-a\n+b\n+c');
   assert.equal(JSON.stringify(read.body).includes(GITHUB_TOKEN), false);
 

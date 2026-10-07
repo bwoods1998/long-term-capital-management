@@ -39,15 +39,24 @@ class ValidationLine(unittest.TestCase):
             "trades": dict(trades=49),
             "days": dict(days=24),
             "mean_positive": dict(mean=-0.01),
-            "t": dict(t=1.99),
-            "quarters": dict(quarters="2/4"),
+            "t": dict(t=1.64),  # FAST LANE V2: the t line is 1.65
+            "quarters": dict(quarters="1/4"),  # FAST LANE V2: 2 of 4 quarters
         }
+        # FAST LANE V2: with N = 1 the deflated Sharpe is the probabilistic Sharpe against 0, a moments-adjusted t of
+        # about 1.645 that is never above the t itself: a t under the line fails it too.
+        along = {"t": {"dsr"}}
         for check, kw in cases.items():
             out = self.line(good(**kw))
             self.assertFalse(out["passed"], check)
             self.assertFalse(out["checks"][check], check)
-            others = {k: v for k, v in out["checks"].items() if k != check}
+            others = {k: v for k, v in out["checks"].items() if k != check and k not in along.get(check, ())}
             self.assertTrue(all(others.values()), (check, others))
+
+    def test_fast_lane_v2_the_line_is_t_1_65_and_two_of_four_quarters(self):
+        self.assertEqual((E.MIN_T, E.MIN_QUARTERS_POSITIVE, E.MIN_DSR), (1.65, 2, 0.95))
+        edge = self.line(good(t=1.65, quarters="2/4", trades=400, days=200))
+        self.assertTrue(edge["checks"]["t"] and edge["checks"]["quarters"], edge)
+        self.assertFalse(self.line(good(t=1.64, quarters="2/4", trades=400, days=200))["checks"]["t"])
 
     def test_the_stress_run_must_stay_positive(self):
         out = self.line(good(), stressed={"summary": {"pnl": -1.0}})
@@ -89,7 +98,7 @@ class ValidationLine(unittest.TestCase):
         self.assertFalse(self.line({**view, "summary": {**view["summary"], "t_daily": 0.5}})["checks"]["dsr"])
 
     def test_checks_passed_is_a_count_only(self):
-        out = self.line(good(t=1.5, quarters="2/4"))
+        out = self.line(good(t=1.5, quarters="1/4"))
         self.assertEqual(E.checks_passed(out), (5, 8))  # t, the deflated Sharpe and the quarters fail
         self.assertEqual(E.checks_passed(None), (0, 0))
 
@@ -119,29 +128,54 @@ class HoldoutLine(unittest.TestCase):
         # The step-down stops at the first rank that fails: a later small p cannot pass behind it.
         self.assertFalse(E.holm_passes(0.02, [0.02, 0.6])[0])
 
-    def test_the_line_needs_pnl_bootstrap_holm_and_half_the_validation_sharpe(self):
+    def test_the_line_needs_pnl_a_flat_level_and_half_the_validation_sharpe(self):
         rng = random.Random(4)
         daily = [rng.gauss(6.0, 10.0) for _ in range(180)]
         r = result("h", daily=daily, pnl=sum(daily))
         out = E.holdout_line(r, validation_sharpe=0.3, previous_ps=[], seed="s")
         self.assertTrue(out["passed"], out)
+        self.assertEqual(set(out["checks"]), {"status_ok", "pnl", "level", "sharpe"}, "no bootstrap or Holm check")
+        self.assertEqual((out["numbers"]["level"], out["numbers"]["rule"], out["numbers"]["draws"]),
+                         (E.LOOK_LEVEL, "flat", E.BOOTSTRAP_DRAWS))
+        self.assertNotIn("holm_threshold", out["numbers"])
+        self.assertNotIn("holm_reachable", out["numbers"])
         self.assertFalse(E.holdout_line(r, validation_sharpe=5.0, previous_ps=[], seed="s")["checks"]["sharpe"])
-        rng = random.Random(8)
-        modest_daily = [rng.gauss(1.0, 10.0) for _ in range(180)]  # passes one look, not the 204th
-        modest = result("h", daily=modest_daily, pnl=sum(modest_daily))
-        alone = E.holdout_line(modest, validation_sharpe=0.1, previous_ps=[], seed="s")
-        self.assertTrue(alone["checks"]["holm"], alone["numbers"])
-        self.assertFalse(E.holdout_line(modest, validation_sharpe=0.1, previous_ps=[0.001] * 3 + [0.9] * 200, seed="s")["checks"]["holm"])
         losing = result("h", daily=[-x for x in daily], pnl=-sum(daily))
         self.assertFalse(E.holdout_line(losing, validation_sharpe=0.3, previous_ps=[], seed="s")["passed"])
 
-    def test_the_bootstrap_resolves_the_holm_threshold_however_many_looks(self):
+    def test_the_look_is_flat_whatever_the_looks_before(self):
+        rng = random.Random(8)
+        modest_daily = [rng.gauss(1.0, 10.0) for _ in range(180)]
+        modest = result("h", daily=modest_daily, pnl=sum(modest_daily))
+        alone = E.holdout_line(modest, validation_sharpe=0.01, previous_ps=[], seed="s")
+        many = E.holdout_line(modest, validation_sharpe=0.01, previous_ps=[0.001] * 3 + [0.9] * 200, seed="s")
+        self.assertEqual(alone["p"], many["p"])
+        self.assertEqual(alone["checks"], many["checks"], "no Holm: the 204th look faces the same level as the first")
+        self.assertEqual((alone["numbers"]["looks_before"], many["numbers"]["looks_before"]), (0, 203))
+
+    def test_the_level_check_is_the_bootstrap_p_at_the_level(self):
         rng = random.Random(4)
         daily = [rng.gauss(30.0, 5.0) for _ in range(150)]  # overwhelming: every resampled mean above zero
         r = result("h", daily=daily, pnl=sum(daily))
         out = E.holdout_line(r, validation_sharpe=0.3, previous_ps=[0.9] * 120, seed="s")
-        self.assertTrue(out["checks"]["holm"], out["numbers"])
-        self.assertTrue(out["numbers"]["holm_reachable"])
+        self.assertTrue(out["checks"]["level"], out["numbers"])
+        self.assertAlmostEqual(out["p"], 1.0 / (E.BOOTSTRAP_DRAWS + 1))
+        strict = E.holdout_line(r, validation_sharpe=0.3, previous_ps=[], seed="s", level=0.0)
+        self.assertFalse(strict["checks"]["level"], "the level is a keyword the benchmark may set")
+
+    def test_the_contamination_tail_is_reported_and_never_a_check(self):
+        rng = random.Random(5)
+        days = [f"2026-{m:02d}-{d:02d}" for m in range(1, 10) for d in (5, 12, 19, 26)]
+        values = [rng.gauss(8.0, 10.0) if day < E.CONTAMINATION_TAIL_FROM else -3.0 for day in days]
+        r = result("h", daily=values, pnl=sum(values))
+        r["daily"] = [[day, x, 0.0] for day, x in zip(days, values)]
+        out = E.holdout_line(r, validation_sharpe=0.1, previous_ps=[], seed="s")
+        tail = out["numbers"]["tail"]
+        self.assertEqual((tail["from"], tail["days"]), ("2026-07-01", sum(1 for d in days if d >= "2026-07-01")))
+        self.assertAlmostEqual(tail["pnl"], -3.0 * tail["days"])
+        self.assertGreater(tail["p"], 0.9)
+        self.assertTrue(out["passed"], "a losing tail never changes the verdict")
+        self.assertNotIn("tail", out["checks"])
 
     def test_the_leakage_alarm(self):
         self.assertFalse(E.leakage_alarm(9, 9))

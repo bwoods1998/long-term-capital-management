@@ -215,6 +215,22 @@ class TheCommittedPolicy(L.LoopCase):
         self.assertLessEqual(population["floor"], population["start"])
         self.assertLessEqual(population["start"], population["ceiling"])
 
+    def test_fast_lane_v2_switches_the_drift_screen_and_the_look_holds_off(self):
+        """FAST LANE V2 (Oct 7, 2026; D2, direction counts): the committed policy turns the drift screen's refusal off and
+        both look holds off (`gate.look_holds` null), and the House reads them so."""
+        from league.swarm.gate import look_hold_settings
+        from league.swarm.researcher import drift_settings
+
+        layer, status = S.read_policy()
+        self.assertEqual(status["state"], "ok")
+        self.assertIs(layer["tournament"]["drift_screen"], False)
+        self.assertIsNone(layer["gate"]["look_holds"])
+        loaded = S.load(self.root)
+        self.assertIsNone(loaded["gate"]["look_holds"])
+        self.assertIs(loaded["tournament"]["drift_screen"], False)
+        self.assertEqual(look_hold_settings(loaded), (None, None))
+        self.assertIsNone(drift_settings(loaded))
+
     def test_it_sets_no_budget_and_loosens_no_line_of_the_guard(self):
         layer, _ = S.read_policy()
         self.assertNotIn("budget", layer, "THE BUDGET is never a setting: settings without a state root would carry it")
@@ -295,9 +311,12 @@ class TheCommittedPolicy(L.LoopCase):
 
     def test_the_paid_model_lines_are_the_gates_and_the_strategists(self):
         """Claude's $10 a day at the ceiling: the gate's review and audit and the strategist have a line; the researchers,
-        the rewrites, the diagnostician and the architect have none (the stronger models bought no Validation pass)."""
+        the rewrites, the diagnostician and the architect have none (the stronger models bought no Validation pass). The
+        House's weekly post-mortem (league/ops/postmortem.py) keeps its own $1 line from the defaults: the job serves its
+        role itself, one call a week."""
         lines = self.at_usd_day(B.CEILING_USD_DAY)["claude"]["role_usd_day"]
-        self.assertEqual({r: v for r, v in lines.items() if v}, {"review": 5, "audit": 10.0, "strategist": 6})
+        self.assertEqual({r: v for r, v in lines.items() if v}, {"review": 5, "audit": 10.0, "strategist": 6,
+                                                                 "postmortem": 1.0})
         self.assertEqual({r for r, v in lines.items() if not v}, {"architect", "researcher", "rewrite", "diagnostician"})
         for role, hold in B.GATE_HOLDS_USD.items():
             self.assertGreaterEqual(lines[role], hold, f"{role}: its line holds its hold")

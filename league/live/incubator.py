@@ -819,11 +819,12 @@ class Incubator:
             wanted[key] = (row, "real", True)
 
     # ------------------------------------------------------------------ orders
-    def room(self) -> M.Decimal:
-        """What an incubator open leaves the others in the book's and the day's caps: two Probe floors, and the House live
-        test's structure while it can still open (its switch on, not stopped, not ended)."""
+    def room(self, equity: M.Decimal | None) -> M.Decimal:
+        """What an incubator open leaves the others in the book's and the day's caps: the Probe room (`money.probe_room`,
+        `probe.max_open` x `probe.max_loss_share` x E; THE FAST LANE, Oct 7, 2026), and the House live test's structure
+        while it can still open (its switch on, not stopped, not ended)."""
         table, live = self.live.table, self.live
-        room = C.FAMILY_ROOM_PROBES * table.probe_floor
+        room = M.probe_room(table, equity)
         test = getattr(live, "house_test", None)
         if test is not None and live.switches().get("house_test"):
             st = test._st()
@@ -842,7 +843,7 @@ class Incubator:
             return M.Plan(0, table.incubator_max_loss, why)
         tally = self.tally(day.day, family)
         self._week_check(day.day, tally)
-        return M.plan_incubator(table, unit=unit, equity=equity, tally=tally, exposure=exposure, room=self.room())
+        return M.plan_incubator(table, unit=unit, equity=equity, tally=tally, exposure=exposure, room=self.room(equity))
 
     def _week_check(self, day: dt.date, tally: M.IncubatorTally) -> None:
         """Record and alert the weekly stop once a week when the tally's latch has reached the row. The stop itself is
@@ -901,7 +902,7 @@ class Incubator:
             if other.family == family and other.kind == "real" and other.mode == "live" and other.key.endswith((":r", ":t")):
                 return False
         tally = self.tally(today, family)
-        plan = M.plan_incubator(live.table, unit=unit, equity=equity, tally=tally, exposure=exposure, room=self.room())
+        plan = M.plan_incubator(live.table, unit=unit, equity=equity, tally=tally, exposure=exposure, room=self.room(equity))
         return plan.qty >= 1
 
     # ------------------------------------------------------------------ the minute

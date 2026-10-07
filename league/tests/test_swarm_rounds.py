@@ -255,7 +255,9 @@ class TournamentTests(RoundCase):
         Tournament(self.store, self.pool, self.settings).validate(self.store.families(alive=True))
         self.assertEqual(self.pool.jobs[-1].roots, ("SPY",))
 
-    def test_the_deflated_sharpe_counts_the_lineages_validated_versions(self):
+    def test_the_deflated_sharpes_n_is_the_program_not_the_lineage(self):
+        """FAST LANE V2 (Oct 7, 2026): the deflated Sharpe's N is the program itself (1), whatever the lineage validated;
+        its trials are recorded, never divided by."""
         self.family("a")
         t = Tournament(self.store, self.pool, self.settings)
         t.validate(self.store.families(alive=True))
@@ -266,7 +268,8 @@ class TournamentTests(RoundCase):
         self.store.update_family("a", best_version=v2["n"])
         t.validate(self.store.families(alive=True))
         numbers = self.store.family("a")["state"]["validation_line"]["numbers"]
-        self.assertEqual(numbers["validated_versions"], 2, "Train trials are not the N; validated versions are")
+        self.assertEqual(self.store.lineage_validated("a")[0], 2, "the lineage validated two versions")
+        self.assertEqual(numbers["validated_versions"], 1, "the N is the program, never the lineage's history")
         self.assertGreater(numbers["lineage_trials"], 2)
 
     def test_a_late_validation_of_an_older_version_never_overwrites_a_newer_one(self):

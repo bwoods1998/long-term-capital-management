@@ -161,7 +161,8 @@ class RunnerHolds(unittest.TestCase):
         rows = self.rows()
         self.assertEqual(rows["mutating"]["status"], "skipped")
         self.assertIn("the House is paused (prune)", rows["mutating"]["summary_json"])
-        self.assertEqual([c.job for c in self.children], ["paid"], "a job that runs in a pause still starts")
+        # Both run in a pause; due at the same instant, the first in the registry's order starts (fast lane v2's review).
+        self.assertEqual([c.job for c in self.children], ["reader"], "a job that runs in a pause still starts")
 
     def test_a_stop_on_buying_work_skips_only_paid_jobs(self):
         ops = self.ops()
@@ -181,7 +182,10 @@ class RunnerHolds(unittest.TestCase):
 
     def test_the_registry_marks_what_runs_in_a_pause(self):
         jobs = by_name()
-        self.assertEqual({j.name for j in JOBS if j.in_pause}, {"budget", "clock", "preopen", "economics"})
+        # The read-only checks (the stall alarm among them: a pause left on is one of its causes), the close economics,
+        # the budget, and the fast lane's direction closes and report.
+        self.assertEqual({j.name for j in JOBS if j.in_pause}, {"budget", "clock", "preopen", "economics", "stall",
+                                                                "direction", "fast_lane"})
         self.assertEqual({j.name for j in JOBS if j.paid}, {"postmortem", "agenda", "engineer"})
         longest = max(j.wall for j in JOBS)
         self.assertGreaterEqual(jobs["grant"].grace, longest + 5 * 60, "an hourly grant waits behind the longest job, never missed")

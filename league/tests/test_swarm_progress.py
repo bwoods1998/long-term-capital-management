@@ -25,8 +25,17 @@ SPEC = {"id": "synthetic-family", "mechanism": "An invented mechanism for a publ
         "structure": "debit_vertical", "roots": ["SPY"], "dte": [0, 2]}
 
 
+#: FAST LANE V2 (Oct 7, 2026): the line's quarters need is 2, and the site's schema accepts 3 only (`progress.SITE_QUARTERS`),
+#: so the shipped publisher withholds a Gym checklist (`SiteBound`). The checklist's own rules are tested as the site will
+#: take them once the owner's site accepts 2.
+SITE_ACCEPTS_TWO = {"validation_quarters": (2, 3)}
+
+
 class ProgressCase(unittest.TestCase):
     def setUp(self):
+        bounds = patch.dict(progress.COUNT_BOUNDS, SITE_ACCEPTS_TWO)
+        bounds.start()
+        self.addCleanup(bounds.stop)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
@@ -90,7 +99,7 @@ class GymProgress(ProgressCase):
         counts = self.checks(value)
         self.assertEqual((value["target"], value["blocked"]), ("candidate", "holdout_pending"))
         self.assertEqual((counts["validation_trades"], counts["validation_days"], counts["validation_quarters"]),
-                         ((50, 50), (25, 25), (3, 3)))
+                         ((50, 50), (25, 25), (2, 2)))
         self.assertEqual(counts["holdout"], (0, 1))
         encoded = json.dumps(value)
         for secret in ("never-publish-this", "0.314159", "9.876543", "0.998765", "98765.4321", "private_marker", "sbcp_"):
@@ -121,27 +130,28 @@ class GymProgress(ProgressCase):
         self.store.update_family("synthetic-family", best_version=v2["n"])
         self.assertIsNone(self.read(), "the old validated program cannot lend progress to a newer selected one")
 
-    def test_connected_and_prior_lineage_validated_versions_withhold_only_the_cached_dsr_pass(self):
+    def test_the_dsr_pass_is_current_when_judged_with_n_one_whatever_the_lineage_validated(self):
+        """FAST LANE V2: the deflated Sharpe's N is the program (1). A verdict judged with N = 1 stays current when the
+        lineage validates more versions; one judged with a lineage's N (before fast lane v2) is stale."""
         self.family("prior")
         self.family("selected", prior="prior")
         self.family("sibling", parent="selected")
         state = self.store.family("selected")["state"]
         line = copy.deepcopy(state["validation_line"])
-        line["numbers"]["validated_versions"] = self.store.lineage_validated("selected")[0]
-        self.assertEqual(line["numbers"]["validated_versions"], 3, "the prior slice's and the sibling's versions count")
+        line["numbers"]["validated_versions"] = 1  # as the tournament judges since fast lane v2
         self.store.set_state("selected", validation_line=line)
         before = self.read("selected")
         self.assertEqual(self.checks(before)["validation_dsr"], (1, 1))
-        self.store.bump("prior", trials=1)
-        self.assertEqual(self.checks(self.read("selected"))["validation_dsr"], (1, 1), "Train trials no longer deflate (D2b)")
         v2 = self.store.add_version("prior", "# another invented program", {}, author="test")
-        self.validated("prior", v2["n"])  # one more validated version in the lineage set: the cached verdict is stale
+        self.validated("prior", v2["n"])  # one more validated version in the lineage set
+        self.assertEqual(self.store.lineage_validated("selected")[0], 4)
         after = self.read("selected")
-        self.assertEqual(after["blocked"], "evidence_stale")
-        self.assertEqual(self.checks(after)["validation_dsr"], (0, 1))
-        expected = copy.deepcopy(self.checks(before))
-        expected["validation_dsr"] = (0, 1)
-        self.assertEqual(self.checks(after), expected)
+        self.assertEqual(self.checks(after), self.checks(before), "a lineage's later validations stale nothing")
+        self.assertEqual(after["blocked"], before["blocked"])
+        line["numbers"]["validated_versions"] = 3  # judged with the lineage's N, before fast lane v2
+        self.store.set_state("selected", validation_line=line)
+        stale = self.read("selected")
+        self.assertEqual((stale["blocked"], self.checks(stale)["validation_dsr"]), ("evidence_stale", (0, 1)))
         self.assertEqual(progress._lines(self.store.family("selected"),
             {f["id"]: f for f in self.store.families()}, [], prior=True), set(self.store.lineages("selected")))
 
@@ -167,7 +177,8 @@ class GymProgress(ProgressCase):
         self.assertEqual(progress._lines(families["first"], families, links, prior=True),
                          set(self.store.lineages("first")))
         value = self.read("first")
-        self.assertEqual((value["blocked"], self.checks(value)["validation_dsr"]), ("evidence_stale", (0, 1)))
+        self.assertEqual((value["blocked"], self.checks(value)["validation_dsr"]), ("holdout_pending", (1, 1)),
+                         "FAST LANE V2: joined lineages stale no N = 1 verdict")
 
     def test_a_past_holdout_pass_while_back_in_gym_cannot_claim_fresh_promotion(self):
         version = self.family()
@@ -314,6 +325,7 @@ class Allowlist(ProgressCase):
 
     @unittest.skipUnless(os.environ.get("LTCM_SITE_SCHEMA"), "set LTCM_SITE_SCHEMA to the site's exact schema.js for the cross-repo contract")
     def test_python_output_matches_the_sites_exact_progress_contract(self):
+        patch.stopall()  # the shipped bound: the Gym checklist withheld while the site accepts a quarters need of 3 only
         rows = []
         for band in ("gym", "candidate", "probe", "sized"):
             self.family(band, band=band)
@@ -323,12 +335,13 @@ class Allowlist(ProgressCase):
         at = publish.site_instant(self.account()["as_of"])
         body = publish.build_checkpoint({"agents": agents, "account": self.account()}, at)
         rows.extend(body["agents"])
-        self.assertTrue(all(row.get("progress") for row in rows))
+        self.assertEqual({row["band"]: row.get("progress") is not None for row in rows},
+                         {"gym": False, "candidate": True, "probe": True, "sized": True})
         source = """import fs from 'node:fs'; import {pathToFileURL} from 'node:url';
 const {validCheckpoint, validProgress} = await import(pathToFileURL(process.argv[1]).href);
 const body = JSON.parse(fs.readFileSync(0, 'utf8'));
 if (!validCheckpoint(body)) throw new Error('Python checkpoint rejected');
-for (const row of body.agents) if (!validProgress(row.progress, row.band)) throw new Error('progress rejected: '+row.band);
+for (const row of body.agents) if (row.progress !== null && !validProgress(row.progress, row.band)) throw new Error('progress rejected: '+row.band);
 for (const row of body.agents) delete row.progress;
 if (!validCheckpoint(body)) throw new Error('old optional-field shape rejected');
 process.stdout.write('all four progress targets and old checkpoint accepted\\n');
@@ -337,6 +350,29 @@ process.stdout.write('all four progress targets and old checkpoint accepted\\n')
                               input=json.dumps(body), text=True, capture_output=True, check=False)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertIn("all four progress targets", done.stdout)
+
+
+class SiteBound(ProgressCase):
+    """FAST LANE V2 (Oct 7, 2026) moved the quarters line to 2 of 4; the owner's site accepts a quarters need of 3 only
+    (capital/schema.js `PROGRESS_LIMITS`, copied in fixtures/site_schema.js), and one invalid agent fails the whole
+    checkpoint. The shipped publisher withholds the Gym checklist (null progress) rather than misstate the need or send a
+    checkpoint the site rejects."""
+
+    def setUp(self):
+        super().setUp()
+        patch.stopall()  # the shipped bound (`progress.SITE_QUARTERS`)
+
+    def test_the_gym_checklist_is_withheld_while_the_site_cannot_state_the_line(self):
+        self.assertEqual(progress.COUNT_BOUNDS["validation_quarters"], progress.SITE_QUARTERS)
+        self.assertEqual(progress.SITE_QUARTERS, (3, 3))
+        self.family()
+        self.assertIsNone(self.read(), "withheld, never a need of 3 the line does not ask")
+        self.family("live-one", band="candidate")
+        self.assertEqual(self.read("live-one")["target"], "probe", "a live band's checklist has no quarters row")
+
+    def test_the_fixture_schema_still_accepts_three_only(self):
+        text = (Path(__file__).resolve().parent / "fixtures" / "site_schema.js").read_text(encoding="utf-8")
+        self.assertIn("validation_quarters: [3, 3]", text)
 
 
 if __name__ == "__main__":

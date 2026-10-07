@@ -26,9 +26,62 @@ any other deploy.
 
 ## Not yet deployed
 
-The running House release is `20261003T084912Z-be16b05904ff` (main `266e6861`, 08:49Z Oct 3, below), the gateway is
-`e95a2d4a`, and the box's updater is on. Main holds nothing in its release trees that the box does not run, and the
-gateway runs main's `gateway/`. What is built and not deployed is on branches.
+### The self-running release, the improvers (`release/self-running`; built, not deployed)
+
+The House's weekly post-mortem (`v3/b4`) and the engineer with its reviewer (`v3/b5`), ported onto `research/restart-1007`
+(budget rule v2). The post-mortem: Saturdays 14:00Z, at most $1 a week of Claude, a private report and a public page
+under `docs/runs/desk/`. The engineer: on by `policy.json` `engineer.enabled`, at most $4 a UTC day of Claude, one
+candidate in flight, research-class only (the modules the live path loads are held, by the House and by the gateway's
+`ENGINEER_HELD`), merges only through the gateway's walls (green CI, a recorded review, two a day, no protected path),
+closes its own superseded and unmerged pull requests through `POST /v1/github/close`, authors at most once a UTC day,
+main's head as its base after an owner deploy of it.
+Both are under `league/ops/`, so both are an owner deploy. Off without a deploy: the box's `swarm.json`
+`{"engineer": {"enabled": false}}`; ops.json `{"jobs": {"postmortem": {"enabled": false}}}`. Detail: operations,
+**The improvers**.
+
+### The self-running release, the stall alarm and the funnel (`release/self-running`; built, not deployed)
+
+The owner's goal of Oct 7, items 3 and 6. A new House job `stall` (`league/ops/stall.py`, every 30 minutes at :20 and
+:50, read-only, a maintenance pause included) names a stall by its cause: no birth in 12 h under the population
+ceiling, fewer than 10 Gym runs in 6 h, no Validation verdict in 24 h while a family is owed one, the Sail guard braked
+12 of 24 h, a meter under 3 days of research at the ceiling, main and the running release differing in what only the
+owner deploys, a pause left on 6 h, a refused grant, or the kill switch on. One `stall` mail lists every cause (the
+numbers, how long, what the House is doing, the owner steps first or that nothing needs the owner): at once and every
+12 h while one needs the owner, else at most once a day; each cause is also a House warning every 12 h; it never acts.
+The daily page gains the Funnel table (last 24 h and since the release: `league/ops/funnel.py`). The job runner counts
+a job or trigger a release adds from the deploy (`first_seen`), so `stall` and the engineer's :40 are never reported
+`missed` for the days before. The gateway composes the new `stall` kind on `/v1/notify` and dedupes it by its owner
+causes for 12 h (`stall:info` 24 h) inside the day's cap: deploy the gateway first (an older gateway answers 400, which
+the job records and warns of).
+Owner deploy (`league/ops/`); off without one: ops.json `{"jobs": {"stall": {"enabled": false}}}`. Detail: operations,
+**The stall alarm and the funnel**.
+
+### Fast lane v2: built on `release/fast-lane-v2`, waiting for the owner's deploy (Oct 7, 2026)
+
+The owner's goal of Oct 7, item 4: a program trades at Probe size as soon as it passes a pre-registered screen whose
+false-positive rate is measured. Based on PR #505 (the House's release `20261007T160204Z`). The screen (t 1.65, 2 of 4
+quarters, N = 1, one flat holdout look at p <= 0.10 a program), direction counts (`policy.json`: the drift screen's
+refusal and the look holds off; the `direction` job and `scripts/fast_lane_report.py` report the drift fit and the
+same-risk buy-and-hold), a one-structure Probe within 10% of E, at most 3 Probe positions, a $400 Probe loss budget,
+same-minute entry and D5 demotion by live results. **The money digest moves** `42c4a3af` -> `da5c7542` (constitution
+`595228a6` -> `5edc8956`): the standing grant re-ratifies at the House's start on the owner's deploy. **An evidence
+reset**: league/live changes, so the execution fingerprint moves `ba60c473` -> `b4c34031`; no family is banded. The
+benchmark is [docs/benchmarks/FAST_LANE_SCREEN_1.md](docs/benchmarks/FAST_LANE_SCREEN_1.md); the deploy's steps and the
+stated consequences are in [docs/operations.md](docs/operations.md) ("Fast lane v2").
+
+Its review's fixes (Oct 7): the Probe loss budget counts realized Probe losses GROSS, from positions a Probe family
+opened (marked at the order), so a Sized gain or a Probe gain never refills it, and a lost open counts until it is
+found (it had netted every `:r` close, Sized included); tuition sends one structure only within the Probe's cap, and
+its reach (real 1-lots before the look, up to $300 a week) is stated; C3 keeps its trigger (a Sized family at a
+Probe-sized stake under the Probe's limits); the practice caps and the grant's $100 smallest stake stay as they were; a
+program a paid review or audit failed is closed unpaid after the deploy's adoption (`Gate.paid_verdict`); the
+`direction` job's failure is a failed receipt, and at a House start the grant runs first (same-instant jobs in the
+registry's order); a new `fast_lane` job writes the report daily, read-only, with contamination measured (head against
+tail per look, pooled, and live against holdout); the adaptive-search ceiling (20-38% for a persistent no-edge lineage
+with 3 looks) and the benchmark's history are stated.
+
+The running House release is `20261007T160204Z-31d63e37434e` (main `ab6c0c6a`, the research restart, 16:03Z Oct 7),
+the gateway is `e95a2d4a`, and the box's updater is on. What is built and not deployed is on branches.
 
 ### On branches, not in V3-A part 1
 

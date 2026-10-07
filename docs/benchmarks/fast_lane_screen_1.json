@@ -1,0 +1,88 @@
+{
+ "acceptance": "In every null world (gauss, t3, skew, ar, mid), the floor-eligible per-program false-positive rate's exact one-sided 95% upper bound (Clopper-Pearson, league.stats.exact_upper) is at most 2%. If it holds, the constants ship. If any world fails, MIN_T is raised by 0.1, a new receipt is frozen and the run is made again, until it holds. A result never loosens a constant.",
+ "constants": {
+  "BOOTSTRAP_BLOCK": 5,
+  "BOOTSTRAP_DRAWS": 2000,
+  "HOLDOUT_SHARPE_SHARE": 0.5,
+  "LOOK_LEVEL": 0.1,
+  "MIN_DAYS": 25,
+  "MIN_DSR": 0.95,
+  "MIN_QUARTERS_POSITIVE": 2,
+  "MIN_T": 1.65,
+  "MIN_TRADES": 50,
+  "STRESS": 1.5
+ },
+ "frozen_at": "2026-10-07T17:08:12+00:00",
+ "input_db": "/home/bwoods1998/Work/.ltcm-main/scratch/blockers-1007/house.sqlite",
+ "name": "fast_lane_screen_1",
+ "protocol": {
+  "cap": 0.02,
+  "confidence": 0.95,
+  "contamination_tail_from": "2026-07-01",
+  "demote_multiple": 3,
+  "drift_sharpe_year": 1.0,
+  "floor": {
+   "days": 25,
+   "trades": 50
+  },
+  "holdout_window": [
+   "2026-01-02",
+   "2026-09-25"
+  ],
+  "look_size_draws": 6000,
+  "looks_per_lineage": 3,
+  "max_processes": 8,
+  "null_worlds": [
+   "gauss",
+   "t3",
+   "skew",
+   "ar",
+   "mid"
+  ],
+  "old_rule": {
+   "dsr": 0.95,
+   "dsr_n": "the program's lineage size in the store",
+   "look": "lcb95 > 0 and p <= 0.0125 (Holm at the next look), P&L > 0, half the Validation Sharpe",
+   "min_t": 2.0,
+   "quarters": 3
+  },
+  "planted_shape": "gauss",
+  "planted_sharpes": [
+   1,
+   2,
+   3
+  ],
+  "probe_budget_usd": 400,
+  "removed_checks": [
+   "t",
+   "dsr",
+   "quarters",
+   "stress",
+   "mean",
+   "look_pnl",
+   "look_sharpe"
+  ],
+  "reps": {
+   "drift_only": 20,
+   "null": 40,
+   "planted": 10
+  },
+  "seed": "fast-lane-screen-1",
+  "tickets_usd": [
+   40,
+   125
+  ],
+  "validation_window": [
+   "2025-01-02",
+   "2025-12-31"
+  ]
+ },
+ "sha256": {
+  "input_db": "749b75f2eb24dd71b842e3a139c4f70f7c6e03c1063e29fdb7d765efcca447c4",
+  "league/gym/results.py": "d29ed18d37a234238ef02fb1bc6f1abc32ad3360b747501ccefd2785a9851ae1",
+  "league/stats.py": "866ecda27a79bbeaba033ef92847093e182a0dbe2bd1041a568c2dbf81a302d3",
+  "league/swarm/evidence.py": "f4f49dd22625d72f2965f147e004afd403b9e7e58c00b263df592800c3b866d3",
+  "scripts/screen_benchmark.py": "7758af9d012bb4dd3bb7c559579ee6f304681bd111f48b405dc2dc11abb8d80c"
+ },
+ "tree_head": "e67907ce9806deddad7d3e13819a8bf7ea042e62"
+}

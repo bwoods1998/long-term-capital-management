@@ -18,12 +18,15 @@ XSP/SPXW and exercise of equity legs at the close, a day's working orders expiri
 State: the accounts are written to `<root>/live-shadow.json` after every minute (`ShadowBook.save`), so a restart
 resumes them, working orders and all.
 
-THE PRACTICE CAPS (v3, Oct 2026): a practice account (`<family>@<version>:o`) holds what a Probe may hold, scaled to its
-own shadow capital, from the constitution's `options_money.probe` (`money.Table`), and sized as `money.plan_open` sizes
-a Probe's open: at most `open_per_family` structures open or working; a new open's size at most floor(`max_loss_share` x
-capital / unit), where unit is one structure's maximum loss with its open and close fees (one structure when that is
-none and the unit is within `floor_usd`), and at most what keeps the account's maximum loss at risk (open structures and
-working opens) within max(`family_share` x capital, `floor_usd`). An open over its size is resolved again at that size
+THE PRACTICE CAPS (v3, Oct 2026): a practice account (`<family>@<version>:o`) holds what a Probe could hold before the
+fast lane, scaled to its own shadow capital: at most `open_per_family` structures open or working (the constitution's
+`options_money.probe`, `money.Table`); a new open's size at most floor(`PRACTICE_SHARE` x capital / unit), where unit is
+one structure's maximum loss with its open and close fees (one structure when that is none and the unit is within
+`PRACTICE_FLOOR_USD`), and at most what keeps the account's maximum loss at risk (open structures and working opens)
+within max(`family_share` x capital, `PRACTICE_FLOOR_USD`). The share and the floor are this module's constants, the
+Probe's 5% and $100 as they were before THE FAST LANE (Oct 7, 2026) moved the real Probe to one structure within 10%
+of E with no floor: practice evidence (returns per dollar of maximum loss, sizes and how many opens run at once) stays
+as it was (the fast lane's D6 and its review). An open over its size is resolved again at that size
 (never above what the program asked: the program's own size stays its ceiling, where a Probe sizes to the cap), its
 order event marked `practice_sized`. An open the caps leave no structure is withdrawn before it can work (the engine's
 counts as if it was never sent) and refused: a practice `rejected` event with its reason, told to the program like any
@@ -351,14 +354,21 @@ class ShadowAccount(E.Account):
         return acc
 
 
+#: THE PRACTICE CAPS' share of the practice capital a structure and their one-structure floor: the Probe's before THE
+#: FAST LANE (Oct 7, 2026), kept so the real Probe's new row does not move practice evidence (the module docstring).
+PRACTICE_SHARE = 0.05
+PRACTICE_FLOOR_USD = 100.0
+
+
 @functools.lru_cache(maxsize=1)
 def _probe_caps() -> tuple[tuple[float, float], int, float]:
-    """((max_loss_share, floor_usd), open_per_family, family_share) of the constitution's `options_money.probe`, as the
-    money table reads it (ValueError on a table outside its bounds: the practice caps then refuse every open)."""
+    """((`PRACTICE_SHARE`, `PRACTICE_FLOOR_USD`), open_per_family, family_share): the count and the family share are the
+    constitution's `options_money.probe`, as the money table reads it (ValueError on a table outside its bounds: the
+    practice caps then refuse every open)."""
     from .money import Table
 
     table = Table.from_constitution()
-    return (float(table.probe_share), float(table.probe_floor)), int(table.probe_open), float(table.probe_family_share)
+    return (PRACTICE_SHARE, PRACTICE_FLOOR_USD), int(table.probe_open), float(table.probe_family_share)
 
 
 def _num(value: float) -> float | None:
