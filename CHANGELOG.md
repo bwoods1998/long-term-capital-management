@@ -169,8 +169,9 @@ merge by hand, which changes no release, holds nothing and needs no deploy):
   gateway's credit list: an owner deploy and a money-digest move. With the ladder it is V3-A part 2.
 - `v3/b1` (research v3), `v3/b23` (births from the mechanism library, the Train kill tests as code, the strategist's
   whole agenda), `v3/b4` (the weekly post-mortem and the monthly cost review), `v3/b5` (the engineer and the reviewer;
-  `v3/b4` and `v3/b5` are ported to `release/self-running`, above). Each changes a protected file as it stands (`league/swarm/settings.py`, the store, the evidence and tournament
-  modules, `league/ops/`), so each is an owner deploy, not an updater release.
+  `v3/b4` and `v3/b5` are ported to `release/self-running`, above). Each changes a protected file as it stands
+  (`league/swarm/settings.py`, the store, the evidence and tournament modules, `league/ops/`), so each is an owner
+  deploy, not an updater release.
 
 ## 2026-10-02
 
