@@ -159,8 +159,25 @@ def budget_lines(budget: Mapping[str, Any] | None) -> list[str]:
     return lines or ["The budget state names no meter."]
 
 
+def engineer_lines(engineer: Mapping[str, Any] | None) -> list[str]:
+    """The engineer's counts (`league/ops/engineer.py` `public_summary`): changes authored, merged, retained, reverted."""
+    if not isinstance(engineer, Mapping):
+        return ["The engineer has not run yet."]
+    lines = ["| Authored | Merged | Retained | Reverted | Rejected | Failed | Claude USD |", "|---:|---:|---:|---:|---:|---:|---:|",
+             f"| {_cell(engineer.get('authored'))} | {_cell(engineer.get('merged'))} | {_cell(engineer.get('retained'))} | "
+             f"{_cell(engineer.get('reverted'))} | {_cell(engineer.get('rejected'))} | {_cell(engineer.get('failed'))} | "
+             f"{_cell(engineer.get('claude_usd'))} |", ""]
+    lines.append(f"In flight: {engineer.get('in_flight') or 'none'}.")
+    leftover = [n for n in engineer.get("leftover_prs") or [] if isinstance(n, int) and not isinstance(n, bool)]
+    if leftover:  # the gateway closes no pull request: the owner does
+        lines += ["", "Engineer pull requests left open (superseded or unmerged; the owner closes them): "
+                      + ", ".join(f"#{n}" for n in leftover[-20:]) + "."]
+    return lines
+
+
 def build(*, day: str, release: str, economics: Mapping[str, Any] | None, deploys: Mapping[str, Any],
-          budget: Mapping[str, Any] | None, ladder: Mapping[str, Any], jobs: Mapping[str, int], written_at: str) -> str:
+          budget: Mapping[str, Any] | None, ladder: Mapping[str, Any], jobs: Mapping[str, int], written_at: str,
+          engineer: Mapping[str, Any] | None = None) -> str:
     """The page, from an allowlist of figures."""
     lines = [f"# Desk scoreboard, {day}", "",
              f"Written by the House at {written_at} from its own records (release `{release}`). Money figures run from the "
@@ -195,6 +212,7 @@ def build(*, day: str, release: str, economics: Mapping[str, Any] | None, deploy
               "|---:|---:|---:|---:|",
               f"| {_cell(ladder.get('entrants'))} | {_cell(ladder.get('in_practice'))} | {_cell(ladder.get('promoted'))} | "
               f"{_cell(ladder.get('bh_family_size'))} |", "",
+              "## The engineer (harness changes)", "", *engineer_lines(engineer), "",
               "## The House's jobs today", "",
               f"Ran: {jobs.get('ok', 0)}; failed: {jobs.get('failed', 0)}; missed: {jobs.get('missed', 0)}; skipped: {jobs.get('skipped', 0)}.", ""]
     return "\n".join(lines)
@@ -205,9 +223,15 @@ def run(ctx: Any) -> dict[str, Any]:
 
     now = ctx.now()
     day = S.iso(ctx.due_at)[:10]
+    try:
+        from .engineer import public_summary
+
+        engineer = public_summary(ctx.root)
+    except Exception:  # noqa: BLE001 - the page is written whatever the engineer's journal holds
+        engineer = None
     text = build(day=day, release=Path(ctx.release).name, economics=latest(ctx.root), deploys=deploy_counts(ctx.base, day=day),
                  budget=read_json(ctx.root / "budget.json", None), ladder=ladder_counts(ctx.root, now),
-                 jobs=job_counts(ctx.root, day), written_at=S.iso(now)[11:16] + "Z")
+                 jobs=job_counts(ctx.root, day), written_at=S.iso(now)[11:16] + "Z", engineer=engineer)
     problems = public_problems(text)
     local = write_text(ctx.root / "scoreboard" / f"{day}.md", text)
     if problems:
