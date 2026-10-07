@@ -340,15 +340,21 @@ constant changes only by a gateway deploy):
   `unknown`. `test: true` is marked a drill in the subject and the first line, its figures said to be the drill's. A
   `funding*` notice id is remembered eight days (others 48 hours); `NOTIFY_MAX_PER_DAY` is unchanged.
 - **`stall` notices** on `/v1/notify` (the owner's goal of Oct 7, 2026, item 6; `league/ops/stall.py` `notice_facts`):
-  the subject is `LTCM: stalled: <cause>` in this gateway's own words for one of the causes `STALL_CAUSES` names
-  (`births`, `gym_runs`, `validations`, `braked`, `runway_sail`, `runway_claude`, `owner_deploy`; any other is a 400).
-  The body is the House's sentence for the cause (one line, cut at 400 characters), its figures (at most 16, each name a
-  lower-case word, each value a decimal, a date or time, yes or no or a short lower-case token, else `unknown`), how
-  long it has stood (`hours`, `since`), what the House is doing about it, and either the owner step ("Only you can do
-  this: ...", e.g. a top-up with the budget's own amount, or an owner deploy) or that nothing needs the owner. The router
-  keys a stall's dedupe on its cause (`stall:<cause>`, remembered 12 hours) whatever id the House sends, so one cause
-  is mailed at most once every 12 hours even if the House loses its own record; `NOTIFY_MAX_PER_DAY` holds for stalls
-  too.
+  one mail lists every cause standing (`causes`, each `cause_facts`), each one of `STALL_CAUSES` (`births`, `gym_runs`,
+  `validations`, `braked`, `runway_sail`, `runway_claude`, `owner_deploy`, `paused`, `grant_refused`, `kill_on`; any
+  other, an empty list, a repeated cause or more than ten is a 400). The subject is this gateway's own words: `LTCM:
+  needs you: <the causes with an owner step>` when there is one, else `LTCM: stalled: <the causes>` (three by name, then
+  how many more). The body opens with the owner steps ("Only you can do this", one line each, cut at 400 characters) or
+  says nothing needs the owner, then each cause: its words, the House's sentence (one line, cut at 400 characters), its
+  figures (at most 16, each name a lower-case word, each value a decimal, a date or time, yes or no or a short
+  lower-case token, else `unknown`), how long it has stood (`hours`, `since`) and what the House is doing about it. The
+  router keys the dedupe itself (`stallKey`), whatever id the House sends: `stall:owner:<the owner causes, sorted,
+  joined by +>`, remembered 12 hours, so a new owner step is mailed at once and the same ones at most every 12 hours;
+  `stall:info` when none needs the owner, remembered 24 hours. `NOTIFY_MAX_PER_DAY` holds for stalls too.
+- **`ENGINEER_HELD`** (`lib/github.mjs`, the self-running release): `league/swarm/researcher.py` and
+  `league/swarm/claude_research.py`, the research lane's files the live path loads, are refused to every engineer
+  proposal and merge (`outside_surface`, "held from the engineer in this release"), as the House's engineer holds them
+  (`league/ops/engineer.py` `RELEASE_CLASSES`). The research lane writes `league/swarm/preflight.py` and new tests.
 
 The token needs nothing new: Contents and Pull requests read/write already cover the docs commit and the merge, and the
 Actions runs and jobs it reads are public on this repository. A branch protection rule on `main` that requires pull

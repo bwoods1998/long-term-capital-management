@@ -454,7 +454,11 @@ hourly `grant` job also runs in session (a niced, bounded child like every other
 started again while its grace allows); a job not started within its grace is `missed` and a House warning; a failed run
 is retried after 15 minutes inside its grace (at most 3 attempts) unless the job may not repeat. Alerts a job raises
 reach the House at warning level at most, scrubbed of box ids and dollar figures (the full text stays in the private
-receipt). An occurrence older than the runner's first tick on the state, or than 8 days, is never reported.
+receipt). An occurrence older than the runner's first tick on the state, or than 8 days, is never reported; nor is one
+older than the first tick whose registry held its job and trigger (`first_seen` in the `ops.sqlite` kv), so a job or a
+trigger a release adds (`stall`, the engineer's hourly :40) starts from the deploy, never `missed` for the days before
+it. The first runner to keep `first_seen` on a state that already ran jobs reads the receipts: a trigger none of whose
+occurrences past its grace has a receipt was not in the old registry.
 
 | Job | When (UTC) | Grace | What | In a maintenance pause |
 |---|---|---|---|---|
@@ -465,7 +469,7 @@ receipt). An occurrence older than the runner's first tick on the state, or than
 | `preopen` | trading days, open − 60 min (12:30 summer, 13:30 winter) | 40 min | the nine pre-open checks (release, grant, gateway caps, account and kill switch, swarm, bands, mirror, backup, compute), read-only; each FAIL a warning | runs |
 | `economics` | trading days, close + 10 min | 3 h | the one-cutoff close economics (realized options P&L from the Sept 26 basis, every cost from T0, open lots at conservative marks, one Net, deposits never counted) and `p30`; private, `<state>/economics/<YYYYMMDD>-close/` | runs |
 | `scoreboard` | daily 23:30 | 2 h | the public-safe daily page with its Funnel table (**The stall alarm and the funnel**), committed to `docs/runs/desk/<date>.md` through the gateway | skipped |
-| `stall` | every 30 minutes, at :20 and :50, round the clock | 70 min | the stall alarm (**The stall alarm and the funnel**, below): read-only; a `stall` notice and a House warning per cause at most every 12 h | skipped |
+| `stall` | every 30 minutes, at :20 and :50, round the clock | 70 min | the stall alarm (**The stall alarm and the funnel**, below): read-only; one `stall` notice listing every cause (an owner step at once and every 12 h, the rest every 24 h); a House warning per cause every 12 h | runs (a pause left on 6 h is one of its causes) |
 | `drills` | first Saturday of the month, 15:00 and 17:00 | 6 h | the failure drills (below); never retried | skipped |
 | `postmortem` | Saturdays 14:00 | 6 h | the weekly post-mortem, and the cost review on the month's first Saturday (Phase 5; **The improvers**) | skipped |
 | `agenda` | daily 03:00 | 6 h | the strategist's agenda (Phase 2); not in this release | skipped |
@@ -528,7 +532,9 @@ the kill switch on); the updater's deploy at its train; the canary (an arm in `<
 lane's window); retain or revert once by the predeclared metric, a revert being a pull request through the same route;
 then 20 sessions of the global guard on the promoted programs' forward record. The journal is
 `<state>/harness/engineer.sqlite`; the daily scoreboard counts authored, merged, retained, reverted, rejected and failed
-candidates and lists the engineer pull requests left open for the owner to close (the gateway closes none). It cannot
+candidates and lists the engineer pull requests left for the owner: those the gateway would not close, and a revert that did not merge (the
+owner's revert by hand may be merging it). The engineer closes its own superseded and unmerged pull requests through
+`POST /v1/github/close` at their exact heads. It cannot
 change a protected path: the author's tools and static guards, the gateway's lane surface and protected list (on the
 pull request and again on the merge), `league/ci.py` `FORBIDDEN` in CI and the updater's own refusal each stop it.
 
@@ -540,12 +546,15 @@ What the self-running release adds to `v3/b5`:
   replaces `claude.roles` whole.
 - **$4 a UTC day** (`engineer.usd_day`): the engineer and the reviewer together, holds included. An attempt is capped at
   what is left, and no attempt or review starts with less than its own cap: one attempt and its review a day, 40% of
-  the Claude meter at the ceiling. It authors at most once a New York day and only with nothing in flight, so most days
-  cost a review, a revision or nothing.
+  the Claude meter at the ceiling. It authors at most once a UTC day (its 04:00Z occurrence's own day: 04:00Z is New
+  York's midnight in summer and 23:00 the day before in winter, so a New York day skipped one authoring a year) and
+  only with nothing in flight, so most days cost a review, a revision or nothing.
 - **Research-class only:** a lane file the live path loads is held (`RELEASE_CLASSES`; on this tree
   `league/swarm/researcher.py` and `claude_research.py`): the tools refuse it, the brief names it held, and a candidate
-  whose tree classifies as money-path or evidence-reset is closed before its pull request. Opening the money path to
-  the engineer is a change to that constant: an owner deploy.
+  whose tree classifies as money-path or evidence-reset is closed before its pull request. The gateway holds the same
+  two files (`gateway/lib/github.mjs` `ENGINEER_HELD`): no engineer pull request opens on them or merges them, so the
+  hold is two walls. `league/ci.py`'s lane table still lists them (a branch pushed by hand is the owner's). Opening the
+  money path to the engineer is a change to both: an owner deploy of the House and of the gateway.
 - **A base after an owner deploy:** an owner deploy carries no updater attestation. When no observer policy names the
   running release either, main's head is the base if its release trees digest to the running tree, remembered for that
   release. An owner deploy of anything but main's head leaves the engineer idle, its daily note saying why, until the
@@ -561,38 +570,51 @@ The owner's goal of Oct 7, 2026 (item 6: "raises an alarm when it stalls ... pus
 can do is blocking"; item 3: "report the funnel daily"). From Oct 3 to Oct 7 research ran 1 to 13 Gym runs a day with
 no birth and nobody was told: the House's only alarm (a pre-open FAIL) went to a ledger row no mail carries.
 
-**The `stall` job** (`league/ops/stall.py`, every 30 minutes at :20 and :50, round the clock; skipped in a maintenance
-pause, which stops births by design). It reads the swarm store, `budget.json`, the swarm's heartbeat and `deploys.jsonl`
-read-only and names a stall by its cause:
+**The `stall` job** (`league/ops/stall.py`, every 30 minutes at :20 and :50, round the clock, a maintenance pause
+included: it is read-only like `preopen` and `clock`). It reads the swarm store, `budget.json`, the swarm's heartbeat,
+`deploys.jsonl`, the pause files, the `grant` job's receipts in `ops.sqlite` and the gateway's `/v1/health`, all
+read-only, and names a stall by its cause:
 
 | Cause | Raised when | The owner step it names |
 |---|---|---|
-| `births` | no `swarm.born` in the last 12 h while the living population is under `population.ceiling` (as the swarm loads its settings, the budget's tightening included) | none, unless the Sail guard is braked under its line or for disk |
-| `gym_runs` | fewer than 10 Gym runs in the last 6 h (a run is a `runs` row the Gym evaluated: `refused` and `error` rows are counted apart) | as `births` |
-| `validations` | no Validation run in the last 24 h while a living family holds a Train best never validated (its best version is not its validated version; with every best validated none is owed) | as `births` |
+| `births` | no `swarm.born` in the last 12 h while the living population is under `population.ceiling` (as the swarm loads its settings, the budget's tightening included) | none, unless the Sail guard is braked under its line or for disk, or the kill switch is on |
+| `gym_runs` | fewer than 10 Gym runs in the last 6 h (a run is a `runs` row the Gym evaluated: a row with a trial, neither `refused` nor `error`; those, and the rows with no trial an F1 verdict copies from an identical program, are counted apart) | as `births` |
+| `validations` | no Validation verdict in the last 24 h (no validation the Gym evaluated, no verdict read from an identical program, nothing a tournament round judged) while a living family is owed one: its candidate (the submitted best, else the Train best the researcher picked by score, `state.best_train_version`, as `Tournament.candidate_version` reads it) is not its validated version, and the last round within the 24 h did not leave it waiting on its 1.5x robustness run or the drift screen (those are counted apart) | as `births` |
 | `braked` | the Sail guard braked 12 or more of the last 24 h, whatever the cause (the budget's daily stop reached by noon keeps research from running round the clock as surely as a low balance) | "top up Sail" for `under_line`, "free disk" for `disk`; none for the budget's own stop |
 | `runway_sail`, `runway_claude` | the meter's days of research left at the ceiling (`budget.json` `card_runway_days`, the figure the funding notice reads) under 3; a `budget.json` older than 36 h is not read | "top up Sail" or "top up Claude (Anthropic)", with the budget's own amount for 7 more days |
-| `owner_deploy` | the updater refused main's head as the owner's deploy (a `deploys.jsonl` `vet` refusal naming a protected file, the workflows or `real_money`) and no release was promoted since | "deploy main at `<sha>` yourself (`scripts/floor_box.py deploy`)", naming the files, or merge the running release to main when main is behind it |
+| `owner_deploy` | the updater refused main's head as the owner's deploy (a `deploys.jsonl` `vet` refusal naming a protected file, the workflows or `real_money`) and no release was promoted since: main's head and the running release differ in a file only the owner deploys | both ways out, since the record does not say which side is ahead: "if main is ahead, deploy it yourself (`scripts/floor_box.py deploy`); if the running release is ahead, merge it to main instead", naming the files |
+| `paused` | a maintenance pause (`<state>/PAUSE`) or a stopped swarm (`<state>/swarm.stop`) has stood 6 h or more (by the file's time). While either stands, `births`, `gym_runs`, `validations` and `braked` are not raised: a pause stops research by design | "lift the maintenance pause once its work is done (`scripts/floor_box.py maintenance off`)", or "remove state/swarm.stop" |
+| `grant_refused` | the standing grant refused to re-ratify since the `grant` job's last `ok` run (its receipts: `standing grant refused`; a failure to read the account is no refusal) | "ratify the grant by hand on the box (`python3 scripts/live_trading.py --ratify`)", with the grant's own reason |
+| `kill_on` | the gateway's kill switch is on (`/v1/health` `kill_switch`; since its latest `kill` in `admin_log`): no real order, no Claude call, no merge. An unreadable health is no cause | "lift the gateway's kill switch once its cause is fixed (`python3 scripts/gateway_admin.py unkill`, your admin token)" |
 
-For each cause standing it posts one `POST /v1/notify` kind `stall` through the budget's own gateway client: the
-subject `LTCM: stalled: <cause>`; the body the House's sentence, the numbers, how long (from the record when it says:
-the last birth, the last Validation run, the start of the brake, the first refusal; else from when the job first saw
-it), what the House is doing about it (the architect's passes and why each made no birth, the researchers' cycles,
-the guard's state and the heartbeat's age, the tournament's last round and what waits on robustness or the drift
-screen, how the guard releases, the budget's taper, the updater keeping the running release), and the owner step or
-"nothing here needs you". One cause is mailed at most once every 12 hours, by the House's record
-(`<state>/stall.json`, private: since when each cause stands, when it was last told and warned of) and by the
-gateway's own (it keys a stall's dedupe on the cause for 12 hours, whatever id comes), inside `NOTIFY_MAX_PER_DAY`. A
-cause is told only when the gateway says it SENT the notice: a `duplicate` answer or a failure is tried at the next
-run. Each cause standing is also one House warning (`stall: <cause>: ...`, its dollar figures scrubbed) at the same
-pace. A cause that clears is named in the receipt (`cleared`). The job moves no money, changes no setting, and starts
-and stops nothing; it writes only `stall.json`. Switch it off like any job (`ops.json` `jobs.stall.enabled` false).
+**The notice.** One `POST /v1/notify` kind `stall` a run at most, through the budget's own gateway client, listing
+EVERY cause standing, owner steps first: the subject `LTCM: needs you: <the causes with an owner step>` or `LTCM: stalled:
+<the causes>`; the body opens with the owner steps (or "nothing here needs you"), then each cause with the House's
+sentence, its numbers, how long (from the record when it says: the last birth, the last Validation verdict, the start of
+the brake, the first refusal, the pause file, the kill; else from when the job first saw it) and what the House is doing
+about it (the architect's passes and why each made no birth, the researchers' cycles, the guard's state and the
+heartbeat's age, the tournament's last round and what waits on robustness or the drift screen, how the guard releases,
+the budget's taper, the updater keeping the running release, the grant job asking hourly). It is mailed:
+- while some cause has an owner step: at once when one of them was not in the last owner notice (a new top-up, a new
+  refusal), else at most once every 12 hours;
+- while none has: at most once every 24 hours after the last notice of either kind.
+
+The gateway holds the same pace by its own record, whatever id the House sends: it keys an owner notice on its owner
+causes (`stall:owner:<causes, sorted, joined by +>`, 12 hours) and one with none on `stall:info` (24 hours), inside
+`NOTIFY_MAX_PER_DAY`. A notice counts as told only when the gateway says it SENT it: a `duplicate` answer or a failure is
+tried at the next run. Each cause standing is also one House warning (`stall: <cause>: ...`, its dollar figures
+scrubbed) every 12 hours. `<state>/stall.json` (private) keeps each cause (since when it stands, when it was last warned
+of, when it cleared) and the notices (when the last owner notice and the last other notice were sent, which owner causes
+it told). A cause that clears is named in the receipt (`cleared`); the receipt carries every check with its numbers and
+what the House is doing. The job moves no money, changes no setting, and starts and stops nothing; it writes only
+`stall.json`. Switch it off like any job (`ops.json` `jobs.stall.enabled` false).
 
 **The funnel** (`league/ops/funnel.py`, read by the `scoreboard` job): the daily page gains **Funnel (last 24 h /
 since the release)**, the last 24 hours beside the time since the running release's latest `promoted` verdict in
 `deploys.jsonl` (n/a when the record has none): births (`swarm.born`), program versions written, Gym runs by window
 (train, validations, looks, forward, probe, mechanism; refused or failed apart), validations judged and passed (the
-tournament rounds' verdicts), looks taken and passed, moves to Candidate, Probe and Sized and the bands now, real orders
+tournament rounds' verdicts; rows copied from an identical program's verdict, F1, are their own row and no Gym run),
+looks taken and passed, moves to Candidate, Probe and Sized and the bands now, real orders
 (and of them filled) and real closes by route (the agents' routes against the House's, as the close economics routes
 them), research spend by meter (Sail, Claude, OpenAI) and the hours the Sail guard braked, then the stalls standing
 (causes and since when). Counts and spend only, never a Validation or holdout figure, and the page passes the public
@@ -738,8 +760,8 @@ as its code says. After that a receipt reads `none` until a trigger.
 `POST /v1/github/docs` (one page under `docs/runs/desk/`, at most 64 KB, at most 6 commits a New York day, message
 `desk: ...`); `POST /v1/github/pr` with role `engineer` (a lane, its own files only, at most 2 a New York day),
 `POST /v1/github/review` and `POST /v1/github/merge` (engineer pull requests only, above);
-`GET /v1/github/pr/<n>/files` and `POST /v1/github/close`; `funding` and `stall` notices on `/v1/notify` (a stall at
-most once per cause per 12 hours, keyed on the cause); and the admin log (every
+`GET /v1/github/pr/<n>/files` and `POST /v1/github/close`; `funding` and `stall` notices on `/v1/notify` (one stall
+notice lists every cause: keyed on its owner causes, 12 hours, or `stall:info`, 24 hours); and the admin log (every
 kill, unkill and admin-token call, in `/v1/health` as `admin_log`, beside `autonomy`). The kill switch also stops
 merges, and `/v1/kill` now takes either token (stopping is never gated); `/v1/unkill` stays the owner's. The Sail
 balance mails (`LOW_BALANCE_USD`, `CRITICAL_BALANCE_USD`) are $25 and $12, under the budget rule's own floor, so the
@@ -911,7 +933,8 @@ python3 scripts/floor_box.py maintenance off                 # resume on the nex
   job), but a swarm already running goes on, and the Gym trains through a pause. To stop the swarm,
   write `/workspace/state/swarm.stop`; the House starts it again once the file is gone and the House
   is not paused.
-- **The House's jobs and the updater under a pause** (from A1): `preopen`, `clock`, `economics` and `budget` run;
+- **The House's jobs and the updater under a pause** (from A1): `preopen`, `clock`, `economics` and `budget` run (and,
+  from the self-running release, `stall`, which reports a pause left on 6 hours as an owner step);
   `grant`, `hygiene`, `scoreboard`, `drills` and the paid jobs get a `skipped` receipt naming the pause, and the next
   occurrence after it runs. The updater is not paused: it still deploys main's head inside its walls.
 
@@ -2224,8 +2247,8 @@ right after the Sail guard's reading). It changes no route, line, hold or guard 
 hours of runway; from A1 the owner's mail about a card is the budget rule's `funding` notice, on 60 days (**The budget
 rule**, under **Running unattended**). Claude's cliff reads the funded room only: the budget's daily Claude line runs
 out every day by design and is not a cliff. From the self-running release, research that stalls (no births, too few Gym
-runs, no Validation, a guard braked most of the day, a meter under three days of research, an owner deploy waiting) is
-mailed too, as a `stall` notice (**The stall alarm and the funnel**, under **Running unattended**).
+runs, no Validation, a guard braked most of the day, a meter under three days of research, an owner deploy waiting, a
+pause left on, a refused grant, the kill switch on) is mailed too, as a `stall` notice (**The stall alarm and the funnel**, under **Running unattended**).
 
 | Cliff | Measured as | Leads: notice / warning / urgent |
 |---|---|---|

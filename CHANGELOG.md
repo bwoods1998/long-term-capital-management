@@ -30,8 +30,10 @@ its self-deploys and self-rollbacks, and they get entries here like any other de
 The House's weekly post-mortem (`v3/b4`) and the engineer with its reviewer (`v3/b5`), ported onto `research/restart-1007`
 (budget rule v2). The post-mortem: Saturdays 14:00Z, at most $1 a week of Claude, a private report and a public page
 under `docs/runs/desk/`. The engineer: on by `policy.json` `engineer.enabled`, at most $4 a UTC day of Claude, one
-candidate in flight, research-class only (the modules the live path loads are held), merges only through the gateway's
-walls (green CI, a recorded review, two a day, no protected path), main's head as its base after an owner deploy of it.
+candidate in flight, research-class only (the modules the live path loads are held, by the House and by the gateway's
+`ENGINEER_HELD`), merges only through the gateway's walls (green CI, a recorded review, two a day, no protected path),
+closes its own superseded and unmerged pull requests through `POST /v1/github/close`, authors at most once a UTC day,
+main's head as its base after an owner deploy of it.
 Both are under `league/ops/`, so both are an owner deploy. Off without a deploy: the box's `swarm.json`
 `{"engineer": {"enabled": false}}`; ops.json `{"jobs": {"postmortem": {"enabled": false}}}`. Detail: operations,
 **The improvers**.
@@ -39,13 +41,17 @@ Both are under `league/ops/`, so both are an owner deploy. Off without a deploy:
 ### The self-running release, the stall alarm and the funnel (`release/self-running`; built, not deployed)
 
 The owner's goal of Oct 7, items 3 and 6. A new House job `stall` (`league/ops/stall.py`, every 30 minutes at :20 and
-:50, read-only) names a stall by its cause: no birth in 12 h under the population ceiling, fewer than 10 Gym runs in
-6 h, no Validation run in 24 h while a Train best waits, the Sail guard braked 12 of 24 h, a meter under 3 days of
-research at the ceiling, or main's head waiting for the owner's deploy. Each cause is one `stall` mail (the numbers, how
-long, what the House is doing, the owner step or that nothing needs the owner) and one House warning, at most once per
-cause per 12 h; it never acts. The daily page gains the Funnel table (last 24 h and since the release:
-`league/ops/funnel.py`). The gateway composes the new `stall` kind on `/v1/notify` and dedupes it by cause for 12 h
-inside the day's cap: deploy the gateway first (an older gateway answers 400, which the job records and warns of).
+:50, read-only, a maintenance pause included) names a stall by its cause: no birth in 12 h under the population
+ceiling, fewer than 10 Gym runs in 6 h, no Validation verdict in 24 h while a family is owed one, the Sail guard braked
+12 of 24 h, a meter under 3 days of research at the ceiling, main and the running release differing in what only the
+owner deploys, a pause left on 6 h, a refused grant, or the kill switch on. One `stall` mail lists every cause (the
+numbers, how long, what the House is doing, the owner steps first or that nothing needs the owner): at once and every
+12 h while one needs the owner, else at most once a day; each cause is also a House warning every 12 h; it never acts.
+The daily page gains the Funnel table (last 24 h and since the release: `league/ops/funnel.py`). The job runner counts
+a job or trigger a release adds from the deploy (`first_seen`), so `stall` and the engineer's :40 are never reported
+`missed` for the days before. The gateway composes the new `stall` kind on `/v1/notify` and dedupes it by its owner
+causes for 12 h (`stall:info` 24 h) inside the day's cap: deploy the gateway first (an older gateway answers 400, which
+the job records and warns of).
 Owner deploy (`league/ops/`); off without one: ops.json `{"jobs": {"stall": {"enabled": false}}}`. Detail: operations,
 **The stall alarm and the funnel**.
 
