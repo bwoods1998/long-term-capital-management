@@ -35,6 +35,19 @@ path loads, so the next House release from main deploys in the money path's wind
 does not move. Once PR #489 merges, main's head is V3-A part 1 (below) as well, which the running release, its updater
 off, does not take until the owner's deploy.
 
+### Fast lane v2: built on `release/fast-lane-v2`, waiting for the owner's deploy (Oct 7, 2026)
+
+The owner's goal of Oct 7, item 4: a program trades at Probe size as soon as it passes a pre-registered screen whose
+false-positive rate is measured. Based on PR #505 (the House's release `20261007T160204Z`). The screen (t 1.65, 2 of 4
+quarters, N = 1, one flat holdout look at p <= 0.10 a program), direction counts (`policy.json`: the drift screen's
+refusal and the look holds off; the `direction` job and `scripts/fast_lane_report.py` report the drift fit and the
+same-risk buy-and-hold), a one-structure Probe within 10% of E, at most 3 Probe positions, a $400 Probe loss budget,
+same-minute entry and D5 demotion by live results. **The money digest moves** `42c4a3af` -> `da5c7542` (constitution
+`595228a6` -> `5edc8956`): the standing grant re-ratifies at the House's start on the owner's deploy. **An evidence
+reset**: league/live changes, so the execution fingerprint moves `ba60c473` -> `fdd74074`; no family is banded. The
+benchmark is [docs/benchmarks/FAST_LANE_SCREEN_1.md](docs/benchmarks/FAST_LANE_SCREEN_1.md); the deploy's steps and the
+stated consequences are in [docs/operations.md](docs/operations.md) ("Fast lane v2").
+
 ### V3-A part 1: built and integrated, waiting for the owner's deploy (`release/v3a`, PR #489)
 
 LTCM v3's first release, the one that lets the desk run unattended
