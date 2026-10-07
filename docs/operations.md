@@ -313,7 +313,7 @@ standing grant and the gateway's new routes. The code is the authority; these su
 |---|---|---|---|
 | Owner deploy | any change to a protected path in the release trees (below), a `config.json` change beyond its operating dials, `real_money`, and every gateway change | `scripts/floor_box.py deploy` from `~/Work/ltcm-deploy`; the gateway by `npx wrangler@4.129.1 deploy` | the money path's window (20:05-13:25Z on a trading day; from 21:05Z in winter), except a rollback |
 | The updater | a change merged to `main` that touches the release trees (`league/`, `ltcm/`, `playbooks/`, `scripts/`, `deploy/`) and no protected path: the swarm's loop, researcher, architect, strategist and pool, the publisher, the House's service code. `league/config.json` only when the running release's checks find nothing but its bounded dials moved. A merge that changes nothing in those trees (docs, the CHANGELOG, `gateway/`) changes no release and holds nothing | the House by itself: it reads main's head every half hour, then the attested commit, the walls, the release train, the canary, promotion, the ten-minute watch, rollback | never inside its calendar hold (12:55Z to 20:05Z on a trading day, to 21:05Z in winter), never within 30 minutes of a House start, at most one release every `release_train_hours` (4) |
-| Engineer merges (the engineer is not in A1, so nothing calls these routes yet) | `engineer/<lane>/<slug>-<hash>` pull requests | the gateway's `POST /v1/github/merge`: green `checks.yml` on the exact head (its three jobs), a recorded approve and no reject for that commit, no protected path, only the branch's own lane and only what the harness lanes declare, new `league/tests/test_harness_candidate_*.py` files only ever added; at most 2 a New York day; never while the kill switch is on | a merge is then an updater release |
+| Engineer merges (the House's `engineer` job, from the self-running release; **The improvers**, below) | `engineer/<lane>/<slug>-<hash>` pull requests | the gateway's `POST /v1/github/merge`: green `checks.yml` on the exact head (its three jobs), a recorded approve and no reject for that commit, no protected path, only the branch's own lane and only what the harness lanes declare, new `league/tests/test_harness_candidate_*.py` files only ever added; at most 2 a New York day; never while the kill switch is on | a merge is then an updater release |
 
 **The protected paths.** `league/ci.py` `FORBIDDEN` lists 86 files and trees. No role's branch may change one, and the
 gateway's merge route refuses the same list plus `league/config.json` (`gateway/lib/protected.mjs`; a test on each
@@ -371,7 +371,9 @@ the stricter wall (`gateway/lib/github.mjs` `ENGINEER_SURFACE`): it opens and me
 themselves declare, so it refuses `league/swarm/loop.py` and `league/swarm/mechanisms.py`, to their own lanes too. The
 scheduler lane therefore admits new candidate tests only. Opening either path is an owner deploy (the path named in
 `league/swarm/harness_lanes.py` and in `ENGINEER_SURFACE`, both protected). The gateway is the only merge route;
-`league/ci.py`'s path guard alone would pass such a change only on a branch pushed by hand.
+`league/ci.py`'s path guard alone would pass such a change only on a branch pushed by hand. The House's engineer also
+holds every lane file the live path loads (on this tree `league/swarm/researcher.py` and `claude_research.py`): its
+research lane is `preflight.py` and new tests (**The improvers**, below).
 
 ### The settings layers
 
@@ -464,15 +466,15 @@ receipt). An occurrence older than the runner's first tick on the state, or than
 | `economics` | trading days, close + 10 min | 3 h | the one-cutoff close economics (realized options P&L from the Sept 26 basis, every cost from T0, open lots at conservative marks, one Net, deposits never counted) and `p30`; private, `<state>/economics/<YYYYMMDD>-close/` | runs |
 | `scoreboard` | daily 23:30 | 2 h | the public-safe daily page, committed to `docs/runs/desk/<date>.md` through the gateway | skipped |
 | `drills` | first Saturday of the month, 15:00 and 17:00 | 6 h | the failure drills (below); never retried | skipped |
-| `postmortem` | Saturdays 14:00 | 6 h | the weekly post-mortem (Phase 5) | skipped |
-| `agenda` | daily 03:00 | 6 h | the strategist's agenda (Phase 2) | skipped |
-| `engineer` | daily 04:00 | 6 h | the engineer's harness change (Phase 4); never retried | skipped |
+| `postmortem` | Saturdays 14:00 | 6 h | the weekly post-mortem, and the cost review on the month's first Saturday (Phase 5; **The improvers**) | skipped |
+| `agenda` | daily 03:00 | 6 h | the strategist's agenda (Phase 2); not in this release | skipped |
+| `engineer` | daily 04:00 (authors), hourly :40 (moves its candidate on) | 50 min | the engineer's harness change (Phase 4; **The improvers**); never retried | skipped |
 
 Every job is protected: the whole of `league/ops/` is on the list, so a new job or a changed one is the owner's deploy.
 
-`postmortem`, `agenda` and `engineer` are registered but their modules are not in V3-A part 1 (they are on `v3/b4`,
-`v3/b23` and `v3/b5`): each occurrence writes a `skipped` receipt that says so. Being paid, they are also skipped while
-the House has stopped buying work. The owner's private `<state>/ops.json` can switch a job off
+`agenda` is registered but its module is not in this release (it is on `v3/b23`): each occurrence writes a `skipped`
+receipt that says so. `postmortem` and `engineer` are in the self-running release, ported from `v3/b4` and `v3/b5`
+(**The improvers**, below). Being paid, the three are also skipped while the House has stopped buying work. The owner's private `<state>/ops.json` can switch a job off
 (`{"jobs": {"<name>": {"enabled": false}}}`) or every job (`{"enabled": false}`), and holds per-job settings: the
 economics' declared external costs (`economics.external`) and `hygiene.end_retired_cohorts`. `health.json` carries an
 `ops` block (the day's occurrences: due, late, failed, missed, and the job running now). The jobs' logs are
@@ -490,6 +492,67 @@ and fixed dollars while the swarm's booked research was under its cap. A brake f
 the line, an unreadable balance, a budget rule that could not be read, a full disk), or one that names no cause, is a
 FAIL; a FAIL's public warning never carries the guard's reason, which holds the account's numbers (the receipt keeps
 it). Check 6 counts the practice rows the swarm offers, not the cohorts the live path has pinned.
+
+### The improvers: the post-mortem and the engineer
+
+The self-running release (Oct 7, 2026) carries the two House jobs that report on the floor and improve it, ported from
+`v3/b4` and `v3/b5`. Both are protected (`league/ops/`), so they reach the House only by the owner's deploy. Both spend
+Claude through the swarm's router: every call is a `spend` row in `swarm.sqlite`, admitted inside budget rule v2's Claude
+meter (the day's Claude research dollars, $10 at the owner's ceiling, less the gate's two holds, $1.95).
+
+**The post-mortem** (`league/ops/postmortem.py`, Saturdays 14:00Z). Code reads the week's receipts, read-only: real
+orders by outcome and route with the rejection and refusal reasons; the calibration round trips' real fills against
+the mid beside the practice book's fills under the Gym's rules; demotions, promotions and retirements; the updater's
+self-deploys, the owner's deploys and the engineer's journal; the week's costs by service, its realized options P&L,
+the swarm's model spend and the jobs. On the month's first Saturday also the cost review: 30-day costs, the data
+vendor's share, research activity and universe, and a proposal for the owner's D6 by a fixed rule (a proposal only).
+One Claude Opus 5.5 call (role `postmortem`, its own $1 line, `max_tokens` 16,000, a worst case near $0.52, a
+model-safe prompt of aggregates) writes a headline, findings and at most three actions. Private:
+`<state>/postmortem/<date>.md` and `.json`. Public: `docs/runs/desk/<date>-postmortem.md` through the docs route, from an
+allowlist of counts and dollars and checked by the scoreboard's filter; the model's text joins it only when it passes.
+A week the model cannot be asked (no room in the line, the budget at the floor, an error) still gets its facts, with a
+warning. Cost: at most $1 a week. It runs once deployed; ops.json turns it off (`{"jobs": {"postmortem": {"enabled":
+false}}}`), keeps the facts but asks no model (`{"postmortem": {"model": false}}`), posts nothing
+(`{"postmortem": {"public": false}}`) or moves the cost review (`"cost_review": "always"` or `"never"`). Nothing in it
+feeds research: no swarm role reads the post-mortem.
+
+**The engineer** (`league/ops/engineer.py` with `author.py` and `reviewer.py`; daily 04:00Z it may author, hourly at
+:40 the candidate in flight moves on). One candidate at a time walks `playbooks/harness-improvement.md`: the top
+captured bottleneck of an engineer lane (`research`, `memory`, `data`) with its predeclared metric frozen; a change on
+the running release's commit, written by Claude Opus 5.5 (role `engineer`, at most $3 an attempt) through confined
+tools; the static guards; a pull request through the gateway's engineer role; green CI on the exact head; an
+adversarial review of the exact diff (role `reviewer`, at most $1), its verdict posted to `/v1/github/review` (a CI
+failure or a reject goes back once); the gateway's merge (at most 2 a New York day, never a protected path, never with
+the kill switch on); the updater's deploy at its train; the canary (an arm in `<state>/harness/canary.json`, or the data
+lane's window); retain or revert once by the predeclared metric, a revert being a pull request through the same route;
+then 20 sessions of the global guard on the promoted programs' forward record. The journal is
+`<state>/harness/engineer.sqlite`; the daily scoreboard counts authored, merged, retained, reverted, rejected and failed
+candidates and lists the engineer pull requests left open for the owner to close (the gateway closes none). It cannot
+change a protected path: the author's tools and static guards, the gateway's lane surface and protected list (on the
+pull request and again on the merge), `league/ci.py` `FORBIDDEN` in CI and the updater's own refusal each stop it.
+
+What the self-running release adds to `v3/b5`:
+- **One switch, on:** `engineer.enabled` in the swarm settings. The committed `league/swarm/policy.json` sets it true;
+  the box's `swarm.json` `{"engineer": {"enabled": false}}` wins over it with no deploy, and ops.json
+  `{"jobs": {"engineer": {"enabled": false}}}` stops the job. The job serves its own two roles (`engineer`, `reviewer`,
+  on Claude Opus 5.5 unless `claude.role_model` names one) in its copy of the settings, since the box's `swarm.json`
+  replaces `claude.roles` whole.
+- **$4 a UTC day** (`engineer.usd_day`): the engineer and the reviewer together, holds included. An attempt is capped at
+  what is left, and no attempt or review starts with less than its own cap: one attempt and its review a day, 40% of
+  the Claude meter at the ceiling. It authors at most once a New York day and only with nothing in flight, so most days
+  cost a review, a revision or nothing.
+- **Research-class only:** a lane file the live path loads is held (`RELEASE_CLASSES`; on this tree
+  `league/swarm/researcher.py` and `claude_research.py`): the tools refuse it, the brief names it held, and a candidate
+  whose tree classifies as money-path or evidence-reset is closed before its pull request. Opening the money path to
+  the engineer is a change to that constant: an owner deploy.
+- **A base after an owner deploy:** an owner deploy carries no updater attestation. When no observer policy names the
+  running release either, main's head is the base if its release trees digest to the running tree, remembered for that
+  release. An owner deploy of anything but main's head leaves the engineer idle, its daily note saying why, until the
+  next updater release.
+
+What it needs, in place since V3-A: the gateway's engineer routes with `autonomy.engineer_pulls` in `/v1/health`, green
+`checks.yml` on main, and `auto_update` on (an engineer merge is an updater release: it deploys outside the updater's
+calendar hold, at most one a train).
 
 ### Observing without exec
 

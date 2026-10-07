@@ -80,9 +80,12 @@ operations are House jobs; one funding action a year, not one a week; an honest 
 - **Research v3 and births v3** (`v3/b1`, `v3/b23`): every family on Claude Sonnet 5.5, a cycle as a sweep of variants
   with a placebo row, a per-family ledger; births only from a curated library of documented premia, the Train kill
   tests as code, the strategist writing the whole agenda.
-- **The weekly post-mortem and the engineer** (`v3/b4`, `v3/b5`): the post-mortem and a monthly cost review as House
-  jobs; an engineer that proposes one lane change at a time, an automated reviewer, the gateway's merge, the updater's
-  canary, and retain or revert by a predeclared metric.
+- **The weekly post-mortem and the engineer** (`v3/b4`, `v3/b5`; ported to the self-running release, Oct 7): the
+  post-mortem and a monthly cost review as House jobs; an engineer that proposes one lane change at a time, an
+  automated reviewer, the gateway's merge, the updater's canary, and retain or revert by a predeclared metric. In that
+  release the engineer is on (`engineer.enabled` in `policy.json`), spends at most $4 a day inside budget rule v2's
+  Claude meter, and stays research-class: it never changes a module the live path loads. The post-mortem reports and
+  feeds no research role.
 
 ## The goal and the one number
 

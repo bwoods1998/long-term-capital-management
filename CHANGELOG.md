@@ -25,6 +25,17 @@ its self-deploys and self-rollbacks, and they get entries here like any other de
 
 ## Not yet deployed
 
+### The self-running release, the improvers (`release/self-running`; built, not deployed)
+
+The House's weekly post-mortem (`v3/b4`) and the engineer with its reviewer (`v3/b5`), ported onto `research/restart-1007`
+(budget rule v2). The post-mortem: Saturdays 14:00Z, at most $1 a week of Claude, a private report and a public page
+under `docs/runs/desk/`. The engineer: on by `policy.json` `engineer.enabled`, at most $4 a UTC day of Claude, one
+candidate in flight, research-class only (the modules the live path loads are held), merges only through the gateway's
+walls (green CI, a recorded review, two a day, no protected path), main's head as its base after an owner deploy of it.
+Both are under `league/ops/`, so both are an owner deploy. Off without a deploy: the box's `swarm.json`
+`{"engineer": {"enabled": false}}`; ops.json `{"jobs": {"postmortem": {"enabled": false}}}`. Detail: operations,
+**The improvers**.
+
 The running House release is `20261002T112610Z-e11710692569` (main `e3d0111f`, 11:26Z Oct 2, below), and the box's
 updater is off. Until PR #489 merges, main is ahead of it by docs, by comment-only edits (the Oct 2 pause refresh: no
 behaviour change, verified by an AST comparison) and by a prune of dead files from the Kalshi era and the first run
@@ -157,8 +168,8 @@ merge by hand, which changes no release, holds nothing and needs no deploy):
 - `v3/wp7`, credit types at $2,000 of equity or more and a paper proof per type (money rules v3, D3), with the
   gateway's credit list: an owner deploy and a money-digest move. With the ladder it is V3-A part 2.
 - `v3/b1` (research v3), `v3/b23` (births from the mechanism library, the Train kill tests as code, the strategist's
-  whole agenda), `v3/b4` (the weekly post-mortem and the monthly cost review), `v3/b5` (the engineer and the reviewer).
-  Each changes a protected file as it stands (`league/swarm/settings.py`, the store, the evidence and tournament
+  whole agenda), `v3/b4` (the weekly post-mortem and the monthly cost review), `v3/b5` (the engineer and the reviewer;
+  `v3/b4` and `v3/b5` are ported to `release/self-running`, above). Each changes a protected file as it stands (`league/swarm/settings.py`, the store, the evidence and tournament
   modules, `league/ops/`), so each is an owner deploy, not an updater release.
 
 ## 2026-10-02
