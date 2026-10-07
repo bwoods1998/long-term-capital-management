@@ -2591,7 +2591,10 @@ class OptionsLive:
         evidence = not inst.tuition and not house and not incubator
         family_rows = self.families.forward_rows(inst.family) if evidence else []
         fwd = M.forward_stats(family_rows, self.table.sized_confidence, version=inst.version) if evidence else None
-        if fwd is not None and (fwd.negative or (inst.band == "sized" and (not M.sized_ok(self.table, fwd) or fwd.real_bad))):
+        if fwd is not None and (fwd.negative or (inst.band == "sized" and (not M.sized_ok(self.table, fwd) or fwd.real_bad))
+                                or (inst.band == "probe" and M.demotion(fwd) is not None)):
+            # (D5, fast lane v2: a Probe whose live results end its Probe is refused at once; the families pass, forced
+            # here, moves its band and its real instance to exits only)
             self._families_at = float("-inf")
             return "its current forward evidence no longer qualifies for this real band"
         week_start = (day.day - dt.timedelta(days=day.day.weekday())).isoformat()

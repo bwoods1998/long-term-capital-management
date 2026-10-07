@@ -368,5 +368,109 @@ class TheLivePath(LiveCase):
         self.assertEqual(M.cents(M.probe_room(live.table, E)), D("386.52"))
 
 
+# ======================================================================================= D5: demotion by live results
+def real_rows(n, *, pnl, max_loss=40.0, day0=1, version=1):
+    return [{"day": f"2026-10-{day0 + i:02d}", "source": "real", "pnl": pnl, "max_loss": max_loss, "version": version}
+            for i in range(n)]
+
+
+def matched(n, *, gap, max_loss=50.0):
+    """`n` days on which the version traded real money (at $0 a trade) and its nightly replay made `gap` a dollar of
+    maximum loss: a replay gap of `gap` over `n` real trades."""
+    out = []
+    for i in range(n):
+        day = f"2026-10-{i + 1:02d}"
+        out.append({"day": day, "source": "real", "pnl": 0.0, "max_loss": max_loss, "version": 1})
+        out.append({"day": day, "source": "nightly", "pnl": gap * max_loss, "max_loss": max_loss, "version": 1})
+    return out
+
+
+class TheDemotion(unittest.TestCase):
+    def setUp(self):
+        self.t = M.Table.from_constitution()
+
+    def band(self, rows, band="probe"):
+        row = {"family": "f", "band": band, "structure": "debit_vertical", "holdout_passed": True,
+               "typical_max_loss_usd": 40.0}
+        return M.band_for(self.t, row, E, M.forward_stats(rows, 0.8, version=1))
+
+    def test_real_losses_past_three_mean_maximum_losses_end_the_probe_for_good(self):
+        self.assertEqual(self.band(real_rows(4, pnl=-30.0))[0], "probe", "-$120 is not below -3 x $40")
+        band, why = self.band(real_rows(4, pnl=-30.01))
+        self.assertEqual(band, "candidate")
+        self.assertTrue(why.startswith("D5: its 4 real trades realized $-120.04, below -3 x its mean maximum loss $40.00"),
+                        why)
+        self.assertEqual(self.band(real_rows(4, pnl=-30.01), band="candidate")[0], "candidate", "sticky at the next pass")
+        self.assertEqual(self.band(real_rows(4, pnl=-30.01) + real_rows(1, pnl=100.0, day0=20, version=2))[0], "candidate",
+                         "another version's rows never lift it")
+        fwd = M.forward_stats(real_rows(4, pnl=-30.01), 0.8, version=1)
+        self.assertEqual((fwd.real_n, round(fwd.real_pnl, 2), fwd.real_max_loss), (4, -120.04, 40.0))
+
+    def test_the_replay_gap_needs_five_matched_real_trades_over_0_20(self):
+        self.assertTrue(self.band(matched(5, gap=0.21))[1].startswith("D5: its live fills ran 0.210"))
+        self.assertEqual(self.band(matched(5, gap=0.21))[0], "candidate")
+        self.assertEqual(self.band(matched(4, gap=0.21))[0], "probe", "4 matched trades: too few")
+        self.assertEqual(self.band(matched(10, gap=0.19))[0], "probe", "0.19: inside the bound")
+        fwd = M.forward_stats(matched(5, gap=0.21) + [{"day": "2026-10-30", "source": "real", "pnl": 0.0,
+                                                        "max_loss": 50.0, "version": 1}], 0.8, version=1)
+        self.assertEqual(fwd.replay_n, 5, "a real day without a replay is not matched")
+        self.assertAlmostEqual(fwd.replay_gap, 0.21)
+
+    def test_sized_is_untouched(self):
+        self.assertNotEqual(self.band(real_rows(4, pnl=-30.01), band="sized")[1][:3], "D5:")
+        self.assertIsNone(M.demotion(M.forward_stats([], 0.8)))
+
+
+@unittest.skipUnless(HAVE, "numpy not installed")
+class TheDemotionLive(LiveCase):
+    def refusals(self):
+        return [p["why"] for p, a in self.ledger.of("live.refusal")]
+
+    def test_a_demoted_record_refuses_the_next_open_at_once_and_the_real_instance_goes_exit_only(self):
+        live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 3, "opens": 3})])
+        self.run_to(9, 31)
+        self.assertEqual(len(self.venue.sent), 1)
+        self.families.add_forward("vert", "real", [dict(r, id=f"d5-{i}") for i, r in enumerate(real_rows(4, pnl=-60.0))])
+        self.run_to(9, 36)
+        self.assertIn("its current forward evidence no longer qualifies for this real band", self.refusals())
+        self.run_to(9, 38)
+        self.assertEqual(self.families.rows["vert"]["band"], "candidate")
+        inst = live.instances.get("vert@1:r")
+        [row] = live.state.rows("SELECT mode FROM instances WHERE id='vert@1:r'")
+        self.assertTrue(inst is None or inst.mode == "exit_only", "exits only, then gone once flat")
+        self.assertEqual(row["mode"], "exit_only")
+        moved = [p for p, a in self.ledger.of("live.band") if p.get("to") == "candidate"]
+        self.assertTrue(moved and moved[0]["why"].startswith("D5:"), moved)
+        opens = [b for b in self.venue.sent if b.get("legs") and b["legs"][0]["position_intent"] == "buy_to_open"]
+        self.assertEqual(len(opens), 1, "no real open after the demotion")
+
+    def test_the_swarms_band_event_keeps_the_reason(self):
+        from league.live.families import SwarmFamilies
+        from league.swarm.store import SwarmStore
+        from league.tests.evaluator_fakes import band_proof
+
+        live = self.make([])
+        store = SwarmStore(self.root)
+        self.addCleanup(store.close)
+        store.add_family({"id": "vert", "mechanism": "An invented mechanism for the demotion test.",
+                          "structure": "debit_vertical", "roots": ["SPY"], "dte": [0, 2]}, origin="test")
+        version = store.add_version("vert", VERTICAL, {"hold": 600}, author="test")
+        store.set_state("vert", banded_version=1, banded_sha=version["sha"], banded_evaluator=band_proof(version),
+                        typical_by_version={"1": 50}, forward={"negative": False},
+                        live_promoted_at=at(MONDAY - dt.timedelta(days=3), 16, 1))
+        store.add_look("vert", 1, "a" * 64, passed=True, p_value=0.05, detail={})
+        store.set_band("vert", "probe", reason="synthetic pass")
+        store.add_forward("vert", "real", [dict(r, id=f"d5-{i}") for i, r in enumerate(real_rows(4, pnl=-60.0, max_loss=50.0))])
+        live.families = SwarmFamilies(self.root)
+        self.addCleanup(lambda: live.families._store.close() if live.families._store is not None else None)
+        live.account_row = self.venue.account()
+        live.sync_families(self.clock(), force=True)
+        self.assertEqual(store.family("vert")["band"], "candidate")
+        events = [e["payload"] for e in store.events_after(0) if e["kind"] == "swarm.band"
+                  and e["payload"].get("band_to") == "candidate"]
+        self.assertTrue(events and events[-1]["reason"].startswith("D5: its 4 real trades realized $-240.00"), events)
+        self.assertEqual(len(store.forward("vert")), 4, "the record keeps its rows: failures are never erased")
+
+
 if __name__ == "__main__":
     unittest.main()

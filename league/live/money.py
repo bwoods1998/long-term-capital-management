@@ -26,6 +26,12 @@ BANDS (the live path owns candidate <-> probe <-> sized; the swarm owns gym <-> 
   Sized one goes back to Probe.
 - A Probe or Sized family whose forward record turns negative (the swarm's `forward.negative`, or this record's own:
   20 trades and a mean below zero) loses its band: back to Candidate, its real instance on exits only.
+- D5, DEMOTION BY LIVE RESULTS (fast lane v2, Oct 7, 2026; `demotion`, pre-registered bounds chosen, not measured): a
+  Candidate or Probe whose version's realized real P&L is below -`DEMOTE_LOSS_MULTIPLE` (3) x the mean maximum loss of
+  its real positions, or whose live fills ran below its nightly replay of the same days by more than `REPLAY_GAP_BOUND`
+  (0.20) a dollar of maximum loss over at least `REPLAY_GAP_MIN_TRADES` (5) real trades, is (or stays) a Candidate, its
+  real instance on exits only. Sticky: the version's real rows persist (a new version starts its own record), and the
+  record keeps it (the swarm's band event and `live.band` carry the reason). Sizing up is unchanged (Sized rules).
 
 SIZING a real open (`plan_open`), by maximum loss, never premium. `unit` is one structure's maximum loss at its limit
 plus its open and close fees, from the ORDER's own type and legs (a `long_single` family's call and put are each sized
@@ -262,6 +268,13 @@ class Table:
 #: The real subset of a forward record read on its own once it has this many trades: losing, it holds the family at
 #: Probe (never Sized) and takes a Sized family back to Probe.
 REAL_MIN_TRADES = 10
+#: DEMOTION BY LIVE RESULTS (D5, fast lane v2, Oct 7, 2026; `demotion`): pre-registered and chosen, not measured. They only
+#: ever stop opens. A Probe (or Candidate) program goes exit-only when its realized real P&L is below -3 x the mean
+#: maximum loss of its real positions, or when its live fills ran below its nightly replay of the same days by more than
+#: 0.20 a dollar of maximum loss over at least 5 real trades on days its replay also traded.
+DEMOTE_LOSS_MULTIPLE = 3
+REPLAY_GAP_BOUND = 0.20
+REPLAY_GAP_MIN_TRADES = 5
 #: Per market day, the one source counted: real fills first, then the live shadow book, then the nightly replay.
 SOURCE_ORDER = ("real", "shadow", "nightly")
 
@@ -278,6 +291,12 @@ class Forward:
     negative: bool
     real_n: int = 0
     real_mean: float | None = None
+    # D5 (fast lane v2): the version's own real rows' realized P&L and mean maximum loss, and its live fills against its
+    # nightly replay on the days both traded (`forward_stats`).
+    real_pnl: float = 0.0
+    real_max_loss: float | None = None
+    replay_gap: float | None = None
+    replay_n: int = 0
 
     @property
     def variance(self) -> float | None:
@@ -289,6 +308,28 @@ class Forward:
         return self.real_n >= REAL_MIN_TRADES and self.real_mean is not None and self.real_mean <= 0
 
 
+def _own(rows: Sequence[Mapping[str, Any]], version: Any) -> list[Mapping[str, Any]]:
+    """The program version's own rows (a new version starts its own record; rows written without a version count only
+    while no row carries one)."""
+    rows = list(rows)
+    if version is not None and any(r.get("version") is not None for r in rows):
+        rows = [r for r in rows if r.get("version") is not None and str(r.get("version")) == str(version)]
+    return rows
+
+
+def _sums(rows: Sequence[Mapping[str, Any]]) -> tuple[float, float]:
+    """(P&L, maximum loss) summed over rows with a finite P&L and a positive maximum loss."""
+    pnl = loss = 0.0
+    for row in rows:
+        try:
+            p, m = float(row["pnl"]), float(row.get("max_loss") or 0.0)
+        except (KeyError, TypeError, ValueError):
+            continue
+        if math.isfinite(p) and math.isfinite(m) and m > 0:
+            pnl, loss = pnl + p, loss + m
+    return pnl, loss
+
+
 def one_record(rows: Sequence[Mapping[str, Any]], *, version: Any = None) -> list[Mapping[str, Any]]:
     """The forward record the money table reads: the program version's own (a new version starts its own record;
     rows written without a version count only while no row carries one), and each market day counted ONCE, from one
@@ -297,9 +338,7 @@ def one_record(rows: Sequence[Mapping[str, Any]], *, version: Any = None) -> lis
     real losses are never hidden behind a winning shadow day. The swarm's `league/swarm/evidence.py` reads the same
     record by the same rule (the review of #362, Sept 26, 2026: one rule for both sides). Returns are per dollar of
     maximum loss, scale-free across the shadow's notional and the real stake."""
-    rows = list(rows)
-    if version is not None and any(r.get("version") is not None for r in rows):
-        rows = [r for r in rows if r.get("version") is not None and str(r.get("version")) == str(version)]
+    rows = _own(rows, version)
     by_day: dict[str, dict[str, list]] = {}
     for row in rows:
         by_day.setdefault(str(row.get("day") or ""), {}).setdefault(str(row.get("source") or ""), []).append(row)
@@ -340,9 +379,50 @@ def forward_stats(rows: Sequence[Mapping[str, Any]], confidence: float, *, negat
     mean = bounds["mean"] if bounds else (returns[0] if n == 1 else None)
     real, _ = _returns([r for r in record if str(r.get("source") or "") == "real"])
     own_negative = n >= 20 and mean is not None and mean < 0
+    # D5: the version's own real rows, and the days both its real fills and its nightly replay traded.
+    own = _own(rows, version)
+    real_rows = [r for r in own if str(r.get("source") or "") == "real"]
+    _, real_pnl = _returns(real_rows)
+    losses = [float(r["max_loss"]) for r in real_rows if _finite_positive(r.get("max_loss"))]
+    by_day: dict[str, dict[str, list]] = {}
+    for row in own:
+        by_day.setdefault(str(row.get("day") or ""), {}).setdefault(str(row.get("source") or ""), []).append(row)
+    both = [d for d, sources in by_day.items() if sources.get("real") and sources.get("nightly")]
+    replay_gap, replay_n = None, 0
+    if both:
+        nightly_pnl, nightly_loss = _sums([r for d in both for r in by_day[d]["nightly"]])
+        live_pnl, live_loss = _sums([r for d in both for r in by_day[d]["real"]])
+        replay_n = sum(len(by_day[d]["real"]) for d in both)
+        if nightly_loss > 0 and live_loss > 0:
+            replay_gap = nightly_pnl / nightly_loss - live_pnl / live_loss
     return Forward(n=n, mean=mean, sd=bounds["sd"] if bounds else None, lcb=bounds["lcb"] if bounds else None, pnl=pnl,
                    negative=bool(negative) or own_negative, real_n=len(real),
-                   real_mean=(sum(real) / len(real)) if real else None)
+                   real_mean=(sum(real) / len(real)) if real else None, real_pnl=real_pnl,
+                   real_max_loss=(sum(losses) / len(losses)) if losses else None, replay_gap=replay_gap,
+                   replay_n=replay_n)
+
+
+def _finite_positive(value: Any) -> bool:
+    try:
+        x = float(value)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(x) and x > 0
+
+
+def demotion(fwd: Forward) -> str | None:
+    """D5 (fast lane v2, Oct 7, 2026): why a Probe program's live results end its Probe, or None. Its realized real P&L
+    below -`DEMOTE_LOSS_MULTIPLE` x the mean maximum loss of its real positions, or its live fills below its nightly replay
+    of the same days by more than `REPLAY_GAP_BOUND` a dollar of maximum loss over at least `REPLAY_GAP_MIN_TRADES` real
+    trades. Sticky: the version's real rows persist, so a demoted version stays a Candidate (a new version starts its own
+    record). The bounds are pre-registered and chosen, not measured."""
+    if fwd.real_n and fwd.real_max_loss and fwd.real_pnl < -DEMOTE_LOSS_MULTIPLE * fwd.real_max_loss:
+        return (f"D5: its {fwd.real_n} real trades realized ${fwd.real_pnl:.2f}, below -{DEMOTE_LOSS_MULTIPLE} x its mean "
+                f"maximum loss ${fwd.real_max_loss:.2f}: exits only")
+    if fwd.replay_n >= REPLAY_GAP_MIN_TRADES and fwd.replay_gap is not None and fwd.replay_gap > REPLAY_GAP_BOUND:
+        return (f"D5: its live fills ran {fwd.replay_gap:.3f} a dollar of maximum loss below its replay of the same days "
+                f"over {fwd.replay_n} real trades (bound {REPLAY_GAP_BOUND}): exits only")
+    return None
 
 
 # --------------------------------------------------------------------------------------------------------- bands
@@ -379,6 +459,11 @@ def band_for(table: Table, row: Mapping[str, Any], equity: Decimal, fwd: Forward
         return "candidate", "has not passed the holdout"
     if fwd.negative:
         return "candidate", f"its forward record turned negative ({fwd.n} trades, ${fwd.pnl:.2f})"
+    if band in ("candidate", "probe"):
+        # D5, DEMOTION BY LIVE RESULTS (fast lane v2): exits only, and sticky for the version (`demotion`).
+        why = demotion(fwd)
+        if why:
+            return "candidate", why
     why = table.family_allowed(str(row.get("structure") or ""), equity)
     if why:
         return "candidate", why
@@ -915,4 +1000,5 @@ class FlowBook:
 
 __all__ = ["Table", "DECLARED_TYPES", "order_types", "Forward", "forward_stats", "one_record", "kelly_cap", "sizing_band", "REAL_MIN_TRADES", "band_for", "fits_probe", "probe_cap", "structure_cap", "family_cap",
            "Exposure", "Plan", "plan_open", "Stops", "FlowBook", "D", "cents", "sized_ok", "IncubatorTally", "practice_ok",
-           "plan_incubator", "INCUBATOR_DAY_LEGS", "INCUBATOR_DAY_OPEN_SHARE"]
+           "plan_incubator", "INCUBATOR_DAY_LEGS", "INCUBATOR_DAY_OPEN_SHARE", "probe_room", "demotion",
+           "DEMOTE_LOSS_MULTIPLE", "REPLAY_GAP_BOUND", "REPLAY_GAP_MIN_TRADES"]
