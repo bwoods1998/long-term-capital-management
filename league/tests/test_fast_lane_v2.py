@@ -25,7 +25,7 @@ from league.tests import REAL_POLICY_PATH
 from league.tests.swarm_fakes import result
 from league.tests.test_live_step import HAVE, LiveCase
 from league.tests.test_swarm_look_holds import PASS, HoldCase, lean
-from league.tests.test_swarm_rounds import RoundCase
+from league.tests.test_swarm_rounds import RoundCase, review_failure
 
 if HAVE:
     from league.live.real import probe_tally
@@ -124,6 +124,115 @@ class TheScreen(RoundCase):
         self.assertEqual(out["refused"], ["b"])
         self.assertEqual([r["stage"] for r in self.store.refusals("b")], [DUPLICATE_STAGE])
         self.assertEqual(len([j for j in self.pool.jobs if j.window == "holdout"]), 1)
+
+
+class APaidVerdictBinds(RoundCase):
+    """The fast lane's review (Oct 7, 2026): the release's evaluator adoption clears the gate's `review` and `gated_sha`,
+    so a version a paid review or audit refused (never looked at) was gate-ready again under the new line and would be
+    reviewed again, and could pass on a second roll. A kept paid refusal or bar now closes it before anything is paid."""
+
+    FAIL = {"text": json.dumps(review_failure("it reads the day's settlement before the close"))}
+
+    def gate(self):
+        return Gate(self.store, self.pool, self.router, self.settings, clock=self.clock)
+
+    def paid(self) -> int:
+        return len(self.sail.bodies) + len(self.asked)
+
+    def validate(self):
+        Tournament(self.store, self.pool, self.settings).validate(self.store.families(alive=True))
+
+    def adopt_and_validate_again(self, fid: str) -> None:
+        from league.swarm import bands
+        from league.swarm.evaluator import adopt, identity
+        from league.tests.evaluator_fakes import seed_current_run
+
+        train = seed_current_run(self.store, fid, 1, window="train")  # the researcher's Train run under the new evaluator
+        self.assertTrue(adopt(self.store, identity("synthetic-image", bands._bundle()))["adopted"])
+        state = self.store.family(fid)["state"]
+        self.assertEqual((state.get("gated_sha"), state.get("review")), (None, None), "the adoption clears both")
+        self.store.update_family(fid, best_version=1)
+        self.store.set_state(fid, best_train_run=train["run_id"], best_train_version=1)
+        self.validate()
+        self.assertTrue(self.store.family(fid)["state"]["gate_ready"], "gate-ready again: the gap the review found")
+
+    def events(self, fid):
+        return [e["payload"] for e in self.store.events_after(0) if e["kind"] == "swarm.gate" and e["family"] == fid
+                and e["payload"].get("action") == "paid_verdict"]
+
+    def test_a_failed_audit_binds_after_an_evaluator_adoption(self):
+        from league.swarm.gate import run_sha
+
+        self.replies = [PASS, self.FAIL]
+        self.family("a")
+        self.validate()
+        out = self.gate().run()
+        self.assertEqual((out["refused"], out["looked"]), (["a"], []))
+        self.assertEqual([r["stage"] for r in self.store.refusals("a")], ["audit"])
+        paid = self.paid()
+        self.adopt_and_validate_again("a")
+        self.replies = [PASS] * 8                                    # a second roll would pass: it is never asked
+        out = self.gate().run()
+        self.assertEqual((out["refused"], out["looked"]), (["a"], []))
+        self.assertEqual(self.paid(), paid, "no new review or audit is paid")
+        self.assertEqual([j for j in self.pool.jobs if j.window == "holdout"], [], "no look")
+        self.assertEqual([r["stage"] for r in self.store.refusals("a")], ["audit"], "the earlier row is the record")
+        [event] = self.events("a")
+        self.assertTrue(event["earlier"].startswith("the audit refused it on "), event)
+        state = self.store.family("a")["state"]
+        self.assertEqual((state["gated_sha"], state["gate_ready"]), (run_sha(self.store.version("a", 1)), False))
+        self.assertEqual(state["gate_outcome"]["result"], "refused")
+        self.assertTrue(state["gate"].startswith("fail (an earlier paid review or audit"), state["gate"])
+        self.assertEqual(self.gate().run()["refused"], [], "closed: the next round passes it by")
+
+    def test_a_failed_review_of_the_same_program_in_another_family_binds(self):
+        self.replies = [self.FAIL]
+        self.family("a")
+        self.validate()
+        self.assertEqual(self.gate().run()["refused"], ["a"])
+        self.assertEqual([r["stage"] for r in self.store.refusals("a")], ["review"])
+        paid = self.paid()
+        self.family("b")
+        v = self.store.add_version("b", self.store.version("a", 1)["code"], {}, author="seed")  # the same program
+        self.store.update_family("b", best_version=v["n"])
+        self.replies = [PASS] * 8
+        self.validate()
+        out = self.gate().run()
+        self.assertEqual((out["refused"], out["looked"]), (["b"], []))
+        self.assertEqual(self.paid(), paid)
+        [event] = self.events("b")
+        self.assertIn("(the same program in a, version 1)", event["earlier"])
+        self.assertEqual(self.store.refusals("b"), [], "no new refusal row: a's is the record")
+
+    def test_a_kept_bar_from_a_failed_review_binds_without_a_refusal_row(self):
+        from league.swarm.gate import run_sha
+
+        self.family("a")
+        sha = run_sha(self.store.version("a", 1))
+        self.store.set_state("a", incubator_barred={sha: {"why": "the gate's reviewer failed it", "at": 1.0, "version": 1}})
+        self.replies = [PASS] * 8
+        self.validate()
+        paid = self.paid()
+        out = self.gate().run()
+        self.assertEqual((out["refused"], out["looked"]), (["a"], []))
+        self.assertEqual(self.paid(), paid)
+        self.assertEqual(self.events("a")[0]["earlier"], "the gate's reviewer failed it")
+
+    def test_a_free_refusal_does_not_bind(self):
+        """A refusal at a free stage (here the drift screen, which this release switches off) is judged again by its own
+        rule: the version is reviewed, audited and looked at."""
+        from league.swarm.gate import run_sha
+
+        self.family("a")
+        sha = run_sha(self.store.version("a", 1))
+        self.store.refuse("a", 1, "drift screen", "its Train drift-adjusted t is under the line")
+        self.store.set_state("a", incubator_barred={sha: {"why": "the gate refused it (the drift screen)", "at": 1.0}})
+        self.replies = [PASS] * 8
+        self.validate()
+        out = self.gate().run()
+        self.assertEqual(out["refused"], [])
+        self.assertEqual([x["family"] for x in out["looked"]], ["a"])
+        self.assertEqual(self.events("a"), [])
 
 
 # ======================================================================================= D2: direction counts

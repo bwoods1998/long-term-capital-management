@@ -99,7 +99,8 @@ available context fields. A rejection must locate the submitted code, name the r
 rule and describe a causal counterexample. Missing grounding requires another review; it never
 becomes a pass. Neither a model's claim nor a well-formed receipt substitutes for an executable
 test of a disputed runtime fact. Review approval is bound to that runtime contract. Historical
-trial counts and holdout looks survive runtime upgrades; an upgrade grants no extra looks.
+trial counts and holdout looks survive runtime upgrades; an upgrade grants no extra looks, and a program
+a review or audit failed is never reviewed again, in any family, after an upgrade too.
 
 ## ctx
 

@@ -39,6 +39,18 @@ closed (`gated_sha`), and one that repeats a look still in flight in another fam
 version compares with nothing and goes on as before. Tightening only: no threshold, no Holm or deflated-Sharpe rule,
 no forward rule moves.
 
+A PAID VERDICT BINDS (fast lane v2's review, Oct 7, 2026; `paid_verdict`). An evaluator adoption (a release that moves
+the Gym's image or the execution fingerprint, `evaluator.adopt`) clears the gate's `review` and `gated_sha`, so a version
+the gate refused at its review or audit, never looked at, would be validated again, reviewed again (the audit's request
+id is new each time) and could pass on a second roll. Right after THE DUPLICATE LOOK, a version whose PROGRAM (`run_sha`:
+in this family or any family holding the same code and parameters, `incubator.twins`) has a kept refusal at the stage
+"review" or "audit", or a kept bar (`incubator_barred`) from a paid review or audit, the gate's or the incubator's, that
+failed it or could not be read, is closed as a version whose look already landed is (`gated_sha`, `gate_ready`
+cleared), its outcome "refused", the researcher told so, and one private `swarm.gate` event (`paid_verdict`) names the
+earlier verdict: no new review, no look. A refusal at a FREE stage (the experiment contract, the drift screen, the
+rations, a duplicate look, a look hold) does not bind here: those are judged again by their own rules, which this
+release changed (the drift screen and the holds are off). Tightening only.
+
 THE LOOK HOLDS (L6(b) and L6(c) of the edge study, approved by the owner on Oct 2, 2026 as a tightening; `look_hold`,
 `evidence.drift_lean`, `evidence.holdout_power`). OFF SINCE FAST LANE V2 (Oct 7, 2026; the owner's goal item 4: direction
 counts, and a look is flat at `evidence.LOOK_LEVEL`, so a look no longer raises any later one's bar): policy.json sets
@@ -175,6 +187,10 @@ def run_sha(version: Mapping[str, Any]) -> str:
     return hashlib.sha256((str(version["sha"]) + dumps(version.get("params") or {})).encode()).hexdigest()
 
 
+#: A PAID VERDICT BINDS (the module docstring): the refusal stages a paid reader wrote, and the words of a kept bar
+#: (`incubator._audit_bar`, the gate's and the incubator's own) that a paid reader's failing or unreadable verdict wrote.
+PAID_STAGES = ("review", "audit")
+PAID_BAR_WORDS = ("reviewer failed it", "audit failed it", "review of it cannot be read", "audit of it cannot be read")
 #: THE DUPLICATE LOOK's refusal stage (the module docstring).
 DUPLICATE_STAGE = "duplicate look"
 #: A Validation run's evaluation and outcome, as the Gym's validation view carries them: two runs that agree on all of
@@ -504,6 +520,44 @@ class Gate:
                                                    "of_look": duplicate.get("seq"), "of_family": duplicate.get("family"),
                                                    "of_version": duplicate.get("version"), "match": duplicate.get("match")})
 
+    # ------------------------------------------------------------------ A PAID VERDICT BINDS (fast lane v2's review)
+    def paid_verdict(self, fam: Mapping[str, Any], n: Any, sha: str) -> str | None:
+        """Why an earlier paid review or audit binds version `n` of `fam` (program `sha`), or None (the module
+        docstring): a kept refusal of the program's version, in this family or a twin's, at the stage "review" or
+        "audit", or a kept bar of the program (`incubator_barred[sha]`) whose words are a paid reader's failing or
+        unreadable verdict (`PAID_BAR_WORDS`). Reads the refusal rows and the families' states, never a model."""
+        from . import incubator
+
+        fid, n = str(fam["id"]), int(n)
+        programs = [(fid, n)] + [(f, m) for f, m in incubator.twins(self.store, fid, n) if (f, m) != (fid, n)]
+        for other, m in programs:
+            for row in self.store.refusals(other):
+                if row.get("version") == m and str(row.get("stage")) in PAID_STAGES:
+                    where = "" if other == fid else f" (the same program in {other}, version {m})"
+                    return f"the {row['stage']} refused it on {row['at']}{where}: {str(row.get('reason') or '')[:300]}"
+        for other in dict.fromkeys(f for f, _ in programs):
+            state = ((fam if other == fid else self.store.family(other)) or {}).get("state") or {}
+            recorded = state.get("incubator_barred")
+            entry = recorded.get(sha) if isinstance(recorded, Mapping) else None
+            why = str(entry.get("why") or "") if isinstance(entry, Mapping) else ""
+            if any(words in why for words in PAID_BAR_WORDS):
+                where = "" if other == fid else f" (the same program in {other})"
+                return f"{why}{where}"
+        return None
+
+    def close_paid(self, fam: Mapping[str, Any], n: int, sha: str, why: str, out: dict[str, Any]) -> None:
+        """A PAID VERDICT BINDS: the version is closed as one whose look landed (`gated_sha`, `gate_ready` cleared), its
+        outcome "refused", the researcher told, and one private `swarm.gate` event. No refusal row is added: the earlier
+        verdict's row or bar is the record, and it is kept."""
+        if not self.store.compare_and_set_state(fam["id"], {"validation_version": n}, gated_sha=sha, gate_ready=False,
+                                                dormant_cycles=0):
+            return
+        self.outcome(fam["id"], sha, "refused")
+        self.store.event("swarm.gate", fam["id"], {"action": "paid_verdict", "version": n, "sha": sha[:12], "earlier": why[:400]})
+        self.tell(fam["id"], "fail (an earlier paid review or audit of this program failed it; it is not reviewed again: "
+                             f"{why[:300]})", verdict=True)
+        out["refused"].append(fam["id"])
+
     # ------------------------------------------------------------------ THE LOOK HOLDS (L6)
     def look_hold(self, fam: Mapping[str, Any], n: Any) -> dict[str, Any] | None:
         """THE LOOK HOLDS (the module docstring) on version `n` of `fam` (its state as read: `validation_numbers` must be
@@ -619,6 +673,10 @@ class Gate:
                     self.store.compare_and_set_state(fam["id"], {"validation_version": n}, gated_sha=sha, gate_ready=False)
                 else:
                     self.refuse_duplicate(fam, n, sha, duplicate, out)
+                continue
+            earlier = self.paid_verdict(fam, n, sha)
+            if earlier is not None:  # A PAID VERDICT BINDS: a failed review or audit outlives an evaluator adoption
+                self.close_paid(fam, int(n), sha, earlier, out)
                 continue
             try:
                 check_experiment(version["code"], version.get("params") or {})
