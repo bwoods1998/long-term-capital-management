@@ -8,7 +8,8 @@ the tools below, and nothing else:
 - `list_dir`, `read_file`, `grep`: read anywhere inside the work tree (the public repository's own files);
 - `edit_file`: one exact, unique replacement in a file the candidate may change: the lane's surface
   (`harness_lanes.LANES[lane].surface`) AND the gateway's engineer allowlist for that lane (`GATEWAY_LANE_PATHS`), never a
-  protected path (`harness_lanes.protected_reason`);
+  protected path (`harness_lanes.protected_reason`), and never a path the job HOLDS for this attempt (`Workspace.held`:
+  the engineer holds every module the live path loads, so its changes stay research-class);
 - `create_file`: a NEW test file only (`league/tests/test_harness_candidate_*.py`, absent from the base);
 - `check`: the static guards now (`static_guards`);
 - `finish` (the change, its title, what it predicts and its canary plan) or `give_up` (no viable change). After either,
@@ -84,21 +85,24 @@ def is_new_test(path: Any) -> bool:
     return isinstance(path, str) and NEW_TEST_RE.fullmatch(path) is not None
 
 
-def writable(lane: str, path: str) -> bool:
-    """Whether a candidate of `lane` may change `path`: the lane's surface and the gateway's allowlist, never protected."""
+def writable(lane: str, path: str, held: Mapping[str, str] | None = None) -> bool:
+    """Whether a candidate of `lane` may change `path`: the lane's surface and the gateway's allowlist, never protected,
+    never one of the paths `held` (path -> why) for this attempt."""
     from ..swarm import harness_lanes as lanes
 
     spec = lanes.LANES.get(lane)
     if spec is None or lanes.protected_reason(path) is not None:  # a new candidate test file is not protected
+        return False
+    if held and path in held:
         return False
     in_surface = any(fnmatch.fnmatchcase(path, pattern) for pattern in spec.surface)
     in_gateway = path in GATEWAY_LANE_PATHS.get(lane, ()) or is_new_test(path)
     return in_surface and in_gateway
 
 
-def writable_paths(lane: str) -> list[str]:
-    """The lane's editable files the gateway also admits (tests aside), for the brief."""
-    return [p for p in GATEWAY_LANE_PATHS.get(lane, ()) if writable(lane, p)]
+def writable_paths(lane: str, held: Mapping[str, str] | None = None) -> list[str]:
+    """The lane's editable files the gateway also admits (tests aside), less the paths `held`, for the brief."""
+    return [p for p in GATEWAY_LANE_PATHS.get(lane, ()) if writable(lane, p, held)]
 
 
 def sha256(text: str | bytes) -> str:
@@ -109,11 +113,14 @@ def sha256(text: str | bytes) -> str:
 # ------------------------------------------------------------------------------------------------ the work tree
 class Workspace:
     """The unpacked base tree plus the candidate's edits, applied in place. `originals` holds each edited file's base
-    text (None for a new file), so the base is always readable beside the candidate."""
+    text (None for a new file), so the base is always readable beside the candidate. `held` ({path: why}) names the lane
+    files this attempt may not change: the tools refuse them and the static guards count them as problems."""
 
-    def __init__(self, root: str | Path, lane: str, *, start: Mapping[str, str] | None = None):
+    def __init__(self, root: str | Path, lane: str, *, start: Mapping[str, str] | None = None,
+                 held: Mapping[str, str] | None = None):
         self.root = Path(root).resolve()
         self.lane = lane
+        self.held: dict[str, str] = {str(k): str(v) for k, v in (held or {}).items()}
         self.originals: dict[str, str | None] = {}
         for path, text in (start or {}).items():
             self.write(path, text, new_test_ok=True)
@@ -181,7 +188,9 @@ def static_guards(lane: str, ws: Workspace, *, key: str | None) -> list[str]:
     except ImprovementError as exc:
         problems.append(str(exc))
     for path in paths:
-        if not writable(lane, path):
+        if path in ws.held:
+            problems.append(f"{path}: held in this release ({ws.held[path]})")
+        elif not writable(lane, path):
             problems.append(f"{path}: outside what the gateway's engineer role may write for the {lane} lane")
     touched = lanes.protected_touch([("A" if changes[p][0] is None else "M", p) for p in paths])
     problems += [f"protected: {t}" for t in touched]
@@ -371,8 +380,12 @@ class Tools:
 
     def t_edit_file(self, path: str, old_text: str, new_text: str) -> tuple[str, bool]:
         own_test = is_new_test(path) and path in self.ws.originals and self.ws.originals[path] is None
+        if path in self.ws.held:
+            return (f"{path}: held in this release ({self.ws.held[path]}); you may change only "
+                    f"{', '.join(writable_paths(self.lane, self.ws.held)) or 'a new test file'}"), True
         if not writable(self.lane, path) or is_new_test(path) and not own_test:
-            return (f"{path}: you may change only {', '.join(writable_paths(self.lane))} (and your own new test file)"), True
+            return (f"{path}: you may change only {', '.join(writable_paths(self.lane, self.ws.held))} (and your own new "
+                    "test file)"), True
         text = self.ws.read(path)
         if text is None:
             return f"{path}: no such file", True

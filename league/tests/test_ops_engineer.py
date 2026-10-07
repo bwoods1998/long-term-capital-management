@@ -99,6 +99,57 @@ def gated_author(variant="and \"decide\" in program", test_file=False):
     return script
 
 
+class SelfRunning(unittest.TestCase):
+    """The self-running release's rules (Oct 7, 2026): one switch, inside the Claude meter, research-class only."""
+
+    def test_the_job_serves_its_roles_on_the_line_a_swarm_json_that_replaces_the_list_still_holds(self):
+        house = {"claude": {"roles": ["architect", "audit", "review", "strategist"], "role_model": {"audit": "claude-opus-5-5"},
+                            "role_usd_day": {"review": 5, "strategist": 6, "reviewer": 0.5}, "model": "claude-sonnet-5-5"},
+                 "budget": {"source": "budget.json", "claude_usd_day": 10.0}}
+        out = E.served(house, usd_day=4.0)
+        self.assertEqual(out["claude"]["roles"], ["architect", "audit", "review", "strategist", "engineer", "reviewer"])
+        self.assertEqual(out["claude"]["role_model"], {"audit": "claude-opus-5-5", "engineer": E.ROLE_MODEL,
+                                                       "reviewer": E.ROLE_MODEL})
+        self.assertEqual(out["claude"]["role_usd_day"], {"review": 5, "strategist": 6, "engineer": 4.0, "reviewer": 0.5},
+                         "the job's line, never loosening a lower one")
+        self.assertEqual(out["budget"], house["budget"], "the budget block is the swarm's own")
+        self.assertEqual(house["claude"]["roles"], ["architect", "audit", "review", "strategist"], "the input is not changed")
+        self.assertEqual(E.served({}, usd_day=None)["claude"]["roles"], list(E.ROLES))
+        for bad in ("lots", None, float("nan"), True, -3):
+            self.assertEqual(E._line(bad), 0.0, bad)
+
+    def test_the_line_is_four_dollars_inside_budget_rule_v2s_claude_share(self):
+        from league.ops import budget as B
+
+        self.assertEqual(E.DEFAULTS["usd_day"], 4.0)
+        self.assertLessEqual(E.AUTHOR_USD_CAP + E.REVIEW_USD_CAP, E.DEFAULTS["usd_day"], "an attempt and its review a day")
+        self.assertLessEqual(E.DEFAULTS["usd_day"], B.ceiling_usd_day("claude") - sum(B.GATE_HOLDS_USD.values()),
+                             "the gate's holds keep their room in the Claude meter")
+        self.assertEqual(E.RELEASE_CLASSES, ("research",))
+
+    def test_the_money_path_is_held_on_the_real_tree(self):
+        # On this repository's own tree the live path loads researcher.py and claude_research.py: the engineer may not
+        # change them, so its research lane is preflight.py (and a new test) in this release.
+        repo = Path(__file__).resolve().parents[2]
+        ctx = Context("engineer", root=Path(tempfile.mkdtemp()), base=Path(tempfile.mkdtemp()), due_at=0.0, config={},
+                      clock=lambda: 0.0, release=repo, gateway=None)
+        engineer = E.Engineer(ctx)
+        held = engineer.held("research")
+        self.assertIn("league/swarm/researcher.py", held)
+        self.assertIn("a module the live path loads", held["league/swarm/researcher.py"])
+        self.assertEqual(A.writable_paths("research", held), ["league/swarm/preflight.py"])
+        self.assertEqual(engineer.held("memory"), {}, "the memory lane's files are research-class")
+        ws = A.Workspace(Path(tempfile.mkdtemp()), "research", held=held)
+        tools = A.Tools(ws, "research", None)
+        text, error = tools.call("edit_file", {"path": "league/swarm/researcher.py", "old_text": "a", "new_text": "b"})
+        self.assertTrue(error)
+        self.assertIn("held in this release", text)
+        text = E.brief(lane="research", row={"metric": "train_dq_rate", "value": 0.1, "denominator": 10}, key="k",
+                       examples=[], held=held)
+        self.assertIn("FILES YOU MAY CHANGE: league/swarm/preflight.py;", text)
+        self.assertIn("HELD IN THIS RELEASE", text)
+
+
 class FakeRouter:
     def __init__(self, script=None, verdicts=("approve",), enabled=True, room=6.0, ceiling=0.5):
         self.script, self.verdicts, self.enabled, self.room, self.ceiling = script, list(verdicts), enabled, room, ceiling
@@ -326,10 +377,56 @@ class Flow(unittest.TestCase):
         self.assertIn("refused the pull request", cand["record"]["closed_why"])
 
     def test_no_attested_commit_no_candidate(self):
+        # An owner deploy of a commit that is not main's head: no attestation, no observer policy, and main's head's
+        # release trees are not the running tree. Nothing is authored.
         (self.base / "deploys.jsonl").write_text("")
+        moved = "c" * 40
+        self.gh.commits[moved] = {**FILES, "scripts/tool.py": "x = 2\n"}
+        self.gh.main = moved
         out = self.go("2026-10-06T04:00:00Z")
         self.assertEqual(self.journal(), [])
-        self.assertTrue(any("no attested commit" in a for a in out["actions"]), out)
+        self.assertTrue(any("no attested commit" in a and "not its tree" in a for a in out["actions"]), out)
+
+    def test_an_owner_deploy_of_mains_head_is_the_base_checked_once_a_release(self):
+        # Self-running (Oct 7): an owner deploy carries no attestation. Main's head whose release trees ARE the running
+        # tree is the base, remembered for the release in the journal, so the engineer is not idle until a hand edit.
+        (self.base / "deploys.jsonl").write_text("")
+        fetched = []
+        fetch = self.gh.fetch
+        self.gh.fetch = lambda sha: fetched.append(sha) or fetch(sha)
+        self.go("2026-10-06T04:00:00Z")
+        cand = self.only()
+        self.assertEqual((cand["base_sha"], cand["state"]), (BASE, "pr_open"))
+        self.assertIn("main's head", cand["record"]["base_how"])
+        j = E.Journal(self.root)
+        try:
+            self.assertEqual(j.kv_get(f"base:{self.release.name}")["sha"], BASE)
+        finally:
+            j.close()
+        self.assertFalse((self.root / E.WORK / "base-probe").exists(), "the probe tree is removed")
+        probes = len(fetched)
+        engineer = E.Engineer(Context("engineer", root=self.root, base=self.base, due_at=at("2026-10-07T04:00:00Z"),
+                                      config={}, clock=lambda: at("2026-10-07T04:00:00Z"), release=self.release,
+                                      gateway=self.gh), fetch=self.gh.fetch, resolve_head=lambda: "d" * 40)
+        j = E.Journal(self.root)
+        try:
+            self.assertEqual(engineer.base_of_running(j), (BASE, cand["record"]["base_how"]), "remembered: main moved on")
+        finally:
+            j.close()
+        self.assertEqual(len(fetched), probes, "no second download for the same release")
+
+    def test_a_change_that_classifies_as_the_money_path_is_closed_before_its_pull_request(self):
+        # Defense in depth behind the held paths: whatever the tools let through, a tree whose change the live path
+        # loads is never a pull request in this release.
+        from unittest import mock
+
+        money = {"release_class": "money_path", "paths": {"money_path": ["league/swarm/researcher.py"]}}
+        with mock.patch.object(E.Engineer, "held", return_value={}), mock.patch.object(lanes, "classify", return_value=money):
+            self.go("2026-10-06T04:00:00Z")
+        cand = self.only()
+        self.assertEqual(cand["state"], "closed_failed")
+        self.assertIn("money_path (league/swarm/researcher.py)", cand["record"]["closed_why"])
+        self.assertEqual([p for p, _ in self.gh.posts if p == "/v1/github/pr"], [])
 
     def test_roles_not_configured_no_candidate(self):
         out = self.go("2026-10-06T04:00:00Z", router=FakeRouter(gated_author(), enabled=False))
@@ -584,17 +681,17 @@ class Flow(unittest.TestCase):
         self.assertEqual(self.journal(), [])
         self.assertTrue(any("are used" in a for a in out["actions"]), out)
         self.gh.health = {"autonomy": {"engineer_pulls": {"count": 0, "cap": 2}}}
-        self.router.spent = {"engineer": 6.0, "reviewer": 3.5}  # $0.50 left of the $10 day
+        self.router.spent = {"engineer": 2.0, "reviewer": 1.5}  # $0.50 left of the $4 day
         out = self.go("2026-10-06T04:00:00Z")
         self.assertEqual((self.journal(), self.router.turns), ([], []))
-        self.assertTrue(any("left of their $10.00" in a for a in out["actions"]), out)
+        self.assertTrue(any("left of their $4.00" in a for a in out["actions"]), out)
 
     def test_an_attempt_is_capped_at_what_the_day_line_has_left(self):
         def costly(kw, n):
             b, u = use(n, "read_file", {"path": "league/swarm/researcher.py"})
             return reply([b], [u], cost=0.5)
         self.router = FakeRouter(costly)
-        self.router.spent = {"reviewer": 8.5}  # $1.50 left
+        self.router.spent = {"reviewer": 2.5}  # $1.50 left of the $4 day
         self.go("2026-10-06T04:00:00Z")
         cand = self.only()
         self.assertEqual(cand["state"], "closed_failed")
@@ -604,7 +701,7 @@ class Flow(unittest.TestCase):
     def test_a_review_waits_when_the_day_line_cannot_cover_it(self):
         self.go("2026-10-06T04:00:00Z")
         self.gh.ci = "success"
-        self.router.spent = {"engineer": 9.5}
+        self.router.spent = {"engineer": 3.5}  # $0.50 left of the $4 day: under the review's $1
         self.go("2026-10-06T05:40:00Z")
         self.assertEqual((self.only()["state"], self.router.asks), ("pr_open", []))
         self.router.spent = {}

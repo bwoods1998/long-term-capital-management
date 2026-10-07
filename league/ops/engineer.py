@@ -45,7 +45,25 @@ journal `<state>/harness/engineer.sqlite` (mode 0600):
 THE HELD-OUT JUDGE on the House is the canary window's data: units and sessions the author never saw. The laptop's
 held-out pools stay where they are. Every step's spend goes through the swarm's `ModelRouter` (roles `engineer` and
 `reviewer`: their `claude.role_usd_day` lines, which the budget may only tighten). Off unless the swarm's settings say
-`engineer.enabled` true; the roles must also be in `claude.roles`.
+`engineer.enabled` true (the committed `league/swarm/policy.json` does; the box's swarm.json wins over it).
+
+THE SELF-RUNNING RELEASE (Oct 7, 2026) adds four rules:
+- ONE SWITCH (`served`). The House's swarm.json replaces `claude.roles` whole and its list predates these roles, so the
+  job serves `ROLES` in its own copy of the settings (as the post-mortem serves its own), on `ROLE_MODEL` unless
+  `claude.role_model` names one, each held to the day line below on the router too. `engineer.enabled` alone turns the
+  loop on or off.
+- INSIDE THE CLAUDE METER. `usd_day` (the engineer and the reviewer together, a UTC day, holds included) is $4 by
+  default: 40% of budget rule v2's Claude share of the owner's ceiling ($10), which leaves the gate's holds and the
+  strategist's line their room. Every call is also admitted by the router inside the budget's Claude dollars left
+  today (less the gate's holds), so the engineer never spends past the meter, whatever its own line says.
+- RESEARCH-CLASS ONLY (`RELEASE_CLASSES`). A module the live path loads (`harness_lanes.classify`: `money_path`) or an
+  evidence-reset path is HELD: the author's tools refuse it, the brief does not offer it, and a candidate whose tree
+  classifies outside `RELEASE_CLASSES` is closed before its pull request. Opening the money path to the engineer is a
+  change to this constant: the owner's deploy.
+- THE BASE AFTER AN OWNER DEPLOY (`base_of_running`). An owner deploy carries no updater attestation; when the observer's
+  policy does not name it either, main's head is the base if its release trees are the running tree (the digest, as
+  the attempt checks again), remembered for that release in the journal. So an owner deploy of main's head never leaves
+  the engineer idle until a hand edit of runtime.json.
 """
 from __future__ import annotations
 
@@ -74,6 +92,13 @@ RANKED = Path("harness") / "lanes-ranked.json"
 MEASUREMENT = Path("harness") / "lanes-measurement.json"
 RUNTIME = Path("harness") / "runtime.json"
 ENGINEER_LANES = ("research", "memory", "data")
+#: The engineer's two Claude roles, served by the job itself (`served`), and their model unless `claude.role_model`
+#: names one (Phase 4: Opus 5.5).
+ROLES = ("engineer", "reviewer")
+ROLE_MODEL = "claude-opus-5-5"
+#: The release classes (`harness_lanes.DEPLOY_RULES`) the engineer may author in this release. A module the live path
+#: loads (`money_path`) or an evidence reset is never this job's: the money path stays the owner's.
+RELEASE_CLASSES = ("research",)
 #: The daily occurrence (UTC) that may author; every other occurrence only moves the candidates along.
 AUTHOR_AT = (4, 0)
 #: Hard caps whatever the settings say: an authoring attempt, a review.
@@ -94,8 +119,9 @@ DEFAULTS: dict[str, Any] = {
     "max_tokens": 16000,
     "keep_usd": 5.0,
     # The engineer's and the reviewer's Claude together, a UTC day (holds included, `claude_spent`): an attempt is
-    # capped at what is left, and no attempt or review starts with less than its own cap left.
-    "usd_day": 10.0,
+    # capped at what is left, and no attempt or review starts with less than its own cap left. $4: one attempt ($3) and
+    # its review ($1) a day, 40% of budget rule v2's $10 Claude share of the owner's ceiling.
+    "usd_day": 4.0,
     "ranked_max_age_hours": 36,
     "cooldown_hours": 72,
     "attempts_per_base": 3,
@@ -123,6 +149,15 @@ CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
 SHA40 = re.compile(r"[0-9a-f]{40}")
 UTC = timezone.utc
+
+
+def _line(value: Any) -> float:
+    """A dollar line from a setting: a finite number at or above 0, else 0 (a typo never lifts a line)."""
+    try:
+        line = float(value) if not isinstance(value, bool) else float("nan")
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, line) if math.isfinite(line) else 0.0
 
 
 def ny_day(moment: float) -> str:
@@ -186,6 +221,17 @@ class Journal:
 
     def all(self) -> list[dict[str, Any]]:
         return [self._row(r) for r in self.db.execute("SELECT * FROM candidates ORDER BY id")]
+
+    def kv_get(self, key: str) -> Any:
+        row = self.db.execute("SELECT value FROM kv WHERE key=?", (key,)).fetchone()
+        try:
+            return None if row is None else json.loads(row["value"])
+        except ValueError:
+            return None
+
+    def kv_set(self, key: str, value: Any) -> None:
+        self.db.execute("INSERT INTO kv(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                        (key, json.dumps(value, default=str)))
 
     def authored_on(self, day: str) -> bool:
         return self.db.execute("SELECT 1 FROM candidates WHERE ny_day=? LIMIT 1", (day,)).fetchone() is not None
@@ -360,7 +406,7 @@ The walls (the static guards enforce them; a reviewer and CI check again):
 
 
 def brief(*, lane: str, row: Mapping[str, Any], key: str, examples: Sequence[Mapping[str, Any]],
-          feedback: Sequence[str] = (), revision: bool = False) -> str:
+          feedback: Sequence[str] = (), revision: bool = False, held: Mapping[str, str] | None = None) -> str:
     """The author's first message (model-safe: no Validation or holdout figure, no family name, no date)."""
     from ..swarm import harness_lanes as lanes
 
@@ -376,8 +422,11 @@ def brief(*, lane: str, row: Mapping[str, Any], key: str, examples: Sequence[Map
              f"(a bottleneck from {m.threshold}). The change is kept only if a concurrent canary shows a relative "
              f"improvement of at least {m.min_effect:.0%} with p <= {ALPHA}, and nothing below worsens:",
              "  " + (", ".join(x.name for x in list(bottleneck.secondary) + list(spec.guards)) or "(none)"),
-             f"FILES YOU MAY CHANGE: {', '.join(writable_paths(lane))}; and one new test file {NEW_TEST} (the * of "
+             f"FILES YOU MAY CHANGE: {', '.join(writable_paths(lane, held))}; and one new test file {NEW_TEST} (the * of "
              "lower-case letters, digits and underscores only)."]
+    if held:
+        lines.append("HELD IN THIS RELEASE (read them, never change them): "
+                     + "; ".join(f"{p} ({why})" for p, why in sorted(held.items())))
     if canary.get("mode") == "arms":
         unit = ('the family id: a name for it such as fam["id"]' if canary.get("unit") == "family" else
                 "canary.mechanism_unit(mechanism) of the text Architect.admit admits, asked inside Architect.admit (a "
@@ -494,6 +543,35 @@ def write_arm(root: str | Path, key: str, arm: Mapping[str, Any] | None) -> Path
     return write_json(path, {"schema": 1, "arms": arms})
 
 
+def served(settings: Mapping[str, Any], usd_day: float | None = None) -> dict[str, Any]:
+    """The swarm's settings as this job's router reads them: `ROLES` added to its own copy of `claude.roles` (a list the
+    House's swarm.json replaces whole), each on `ROLE_MODEL` unless `claude.role_model` names one, and each role's
+    `claude.role_usd_day` line held to `usd_day` (never loosened: a lower line stands). Nothing else changes: the budget
+    block, the funded room and every other role's line are the swarm's own."""
+    out = dict(settings)
+    claude = dict(out.get("claude") or {}) if isinstance(out.get("claude"), Mapping) else {}
+    roles = claude.get("roles")
+    roles = [r for r in roles if isinstance(r, str)] if isinstance(roles, (list, tuple)) else []
+    claude["roles"] = roles + [r for r in ROLES if r not in roles]
+    models = dict(claude.get("role_model") or {}) if isinstance(claude.get("role_model"), Mapping) else {}
+    for role in ROLES:
+        if not (isinstance(models.get(role), str) and models[role].strip()):
+            models[role] = ROLE_MODEL
+    claude["role_model"] = models
+    if usd_day is not None:
+        lines = claude.get("role_usd_day")
+        lines = dict(lines) if isinstance(lines, Mapping) else {}
+        for role in ROLES:
+            try:
+                had = float(lines[role]) if role in lines and lines[role] is not None else None
+            except (TypeError, ValueError):
+                had = 0.0  # a typo never lifts a line
+            lines[role] = float(usd_day) if had is None or not math.isfinite(had) else min(had, float(usd_day))
+        claude["role_usd_day"] = lines
+    out["claude"] = claude
+    return out
+
+
 # ------------------------------------------------------------------------------------------------ the job
 class Engineer:
     def __init__(self, ctx: Any, *, router_factory: Callable[[], Any] | None = None,
@@ -511,14 +589,18 @@ class Engineer:
         self._swarm = swarm_settings
         self.actions: list[str] = []
         self.spend = 0.0
+        self._held: dict[str, dict[str, str] | None] = {}
 
     # dependencies
     @property
     def swarm(self) -> Mapping[str, Any]:
+        """The swarm's settings from the state root (the budget block included), with this job's roles served."""
         if self._swarm is None:
             from ..swarm import settings as settings_mod
 
-            self._swarm = settings_mod.load(self.root, config=self.ctx.config)
+            loaded = settings_mod.load(self.root, config=self.ctx.config)
+            mine = loaded.get("engineer") if isinstance(loaded.get("engineer"), Mapping) else {}
+            self._swarm = served(loaded, usd_day=_line(mine.get("usd_day", DEFAULTS["usd_day"])))
         return self._swarm
 
     def cfg(self) -> dict[str, Any]:
@@ -527,10 +609,7 @@ class Engineer:
         out.update(mine)
         out["author_usd"] = min(float(out["author_usd"]), AUTHOR_USD_CAP)
         out["review_usd"] = min(float(out["review_usd"]), REVIEW_USD_CAP)
-        try:
-            out["usd_day"] = max(0.0, float(out["usd_day"])) if math.isfinite(float(out["usd_day"])) else 0.0
-        except (TypeError, ValueError):
-            out["usd_day"] = 0.0  # a typo never lifts the line
+        out["usd_day"] = _line(out["usd_day"])  # a typo never lifts the line
         out["lanes"] = [lane for lane in out.get("lanes") or [] if lane in ENGINEER_LANES]
         return out
 
@@ -713,6 +792,9 @@ class Engineer:
             lane, metric = row.get("lane"), row.get("metric")
             if not row.get("captured") or lane not in cfg["lanes"]:
                 continue
+            held = self.held(str(lane))
+            if held is None or not writable_paths(str(lane), held):
+                continue  # nothing in the lane this release may change (or its live path unread)
             mine = [c for c in history if c["lane"] == lane and c["metric"] == metric]
             if sum(1 for c in mine if c["base_sha"] == base_sha) >= int(cfg["attempts_per_base"]):
                 continue
@@ -722,21 +804,71 @@ class Engineer:
             return dict(row)
         return None
 
-    def base_of_running(self) -> tuple[str | None, str]:
+    def base_of_running(self, journal: Journal | None = None) -> tuple[str | None, str]:
+        """(the running release's commit, how it is known) or (None, why not): the updater's attestation; else the
+        observer policy naming this release's digest; else main's head when its release trees are the running tree
+        (an owner deploy of main's head), checked once a release and remembered in the journal."""
+        from ..updater import unpack
+
         release = Path(self.ctx.release).name
         sha = attested_sha(deploy_rows(self.ctx.base), release)
         if sha:
             return sha, "attested"
+        digest = self.digest(Path(self.ctx.release))
         policy = read_json(self.root / RUNTIME, {}) or {}
-        if SHA40.fullmatch(str(policy.get("base") or "")) and policy.get("release_digest") == self.digest(Path(self.ctx.release)):
+        if SHA40.fullmatch(str(policy.get("base") or "")) and policy.get("release_digest") == digest:
             return str(policy["base"]), "observer policy"
-        return None, "the running release has no attested commit (an owner deploy with no observer policy for it)"
+        how = "main's head (its release trees are the running tree: an owner deploy of main)"
+        remembered = journal.kv_get(f"base:{release}") if journal is not None else None
+        if isinstance(remembered, dict) and remembered.get("digest") == digest and SHA40.fullmatch(str(remembered.get("sha") or "")):
+            return str(remembered["sha"]), how
+        probe = self.root / WORK / "base-probe"
+        try:
+            head = self.head()
+            if not SHA40.fullmatch(str(head or "")):
+                raise ValueError(f"main's head reads {str(head)[:60]!r}")
+            shutil.rmtree(probe, ignore_errors=True)
+            probe.mkdir(parents=True, exist_ok=True, mode=0o700)
+            unpack(self.fetch(head), probe, sha=head)
+            same = self.digest(probe) == digest
+        except Exception as exc:  # noqa: BLE001 - no base, no attempt
+            return None, (f"the running release has no attested commit and main's head could not be checked against it "
+                          f"({type(exc).__name__}: {str(exc)[:160]})")
+        finally:
+            shutil.rmtree(probe, ignore_errors=True)
+        if not same:
+            return None, ("the running release has no attested commit, no observer policy names it, and main's head is "
+                          "not its tree (an owner deploy of another commit)")
+        if journal is not None:
+            journal.kv_set(f"base:{release}", {"sha": head, "digest": digest, "at": self.now()})
+        return head, how
+
+    def held(self, lane: str) -> dict[str, str] | None:
+        """{path: why} for the lane's files whose change would be outside `RELEASE_CLASSES` on the running tree (a module
+        the live path loads, an evidence-reset path); None when the live path's modules cannot be read (fail closed:
+        that lane is not authored)."""
+        from ..swarm import harness_lanes as lanes
+
+        cache = self._held
+        if lane not in cache:
+            try:
+                live = lanes.live_path_modules(Path(self.ctx.release))
+                out = {}
+                for path in writable_paths(lane):
+                    kind = lanes.classify([path], live).get("release_class")
+                    if kind not in RELEASE_CLASSES:
+                        what = "a module the live path loads" if kind == "money_path" else str(kind).replace("_", " ")
+                        out[path] = f"{what}: the engineer's changes stay research-class"
+                cache[lane] = out
+            except Exception:  # noqa: BLE001 - an unread live path holds the whole lane
+                cache[lane] = None
+        return cache[lane]
 
     def author_new(self, journal: Journal, cfg: Mapping[str, Any]) -> None:
         from ..swarm import harness_lanes as lanes
 
         now = self.now()
-        base_sha, how = self.base_of_running()
+        base_sha, how = self.base_of_running(journal)
         if base_sha is None:
             self.note(f"no authoring: {how}")
             return
@@ -767,7 +899,9 @@ class Engineer:
                               record=record)
         self.note(f"picked {lane}/{metric} on {base_sha[:12]} ({source}); key {key}")
         examples = measured.get("examples") or row.get("examples") or []
-        cand = self.attempt(journal, cand, cfg, brief_text=brief(lane=lane, row=row, key=key, examples=examples), start=None)
+        held = self.held(lane) or {}
+        cand = self.attempt(journal, cand, cfg, brief_text=brief(lane=lane, row=row, key=key, examples=examples, held=held),
+                            start=None, held=held)
         self.advance(journal, cand, cfg)
 
     def no_room(self, cfg: Mapping[str, Any]) -> str | None:
@@ -815,7 +949,7 @@ class Engineer:
         return max(0.0, float(cfg["usd_day"]) - spent) if math.isfinite(spent) else 0.0
 
     def attempt(self, journal: Journal, cand: dict[str, Any], cfg: Mapping[str, Any], *, brief_text: str,
-                start: Mapping[str, str] | None) -> dict[str, Any]:
+                start: Mapping[str, str] | None, held: Mapping[str, str] | None = None) -> dict[str, Any]:
         """One authoring attempt on a fresh work tree of the base: a `pr_pending` candidate, or a closed one."""
         from ..swarm import harness_lanes as lanes
         from ..updater import unpack
@@ -839,7 +973,7 @@ class Engineer:
             return self.close(journal, cand, "closed_failed",
                               f"the engineer and the reviewer have ${usd_cap:.2f} left of their line today")
         try:
-            ws = Workspace(tree, lane, start=start)
+            ws = Workspace(tree, lane, start=start, held=held)
             n = len(rec["attempts"]) + 1
             outcome: Outcome = run_loop(self.router, ws=ws, lane=lane, key=key, system=AUTHOR_SYSTEM, brief=brief_text,
                                         request_key=f"engineer:{key}:{n}", usd_cap=usd_cap,
@@ -862,6 +996,11 @@ class Engineer:
                                 "usd": outcome.usd, "turns": outcome.turns, "guards": outcome.guards[:12]})
         if outcome.status != "finished":
             return self.close(journal, cand, "closed_failed", f"the authoring attempt {outcome.status}: {outcome.why}")
+        kind = (classified or {}).get("release_class", "research")
+        if kind not in RELEASE_CLASSES:  # defense in depth: the tools already refuse the held paths
+            return self.close(journal, cand, "closed_failed",
+                              f"the change is {kind} ({', '.join(sorted(((classified or {}).get('paths') or {}).get(kind) or []))}): "
+                              "the engineer's changes stay research-class in this release")
         rec.update(files={p: sha256(t) for p, t in outcome.files.items()},
                    originals={p: None if t is None else sha256(t) for p, t in outcome.originals.items()},
                    title=outcome.title, summary=outcome.summary, predicted_effect=outcome.predicted_effect,
@@ -1090,6 +1229,10 @@ class Engineer:
         if left < min(1.0, float(cfg["author_usd"])):
             self.note(f"{cand['key']}: the revision waits for room (${left:.2f} left of the day's ${float(cfg['usd_day']):.2f})")
             return cand
+        held = self.held(cand["lane"])
+        if held is None:
+            self.note(f"{cand['key']}: the revision waits: the live path's modules could not be read")
+            return cand
         rec = cand["record"]
         rec["revise"]["tries"] = int(rec["revise"].get("tries") or 0) + 1
         if rec["revise"]["tries"] > 2:
@@ -1098,8 +1241,8 @@ class Engineer:
         rec = cand["record"]
         start = {p: t for p, t in self.load_files(cand["key"], "cand", rec["files"]).items() if t is not None}
         text = brief(lane=cand["lane"], row={"metric": cand["metric"], **(rec.get("capture") or {})}, key=cand["key"],
-                     examples=[], feedback=rec["revise"]["reasons"], revision=True)
-        return self.attempt(journal, cand, cfg, brief_text=text, start=start)
+                     examples=[], feedback=rec["revise"]["reasons"], revision=True, held=held)
+        return self.attempt(journal, cand, cfg, brief_text=text, start=start, held=held)
 
     def merge(self, journal: Journal, cand: dict[str, Any], cfg: Mapping[str, Any]) -> dict[str, Any]:
         from ..swarm import harness_lanes as lanes
