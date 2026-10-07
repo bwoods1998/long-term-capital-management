@@ -127,6 +127,20 @@ class SelfRunning(unittest.TestCase):
                              "the gate's holds keep their room in the Claude meter")
         self.assertEqual(E.RELEASE_CLASSES, ("research",))
 
+    def test_the_committed_policy_switches_it_on_and_the_box_can_switch_it_off(self):
+        import tempfile as _tmp
+
+        from league.swarm import settings as S
+
+        policy = json.loads((Path(__file__).resolve().parents[2] / "league" / "swarm" / "policy.json").read_text())
+        self.assertIs(policy["engineer"]["enabled"], True)
+        self.assertEqual(S.policy_layer(policy)[1]["state"], "ok")
+        with _tmp.TemporaryDirectory() as tmp:
+            loaded = S.load(tmp, config={}, policy=policy)
+            self.assertIs(loaded["engineer"]["enabled"], True)
+            Path(tmp, "swarm.json").write_text(json.dumps({"engineer": {"enabled": False}}))
+            self.assertIs(S.load(tmp, config={}, policy=policy)["engineer"]["enabled"], False, "the box's swarm.json wins")
+
     def test_the_money_path_is_held_on_the_real_tree(self):
         # On this repository's own tree the live path loads researcher.py and claude_research.py: the engineer may not
         # change them, so its research lane is preflight.py (and a new test) in this release.
