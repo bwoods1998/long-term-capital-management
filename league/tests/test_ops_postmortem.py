@@ -4,6 +4,7 @@ monthly cost review and its D6 proposal, the model-safe prompt, one Claude call 
 import contextlib
 import json
 import sqlite3
+import time
 import unittest
 from unittest import mock
 
@@ -11,6 +12,7 @@ from league.claude import Claude
 from league.live import calibration as CAL
 from league.live import observe as OBS
 from league.live import state as LS
+from league.ops import budget as B
 from league.ops import postmortem as PM
 from league.ops import registry
 from league.ops import scoreboard as SB
@@ -148,6 +150,15 @@ class House(Base):
         self.opener = FakeOpener()
         self.meter = FakeClaudeMeter(100)
         self.swarm_json({"claude": {"stream": False}})
+        self.budget_json(B.ceiling_usd_day("claude"))
+
+    def budget_json(self, claude_usd_day):
+        """A fresh budget.json (RULE_VERSION 2) giving Claude `claude_usd_day` research dollars today: the job is judged
+        inside the Claude meter at its ceiling. `settings.load` reads it on the real clock."""
+        (self.root / "budget.json").write_text(json.dumps({"schema": B.SCHEMA, "rule_version": B.RULE_VERSION,
+                                                           "at": time.time(), "meters": {
+                                                               "sail": {"research_usd_day": B.ceiling_usd_day("sail")},
+                                                               "claude": {"research_usd_day": claude_usd_day}}}))
 
     def economics(self, name, value):
         folder = self.root / "economics" / name
@@ -357,6 +368,22 @@ class Model(House):
         self.assertIn("(line)", alerts[0]["text"])
         self.assertIn("No narrative this week", (self.root / "postmortem" / "2026-10-10.md").read_text())
         self.assertEqual(out["posted"], "docs/runs/desk/2026-10-10-postmortem.md")  # the facts are still published
+
+    def test_the_budgets_claude_line_holds_the_run_inside_the_claude_meter(self):
+        # Budget rule v2: the post-mortem's call is admitted inside the day's Claude research dollars less the gate's
+        # two holds. With no budget.json (the floor, $2 of Claude) the line has $0.05 for this role: no call, the
+        # refusal's kind in the receipt, a warning, and the week's facts still written and published.
+        (self.root / "budget.json").unlink()
+        out = self.run_job()
+        self.assertEqual(self.opener.calls, [])
+        self.assertEqual(out["model"]["kind"], "line")
+        self.assertIn("research budget's Claude line", out["model"]["missing"])
+        self.assertEqual(len(self.alerts()), 1)
+        self.assertEqual(out["posted"], "docs/runs/desk/2026-10-10-postmortem.md")
+        # Two dollars of Claude left today at the ceiling's rule: the call (its hold under a dollar) is asked.
+        self.budget_json(2.0 + sum(B.GATE_HOLDS_USD.values()))
+        self.opener.script = [message(json.dumps(ANSWER), cost="0.31")]
+        self.assertAlmostEqual(self.run_job()["model"]["cost_usd"], 0.31)
 
     def test_the_run_cap_is_checked_before_the_call(self):
         with mock.patch.object(PM, "RUN_CAP_USD", 0.05):
