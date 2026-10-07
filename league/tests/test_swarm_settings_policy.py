@@ -295,9 +295,12 @@ class TheCommittedPolicy(L.LoopCase):
 
     def test_the_paid_model_lines_are_the_gates_and_the_strategists(self):
         """Claude's $10 a day at the ceiling: the gate's review and audit and the strategist have a line; the researchers,
-        the rewrites, the diagnostician and the architect have none (the stronger models bought no Validation pass)."""
+        the rewrites, the diagnostician and the architect have none (the stronger models bought no Validation pass). The
+        House's weekly post-mortem (league/ops/postmortem.py) keeps its own $1 line from the defaults: the job serves its
+        role itself, one call a week."""
         lines = self.at_usd_day(B.CEILING_USD_DAY)["claude"]["role_usd_day"]
-        self.assertEqual({r: v for r, v in lines.items() if v}, {"review": 5, "audit": 10.0, "strategist": 6})
+        self.assertEqual({r: v for r, v in lines.items() if v}, {"review": 5, "audit": 10.0, "strategist": 6,
+                                                                 "postmortem": 1.0})
         self.assertEqual({r for r, v in lines.items() if not v}, {"architect", "researcher", "rewrite", "diagnostician"})
         for role, hold in B.GATE_HOLDS_USD.items():
             self.assertGreaterEqual(lines[role], hold, f"{role}: its line holds its hold")
