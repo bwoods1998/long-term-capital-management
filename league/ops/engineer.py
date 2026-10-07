@@ -4,7 +4,9 @@ One candidate at a time walks the loop of `playbooks/harness-improvement.md` on 
 journal `<state>/harness/engineer.sqlite` (mode 0600):
 
 1. PICK (the daily occurrence, 04:00Z, after the scoreboard; only when no candidate is in flight or reverting, none was
-   authored today, New York's day, the gateway's /v1/health shows the engineer's pull requests with room today, and the
+   authored on the occurrence's own UTC day (04:00Z is New York's midnight in summer and 23:00 the day before in winter,
+   so a New York day would skip one authoring a year), the gateway's /v1/health shows the engineer's pull requests with
+   room today, and the
    engineer's and the reviewer's Claude together have an attempt's cap left of `usd_day`). The lanes' measurement: the
    supervised observer's `<state>/harness/lanes-ranked.json` and `lanes-measurement.json` when they are fresh and of the
    running release, else the job measures the last day itself, read-only (`harness_lanes.measure`, `rank`). The top
@@ -22,8 +24,11 @@ journal `<state>/harness/engineer.sqlite` (mode 0600):
    `main`'s change), or the candidate is dropped.
 4. CI (`GET /v1/github/pr/<n>`), then THE REVIEWER (`league/ops/reviewer.py`; Opus 5.5, at most $1; two for a money-path
    candidate) on the exact diff between the pull request's head and the `main` it was cut from, verdict posted to
-   `POST /v1/github/review`. A CI failure or a reject goes back to the engineer ONCE (a revision: a new pull request);
-   a second is final.
+   `POST /v1/github/review`. A CI failure or a reject goes back to the engineer ONCE (a revision: a new pull request,
+   the one it supersedes closed through `POST /v1/github/close` at its exact head); a second is final, and its pull
+   request is closed the same way. The gateway closes only an open engineer pull request at the head named; one it
+   refuses to close is listed for the owner (`leftover_prs`, the daily scoreboard), as is a REVERT that did not merge
+   (the owner's revert by hand may be merging it).
 5. MERGE (`POST /v1/github/merge`, exact head). A window-lane candidate merges only once its control window (the
    observation length before the deploy) can lie wholly after the capture's window.
 6. DEPLOY: the updater ships `main` at its train; the job sees the running release carry the candidate's inserted code.
@@ -234,7 +239,12 @@ class Journal:
                         (key, json.dumps(value, default=str)))
 
     def authored_on(self, day: str) -> bool:
-        return self.db.execute("SELECT 1 FROM candidates WHERE ny_day=? LIMIT 1", (day,)).fetchone() is not None
+        """A candidate was created on the UTC date `day` (YYYY-MM-DD): the authoring occurrence's own clock."""
+        start = S.epoch(f"{day}T00:00:00Z")
+        if start is None:
+            return False
+        return self.db.execute("SELECT 1 FROM candidates WHERE created_at>=? AND created_at<? LIMIT 1",
+                               (start, start + 86400)).fetchone() is not None
 
     def events(self, key: str | None = None) -> list[dict[str, Any]]:
         rows = (self.db.execute("SELECT * FROM events WHERE key=? ORDER BY seq", (key,)) if key else
@@ -732,8 +742,8 @@ class Engineer:
                 self.note(f"in flight: {busy[0]['key']} ({busy[0]['state']})")
             elif not authoring:
                 self.note("no candidate in flight; authoring waits for the daily occurrence")
-            elif journal.authored_on(ny_day(self.now())):
-                self.note("a candidate was already authored today")
+            elif journal.authored_on(due.date().isoformat()):
+                self.note("a candidate was already authored today (UTC)")
             else:
                 self.author_new(journal, cfg)
             states: dict[str, int] = {}
@@ -1014,17 +1024,49 @@ class Engineer:
         self.note(f"{key}: authored {len(outcome.files)} file(s) for ${outcome.usd:.2f}")
         return cand
 
+    def close_pr(self, cand: Mapping[str, Any], pr: Any, head: Any) -> bool:
+        """Close one of the candidate's own pull requests (`POST /v1/github/close` at its exact head: the gateway closes
+        only an open engineer pull request aimed at main, never merges, pushes or deletes). True when it is closed, or
+        is no longer open (merged, closed outside the loop, gone); False when the gateway would not close it (a moved
+        head, an outage): the owner closes it then (`leftover_prs`)."""
+        if pr is None or not head:
+            return False
+        try:
+            self.ctx.gateway.post("/v1/github/close", {"pr": int(pr), "head_sha": str(head)})
+        except GatewayError as exc:
+            text = str(exc)
+            if exc.status == 404 or "not_open" in text or "not_found" in text:
+                return True
+            self.note(f"{cand['key']}: #{pr} could not be closed ({text[:120]}); left for the owner")
+            return False
+        self.note(f"{cand['key']}: closed #{pr}")
+        return True
+
     def close(self, journal: Journal, cand: dict[str, Any], state: str, why: str) -> dict[str, Any]:
         rec = cand["record"]
         rec["closed_why"] = why
-        # The gateway has no route that closes a pull request: the ones this candidate leaves open (a superseded head,
-        # an unmerged one, a revert that did not merge) are listed for the owner (the scoreboard).
-        leftover = [int(n) for n in rec.get("superseded_prs") or [] if n is not None]
+        # The pull requests this candidate leaves open are closed through the gateway (a superseded head, an unmerged
+        # one); those it would not close are listed for the owner (the scoreboard), as is a revert that did not merge:
+        # main still carries the change, and the owner's revert by hand may be merging that pull request.
+        closed = {int(n) for n in rec.get("closed_prs") or [] if isinstance(n, int)}
+        mine = [(item.get("pr"), item.get("head")) for item in rec.get("superseded") or [] if isinstance(item, Mapping)]
+        known = {int(pr) for pr, _ in mine if pr is not None}
+        mine += [(n, None) for n in rec.get("superseded_prs") or [] if n is not None and int(n) not in known]
         if state in ("closed_failed", "closed_rejected") and rec.get("pr") is not None and not rec.get("merged"):
-            leftover.append(int(rec["pr"]))
+            mine.append((rec["pr"], rec.get("head")))
+        leftover = []
+        for pr, head in mine:
+            if pr is None or int(pr) in closed:
+                continue
+            if self.close_pr(cand, pr, head):
+                closed.add(int(pr))
+            else:
+                leftover.append(int(pr))
         revert = rec.get("revert") or {}
         if state == "closed_reverted" and revert.get("pr") is not None and why != revert.get("why"):
             leftover.append(int(revert["pr"]))
+        if closed:
+            rec["closed_prs"] = sorted(closed)
         if leftover:
             rec["leftover_prs"] = sorted(set(leftover))
         self.note(f"{cand['key']}: {state}: {why}")
@@ -1215,6 +1257,10 @@ class Engineer:
             return self.close(journal, cand, "closed_rejected", f"{why} after its revision")
         rec["revisions_left"] = int(rec["revisions_left"]) - 1
         rec["superseded_prs"] = list(rec.get("superseded_prs") or []) + [rec.get("pr")]
+        rec["superseded"] = list(rec.get("superseded") or []) + [{"pr": rec.get("pr"), "head": rec.get("head")}]
+        # The revision opens a new pull request: the one it supersedes is closed now (or left for the owner, `close`).
+        if rec.get("pr") is not None and self.close_pr(cand, rec["pr"], rec.get("head")):
+            rec["closed_prs"] = sorted({*(rec.get("closed_prs") or []), int(rec["pr"])})
         rec.pop("verdict_posted", None)
         rec["revise"] = {"why": why, "reasons": [str(r)[:900] for r in reasons][:16]}
         self.note(f"{cand['key']}: {why}; back to the engineer once")

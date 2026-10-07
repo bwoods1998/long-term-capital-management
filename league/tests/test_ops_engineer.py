@@ -204,7 +204,7 @@ class FakeGitHub:
     def __init__(self):
         self.commits = {BASE: dict(FILES)}
         self.main = BASE
-        self.prs, self.posts, self.reviews, self.merges = {}, [], [], []
+        self.prs, self.posts, self.reviews, self.merges, self.closed = {}, [], [], [], []
         self.ci = "pending"
         self.n = 6
         self.refuse = {}
@@ -227,6 +227,18 @@ class FakeGitHub:
         if path == "/v1/github/review":
             self.reviews.append(body)
             return {"ok": True}
+        if path == "/v1/github/close":
+            pr = self.prs.get(body["pr"])
+            if pr is None:
+                raise GatewayError('POST /v1/github/close: HTTP 404 {"error":"No such pull request.","refused":"not_found"}', status=404)
+            if pr["state"] != "open":
+                raise GatewayError('POST /v1/github/close: HTTP 409 {"error":"The pull request is not open.","refused":"not_open"}',
+                                   status=409)
+            if body["head_sha"] != pr["head"]:
+                raise GatewayError('POST /v1/github/close: HTTP 409 {"error":"The head moved.","refused":"head_moved"}', status=409)
+            pr["state"] = "closed"
+            self.closed.append(body)
+            return {"ok": True, "closed": True, "pr": body["pr"], "head_sha": body["head_sha"]}
         if path == "/v1/github/merge":
             pr = self.prs[body["pr"]]
             assert body["head_sha"] == pr["head"]
@@ -377,6 +389,27 @@ class Flow(unittest.TestCase):
         self.go("2026-10-06T05:00:00Z")
         self.assertEqual(len(self.journal()), 1)
 
+    def test_authoring_is_once_a_utc_day_of_the_occurrence_so_the_dst_change_skips_none(self):
+        # 04:00Z is New York's midnight in summer and 23:00 the day before in winter: on Nov 2, 2026 (EST) it is still
+        # New York's Nov 1, the day the Nov 1 (EDT) authoring was stamped with. The rule reads the occurrence's UTC day.
+        self.assertEqual((E.ny_day(at("2026-11-01T04:00:00Z")), E.ny_day(at("2026-11-02T04:00:00Z"))), ("2026-11-01", "2026-11-01"))
+        journal = E.Journal(self.root)
+        self.addCleanup(journal.close)
+        journal.create("k1", "memory", "other_metric", at=at("2026-11-01T04:00:30Z"), base_sha=BASE, release="r",
+                       record={}, state="closed_failed")
+        self.assertEqual([journal.authored_on(d) for d in ("2026-10-31", "2026-11-01", "2026-11-02")], [False, True, False])
+        self.assertFalse(journal.authored_on("not a day"))
+        self.capture = at("2026-11-02T03:30:00Z")
+        self.write_capture()
+        out = self.go("2026-11-02T04:00:00Z")
+        self.assertNotIn("a candidate was already authored today (UTC)", out["actions"])
+        self.assertEqual(len([p for p in self.gh.posts if p[0] == "/v1/github/pr"]), 1, "the Nov 2 authoring happened")
+        # Closed again, the same UTC day's occurrence (a retry) authors nothing more.
+        journal.db.execute("UPDATE candidates SET state='closed_failed'")
+        out = self.go("2026-11-02T04:00:00Z")
+        self.assertIn("a candidate was already authored today (UTC)", out["actions"])
+        self.assertEqual(len([p for p in self.gh.posts if p[0] == "/v1/github/pr"]), 1)
+
     def test_a_full_day_at_the_gateway_waits_for_the_next_run(self):
         self.gh.refuse["/v1/github/pr"] = GatewayError("POST /v1/github/pr: HTTP 429 cap", status=429)
         self.go("2026-10-06T04:00:00Z")
@@ -521,7 +554,28 @@ class Flow(unittest.TestCase):
         self.assertEqual(self.only()["state"], "closed_rejected")
         self.assertEqual(self.gh.merges, [])
         self.assertEqual([r["verdict"] for r in self.gh.reviews], ["reject", "reject"])
-        # The gateway closes no pull request: both are listed for the owner.
+        # Both pull requests are closed through the gateway at their exact heads, the superseded one when the revision
+        # began: nothing is left for the owner.
+        first, second = sorted(self.gh.prs)
+        self.assertEqual([(c["pr"], c["head_sha"]) for c in self.gh.closed],
+                         [(first, self.gh.prs[first]["head"]), (second, self.gh.prs[second]["head"])])
+        self.assertEqual({n: pr["state"] for n, pr in self.gh.prs.items()}, {first: "closed", second: "closed"})
+        record = self.only()["record"]
+        self.assertEqual((record["closed_prs"], record.get("leftover_prs")), ([first, second], None))
+        self.assertEqual(E.public_summary(self.root)["leftover_prs"], [])
+
+    def test_a_pull_request_the_gateway_will_not_close_is_left_for_the_owner(self):
+        self.router.verdicts = ["reject"]
+        self.router.script = gated_author('and "decide(" in program')
+        self.gh.refuse["/v1/github/close"] = GatewayError('POST /v1/github/close: HTTP 409 {"refused":"head_moved"}', status=409)
+        self.go("2026-10-06T04:00:00Z")
+        self.gh.ci = "success"
+        self.go("2026-10-06T14:40:00Z")
+        self.gh.ci = "pending"
+        self.go("2026-10-06T21:40:00Z")
+        self.gh.ci = "success"
+        self.go("2026-10-06T22:40:00Z")
+        self.assertEqual(self.only()["state"], "closed_rejected")
         self.assertEqual(cand_prs := self.only()["record"]["leftover_prs"], sorted(self.gh.prs))
         summary = E.public_summary(self.root)
         self.assertEqual(summary["leftover_prs"], cand_prs)
@@ -529,6 +583,11 @@ class Flow(unittest.TestCase):
                         written_at="23:30Z", engineer=summary)
         self.assertIn(", ".join(f"#{n}" for n in cand_prs), page)
         self.assertEqual(SB.public_problems(page), [])
+        # A pull request already closed outside the loop needs nothing: the gateway's not_open is closed enough.
+        del self.gh.refuse["/v1/github/close"]
+        self.gh.prs[cand_prs[0]]["state"] = "closed"
+        self.assertTrue(E.Engineer(Context("engineer", root=self.root, base=self.base, due_at=0.0, config={}, clock=lambda: 0.0,
+                                           release=self.release, gateway=self.gh)).close_pr(self.only(), cand_prs[0], "f" * 40))
 
     def test_a_ci_failure_revises_with_the_annotations(self):
         self.router.script = gated_author('and "decide(" in program')
