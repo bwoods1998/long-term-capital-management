@@ -133,6 +133,48 @@ class Runner(unittest.TestCase):
         ops.tick(self.house)
         self.assertEqual(len([t for level, t in self.house.alerts if "missed" in t]), 1)
 
+    def test_a_job_a_release_adds_is_never_missed_for_the_time_before_it_was_in_the_registry(self):
+        # A runner installed on Oct 1 by a release that kept no `first_seen`: receipts for a every day, for b all but Oct 4.
+        store = OpsStore(self.root)
+        store.put("installed_at", "2026-10-01T01:00:00Z")
+        for day in ("01", "02", "03", "04"):
+            store.record("a", f"2026-10-{day}T02:00:00Z", "ok", f"2026-10-{day}T02:05:00Z")
+            if day != "04":
+                store.record("b", f"2026-10-{day}T02:00:00Z", "ok", f"2026-10-{day}T02:05:00Z")
+        store.close()
+        stall = Job("stall", "league.ops.a", (S.hourly(20), S.hourly(50)), grace=4200, cpu=60, wall=300)
+        self.now = at("2026-10-05T01:00:00Z")
+        ops = self.ops(jobs=(self.jobs[0], self.jobs[1], stall))
+        out = ops.tick(self.house)
+        self.assertEqual(out.get("missed"), ["b due 2026-10-04T02:00:00Z"], "a real gap is still said; the new job's days are not")
+        self.assertEqual([r for r in self.rows() if r["job"] == "stall"], [])
+        seen = OpsStore(self.root)
+        self.addCleanup(seen.close)
+        self.assertEqual(seen.get("first_seen"), {"a|daily 02:00Z": "2026-10-01T01:00:00Z", "b|daily 02:00Z": "2026-10-01T01:00:00Z",
+                                                  "stall|hourly at :20": "2026-10-05T01:00:00Z",
+                                                  "stall|hourly at :50": "2026-10-05T01:00:00Z"})
+        self.now = at("2026-10-05T01:20:30Z")
+        self.assertEqual(ops.tick(self.house)["started"], "stall", "its time starts at the first tick that saw it")
+
+    def test_a_trigger_added_to_a_job_counts_from_the_first_tick_that_saw_it(self):
+        self.now = at("2026-10-05T01:00:00Z")
+        self.ops(jobs=(self.jobs[0],)).close()
+        wider = Job("a", "league.ops.a", (S.daily(2, 0), S.hourly(40)), grace=3600, cpu=60, wall=600)
+        self.now = at("2026-10-05T06:30:00Z")
+        ops = self.ops(jobs=(wider,))
+        out = ops.tick(self.house)
+        # 02:00 was in the registry (and past its grace): missed. 01:40 to 05:40 were not: never reported.
+        self.assertEqual(out.get("missed"), ["a due 2026-10-05T02:00:00Z"])
+        self.assertEqual([r["due_at"] for r in self.rows()], ["2026-10-05T02:00:00Z"])
+        self.now = at("2026-10-05T06:40:30Z")
+        self.assertEqual(ops.tick(self.house)["started"], "a")
+        # Taken out and put back later, a trigger starts again.
+        ops.close()
+        self.ops(jobs=(self.jobs[0],)).close()
+        self.now = at("2026-10-05T09:00:00Z")
+        again = self.ops(jobs=(wider,))
+        self.assertEqual([due for due, _, kind in again.due(self.now) if kind == "missed"], [])
+
     def test_occurrences_before_the_runner_was_installed_are_never_reported(self):
         self.now = at("2026-10-05T05:00:00Z")
         ops = self.ops()
