@@ -23,7 +23,11 @@ While the House is in a maintenance PAUSE, only the jobs the registry marks `in_
 economics, the budget) run; every other due occurrence gets a `skipped` receipt naming the pause. While it has stopped
 buying work, the `paid` jobs are skipped the same way.
 
-Occurrences older than this runner's `installed_at` (its first tick on this state) or `LOOKBACK` are never reported.
+Occurrences older than this runner's `installed_at` (its first tick on this state) or `LOOKBACK` are never reported,
+nor, for a job or a trigger a release adds, those older than the first tick whose registry held it (`first_seen` in the
+ops kv, by job and trigger): a new job is never `missed` for the days before it was in the release. The first runner to
+keep `first_seen` on a state that already ran jobs reads the receipts instead: a trigger none of whose occurrences past
+their grace has a receipt was not in the registry before, so its time starts now.
 """
 from __future__ import annotations
 
@@ -43,6 +47,8 @@ from .registry import JOBS, Job
 from .store import INTERRUPTED, MAX_ATTEMPTS, RETRY_AFTER, OpsStore, retry_state
 
 LOOKBACK = 8 * 86400
+#: The ops kv key holding when this runner first saw each (job, trigger) of its registry (`trigger_key`).
+FIRST_SEEN = "first_seen"
 RECEIPTS_EVERY = 600
 #: The child's address space above what the interpreter holds when it starts (`RLIMIT_AS`).
 EXTRA_MB = 500
@@ -66,6 +72,11 @@ def process_info(pid: int) -> tuple[list[str], str] | None:
     from ..data_job import process_info as info
 
     return info(pid)
+
+
+def trigger_key(job: Job, trigger: S.Trigger) -> str:
+    """One (job, trigger) of the registry, as `first_seen` keys it: a trigger moved to another time is a new one."""
+    return f"{job.name}|{trigger.describe()}"
 
 
 def module_present(name: str) -> bool:
@@ -95,6 +106,7 @@ class Ops:
             installed = self.started_at
             self.store.put("installed_at", S.iso(installed))
         self.installed_at = installed
+        self.first_seen = self._first_seen()
         self.child: dict[str, Any] | None = None
         self.receipts_at = float("-inf")
         self._settled: set[tuple[str, str]] = set()
@@ -159,17 +171,57 @@ class Ops:
     def _instants(self, job: Job, start: float, now: float) -> list[float]:
         found: set[float] = set()
         for trigger in job.triggers:
-            if trigger.kind == "start":
-                if start < self.started_at <= now:
-                    found.add(float(int(self.started_at)))
-            elif trigger.kind == "after":
-                for row in self.store.ok_since(trigger.job, S.iso(start)):
-                    at = S.epoch(row.get("finished_at"))
-                    if at is not None and at <= now:
-                        found.add(float(int(at)))
-            else:
-                found.update(S.occurrences(trigger, start, now))
+            # A trigger counts from the first tick whose registry held it (`first_seen`), never from before.
+            since = max(start, self.first_seen.get(trigger_key(job, trigger), start) - 1)
+            found.update(self._trigger_instants(trigger, since, now))
         return sorted(found)
+
+    def _trigger_instants(self, trigger: S.Trigger, start: float, now: float) -> list[float]:
+        found: set[float] = set()
+        if trigger.kind == "start":
+            if start < self.started_at <= now:
+                found.add(float(int(self.started_at)))
+        elif trigger.kind == "after":
+            for row in self.store.ok_since(trigger.job, S.iso(start)):
+                at = S.epoch(row.get("finished_at"))
+                if at is not None and at <= now:
+                    found.add(float(int(at)))
+        else:
+            found.update(S.occurrences(trigger, start, now))
+        return sorted(found)
+
+    def _first_seen(self) -> dict[str, float]:
+        """When this runner first saw each (job, trigger) of its registry: the ops kv `first_seen`, kept for the registry
+        in force (a trigger taken out and put back later starts again). A pair it has no time for is new now, except on
+        the first runner to keep the record on a state that already ran jobs, which reads the receipts (`_ran_before`)."""
+        known = self.store.get(FIRST_SEEN)
+        seeded = isinstance(known, Mapping)
+        known = {str(k): v for k, v in known.items()} if isinstance(known, Mapping) else {}
+        out: dict[str, float] = {}
+        for job in self.jobs:
+            for trigger in job.triggers:
+                key = trigger_key(job, trigger)
+                at = S.epoch(known.get(key))
+                if at is None:
+                    at = self.installed_at if not seeded and self._ran_before(job, trigger) else self.started_at
+                out[key] = at
+        stored = {key: S.iso(at) for key, at in out.items()}
+        if stored != known:
+            self.store.put(FIRST_SEEN, stored)
+        return out
+
+    def _ran_before(self, job: Job, trigger: S.Trigger) -> bool:
+        """Was (job, trigger) in the registry before the runner kept `first_seen`? Yes when none of its occurrences since
+        the runner was installed is past its grace yet (there is nothing to report either way), or when one of them has a
+        receipt (the runner settles every occurrence it walks: run, `skipped` or `missed`). No otherwise: a job or a
+        trigger the release adds, whose earlier occurrences would all be reported `missed`."""
+        if self.installed_at >= self.started_at or trigger.kind == "start":
+            return True
+        start = max(self.installed_at - 1, self.started_at - self.lookback)
+        instants = self._trigger_instants(trigger, start, self.started_at)
+        if not any(at + job.grace < self.started_at for at in instants):
+            return True
+        return any(self.store.run(job.name, S.iso(at)) is not None for at in instants)
 
     def _held(self, job: Job) -> str | None:
         """Why the House's own state holds `job` now (its maintenance pause, or its stop on buying work for a paid job)."""

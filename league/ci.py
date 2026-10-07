@@ -45,8 +45,11 @@ REPO = Path(__file__).resolve().parents[1]
 #: themselves declare (its ENGINEER_SURFACE), so two paths this table admits are closed there, to
 #: their own lane too: the scheduler lane's league/swarm/loop.py and the memory lane's
 #: league/swarm/mechanisms.py. They stay closed until an owner deploy opens them (the path named in
-#: `league/swarm/harness_lanes.py` LANES and in ENGINEER_SURFACE, both protected). The gateway is
-#: the only merge route, so what this guard alone would pass is a branch pushed by hand.
+#: `league/swarm/harness_lanes.py` LANES and in ENGINEER_SURFACE, both protected). From the
+#: self-running release (Oct 7, 2026) the gateway also holds the research lane's two files the live
+#: path loads, league/swarm/researcher.py and league/swarm/claude_research.py (its ENGINEER_HELD, as
+#: the House's engineer holds them by `league/ops/engineer.py` RELEASE_CLASSES). The gateway is the
+#: only merge route, so what this guard alone would pass is a branch pushed by hand.
 ENGINEER_LANES: dict[str, tuple[str, ...]] = {
     "scheduler": ("league/swarm/loop.py",),
     "research": ("league/swarm/researcher.py", "league/swarm/preflight.py", "league/swarm/claude_research.py"),

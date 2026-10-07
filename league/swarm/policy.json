@@ -51,6 +51,9 @@
     "per_round": 6,
     "usd_day": 60
   },
+  "engineer": {
+    "enabled": true
+  },
   "gate": {
     "audit_openai_model": null,
     "review_openai_model": null

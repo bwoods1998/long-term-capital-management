@@ -229,8 +229,9 @@ These read file names, statuses, journal rows and the watchdog's receipts, not w
   funded spending limits, capital permissions (the constitution, grants, the money table, the House
   test, calibration, the live step, the allocator, the real-money order path, the venue, the live
   state and paper orders) and the release train. A candidate may add a test file named
-  `league/tests/test_harness_candidate_*.py` but never edit or delete an existing test, an earlier
-  candidate's included.
+  `league/tests/test_harness_candidate_*.py` (the `*` of lower-case letters, digits and underscores
+  only, the name the gateway's engineer route admits) but never edit or delete an existing test, an
+  earlier candidate's included.
 - **The adversarial review and the deploy step** (below): an approving review of the exact patch and
   evaluated tree, then the deploy step's ticket, both before the watchdog's first row for that tree.
   The release train does not read the journal: a deploy around the loop is caught when the canary is

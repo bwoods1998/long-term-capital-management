@@ -85,8 +85,20 @@ test('the new-test glob is one name of a-z, 0-9 and _ under league/tests, ending
 
 test('the engineer s proposal names a known lane and writes only that lane s surface and new tests', () => {
   const undeclared = [];
+  const held = [];
   for (const [lane, own] of Object.entries(SURFACES)) {
     for (const path of own) {
+      if (github.ENGINEER_HELD.includes(path)) {
+        // The live path loads it (the self-running release's second wall, ENGINEER_HELD): refused to every lane, its own
+        // included, as the House's engineer holds it (league/ops/engineer.py RELEASE_CLASSES).
+        held.push(path);
+        for (const any of Object.keys(SURFACES)) {
+          const refused = github.admit(engineer({ lane: any, files: [{ path, content: 'X = 1\n' }] }));
+          assert.equal(refused.status, 403, `${any} may not write ${path}`);
+          assert.match(refused.error, /is refused: held from the engineer in this release: the live path loads it/);
+        }
+        continue;
+      }
       if (!github.ENGINEER_SURFACE.only.includes(path)) {
         // The wall behind the table (the WP8 review; test/merge.test.mjs): a lane's path that no harness lane's surface
         // declares is refused to every lane, its own included, until league/swarm/harness_lanes.py names it.
@@ -115,6 +127,8 @@ test('the engineer s proposal names a known lane and writes only that lane s sur
   // The scheduler lane's one file (the harness loop's scheduler lane changes the Scheduler class's body alone, and no
   // lane of harness_lanes.py names the file) and the memory lane's mechanisms.py, and no other path of the table.
   assert.deepEqual(undeclared, ['league/swarm/loop.py', 'league/swarm/mechanisms.py']);
+  assert.deepEqual(held, ['league/swarm/researcher.py', 'league/swarm/claude_research.py']);
+  assert.ok(Object.isFrozen(github.ENGINEER_HELD));
   // Research-class paths outside every lane, and the protected and judged paths, are refused to every lane.
   for (const path of ['league/ops/agenda.py', 'league/swarm/models.py', 'league/house.py', 'league/swarm/loop_v2.py',
     'League/Swarm/Loop.py', 'league/swarm/harness_lanes.py', 'scripts/data/boxlib.py', 'league/tests/test_swarm_loop.py']) {
@@ -167,9 +181,9 @@ test('the engineer carries at most six files of 512 KiB each; the other roles ke
   assert.equal(github.admit(engineer({ files: tests(7) })).status, 400);
   assert.match(github.admit(engineer({ files: tests(7) })).error, /1 to 6 files/);
   const exactly = 'x'.repeat(512 * 1024);
-  assert.equal(github.admit(engineer({ files: [{ path: 'league/swarm/researcher.py', content: exactly }] })).error, undefined, '512 KiB is the ceiling');
-  assert.equal(github.admit(engineer({ files: [{ path: 'league/swarm/researcher.py', content: exactly + 'x' }] })).status, 400);
-  assert.equal(github.admit(engineer({ files: [{ path: 'league/swarm/researcher.py', content: 'é'.repeat(256 * 1024 + 1) }] })).status, 400, 'bytes, not characters');
+  assert.equal(github.admit(engineer({ files: [{ path: 'league/swarm/preflight.py', content: exactly }] })).error, undefined, '512 KiB is the ceiling');
+  assert.equal(github.admit(engineer({ files: [{ path: 'league/swarm/preflight.py', content: exactly + 'x' }] })).status, 400);
+  assert.equal(github.admit(engineer({ files: [{ path: 'league/swarm/preflight.py', content: 'é'.repeat(256 * 1024 + 1) }] })).status, 400, 'bytes, not characters');
   // The other roles' ceilings are unchanged.
   assert.deepEqual(github.limitsFor('architect'), { files: 12, contentBytes: 64 * 1024, requestBytes: 256 * 1024 });
   assert.deepEqual(github.limitsFor('engineer'), { files: 6, contentBytes: 512 * 1024, requestBytes: 1536 * 1024 });
@@ -183,14 +197,16 @@ test('an engineer request of up to 1.5 MiB is read; over it, or another role s o
   const big = n => 'x'.repeat(n * 1024);
   const hub = fakeGitHub();
   const gate = gateAt();
-  // Three lane files of 500 KiB: a request of about 1.46 MiB, admitted and opened.
-  const heavy = engineer({ files: SURFACES.research.map(path => ({ path, content: big(500) })) });
+  // Three lane files of 500 KiB (the memory lane's: the research lane holds one open file, ENGINEER_HELD), a request of
+  // about 1.46 MiB, admitted and opened.
+  const three = SURFACES.memory.slice(0, 3);
+  const heavy = engineer({ lane: 'memory', files: three.map(path => ({ path, content: big(500) })) });
   assert.ok(Buffer.byteLength(JSON.stringify(heavy)) > 1400 * 1024 && Buffer.byteLength(JSON.stringify(heavy)) <= 1536 * 1024);
   const opened = await send(heavy, { gate, hub });
   assert.equal(opened.response.status, 200, JSON.stringify(opened.body));
   // Four of 400 KiB, each inside its own ceiling, are together over the request's 1.5 MiB.
   const before = hub.calls.length;
-  const over = engineer({ files: [...SURFACES.research, 'league/tests/test_harness_candidate_x.py'].map(path => ({ path, content: big(400) })) });
+  const over = engineer({ lane: 'memory', files: [...three, 'league/tests/test_harness_candidate_x.py'].map(path => ({ path, content: big(400) })) });
   assert.equal((await send(over, { gate, hub })).response.status, 413);
   // The architect's request ceiling is what it was, though the route now reads further before it knows the role.
   const architect = { ...ARCHITECT, files: [0, 1, 2, 3, 4].map(n => ({ path: `league/strategies/heavy_${n}.py`, content: big(60) })) };

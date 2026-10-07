@@ -348,7 +348,7 @@ rule, the standing grant and the gateway's new routes. The code is the authority
 |---|---|---|---|
 | Owner deploy | any change to a protected path in the release trees (below), a `config.json` change beyond its operating dials, `real_money`, and every gateway change | `scripts/floor_box.py deploy` from `~/Work/ltcm-deploy`; the gateway by `npx wrangler@4.129.1 deploy` | the money path's window (20:05-13:25Z on a trading day; from 21:05Z in winter), except a rollback |
 | The updater | a change merged to `main` that touches the release trees (`league/`, `ltcm/`, `playbooks/`, `scripts/`, `deploy/`) and no protected path: the swarm's loop, researcher, architect, strategist and pool, the publisher, the House's service code. `league/config.json` only when the running release's checks find nothing but its bounded dials moved. A merge that changes nothing in those trees (docs, the CHANGELOG, `gateway/`) changes no release and holds nothing | the House by itself: it reads main's head every half hour, then the attested commit, the walls, the release train, the canary, promotion, the ten-minute watch, rollback | never inside its calendar hold (12:55Z to 20:05Z on a trading day, to 21:05Z in winter), never within 30 minutes of a House start, at most one release every `release_train_hours` (4) |
-| Engineer merges (the engineer is not in A1, so nothing calls these routes yet) | `engineer/<lane>/<slug>-<hash>` pull requests | the gateway's `POST /v1/github/merge`: green `checks.yml` on the exact head (its three jobs), a recorded approve and no reject for that commit, no protected path, only the branch's own lane and only what the harness lanes declare, new `league/tests/test_harness_candidate_*.py` files only ever added; at most 2 a New York day; never while the kill switch is on | a merge is then an updater release |
+| Engineer merges (the House's `engineer` job, from the self-running release; **The improvers**, below) | `engineer/<lane>/<slug>-<hash>` pull requests | the gateway's `POST /v1/github/merge`: green `checks.yml` on the exact head (its three jobs), a recorded approve and no reject for that commit, no protected path, only the branch's own lane and only what the harness lanes declare, new `league/tests/test_harness_candidate_*.py` files only ever added; at most 2 a New York day; never while the kill switch is on | a merge is then an updater release |
 
 **The protected paths.** `league/ci.py` `FORBIDDEN` lists 86 files and trees. No role's branch may change one, and the
 gateway's merge route refuses the same list plus `league/config.json` (`gateway/lib/protected.mjs`; a test on each
@@ -406,7 +406,9 @@ the stricter wall (`gateway/lib/github.mjs` `ENGINEER_SURFACE`): it opens and me
 themselves declare, so it refuses `league/swarm/loop.py` and `league/swarm/mechanisms.py`, to their own lanes too. The
 scheduler lane therefore admits new candidate tests only. Opening either path is an owner deploy (the path named in
 `league/swarm/harness_lanes.py` and in `ENGINEER_SURFACE`, both protected). The gateway is the only merge route;
-`league/ci.py`'s path guard alone would pass such a change only on a branch pushed by hand.
+`league/ci.py`'s path guard alone would pass such a change only on a branch pushed by hand. The House's engineer also
+holds every lane file the live path loads (on this tree `league/swarm/researcher.py` and `claude_research.py`): its
+research lane is `preflight.py` and new tests (**The improvers**, below).
 
 ### The settings layers
 
@@ -487,7 +489,11 @@ hourly `grant` job also runs in session (a niced, bounded child like every other
 started again while its grace allows); a job not started within its grace is `missed` and a House warning; a failed run
 is retried after 15 minutes inside its grace (at most 3 attempts) unless the job may not repeat. Alerts a job raises
 reach the House at warning level at most, scrubbed of box ids and dollar figures (the full text stays in the private
-receipt). An occurrence older than the runner's first tick on the state, or than 8 days, is never reported.
+receipt). An occurrence older than the runner's first tick on the state, or than 8 days, is never reported; nor is one
+older than the first tick whose registry held its job and trigger (`first_seen` in the `ops.sqlite` kv), so a job or a
+trigger a release adds (`stall`, the engineer's hourly :40) starts from the deploy, never `missed` for the days before
+it. The first runner to keep `first_seen` on a state that already ran jobs reads the receipts: a trigger none of whose
+occurrences past its grace has a receipt was not in the old registry.
 
 | Job | When (UTC) | Grace | What | In a maintenance pause |
 |---|---|---|---|---|
@@ -497,17 +503,18 @@ receipt). An occurrence older than the runner's first tick on the state, or than
 | `clock` | daily 11:00 | 2 h | Alpaca's `/v2/clock` and `/v2/calendar` against the House's calendar for the next 10 sessions; a mismatch is a warning; writes `<state>/calendar.json` | runs |
 | `preopen` | trading days, open − 60 min (12:30 summer, 13:30 winter) | 40 min | the nine pre-open checks (release, grant, gateway caps, account and kill switch, swarm, bands, mirror, backup, compute), read-only; each FAIL a warning | runs |
 | `economics` | trading days, close + 10 min | 3 h | the one-cutoff close economics (realized options P&L from the Sept 26 basis, every cost from T0, open lots at conservative marks, one Net, deposits never counted) and `p30`; private, `<state>/economics/<YYYYMMDD>-close/` | runs |
-| `scoreboard` | daily 23:30 | 2 h | the public-safe daily page, committed to `docs/runs/desk/<date>.md` through the gateway | skipped |
+| `scoreboard` | daily 23:30 | 2 h | the public-safe daily page with its Funnel table (**The stall alarm and the funnel**), committed to `docs/runs/desk/<date>.md` through the gateway | skipped |
+| `stall` | every 30 minutes, at :20 and :50, round the clock | 70 min | the stall alarm (**The stall alarm and the funnel**, below): read-only; one `stall` notice listing every cause (an owner step at once and every 12 h, the rest every 24 h); a House warning per cause every 12 h | runs (a pause left on 6 h is one of its causes) |
 | `drills` | first Saturday of the month, 15:00 and 17:00 | 6 h | the failure drills (below); never retried | skipped |
-| `postmortem` | Saturdays 14:00 | 6 h | the weekly post-mortem (Phase 5) | skipped |
-| `agenda` | daily 03:00 | 6 h | the strategist's agenda (Phase 2) | skipped |
-| `engineer` | daily 04:00 | 6 h | the engineer's harness change (Phase 4); never retried | skipped |
+| `postmortem` | Saturdays 14:00 | 6 h | the weekly post-mortem, and the cost review on the month's first Saturday (Phase 5; **The improvers**) | skipped |
+| `agenda` | daily 03:00 | 6 h | the strategist's agenda (Phase 2); not in this release | skipped |
+| `engineer` | daily 04:00 (authors), hourly :40 (moves its candidate on) | 50 min | the engineer's harness change (Phase 4; **The improvers**); never retried | skipped |
 
 Every job is protected: the whole of `league/ops/` is on the list, so a new job or a changed one is the owner's deploy.
 
-`postmortem`, `agenda` and `engineer` are registered but their modules are not in V3-A part 1 (they are on `v3/b4`,
-`v3/b23` and `v3/b5`): each occurrence writes a `skipped` receipt that says so. Being paid, they are also skipped while
-the House has stopped buying work. The owner's private `<state>/ops.json` can switch a job off
+`agenda` is registered but its module is not in this release (it is on `v3/b23`): each occurrence writes a `skipped`
+receipt that says so. `postmortem` and `engineer` are in the self-running release, ported from `v3/b4` and `v3/b5`
+(**The improvers**, below). Being paid, the three are also skipped while the House has stopped buying work. The owner's private `<state>/ops.json` can switch a job off
 (`{"jobs": {"<name>": {"enabled": false}}}`) or every job (`{"enabled": false}`), and holds per-job settings: the
 economics' declared external costs (`economics.external`) and `hygiene.end_retired_cohorts`. `health.json` carries an
 `ops` block (the day's occurrences: due, late, failed, missed, and the job running now). The jobs' logs are
@@ -525,6 +532,128 @@ and fixed dollars while the swarm's booked research was under its cap. A brake f
 the line, an unreadable balance, a budget rule that could not be read, a full disk), or one that names no cause, is a
 FAIL; a FAIL's public warning never carries the guard's reason, which holds the account's numbers (the receipt keeps
 it). Check 6 counts the practice rows the swarm offers, not the cohorts the live path has pinned.
+
+### The improvers: the post-mortem and the engineer
+
+The self-running release (Oct 7, 2026) carries the two House jobs that report on the floor and improve it, ported from
+`v3/b4` and `v3/b5`. Both are protected (`league/ops/`), so they reach the House only by the owner's deploy. Both spend
+Claude through the swarm's router: every call is a `spend` row in `swarm.sqlite`, admitted inside budget rule v2's Claude
+meter (the day's Claude research dollars, $10 at the owner's ceiling, less the gate's two holds, $1.95).
+
+**The post-mortem** (`league/ops/postmortem.py`, Saturdays 14:00Z). Code reads the week's receipts, read-only: real
+orders by outcome and route with the rejection and refusal reasons; the calibration round trips' real fills against
+the mid beside the practice book's fills under the Gym's rules; demotions, promotions and retirements; the updater's
+self-deploys, the owner's deploys and the engineer's journal; the week's costs by service, its realized options P&L,
+the swarm's model spend and the jobs. On the month's first Saturday also the cost review: 30-day costs, the data
+vendor's share, research activity and universe, and a proposal for the owner's D6 by a fixed rule (a proposal only).
+One Claude Opus 5.5 call (role `postmortem`, its own $1 line, `max_tokens` 16,000, a worst case near $0.52, a
+model-safe prompt of aggregates) writes a headline, findings and at most three actions. Private:
+`<state>/postmortem/<date>.md` and `.json`. Public: `docs/runs/desk/<date>-postmortem.md` through the docs route, from an
+allowlist of counts and dollars and checked by the scoreboard's filter; the model's text joins it only when it passes.
+A week the model cannot be asked (no room in the line, the budget at the floor, an error) still gets its facts, with a
+warning. Cost: at most $1 a week. It runs once deployed; ops.json turns it off (`{"jobs": {"postmortem": {"enabled":
+false}}}`), keeps the facts but asks no model (`{"postmortem": {"model": false}}`), posts nothing
+(`{"postmortem": {"public": false}}`) or moves the cost review (`"cost_review": "always"` or `"never"`). Nothing in it
+feeds research: no swarm role reads the post-mortem.
+
+**The engineer** (`league/ops/engineer.py` with `author.py` and `reviewer.py`; daily 04:00Z it may author, hourly at
+:40 the candidate in flight moves on). One candidate at a time walks `playbooks/harness-improvement.md`: the top
+captured bottleneck of an engineer lane (`research`, `memory`, `data`) with its predeclared metric frozen; a change on
+the running release's commit, written by Claude Opus 5.5 (role `engineer`, at most $3 an attempt) through confined
+tools; the static guards; a pull request through the gateway's engineer role; green CI on the exact head; an
+adversarial review of the exact diff (role `reviewer`, at most $1), its verdict posted to `/v1/github/review` (a CI
+failure or a reject goes back once); the gateway's merge (at most 2 a New York day, never a protected path, never with
+the kill switch on); the updater's deploy at its train; the canary (an arm in `<state>/harness/canary.json`, or the data
+lane's window); retain or revert once by the predeclared metric, a revert being a pull request through the same route;
+then 20 sessions of the global guard on the promoted programs' forward record. The journal is
+`<state>/harness/engineer.sqlite`; the daily scoreboard counts authored, merged, retained, reverted, rejected and failed
+candidates and lists the engineer pull requests left for the owner: those the gateway would not close, and a revert that did not merge (the
+owner's revert by hand may be merging it). The engineer closes its own superseded and unmerged pull requests through
+`POST /v1/github/close` at their exact heads. It cannot
+change a protected path: the author's tools and static guards, the gateway's lane surface and protected list (on the
+pull request and again on the merge), `league/ci.py` `FORBIDDEN` in CI and the updater's own refusal each stop it.
+
+What the self-running release adds to `v3/b5`:
+- **One switch, on:** `engineer.enabled` in the swarm settings. The committed `league/swarm/policy.json` sets it true;
+  the box's `swarm.json` `{"engineer": {"enabled": false}}` wins over it with no deploy, and ops.json
+  `{"jobs": {"engineer": {"enabled": false}}}` stops the job. The job serves its own two roles (`engineer`, `reviewer`,
+  on Claude Opus 5.5 unless `claude.role_model` names one) in its copy of the settings, since the box's `swarm.json`
+  replaces `claude.roles` whole.
+- **$4 a UTC day** (`engineer.usd_day`): the engineer and the reviewer together, holds included. An attempt is capped at
+  what is left, and no attempt or review starts with less than its own cap: one attempt and its review a day, 40% of
+  the Claude meter at the ceiling. It authors at most once a UTC day (its 04:00Z occurrence's own day: 04:00Z is New
+  York's midnight in summer and 23:00 the day before in winter, so a New York day skipped one authoring a year) and
+  only with nothing in flight, so most days cost a review, a revision or nothing.
+- **Research-class only:** a lane file the live path loads is held (`RELEASE_CLASSES`; on this tree
+  `league/swarm/researcher.py` and `claude_research.py`): the tools refuse it, the brief names it held, and a candidate
+  whose tree classifies as money-path or evidence-reset is closed before its pull request. The gateway holds the same
+  two files (`gateway/lib/github.mjs` `ENGINEER_HELD`): no engineer pull request opens on them or merges them, so the
+  hold is two walls. `league/ci.py`'s lane table still lists them (a branch pushed by hand is the owner's). Opening the
+  money path to the engineer is a change to both: an owner deploy of the House and of the gateway.
+- **A base after an owner deploy:** an owner deploy carries no updater attestation. When no observer policy names the
+  running release either, main's head is the base if its release trees digest to the running tree, remembered for that
+  release. An owner deploy of anything but main's head leaves the engineer idle, its daily note saying why, until the
+  next updater release.
+
+What it needs, in place since V3-A: the gateway's engineer routes with `autonomy.engineer_pulls` in `/v1/health`, green
+`checks.yml` on main, and `auto_update` on (an engineer merge is an updater release: it deploys outside the updater's
+calendar hold, at most one a train).
+
+### The stall alarm and the funnel
+
+The owner's goal of Oct 7, 2026 (item 6: "raises an alarm when it stalls ... push me a short note when something only I
+can do is blocking"; item 3: "report the funnel daily"). From Oct 3 to Oct 7 research ran 1 to 13 Gym runs a day with
+no birth and nobody was told: the House's only alarm (a pre-open FAIL) went to a ledger row no mail carries.
+
+**The `stall` job** (`league/ops/stall.py`, every 30 minutes at :20 and :50, round the clock, a maintenance pause
+included: it is read-only like `preopen` and `clock`). It reads the swarm store, `budget.json`, the swarm's heartbeat,
+`deploys.jsonl`, the pause files, the `grant` job's receipts in `ops.sqlite` and the gateway's `/v1/health`, all
+read-only, and names a stall by its cause:
+
+| Cause | Raised when | The owner step it names |
+|---|---|---|
+| `births` | no `swarm.born` in the last 12 h while the living population is under `population.ceiling` (as the swarm loads its settings, the budget's tightening included) | none, unless the Sail guard is braked under its line or for disk, or the kill switch is on |
+| `gym_runs` | fewer than 10 Gym runs in the last 6 h (a run is a `runs` row the Gym evaluated: a row with a trial, neither `refused` nor `error`; those, and the rows with no trial an F1 verdict copies from an identical program, are counted apart) | as `births` |
+| `validations` | no Validation verdict in the last 24 h (no validation the Gym evaluated, no verdict read from an identical program, nothing a tournament round judged) while a living family is owed one: its candidate (the submitted best, else the Train best the researcher picked by score, `state.best_train_version`, as `Tournament.candidate_version` reads it) is not its validated version, and the last round within the 24 h did not leave it waiting on its 1.5x robustness run or the drift screen (those are counted apart) | as `births` |
+| `braked` | the Sail guard braked 12 or more of the last 24 h, whatever the cause (the budget's daily stop reached by noon keeps research from running round the clock as surely as a low balance) | "top up Sail" for `under_line`, "free disk" for `disk`; none for the budget's own stop |
+| `runway_sail`, `runway_claude` | the meter's days of research left at the ceiling (`budget.json` `card_runway_days`, the figure the funding notice reads) under 3; a `budget.json` older than 36 h is not read | "top up Sail" or "top up Claude (Anthropic)", with the budget's own amount for 7 more days |
+| `owner_deploy` | the updater refused main's head as the owner's deploy (a `deploys.jsonl` `vet` refusal naming a protected file, the workflows or `real_money`) and no release was promoted since: main's head and the running release differ in a file only the owner deploys | both ways out, since the record does not say which side is ahead: "if main is ahead, deploy it yourself (`scripts/floor_box.py deploy`); if the running release is ahead, merge it to main instead", naming the files |
+| `paused` | a maintenance pause (`<state>/PAUSE`) or a stopped swarm (`<state>/swarm.stop`) has stood 6 h or more (by the file's time). While either stands, `births`, `gym_runs`, `validations` and `braked` are not raised: a pause stops research by design | "lift the maintenance pause once its work is done (`scripts/floor_box.py maintenance off`)", or "remove state/swarm.stop" |
+| `grant_refused` | the standing grant refused to re-ratify since the `grant` job's last `ok` run (its receipts: `standing grant refused`; a failure to read the account is no refusal) | "ratify the grant by hand on the box (`python3 scripts/live_trading.py --ratify`)", with the grant's own reason |
+| `kill_on` | the gateway's kill switch is on (`/v1/health` `kill_switch`; since its latest `kill` in `admin_log`): no real order, no Claude call, no merge. An unreadable health is no cause | "lift the gateway's kill switch once its cause is fixed (`python3 scripts/gateway_admin.py unkill`, your admin token)" |
+
+**The notice.** One `POST /v1/notify` kind `stall` a run at most, through the budget's own gateway client, listing
+EVERY cause standing, owner steps first: the subject `LTCM: needs you: <the causes with an owner step>` or `LTCM: stalled:
+<the causes>`; the body opens with the owner steps (or "nothing here needs you"), then each cause with the House's
+sentence, its numbers, how long (from the record when it says: the last birth, the last Validation verdict, the start of
+the brake, the first refusal, the pause file, the kill; else from when the job first saw it) and what the House is doing
+about it (the architect's passes and why each made no birth, the researchers' cycles, the guard's state and the
+heartbeat's age, the tournament's last round and what waits on robustness or the drift screen, how the guard releases,
+the budget's taper, the updater keeping the running release, the grant job asking hourly). It is mailed:
+- while some cause has an owner step: at once when one of them was not in the last owner notice (a new top-up, a new
+  refusal), else at most once every 12 hours;
+- while none has: at most once every 24 hours after the last notice of either kind.
+
+The gateway holds the same pace by its own record, whatever id the House sends: it keys an owner notice on its owner
+causes (`stall:owner:<causes, sorted, joined by +>`, 12 hours) and one with none on `stall:info` (24 hours), inside
+`NOTIFY_MAX_PER_DAY`. A notice counts as told only when the gateway says it SENT it: a `duplicate` answer or a failure is
+tried at the next run. Each cause standing is also one House warning (`stall: <cause>: ...`, its dollar figures
+scrubbed) every 12 hours. `<state>/stall.json` (private) keeps each cause (since when it stands, when it was last warned
+of, when it cleared) and the notices (when the last owner notice and the last other notice were sent, which owner causes
+it told). A cause that clears is named in the receipt (`cleared`); the receipt carries every check with its numbers and
+what the House is doing. The job moves no money, changes no setting, and starts and stops nothing; it writes only
+`stall.json`. Switch it off like any job (`ops.json` `jobs.stall.enabled` false).
+
+**The funnel** (`league/ops/funnel.py`, read by the `scoreboard` job): the daily page gains **Funnel (last 24 h /
+since the release)**, the last 24 hours beside the time since the running release's latest `promoted` verdict in
+`deploys.jsonl` (n/a when the record has none): births (`swarm.born`), program versions written, Gym runs by window
+(train, validations, looks, forward, probe, mechanism; refused or failed apart), validations judged and passed (the
+tournament rounds' verdicts; rows copied from an identical program's verdict, F1, are their own row and no Gym run),
+looks taken and passed, moves to Candidate, Probe and Sized and the bands now, real orders
+(and of them filled) and real closes by route (the agents' routes against the House's, as the close economics routes
+them), research spend by meter (Sail, Claude, OpenAI) and the hours the Sail guard braked, then the stalls standing
+(causes and since when). Counts and spend only, never a Validation or holdout figure, and the page passes the public
+filter as before. A section that cannot be read is n/a, never a zero.
 
 ### Observing without exec
 
@@ -667,7 +796,8 @@ ratification on the trigger `deposit` at its first look, then `none`.
 `POST /v1/github/docs` (one page under `docs/runs/desk/`, at most 64 KB, at most 6 commits a New York day, message
 `desk: ...`); `POST /v1/github/pr` with role `engineer` (a lane, its own files only, at most 2 a New York day),
 `POST /v1/github/review` and `POST /v1/github/merge` (engineer pull requests only, above);
-`GET /v1/github/pr/<n>/files` and `POST /v1/github/close`; `funding` notices on `/v1/notify`; and the admin log (every
+`GET /v1/github/pr/<n>/files` and `POST /v1/github/close`; `funding` and `stall` notices on `/v1/notify` (one stall
+notice lists every cause: keyed on its owner causes, 12 hours, or `stall:info`, 24 hours); and the admin log (every
 kill, unkill and admin-token call, in `/v1/health` as `admin_log`, beside `autonomy`). The kill switch also stops
 merges, and `/v1/kill` now takes either token (stopping is never gated); `/v1/unkill` stays the owner's. The Sail
 balance mails (`LOW_BALANCE_USD`, `CRITICAL_BALANCE_USD`) are $25 and $12, under the budget rule's own floor, so the
@@ -839,7 +969,8 @@ python3 scripts/floor_box.py maintenance off                 # resume on the nex
   job), but a swarm already running goes on, and the Gym trains through a pause. To stop the swarm,
   write `/workspace/state/swarm.stop`; the House starts it again once the file is gone and the House
   is not paused.
-- **The House's jobs and the updater under a pause** (from A1): `preopen`, `clock`, `economics` and `budget` run;
+- **The House's jobs and the updater under a pause** (from A1): `preopen`, `clock`, `economics` and `budget` run (and,
+  from the self-running release, `stall`, which reports a pause left on 6 hours as an owner step);
   `grant`, `hygiene`, `scoreboard`, `drills` and the paid jobs get a `skipped` receipt naming the pause, and the next
   occurrence after it runs. The updater is not paused: it still deploys main's head inside its walls.
 
@@ -2172,7 +2303,9 @@ The swarm says each funding cliff ahead of time (`league/swarm/funding.py`, `Fun
 right after the Sail guard's reading). It changes no route, line, hold or guard decision. These are House alerts on
 hours of runway; from A1 the owner's mail about a card is the budget rule's `funding` notice, on 60 days (**The budget
 rule**, under **Running unattended**). Claude's cliff reads the funded room only: the budget's daily Claude line runs
-out every day by design and is not a cliff.
+out every day by design and is not a cliff. From the self-running release, research that stalls (no births, too few Gym
+runs, no Validation, a guard braked most of the day, a meter under three days of research, an owner deploy waiting, a
+pause left on, a refused grant, the kill switch on) is mailed too, as a `stall` notice (**The stall alarm and the funnel**, under **Running unattended**).
 
 | Cliff | Measured as | Leads: notice / warning / urgent |
 |---|---|---|
