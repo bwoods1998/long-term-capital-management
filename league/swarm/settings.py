@@ -433,7 +433,10 @@ DEFAULTS: dict[str, Any] = {
     # next route): with "review" and "audit" both in `roles`, e.g. {"review": "claude-sonnet-5-5"} keeps the gate's two
     # reads on two different models. No entry is `model`. "researcher" (Sept 29, 2026) is the top band's research cycles
     # on Claude (`researcher.claude_*`): on Claude Sonnet 5.5 (its `role_model`), within $100 a UTC day (its
-    # `role_usd_day`); removing the role from `roles` turns the band off.
+    # `role_usd_day`); removing the role from `roles` turns the band off. "postmortem" (LTCM v3) is the House's weekly
+    # post-mortem (league/ops/postmortem.py): Claude Opus 5.5 (its `role_model`), within $1 a UTC day (one run a week, so
+    # the run's cap); it alone may spend `reserve_usd`, kept for it. Removing it from `roles` leaves the report unwritten
+    # by the model (the facts are still written).
     "claude": {
         "model": "claude-opus-5-5",
         "effort": "high",
@@ -441,10 +444,10 @@ DEFAULTS: dict[str, Any] = {
         "reserve_usd": 5.0,
         "max_tokens": 16000,            # thinking and the answer together (up to 32,000 streamed; 16,000 not)
         "stream": True,                 # server-sent events through the gateway: no hop waits 100 s in silence (HTTP 524)
-        "roles": ["architect", "audit", "diagnostician", "researcher", "strategist"],
+        "roles": ["architect", "audit", "diagnostician", "postmortem", "researcher", "strategist"],
         # The strategist's own line (Sept 29, 2026): its run is skipped, with no call, when the next call could pass it.
-        "role_usd_day": {"researcher": 100.0, "strategist": 4.0},
-        "role_model": {"researcher": "claude-sonnet-5-5"},
+        "role_usd_day": {"postmortem": 1.0, "researcher": 100.0, "strategist": 4.0},
+        "role_model": {"postmortem": "claude-opus-5-5", "researcher": "claude-sonnet-5-5"},
         # The 1-hour cache marker (Sept 29, 2026): true only once the gateway admits `ttl: "1h"` (today it refuses it
         # with a 400, which would drop the call to its next route). Off, no call ever sends one.
         "cache_1h": False,
