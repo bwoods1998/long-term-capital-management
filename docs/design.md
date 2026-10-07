@@ -17,6 +17,7 @@ disagree, the code is right and this page is fixed. How to operate it is in
 | The swarm | `league/swarm/`, `league/CONTRACT.md` | 13 alive at the Oct 3 deploy (16 at the Oct 2 close), at a funded floor since Oct 2 evening (start 16, floor 8, one Gym box, the Sail researchers at $0.25 an hour, the architect every two hours); 3 holdout looks, 0 passes; births of debit verticals and two-sided singles only, under agenda v16c; the architect on Sail (DeepSeek-V4-Pro, asap queue); Claude at the gate and for the strategist; duplicate looks refused and the look holds on; automatic forks of validated lineages off. Since the A1 deploy (Oct 3) the budget rule tightens the floor further and closes OpenAI |
 | Paper and production paths | `league/live/`, `gateway/` | real money opens four debit types; both paper route proofs passed Sept 28; 23 D3 calibration round trips by the Oct 2 close; one exit-only tuition lot; the House live test armed, no order yet; the practice league (validated and Train tiers; capped as a Probe since A1, and empty since its evidence reset on Oct 3 until new versions qualify); the incubator on since Oct 1; no general agent paper book; covered strategies absent |
 | Built, not deployed | branches `v3/wp6`, `v3/wp7`, `v3/b1`, `v3/b23`, `v3/b4`, `v3/b5` | after V3-A part 1, each an owner deploy of its own: the forward ladder (its confirmation study is not run; as first specified it does not meet its benchmark rule) and credit types at $2,000 of equity (part 2), research v3, births from a mechanism library and the strategist's agenda, the weekly post-mortem, the engineer and reviewer ([run record](runs/2026-10-02-unattended-desk.md)) |
+| Fast lane v2 (Oct 7, 2026) | `release/fast-lane-v2` | built, not deployed (the owner's deploy): the screen (t 1.65, 2 of 4 quarters, N = 1, one flat look at p <= 0.10), direction counts (the drift screen's refusal and the look holds off by setting; the drift fit and the same-risk buy-and-hold reported), a one-structure Probe within 10% of E with at most 3 Probe positions and a $400 Probe loss budget (gross realized Probe losses, every real position at risk), same-minute entry, D5 demotion; after its review: tuition held within the Probe's cap, a paid review's or audit's failure binding across the deploy's adoption, the report written daily by the `fast_lane` job with contamination measured, C3, the practice caps and the grant's $100 smallest stake kept as they were. Money digest `42c4a3af` -> `da5c7542` (constitution `595228a6` -> `5edc8956`): the standing grant re-ratifies at the House's start on the owner's deploy; the execution fingerprint moves (league/live changed), so its deploy is an evidence reset (no family is banded) |
 | The public page | blakewoods.us/capital | the owner's (`personal-site`, revamped by the owner on Oct 2); the House's publisher feeds it |
 
 This is observed state, not completion of the design below. Broad universe discovery, covered strategies, the
@@ -523,21 +524,39 @@ diagnostician.
   verdict retires it with MECHANISM), which the rebirth refusal then reads. A thin, invalid or untestable verdict
   retires the family with the idle rule's words (IDLE, not a finding) once four of its own versions made one. A pass
   holds for the whole lineage on any later Gym.
+- **The screen (FAST LANE V2, Oct 7, 2026; the owner's goal of Oct 7, item 4)** is the Validation line plus one holdout
+  look a distinct program, both pre-registered; its false-positive rate is measured by the pre-registered benchmark
+  `scripts/screen_benchmark.py` (receipt `docs/benchmarks/fast_lane_screen_1.json`, result
+  [FAST_LANE_SCREEN_1.md](benchmarks/FAST_LANE_SCREEN_1.md); acceptance: the floor-eligible per-program rate's 95% upper
+  bound at most 2% in every null world). Accepted on Oct 7: 0.18-0.51% in the iid null worlds and 1.19% (upper 1.36%)
+  under AR(0.2) daily P&L, against 0.01-0.10% for the rule it replaces; power 8%, 40% and 78% at a yearly Sharpe of 1, 2
+  and 3 (that rule: 0.7%, 11%, 44%). A pass makes the family a Candidate, and the live path makes it a Probe at its
+  next families pass with real orders from the next live minute.
 - **The validation line** (a family's best program): at least 50 trades on at least 25 distinct
   days in Validation; mean P&L per dollar of maximum loss above zero after fees with a one-sided t of
-  at least 2; a deflated Sharpe probability of at least 0.95 on the traded-day Sharpe, against the
-  lineage's validated versions (inherited ones included); positive in at least 3 of Validation's 4
-  quarters; positive at 1.5x the half-spread. The owner's decision D2 (Sept 26, 2026) set these; it
-  also limits what a researcher sees of Validation to pass or fail and a count of checks passed.
-  A version reaches Validation only after its 1.5x-stress Train robustness run made a profit and it
-  passed the drift screen (its Train alpha net of the root's own move, pooled t at least 1, positive
-  in every Train year but one); the gate refuses a look at a version that fails the screen.
-- **The holdout line**, one look per program version and at most three per lineage: P&L after fees
-  positive; a day-block bootstrap one-sided 95% lower bound on mean daily P&L above zero, with a
-  Holm-Bonferroni correction across every holdout look the swarm has made; holdout Sharpe at least
-  half the validation Sharpe. **Researchers learn only pass or fail**, never the holdout's numbers.
+  at least 1.65; a probabilistic Sharpe of at least 0.95 on the traded-day Sharpe with N = 1, the program itself (the
+  deflated Sharpe against 0: a moments-adjusted t of about 1.645; before fast lane v2, N was the lineage's validated
+  versions); positive in at least 2 of Validation's 4 quarters; positive at 1.5x the half-spread. The owner's decision
+  D2 (Sept 26, 2026) set the frequency and what a researcher sees of Validation (pass or fail and a count of checks
+  passed); fast lane v2 set t 1.65 (was 2), 2 of 4 quarters (was 3) and N = 1. The allocator reads `evidence.MIN_T`, so
+  its line follows by itself. A version reaches Validation only after its 1.5x-stress Train robustness run made a
+  profit. The drift screen (its Train alpha net of the root's own move, pooled t at least 1, positive in every Train
+  year but one) is OFF since fast lane v2 (`tournament.drift_screen` false in `policy.json`; direction counts): no
+  version is refused or held for drift, and its drift fit and the same-risk buy-and-hold are reported beside every
+  screen result (`league/ops/direction.py`, `league/ops/fast_lane.py` daily into `<state>/fast-lane-report.json`, and
+  `scripts/fast_lane_report.py` on copies), never a bar.
+- **The holdout line**, one look per program and at most three per lineage: P&L after fees positive; a day-block
+  bootstrap one-sided p on mean daily P&L at most 0.10, FLAT (no Holm escalation across looks; since fast lane v2;
+  before it, a 95% lower bound above zero with Holm across every look made); holdout Sharpe at least half the
+  validation Sharpe. Every look carries its contamination tail from 2026-07-01 (61 of the 184 sessions are after Opus
+  5.5's training cutoff; the other authors' cutoffs are unknown), reported and never a check; the fast lane's report
+  measures contamination on the real looks (each look's in-training head against its after-cutoff tail, pooled over the
+  looks, and live against holdout per band), weakly. **Researchers learn only pass or fail**, never the holdout's
+  numbers. A program a paid review or audit failed is never reviewed again, even after an evaluator adoption clears the
+  gate's records (`Gate.paid_verdict`, fast lane v2's review).
 - **A look that repeats an earlier one is refused** (the duplicate look, H3a, Oct 1, 2026; `Gate.duplicate_look`). Every
-  look raises the Holm bar for every later one, and the three looks after the Sept 26 reset covered two programs. Before
+  look then raised the Holm bar for every later one (since fast lane v2 a look is flat and a program is still counted
+  once), and the three looks after the Sept 26 reset covered two programs. Before
   anything else is asked of a version, the gate compares it with every look the swarm has made, in any family and
   lineage. A repeat is the same program (`run_sha`), or a version whose Validation run says the same as a looked
   version's: the Gym's own run sha (the code with its parameters merged over the defaults), or the same evaluation (the
@@ -546,7 +565,7 @@ diagnostician.
   earlier look's number, never a figure. A version that repeats a look still in flight waits for it. This
   only tightens: no threshold, Holm or deflated-Sharpe rule moves.
 - **A look the holdout cannot judge is held** (the look holds, L6(b) and L6(c), approved by the owner on Oct 2, 2026 as
-  a tightening; `Gate.look_hold`). The three looks after the Sept 26 reset were all long-delta programs and all failed,
+  a tightening; `Gate.look_hold`). OFF since fast lane v2 (`gate.look_holds` null in `policy.json`); as they stood: The three looks after the Sept 26 reset were all long-delta programs and all failed,
   and a 2025 Validation pass has mostly measured long-market drift. After the free checks that refuse (the experiment
   contract, the drift screen, the rations) and before anything is paid or opened, the gate holds the look at: (b) a
   long-delta version (pooled Train beta above zero) whose own Train drift fit puts a quarter or more of its profit on
@@ -627,19 +646,22 @@ diagnostician.
 
 | Rule | Now (D4, Sept 26) | Allowed range |
 |---|---|---|
-| Probe: a Candidate that passed the holdout, has a verified/enabled execution type, and whose typical maximum loss fits the cap at current equity | real from its next session; real money opens four debit types | - |
+| Probe: a Candidate that passed the holdout, has a verified/enabled execution type, and whose typical maximum loss fits the cap at current equity | real from the next live minute (fast lane v2; from its next session before it); real money opens four debit types | - |
 | Credit structures on real money | only from $2,000 of equity, in one deploy with the gateway's list and a re-ratified grant (#393, the owner's decision; D3 of Oct 2 confirms it); built on `v3/wp7` with a paper proof per type, not deployed; debit types until then | - |
-| Probe max loss per structure | 5% of equity | 2-5% |
+| Probe position: one structure, max loss with fees per structure | 10% of equity (fast lane v2, the owner's goal item 4; 5% before it) | 2-10% |
 | Probe open structures per family | 3 | 1-5 |
 | Probe family total max loss | 15% of equity | 8-15% |
-| Probe floor for a small account | one contract when its max loss is at most $100 | $0-100 |
+| Probe floor for a small account | $0 since fast lane v2 (one contract at most $100 before it) | $0-100 |
+| Probe positions held or working at once, across the account | 3 (3 x 10% = 30% of E, inside the 35% daily stop) | 0-3 (0 stops Probe opens) |
+| The Probe loss budget: realized Probe losses since fast lane v2, gross (each position a Probe family opened, its own loss; no gain offsets one), plus the maximum loss of every real position held or working (Sized too) and of a lost open until it is found | $400 in total; an open that would breach it is refused, exits go on | $0-400 (0 stops Probe opens) |
+| D5, demotion by live results (code, pre-registered, chosen not measured) | a Probe goes exit-only, for good for its version, when its realized real P&L is below -3 x its mean maximum loss, or its live fills run below its nightly replay of the same days by more than 0.20 a dollar of maximum loss over 5 or more real trades | - |
 | Sized: current-version forward record of at least 20 trades, mean > 0 and 80% lower bound > 0, plus at least 5 real Probe trades and 1 whole Probe session | quarter-Kelly on the lower bound; paper/shadow alone cannot satisfy the real minimum | eighth- to half-Kelly |
 | Sized max loss per structure | 10% of equity | 5-15% |
 | Sized family total max loss | 30% of equity | 20-40% |
 | Book: open max loss, all families | 90% of equity | 50-90% |
 | Daily stop: the day's realized plus marked loss | 35% of start-of-day equity: no new entries that day | 15-35% |
 | Drawdown stop from the peak since the reset | 60%: real money paused, exits go on, the owner told, the Gym keeps running | 40-60% |
-| Execution tuition: 1-lot real orders before the holdout, to measure multi-leg fills (never evidence) | $200 max loss a day, $300 a week | $0-200 a day |
+| Execution tuition: 1-lot real orders before the holdout, to measure multi-leg fills (never evidence) | $200 max loss a day, $300 a week; since fast lane v2 one structure within the Probe's cap (10% of E) | $0-200 a day |
 | D3 calibration: the House's own 1-lot round trips on SPY, QQQ and IWM (never evidence) | $50 of possible loss a day | - |
 | The House live test: one frozen, pre-registered program as the House's own instance (never evidence) | a structure at most $100, 3 open, $300 at risk, no new open after a $150 loss, 20 sessions, 30 round trips | - |
 | The incubator (Release B): one lot of a real structure for a family that passed Train and the drift screen, the gate's review and audit, and a pre-registered first look at its live practice (3 sessions, 10 program closes, coverage 0.80, P&L above $0 three ways); never evidence, never a promotion | $50 max loss a structure, 4 held or working, stopped for the ISO week once its net realized loss reaches $150 | $0-50, 0-4, $0-150 (0 stops it) |

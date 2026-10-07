@@ -33,13 +33,33 @@ class ConstitutionTest(unittest.TestCase):
                          {"max_loss_usd": "50", "contracts": 1, "max_open": 4, "week_loss_usd": "150",
                           "min_sessions": 3, "min_trades": 10, "min_coverage": "0.80"})
 
-    def test_the_incubator_row_moved_the_money_digest_to_the_one_the_owner_ratifies(self):
-        """Release B's money digest (a3e2aa7c before it) and the full digest (fcf8d735 before it): the grant is ratified
-        again on this one right after the deploy."""
+    def test_the_fast_lane_row_moved_the_money_digest_to_the_one_the_grant_re_ratifies(self):
+        """Fast lane v2 (Oct 7, 2026; the owner's goal item 4): the Probe row (one structure within 10% of E, at most 3 Probe
+        positions, the $400 Probe loss budget) moved the money digest (42c4a3af before it, Release B's incubator row) and
+        the full digest (595228a6 before it). The standing grant re-ratifies on it at the House's start on the owner's
+        deploy (league/ops/grant.py)."""
         from league.constitution import money_digest
 
-        self.assertEqual(money_digest(), "42c4a3af2b5c7d1c83e720650ac0596bebf69e0bc77556601347b589f759643a")
-        self.assertEqual(PINNED_DIGEST, "595228a68a0a0e146901ba08185dfa7b39bcb2952a2abc1ae0cf16f19193d102")
+        self.assertEqual(money_digest(), "da5c7542d7b78f967c12c3b2d98140153026c98b5fea9de27b6cf912eff85694")
+        self.assertEqual(PINNED_DIGEST, "5edc8956aba636624599cd97d20f85edeb33f344dcb83c4df194f0cbf8c6acb7")
+        self.assertEqual(CONSTITUTION["options_money"]["probe"],
+                         {"max_loss_share": "0.10", "contracts": 1, "open_per_family": 3, "family_share": "0.15",
+                          "floor_usd": "0", "max_open": 3, "loss_budget_usd": "400"})
+
+    def test_the_fast_lane_probe_rows_stay_inside_the_goals_bounds(self):
+        import copy
+
+        from league.constitution import options_money_problems
+
+        for key, value in (("max_loss_share", "0.1001"), ("contracts", 2), ("contracts", 0), ("max_open", 4),
+                           ("max_open", 2.0), ("loss_budget_usd", "400.01"), ("floor_usd", "100.01")):
+            changed = copy.deepcopy(CONSTITUTION)
+            changed["options_money"]["probe"][key] = value
+            self.assertTrue(any(f"probe.{key}" in p for p in options_money_problems(changed)), (key, value))
+        for key, value in (("max_open", 0), ("loss_budget_usd", "0"), ("max_loss_share", "0.02")):
+            changed = copy.deepcopy(CONSTITUTION)
+            changed["options_money"]["probe"][key] = value
+            self.assertEqual(options_money_problems(changed), [], (key, value))
 
     def test_the_incubator_row_may_only_tighten(self):
         import copy

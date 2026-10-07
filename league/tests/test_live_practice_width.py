@@ -555,8 +555,11 @@ class CapArithmetic(unittest.TestCase):
 
         probe = CONSTITUTION["options_money"]["probe"]
         (share, floor), open_max, family = S._probe_caps()
-        self.assertEqual((share, floor, open_max, family), (float(probe["max_loss_share"]), float(probe["floor_usd"]),
-                                                           int(probe["open_per_family"]), float(probe["family_share"])))
+        self.assertEqual((open_max, family), (int(probe["open_per_family"]), float(probe["family_share"])))
+        # THE FAST LANE (Oct 7, 2026) moved the real Probe to one structure within 10% and no floor; practice keeps the
+        # Probe's 5% and $100 from before it, so practice evidence does not move with the money row (its review, D6).
+        self.assertEqual((share, floor), (0.05, 100.0))
+        self.assertNotEqual(share, float(probe["max_loss_share"]))
 
     def test_per_open_with_fees(self):
         acc = self.account()

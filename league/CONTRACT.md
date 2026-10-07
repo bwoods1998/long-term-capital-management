@@ -99,7 +99,8 @@ available context fields. A rejection must locate the submitted code, name the r
 rule and describe a causal counterexample. Missing grounding requires another review; it never
 becomes a pass. Neither a model's claim nor a well-formed receipt substitutes for an executable
 test of a disputed runtime fact. Review approval is bound to that runtime contract. Historical
-trial counts and holdout looks survive runtime upgrades; an upgrade grants no extra looks.
+trial counts and holdout looks survive runtime upgrades; an upgrade grants no extra looks, and a program
+a review or audit failed is never reviewed again, in any family, after an upgrade too.
 
 ## ctx
 
@@ -306,25 +307,22 @@ program code on the same structure and roots joins lineages; renaming a family o
 never creates a fresh ration. A version that repeats a program already looked at, in any family, is
 refused before its look, and no look is spent: the same code and parameters, parameters that resolve to
 the same values, or a Validation run identical to a looked version's (a renamed variable or a new comment
-changes nothing). Only a genuinely different version is looked at. A look is also held, and no look is
-spent, when the holdout could not judge the version: its Train profit leans on market drift (it holds long
-market exposure, and a large share of what it made is what that exposure earns on average days: the drift
-lines of your Train runs show both), or it makes too few independent bets for the holdout to tell a real
-edge from luck. A held version is closed at the gate; a new version that clears both can be looked at.
-Build programs whose profit is their timing, not the market's drift. A revised retired mechanism must
+changes nothing). Only a genuinely different version is looked at. Since Oct 7, 2026 no look is held or
+refused for market drift: profit from market direction counts, and the drift lines of your Train runs and a
+same-risk buy-and-hold are reported beside every result, never as a bar. A revised retired mechanism must
 identify its parent.
 
 **Trials.** Every Gym evaluation is a trial, counted per lineage (every family in it: parent, forks,
-siblings, alive or retired, and a dead slice's lineage when your idea was born on its slice) and in total. The line
-deflates your validation Sharpe by the versions your lineage has had validated, so submitting sweeps that each look
-good by chance buys nothing. Every variant of a `gym_sweep` is a trial like any run. Change the idea when it fails; do
+siblings, alive or retired, and a dead slice's lineage when your idea was born on its slice) and in total. Each
+program gets one sealed holdout look, and a lineage at most three, so submitting sweeps that each look good by chance
+spends looks and buys nothing. Every variant of a `gym_sweep` is a trial like any run. Change the idea when it fails; do
 not grind parameters.
 
 **The validation line** (your submitted best, on Validation): at least 50 trades on at least 25 days;
-mean P&L per dollar of maximum loss above zero after fees with a one-sided t of at least 2; a deflated
-Sharpe probability of at least 0.95 on traded days given your lineage's validated versions; positive in at
-least 3 of 4 quarters; positive at 1.5x the half-spread. Meeting it sends your program to the gate: a code review for lookahead,
-leakage and fill abuse, then one holdout look. Passing makes your family a Candidate (live shadow trading);
+mean P&L per dollar of maximum loss above zero after fees with a one-sided t of at least 1.65; a probabilistic
+Sharpe of at least 0.95 on traded days; positive in at least 2 of 4 quarters; positive at 1.5x the half-spread.
+Meeting it sends your program to the gate: a code review for lookahead, leakage and fill abuse, then one sealed
+holdout look per program at p <= 0.10. Passing makes your family a Candidate (live shadow trading);
 Candidates may become Probes only when their execution type, account checks and real-money path are
 verified and enabled; earning a band alone cannot send an order. A forward record of 20
 trades with a positive mean and an 80% lower bound above zero is necessary for Sized, along with

@@ -1,9 +1,9 @@
 """THE LOOK HOLDS (L6(b) and L6(c), the owner's approval of Oct 2, 2026; league/swarm/gate.py `look_hold`).
 
-Every holdout look raises the Holm bar of every later one. The gate now HOLDS a look (no look, no try, no review, no audit,
-no sealed read) at a long-delta version whose Train profit leans on market drift (drift share >= 0.25 of its own Train
-drift fit), and at a version whose expected holdout power, at the level the look would have to reach under Holm, is below
-0.30. Missing figures hold (fail-closed). A hold is recorded in its own table, never as a refusal; a new version that
+The gate HOLDS a look (no look, no try, no review, no audit, no sealed read), when the holds are on, at a long-delta
+version whose Train profit leans on market drift (drift share >= 0.25 of its own Train drift fit), and at a version whose
+expected holdout power, at the look's flat level (`evidence.LOOK_LEVEL`, fast lane v2: no Holm across looks), is below
+0.30. Since fast lane v2 (Oct 7, 2026) policy.json switches both off (`gate.look_holds` null); these tests switch them on. Missing figures hold (fail-closed). A hold is recorded in its own table, never as a refusal; a new version that
 clears both is looked at. On the money path a hold is a failed look (reviews A1 and B1 of PR #484): the held version's
 execution tuition ends, even when the hold lands after a passed review, and its program never trades the incubator. The
 researcher hears words with no figure (D2a). Each hold is a setting; null restores today's gate. Every figure is
@@ -212,8 +212,8 @@ class ThePowerHold(HoldCase):
         self.assertEqual(out["look_held"], ["a"])
         figures = self.assert_held("a", n, HOLD_POWER_STAGE)
         power = figures["power"]
-        self.assertEqual((power["sessions"], power["level"], power["looks_before"]), (holdout_sessions(), 0.05, 0))
-        self.assertAlmostEqual(power["power"], evidence.holdout_power(THIN_SHARPE, holdout_sessions(), 0.05))
+        self.assertEqual((power["sessions"], power["level"], power["looks_before"]), (holdout_sessions(), evidence.LOOK_LEVEL, 0))
+        self.assertAlmostEqual(power["power"], evidence.holdout_power(THIN_SHARPE, holdout_sessions(), evidence.LOOK_LEVEL))
         self.assertLess(power["power"], 0.30)
         self.assertFalse(figures["drift"]["held"])
 
@@ -222,22 +222,21 @@ class ThePowerHold(HoldCase):
         for fid in fids:
             self.store.add_family({**SPEC, "id": fid}, origin="seed")
 
-    def test_the_power_is_taken_at_the_level_the_next_look_must_reach_under_holm(self):
-        sharpe = 0.12  # power ~0.49 at a first look, ~0.31 at a third, ~0.27 at a fourth
+    def test_the_power_is_taken_at_the_flat_look_level_whatever_the_looks_before(self):
+        """FAST LANE V2: the look's level is flat, so looks made or in flight elsewhere move no power; they are counted in
+        the figures only."""
         self.bystanders("x", "y", "z")
-        n = self.ready("a", sharpe=sharpe)
+        n = self.ready("a", sharpe=0.12)  # power about 0.63 at 0.10
         self.assertIsNone(self.gate.look_hold(self.store.family("a"), n), "a first look")
         for i, (fid, p) in enumerate((("x", 0.64), ("y", 0.71))):
             self.store.add_look(fid, 1, f"{i}" * 64, passed=False, p_value=p, detail={})
-        self.assertIsNone(self.gate.look_hold(self.store.family("a"), n), "a third look: level 0.05 / 3")
         self.store.set_state("z", look_inflight={"sha": "f" * 64, "n": 1, "at": self.clock()})
-        hold = self.gate.look_hold(self.store.family("a"), n)
-        self.assertEqual(hold["stage"], HOLD_POWER_STAGE, "a look in flight elsewhere counts as a failed one: 0.05 / 4")
-        self.assertEqual((hold["figures"]["power"]["level"], hold["figures"]["power"]["inflight_elsewhere"]), (0.0125, 1))
-        self.store.set_state("z", look_inflight=None)
-        self.store.add_look("z", 1, "f" * 64, passed=False, p_value=0.58, detail={})
-        self.gate.run()
-        self.assert_held("a", n, HOLD_POWER_STAGE)
+        self.assertIsNone(self.gate.look_hold(self.store.family("a"), n), "a fourth look: the same level")
+        thin = self.ready("b", sharpe=THIN_SHARPE)
+        hold = self.gate.look_hold(self.store.family("b"), thin)
+        power = hold["figures"]["power"]
+        self.assertEqual((power["level"], power["looks_before"], power["inflight_elsewhere"]), (evidence.LOOK_LEVEL, 2, 1))
+        self.assertAlmostEqual(power["power"], evidence.holdout_power(THIN_SHARPE, holdout_sessions(), evidence.LOOK_LEVEL))
 
     def test_a_version_with_no_validation_sharpe_or_no_session_count_is_held_fail_closed(self):
         n = self.ready("a", sharpe=None)
@@ -258,12 +257,9 @@ class ThePowerHold(HoldCase):
         self.assertEqual(event["payload"]["holds"], [HOLD_DRIFT_STAGE, HOLD_POWER_STAGE])
 
     def test_the_look_asks_again_under_the_lock(self):
-        """A look that lands between the round's hold check and its own look lowers the power: no look starts."""
-        sharpe = 0.12
-        self.bystanders("x", "y", "z")
-        n = self.ready("a", sharpe=sharpe)
-        for i, (fid, p) in enumerate((("x", 0.64), ("y", 0.71), ("z", 0.58))):
-            self.store.add_look(fid, 1, f"{i}" * 64, passed=False, p_value=p, detail={})
+        """A hold that applies when the look starts (the holds switched on after the round's check) stops it: no look
+        starts, and the next round holds it."""
+        n = self.ready("a", sharpe=THIN_SHARPE)
         fam = self.store.family("a")
         self.assertIsNone(self.gate.look(fam, self.store.version("a", n), self.sha("a", n)))
         self.assertEqual(self.holdout_jobs("a"), [])
@@ -343,14 +339,15 @@ class TheTuition(HoldCase):
         self.settings["gym"]["gate_checkpoint"] = "sbcp_gate"  # the image is ready
         return n
 
-    def looks_land_elsewhere(self) -> None:
-        """Three failed looks in other families: the next look faces 0.05 / 4."""
-        for i, (fid, p) in enumerate(zip(self.bystanders, (0.64, 0.71, 0.58))):
-            self.store.add_look(fid, 1, f"{i}" * 64, passed=False, p_value=p, detail={})
+    def holds_switched_on(self) -> None:
+        """The holds off while the version is reviewed, then on (since fast lane v2 a look elsewhere moves no power: only
+        the setting can bring a hold after a passed review)."""
+        self.settings["gate"]["look_holds"] = {"drift_share": 0.25, "min_power": 0.30}
 
     def test_a_power_hold_after_a_passed_review_ends_the_tuition_for_good(self):
-        n = self.reviewed_and_waiting(sharpe=0.12)  # power about 0.49 at a first look: not held at its review
-        self.looks_land_elsewhere()  # about 0.27 at a fourth
+        self.settings["gate"]["look_holds"] = None
+        n = self.reviewed_and_waiting(sharpe=THIN_SHARPE)  # the holds off: reviewed and audited
+        self.holds_switched_on()  # power about 0.27 at 0.10
         out = self.gate.run()
         self.assertEqual((out["look_held"], out["looked"]), (["a"], []))
         self.assertEqual(self.tuition(), [], "the hold ends the tuition, as a failed look would")
@@ -361,8 +358,9 @@ class TheTuition(HoldCase):
         self.assertEqual(self.holdout_jobs(), [], "and no look was made")
 
     def test_a_hold_found_by_the_looks_recheck_under_the_lock_ends_the_tuition_next_round(self):
-        n = self.reviewed_and_waiting(sharpe=0.12)
-        self.looks_land_elsewhere()
+        self.settings["gate"]["look_holds"] = None
+        n = self.reviewed_and_waiting(sharpe=THIN_SHARPE)
+        self.holds_switched_on()
         fam = self.store.family("a")
         self.assertIsNone(self.gate.look(fam, self.store.version("a", n), self.sha("a", n)), "no look starts")
         self.assertEqual(self.tuition(), ["a"], "gate_ready kept: the next round records the hold")
@@ -383,8 +381,7 @@ class TheTuition(HoldCase):
         """The control (holds off): the same version is looked at, the look fails, and the tuition ends; with the holds the
         tuition ends the same way, with no look spent."""
         self.settings["gate"]["look_holds"] = None
-        self.reviewed_and_waiting(sharpe=0.12)
-        self.looks_land_elsewhere()
+        self.reviewed_and_waiting(sharpe=THIN_SHARPE)
         out = self.gate.run()
         self.assertEqual(out["looked"], [{"family": "a", "passed": False}])
         self.assertEqual(self.store.family("a")["state"]["gate_outcome"]["result"], "failed")

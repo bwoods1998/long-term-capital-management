@@ -14,13 +14,15 @@ THE GATE (when a family's validated best meets the validation line):
    Claude (a default role), else GPT-6 Astra while the OpenAI month has room (`audit_openai_model`; null skips it), else
    a different Sail model; a failed audit is a refusal too.
 3. ONE HOLDOUT LOOK on a gate box (a fork of the gate image; the Gym image has no holdout days), judged by
-   the plan's holdout line (`evidence.holdout_line`, with Holm-Bonferroni across every look the swarm has
-   made). The researcher is told PASS or FAIL, never a number.
+   the holdout line (`evidence.holdout_line`: since FAST LANE V2, Oct 7, 2026, at the flat one-sided level
+   `evidence.LOOK_LEVEL` (0.10) per program, with no Holm escalation across looks). The researcher is told PASS or
+   FAIL, never a number.
 4. A pass makes the family a Candidate (live shadow). Candidate <-> Probe <-> Sized is the LIVE PATH's
    (the Money table), written through `SwarmStore.set_band`; the swarm never makes a Probe or a Sized.
 
-THE DUPLICATE LOOK (H3a, Oct 1, 2026; the edge study's "a duplicate adds no signal"). Every look raises the Holm bar of
-every later one, and the three looks since the Sept 26 reset covered two programs: the two Sept 27 looks had identical
+THE DUPLICATE LOOK (H3a, Oct 1, 2026; the edge study's "a duplicate adds no signal"). Every look then raised the Holm
+bar of every later one (since fast lane v2 a look is flat, and a program is still counted once), and the three looks
+since the Sept 26 reset covered two programs: the two Sept 27 looks had identical
 Train and Validation results under different run shas. So before anything else is asked of a version (the experiment
 contract, the drift screen, the rations, a paid review, a sealed read), `duplicate_look` compares it with every look the
 swarm has made, in any family and lineage. It repeats one when (1) it is the same program (`run_sha`: code and
@@ -37,9 +39,24 @@ closed (`gated_sha`), and one that repeats a look still in flight in another fam
 version compares with nothing and goes on as before. Tightening only: no threshold, no Holm or deflated-Sharpe rule,
 no forward rule moves.
 
+A PAID VERDICT BINDS (fast lane v2's review, Oct 7, 2026; `paid_verdict`). An evaluator adoption (a release that moves
+the Gym's image or the execution fingerprint, `evaluator.adopt`) clears the gate's `review` and `gated_sha`, so a version
+the gate refused at its review or audit, never looked at, would be validated again, reviewed again (the audit's request
+id is new each time) and could pass on a second roll. Right after THE DUPLICATE LOOK, a version whose PROGRAM (`run_sha`:
+in this family or any family holding the same code and parameters, `incubator.twins`) has a kept refusal at the stage
+"review" or "audit", or a kept bar (`incubator_barred`) recording that the GATE's own review or audit failed it, is
+closed as a version whose look already landed is (`gated_sha`, `gate_ready`
+cleared), its outcome "refused", the researcher told so, and one private `swarm.gate` event (`paid_verdict`) names the
+earlier verdict: no new review, no look. A refusal at a FREE stage (the experiment contract, the drift screen, the
+rations, a duplicate look, a look hold) does not bind here: those are judged again by their own rules, which this
+release changed (the drift screen and the holds are off). Nor do the incubator's own reads (its failed review or audit
+bars the incubator route only, as before: the gate asks its own questions), nor a record that merely could not be read
+(no verdict was given). Tightening only.
+
 THE LOOK HOLDS (L6(b) and L6(c) of the edge study, approved by the owner on Oct 2, 2026 as a tightening; `look_hold`,
-`evidence.drift_lean`, `evidence.holdout_power`). Every look raises the Holm bar of every later one; the three looks since
-the Sept 26 reset were all long-delta programs, and all failed. So, after the experiment contract, the drift screen and
+`evidence.drift_lean`, `evidence.holdout_power`). OFF SINCE FAST LANE V2 (Oct 7, 2026; the owner's goal item 4: direction
+counts, and a look is flat at `evidence.LOOK_LEVEL`, so a look no longer raises any later one's bar): policy.json sets
+`gate.look_holds` null, and `look_hold` returns None. As they stood, when switched on: after the experiment contract, the drift screen and
 the rations (each of which REFUSES, and a refusal bars the program from the incubator: a hold never takes a refusal's
 place) and before anything is paid (the review, the audit) or opened (the sealed read), the gate HOLDS the look at:
 - (b) THE DRIFT HOLD (stage "look hold (drift)"): a long-delta version (pooled Train beta above zero) whose Train drift
@@ -50,8 +67,8 @@ place) and before anything is paid (the review, the audit) or opened (the sealed
   `gate.look_holds.min_power` (0.30): the one-sided power of the holdout line's test of mean daily P&L above zero (a
   day-block bootstrap, taken in the normal approximation: P(Z >= z(level) - S sqrt(N))), with S the version's Validation
   all-days daily Sharpe (`validation_numbers.sharpe_daily`, the figure the look's Sharpe check uses), N the holdout
-  window's NYSE sessions (`holdout_sessions`) and the level the look would have to reach under Holm across every look
-  made (`evidence.holm_level`), a look in flight in another family counted as a failed one. Missing figures hold
+  window's NYSE sessions (`holdout_sessions`) and the level the look must reach, the flat `evidence.LOOK_LEVEL` (the
+  looks before and in flight elsewhere are counted in the figures, no longer in the level). Missing figures hold
   (fail-closed). The approximation leaves out the line's other checks (which can only lower the pass chance); for
   independent daily P&L the bootstrap passes a little more often than it says near the line, so the hold errs toward holding,
   and for positively autocorrelated daily P&L (multi-day marks) toward looking (`evidence.holdout_power`).
@@ -172,6 +189,11 @@ def run_sha(version: Mapping[str, Any]) -> str:
     return hashlib.sha256((str(version["sha"]) + dumps(version.get("params") or {})).encode()).hexdigest()
 
 
+#: A PAID VERDICT BINDS (the module docstring): the refusal stages a paid reader wrote, and the words of a kept bar
+#: (`incubator._audit_bar` with "the gate's") that the gate's own failing review or audit wrote. The incubator's own reads
+#: ("the incubator's ...") bar the incubator route only.
+PAID_STAGES = ("review", "audit")
+PAID_BAR_WORDS = ("the gate's reviewer failed it", "the gate's audit failed it")
 #: THE DUPLICATE LOOK's refusal stage (the module docstring).
 DUPLICATE_STAGE = "duplicate look"
 #: A Validation run's evaluation and outcome, as the Gym's validation view carries them: two runs that agree on all of
@@ -501,12 +523,50 @@ class Gate:
                                                    "of_look": duplicate.get("seq"), "of_family": duplicate.get("family"),
                                                    "of_version": duplicate.get("version"), "match": duplicate.get("match")})
 
+    # ------------------------------------------------------------------ A PAID VERDICT BINDS (fast lane v2's review)
+    def paid_verdict(self, fam: Mapping[str, Any], n: Any, sha: str) -> str | None:
+        """Why an earlier paid review or audit binds version `n` of `fam` (program `sha`), or None (the module
+        docstring): a kept refusal of the program's version, in this family or a twin's, at the stage "review" or
+        "audit", or a kept bar of the program (`incubator_barred[sha]`) whose words are the gate's own failing review or
+        audit (`PAID_BAR_WORDS`). Reads the refusal rows and the families' states, never a model."""
+        from . import incubator
+
+        fid, n = str(fam["id"]), int(n)
+        programs = [(fid, n)] + [(f, m) for f, m in incubator.twins(self.store, fid, n) if (f, m) != (fid, n)]
+        for other, m in programs:
+            for row in self.store.refusals(other):
+                if row.get("version") == m and str(row.get("stage")) in PAID_STAGES:
+                    where = "" if other == fid else f" (the same program in {other}, version {m})"
+                    return f"the {row['stage']} refused it on {row['at']}{where}: {str(row.get('reason') or '')[:300]}"
+        for other in dict.fromkeys(f for f, _ in programs):
+            state = ((fam if other == fid else self.store.family(other)) or {}).get("state") or {}
+            recorded = state.get("incubator_barred")
+            entry = recorded.get(sha) if isinstance(recorded, Mapping) else None
+            why = str(entry.get("why") or "") if isinstance(entry, Mapping) else ""
+            if why.startswith(PAID_BAR_WORDS):
+                where = "" if other == fid else f" (the same program in {other})"
+                return f"{why}{where}"
+        return None
+
+    def close_paid(self, fam: Mapping[str, Any], n: int, sha: str, why: str, out: dict[str, Any]) -> None:
+        """A PAID VERDICT BINDS: the version is closed as one whose look landed (`gated_sha`, `gate_ready` cleared), its
+        outcome "refused", the researcher told, and one private `swarm.gate` event. No refusal row is added: the earlier
+        verdict's row or bar is the record, and it is kept."""
+        if not self.store.compare_and_set_state(fam["id"], {"validation_version": n}, gated_sha=sha, gate_ready=False,
+                                                dormant_cycles=0):
+            return
+        self.outcome(fam["id"], sha, "refused")
+        self.store.event("swarm.gate", fam["id"], {"action": "paid_verdict", "version": n, "sha": sha[:12], "earlier": why[:400]})
+        self.tell(fam["id"], "fail (an earlier paid review or audit of this program failed it; it is not reviewed again: "
+                             f"{why[:300]})", verdict=True)
+        out["refused"].append(fam["id"])
+
     # ------------------------------------------------------------------ THE LOOK HOLDS (L6)
     def look_hold(self, fam: Mapping[str, Any], n: Any) -> dict[str, Any] | None:
         """THE LOOK HOLDS (the module docstring) on version `n` of `fam` (its state as read: `validation_numbers` must be
         version `n`'s): {"stage", "holds" (every hold that fired, the drift hold first), "figures"} when a look at it is
         held, else None. "figures" are operator-only: the drift fit's beta, alpha, drift and share, and the power with
-        its Sharpe, sessions, Holm level and looks counted. Each hold is skipped while its setting is null."""
+        its Sharpe, sessions, the flat look level and looks counted. Each hold is skipped while its setting is null."""
         drift_share, min_power = look_hold_settings(self.settings)
         if drift_share is None and min_power is None:
             return None
@@ -526,7 +586,7 @@ class Gate:
                 else None
             previous = [x["p_value"] for x in self.store.looks() if x["p_value"] is not None]
             flying = [other for other, _ in self.store.looks_inflight() if other != str(fam["id"])]
-            level = evidence.holm_level(previous + [1.0] * len(flying))  # a look in flight elsewhere: a failed one
+            level = evidence.LOOK_LEVEL  # FAST LANE V2: the flat look; the looks before and in flight are figures only
             sessions = holdout_sessions()
             power = evidence.holdout_power(sharpe, sessions, level)
             held = power is None or power < min_power
@@ -616,6 +676,10 @@ class Gate:
                     self.store.compare_and_set_state(fam["id"], {"validation_version": n}, gated_sha=sha, gate_ready=False)
                 else:
                     self.refuse_duplicate(fam, n, sha, duplicate, out)
+                continue
+            earlier = self.paid_verdict(fam, n, sha)
+            if earlier is not None:  # A PAID VERDICT BINDS: a failed review or audit outlives an evaluator adoption
+                self.close_paid(fam, int(n), sha, earlier, out)
                 continue
             try:
                 check_experiment(version["code"], version.get("params") or {})
@@ -981,8 +1045,8 @@ class Gate:
                     self.store.lineage_looks(fam["id"], include_inflight=True) >= evidence.LOOKS_PER_LINEAGE or \
                     self.duplicate_look(current, n, sha) is not None or self.look_hold(current, n) is not None:
                 # (held by the operator meanwhile: no look is spent, gate_ready stays; a look it would repeat landed or went
-                # out meanwhile: THE DUPLICATE LOOK refuses it next round, or waits for it; a look that landed or went out
-                # meanwhile lowered its power: THE LOOK HOLDS hold it next round)
+                # out meanwhile: THE DUPLICATE LOOK refuses it next round, or waits for it; a hold switched on meanwhile:
+                # THE LOOK HOLDS hold it next round. Since fast lane v2 the level is flat, so a look elsewhere moves no power)
                 return None
             if not self.store.compare_and_set_state(fam["id"], {"validation_version": n, "validation_image": image, "validation_bundle": bundle,
                                                                "look_inflight": None}, gate_ready=False, look_inflight=marker):
@@ -1122,8 +1186,6 @@ class Gate:
         self.store.compare_and_set_state(fid, {"validation_version": n}, gated_sha=sha)
         self.store.event("swarm.gate", fid, {"action": "look", "version": n, "passed": line["passed"],
                                              "_line": line})  # the numbers stay private (underscore)
-        if not line["numbers"].get("holm_reachable", True):
-            self.store.event("swarm.status", None, {"action": "holm_unreachable", "looks": len(previous) + 1})
         self.tell(fid, "pass" if line["passed"] else "fail", verdict=True)
         self.outcome(fid, sha, "passed" if line["passed"] else "failed")
         has_image = callable(getattr(self.pool, "image", None))

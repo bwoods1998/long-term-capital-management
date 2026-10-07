@@ -56,7 +56,7 @@ class Triggers(unittest.TestCase):
         names = [job.name for job in JOBS]
         self.assertEqual(len(names), len(set(names)))
         for name in ("preopen", "economics", "scoreboard", "hygiene", "clock", "budget", "grant", "drills", "postmortem",
-                     "agenda", "engineer"):
+                     "agenda", "engineer", "direction", "fast_lane"):
             self.assertIn(name, by_name())
         for job in JOBS:
             for trigger in job.triggers:

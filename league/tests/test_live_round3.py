@@ -576,7 +576,9 @@ class BandRace(LiveCase):
             live.sync_families(self.clock(), force=True)
         self.assertNotIn("vert@1:r", live.instances)
 
-    def test_promotion_wait_survives_a_crash_before_the_local_move_record(self):
+    def test_the_swarms_promotion_time_survives_a_crash_before_the_local_move_record(self):
+        """THE FAST LANE (D3, Oct 7, 2026): the swarm's durable `live_promoted_at` alone confers same-minute entry after a
+        crash lost the local move record (before the fast lane it kept the wait for the next session)."""
         from league.live.families import SwarmFamilies
 
         live, store, other = self.swarm_live()
@@ -588,9 +590,8 @@ class BandRace(LiveCase):
         again = self.make([])
         again.families = SwarmFamilies(self.root)
         self.addCleanup(lambda: again.families._store.close() if again.families._store is not None else None)
-        self.assertFalse(again._real_eligible("vert"))
-        self.clock.set(at(MONDAY + dt.timedelta(days=1), 9, 31))
-        self.assertTrue(again._real_eligible("vert"))
+        self.assertTrue(again._real_eligible("vert"), "the swarm's durable promotion: the next live minute")
+        self.assertIsNone(again.state.get("real_first_seen"), "never the legacy first-sight wait")
 
     def test_missing_legacy_promotion_time_waits_a_session_and_persists_first_sight(self):
         live, store, other = self.swarm_live("probe")
@@ -607,7 +608,7 @@ class BandRace(LiveCase):
         live, store, other = self.swarm_live("probe")
         live.state.put("band_moves", {"vert": {"band": "probe", "at": at(MONDAY - dt.timedelta(days=7), 9, 0)}})
         other.set_state("vert", live_promoted_at=self.clock())  # new promotion committed before the local write crashed
-        self.assertFalse(live._real_eligible("vert"))
+        self.assertTrue(live._real_eligible("vert"), "THE FAST LANE: a confirmed promotion trades from the next minute")
         self.assertEqual(live._probe_sessions("vert", "probe"), 0)
         self.clock.set(at(MONDAY + dt.timedelta(days=1), 16, 0))
         self.assertEqual(live._probe_sessions("vert", "probe"), 1)

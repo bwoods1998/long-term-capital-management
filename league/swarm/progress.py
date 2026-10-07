@@ -3,9 +3,10 @@
 The publisher calls this after its existing account read. A single read transaction binds family, version,
 lineage, completed looks and forward rows; no SwarmStore is opened, migrated or written. Existing live bands
 keep their recorded holdout authority across a Gym image change. Gym validation must match the current image
-and engine, and an old lineage-adjusted verdict cannot claim a current deflated-Sharpe pass: since the owner's
-decision D2 (Sept 26) the deflated Sharpe counts the lineage's validated versions, so a verdict is current while
-that count is the one it was judged with. The counts' targets are the line's own (`evidence.MIN_TRADES`, `MIN_DAYS`).
+and engine, and an old lineage-adjusted verdict cannot claim a current deflated-Sharpe pass: since FAST LANE V2
+(Oct 7, 2026) the deflated Sharpe's N is the program itself (1; before it, the owner's decision D2 of Sept 26 counted the
+lineage's validated versions), so a verdict is current when it was judged with N = 1. The counts' targets are the
+line's own (`evidence.MIN_TRADES`, `MIN_DAYS`, `MIN_QUARTERS_POSITIVE`), within the site's schema (`SITE_QUARTERS`).
 """
 
 from __future__ import annotations
@@ -32,8 +33,15 @@ TARGET_KEYS = {
     "maintain": ("execution_ready", "holdout", "real_structure", "credit_equity", "risk_fit", "forward_nonnegative",
                  "forward_trades", "forward_mean", "forward_confidence", "real_record"),
 }
+#: The quarters need the site's schema accepts (the owner's site, capital/schema.js `PROGRESS_LIMITS`, copied in
+#: league/tests/fixtures/site_schema.js): 3 only. FAST LANE V2 (Oct 7, 2026) moved the line to
+#: `evidence.MIN_QUARTERS_POSITIVE` (2) of 4. A checklist stating need 2 would fail the site's schema, and with it the whole
+#: checkpoint (`validCheckpoint` requires every agent valid), and the site is the owner's to change. So `clean` withholds
+#: (null) a Gym checklist whose quarters need lies outside these bounds until the site accepts it: never a misstated need,
+#: never a rejected checkpoint.
+SITE_QUARTERS = (3, 3)
 COUNT_BOUNDS = {"validation_trades": (evidence.MIN_TRADES, evidence.MIN_TRADES), "validation_days": (evidence.MIN_DAYS, evidence.MIN_DAYS),
-                "validation_quarters": (3, 3),
+                "validation_quarters": SITE_QUARTERS,
                 "forward_trades": (20, 1000), "real_trades": (5, 50), "probe_sessions": (1, 20)}
 BLOCKERS = frozenset(("validation_pending", "evidence_stale", "validation_failed", "review_pending", "review_failed",
                      "audit_pending", "audit_failed", "holdout_pending", "holdout_failed", "look_limit", "gate_paused",
@@ -139,9 +147,9 @@ def _gym(fam: Mapping, version: Mapping, families: Mapping, looks: Sequence, lin
     numbers, checks = line.get("numbers") or {}, line.get("checks") or {}
     if not checks or not numbers:
         return None
-    trial_lines = _lines(fam, families, links, prior=True)
-    members = {fid for fid, f in families.items() if f["lineage"] in trial_lines}
-    fresh_dsr = numbers.get("validated_versions") == len({(f, v) for f, v in validated if f in members})
+    # FAST LANE V2: the deflated Sharpe's N is the program (1), so a verdict judged with N = 1 is current whatever the
+    # lineage validated since; one judged with a lineage's N (before it) is stale (the adoption re-judges it).
+    fresh_dsr = numbers.get("validated_versions") == 1
     sha = run_sha(version)
     review = state.get("review") or {}
     review_current = review.get("sha") == sha and review.get("version") == n
