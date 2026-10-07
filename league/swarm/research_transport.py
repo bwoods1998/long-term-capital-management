@@ -29,7 +29,7 @@ from decimal import Decimal, InvalidOperation, ROUND_CEILING
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from .daily_compute import DailyAdmissionError, DailyBudget, ResourceBound, NANOS
+from .daily_compute import DailyAdmissionError, DailyBudget, ResourceBound, NANOS, ObservedTariffEvidence
 
 EVENT_KIND = "swarm.research_broker"
 STATE_KEY = "research_broker_v1"
@@ -290,7 +290,10 @@ class ResearchBroker:
         self._verified_blobs = {}
         self._artifact_root = Path(artifact_root).resolve()
         self._artifact_bundle = self._artifact()
-        self.policy_digest = _digest({"research": asdict(policy), "models": {k: asdict(v.policy) for k, v in sorted(self._models.items())}})
+        policy_document = {"research": asdict(policy), "models": {k: asdict(v.policy) for k, v in sorted(self._models.items())}}
+        if isinstance(budget.tariff, ObservedTariffEvidence):
+            policy_document["accounting_mode"] = "observed_self_service"
+        self.policy_digest = _digest(policy_document)
 
     def _artifact(self):
         """Read actual reviewed bytes without evaluator's process-global fingerprint cache."""
@@ -494,7 +497,9 @@ class ResearchBroker:
         proof = self._scope()
         _require(self._artifact() == self._artifact_bundle, "reviewed host bundle changed")
         bad_reply = None
+        self.budget.observe_prices()
         with self.store.atomic():
+            self.budget.sync_observed_prices()
             summary = self.budget.summary()
             _require(summary["within_cap"], "current daily obligations exceed their ceiling")
             state = self._load()

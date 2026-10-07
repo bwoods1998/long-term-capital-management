@@ -141,6 +141,57 @@ class TariffEvidence:
 
 
 @dataclass(frozen=True)
+class ObservedTariffEvidence(TariffEvidence):
+    """Fresh ordinary-service rates for a local admission projection, not maxima.
+
+    The tagged journal retains this distinction across restart. Original schema1
+    tariff documents remain unchanged. Old readers refuse the additional fields.
+    A freshness deadline is never a future price lock or completed cancellation.
+    """
+
+    mode: str
+    basis_sha256: str
+    future_rate_lock: bool
+    fixed_day_fee_usd: str
+    prior_utc_day: str
+    prior_upper_usd: str
+    pending: tuple[tuple[str, str], ...]
+
+    def __post_init__(self):
+        super().__post_init__()
+        if (self.mode != "observed_self_service" or self.future_rate_lock is not False
+                or not isinstance(self.basis_sha256, str) or re.fullmatch(r"[0-9a-f]{64}", self.basis_sha256) is None
+                or self.valid_until > self.valid_from + 300):
+            raise DailyAdmissionError("explicit fresh observed price basis without a rate lock required")
+        _day(self.prior_utc_day)
+        for name in ("fixed_day_fee_usd", "prior_upper_usd"):
+            object.__setattr__(self, name, format(_decimal(getattr(self, name)), "f"))
+        if (not isinstance(self.pending, tuple) or any(not isinstance(row, tuple) or len(row) != 2
+                or not _identity(row[0]) for row in self.pending)
+                or len({row[0] for row in self.pending}) != len(self.pending)):
+            raise DailyAdmissionError("original bounded pending identities required")
+        for _, upper in self.pending:
+            _decimal(upper)
+
+    def covers_day(self, day):
+        return False  # Observed rates never certify a whole future UTC interval.
+
+
+def tariff_from_document(value):
+    """Read both original certified tariffs and explicitly tagged schema2 facts."""
+    if isinstance(value, dict) and value.get("mode") == "observed_self_service":
+        value = {**value, "pending": tuple(tuple(row) for row in value["pending"])}
+        return ObservedTariffEvidence(**value)
+    return TariffEvidence(**value)
+
+
+def _admission_prices(tariff, at):
+    if isinstance(tariff, ObservedTariffEvidence):
+        return tariff.valid_from <= at <= tariff.valid_until
+    return tariff.covers_day(int(at // DAY_SECONDS))
+
+
+@dataclass(frozen=True)
 class ResourceBound:
     """Hard resource ceilings, with separately persistent volumes represented as kind=volume."""
 
@@ -396,7 +447,7 @@ def _interval_nanos(bound, tariff, start, end):
 
 def _higher_rates(tariff, earlier):
     # Do not let a later cheaper observation erase an unresolved earlier bill.
-    return TariffEvidence(**{**asdict(tariff), **{
+    return tariff_from_document({**asdict(tariff), **{
         name: format(max(_decimal(getattr(tariff, name)), _decimal(getattr(earlier, name))), "f")
         for name in ("vcpu_usd_hour", "memory_gib_usd_hour", "disk_gib_usd_hour", "volume_gib_usd_hour")}})
 
@@ -441,6 +492,23 @@ def _fields(row, names):
         raise DailyAdmissionError("invalid immutable daily budget receipt")
 
 
+def _retain_observed_facts(state, tariff):
+    resources,inference=state["resources"],state["inference"]
+    held = state.setdefault("observed_pending_upper", {})
+    for identity, upper in tariff.pending:
+        row = resources.get(identity, inference.get(identity))
+        if row is None or row["dispatch_at"] is None or row["canceled"]:
+            raise DailyAdmissionError("observed epoch has no original dispatched obligation")
+        held[identity] = max(held.get(identity, 0), _nanos(upper))
+    rates = state.setdefault("observed_rate_max", {})
+    for name in ("vcpu_usd_hour", "memory_gib_usd_hour", "disk_gib_usd_hour", "volume_gib_usd_hour"):
+        rates[name] = format(max(_decimal(rates.get(name, "0")), _decimal(getattr(tariff, name))), "f")
+    days = state.setdefault("observed_day_facts", {})
+    original = days.setdefault(tariff.prior_utc_day, {"prior_nanos": 0, "fee_nanos": 0})
+    original["prior_nanos"] = max(original["prior_nanos"], _nanos(tariff.prior_upper_usd))
+    original["fee_nanos"] = max(original["fee_nanos"], _nanos(tariff.fixed_day_fee_usd))
+
+
 def _apply(state, receipt):
     """Validate the immutable history through the same transitions used for writes."""
     if not isinstance(receipt, dict):
@@ -470,8 +538,8 @@ def _apply(state, receipt):
             raise DailyAdmissionError("daily obligation identity was already used")
         if action == "resource_reserved":
             _fields(receipt, "action at key bound tariff")
-            bound, tariff = ResourceBound(**receipt["bound"]), TariffEvidence(**receipt["tariff"])
-            if tariff.scope != state["scope"] or not tariff.covers_day(int(at // DAY_SECONDS)):
+            bound, tariff = ResourceBound(**receipt["bound"]), tariff_from_document(receipt["tariff"])
+            if tariff.scope != state["scope"] or not _admission_prices(tariff, at):
                 raise DailyAdmissionError("original reservation has no day tariff evidence")
             resources[key] = {"at": at, "bound": asdict(bound), "tariff": asdict(tariff), "dispatch_at": None,
                               "resource_id": None, "created_at": None, "terminal_at": None, "canceled": False}
@@ -483,6 +551,34 @@ def _apply(state, receipt):
             _provenance(receipt["provenance"])
             inference[key] = {"at": at, "max_nanos": cap, "provenance": receipt["provenance"],
                               "dispatch_at": None, "receipt": None, "canceled": False}
+    elif action == "observed_basis":
+        _fields(receipt, "action at key tariff")
+        tariff = tariff_from_document(receipt["tariff"])
+        if (not isinstance(tariff, ObservedTariffEvidence) or tariff.scope != state["scope"]
+                or key != tariff.basis_sha256 or not _admission_prices(tariff, at)):
+            raise DailyAdmissionError("invalid original-scope observed tariff epoch")
+        previous = state.get("observed_basis")
+        if previous and tariff.valid_from < previous["valid_from"]:
+            raise DailyAdmissionError("observed tariff epoch rolled back")
+        state["observed_basis"] = asdict(tariff)
+        _retain_observed_facts(state, tariff)
+    elif action == "observed_facts_retained":
+        _fields(receipt, "action at key observation")
+        observation=receipt["observation"]
+        tariff=tariff_from_document(observation["tariff"])
+        if (not isinstance(tariff,ObservedTariffEvidence) or tariff.scope!=state["scope"]
+                or not _admission_prices(tariff,_time(observation["observed_at"]))):
+            raise DailyAdmissionError("invalid retained original-scope observed facts")
+        from .observed_cost_journal import encode,digest
+        if digest(encode(observation))!=key:
+            raise DailyAdmissionError("retained observed fact hash differs")
+        refs=state.setdefault("observed_external_refs",[])
+        if key in refs:raise DailyAdmissionError("observed fact was already journaled")
+        refs.append(key);refs.sort()
+        previous=state.get("observed_basis")
+        if not previous or tariff.valid_from>=previous["valid_from"]:
+            state["observed_basis"]=asdict(tariff)
+        _retain_observed_facts(state,tariff)
     elif action in ("dispatched", "canceled_unsent"):
         _fields(receipt, "action at key")
         row = resources.get(key, inference.get(key))
@@ -524,6 +620,8 @@ def _apply(state, receipt):
         row = resources.get(key)
         observation, fence = NativePausedEvidence(**receipt["observation"]), _pause_fence(receipt["fence"])
         tariff, retained = TariffEvidence(**receipt["tariff"]), receipt["retained_usage_nanos"]
+        if row and "mode" in row.get("tariff", {}):
+            raise DailyAdmissionError("observed resource usage needs genuine interval prices before pause savings")
         if (row is None or row["canceled"] or row["dispatch_at"] is None or row["resource_id"] is None
                 or row["terminal_at"] is not None or row["bound"]["kind"] == "volume"
                 or observation.scope != state["scope"] or fence.scope != state["scope"]
@@ -651,7 +749,7 @@ class DailyBudget:
         if not 0 < self.cap_nanos <= MAX_DAILY_NANOS or tariff.scope != inventory.scope:
             raise DailyAdmissionError("invalid unified daily ceiling or mismatched scope")
 
-    def _load(self):
+    def _sqlite_load(self):
         try:
             state = None
             for raw in self.store._all("SELECT payload FROM events WHERE kind=? ORDER BY seq", (EVENT_KIND,)):
@@ -665,6 +763,73 @@ class DailyBudget:
         except (KeyError, TypeError, ValueError, OverflowError, sqlite3.Error) as exc:
             raise DailyAdmissionError("unreadable durable daily obligations") from exc
 
+    def _observations(self, state):
+        from .observed_cost_journal import records,ObservationJournalError
+        first=self.store._one("SELECT payload FROM events WHERE kind=? ORDER BY seq LIMIT 1",(EVENT_KIND,))
+        opened=hashlib.sha256(first["payload"].encode()).hexdigest()
+        try:
+            return records(self.store.root,state["scope"],opened,required=state.get("observed_external_refs",()))
+        except (OSError,ObservationJournalError) as exc:
+            raise DailyAdmissionError("retained observed cost journal is missing or corrupt") from exc
+
+    @staticmethod
+    def _project_observations(state, records):
+        refs=set(state.get("observed_external_refs",()))
+        for key,observation in sorted(records,key=lambda row:(row[1]["observed_at"],row[0])):
+            if key not in refs:
+                state=_apply(state,{"action":"observed_facts_retained","at":max(state["last_at"],observation["observed_at"]),
+                                    "key":key,"observation":observation})
+        return state
+
+    def _load(self):
+        # Always validate the original SQLite journal/cache before projecting the
+        # separately durable facts. Readers perform no synchronization writes.
+        state=self._sqlite_load()
+        return self._project_observations(state,self._observations(state))
+
+    def observe_prices(self):
+        """Retain validated cost increases before any cap decision/outer rollback.
+
+        SQLite may already be in a caller transaction. This append-only file
+        publication is deliberately independent; it neither commits that caller
+        nor initializes, settles, reserves or dispatches any original obligation.
+        """
+        if not isinstance(self.tariff,ObservedTariffEvidence):return
+        with self.store._lock:
+            state,now=self._load(),_time(self.store.clock())
+            self._check(state,now)
+            tariff=asdict(self.tariff)
+            first=self.store._one("SELECT payload FROM events WHERE kind=? ORDER BY seq LIMIT 1",(EVENT_KIND,))
+            opened=hashlib.sha256(first["payload"].encode()).hexdigest()
+            from .observed_cost_journal import append,ObservationJournalError
+            def needed(records):
+                before=self._project_observations(self._sqlite_load(),records)
+                candidate=json.loads(json.dumps(before))
+                _retain_observed_facts(candidate,self.tariff)
+                return not before.get("observed_basis") or any(not _same(candidate.get(name),before.get(name)) for name in
+                    ("observed_pending_upper","observed_rate_max","observed_day_facts"))
+            try:append(self.store.root,state["scope"],opened,now,tariff,needed=needed)
+            except (OSError,ObservationJournalError) as exc:
+                raise DailyAdmissionError("observed cost facts could not be durably retained") from exc
+
+    def sync_observed_prices(self):
+        """Copy retained facts into the original SQLite journal/cache atomically.
+
+        Losing this SQLite transaction is safe: replay still sees the immutable
+        file facts. This method grants no dollar room and does not refresh facts.
+        """
+        with self.store.atomic():
+            state=self._sqlite_load();records=self._observations(state)
+            refs=set(state.get("observed_external_refs",()))
+            for key,observation in sorted(records,key=lambda row:(row[1]["observed_at"],row[0])):
+                if key not in refs:
+                    receipt={"action":"observed_facts_retained","at":max(state["last_at"],observation["observed_at"]),
+                             "key":key,"observation":observation}
+                    state=_apply(state,receipt)
+                    self.store.event(EVENT_KIND,None,receipt);self.store.put(STATE_KEY,state)
+                    refs.add(key)
+            return state
+
     def _check(self, state, now):
         evidence = self.inventory
         if state["breached"]:
@@ -674,6 +839,25 @@ class DailyBudget:
             raise DailyAdmissionError("inventory is partial, stale, shared, or has unknown obligations")
         if now < state["last_at"]:
             raise DailyAdmissionError("daily admission clock rolled back")
+        observed = isinstance(self.tariff, ObservedTariffEvidence)
+        if state.get("observed_basis") and not observed:
+            raise DailyAdmissionError("observed journal requires its compatible accounting reader")
+        if observed:
+            if not _admission_prices(self.tariff, now) or _day(self.tariff.prior_utc_day) != int(now // DAY_SECONDS):
+                raise DailyAdmissionError("observed tariff or original current-day cost facts are stale")
+            if (_day(state["baseline"]["utc_day"]) == int(now // DAY_SECONDS)
+                    and _decimal(self.tariff.prior_upper_usd) < _decimal(state["baseline"]["upper_usd"])):
+                raise DailyAdmissionError("observed facts would erase original prior costs")
+            pending = dict(self.tariff.pending)
+            original = {key for key, row in state["inference"].items()
+                        if row["dispatch_at"] is not None and not row["canceled"] and row["receipt"] is None}
+            original |= {key for key, row in state["resources"].items()
+                         if row["dispatch_at"] is not None and not row["canceled"]
+                         and (row["terminal_at"] is None or state.get("observed_pending_upper", {}).get(key, 0))}
+            if original - set(pending):
+                raise DailyAdmissionError("original pending exposure is absent from fresh bounded cost facts")
+            if set(pending) - original:
+                raise DailyAdmissionError("fresh cost facts contain an unbound pending obligation")
         covered = {r["resource_id"] for r in state["resources"].values() if r["resource_id"] is not None}
         pending_models = {key for key, row in state["inference"].items() if not row["canceled"] and row["receipt"] is None}
         if set(evidence.resource_ids) - covered or set(evidence.model_keys) - pending_models:
@@ -682,7 +866,7 @@ class DailyBudget:
         # than just current inventory: even canceled or terminal resource rows
         # retain the conservative resource-tariff gate. A first resource admission
         # independently requires full-day coverage in _apply(resource_reserved).
-        if state["resources"] and not self.tariff.covers_day(int(now // DAY_SECONDS)):
+        if state["resources"] and not observed and not self.tariff.covers_day(int(now // DAY_SECONDS)):
             raise DailyAdmissionError("tariff evidence does not cover this full UTC day")
         if any(r.get("native_pause") and r["terminal_at"] is None
                and r["native_pause"]["resume"] is None
@@ -690,6 +874,9 @@ class DailyBudget:
             raise DailyAdmissionError("paused resume-writer fence expired; reconcile before further paid work")
 
     def _write(self, state, receipt):
+        if state is not None:
+            state=self.sync_observed_prices()
+            receipt={**receipt,"at":max(receipt["at"],state["last_at"])}
         state = _apply(state, receipt)
         self.store.event(EVENT_KIND, None, receipt)
         self.store.put(STATE_KEY, state)
@@ -717,6 +904,20 @@ class DailyBudget:
         baseline = state["baseline"]
         resource_nanos = fee_nanos = inference_nanos = 0
         prior_nanos = _nanos(baseline["upper_usd"]) if _day(baseline["utc_day"]) == day else 0
+        if isinstance(self.tariff, ObservedTariffEvidence) and _day(self.tariff.prior_utc_day) == day:
+            prior_nanos = max(prior_nanos, _nanos(self.tariff.prior_upper_usd))
+            fee_nanos += _nanos(self.tariff.fixed_day_fee_usd)
+        if isinstance(self.tariff, ObservedTariffEvidence):
+            date = dt.date(1970, 1, 1) + dt.timedelta(days=day)
+            saved = state.get("observed_day_facts", {}).get(date.isoformat(), {})
+            prior_nanos = max(prior_nanos, saved.get("prior_nanos", 0))
+            fee_nanos = max(fee_nanos, saved.get("fee_nanos", 0))
+            historical = state.get("observed_rate_max", {})
+            pricing = tariff_from_document({**asdict(self.tariff), **{
+                name: format(max(_decimal(rate), _decimal(getattr(self.tariff, name))), "f")
+                for name, rate in historical.items()}})
+        else:
+            pricing = self.tariff
         for row in state["resources"].values():
             if row["canceled"] or int(row["at"] // DAY_SECONDS) > day:
                 continue
@@ -736,10 +937,10 @@ class DailyBudget:
                 if terminal_settled:
                     pass  # Actual complete final usage is booked only to its genuine UTC accrual days.
                 elif resume:
-                    priced = _higher_rates(self.tariff, TariffEvidence(**resume["tariff"]))
+                    priced = _higher_rates(pricing, tariff_from_document(resume["tariff"]))
                     if row["terminal_at"] is None:
                         # Admit the full current day before an explicit-resume POST.
-                        resource_nanos += bound.daily_nanos(self.tariff)
+                        resource_nanos += bound.daily_nanos(pricing)
                         resource_nanos += _interval_nanos(bound, priced, resume["at"], day * DAY_SECONDS)
                     else:
                         # A terminal readback ends future compute but does not
@@ -749,13 +950,15 @@ class DailyBudget:
                     # Price possible running time after finite enforcement
                     # expiry now, rather than discovering the liability later.
                     end = max(_time(self.store.clock()), (day + 1) * DAY_SECONDS)
-                    priced = _higher_rates(self.tariff, TariffEvidence(**pause["tariff"]))
+                    priced = _higher_rates(pricing, tariff_from_document(pause["tariff"]))
                     resource_nanos += _interval_nanos(bound, priced, pause["fence"]["valid_until"], end)
                 else:
-                    priced = _higher_rates(self.tariff, TariffEvidence(**pause["tariff"]))
+                    priced = _higher_rates(pricing, tariff_from_document(pause["tariff"]))
                     resource_nanos += _interval_nanos(bound, priced, pause["fence"]["valid_until"], row["terminal_at"])
             elif row["terminal_at"] is None or day <= int(row["terminal_at"] // DAY_SECONDS):
-                resource_nanos += bound.daily_nanos(self.tariff)
+                priced = _higher_rates(pricing, tariff_from_document(row["tariff"])) if isinstance(
+                    self.tariff, ObservedTariffEvidence) else self.tariff
+                resource_nanos += bound.daily_nanos(priced)
             # An unconfirmed POST may create later. Its one-time fee has an unknown day.
             if row["created_at"] is None or day == int(row["created_at"] // DAY_SECONDS):
                 fee_nanos += _nanos(bound.creation_fee_usd)
@@ -764,6 +967,22 @@ class DailyBudget:
                 continue
             bill = row["receipt"]
             inference_nanos += row["max_nanos"] if bill is None else bill["actual_nanos"] if bill["accrued_day"] == day else 0
+        if isinstance(self.tariff, ObservedTariffEvidence):
+            held = dict(state.get("observed_pending_upper", {}))
+            for key, upper in self.tariff.pending:
+                held[key] = max(held.get(key, 0), _nanos(upper))
+            for key, upper in held.items():
+                row = state["inference"].get(key)
+                if row and not row["canceled"] and row["receipt"] is None:
+                    inference_nanos += max(0, upper - row["max_nanos"])
+                row = state["resources"].get(key)
+                if row and not row["canceled"]:
+                    priced = _higher_rates(pricing, tariff_from_document(row["tariff"]))
+                    reserved = ResourceBound(**row["bound"]).daily_nanos(priced) + _nanos(row["bound"]["creation_fee_usd"])
+                    if row["terminal_at"] is None or day <= int(row["terminal_at"] // DAY_SECONDS):
+                        resource_nanos += max(0, upper - reserved)
+                    else:
+                        resource_nanos += upper  # Terminal GET alone is not a final all-in charge allocation.
         return resource_nanos, fee_nanos, inference_nanos, prior_nanos
 
     def summary(self):
@@ -775,17 +994,32 @@ class DailyBudget:
             total = resources + fees + inference + prior
             # The following day is a conditional same-tariff projection, not proof of future prices.
             future = sum(self._totals(state, day + 1))
-            return {"utc_day": dt.datetime.fromtimestamp(day * DAY_SECONDS, dt.timezone.utc).date().isoformat(),
+            result = {"utc_day": dt.datetime.fromtimestamp(day * DAY_SECONDS, dt.timezone.utc).date().isoformat(),
                     "resource_upper_nanos": resources, "creation_upper_nanos": fees, "inference_upper_nanos": inference,
                     "prior_cost_upper_nanos": prior,
                     "total_upper_nanos": total, "total_upper_usd": _usd(total), "room_nanos": max(0, self.cap_nanos - total),
                     "within_cap": total <= self.cap_nanos, "conditional_future_daily_upper_nanos": future,
                     "tariff_valid_until": self.tariff.valid_until, "vendor_actual": False}
+            if isinstance(self.tariff, ObservedTariffEvidence):
+                result.update(accounting_mode=self.tariff.mode, admission_total_at_observed_rates_usd=_usd(total),
+                              admission_total_at_observed_rates_nanos=total,
+                              price_basis_sha256=self.tariff.basis_sha256, price_basis_time=self.tariff.valid_from,
+                              future_rate_lock=False, verified_all_in_ceiling=False,
+                              provider_final_bill_guaranteed=False)
+                # Preserve the shared numeric gate while naming the estimate honestly.
+                result["total_upper_usd"] = None
+                result["total_upper_nanos"] = None
+                result["conditional_future_daily_upper_nanos"] = None
+            return result
 
     def _admit(self, receipt):
+        self.observe_prices()
         with self.store.atomic():
             state, now = self._load(), _time(self.store.clock())
             self._check(state, now)
+            if isinstance(self.tariff, ObservedTariffEvidence) and not _same(state.get("observed_basis"), asdict(self.tariff)):
+                state = self._write(state, {"action": "observed_basis", "at": now,
+                                           "key": self.tariff.basis_sha256, "tariff": asdict(self.tariff)})
             receipt = {**receipt, "at": now}
             projected = _apply(json.loads(json.dumps(state)), receipt)
             if sum(self._totals(projected, int(now // DAY_SECONDS))) > self.cap_nanos:
@@ -803,6 +1037,7 @@ class DailyBudget:
                             "provenance": provenance})["inference"][key]
 
     def _transition(self, receipt, *, admission=False):
+        if admission:self.observe_prices()
         with self.store.atomic():
             state, now = self._load(), _time(self.store.clock())
             if admission:
@@ -860,6 +1095,8 @@ class DailyBudget:
         """
         if not isinstance(observation, NativePausedEvidence) or not isinstance(fence, ResumeFenceEvidence):
             raise DailyAdmissionError("native paused GET and explicit resume enforcement evidence are required")
+        if isinstance(self.tariff, ObservedTariffEvidence):
+            raise DailyAdmissionError("fresh observed prices cannot certify the original paused usage interval; full hold retained")
         receipt = {"action": "native_paused", "key": key, "observation": asdict(observation),
                    "fence": asdict(fence), "tariff": asdict(self.tariff),
                    "retained_usage_nanos": _nanos(retained_native_usage_upper_usd),
@@ -887,6 +1124,8 @@ class DailyBudget:
             raise DailyAdmissionError("native resource or storage exceeds original obligations; paid scope closed")
 
     def reserve_resume(self, key: str, resume_key: str, *, provenance: str):
+        if isinstance(self.tariff, ObservedTariffEvidence):
+            raise DailyAdmissionError("observed mode retains full resources; interval-bound pause/resume accounting remains required")
         """Reserve on the same original resource before allowing an explicit resume."""
         self._admit({"action": "resume_reserved", "key": key, "resume_key": resume_key,
                      "tariff": asdict(self.tariff), "provenance": provenance})

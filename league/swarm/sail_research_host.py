@@ -23,13 +23,15 @@ from pathlib import Path
 import re
 import shlex
 import stat
+import sys
 import time
 from typing import Callable
 from urllib.request import build_opener
 
 from ..sailbox import SailboxClient, Transport as BoxTransport
 from ..gym.driver import GymDriver, build_bundle
-from .daily_compute import DailyAdmissionError, DailyBudget, InventoryEvidence, ResourceBound, TariffEvidence
+from .daily_compute import (DailyAdmissionError, DailyBudget, InventoryEvidence, ResourceBound, TariffEvidence,
+                            ObservedTariffEvidence, tariff_from_document)
 from .research_host import HostAdapters, HostConfig, ReviewedFile
 from .research_sandbox import HostContextEvidence, _host_context, _verify_artifact
 from .research_state import artifact_identity
@@ -130,13 +132,18 @@ class _Bridge:
                  "separate approved data/code roots and Python required")
         self.profile_receipt = self.receipt(inputs.models)
         m = self.profile_receipt
-        _require(set(m) == {"schema", "scope", "profiles", "provenance"} and m["schema"] == 1
+        self.observed_mode = type(m.get("schema")) is int and m["schema"] == 2
+        model_fields = {"schema", "scope", "profiles", "provenance"} | ({"cost_basis"} if self.observed_mode else set())
+        _require(set(m) == model_fields and type(m["schema"]) is int and m["schema"] in (1, 2)
                  and m["scope"] == self.policy.scope and isinstance(m["profiles"], dict) and m["profiles"],
                  "reviewed Sail model profiles required")
+        _require(self.observed_mode == isinstance(config.tariff, ObservedTariffEvidence),
+                 "model receipt and explicit host accounting mode differ")
         self.model_policies = {}
         for name, row in m["profiles"].items():
             _require(isinstance(name, str) and _RESPONSE.fullmatch(name) and isinstance(row, dict)
-                     and set(row) == {"policy", "max_request_bytes", "billable_input_ceiling", "completion_window", "agreement"},
+                     and set(row) == ({"policy", "max_request_bytes", "billable_input_ceiling", "completion_window"}
+                                      | (set() if self.observed_mode else {"agreement"})),
                      "invalid reviewed Sail model profile")
             policy = ModelPolicy(**{**row["policy"], "allowed_efforts": tuple(row["policy"]["allowed_efforts"]),
                                    "allowed_tools": tuple(row["policy"]["allowed_tools"])})
@@ -149,10 +156,18 @@ class _Bridge:
             if name in PROFILES:
                 _require((policy.model, row["completion_window"]) == PROFILES[name][:2],
                          "stock Sail profile/model/completion window changed")
-            self.agreement(row["agreement"], model=True)
+            if not self.observed_mode:
+                self.agreement(row["agreement"], model=True)
             self.model_policies[name] = policy
-        self.policy_digest = _digest({"research": asdict(self.policy),
-                                     "models": {k: asdict(v) for k, v in sorted(self.model_policies.items())}})
+        if self.observed_mode:
+            # Immutable profile origin remains readable after expiry for GET-only
+            # recovery. Every new paid operation validates a separate fresh basis.
+            self.read_basis(m["cost_basis"], fresh=False).validate_profiles(m["profiles"])
+        policy_document = {"research": asdict(self.policy),
+                           "models": {k: asdict(v) for k, v in sorted(self.model_policies.items())}}
+        if self.observed_mode:
+            policy_document["accounting_mode"] = "observed_self_service"
+        self.policy_digest = _digest(policy_document)
         if not cleanup_only:
             tariff, inventory = self.fresh()
             store = self.store()
@@ -185,19 +200,53 @@ class _Bridge:
                          (self.config.artifact_root, self.config.state_root)), "agreement must be host private")
         approved.read()  # Its interpretation is independently reviewed, not inferred from a rate GET.
 
+    def read_basis(self, value, *, fresh=True):
+        from . import self_service_cost
+        def read_reference(path, sha):
+            approved = ReviewedFile(path, sha)
+            _require(not any(root == path or root in path.parents for root in
+                             (self.config.artifact_root, self.config.state_root)),
+                     "raw billing facts must be outside controller mounts")
+            return approved.read()
+        names = ("league/swarm/sail_research_host.py", "league/swarm/research_transport.py",
+                 "league/swarm/self_service_cost.py", "ltcm/provider.py")
+        sources = {name: dict(self.config.artifact_files).get(name) for name in names}
+        loaded = {"league/swarm/sail_research_host.py": __file__,
+                  "league/swarm/research_transport.py": sys.modules[ResearchBroker.__module__].__file__,
+                  "league/swarm/self_service_cost.py": self_service_cost.__file__,
+                  "ltcm/provider.py": sys.modules["ltcm.provider"].__file__}
+        _require(all(sources.values()) and all(hashlib.sha256(Path(path).read_bytes()).hexdigest() == sources[name]
+                 for name, path in loaded.items()), "loaded quantity/cost-basis sources differ from reviewed artifact")
+        return self_service_cost.read_cost_basis(value, scope=self.policy.scope, now=self.clock(),
+                                                read_reference=read_reference, quantity_sources=sources, require_fresh=fresh)
+
     def billing(self, *, initialization_preflight=False):
+        observed_mode = getattr(self, "observed_mode", False)  # Original schema1 passive reader compatibility.
         _require(type(initialization_preflight) is bool
                  and (not initialization_preflight or self.cleanup_only),
                  "first-admission billing preflight is restricted to a passive bridge")
         b = self.receipt(self.inputs.billing())
-        _require(set(b) == {"schema", "scope", "observed_at", "valid_until", "tariff", "inventory", "agreement", "provenance"}
-                 and b["schema"] == 1 and b["scope"] == self.policy.scope,
+        expected = {"schema", "scope", "observed_at", "valid_until", "tariff", "inventory", "provenance"}
+        expected.add("cost_basis" if observed_mode else "agreement")
+        _require(set(b) == expected and type(b["schema"]) is int
+                 and b["schema"] == (2 if observed_mode else 1) and b["scope"] == self.policy.scope,
                  "fresh complete Sail billing receipt required")
         now = _time(self.clock())
         _require(_time(b["observed_at"]) <= now <= _time(b["valid_until"]) <= b["observed_at"] + 300,
                  "Sail billing receipt is stale")
-        self.agreement(b["agreement"])
-        tariff = TariffEvidence(**b["tariff"])
+        if observed_mode:
+            basis = self.read_basis(b["cost_basis"])
+            basis.require_admission_facts()
+            basis.validate_profiles(self.profile_receipt["profiles"])
+            _require(Decimal(self.policy.resource_bound.creation_fee_usd) >= Decimal(
+                basis.document["fees_taxes"]["creation_fee_upper_usd"]) * basis.factor(),
+                "observed creation fee exceeds the original admitted resource policy")
+            _require(_digest(b["tariff"]) == _digest(basis.tariff_document()),
+                     "observed tariff differs from original raw applicable cost facts")
+            self.current_basis = basis
+        else:
+            self.agreement(b["agreement"])
+        tariff = tariff_from_document(b["tariff"])
         inventory = InventoryEvidence(**{**b["inventory"], "resource_ids": tuple(b["inventory"]["resource_ids"]),
                                          "model_keys": tuple(b["inventory"]["model_keys"])})
         _require(tariff.scope == inventory.scope == self.policy.scope
@@ -208,7 +257,7 @@ class _Bridge:
         # original allowance. This explicit preflight conveys no model-only or
         # paid authority, needs the full compute day, and never opens SQLite.
         if initialization_preflight:
-            _require(tariff.covers_day(int(now//86400)),
+            _require(observed_mode or tariff.covers_day(int(now//86400)),
                      "first-admission preflight requires full-day compute prices")
             return tariff, inventory
         # Normal admission requires existing replay-checked history. Read it
@@ -221,7 +270,9 @@ class _Bridge:
         try:
             store._exec("BEGIN")
             ledger = DailyBudget(store, tariff, inventory)._load()
-            _require(not ledger["resources"] or tariff.covers_day(int(now//86400)),
+            if observed_mode:
+                DailyBudget(store, tariff, inventory)._check(ledger, now)
+            _require(observed_mode or not ledger["resources"] or tariff.covers_day(int(now//86400)),
                      "resource history requires guaranteed full-day compute prices")
         finally:
             store.close()
@@ -262,9 +313,13 @@ class _Bridge:
         tariff, inventory = self.fresh() if paid else (self.config.tariff, self.config.inventory)
         store = self.store()
         try:
+            budget=DailyBudget(store,tariff,inventory)
+            if paid:
+                budget.observe_prices()
+                budget.sync_observed_prices()
             state = self.state(store)
             if paid:
-                _require(not state["closed"] and DailyBudget(store, tariff, inventory).summary()["within_cap"],
+                _require(not state["closed"] and budget.summary()["within_cap"],
                          "Sail operation lacks shared admitted dollar room")
             _require(len(state["resources"]) == 1, "exactly one original research resource intent required")
             key, row = next(iter(state["resources"].items()))
@@ -348,6 +403,8 @@ class _Bridge:
         return digest
 
     def intent(self, key, document):
+        if self.observed_mode:
+            self.journal("cost_basis", self.current_basis.sha256, self.current_basis.document)
         self.journal("intent", key, document, exclusive=True)
 
     def terminal_bill(self, key, response, model, body_sha):
@@ -355,12 +412,23 @@ class _Bridge:
         if approved is None:
             return None
         bill = self.receipt(approved)
-        _require(set(bill) == {"schema", "scope", "request_key", "response_id", "model", "body_sha256",
-                              "actual_usd", "accrued_day", "final", "provenance"}
-                 and bill["schema"] == 1 and bill["scope"] == self.policy.scope and bill["request_key"] == key
+        expected = {"schema", "scope", "request_key", "response_id", "model", "body_sha256",
+                    "actual_usd", "accrued_day", "final", "provenance"}
+        if self.observed_mode:
+            expected |= {"inclusive_fees_taxes", "source_document"}
+        _require(set(bill) == expected and type(bill["schema"]) is int
+                 and bill["schema"] == (2 if self.observed_mode else 1)
+                 and bill["scope"] == self.policy.scope and bill["request_key"] == key
                  and bill["response_id"] == response and bill["model"] == model
                  and bill["body_sha256"] == body_sha and bill["final"] is True,
                  "actual model bill is not linked to the original request")
+        if self.observed_mode:
+            _require(bill["inclusive_fees_taxes"] is True and isinstance(bill["source_document"], dict)
+                     and set(bill["source_document"]) == {"path", "sha256"}, "final all-in original charge source required")
+            source = ReviewedFile(Path(bill["source_document"]["path"]), bill["source_document"]["sha256"])
+            _require(not any(root == source.path or root in source.path.parents for root in
+                             (self.config.artifact_root, self.config.state_root)), "all-in bill source must be host private")
+            source.read()  # Authentic raw bills need not invent a local JSON provenance field.
         _require(isinstance(bill["actual_usd"], str), "exact terminal bill units required")
         try:
             amount = Decimal(bill["actual_usd"])
@@ -630,6 +698,8 @@ class _SailModel:
             tariff, inventory = b.billing() if sending else (b.config.tariff, b.config.inventory)
             budget = DailyBudget(store, tariff, inventory)
             if sending:
+                budget.observe_prices()
+                budget.sync_observed_prices()
                 _require(budget.summary()["within_cap"], "model lacks shared admitted budget")
             daily_key = "model-"+hashlib.sha256((b.policy.scope+":"+key).encode()).hexdigest()
             held = budget._load()["inference"].get(daily_key)
@@ -691,7 +761,8 @@ class _SailModel:
         _require(body["model"] == self.policy.model and body["max_output_tokens"] <= self.policy.max_output_tokens,
                  "Sail model or output ceiling changed")
         now = _time(b.clock())
-        _require(self.policy.valid_from <= now and now+self.policy.timeout_seconds < self.policy.valid_until,
+        _require(self.policy.valid_from <= now and (now < self.policy.valid_until if b.observed_mode
+                 else now+self.policy.timeout_seconds < self.policy.valid_until),
                  "Sail accepted-request price evidence is expired")
         key, wire, intent = self._original(body, sending=True)
         b.intent("model:"+key, intent)

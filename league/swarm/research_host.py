@@ -31,7 +31,7 @@ import time
 from dataclasses import dataclass, fields
 from typing import Callable, Mapping
 
-from .daily_compute import DailyBudget, InventoryEvidence, ResourceBound, TariffEvidence
+from .daily_compute import DailyBudget, InventoryEvidence, ResourceBound, TariffEvidence, tariff_from_document
 from .research_ipc import BrokerServer, create_listener
 from .research_sandbox import (HostContextEvidence, SandboxSpec, _host_context, _verify_artifact,
                                launch_sandbox)
@@ -336,8 +336,10 @@ class HostRuntime:
                  and isinstance(observed[1], InventoryEvidence)
                  and observed[0].scope == observed[1].scope == self.config.research_policy.scope,
                  "fresh authoritative shared billing scope required")
+        self.budget.tariff, self.budget.inventory = observed
+        self.budget.observe_prices()
         with self.store.atomic():
-            self.budget.tariff, self.budget.inventory = observed
+            self.budget.sync_observed_prices()
             _require(self.budget.summary()["within_cap"], "fresh shared billing obligations exceed their ceiling")
 
     def _build_broker(self, *, admission=True):
@@ -493,7 +495,7 @@ def load_config(reviewed: ReviewedFile):
         if name in policy:
             policy[name] = tuple(policy[name])
     document["research_policy"] = ResearchPolicy(**policy)
-    document["tariff"] = TariffEvidence(**document["tariff"])
+    document["tariff"] = tariff_from_document(document["tariff"])
     inventory = dict(document["inventory"])
     for name in ("resource_ids", "model_keys"):
         inventory[name] = tuple(inventory[name])
