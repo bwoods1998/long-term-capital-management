@@ -353,7 +353,9 @@ def checks(swarm: Mapping[str, Any], *, now: float, ceiling: int | None, budget:
 def notice_facts(cause: str, check: Mapping[str, Any], since: float | None, now: float) -> dict[str, Any]:
     """The `stall` notice's facts (the gateway composes the words, gateway/lib/email.mjs): the cause, the House's own
     sentence for it, the numbers, how long (hours, and since when), what the House is doing, the owner step or None."""
-    numbers = {k: v for k, v in (check.get("numbers") or {}).items()}
+    # A figure is a count, a dollar or hour figure to two places, a time, yes or no, or a short token (the gateway echoes
+    # only those, and an unknown one as unknown).
+    numbers = {k: round(v, 2) if isinstance(v, float) else v for k, v in (check.get("numbers") or {}).items()}
     return {"kind": "stall", "notice_id": f"stall:{cause}", "cause": cause, "what": str(check.get("what") or ""),
             "numbers": numbers, "since": None if since is None else S.iso(since),
             "hours": None if since is None else _hours(now - since), "doing": str(check.get("doing") or ""),

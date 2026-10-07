@@ -112,9 +112,25 @@ export function compose(kind, facts = {}) {
   return { subject, text: lines.filter(line => line !== undefined && line !== null).join('\n') + '\n' };
 }
 
-// What the floor may post to /v1/notify: fills, settlements, the sample, a disk warning, a real-money stop, and a
-// funding cliff (V3-A, WP8: the budget rule's card notice, league/ops/budget.py).
-export const NOTICE_KINDS = ['trade', 'settled', 'test', 'disk_low', 'live_stop', 'funding'];
+// What the floor may post to /v1/notify: fills, settlements, the sample, a disk warning, a real-money stop, a funding
+// cliff (V3-A, WP8: the budget rule's card notice, league/ops/budget.py), and a stall (the owner's goal of Oct 7, 2026,
+// item 6: the House's `stall` job, league/ops/stall.py).
+export const NOTICE_KINDS = ['trade', 'settled', 'test', 'disk_low', 'live_stop', 'funding', 'stall'];
+//: The causes a stall notice may name (league/ops/stall.py CAUSES) and the words its subject gives each. A cause not named
+//: here is not composed (a 400): the subject carries only these words, never the House's text.
+export const STALL_CAUSES = {
+  births: 'no births',
+  gym_runs: 'too few Gym runs',
+  validations: 'no Validation runs',
+  braked: 'the Sail guard braked most of the day',
+  runway_sail: 'Sail research runway short',
+  runway_claude: 'Claude research runway short',
+  owner_deploy: 'an owner deploy is waiting',
+};
+//: The most figures a stall notice lists, and the shape of a figure's name.
+const STALL_NUMBERS = 16;
+const FIGURE_NAME = /^[a-z][a-z0-9_]{0,39}$/;
+const TOKEN = /^[a-z0-9_.,:-]{1,80}$/;
 //: The meters a funding notice may name (league/ops/budget.py): Sail's prefund and the Anthropic account.
 export const FUNDING_METERS = { sail: 'Sail', claude: 'Claude (Anthropic)' };
 //: The stops the House trips on real money (Sept 26, 2026 (the options-swarm run, Wave 5)). A stop not named here is not
@@ -132,6 +148,16 @@ const dayCount = value => (decimal(value) === null ? 'unknown' : `${Number(decim
 const DATE = /^\d{4}-\d{2}-\d{2}(T[0-9:.]{2,15}Z)?$/;
 const dateOf = value => (typeof value === 'string' && DATE.test(value) ? value.slice(0, 10) : 'unknown');
 const clip = (value, max) => (typeof value === 'string' ? value.slice(0, max) : '');
+//: The House's own sentence, on one line: control characters (a newline included) become one space.
+const sentence = (value, max) => clip(value, max).replace(/[\x00-\x1f\x7f]+/g, ' ').trim();
+//: A stall's figure as the House sent it: a decimal, a date or time, yes or no, a short lower-case token, else unknown.
+const figure = value => {
+  if (value === true || value === false) return value ? 'yes' : 'no';
+  if (decimal(value) !== null) return decimal(value);
+  if (typeof value === 'string' && DATE.test(value)) return value;
+  if (typeof value === 'string' && TOKEN.test(value)) return value;
+  return 'unknown';
+};
 const price = value => (typeof value === 'string' && value ? `$${value}` : 'unknown');
 
 /**
@@ -255,6 +281,33 @@ export function composeNotice(facts = {}) {
               ? `If no card is added, ${meter} lasts ${lasts} days above its reserve at the rate the desk is held to now: research on it ${idle ? `is already at ${dollars(facts.current_research_usd_day)}, so there is nothing left to throttle` : versionOne ? 'stays throttled' : 'tapers as the balance falls'}.`
               : `If no card is added, research on ${meter} stays throttled; how long ${meter} lasts at the rate the desk is held to now was not sent.`,
         'The budget rule never raises a cap or moves money.',
+        `At: ${clip(facts.at, 40) || 'an unknown time'}.`,
+      );
+      break;
+    }
+    case 'stall': {
+      // A stall (the owner's goal of Oct 7, 2026, item 6): the House's `stall` job (league/ops/stall.py `notice_facts`)
+      // found the floor not improving itself for one cause and says it once per cause per 12 hours (the router keys the
+      // dedupe on the cause, whatever id the House sends). The subject is this file's words for the cause; the body
+      // carries the House's sentence for it, its figures (each name a lower-case word, each value a decimal, a date, yes or
+      // no or a short token, else unknown), how long, what the House is doing about it, and the owner step when there is
+      // one. With none, the mail says nothing needs the owner.
+      if (!Object.hasOwn(STALL_CAUSES, facts.cause)) return null;
+      subject = `LTCM: stalled: ${STALL_CAUSES[facts.cause]}`;
+      const numbers = facts.numbers && typeof facts.numbers === 'object' && !Array.isArray(facts.numbers)
+        ? Object.entries(facts.numbers).filter(([name]) => FIGURE_NAME.test(name)).slice(0, STALL_NUMBERS) : [];
+      const hours = decimal(facts.hours);
+      const since = typeof facts.since === 'string' && DATE.test(facts.since) ? facts.since : null;
+      const step = sentence(facts.owner_step, 300);
+      lines.push(
+        sentence(facts.what, 400) || `The floor is stalled: ${STALL_CAUSES[facts.cause]}.`,
+        '',
+        ...(numbers.length ? ['The numbers:', ...numbers.map(([name, value]) => `- ${name}: ${figure(value)}`), ''] : []),
+        hours === null ? 'How long: unknown.' : `How long: ${Number(hours)} hours${since ? `, since ${since}` : ''}.`,
+        `What the House is doing: ${sentence(facts.doing, 700) || 'it did not say.'}`,
+        step
+          ? `Only you can do this: ${step.replace(/\.$/, '')}. The House keeps working around it meanwhile.`
+          : 'Nothing here needs you: the House keeps working around it, and says so again in 12 hours if it still stands.',
         `At: ${clip(facts.at, 40) || 'an unknown time'}.`,
       );
       break;
