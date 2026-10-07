@@ -82,7 +82,7 @@ class Protocol(unittest.TestCase):
         self.assertEqual(row["accounting"]["global_looks"], 3)
         holdout = row["attempts"][0]["holdout"]
         self.assertEqual(holdout["numbers"]["looks_before"], 2)
-        self.assertAlmostEqual(holdout["numbers"]["holm_threshold"], evidence.HOLDOUT_ALPHA / 3)
+        self.assertEqual(holdout["numbers"]["level"], evidence.LOOK_LEVEL)  # FAST LANE V2: flat, the looks before recorded only
 
     def test_real_store_counts_every_noise_version_and_never_resets_lineage(self):
         row = B.trial("adaptive_noise", "development", 0)

@@ -1,5 +1,5 @@
 """The evidence lines, exactly as the plan states them ("Evidence: fast without fooling ourselves"), as amended by
-the owner's decision D2 of Sept 26, 2026.
+the owner's decision D2 of Sept 26, 2026 and by FAST LANE V2 of Oct 7, 2026 (the owner's goal of Oct 7, item 4; below).
 
 A search over tens of thousands of programs finds something that looks great on any window by chance,
 so these lines are the swarm's brakes. They may be TIGHTENED on evidence; loosening one is the owner's
@@ -14,16 +14,18 @@ holdout Sharpe at least half of validation's, at most 3 looks per lineage)." Bef
 on 60 days and deflated the all-days Sharpe by every Train trial of the lineage, which capped a family trading a
 fraction f of days at sqrt(f / (1 - f)) and punished sparse mechanisms twice. (a) lives in `diagnostics.py`.
 
-THE VALIDATION LINE (a family's best program, on Validation 2025):
+THE VALIDATION LINE (a family's best program, on Validation 2025; FAST LANE V2, Oct 7, 2026):
   - at least 50 trades on at least 25 distinct trading days (D2c);
-  - mean P&L per dollar of maximum loss above zero after fees, with a one-sided t of at least 2 (the t on
+  - mean P&L per dollar of maximum loss above zero after fees, with a one-sided t of at least 1.65 (`MIN_T`; the t on
     DAILY-aggregated P&L per dollar of maximum loss, `t_daily`: correlated intraday entries make a per-trade t
     overstate the evidence, the Gym's review of Sept 26);
   - a deflated Sharpe probability of at least 0.95 on the TRADED-DAY Sharpe (`t_daily / sqrt(days_traded)` over
-    `days_traded` observations, with the traded-day moments), against the best of N luck, N = the lineage's
-    validated versions (inherited ones included) and the spread of their traded-day Sharpes (D2b; `league/stats.py`);
-  - positive in at least 3 of Validation's 4 quarters;
+    `days_traded` observations, with the traded-day moments), with N = 1: the program itself, never its lineage's history
+    (the tournament passes 1), so it is the probabilistic Sharpe against 0 (a moments-adjusted t of about 1.645;
+    `league/stats.py`). `deflated` still takes any N (the benchmark scripts' lineage rows);
+  - positive in at least 2 of Validation's 4 quarters (`MIN_QUARTERS_POSITIVE`);
   - positive at 1.5x the half-spread (the stress run's P&L after fees).
+  `allocation.py` reads `MIN_T`, so the allocator's line follows these constants by itself.
 
 THE TRAIN OBJECTIVE (`train_score`, the sprint's "robust Train objective", Sept 26): a version is scored on its WORST
 Train year (the `t_daily` of each year its own roots had data, the Gym's `by_year`), times the share of those years'
@@ -47,28 +49,41 @@ run from before the figures is not screened (`known` False): it is never validat
 (`first_year`), and a year before 2022 only when every root of the program had data on half its days (as the Train score
 does); "all but one" is over the years it counts, and the pooled t is refitted over them.
 
-THE HOLDOUT LINE (one look per program version, at most three per lineage; the gate's box only):
+THE HOLDOUT LINE (one look per program, duplicate looks refused (the gate's `duplicate_look`), at most three per lineage;
+the gate's box only; FAST LANE V2, Oct 7, 2026):
   - P&L after fees above zero;
-  - a day-block bootstrap one-sided 95% lower bound on mean daily P&L above zero, with a Holm-Bonferroni
-    correction across EVERY holdout look the swarm has made;
+  - a day-block bootstrap one-sided p of mean daily P&L at most `LOOK_LEVEL` (0.10), FLAT: no Holm escalation across
+    looks (the earlier looks are recorded as `looks_before`, never a divisor);
   - holdout Sharpe at least half of the validation Sharpe.
-  The researcher is told pass or fail, never the numbers.
+  The researcher is told pass or fail, never the numbers. `holm_passes` and `holm_level` stay for the benchmark scripts.
 
 THE LOOK HOLDS (L6(b) and L6(c), approved by the owner on Oct 2, 2026 as a TIGHTENING; the gate's
-`Gate.look_hold`). Every look raises the Holm bar of every later one, so the gate does not spend one on a version
-the holdout cannot judge. It HOLDS the look (no look, no review, no sealed read) when:
+`Gate.look_hold`): OFF since fast lane v2 by the owner's setting (`gate.look_holds` null in policy.json; direction
+counts, goal item 4). When switched on again they HOLD the look (no look, no review, no sealed read) when:
   - (b) THE DRIFT HOLD (`drift_lean`): the version's own Train drift fit is long-delta (pooled beta above zero) and its
     drift share, |drift_usd| / (|alpha_usd| + |drift_usd|) over the years THE DRIFT SCREEN counts, is at least
     `LOOK_HOLD_DRIFT_SHARE`. A Validation pass by such a program has mostly measured the market's drift;
-  - (c) THE POWER HOLD (`holdout_power`): the one-sided power of the holdout's own test, at the level the look would
-    have to reach under Holm (`holm_level`), is below `LOOK_HOLD_MIN_POWER`, taking the version's Validation all-days
-    daily Sharpe as its true Sharpe over the holdout's sessions. The test is a day-block bootstrap of the mean daily
-    P&L; its power is taken in the normal approximation, P(Z >= z(level) - S sqrt(N)). The line's other checks are left
-    out (they can only lower the pass chance, and barely bind near the line). The bootstrap is not exactly normal: for
-    independent daily P&L it passes a little more often than the approximation near the line, so the hold errs toward
-    holding (the tighter side); for positively autocorrelated daily P&L (positions marked over several days) it passes
-    less often, so the hold errs toward looking.
+  - (c) THE POWER HOLD (`holdout_power`): the one-sided power of the holdout's own test, at the flat `LOOK_LEVEL`, is
+    below `LOOK_HOLD_MIN_POWER`, taking the version's Validation all-days daily Sharpe as its true Sharpe over the
+    holdout's sessions. The test is a day-block bootstrap of the mean daily P&L; its power is taken in the normal
+    approximation, P(Z >= z(level) - S sqrt(N)). The line's other checks are left out (they can only lower the pass
+    chance, and barely bind near the line). The bootstrap is not exactly normal: for independent daily P&L it passes a
+    little more often than the approximation near the line, so the hold errs toward holding (the tighter side); for
+    positively autocorrelated daily P&L (positions marked over several days) it passes less often, so the hold errs
+    toward looking.
   Missing figures hold too (fail-closed). These are the owner's settings (`gate.look_holds`), each switchable to null.
+
+FAST LANE V2 (Oct 7, 2026; the owner's goal of Oct 7, item 4: "a program trades at Probe size as soon as it passes a
+pre-registered screen whose false-positive rate you have measured"). THE SCREEN is the Validation line above plus one
+holdout look per distinct program at the flat level 0.10, both pre-registered. Its false-positive rate (a no-edge program
+reaching Validation passing both, at Gym costs) was measured by the pre-registered benchmark
+`scripts/screen_benchmark.py` against its frozen receipt `docs/benchmarks/fast_lane_screen_1.json` (acceptance: the 95%
+upper bound of the floor-eligible per-program rate at most 2% in every null world); the figures, today's rule beside
+them and the power at yearly Sharpe 1, 2 and 3 are in `docs/benchmarks/FAST_LANE_SCREEN_1.md`. CONTAMINATION is stated,
+not measured: 123 of the holdout's 184 sessions (through 2026-06-30) are inside the training of Opus 5.5 (cutoff June
+2026), and the cutoffs of the other authors are unknown; every look carries the tail from `CONTAMINATION_TAIL_FROM`
+(61 sessions) beside it (`numbers.tail`), weak in power and never a bar. The drift fit and the same-risk buy-and-hold
+are reported beside every screen result (`league/ops/direction.py`, `scripts/fast_lane_report.py`), never a bar.
 
 THE LEAKAGE ALARM: once there are at least 10 holdout looks, more than 30% passing stops the gate.
 
@@ -91,12 +106,19 @@ from .. import stats
 # ---------------------------------------------------------------------------- the lines (the plan's)
 MIN_TRADES = 50  # D2c (was 100)
 MIN_DAYS = 25    # D2c (was 60)
-MIN_T = 2.0
-MIN_DSR = 0.95
-MIN_QUARTERS_POSITIVE = 3
+MIN_T = 1.65  # FAST LANE V2 (Oct 7, 2026; was 2.0)
+MIN_DSR = 0.95  # with N = 1 a program (fast lane v2) the probabilistic Sharpe against 0: a moments-adjusted t of about 1.645
+MIN_QUARTERS_POSITIVE = 2  # FAST LANE V2 (was 3)
 STRESS = 1.5
+#: Holm's family-wise level across every look (`holm_passes`, `holm_level`): kept for the benchmark scripts and their tests;
+#: the gate no longer calls them (fast lane v2: one look a program at the flat `LOOK_LEVEL`).
 HOLDOUT_ALPHA = 0.05
 HOLDOUT_SHARPE_SHARE = 0.5
+#: FAST LANE V2 (Oct 7, 2026): the flat one-sided level of every holdout look, with no Holm escalation across looks.
+LOOK_LEVEL = 0.10
+#: FAST LANE V2: reported only, never a check. The holdout sessions from this day (61 of the 184 of Jan 2 - Sep 25, 2026)
+#: are after Opus 5.5's training cutoff (June 2026); the cutoffs of the other authors are unknown.
+CONTAMINATION_TAIL_FROM = "2026-07-01"
 LOOKS_PER_LINEAGE = 3
 ALARM_MIN_LOOKS = 10
 ALARM_PASS_SHARE = 0.30
@@ -185,7 +207,8 @@ def validation_line(result: Mapping[str, Any], stressed: Mapping[str, Any] | Non
                     version_sharpes: Sequence[float], lineage_trials: int = 0) -> dict[str, Any]:
     """Does a validation result meet the line? It may be the Gym's validation VIEW (summaries only: no trades,
     no dates, no daily series); `stressed` is the same program's validation result at 1.5x the half-spread.
-    `validated_versions` and `version_sharpes` are the lineage's (`SwarmStore.lineage_validated`, this one included);
+    `validated_versions` and `version_sharpes` are the N and Sharpes of the deflated Sharpe: the tournament passes 1 and
+    none (FAST LANE V2: N is the program itself); the benchmark scripts may pass a lineage's (`SwarmStore.lineage_validated`).
     `lineage_trials` is recorded, no longer a divisor (D2b)."""
     s = dict(result.get("summary") or {})
     trades = int(s.get("trades") or 0)
@@ -434,32 +457,35 @@ def holm_passes(p_new: float, previous: Sequence[float], *, alpha: float = HOLDO
 
 
 def holdout_line(result: Mapping[str, Any], *, validation_sharpe: float | None, previous_ps: Sequence[float],
-                 seed: str) -> dict[str, Any]:
-    """Does a holdout result meet the line? The numbers stay with the gate: the researcher hears pass or fail."""
+                 seed: str, level: float = LOOK_LEVEL) -> dict[str, Any]:
+    """Does a holdout result meet the line (FAST LANE V2, Oct 7, 2026)? P&L after fees above zero, the day-block
+    bootstrap's one-sided p at most `level` (flat: no Holm across looks; `previous_ps` is recorded only, as
+    `looks_before`), and the holdout Sharpe at least half of Validation's. The numbers carry the contamination tail
+    (`CONTAMINATION_TAIL_FROM` on: its days, P&L and own bootstrap p), reported and never a check. The numbers stay with
+    the gate: the researcher hears pass or fail."""
     s = dict(result.get("summary") or {})
     pnl = _num(s.get("pnl"))
     daily = daily_pnl(result)
-    # Enough draws that the smallest p the bootstrap can give (1 / (draws + 1)) stays well under the smallest Holm
-    # threshold (alpha / m, m = every look so far and this one): 20x, capped at 200,000.
-    m = len([p for p in previous_ps if _num(p) is not None]) + 1
-    draws = min(200_000, max(BOOTSTRAP_DRAWS, int(math.ceil(20.0 * m / HOLDOUT_ALPHA))))
-    boot = block_bootstrap(daily, seed=seed, draws=draws)
+    boot = block_bootstrap(daily, seed=seed, draws=BOOTSTRAP_DRAWS)  # 2000 draws: the smallest p, 1/2001, is far under 0.10
     p = boot["p"] if boot else 1.0
-    holm, threshold = holm_passes(p, previous_ps)
     sharpe = stats.sharpe(daily) if len(daily) >= 2 else None
     need = (validation_sharpe or 0.0) * HOLDOUT_SHARPE_SHARE
     checks = {
         "status_ok": result.get("status") == "ok",
         "pnl": pnl is not None and pnl > 0,
-        "bootstrap": boot is not None and boot["lcb95"] > 0,
-        "holm": boot is not None and holm,
+        "level": boot is not None and p <= float(level),
         "sharpe": sharpe is not None and validation_sharpe is not None and validation_sharpe > 0 and sharpe >= need,
     }
+    tail = [float(d[1]) for d in (result.get("daily") or []) if isinstance(d, (list, tuple)) and len(d) >= 2
+            and _num(d[1]) is not None and str(d[0])[:10] >= CONTAMINATION_TAIL_FROM]
+    tail_boot = block_bootstrap(tail, seed=f"{seed}:tail", draws=BOOTSTRAP_DRAWS)
     return {"passed": all(checks.values()), "checks": checks, "p": p,
             "numbers": {"pnl": pnl, "mean_daily": boot["mean"] if boot else None, "lcb95": boot["lcb95"] if boot else None,
-                        "p": p, "holm_threshold": threshold, "looks_before": len(previous_ps), "sharpe_daily": sharpe,
-                        "draws": draws, "holm_reachable": 1.0 / (draws + 1) <= HOLDOUT_ALPHA / m,
-                        "validation_sharpe_daily": validation_sharpe, "days": len(daily)}}
+                        "p": p, "level": float(level), "rule": "flat", "looks_before": len(previous_ps),
+                        "sharpe_daily": sharpe, "draws": BOOTSTRAP_DRAWS, "validation_sharpe_daily": validation_sharpe,
+                        "days": len(daily),
+                        "tail": {"from": CONTAMINATION_TAIL_FROM, "days": len(tail), "pnl": round(sum(tail), 6),
+                                 "p": tail_boot["p"] if tail_boot else None}}}
 
 
 def leakage_alarm(looks: int, passes: int) -> bool:
@@ -651,4 +677,5 @@ __all__ = ["validation_line", "holdout_line", "block_bootstrap", "holm_passes", 
            "train_score", "years_of", "robustness_view", "traded_sharpe", "checks_passed", "quarters_positive", "daily_pnl",
            "one_record", "MIN_TRADES", "MIN_DAYS", "MIN_T", "MIN_DSR", "STRESS", "LOOKS_PER_LINEAGE", "TRAIN_YEAR_MIN_TRADES",
            "TRAIN_YEAR_MIN_DAYS", "drift_numbers", "drift_screen", "DRIFT_MIN_T", "EXPLOIT_PER_POSITIVE", "drift_lean",
-           "holm_level", "holdout_power", "LOOK_HOLD_DRIFT_SHARE", "LOOK_HOLD_MIN_POWER"]
+           "holm_level", "holdout_power", "LOOK_HOLD_DRIFT_SHARE", "LOOK_HOLD_MIN_POWER", "LOOK_LEVEL",
+           "CONTAMINATION_TAIL_FROM", "MIN_QUARTERS_POSITIVE"]

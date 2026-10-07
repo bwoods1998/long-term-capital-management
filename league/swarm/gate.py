@@ -14,13 +14,15 @@ THE GATE (when a family's validated best meets the validation line):
    Claude (a default role), else GPT-6 Astra while the OpenAI month has room (`audit_openai_model`; null skips it), else
    a different Sail model; a failed audit is a refusal too.
 3. ONE HOLDOUT LOOK on a gate box (a fork of the gate image; the Gym image has no holdout days), judged by
-   the plan's holdout line (`evidence.holdout_line`, with Holm-Bonferroni across every look the swarm has
-   made). The researcher is told PASS or FAIL, never a number.
+   the holdout line (`evidence.holdout_line`: since FAST LANE V2, Oct 7, 2026, at the flat one-sided level
+   `evidence.LOOK_LEVEL` (0.10) per program, with no Holm escalation across looks). The researcher is told PASS or
+   FAIL, never a number.
 4. A pass makes the family a Candidate (live shadow). Candidate <-> Probe <-> Sized is the LIVE PATH's
    (the Money table), written through `SwarmStore.set_band`; the swarm never makes a Probe or a Sized.
 
-THE DUPLICATE LOOK (H3a, Oct 1, 2026; the edge study's "a duplicate adds no signal"). Every look raises the Holm bar of
-every later one, and the three looks since the Sept 26 reset covered two programs: the two Sept 27 looks had identical
+THE DUPLICATE LOOK (H3a, Oct 1, 2026; the edge study's "a duplicate adds no signal"). Every look then raised the Holm
+bar of every later one (since fast lane v2 a look is flat, and a program is still counted once), and the three looks
+since the Sept 26 reset covered two programs: the two Sept 27 looks had identical
 Train and Validation results under different run shas. So before anything else is asked of a version (the experiment
 contract, the drift screen, the rations, a paid review, a sealed read), `duplicate_look` compares it with every look the
 swarm has made, in any family and lineage. It repeats one when (1) it is the same program (`run_sha`: code and
@@ -38,8 +40,9 @@ version compares with nothing and goes on as before. Tightening only: no thresho
 no forward rule moves.
 
 THE LOOK HOLDS (L6(b) and L6(c) of the edge study, approved by the owner on Oct 2, 2026 as a tightening; `look_hold`,
-`evidence.drift_lean`, `evidence.holdout_power`). Every look raises the Holm bar of every later one; the three looks since
-the Sept 26 reset were all long-delta programs, and all failed. So, after the experiment contract, the drift screen and
+`evidence.drift_lean`, `evidence.holdout_power`). OFF SINCE FAST LANE V2 (Oct 7, 2026; the owner's goal item 4: direction
+counts, and a look is flat at `evidence.LOOK_LEVEL`, so a look no longer raises any later one's bar): policy.json sets
+`gate.look_holds` null, and `look_hold` returns None. As they stood, when switched on: after the experiment contract, the drift screen and
 the rations (each of which REFUSES, and a refusal bars the program from the incubator: a hold never takes a refusal's
 place) and before anything is paid (the review, the audit) or opened (the sealed read), the gate HOLDS the look at:
 - (b) THE DRIFT HOLD (stage "look hold (drift)"): a long-delta version (pooled Train beta above zero) whose Train drift
@@ -50,8 +53,8 @@ place) and before anything is paid (the review, the audit) or opened (the sealed
   `gate.look_holds.min_power` (0.30): the one-sided power of the holdout line's test of mean daily P&L above zero (a
   day-block bootstrap, taken in the normal approximation: P(Z >= z(level) - S sqrt(N))), with S the version's Validation
   all-days daily Sharpe (`validation_numbers.sharpe_daily`, the figure the look's Sharpe check uses), N the holdout
-  window's NYSE sessions (`holdout_sessions`) and the level the look would have to reach under Holm across every look
-  made (`evidence.holm_level`), a look in flight in another family counted as a failed one. Missing figures hold
+  window's NYSE sessions (`holdout_sessions`) and the level the look must reach, the flat `evidence.LOOK_LEVEL` (the
+  looks before and in flight elsewhere are counted in the figures, no longer in the level). Missing figures hold
   (fail-closed). The approximation leaves out the line's other checks (which can only lower the pass chance); for
   independent daily P&L the bootstrap passes a little more often than it says near the line, so the hold errs toward holding,
   and for positively autocorrelated daily P&L (multi-day marks) toward looking (`evidence.holdout_power`).
@@ -506,7 +509,7 @@ class Gate:
         """THE LOOK HOLDS (the module docstring) on version `n` of `fam` (its state as read: `validation_numbers` must be
         version `n`'s): {"stage", "holds" (every hold that fired, the drift hold first), "figures"} when a look at it is
         held, else None. "figures" are operator-only: the drift fit's beta, alpha, drift and share, and the power with
-        its Sharpe, sessions, Holm level and looks counted. Each hold is skipped while its setting is null."""
+        its Sharpe, sessions, the flat look level and looks counted. Each hold is skipped while its setting is null."""
         drift_share, min_power = look_hold_settings(self.settings)
         if drift_share is None and min_power is None:
             return None
@@ -526,7 +529,7 @@ class Gate:
                 else None
             previous = [x["p_value"] for x in self.store.looks() if x["p_value"] is not None]
             flying = [other for other, _ in self.store.looks_inflight() if other != str(fam["id"])]
-            level = evidence.holm_level(previous + [1.0] * len(flying))  # a look in flight elsewhere: a failed one
+            level = evidence.LOOK_LEVEL  # FAST LANE V2: the flat look; the looks before and in flight are figures only
             sessions = holdout_sessions()
             power = evidence.holdout_power(sharpe, sessions, level)
             held = power is None or power < min_power
@@ -981,8 +984,8 @@ class Gate:
                     self.store.lineage_looks(fam["id"], include_inflight=True) >= evidence.LOOKS_PER_LINEAGE or \
                     self.duplicate_look(current, n, sha) is not None or self.look_hold(current, n) is not None:
                 # (held by the operator meanwhile: no look is spent, gate_ready stays; a look it would repeat landed or went
-                # out meanwhile: THE DUPLICATE LOOK refuses it next round, or waits for it; a look that landed or went out
-                # meanwhile lowered its power: THE LOOK HOLDS hold it next round)
+                # out meanwhile: THE DUPLICATE LOOK refuses it next round, or waits for it; a hold switched on meanwhile:
+                # THE LOOK HOLDS hold it next round. Since fast lane v2 the level is flat, so a look elsewhere moves no power)
                 return None
             if not self.store.compare_and_set_state(fam["id"], {"validation_version": n, "validation_image": image, "validation_bundle": bundle,
                                                                "look_inflight": None}, gate_ready=False, look_inflight=marker):
@@ -1122,8 +1125,6 @@ class Gate:
         self.store.compare_and_set_state(fid, {"validation_version": n}, gated_sha=sha)
         self.store.event("swarm.gate", fid, {"action": "look", "version": n, "passed": line["passed"],
                                              "_line": line})  # the numbers stay private (underscore)
-        if not line["numbers"].get("holm_reachable", True):
-            self.store.event("swarm.status", None, {"action": "holm_unreachable", "looks": len(previous) + 1})
         self.tell(fid, "pass" if line["passed"] else "fail", verdict=True)
         self.outcome(fid, sha, "passed" if line["passed"] else "failed")
         has_image = callable(getattr(self.pool, "image", None))

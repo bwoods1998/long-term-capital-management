@@ -17,8 +17,9 @@
    new validated version in the deflated Sharpe's count. It keeps its own copy of the record (rows with no trial that
    name the source) and its state says where the verdict is from (`validation_inherited`); two such families in one
    round cost one job.
-2. THE LINE (`evidence.validation_line`, as the owner's decision D2 amended it): its deflated Sharpe is on traded
-   days with N = the lineage's validated versions (`SwarmStore.lineage_validated`). A family that meets it goes to
+2. THE LINE (`evidence.validation_line`, as the owner's decision D2 and FAST LANE V2 of Oct 7, 2026 amended it): its
+   deflated Sharpe is on traded days with N = 1, the program itself (fast lane v2; before it, the lineage's validated
+   versions, `SwarmStore.lineage_validated`, kept for the benchmark scripts). A family that meets it goes to
    the gate's queue. Then THE INCUBATOR'S TRAIN AND DRIFT MARKS (`incubator.facts`, release B2, Sept 30, 2026): each
    version an alive Gym family practises in an active, current cohort is marked `train_passed` once it has an eligible
    Train run, a profitable 1.5x run, no demotion and a passed drift screen, under the current evaluator. The mark is
@@ -484,7 +485,7 @@ class Tournament:
     def _verdict(self, fid: str, fam: Mapping[str, Any], n: int, result: Mapping[str, Any], *, counted: bool,
                  inherited: Mapping[str, Any] | None = None) -> dict[str, Any]:
         stressed = evidence.stressed_of(result)
-        validated, sharpes = self.store.lineage_validated(fid)
+        validated, sharpes = 1, []  # FAST LANE V2 (D1): the deflated Sharpe's N is the program itself, never the lineage's history
         line = evidence.validation_line(result, stressed, validated_versions=validated, version_sharpes=sharpes,
                                         lineage_trials=self.store.lineage_trials(fid))
         view = diagnostics.validation_view(result, line)
