@@ -54,6 +54,25 @@ drift_only (direction profit, reported, never a bar): screen 2.14%, Validation 1
 
 ## Contamination
 
-Stated, not measured: 123 of the holdout's 184 sessions (through 2026-06-30) are inside the training of Opus 5.5 (cutoff June 2026); the cutoffs of DeepSeek-V4-Flash (about 93% of versions), Kimi-K3 and GPT-6 Astra are unknown. A synthetic benchmark cannot measure it. Every look carries its 61-session tail from 2026-07-01 beside it (numbers.tail), weak in power and never a bar.
+123 of the holdout's 184 sessions (through 2026-06-30) are inside the training of Opus 5.5 (cutoff June 2026); the cutoffs of DeepSeek-V4-Flash (about 93% of versions), Kimi-K3 and GPT-6 Astra are unknown. A synthetic benchmark cannot measure it. Every look carries its 61-session tail from 2026-07-01 beside it (numbers.tail), weak in power and never a bar.
+
+Added after this run (the fast lane's review, Oct 7, 2026; reported only, outside the receipt's files): the fast lane's report (`league/ops/fast_lane.py`, daily in `<state>/fast-lane-report.json`) measures it on the real looks. Per look, the holdout series split at 2026-07-01 into the in-training head and the after-cutoff tail (days, P&L, daily Sharpe, own bootstrap p, whether that part alone meets the level, the head-minus-tail Sharpe gap); pooled over the looks, the mean gap with its t and the head-only against the tail-only pass share; per live band, live P&L per dollar of maximum loss against the holdout's. Its power is low with few looks.
 
 The tail look's power (normal approximation, level 0.10, an every-session program): Sharpe 1: 21.49% on the 61-session tail, 33.47% on the 184-session look; Sharpe 2: 38.30% on the 61-session tail, 66.55% on the 184-session look; Sharpe 3: 57.71% on the 61-session tail, 90.01% on the 184-session look.
+
+## Adaptive search (added after this run: the fast lane's review, Oct 7, 2026)
+
+The accepted rate (0.18-1.19%, upper bound 1.36%) is for ONE no-edge program drawn independently. It does not bound what a persistent no-edge lineage can reach:
+
+- With N = 1 a lineage pays nothing for repeated Validation tries, so once it can reach Validation again and again the operative rate is the look's given Validation, the "Look given Validation" column (7.2-14.6%).
+- With its 3 looks, such a lineage passes at least one with probability 1-(1-q)^3: skew 20.2%, mid 22.5%, gauss 27.9%, t3 29.7%, AR(0.2) 37.7%.
+- The "Per lineage (<= 3 looks)" column (0.3-2.2%; 3.8-12.5% for the largest lineage) replays the snapshot's past program counts as independent draws under the old regime: a historical floor, not a bound.
+- A new family the architect proposes on a failed mechanism starts a fresh lineage with fresh looks.
+- The weekly volume above (287 floor-eligible programs) was measured while the drift screen still kept long-delta programs out of Validation; with it off, the false-Probe figures above are low.
+- A near-duplicate (a parameter tweak that changes one fill) is a new program with a new look inside its lineage's 3. Its bootstrap is reseeded by its run sha over almost the same holdout P&L; with 2,000 draws the Monte Carlo error of p near 0.10 is about 0.007, so a borderline fail can flip on bootstrap noise alone. Researchers hear only pass or fail, so this is hard to aim at, but the flat look makes it cheaper than under Holm.
+
+Binding fixes (a within-lineage level, a near-duplicate rule in the gate's duplicate look, seeding the bootstrap by the lineage, more draws) are the owner's call: D1 asks for a flat look a program, and the seeding or the draws change a receipt file (the next receipt).
+
+## Before the receipt (added after this run)
+
+The constants were the spec's starting proposal, sized beforehand by prototype runs on the same snapshot (`proto_screen2.py` and `dsr_variants.py`, deterministic seeds; not the benchmark): screen false positives 0.39% gauss, 0.48% t3, 0.25% skew; Validation alone 3.3-4.5%; power 6-10%, 40-46% and 77-85% at a yearly Sharpe of 1, 2 and 3; a MIN_DSR of 0.90 or none against 0.95 the same false-positive rate and 1-3 points more power; the look's size at 0.10 11.35% gauss, 11.28% AR(0.2), 8.85% sparse. Whether `scripts/screen_benchmark.py --dev` was run before the receipt was frozen is not recorded. Its dev mode uses the same seed namespace as `--run` (its reps 0-1 are among the frozen 0-39), so a dev run would have previewed 2 of the 40 frozen draws. The acceptance rule can only tighten a constant (a failing world raises MIN_T), so neither could have loosened one. The next receipt (fast_lane_screen_2) gives `--dev` its own seed prefix; changing the script now would break this receipt's hashes.

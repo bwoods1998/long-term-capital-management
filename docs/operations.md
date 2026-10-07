@@ -19,7 +19,8 @@ has run it since 16:03Z Oct 7, release `20261007T160204Z`). It ships only by the
   profit at 1.5x the half-spread, the probabilistic Sharpe at 0.95). One holdout look a distinct program at a FLAT
   one-sided p <= 0.10 (`evidence.LOOK_LEVEL`): no Holm across looks, so the next look is no longer at 0.0125. Every look
   carries its contamination tail from 2026-07-01 (`numbers.tail`), never a check. The experiment contract, the duplicate
-  look, the rations (3 a lineage), the paid review and audit and the leakage alarm are unchanged. The false-positive
+  look, the rations (3 a lineage), the paid review and audit and the leakage alarm are unchanged; a program a paid
+  review or audit failed stays failed across the deploy's evaluator adoption (`Gate.paid_verdict`, below). The false-positive
   rate is measured by `scripts/screen_benchmark.py` against its frozen receipt
   (`docs/benchmarks/fast_lane_screen_1.json`), ACCEPTED: the floor-eligible per-program rate is 0.18-0.51% in the iid
   null worlds and 1.19% under AR(0.2) daily P&L (95% upper bound 1.36%, under the 2% cap); power 8%, 40% and 78% at a
@@ -27,31 +28,48 @@ has run it since 16:03Z Oct 7, release `20261007T160204Z`). It ships only by the
   [FAST_LANE_SCREEN_1.md](benchmarks/FAST_LANE_SCREEN_1.md).
 - **Direction counts (D2).** `league/swarm/policy.json` sets `tournament.drift_screen` false and `gate.look_holds` null:
   no version is demoted, refused or held for drift or power. The drift fit and the same-risk buy-and-hold are reported
-  beside every screen result and band row by the new `direction` job (`league/ops/direction.py`: at the House's start and
-  daily 01:00Z, the Gym roots' daily SIP closes through the gateway's bars route into `<state>/direction-closes.json`;
-  XSP and SPXW read SPY) and `scripts/fast_lane_report.py` (copies only; JSON). Nothing that decides reads them.
+  beside every screen result and band row by two new jobs: `direction` (`league/ops/direction.py`: at the House's start,
+  after the grant, and daily 01:00Z, the Gym roots' daily SIP closes through the gateway's bars route into
+  `<state>/direction-closes.json`; XSP and SPXW read SPY; a gateway error is a failed receipt, a House warning and a
+  retry) and `fast_lane` (`league/ops/fast_lane.py`: after each `direction` run, read-only, the report into
+  `<state>/fast-lane-report.json`, with the last 7 days' Validation rows and every look, band row and the Probe budget;
+  a Probe or Sized family whose look has no buy-and-hold is a House warning). `scripts/fast_lane_report.py` is the same
+  report on copies with any window. Nothing that decides reads them.
 - **The Probe (D3).** One structure (`probe.contracts` 1) whose maximum loss with fees fits 10% of the sizing equity E
   (`probe.max_loss_share` 0.10, bound 0.02-0.10), replacing 5% and the $100 floor (`floor_usd` 0); at most 3 Probe
-  positions held or working at once (`probe.max_open`); a Sized family whose Kelly stake buys no whole structure keeps
-  the Probe's one structure and limits (C3). A family the live path confirms onto Probe trades from the next live
+  positions held or working at once (`probe.max_open`). C3 is kept as it was: a Sized family whose Kelly stake is under
+  the Probe's cap (or buys no whole structure) is sized under the Probe's limits, now its one structure, 3 open and
+  15% the family; Sized limits apply only at a Kelly stake at its 10% cap. A family the live path confirms onto Probe trades from the next live
   minute: no session wait (`step._real_eligible`; a legacy Probe with no promotion record still waits a session). The
   calibration, the incubator and the House test keep `money.probe_room` (3 x 10% x E: $386.52 at E $1,288.40) of the
   book's and the day's caps, in place of two $100 floors.
-- **The Probe loss budget (D4).** $400 (`probe.loss_budget_usd`): realized net Probe losses (every `:r` row; none
-  existed before) plus the maximum loss of every Probe position held or working (`real.probe_tally`, from the live
-  state's rows, restart-safe). An open that would breach it is refused (`plan_open`), exits go on, and one House warning a
-  New York day says the budget is spent (raising it is the owner's). Sized positions count against it and against the 3;
-  a Sized open is never refused by either. The kill switch, the daily stop (35%), the drawdown stop (60%), the grant and
+- **The Probe loss budget (D4).** $400 (`probe.loss_budget_usd`): realized Probe losses, GROSS (each closed position a
+  Probe family opened counts its own loss; a gain, Probe or Sized, never offsets one), plus the maximum loss of every
+  real position held or working (`real.probe_tally`, from the live state's rows, restart-safe). A Probe family's open is
+  marked at its order (`money.Plan.probe`, kept in the order's `answer` and copied to its position's `info`), so "since
+  this release" is the mark itself: no order before it carries one, and a Sized position's result never touches the
+  realized figure. A LOST open (its outcome unknown) counts whole until the book finds it at the venue, whatever its
+  week, and holds its slot until its first leg expires. An open that would breach the budget is refused (`plan_open`),
+  exits go on, and one House warning a New York day says the budget is spent (raising it is the owner's). Sized
+  positions held or working count against it and against the 3 (a tightening); a Sized open is never refused by
+  either. The kill switch, the daily stop (35%), the drawdown stop (60%), the grant and
   reconciliation still refuse first (`real_block`). At E $1,288.40: the Probe cap $128.84, 3 x $128.84 = $386.52, the
   gateway's per-order cap $322.10 and day cap $1,288.40, the book cap $1,159.56, the daily stop $450.94.
 - **Demotion by live results (D5).** A Probe goes exit-only, for good for its version, when its realized real P&L falls
   below -3 x the mean maximum loss of its real positions, or its live fills run below its nightly replay of the same days
   by more than 0.20 a dollar of maximum loss over 5 or more matched real trades (`money.demotion`; chosen, not measured).
   The `swarm.band` and `live.band` events carry the reason; the forward rows are kept. Sizing up (Sized) is unchanged.
+- **Tuition within the Probe's cap.** Tuition (`:t`, a real 1-lot of a program that passed Validation only) sends one
+  structure only when its maximum loss with fees fits the Probe's cap, 10% of E (`plan_open`; it had only the tuition
+  day's $200 and week's $300). It stays outside the Probe count and the Probe budget (below, its reach).
+- **A paid verdict binds (`Gate.paid_verdict`).** The deploy's adoption clears the gate's `review` and `gated_sha`; a
+  version whose program a paid review or audit failed (a kept refusal at the stage "review" or "audit", in any family
+  holding the same program, or a kept bar from such a verdict) is closed before anything is paid: no second review, no
+  look. Refusals at free stages (the drift screen, the rations, the holds) are judged again by their own rules.
 
 **Identities.** Constitution digest `595228a6` -> `5edc8956`; money digest `42c4a3af` -> `da5c7542` (the grant
 re-ratifies by itself at the House's start on the owner's deploy: `league/ops/grant.py`, the digest moved with an owner
-deploy row); the execution fingerprint `ba60c473` -> `fdd74074` (league/live changed). Check a tree with
+deploy row); the execution fingerprint `ba60c473` -> `b4c34031` (league/live changed). Check a tree with
 `python3 -c "from league.constitution import digest, money_digest; print(digest(), money_digest())"` and
 `python3 -c "from league.swarm.evaluator import execution_fingerprint; print(execution_fingerprint())"`.
 
@@ -60,25 +78,49 @@ candidates, submissions, robustness (with `robust_failed` and `drift_failed`), v
 `gated_sha`, `gate_outcome`, `train_passed` and incubator reviews. No family is banded, so no band is lost. Looks,
 trials, refusals, incubator bars, forward rows and extension holds are kept. Recorded validations are re-judged under
 the new line without a new trial; each pass costs a paid review and audit before its look (a burst, inside the roles'
-daily caps): every program the old line, Holm or the holds kept from a look gets one now. Practice cohorts reset.
+daily caps): every program the old line, Holm or the holds kept from a look gets one now, except a program a paid
+review or audit already failed (closed unpaid, `Gate.paid_verdict`). Practice cohorts reset.
 
 **The owner's deploy, in order.** (1) CI green on the exact head; rollback ready (`floor_box.py rollback` to
 `20261007T160204Z`); no order in flight. (2) At the House's start the grant re-ratifies on `da5c7542` and the adoption
 runs: verify the grant `active`, the adoption count and the policy layer's state "ok". (3) The box's `swarm.json`: keep
 `tournament.drift_screen` false (set since 15:53Z Oct 7); `gate.look_holds` must be ABSENT (a value there would override
-the policy's null). (4) The `direction` job ran at start: `<state>/direction-closes.json` exists. (5) Watch the first
-families pass after a passed look: Candidate -> Probe -> `:r` -> the first real order; then the Probe budget tally
-(`scripts/fast_lane_report.py`) and any D5 event.
+the policy's null). (4) The `direction` job ran at start, after the grant: `<state>/direction-closes.json` exists, and
+the `fast_lane` job after it: `<state>/fast-lane-report.json` exists. (5) Watch the first families pass after a passed
+look: Candidate -> Probe -> `:r` -> the first real order (its order's `answer` carries `"probe": true`); then the Probe
+budget in `<state>/fast-lane-report.json` (`probe_budget`), each band row's buy-and-hold and any D5 event.
 
 **Stated consequences.**
 - The incubator route stays off: with the drift screen off, `incubator.facts` never marks `train_passed`, so the route
   (off since 15:53Z Oct 7 for this reason) has no candidate; restoring it needs a "drift does not refuse" switch, not
   built here.
-- Practice and shadow caps follow the 10% share (`league/live/shadow.py` unchanged): their structures may be twice the
-  size, the family stays at 15%, and returns are per dollar of maximum loss (scale-free).
-- The grant's smallest real stake (`live_trading.smallest_stake`) was the $100 floor; with the floor at $0 it is the
-  allocator's $25 bunt stake, so the standing grant refuses only under $25 of capital and its policy reads `stake_usd`
-  25 (`max_agents` capital // 25). Nothing on the options path reads either.
+- The practice caps (`:o`) keep the Probe's sizing from before the fast lane, 5% of the practice capital a structure
+  with the $100 one-structure floor (`shadow.PRACTICE_SHARE`, `PRACTICE_FLOOR_USD`); only their open count and family
+  share read the Probe row (unchanged at 3 and 15%). Practice evidence (sizes, how many opens run at once) does not move
+  with the real Probe's row (D6).
+- The grant's smallest real stake (`live_trading.smallest_stake`) stays $100 (`OPTIONS_MIN_STAKE`, the floor's old
+  value) with the floor at $0: the standing grant refuses under $100 of capital, its policy reads `stake_usd` 100 and
+  `max_agents` capital // 100, exactly as before. No grant refusal is loosened.
+- THE TUITION ROUTE'S REACH (an existing route the fast lane widens). Tuition sends real 1-lots, never evidence, for a
+  Gym family whose version passed Validation and has not passed its look (`step` "tuition", `:t`): real money BEFORE
+  the screen's look, outside the Probe count and the $400 budget. The looser Validation line (2.2-8.2% of no-edge
+  eligible programs pass it, FAST_LANE_SCREEN_1), the drift screen and the holds off, and the deploy's
+  re-judging of recorded validations all enlarge the set it reaches. Its bounds: one structure within the Probe's cap
+  (10% of E, $128.84 at E $1,288.40; new here), the tuition day's $200 and week's $300 of maximum loss. Cost: up to
+  $300 a week of real maximum loss on programs that passed Validation only; its losses are real money outside the
+  Probe budget, inside the daily and drawdown stops. Switching it off is `options_money.tuition` `day_usd` 0 (a money
+  row: the owner's deploy and a re-ratified grant).
+- A D5-demoted family stays a Candidate, shadow only, until a release: research acts on Gym families only, and the
+  swarm sends a Candidate back to the Gym only on a negative forward record (20 trades, a mean below zero) or an
+  evaluator adoption. So a family whose live fills lost while its shadow record stays positive is parked: never
+  researched or looked at again, its nightly replays still run (Gym compute). Not changed here (a swarm-side route back
+  to the Gym on D5 is the next release's).
+- Contamination is MEASURED, weakly, in the report (`league/ops/fast_lane.py`, reported only): each look's holdout
+  series split at 2026-07-01 into the 123 in-training sessions and the 61 after Opus 5.5's cutoff (days, P&L, daily
+  Sharpe, own bootstrap p, whether that part alone meets the level, the head-minus-tail Sharpe gap); pooled over the
+  looks, the mean gap with its t and the head-only against the tail-only pass share; and per live band, its live P&L per
+  dollar of maximum loss against its holdout's (live is after every author's training). With a handful of looks the
+  pooled measure has little power; DeepSeek-V4-Flash, which wrote most versions, has an unknown cutoff.
 - The public site's progress checklist for a Gym family states the quarters need as 3 only (the site's schema,
   `capital/schema.js` `PROGRESS_LIMITS`), and one invalid agent fails the whole checkpoint. The publisher therefore
   withholds a Gym family's checklist (null progress) while the line's need is 2 (`progress.SITE_QUARTERS`); widening the
@@ -92,12 +134,29 @@ families pass after a passed look: Candidate -> Probe -> `:r` -> the first real 
   0.3-2.2%, and 3.8-12.5% for the largest (14-program) lineage; the Probe 5% + $100 floor -> 10% of E (below E $1,000
   tighter than the floor); the drift screen's refusal and both holds off (the drift_only world, a program that only holds
   a Sharpe-1 market factor, passes 2.14%); the next-session wait removed (real money within about 5 minutes of a passed
-  look, with no shadow session first). Tightened: one structure a Probe position, 3 at once, the $400 budget with Sized
-  counted, D5, larger rooms kept for Probe opens.
+  look, with no shadow session first); tuition's reach (above: up to $300 a week of real maximum loss on programs that
+  passed Validation only). Tightened: one structure a Probe position, 3 at once, the $400 budget (gross realized Probe
+  losses; every real position held or working, Sized too, counted at risk; a lost open counted until it is found), D5,
+  larger rooms kept for Probe opens, a tuition structure within the Probe's cap, a paid review's or audit's failure
+  binding across the adoption. Kept as they were: C3 (a Sized family at a Probe-sized stake under the Probe's limits),
+  the practice caps' sizing, the grant's $100 smallest stake.
+- ADAPTIVE SEARCH (the screen's rate is per program, not per lineage). The 0.18-1.19% is the rate for one no-edge
+  program drawn independently. A lineage that keeps validating versions pays nothing more for repeated Validation tries
+  (N = 1), so once it can reach Validation again and again the operative rate is the look's given Validation (7-15%,
+  by null world), and with its 3 looks a persistent no-edge lineage passes at least one with probability 1-(1-q)^3:
+  20% (skew), 22% (mid), 28% (gauss), 30% (t3), 38% (AR(0.2)). The per-lineage 0.3-2.2% (3.8-12.5% for the largest
+  lineage) replays the snapshot's past program counts as independent draws under the old regime: a historical floor,
+  not a bound. A new family the architect proposes on a failed mechanism starts a fresh lineage, with fresh looks. A
+  near-duplicate (a parameter tweak that changes one fill) is a new program with a new look; its bootstrap, reseeded by
+  its run sha over almost the same holdout P&L, has a Monte Carlo error of about 0.007 near p 0.10, so a borderline fail
+  can flip on bootstrap noise alone. Binding fixes (a within-lineage level, a near-duplicate rule in `duplicate_look`)
+  are the owner's call: D1 asks for a flat look a program.
 - The budget against the false-positive volume: 287 floor-eligible programs were validated in the snapshot's last 7
-  days; if all were no-edge, that is about 1.4 false Probes a week at the gaussian rate and 3.4 at AR(0.2). A demoted
-  Probe loses about 3 x its maximum loss ($120-375 for $40-125 tickets), so the $400 covers 1-3 demotions and false
-  positives alone can spend it within one to two weeks. Raising it is the owner's decision.
+  days; if all were no-edge, that is about 1.4 false Probes a week at the gaussian rate and 3.4 at AR(0.2). That volume
+  was measured while the drift screen still kept long-delta programs out of Validation, so with it off these are low
+  (a floor). A demoted Probe loses about 3 x its maximum loss ($120-375 for $40-125 tickets), so the $400 covers 1-3
+  demotions, and since the budget counts losses gross (a winning Probe never refills it), false positives alone can
+  spend it within one to two weeks. Raising it is the owner's decision.
 - The D5 replay bound (0.20 a dollar on 5 or more matched trades) is chosen, not measured: its false-demotion rate is
   unknown until live and replay pairs exist; every demotion is reported with its numbers.
 
@@ -536,8 +595,9 @@ House's own loop stepping on it. The same module holds the House to never import
 
 ### The House's jobs
 
-`league/ops/`: the House's tick calls `_ops_step` once (never waiting); due jobs start as one child at a time
-(`python -m league.ops run <job>`: nice 19, memory bounded at what it holds plus 500 MB, CPU and wall limits, a
+`league/ops/`: the House's tick calls `_ops_step` once (never waiting); due jobs start as one child at a time, the
+earliest first and, among jobs due at the same instant (a House start's), in the registry's order, so the grant goes
+first (fast lane v2's review) (`python -m league.ops run <job>`: nice 19, memory bounded at what it holds plus 500 MB, CPU and wall limits, a
 scrubbed environment). Session triggers read the House's NYSE calendar (`ltcm.data.us_equity_session`), so they follow
 DST and early closes; the fixed daily, weekly and monthly UTC times sit outside every session in both seasons, and the
 hourly `grant` job also runs in session (a niced, bounded child like every other). Every occurrence gets one row in
@@ -560,7 +620,8 @@ receipt). An occurrence older than the runner's first tick on the state, or than
 | `postmortem` | Saturdays 14:00 | 6 h | the weekly post-mortem (Phase 5) | skipped |
 | `agenda` | daily 03:00 | 6 h | the strategist's agenda (Phase 2) | skipped |
 | `engineer` | daily 04:00 | 6 h | the engineer's harness change (Phase 4); never retried | skipped |
-| `direction` | at each House start, and daily 01:00 (fast lane v2) | 3 h | the Gym roots' daily split-adjusted SIP closes from 2024-12-31 (XSP and SPXW read SPY) through the gateway's bars route into `<state>/direction-closes.json`, for the same-risk buy-and-hold beside each screen result and band row (`scripts/fast_lane_report.py`; reported, never a bar); a gateway error writes nothing | runs |
+| `direction` | at each House start (after the grant: jobs due at the same instant start in the registry's order), and daily 01:00 (fast lane v2) | 3 h | the Gym roots' daily split-adjusted SIP closes from 2024-12-31 (XSP and SPXW read SPY) through the gateway's bars route into `<state>/direction-closes.json`, for the same-risk buy-and-hold beside each screen result and band row (reported, never a bar); a gateway error writes nothing and is a failed receipt (a House warning, retried inside its grace) | runs |
+| `fast_lane` | after each `direction` run (fast lane v2) | 3 h | the fast lane's report, read-only (`guard.readonly()`), into `<state>/fast-lane-report.json`: the last 7 days' Validation rows and every look, band row and the Probe budget, each with its drift fit and same-risk buy-and-hold, the contamination measures and D5 (`league/ops/fast_lane.py`; reported, never a bar); a Probe or Sized family whose look has no buy-and-hold is a House warning | runs |
 
 Every job is protected: the whole of `league/ops/` is on the list, so a new job or a changed one is the owner's deploy.
 
@@ -2345,7 +2406,7 @@ is installed (**The settings layers**, "The reduced `swarm.json`").
 | `research.enabled`, `requests_day`, `family_requests_day`, `cycle_calls` | `swarm.json` on the box | defaults (Release B, #447): false, 300, 12, 2 | the research library on the House, and its lines: calls a UTC day for the floor, a family, a research cycle (**The research library**) | edit `swarm.json`; on only after the gateway and the House that carry it |
 | The money rules | `league/constitution.py` | the sprint's D4 table and the House live test's bounds (money `a3e2aa7c`); Release B adds the incubator's row (`42c4a3af`); V3-A part 1 leaves it as it is; fast lane v2 moves the Probe row (`da5c7542`) | what real money may do | owner deploy; the standing grant ratifies it when the House starts on it (`--ratify` if it refuses) |
 | `options_money.probe` | `league/constitution.py` | from fast lane v2: `max_loss_share` 0.10, `contracts` 1, `open_per_family` 3, `family_share` 0.15, `floor_usd` 0, `max_open` 3, `loss_budget_usd` 400 | the Probe: one structure within 10% of E, at most 3 Probe positions at once, the $400 Probe loss budget (0 in `max_open` or `loss_budget_usd` stops Probe opens) | owner deploy; the standing grant re-ratifies at the House's start |
-| `tournament.drift_screen` | `league/swarm/policy.json` and `swarm.json` on the box | false (the box since 15:53Z Oct 7; the policy from fast lane v2) | THE DRIFT SCREEN's refusal (direction counts since fast lane v2; its fit is reported by the `direction` job and `scripts/fast_lane_report.py`) | edit the file; true restores the screen |
+| `tournament.drift_screen` | `league/swarm/policy.json` and `swarm.json` on the box | false (the box since 15:53Z Oct 7; the policy from fast lane v2) | THE DRIFT SCREEN's refusal (direction counts since fast lane v2; its fit is reported by the `direction` and `fast_lane` jobs into `<state>/fast-lane-report.json`, and by `scripts/fast_lane_report.py` on copies) | edit the file; true restores the screen |
 | `options_money.incubator` | `league/constitution.py` | from Release B: `max_loss_usd` 50, `contracts` 1, `max_open` 4, `week_loss_usd` 150, `min_sessions` 3, `min_trades` 10, `min_coverage` 0.80 | the incubator's caps and its pre-registered practice rule; each row may only tighten, and 0 in `max_open`, `week_loss_usd` or `max_loss_usd` stops the route | owner deploy, then `--ratify` (no evidence reset) |
 
 In the settings, `researcher.sail_usd_per_hour`, when set, is the researcher pace: the Sail models' spend over the

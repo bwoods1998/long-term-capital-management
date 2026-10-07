@@ -44,9 +44,20 @@ refusal and the look holds off; the `direction` job and `scripts/fast_lane_repor
 same-risk buy-and-hold), a one-structure Probe within 10% of E, at most 3 Probe positions, a $400 Probe loss budget,
 same-minute entry and D5 demotion by live results. **The money digest moves** `42c4a3af` -> `da5c7542` (constitution
 `595228a6` -> `5edc8956`): the standing grant re-ratifies at the House's start on the owner's deploy. **An evidence
-reset**: league/live changes, so the execution fingerprint moves `ba60c473` -> `fdd74074`; no family is banded. The
+reset**: league/live changes, so the execution fingerprint moves `ba60c473` -> `b4c34031`; no family is banded. The
 benchmark is [docs/benchmarks/FAST_LANE_SCREEN_1.md](docs/benchmarks/FAST_LANE_SCREEN_1.md); the deploy's steps and the
 stated consequences are in [docs/operations.md](docs/operations.md) ("Fast lane v2").
+
+Its review's fixes (Oct 7): the Probe loss budget counts realized Probe losses GROSS, from positions a Probe family
+opened (marked at the order), so a Sized gain or a Probe gain never refills it, and a lost open counts until it is
+found (it had netted every `:r` close, Sized included); tuition sends one structure only within the Probe's cap, and
+its reach (real 1-lots before the look, up to $300 a week) is stated; C3 keeps its trigger (a Sized family at a
+Probe-sized stake under the Probe's limits); the practice caps and the grant's $100 smallest stake stay as they were; a
+program a paid review or audit failed is closed unpaid after the deploy's adoption (`Gate.paid_verdict`); the
+`direction` job's failure is a failed receipt, and at a House start the grant runs first (same-instant jobs in the
+registry's order); a new `fast_lane` job writes the report daily, read-only, with contamination measured (head against
+tail per look, pooled, and live against holdout); the adaptive-search ceiling (20-38% for a persistent no-edge lineage
+with 3 looks) and the benchmark's history are stated.
 
 ### V3-A part 1: built and integrated, waiting for the owner's deploy (`release/v3a`, PR #489)
 
