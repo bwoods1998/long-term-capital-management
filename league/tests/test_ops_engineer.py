@@ -145,15 +145,18 @@ class SelfRunning(unittest.TestCase):
         # On this repository's own tree the live path loads researcher.py and claude_research.py: the engineer may not
         # change them, so its research lane is preflight.py (and a new test) in this release.
         repo = Path(__file__).resolve().parents[2]
-        ctx = Context("engineer", root=Path(tempfile.mkdtemp()), base=Path(tempfile.mkdtemp()), due_at=0.0, config={},
-                      clock=lambda: 0.0, release=repo, gateway=None)
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        tmp = Path(scratch.name)
+        ctx = Context("engineer", root=tmp / "state", base=tmp, due_at=0.0, config={}, clock=lambda: 0.0, release=repo,
+                      gateway=None)
         engineer = E.Engineer(ctx)
         held = engineer.held("research")
         self.assertIn("league/swarm/researcher.py", held)
         self.assertIn("a module the live path loads", held["league/swarm/researcher.py"])
         self.assertEqual(A.writable_paths("research", held), ["league/swarm/preflight.py"])
         self.assertEqual(engineer.held("memory"), {}, "the memory lane's files are research-class")
-        ws = A.Workspace(Path(tempfile.mkdtemp()), "research", held=held)
+        ws = A.Workspace(tmp / "tree", "research", held=held)
         tools = A.Tools(ws, "research", None)
         text, error = tools.call("edit_file", {"path": "league/swarm/researcher.py", "old_text": "a", "new_text": "b"})
         self.assertTrue(error)
