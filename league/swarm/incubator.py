@@ -175,7 +175,7 @@ def final_review(state: Mapping[str, Any], sha: str) -> dict[str, Any] | None:
     """The FINAL review of program `sha` under the current review contract, or None: the gate's (`review`) or the
     incubator's (`incubator_reviews`), when it failed or its audit was made. A review that passed with its audit still
     owed is not final."""
-    from ..gym.review_contract import review_contract
+    from .gate import gate_contract as review_contract
 
     contract = review_contract()["sha256"]
     reviews = state.get("incubator_reviews")
@@ -220,7 +220,7 @@ def incubator_review_bar(record: Any, sha: str) -> str | None:
     1): under the current review contract only (a review under another is asked again, as `final_review` says), a
     verdict other than "pass" or an audit that is there but is not a readable passed audit. A record that is not this
     program's under the current contract is none (it is read again, never counted by the live side)."""
-    from ..gym.review_contract import review_contract
+    from .gate import gate_contract as review_contract
 
     if not isinstance(record, Mapping) or record.get("sha") != sha or record.get("contract_sha") != review_contract()["sha256"]:
         return None

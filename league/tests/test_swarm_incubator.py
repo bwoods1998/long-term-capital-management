@@ -15,7 +15,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from league.gym.review_contract import review_contract
+from league.swarm.gate import gate_contract as review_contract
 from league.gym.safety import CodeRefused
 from league.live.observe import ObserveStore
 from league.swarm import bands

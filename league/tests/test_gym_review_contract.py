@@ -70,7 +70,10 @@ class GateContract(RoundCase):
             packet = json.dumps(body)
             self.assertIn("runtime.py:Runner.__init__", packet)
             self.assertIn("session_id", packet)  # explicitly documented as unavailable
-            self.assertIn(review_contract()["sha256"], packet)
+            from league.swarm.gate import gate_contract
+
+            self.assertIn(gate_contract()["sha256"], packet)  # the gate's contract: the Gym's plus the computed fields
+            self.assertIn('"delta"', packet)
         review = self.store.family("a")["state"]["review"]
         self.assertEqual(review["contract_sha"], review["audit"]["contract_sha"])
 
@@ -112,7 +115,9 @@ class GateContract(RoundCase):
         self.replies = [{"text": json.dumps({"verdict": "pass"})}] * 2
         Gate(self.store, self.pool, self.router, self.settings).run()
         self.assertEqual(len(self.sail.bodies), 2)
-        self.assertEqual(self.store.family("a")["state"]["review"]["contract_sha"], review_contract()["sha256"])
+        from league.swarm.gate import gate_contract
+
+        self.assertEqual(self.store.family("a")["state"]["review"]["contract_sha"], gate_contract()["sha256"])
 
 
 if __name__ == "__main__":

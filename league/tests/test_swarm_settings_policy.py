@@ -334,7 +334,7 @@ class TheCommittedPolicy(L.LoopCase):
         loaded = self.at_usd_day(B.CEILING_USD_DAY)
         router = ModelRouter(self.store, None, settings=loaded, claude_factory=lambda model: None, claude_meter=None)
         program = ("x = 1\n" * MAX_CODE_CHARS)[:MAX_CODE_CHARS]  # a newline every six characters: more bytes than code is
-        contract = json.dumps(G.review_contract(), sort_keys=True)
+        contract = json.dumps(G.gate_contract(), sort_keys=True)
         needs = {"review": 0.5, "audit": float(loaded["gate"].get("audit_need_usd", 1.0))}  # league/swarm/gate.py's own
         for head, role, effort in (("", "review", "medium"), ("AUDIT. ", "audit", "high")):
             user = (f"{head}Family f0123456789ab: {'a mechanism in words. ' * 20}\nStructure debit_vertical, roots SPY, QQQ.\n\n"
