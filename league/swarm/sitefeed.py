@@ -161,8 +161,8 @@ def _read(root: str | Path, ids: Any = None, *, retired_shown: int = 24, light: 
 
 
 #: THE LEARNING GAME's children (league/swarm/game.py `ORIGIN`): never on the site. A child is born only of a program that
-#: passed the game's private exam, and its row (its mechanism is its parent's, its lineage its parent's, its trials its
-#: lineage's) would name which lineage passed. Nor are their trials in any other family's.
+#: ranked near the top of the game's private exam, and its row (its mechanism is its parent's, its lineage its parent's,
+#: its trials its lineage's) would name which lineage passed. Nor are their trials in any other family's.
 PRIVATE_ORIGINS = ("game",)
 
 

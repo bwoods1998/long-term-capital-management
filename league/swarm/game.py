@@ -73,9 +73,11 @@ years clear 1.28, so ranking keeps the pressure on), its family has fewer than `
 and has not bred in `child_cooldown_hours` (6). At most `children_per_round` (4) a round and `children_per_day` (24) a
 day, inside `population.ceiling`. A child is `add_family(origin="game", parent=...)` with a neutral id (`g-<8 hex>`),
 version 1 the parent's looked version (code and params, as `Tournament.fork` seeds a fork), the parent's card copied
-(`cards.put`), and one change: MUTATE (the rest) gives it a structural directive, `DIRECTIVES[(hash(parent) + k) % 6]` for
-its k-th sibling (structural steps carry to unseen years, parameter tweaks do not: 73% sign agreement for the largest fifth
-of steps against about 52%); CROSSOVER (`crossover_share`, 20%, when a donor exists) shows it another parent-qualified
+(`cards.put`), and one change: MUTATE (the rest) gives it a structural directive,
+`DIRECTIVES[ROTATION[(hash(parent) + k) % 12]]` for its k-th sibling, a rotation that favours pricing, structure and
+regime filters (structural steps carry to unseen years, parameter tweaks do not: 73% sign agreement for the largest fifth
+of steps against about 52%; the planted-edge arena of Oct 8 found pricing, structure and filters carried and input swaps
+and exit rewrites broke a half-found edge); CROSSOVER (`crossover_share`, 20%, when a donor exists) shows it another parent-qualified
 program of the same fold group and another lineage, at most `donor_max_chars` (6,000), to adopt its execution while it
 keeps its own signal.
 
@@ -184,18 +186,26 @@ DEFAULTS: dict[str, Any] = {
     "look_retry_hours": 2, "look_attempts": 3,
 }
 
-#: A MUTATE child's change, by `(hash(parent) + k) % 6` (the spec's six structural directives).
+#: A MUTATE child's change (the spec's six structural directives, and the structure's shape): its index is
+#: `ROTATION[(hash(parent) + k) % len(ROTATION)]` for the k-th sibling. Indices are stable (the report counts by them).
 DIRECTIVES = (
     "Replace the signal's market input with another one.",
     "Replace the exit rule (target, stop or time stop): change the rule, not its numbers.",
-    "Change how entries and exits are priced (mid vs natural, patience, time in force).",
+    "Change how entries and exits are priced (mid vs natural, patience, time in force). When the signal is a move "
+    "already under way, try a marketable limit (the natural plus a few cents): a limit fixed at the decision minute's "
+    "natural rests and misses the trades that move your way.",
     "Move the holding horizon to another expiry bucket.",
     "Add one regime filter that switches the signal off in a market condition you can name.",
     "Flip the signal's logic (fade instead of follow, or the reverse).",
+    "Change the structure's shape (width, strikes against spot, a single leg or a vertical) and keep the signal.",
 )
+#: The planted-edge arena (Oct 8, scratch/arena-1008/REPORT.md): pricing, structure and a regime filter carried a half-found
+#: edge to unseen years (a pricing child took the same signal from Validation t 1.56 to 2.85); a forced input swap or exit
+#: rewrite broke it. So those three come round most often and the other three once each in 12.
+ROTATION = (2, 4, 6, 2, 3, 4, 2, 6, 0, 4, 1, 5)
 CROSSOVER = "Keep your signal; adopt the donor's entry pricing, exits and position management."
-CHILD_NOTE = ("Your version 1 is a program that passed this game's private exam. Make the change below before anything "
-              "else, then improve on your Train years as usual.")
+CHILD_NOTE = ("Your version 1 is a program that ranked near the top of this game's private exam. Make the change below "
+              "before anything else, then improve on your Train years as usual.")
 STATUS = ("PRIVATE EXAM: every version that beats your last examined Train score by {eta:g} and makes money at {stress:g}x "
           "is scored on market years you never see, at {stress:g}x and net of its market exposure's drift. Only versions "
           "that pass go to Validation, and passing families have children. You get no figures from it; tune nothing to "
@@ -1303,7 +1313,7 @@ def _breed(store: Any, c: Mapping[str, Any], parent: Mapping[str, Any], qualifie
                 structure=fam["structure"], roots=_birth_roots(fam) or list(fam["roots"]))
     directive = donor = None
     if op == "mutate":
-        directive = (_seed(fid) + k) % len(DIRECTIVES)
+        directive = ROTATION[(_seed(fid) + k) % len(ROTATION)]
         spec["game_directive"] = directive
     else:
         pick = donors[rng.randrange(len(donors))]
@@ -1814,7 +1824,7 @@ def metrics(store: Any, *, settings: Mapping[str, Any] | None = None, now: float
             "R6": r6}
 
 
-__all__ = ["SWITCH_AT", "HIDDEN", "HIDDEN_YEARS", "SEEN_FROM", "CORE", "DEFAULTS", "DIRECTIVES", "GAME_SQL", "HIDDEN_SPLIT",
+__all__ = ["SWITCH_AT", "HIDDEN", "HIDDEN_YEARS", "SEEN_FROM", "CORE", "DEFAULTS", "DIRECTIVES", "ROTATION", "GAME_SQL", "HIDDEN_SPLIT",
            "PROGRAM_ENDS", "RETIRED", "RULES", "Sealed", "cfg", "birth_roots", "seen_only", "t0", "live_t0", "void", "started",
            "fold", "arm", "fitness", "seen_fitness", "tier_of", "ensure", "select_view", "confirm_view", "maybe_look", "landed",
            "confirm_waiting", "requeue_stale", "recheck", "shadow_validated", "candidate", "validations_left",

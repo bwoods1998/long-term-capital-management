@@ -489,7 +489,9 @@ spreads remove.
 - **The game arm in "gate".** A SELECT PASS (F >= 1.28, one-sided 10% a year) reads the CONFIRM year once (2 reads a
   family, 3 a lineage, as the holdout's looks); only a CONFIRMED version goes to Validation, with 2 tries; its
   Validation t never steers its compute. Survivors (the top decile of the last 72 hours' SELECT figures) have children:
-  the parent's looked program with one forced structural directive, or (20%) a donor's execution taken by a child that
+  the parent's looked program with one forced structural directive (seven, in a rotation that brings pricing, the
+  structure's shape and a regime filter round most often: in the Oct 8 planted-edge arena those carried a half-found
+  edge to unseen years and an input swap or exit rewrite broke it), or (20%) a donor's execution taken by a child that
   keeps its signal and its signal parent's lineage. Three retirement reasons come first: 4 looks without a pass, 2
   failed CONFIRM reads, 2 failed Validation tries.
 - **What agents see.** The game-arm researcher reads one PRIVATE EXAM line (its looks used, never a figure); a child,

@@ -41,7 +41,9 @@ Train 2022-2024. `league/swarm/game.py` (new, protected) holds the rules; the bu
 - **Gate mode, game arm.** The look ladder (best by Train score, +0.5 over the last looked score, a profitable 1.5x seen
   run, 4 looks); a SELECT PASS (F >= 1.28) reads the CONFIRM year once (2 a family, 3 a lineage); only a CONFIRMED
   version goes to Validation, 2 tries; its Validation t never steers its compute; children of the top SELECT decile
-  with a structural directive or a donor's execution (the child joins its signal parent's lineage only); three
+  with a structural directive (a rotation of 12 that favours pricing, the structure's shape and a regime filter, which
+  carried a half-found edge to unseen years in the Oct 8 planted-edge arena, over an input swap, an exit rewrite or a
+  flip, which broke it) or a donor's execution (the child joins its signal parent's lineage only); three
   retirement reasons first; the dormancy clause spares such a family only while a CONFIRMED version awaits Validation
   or a look is out.
 - **Blindness.** The architect and the strategist never read a game-arm family; every graveyard reader drops game-arm

@@ -654,14 +654,15 @@ class Reproduction(GameCase):
         self.assertTrue(own["own"])
         self.assertEqual(own["card"], cards.card_of(self.store, mother["id"])["card"])
         h = int.from_bytes(hashlib.sha256(mother["id"].encode()).digest()[:8], "big")
-        self.assertEqual(child["spec"]["game_directive"], h % 6)
+        self.assertEqual(child["spec"]["game_directive"], game.ROTATION[h % len(game.ROTATION)])
         self.assertIn(game.CHILD_NOTE, self.store.notebook(first)[-1]["text"])
-        self.assertIn(game.DIRECTIVES[h % 6], game.brief_text(self.store, child, self.settings))
+        self.assertIn(game.DIRECTIVES[game.ROTATION[h % len(game.ROTATION)]], game.brief_text(self.store, child, self.settings))
         self.assertEqual(game.reproduce(self.store, self.settings), [], "the parent's cooldown")
         self.clock.advance(6 * 3600 + 1)
         self.plant(mother, 2.0, 0.0)  # a fresh look in the window
         [second] = game.reproduce(self.store, self.settings)
-        self.assertEqual(self.store.family(second)["spec"]["game_directive"], (h + 1) % 6, "the next sibling's directive")
+        self.assertEqual(self.store.family(second)["spec"]["game_directive"], game.ROTATION[(h + 1) % len(game.ROTATION)],
+                         "the next sibling's directive")
         self.assertEqual(game.fold(self.store.family(second)["lineage"]), game.fold(mother["lineage"]))
         self.assertEqual(self.store._one("SELECT generation FROM game_looks WHERE seq=?",
                                          (self.plant(self.store.family(second), 0.1, 0.1),))["generation"], 1)
