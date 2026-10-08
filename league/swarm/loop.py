@@ -10,7 +10,8 @@ One process beside the House loop, niced. Its threads:
   durable event-driven holds; the main loop counts each park toward the idle rule's dormancy clause, F1's PARKED
   DORMANCY, so a family that only waits still leaves);
 - THE GYM POOL's dispatchers (one per box) and forks (`pool.py`);
-- ROUNDS on their own threads so none blocks another: the tournament (hourly), the idle pass between its rounds (every
+- ROUNDS on their own threads so none blocks another: the tournament (hourly; then, on its thread, THE INCUBATOR'S
+  RE-RUNS, `incubator_reruns`), the idle pass between its rounds (every
   five minutes, the idle rule's retirements alone: `Tournament.idle_pass`), the gate (every few
   minutes), the nightly forward (once a day), the architect (`architect.every_seconds`, four hours by default; THE
   LIBRARY's retrieval first, then the strategist, then the architect: `architect_pass`), the diagnostician (every few
@@ -461,9 +462,7 @@ class Swarm:
         self.researcher = Researcher(self.store, self.router, self.pool, self.settings, clock=clock,
                                      starter=lambda spec: program_for(spec), library=self.library, preflight=preflight)
         self.researcher.pace = self.over_pace
-        # THE INCUBATOR'S RE-RUNS (`Tournament.incubator_reruns`): queued by the researcher, under the guard's research word.
-        self.tournament = Tournament(self.store, self.pool, self.settings, clock=clock, researcher=self.researcher,
-                                     allows=lambda: self.guard.allows("research"))
+        self.tournament = Tournament(self.store, self.pool, self.settings, clock=clock)
         self.scheduler.useful_ids = lambda: self.tournament.useful  # THE CONCURRENCY's useful experiments
         self.gate = Gate(self.store, self.pool, self.router, self.settings, clock=clock)
         # The whole graveyard as one sealed digest, shared by the architect and the strategist (Sept 29, 2026): one pass's
@@ -757,6 +756,40 @@ class Swarm:
             "accepted", "route", "cost_usd", "reasons", "skipped", "error", "primed", "turns", "note")}} if ran else {}),
                 **({"library": out["library"]} if "library" in out else {})}
 
+    def tournament_round(self) -> dict[str, Any]:
+        """The tournament's hourly round (`Tournament.run`), then THE INCUBATOR'S RE-RUNS on the same thread, whether or
+        not the round raised (`incubator_reruns`): a round that failed still leaves the cohorts' runs owed."""
+        try:
+            return self.tournament.run()
+        finally:
+            self.incubator_reruns()
+
+    def incubator_reruns(self) -> dict[str, Any]:
+        """THE INCUBATOR'S RE-RUNS (`incubator.reruns`, Oct 8, 2026; the module docstring of league/swarm/incubator.py,
+        3): the Gym runs an active practice cohort's version needs before its Train-and-drift mark can come back (after
+        the learning game's T0 or a Gym image change), queued through the swarm's Researcher after the tournament's round
+        has written the marks. Asked only while the guard allows new research (THE GATE'S RESERVE and the brake); jobs
+        already queued are the pool's, as every robustness run is. Never raises: an error is one private `swarm.status`
+        event. Here, not in the tournament, because league/swarm/tournament.py is the owner's deploy (`league.ci`
+        FORBIDDEN) and the re-runs ride the release train."""
+        from . import incubator
+
+        try:
+            if not self.guard.allows("research"):
+                out: dict[str, Any] = {"held": "the guard holds new research (the gate's reserve or the brake)"}
+            else:
+                out = incubator.reruns(self.store, self.settings, self.researcher, self.root, clock=self.clock)
+        except Exception as exc:  # noqa: BLE001 - never fails the round
+            out = {"error": type(exc).__name__}
+            try:
+                self.store.event("swarm.status", None, {"action": "incubator_reruns_error",
+                                                        "error": f"{type(exc).__name__}: {str(exc)[:300]}"})
+            except Exception:  # noqa: BLE001
+                pass
+        if out:
+            log(f"incubator re-runs: {json.dumps(out, default=str)[:600]}")
+        return out
+
     def round_alive(self, name: str) -> bool:
         thread = self.rounds.get(name)
         return thread is not None and thread.is_alive()
@@ -890,7 +923,7 @@ class Swarm:
         self.pool.manage()
         if self.guard.allows() and self.gym_ready():
             if self.tournament.due():
-                self._round("tournament", self.tournament.run)
+                self._round("tournament", self.tournament_round)
             elif self.tournament.idle_due() and not self.round_alive("tournament"):
                 # THE IDLE PASS: the idle rule alone between the hourly rounds, never while one runs (its validations may be
                 # re-validating the very families the pass would judge), never on a family in a researcher's cycle.
