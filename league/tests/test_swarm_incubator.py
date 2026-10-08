@@ -23,7 +23,7 @@ from league.swarm import evaluator as E
 from league.swarm import incubator as I
 from league.swarm.bands import demoted
 from league.swarm.gate import Gate, incubator_stage, run_sha
-from league.swarm.researcher import demote_version, screen_best
+from league.swarm.researcher import demote_version, drift_verdict, screen_best
 from league.swarm.settings import DEFAULTS
 from league.swarm.store import SwarmStore
 from league.swarm.tournament import Tournament
@@ -268,23 +268,75 @@ class Mark(Case):
         for fam in self.store.families():
             self.assertNotIn("train_passed", fam["state"], fam["id"])
 
-    def test_an_off_drift_screen_writes_nothing_and_takes_existing_marks_until_it_is_on_again(self):
-        self.eligible("a")
+    def test_an_off_tournament_screen_marks_by_the_incubators_own_screen_at_its_default_thresholds(self):
+        # THE INCUBATOR'S OWN DRIFT SCREEN (Oct 8, 2026): FAST LANE V2 switched the tournament's screen off for selection;
+        # the mark still needs the screen to pass ("pass Train, pass the drift screen alone"), so it evaluates it itself.
         self.settings["tournament"]["drift_screen"] = False
+        before = copy.deepcopy(self.settings)
+        a = self.eligible("a")                                    # passes the screen (t 2.0, every year positive)
+        b = self.family("b")
+        self.train("b", b, drift=FAILING)                         # its profit is the market's drift (t 0.4)
+        self.robust("b", b)
+        self.cohort("b", b)
+        c = self.family("c")
+        self.train("c", c, drift=None)                            # its figures are owed
+        self.robust("c", c)
+        self.cohort("c", c)
         out = self.facts()
-        self.assertEqual((out["written"], out["waiting"]), ([], 1))
-        self.assertNotIn("train_passed", self.state("a"))
-        self.settings["tournament"]["drift_screen"] = True
-        self.assertEqual(self.facts()["written"], ["a@1"])
-        n = self.eligible("b")
-        self.store.set_state("b", train_passed={str(n): self.state("a")["train_passed"]["1"]})  # e.g. an ended cohort
+        self.assertEqual((out["written"], out["waiting"], out["marked"]), (["a@1"], 2, 1))
+        self.assertEqual(self.state("a")["train_passed"][str(a)]["drift"], {"t": 2.0, "positive": 3, "years": 3})
+        self.assertNotIn("train_passed", self.state("b"))
+        self.assertNotIn("train_passed", self.state("c"))
+        for fid, n, words, drop in (("b", b, "it fails the drift screen", True), ("c", c, "its drift figures are owed", False)):
+            mark, why, final = I.mark_of(self.store, self.store.family(fid), n, self.settings, evaluator=EVALUATOR,
+                                         objective=OBJECTIVE, clock=self.clock)
+            self.assertIsNone(mark, fid)
+            self.assertIn(words, why, fid)
+            self.assertEqual(final, drop, fid)
+        self.assertEqual(self.settings, before, "the settings are never written: the tournament's screen stays off")
+        self.assertIsNone(drift_verdict(self.store, self.store.family("b"), b, self.settings),
+                          "the tournament's own screen is still off (fast lane v2's selection is unchanged)")
+        self.assertEqual(screen_best(self.store, "b", self.settings, clock=self.clock), [], "no demotion by an off screen")
+        self.assertEqual(self.facts()["written"], [], "a current mark is not written again")
+
+    def test_an_off_tournament_screen_keeps_marks_through_the_sweep_and_drops_only_a_known_failure(self):
+        a = self.eligible("a")
+        self.facts()
+        mark = self.state("a")["train_passed"][str(a)]
+        b = self.eligible("b")
+        self.store.set_state("b", train_passed={str(b): mark})    # e.g. an ended cohort's mark
         self.ledger._connect().execute("UPDATE cohorts SET status='complete' WHERE family='b'")
-        self.settings["tournament"]["drift_screen"] = False  # an off screen never passes: every mark goes
+        self.settings["tournament"]["drift_screen"] = False
+        self.assertEqual(I.sweep(self.store, self.settings, clock=self.clock), {"removed": [], "barred": [], "revoked": []})
         out = self.facts()
-        self.assertEqual(sorted(out["removed"]), ["a@1", "b@1"])
-        self.assertEqual((self.state("a")["train_passed"], self.state("b")["train_passed"]), ({}, {}))
-        self.settings["tournament"]["drift_screen"] = True
-        self.assertEqual(self.facts()["written"], ["a@1"], "not final: marked again once the screen is on and passes")
+        self.assertEqual((out["removed"], out["written"], out["marked"]), ([], [], 1))
+        self.assertEqual(self.state("a")["train_passed"][str(a)], mark, "kept: an off tournament screen is no failure")
+        self.assertEqual(self.state("b")["train_passed"][str(b)], mark)
+        self.train("a", a, drift=FAILING)                         # its newest Train run's figures now fail the screen
+        self.assertEqual(self.facts()["removed"], ["a@1"], "a known failure under the incubator's own screen drops it")
+        self.assertEqual(self.state("a")["train_passed"], {})
+
+    def test_an_off_tournament_screen_reads_the_default_thresholds_and_an_on_screen_its_own(self):
+        borderline = drift_block(t=0.8)                           # under the default t of 1.0, over a loosened 0.5
+        n = self.family("a")
+        self.train("a", n, drift=borderline)
+        self.robust("a", n)
+        self.cohort("a", n)
+        self.settings["tournament"].update(drift_screen=False, drift_min_t=0.5)  # a loosened threshold the off screen kept
+        mark, why, drop = I.mark_of(self.store, self.store.family("a"), n, self.settings, evaluator=EVALUATOR,
+                                    objective=OBJECTIVE, clock=self.clock)
+        self.assertIsNone(mark)
+        self.assertIn("it fails the drift screen", why)
+        self.assertTrue(drop)
+        self.assertEqual(I.screen_settings(self.settings)["tournament"]["drift_screen"], True)
+        self.assertNotIn("drift_min_t", I.screen_settings(self.settings)["tournament"])
+        self.assertEqual(self.facts()["written"], [])
+        self.settings["tournament"]["drift_screen"] = True        # on: the tournament's screen at its own thresholds, as before
+        self.assertIs(I.screen_settings(self.settings), self.settings)
+        self.assertEqual(self.facts()["written"], ["a@1"])
+        self.assertEqual(self.state("a")["train_passed"][str(n)]["drift"]["t"], 0.8)
+        self.settings["tournament"]["drift_min_t"] = 1.0
+        self.assertEqual(self.facts()["removed"], ["a@1"], "on, a failure at the tournament's threshold drops the mark")
 
     def test_without_a_research_evaluator_or_an_objective_or_a_readable_record_nothing_is_written(self):
         self.eligible("a")

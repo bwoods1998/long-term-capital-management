@@ -13,7 +13,9 @@ family's state. Each is bound to the evaluator it was made under, so no stale fa
    - an eligible Train run of `n` (`train_eligible`) over the running Train span, under the current research evaluator;
    - its 1.5x Train robustness run landed with a profit (`researcher.robust_at_stress`);
    - it was not demoted (`bands.demoted`: a loss at 1.5x, or a failed drift screen);
-   - THE DRIFT SCREEN is on, knows its figures and passes them (`researcher.drift_verdict`);
+   - THE DRIFT SCREEN knows its figures and passes them (`researcher.drift_verdict` under `screen_settings`: the
+     tournament's own screen while it is on; while the tournament has switched it off, the screen at its default
+     thresholds, evaluated for the mark alone, Oct 8, 2026);
    - THE GATE HAS NOT BARRED ITS PROGRAM (`gate_bar`, below).
    `evaluator` is the store's `research_evaluator` and `objective` its `train_objective`, both as the mark was made. The
    live side (`bands.incubator`) accepts a mark only while both still equal the store's, because an evaluator adoption
@@ -21,11 +23,18 @@ family's state. Each is bound to the evaluator it was made under, so no stale fa
    `drift_failed` and `train_passed` as read, so a demotion landing meanwhile wins. The newest `MARKS_KEPT` marks are
    kept per family. No Gym run is queued here: a version whose 1.5x run never landed stays unmarked (fail-closed).
 
-   A MARK GOES when its version is demoted or lost at 1.5x, when the gate bars its program, or when the drift screen is
-   switched off (an off screen never passes: the mark is made again once the screen is on and passes): with the
-   verdict itself (THE VERDICT FIRST, below; `researcher.demote_version`), and by `sweep` (at the start of `facts`, and
-   at the start and the end of every gate round, the leakage alarm's too). A mark is never removed while figures are
-   only owed.
+   A MARK GOES when its version is demoted or lost at 1.5x, when the gate bars its program, or when its drift figures
+   are known and fail the screen (`facts`): with the verdict itself (THE VERDICT FIRST, below;
+   `researcher.demote_version`), and by `sweep` (at the start of `facts`, and at the start and the end of every gate
+   round, the leakage alarm's too). A mark is never removed while figures are only owed.
+
+   THE INCUBATOR'S OWN DRIFT SCREEN (Oct 8, 2026; `screen_settings`). The owner's term is "pass Train, pass the drift
+   screen alone", and the screen binds the mark whatever the tournament does with it. FAST LANE V2 (Oct 7) switched the
+   tournament's screen off for selection (`tournament.drift_screen` false: direction counts), and the mark read that as
+   "never passes": no mark was written, the sweep took every mark, and no cohort could ever be pinned. Now, while the
+   tournament's screen is off, the mark evaluates the screen itself at its default thresholds (`evidence.DRIFT_MIN_T`,
+   every Train year but one), and the sweep keeps the marks. Nothing the tournament, validation, the gate or the bands
+   select by changes: `screen_settings` is read here only, never written back to the settings.
 
    THE GATE'S BAR (`gate_bar`) is durable, so it outlives the family's `gate_outcome` and `review` moving on to a newer
    version (the live side's own check reads `gate_outcome`, which names one program a family, and counts a passed
@@ -578,8 +587,8 @@ def _record_bar(store: SwarmStore, fid: str, sha: str, why: str, version: int | 
         values["incubator_barred"] = {**dict(recorded or {}), sha: entry}
         view = {**fam, "state": {**state, "incubator_barred": values["incubator_barred"]}}
     # The sweep's work for this family, on the view that holds the new entry (its own record of `unrecorded_bars`
-    # builds on it). The drift screen is the sweep's own business: `screen_on` here only keeps its marks for it.
-    swept, done, why_of = _swept(store, view, True, store.looks(), clock)
+    # builds on it).
+    swept, done, why_of = _swept(store, view, store.looks(), clock)
     values.update(swept)
     if added:
         done["barred"].insert(0, f"{fid}:{sha[:12]}")
@@ -601,6 +610,21 @@ def reviews_per_round(settings: Mapping[str, Any]) -> int:
     if isinstance(raw, bool) or not isinstance(raw, (int, float)) or not math.isfinite(raw) or float(raw) != int(raw):
         return REVIEWS_PER_ROUND
     return max(0, min(REVIEWS_CEILING, int(raw)))
+
+
+def screen_settings(settings: Mapping[str, Any]) -> Mapping[str, Any]:
+    """THE INCUBATOR'S OWN DRIFT SCREEN (the module docstring, 1): the settings the mark's drift screen is read under.
+    While the tournament's screen is on (`researcher.drift_settings` not None), `settings` itself, so the mark and the
+    tournament read one screen at the same thresholds. While the tournament has switched it off (`tournament.drift_screen`
+    false, FAST LANE V2), a copy with the screen on at its DEFAULT thresholds (`drift_min_t` and `drift_years_positive`
+    left out: `evidence.DRIFT_MIN_T`, and every Train year but one): an off screen is the tournament's choice for
+    selection, never a pass, and never a reason to mark nothing. Never written back: the tournament, validation, the gate
+    and the bands read `settings` as they were."""
+    if drift_settings(settings) is not None:
+        return settings
+    tournament = {k: v for k, v in dict(settings.get("tournament") or {}).items()
+                  if k not in ("drift_min_t", "drift_years_positive")}
+    return {**dict(settings), "tournament": {**tournament, "drift_screen": True}}
 
 
 # ---------------------------------------------------------------------------------------------------- the cohorts
@@ -679,8 +703,8 @@ def mark_of(store: SwarmStore, fam: Mapping[str, Any], n: int, settings: Mapping
             objective: Any, clock: Callable[[], float] = time.time) -> tuple[dict[str, Any] | None, str, bool]:
     """(the mark, why not, drop): version `n`'s Train and drift mark (the module docstring) when every condition holds,
     else None with the reason. `drop` is True when an existing mark must go: the version failed for good (demoted, a
-    loss at 1.5x, a known failed drift screen, the gate's bar) or the drift screen is off. Figures only owed never drop
-    a mark."""
+    loss at 1.5x, a known failed drift screen, the gate's bar). Figures only owed never drop a mark. The drift screen is
+    the incubator's own (`screen_settings`): the tournament's while it is on, else the screen at its defaults."""
     state = fam.get("state") or {}
     if demoted(state, n):
         return None, "demoted (a loss at 1.5x or a failed drift screen)", True
@@ -690,8 +714,6 @@ def mark_of(store: SwarmStore, fam: Mapping[str, Any], n: int, settings: Mapping
     bar = gate_bar(store, fam, n)
     if bar is not None:
         return None, f"barred by the gate: {bar}", True
-    if drift_settings(settings) is None:
-        return None, "the drift screen is off (an off screen never passes)", True
     if robust is None:
         return None, "its 1.5x Train run has not landed", False
     stressed = ((state.get("robustness") or {}).get(str(n)) or {}).get("stress_1.5") or {}
@@ -702,10 +724,8 @@ def mark_of(store: SwarmStore, fam: Mapping[str, Any], n: int, settings: Mapping
     run = eligible_train_run(store, fam, n, evaluator)
     if run is None:
         return None, "no eligible Train run under the current evaluator", False
-    screen = drift_verdict(store, fam, n, settings)
-    if screen is None:
-        return None, "the drift screen is off (an off screen never passes)", True
-    if not screen["known"]:
+    screen = drift_verdict(store, fam, n, screen_settings(settings))
+    if screen is None or not screen["known"]:
         return None, "its drift figures are owed", False
     if not screen["passed"]:
         return None, f"it fails the drift screen: {screen['why']}", True
@@ -724,15 +744,14 @@ def _kept(marks: Mapping[str, Any]) -> dict[str, Any]:
 
 def sweep(store: SwarmStore, settings: Mapping[str, Any], *, clock: Callable[[], float] = time.time) -> dict[str, list[str]]:
     """THE SWEEP (the module docstring, 1), over every alive family, whatever its band or its cohort's status: a mark goes
-    when its version is demoted or lost at 1.5x, when its program is barred (`gate_bar`), or, every mark, while the
-    drift screen is off; a family's `gate_outcome` naming a program refused, failed, demoted or held, and its gate `review`
+    when its version is demoted or lost at 1.5x, or when its program is barred (`gate_bar`) (an off tournament screen
+    takes no mark: the mark's screen is the incubator's own, `screen_settings`); a family's `gate_outcome` naming a program refused, failed, demoted or held, and its gate `review`
     failing a program or unreadable for it, are recorded in `incubator_barred` (`unrecorded_bars`: so the bar outlives
     either moving on); a passed incubator review of a program barred by name becomes verdict "fail", stage "gate". It
     only removes and records bars: it never writes a mark or a pass, nor anything the gate, validation or the bands
     read. Returns {"removed": ["family@version"], "barred": ["family:sha12"], "revoked": ["family@version"]}; anything
     done is one private `swarm.gate` event (`incubator_sweep`)."""
     out: dict[str, list[str]] = {"removed": [], "barred": [], "revoked": []}
-    screen_on = drift_settings(settings) is not None
     looks: list[dict[str, Any]] | None = None
     why_of: dict[str, str] = {}
     for fam in store.families(alive=True):
@@ -744,13 +763,13 @@ def sweep(store: SwarmStore, settings: Mapping[str, Any], *, clock: Callable[[],
             continue
         if looks is None:
             looks = store.looks()
-        if not _swept(store, fam, screen_on, looks, clock)[0]:
+        if not _swept(store, fam, looks, clock)[0]:
             continue  # nothing to remove: no write transaction is taken
         with store.atomic():  # read again under the store's lock, then written
             now = store.family(str(fam["id"])) or {}
             if not now or now.get("retired_at"):
                 continue
-            values, done, why = _swept(store, now, screen_on, looks, clock)
+            values, done, why = _swept(store, now, looks, clock)
             if values:
                 store.set_state(str(fam["id"]), **values)
                 for key in out:
@@ -761,8 +780,7 @@ def sweep(store: SwarmStore, settings: Mapping[str, Any], *, clock: Callable[[],
     return out
 
 
-def _swept(store: SwarmStore, fam: Mapping[str, Any], screen_on: bool, looks: list[dict[str, Any]],
-           clock: Callable[[], float]) -> tuple[dict[str, Any], dict[str, list[str]], dict[str, str]]:
+def _swept(store: SwarmStore, fam: Mapping[str, Any], looks: list[dict[str, Any]], clock: Callable[[], float]) -> tuple[dict[str, Any], dict[str, list[str]], dict[str, str]]:
     """One family's part of `sweep`: (the state values to write, {removed, barred, revoked}, why each mark goes)."""
     from .gate import run_sha
 
@@ -800,8 +818,6 @@ def _swept(store: SwarmStore, fam: Mapping[str, Any], screen_on: bool, looks: li
             why = "demoted (a loss at 1.5x or a failed drift screen)"
         elif robust_at_stress(state, n) is False:
             why = "its 1.5x Train run lost money"
-        elif not screen_on:
-            why = "the drift screen is off (an off screen never passes)"
         else:
             bar = barred(n)
             why = None if bar is None else f"barred by the gate: {bar}"
@@ -973,5 +989,5 @@ __all__ = ["facts", "sweep", "due_reviews", "practice_cohorts", "practice_curren
            "mark_of", "gate_bar", "gate_review_bar", "incubator_review_bar", "family_bar", "unrecorded_bars", "verdict_bar",
            "record_verdict", "record_bar", "BAD_OUTCOMES", "twins", "program_bar", "owed_audit_bar", "adoption_bars",
            "save_owed", "load_owed", "backfill", "BACKFILL_KEY",
-           "eligible_train_run", "reviewable", "put_review", "reviews_per_round", "session_day", "MARKS_KEPT",
+           "eligible_train_run", "reviewable", "put_review", "reviews_per_round", "screen_settings", "session_day", "MARKS_KEPT",
            "REVIEWS_KEPT", "REVIEW_MIN_SESSIONS", "REVIEW_MIN_CLOSES", "REVIEWS_PER_ROUND", "REVIEWS_CEILING", "OBSERVE_FILE"]
