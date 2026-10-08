@@ -41,10 +41,11 @@
     "box_name": "ltcm-house"
   },
   "live": {
-    "_about": "The live options path (league/live/, the options swarm's Wave 5, Sept 26, 2026): Candidates trade the shadow book on live quotes (the Gym's own fill rules), Probe and Sized families trade real money under the constitution's options_money table and the grant, the practice account proves the multi-leg route first. enabled: it runs, and it owns both Alpaca accounts (no old Book is built for them). require_paper_proof: real opens wait for the practice account's multi-leg round trip. shadow_capital: each shadow instance's notional capital (the Gym's). The House box needs numpy.",
+    "_about": "The live options path (league/live/, the options swarm's Wave 5, Sept 26, 2026): Candidates trade the shadow book on live quotes (the Gym's own fill rules), Probe and Sized families trade real money under the constitution's options_money table and the grant, the practice account proves the multi-leg route first. enabled: it runs, and it owns both Alpaca accounts (no old Book is built for them). require_paper_proof: real opens wait for the practice account's multi-leg round trip. shadow_capital: each shadow instance's notional capital (the Gym's). The House box needs numpy. observe_max_sessions: a practice cohort's session window (league/live/step.py DEFAULTS 10; Oct 8, 2026: 30, so a cohort under the practice cap of 3 open structures can reach the incubator's 10 program closes before its window ends; the House reads it at its start, for the cohorts already active too, and league/swarm/practice.py COHORT_WINDOW mirrors it).",
     "enabled": true,
     "require_paper_proof": true,
-    "shadow_capital": 10000.0
+    "shadow_capital": 10000.0,
+    "observe_max_sessions": 30
   },
   "gym": {
     "_about": "The Gym (Wave 3, league/gym/): sealed Sailboxes forked from the Gym image that replay agent programs over recorded one-minute NBBO. A placeholder until the Gym's builder fills it; nothing reads it yet.",

@@ -327,9 +327,12 @@ def apply_bonus(shares: Mapping[str, float], store: Any, settings: Mapping[str, 
 
 # ------------------------------------------------------------------------------------------ the active cohorts (L1)
 #: A cohort's bounded session window, as the House computes it (`ObserveStore.cohort_candidates` with its step's
-#: DEFAULTS): the snapshot's `practice_max_sessions`, at least `COHORT_WINDOW` (`observe_max_sessions`), at most
-#: `COHORT_WINDOW_MAX`, and never below `COHORT_WINDOW_MIN` (`observe_min_sessions`).
-COHORT_WINDOW = 10
+#: settings): the snapshot's `practice_max_sessions`, at least `COHORT_WINDOW` (`observe_max_sessions`), at most
+#: `COHORT_WINDOW_MAX`, and never below `COHORT_WINDOW_MIN` (`observe_min_sessions`). `COHORT_WINDOW` is the House's
+#: `observe_max_sessions` as it runs: league/config.json "live" over league/live/step.py DEFAULTS (10). THE LONGER WINDOW
+#: (Oct 8, 2026): 30 in both, because under the practice cap of 3 open structures, mostly held to expiry, no cohort
+#: could reach the incubator's 10 program closes inside 10-18 sessions (a test holds the two equal).
+COHORT_WINDOW = 30
 COHORT_WINDOW_MAX = 60
 COHORT_WINDOW_MIN = 3
 NEW_YORK = ZoneInfo("America/New_York")
