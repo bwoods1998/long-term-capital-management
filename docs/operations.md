@@ -2152,9 +2152,13 @@ structure as null (the site's schema has only the eleven order types) and each o
   (`observe_shed` in the live state, so a restart keeps it; one `live.observe` {shed, effective_cap, why} and one
   alert). Validated pins are never shed. The next session admits surviving frozen cohorts at the full caps.
 - **Frozen cohorts.** Research retirement and newer revisions do not terminate a cohort. It finishes between sessions
-  after at least three observed sessions and ten program closes while flat; otherwise its maximum is ten session days,
-  extended to cover the program's declared DTE horizon plus three sessions, bounded at sixty. An expired snapshot never
-  rejoins; a newer eligible version may. Switches, caps and pressure can still wind it down. These are practice durations,
+  after at least three observed sessions and ten program closes while flat; otherwise its maximum is
+  `observe_max_sessions` session days (the step's default is ten; `league/config.json` `live.observe_max_sessions` is 30
+  since Oct 8, 2026, mirrored by `league/swarm/practice.py` `COHORT_WINDOW`), extended to cover the program's declared
+  DTE horizon plus three sessions, bounded at sixty. The House reads the window at every cohort pass and a snapshot
+  keeps only its DTE horizon, so a new window applies to the cohorts already active from the House's next start. An
+  expired snapshot never rejoins; a newer eligible version may. Switches, caps and pressure can still wind it down.
+  These are practice durations,
   not capital gates (`OptionsLive` config `observe_min_sessions`, `observe_min_trades`, `observe_max_sessions`).
   Snapshots pin the Gym bundle and fill model. If either changes, old cohorts become close-only and their wind-down
   outcomes are excluded from program feedback. The family/version ledger currently requires a newly eligible source
@@ -2169,6 +2173,43 @@ structure as null (the site's schema has only the eleven order types) and each o
 
   The cohort then reads `failed`, and its pin is freed at the next session's first pass. The store opens SQLite with a
   0.05 s timeout, so retry on "database is locked". Record it in the run record.
+- **The 30-session cohort window** (Oct 8, 2026; `league/config.json` `live.observe_max_sessions`, the owner's deploy,
+  and `practice.COHORT_WINDOW`). Under the practice cap of 3 open structures, mostly held to expiry, no cohort could
+  reach the incubator's 10 program closes inside 10-18 sessions. The verifier's replay on the House (each cohort's own
+  Gym trades under the practice caps) gave a first look inside the window with probability 0.46 / 0.24 / 0.13 at 20
+  sessions and 0.92 / 0.98 / 0.78 at 30 for the three best candidates (china-tech-us-lead-lag@16,
+  peer-skew-conduction-single@11, opening-range-highbeta-continuation@31), with expected looks around sessions 20-24.
+  So 20 is too short and 30 is the window. What it costs, and the levers:
+  - **Roots.** Frozen cohorts are pinned before any new family (`observe.cohort_candidates`), and the binding cap is
+    `live.observe_roots_max` (24). On Oct 8 the 12 active cohorts held 22 of the 24 roots; after the two barred ones end
+    at the 02:00Z hygiene, 10 hold 21. Every new family then has at most 3 new roots until the cohorts complete (Nov 19
+    for the Oct 8 batch, against Oct 22 to Nov 3 under the old window). SPY, XSP and SPXW are free, so the game's core
+    arms are not starved; families on other roots are.
+  - **Newer versions.** A family with an active cohort practises no other version for the whole window
+    (`cohort_candidates` drops its current rows). After T0 that includes the family's new best over 2022-24.
+  - **Cohorts that cannot be pinned.** Three cohorts fail the incubator's screen over the current span
+    (index-corr-dispersion-break-vertical@32 t 0.46, smci-mara-post-earnings-drift-debit@11 t 0.08,
+    semis-lead-smallcap@16 t 0.88) and alone hold IWM, MARA and SMCI. T0 judges them again over 2022-24, so they are
+    not dead for good. `tournament.keep_order` spares their families from retirement all the same (it does not ask
+    whether a cohort can be marked).
+  - **Levers.** (a) The operator ends a cohort that can never be pinned (**Ending a cohort by hand**, above), as the
+    Oct 2 "operator (v3 phase 0)" failures were recorded: the screen failures only when T0 is not near. (b) swarm.json
+    `live.observe_roots_max` (a runtime switch, 1-128), with `live.observe_read_calls` raised by 4 per root (the read
+    budget is 1 + 4 x roots + 20). (c) Owner deploys, both in walled files: `tournament.keep_order` skipping a cohort
+    whose mark is dropped for good, and `league/ops/hygiene.py` `end_cohorts` ending a demoted or lost-at-1.5x cohort
+    (not a screen failure alone).
+- **The practice-evaluator freeze** (Oct 8, 2026). A cohort ends at once when the practice evaluator moves ("evaluator
+  changed; a new version needs fresh practice"). Of the 33 cohorts ever completed on the House up to Oct 8, 30 ended
+  that way (most 0-2 days after admission, at the Oct 3 and Oct 7 releases) and 3 by an operator; none has ever reached
+  its window or its observation target. The practice evaluator is
+  `<Gym bundle>:<fill model>:<execution fingerprint>` (`league/live/step.py`): `league/gym/**` (.py and .md), the
+  LEAGUE_FILES (`league/__init__.py`, `safety.py`, `structure_core.py`, `stats.py`), `league/live/**.py`, and the
+  House's fill model (`/data/calibration/fill_model.json`, read at the House's start). The 30-session window only helps
+  if none of these moves until the Oct 8 cohorts have had their first looks (expected around sessions 20-24, Nov 4-10),
+  better until they complete (Nov 19): no release that touches those paths, no fill-model recalibration
+  (swarm.json `live.calibration` stays false and the fill model file stays as it is). Before any release, compute the
+  candidate tree's execution fingerprint and Gym bundle (`league.swarm.evaluator.execution_fingerprint`,
+  `league.gym.driver.build_bundle`) and compare them with the cohorts' `practice_evaluator`.
 - **Private receipts.** `observe.sqlite.events` records decisions, coverage, intents, rejections, orders and fills with
   leg quotes, fees and slippage against decision mid. The shadow account saves unacknowledged receipts and retries
   idempotently after a restart. Events retain 120 days; a prolonged ledger outage has a 10,000-event per-account buffer
