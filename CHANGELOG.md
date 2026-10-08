@@ -29,6 +29,38 @@ any other deploy.
 The running House release is `20261008T124025Z-a9686c7cfcfd` (main `ab64c68b`, 12:41Z Oct 8, below), the gateway is
 `f63dd354`, and the box's updater is on. What is built and not deployed is on branches.
 
+### The learning game v1, on `release/learning-game` (unreleased; an owner deploy)
+
+From T0 no agent sees 2020 or 2021 again; those two years, scored privately at 1.5x the half-spread and net of each
+program's own exposure's drift, decide which programs reproduce and which reach Validation. Researchers keep working on
+Train 2022-2024. `league/swarm/game.py` (new, protected) holds the rules; the build spec of Oct 8 holds their numbers.
+- **Arms.** New core-five families split by their lineage's hash: half the game arm, half a concurrent control on the
+  same seen years with the same hidden measurements as records. Families alive at T0, or with another root, are legacy
+  (today's rules). Births are core-five only while the game is on.
+- **Gate mode, game arm.** The look ladder (best by Train score, +0.5 over the last looked score, a profitable 1.5x seen
+  run, 4 looks); a SELECT PASS (F >= 1.28) reads the CONFIRM year once (2 a family, 3 a lineage); only a CONFIRMED
+  version goes to Validation, 2 tries; its Validation t never steers its compute; children of the top SELECT decile
+  with a structural directive or a donor's execution (the child joins its signal parent's lineage only); three
+  retirement reasons first; the dormancy clause spares such a family only while a CONFIRMED version awaits Validation
+  or a look is out.
+- **Blindness.** The architect and the strategist never read a game-arm family; every graveyard reader drops game-arm
+  rows and those of families born before T0 and retired since the 2020-21 switch; the strategist's section may not name
+  2020 or 2021; the input card reads "span_mismatch" under a 2022 Train. `league/CONTRACT.md` is unchanged.
+- **Settings** (`league/swarm/policy.json`): `gym.train_from` "2022-01-03", `gym.allow_earlier_image` true,
+  `practice.feedback` false, and the `game` block (`enabled` true, `mode` "gate", `arm_fraction` 0.5, and the rest as
+  the spec's section 5; `game.cfg` bounds each). The House's `swarm.json` pins `gym.train_from` "2020-01-02": the
+  operator changes it at T0 (docs/operations.md, **The learning game v1**, has the T0 steps and the rollback).
+- **The span switch is the one evidence reset:** at the next start every living family's best is chosen again over
+  2022-2024 (`migrate_objective`) and its robustness starts over; a recorded validation of the same version on the same
+  Gym is reused.
+- **Measurement.** The House's new `game` job (daily 00:00Z, read-only) and `scripts/game_report.py` write the
+  operator-only report `<state>/game/report-<day>.json` (R1-R6, family-cluster bootstrap, the pre-registered
+  decisions).
+- **What does not move:** nothing in `league/gym/`, `league/live/`, `league/constitution.py`, `league/swarm/settings.py`
+  or the store: the execution fingerprint and the money digest are unchanged, no evaluator adoption, and Validation, the
+  gate, the holdout look and Probe sizing are as they were. Control and legacy families, and every family with the game
+  off, play main's round byte for byte (`league/tests/test_game.py` `Golden`, against `ab64c68b`).
+
 ### On branches, not in V3-A part 1
 
 - `v3/wp6`, the forward ladder and its benchmark (evidence v3, the owner's D2). As first specified it does not meet its
