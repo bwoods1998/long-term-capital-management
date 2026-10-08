@@ -1690,6 +1690,9 @@ class Researcher:
         #: (family, version, label) robustness runs this process has in flight (a restart loses queued jobs: they are
         #: queued again; a run that failed leaves the set, so a later cycle queues it again).
         self._robust: set[tuple[str, int, str]] = set()
+        #: THE INCUBATOR'S RE-RUNS this process queued (`incubator.reruns`): (family, version, objective, evaluator) keys,
+        #: each queued at most once a process (a restart loses queued jobs; the store's record caps the attempts).
+        self._incubator: set[tuple[str, int, str, str]] = set()
         #: family -> the variants its sweep has in flight; every worker shares this Researcher, so their sum is the load
         #: sweeps add to the pool (`max_sweep_jobs_in_flight`, the module docstring's SWEEP LOAD).
         self._sweeping: dict[str, int] = {}
@@ -3804,29 +3807,35 @@ class Researcher:
                    f"over Train, positive in {verdict['positive']} of {verdict['years']} years")
         return f"it passes the drift screen: {figures}" if verdict["passed"] else f"it fails the drift screen: {verdict['why']}"
 
-    def robust_labels(self, fam: Mapping[str, Any], n: int) -> tuple[str, ...]:
+    def robust_labels(self, fam: Mapping[str, Any], n: int, *, figures: bool | None = None) -> tuple[str, ...]:
         """The robustness runs version `n` needs: at 1.5x the half-spread and at the mid; and "drift", its Train run once
         more at the normal spread, while the drift screen is on and no run of it carries the drift figures (a version whose
-        Train run predates them, Sept 27: the screen binds, so it is made again rather than waved through)."""
-        if drift_settings(self.settings) is not None and version_drift(self.store, fam, n) is None:
+        Train run predates them, Sept 27: the screen binds, so it is made again rather than waved through). `figures`
+        (THE INCUBATOR'S RE-RUNS, `incubator.reruns`): True asks for the "drift" run whenever the figures are owed, the
+        tournament's screen on or off (the incubator's mark screens them itself); False never (a Train run of the version
+        is queued beside it and brings them); None is the tournament's rule above."""
+        wanted = drift_settings(self.settings) is not None if figures is None else figures
+        if wanted and version_drift(self.store, fam, n) is None:
             return ("stress_1.5", "mid", "drift")
         return ("stress_1.5", "mid")
 
-    def queue_robustness(self, fid: str, n: int, code: str, params: Mapping[str, Any], roots: tuple[str, ...]) -> bool:
+    def queue_robustness(self, fid: str, n: int, code: str, params: Mapping[str, Any], roots: tuple[str, ...], *,
+                         figures: bool | None = None, incubator: bool = False) -> bool:
         """The Train runs of a best version (a new best by score, or a submitted one) at 1.5x the half-spread and at the
         mid that it does not have yet (and at the normal spread for the drift figures, `robust_labels`), at the pool's
         lowest priority (they fill idle boxes and never delay a researcher's run or a validation). Each counts as a trial
         when it lands; its compact figures go to the family's state (`robustness`), and a loss at 1.5x demotes the version
         (`robust_landed`). Not waited for; once per version in flight per process; a run the Gym executed and failed is
         queued again, up to `ROBUSTNESS_ATTEMPTS` failures a label (only executed runs count: a restart or a supersession
-        charges nothing)."""
+        charges nothing). `figures` is `robust_labels`'; `incubator` marks the jobs THE INCUBATOR'S RE-RUNS queue for a
+        version an active practice cohort holds (`GymJob.incubator`: a newer best never supersedes them)."""
         submit = getattr(self.pool, "submit", None)
         if submit is None:
             return False
         self.screen(fid)  # a candidate whose drift figures fail is demoted first: it needs no robustness run
         if int(n) in (((self.store.family(fid) or {}).get("state") or {}).get("robust_failed") or []):
             return False
-        labels = self.robust_labels(self.store.family(fid) or {"id": fid}, int(n))
+        labels = self.robust_labels(self.store.family(fid) or {"id": fid}, int(n), figures=figures)
         with self.store.atomic():
             fam = self.store.family(fid) or {}
             if fam.get("retired_at"):
@@ -3848,7 +3857,7 @@ class Researcher:
             if label not in need:
                 continue
             job = GymJob(family=fid, version=int(n), code=code, params=dict(params or {}), window="train", roots=tuple(roots),
-                         stress=stress, purpose="robustness", priority=ROBUSTNESS_PRIORITY)
+                         stress=stress, purpose="robustness", priority=ROBUSTNESS_PRIORITY, incubator=bool(incubator))
             image, bundle = self._gym_identity()
             # Keyed like a researcher's run (NO DUPLICATE RUNS): a gym_run of this version at 1.5x reads it back.
             job.late = lambda result, label=label, stress=stress, job=job: self.robust_landed(
@@ -3877,6 +3886,50 @@ class Researcher:
             if version and version.get("code"):
                 self.queue_robustness(fam["id"], int(n), version["code"], version.get("params") or {},
                                       needs_roots(version["code"], fam["roots"]))
+
+    def queue_incubator_runs(self, fid: str, n: int, *, train: bool, robust: bool, drift: bool) -> list[str]:
+        """THE INCUBATOR'S RE-RUNS (Oct 8, 2026; `incubator.reruns` decides which, once a process): the Gym runs version
+        `n` (a version an active practice cohort holds) needs before its Train and drift mark can come back, the same
+        jobs a best gets. `train`: its Train run at the normal spread over the running span, recorded as a scored Train
+        row of the version (`incubator_train_landed`: its Train score, eligibility and drift figures, as a researcher's
+        run); `robust`/`drift`: its 1.5x and mid robustness runs, and "drift" when its figures are owed and no Train run
+        is queued (`queue_robustness`, which skips what landed and caps the failures). Every job is at the robustness
+        priority with `GymJob.incubator` (it fills idle boxes, never delays a researcher's run or a validation, never
+        supersedes a researcher's Train job and is never superseded by a newer best), and counts as a trial when it
+        lands. Returns what was queued ("train", "robustness")."""
+        submit = getattr(self.pool, "submit", None)
+        fam = self.store.family(fid) or {}
+        version = self.store.version(fid, int(n)) if fam else None
+        if submit is None or not fam or fam.get("retired_at") or not version or not version.get("code"):
+            return []
+        code, params = str(version["code"]), dict(version.get("params") or {})
+        roots = needs_roots(code, fam["roots"])
+        out: list[str] = []
+        if train:
+            job = GymJob(family=fid, version=int(n), code=code, params=params, window="train", roots=tuple(roots), stress=1.0,
+                         purpose="robustness", priority=ROBUSTNESS_PRIORITY, incubator=True)
+            job.late = lambda result, job=job: self.incubator_train_landed(fid, int(n), job, result)
+            job.late_fail = lambda why: self.store.event("swarm.robustness", fid, {
+                "version": int(n), "action": "incubator_train_failed", "why": str(why)[:200]})
+            submit(job)
+            out.append("train")
+        if (robust or drift) and self.queue_robustness(fid, int(n), code, params, roots, figures=not train, incubator=True):
+            out.append("robustness")
+        return out
+
+    def incubator_train_landed(self, fid: str, n: int, job: GymJob, result: Mapping[str, Any]) -> None:
+        """An incubator re-run's Train result (on the pool's dispatcher thread): a trial, recorded as the version's Train
+        run at the normal spread exactly as a researcher's run that landed late is (`_with_score`: its Train score and
+        eligibility over its own span, and `train_from`; the drift figures stay on its row), so `incubator.mark_of` reads
+        it. It changes no best and no candidate, and it is no researcher's evaluation (the dormancy clause is untouched)."""
+        try:
+            days = float((result.get("summary") or {}).get("days") or 0)
+            self.store.add_run(fid, int(n), self._with_score(result, 1.0)[0], window="train", stress=1.0, purpose="train",
+                               program_years=days / 252.0 * max(1, len(job.roots)), key=self._result_key(job, result))
+            self.store.event("swarm.robustness", fid, {"version": int(n), "action": "incubator_train",
+                                                       "status": str(result.get("status") or "")[:40]})
+        except Exception:  # noqa: BLE001 - on the dispatcher's thread: a record never breaks the pool
+            pass
 
     def robust_landed(self, fid: str, n: int, label: str, stress: float | None, result: Mapping[str, Any], *,
                       key: str | None = None) -> None:

@@ -24,6 +24,10 @@
    version an alive Gym family practises in an active, current cohort is marked `train_passed` once it has an eligible
    Train run, a profitable 1.5x run, no demotion and a passed drift screen, under the current evaluator. The mark is
    a fact for the House's incubator route only (one lot, never evidence, never a promotion); nothing here reads it.
+   Then THE INCUBATOR'S RE-RUNS (`incubator.reruns`, Oct 8, 2026): a cohort version whose mark waits only on Gym runs
+   (after the learning game's T0 or a Gym image change) has its Train run over the running span and its robustness runs
+   queued, the same jobs a best gets, at most once per version, Train objective and evaluator, while the guard allows
+   new research.
 3. THE ALLOCATION (Release B, league/swarm/allocation.py; `allocation.mode` "value"): each family's share of researcher
    turns and Gym priority by its expected information value (the variance of its next validation's pass or fail under
    an empirical-Bayes posterior, discounted by the idea's trials, its own and those inherited at birth, by exhaustion:
@@ -263,12 +267,17 @@ def keep_order(rows: list[Mapping[str, Any]], alive: Mapping[str, Any] | set[str
 
 class Tournament:
     def __init__(self, store: SwarmStore, pool: Any, settings: Mapping[str, Any], *, clock: Callable[[], float] = time.time,
-                 rng: random.Random | None = None):
+                 rng: random.Random | None = None, researcher: Any = None, allows: Callable[[], bool] | None = None):
         self.store = store
         self.pool = pool
         self.settings = settings
         self.clock = clock
         self.rng = rng or random.Random()
+        #: THE INCUBATOR'S RE-RUNS (`incubator_reruns`): the swarm's Researcher, which queues them, and the guard's word on
+        #: new research (`SailGuard.allows("research")`: THE GATE'S RESERVE and the brake). None (tests, a tournament
+        #: built alone): no re-run is queued.
+        self.researcher = researcher
+        self.allows = allows
         self.allocation: dict[str, Any] = {}  # the last allocation's report (`allocate`; allocation.py's `value_shares`)
         #: The families the last allocation named useful experiments (THE CONCURRENCY, allocation.py): none under the bandit.
         self.useful: frozenset[str] = frozenset()
@@ -623,6 +632,21 @@ class Tournament:
             return incubator.facts(self.store, self.settings, self.store.root, clock=self.clock)
         except Exception as exc:  # noqa: BLE001
             self.store.event("swarm.status", None, {"action": "incubator_facts_error", "error": f"{type(exc).__name__}: {str(exc)[:300]}"})
+            return {"error": type(exc).__name__}
+
+    def incubator_reruns(self) -> dict[str, Any]:
+        """THE INCUBATOR'S RE-RUNS (`incubator.reruns`, after the marks; Oct 8, 2026): the Gym runs an active cohort's
+        version needs before its mark can come back (after the learning game's T0 or a Gym image change), queued only
+        while the guard allows new research (THE GATE'S RESERVE; the round itself runs only while it allows any) and
+        never failing the round: an error is one private `swarm.status` event. {} without a researcher or a guard."""
+        if self.researcher is None or self.allows is None:
+            return {}
+        try:
+            if not self.allows():
+                return {"held": "the guard holds new research (the gate's reserve or the brake)"}
+            return incubator.reruns(self.store, self.settings, self.researcher, self.store.root, clock=self.clock)
+        except Exception as exc:  # noqa: BLE001
+            self.store.event("swarm.status", None, {"action": "incubator_reruns_error", "error": f"{type(exc).__name__}: {str(exc)[:300]}"})
             return {"error": type(exc).__name__}
 
     # ------------------------------------------------------------------ 3. the allocation
@@ -1090,6 +1114,7 @@ class Tournament:
         self.game_step("requeue_stale", lambda: game.requeue_stale(self.store, self.settings, self.pool, self.clock))
         self.game_step("recheck", lambda: game.recheck(self.store, self.settings, self.pool, self.clock))
         facts = self.incubator_facts()
+        reruns = self.incubator_reruns()
         fams = self.store.families(alive=True)
         self.allocate(fams)  # the shares retirements rank by (the least favoured go first)
         retired = self.retirements(self.store.families(alive=True))
@@ -1121,6 +1146,8 @@ class Tournament:
         row = {"at": began, "seconds": round(self.clock() - began, 1), "validation": validation, "retired": retired, "born": born,
                "board": board, "totals": totals, "last_hour": last_hour, "practice_bonus": dict(self.practice_bonus),
                "allocation": dict(self.allocation), "incubator": facts}
+        if reruns:
+            row["incubator_reruns"] = reruns
         self.store.event("swarm.tournament", None, row)
         self.store.put("leaderboard", {"at": began, "board": board, "totals": totals})
         return row

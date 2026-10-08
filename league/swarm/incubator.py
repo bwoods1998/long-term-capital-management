@@ -21,7 +21,8 @@ family's state. Each is bound to the evaluator it was made under, so no stale fa
    live side (`bands.incubator`) accepts a mark only while both still equal the store's, because an evaluator adoption
    clears alive families only. The mark is written with a compare-and-set on the version's `robust_failed`,
    `drift_failed` and `train_passed` as read, so a demotion landing meanwhile wins. The newest `MARKS_KEPT` marks are
-   kept per family. No Gym run is queued here: a version whose 1.5x run never landed stays unmarked (fail-closed).
+   kept per family. No Gym run is queued here: a version whose 1.5x run never landed stays unmarked (fail-closed); THE
+   RE-RUNS (3, below) queue the runs a cohort version's mark waits on.
 
    A MARK GOES when its version is demoted or lost at 1.5x, when the gate bars its program, or when its drift figures
    are known and fail the screen (`facts`): with the verdict itself (THE VERDICT FIRST, below;
@@ -107,6 +108,26 @@ family's state. Each is bound to the evaluator it was made under, so no stale fa
    only thing the two share. The gate's own review state (`review`, `gate_ready`, `gated_sha`, `gate_outcome`) and its
    holdout looks are never touched, and no look is spent.
 
+3. THE RE-RUNS (`reruns`, Oct 8, 2026; the tournament's hourly round, after the marks). A mark is bound to the Train
+   objective and the evaluator it was made under, and its runs must be the running span's and the current evaluator's.
+   The learning game's T0 (a new Train span, `researcher.migrate_objective`: `robustness` emptied, a new
+   `train_objective`) and a Gym image change (`evaluator.adopt`: the marks, `robustness` and the selection cleared)
+   leave every cohort version's mark stale and its runs another span's or image's, and the researcher queues those runs
+   only for a family's best or submitted version, which a cohort version seldom is. So an active, current cohort's
+   version with no current mark whose mark waits ONLY on Gym runs (`owed_runs`: no Train answer over the running span
+   under the current evaluator, its 1.5x run not landed, or its drift figures owed) has them queued, the same jobs a
+   best gets (`researcher.Researcher.queue_incubator_runs`: its Train run over the running span, recorded as a scored
+   Train row of the version, and its 1.5x and mid robustness runs, "drift" when only the figures are owed), at the
+   robustness priority (they fill idle boxes and never delay a researcher's run or a validation). Never for a version
+   that failed for good (`mark_of`'s drop: demoted, a loss at 1.5x, a known failed drift screen, the gate's bar), whose
+   Train answer over the span is in and not eligible, whose drift figures over the span are in and fail the screen, on D2's route (the reader never admits it), or in a cohort that
+   is failed, complete or under another evaluator (`practice_cohorts` reads the active, current ones only). At most once
+   per (version, Train objective, evaluator) in a swarm process (`Researcher._incubator`), and at most `RERUN_ATTEMPTS`
+   times in all (`RERUNS_KEY` in the family's state: a restart loses the queued jobs, charging nothing); once its runs
+   have landed nothing is queued again (it is marked, or it failed for good). The tournament asks for them only while
+   the guard allows research (`Tournament.incubator_reruns`: THE GATE'S RESERVE and the brake), and the pool starts no
+   box for them. They write no mark themselves: the next round's `facts` reads what landed.
+
 WHY NEITHER FACT CAN PROMOTE ANYTHING. Neither is read by validation, the validation line, the gate's holdout, the
 forward record, the bands' moves or `bands.read`. Only the live side's incubator reader (`bands.incubator`) reads them,
 for the incubator route, whose trades are tuition (never a forward row) under its own money row. Research never reads
@@ -144,6 +165,12 @@ REVIEWS_KEPT = 8
 #: positive program P&L: ready before its first look (3 sessions and 10 closes), and paid for only when it could pass.
 REVIEW_MIN_SESSIONS = 2
 REVIEW_MIN_CLOSES = 5
+#: THE RE-RUNS (the module docstring, 3): the family-state key of the record of the re-runs queued for a version
+#: ({version: {objective, evaluator, attempts, at, train, robust, drift}}, the newest `RERUNS_KEPT` versions), and how many
+#: times in all one (version, Train objective, evaluator) may have them queued (a restart loses queued jobs).
+RERUNS_KEY = "incubator_reruns"
+RERUNS_KEPT = 8
+RERUN_ATTEMPTS = 3
 #: Incubator reviews a gate round makes (`gate.incubator_reviews`); a value past `REVIEWS_CEILING` is the ceiling.
 REVIEWS_PER_ROUND = 2
 REVIEWS_CEILING = 8
@@ -891,6 +918,135 @@ def facts(store: SwarmStore, settings: Mapping[str, Any], root: str | Path | Non
     return out
 
 
+# ---------------------------------------------------------------------------------------------------- 3. the re-runs
+#: The Gym's final answers to a Train run (the program's answer: run again on the same span and evaluator, it says the
+#: same). A row of status "error" or "failed" is none: the Gym could not finish it.
+ANSWERED = ("ok", "disqualified", "no_data", "refused")
+
+
+def train_answer(store: SwarmStore, fam: Mapping[str, Any], n: int, evaluator: Mapping[str, Any]) -> str | None:
+    """Version `n`'s Train answer over the running Train span under `evaluator`: "eligible" (`eligible_train_run`),
+    "ineligible" (a scored run that is not eligible, or the Gym's final answer: disqualified, no data, refused), or None
+    (none yet: its Train run is owed)."""
+    from .evaluator import row_matches
+
+    if eligible_train_run(store, fam, n, evaluator) is not None:
+        return "eligible"
+    span = running_span(store)
+    for row in store.version_runs(fam["id"], int(n), window="train", stress=1.0, limit=20):
+        if row.get("status") not in ANSWERED or row_span(row) != span or not row_matches(store, row, evaluator):
+            continue
+        summary = row.get("summary") or {}
+        if row.get("status") != "ok" or summary.get("train_eligible") is False:
+            return "ineligible"
+    return None
+
+
+def owed_runs(store: SwarmStore, settings: Mapping[str, Any], root: str | Path | None = None, *,
+              clock: Callable[[], float] = time.time) -> list[dict[str, Any]]:
+    """THE RE-RUNS' list (the module docstring, 3): each active, current cohort's version in an alive Gym family with no
+    current mark whose mark waits only on Gym runs, oldest cohort first: [{family, version, train, robust, drift, why}]
+    (`train`: its Train run over the running span is owed; `robust`: its 1.5x run has not landed; `drift`: its figures
+    are owed while a Train answer is in; `why`: `mark_of`'s reason). [] without a research evaluator and Train objective
+    or a readable practice record. Read-only."""
+    from .evaluator import KEY
+    from .gate import run_sha
+    from .researcher import version_drift
+
+    evaluator, objective = store.get(KEY), store.get("train_objective")
+    if not isinstance(evaluator, Mapping) or objective is None:
+        return []
+    out = []
+    for cohort in practice_cohorts(root if root is not None else store.root, research=evaluator, before=session_day(clock)):
+        fid, n = cohort["family"], int(cohort["version"])
+        fam = store.family(fid)
+        if fam is None or fam.get("retired_at") or fam.get("band") != "gym":
+            continue
+        state = fam.get("state") or {}
+        if current_mark((state.get("train_passed") or {}).get(str(n)), evaluator, objective):
+            continue
+        if (state.get("validation_line") or {}).get("passed") and state.get("validation_version"):
+            continue  # D2's route: the House's reader never admits it to the incubator (`bands.incubator`)
+        mark, why, drop = mark_of(store, fam, n, settings, evaluator=evaluator, objective=objective, clock=clock)
+        if mark is not None or drop:
+            continue  # marked at this round's `facts`, or failed for good (demoted, a loss at 1.5x, the screen, a bar)
+        version = store.version(fid, n)
+        if version is None or not version.get("code") or cohort["run_sha"] != run_sha(version):
+            continue  # the cohort practises another program than this version's
+        answer = train_answer(store, fam, n, evaluator)
+        if answer == "ineligible":
+            continue  # the Gym's answer over this span is in: it can never be marked under it
+        screen = drift_verdict(store, fam, n, screen_settings(settings))
+        if screen is not None and screen["known"] and not screen["passed"]:
+            continue  # its figures over this span are in and fail the screen (`mark_of` reads its 1.5x run first)
+        train = answer is None
+        robust = robust_at_stress(state, n) is None
+        drift = not train and version_drift(store, fam, n) is None
+        if train or robust or drift:
+            out.append({"family": fid, "version": n, "train": train, "robust": robust, "drift": drift, "why": why})
+    return out
+
+
+def reruns(store: SwarmStore, settings: Mapping[str, Any], researcher: Any, root: str | Path | None = None, *,
+           clock: Callable[[], float] = time.time) -> dict[str, Any]:
+    """THE RE-RUNS (the module docstring, 3): `owed_runs` queued through `researcher.queue_incubator_runs`, each
+    (version, Train objective, evaluator) at most once in this process (`researcher._incubator`) and at most
+    `RERUN_ATTEMPTS` times in all (`RERUNS_KEY`). Returns {"owed": n, "queued": [...], "waiting": [...], "spent": [...]}
+    ("family@version": queued now; queued by this process before, in flight or landed; its attempts spent), {} when
+    nothing is owed. One private `swarm.robustness` event (`incubator_reruns`) when anything was queued."""
+    from .evaluator import KEY
+
+    rows = owed_runs(store, settings, root, clock=clock)
+    if not rows:
+        return {}
+    evaluator, objective = dict(store.get(KEY)), store.get("train_objective")
+    seen = getattr(researcher, "_incubator", None)
+    if not isinstance(seen, set):
+        seen = set()
+        researcher._incubator = seen
+    out: dict[str, Any] = {"owed": len(rows), "queued": [], "waiting": [], "spent": []}
+    for row in rows:
+        fid, n = row["family"], int(row["version"])
+        name = f"{fid}@{n}"
+        key = (fid, n, dumps(objective), dumps(evaluator))
+        if key in seen:
+            out["waiting"].append(name)
+            continue
+        if _attempts(store, fid, n, objective, evaluator) >= RERUN_ATTEMPTS:
+            out["spent"].append(name)
+            continue
+        seen.add(key)  # once a process, whatever the queue said (a job in flight as a best's is not queued twice)
+        queued = researcher.queue_incubator_runs(fid, n, train=row["train"], robust=row["robust"], drift=row["drift"])
+        if not queued:
+            continue
+        with store.atomic():  # the attempt, counted once the jobs are queued
+            fam = store.family(fid) or {}
+            raw = (fam.get("state") or {}).get(RERUNS_KEY)
+            records = {k: dict(v) for k, v in raw.items() if isinstance(v, Mapping)} if isinstance(raw, Mapping) else {}
+            records[str(n)] = {"objective": objective, "evaluator": evaluator,
+                               "attempts": _attempts(store, fid, n, objective, evaluator) + 1, "at": float(clock()),
+                               "train": row["train"], "robust": row["robust"], "drift": row["drift"], "jobs": list(queued)}
+            keep = sorted(records, key=lambda k: (float(records[k].get("at") or 0.0), k))[-RERUNS_KEPT:]
+            if fam and not fam.get("retired_at"):
+                store.set_state(fid, **{RERUNS_KEY: {k: records[k] for k in keep}})
+        out["queued"].append(name)
+        out.setdefault("jobs", {})[name] = list(queued)
+    if out["queued"]:
+        store.event("swarm.robustness", None, {"action": "incubator_reruns", **out})
+    return out
+
+
+def _attempts(store: SwarmStore, fid: str, n: int, objective: Any, evaluator: Mapping[str, Any]) -> int:
+    """How many times the re-runs of version `n` were queued under this Train objective and evaluator (`RERUNS_KEY`; 0
+    for a record of another objective or evaluator, or one that cannot be read)."""
+    raw = ((store.family(fid) or {}).get("state") or {}).get(RERUNS_KEY)
+    record = raw.get(str(n)) if isinstance(raw, Mapping) else None
+    if not isinstance(record, Mapping) or record.get("objective") != objective or record.get("evaluator") != evaluator:
+        return 0
+    attempts = record.get("attempts")
+    return int(attempts) if isinstance(attempts, int) and not isinstance(attempts, bool) else RERUN_ATTEMPTS
+
+
 # ---------------------------------------------------------------------------------------------------- 2. the reviews
 def due_reviews(store: SwarmStore, settings: Mapping[str, Any], root: str | Path | None = None, *,
                 clock: Callable[[], float] = time.time) -> list[dict[str, Any]]:
@@ -989,5 +1145,6 @@ __all__ = ["facts", "sweep", "due_reviews", "practice_cohorts", "practice_curren
            "mark_of", "gate_bar", "gate_review_bar", "incubator_review_bar", "family_bar", "unrecorded_bars", "verdict_bar",
            "record_verdict", "record_bar", "BAD_OUTCOMES", "twins", "program_bar", "owed_audit_bar", "adoption_bars",
            "save_owed", "load_owed", "backfill", "BACKFILL_KEY",
-           "eligible_train_run", "reviewable", "put_review", "reviews_per_round", "screen_settings", "session_day", "MARKS_KEPT",
+           "eligible_train_run", "reviewable", "put_review", "reviews_per_round", "screen_settings", "session_day",
+           "owed_runs", "reruns", "train_answer", "RERUNS_KEY", "RERUNS_KEPT", "RERUN_ATTEMPTS", "ANSWERED", "MARKS_KEPT",
            "REVIEWS_KEPT", "REVIEW_MIN_SESSIONS", "REVIEW_MIN_CLOSES", "REVIEWS_PER_ROUND", "REVIEWS_CEILING", "OBSERVE_FILE"]

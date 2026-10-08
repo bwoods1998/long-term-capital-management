@@ -28,6 +28,7 @@ from league.swarm.settings import DEFAULTS
 from league.swarm.store import SwarmStore
 from league.swarm.tournament import Tournament
 from league.tests.swarm_fakes import Clock, drift_block, result
+from league.tests.test_swarm_search import yearly
 from league.tests.test_swarm_rounds import FakeGymPool, RoundCase, review_failure, strong
 
 REPO = Path(__file__).resolve().parents[2]
@@ -455,6 +456,187 @@ class Mark(Case):
         self.assertEqual(row["incubator"], {"error": "RuntimeError"}, "an error never fails the round")
         errors = [e for e in self.store.events_after(0) if e["payload"].get("action") == "incubator_facts_error"]
         self.assertEqual(len(errors), 1)
+
+
+# ---------------------------------------------------------------------------------------------------- the re-runs
+OLD_OBJECTIVE = "worst-train-year-v1@2020-01-02"   # the running objective before the learning game's T0
+
+
+class QueuePool:
+    """A Gym pool that holds every job until a test lands it (`job.late`), on the fixture's Gym image and bundle."""
+
+    def __init__(self, identity: dict = EVALUATOR):
+        self.identity, self.jobs = identity, []
+
+    def submit(self, job):
+        self.jobs.append(job)
+        return job
+
+    def image(self, kind="gym"):
+        return self.identity["image"]
+
+    def bundle(self):
+        return self.identity["bundle"]
+
+
+class Reruns(Case):
+    """THE RE-RUNS (Oct 8, 2026; `incubator.reruns`): a cohort version whose mark waits only on Gym runs (after the
+    learning game's T0 or a Gym image change) has its Train run over the running span and its robustness runs queued."""
+
+    def setUp(self):
+        super().setUp()
+        self.pool = QueuePool()
+
+    def researcher(self, pool=None):
+        from league.swarm.researcher import Researcher
+
+        return Researcher(self.store, None, pool or self.pool, self.settings, clock=self.clock, background=False)
+
+    def after_t0(self, fid: str) -> int:
+        """A cohort version marked before T0 (its Train run over 2020-2024), as T0 leaves it: a new running objective
+        (2022-2024), its robustness figures emptied (`migrate_objective`), its mark stale."""
+        n = self.family(fid)
+        r = result(f"{fid}-old")
+        r["summary"].update(train_eligible=True, train_from="2020-01-02")
+        r.update(gym_image=EVALUATOR["image"], gym_bundle=EVALUATOR["bundle"])
+        self.store.add_run(fid, n, r, window="train", stress=1.0, purpose="train")
+        self.store.set_state(fid, robustness={}, train_passed={str(n): {
+            "evaluator": EVALUATOR, "objective": OLD_OBJECTIVE, "run": r["run_id"], "robust_pnl": 40.0,
+            "drift": {"t": 2.0, "positive": 5, "years": 5}, "at": 1.0}})
+        self.cohort(fid, n)
+        return n
+
+    def answer(self, job, *, stress=None, pnl=500.0, identity=EVALUATOR, span="2022-01-03", **shape):
+        r = yearly(job.name, roots=job.roots, pnl=pnl, stress=job.stress if stress is None else stress, **shape)
+        r.update(gym_image=identity["image"], gym_bundle=identity["bundle"], train_from=span)
+        return r
+
+    def land(self, pool=None, **kw):
+        for job in list((pool or self.pool).jobs):
+            if job.late is not None:
+                job.late(self.answer(job, **kw))
+
+    def test_after_t0_the_train_and_robustness_runs_are_queued_once_and_the_mark_comes_back(self):
+        n = self.after_t0("a")
+        self.assertEqual(self.facts()["written"], [], "the stale mark waits: its 1.5x run is owed again")
+        self.assertIsNone(live_rows(self.root, "a", n) or None, "the House's reader refuses a stale objective's mark")
+        [owed] = I.owed_runs(self.store, self.settings, self.root, clock=self.clock)
+        self.assertEqual({k: owed[k] for k in ("family", "version", "train", "robust", "drift")},
+                         {"family": "a", "version": n, "train": True, "robust": True, "drift": False})
+        researcher = self.researcher()
+        out = I.reruns(self.store, self.settings, researcher, self.root, clock=self.clock)
+        self.assertEqual((out["owed"], out["queued"], out["jobs"]), (1, ["a@1"], {"a@1": ["train", "robustness"]}))
+        jobs = {(j.purpose, j.stress, j.incubator, j.priority) for j in self.pool.jobs}
+        self.assertEqual(jobs, {("robustness", 1.0, True, -1.0), ("robustness", 1.5, True, -1.0), ("robustness", 0.0, True, -1.0)},
+                         "the same jobs a best gets (Train, 1.5x, mid), at the robustness priority, never superseded")
+        self.assertEqual({j.version for j in self.pool.jobs}, {n})
+        self.assertEqual(self.state("a")[I.RERUNS_KEY][str(n)]["attempts"], 1)
+        again = I.reruns(self.store, self.settings, researcher, self.root, clock=self.clock)
+        self.assertEqual((again["queued"], again["waiting"], len(self.pool.jobs)), ([], ["a@1"], 3), "once a process")
+        self.land()
+        [row] = [r for r in self.store.version_runs("a", n, window="train", stress=1.0) if r["summary"].get("train_from") == "2022-01-03"]
+        self.assertEqual((row["purpose"], row["summary"]["train_eligible"]), ("train", True))
+        out = self.facts()
+        self.assertEqual(out["written"], ["a@1"])
+        mark = self.state("a")["train_passed"][str(n)]
+        self.assertEqual((mark["objective"], mark["evaluator"], mark["run"]), (OBJECTIVE, EVALUATOR, row["run_id"]))
+        self.assertEqual(I.owed_runs(self.store, self.settings, self.root, clock=self.clock), [])
+        self.assertEqual(I.reruns(self.store, self.settings, self.researcher(), self.root, clock=self.clock), {},
+                         "a restarted swarm queues nothing once the mark is back")
+        self.assertIsNone(self.store.family("a")["best_version"], "no best and no candidate is chosen by a re-run")
+        self.assertEqual(self.state("a").get("train_candidates") or [], [])
+
+    def test_a_restart_queues_again_only_what_never_landed_and_at_most_three_times(self):
+        n = self.after_t0("a")
+        for attempt in (1, 2, 3):                           # each a new swarm process: its queued jobs were lost
+            pool = QueuePool()
+            out = I.reruns(self.store, self.settings, self.researcher(pool), self.root, clock=self.clock)
+            self.assertEqual(out["queued"], ["a@1"], attempt)
+            self.assertEqual(self.state("a")[I.RERUNS_KEY][str(n)]["attempts"], attempt)
+        out = I.reruns(self.store, self.settings, self.researcher(QueuePool()), self.root, clock=self.clock)
+        self.assertEqual((out["queued"], out["spent"]), ([], ["a@1"]), "its attempts are spent")
+        pool = QueuePool()
+        researcher = self.researcher(pool)
+        researcher._incubator.clear()
+        self.store.set_state("a", **{I.RERUNS_KEY: {}})
+        I.reruns(self.store, self.settings, researcher, self.root, clock=self.clock)
+        [train] = [j for j in pool.jobs if j.stress == 1.0]
+        train.late(self.answer(train))                      # the Train run landed; the robustness runs were lost
+        pool = QueuePool()
+        out = I.reruns(self.store, self.settings, self.researcher(pool), self.root, clock=self.clock)
+        self.assertEqual(out["jobs"], {"a@1": ["robustness"]}, "only what never landed")
+        self.assertEqual(sorted(j.stress for j in pool.jobs), [0.0, 1.5])
+
+    def test_a_gym_image_change_queues_them_for_the_new_image(self):
+        n = self.eligible("a")
+        self.assertEqual(self.facts()["written"], ["a@1"])
+        new = {**EVALUATOR, "image": "sbcp_gym_c"}          # an image change: the cohorts stay (bundle and fingerprint)
+        E.adopt(self.store, new)
+        self.assertEqual(self.state("a")["train_passed"], {})
+        pool = QueuePool(new)
+        out = I.reruns(self.store, self.settings, self.researcher(pool), self.root, clock=self.clock)
+        self.assertEqual(out["jobs"], {"a@1": ["train", "robustness"]})
+        self.assertEqual(self.state("a")[I.RERUNS_KEY][str(n)]["evaluator"], new)
+        self.land(pool, identity=new)
+        self.assertEqual(self.facts()["written"], ["a@1"])
+        self.assertEqual(self.state("a")["train_passed"][str(n)]["evaluator"], new)
+
+    def test_figures_owed_alone_queue_the_drift_run_whatever_the_tournaments_screen(self):
+        self.settings["tournament"]["drift_screen"] = False
+        n = self.family("a")
+        self.train("a", n, drift=None)                      # eligible over the running span, but no drift figures
+        self.robust("a", n)
+        self.cohort("a", n)
+        [owed] = I.owed_runs(self.store, self.settings, self.root, clock=self.clock)
+        self.assertEqual((owed["train"], owed["robust"], owed["drift"]), (False, False, True))
+        out = I.reruns(self.store, self.settings, self.researcher(), self.root, clock=self.clock)
+        self.assertEqual(out["jobs"], {"a@1": ["robustness"]})
+        self.assertIn(("robustness", 1.0), {(j.purpose, j.stress) for j in self.pool.jobs}, "the drift run")
+        self.assertNotIn(1.5, {j.stress for j in self.pool.jobs}, "its 1.5x run landed: not again")
+
+    def test_never_for_a_barred_failed_demoted_ineligible_d2_or_marked_cohort(self):
+        cases = {
+            "barred": lambda f, n: self.store.refuse(f, n, "review", "x"),
+            "its look failed": lambda f, n: self.store.add_look(f, n, self.sha(f, n), passed=False, p_value=0.9, detail={}),
+            "demoted": lambda f, n: self.store.set_state(f, robust_failed=[n]),
+            "lost at 1.5x": lambda f, n: self.robust(f, n, pnl=-5.0),
+            "fails the screen": lambda f, n: self.train(f, n, drift=FAILING),
+            "ineligible over the span": lambda f, n: self.train(f, n, eligible=False),
+            "on D2's route": lambda f, n: self.store.set_state(f, validation_line={"passed": True}, validation_version=n),
+        }
+        for i, (why, arrange) in enumerate(cases.items()):
+            fid = f"never-{i}"
+            n = self.family(fid)
+            arrange(fid, n)
+            self.cohort(fid, n)
+        n = self.after_t0("failed")
+        self.ledger.fail_cohort("failed", n, day=TODAY, reason="refused")
+        n = self.after_t0("complete")
+        self.ledger._connect().execute("UPDATE cohorts SET status='complete' WHERE family='complete'")
+        self.eligible("marked")
+        self.facts()
+        self.assertIn("1", self.state("marked")["train_passed"])
+        self.assertEqual(I.owed_runs(self.store, self.settings, self.root, clock=self.clock), [])
+        self.assertEqual(I.reruns(self.store, self.settings, self.researcher(), self.root, clock=self.clock), {})
+        self.assertEqual(self.pool.jobs, [])
+
+    def test_the_tournament_queues_them_only_while_the_guard_allows_research(self):
+        self.after_t0("a")
+        researcher = self.researcher()
+        held = Tournament(self.store, FakeGymPool(strong), self.settings, clock=self.clock, researcher=researcher,
+                          allows=lambda: False).run()
+        self.assertIn("held", held["incubator_reruns"])
+        self.assertEqual(self.pool.jobs, [])
+        self.assertNotIn("incubator_reruns", Tournament(self.store, FakeGymPool(strong), self.settings, clock=self.clock).run(),
+                         "no researcher: nothing is asked")
+        row = Tournament(self.store, FakeGymPool(strong), self.settings, clock=self.clock, researcher=researcher,
+                         allows=lambda: True).run()
+        self.assertEqual(row["incubator_reruns"]["queued"], ["a@1"])
+        self.assertEqual(len(self.pool.jobs), 3)
+        with patch.object(I, "reruns", side_effect=RuntimeError("boom")):
+            row = Tournament(self.store, FakeGymPool(strong), self.settings, clock=self.clock, researcher=researcher,
+                             allows=lambda: True).run()
+        self.assertEqual(row["incubator_reruns"], {"error": "RuntimeError"}, "an error never fails the round")
 
 
 # ---------------------------------------------------------------------------------------------------- the practice record

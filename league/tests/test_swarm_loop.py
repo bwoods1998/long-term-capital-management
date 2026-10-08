@@ -108,6 +108,20 @@ class LoopCase(unittest.TestCase):
 
 
 class Process(LoopCase):
+    def test_the_tournament_queues_the_incubators_reruns_through_the_researcher_under_the_research_guard(self):
+        # THE INCUBATOR'S RE-RUNS (Oct 8, 2026, `Tournament.incubator_reruns`): the swarm's own Researcher queues them, and
+        # only while the guard allows new research (THE GATE'S RESERVE and the brake).
+        sw = self.swarm()
+        self.assertIs(sw.tournament.researcher, sw.researcher)
+        self.assertTrue(sw.tournament.allows())
+        self.guard.research_held = True
+        self.assertFalse(sw.tournament.allows())
+        self.assertIn("held", sw.tournament.incubator_reruns())
+        self.guard.research_held, self.guard.braked = False, True
+        self.assertFalse(sw.tournament.allows())
+        self.guard.braked = False
+        self.assertEqual(sw.tournament.incubator_reruns(), {}, "nothing owed: no practice record")
+
     def test_it_seeds_the_48_founders_once(self):
         sw = self.swarm()
         born = sw.seed()

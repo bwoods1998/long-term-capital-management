@@ -461,7 +461,9 @@ class Swarm:
         self.researcher = Researcher(self.store, self.router, self.pool, self.settings, clock=clock,
                                      starter=lambda spec: program_for(spec), library=self.library, preflight=preflight)
         self.researcher.pace = self.over_pace
-        self.tournament = Tournament(self.store, self.pool, self.settings, clock=clock)
+        # THE INCUBATOR'S RE-RUNS (`Tournament.incubator_reruns`): queued by the researcher, under the guard's research word.
+        self.tournament = Tournament(self.store, self.pool, self.settings, clock=clock, researcher=self.researcher,
+                                     allows=lambda: self.guard.allows("research"))
         self.scheduler.useful_ids = lambda: self.tournament.useful  # THE CONCURRENCY's useful experiments
         self.gate = Gate(self.store, self.pool, self.router, self.settings, clock=clock)
         # The whole graveyard as one sealed digest, shared by the architect and the strategist (Sept 29, 2026): one pass's
