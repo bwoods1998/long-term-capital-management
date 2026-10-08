@@ -120,8 +120,9 @@ family's state. Each is bound to the evaluator it was made under, so no stale fa
    Train row of the version, and its 1.5x and mid robustness runs, "drift" when only the figures are owed), at the
    robustness priority (they fill idle boxes and never delay a researcher's run or a validation). Never for a version
    that failed for good (`mark_of`'s drop: demoted, a loss at 1.5x, a known failed drift screen, the gate's bar), whose
-   Train answer over the span is in and not eligible, whose drift figures over the span are in and fail the screen, on D2's route (the reader never admits it), or in a cohort that
-   is failed, complete or under another evaluator (`practice_cohorts` reads the active, current ones only). At most once
+   Train answer over the span is in and not eligible, whose drift figures over the span are in and fail the screen, on
+   D2's route (the reader never admits it), or in a cohort that is failed, complete or under another evaluator
+   (`practice_cohorts` reads the active, current ones only). At most once
    per (version, Train objective, evaluator) in a swarm process (`Researcher._incubator`), and at most `RERUN_ATTEMPTS`
    times in all (`RERUNS_KEY` in the family's state: a restart loses the queued jobs, charging nothing); once its runs
    have landed nothing is queued again (it is marked, or it failed for good). The tournament asks for them only while
@@ -772,12 +773,13 @@ def _kept(marks: Mapping[str, Any]) -> dict[str, Any]:
 def sweep(store: SwarmStore, settings: Mapping[str, Any], *, clock: Callable[[], float] = time.time) -> dict[str, list[str]]:
     """THE SWEEP (the module docstring, 1), over every alive family, whatever its band or its cohort's status: a mark goes
     when its version is demoted or lost at 1.5x, or when its program is barred (`gate_bar`) (an off tournament screen
-    takes no mark: the mark's screen is the incubator's own, `screen_settings`); a family's `gate_outcome` naming a program refused, failed, demoted or held, and its gate `review`
-    failing a program or unreadable for it, are recorded in `incubator_barred` (`unrecorded_bars`: so the bar outlives
-    either moving on); a passed incubator review of a program barred by name becomes verdict "fail", stage "gate". It
-    only removes and records bars: it never writes a mark or a pass, nor anything the gate, validation or the bands
-    read. Returns {"removed": ["family@version"], "barred": ["family:sha12"], "revoked": ["family@version"]}; anything
-    done is one private `swarm.gate` event (`incubator_sweep`)."""
+    takes no mark: the mark's screen is the incubator's own, `screen_settings`); a family's `gate_outcome` naming a
+    program refused, failed, demoted or held, and its gate `review` failing a program or unreadable for it, are recorded
+    in `incubator_barred` (`unrecorded_bars`: so the bar outlives either moving on); a passed incubator review of a
+    program barred by name becomes verdict "fail", stage "gate". It only removes and records bars: it never writes a
+    mark or a pass, nor anything the gate, validation or the bands read. Returns {"removed": ["family@version"],
+    "barred": ["family:sha12"], "revoked": ["family@version"]}; anything done is one private `swarm.gate` event
+    (`incubator_sweep`)."""
     out: dict[str, list[str]] = {"removed": [], "barred": [], "revoked": []}
     looks: list[dict[str, Any]] | None = None
     why_of: dict[str, str] = {}
@@ -807,7 +809,8 @@ def sweep(store: SwarmStore, settings: Mapping[str, Any], *, clock: Callable[[],
     return out
 
 
-def _swept(store: SwarmStore, fam: Mapping[str, Any], looks: list[dict[str, Any]], clock: Callable[[], float]) -> tuple[dict[str, Any], dict[str, list[str]], dict[str, str]]:
+def _swept(store: SwarmStore, fam: Mapping[str, Any], looks: list[dict[str, Any]],
+           clock: Callable[[], float]) -> tuple[dict[str, Any], dict[str, list[str]], dict[str, str]]:
     """One family's part of `sweep`: (the state values to write, {removed, barred, revoked}, why each mark goes)."""
     from .gate import run_sha
 
@@ -1037,8 +1040,9 @@ def reruns(store: SwarmStore, settings: Mapping[str, Any], researcher: Any, root
 
 
 def _attempts(store: SwarmStore, fid: str, n: int, objective: Any, evaluator: Mapping[str, Any]) -> int:
-    """How many times the re-runs of version `n` were queued under this Train objective and evaluator (`RERUNS_KEY`; 0
-    for a record of another objective or evaluator, or one that cannot be read)."""
+    """How many times the re-runs of version `n` were queued under this Train objective and evaluator (`RERUNS_KEY`): 0
+    without a record, or for one of another objective or evaluator; a record whose count cannot be read counts as spent
+    (fail-closed: no more Gym spend on it)."""
     raw = ((store.family(fid) or {}).get("state") or {}).get(RERUNS_KEY)
     record = raw.get(str(n)) if isinstance(raw, Mapping) else None
     if not isinstance(record, Mapping) or record.get("objective") != objective or record.get("evaluator") != evaluator:
