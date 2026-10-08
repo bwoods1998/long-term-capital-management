@@ -26,37 +26,33 @@ any other deploy.
 
 ## Not yet deployed
 
-### The self-running release, the improvers (`release/self-running`; built, not deployed)
+The running House release is `20261007T191231Z-2cfea1c1f73c` (main `cd58fc8f`, 19:13Z Oct 7, below), the gateway is
+`f63dd354`, and the box's updater is on. What is built and not deployed is on branches.
 
-The House's weekly post-mortem (`v3/b4`) and the engineer with its reviewer (`v3/b5`), ported onto `research/restart-1007`
-(budget rule v2). The post-mortem: Saturdays 14:00Z, at most $1 a week of Claude, a private report and a public page
-under `docs/runs/desk/`. The engineer: on by `policy.json` `engineer.enabled`, at most $4 a UTC day of Claude, one
-candidate in flight, research-class only (the modules the live path loads are held, by the House and by the gateway's
-`ENGINEER_HELD`), merges only through the gateway's walls (green CI, a recorded review, two a day, no protected path),
-closes its own superseded and unmerged pull requests through `POST /v1/github/close`, authors at most once a UTC day,
-main's head as its base after an owner deploy of it.
-Both are under `league/ops/`, so both are an owner deploy. Off without a deploy: the box's `swarm.json`
-`{"engineer": {"enabled": false}}`; ops.json `{"jobs": {"postmortem": {"enabled": false}}}`. Detail: operations,
-**The improvers**.
+### On branches, not in V3-A part 1
 
-### The self-running release, the stall alarm and the funnel (`release/self-running`; built, not deployed)
+- `v3/wp6`, the forward ladder and its benchmark (evidence v3, the owner's D2). As first specified it does not meet its
+  benchmark rule. A tighter design was frozen before any confirmation run; the confirmation, under a rule
+  pre-registered before it, has not been run. It changes `league/live/` and the constitution: an owner deploy and one
+  more evidence reset.
+- `v3/wp7`, credit types at $2,000 of equity or more and a paper proof per type (money rules v3, D3), with the
+  gateway's credit list: an owner deploy and a money-digest move. With the ladder it is V3-A part 2.
+- `v3/b1` (research v3), `v3/b23` (births from the mechanism library, the Train kill tests as code, the strategist's
+  whole agenda), `v3/b4` (the weekly post-mortem and the monthly cost review), `v3/b5` (the engineer and the reviewer).
+  Each changes a protected file as it stands (`league/swarm/settings.py`, the store, the evidence and tournament
+  modules, `league/ops/`), so each is an owner deploy, not an updater release.
 
-The owner's goal of Oct 7, items 3 and 6. A new House job `stall` (`league/ops/stall.py`, every 30 minutes at :20 and
-:50, read-only, a maintenance pause included) names a stall by its cause: no birth in 12 h under the population
-ceiling, fewer than 10 Gym runs in 6 h, no Validation verdict in 24 h while a family is owed one, the Sail guard braked
-12 of 24 h, a meter under 3 days of research at the ceiling, main and the running release differing in what only the
-owner deploys, a pause left on 6 h, a refused grant, or the kill switch on. One `stall` mail lists every cause (the
-numbers, how long, what the House is doing, the owner steps first or that nothing needs the owner): at once and every
-12 h while one needs the owner, else at most once a day; each cause is also a House warning every 12 h; it never acts.
-The daily page gains the Funnel table (last 24 h and since the release: `league/ops/funnel.py`). The job runner counts
-a job or trigger a release adds from the deploy (`first_seen`), so `stall` and the engineer's :40 are never reported
-`missed` for the days before. The gateway composes the new `stall` kind on `/v1/notify` and dedupes it by its owner
-causes for 12 h (`stall:info` 24 h) inside the day's cap: deploy the gateway first (an older gateway answers 400, which
-the job records and warns of).
-Owner deploy (`league/ops/`); off without one: ops.json `{"jobs": {"stall": {"enabled": false}}}`. Detail: operations,
-**The stall alarm and the funnel**.
+## 2026-10-07
 
-### Fast lane v2: built on `release/fast-lane-v2`, waiting for the owner's deploy (Oct 7, 2026)
+### 19:12-19:24Z, fast lane v2 and the self-running release: gateway `f63dd354`, House release `20261007T191231Z-2cfea1c1f73c` (main `cd58fc8f`; PRs #506, #507), money digest `42c4a3af` -> `da5c7542`, evidence reset 4
+
+Owner deploy in the US session under the owner's goal of Oct 7 (item 1: deploy any time when CI is green on the exact head and rollback is ready; a live-execution change first confirms no order is in flight).
+- **CI:** green on the exact head `bf355f55` (gateway, tests 3.11 and 3.14); local full suites green on both Pythons (7,521 league tests); gateway 412/412.
+- **Gateway first:** `f63dd354-253a-46d5-90a6-35ca07a49adf` at 19:12Z (rollback `e95a2d4a-a79a-4a68-97f6-914e6af2cace`); kill switch false after.
+- **House:** no order in flight at 19:11:57Z; nightly stopped (operator:oct7) while idle; `floor_box.py deploy` PROMOTED 19:13:47Z (canary and ten-minute watch); previous `20261007T160204Z-31d63e37434e`. The standing grant RATIFIED itself at 19:14:20Z on money digest `da5c7542` (the `grant` job, release-triggered). `real_money` true, health failures []. The new jobs ran: `direction` (23 symbols), `fast_lane`, `stall`. Nightly unstopped; harness observer re-pointed to `cd58fc8f`.
+- **PR #506** (`league/CONTRACT.md`): the researchers' contract now says real money opens four types and is on.
+
+#### Fast lane v2
 
 The owner's goal of Oct 7, item 4: a program trades at Probe size as soon as it passes a pre-registered screen whose
 false-positive rate is measured. Based on PR #505 (the House's release `20261007T160204Z`). The screen (t 1.65, 2 of 4
@@ -80,21 +76,48 @@ registry's order); a new `fast_lane` job writes the report daily, read-only, wit
 tail per look, pooled, and live against holdout); the adaptive-search ceiling (20-38% for a persistent no-edge lineage
 with 3 looks) and the benchmark's history are stated.
 
-The running House release is `20261007T160204Z-31d63e37434e` (main `ab6c0c6a`, the research restart, 16:03Z Oct 7),
-the gateway is `e95a2d4a`, and the box's updater is on. What is built and not deployed is on branches.
+#### The self-running release: the improvers
 
-### On branches, not in V3-A part 1
+The House's weekly post-mortem (`v3/b4`) and the engineer with its reviewer (`v3/b5`), ported onto `research/restart-1007`
+(budget rule v2). The post-mortem: Saturdays 14:00Z, at most $1 a week of Claude, a private report and a public page
+under `docs/runs/desk/`. The engineer: on by `policy.json` `engineer.enabled`, at most $4 a UTC day of Claude, one
+candidate in flight, research-class only (the modules the live path loads are held, by the House and by the gateway's
+`ENGINEER_HELD`), merges only through the gateway's walls (green CI, a recorded review, two a day, no protected path),
+closes its own superseded and unmerged pull requests through `POST /v1/github/close`, authors at most once a UTC day,
+main's head as its base after an owner deploy of it.
+Both are under `league/ops/`, so both are an owner deploy. Off without a deploy: the box's `swarm.json`
+`{"engineer": {"enabled": false}}`; ops.json `{"jobs": {"postmortem": {"enabled": false}}}`. Detail: operations,
+**The improvers**.
 
-- `v3/wp6`, the forward ladder and its benchmark (evidence v3, the owner's D2). As first specified it does not meet its
-  benchmark rule. A tighter design was frozen before any confirmation run; the confirmation, under a rule
-  pre-registered before it, has not been run. It changes `league/live/` and the constitution: an owner deploy and one
-  more evidence reset.
-- `v3/wp7`, credit types at $2,000 of equity or more and a paper proof per type (money rules v3, D3), with the
-  gateway's credit list: an owner deploy and a money-digest move. With the ladder it is V3-A part 2.
-- `v3/b1` (research v3), `v3/b23` (births from the mechanism library, the Train kill tests as code, the strategist's
-  whole agenda), `v3/b4` (the weekly post-mortem and the monthly cost review), `v3/b5` (the engineer and the reviewer).
-  Each changes a protected file as it stands (`league/swarm/settings.py`, the store, the evidence and tournament
-  modules, `league/ops/`), so each is an owner deploy, not an updater release.
+#### The self-running release: the stall alarm and the funnel
+
+The owner's goal of Oct 7, items 3 and 6. A new House job `stall` (`league/ops/stall.py`, every 30 minutes at :20 and
+:50, read-only, a maintenance pause included) names a stall by its cause: no birth in 12 h under the population
+ceiling, fewer than 10 Gym runs in 6 h, no Validation verdict in 24 h while a family is owed one, the Sail guard braked
+12 of 24 h, a meter under 3 days of research at the ceiling, main and the running release differing in what only the
+owner deploys, a pause left on 6 h, a refused grant, or the kill switch on. One `stall` mail lists every cause (the
+numbers, how long, what the House is doing, the owner steps first or that nothing needs the owner): at once and every
+12 h while one needs the owner, else at most once a day; each cause is also a House warning every 12 h; it never acts.
+The daily page gains the Funnel table (last 24 h and since the release: `league/ops/funnel.py`). The job runner counts
+a job or trigger a release adds from the deploy (`first_seen`), so `stall` and the engineer's :40 are never reported
+`missed` for the days before. The gateway composes the new `stall` kind on `/v1/notify` and dedupes it by its owner
+causes for 12 h (`stall:info` 24 h) inside the day's cap: deploy the gateway first (an older gateway answers 400, which
+the job records and warns of).
+Owner deploy (`league/ops/`); off without one: ops.json `{"jobs": {"stall": {"enabled": false}}}`. Detail: operations,
+**The stall alarm and the funnel**.
+
+### 16:02-16:14Z, the research restart: House release `20261007T160204Z-31d63e37434e` (main `ab6c0c6a`; PR #505)
+
+Budget rule version 2 (the owner's $25 a day ceiling, Sail 0.6 / Claude 0.4, one 5-day runway term) and the F1 research fixes on V3-A. Money digest `42c4a3af`, constitution `595228a6` and the execution fingerprint unchanged: no ratification, no evidence reset. CI green on the exact head `763f9e57`; no order in flight; PROMOTED 16:03:30Z; budget job run by hand at 16:14Z (research $25.00 a day: Sail $15, Claude $10).
+
+### Operator changes, no deploy (`swarm.json`, Oct 7-8)
+
+- 15:44Z `live.calibration` false (the House's calibration round trips: about $12 a session for data no code reads).
+- 15:53Z `tournament.drift_screen` false; `architect.cell_yield` true; `architect.max_rebirths_per_cell` 12; agenda v17.
+- 16:13Z `gym.max_boxes` 5, `tournament.retire_revisions` 100, `claude.role_usd_day.diagnostician` 0, `researcher.sail_usd_per_hour` 1.0, `architect.every_seconds` 1800.
+- 18:44Z agenda v18 (the edge census's STOP and TARGET cells); 19:35Z `researcher.claude_top` 3, `claude.role_usd_day.researcher` 4, `strategist` 2 (a Claude researcher A/B).
+- 19:27Z four near-miss validated programs revived (`operator-revive`); two looked and failed, one retired, one validated.
+- 22:00Z and Oct 8 06:30Z pacing for 24/7 inside the Sail line: `gym.max_boxes` 2 then 1, `researcher.sail_usd_per_hour` 0.5 then 0.2.
 
 ## 2026-10-03
 
