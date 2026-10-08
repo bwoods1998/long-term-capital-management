@@ -82,8 +82,19 @@ def _read(path: Path, stamp: tuple[int, ...]) -> dict[str, Any] | None:
         return None
 
 
-def context(root: str | Path, image: Any, roots: Iterable[str]) -> str:
-    """A bounded prompt block, refreshed on local file replacement or a different active image."""
+def _before(first: Any, span: Any) -> bool:
+    """The card's first Train day is before the running span's first day (False without a span or an unreadable one)."""
+    try:
+        return span is not None and dt.date.fromisoformat(str(first)) < dt.date.fromisoformat(str(span)[:10])
+    except ValueError:
+        return False
+
+
+def context(root: str | Path, image: Any, roots: Iterable[str], *, span: Any = None) -> str:
+    """A bounded prompt block, refreshed on local file replacement or a different active image. `span` (THE LEARNING
+    GAME, Oct 8, 2026: the running Train span's first day, passed while the game is on): a card audited from an earlier
+    day describes another Train (the 2020 image under a 2022-2024 Train) and reads as unknown ("span_mismatch"), so no
+    hidden day reaches a prompt; None (the game off), as before."""
     image = str(image or "")
     card = None
     reason = "image_unknown" if not image else "missing_or_invalid"
@@ -95,6 +106,8 @@ def context(root: str | Path, image: Any, roots: Iterable[str]) -> str:
             pass
         if card is not None and card["image_checkpoint"] != image:
             reason, card = "image_mismatch", None
+        if card is not None and _before(card["train_from"], span):
+            reason, card = "span_mismatch", None
     lines = ["INPUT AVAILABILITY (before hypothesis selection; cached local Train metadata, no new data/model query):"]
     if card is None:
         lines.append(f"Card: unknown ({reason}). Raw column coverage and verified as-of counts are unknown for the active "

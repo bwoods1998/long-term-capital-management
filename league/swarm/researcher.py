@@ -268,6 +268,14 @@ call is made before any store transaction (a network call never holds the SQLite
 `max_tool_calls`. The cycle event gains `literature_calls`, `literature_ids` and `literature_refused`. A paper's finding
 is a hypothesis: it faces the Train score, the stress, the drift screen and the verifier like any idea.
 
+THE LEARNING GAME (Oct 8, 2026; league/swarm/game.py). Four hooks, each wrapped so the game never breaks a cycle or the
+pool: a version's 1.5x seen run that lands with a profit and is not demoted may open a private look (`robust_landed` ->
+`game.maybe_look`, on the dispatcher's thread); a game-arm family in "gate" mode reads one PRIVATE EXAM line in its
+status (`game.status_text`: how many of its looks it used, never a figure, a tier or a year); a game child's brief
+carries its change (`game.brief_text`); and the `graveyard` tool reads `game.visible_graveyard` (no game-arm row, no row
+of a family that learned on the hidden years). A hidden run never becomes a run row, a trial or a notebook entry, so
+`read_run`, the sweep table and every view stay over the seen years.
+
 Every cycle is a `swarm.cycle` event; a notebook entry becomes a public `swarm.note` (the site's tape,
 masked there for quotes) at most every `note_every_cycles` cycles. Standard library only.
 """
@@ -286,6 +294,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from . import cards, diagnostics, evidence, inputs, mechanism, public
+from . import game
 from . import settings as settings_mod
 from .claude_research import ClaudeSession, ClaudeTurn, anthropic_tools, sail_items, tool_calls
 from .library import LIBRARY_RULE, LITERATURE_TOOL
@@ -1724,7 +1733,8 @@ class Researcher:
                  f"Structure: {structure_text(fam['structure'])}. Roots: {', '.join(fam['roots'])}. Days to expiry: "
                  f"{(spec.get('dte') or ['?', '?'])[0]}-{(spec.get('dte') or ['?', '?'])[1]}.",
                  f"Rejection test: {spec.get('rejection') or 'state one in your notebook'}",
-                 inputs.context(self.store.root, self.settings.get("gym", {}).get("image_checkpoint"), fam["roots"])]
+                 inputs.context(self.store.root, self.settings.get("gym", {}).get("image_checkpoint"), fam["roots"],
+                                span=self.train_span() if game.cfg(self.settings)["enabled"] else None)]
         lessons = spec.get("lessons") or []
         if lessons:
             lines.append("Lessons from the graveyard when you were born:")
@@ -1736,6 +1746,12 @@ class Researcher:
         if literature:  # THE LIBRARY: the papers the architect built this family on (a hypothesis, never evidence)
             lines.append("Literature the architect built on: " + "; ".join(f"{x['id']} {str(x.get('title') or '')[:160]}"
                                                                            for x in literature[:3]))
+        try:  # THE LEARNING GAME: a game child's change (its directive, or the donor's program); "" for anyone else
+            change = game.brief_text(self.store, fam, self.settings)
+        except Exception:  # noqa: BLE001 - the brief goes without it
+            change = ""
+        if change:
+            lines.append(change)
         return "\n".join(lines)
 
     def status(self, fam: Mapping[str, Any]) -> str:
@@ -1780,6 +1796,12 @@ class Researcher:
                      "trades or weaken the evidence requirements.")
         if gate:
             parts.append(f"The gate's last answer: {gate}.")
+        try:  # THE LEARNING GAME's PRIVATE EXAM line: a game-arm family in "gate" mode only, never a figure or a year
+            exam = game.status_text(self.store, fam, self.settings)
+        except Exception:  # noqa: BLE001 - the status goes without it
+            exam = ""
+        if exam:
+            parts.append(exam)
         from .practice import family_feedback
         practice = family_feedback(self.store, self.settings, str(fam["id"]))
         if practice:
@@ -3665,7 +3687,11 @@ class Researcher:
         if name == "graveyard":
             from .architect import lesson_view  # D2a: no sentence about Validation, the holdout or 2025 (Sept 29, 2026)
 
-            rows = self.store.graveyard(str(args.get("query") or ""), limit=5)
+            try:  # THE LEARNING GAME's quarantine (exactly the store's read with the game off); a failure shows nothing
+                rows = game.visible_graveyard(self.store, str(args.get("query") or ""), limit=5,
+                                              settings=getattr(self, "settings", None))
+            except Exception:  # noqa: BLE001 - fail closed: never the unfiltered read
+                rows = []
             return {"lessons": [{"family": r["family"], "mechanism": r["mechanism"][:200], "structure": r["structure"],
                                  "roots": r["roots"], "lesson": lesson_view(r["lesson"])[:600]} for r in rows]}
         if name == "submit":
@@ -3884,6 +3910,11 @@ class Researcher:
                     why = f"its Train run for the drift figures failed {ROBUSTNESS_ATTEMPTS} times"
                 if why and not fam.get("retired_at"):
                     demoted = self._demote(fam, n, why=why)
+            if label == "stress_1.5" and ok and isinstance(pnl, (int, float)) and pnl > 0 and demoted is None:
+                try:  # THE LEARNING GAME's ladder: a private look at this version when every trigger holds (never raises)
+                    game.maybe_look(self, fid, int(n), result)
+                except Exception:  # noqa: BLE001 - on the dispatcher's thread: the game never breaks the pool
+                    pass
             if demoted is not None:
                 self.store.event("swarm.robustness", fid, {"version": n, "action": "demoted", "why": why, "next": demoted.get("version")})
                 if demoted.get("version") is not None:

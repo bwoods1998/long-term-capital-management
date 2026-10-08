@@ -882,6 +882,14 @@ def look_seen_run(store: Any, fam: Any, n: Any) -> str | None:
     return str(row["seen_run"]) if row else None
 
 
+def in_flight(store: Any, fam: Any) -> bool:
+    """A look of the family's has not landed (its hidden run is queued, out, or waiting for its retry): THE GAME'S
+    VALIDATION WAIT reads it (`Tournament.game_dormant`), never a figure."""
+    if not _tables(store):
+        return False
+    return any(r["status"] not in TERMINAL for r in _rows(store, "family=?", (_fid(fam),)))
+
+
 def looks_used(store: Any, fam: Any) -> int:
     """The family's ladder looks that count against `looks` (in flight or landed; a failed or cancelled one does not)."""
     if not _tables(store):
@@ -1175,8 +1183,10 @@ def _cluster_ci(items: Sequence[Mapping[str, Any]], stat: Callable[[list[Mapping
     return [pick(tail), pick(1.0 - tail)]
 
 
-#: THE LEAK SCAN (R1a): a hidden year as a quoted key or an ISO date in what a game-arm researcher was shown.
-_HIDDEN_TEXT = re.compile(r"\"20(?:20|21)\"|(?<!\d)20(?:20|21)-\d\d-\d\d")
+#: THE LEAK SCAN (R1a): a hidden year as a quoted key or an ISO date in what a game-arm researcher was shown. A tool's
+#: answer is JSON text inside the conversation's JSON, so its quotes come escaped (`\\"2020\\"`): any backslashes before a
+#: quote are read through.
+_HIDDEN_TEXT = re.compile(r'\\*"20(?:20|21)\\*"|(?<!\d)20(?:20|21)-\d\d-\d\d')
 
 
 def _leak_scan(store: Any, rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
@@ -1377,5 +1387,5 @@ def metrics(store: Any, *, settings: Mapping[str, Any] | None = None, now: float
 __all__ = ["SWITCH_AT", "HIDDEN", "HIDDEN_YEARS", "SEEN_FROM", "CORE", "DEFAULTS", "DIRECTIVES", "GAME_SQL", "Sealed", "cfg",
            "birth_roots", "seen_only", "t0", "fold", "arm", "fitness", "seen_fitness", "tier_of", "ensure", "select_view",
            "confirm_view", "maybe_look", "landed", "requeue_stale", "shadow_validated", "candidate", "validations_left",
-           "seen_robust_ok", "look_seen_run", "looks_used", "retire_reason", "parents", "reproduce", "visible_families",
-           "visible_graveyard", "quarantined", "status_text", "brief_text", "spearman", "metrics"]
+           "seen_robust_ok", "look_seen_run", "in_flight", "looks_used", "retire_reason", "parents", "reproduce",
+           "visible_families", "visible_graveyard", "quarantined", "status_text", "brief_text", "spearman", "metrics"]

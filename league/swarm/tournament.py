@@ -103,6 +103,20 @@
    rank, share, validation summary, trials and band, and the totals. Its order (`board_rank`): Candidates and beyond,
    then families at the gate or with a look out, then by share, so the architect's and the strategist's first 60 rows
    always hold the most advanced families (the allocation gives them the floor share: the gate decides them next).
+7. THE LEARNING GAME (Oct 8, 2026; league/swarm/game.py). For a game-arm family in mode "gate" (`played`): its candidate
+   for Validation is its latest CONFIRMED version, none without one (`game.candidate`, in place of submitted, else best
+   Train); it has `game.val_tries` (2) Validation tries (`game_try_left`: a version validated before, as after an
+   adoption, is no new try); its ladder look's seen run is an eligible Train run for it, and its robustness requirement is
+   met by that look (a look needed a profitable 1.5x seen run, and the state keeps only the last six versions' figures);
+   the game's three retirement reasons come first (`game.retire_reason`: its private looks spent without a pass, two
+   failed private confirmations, its Validation tries used and failed; Gym band only, under the floor); and THE GAME'S
+   VALIDATION WAIT (`game_dormant`): the dormancy clause spares such a family only while its CONFIRMED version awaits
+   Validation or a look of it is out (its best is never validated otherwise, so today's wait would spare a holding
+   family for ever). Each round, after Validation, control's records of the versions it validated are queued
+   (`game.shadow_validated`) and a look whose hidden run failed or was lost is queued again (`game.requeue_stale`); after
+   the forks, the game's children are born (`game.reproduce`). Control, legacy families and the game off: every rule
+   above as it was. Every game call is wrapped: a game error never fails a round (one private `swarm.status` event names
+   its type, never its words).
 
 Standard library only.
 """
@@ -114,11 +128,12 @@ import random
 import time
 from typing import Any, Callable, Mapping
 
-from . import diagnostics, evidence, incubator, practice
+from . import diagnostics, evidence, game, incubator, practice
 from .architect import allowed_structures
 from .pool import GymJob, PoolError
-from .researcher import (IDLE_CAUSE, MAX_ROOTS, VALIDATED_CYCLES_KEY, drift_verdict, floor_counts, held_at_gate, idle_cause,
-                         idle_dead, judge_extension, kept_families, merged_key, needs_roots, params_of, record_verdict,
+from .researcher import (IDLE_CAUSE, MAX_ROOTS, VALIDATED_CYCLES_KEY, awaiting_validation, dormant_count, dormant_limit,
+                         drift_failed, drift_verdict, floor_counts, held_at_gate, idle_cause, idle_dead, judge_extension,
+                         kept_families, merged_key, needs_roots, params_of, record_verdict, revalidation_owed,
                          robust_at_stress, screen_best, short_dead, train_record, validation_drift_failed, with_roots)
 from .store import CLOSEABLE, SwarmStore
 
@@ -275,7 +290,20 @@ class Tournament:
         return self.clock() - last >= float(self.cfg.get("every_seconds", 3600))
 
     # ------------------------------------------------------------------ 1-2. validation and the line
+    def played(self, fam: Mapping[str, Any]) -> bool:
+        """THE LEARNING GAME's rules apply to this family: mode "gate" and the game arm (`game.arm`). False with the game
+        off, in "shadow", for a control or legacy family, and on any error (today's rules then)."""
+        try:
+            return game.cfg(self.settings)["mode"] == "gate" and game.arm(self.store, fam, self.settings) == "game"
+        except Exception:  # noqa: BLE001
+            return False
+
     def candidate_version(self, fam: Mapping[str, Any]) -> int | None:
+        if self.played(fam):
+            try:  # THE LEARNING GAME: its latest CONFIRMED version, none without one (also `judge`'s stale check)
+                return game.candidate(self.store, fam)
+            except Exception:  # noqa: BLE001 - on the dispatcher's thread too (`judge`): no Validation on an error
+                return None
         if fam.get("best_version"):
             return int(fam["best_version"])
         state = fam.get("state") or {}
@@ -304,6 +332,9 @@ class Tournament:
             n = self.candidate_version(fam)
             if n is None:
                 continue
+            played = self.played(fam)
+            if played and not self.game_try_left(fam, n):
+                continue  # THE LEARNING GAME: its Validation tries are used
             state = fam.get("state") or {}
             from .evaluator import KEY, row_matches
 
@@ -312,12 +343,15 @@ class Tournament:
             current_evaluator = self.store.get(KEY)
             if current_evaluator is not None:
                 run_ids = [state.get("submitted_run"), state.get("best_train_run")]
+                if played:  # THE LEARNING GAME: the seen Train run its ladder look recorded
+                    run_ids.append(self._game_read(game.look_seen_run, fam, n))
                 eligible_train = any(row is not None and row.get("version") == n and row_matches(self.store, row, current_evaluator)
                                      for row in (self.store.run(str(rid)) for rid in run_ids if rid))
                 if not eligible_train:
                     waiting.append(fam["id"])
                     continue
-            if self.cfg.get("require_robustness", True) and not robust_at_stress(state, n):
+            if self.cfg.get("require_robustness", True) and not robust_at_stress(state, n) \
+                    and not (played and self._game_read(game.seen_robust_ok, fam, n)):
                 waiting.append(fam["id"])  # its robustness run at 1.5x has not landed (or lost): not validated yet
                 continue
             if n == fam.get("validated_version") and state.get("validation_image") == image and state.get("validation_bundle") == bundle:
@@ -389,6 +423,22 @@ class Tournament:
         if inherited or waiting_twin:
             out.update(inherited=inherited, waiting_twin=waiting_twin)
         return out
+
+    def _game_read(self, read: Callable[..., Any], fam: Mapping[str, Any], n: Any) -> Any:
+        """One of the game's reads of a version (`game.look_seen_run`, `game.seen_robust_ok`), None on an error."""
+        try:
+            return read(self.store, fam, n)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def game_try_left(self, fam: Mapping[str, Any], n: int) -> bool:
+        """THE LEARNING GAME's Validation tries (`game.validations_left`): one is left, or version `n` was validated before
+        (an adoption's re-validation of it is no new try). False on an error (no Validation)."""
+        try:
+            return game.validations_left(self.store, fam, self.settings) > 0 or \
+                bool(self.store.version_runs(fam["id"], int(n), window="validation", stress=1.0, limit=1))
+        except Exception:  # noqa: BLE001
+            return False
 
     def reuse_validations(self) -> bool:
         """`tournament.reuse_validations` (true, F1): AN IDENTICAL PROGRAM IS VALIDATED ONCE; JSON false validates every
@@ -702,6 +752,14 @@ class Tournament:
             # The operator holds its validated version at the gate: no rule retires it until the hold is cleared (the
             # look it holds must still happen; `SwarmStore.retire_gym` refuses it too).
             return None
+        if self.played(fam):
+            # THE LEARNING GAME's reasons first (a game-arm family in "gate"): never a figure, a tier or a year in them.
+            try:
+                why = game.retire_reason(self.store, fam, self.settings)
+            except Exception:  # noqa: BLE001 - today's rules then
+                why = None
+            if why:
+                return why
         clock: tuple[str, str] | None = None
         if int(fam.get("since_val_revisions") or 0) >= int(self.cfg.get("retire_revisions", 30)):
             clock = ("revisions", f"no validation improvement in {fam['since_val_revisions']} revisions")
@@ -876,7 +934,10 @@ class Tournament:
         `incubator_keep`, read only for a dead family); the spared rule is recorded (`keep_spared`)."""
         if fam.get("band") != "gym" or fam.get("retired_at") or held_at_gate(fam):
             return None
-        dead = idle_dead(fam, self.settings, current=current if current is not None else self.identity())
+        current = current if current is not None else self.identity()
+        dead = idle_dead(fam, self.settings, current=current)
+        if not dead and self.played(fam):
+            dead = self.game_dormant(fam, current)
         if not dead:
             return None
         if fam["id"] in (self.incubator_keep() if kept is None else kept):
@@ -889,6 +950,27 @@ class Tournament:
         if screen == "scored" and dead == short_dead(fam, self.settings):
             screen = "short"
         return f"It {dead}. {idle_cause(screen)}"
+
+    def game_dormant(self, fam: Mapping[str, Any], current: tuple[Any, Any] | None) -> str | None:
+        """THE GAME'S VALIDATION WAIT (the module docstring, 7): the dormancy clause of `idle_dead` for a game-arm family in
+        "gate" whose best awaits validation by today's reading (`awaiting_validation`), which is all that spared it there:
+        it is dead unless its CONFIRMED version awaits Validation (not validated, not failed by the drift screen) or a
+        look of it is out (`game.in_flight`). The clause's own words; None otherwise and on an error."""
+        from .researcher import extension_held
+
+        limit, cycles = dormant_limit(self.settings), dormant_count(fam)
+        state = fam.get("state") or {}
+        if limit <= 0 or cycles < limit or not awaiting_validation(fam) or extension_held(fam) or state.get("gate_ready") \
+                or state.get("look_inflight") or revalidation_owed(fam, current):
+            return None
+        try:
+            n = game.candidate(self.store, fam)
+            if (n is not None and n != fam.get("validated_version") and drift_failed(fam, n) is None) \
+                    or game.in_flight(self.store, fam):
+                return None
+        except Exception:  # noqa: BLE001 - today's wait then
+            return None
+        return f"made no new Gym evaluation in its last {cycles} cycles (only stored results, holds and refused runs)"
 
     def _retire_if(self, fid: str, judge: Callable[[Mapping[str, Any]], str | None]) -> str | None:
         """Read the family, judge it and retire it in ONE store transaction (R4, the review of PR #402): a result landing
@@ -961,18 +1043,31 @@ class Tournament:
             pass
         return True
 
+    # ------------------------------------------------------------------ the learning game's steps
+    def game_step(self, step: str, call: Callable[[], Any]) -> Any:
+        """One of THE LEARNING GAME's round steps, never failing the round: an error is one private `swarm.status` event
+        naming the step and the error's type (never its words, which could carry a figure), and None."""
+        try:
+            return call()
+        except Exception as exc:  # noqa: BLE001
+            self.store.event("swarm.status", None, {"action": "game_error", "step": step, "error": type(exc).__name__})
+            return None
+
     # ------------------------------------------------------------------ the whole round
     def run(self) -> dict[str, Any]:
         began = self.clock()
         self.store.put("tournament_at", began)
         fams = self.store.families(alive=True)
         validation = self.validate(fams)
+        self.game_step("shadow_validated", lambda: game.shadow_validated(self.store, self.settings, self.pool, self.clock))
+        self.game_step("requeue_stale", lambda: game.requeue_stale(self.store, self.settings, self.pool, self.clock))
         facts = self.incubator_facts()
         fams = self.store.families(alive=True)
         self.allocate(fams)  # the shares retirements rank by (the least favoured go first)
         retired = self.retirements(self.store.families(alive=True))
         self.keep_event()  # THE COHORT KEEP's one private event a round
         born = self.forks(self.store.families(alive=True))
+        born += self.game_step("reproduce", lambda: game.reproduce(self.store, self.settings, self.clock)) or []
         fams = self.store.families(alive=True)
         self.allocate(fams)  # again, so a newborn fork has its share at once
         board = []

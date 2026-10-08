@@ -25,6 +25,9 @@ One process beside the House loop, niced. Its threads:
   the rounds that are due, write the heartbeat, and leave when
   asked (the STOP files, `<root>/swarm.stop`) or when the House's release changed (the House starts the new one).
 
+At each start, after the Train objective's migration: THE LEARNING GAME's T0 (league/swarm/game.py), written once by the
+first start with `game.enabled` whose running Train span is the seen span (2022-01-03); every family alive then is legacy.
+
 The heartbeat (`<root>/swarm.heartbeat`, JSON) carries the pid, the release directory, the time, and a live
 status (families, cycles and spend in the last hour by kind, the guard, the pool): the House's `SwarmStep`
 reads it to supervise the process and the operator reads it to see the swarm.
@@ -47,6 +50,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from . import allocation as allocation_mod
+from . import game
 from . import HEARTBEAT, LOCK_FILE, LOG_FILE, PID_FILE, settings as settings_mod
 from .architect import AGENDA_KEY, Architect, GraveyardDigest, allowed_structures
 from .diagnostician import Diagnostician
@@ -946,6 +950,20 @@ class Swarm:
                     f"{moved['failed']} emptied after an error")
         except Exception:  # noqa: BLE001 - the migration never keeps the swarm from starting; it runs again next start
             log(f"train objective migration failed: {traceback.format_exc()[-800:]}")
+        # THE LEARNING GAME's T0 (league/swarm/game.py): the first start with `game.enabled` writes it once; every family
+        # born before it stays legacy. After the migration, and only once the running Train span is the seen span (the
+        # operator's `gym.train_from` "2022-01-03"): under a span that shows the hidden years nobody plays, and it says so.
+        try:
+            first = self.store.get(game.T0_KEY)
+            if not first and game.cfg(self.settings)["enabled"] and not game.seen_only(self.store, self.settings):
+                log("the learning game waits: the running Train span shows its hidden years (set gym.train_from to "
+                    f"{game.cfg(self.settings)['seen_from']} and restart)")
+            else:
+                started = game.t0(self.store, self.settings)
+                if started and not first:
+                    log(f"the learning game starts: T0 {started}")
+        except Exception:  # noqa: BLE001 - nobody plays without it (every family legacy), and the next start writes it
+            log(f"the learning game's T0 could not be written: {traceback.format_exc()[-400:]}")
         # Derived Train/validation views must change with the code/data that evaluates them. Run
         # this before any researcher/tournament thread; historical trials and looks are untouched.
         from .evaluator import adopt, identity
