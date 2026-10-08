@@ -130,6 +130,14 @@ digest's cache entry). Each proposal may name in "literature" at most three ids 
 private `swarm.born` payload. A paper's finding is a hypothesis: the verifier judges every family alike. The pass's
 event gains `library` (the searches, the ids and how many proposals cited one).
 
+THE LEARNING GAME (Oct 8, 2026; league/swarm/game.py). The architect never reads a game-arm family: every content reader
+goes through `game.visible_families` and `game.visible_graveyard` (`visible`, `graves`), and the rows it may not read
+(`unseen`: the game arm's families, alive or retired, and the graveyard rows `game.quarantined` drops) are left out of
+the digest, the cited ids, the rebirth index, the cell yields and the lineage a birth continues. Pure counts (the refill,
+the want, the ceiling, the birth quota's population) read every family. While the game is on, births are core-five only
+(`game.birth_roots`: the roots the request offers, the GAPS and `admit` take), and the input card shows no day before
+the running Train span (`inputs.context`). With the game off or before T0 every read is the store's own.
+
 Each pass is a `swarm.architect` event; each birth a `swarm.born` event (the site's news; a carded birth's `card` key is
 its cell, sha and rebirth row).
 Standard library only.
@@ -147,6 +155,7 @@ from dataclasses import dataclass, replace
 from typing import Any, Callable, Mapping, Sequence
 
 from . import cards, diagnostics, inputs, mechanism
+from . import game
 from . import settings as settings_mod
 from .researcher import MAX_ROOTS, SCREENED, SELF_REFUTED, VERDICT_TAG, VERDICT_WORDS
 from .store import LONG_SINGLE, SINGLE_SIDES, STRUCTURES, SwarmStore, iso, same_slice, slice_priors, slugify, structure_query
@@ -826,7 +835,9 @@ class GraveyardDigest:
     def rows(self) -> list[dict[str, Any]]:
         """Every graveyard row parsed (`parse_lesson`), in (at, id) order whatever order the store returns them in."""
         families = {f["id"]: f for f in self.store._all("SELECT id, lineage, retire_reason FROM families")}
-        raw = self.store.graveyard(limit=10 ** 9)
+        # THE LEARNING GAME: no game-arm row, no row of a family that learned on the hidden years (the store's own read
+        # with the game off).
+        raw = game.visible_graveyard(self.store, "", limit=10 ** 9, settings=self.settings)
         return sorted((parse_lesson(r, families.get(r["family"])) for r in raw), key=lambda p: (p["at"], p["id"]))
 
     @staticmethod
@@ -871,7 +882,7 @@ class GraveyardDigest:
         seal = self.store.get(SEAL_KEY)
         newest = self.store._one("SELECT COUNT(*) AS n, MAX(at || ' ' || family) AS last FROM graveyard") or {}
         key = (newest.get("n"), newest.get("last"), self.tokens(), self.tail_share(),
-               json.dumps(seal, sort_keys=True, default=str))
+               json.dumps(seal, sort_keys=True, default=str), game.cfg(self.settings)["enabled"], game.t0(self.store))
         if self._memo is not None and self._memo[0] == key:
             return replace(self._memo[1], resealed=None)  # the same bytes: sealed before, not by this call
         rows = self.rows()
@@ -897,7 +908,7 @@ class GraveyardDigest:
         digest = Digest(sealed=text, tail=tail, rows=len(rows), sealed_rows=len(sealed), level=int(seal["level"]),
                         scale=float(seal["scale"]), sha=str(seal["sha"]), resealed=why)
         # The memo is keyed on the seal as it is stored after this snapshot, so the next call finds it.
-        key = key[:4] + (json.dumps(self.store.get(SEAL_KEY), sort_keys=True, default=str),)
+        key = key[:4] + (json.dumps(self.store.get(SEAL_KEY), sort_keys=True, default=str),) + key[5:]
         self._memo = (key, digest)
         return digest
 
@@ -1301,6 +1312,28 @@ class Architect:
         raw = self.cfg.get("sail_effort")
         return raw if isinstance(raw, str) and raw in SAIL_EFFORTS else SAIL_EFFORT
 
+    # ------------------------------------------------------------------ the learning game's filter
+    def visible(self, *, alive: bool | None = None) -> list[dict[str, Any]]:
+        """The families the architect reads (THE LEARNING GAME, `game.visible_families`: no game-arm family); with the game
+        off or before T0, exactly `store.families`. Pure counts read the store's own list."""
+        return game.visible_families(self.store, alive=alive, settings=self.settings)
+
+    def graves(self, query: str = "", limit: int = 8) -> list[dict[str, Any]]:
+        """The graveyard rows the architect reads (`game.visible_graveyard`; the store's own read with the game off)."""
+        return game.visible_graveyard(self.store, query, limit=limit, settings=self.settings)
+
+    def unseen(self) -> frozenset[str]:
+        """The families whose rows the architect may not read: the game arm's, alive or retired, and those whose graveyard
+        rows `game.quarantined` drops. Empty with the game off or before T0."""
+        seen = {f["id"] for f in self.visible()}
+        return (frozenset(f["id"] for f in self.store.families() if f["id"] not in seen)
+                | game.quarantined(self.store, self.settings))
+
+    def admitted_roots(self) -> list[str]:
+        """The roots a birth may use: the core five while THE LEARNING GAME is on (`game.birth_roots`), else `gym.roots`."""
+        return list(game.birth_roots(self.settings)
+                    or self.settings.get("gym", {}).get("roots", ["SPY", "QQQ", "IWM", "XSP", "SPXW"]))
+
     def refilling(self) -> bool:
         """Fewer families live than the swarm starts with."""
         return len(self.store.families(alive=True)) < int(self.settings.get("population", {}).get("start", 48))
@@ -1334,8 +1367,8 @@ class Architect:
         one-sided `long_call` and `long_put` are never gaps (they carry the market's drift and invited twin pairs), though
         a proposal of either is still admitted. Only while `architect.structures` leaves `long_single` out (it names one
         side alone) is an allowed side a gap of its own, so the GAPS never go empty with every allowed type unexplored."""
-        roots = list(self.settings.get("gym", {}).get("roots", ["SPY", "QQQ", "IWM", "XSP", "SPXW"]))
-        covered = {(r, f["structure"]) for f in self.store.families(alive=True) for r in f["roots"]}
+        roots = self.admitted_roots()
+        covered = {(r, f["structure"]) for f in self.visible(alive=True) for r in f["roots"]}
         allowed = self.structures()
         sides_are_gaps = LONG_SINGLE not in allowed
         out = {}
@@ -1364,7 +1397,7 @@ class Architect:
         roots = set(self.settings.get("gym", {}).get("roots", ["SPY", "QQQ", "IWM", "XSP", "SPXW"]))
         rows = {kind: {"active_families": 0, "retired_families": 0, "trials": 0, "validated_families": 0}
                 for kind in STRUCTURES}
-        for family in self.store.families():
+        for family in self.visible():
             if not roots.intersection(family["roots"]):
                 continue
             row = rows[family["structure"]]
@@ -1433,7 +1466,8 @@ class Architect:
         return "5m" if paired else None
 
     def graveyard_ids(self) -> set[str]:
-        return {r["family"] for r in self.store._all("SELECT family FROM graveyard")}
+        unseen = self.unseen()  # THE LEARNING GAME: an id the architect may not read is no row to cite
+        return {r["family"] for r in self.store._all("SELECT family FROM graveyard") if r["family"] not in unseen}
 
     def class_cap(self) -> int:
         """`architect.max_alive_per_class` (12): the most living families of one mechanism class (R11-2); 0 (off) when it
@@ -1452,7 +1486,7 @@ class Architect:
         from .strategist import mechanism_class
 
         counts: dict[str, int] = {}
-        for f in self.store.families(alive=True):
+        for f in self.visible(alive=True):
             cls = mechanism_class(f["structure"], f["roots"])
             counts[cls] = counts.get(cls, 0) + 1
         return counts
@@ -1524,7 +1558,7 @@ class Architect:
         """The request. `full_graveyard` (the Claude route with the digest): THE GRAVEYARD is a pointer to the digest in
         the system prompt; else the 20 newest rows, each lesson as `lesson_view` gives it. `library` (a
         `library.LibraryBlock`): THE LIBRARY, after the GAPS and before the agenda."""
-        alive = self.store.families(alive=True)
+        alive = self.visible(alive=True)
         living_ids = {f["id"] for f in alive}
         board = (self.store.get("leaderboard") or {}).get("board") or []
         # Of Validation the architect sees what a researcher sees (D2a): the line met or not and the checks passed.
@@ -1540,13 +1574,15 @@ class Architect:
             graveyard = GRAVEYARD_POINTER
         else:
             graves = [{"family": g["family"], "structure": g["structure"], "roots": g["roots"], "lesson": lesson_view(g["lesson"])[:400]}
-                      for g in self.store.graveyard(limit=20)]
+                      for g in self.graves(limit=20)]
             graveyard = f"THE GRAVEYARD:\n{json.dumps(graves)}"
         want = self.want()
         gym = self.settings.get("gym", {})
-        admitted_roots = gym.get("roots", ["SPY", "QQQ", "IWM", "XSP", "SPXW"])
+        admitted_roots = self.admitted_roots()
         roots = ", ".join(admitted_roots)
-        available = inputs.context(self.store.root, gym.get("image_checkpoint"), admitted_roots)
+        span = (settings_mod.objective_span(self.store.get("train_objective")).isoformat()
+                if game.cfg(self.settings)["enabled"] else None)
+        available = inputs.context(self.store.root, gym.get("image_checkpoint"), admitted_roots, span=span)
         gaps = json.dumps(self._gaps_by_root(), separators=(",", ":"))
         coverage = json.dumps(self.coverage(allowed_only=True), separators=(",", ":"))
         # During a burst refill, ask for the whole bounded gap. Asking for "3 to 12" repeatedly underfilled a
@@ -1610,7 +1646,7 @@ class Architect:
         if families is None or not self.require_card() or self.rebirth_mode() != "refuse":
             return None
         try:
-            index = cards.RebirthIndex(self.store, self.settings)
+            index = cards.RebirthIndex(self.store, self.settings, exclude=self.unseen())
             grid = index.grid(families)
             if any(index.bearable(cell, rows) for cell, rows in grid):
                 return None
@@ -1645,7 +1681,7 @@ class Architect:
             claimable, extra = self.claimable_rows(), ""
             families = self.cell_families()
             try:
-                index = cards.RebirthIndex(self.store, self.settings)
+                index = cards.RebirthIndex(self.store, self.settings, exclude=self.unseen())
                 cells = index.cells(claimable=claimable, families=families, chars=BIRTH_CELLS_CHARS)
             except Exception:  # noqa: BLE001 - the request goes without the list; admit still checks every card
                 cells = []
@@ -1696,16 +1732,17 @@ class Architect:
         pass_yields, self.pass_yields = getattr(self, "pass_yields", None), None  # the request's reading, used once
         require_card, index = self.require_card(), None
         cap = self.want()
+        unseen = self.unseen()  # THE LEARNING GAME: the rows this pass may not read, nor continue the lineage of
         known = self.graveyard_ids()
         strict = digest and self.cfg.get("require_differs") is True
-        alive = self.store.families(alive=True)
+        alive = self.visible(alive=True)
         living = {(f["mechanism"].lower()[:80], tuple(f["roots"]), f["structure"]) for f in alive}
         per_class, classes = self.class_cap(), self.classes()
         self.capped: dict[str, int] = {}
         quota = self.birth_quota()
         before = dict(quota.refused) if quota is not None else {}
         self.structure_capped: dict[str, int] = {}  # this call's refusals by the quota, by structure family
-        allowed_roots = set(self.settings.get("gym", {}).get("roots", ["SPY", "QQQ", "IWM", "XSP", "SPXW"]))
+        allowed_roots = set(self.admitted_roots())
         allowed = self.structures()
         self.not_allowed: list[dict[str, Any]] = []  # this call's refusals by THE STRUCTURES: slug, structure, roots
         born = []
@@ -1753,7 +1790,7 @@ class Architect:
             # CARD-BASED REBIRTH REFUSAL: a card in a refuted cell needs a valid rebirth (deterministic, no model call).
             if card is not None and self.rebirth_mode() == "refuse":
                 if index is None:
-                    index = cards.RebirthIndex(self.store, self.settings, yields=pass_yields)
+                    index = cards.RebirthIndex(self.store, self.settings, yields=pass_yields, exclude=unseen)
                 verdict = index.check(card, structure, mechanism, dte)
                 if not verdict["ok"]:
                     self.card_refused.append({"slug": slug, "why": verdict["reason"], "row": verdict.get("row"),
@@ -1780,12 +1817,14 @@ class Architect:
             # Three distinct lessons: many open with the same wording (the idle rule's), and 300 characters is all a
             # family is born with, so a repeat would only crowd out another lesson. Each as `lesson_view` gives it (D2a).
             lessons = list(dict.fromkeys(lesson_view(g["lesson"])[:300]
-                                         for g in self.store.graveyard(f"{structure_query(structure)} {' '.join(roots)} {mechanism}",
-                                                                       limit=12)))[:3]
+                                         for g in self.graves(f"{structure_query(structure)} {' '.join(roots)} {mechanism}",
+                                                              limit=12)))[:3]
             spec = {"id": slug, "mechanism": mechanism, "structure": structure, "roots": roots, "dte": [lo, hi],
                     "rejection": str(row.get("rejection") or "")[:400], "sketch": str(row.get("sketch") or "")[:800],
                     "lessons": lessons}
             reborn = str((card or {}).get("rebirth", {}).get("row") or "") or None
+            if reborn in unseen:
+                reborn = None  # THE LEARNING GAME: a row the architect may not read is never re-entered
             if card is not None:
                 spec["card_sha"] = cards.card_sha(card)
                 if reborn:  # the lesson it re-enters is one it is born with, first
@@ -1800,13 +1839,14 @@ class Architect:
             # idea is a new lineage that still counts the slice's trials (`prior_lineage`) but not its look ration. A
             # `long_single` searches its singles' slices too (`same_slice`): a dead call or put twin's idea continues, and
             # each newest dead lineage of the slice's types counts (`slice_priors`, own type first).
-            dead = [f for f in self.store.families(alive=False)
+            dead = [f for f in self.visible(alive=False)
                     if same_slice(f["structure"], structure) and sorted(f["roots"]) == sorted(roots)]
             # A rebirth on the slice of the row it names continues that row's lineage (its trials and looks); one on another
             # slice is a new lineage that counts the named row's lineage as a prior (its trials, and its failed mechanism
             # tests, count; its looks do not): a card never buys a fresh trial count.
             same = [f for f in dead if f["id"] in (row.get("parent"), row.get("slug"), reborn) or same_idea(f["mechanism"], mechanism)]
-            declared = self.store.family(str(row.get("parent"))) if row.get("parent") else None
+            declared = (self.store.family(str(row.get("parent")))
+                        if row.get("parent") and str(row.get("parent")) not in unseen else None)
             parent = (declared["id"] if declared and same_slice(declared["structure"], structure)
                       else (same[-1]["id"] if same else (kin[-1]["id"] if kin else None)))
             prior = slice_priors(dead, structure) if dead and not parent else None

@@ -44,7 +44,7 @@ import re
 import time
 from typing import Any, Callable, Mapping
 
-from . import diagnostics
+from . import diagnostics, game
 from . import settings as settings_mod
 from .researcher import CODE_BLOCK, CONTRACT, check_code, needs_of
 from .store import SwarmStore, structure_query, structure_text
@@ -247,10 +247,11 @@ class Diagnostician:
             if result.get("robustness") is not None:
                 view["robustness"] = result["robustness"]
         robustness = (fam.get("state") or {}).get("robustness")
+        # THE LEARNING GAME: the rows every reader reads (`game.visible_graveyard`; the store's own read with the game off).
         lessons = [{"mechanism": withheld(g["mechanism"])[:300], "structure": g["structure"], "roots": g["roots"],
                     "lesson": withheld(g["lesson"])[:700]}
-                   for g in self.store.graveyard(f"{structure_query(fam['structure'])} {' '.join(fam['roots'])} {fam['mechanism']}",
-                                                 limit=6)
+                   for g in game.visible_graveyard(self.store, f"{structure_query(fam['structure'])} {' '.join(fam['roots'])} "
+                                                   f"{fam['mechanism']}", limit=6, settings=self.settings)
                    if g["family"] != fid]
         dte = spec.get("dte") or ["?", "?"]
         parts = [
