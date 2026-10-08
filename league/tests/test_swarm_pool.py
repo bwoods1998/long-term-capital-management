@@ -580,5 +580,92 @@ class Rows(PoolCase):
                          "a row made within the grace may be a fork whose answer is still on its way")
 
 
+class GamePrivateJobs(PoolCase):
+    """THE GAME'S PRIVATE JOBS (league/swarm/game.py, the module docstring's paragraph): the hidden years are reached by a
+    private job alone, through `submit`; with `gym.allow_earlier_image` a job stamped with the 2022 span runs on the 2020
+    image, and an image that starts later than the span is refused as ever."""
+
+    def box(self, pool, train_first):
+        box = self.ready_box(pool)
+        box.train_first = train_first
+        box.driver = FakeDriver(self.sail, "x", calls=self.calls, fail=lambda: self.failure, train_first=train_first)
+        return box
+
+    @staticmethod
+    def private(start="2020-01-02", end="2021-12-31"):
+        out = job("p", stress=1.5, priority=1.0)
+        out.purpose, out.start, out.end = "private", start, end
+        return out
+
+    def test_a_private_job_is_not_stamped_and_has_no_span_check(self):
+        pool = self.pool()  # the running span: 2022-01-03 (no start migrated the store anywhere else)
+        box = self.box(pool, "2022-01-03")
+        p = pool.submit(self.private())
+        self.assertEqual((p.start, p.end, p.span, p.error), ("2020-01-02", "2021-12-31", None, None))
+        self.clock.advance(9)
+        pool.run_batch(box, pool._take(box))
+        self.assertEqual((self.calls[-1]["start"], self.calls[-1]["end"], self.calls[-1]["stress"]), ("2020-01-02", "2021-12-31", 1.5))
+        self.assertIsNone(p.error, "no span check: the job's own window is the Gym's")
+        self.assertEqual(p.result["train_from"], "2020-01-02")
+
+    def test_a_private_job_runs_only_on_days_before_the_span(self):
+        pool = self.pool()
+        for start, end in (("2020-01-02", "2022-06-30"), ("2020-01-02", None), (None, "2021-12-31"), ("2021-12-31", "2020-01-02")):
+            p = pool.submit(self.private(start, end))
+            self.assertIn("before the swarm's Train span", p.error)
+            self.assertTrue(p.done.is_set())
+        self.assertEqual(pool.queue, [])
+
+    def test_a_stamped_job_runs_on_an_earlier_image_only_when_allowed(self):
+        for allowed in (True, False):
+            self.calls.clear()
+            pool = self.pool(allow_earlier_image=True) if allowed else self.pool()
+            box = self.box(pool, "2020-01-02")
+            a = pool.submit(job(f"a{allowed}"))
+            self.assertEqual((a.start, a.span), ("2022-01-03", "2022-01-03"))
+            self.clock.advance(9)
+            pool.run_batch(box, pool._take(box))
+            if allowed:
+                self.assertEqual(self.calls[-1]["start"], "2022-01-03", "the job's own start cuts the window")
+                self.assertEqual(a.result["train_from"], a.start, "train_from is the job's start")
+            else:
+                self.assertEqual(self.calls, [], "today's refusal")
+                self.assertIn("starts Train at 2020-01-02", a.error)
+
+    def test_a_batch_reporting_an_earlier_image_is_delivered_when_allowed_and_a_later_image_never(self):
+        pool = self.pool(allow_earlier_image=True)
+        box = self.box(pool, None)  # adopted without a recorded first day: the batch says it
+        box.driver = FakeDriver(self.sail, "x", calls=self.calls, train_first="2020-01-02")
+        a = pool.submit(job("a"))
+        self.clock.advance(9)
+        pool.run_batch(box, pool._take(box))
+        self.assertEqual((a.error, a.result["train_from"], box.train_first), (None, "2022-01-03", "2020-01-02"))
+        self.store.put("train_objective", "worst-train-year-v1@2020-01-02")  # a 2020 span on a 2022 image
+        later = self.pool(allow_earlier_image=True)
+        box = self.box(later, "2022-01-03")
+        b = later.submit(job("b"))
+        self.clock.advance(9)
+        later.run_batch(box, later._take(box))
+        self.assertIsNone(b.result)
+        self.assertIn("starts Train at 2022-01-03", b.error)
+
+    def test_an_early_train_job_fails_in_submit_and_a_probe_from_january_first_runs(self):
+        pool = self.pool()
+        early = job("e")
+        early.start, early.end = "2021-01-04", "2021-12-31"
+        early = pool.submit(early)
+        self.assertIn("may not start before the swarm's Train span (2022)", early.error)
+        self.assertNotIn("2021", early.error, "the refusal never names the job's own year")
+        probe = job("q")
+        probe.purpose, probe.start, probe.end = "probe", "2022-01-01", "2022-12-31"
+        probe = pool.submit(probe)
+        self.assertIsNone(probe.error, "compared by year: the zero-trade probe starts on January 1")
+        self.assertIn(probe, pool.queue)
+        self.store.put("train_objective", "worst-train-year-v1@2020-01-02")
+        own = job("o")
+        own.start = "2020-06-01"
+        self.assertIsNone(self.pool().submit(own).error, "a 2020 span: a 2020 start is the span's")
+
+
 if __name__ == "__main__":
     unittest.main()
