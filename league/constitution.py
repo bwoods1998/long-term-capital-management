@@ -739,9 +739,14 @@ CONSTITUTION: dict[str, Any] = {
     #   Train trades: semis-lead 4% -> 71%, smci-mara 40% -> 71%, opening-range 40% -> 62%, china-tech 55% -> 77%,
     #   peer-skew 50% -> 71%). `week_loss_usd` ($150), `max_open` (4) and `contracts` (1) are unchanged, so the week's
     #   bound and the month's ($650 on average, $750 in a five-week month) are the same and at most two $75 units are
-    #   ever open at once (three $50 ones before it). Its cost is use of that same envelope: replayed on those cohorts
-    #   with no edge after costs (-8% of maximum loss a trade), the expected real loss per first-look pass rises from
-    #   about $0.40 to $2.45 at today's practice windows and from $5.52 to $26.59 at 40-session windows.
+    #   ever open at once (three $50 ones before it). The same row is the family's cap on what it holds and works, so one
+    #   family may now have $75 open (from $50). Its cost is use of that same envelope: replayed on those cohorts with no
+    #   edge after costs (-8% of maximum loss a trade), the expected real loss per first-look pass rises from about $0.40
+    #   to $2.45 at today's practice windows, from $2.22 to $25.53 at 30-session windows and from $5.52 to $26.59 at
+    #   40-session windows; the worst simulated pass from -$272 to -$419 at 30 sessions (several weeks, each within the
+    #   $150). Alone it opens nothing: on this tree no cohort holds a Train-and-drift mark (the tournament's drift screen
+    #   is off), and in the incubator audit's replay (Oct 8) 11 of 12 cohorts never reach the first look's 10 program
+    #   closes inside today's windows.
     #   Setting `max_open`, `week_loss_usd` or `max_loss_usd` to 0 stops the route (a tightening: a new digest and a
     #   ratification).
     #
@@ -861,9 +866,9 @@ OPTIONS_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
     # The incubator (the owner, Sept 29, 2026; the reading of Sept 30; `league/live/incubator.py`): the owner's terms are
     # the loose end of each range, so a row may only tighten (0 stops the route); loosening one is the owner's. The
     # practice rule's floors are the pre-registered 3 sessions, 10 program closes and 0.80 coverage.
-    # THE INCUBATOR CAP (Oct 8, 2026; under the owner's goal of Oct 7, item 4, which allows up to 10% of equity at risk
-    # per Probe position): the unit cap's loose end is $75 (from $50), a loosening reported with its cost; the weekly
-    # envelope ($150), the 4 open and the one lot are unchanged.
+    # THE INCUBATOR CAP (Oct 8, 2026; Claude's decision under the owner's goal of Oct 7, whose item 4 allows up to 10% of
+    # equity at risk per Probe position and whose item 5 asks every loosened rule reported with its cost): the unit cap's
+    # loose end is $75 (the owner's $50 before it); the weekly envelope ($150), the 4 open and the one lot are unchanged.
     "incubator.max_loss_usd": ("0", "75"),
     "incubator.contracts": ("1", "1"),
     "incubator.max_open": ("0", "4"),

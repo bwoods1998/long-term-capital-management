@@ -473,6 +473,36 @@ class TheCaps(unittest.TestCase):
         self.order("a", unit=D("45"))
         self.assertEqual(self.plan("0.01", "a").qty, 0, "held and working together")
 
+    def test_two_seventy_five_dollar_units_fill_the_weeks_envelope(self):
+        """The incubator cap (Oct 8, 2026) leaves the week's $150 as it was: with nothing realized, two $75 units (held, or
+        held and working) are the most that can be open at once, and nothing more opens, however small (three $50 units
+        before it). A realized gain never widens it (R is floored at $0)."""
+        self.position("a", loss=D("75"))
+        self.assertEqual(self.plan("75", "b").qty, 1, "the second $75 unit fits: 75 + 75 <= 150")
+        self.order("b", unit=D("75"))
+        for fam in ("c", "d"):
+            plan = self.plan("0.01", fam)
+            self.assertEqual(plan.qty, 0, fam)
+            self.assertIn("envelope", plan.reason)
+        self.position("g", status="closed", cash=D("40"), closed_at=at(dt.date(2026, 9, 28), 10, 0))
+        self.assertEqual(self.tally("c").realized_loss, D("0"))
+        self.assertIn("envelope", self.plan("0.01", "c").reason, "a gain this week does not make room")
+
+    def test_a_seventy_five_dollar_unit_fits_every_other_cap_at_the_equity_of_the_decision(self):
+        """At E = $1,288.40 (the fast lane's figure, under which the cap was decided) with the full room kept for the
+        families' Probe room and the House live test ($386.52 + $100): the book cap ($1,159.56), the incubator's share of
+        the day cap ($322.10), the gateway's per-order cap (the lower of $1,000 and 25% of E: $322.10) and its day cap
+        ($1,288.40) all admit a $75 unit, so the unit cap is the binding one; $75 stays inside the goal's 10% of E
+        ($128.84) for one Probe position."""
+        E = D("1288.40")
+        t = self.table
+        room = M.probe_room(t, E) + t.house_test_structure
+        self.assertEqual(room, D("486.520"))
+        self.assertEqual(min(t.gateway_order_max_loss, t.gateway_order_share * E), D("322.1000"))
+        self.assertLessEqual(t.incubator_max_loss, M.probe_cap(t, E))
+        self.assertEqual(self.plan("75", E=E, room=room).qty, 1)
+        self.assertIn("over its $75 cap", self.plan("75.01", E=E, room=room).reason)
+
     def test_a_position_carried_into_a_new_week_counts_as_held_and_last_weeks_loss_resets_on_monday(self):
         friday = at(dt.date(2026, 9, 25), 15, 0)
         self.position("a", status="closed", cash=D("-140"), closed_at=friday)

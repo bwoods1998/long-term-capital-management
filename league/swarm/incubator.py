@@ -2,8 +2,9 @@
 
 THE ROUTE. The owner approved the incubator on Sept 29, 2026, and its reading was settled on Sept 30. It is a
 shadow-to-real route for families that pass Train, pass the drift screen alone and show positive live practice. It
-trades one lot of an approved real structure, at most $50 maximum loss each. Its trades are never strategy evidence and
-never a promotion: D2 is the only route to Probe and Sized. Every money rule of the route lives in the House
+trades one lot of an approved real structure, at most `incubator.max_loss_usd` of maximum loss each ($75 since the
+incubator cap of Oct 8, 2026; the owner's $50 before it). Its trades are never strategy evidence and never a
+promotion: D2 is the only route to Probe and Sized. Every money rule of the route lives in the House
 (`league/live`, the constitution's `options_money.incubator` row). The swarm records only the two facts below, in the
 family's state. Each is bound to the evaluator it was made under, so no stale fact can pass.
 

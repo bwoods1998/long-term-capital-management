@@ -311,6 +311,55 @@ class TheRule(StandingCase):
             self.assertTrue(LiveGrant(self.root / STORE, clock=self.clock).allows_live(3), "another process sees it")
 
 
+class TheIncubatorCap(StandingCase):
+    """The incubator cap (Oct 8, 2026): `incubator.max_loss_usd` $50 -> $75 moves the money digest from fast lane v2's
+    da5c7542 to 1665c385. A grant pinned on the $50 row holds nothing on the $75 one until the standing grant re-ratifies
+    it, which it does by itself only on an owner's release change (`floor_box.py deploy`, or its rollback back across it)."""
+
+    FAST_LANE = "da5c7542d7b78f967c12c3b2d98140153026c98b5fea9de27b6cf912eff85694"
+    CAP = "1665c3858bce937617a339dfa56ae9a38a51e9fd763225ec10a645d3d5bafa08"
+
+    def at_fifty(self):
+        return patch.dict(CONSTITUTION["options_money"]["incubator"], max_loss_usd="50")
+
+    def pinned_at_fifty(self):
+        with self.at_fifty():
+            self.assertEqual(money_digest(), self.FAST_LANE)
+            grant = self.enabled()
+        self.assertEqual(money_digest(), self.CAP)
+        self.assertEqual(grant.current()["policy"]["constitution_digest"], self.FAST_LANE)
+        return grant
+
+    def test_the_owners_deploy_re_ratifies_it_at_the_houses_start(self):
+        grant = self.pinned_at_fifty()
+        self.assertFalse(grant.allows_live(2), "real entries are held until it is ratified")
+        out = self.standing(grant, release="r-cap-75", rows=owner_deploy(self.clock() - 60, release="r-cap-75"))
+        self.assertEqual((out["action"], out["triggers"]), ("ratified", ["digest"]))
+        self.assertIn(f"money digest {self.FAST_LANE[:12]} -> {self.CAP[:12]}", grant.ratifications()[-1]["why"])
+        self.assertEqual(grant.current()["policy"]["constitution_digest"], self.CAP)
+        self.assertTrue(grant.allows_live(2))
+
+    def test_the_updater_alone_never_ratifies_it(self):
+        grant = self.pinned_at_fifty()
+        out = self.standing(grant, release="main-abcdef123456", rows=updater_deploy(self.clock() - 60))
+        self.assertEqual(out["action"], "refused")
+        self.assertFalse(grant.allows_live(2))
+        self.assertEqual(grant.ratifications(), [])
+
+    def test_the_owners_rollback_across_it_re_ratifies_on_the_fifty_dollar_row(self):
+        grant = self.pinned_at_fifty()
+        self.standing(grant, release="r-cap-75", rows=owner_deploy(self.clock() - 60, release="r-cap-75"))
+        self.clock.advance(HOUR)
+        back = [{"ts": self.clock() - 60, "deploy": "rollback@2", "release": "r-cap-75", "stage": "rollback", "ok": True,
+                 "from": "r-cap-75", "to": "r-fast-lane"}]
+        with self.at_fifty():
+            self.assertFalse(grant.allows_live(2))
+            out = self.standing(grant, release="r-fast-lane", rows=back)
+            self.assertEqual(out["action"], "ratified")
+            self.assertEqual(grant.current()["policy"]["constitution_digest"], self.FAST_LANE)
+            self.assertTrue(grant.allows_live(2))
+
+
 class TheReaders(TestCase):
     def test_deposit_times_are_when_the_money_moved(self):
         at = 1789000000.0
