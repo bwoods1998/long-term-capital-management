@@ -1,0 +1,1301 @@
+{
+ "events": [
+  {
+   "at": "2026-10-03T04:02:00Z",
+   "family": "golden-3",
+   "kind": "swarm.retired",
+   "payload": "{\"band_from\":\"gym\",\"cause\":\"the family left the Gym after review\"}"
+  },
+  {
+   "at": "2026-10-03T04:02:00Z",
+   "family": "golden-5",
+   "kind": "swarm.retired",
+   "payload": "{\"band_from\":\"gym\",\"cause\":\"Retired by the idle rule, a limit on how long a family may research without an eligible Train version, a positive Train score or a new Gym evaluation; it is a time limit, not a finding that the mechanism has no edge\"}"
+  },
+  {
+   "at": "2026-10-03T04:02:00Z",
+   "family": "golden-4-on-qqq",
+   "kind": "swarm.born",
+   "payload": "{\"mechanism\":\"Index calls after a low close rebound: golden-4, a debit vertical.\",\"origin\":\"fork\",\"parent\":\"golden-4\",\"roots\":[\"SPY\",\"QQQ\"],\"structure\":\"debit_vertical\"}"
+  },
+  {
+   "at": "2026-10-03T04:02:00Z",
+   "family": "golden-0-on-qqq",
+   "kind": "swarm.born",
+   "payload": "{\"mechanism\":\"Index calls after a low close rebound: golden-0, a debit vertical.\",\"origin\":\"fork\",\"parent\":\"golden-0\",\"roots\":[\"SPY\",\"QQQ\"],\"structure\":\"debit_vertical\"}"
+  },
+  {
+   "at": "2026-10-03T04:02:00Z",
+   "family": null,
+   "kind": "swarm.tournament",
+   "payload": "{\"allocation\":{\"capped_classes\":[],\"class_cap\":1.0,\"class_cap_in_force\":1.0,\"class_cap_relaxed\":false,\"classes\":{\"debit_vertical x etf\":1.0},\"exhausted\":[],\"families\":6,\"family_cap\":0.3333,\"family_cap_spill\":0.0,\"fresh_value\":0.10049,\"gate_families\":2,\"largest_class\":{\"class\":\"debit_vertical x etf\",\"head_share\":1.0,\"share\":1.0},\"mode\":\"value\",\"pools\":{\"decide\":0.55,\"explore\":0.35,\"floor\":0.1},\"posterior\":{\"between\":0.09,\"looks\":3,\"mean\":-0.713,\"weight\":0.1304,\"within\":2.7304},\"practice_bonus\":{},\"top\":[{\"depth\":0.988,\"family\":\"golden-2\",\"p\":0.1285,\"share\":0.284},{\"depth\":0.964,\"family\":\"golden-0-on-qqq\",\"p\":0.1285,\"share\":0.2776},{\"depth\":0.964,\"family\":\"golden-4-on-qqq\",\"p\":0.1285,\"share\":0.2776},{\"depth\":0.964,\"family\":\"golden-1\",\"p\":0.0501,\"share\":0.1275},{\"depth\":null,\"family\":\"golden-0\",\"p\":null,\"share\":0.0167}],\"unvalidated_families\":3,\"useful\":3},\"at\":1791000120.0,\"board\":[{\"band\":\"gym\",\"best_train\":2.0,\"closeable\":true,\"family\":\"golden-0\",\"gate_ready\":true,\"lineage_trials\":3,\"revisions\":1,\"roots\":[\"SPY\"],\"share\":0.0167,\"structure\":\"debit_vertical\",\"validation\":{\"mean\":0.05,\"quarters\":\"4/4\",\"sharpe_daily\":0.2,\"t\":2.5}},{\"band\":\"gym\",\"best_train\":2.0,\"closeable\":true,\"family\":\"golden-4\",\"gate_ready\":true,\"lineage_trials\":3,\"revisions\":1,\"roots\":[\"SPY\"],\"share\":0.0167,\"structure\":\"debit_vertical\",\"validation\":{\"mean\":0.05,\"quarters\":\"4/4\",\"sharpe_daily\":0.2,\"t\":2.5}},{\"band\":\"gym\",\"best_train\":1.2,\"closeable\":true,\"family\":\"golden-2\",\"gate_ready\":false,\"lineage_trials\":1,\"revisions\":1,\"roots\":[\"SPY\"],\"share\":0.257,\"structure\":\"debit_vertical\",\"validation\":null},{\"band\":\"gym\",\"best_train\":1.5,\"closeable\":true,\"family\":\"golden-1\",\"gate_ready\":false,\"lineage_trials\":3,\"revisions\":1,\"roots\":[\"QQQ\"],\"share\":0.1163,\"structure\":\"debit_vertical\",\"validation\":{\"mean\":-0.01,\"quarters\":\"1/4\",\"sharpe_daily\":0.2,\"t\":-0.5}},{\"band\":\"gym\",\"best_train\":null,\"closeable\":true,\"family\":\"golden-0-on-qqq\",\"gate_ready\":false,\"lineage_trials\":3,\"revisions\":1,\"roots\":[\"SPY\",\"QQQ\"],\"share\":0.0,\"structure\":\"debit_vertical\",\"validation\":null},{\"band\":\"gym\",\"best_train\":null,\"closeable\":true,\"family\":\"golden-4-on-qqq\",\"gate_ready\":false,\"lineage_trials\":3,\"revisions\":1,\"roots\":[\"SPY\",\"QQQ\"],\"share\":0.0,\"structure\":\"debit_vertical\",\"validation\":null}],\"born\":[\"golden-4-on-qqq\",\"golden-0-on-qqq\"],\"incubator\":{\"barred\":[],\"cohorts\":0,\"marked\":0,\"removed\":[],\"revoked\":[],\"waiting\":0,\"written\":[]},\"last_hour\":{\"cycle_errors\":0,\"cycles\":0,\"usd\":{\"gym_box\":0.0,\"openai\":0.0,\"sail_model\":0.0}},\"practice_bonus\":{},\"retired\":[{\"family\":\"golden-3\",\"why\":\"no validation improvement in 31 revisions\"},{\"family\":\"golden-5\",\"why\":\"It made no new Gym evaluation in its last 500 cycles (only stored results, holds and refused runs). Retired by the idle rule, a limit on how long a family may research without an eligible Train version, a positive Train score or a new Gym evaluation; it is a time limit, not a finding that the mechanism has no edge\"}],\"seconds\":0.0,\"totals\":{\"families_alive\":6,\"families_retired\":2,\"holdout_looks\":0,\"holdout_passes\":0,\"market_years\":5.9523809523809526,\"runs\":10,\"trials\":10},\"validation\":{\"errors\":{},\"failed_drift\":[],\"judged\":{\"golden-0\":{\"extension_hold\":true,\"mean\":0.05,\"passed\":true,\"t\":2.5,\"version\":1},\"golden-1\":{\"mean\":-0.01,\"passed\":false,\"t\":-0.5,\"version\":1},\"golden-4\":{\"extension_hold\":true,\"mean\":0.05,\"passed\":true,\"t\":2.5,\"version\":1}},\"queued\":3,\"waiting_drift\":[],\"waiting_robustness\":[\"golden-2\"]}}"
+  }
+ ],
+ "families": [
+  {
+   "band": "gym",
+   "band_since": "2026-10-03T04:02:00Z",
+   "best_train": 2.0,
+   "best_validation": 0.05,
+   "best_version": null,
+   "born_at": "2026-10-03T04:02:00Z",
+   "cycles": 0,
+   "id": "golden-0",
+   "inherited_looks": 0,
+   "inherited_trials": 0,
+   "lineage": "golden-0",
+   "mechanism": "Index calls after a low close rebound: golden-0, a debit vertical.",
+   "origin": "seed",
+   "parent": null,
+   "retire_reason": null,
+   "retired_at": null,
+   "revisions": 1,
+   "rewrites": 0,
+   "roots": [
+    "SPY"
+   ],
+   "since_val_revisions": 0,
+   "since_val_trials": 0,
+   "spec": {
+    "dte": [
+     1,
+     5
+    ],
+    "mechanism": "Index calls after a low close rebound: golden-0, a debit vertical.",
+    "roots": [
+     "SPY"
+    ],
+    "structure": "debit_vertical"
+   },
+   "spent_usd": 0.0,
+   "stall": 1,
+   "state": {
+    "best_train_run": "golden-train-golden-0",
+    "best_train_version": 1,
+    "dormant_cycles": 0,
+    "extension_hold": {
+     "at": "2026-10-03T04:02:00Z",
+     "checks": "8/8",
+     "version": 1
+    },
+    "extension_versions": [
+     1
+    ],
+    "forked_at": 1791000120.0,
+    "gate_ready": true,
+    "robustness": {
+     "1": {
+      "stress_1.5": {
+       "gym_bundle": "bundle-golden",
+       "gym_image": "img-golden",
+       "pnl": 50.0,
+       "status": "ok"
+      }
+     }
+    },
+    "train_candidates": [
+     [
+      2.0,
+      1,
+      "golden-train-golden-0"
+     ]
+    ],
+    "typical_by_version": {
+     "1": 60.0
+    },
+    "typical_max_loss_usd": 60.0,
+    "validated_cycles": 0,
+    "validated_trials": 3,
+    "validation_bundle": "bundle-golden",
+    "validation_image": "img-golden",
+    "validation_inherited": null,
+    "validation_line": {
+     "checks": {
+      "days": true,
+      "dsr": true,
+      "mean_positive": true,
+      "quarters": true,
+      "status_ok": true,
+      "stress": true,
+      "t": true,
+      "trades": true
+     },
+     "numbers": {
+      "days": 120,
+      "dsr": 0.9857059370786174,
+      "lineage_trials": 3,
+      "mean": 0.05,
+      "pnl": 1235.2814017766382,
+      "quarters": "4/4",
+      "sharpe_daily": 0.2,
+      "sharpe_traded": 0.22821773229381923,
+      "stress_pnl": 864.7,
+      "t": 2.5,
+      "trades": 150,
+      "validated_versions": 1
+     },
+     "passed": true
+    },
+    "validation_numbers": {
+     "mean": 0.05,
+     "quarters": "4/4",
+     "sharpe_daily": 0.2,
+     "t": 2.5
+    },
+    "validation_verdicts": {
+     "1": {
+      "at": "2026-10-03T04:02:00Z",
+      "evaluator": {
+       "bundle": "bundle-golden",
+       "execution": "golden",
+       "image": "img-golden"
+      },
+      "passed": true
+     }
+    },
+    "validation_version": 1,
+    "validation_view": {
+     "checks": 8,
+     "checks_passed": 8,
+     "line_met": true
+    }
+   },
+   "structure": "debit_vertical",
+   "trials": 3,
+   "validated_version": 1,
+   "validations": 1,
+   "weight": 0.016666666666666666
+  },
+  {
+   "band": "gym",
+   "band_since": "2026-10-03T04:02:00Z",
+   "best_train": null,
+   "best_validation": null,
+   "best_version": null,
+   "born_at": "2026-10-03T04:02:00Z",
+   "cycles": 0,
+   "id": "golden-0-on-qqq",
+   "inherited_looks": 0,
+   "inherited_trials": 3,
+   "lineage": "golden-0",
+   "mechanism": "Index calls after a low close rebound: golden-0, a debit vertical.",
+   "origin": "fork",
+   "parent": "golden-0",
+   "retire_reason": null,
+   "retired_at": null,
+   "revisions": 1,
+   "rewrites": 0,
+   "roots": [
+    "SPY",
+    "QQQ"
+   ],
+   "since_val_revisions": 1,
+   "since_val_trials": 0,
+   "spec": {
+    "dte": [
+     1,
+     5
+    ],
+    "mechanism": "Index calls after a low close rebound: golden-0, a debit vertical.",
+    "roots": [
+     "SPY",
+     "QQQ"
+    ],
+    "structure": "debit_vertical"
+   },
+   "spent_usd": 0.0,
+   "stall": 1,
+   "state": {},
+   "structure": "debit_vertical",
+   "trials": 0,
+   "validated_version": null,
+   "validations": 0,
+   "weight": 0.27756083472458987
+  },
+  {
+   "band": "gym",
+   "band_since": "2026-10-03T04:02:00Z",
+   "best_train": 1.5,
+   "best_validation": -0.01,
+   "best_version": null,
+   "born_at": "2026-10-03T04:02:00Z",
+   "cycles": 0,
+   "id": "golden-1",
+   "inherited_looks": 0,
+   "inherited_trials": 0,
+   "lineage": "golden-1",
+   "mechanism": "Index calls after a low close rebound: golden-1, a debit vertical.",
+   "origin": "seed",
+   "parent": null,
+   "retire_reason": null,
+   "retired_at": null,
+   "revisions": 1,
+   "rewrites": 0,
+   "roots": [
+    "QQQ"
+   ],
+   "since_val_revisions": 0,
+   "since_val_trials": 0,
+   "spec": {
+    "dte": [
+     1,
+     5
+    ],
+    "mechanism": "Index calls after a low close rebound: golden-1, a debit vertical.",
+    "roots": [
+     "QQQ"
+    ],
+    "structure": "debit_vertical"
+   },
+   "spent_usd": 0.0,
+   "stall": 1,
+   "state": {
+    "best_train_run": "golden-train-golden-1",
+    "best_train_version": 1,
+    "dormant_cycles": 0,
+    "gate_ready": false,
+    "robustness": {
+     "1": {
+      "stress_1.5": {
+       "gym_bundle": "bundle-golden",
+       "gym_image": "img-golden",
+       "pnl": 40.0,
+       "status": "ok"
+      }
+     }
+    },
+    "train_candidates": [
+     [
+      1.5,
+      1,
+      "golden-train-golden-1"
+     ]
+    ],
+    "typical_by_version": {
+     "1": 60.0
+    },
+    "typical_max_loss_usd": 60.0,
+    "validated_cycles": 0,
+    "validated_trials": 3,
+    "validation_bundle": "bundle-golden",
+    "validation_image": "img-golden",
+    "validation_inherited": null,
+    "validation_line": {
+     "checks": {
+      "days": true,
+      "dsr": false,
+      "mean_positive": false,
+      "quarters": false,
+      "status_ok": true,
+      "stress": false,
+      "t": false,
+      "trades": true
+     },
+     "numbers": {
+      "days": 120,
+      "dsr": 0.3053810220286154,
+      "lineage_trials": 3,
+      "mean": -0.01,
+      "pnl": -735.8451194165008,
+      "quarters": "1/4",
+      "sharpe_daily": 0.2,
+      "sharpe_traded": -0.04564354645876384,
+      "stress_pnl": -515.09,
+      "t": -0.5,
+      "trades": 150,
+      "validated_versions": 1
+     },
+     "passed": false
+    },
+    "validation_numbers": {
+     "mean": -0.01,
+     "quarters": "1/4",
+     "sharpe_daily": 0.2,
+     "t": -0.5
+    },
+    "validation_verdicts": {
+     "1": {
+      "at": "2026-10-03T04:02:00Z",
+      "evaluator": {
+       "bundle": "bundle-golden",
+       "execution": "golden",
+       "image": "img-golden"
+      },
+      "passed": false
+     }
+    },
+    "validation_version": 1,
+    "validation_view": {
+     "checks": 8,
+     "checks_passed": 3,
+     "line_met": false
+    }
+   },
+   "structure": "debit_vertical",
+   "trials": 3,
+   "validated_version": 1,
+   "validations": 1,
+   "weight": 0.12754233118282488
+  },
+  {
+   "band": "gym",
+   "band_since": "2026-10-03T04:02:00Z",
+   "best_train": 1.2,
+   "best_validation": null,
+   "best_version": null,
+   "born_at": "2026-10-03T04:02:00Z",
+   "cycles": 0,
+   "id": "golden-2",
+   "inherited_looks": 0,
+   "inherited_trials": 0,
+   "lineage": "golden-2",
+   "mechanism": "Index calls after a low close rebound: golden-2, a debit vertical.",
+   "origin": "seed",
+   "parent": null,
+   "retire_reason": null,
+   "retired_at": null,
+   "revisions": 1,
+   "rewrites": 0,
+   "roots": [
+    "SPY"
+   ],
+   "since_val_revisions": 1,
+   "since_val_trials": 1,
+   "spec": {
+    "dte": [
+     1,
+     5
+    ],
+    "mechanism": "Index calls after a low close rebound: golden-2, a debit vertical.",
+    "roots": [
+     "SPY"
+    ],
+    "structure": "debit_vertical"
+   },
+   "spent_usd": 0.0,
+   "stall": 1,
+   "state": {
+    "best_train_run": "golden-train-golden-2",
+    "best_train_version": 1,
+    "train_candidates": [
+     [
+      1.2,
+      1,
+      "golden-train-golden-2"
+     ]
+    ]
+   },
+   "structure": "debit_vertical",
+   "trials": 1,
+   "validated_version": null,
+   "validations": 0,
+   "weight": 0.28400266603466207
+  },
+  {
+   "band": "retired",
+   "band_since": "2026-10-03T04:02:00Z",
+   "best_train": null,
+   "best_validation": null,
+   "best_version": null,
+   "born_at": "2026-10-03T04:02:00Z",
+   "cycles": 0,
+   "id": "golden-3",
+   "inherited_looks": 0,
+   "inherited_trials": 0,
+   "lineage": "golden-3",
+   "mechanism": "Index calls after a low close rebound: golden-3, a debit vertical.",
+   "origin": "seed",
+   "parent": null,
+   "retire_reason": "no validation improvement in 31 revisions",
+   "retired_at": "2026-10-03T04:02:00Z",
+   "revisions": 1,
+   "rewrites": 0,
+   "roots": [
+    "IWM"
+   ],
+   "since_val_revisions": 31,
+   "since_val_trials": 0,
+   "spec": {
+    "dte": [
+     1,
+     5
+    ],
+    "mechanism": "Index calls after a low close rebound: golden-3, a debit vertical.",
+    "roots": [
+     "IWM"
+    ],
+    "structure": "debit_vertical"
+   },
+   "spent_usd": 0.0,
+   "stall": 1,
+   "state": {
+    "gate_ready": false,
+    "rewrite_ready": null
+   },
+   "structure": "debit_vertical",
+   "trials": 0,
+   "validated_version": null,
+   "validations": 0,
+   "weight": 0.25999832468197737
+  },
+  {
+   "band": "gym",
+   "band_since": "2026-10-03T04:00:00Z",
+   "best_train": 2.0,
+   "best_validation": 0.05,
+   "best_version": null,
+   "born_at": "2026-10-03T04:00:00Z",
+   "cycles": 0,
+   "id": "golden-4",
+   "inherited_looks": 0,
+   "inherited_trials": 0,
+   "lineage": "golden-4",
+   "mechanism": "Index calls after a low close rebound: golden-4, a debit vertical.",
+   "origin": "seed",
+   "parent": null,
+   "retire_reason": null,
+   "retired_at": null,
+   "revisions": 1,
+   "rewrites": 0,
+   "roots": [
+    "SPY"
+   ],
+   "since_val_revisions": 0,
+   "since_val_trials": 0,
+   "spec": {
+    "dte": [
+     1,
+     5
+    ],
+    "mechanism": "Index calls after a low close rebound: golden-4, a debit vertical.",
+    "roots": [
+     "SPY"
+    ],
+    "structure": "debit_vertical"
+   },
+   "spent_usd": 0.0,
+   "stall": 1,
+   "state": {
+    "best_train_run": "golden-train-golden-4",
+    "best_train_version": 1,
+    "dormant_cycles": 0,
+    "extension_hold": {
+     "at": "2026-10-03T04:02:00Z",
+     "checks": "8/8",
+     "version": 1
+    },
+    "extension_versions": [
+     1
+    ],
+    "forked_at": 1791000120.0,
+    "gate_ready": true,
+    "robustness": {
+     "1": {
+      "stress_1.5": {
+       "gym_bundle": "bundle-golden",
+       "gym_image": "img-golden",
+       "pnl": 50.0,
+       "status": "ok"
+      }
+     }
+    },
+    "train_candidates": [
+     [
+      2.0,
+      1,
+      "golden-train-golden-4"
+     ]
+    ],
+    "typical_by_version": {
+     "1": 60.0
+    },
+    "typical_max_loss_usd": 60.0,
+    "validated_cycles": 0,
+    "validated_trials": 3,
+    "validation_bundle": "bundle-golden",
+    "validation_image": "img-golden",
+    "validation_inherited": null,
+    "validation_line": {
+     "checks": {
+      "days": true,
+      "dsr": true,
+      "mean_positive": true,
+      "quarters": true,
+      "status_ok": true,
+      "stress": true,
+      "t": true,
+      "trades": true
+     },
+     "numbers": {
+      "days": 120,
+      "dsr": 0.9857059370786174,
+      "lineage_trials": 3,
+      "mean": 0.05,
+      "pnl": 1577.9793986220218,
+      "quarters": "4/4",
+      "sharpe_daily": 0.2,
+      "sharpe_traded": 0.22821773229381923,
+      "stress_pnl": 1104.59,
+      "t": 2.5,
+      "trades": 150,
+      "validated_versions": 1
+     },
+     "passed": true
+    },
+    "validation_numbers": {
+     "mean": 0.05,
+     "quarters": "4/4",
+     "sharpe_daily": 0.2,
+     "t": 2.5
+    },
+    "validation_verdicts": {
+     "1": {
+      "at": "2026-10-03T04:02:00Z",
+      "evaluator": {
+       "bundle": "bundle-golden",
+       "execution": "golden",
+       "image": "img-golden"
+      },
+      "passed": true
+     }
+    },
+    "validation_version": 1,
+    "validation_view": {
+     "checks": 8,
+     "checks_passed": 8,
+     "line_met": true
+    }
+   },
+   "structure": "debit_vertical",
+   "trials": 3,
+   "validated_version": 1,
+   "validations": 1,
+   "weight": 0.016666666665666668
+  },
+  {
+   "band": "gym",
+   "band_since": "2026-10-03T04:02:00Z",
+   "best_train": null,
+   "best_validation": null,
+   "best_version": null,
+   "born_at": "2026-10-03T04:02:00Z",
+   "cycles": 0,
+   "id": "golden-4-on-qqq",
+   "inherited_looks": 0,
+   "inherited_trials": 3,
+   "lineage": "golden-4",
+   "mechanism": "Index calls after a low close rebound: golden-4, a debit vertical.",
+   "origin": "fork",
+   "parent": "golden-4",
+   "retire_reason": null,
+   "retired_at": null,
+   "revisions": 1,
+   "rewrites": 0,
+   "roots": [
+    "SPY",
+    "QQQ"
+   ],
+   "since_val_revisions": 1,
+   "since_val_trials": 0,
+   "spec": {
+    "dte": [
+     1,
+     5
+    ],
+    "mechanism": "Index calls after a low close rebound: golden-4, a debit vertical.",
+    "roots": [
+     "SPY",
+     "QQQ"
+    ],
+    "structure": "debit_vertical"
+   },
+   "spent_usd": 0.0,
+   "stall": 1,
+   "state": {},
+   "structure": "debit_vertical",
+   "trials": 0,
+   "validated_version": null,
+   "validations": 0,
+   "weight": 0.2775608347235899
+  },
+  {
+   "band": "retired",
+   "band_since": "2026-10-03T04:02:00Z",
+   "best_train": null,
+   "best_validation": null,
+   "best_version": null,
+   "born_at": "2026-10-03T04:02:00Z",
+   "cycles": 0,
+   "id": "golden-5",
+   "inherited_looks": 0,
+   "inherited_trials": 0,
+   "lineage": "golden-5",
+   "mechanism": "Index calls after a low close rebound: golden-5, a debit vertical.",
+   "origin": "seed",
+   "parent": null,
+   "retire_reason": "It made no new Gym evaluation in its last 500 cycles (only stored results, holds and refused runs). Retired by the idle rule, a limit on how long a family may research without an eligible Train version, a positive Train score or a new Gym evaluation; it is a time limit, not a finding that the mechanism has no edge",
+   "retired_at": "2026-10-03T04:02:00Z",
+   "revisions": 1,
+   "rewrites": 0,
+   "roots": [
+    "TSLA"
+   ],
+   "since_val_revisions": 1,
+   "since_val_trials": 0,
+   "spec": {
+    "dte": [
+     1,
+     5
+    ],
+    "mechanism": "Index calls after a low close rebound: golden-5, a debit vertical.",
+    "roots": [
+     "TSLA"
+    ],
+    "structure": "debit_vertical"
+   },
+   "spent_usd": 0.0,
+   "stall": 1,
+   "state": {
+    "dormant_cycles": 500,
+    "gate_ready": false,
+    "rewrite_ready": null
+   },
+   "structure": "debit_vertical",
+   "trials": 0,
+   "validated_version": null,
+   "validations": 0,
+   "weight": 0.3333333333333333
+  }
+ ],
+ "graveyard": [
+  {
+   "at": "2026-10-03T04:02:00Z",
+   "best": "{\"best_train\":null,\"best_version\":null,\"validation\":null}",
+   "family": "golden-3",
+   "lesson": "debit_vertical on IWM: no validation improvement in 31 revisions. Tried 1 versions over 0 lineage trials; best Train score None; best validation: never validated. Last notes: ",
+   "mechanism": "Index calls after a low close rebound: golden-3, a debit vertical.",
+   "roots": "[\"IWM\"]",
+   "structure": "debit_vertical"
+  },
+  {
+   "at": "2026-10-03T04:02:00Z",
+   "best": "{\"best_train\":null,\"best_version\":null,\"validation\":null}",
+   "family": "golden-5",
+   "lesson": "debit_vertical on TSLA: It made no new Gym evaluation in its last 500 cycles (only stored results, holds and refused runs). Retired by the idle rule, a limit on how long a family may research without an eligible Train version, a positive Train score or a new Gym evaluation; it is a time limit, not a finding that the mechanism has no edge. Tried 1 versions over 0 lineage trials; best Train score None; best validation: never validated. Last notes: ",
+   "mechanism": "Index calls after a low close rebound: golden-5, a debit vertical.",
+   "roots": "[\"TSLA\"]",
+   "structure": "debit_vertical"
+  }
+ ],
+ "jobs": [
+  [
+   "golden-4",
+   1,
+   "validation",
+   1.0,
+   "validation",
+   [
+    "SPY"
+   ]
+  ],
+  [
+   "golden-0",
+   1,
+   "validation",
+   1.0,
+   "validation",
+   [
+    "SPY"
+   ]
+  ],
+  [
+   "golden-1",
+   1,
+   "validation",
+   1.0,
+   "validation",
+   [
+    "QQQ"
+   ]
+  ]
+ ],
+ "leaderboard": {
+  "at": 1791000120.0,
+  "board": [
+   {
+    "band": "gym",
+    "best_train": 2.0,
+    "closeable": true,
+    "family": "golden-0",
+    "gate_ready": true,
+    "lineage_trials": 3,
+    "revisions": 1,
+    "roots": [
+     "SPY"
+    ],
+    "share": 0.0167,
+    "structure": "debit_vertical",
+    "validation": {
+     "mean": 0.05,
+     "quarters": "4/4",
+     "sharpe_daily": 0.2,
+     "t": 2.5
+    }
+   },
+   {
+    "band": "gym",
+    "best_train": 2.0,
+    "closeable": true,
+    "family": "golden-4",
+    "gate_ready": true,
+    "lineage_trials": 3,
+    "revisions": 1,
+    "roots": [
+     "SPY"
+    ],
+    "share": 0.0167,
+    "structure": "debit_vertical",
+    "validation": {
+     "mean": 0.05,
+     "quarters": "4/4",
+     "sharpe_daily": 0.2,
+     "t": 2.5
+    }
+   },
+   {
+    "band": "gym",
+    "best_train": 1.2,
+    "closeable": true,
+    "family": "golden-2",
+    "gate_ready": false,
+    "lineage_trials": 1,
+    "revisions": 1,
+    "roots": [
+     "SPY"
+    ],
+    "share": 0.257,
+    "structure": "debit_vertical",
+    "validation": null
+   },
+   {
+    "band": "gym",
+    "best_train": 1.5,
+    "closeable": true,
+    "family": "golden-1",
+    "gate_ready": false,
+    "lineage_trials": 3,
+    "revisions": 1,
+    "roots": [
+     "QQQ"
+    ],
+    "share": 0.1163,
+    "structure": "debit_vertical",
+    "validation": {
+     "mean": -0.01,
+     "quarters": "1/4",
+     "sharpe_daily": 0.2,
+     "t": -0.5
+    }
+   },
+   {
+    "band": "gym",
+    "best_train": null,
+    "closeable": true,
+    "family": "golden-0-on-qqq",
+    "gate_ready": false,
+    "lineage_trials": 3,
+    "revisions": 1,
+    "roots": [
+     "SPY",
+     "QQQ"
+    ],
+    "share": 0.0,
+    "structure": "debit_vertical",
+    "validation": null
+   },
+   {
+    "band": "gym",
+    "best_train": null,
+    "closeable": true,
+    "family": "golden-4-on-qqq",
+    "gate_ready": false,
+    "lineage_trials": 3,
+    "revisions": 1,
+    "roots": [
+     "SPY",
+     "QQQ"
+    ],
+    "share": 0.0,
+    "structure": "debit_vertical",
+    "validation": null
+   }
+  ],
+  "totals": {
+   "families_alive": 6,
+   "families_retired": 2,
+   "holdout_looks": 0,
+   "holdout_passes": 0,
+   "market_years": 5.9523809523809526,
+   "runs": 10,
+   "trials": 10
+  }
+ },
+ "notebook": [
+  {
+   "at": "2026-10-03T04:02:00Z",
+   "family": "golden-3",
+   "text": "Retired by tournament: no validation improvement in 31 revisions"
+  },
+  {
+   "at": "2026-10-03T04:02:00Z",
+   "family": "golden-5",
+   "text": "Retired by tournament: It made no new Gym evaluation in its last 500 cycles (only stored results, holds and refused runs). Retired by the idle rule, a limit on how long a family may research without an eligible Train version, a positive Train score or a new Gym evaluation; it is a time limit, not a finding that the mechanism has no edge"
+  },
+  {
+   "at": "2026-10-03T04:02:00Z",
+   "family": "golden-4-on-qqq",
+   "text": "Forked from golden-4 onto SPY, QQQ: its roots and QQQ. Version 1 is the parent's best with QQQ added to NEEDS; check widths and risk_usd for QQQ."
+  },
+  {
+   "at": "2026-10-03T04:02:00Z",
+   "family": "golden-0-on-qqq",
+   "text": "Forked from golden-0 onto SPY, QQQ: its roots and QQQ. Version 1 is the parent's best with QQQ added to NEEDS; check widths and risk_usd for QQQ."
+  }
+ ],
+ "round": {
+  "allocation": {
+   "capped_classes": [],
+   "class_cap": 1.0,
+   "class_cap_in_force": 1.0,
+   "class_cap_relaxed": false,
+   "classes": {
+    "debit_vertical x etf": 1.0
+   },
+   "exhausted": [],
+   "families": 6,
+   "family_cap": 0.3333,
+   "family_cap_spill": 0.0,
+   "fresh_value": 0.10049,
+   "gate_families": 2,
+   "largest_class": {
+    "class": "debit_vertical x etf",
+    "head_share": 1.0,
+    "share": 1.0
+   },
+   "mode": "value",
+   "pools": {
+    "decide": 0.55,
+    "explore": 0.35,
+    "floor": 0.1
+   },
+   "posterior": {
+    "between": 0.09,
+    "looks": 3,
+    "mean": -0.713,
+    "weight": 0.1304,
+    "within": 2.7304
+   },
+   "practice_bonus": {},
+   "top": [
+    {
+     "depth": 0.988,
+     "family": "golden-2",
+     "p": 0.1285,
+     "share": 0.284
+    },
+    {
+     "depth": 0.964,
+     "family": "golden-0-on-qqq",
+     "p": 0.1285,
+     "share": 0.2776
+    },
+    {
+     "depth": 0.964,
+     "family": "golden-4-on-qqq",
+     "p": 0.1285,
+     "share": 0.2776
+    },
+    {
+     "depth": 0.964,
+     "family": "golden-1",
+     "p": 0.0501,
+     "share": 0.1275
+    },
+    {
+     "depth": null,
+     "family": "golden-0",
+     "p": null,
+     "share": 0.0167
+    }
+   ],
+   "unvalidated_families": 3,
+   "useful": 3
+  },
+  "at": 1791000120.0,
+  "board": [
+   {
+    "band": "gym",
+    "best_train": 2.0,
+    "closeable": true,
+    "family": "golden-0",
+    "gate_ready": true,
+    "lineage_trials": 3,
+    "revisions": 1,
+    "roots": [
+     "SPY"
+    ],
+    "share": 0.0167,
+    "structure": "debit_vertical",
+    "validation": {
+     "mean": 0.05,
+     "quarters": "4/4",
+     "sharpe_daily": 0.2,
+     "t": 2.5
+    }
+   },
+   {
+    "band": "gym",
+    "best_train": 2.0,
+    "closeable": true,
+    "family": "golden-4",
+    "gate_ready": true,
+    "lineage_trials": 3,
+    "revisions": 1,
+    "roots": [
+     "SPY"
+    ],
+    "share": 0.0167,
+    "structure": "debit_vertical",
+    "validation": {
+     "mean": 0.05,
+     "quarters": "4/4",
+     "sharpe_daily": 0.2,
+     "t": 2.5
+    }
+   },
+   {
+    "band": "gym",
+    "best_train": 1.2,
+    "closeable": true,
+    "family": "golden-2",
+    "gate_ready": false,
+    "lineage_trials": 1,
+    "revisions": 1,
+    "roots": [
+     "SPY"
+    ],
+    "share": 0.257,
+    "structure": "debit_vertical",
+    "validation": null
+   },
+   {
+    "band": "gym",
+    "best_train": 1.5,
+    "closeable": true,
+    "family": "golden-1",
+    "gate_ready": false,
+    "lineage_trials": 3,
+    "revisions": 1,
+    "roots": [
+     "QQQ"
+    ],
+    "share": 0.1163,
+    "structure": "debit_vertical",
+    "validation": {
+     "mean": -0.01,
+     "quarters": "1/4",
+     "sharpe_daily": 0.2,
+     "t": -0.5
+    }
+   },
+   {
+    "band": "gym",
+    "best_train": null,
+    "closeable": true,
+    "family": "golden-0-on-qqq",
+    "gate_ready": false,
+    "lineage_trials": 3,
+    "revisions": 1,
+    "roots": [
+     "SPY",
+     "QQQ"
+    ],
+    "share": 0.0,
+    "structure": "debit_vertical",
+    "validation": null
+   },
+   {
+    "band": "gym",
+    "best_train": null,
+    "closeable": true,
+    "family": "golden-4-on-qqq",
+    "gate_ready": false,
+    "lineage_trials": 3,
+    "revisions": 1,
+    "roots": [
+     "SPY",
+     "QQQ"
+    ],
+    "share": 0.0,
+    "structure": "debit_vertical",
+    "validation": null
+   }
+  ],
+  "born": [
+   "golden-4-on-qqq",
+   "golden-0-on-qqq"
+  ],
+  "incubator": {
+   "barred": [],
+   "cohorts": 0,
+   "marked": 0,
+   "removed": [],
+   "revoked": [],
+   "waiting": 0,
+   "written": []
+  },
+  "last_hour": {
+   "cycle_errors": 0,
+   "cycles": 0,
+   "usd": {
+    "gym_box": 0.0,
+    "openai": 0.0,
+    "sail_model": 0.0
+   }
+  },
+  "practice_bonus": {},
+  "retired": [
+   {
+    "family": "golden-3",
+    "why": "no validation improvement in 31 revisions"
+   },
+   {
+    "family": "golden-5",
+    "why": "It made no new Gym evaluation in its last 500 cycles (only stored results, holds and refused runs). Retired by the idle rule, a limit on how long a family may research without an eligible Train version, a positive Train score or a new Gym evaluation; it is a time limit, not a finding that the mechanism has no edge"
+   }
+  ],
+  "seconds": 0.0,
+  "totals": {
+   "families_alive": 6,
+   "families_retired": 2,
+   "holdout_looks": 0,
+   "holdout_passes": 0,
+   "market_years": 5.9523809523809526,
+   "runs": 10,
+   "trials": 10
+  },
+  "validation": {
+   "errors": {},
+   "failed_drift": [],
+   "judged": {
+    "golden-0": {
+     "extension_hold": true,
+     "mean": 0.05,
+     "passed": true,
+     "t": 2.5,
+     "version": 1
+    },
+    "golden-1": {
+     "mean": -0.01,
+     "passed": false,
+     "t": -0.5,
+     "version": 1
+    },
+    "golden-4": {
+     "extension_hold": true,
+     "mean": 0.05,
+     "passed": true,
+     "t": 2.5,
+     "version": 1
+    }
+   },
+   "queued": 3,
+   "waiting_drift": [],
+   "waiting_robustness": [
+    "golden-2"
+   ]
+  }
+ },
+ "runs": [
+  {
+   "at": "2026-10-03T04:00:00Z",
+   "family": "golden-4",
+   "program_years": 0.0,
+   "purpose": "train",
+   "run_id": "golden-train-golden-4",
+   "status": "ok",
+   "stress": 1.0,
+   "summary": "{\"drift\":{\"basis\":\"held-hours\",\"pooled\":{\"alpha\":0.6,\"alpha_usd\":450.0,\"beta\":200.0,\"days\":750,\"drift_usd\":60.0,\"held_days\":300,\"pnl\":510.0,\"t\":2.0},\"years\":{\"2022\":{\"alpha\":0.6,\"alpha_usd\":150.0,\"beta\":200.0,\"days\":250,\"drift_usd\":20.0,\"held_days\":100,\"pnl\":170.0,\"t\":2.0},\"2023\":{\"alpha\":0.6,\"alpha_usd\":150.0,\"beta\":200.0,\"days\":250,\"drift_usd\":20.0,\"held_days\":100,\"pnl\":170.0,\"t\":2.0},\"2024\":{\"alpha\":0.6,\"alpha_usd\":150.0,\"beta\":200.0,\"days\":250,\"drift_usd\":20.0,\"held_days\":100,\"pnl\":170.0,\"t\":2.0}}},\"gym_bundle\":\"bundle-golden\",\"gym_image\":\"img-golden\",\"pnl\":400.0,\"train_eligible\":true,\"train_from\":\"2022-01-03\",\"train_score\":2.0}",
+   "trials": 1,
+   "version": 1,
+   "window": "train"
+  },
+  {
+   "at": "2026-10-03T04:02:00Z",
+   "family": "golden-0",
+   "program_years": 0.0,
+   "purpose": "train",
+   "run_id": "golden-train-golden-0",
+   "status": "ok",
+   "stress": 1.0,
+   "summary": "{\"drift\":{\"basis\":\"held-hours\",\"pooled\":{\"alpha\":0.6,\"alpha_usd\":450.0,\"beta\":200.0,\"days\":750,\"drift_usd\":60.0,\"held_days\":300,\"pnl\":510.0,\"t\":2.0},\"years\":{\"2022\":{\"alpha\":0.6,\"alpha_usd\":150.0,\"beta\":200.0,\"days\":250,\"drift_usd\":20.0,\"held_days\":100,\"pnl\":170.0,\"t\":2.0},\"2023\":{\"alpha\":0.6,\"alpha_usd\":150.0,\"beta\":200.0,\"days\":250,\"drift_usd\":20.0,\"held_days\":100,\"pnl\":170.0,\"t\":2.0},\"2024\":{\"alpha\":0.6,\"alpha_usd\":150.0,\"beta\":200.0,\"days\":250,\"drift_usd\":20.0,\"held_days\":100,\"pnl\":170.0,\"t\":2.0}}},\"gym_bundle\":\"bundle-golden\",\"gym_image\":\"img-golden\",\"pnl\":400.0,\"train_eligible\":true,\"train_from\":\"2022-01-03\",\"train_score\":2.0}",
+   "trials": 1,
+   "version": 1,
+   "window": "train"
+  },
+  {
+   "at": "2026-10-03T04:02:00Z",
+   "family": "golden-1",
+   "program_years": 0.0,
+   "purpose": "train",
+   "run_id": "golden-train-golden-1",
+   "status": "ok",
+   "stress": 1.0,
+   "summary": "{\"drift\":{\"basis\":\"held-hours\",\"pooled\":{\"alpha\":0.6,\"alpha_usd\":450.0,\"beta\":200.0,\"days\":750,\"drift_usd\":60.0,\"held_days\":300,\"pnl\":510.0,\"t\":2.0},\"years\":{\"2022\":{\"alpha\":0.6,\"alpha_usd\":150.0,\"beta\":200.0,\"days\":250,\"drift_usd\":20.0,\"held_days\":100,\"pnl\":170.0,\"t\":2.0},\"2023\":{\"alpha\":0.6,\"alpha_usd\":150.0,\"beta\":200.0,\"days\":250,\"drift_usd\":20.0,\"held_days\":100,\"pnl\":170.0,\"t\":2.0},\"2024\":{\"alpha\":0.6,\"alpha_usd\":150.0,\"beta\":200.0,\"days\":250,\"drift_usd\":20.0,\"held_days\":100,\"pnl\":170.0,\"t\":2.0}}},\"gym_bundle\":\"bundle-golden\",\"gym_image\":\"img-golden\",\"pnl\":400.0,\"train_eligible\":true,\"train_from\":\"2022-01-03\",\"train_score\":1.5}",
+   "trials": 1,
+   "version": 1,
+   "window": "train"
+  },
+  {
+   "at": "2026-10-03T04:02:00Z",
+   "family": "golden-2",
+   "program_years": 0.0,
+   "purpose": "train",
+   "run_id": "golden-train-golden-2",
+   "status": "ok",
+   "stress": 1.0,
+   "summary": "{\"drift\":{\"basis\":\"held-hours\",\"pooled\":{\"alpha\":0.6,\"alpha_usd\":450.0,\"beta\":200.0,\"days\":750,\"drift_usd\":60.0,\"held_days\":300,\"pnl\":510.0,\"t\":2.0},\"years\":{\"2022\":{\"alpha\":0.6,\"alpha_usd\":150.0,\"beta\":200.0,\"days\":250,\"drift_usd\":20.0,\"held_days\":100,\"pnl\":170.0,\"t\":2.0},\"2023\":{\"alpha\":0.6,\"alpha_usd\":150.0,\"beta\":200.0,\"days\":250,\"drift_usd\":20.0,\"held_days\":100,\"pnl\":170.0,\"t\":2.0},\"2024\":{\"alpha\":0.6,\"alpha_usd\":150.0,\"beta\":200.0,\"days\":250,\"drift_usd\":20.0,\"held_days\":100,\"pnl\":170.0,\"t\":2.0}}},\"gym_bundle\":\"bundle-golden\",\"gym_image\":\"img-golden\",\"pnl\":400.0,\"train_eligible\":true,\"train_from\":\"2022-01-03\",\"train_score\":1.2}",
+   "trials": 1,
+   "version": 1,
+   "window": "train"
+  },
+  {
+   "at": "2026-10-03T04:02:00Z",
+   "family": "golden-4",
+   "program_years": 0.9920634920634921,
+   "purpose": "validation",
+   "run_id": "golden-golden-4-validation-1.0-1",
+   "status": "ok",
+   "stress": 1.0,
+   "summary": "{\"avg_trade\":10.519862657480145,\"days\":250,\"days_traded\":120,\"fees\":30.0,\"gym_bundle\":\"bundle-golden\",\"gym_image\":\"img-golden\",\"max_drawdown\":200.0,\"mean_return_on_max_loss\":0.05,\"median_max_loss_per_structure\":60.0,\"pnl\":1577.9793986220218,\"pnl_per_max_loss\":0.05,\"profit_factor\":1.4,\"quarters_positive\":\"4/4\",\"sharpe\":3.174,\"sharpe_daily\":0.2,\"t_daily\":2.5,\"t_stat\":3.5,\"trades\":150,\"win_rate\":0.6}",
+   "trials": 1,
+   "version": 1,
+   "window": "validation"
+  },
+  {
+   "at": "2026-10-03T04:02:00Z",
+   "family": "golden-4",
+   "program_years": 0.9920634920634921,
+   "purpose": "validation",
+   "run_id": "golden-golden-4-validation-1.0-1-s15",
+   "status": "ok",
+   "stress": 1.5,
+   "summary": "{\"pnl\":1104.59,\"sharpe_daily\":0.13999999999999999,\"status\":\"ok\",\"stress\":1.5,\"t_daily\":1.75,\"trades\":150}",
+   "trials": 1,
+   "version": 1,
+   "window": "validation"
+  },
+  {
+   "at": "2026-10-03T04:02:00Z",
+   "family": "golden-0",
+   "program_years": 0.9920634920634921,
+   "purpose": "validation",
+   "run_id": "golden-golden-0-validation-1.0-2",
+   "status": "ok",
+   "stress": 1.0,
+   "summary": "{\"avg_trade\":8.235209345177587,\"days\":250,\"days_traded\":120,\"fees\":30.0,\"gym_bundle\":\"bundle-golden\",\"gym_image\":\"img-golden\",\"max_drawdown\":200.0,\"mean_return_on_max_loss\":0.05,\"median_max_loss_per_structure\":60.0,\"pnl\":1235.2814017766382,\"pnl_per_max_loss\":0.05,\"profit_factor\":1.4,\"quarters_positive\":\"4/4\",\"sharpe\":3.174,\"sharpe_daily\":0.2,\"t_daily\":2.5,\"t_stat\":3.5,\"trades\":150,\"win_rate\":0.6}",
+   "trials": 1,
+   "version": 1,
+   "window": "validation"
+  },
+  {
+   "at": "2026-10-03T04:02:00Z",
+   "family": "golden-0",
+   "program_years": 0.9920634920634921,
+   "purpose": "validation",
+   "run_id": "golden-golden-0-validation-1.0-2-s15",
+   "status": "ok",
+   "stress": 1.5,
+   "summary": "{\"pnl\":864.7,\"sharpe_daily\":0.13999999999999999,\"status\":\"ok\",\"stress\":1.5,\"t_daily\":1.75,\"trades\":150}",
+   "trials": 1,
+   "version": 1,
+   "window": "validation"
+  },
+  {
+   "at": "2026-10-03T04:02:00Z",
+   "family": "golden-1",
+   "program_years": 0.9920634920634921,
+   "purpose": "validation",
+   "run_id": "golden-golden-1-validation-1.0-3",
+   "status": "ok",
+   "stress": 1.0,
+   "summary": "{\"avg_trade\":-4.905634129443339,\"days\":250,\"days_traded\":120,\"fees\":30.0,\"gym_bundle\":\"bundle-golden\",\"gym_image\":\"img-golden\",\"max_drawdown\":200.0,\"mean_return_on_max_loss\":-0.01,\"median_max_loss_per_structure\":60.0,\"pnl\":-735.8451194165008,\"pnl_per_max_loss\":-0.01,\"profit_factor\":1.4,\"quarters_positive\":\"1/4\",\"sharpe\":3.174,\"sharpe_daily\":0.2,\"t_daily\":-0.5,\"t_stat\":0.5,\"trades\":150,\"win_rate\":0.6}",
+   "trials": 1,
+   "version": 1,
+   "window": "validation"
+  },
+  {
+   "at": "2026-10-03T04:02:00Z",
+   "family": "golden-1",
+   "program_years": 0.9920634920634921,
+   "purpose": "validation",
+   "run_id": "golden-golden-1-validation-1.0-3-s15",
+   "status": "ok",
+   "stress": 1.5,
+   "summary": "{\"pnl\":-515.09,\"sharpe_daily\":0.13999999999999999,\"status\":\"ok\",\"stress\":1.5,\"t_daily\":-0.35,\"trades\":150}",
+   "trials": 1,
+   "version": 1,
+   "window": "validation"
+  }
+ ],
+ "versions": [
+  {
+   "author": "seed",
+   "family": "golden-0",
+   "n": 1,
+   "sha": "d0b9015dbc46abb0bc83d80c32df31c31f7b17560091e498f32489cc161fb389"
+  },
+  {
+   "author": "fork of golden-0",
+   "family": "golden-0-on-qqq",
+   "n": 1,
+   "sha": "572d300f4a5f43814230bc33097f91bf7635829a8ff866523ec4604febbd4ca1"
+  },
+  {
+   "author": "seed",
+   "family": "golden-1",
+   "n": 1,
+   "sha": "c50e5ea1742ab33fc463b9d11b2a5178e23b804d6c591f308f54f4218e035b9d"
+  },
+  {
+   "author": "seed",
+   "family": "golden-2",
+   "n": 1,
+   "sha": "5167559d273a94ccad01d969e6bf337676415240b684dc32e67d67da48c6ab40"
+  },
+  {
+   "author": "seed",
+   "family": "golden-3",
+   "n": 1,
+   "sha": "c9bcac43eefe3fff0089edbfd2b6cb089a255b310fb75f1e6859185f405488b5"
+  },
+  {
+   "author": "seed",
+   "family": "golden-4",
+   "n": 1,
+   "sha": "cd4ae8aa53484e1842b332192f4aa06ee6b8844bb3dc44410b8a1fa34d25cfe5"
+  },
+  {
+   "author": "fork of golden-4",
+   "family": "golden-4-on-qqq",
+   "n": 1,
+   "sha": "009d724ba4bf59ba84dbef7cda4ef464dda7b416cea620d98c927c27811deaba"
+  },
+  {
+   "author": "seed",
+   "family": "golden-5",
+   "n": 1,
+   "sha": "2890e5f899222102c84ffcf6ced9c4b3993211874b40fb75d12b8edd7afe2ef2"
+  }
+ ]
+}

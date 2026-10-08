@@ -29,7 +29,7 @@ from league.swarm import settings as S  # noqa: E402
 from league.swarm.pool import ROBUSTNESS_PRIORITY  # noqa: E402
 from league.swarm.researcher import (CORE_SPAN, OBJECTIVE, drift_verdict, idle_dead, idle_evaluations,  # noqa: E402
                                      migrate_objective, objective_for, span_of, version_drift)
-from league.tests.swarm_fakes import FakeDriver, drift_block  # noqa: E402
+from league.tests.swarm_fakes import FakeDriver, drift_block, result  # noqa: E402
 from league.swarm.pool import GymPool  # noqa: E402
 from league.tests.test_swarm_pool import PoolCase, job, settings as pool_settings  # noqa: E402
 from league.tests.test_swarm_researcher import ResearcherCase  # noqa: E402
@@ -897,6 +897,87 @@ class Migration(ResearcherCase):
         fam = self.store.family(fid)
         self.assertEqual((fam["best_train"], fam["state"]["objective_migrated"]), (3.0, OBJECTIVE))
         self.assertNotIn("previous_best", self.store.family(other)["state"])
+
+
+class GameSpanSwitch(ResearcherCase):
+    """THE LEARNING GAME's span switch (Oct 8, 2026; docs/operations.md, THE LEARNING GAME): `gym.train_from` back to
+    2022-01-03 on a store migrated to 2020, its one evidence reset. The next start empties a best chosen over 2020-24 (no
+    run over 2022-24 stands beside it), the version re-run over 2022-24 is chosen again, and its validation recorded on
+    the same Gym image and bundle is reused: no new Validation job."""
+
+    def setUp(self):
+        super().setUp()
+        self.span = ON
+        self.jobs: list = []
+        researcher_case = self
+
+        class SpanPool:
+            """Train over the running span (five years on 2020, three on 2022) and Validation, stamped with one Gym."""
+
+            def image(self, kind="gym"):
+                return "img"
+
+            def bundle(self):
+                return "b"
+
+            def submit(self, job):
+                researcher_case.jobs.append(job)
+                return job
+
+            def wait(self, job, timeout=None, late=None, late_fail=None):
+                if job.window == "validation":
+                    out = result(job.name, window="validation")
+                elif researcher_case.span == ON:
+                    out = five(job.name, t=(1.5,) * 5, train_from=ON)
+                else:
+                    out = dict(yearly(job.name, t=(2.0, 2.5, 3.0)), train_from=CORE_SPAN)
+                return {**out, "gym_image": "img", "gym_bundle": "b"}
+
+            def run(self, job, timeout=None, late=None):
+                return self.wait(self.submit(job), timeout, late)
+
+            def cancel_family(self, fid):
+                pass
+
+        self.pool = SpanPool()
+        self.settings["tournament"].update(require_robustness=False, drift_screen=False)
+
+    def test_back_to_2022_empties_a_five_year_best_chooses_its_rerun_and_reuses_its_validation(self):
+        from league.swarm.tournament import Tournament
+
+        fid = self.fam["id"]
+        migrate_objective(self.store, settings=S.DEFAULTS)  # the store's first pass
+        self.assertEqual(migrate_objective(self.store, settings=with_switch(ON))["migrated"], 1)  # the House: on 2020
+        self.researcher().cycle(fid)  # the starter over 2020-24
+        fam = self.store.family(fid)
+        self.assertEqual((fam["best_train"], fam["state"]["best_train_version"]), (1.5, 1))
+        tour = Tournament(self.store, self.pool, self.settings, clock=self.clock)
+        tour.validate(self.store.families(alive=True))
+        self.assertEqual([j.window for j in self.jobs].count("validation"), 1)
+        self.assertEqual(self.store.family(fid)["validated_version"], 1)
+        # T0's switch: the next start migrates back to 2022-01-03.
+        self.span = CORE_SPAN
+        self.assertEqual(migrate_objective(self.store, settings=with_switch("2022-01-03")),
+                         {"migrated": 1, "with_best": 0, "failed": 0})
+        fam = self.store.family(fid)
+        self.assertEqual((fam["best_train"], fam["best_version"], fam["state"]["best_train_version"]), (None, None, None),
+                         "a best over 2020-24 does not stand over 2022-24")
+        self.assertEqual(fam["state"]["previous_best"]["best_train"], 1.5)
+        self.assertIn("Train now runs from 2022-01-03", self.store.notebook(fid, limit=1)[-1]["text"])
+        # Its program run again over 2022-24 is chosen: the same version, scored over the running span.
+        self.steps = [{"calls": [("gym_run", {"why": "the best again over the new span"})]}, {"text": "ok"}]
+        self.researcher().cycle(fid)
+        fam = self.store.family(fid)
+        self.assertEqual((fam["best_train"], fam["state"]["best_train_version"]), (2.0, 1))
+        rows = [r for r in self.store.runs(fid, window="train") if float(r["stress"] or 1.0) == 1.0]
+        self.assertEqual(sorted(r["summary"]["train_from"] for r in rows), [ON, CORE_SPAN])
+        # Validation: the recorded validation of version 1 on this Gym is reused, no new job.
+        before = [j.window for j in self.jobs].count("validation")
+        out = tour.validate(self.store.families(alive=True))
+        self.assertEqual([j.window for j in self.jobs].count("validation"), before, "no new Validation job")
+        self.assertEqual(out["queued"], 0)
+        self.assertEqual(self.store.family(fid)["validated_version"], 1)
+        self.assertEqual(self.store.family(fid)["state"]["validation_image"], "img")
 
 
 class FlipRetirement(RoundCase):
