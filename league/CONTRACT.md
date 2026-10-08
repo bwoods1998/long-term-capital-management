@@ -221,6 +221,15 @@ An order meets the quotes of the minute AFTER your decision, and every chance in
 - **Natural** (long legs at the ask, short legs at the bid), or any limit at or through it, always
   fills, at the natural, up to the quoted size (the smallest leg's size over its ratio); the rest
   keeps taking the natural as size appears. It pays every leg's whole half-spread, in and out.
+  **But `"natural"` is priced at YOUR decision minute and meets the NEXT minute's quotes.** If the
+  market moved your way in between (the ask rose under a buy), your limit is now inside the new
+  natural: it rests as a patient limit and fills only if the market comes back to it. So a
+  `"natural"` entry on a move already under way misses exactly the trades that go your way and gets
+  the ones that reverse (in the swarm's own runs, 71% of directional entries were priced this way and
+  none of 836 such fills caught a first-minute move). For a signal that is a move in progress, pay
+  through: choose the strikes yourself from `ctx.chains` and send `{"price": v}` a few ticks above the
+  package's ask-side value at the decision minute (below it for a sale), with a short `tif`; check
+  `fills.fill_rate` and the open slippage in your results to see what it cost.
 - **Patient pricing is modelled, and it is often cheaper than the natural.** A limit short of the
   natural (`{"mid": k}`: k ticks from the mid toward the natural; `"mid"`; `{"price": v}`) works for
   its `tif` minutes (`"day"` by default). Each minute it has not filled, it fills AT ITS LIMIT if
