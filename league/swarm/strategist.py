@@ -40,6 +40,13 @@ and the header are the containment, and the section reaches nothing but the arch
 D2 path reads it). A final rejection, a failed call, a skipped or disabled run leave the last accepted section in place.
 Nothing here writes swarm.json or the locked preamble.
 
+THE LEARNING GAME (Oct 8, 2026; league/swarm/game.py). The strategist reads what the architect reads: no game-arm family
+(`game.visible_families`: the board, the births and deaths, the checks, the coverage and the gaps), no game-arm or
+quarantined graveyard row (the digest, the sample, the ids it may cite: `Architect.unseen`), and the board's research
+shares renormalized over the rows it reads (`game.visible_shares`). Once the game has started, a section that names a
+hidden year in digits is refused (`check_section`'s `hidden`, the rule "years"): the agenda carries no 2020 or 2021 (ids
+are masked first, as for every rule).
+
 THE LIBRARY (Sept 29, 2026; league/swarm/library.py). While `research.enabled`, the packet carries the block of pre-2025
 literature the pass retrieved first (`loop.Swarm.architect_pass`), and the answer may add "library_queries" (1 to 4 short
 keyword searches for the directions it names: the next pass's retrieval runs them) and "literature" (the ids it relied
@@ -64,7 +71,7 @@ import statistics
 import time
 from typing import Any, Callable, Mapping, NamedTuple, Sequence
 
-from . import diagnostics
+from . import diagnostics, game
 from . import settings as settings_mod
 from .allocation import SHARE_LEGEND
 from .architect import (AGENDA_KEY, ASCII_MAP, OPERATOR_SQL, SECTION_MAX, USAGE_KEYS, Architect, GraveyardDigest, lesson_view,
@@ -325,7 +332,7 @@ def foreign_roots(text: Any, roots: Sequence[str]) -> list[str]:
 
 
 def check_section(text: Any, *, max_chars: int, cites: Any, known_ids: set[str] | frozenset[str], min_cites: int,
-                  roots: Sequence[str] | None = None) -> Verdict:
+                  roots: Sequence[str] | None = None, hidden: Sequence[int] = ()) -> Verdict:
     """The validator (a pure function): `Verdict(ok, reasons, text)` for a WHERE TO LOOK section, `text` normalized. Each
     reason starts with its rule's name (shape, money, real_money, threshold, numeric_rule, d2, override, revival,
     roots, grounding) and quotes the sentence that broke it. Mentioning a check without a changing verb is allowed ("most
@@ -333,9 +340,11 @@ def check_section(text: Any, *, max_chars: int, cites: Any, known_ids: set[str] 
     `known_ids` is masked (`mask_ids`) before the content rules read a sentence (R11-2), so a cited id's own words never
     void a section; the sentence a reason quotes is the one written. `roots` (F1: the Gym's admitted roots, `gym.roots`;
     None: the rule is off): a section that names a ticker outside them (`foreign_roots`) is refused, the tickers named
-    in the reason."""
+    in the reason. `hidden` (THE LEARNING GAME's hidden years while it is on; empty: the rule is off): a sentence that
+    names one of them in digits is refused (the rule "years")."""
     reasons: list[str] = []
     known = frozenset(str(k) for k in known_ids)
+    years = re.compile(r"(?<![0-9])(?:" + "|".join(str(int(y)) for y in hidden) + r")(?![0-9])") if hidden else None
     raw = text if isinstance(text, str) else ""
     clean = normalize(raw)
     cap = max(1, min(int(max_chars), SECTION_MAX))
@@ -371,6 +380,8 @@ def check_section(text: Any, *, max_chars: int, cites: Any, known_ids: set[str] 
             say("numeric_rule", sentence)
         if _D2.search(read):
             say("d2", sentence)
+        if years is not None and years.search(read):
+            say("years", "names a year before Train: " + sentence)
         if _OVERRIDE.search(read) or (_VOID_WHAT.search(read) and _VOID_HOW.search(read)):
             say("override", sentence)
         if _OPERATOR.search(_OPERATOR_OK.sub(" ", read)):
@@ -528,8 +539,13 @@ class Strategist:
         return {"text": legacy or "", "at": None, "run": None, "accepted": False}
 
     def known_ids(self) -> set[str]:
+        unseen = self.architect.unseen()  # THE LEARNING GAME: an id the strategist may not read is no id to cite
         return ({r["family"] for r in self.store._all("SELECT family FROM graveyard")}
-                | {r["id"] for r in self.store._all("SELECT id FROM families")})
+                | {r["id"] for r in self.store._all("SELECT id FROM families")}) - unseen
+
+    def hidden(self) -> tuple[int, ...]:
+        """THE LEARNING GAME's hidden years once it has started (`game.started`; `check_section`'s `hidden`), else none."""
+        return tuple(game.HIDDEN_YEARS) if game.started(self.store, self.settings) else ()
 
     def roots(self) -> list[str] | None:
         """THE GYM'S ROOTS (F1): the admitted roots a section may name (`gym.roots`), or None while
@@ -563,7 +579,7 @@ class Strategist:
         alive = {f["id"]: f for f in fams if not f["retired_at"]}
         board = (self.store.get("leaderboard") or {}).get("board") or []
         order = [r["family"] for r in board if r.get("family") in alive] or list(alive)
-        shares = {r["family"]: r.get("share") for r in board if isinstance(r, dict) and "family" in r}
+        shares = game.visible_shares(self.store, board, alive)  # THE LEARNING GAME: over the rows it may read
         out = []
         for fid in order[:60]:
             f = alive[fid]
@@ -644,10 +660,10 @@ class Strategist:
 
     def _sample(self) -> list[dict[str, Any]]:
         """The graveyard for a call without the digest: the 20 newest rows and every operator row, through `lesson_view`."""
-        rows = self.store.graveyard(limit=20)
+        rows = self.architect.graves(limit=20)  # THE LEARNING GAME: the rows the architect reads
         seen = {r["family"] for r in rows}
         ops = operator_ids(self.store)
-        rows += [r for r in self.store.graveyard(limit=10 ** 9) if r["family"] in ops and r["family"] not in seen]
+        rows += [r for r in self.architect.graves(limit=10 ** 9) if r["family"] in ops and r["family"] not in seen]
         return [{"family": r["family"], "structure": r["structure"], "roots": r["roots"], "lesson": lesson_view(r["lesson"])[:700]}
                 for r in rows]
 
@@ -655,7 +671,7 @@ class Strategist:
         """The request (the module docstring). `sample` adds the graveyard's 20 newest rows and every operator row, for a
         call that has no digest (the Sail fallback). `library`: THE LIBRARY's block, before the closing instruction."""
         current = current or self.current()
-        fams = self.store.families()
+        fams = self.architect.visible()  # THE LEARNING GAME: no game-arm family (the store's own list with the game off)
         age = None
         if current.get("at"):
             age = _hours(current["at"], iso(self.clock()))
@@ -853,13 +869,13 @@ class Strategist:
             else:
                 known = self.known_ids()
                 verdict = check_section(where, max_chars=self.max_chars(), cites=cites, known_ids=known,
-                                        min_cites=self.min_cites(), roots=self.roots())
+                                        min_cites=self.min_cites(), roots=self.roots(), hidden=self.hidden())
                 if not verdict.ok and overflow_only(verdict.reasons):
                     # R11-2: a section refused for its length alone, at most TRIM_SLACK over the cap, is cut at its last
                     # sentence end inside the cap and validated again, instead of paying for a repair turn.
                     trimmed = trim_section(verdict.text, max(1, min(self.max_chars(), SECTION_MAX)))
                     again = check_section(trimmed, max_chars=self.max_chars(), cites=cites, known_ids=known,
-                                          min_cites=self.min_cites(), roots=self.roots()) if trimmed else None
+                                          min_cites=self.min_cites(), roots=self.roots(), hidden=self.hidden()) if trimmed else None
                     if again is not None and again.ok:
                         attempt["trimmed"] = {"from": len(verdict.text), "to": len(again.text)}
                         verdict = again

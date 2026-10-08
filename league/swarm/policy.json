@@ -54,6 +54,44 @@
   "engineer": {
     "enabled": true
   },
+  "game": {
+    "enabled": true,
+    "mode": "gate",
+    "arm_fraction": 0.5,
+    "salt": "ltcm-game-v1",
+    "roots": [
+      "SPY",
+      "QQQ",
+      "IWM",
+      "XSP",
+      "SPXW"
+    ],
+    "seen_from": "2022-01-03",
+    "hidden": [
+      "2020-01-02",
+      "2021-12-31"
+    ],
+    "stress": 1.5,
+    "eta": 0.5,
+    "looks": 4,
+    "c_select": 1.28,
+    "c_confirm": 1.28,
+    "confirms_family": 2,
+    "confirms_lineage": 3,
+    "val_tries": 2,
+    "parent_quantile": 0.1,
+    "parent_window_hours": 72,
+    "parent_min_looks": 30,
+    "parent_bootstrap_f": 1.0,
+    "children_per_parent": 3,
+    "children_per_round": 4,
+    "children_per_day": 24,
+    "child_cooldown_hours": 6,
+    "crossover_share": 0.2,
+    "donor_max_chars": 6000,
+    "look_retry_hours": 2,
+    "look_attempts": 3
+  },
   "gate": {
     "audit_openai_model": null,
     "review_openai_model": null,
@@ -92,7 +130,8 @@
       "SOXL"
     ],
     "start_boxes": 2,
-    "train_from": "2020-01-02",
+    "train_from": "2022-01-03",
+    "allow_earlier_image": true,
     "validation_split": 1
   },
   "population": {
@@ -100,6 +139,9 @@
     "floor": 8,
     "floor_researching": true,
     "start": 16
+  },
+  "practice": {
+    "feedback": false
   },
   "researcher": {
     "claude_top": 0,

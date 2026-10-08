@@ -631,7 +631,8 @@ def cell_yield_settings(settings: Mapping[str, Any] | None) -> dict[str, Any] | 
     return out
 
 
-def cell_yields(store: Any, settings: Mapping[str, Any] | None, since: str) -> dict[tuple[str, str, str], dict[str, int]]:
+def cell_yields(store: Any, settings: Mapping[str, Any] | None, since: str, *,
+                exclude: frozenset[str] | set[str] = frozenset()) -> dict[tuple[str, str, str], dict[str, int]]:
     """Each cell's families born at or after `since` (ISO) and their outcomes (THE CELL'S YIELD in the module docstring):
     {cell: {"births": settled births, "passed": those holding a drift-passing eligible Train run, "pending": alive without
     one, "unknown": settled, eligible, and no run with drift figures the screen can read}}. A family's cell is its card's
@@ -639,7 +640,8 @@ def cell_yields(store: Any, settings: Mapping[str, Any] | None, since: str) -> d
     structure and days to expiry; a family with neither is in no cell. A drift pass is `evidence.drift_screen` under the
     running screen's thresholds (`tournament.drift_min_t`, `drift_years_positive`; their defaults while the screen is off)
     from the run's own Train start, on a completed, eligible Train run at the normal spread (purpose train or drift).
-    Train rows only, one query per 400 families, read-only."""
+    Train rows only, one query per 400 families, read-only. `exclude`: families left out (THE LEARNING GAME's game arm,
+    which the architect never reads: `Architect.unseen`)."""
     from .researcher import CORE_SPAN, drift_settings  # a local import: the researcher imports this module
 
     screen = drift_settings(settings or {}) or (evidence_mod.DRIFT_MIN_T, None)
@@ -654,6 +656,8 @@ def cell_yields(store: Any, settings: Mapping[str, Any] | None, since: str) -> d
     alive: set[str] = set()
     for f in store._all("SELECT id, retired_at, mechanism, structure, spec FROM families WHERE born_at >= ? "
                         "ORDER BY born_at, id", (since,)):
+        if f["id"] in exclude:
+            continue
         try:
             spec = json.loads(f["spec"] or "{}") or {}
         except (TypeError, ValueError):
@@ -719,10 +723,12 @@ def cell_yields(store: Any, settings: Mapping[str, Any] | None, since: str) -> d
 class RebirthIndex:
     """The graveyard's rows killed by a mechanism verdict, each with its cell (its card's, else `infer_key`'s), and the
     rebirths already born by row and by cell, read once for an architect pass. `check(card, structure, mechanism)`
-    answers a proposal."""
+    answers a proposal. `exclude` (THE LEARNING GAME, Oct 8, 2026: `Architect.unseen`, the families the architect may
+    not read): their graveyard rows, their cards' rebirths and their cell yields are left out, so no refusal quotes a
+    game-arm lesson and no count moves with the game arm."""
 
     def __init__(self, store: Any, settings: Mapping[str, Any] | None = None, *,
-                 yields: dict[tuple[str, str, str], dict[str, int]] | None = None):
+                 yields: dict[tuple[str, str, str], dict[str, int]] | None = None, exclude: frozenset[str] = frozenset()):
         from .architect import lesson_view, tag_of  # a local import: the architect imports this module
 
         self.store = store
@@ -733,13 +739,18 @@ class RebirthIndex:
         self.yield_cfg = cell_yield_settings(self.settings)
         self._yields: dict[tuple[str, str, str], dict[str, int]] | None = yields if self.yield_cfg is not None else None
         self.yield_error: str | None = None
+        self.exclude = frozenset(exclude)
         cards: dict[str, dict[str, Any]] = {}
         if _tables(store):
             for r in store._all("SELECT family, card, key, at FROM family_cards ORDER BY at, family"):
+                if r["family"] in self.exclude:
+                    continue
                 cards[r["family"]] = {"key": json.loads(r["key"]), "card": json.loads(r["card"]), "at": r["at"]}
         families = {f["id"]: f for f in store._all("SELECT id, lineage, retire_reason, spec FROM families")}
         self.rows: list[dict[str, Any]] = []
         for g in store._all("SELECT family, at, mechanism, structure, roots, lesson FROM graveyard ORDER BY at, family"):
+            if g["family"] in self.exclude:
+                continue
             fam = families.get(g["family"])
             tag = tag_of(g, fam)
             if tag not in MECHANISM_VERDICTS:
@@ -811,7 +822,7 @@ class RebirthIndex:
                 if now is None:
                     raise ValueError(f"the store's clock reads {self.store.now()!r}")
                 since = (now - dt.timedelta(days=float(self.yield_cfg["lookback_days"]))).strftime("%Y-%m-%dT%H:%M:%SZ")
-                self._yields = cell_yields(self.store, self.settings, since)
+                self._yields = cell_yields(self.store, self.settings, since, exclude=self.exclude)
             except Exception as exc:  # noqa: BLE001 - fail closed: today's rule for every cell
                 self.yield_error = f"{type(exc).__name__}: {str(exc)[:200]}"
                 self._yields = {}

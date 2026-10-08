@@ -142,6 +142,9 @@ FORBIDDEN: tuple[str, ...] = (
     "league/swarm/canary.py", "league/swarm/benchmarks.py", "league/swarm/long_single_benchmarks.py",
     "league/swarm/evidence.py", "league/swarm/diagnostics.py", "league/swarm/tournament.py", "scripts/harness_improve.py",
     "playbooks/harness-improvement.md", "docs/goals/", "docs/benchmarks/",
+    # THE LEARNING GAME (Oct 8, 2026): the hidden years' folds and arms, the fitness and its selection constants, and the
+    # one-shot CONFIRM read on the way to Validation (league/swarm/game.py): a judge, like the evidence lines.
+    "league/swarm/game.py",
     # How the House is deployed and the House itself (its tick calls the updater).
     "scripts/floor_box.py", "league/house.py", "CHANGELOG.md",
 )

@@ -132,7 +132,7 @@ def _read(root: str | Path, ids: Any = None, *, retired_shown: int = 24, light: 
         db.row_factory = sqlite3.Row
         try:
             fams = [dict(r) for r in db.execute("SELECT id, lineage, mechanism, structure, band, born_at, retired_at, trials,"
-                                                " revisions, spec FROM families")]
+                                                " revisions, spec, origin FROM families")]
             chosen = list(ids) if ids is not None else [f["id"] for f in _shown(fams, retired_shown)]
             totals, spend, meter = {}, {}, {}
             if not light:
@@ -160,8 +160,15 @@ def _read(root: str | Path, ids: Any = None, *, retired_shown: int = 24, light: 
             "names": names}
 
 
+#: THE LEARNING GAME's children (league/swarm/game.py `ORIGIN`): never on the site. A child is born only of a program that
+#: ranked near the top of the game's private exam, and its row (its mechanism is its parent's, its lineage its parent's,
+#: its trials its lineage's) would name which lineage passed. Nor are their trials in any other family's.
+PRIVATE_ORIGINS = ("game",)
+
+
 def _shown(fams: list[dict[str, Any]], retired_shown: int = 24) -> list[dict[str, Any]]:
-    """The families `site_inputs` shows: every alive one, then the newest retired."""
+    """The families `site_inputs` shows: every alive one, then the newest retired (never a game child)."""
+    fams = [f for f in fams if f.get("origin") not in PRIVATE_ORIGINS]
     alive = [f for f in fams if not f["retired_at"]]
     dead = sorted((f for f in fams if f["retired_at"]), key=lambda f: f["retired_at"], reverse=True)[:retired_shown]
     return alive + dead
@@ -179,6 +186,8 @@ def _agents(data: dict[str, Any], chosen: list[dict[str, Any]]) -> list[dict[str
         connected.setdefault(a, set()).add(b)
         connected.setdefault(b, set()).add(a)
     for f in fams:
+        if f.get("origin") in PRIVATE_ORIGINS:
+            continue  # a game child's trials would show in its parent's lineage that it bred
         by_line[f["lineage"]] = by_line.get(f["lineage"], 0) + int(f["trials"] or 0)
         before = priors_of(loads(f["spec"], {}) or {})  # `prior_lineage`, and a singles' slice's `prior_lineages`
         if f["id"] == f["lineage"] and before:
@@ -197,6 +206,8 @@ def _agents(data: dict[str, Any], chosen: list[dict[str, Any]]) -> list[dict[str
 
     agents = []
     for f in chosen:
+        if f.get("origin") in PRIVATE_ORIGINS:
+            continue
         # The same record the bands are judged on (`evidence.one_record`: the banded version's rows, one source a day).
         counted = evidence.one_record(rows.get(f["id"], []), version=banded.get(f["id"]))
         fwd = real = None

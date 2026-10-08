@@ -18,6 +18,7 @@ disagree, the code is right and this page is fixed. How to operate it is in
 | Paper and production paths | `league/live/`, `gateway/` | real money opens four debit types; both paper route proofs passed Sept 28; 23 D3 calibration round trips by the Oct 2 close; one exit-only tuition lot; the House live test armed, no order yet; the practice league (validated and Train tiers; capped as a Probe since A1, and empty since its evidence reset on Oct 3 until new versions qualify); the incubator on since Oct 1; no general agent paper book; covered strategies absent |
 | Built, not deployed | branches `v3/wp6`, `v3/wp7`, `v3/b1`, `v3/b23`, `v3/b4`, `v3/b5` | after V3-A part 1, each an owner deploy of its own: the forward ladder (its confirmation study is not run; as first specified it does not meet its benchmark rule) and credit types at $2,000 of equity (part 2), research v3, births from a mechanism library and the strategist's agenda, the weekly post-mortem, the engineer and reviewer ([run record](runs/2026-10-02-unattended-desk.md)) |
 | Fast lane v2 (Oct 7, 2026) | `release/fast-lane-v2` | built, not deployed (the owner's deploy): the screen (t 1.65, 2 of 4 quarters, N = 1, one flat look at p <= 0.10), direction counts (the drift screen's refusal and the look holds off by setting; the drift fit and the same-risk buy-and-hold reported), a one-structure Probe within 10% of E with at most 3 Probe positions and a $400 Probe loss budget (gross realized Probe losses, every real position at risk), same-minute entry, D5 demotion; after its review: tuition held within the Probe's cap, a paid review's or audit's failure binding across the deploy's adoption, the report written daily by the `fast_lane` job with contamination measured, C3, the practice caps and the grant's $100 smallest stake kept as they were. Money digest `42c4a3af` -> `da5c7542` (constitution `595228a6` -> `5edc8956`): the standing grant re-ratifies at the House's start on the owner's deploy; the execution fingerprint moves (league/live changed), so its deploy is an evidence reset (no family is banded) |
+| The learning game v1 (Oct 8, 2026) | `release/learning-game` | built, not deployed (the owner's deploy): from T0 no agent sees 2020-21; private hidden-year looks decide which game-arm programs reproduce and reach Validation, a concurrent control arm on the same seen years (2022-2024), the architect and the strategist blind to the game arm, practice feedback off, a daily operator-only report. No `league/gym/`, `league/live/` or constitution change: the fingerprint and the money digest do not move; the span switch to 2022-2024 is its one evidence reset (**The learning game v1**, below) |
 | The public page | blakewoods.us/capital | the owner's (`personal-site`, revamped by the owner on Oct 2); the House's publisher feeds it |
 
 This is observed state, not completion of the design below. Broad universe discovery, covered strategies, the
@@ -459,6 +460,63 @@ rewrites, the researcher's top band and the diagnostician are off. By default GP
 stands behind the audit while OpenAI's funded month lasts (to Sept 30), on its half-price flex tier wherever latency
 does not matter; the live settings switch both off, so OpenAI is unused. Sail is the last fallback of every role but the
 diagnostician.
+
+## The learning game v1 (Oct 8, 2026)
+
+Built on `release/learning-game`, not deployed (the owner's deploy; how to run it is in [operations.md](operations.md),
+**The learning game v1**). Every researcher, the architect and the strategist had tuned on every Train year they were
+shown, so a version that scored better on Train was mostly one fitted harder to those days: a gain under 0.5 t carried to
+a left-out year at chance. The game keeps two years out of every agent's sight and lets them, not Train, decide
+selection. It raises the odds of finding an edge that exists and cuts false Probes; it cannot make an edge that one-lot
+spreads remove.
+
+- **The calendar.** SEEN is 2022-2024, the swarm's Train (`gym.train_from` "2022-01-03"), every view as before. HIDDEN
+  is 2020-01-02..2021-12-31: from T0 (the first start with `game.enabled`) no agent sees a figure, tier, year or result
+  of it. Validation (2025), the holdout and the forward record are unchanged. The image stays the 2020 one: the pool runs
+  a 2022-start job on it (`gym.allow_earlier_image`), and a hidden run is one private Train job over the hidden window at
+  1.5x the half-spread whose result never becomes a run, a trial, a notebook line or a view.
+- **Arms and folds.** New core-five families are split by their lineage's hash: half play the game, half keep today's
+  rules on the same seen years and get the same hidden measurements as records (a concurrent control, never a
+  before/after). Each lineage has a SELECT year (the one selection reads) and a CONFIRM year (read once, by the gate on
+  the way to Validation, and by the operator's report). A child keeps its parent's lineage, so it keeps both years and
+  its arm.
+- **The fitness.** F = min(the hidden year's t of daily P&L, its drift-adjusted alpha t): money after stressed costs
+  AND beating the program's own exposure's drift (the placebo is inside F). A year counts with 40 trades on 20 days and
+  every root of the program with data.
+- **The look ladder.** A look needs a version that is the family's best by Train score, made money at 1.5x on Train,
+  beats its last looked score by 0.5 (smaller gains carry at chance) and was never looked at in its lineage; at most 4
+  ladder looks a family, one at a time.
+- **The game arm in "gate".** A SELECT PASS (F >= 1.28, one-sided 10% a year) reads the CONFIRM year once (2 reads a
+  family, 3 a lineage, as the holdout's looks); only a CONFIRMED version goes to Validation, with 2 tries; its
+  Validation t never steers its compute. Survivors (the top decile of the last 72 hours' SELECT figures) have children:
+  the parent's looked program with one forced structural directive (seven, in a rotation that brings pricing, the
+  structure's shape and a regime filter round most often: in the Oct 8 planted-edge arena those carried a half-found
+  edge to unseen years and an input swap or exit rewrite broke it), or (20%) a donor's execution taken by a child that
+  keeps its signal and its signal parent's lineage. Three retirement reasons come first: 4 looks without a pass, 2
+  failed CONFIRM reads, 2 failed Validation tries.
+- **What agents see.** The game-arm researcher reads one PRIVATE EXAM line (its looks used, never a figure); a child,
+  its change. The architect and the strategist never read the game arm; every graveyard reader drops game-arm rows and
+  the rows of families that learned on the hidden years (born before T0, retired since the 2020-21 switch). The
+  strategist's section may not name 2020 or 2021. Practice feedback is off for both arms (it keeps the forward record
+  clean). `league/CONTRACT.md` is unchanged: the contract is every researcher's shared prefix, and control's view stays
+  exactly what it was.
+- **What does not move.** Nothing in `league/gym/`, `league/live/` or the constitution: the execution fingerprint and
+  the money digest are unchanged, so there is no evaluator reset. The span switch is the one evidence reset: at the next
+  start every living family's best is chosen again over 2022-2024 and its robustness starts over.
+- **Measurement.** A daily operator-only report (`league/ops/game_report.py`, R1 plumbing to R6 money, family-cluster
+  bootstrap intervals) with decisions written down before the first look: R1 on day 1, the selection carry (does one
+  hidden year predict the other better than Train does) on day 3, the generation gain and the out-of-fold quality of
+  what each arm would validate on day 7. Expect 0-2 Validation passes from the game arm in two weeks; no profit claim
+  before the holdout and the forward record support one.
+- **After its review (Oct 8).** A family's first arm is kept (`game_arms`): a researcher's change of roots, a setting
+  (`arm_fraction` 1.0 at GO-WIDE is for new births) or the game switched off never moves it, and once a T0 exists the
+  game off releases nothing it hid. A parent never reads that it bred: its own views count no child's trial
+  (`game.shown_trials`) nor a child's mechanism verdict. A game retirement's public cause is the same words for all three
+  rules, and the public site shows no game child. The ladder's triggers are a state (`game.recheck`), a program the Gym
+  ends on the hidden years is a landed look, a failed look bars its program, a hidden run is split as the retro ran it
+  (8), a shadow PASS is read at the first gate round, and the game's Validation tries count CONFIRMED versions only. A
+  start after T0 under a span that shows the hidden years voids the epoch: the next T0 starts a new one, every family
+  alive across the break legacy.
 
 ## Evidence
 

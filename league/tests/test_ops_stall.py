@@ -215,6 +215,26 @@ class Causes(Base):
         # A round older than the window says nothing of now: every family without a verdict is owed.
         self.assertEqual(self.check("validations", now=NOW + 24 * HOUR)["numbers"]["owed_validation"], 3)
 
+    def test_the_learning_games_wait_for_a_confirm_is_owed_nothing_and_its_children_are_births(self):
+        """THE LEARNING GAME (league/swarm/game.py): a game-arm family in "gate" is validated only once a version of it is
+        CONFIRMED, so one the round names in `waiting_game` is owed no Validation; the game's children emit no
+        `swarm.born`, and their family rows (origin "game") are births all the same."""
+        self.healthy(birth_hours=13, validation_hours=30)
+        self.family("played", best_version=1, best_train=0.5)
+        self.assertTrue(self.check("validations")["stalled"], "by today's reading its Train best is owed a Validation")
+        self.ago(1)
+        self.store.event("swarm.tournament", None, {"validation": {"queued": 0, "judged": {}, "errors": {}, "waiting_robustness": [],
+                                                                    "waiting_drift": [], "waiting_game": ["played"]}})
+        validations = self.check("validations")
+        self.assertFalse(validations["stalled"], "a game family waiting for a CONFIRM is owed nothing")
+        self.assertEqual(validations["numbers"]["owed_validation"], 0)
+        self.assertTrue(self.check("births")["stalled"])
+        self.ago(2)
+        child = self.store.add_family({**SPEC, "id": "g-0000abcd"}, origin="game", parent="played")
+        births = self.check("births")
+        self.assertFalse(births["stalled"])
+        self.assertEqual((births["numbers"]["births_12h"], births["numbers"]["last_birth_at"]), (1, child["born_at"]))
+
     def test_validations_a_verdict_read_from_an_identical_program_or_judged_in_a_round_is_a_verdict(self):
         self.family("twin", best_version=1, best_train=0.5)
         self.ago(3)

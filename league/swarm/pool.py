@@ -54,6 +54,13 @@
   give January 2022 a history the old image never had. A result carries the span its image covered as `train_from`,
   which a batch reports; the Train split and time limit follow the span unless the operator sets them
   (`settings.train_split`, `settings.run_timeout`).
+- THE GAME'S PRIVATE JOBS (the learning game, Oct 8, 2026; league/swarm/game.py). `submit` is the one door every Train
+  job passes, so it holds the hidden years: a Train job that starts in a calendar year before the running span's first
+  year fails there at once (by year: the zero-trade probe starts on January 1 of a span year), unless its purpose is
+  "private", the game's own hidden run, which is never stamped, has no span check, and must start and end before the
+  span. With `gym.allow_earlier_image` true a job stamped with the span runs on an image whose Train starts EARLIER (the
+  2020 image under the 2022 span: the job's own start cuts the window, and the result's `train_from` is the job's
+  start); an image that starts later than the span is refused as ever. Without it, today's refusal both ways.
 
 The Gym's driver (`league.gym.driver.GymDriver`) is imported when a box starts; tests hand in fakes.
 Standard library only.
@@ -262,6 +269,11 @@ class GymPool:
         for job in jobs:
             self._fail(job, why)
 
+    def _earlier_ok(self, first: str, span: str) -> bool:
+        """An image whose Train starts at `first` may run a job stamped with `span`: only one that starts EARLIER, and only
+        with `gym.allow_earlier_image` true (JSON true: THE GAME'S PRIVATE JOBS in the module docstring)."""
+        return self.gym.get("allow_earlier_image") is True and str(first) < str(span)
+
     def image(self, kind: str) -> str | None:
         return self.gym.get("image_checkpoint") if kind == "gym" else self.gym.get("gate_checkpoint")
 
@@ -279,9 +291,21 @@ class GymPool:
         """Queue a job. A family has at most one Train job (or one sweep's jobs: the same `group`) waiting: a newer one
         supersedes it (its waiter, if any, is told; it never ran), so a backlog of orphaned versions cannot build up."""
         job.created = self.clock()
-        if job.window == "train" and not job.gate and job.start is None:
-            job.start = job.span = self.span().isoformat()
+        refused = None
+        if job.window == "train" and not job.gate:
+            # THE GAME'S PRIVATE JOBS (the module docstring): the hidden years are reached by a private job alone.
+            span = self.span().isoformat()
+            if job.purpose == "private":
+                if not job.start or not job.end or not str(job.start) <= str(job.end) < span:
+                    refused = "a private Train job runs only on days before the swarm's Train span"
+            elif job.start is None:
+                job.start = job.span = span
+            elif str(job.start)[:4].isdigit() and int(str(job.start)[:4]) < int(span[:4]):
+                refused = f"a Train job may not start before the swarm's Train span ({span[:4]})"
         with self._wake, self.store.atomic():
+            if refused:
+                self._fail(job, refused)
+                return job
             if (self.store.family(job.family) or {}).get("retired_at"):
                 self._fail(job, "the family retired before dispatch")
                 return job
@@ -746,7 +770,7 @@ class GymPool:
         if not batch:
             return
         span = batch[0].span if batch[0].window == "train" else None
-        if span and box.train_first and box.train_first != span:
+        if span and box.train_first and box.train_first != span and not self._earlier_ok(box.train_first, span):
             self._span_refused(box, span, box.train_first, batch)  # nothing runs: the image covers another Train span
             return
         if box.state == "asleep":
@@ -815,7 +839,7 @@ class GymPool:
         covered = info.get("train_first") if head.window == "train" else None
         if covered and not box.train_first:
             box.train_first = str(covered)
-        if span and covered and str(covered) != span:
+        if span and covered and str(covered) != span and not self._earlier_ok(str(covered), span):
             self._span_refused(box, span, str(covered), batch)  # ran, but over another span: never delivered as this one
             return
         years = 0.0
@@ -826,9 +850,10 @@ class GymPool:
                 continue
             result = {**result, "gym_image": box.version, "gym_bundle": getattr(box.driver, "version", None)}
             if job.window == "train":
-                # The span the Train score is over: the image's first Train day the batch reported (a job stamped with the
-                # swarm's span never gets here on another one), else the job's own start.
-                result["train_from"] = str(covered) if covered and job.span else job.start
+                # The span the Train score is over: the job's own start (a job stamped with the swarm's span gets here only
+                # on an image that covers it from that day, or from earlier with `gym.allow_earlier_image`, where the
+                # job's start cut the window), else the image's first Train day the batch reported.
+                result["train_from"] = job.start or (str(covered) if covered else None)
             job.result = result
             job.batch = {**info, "box": box.id, "programs_in_batch": len(batch), "wall_seconds": round(elapsed, 2)}
             days = (result.get("summary") or {}).get("days") or len(result.get("daily") or [])

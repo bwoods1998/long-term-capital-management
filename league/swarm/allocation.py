@@ -107,6 +107,12 @@ architect's request shows the counts and which families are full (while `archite
 families of its types: `BirthQuota.text(allowed)`); a refused proposal is counted in the pass's event
 (`structure_capped`).
 
+THE LEARNING GAME (Oct 8, 2026; league/swarm/game.py). A game-arm family in mode "gate" never feeds its Validation t into
+its own row (`row_of`'s `blind`, set by `allocate_from_store`): its share comes from its class prior and the discounts
+alone, so compute never follows a version the game's private confirmation sent to Validation. Its depth reads its
+lineage's trials without the game's children beside it (`game.shown_trials`): a parent's share never falls because it
+bred. Control and legacy families, and the game off or in "shadow", read exactly as before.
+
 Every knob lives in swarm.json's `allocation` block (read every loop, no deploy; `settings.py` has no entry: this module's
 DEFAULTS are the defaults, and a misread value falls back to its default). Standard library only. Nothing on the live
 path imports this module.
@@ -118,7 +124,7 @@ import math
 import time
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
-from . import evidence
+from . import evidence, game
 
 # ---------------------------------------------------------------------------------------------------------------- settings
 DEFAULTS: dict[str, Any] = {
@@ -328,9 +334,10 @@ class Posterior:
 
 # ------------------------------------------------------------------------------------------------------------ the rows
 def row_of(fam: Mapping[str, Any], *, cls: str, looks_spent: bool, gate_done: bool = False,
-           lineage_trials: int | None = None) -> dict[str, Any]:
+           lineage_trials: int | None = None, blind: bool = False) -> dict[str, Any]:
     """What the allocation reads of a family row (`store.families`). `gate_done`: the gate is done with its validated
-    version (`gate_spent`). `lineage_trials`: its lineage set's trials now (`store.lineage_trials`), when read."""
+    version (`gate_spent`). `lineage_trials`: its lineage set's trials now (`store.lineage_trials`), when read. `blind`
+    (THE LEARNING GAME: a game-arm family in mode "gate"): its Validation t is never read (`t` None)."""
     from .researcher import validation_drift_failed  # the tournament's own rule: a drift-failed validation earns nothing
 
     state = fam.get("state") or {}
@@ -352,7 +359,7 @@ def row_of(fam: Mapping[str, Any], *, cls: str, looks_spent: bool, gate_done: bo
     if isinstance(lineage_trials, int) and not isinstance(lineage_trials, bool):
         idea = max(idea, lineage_trials)
     return {"id": str(fam["id"]), "cls": cls, "structure": fam.get("structure"),
-            "t": float(t) if usable and not gate_done else None, "drift_failed": drift, "gate_done": gate_done,
+            "t": float(t) if usable and not gate_done and not blind else None, "drift_failed": drift, "gate_done": gate_done,
             "trials": idea, "own_trials": own, "looks_spent": bool(looks_spent),
             "hold_streak": int(streak) if isinstance(streak, int) and not isinstance(streak, bool) else 0,
             "gate": bool(state.get("gate_ready") or state.get("look_inflight") or (fam.get("band") or "gym") != "gym")}
@@ -669,6 +676,7 @@ def allocate_from_store(store: Any, fams: Sequence[Mapping[str, Any]], settings:
     classes = classes_from_store(store)
     for fam in fams:
         classes.setdefault(str(fam["id"]), mechanism_class(fam.get("structure"), fam.get("roots") or []))
+    gated = game.cfg(settings)["mode"] == "gate"
     post = Posterior(looks_from_store(store, since=now - c["lookback_hours"] * 3600.0, class_of=classes.get))
     rows = []
     for fam in fams:
@@ -677,8 +685,8 @@ def allocate_from_store(store: Any, fams: Sequence[Mapping[str, Any]], settings:
             spent = store.lineage_looks(fid, include_inflight=True) >= evidence.LOOKS_PER_LINEAGE
         except Exception:  # noqa: BLE001 - an unreadable lineage is not a spent one
             spent = False
-        try:
-            trials: int | None = int(store.lineage_trials(fid))
+        try:  # THE LEARNING GAME: no trial of a child the game bore beside it (`game.shown_trials`; the store's count else)
+            trials: int | None = int(game.shown_trials(store, fam))
         except Exception:  # noqa: BLE001 - its own and inherited trials still count
             trials = None
         state = fam.get("state") or {}
@@ -689,7 +697,11 @@ def allocate_from_store(store: Any, fams: Sequence[Mapping[str, Any]], settings:
                 done = gate_spent(store, fam)
             except Exception:  # noqa: BLE001 - an unreadable version: its validation reads as it stands
                 done = False
-        rows.append(row_of(fam, cls=classes[fid], looks_spent=spent, gate_done=done, lineage_trials=trials))
+        try:  # THE LEARNING GAME: a game-arm family's Validation t never steers its compute
+            blind = gated and game.arm(store, fam, settings) == "game"
+        except Exception:  # noqa: BLE001 - its row as before
+            blind = False
+        rows.append(row_of(fam, cls=classes[fid], looks_spent=spent, gate_done=done, lineage_trials=trials, blind=blind))
     return value_shares(rows, post, settings)
 
 
