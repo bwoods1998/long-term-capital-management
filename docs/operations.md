@@ -8,6 +8,54 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## The incubator cap (Oct 8, 2026): built on `feat/incubator-cap-75`, not deployed
+
+One money row moves: `options_money.incubator.max_loss_usd` "50" -> "75" (its bound in `OPTIONS_MONEY_BOUNDS` $0-50 ->
+$0-75). It is Claude's decision under the owner's goal of Oct 7: item 4 allows up to 10% of equity at risk per Probe
+position ($128.84 at E = $1,288.40), and item 5 asks every loosened rule reported with its cost. Nothing else moves:
+`week_loss_usd` $150, `max_open` 4, `contracts` 1, the practice rule, the Probe, tuition, calibration, the House live
+test, the gateway rows of the table and the gateway's own vars (it has no incubator cap; its per-order cap, the lower of
+$1,000 and 25% of E, is $322.10 at that E).
+
+- **What it loosens.** One row, two caps: a structure's maximum loss with its fees, and what a family holds and works,
+  each $50 -> $75 (`money.plan_incubator`). The week's bound is unchanged ($150 of net realized loss plus residuals;
+  about $650 a month on average, $750 in a five-week month), so at most two $75 units are open at once (three $50 ones
+  before it).
+- **Why.** The incubator audit of Oct 8 found the $50 cap refuses most one-lot units of the single-name cohorts. Share
+  of one-lot units (maximum loss plus open and close fees) at or under $50 -> $75 in the active cohorts' Gym Train
+  trades: semis-lead-smallcap 4% -> 71%, smci-mara 40% -> 71%, opening-range 40% -> 62%, china-tech 55% -> 77%,
+  peer-skew 50% -> 71%, index-corr 83% -> 98%, earnings-gap 10% -> 17%, megacap 0% -> 3%, semis-supply 2% -> 2%.
+- **Cost.** Replayed on the 10 live cohorts' eligible Train runs, with the practice and route caps and no edge after
+  costs (-8% of maximum loss a trade, the placebo median), the expected real loss per first-look pass:
+
+  | Practice window | $50 | $75 | Maximum loss sent per pass | Worst simulated pass |
+  |---|---|---|---|---|
+  | today's (10-18 sessions) | -$0.40 | -$2.45 | $20 -> $224 | -$126 -> -$121 |
+  | 30 sessions | -$2.22 | -$25.53 | $53 -> $145 | -$272 -> -$419 |
+  | 40 sessions | -$5.52 | -$26.59 | $71 -> $164 | -$310 -> -$424 |
+
+  A worst pass spans several weeks, each within the $150. With zero edge (E = 0) the means are noise around $0. The
+  trades are in-sample Train trades over overlapping windows, so read the figures as rough.
+- **Alone it opens nothing.** On this tree no cohort holds the Train-and-drift mark the incubator's facts need (the
+  tournament's drift screen is off since fast lane v2: its **Stated consequences**, below), and in the audit's replay
+  11 of the 12 cohorts never reach the first look's 10 program closes inside today's windows (semis-lead-smallcap about
+  half the time). The cap matters once those are fixed, a separate change.
+
+**Identities.** Constitution digest `5edc8956` -> `5698a2f9`; money digest `da5c7542` -> `1665c385`; the execution
+fingerprint `b4c34031` and the Gym bundle are unchanged (no `league/gym`, `league/live` or base-file change), so there
+is no evidence reset and the practice cohorts carry over.
+
+**The owner's deploy, in order.** (1) CI green on the exact head; rollback ready (`floor_box.py rollback` to the
+running release); no order in flight. Merging it holds every later head of the updater until main's head is deployed
+by the owner (the constitution is protected), so deploy it right after the merge. (2) `floor_box.py deploy` from
+`~/Work/ltcm-deploy`. (3) At the House's start the `grant` job re-ratifies on `1665c385` by itself (**The standing
+grant**): its receipt reads `ratified` with the trigger `digest`; if it refuses, `python3 scripts/live_trading.py
+--ratify` on the box. (4) `health.json` `options_live.incubator.table.max_loss_usd` reads "75".
+
+**Roll back.** `floor_box.py rollback` is an owner's release change too, so at the House's start the grant re-ratifies
+on `da5c7542` by itself (read the receipt; `--ratify` if it refuses). A structure opened under $75 is held and exits as
+its program says; no new open is over $50.
+
 ## The learning game v1 (Oct 8, 2026): built on `release/learning-game`, not deployed
 
 From T0 no agent sees 2020 or 2021 again, and those two years, scored privately, decide which programs reproduce and
@@ -2318,6 +2366,11 @@ never evidence.
   approved real structure: at most $50 of maximum loss a structure, fees included, and at most 4 held or working. The
   route stops for the ISO week once its net realized loss reaches $150. It never promotes: D2 is the only route to
   Probe and Sized.
+- **The incubator cap (Oct 8, 2026).** Claude's decision under the owner's goal of Oct 7 (item 4 allows up to 10% of
+  equity at risk per Probe position; item 5 asks every loosened rule reported with its cost): a structure may risk at
+  most $75 with its fees, and a family at most $75 held and working (both $50 before it). The week's $150, the 4 held
+  or working and the one lot are the owner's terms as they were, so at most two $75 units are open at once. Its reason
+  and cost are in **The incubator cap**, at the top of this page.
 - **What it trades.** The unit is a practice cohort `(family, version)`. Its frozen snapshot is the program the
   incubator trades, byte for byte, as the real, tuition-flagged instance `<family>@<version>:i`.
 - **The first look** (pre-registered; `money.practice_ok`). It is taken once per cohort, at the first session pin at
@@ -2402,7 +2455,7 @@ never evidence.
   - the facts, with the snapshot's run sha;
   - no D2 route for the family (`:r` > `:t` > `:i`);
   - a real structure;
-  - at least one sampled program close that one lot could open under the $50 cap.
+  - at least one sampled program close that one lot could open under the $75 cap.
 
   Every families pass checks again, and a failure sends the instance to exits only, its working opens cancelled.
   `health.json` `options_live.incubator.pins.refused` says why each passing cohort was not pinned.
@@ -2453,15 +2506,17 @@ never evidence.
     and switching the observe band on mid-session still pins it at the next minute.
 - **The caps** (`money.plan_incubator`, with the tally read afresh from `live.sqlite` at every open). They live in the
   House only: the gateway cannot tell routes apart, so its caps are the backstop.
-  - One lot; at most $50 a structure; at most $50 held or working per family.
+  - One lot; at most $75 a structure; at most $75 held or working per family (both $50 before the incubator cap of
+    Oct 8, 2026).
   - At most 4 structures held or working.
   - **The weekly envelope:** this ISO week's net realized loss, plus what is held, plus what is working, plus the new
     unit, at most $150 at every open. Once the week's net realized loss has reached $150 at any close, the route is
     stopped until the next ISO week, a later gain notwithstanding. The stop is alerted once a week: "live: the incubator
     its net realized loss this week reached $X, at or over $150: stopped for the rest of the week (exits go on)".
   - 40 order legs a day, and 25% of the gateway's day cap.
-  - Room kept in the book's and the day's caps: two Probe floors ($200) and, while the House live test can still open,
-    its structure ($100).
+  - Room kept in the book's and the day's caps: the families' Probe room (`money.probe_room`: 3 x 10% of E since fast
+    lane v2, $386.52 at E = $1,288.40; two Probe floors, $200, before it) and, while the House live test can still
+    open, its structure ($100).
 
   The $150 is a true bound apart from residuals: broker fees above the book's estimate, and a broken structure closed
   leg by leg.
@@ -2849,10 +2904,10 @@ is installed (**The settings layers**, "The reduced `swarm.json`").
 | `researcher.retire_guard_days` | `swarm.json` on the box | default 14 (Oct 1) | the validated-family guard: a researcher may not retire a family that holds a version which passed the validation line (in its state, in the tournament's verdict records, or archived by any evaluator adoption) last validated within this many days, unless a later validation of that version failed the line; a number at or below 0 turns it off; null, a boolean or a string reads as 14 | edit `swarm.json` |
 | `funding` (`enabled`, `every_seconds`, `lead_hours`, `repeat_hours`, `clear_factor`, `claude_out_usd`, `burn_window_hours`, `after_end_hours`, `fallback_every_seconds`, `fallback_flush_seconds`) | `swarm.json` on the box | defaults (Release A, #439): on, 300, per cliff, 12, 1.5, 2, 6, 48, 21600, 30 | the funding cliff alerts (**Funding cliffs and alerts**) | edit `swarm.json` |
 | `research.enabled`, `requests_day`, `family_requests_day`, `cycle_calls` | `swarm.json` on the box | defaults (Release B, #447): false, 300, 12, 2 | the research library on the House, and its lines: calls a UTC day for the floor, a family, a research cycle (**The research library**) | edit `swarm.json`; on only after the gateway and the House that carry it |
-| The money rules | `league/constitution.py` | the sprint's D4 table and the House live test's bounds (money `a3e2aa7c`); Release B adds the incubator's row (`42c4a3af`); V3-A part 1 leaves it as it is; fast lane v2 moves the Probe row (`da5c7542`) | what real money may do | owner deploy; the standing grant ratifies it when the House starts on it (`--ratify` if it refuses) |
+| The money rules | `league/constitution.py` | the sprint's D4 table and the House live test's bounds (money `a3e2aa7c`); Release B adds the incubator's row (`42c4a3af`); V3-A part 1 leaves it as it is; fast lane v2 moves the Probe row (`da5c7542`); the incubator cap moves `incubator.max_loss_usd` to $75 (`1665c385`) | what real money may do | owner deploy; the standing grant ratifies it when the House starts on it (`--ratify` if it refuses) |
 | `options_money.probe` | `league/constitution.py` | from fast lane v2: `max_loss_share` 0.10, `contracts` 1, `open_per_family` 3, `family_share` 0.15, `floor_usd` 0, `max_open` 3, `loss_budget_usd` 400 | the Probe: one structure within 10% of E, at most 3 Probe positions at once, the $400 Probe loss budget (0 in `max_open` or `loss_budget_usd` stops Probe opens) | owner deploy; the standing grant re-ratifies at the House's start |
 | `tournament.drift_screen` | `league/swarm/policy.json` and `swarm.json` on the box | false (the box since 15:53Z Oct 7; the policy from fast lane v2) | THE DRIFT SCREEN's refusal (direction counts since fast lane v2; its fit is reported by the `direction` and `fast_lane` jobs into `<state>/fast-lane-report.json`, and by `scripts/fast_lane_report.py` on copies) | edit the file; true restores the screen |
-| `options_money.incubator` | `league/constitution.py` | from Release B: `max_loss_usd` 50, `contracts` 1, `max_open` 4, `week_loss_usd` 150, `min_sessions` 3, `min_trades` 10, `min_coverage` 0.80 | the incubator's caps and its pre-registered practice rule; each row may only tighten, and 0 in `max_open`, `week_loss_usd` or `max_loss_usd` stops the route | owner deploy, then `--ratify` (no evidence reset) |
+| `options_money.incubator` | `league/constitution.py` | from Release B, with `max_loss_usd` 75 from the incubator cap (Oct 8, 2026; 50 before it): `max_loss_usd` 75, `contracts` 1, `max_open` 4, `week_loss_usd` 150, `min_sessions` 3, `min_trades` 10, `min_coverage` 0.80 | the incubator's caps and its pre-registered practice rule; each row may only tighten (`max_loss_usd` within $0-75), and 0 in `max_open`, `week_loss_usd` or `max_loss_usd` stops the route | owner deploy; the standing grant re-ratifies at the House's start (`--ratify` if it refuses; no evidence reset) |
 
 In the settings, `researcher.sail_usd_per_hour`, when set, is the researcher pace: the Sail models' spend over the
 trailing hour (0.25 since 17:23Z Oct 2; 1.3 from 02:47Z Oct 1; 12 from Sept 29), capped from A1 by the budget
