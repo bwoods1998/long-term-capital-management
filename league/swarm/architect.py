@@ -133,10 +133,13 @@ event gains `library` (the searches, the ids and how many proposals cited one).
 THE LEARNING GAME (Oct 8, 2026; league/swarm/game.py). The architect never reads a game-arm family: every content reader
 goes through `game.visible_families` and `game.visible_graveyard` (`visible`, `graves`), and the rows it may not read
 (`unseen`: the game arm's families, alive or retired, and the graveyard rows `game.quarantined` drops) are left out of
-the digest, the cited ids, the rebirth index, the cell yields and the lineage a birth continues. Pure counts (the refill,
-the want, the ceiling, the birth quota's population) read every family. While the game is on, births are core-five only
-(`game.birth_roots`: the roots the request offers, the GAPS and `admit` take), and the input card shows no day before
-the running Train span (`inputs.context`). With the game off or before T0 every read is the store's own.
+the digest, the cited ids, the rebirth index, the cell yields and the lineage a birth continues; nor the dead families
+that learned on the hidden years (`visible`; `admit` alone still counts their trials when a birth lands on their slice).
+The board's research shares are renormalized over the rows it reads (`game.visible_shares`), so a child the game bears
+dilutes none of them. Pure counts (the refill, the want, the ceiling, the birth quota's population) read every family.
+Once the game has started (`game.started`), births are core-five only (`game.birth_roots`: the roots the request offers,
+the GAPS and `admit` take), and the input card shows no day before the running Train span (`inputs.context`). A store
+that never had a T0 reads the store's own lists; once one exists the game off releases nothing it hid.
 
 Each pass is a `swarm.architect` event; each birth a `swarm.born` event (the site's news; a carded birth's `card` key is
 its cell, sha and rebirth row).
@@ -882,7 +885,7 @@ class GraveyardDigest:
         seal = self.store.get(SEAL_KEY)
         newest = self.store._one("SELECT COUNT(*) AS n, MAX(at || ' ' || family) AS last FROM graveyard") or {}
         key = (newest.get("n"), newest.get("last"), self.tokens(), self.tail_share(),
-               json.dumps(seal, sort_keys=True, default=str), game.cfg(self.settings)["enabled"], game.t0(self.store))
+               json.dumps(seal, sort_keys=True, default=str), tuple(sorted(game.quarantined(self.store, self.settings))))
         if self._memo is not None and self._memo[0] == key:
             return replace(self._memo[1], resealed=None)  # the same bytes: sealed before, not by this call
         rows = self.rows()
@@ -1313,10 +1316,11 @@ class Architect:
         return raw if isinstance(raw, str) and raw in SAIL_EFFORTS else SAIL_EFFORT
 
     # ------------------------------------------------------------------ the learning game's filter
-    def visible(self, *, alive: bool | None = None) -> list[dict[str, Any]]:
-        """The families the architect reads (THE LEARNING GAME, `game.visible_families`: no game-arm family); with the game
-        off or before T0, exactly `store.families`. Pure counts read the store's own list."""
-        return game.visible_families(self.store, alive=alive, settings=self.settings)
+    def visible(self, *, alive: bool | None = None, learners: bool = False) -> list[dict[str, Any]]:
+        """The families the architect reads (THE LEARNING GAME, `game.visible_families`: no game-arm family, alive or
+        retired, and no dead family that learned on the hidden years unless `learners`); a store that never had a T0,
+        exactly `store.families`. Pure counts read the store's own list."""
+        return game.visible_families(self.store, alive=alive, settings=self.settings, learners=learners)
 
     def graves(self, query: str = "", limit: int = 8) -> list[dict[str, Any]]:
         """The graveyard rows the architect reads (`game.visible_graveyard`; the store's own read with the game off)."""
@@ -1330,8 +1334,9 @@ class Architect:
                 | game.quarantined(self.store, self.settings))
 
     def admitted_roots(self) -> list[str]:
-        """The roots a birth may use: the core five while THE LEARNING GAME is on (`game.birth_roots`), else `gym.roots`."""
-        return list(game.birth_roots(self.settings)
+        """The roots a birth may use: the core five once THE LEARNING GAME has started (`game.birth_roots`), else
+        `gym.roots`."""
+        return list(game.birth_roots(self.store, self.settings)
                     or self.settings.get("gym", {}).get("roots", ["SPY", "QQQ", "IWM", "XSP", "SPXW"]))
 
     def refilling(self) -> bool:
@@ -1564,9 +1569,10 @@ class Architect:
         # Of Validation the architect sees what a researcher sees (D2a): the line met or not and the checks passed.
         lines = {f["id"]: (f.get("state") or {}).get("validation_line") for f in alive}
         from .allocation import SHARE_LEGEND  # local, as in `birth_quota`: the allocator loads only with a pass
+        shares = game.visible_shares(self.store, board, living_ids)  # THE LEARNING GAME: over the rows it may read
         living = [{"family": r["family"], "band": r["band"], "structure": r["structure"], "roots": r["roots"],
                    "validation": diagnostics.validation_view({}, lines.get(r["family"])) if lines.get(r["family"]) else None,
-                   "research_share": r.get("share")} for r in board if r["family"] in living_ids][:60]
+                   "research_share": shares.get(r["family"])} for r in board if r["family"] in living_ids][:60]
         if not living:
             living = [{"family": f["id"], "structure": f["structure"], "roots": f["roots"], "mechanism": f["mechanism"][:160]}
                       for f in alive][:60]
@@ -1581,7 +1587,7 @@ class Architect:
         admitted_roots = self.admitted_roots()
         roots = ", ".join(admitted_roots)
         span = (settings_mod.objective_span(self.store.get("train_objective")).isoformat()
-                if game.cfg(self.settings)["enabled"] else None)
+                if game.started(self.store, self.settings) else None)
         available = inputs.context(self.store.root, gym.get("image_checkpoint"), admitted_roots, span=span)
         gaps = json.dumps(self._gaps_by_root(), separators=(",", ":"))
         coverage = json.dumps(self.coverage(allowed_only=True), separators=(",", ":"))
@@ -1839,7 +1845,7 @@ class Architect:
             # idea is a new lineage that still counts the slice's trials (`prior_lineage`) but not its look ration. A
             # `long_single` searches its singles' slices too (`same_slice`): a dead call or put twin's idea continues, and
             # each newest dead lineage of the slice's types counts (`slice_priors`, own type first).
-            dead = [f for f in self.visible(alive=False)
+            dead = [f for f in self.visible(alive=False, learners=True)
                     if same_slice(f["structure"], structure) and sorted(f["roots"]) == sorted(roots)]
             # A rebirth on the slice of the row it names continues that row's lineage (its trials and looks); one on another
             # slice is a new lineage that counts the named row's lineage as a prior (its trials, and its failed mechanism

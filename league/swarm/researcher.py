@@ -274,7 +274,10 @@ pool: a version's 1.5x seen run that lands with a profit and is not demoted may 
 status (`game.status_text`: how many of its looks it used, never a figure, a tier or a year); a game child's brief
 carries its change (`game.brief_text`); and the `graveyard` tool reads `game.visible_graveyard` (no game-arm row, no row
 of a family that learned on the hidden years). A hidden run never becomes a run row, a trial or a notebook entry, so
-`read_run`, the sweep table and every view stay over the seen years.
+`read_run`, the sweep table and every view stay over the seen years. A family's own views (its status, its run views,
+its sweep table) count its lineage's trials without the game's children beside it (`shown_trials`, `game.shown_trials`),
+and its hypothesis's record across its lineage (`mechanism_lineage`) leaves those children out too: a parent never reads
+that it bred. The input card reads the running span (`inputs.context`'s `span`) once the game has started.
 
 Every cycle is a `swarm.cycle` event; a notebook entry becomes a public `swarm.note` (the site's tape,
 masked there for quotes) at most every `note_every_cycles` cycles. Standard library only.
@@ -1734,7 +1737,7 @@ class Researcher:
                  f"{(spec.get('dte') or ['?', '?'])[0]}-{(spec.get('dte') or ['?', '?'])[1]}.",
                  f"Rejection test: {spec.get('rejection') or 'state one in your notebook'}",
                  inputs.context(self.store.root, self.settings.get("gym", {}).get("image_checkpoint"), fam["roots"],
-                                span=self.train_span() if game.cfg(self.settings)["enabled"] else None)]
+                                span=self.train_span() if self._game_started() else None)]
         lessons = spec.get("lessons") or []
         if lessons:
             lines.append("Lessons from the graveyard when you were born:")
@@ -1754,6 +1757,21 @@ class Researcher:
             lines.append(change)
         return "\n".join(lines)
 
+    def _game_started(self) -> bool:
+        """THE LEARNING GAME has started (`game.started`: on, a live T0, the seen span); False on an error."""
+        try:
+            return game.started(self.store, self.settings)
+        except Exception:  # noqa: BLE001
+            return False
+
+    def shown_trials(self, fid: str) -> int:
+        """The lineage's trials as this family's own views show them (THE LEARNING GAME, `game.shown_trials`: no trial of a
+        child the game bore beside it, so a parent never reads that it bred); the store's own count on an error."""
+        try:
+            return game.shown_trials(self.store, fid)
+        except Exception:  # noqa: BLE001
+            return self.store.lineage_trials(fid)
+
     def status(self, fam: Mapping[str, Any]) -> str:
         best = self.store.version(fam["id"], fam.get("best_version"))
         state = fam.get("state") or {}
@@ -1761,7 +1779,7 @@ class Researcher:
         gate = state.get("gate")
         notes = self.store.notebook(fam["id"], limit=5)
         parts = [f"Cycle {int(fam['cycles']) + 1}. Revisions so far (a sweep is one): {fam['revisions']}. Lineage trials: "
-                 f"{self.store.lineage_trials(fam['id'])}. Revisions since a better Train score: {fam['stall']} "
+                 f"{self.shown_trials(fam['id'])}. Revisions since a better Train score: {fam['stall']} "
                  f"(a rewrite from a stronger model comes at {self.cfg.get('stall_revisions', 5)})."]
         if state.get("best_train_version") is not None:
             parts.append(f"Your best Train score: {fam.get('best_train')} (version {state['best_train_version']}).")
@@ -2555,7 +2573,7 @@ class Researcher:
         out["run_id"] = run["run_id"]
         # This evaluation's trials (the row's own count also holds earlier identical evaluations of a row recorded before keys).
         out["trials"] = out.get("trials", 0) + int(result.get("trials", 0) or 0)
-        view = diagnostics.train_view(result, lineage_trials=self.store.lineage_trials(fam["id"]), screen=drift_settings(self.settings))
+        view = diagnostics.train_view(result, lineage_trials=self.shown_trials(fam["id"]), screen=drift_settings(self.settings))
         view["version"] = version["n"]
         view["run_id"] = run["run_id"]
         score = self._scored(fam, version["n"], run["run_id"], robust, view, out, code=code, params=params, span=span_of(result))
@@ -2685,8 +2703,13 @@ class Researcher:
         lines = self.store.lineages(fid)
         if not lines:
             return empty
-        fams = self.store._all(f"SELECT id, structure, mechanism, spec FROM families WHERE lineage IN ({','.join('?' * len(lines))})",
-                               tuple(lines))
+        fams = self.store._all(f"SELECT id, structure, mechanism, spec, origin FROM families WHERE lineage IN "
+                               f"({','.join('?' * len(lines))})", tuple(lines))
+        try:  # THE LEARNING GAME: a child the game bore beside this family is not in its record (it would tell it bred)
+            unrelated = game.unrelated_children(self.store, fid)
+        except Exception:  # noqa: BLE001 - fail closed: none of the game's children
+            unrelated = frozenset(f["id"] for f in fams if f.get("origin") == game.ORIGIN)
+        fams = [f for f in fams if f["id"] not in unrelated or f["id"] == fid]
         ids = [f["id"] for f in fams]
         marks = ",".join("?" * len(ids))
         own = {r["family"]: r for r in self.store._all(f"SELECT family, sha, card FROM family_cards WHERE family IN ({marks})",
@@ -3222,12 +3245,12 @@ class Researcher:
         summary = run.get("summary") or {}
         span = span_of(full) if full is not None else str(summary.get("train_from") or CORE_SPAN)
         if full is not None:
-            view = diagnostics.train_view(full, lineage_trials=self.store.lineage_trials(fid), screen=drift_settings(self.settings))
+            view = diagnostics.train_view(full, lineage_trials=self.shown_trials(fid), screen=drift_settings(self.settings))
             robust = self._robust_of(full) if stress == 1.0 else None
         else:
             view = {"run_id": run["run_id"], "status": run.get("status"), "window": "train", "stress": run.get("stress"),
                     "summary": {k: summary[k] for k in diagnostics.SUMMARY_KEYS if k in summary},
-                    "lineage_trials": self.store.lineage_trials(fid),
+                    "lineage_trials": self.shown_trials(fid),
                     "kept": "its full result is no longer kept (your newest six runs and your best are): its summary only"}
             robust = None
             if stress == 1.0 and summary.get("train_score") is not None:
@@ -3581,7 +3604,7 @@ class Researcher:
             "status": "ok" if any(r["status"] == "ok" for r in rows) else str(top["status"] or "failed"),
             "run_id": top["run_id"], "version": top["job"].version, "base_params": dict(base),
             "variants": len(variants), "completed": out["sweep"]["completed"], "eligible": eligible, "positive_score": positive,
-            "table": table, "lineage_trials": self.store.lineage_trials(fid),
+            "table": table, "lineage_trials": self.shown_trials(fid),
             "next": "submit the best ROBUST row's run_id (a plateau of positive neighbours beats a lone peak), or read_run it"}
         if not todo:
             view["already_run"] = ALREADY_RUN

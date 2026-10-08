@@ -27,6 +27,8 @@ One process beside the House loop, niced. Its threads:
 
 At each start, after the Train objective's migration: THE LEARNING GAME's T0 (league/swarm/game.py), written once by the
 first start with `game.enabled` whose running Train span is the seen span (2022-01-03); every family alive then is legacy.
+With the game on under a span that shows the hidden years, it waits (a House warning); a start under such a span after T0
+voids the epoch (a House warning), and the next start under the seen span with the game on writes a new T0.
 
 The heartbeat (`<root>/swarm.heartbeat`, JSON) carries the pid, the release directory, the time, and a live
 status (families, cycles and spend in the last hour by kind, the guard, the pool): the House's `SwarmStep`
@@ -952,16 +954,28 @@ class Swarm:
             log(f"train objective migration failed: {traceback.format_exc()[-800:]}")
         # THE LEARNING GAME's T0 (league/swarm/game.py): the first start with `game.enabled` writes it once; every family
         # born before it stays legacy. After the migration, and only once the running Train span is the seen span (the
-        # operator's `gym.train_from` "2022-01-03"): under a span that shows the hidden years nobody plays, and it says so.
+        # operator's `gym.train_from` "2022-01-03"): under a span that shows the hidden years nobody plays, and it says so
+        # (a House warning). A start under such a span after T0 voids the epoch (`game.void`): its families saw a hidden
+        # year; the next start under the seen span with the game on writes a new T0, and every family alive then is legacy.
         try:
-            first = self.store.get(game.T0_KEY)
-            if not first and game.cfg(self.settings)["enabled"] and not game.seen_only(self.store, self.settings):
-                log("the learning game waits: the running Train span shows its hidden years (set gym.train_from to "
-                    f"{game.cfg(self.settings)['seen_from']} and restart)")
-            else:
+            first = game.t0(self.store)
+            seen = game.seen_only(self.store, self.settings)
+            on = game.cfg(self.settings)["enabled"]
+            if first and not seen:
+                if game.void(self.store):
+                    text = ("the learning game is void from now: the running Train span shows its hidden years; its "
+                            "families never play again, and the next start under the seen span writes a new T0")
+                    log(text)
+                    self.store.event("swarm.status", None, {"action": "game_void", "alert": True, "text": text})
+            elif on and not seen:
+                text = ("the learning game waits: the running Train span shows its hidden years (set gym.train_from to "
+                        f"{game.cfg(self.settings)['seen_from']} and restart)")
+                log(text)
+                self.store.event("swarm.status", None, {"action": "game_waits", "alert": True, "text": text})
+            elif on:
                 started = game.t0(self.store, self.settings)
-                if started and not first:
-                    log(f"the learning game starts: T0 {started}")
+                if started and started != first:
+                    log(f"the learning game starts: T0 {started}" + (" (a new epoch: the last one was void)" if first else ""))
         except Exception:  # noqa: BLE001 - nobody plays without it (every family legacy), and the next start writes it
             log(f"the learning game's T0 could not be written: {traceback.format_exc()[-400:]}")
         # Derived Train/validation views must change with the code/data that evaluates them. Run

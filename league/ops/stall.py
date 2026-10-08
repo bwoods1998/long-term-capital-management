@@ -6,7 +6,8 @@ pre-open FAIL) went to a ledger row no mail carries. This job reads the House's 
 a STALL by its cause:
 
 - `births`: no family was born in the last `BIRTH_HOURS` hours while the living population is under its ceiling
-  (`population.ceiling` as the swarm's own settings load it, the budget's tightening included);
+  (`population.ceiling` as the swarm's own settings load it, the budget's tightening included); the learning game's
+  children count (they emit no `swarm.born`: their family rows' origin is "game");
 - `gym_runs`: the Gym evaluated fewer than `MIN_GYM_RUNS` programs in the last `GYM_HOURS` hours (a run is a `runs` row
   with a trial whose status is not `funnel.NOT_RUN`: a run the Gym refused or failed is not one, nor a verdict read
   from an identical program's validation, F1, which writes rows with no trial);
@@ -14,7 +15,8 @@ a STALL by its cause:
   read from an identical program, nothing a tournament round judged) while a living family is OWED one: its candidate
   (the version the tournament validates, `Tournament.candidate_version`: its submitted best, else the Train best the
   researcher picked by score, `state.best_train_version`) is not its validated version, and the last round within the
-  window did not leave it waiting on its 1.5x robustness run or the drift screen (those are counted apart);
+  window did not leave it waiting on its 1.5x robustness run or the drift screen (those are counted apart), nor named it
+  as a game-arm family that waits for a CONFIRM (`waiting_game`: the learning game validates CONFIRMED versions only);
 - `braked`: the Sail guard was braked `BRAKED_HOURS` or more of the last `BRAKE_WINDOW_HOURS` hours, whatever the cause
   (the budget's daily stop reached by noon keeps research from running round the clock as surely as a low balance);
 - `runway_sail`, `runway_claude`: a meter's days of research left at the ceiling (`budget.json` `card_runway_days`: what it
@@ -113,6 +115,8 @@ GUARD_DOING = {
 _OWNER_DEPLOY = re.compile(r"owner's (?:own )?deploy")
 #: The grant job's error for a refusal (league/ops/grant.py `failed` after `LiveGrant.standing` answered `refused`).
 _GRANT_REFUSED = "standing grant refused"
+#: THE LEARNING GAME's children's origin (league/swarm/game.py `ORIGIN`; this job imports nothing of the swarm).
+GAME_ORIGIN = "game"
 
 
 def _get(ctx: Any, name: str, default: Any = None) -> Any:
@@ -170,6 +174,13 @@ def swarm_facts(db: Any, now: float) -> dict[str, Any]:
     out: dict[str, Any] = {}
     out["births"] = int(one("SELECT count(*) FROM events WHERE kind='swarm.born' AND at>=?", (iso(BIRTH_HOURS),)) or 0)
     out["last_birth_at"] = one("SELECT max(at) FROM events WHERE kind='swarm.born'")
+    # THE LEARNING GAME's children (league/swarm/game.py `ORIGIN`) are births too, though they emit no `swarm.born`.
+    children = int(one("SELECT count(*) FROM families WHERE origin=? AND born_at>=?", (GAME_ORIGIN, iso(BIRTH_HOURS))) or 0)
+    if children:
+        out["births"] += children
+    last_child = one("SELECT max(born_at) FROM families WHERE origin=?", (GAME_ORIGIN,))
+    if last_child and (out["last_birth_at"] is None or str(last_child) > str(out["last_birth_at"])):
+        out["last_birth_at"] = last_child
     out["alive"] = int(one("SELECT count(*) FROM families WHERE retired_at IS NULL") or 0)
     passes = {"passes": 0, "no_cell": 0, "ceiling": 0, "failed": 0, "asked": 0, "proposed": 0, "born": 0}
     for text in guard.ids(db, "SELECT payload FROM events WHERE kind='swarm.architect' AND at>=? ORDER BY seq",
@@ -232,6 +243,7 @@ def swarm_facts(db: Any, now: float) -> dict[str, Any]:
         round_ = {"at": last[0]["at"], "queued": int(_finite(validation.get("queued")) or 0),
                   "judged": len(ids(validation.get("judged"))), "waiting_robustness": ids(validation.get("waiting_robustness")),
                   "waiting_drift": ids(validation.get("waiting_drift")), "waiting_twin": ids(validation.get("waiting_twin")),
+                  "waiting_game": ids(validation.get("waiting_game")),
                   "errors": len(ids(validation.get("errors")))}
     out["last_round"] = round_
     out["brake"] = F.guard_hours(db, now - BRAKE_WINDOW_HOURS * 3600, now)
@@ -429,7 +441,10 @@ def checks(swarm: Mapping[str, Any], *, now: float, ceiling: int | None, budget:
     drift = set(round_.get("waiting_drift") or []) | set(round_.get("waiting_twin") or []) if recent else set()
     waiting_robustness = [f for f in awaiting if f in robust]
     waiting_drift = [f for f in awaiting if f in drift and f not in robust]
-    owed = [f for f in awaiting if f not in robust and f not in drift]
+    # THE LEARNING GAME: a game-arm family in "gate" is owed a Validation only for a CONFIRMED version, so the round's
+    # `waiting_game` (no CONFIRM yet, or its tries used) owes none.
+    game = set(round_.get("waiting_game") or []) if recent else set()
+    owed = [f for f in awaiting if f not in robust and f not in drift and f not in game]
     if round_:
         round_words = (f"The tournament's last round ({round_['at']}) queued {round_['queued']} and judged {round_['judged']}; "
                        f"{len(round_.get('waiting_robustness') or [])} wait on their 1.5x robustness run, "

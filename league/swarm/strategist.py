@@ -42,9 +42,10 @@ Nothing here writes swarm.json or the locked preamble.
 
 THE LEARNING GAME (Oct 8, 2026; league/swarm/game.py). The strategist reads what the architect reads: no game-arm family
 (`game.visible_families`: the board, the births and deaths, the checks, the coverage and the gaps), no game-arm or
-quarantined graveyard row (the digest, the sample, the ids it may cite: `Architect.unseen`). While the game is on, a
-section that names a hidden year in digits is refused (`check_section`'s `hidden`, the rule "years"): the agenda
-carries no 2020 or 2021 (ids are masked first, as for every rule).
+quarantined graveyard row (the digest, the sample, the ids it may cite: `Architect.unseen`), and the board's research
+shares renormalized over the rows it reads (`game.visible_shares`). Once the game has started, a section that names a
+hidden year in digits is refused (`check_section`'s `hidden`, the rule "years"): the agenda carries no 2020 or 2021 (ids
+are masked first, as for every rule).
 
 THE LIBRARY (Sept 29, 2026; league/swarm/library.py). While `research.enabled`, the packet carries the block of pre-2025
 literature the pass retrieved first (`loop.Swarm.architect_pass`), and the answer may add "library_queries" (1 to 4 short
@@ -543,8 +544,8 @@ class Strategist:
                 | {r["id"] for r in self.store._all("SELECT id FROM families")}) - unseen
 
     def hidden(self) -> tuple[int, ...]:
-        """THE LEARNING GAME's hidden years while it is on (`check_section`'s `hidden`), else none."""
-        return tuple(game.HIDDEN_YEARS) if game.cfg(self.settings)["enabled"] else ()
+        """THE LEARNING GAME's hidden years once it has started (`game.started`; `check_section`'s `hidden`), else none."""
+        return tuple(game.HIDDEN_YEARS) if game.started(self.store, self.settings) else ()
 
     def roots(self) -> list[str] | None:
         """THE GYM'S ROOTS (F1): the admitted roots a section may name (`gym.roots`), or None while
@@ -578,7 +579,7 @@ class Strategist:
         alive = {f["id"]: f for f in fams if not f["retired_at"]}
         board = (self.store.get("leaderboard") or {}).get("board") or []
         order = [r["family"] for r in board if r.get("family") in alive] or list(alive)
-        shares = {r["family"]: r.get("share") for r in board if isinstance(r, dict) and "family" in r}
+        shares = game.visible_shares(self.store, board, alive)  # THE LEARNING GAME: over the rows it may read
         out = []
         for fid in order[:60]:
             f = alive[fid]

@@ -232,7 +232,7 @@ class Diagnostician:
         result, others = self._train(fid, int(best.get("n") or 0))
         view: dict[str, Any] = {}
         if result is not None:
-            view = diagnostics.train_view(result, lineage_trials=self.store.lineage_trials(fid))
+            view = diagnostics.train_view(result, lineage_trials=game.shown_trials(self.store, fid))
             view["by"] = {name: diagnostics.section(result, f"breakdown.{name}").get(f"breakdown.{name}")
                           for name in diagnostics.BREAKDOWNS if (result.get("breakdown") or {}).get(name)}
             years: dict[str, dict[str, Any]] = {}
@@ -262,7 +262,7 @@ class Diagnostician:
         if spec.get("sketch"):
             parts.append(f"The architect's sketch: {withheld(spec['sketch'])}")
         parts += [
-            f"Versions so far: {fam.get('revisions')}; lineage trials {self.store.lineage_trials(fid)}; best Train score "
+            f"Versions so far: {fam.get('revisions')}; lineage trials {game.shown_trials(self.store, fid)}; best Train score "
             f"{fam.get('best_train')}.",
             f"VALIDATION: {'passed' if seen['passed'] else 'not passed'}; {seen['met']} of {seen['total']} checks passed on the "
             f"latest; {seen['validations']} validations so far.",

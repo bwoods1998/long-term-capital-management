@@ -129,6 +129,8 @@ PROTECTED: tuple[tuple[str, str], ...] = (
     ("league/swarm/evaluator.py", "sealed"), ("league/swarm/settings.py", "sealed"), ("league/swarm/diagnostics.py", "sealed"),
     ("league/swarm/policy.json", "sealed"),  # settings as code: overrides config.json and settings.py's DEFAULTS
     ("league/swarm/tournament.py", "sealed"), ("league/swarm/store.py", "sealed"), ("ltcm/data/*", "sealed"),
+    # THE LEARNING GAME (Oct 8, 2026): its selection rules, the CONFIRM seal and the filters every reader goes through
+    ("league/swarm/game.py", "sealed"),
     ("scripts/data/window.py", "sealed"), ("scripts/data/images.py", "sealed"), ("scripts/data/universe.py", "sealed"),
     ("scripts/data/frames.py", "sealed"), ("scripts/data/complete.py", "sealed"), ("scripts/data/check.py", "sealed"),
     ("scripts/data/sip.py", "sealed"), ("scripts/data/backfill.py", "sealed"), ("scripts/data/calibration.py", "sealed"),
@@ -1100,7 +1102,12 @@ FROZEN_SYMBOLS: dict[str, tuple[str, ...]] = {
     "league/swarm/architect.py": ("SAME_IDEA", "_STOP", "words", "same_idea", "salvage_families", "_FAMILIES",
                                   "read_families", "recover_families", "_from_families", "without_trailing_commas",
                                   "_past_object", "_CARD", "CARD_KEY",
-                                  "SALVAGE_MIN", "Architect.run", "Architect._digest_call", "Architect._salvage_retry"),
+                                  "SALVAGE_MIN", "Architect.run", "Architect._digest_call", "Architect._salvage_retry",
+                                  # THE LEARNING GAME's filters (Oct 8): a lane that read the store's own lists here would
+                                  # show the architect the game arm and the quarantined lessons.
+                                  "Architect.visible", "Architect.graves", "Architect.unseen", "Architect.admitted_roots"),
+    # THE LEARNING GAME's filters in the strategist (Oct 8): the ids it may cite, the hidden years' rule.
+    "league/swarm/strategist.py": ("Strategist.hidden", "Strategist.known_ids"),
     # The model's tool calls parsed into the arguments `Researcher._execute` receives (the program among them).
     "league/swarm/claude_research.py": ("ToolCall", "tool_calls", "validate", "check_input", "_type_error", "resolve_name",
                                         "_object", "_finite"),

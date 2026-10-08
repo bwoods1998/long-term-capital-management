@@ -183,12 +183,15 @@ class FoldsAndArms(GameCase):
         self.assertAlmostEqual(sum(game.fold(x)[0] == 2020 for x in lineages) / 10000, 0.5, delta=0.015)
         for fraction in (0.5, 0.3):
             settings = on(arm_fraction=fraction)
+            c = game.cfg(settings)
             fams = [{"id": x, "lineage": x, "born_at": self.store.now(), "roots": ["SPY"]} for x in lineages]
-            share = sum(game.arm(self.store, f, settings) == "game" for f in fams) / 10000
+            share = sum(game._arm_of(f, c, self.t0) == "game" for f in fams) / 10000  # the hash alone: no arm kept yet
             self.assertAlmostEqual(share, fraction, delta=0.015)
-            self.assertTrue(all(game.arm(self.store, f, settings) in game.ARMS for f in fams[:50]))
-            self.assertEqual(game.arm(self.store, fams[7], settings) == "game",
+            self.assertTrue(all(game._arm_of(f, c, self.t0) in game.ARMS for f in fams[:50]))
+            self.assertEqual(game._arm_of(fams[7], c, self.t0) == "game",
                              canary.in_arm("ltcm-game-v1", "game-v1", fams[7]["lineage"], fraction))
+        f = {"id": "lineage-7", "lineage": "lineage-7", "born_at": self.store.now(), "roots": ["SPY"]}
+        self.assertEqual(game.arm(self.store, f, on(arm_fraction=0.5)), game._arm_of(f, game.cfg(on(arm_fraction=0.5)), self.t0))
 
     def test_a_child_has_its_parents_fold_and_arm(self):
         settings = on(arm_fraction=0.5)
@@ -198,6 +201,33 @@ class FoldsAndArms(GameCase):
             self.assertEqual(child["lineage"], mother["lineage"])
             self.assertEqual(game.fold(child["lineage"]), game.fold(mother["lineage"]))
             self.assertEqual(game.arm(self.store, child, settings), game.arm(self.store, mother, settings))
+
+    def test_a_familys_first_arm_is_kept_whatever_its_roots_or_the_settings_say(self):
+        """A researcher may change its family's roots (`researcher._admit` -> `update_family(roots=...)`, any of the 25):
+        the family stays in the arm it was given, hidden from the architect and the strategist, its graveyard row
+        quarantined, and the tournament's game rules (and so CONFIRM) still apply. A setting change (GO-WIDE's
+        `arm_fraction` 1.0, which is for new births) moves no family's arm either."""
+        settings = on(arm_fraction=0.5)
+        tour = Tournament(self.store, FakePool(), round_settings(arm_fraction=0.5), clock=self.clock)
+        played, control = self.family(arm_id("game", "keep")), self.family(arm_id("control", "keep"))
+        self.assertEqual((game.arm(self.store, played, settings), game.arm(self.store, control, settings)), ("game", "control"))
+        self.store.update_family(played["id"], roots=["SPY", "GLD"])
+        moved = self.store.family(played["id"])
+        self.assertEqual(moved["roots"], ["SPY", "GLD"])
+        self.assertEqual(game.arm(self.store, moved, settings), "game")
+        self.assertTrue(tour.played(moved), "its game rules hold: no Validation without a CONFIRM")
+        self.assertNotIn(played["id"], [f["id"] for f in game.visible_families(self.store, settings=settings)])
+        late = self.family(arm_id("game", "late"))  # its roots changed before anything gave it its arm
+        self.store.update_family(late["id"], roots=["SPY", "TLT"])
+        self.assertEqual(game.arm(self.store, self.store.family(late["id"]), settings), "game", "its birth roots decide")
+        self.store.retire_gym(played["id"], "retired under the learning game's rules", floor=0, source="test")
+        self.assertNotIn(played["id"], [r["family"] for r in game.visible_graveyard(self.store, limit=50, settings=settings)])
+        self.assertIn(played["id"], game.quarantined(self.store, settings))
+        wide = on(arm_fraction=1.0)
+        self.assertEqual(game.arm(self.store, control, wide), "control", "GO-WIDE is for new births")
+        self.assertEqual(game.arm(self.store, self.family(arm_id("control", "wide")), wide), "game")
+        child = self.family("keep-child", parent=control["id"])
+        self.assertEqual(game.arm(self.store, child, wide), "control", "a child keeps its lineage's arm")
 
     def test_legacy_born_before_t0_a_root_outside_the_core_five_the_game_off_or_no_t0(self):
         new = self.family("new-one")
@@ -225,7 +255,12 @@ class FoldsAndArms(GameCase):
                                "c_confirm": "x", "confirms_lineage": 7, "children_per_day": 100, "children_per_round": 60,
                                "hidden": ["2019-01-02", "2021-12-31"], "seen_from": "soon", "roots": "SPY"}})
         self.assertEqual((c["mode"], c["arm_fraction"], c["eta"], c["looks"], c["c_select"], c["c_confirm"]),
-                         ("shadow", 0.5, 1.0, 6, 1.0, 1.28))
+                         ("shadow", 0.0, 1.0, 6, 1.0, 1.28), "arm_fraction 0: no new lineage in the game arm")
+        self.assertEqual(game.cfg({"game": {"arm_fraction": -0.5}})["arm_fraction"], 0.0, "past a bound: the bound")
+        self.assertEqual(game.cfg({"game": {"looks": 4.9, "val_tries": 3.0}})["looks"], 4, "a count is a whole number")
+        self.assertEqual(game.cfg({"game": {"val_tries": 3.0}})["val_tries"], 3)
+        self.assertEqual(game.cfg({"game": {"roots": ["spy", "GLD", "QQQ", 7]}})["roots"], ["SPY", "QQQ"], "the core five only")
+        self.assertEqual(game.cfg({"game": {"roots": ["GLD"]}})["roots"], list(game.CORE))
         self.assertEqual((c["confirms_lineage"], c["children_per_day"], c["children_per_round"]), (3, 48, 48))
         self.assertEqual((c["hidden"], c["seen_from"], c["roots"]), (list(game.HIDDEN), game.SEEN_FROM, list(game.CORE)))
         self.assertEqual(game.cfg({"game": {"seen_from": "2020-01-02"}})["seen_from"], game.SEEN_FROM,
@@ -233,8 +268,11 @@ class FoldsAndArms(GameCase):
         self.assertEqual(game.cfg({"game": {"hidden": ["2020-03-02", "2021-06-30"]}})["hidden"], ["2020-03-02", "2021-06-30"])
         self.assertFalse(game.cfg(None)["enabled"])
         self.assertEqual(game.cfg({"game": {"arm_fraction": 2}})["arm_fraction"], 1.0)
-        self.assertIsNone(game.birth_roots({}))
-        self.assertEqual(game.birth_roots(self.settings), list(game.CORE))
+        self.assertIsNone(game.birth_roots(self.store, {}))
+        self.assertEqual(game.birth_roots(self.store, self.settings), list(game.CORE))
+        bare = SwarmStore(Path(self.dir.name) / "bare", clock=self.clock)
+        self.addCleanup(bare.close)
+        self.assertIsNone(game.birth_roots(bare, self.settings), "no T0 yet: births as today")
         self.assertEqual(game.cfg({"game": json.loads((Path(ci.REPO) / "league" / "swarm" / "policy.json").read_text())["game"]}),
                          {**game.cfg({"game": {**game.DEFAULTS}}), "enabled": True, "mode": "gate"},
                          "the committed block is the defaults, switched on in gate mode")
@@ -362,6 +400,51 @@ class Ladder(GameCase):
         _, again = self.look("ladder-e", 1.1)
         self.assertIsNotNone(again["look"], "no look in flight: the next best is looked at")
 
+    def test_a_program_the_gym_ends_on_the_hidden_years_is_a_landed_look_never_a_retry(self):
+        """Disqualified, no data or refused (the Gym's verdicts on the PROGRAM, the same on every attempt): the look lands
+        at once with both years ineligible, counts against the four, bars its program, and is the eta reference."""
+        fam = self.family("ladder-z")
+        for i, status in enumerate(game.PROGRAM_ENDS):
+            _, out = self.look("ladder-z", 1.0 + i)
+            self.job_of(out["look"]).late({**hidden(2.0, 2.0), "status": status, "reason": "no data in 2020"})
+            [row] = game._rows(self.store, "seq=?", (out["look"],))
+            self.assertEqual((row["status"], row["tier"], row["attempts"], row["errors"]), ("ok", "FAIL", 1, 0), status)
+            self.assertEqual(game.select_view(row)["F"], float("-inf"))
+            self.clock.advance(3 * 3600)
+            self.assertEqual(game.requeue_stale(self.store, self.settings, self.pool)["requeued"], 0, status)
+        self.assertEqual(game.looks_used(self.store, fam), 3)
+        self.assertIn("eta", self.look("ladder-z", 3.2)[1]["why"], "the last landed look is the reference")
+        report = game.metrics(self.store, draws=0)
+        self.assertEqual(report["R1"]["failure_rate"]["errors"], 0, "no plumbing failure")
+
+    def test_a_best_that_met_the_triggers_while_a_look_was_out_is_looked_at_when_it_lands(self):
+        """The ladder's triggers are a state: a new best whose profitable 1.5x run landed while the family's look was out
+        is looked at as that look lands (and by the round's `recheck` otherwise), from its stored 1.5x run."""
+        self.family("ladder-y")
+        _, first = self.look("ladder-y", 1.0)
+        n = self.best("ladder-y", 2.0)
+        self.store.add_run("ladder-y", n, {"run_id": f"r15-{n}", "status": "ok", "trials": 1,
+                                           "summary": {"pnl": 25.0, "train_from": game.SEEN_FROM}},
+                           window="train", stress=1.5, purpose="robustness")
+        self.assertIn("in flight", game.maybe_look(self.researcher, "ladder-y", n, seen_run())["why"])
+        self.land(first["look"], 0.2, 0.2)
+        [second] = [r for r in game._rows(self.store, "family=?", ("ladder-y",)) if r["seq"] != first["look"]]
+        self.assertEqual((second["version"], second["status"]), (n, "queued"))
+        self.land(second["seq"], 0.3, 0.3)
+        self.assertEqual(game.recheck(self.store, self.settings, self.pool), [], "its program was looked at")
+        m = self.best("ladder-y", 3.0)  # a best the round finds: its 1.5x run landed, no look of it out
+        self.store.add_run("ladder-y", m, {"run_id": f"r15-{m}", "status": "ok", "trials": 1,
+                                           "summary": {"pnl": 25.0, "train_from": game.SEEN_FROM}},
+                           window="train", stress=1.5, purpose="robustness")
+        [third] = game.recheck(self.store, self.settings, self.pool)
+        self.assertEqual(self.store._one("SELECT version FROM game_looks WHERE seq=?", (third,))["version"], m)
+        lost = self.best("ladder-y", 9.0)  # its 1.5x run lost money: never looked at
+        self.store.add_run("ladder-y", lost, {"run_id": f"r15-{lost}", "status": "ok", "trials": 1,
+                                              "summary": {"pnl": -5.0, "train_from": game.SEEN_FROM}},
+                           window="train", stress=1.5, purpose="robustness")
+        self.land(third, 0.1, 0.1)
+        self.assertEqual(len(game._rows(self.store, "family=?", ("ladder-y",))), 3)
+
     def test_a_look_lost_to_a_restart_is_queued_again_and_one_in_the_pool_is_not(self):
         self.family("ladder-f")
         _, out = self.look("ladder-f", 1.0)
@@ -410,6 +493,7 @@ class ThroughThePool(GameCase):
         pool.run_batch(box, pool._take(box))
         self.assertEqual((calls[-1]["window"], calls[-1]["start"], calls[-1]["end"], calls[-1]["stress"]),
                          ("train", "2020-01-02", "2021-12-31", 1.5))
+        self.assertEqual(calls[-1]["split"], 8, "split as the retro split two years (not 16, the 2020-24 span's)")
         [row] = game._rows(self.store, "seq=?", (out["look"],), confirms=True)
         self.assertEqual((row["status"], row["tier"], game.confirm_view(row)["confirmed"]), ("ok", "PASS", True))
         self.assertEqual(game.candidate(self.store, fam), row["version"])
@@ -526,7 +610,12 @@ class TournamentReads(GameCase):
             self.store.add_run("tour-a", v, {"run_id": f"val-{v}-{self.tags}", "status": "ok", "trials": 1, "summary": {}},
                                window="validation", stress=1.0, purpose="validation")
             self.tags += 1
-        self.assertEqual(game.validations_left(self.store, fam, self.settings), 0, "two versions validated: two tries")
+        self.assertEqual(game.validations_left(self.store, fam, self.settings), 1,
+                         "one CONFIRMED version validated (twice is one try); a version never CONFIRMED is no try")
+        m = self.store._one("SELECT version FROM game_looks WHERE seq=?", (self.plant(fam, 2.0, 2.0, confirm=True),))["version"]
+        self.store.add_run("tour-a", m, {"run_id": f"val-{m}-{self.tags}", "status": "ok", "trials": 1, "summary": {}},
+                           window="validation", stress=1.0, purpose="validation")
+        self.assertEqual(game.validations_left(self.store, fam, self.settings), 0, "two CONFIRMED versions validated: two tries")
         control = self.family("tour-b")
         self.assertFalse(game.seen_robust_ok(self.store, control, 1))
 
@@ -664,7 +753,9 @@ class Retirement(GameCase):
         self.assertIsNone(game.retire_reason(self.store, self.store.family("ret-a"), self.settings))
         self.plant(fam, None, 0.0)
         reason = game.retire_reason(self.store, self.store.family("ret-a"), self.settings)
-        self.assertEqual(reason, "spent its four private looks without a pass")
+        self.assertEqual(reason, game.RETIRED, "the public words are the same for every rule")
+        self.assertEqual(game.retire_rule(self.store, self.store.family("ret-a"), self.settings),
+                         (1, "spent its four private looks without a pass"))
         other = self.family("ret-b")
         for f in (0.5, 1.0, -1.0, 1.3):
             self.plant(other, f, 0.0)
@@ -675,20 +766,46 @@ class Retirement(GameCase):
         self.plant(fam, 2.0, 0.5, confirm=False)
         self.assertIsNone(game.retire_reason(self.store, self.store.family("ret-c"), self.settings))
         self.plant(fam, 2.0, 0.4, confirm=False)
-        self.assertEqual(game.retire_reason(self.store, self.store.family("ret-c"), self.settings),
-                         "failed its private confirmation twice")
+        self.assertEqual(game.retire_rule(self.store, self.store.family("ret-c"), self.settings),
+                         (2, "failed its private confirmation twice"))
+        self.assertEqual(game.retire_reason(self.store, self.store.family("ret-c"), self.settings), game.RETIRED)
+        # Two failed reads, the spec's number, whatever `confirms_family` caps the reads at (one: its one read retires it).
+        three = on(confirms_family=3)
+        self.assertEqual(game.retire_rule(self.store, self.store.family("ret-c"), three)[0], 2)
+        once = self.family("ret-c1")
+        self.plant(once, 2.0, 0.5, confirm=False)
+        self.assertIsNone(game.retire_rule(self.store, self.store.family("ret-c1"), self.settings))
+        self.assertEqual(game.retire_rule(self.store, self.store.family("ret-c1"), on(confirms_family=1))[0], 2)
 
     def test_two_validation_tries_both_failed(self):
         fam = self.family("ret-d")
-        for v, passed in ((1, False), (2, False)):
+        versions = [self.store._one("SELECT version FROM game_looks WHERE seq=?", (self.plant(fam, 2.0, 2.0, confirm=True),))
+                    ["version"] for _ in range(2)]
+        for v in versions:
             self.store.add_run("ret-d", v, {"run_id": f"val-ret-{v}", "status": "ok", "trials": 1, "summary": {}},
                                window="validation", stress=1.0, purpose="validation")
-        self.store.set_state("ret-d", validation_verdicts={"1": {"passed": False}, "2": {"passed": True}})
+        first, second = (str(v) for v in versions)
+        self.store.set_state("ret-d", validation_verdicts={first: {"passed": False}, second: {"passed": True}})
         self.assertIsNone(game.retire_reason(self.store, self.store.family("ret-d"), self.settings), "one passed")
-        self.store.set_state("ret-d", validation_verdicts={"1": {"passed": False}, "2": {"passed": False}})
-        reason = game.retire_reason(self.store, self.store.family("ret-d"), self.settings)
-        self.assertEqual(reason, "used its two Validation tries")
-        self.assertNotRegex(reason, r"\d")
+        self.store.set_state("ret-d", validation_verdicts={first: {"passed": False}, second: {"passed": False}})
+        rule = game.retire_rule(self.store, self.store.family("ret-d"), self.settings)
+        self.assertEqual(rule, (3, "used its two Validation tries"))
+        self.assertNotRegex(rule[1] + game.RETIRED, r"\d")
+
+    def test_validations_under_todays_rules_are_no_tries(self):
+        """Shadow first, then gate (the WEAK GO path): the family's validations in "shadow" (today's rules validate every
+        new best) are no tries of the game's: it keeps both and is not retired by rule 3."""
+        fam = self.family("ret-s")
+        for v in (self.version("ret-s")["n"], self.version("ret-s")["n"]):  # validated under today's rules, both failed
+            self.store.add_run("ret-s", v, {"run_id": f"val-shadow-{v}", "status": "ok", "trials": 1, "summary": {}},
+                               window="validation", stress=1.0, purpose="validation")
+        self.store.set_state("ret-s", validation_verdicts={"1": {"passed": False}, "2": {"passed": False}})
+        self.assertEqual(game.validations_left(self.store, fam, self.settings), 2)
+        self.assertIsNone(game.retire_rule(self.store, self.store.family("ret-s"), self.settings))
+        n = self.store._one("SELECT version FROM game_looks WHERE seq=?", (self.plant(fam, 2.0, 2.0, confirm=True),))["version"]
+        self.assertEqual(game.candidate(self.store, self.store.family("ret-s")), n)
+        tour = Tournament(self.store, RoundPool(), round_settings(), clock=self.clock)
+        self.assertTrue(tour.game_try_left(self.store.family("ret-s"), n), "its CONFIRMED version can reach Validation")
 
     def test_each_rule_respects_the_floor_and_only_the_game_arm_in_gate_mode_retires(self):
         fam = self.family("ret-e")
@@ -753,10 +870,20 @@ class Visibility(GameCase):
         names = [r["family"] for r in game.visible_graveyard(store, "calls", limit=10, settings=settings)]
         self.assertEqual(sorted(names), sorted([old, sides["control"]]))
         self.assertEqual(game.quarantined(store, settings), {learned, sides["game"]}, "for the readers of the table itself")
-        self.assertEqual(game.quarantined(store, {}), frozenset())
-        self.assertEqual([r["family"] for r in game.visible_graveyard(store, "", limit=10, settings={})],
-                         [r["family"] for r in store.graveyard("", limit=10)], "the game off: the store's own read")
-        self.assertEqual(game.visible_graveyard(store, "calls", limit=10, settings={}), store.graveyard("calls", limit=10))
+        for off in ({}, on(arm_fraction=0.5, enabled=False)):  # a REVERT or a rollback: the game off, its T0 kept
+            self.assertEqual(game.quarantined(store, off), {learned, sides["game"]}, "the game off releases nothing it hid")
+            self.assertEqual(sorted(r["family"] for r in game.visible_graveyard(store, "calls", limit=10, settings=off)),
+                             sorted([old, sides["control"]]))
+            self.assertNotIn(sides["game"], [f["id"] for f in game.visible_families(store, settings=off)])
+            self.assertNotIn(learned, [f["id"] for f in game.visible_families(store, settings=off)])
+        bare = SwarmStore(root / "bare", clock=clock)
+        self.addCleanup(bare.close)
+        bare.add_family({"id": "bare-x", "mechanism": MECHANISM, "structure": "debit_vertical", "roots": ["SPY"]}, origin="a")
+        bare.retire_gym("bare-x", "a lesson about calls", floor=0, source="test")
+        self.assertEqual(game.visible_graveyard(bare, "calls", limit=10, settings=settings), bare.graveyard("calls", limit=10),
+                         "a store that never had a T0: the store's own read")
+        self.assertEqual(game.quarantined(bare, settings), frozenset())
+        self.assertEqual(game.visible_families(bare, settings=settings), bare.families())
         kept = game.visible_graveyard(store, "", 1, settings=settings)
         self.assertEqual(len(kept), 1)
         self.assertEqual(set(kept[0]), set(store.graveyard("", limit=1)[0]), "the store's row shape")
@@ -794,7 +921,8 @@ class Visibility(GameCase):
         names = [f["id"] for f in game.visible_families(self.store, alive=True, settings=self.settings)]
         self.assertEqual(sorted(names), sorted([control["id"], legacy["id"]]))
         self.assertNotIn(played["id"], names)
-        self.assertEqual(game.visible_families(self.store, alive=True, settings={}), self.store.families(alive=True))
+        self.assertEqual([f["id"] for f in game.visible_families(self.store, alive=True, settings={})], names,
+                         "the game off after T0: still hidden")
 
     def test_status_and_brief_carry_no_hidden_figure_year_or_result(self):
         played = self.by_arm("game", "txt")
@@ -816,11 +944,17 @@ class Visibility(GameCase):
 class ControlLooks(GameCase):
     settings = on(arm_fraction=0.5)
 
+    def validated(self, fid, n):
+        """A Validation of version `n` (the tournament's row) and the family's validated version."""
+        self.store.add_run(fid, n, {"run_id": f"val-{fid}-{n}", "status": "ok", "trials": 1, "summary": {}},
+                           window="validation", stress=1.0, purpose="validation")
+        self.store.set_state(fid, validation_version=n)
+
     def test_control_looks_at_each_validated_version_once_and_reads_nothing(self):
         fid = next(f"ctl-{i}" for i in range(200) if not canary.in_arm("ltcm-game-v1", "game-v1", f"ctl-{i}", 0.5))
         fam = self.family(fid)
         n = self.best(fid, 1.0)
-        self.store.set_state(fid, validation_version=n)
+        self.validated(fid, n)
         [seq] = game.shadow_validated(self.store, self.settings, self.pool)
         row = self.store._one("SELECT * FROM game_looks WHERE seq=?", (seq,))
         self.assertEqual((row["arm"], row["role"], row["seen_score"]), ("control", "validated", 1.0))
@@ -829,6 +963,45 @@ class ControlLooks(GameCase):
         self.assertEqual(self.store._all("SELECT * FROM game_confirms"), [], "control's looks are records only")
         self.assertEqual(game.looks_used(self.store, fam), 0, "a validated look counts against nothing")
         self.assertEqual(game.shadow_validated(self.store, {}, self.pool), [])
+
+    def test_no_ladder_look_while_a_validated_look_is_out(self):
+        fid = next(f"ctl-{i}" for i in range(200) if not canary.in_arm("ltcm-game-v1", "game-v1", f"ctl-{i}", 0.5))
+        self.family(fid)
+        n = self.best(fid, 1.0)
+        self.validated(fid, n)
+        [seq] = game.shadow_validated(self.store, self.settings, self.pool)
+        m = self.best(fid, 2.0)
+        self.assertIn("in flight", game.maybe_look(self.researcher, fid, m, seen_run())["why"], "one look of a family at a time")
+        self.land(seq, 0.1, 0.1)
+        self.assertIsNotNone(game.maybe_look(self.researcher, fid, m, seen_run())["look"])
+
+    def test_every_validated_version_and_never_one_again_after_its_look_failed(self):
+        """Control looks at every version the tournament validated, not only its latest; a validated version whose look
+        failed (three attempts) or whose program the Gym ended is never looked at again (one look a program)."""
+        fid = next(f"ctl-{i}" for i in range(200) if not canary.in_arm("ltcm-game-v1", "game-v1", f"ctl-{i}", 0.5))
+        self.family(fid)
+        first = self.best(fid, 1.0)
+        self.validated(fid, first)
+        second = self.best(fid, 1.5)
+        self.validated(fid, second)  # validated again before a round read the first
+        [a] = game.shadow_validated(self.store, self.settings, self.pool)
+        self.assertEqual(game.shadow_validated(self.store, self.settings, self.pool), [], "one look of a family out at a time")
+        for attempt in range(3):
+            self.job_of(a).late(hidden(2.0, 2.0, status="error"))
+            self.clock.advance(2 * 3600 + 1)
+            game.requeue_stale(self.store, self.settings, self.pool)
+        self.assertEqual(game._rows(self.store, "seq=?", (a,))[0]["status"], "failed")
+        [b] = game.shadow_validated(self.store, self.settings, self.pool)
+        versions = {self.store._one("SELECT version FROM game_looks WHERE seq=?", (q,))["version"] for q in (a, b)}
+        self.assertEqual(versions, {first, second}, "the version validated first is looked at too")
+        self.job_of(b).late(hidden(2.0, 2.0, status="disqualified"))
+        self.assertEqual(game._rows(self.store, "seq=?", (b,))[0]["status"], "ok", "the Gym ended the program: it landed")
+        jobs = len(self.pool.jobs)
+        for _ in range(3):
+            self.clock.advance(3600)
+            self.assertEqual(game.shadow_validated(self.store, self.settings, self.pool), [], "never a second look")
+            game.requeue_stale(self.store, self.settings, self.pool)
+        self.assertEqual(len(self.pool.jobs), jobs, "no hidden job more")
 
 
 # ------------------------------------------------------------------------------------------------ the operator's metrics
@@ -849,7 +1022,7 @@ class Metrics(GameCase):
         self.assertEqual(a, b)
         text = json.dumps(a, allow_nan=False)  # no infinity or NaN anywhere
         self.assertIn("R6", text)
-        both = [game._operator_years(r) for r in game._rows(self.store) if r["status"] == "ok"]
+        both = [game._operator_years(r) for r in game._rows(self.store, operator=True) if r["status"] == "ok"]
         self.assertAlmostEqual(a["R2"]["rho_hidden"], game.spearman([x for x, _ in both], [y for _, y in both]), places=12)
         self.assertEqual(a["R5"]["all"]["children"]["by_op"]["mutate"], len(kids))
         self.assertTrue(a["R1"]["leak"]["passed"])
@@ -859,20 +1032,54 @@ class Metrics(GameCase):
 
     def test_the_leak_scan_finds_a_hidden_year_or_figure_in_a_conversation(self):
         fam = self.family("leak-a")
-        self.plant(fam, 1.3721, 0.0)
+        self.plant(fam, 1.3721, 0.0)  # its SELECT year: t_net 10.0000, t_alpha and F 1.3721
         self.store.save_convo(fam["id"], [{"role": "tool", "content": "ok"}])
         self.assertTrue(game.metrics(self.store, draws=0)["R1"]["leak"]["passed"])
-        self.store.save_convo(fam["id"], [{"role": "tool", "content": "F was 1.3721 on 2021-03-01"}])
+        self.store.save_convo(fam["id"], [{"role": "tool", "content": "F was 1.3721 (t 10.0000) on 2021-03-01"}])
         hits = game.metrics(self.store, draws=0)["R1"]["leak"]["hits"]
         self.assertEqual(sorted(h["kind"] for h in hits), ["hidden figure", "hidden year"])
+
+    def test_the_leak_scan_reads_what_the_researcher_was_shown_and_no_figure_by_chance(self):
+        """R1(a) with no leak passes on a realistic conversation: tool outputs full of four-place figures (one of them a
+        hidden figure's digits by chance, others holding them inside longer numbers), the model's own words naming 2020,
+        and the library's answer dated 2021. Two figures of one look in one shown text is a hit."""
+        fam = self.family("leak-b")
+        self.plant(fam, 1.4181, 0.0)  # t_net 10.0000 and t_alpha 1.4181 on its SELECT year
+        rng = random.Random(5)
+        run = {"status": "ok", "summary": {"pnl": 343.4697, "t_daily": 0.8123, "trades": 812},
+               "drift": {"pooled": {"t": 1.4181, "alpha_usd": 5759840935.9851}},  # 1.4181 alone: chance, not a leak
+               "by_year": {str(y): {"pnl": round(rng.uniform(-500, 500), 4), "t_daily": round(rng.gauss(0, 1), 4)}
+                           for y in (2022, 2023, 2024)},
+               "daily": [[f"2023-01-{d:02d}", round(rng.gauss(0, 50), 4)] for d in range(1, 29)]}
+        cycles = [{"cycle": 2, "items": [
+            {"role": "user", "content": "Cycle 2. Lineage trials: 12."},
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "In 2020-03-16 calls crashed."}]},
+            {"type": "function_call", "call_id": "c1", "name": "gym_run", "arguments": "{}"},
+            {"type": "function_call_output", "call_id": "c1", "output": json.dumps(run)},
+            {"type": "function_call", "call_id": "c2", "name": "literature", "arguments": "{}"},
+            {"type": "function_call_output", "call_id": "c2", "output": json.dumps({"first_posted": "2021-02-01"})}]}]
+        self.store.save_convo(fam["id"], cycles, {"call_id": "c3", "arguments": "{\"note\": \"2021-05-05\"}"})
+        leak = game.metrics(self.store, draws=0)["R1"]["leak"]
+        self.assertTrue(leak["passed"], leak)
+        cycles[0]["items"].append({"type": "function_call_output", "call_id": "c1",
+                                   "output": json.dumps({"t_net": 10.0, "t_alpha": 1.4181, "pooled": "10.0000 and 1.4181"})})
+        self.store.save_convo(fam["id"], cycles)
+        self.assertEqual([h["kind"] for h in game.metrics(self.store, draws=0)["R1"]["leak"]["hits"]], ["hidden figure"])
 
 
 # ------------------------------------------------------------------------------------------------ 13. the CI wall
 class Wall(unittest.TestCase):
     def test_game_py_is_protected_by_the_updater_and_the_gateway(self):
+        from league.swarm import harness_lanes
+
         self.assertIn("league/swarm/game.py", ci.FORBIDDEN)
         source = (Path(ci.REPO) / "gateway" / "lib" / "protected.mjs").read_text(encoding="utf-8")
         self.assertIn("'league/swarm/game.py'", source)
+        self.assertIn(("league/swarm/game.py", "sealed"), harness_lanes.PROTECTED, "no engineer lane edits the game")
+        frozen = harness_lanes.FROZEN_SYMBOLS
+        self.assertLessEqual({"Architect.visible", "Architect.graves", "Architect.unseen", "Architect.admitted_roots"},
+                             set(frozen["league/swarm/architect.py"]), "nor the architect's filters")
+        self.assertLessEqual({"Strategist.hidden", "Strategist.known_ids"}, set(frozen["league/swarm/strategist.py"]))
 
     def test_the_tables_are_append_only(self):
         with tempfile.TemporaryDirectory() as d:
@@ -883,7 +1090,7 @@ class Wall(unittest.TestCase):
                 for sql in ("UPDATE game_children SET op='crossover'", "DELETE FROM game_children"):
                     with self.assertRaises(Exception):
                         store._exec(sql)
-                for table in ("game_looks", "game_results", "game_confirms"):
+                for table in ("game_looks", "game_results", "game_confirms", "game_arms"):
                     names = {r["name"] for r in store._all("SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name=?",
                                                          (table,))}
                     self.assertEqual(names, {f"{table}_no_update", f"{table}_no_delete"})
@@ -894,7 +1101,7 @@ class Wall(unittest.TestCase):
         source = (Path(ci.REPO) / "league" / "swarm" / "game.py").read_text()
         imports = re.findall(r"^\s*(?:from|import) ([\w.]+)", source, re.M)
         allowed = {"__future__", "datetime", "hashlib", "json", "math", "random", "re", "threading", "time", "typing", ".",
-                   ".pool", "..gym.results", ".researcher", ".store"}
+                   ".pool", "..gym.results", ".researcher", ".store", ".evaluator", ".library"}
         self.assertEqual(set(imports) - allowed, set())
 
 
@@ -1050,8 +1257,9 @@ class TournamentGate(GameCase):
         self.settings["population"]["floor"] = 5
         self.assertEqual(self.tour.retirements(self.store.families(alive=True)), [], "the floor holds it")
         self.settings["population"]["floor"] = 0
-        self.assertEqual(self.tour.retirements(self.store.families(alive=True)),
-                         [{"family": "tg-f", "why": "spent its four private looks without a pass"}])
+        self.assertEqual(self.tour.retirements(self.store.families(alive=True)), [{"family": "tg-f", "why": game.RETIRED}])
+        [cause] = [e["payload"]["cause"] for e in self.store.events_after(0) if e["kind"] == "swarm.retired" and e["family"] == "tg-f"]
+        self.assertEqual(cause, game.RETIRED, "the public cause names no rule: which one would tell a SELECT outcome")
         self.assertEqual(self.store.family("tg-f")["band"], "retired")
         [row] = [r for r in self.store.graveyard(limit=10) if r["family"] == "tg-f"]
         self.assertNotRegex(row["lesson"], r"20(20|21)|PASS|ALIVE|FAIL")
@@ -1086,6 +1294,50 @@ class TournamentGate(GameCase):
         self.assertIsNone(shadow.idle_why(self.store.family("tg-k")), "shadow: today's rules")
         self.assertIsNotNone(self.tour.idle_pass()["retired"], "the idle pass reads the same rule")
         self.assertIn("tg-k", [r["family"] for r in self.store.graveyard(limit=20)])
+
+    def test_an_older_confirmed_version_not_yet_judged_gets_the_second_try(self):
+        """Two CONFIRMED versions before a round: the newer is validated, then the older (never judged) is the candidate
+        and takes the second try; a Validation out keeps its candidate (`judge`'s stale check)."""
+        fam = self.family("tg-m")
+        older = self.looked(self.plant(fam, 2.0, 2.0, confirm=True))
+        newer = self.looked(self.plant(fam, 2.0, 2.0, confirm=True))
+        self.assertEqual(self.tour.candidate_version(self.store.family("tg-m")), newer)
+        self.tour.validate(self.store.families(alive=True))
+        self.assertEqual(self.tour.candidate_version(self.store.family("tg-m")), older, "judged: the older is next")
+        self.tour.validate(self.store.families(alive=True))
+        self.assertEqual(self.gym.validations(), [("tg-m", newer), ("tg-m", older)])
+        self.assertEqual(game.validations_left(self.store, fam, self.settings), 0)
+        self.assertEqual(self.tour.candidate_version(self.store.family("tg-m")), newer, "every one judged: the latest read")
+
+    def test_the_wait_spares_no_confirmed_version_that_can_never_be_validated(self):
+        """A CONFIRMED version with no eligible Train run under the evaluator in force (an adoption since its look) waits
+        in `validate` for ever: the dormancy clause is not spared for it."""
+        from league.swarm.evaluator import KEY
+
+        self.settings["researcher"]["dormant_cycles"] = 5
+        fam = self.family("tg-n")
+        self.store.put(KEY, {"image": "img", "bundle": "b", "execution": "x"})
+        n = self.seen_best("tg-n", 1.0)
+        self.store.set_state("tg-n", dormant_cycles=9)
+        self.land(game.maybe_look(self.researcher, "tg-n", n, seen_run())["look"], 2.0, 2.0)  # CONFIRMED
+        self.assertEqual(game.candidate(self.store, self.store.family("tg-n")), n)
+        self.assertIsNone(self.tour.idle_why(self.store.family("tg-n")), "it can be validated: spared")
+        self.store.put(KEY, {"image": "img-2", "bundle": "b2", "execution": "y"})  # an adoption: its Train run is stale
+        self.assertFalse(self.tour.game_train_ok(self.store.family("tg-n"), n))
+        self.assertIn("made no new Gym evaluation", self.tour.idle_why(self.store.family("tg-n")))
+        self.assertIsNotNone(fam)
+
+    def test_a_game_arm_family_is_never_forked_and_the_round_names_it_waiting(self):
+        played, control = self.family("tg-o"), self.family("tg-p", roots=("TSLA",))
+        for fid in ("tg-o", "tg-p"):
+            self.store.update_family(fid, validations=1)
+            self.store.set_state(fid, validation_numbers={"mean": 0.05, "t": 3.0, "sharpe_daily": 0.2, "quarters": "4/4"})
+        born = self.tour.forks(self.store.families(alive=True))
+        self.assertEqual([self.store.family(b)["parent"] for b in born], ["tg-p"], "the legacy family forks; the game's never")
+        self.best("tg-o", 2.0)
+        out = self.tour.validate(self.store.families(alive=True))
+        self.assertEqual(out["waiting_game"], ["tg-o"], "no CONFIRMED version: owed no Validation")
+        self.assertIsNotNone(played and control)
 
     def test_a_round_bears_the_games_children_and_survives_a_game_error(self):
         fam = self.family("tg-l")
@@ -1284,6 +1536,32 @@ class ResearcherLeaks(GameCase):
         self.assertEqual(report["R1"]["leak"]["families"], 1)
 
 
+class ResearcherParent(ResearcherLeaks):
+    """7a for a parent (the review's B2): its status, brief and the views of its own runs are byte-identical before and
+    after the game bears it a child that researches (its trials, a mechanism verdict)."""
+
+    def test_nothing_a_game_researcher_is_shown_carries_a_hidden_year_or_figure(self):  # pragma: no cover - the parent's
+        pass
+
+    def test_a_parents_status_and_views_do_not_move_when_the_game_bears_it_a_child(self):
+        self.landed_look()
+        researcher = self.real()
+        best = self.store.family(self.fid)["state"]["best_train_run"]
+
+        def shown():
+            fam = self.store.family(self.fid)
+            return {"status": researcher.status(fam), "brief": researcher.brief(fam),
+                    "run": json.dumps(researcher._local_tool(fam, "read_run", {"run_id": best, "section": "summary"}, {})),
+                    "mechanism": researcher.mechanism_lineage(self.fid)}
+
+        before = shown()
+        self.assertIn("Lineage trials: ", before["status"])
+        [child] = game.reproduce(self.store, self.settings)
+        self.store.update_family(child, trials=40)
+        self.assertEqual(shown(), before)
+        self.assertNotIn(child, json.dumps(shown()))
+
+
 class ImportWall(unittest.TestCase):
     """7b: only the named modules import the game, and no module but game.py reads its tables."""
 
@@ -1296,7 +1574,7 @@ class ImportWall(unittest.TestCase):
 
         repo = Path(ci.REPO)
         importers, readers = set(), set()
-        tables = re.compile(r"\bgame_(?:looks|results|confirms|children)\b")
+        tables = re.compile(r"\bgame_(?:looks|results|confirms|children|arms)\b")
         for path in sorted([*(repo / "league").rglob("*.py"), *(repo / "scripts").rglob("*.py"), *(repo / "ltcm").rglob("*.py")]):
             rel = path.relative_to(repo).as_posix()
             if rel.startswith("league/tests/") or rel == "league/swarm/game.py" or "/__pycache__/" in rel:
@@ -1363,7 +1641,7 @@ def world(root, *, extra, settings, clock):
     tsla = born("nw-tsla", roots=("TSLA",))
     clock.advance(3600)
     store.retire_gym(buried, "Refuted: the calls on a gap never paid", floor=0, source="test")
-    board = [{"family": fid, "band": "gym", "share": 0.2, "structure": "debit_vertical", "roots": ["SPY"], "revisions": 3,
+    board = [{"family": fid, "band": "gym", "share": 0.25, "structure": "debit_vertical", "roots": ["SPY"], "revisions": 3,
               "lineage_trials": 12, "best_train": 1.25, "validation": None, "gate_ready": False, "closeable": True}
              for fid in (*control, legacy, tsla)]
     if extra:
@@ -1384,7 +1662,9 @@ def world(root, *, extra, settings, clock):
                         (seq, store.now(), f_conf, 1 if f_conf >= 1.28 else 0))
         [child] = game.reproduce(store, {**settings, "game": {**settings["game"], "crossover_share": 0.0}}, clock=clock)
         store.retire_gym(gone, "spent its four private looks without a pass; ZEBRA 2021-03-01 F 3.1415", floor=0, source="test")
-        board += [{**board[0], "family": fid, "share": 0.1} for fid in (played, child)]
+        # The game arm's rows take a fifth of the shares: every visible row's falls from 0.25 to 0.2 (as each child born
+        # dilutes them), which the readers' renormalized shares (`game.visible_shares`) never show.
+        board = [{**r, "share": 0.2} for r in board] + [{**board[0], "family": fid, "share": 0.1} for fid in (played, child)]
     store.put("leaderboard", {"at": clock(), "board": board, "totals": {}})
     return store
 
@@ -1428,10 +1708,39 @@ class NonInterference(unittest.TestCase):
         for key in plain:
             self.assertEqual(played[key], plain[key], key)
         text = json.dumps(plain)
+        self.assertIn('"research_share": 0.25', plain["prompt"], "the shares over the rows it may read")
         self.assertIn("calls never paid", text, "a visible lesson is read")
         self.assertNotIn("ZEBRA", text, "no quarantined lesson: neither the hidden years' learner's nor the game arm's")
         self.assertNotIn("nw-g", text)
         self.assertIsNone(HIDDEN_TEXT.search(text))
+
+
+class BeforeT0(unittest.TestCase):
+    """While the deploy waits for its T0 (the game on, the House's span still 2020-24), the architect's births, the
+    strategist's rule and the input card are as today: they follow the game's start (`game.started`), not its switch."""
+
+    def test_the_waiting_game_changes_nothing(self):
+        from league.swarm.architect import Architect
+        from league.swarm.strategist import Strategist
+        from league.tests.test_swarm_strategist import FakeRouter
+
+        settings = round_settings()
+        settings["gym"]["roots"] = ["SPY", "QQQ", "TSLA"]
+        with tempfile.TemporaryDirectory() as d:
+            clock = Clock()
+            store = SwarmStore(Path(d), clock=clock)
+            try:
+                architect = Architect(store, FakeRouter(), settings, clock=clock)
+                strategist = Strategist(store, FakeRouter(), settings, clock=clock, architect=architect)
+                self.assertEqual((architect.admitted_roots(), strategist.hidden()), (["SPY", "QQQ", "TSLA"], ()), "no T0")
+                game.t0(store, settings)
+                store.put("train_objective", "worst-train-year-v1@2020-01-02")
+                self.assertEqual((architect.admitted_roots(), strategist.hidden()), (["SPY", "QQQ", "TSLA"], ()),
+                                 "a span that shows the hidden years: nobody plays")
+                store.put("train_objective", "worst-train-year-v1")
+                self.assertEqual((architect.admitted_roots(), strategist.hidden()), (list(game.CORE), game.HIDDEN_YEARS))
+            finally:
+                store.close()
 
 
 class AgendaYears(unittest.TestCase):
@@ -1508,7 +1817,7 @@ class QuarantineReaders(unittest.TestCase):
                                                                              {"game": {**settings["game"], "enabled": True}}) == "game"}
                     self.assertEqual(len(hidden_ids), 2, "the learner of the hidden years and the game-arm family")
                     every = {r["family"] for r in store._all("SELECT family FROM graveyard")}
-                    want = every - hidden_ids if enabled else every
+                    want = every - hidden_ids  # the game off after T0 (a REVERT, a rollback) releases nothing it hid
                     architect = Architect(store, FakeRouter(), settings, clock=clock)
                     tool = Researcher._local_tool(types.SimpleNamespace(store=store, settings=settings), {"id": "x"}, "graveyard",
                                                   {"query": ""}, {})
@@ -1636,12 +1945,18 @@ class Report(GameCase):
         rows, who = self.planted()
         out = game_report.report(Path(self.dir.name), settings=self.settings, now=self.clock(), draws=300, seed=3)
         places = 9
-        # R1: D1 over the founders' looks with both years eligible, the failure rate, the ineligible share.
-        d = [r["sel"] - r["conf"] for r in rows if r["gen"] == 0 and r["sel"] is not None and r["conf"] is not None]
+        # R1: D1 over the founders' looks with both years eligible, by lineage (each lineage's mean one draw), the failure
+        # rate, the ineligible share.
+        lines = {}
+        for r in rows:
+            if r["gen"] == 0 and r["sel"] is not None and r["conf"] is not None:
+                lines.setdefault(r["family"], []).append(r["sel"] - r["conf"])  # each founder is its own lineage here
+        d = [_mean(v) for _, v in sorted(lines.items())]
         mean = _mean(d)
         se = math.sqrt(sum((x - mean) ** 2 for x in d) / (len(d) - 1) / len(d))
         r1 = out["R1"]
-        self.assertEqual(r1["d1_founders"]["n"], len(d))
+        self.assertEqual((r1["d1_founders"]["n"], r1["d1_founders"]["lineages"]), (sum(len(v) for v in lines.values()), len(d)))
+        self.assertTrue(r1["d1_founders"]["passed"], "under twenty lineages it is not judged")
         self.assertAlmostEqual(r1["d1_founders"]["mean"], mean, places=places)
         self.assertAlmostEqual(r1["d1_founders"]["se"], se, places=places)
         self.assertAlmostEqual(r1["d1_founders"]["z"], mean / se, places=places)
@@ -1800,6 +2115,194 @@ class DryRun(GameCase):
         self.assertEqual([(t.kind, t.at.hour, t.at.minute) for t in job.triggers], [("daily", 0, 0)])
 
 
+# ------------------------------------------------------------------------------------------------ the review's fixes
+class ConfirmCatchUp(GameCase):
+    """A SELECT PASS that landed while the rules were off ("shadow") reads its CONFIRM year at the first "gate" round,
+    under the same budgets; and a look row read by any decision carries its SELECT year's figures alone."""
+
+    def test_a_shadow_pass_is_read_at_the_first_gate_round(self):
+        fam = self.family("catch-a")
+        self.settings["game"]["mode"] = "shadow"
+        _, out = self.look("catch-a", 1.0)
+        self.land(out["look"], 2.0, 1.9)
+        self.assertEqual(self.store._all("SELECT * FROM game_confirms"), [], "shadow reads nothing")
+        [row] = game._rows(self.store, "seq=?", (out["look"],))
+        self.assertEqual(set(row["years"]), {str(row["select_year"])}, "a decision's row holds no CONFIRM-year figure")
+        self.assertEqual(set(game._rows(self.store, "seq=?", (out["look"],), operator=True)[0]["years"]), {"2020", "2021"})
+        self.assertEqual(game.confirm_waiting(self.store, self.settings), [], "still shadow")
+        self.settings["game"]["mode"] = "gate"
+        self.assertEqual(game.confirm_waiting(self.store, self.settings), [out["look"]])
+        self.assertEqual(game.candidate(self.store, self.store.family("catch-a")), row["version"])
+        self.assertEqual(game.confirm_waiting(self.store, self.settings), [], "read once")
+        gone = self.family("catch-b")
+        self.settings["game"]["mode"] = "shadow"
+        _, other = self.look("catch-b", 1.0)
+        self.land(other["look"], 2.0, 1.9)
+        self.store.retire("catch-b", "test")
+        self.settings["game"]["mode"] = "gate"
+        self.assertEqual(game.confirm_waiting(self.store, self.settings), [], "a retired family reads nothing")
+        self.assertIsNotNone(fam and gone)
+
+
+class EpochGuards(GameCase):
+    """Under a running span that shows the hidden years (a rollback to 2020-24), or after a void, nobody plays: no look,
+    no child, no game candidate, no game retirement, no exam line; and the hiding holds."""
+
+    def test_a_span_with_hidden_days_or_a_void_stops_every_game_rule(self):
+        tour = Tournament(self.store, RoundPool(), round_settings(), clock=self.clock)
+        fam = self.family("guard-a")
+        for _ in range(4):
+            self.plant(fam, 0.5, 0.0)
+        parent = self.family("guard-b")
+        self.plant(parent, 3.0, 0.0)
+        fam = self.store.family("guard-a")
+        self.assertTrue(tour.played(fam))
+        self.assertEqual(game.retire_reason(self.store, fam, self.settings), game.RETIRED)
+        self.store.put("train_objective", "worst-train-year-v1@2020-01-02")
+        self.assertFalse(tour.played(fam), "today's rules: its candidate is its best again")
+        self.assertIsNone(game.retire_reason(self.store, fam, self.settings))
+        self.assertEqual(game.reproduce(self.store, self.settings), [])
+        self.assertEqual(game.status_text(self.store, fam, self.settings), "")
+        self.assertFalse(game.started(self.store, self.settings))
+        self.assertNotIn("guard-a", [f["id"] for f in game.visible_families(self.store, settings=self.settings)])
+        self.assertTrue(game.void(self.store))
+        self.assertFalse(game.void(self.store), "once")
+        self.store.put("train_objective", "worst-train-year-v1")
+        self.assertIsNone(game.live_t0(self.store), "void: no epoch until a start writes a new T0")
+        self.assertFalse(tour.played(fam))
+        self.clock.advance(60)
+        fresh = game.t0(self.store, self.settings)
+        self.assertGreater(fresh, self.t0, "a new epoch")
+        self.assertEqual(self.store.get(game.EPOCHS_KEY)[0]["t0"], self.t0)
+        self.assertIsNone(game.arm(self.store, self.store.family("guard-a"), self.settings), "alive across the break: legacy")
+        self.assertEqual(game.parents(self.store, self.settings), [], "a look of the void epoch is no parent's")
+        self.assertNotIn("guard-a", [f["id"] for f in game.visible_families(self.store, settings=self.settings)],
+                         "what the last epoch hid stays hidden")
+        self.clock.advance(60)
+        late = self.family("guard-c")
+        self.assertEqual(game.arm(self.store, late, self.settings), "game", "born in the new epoch: it plays")
+
+
+class ParentBlindness(GameCase):
+    """B2 of the review: a family's own views never move with the game's children beside it (its lineage's trials, its
+    allocation row's depth, its hypothesis's record), so a parent never learns that a look of it was in the top decile."""
+
+    def test_a_parents_views_and_row_do_not_move_when_it_bears_a_child(self):
+        from league.swarm.researcher import Researcher
+        from league.tests.test_swarm_cards import CARD
+
+        parent = self.family("blind-p")
+        self.store.update_family("blind-p", trials=5)
+        cards.put(self.store, "blind-p", CARD, "debit_vertical")
+        self.plant(parent, 3.0, 0.0)
+        me = types.SimpleNamespace(store=self.store, settings=self.settings)
+
+        def rows():
+            seen = {}
+
+            def capture(rows, post, conf):
+                seen.update({r["id"]: r for r in rows})
+                return {}, {}
+
+            with mock.patch.object(allocation, "value_shares", capture):
+                allocation.allocate_from_store(self.store, self.store.families(alive=True), self.settings, now=self.clock())
+            return seen
+
+        def views(fid):
+            return {"trials": Researcher.shown_trials(me, fid), "mechanism": Researcher.mechanism_lineage(me, fid),
+                    "row": rows()[fid]["trials"]}
+
+        before = views("blind-p")
+        [child] = game.reproduce(self.store, self.settings)
+        self.store.update_family(child, trials=40)
+        card = cards.card_of(self.store, child)
+        cards.add_evidence(self.store, child, card["sha"], 1, "mechanism_test", "failed", {"below_base": True})
+        self.assertEqual(views("blind-p"), before)
+        self.assertEqual(self.store.lineage_trials("blind-p"), 45, "the store's own count (the gate, Validation) keeps them")
+        self.assertEqual(game.shown_trials(self.store, child), 45, "a child counts its parent's trials, as a fork does")
+        self.assertEqual(Researcher.mechanism_lineage(me, child)["own"], 1)
+        self.clock.advance(7 * 3600)
+        self.plant(self.store.family("blind-p"), 3.0, 0.0)
+        [sibling] = game.reproduce(self.store, self.settings)
+        self.store.update_family(sibling, trials=7)
+        self.assertEqual(game.shown_trials(self.store, child), 45, "nor does a child see its parent breed again")
+        self.assertEqual(game.unrelated_children(self.store, child), {sibling})
+        control = self.family("blind-legacy", roots=("TSLA",))
+        self.assertEqual(game.shown_trials(self.store, control), self.store.lineage_trials(control["id"]))
+
+
+class PublicSite(GameCase):
+    """M2 of the review: the site never shows a game child (its row would name the lineage that passed: its mechanism
+    and lineage are its parent's) nor counts its trials in its parent's lineage; a game retirement's public cause is the
+    same words whatever the rule."""
+
+    def test_the_site_shows_no_child_of_the_game(self):
+        from league.swarm import sitefeed
+
+        parent = self.family("site-p")
+        self.store.update_family("site-p", trials=5)
+        self.plant(parent, 3.0, 0.0)
+        [child] = game.reproduce(self.store, self.settings)
+        self.store.update_family(child, trials=40)
+        agents = sitefeed.site_inputs(self.dir.name)["agents"]
+        self.assertEqual([a["id"] for a in agents], ["site-p"])
+        self.assertEqual(agents[0]["record"]["trials"], 5)
+        self.assertEqual(sitefeed.agent_rows(self.dir.name, [child]), [])
+        self.assertEqual([a["id"] for a in sitefeed.agent_rows(self.dir.name, ["site-p", child])], ["site-p"])
+
+
+class ControlSet(GameCase):
+    """R3's control set: every control look at a version the tournament validated, of either role, one a program (a
+    validated version the ladder looked at first is in it); a control look at a version never validated is not."""
+
+    settings = on(arm_fraction=0.5)
+
+    def test_r3_reads_every_control_look_at_a_validated_version(self):
+        fid = arm_id("control", "r3c")
+        self.family(fid)
+        looked = self.plant(self.store.family(fid), 1.6, 0.7)  # a ladder look; its version validated after
+        never = self.plant(self.store.family(fid), 1.2, -0.5)  # a ladder look; never validated
+        for seq in (looked,):
+            v = self.store._one("SELECT version FROM game_looks WHERE seq=?", (seq,))["version"]
+            self.store.add_run(fid, v, {"run_id": f"val-r3-{v}", "status": "ok", "trials": 1, "summary": {}},
+                               window="validation", stress=1.0, purpose="validation")
+        played = arm_id("game", "r3g")
+        self.family(played)
+        self.plant(self.store.family(played), 2.0, 1.1)
+        r3 = game.metrics(self.store, settings=self.settings, draws=0)["R3"]
+        self.assertEqual((r3["n_game"], r3["n_control"]), (1, 1))
+        self.assertAlmostEqual(r3["delta_sel"], 1.1 - 0.7, places=12)
+        self.assertIsNotNone(never)
+
+
+class D1ByLineage(GameCase):
+    """R1(b): the roles are a lineage's, so its looks share the sign of F2020 - F2021; with a real year effect and no leak
+    the looks taken one by one fail the 2.5 SE bar far more often than its 1.2%, and D1 by lineage does not."""
+
+    settings = on(arm_fraction=0.5)
+
+    def test_a_year_effect_with_no_leak_passes(self):
+        rng = random.Random(37)  # one draw of many (about one in eight) where the looks one by one cross 2.5 SE
+        naive = []
+        for i in range(40):
+            fam = self.family(f"d1-{i}")
+            effect = 0.3 + rng.gauss(0, 1.0)  # 2020 is kinder than 2021 for this program family, by its own amount
+            select, _ = game.fold(fam["lineage"])
+            for _ in range(4):
+                f2021 = rng.gauss(0, 1.0)
+                f2020 = f2021 + effect + rng.gauss(0, 0.1)
+                f_sel, f_conf = (f2020, f2021) if select == 2020 else (f2021, f2020)
+                self.plant(fam, round(f_sel, 6), round(f_conf, 6))
+                naive.append(f_sel - f_conf)
+        mean = sum(naive) / len(naive)
+        se = math.sqrt(sum((d - mean) ** 2 for d in naive) / (len(naive) - 1) / len(naive))
+        self.assertGreater(abs(mean / se), 2.5, "the looks one by one would call this a leak")
+        d1 = game.metrics(self.store, draws=0)["R1"]["d1_founders"]
+        self.assertEqual((d1["n"], d1["lineages"]), (160, 40))
+        self.assertTrue(d1["passed"], d1)
+        self.assertLess(abs(d1["z"]), 2.5)
+
+
 # ------------------------------------------------------------------------------------------------ T0 at the swarm's start
 def _loop_case():
     from league.tests.test_swarm_loop import LoopCase
@@ -1836,10 +2339,46 @@ def _loop_case():
             self.assertEqual(self.store.get(game.T0_KEY), t0, "written once")
             self.assertNotIn("the learning game starts", said)
 
+        def test_a_start_under_the_hidden_years_after_t0_voids_the_epoch_and_a_seen_start_begins_a_new_one(self):
+            """A rollback to a 2020-24 span after T0: the start voids the epoch (a House warning); nobody plays under it;
+            the next start under the seen span with the game on writes a new T0, every family alive across the break is
+            legacy for good, and what the void epoch hid stays hidden."""
+            now = [1_791_100_000.0]
+            self.store.clock = lambda: now[0]
+            self.start({"enabled": True, "mode": "gate"})
+            t0 = self.store.get(game.T0_KEY)
+            now[0] += 3600
+            fam = self.store.add_family({"id": "across", "mechanism": MECHANISM, "structure": "debit_vertical",
+                                         "roots": ["SPY"]}, origin="architect")
+            side = game.arm(self.store, fam, self.settings)
+            self.assertIn(side, game.ARMS)
+            now[0] += 3600
+            said = self.start({"enabled": True, "mode": "gate"}, train_from="2020-01-02")
+            self.assertIn("the learning game is void", said)
+            self.assertIsNotNone(self.store.get(game.VOID_KEY))
+            [alert] = [e["payload"] for e in self.store.events_after(0)
+                       if e["kind"] == "swarm.status" and e["payload"].get("action") == "game_void"]
+            self.assertTrue(alert["alert"])
+            self.assertIsNone(game.live_t0(self.store))
+            self.assertNotIn("the learning game is void", self.start({"enabled": False, "mode": "gate"},
+                                                                     train_from="2020-01-02"), "once")
+            now[0] += 3600
+            said = self.start({"enabled": True, "mode": "gate"}, train_from="2022-01-03")
+            fresh = self.store.get(game.T0_KEY)
+            self.assertGreater(fresh, t0)
+            self.assertIn(f"the learning game starts: T0 {fresh} (a new epoch", said)
+            self.assertIsNone(game.arm(self.store, self.store.family("across"), self.settings), "alive across the break")
+            self.assertEqual(self.store.get(game.EPOCHS_KEY)[0]["t0"], t0)
+            if side == "game":
+                self.assertNotIn("across", [f["id"] for f in game.visible_families(self.store, settings=self.settings)])
+
         def test_under_a_span_that_shows_the_hidden_years_or_with_the_game_off_nobody_plays(self):
             said = self.start({"enabled": True, "mode": "gate"}, train_from="2020-01-02")
             self.assertIsNone(self.store.get(game.T0_KEY))
             self.assertIn("the learning game waits", said)
+            [alert] = [e["payload"] for e in self.store.events_after(0)
+                       if e["kind"] == "swarm.status" and e["payload"].get("action") == "game_waits"]
+            self.assertTrue(alert["alert"], "a House warning: a forgotten swarm.json edit is seen on day 0")
             said = self.start({"enabled": False, "mode": "gate"})
             self.assertIsNone(self.store.get(game.T0_KEY))
             self.assertNotIn("learning game", said)

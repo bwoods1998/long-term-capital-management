@@ -109,8 +109,9 @@ families of its types: `BirthQuota.text(allowed)`); a refused proposal is counte
 
 THE LEARNING GAME (Oct 8, 2026; league/swarm/game.py). A game-arm family in mode "gate" never feeds its Validation t into
 its own row (`row_of`'s `blind`, set by `allocate_from_store`): its share comes from its class prior and the discounts
-alone, so compute never follows a version the game's private confirmation sent to Validation. Control and legacy
-families, and the game off or in "shadow", read exactly as before.
+alone, so compute never follows a version the game's private confirmation sent to Validation. Its depth reads its
+lineage's trials without the game's children beside it (`game.shown_trials`): a parent's share never falls because it
+bred. Control and legacy families, and the game off or in "shadow", read exactly as before.
 
 Every knob lives in swarm.json's `allocation` block (read every loop, no deploy; `settings.py` has no entry: this module's
 DEFAULTS are the defaults, and a misread value falls back to its default). Standard library only. Nothing on the live
@@ -684,8 +685,8 @@ def allocate_from_store(store: Any, fams: Sequence[Mapping[str, Any]], settings:
             spent = store.lineage_looks(fid, include_inflight=True) >= evidence.LOOKS_PER_LINEAGE
         except Exception:  # noqa: BLE001 - an unreadable lineage is not a spent one
             spent = False
-        try:
-            trials: int | None = int(store.lineage_trials(fid))
+        try:  # THE LEARNING GAME: no trial of a child the game bore beside it (`game.shown_trials`; the store's count else)
+            trials: int | None = int(game.shown_trials(store, fam))
         except Exception:  # noqa: BLE001 - its own and inherited trials still count
             trials = None
         state = fam.get("state") or {}
