@@ -218,6 +218,16 @@ class SailGuard:
         elif reserve > 0 and metered_today >= caps["account"] - reserve:
             held = (f"today's Sail research is at its line by Sail's meter ({metered_today:.2f} of {caps['account']:.2f} for "
                     f"the account): the last {reserve:.2f} is kept for validation, the gate and the nightly forward")
+        # EVEN PACING (Oct 8, 2026; the owner's goal: research 24/7 at budget): a hold on new research while today's Sail
+        # research runs ahead of the day's budget pro rata (`pace_day`, on by default; `pace_slack`, the share of a day it
+        # may run ahead, 0.05). The day's dollars then spread over 24 hours instead of spending out by noon and holding to
+        # midnight; it is a hold, never a brake: validation, the gate and the nightly forward go on, as under the reserve.
+        if not held and cfg.get("pace_day", True) and caps["research"] > 0:
+            slack = float(cfg.get("pace_slack", 0.05))
+            paced = caps["research"] * min(1.0, (now - midnight) / 86400 + max(0.0, slack))
+            if today_spent >= paced:
+                held = (f"today's Sail research is ahead of its pace ({today_spent:.2f} of the {paced:.2f} due by now, "
+                        f"{caps['research']:.2f} a day): new research waits for the day to catch up")
         try:
             free_gb = self.disk_free() / 2 ** 30
         except OSError:
