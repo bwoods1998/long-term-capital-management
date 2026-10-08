@@ -736,6 +736,8 @@ class Visibility(GameCase):
                 break
         names = [r["family"] for r in game.visible_graveyard(store, "calls", limit=10, settings=settings)]
         self.assertEqual(sorted(names), sorted([old, sides["control"]]))
+        self.assertEqual(game.quarantined(store, settings), {learned, sides["game"]}, "for the readers of the table itself")
+        self.assertEqual(game.quarantined(store, {}), frozenset())
         self.assertEqual([r["family"] for r in game.visible_graveyard(store, "", limit=10, settings={})],
                          [r["family"] for r in store.graveyard("", limit=10)], "the game off: the store's own read")
         self.assertEqual(game.visible_graveyard(store, "calls", limit=10, settings={}), store.graveyard("calls", limit=10))

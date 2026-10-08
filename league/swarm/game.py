@@ -1058,22 +1058,37 @@ def visible_graveyard(store: Any, query: str = "", limit: int = 8, *, settings: 
 
     rows = store._all("SELECT g.*, f.born_at AS _born, f.retired_at AS _retired, f.lineage AS _lineage, f.roots AS _roots, "
                       "f.id AS _id FROM graveyard g LEFT JOIN families f ON f.id=g.family ORDER BY g.at DESC, g.family")
-    kept = []
-    for r in rows:
-        fam = {"id": r.pop("_id"), "born_at": r.pop("_born"), "lineage": r.pop("_lineage"), "roots": r.pop("_roots")}
-        retired = r.pop("_retired")
-        if fam["id"] is not None:
-            if str(fam["born_at"] or "") < start and str(retired or r["at"]) >= SWITCH_AT:
-                continue  # (a) it learned on the hidden years
-            if _arm_of(fam, c, start) == "game":
-                continue  # (b) its lesson tells its SELECT outcomes
-        kept.append(r)
+    kept = [r for r in rows if not _quarantined(r, c, start)]
     out = []
     for r in rank_graveyard(kept, query)[:limit]:
         r["roots"] = _loads(r["roots"], [])
         r["best"] = _loads(r["best"], {})
         out.append(r)
     return out
+
+
+def _quarantined(row: dict[str, Any], c: Mapping[str, Any], start: str) -> bool:
+    """Whether a graveyard row joined with its family's columns (`_born`, `_retired`, `_lineage`, `_roots`, `_id`, which
+    this pops) is one no reader sees: (a) its family was born before T0 and retired since `SWITCH_AT` (it learned on the
+    hidden years), or (b) its family plays in the game arm (its lesson tells its SELECT outcomes)."""
+    fam = {"id": row.pop("_id"), "born_at": row.pop("_born"), "lineage": row.pop("_lineage"), "roots": row.pop("_roots")}
+    retired = row.pop("_retired")
+    if fam["id"] is None:
+        return False
+    if str(fam["born_at"] or "") < start and str(retired or row["at"]) >= SWITCH_AT:
+        return True
+    return _arm_of(fam, c, start) == "game"
+
+
+def quarantined(store: Any, settings: Mapping[str, Any] | None) -> frozenset[str]:
+    """The families whose graveyard rows `visible_graveyard` drops, for a reader that reads the table itself (the rebirth
+    index, `cards.RebirthIndex`; the architect's and the strategist's own SQL): empty with the game off or before T0."""
+    c, start = _playing(store, settings)
+    if start is None:
+        return frozenset()
+    rows = store._all("SELECT g.family, g.at, f.born_at AS _born, f.retired_at AS _retired, f.lineage AS _lineage, "
+                      "f.roots AS _roots, f.id AS _id FROM graveyard g LEFT JOIN families f ON f.id=g.family")
+    return frozenset(str(r["family"]) for r in rows if _quarantined(r, c, start))
 
 
 # ----------------------------------------------------------------------------------------------------------- text
@@ -1363,4 +1378,4 @@ __all__ = ["SWITCH_AT", "HIDDEN", "HIDDEN_YEARS", "SEEN_FROM", "CORE", "DEFAULTS
            "birth_roots", "seen_only", "t0", "fold", "arm", "fitness", "seen_fitness", "tier_of", "ensure", "select_view",
            "confirm_view", "maybe_look", "landed", "requeue_stale", "shadow_validated", "candidate", "validations_left",
            "seen_robust_ok", "look_seen_run", "looks_used", "retire_reason", "parents", "reproduce", "visible_families",
-           "visible_graveyard", "status_text", "brief_text", "spearman", "metrics"]
+           "visible_graveyard", "quarantined", "status_text", "brief_text", "spearman", "metrics"]
