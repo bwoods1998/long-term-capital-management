@@ -26,7 +26,7 @@ any other deploy.
 
 ## Not yet deployed
 
-The running House release is `20261007T191231Z-2cfea1c1f73c` (main `cd58fc8f`, 19:13Z Oct 7, below), the gateway is
+The running House release is `20261008T124025Z-a9686c7cfcfd` (main `ab64c68b`, 12:41Z Oct 8, below), the gateway is
 `f63dd354`, and the box's updater is on. What is built and not deployed is on branches.
 
 ### On branches, not in V3-A part 1
@@ -41,6 +41,28 @@ The running House release is `20261007T191231Z-2cfea1c1f73c` (main `cd58fc8f`, 1
   whole agenda), `v3/b4` (the weekly post-mortem and the monthly cost review), `v3/b5` (the engineer and the reviewer).
   Each changes a protected file as it stands (`league/swarm/settings.py`, the store, the evidence and tournament
   modules, `league/ops/`), so each is an owner deploy, not an updater release.
+
+## 2026-10-08
+
+### 12:40Z, even pacing: House release `20261008T124025Z-a9686c7cfcfd` (main `ab64c68b`; PR #510)
+
+The guard holds new research while today's Sail research runs ahead of the day's budget pro rata plus `guard.pace_slack`
+(0.05 of a day; `guard.pace_day` true). On Oct 8 the day's $13.91 was at its line by about noon UTC and new research
+held to midnight; pacing spreads the dollars over 24 hours. A hold, never a brake: validation, the gate and the
+nightly forward go on, and the stall job's braked hours (brake events) are unchanged. CI green on the exact head
+`f4c0a2ef`; no order in flight; PROMOTED 12:41:07Z; previous `20261008T105752Z-eb1ce3d588a9`. Digests unchanged.
+Operator, no deploy: `gym.max_boxes` 2 and `researcher.sail_usd_per_hour` 0.5 again (the 06:30Z values 1 and 0.2 were
+a stopgap before pacing).
+
+### 10:58Z, the gate's contract: House release `20261008T105752Z-eb1ce3d588a9` (main `8a058384`; PR #509)
+
+The gate's paid readers were told ChainView has no `iv`, `delta`, `gamma`, `theta` or `vega` (league/gym/review_contract.py
+lists `__slots__` only), so a delta-selecting program that ran and validated in the Gym got unclear verdicts as a
+"verified contract defect" and was refused after three (`highbeta-skew-reprice-single` v15, Oct 7). `gate.gate_contract()`
+adds every public property of `Ctx`, `UnderlyingView` and `ChainView` with one fact and its own hash; the gate's prompts
+and keys, its restamped review and audit receipts, and the bands' and incubator's checks use it. Built in league/swarm,
+so the execution fingerprint (`b4c34031`) and the digests do not move: no evidence reset, no ratification. Past
+refusals stand. CI green on the exact head `531e27d9`; no order in flight; PROMOTED 10:58:34Z.
 
 ## 2026-10-07
 
