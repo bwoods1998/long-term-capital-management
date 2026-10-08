@@ -272,7 +272,8 @@ budget in `<state>/fast-lane-report.json` (`probe_budget`), each band row's buy-
 **Stated consequences.**
 - The incubator route stays off: with the drift screen off, `incubator.facts` never marks `train_passed`, so the route
   (off since 15:53Z Oct 7 for this reason) has no candidate; restoring it needs a "drift does not refuse" switch, not
-  built here.
+  built here. (Oct 8, 2026: restored without one. The incubator's mark now evaluates the drift screen itself at its
+  default thresholds while the tournament's screen is off; see **The incubator** below.)
 - The practice caps (`:o`) keep the Probe's sizing from before the fast lane, 5% of the practice capital a structure
   with the $100 one-structure floor (`shadow.PRACTICE_SHARE`, `PRACTICE_FLOOR_USD`); only their open count and family
   share read the Probe row (unchanged at 3 and 15%). Practice evidence (sizes, how many opens run at once) does not move
@@ -2319,6 +2320,25 @@ never evidence.
 
   An unreadable store refuses: no pin and no open, while exits go on. B2 (#444, in Release B) writes the
   Train-and-drift pass and the incubator's reviews.
+
+  **The incubator's own drift screen** (Oct 8, 2026; `incubator.screen_settings`). Fast lane v2 switched
+  `tournament.drift_screen` off for selection on Oct 7, and the mark read that as "never passes": no mark was written,
+  the sweep removed every mark, and no cohort could be pinned. The mark now evaluates the screen itself: the
+  tournament's screen at its own thresholds while it is on, and the screen at its default thresholds (pooled t 1.0,
+  positive in every Train year but one) while it is off. The sweep no longer removes marks for an off screen. A known
+  failure still drops the mark. The tournament's selection, validation, the gate and the bands read the screen as before.
+
+  **The re-runs** (Oct 8, 2026; `incubator.reruns`, in the tournament's hourly round after the marks). The learning
+  game's T0 (a new Train span) and a Gym image change leave every cohort version's mark stale and its runs from another
+  span or image. The researcher re-runs only a family's best or submitted version. So an active, current cohort version
+  with no current mark that waits only on Gym runs gets the same jobs a best gets: its Train run over the running span,
+  recorded as a scored Train row of the version, and its 1.5x and mid robustness runs (the "drift" run when only the
+  figures are owed). They run at the robustness priority (`GymJob.incubator`: a newer best never supersedes them).
+  Nothing is queued for a version that failed for good (demoted, lost at 1.5x, failed the screen, barred), whose Train
+  answer over the span is ineligible, that is on D2's route, or whose cohort is failed, complete or under another
+  evaluator. Each (version, Train objective, evaluator) is queued at most once per swarm process and at most three
+  times in all (`incubator_reruns` in the family state; a restart loses queued jobs), and only while the guard allows
+  new research. The next round's marks read what landed.
 - **Pins,** at the session's first families pass. A restart reuses them, and nothing joins mid-session. At most 8
   cohorts, one per family, by first-look return on risk. Each needs:
   - the switch on and real money on;
