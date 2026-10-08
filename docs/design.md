@@ -506,6 +506,15 @@ spreads remove.
   hidden year predict the other better than Train does) on day 3, the generation gain and the out-of-fold quality of
   what each arm would validate on day 7. Expect 0-2 Validation passes from the game arm in two weeks; no profit claim
   before the holdout and the forward record support one.
+- **After its review (Oct 8).** A family's first arm is kept (`game_arms`): a researcher's change of roots, a setting
+  (`arm_fraction` 1.0 at GO-WIDE is for new births) or the game switched off never moves it, and once a T0 exists the
+  game off releases nothing it hid. A parent never reads that it bred: its own views count no child's trial
+  (`game.shown_trials`) nor a child's mechanism verdict. A game retirement's public cause is the same words for all three
+  rules, and the public site shows no game child. The ladder's triggers are a state (`game.recheck`), a program the Gym
+  ends on the hidden years is a landed look, a failed look bars its program, a hidden run is split as the retro ran it
+  (8), a shadow PASS is read at the first gate round, and the game's Validation tries count CONFIRMED versions only. A
+  start after T0 under a span that shows the hidden years voids the epoch: the next T0 starts a new one, every family
+  alive across the break legacy.
 
 ## Evidence
 
