@@ -73,7 +73,7 @@ class GateContract(RoundCase):
             from league.swarm.gate import gate_contract
 
             self.assertIn(gate_contract()["sha256"], packet)  # the gate's contract: the Gym's plus the computed fields
-            self.assertIn('"delta"', packet)
+            self.assertIn('\\"delta\\"', packet)  # the contract travels JSON-escaped inside the request body
         review = self.store.family("a")["state"]["review"]
         self.assertEqual(review["contract_sha"], review["audit"]["contract_sha"])
 
