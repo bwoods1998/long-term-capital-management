@@ -318,6 +318,10 @@ class Reserve(GuardCase):
     #: by `RESEARCH_KINDS`.
     GATE = ("any", "gym", "gate", "tournament", "forward")
 
+    def setUp(self):
+        super().setUp()
+        self.settings["guard"]["pace_day"] = False  # the reserve alone (EVEN PACING has its own tests, `Pace`)
+
     def budget(self, sail, fixed=None):
         self.settings["budget"] = {"source": "budget.json", "sail_usd_day": sail, "claude_usd_day": 2.0,
                                    "fixed_sail_usd_day": fixed}
@@ -849,6 +853,57 @@ class Causes(GuardCase):
         self.assertEqual(causes_of({"causes": []}), [], "an empty list is no brake, not unknown")
         self.store.put("guard", {"braked": True, "reason": "x", "causes": "research_budget"})
         self.assertIsNone(self.guard().causes)
+
+
+
+class Pace(GuardCase):
+    """EVEN PACING (Oct 8, 2026): new research is held while today's Sail research runs ahead of the day's budget pro
+    rata (plus `pace_slack` of a day), so the dollars spread over 24 hours; a hold, never a brake."""
+
+    def at_hour(self, hour):
+        midnight = self.clock.t - (self.clock.t % 86400)
+        self.clock.t = midnight + hour * 3600
+
+    def test_research_waits_while_it_runs_ahead_of_the_day_and_resumes_as_the_day_catches_up(self):
+        self.settings["budget"] = {"source": "budget.json", "sail_usd_day": 12.0, "claude_usd_day": 0.0,
+                                   "fixed_sail_usd_day": None}
+        self.reading = (5000.0, 5.0)
+        self.at_hour(6)  # a quarter of the day: 12 x (0.25 + 0.05) = 3.60 due by now
+        g = self.guard()
+        self.store.add_spend("gym_box", 3.59)
+        out = g.check()
+        self.assertEqual((out["research_held"], g.braked), (False, False))
+        self.store.add_spend("sail_model", 0.01)
+        out = g.check()
+        self.assertTrue(out["research_held"])
+        self.assertFalse(g.braked, "a pace hold is no brake: the gate and validation go on")
+        self.assertTrue(g.allows("gym") and g.allows("gate") and not g.allows("research"))
+        self.assertIn("ahead of its pace", out["held"])
+        self.at_hour(7)  # 12 x (7/24 + 0.05) = 4.10 due: it may research again
+        out = g.check()
+        self.assertEqual(out["research_held"], False)
+        self.assertTrue(g.allows("research"))
+
+    def test_the_reserve_still_holds_first_near_the_end_of_the_day(self):
+        self.settings["budget"] = {"source": "budget.json", "sail_usd_day": 15.0, "claude_usd_day": 0.0,
+                                   "fixed_sail_usd_day": None}
+        self.reading = (5000.0, 5.0)
+        self.at_hour(23.9)
+        g = self.guard()
+        self.store.add_spend("gym_box", 13.5)
+        out = g.check()
+        self.assertIn("at its line", out["held"])
+
+    def test_pacing_can_be_switched_off(self):
+        self.settings["guard"]["pace_day"] = False
+        self.settings["budget"] = {"source": "budget.json", "sail_usd_day": 12.0, "claude_usd_day": 0.0,
+                                   "fixed_sail_usd_day": None}
+        self.reading = (5000.0, 5.0)
+        self.at_hour(1)
+        g = self.guard()
+        self.store.add_spend("gym_box", 6.0)
+        out = g.check()
+        self.assertEqual(out["research_held"], False)
 
 
 if __name__ == "__main__":

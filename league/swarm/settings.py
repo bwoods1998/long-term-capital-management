@@ -371,6 +371,10 @@ DEFAULTS: dict[str, Any] = {
         "house_burn_usd_day": 1.0,
         "measured_burn": False,
         "margin_usd": 30.0,             # scale to zero below 2 x the House's daily burn + this
+        # EVEN PACING (Oct 8, 2026): hold new research while today's Sail research runs ahead of the day's budget pro rata,
+        # with `pace_slack` of a day's share allowed ahead (guard.py): research spreads over 24 h instead of holding at noon.
+        "pace_day": True,
+        "pace_slack": 0.05,
         # The daily Sail cap is THE BUDGET's (league/ops/budget.py: the `budget` block `load` sets): the trio (`burst_cap_usd`,
         # `burst_until`, `after_burst_usd_day`) is gone (LTCM v3), and a swarm.json that still names it changes nothing.
         "openai_cap_usd": 150.0,        # OpenAI for the burst, and only while the gateway's month has room
