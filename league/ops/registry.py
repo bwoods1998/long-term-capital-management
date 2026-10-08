@@ -95,6 +95,12 @@ JOBS: tuple[Job, ...] = (
         in_pause=True, owner="fast lane v2",
         what="the fast lane's report (read-only): the buy-and-hold and the drift fit beside each screen result and band "
              "row, the contamination measures, D5 and the Probe budget, into <state>/fast-lane-report.json"),
+    # THE LEARNING GAME (Oct 8, 2026): the operator's daily report at 00:00Z, read-only like the fast lane's; it runs in a
+    # pause too (the day-1 plumbing read must not wait for one).
+    Job("game", "league.ops.game_report", (S.daily(0, 0),), grace=3 * HOUR, cpu=600, wall=1200, in_pause=True,
+        owner="learning game",
+        what="the learning game's report (read-only, operator-only): R1-R6 of its measurement plan and the pre-registered "
+             "decisions, into <state>/game/report-<day>.json"),
 )
 
 
