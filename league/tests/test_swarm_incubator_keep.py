@@ -52,6 +52,29 @@ def at(day: str, hour: int = 12, minute: int = 0) -> float:
     return dt.datetime.combine(dt.date.fromisoformat(day), dt.time(hour, minute), NEW_YORK).timestamp()
 
 
+def session_days(first: str, count: int) -> list[str]:
+    """The first `count` session days of the House's calendar from `first` on (`ltcm.data.us_equity_session`)."""
+    from ltcm.data import us_equity_session
+
+    day, out = dt.date.fromisoformat(first), []
+    while len(out) < count:
+        if us_equity_session(day) is not None:
+            out.append(day.isoformat())
+        day += dt.timedelta(days=1)
+    return out
+
+
+def house_window() -> int:
+    """The House's `observe_max_sessions` as it runs: league/config.json "live" over league/live/step.py DEFAULTS
+    (`league/service.py` hands the "live" block to `OptionsLive`, whose settings are `{**DEFAULTS, **config}`)."""
+    import json
+
+    from league.live.step import DEFAULTS
+
+    config = json.loads((REPO / "league" / "config.json").read_text(encoding="utf-8"))
+    return int({**DEFAULTS, **dict(config.get("live") or {})}["observe_max_sessions"])
+
+
 class KeepCase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -289,20 +312,21 @@ class Record(KeepCase):
         self.assertEqual(self.tournament().incubator_keep(), frozenset({"b"}))
 
     def test_the_keep_ends_when_the_cohort_fails_or_its_window_runs_out(self):
-        sessions = ("2026-10-01", "2026-10-02", "2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08", "2026-10-09",
-                    "2026-10-12", "2026-10-13", "2026-10-14")
+        window = practice.COHORT_WINDOW                     # 30 sessions since Oct 8, 2026 (THE LONGER WINDOW)
+        days = session_days(FIRST, window + 1)
+        sessions = days[:window]
         self.family("failed")
         self.cohort("failed")
         self.ledger.fail_cohort("failed", 1, day="2026-10-05", reason="refused")
         self.family("windowed")
-        self.cohort("windowed", practised=False)            # a 0-3 DTE program: a 10-session window
+        self.cohort("windowed", practised=False)            # a 0-3 DTE program: the cohort window, COHORT_WINDOW sessions
         self.practised("windowed", days=sessions)
         self.family("long")
-        self.cohort("long", dte=45, practised=False)        # ceil(45 x 5 / 7) + 3 = 36 sessions
+        self.cohort("long", dte=60, practised=False)        # ceil(60 x 5 / 7) + 3 = 46 sessions
         self.practised("long", days=sessions)
-        self.clock.t = at("2026-10-14", 16, 30)             # nine sessions since Oct 1 (Oct 12 is a session)
+        self.clock.t = at(sessions[-1], 16, 30)             # window - 1 sessions since Oct 1, Oct 12 and Nov 11 among them
         self.assertEqual(self.tournament().incubator_keep(), frozenset({"windowed", "long"}))
-        self.clock.t = at("2026-10-15", 8, 0)               # ten: the House completes it at this session's first sync
+        self.clock.t = at(days[window], 8, 0)               # window: the House completes it at this session's first sync
         self.assertEqual(self.tournament().incubator_keep(), frozenset({"long"}))
         for fid in ("failed", "windowed", "long"):
             self.dead(fid)
@@ -319,7 +343,7 @@ class Record(KeepCase):
         self.family("window")
         self.cohort("window")
         self.assertEqual(self.tournament().incubator_keep(), frozenset({"target", "window"}))
-        self.ledger.cohort_candidates([], day="2026-10-06", in_session=True)
+        self.ledger.cohort_candidates([], day="2026-10-06", in_session=True, max_sessions=house_window())
         self.assertEqual(self.tournament().incubator_keep(), frozenset({"window"}))
         # The window: the research side's count says it has run out on exactly the session the House completes it.
         day = dt.date(2026, 10, 7)
@@ -328,13 +352,44 @@ class Record(KeepCase):
             [row] = [r for r in practice.cohort_status(self.root, today=iso) if r["family"] == "window"] or [None]
             expired = row is None or row["elapsed"] >= row["window"]
             if day.weekday() < 5:
-                self.ledger.cohort_candidates([], day=iso, in_session=True)
+                self.ledger.cohort_candidates([], day=iso, in_session=True, max_sessions=house_window())
                 done = not [r for r in practice.cohort_status(self.root, today=iso) if r["family"] == "window"]
                 self.assertEqual(done, expired, iso)
                 if done:
                     break
             day += dt.timedelta(days=1)
-        self.assertEqual(iso, "2026-10-15")
+        self.assertEqual(iso, session_days(FIRST, practice.COHORT_WINDOW + 1)[-1])
+        self.assertEqual(iso, "2026-11-12", "30 sessions from Oct 1 (Oct 12 and Nov 11 are sessions): Nov 12's first sync")
+
+    @unittest.skipUnless(HAVE_NUMPY, "the House's cohort rule needs numpy (league.live.chains)")
+    def test_the_longer_window_applies_to_the_cohorts_already_active(self):
+        # THE LONGER WINDOW (Oct 8, 2026): the House reads `observe_max_sessions` at every cohort pass, and a snapshot keeps
+        # only its own DTE horizon (`practice_max_sessions`), so a cohort frozen under the 10-session window is held to
+        # the new one: horizon = max(max_sessions, the snapshot's).
+        days = session_days(FIRST, 32)
+        self.family("w")
+        snap = self.cohort("w", practised=False)
+        self.assertEqual(snap["practice_max_sessions"], 6)   # a 0-3 DTE program: the window alone bounds it
+        self.assertNotIn("observe_max_sessions", snap)
+        for iso in days[1:10]:                              # practised under the old window, nine sessions
+            self.ledger.cohort_candidates([], day=iso, in_session=True, max_sessions=10)
+        status = lambda: self.ledger._connect().execute(  # noqa: E731
+            "SELECT status, reason FROM cohorts WHERE family='w'").fetchone()
+        self.assertEqual(status(), ("active", None))
+        old = ObserveStore(self.root / "old", clock=self.clock)  # the same cohort under the old window, for contrast
+        old.evaluator = EVAL
+        self.addCleanup(old.close)
+        old.freeze({**{k: snap[k] for k in ("family", "version", "observe", "band", "tier", "code", "params", "structure",
+                                             "roots", "run_sha")}}, day=FIRST)
+        old.cohort_candidates([], day=days[10], in_session=True, max_sessions=10)
+        self.assertEqual(old._connect().execute("SELECT status, reason FROM cohorts").fetchone(),
+                         ("complete", "maximum session window reached"))
+        for iso in days[10:30]:                             # the new window: the same cohort stays active to session 30
+            self.ledger.cohort_candidates([], day=iso, in_session=True, max_sessions=house_window())
+            self.assertEqual(status(), ("active", None), iso)
+        self.ledger.cohort_candidates([], day=days[30], in_session=True, max_sessions=house_window())
+        self.assertEqual(status(), ("complete", "maximum session window reached"))
+        self.assertEqual(house_window(), 30)
 
     @unittest.skipUnless(HAVE_NUMPY, "the House's step defaults import numpy")
     def test_the_sample_and_the_window_are_the_houses_and_the_money_rows(self):
@@ -343,8 +398,10 @@ class Record(KeepCase):
 
         self.assertEqual((KEEP_SAMPLE_SESSIONS, KEEP_SAMPLE_TRADES),
                          (DEFAULTS["observe_min_sessions"], DEFAULTS["observe_min_trades"]))
+        # The window is the House's as it runs: league/config.json "live" over the step's DEFAULTS (Oct 8, 2026: 30).
         self.assertEqual((practice.COHORT_WINDOW, practice.COHORT_WINDOW_MIN),
-                         (DEFAULTS["observe_max_sessions"], DEFAULTS["observe_min_sessions"]))
+                         (house_window(), DEFAULTS["observe_min_sessions"]))
+        self.assertEqual(practice.COHORT_WINDOW, 30)
         row = CONSTITUTION["options_money"].get("incubator")
         if row is not None:                                  # the incubator's money row (B1)
             self.assertEqual((KEEP_SAMPLE_SESSIONS, KEEP_SAMPLE_TRADES), (row["min_sessions"], row["min_trades"]))
@@ -363,7 +420,7 @@ class Record(KeepCase):
                                                                            "empty -shm/-wal sidecars, as practice_summary's)")
         self.assertEqual(row, {"family": "a", "version": 1, "first_day": FIRST, "evaluator": EVAL, "tier": "train",
                                "validation_t": None, "best_train": 1.0, "structure": "debit_vertical", "run_sha": "sha-a-1",
-                               "window": 10, "elapsed": 3, "sessions": 3, "unpracticed": 0, "coverage": 1.0,
+                               "window": practice.COHORT_WINDOW, "elapsed": 3, "sessions": 3, "unpracticed": 0, "coverage": 1.0,
                                "closes_program": 1, "pnl_program": 12.0, "closes_all": 2, "pnl_all": 11.0,
                                "max_loss_all": 80.0, "return_on_risk": 0.1375})
         self.assertNotIn("open_mark", row, "the open mark is the first look's, never the keep's")

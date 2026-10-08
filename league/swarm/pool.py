@@ -17,7 +17,10 @@
   asleep), so they fill idle boxes and never delay a researcher's run or a validation. They never start, grow or keep
   awake a box (`manage` counts only other work), and a family's queued runs of a version that is no longer its best
   are superseded. So a busy queue cannot starve them (validation waits on the 1.5x run), one waiting past
-  `pool.robust_age_seconds` (600; the mid run twice that) takes a Train job's priority and any free box.
+  `pool.robust_age_seconds` (600; the mid run twice that) takes a Train job's priority and any free box. THE INCUBATOR'S
+  RE-RUNS (`GymJob.incubator`, Oct 8, 2026; `incubator.reruns`) run at this priority too, for a version an active
+  practice cohort holds that is not its family's best: a newer best's robustness runs never supersede them, and they
+  supersede nothing.
 - FAILURES. A root the box's store lacks fails its job at once with the Gym's own words; a batch that
   errs or times out is retried once on another box, then its jobs fail. A failure never kills the pool. A job that
   failed for MISSING DATA carries the roots it lacked (`GymJob.missing`): the box's own list lacks them, or the Gym's
@@ -163,6 +166,10 @@ class GymJob:
     span: str | None = None
     #: The roots a MISSING DATA failure named (the box lacks them, or the Gym's own words); None for any other failure.
     missing: tuple[str, ...] | None = None
+    #: THE INCUBATOR'S RE-RUNS (Oct 8, 2026; `incubator.reruns`): a robustness-priority job for a version an active
+    #: practice cohort holds, which need not be its family's best. A newer best's robustness runs never supersede it (the
+    #: best moves on while the cohort practises), and its own submission supersedes no other job.
+    incubator: bool = False
 
     @property
     def name(self) -> str:
@@ -314,10 +321,11 @@ class GymPool:
                             and (job.group is None or j.group != job.group)]:
                     self.queue.remove(old)
                     self._fail(old, "superseded by a newer version before it ran")
-            if job.purpose == "robustness":
+            if job.purpose == "robustness" and not job.incubator:
                 fam = self.store.family(job.family) or {}
                 current = {job.version, fam.get("best_version"), (fam.get("state") or {}).get("best_train_version")}
-                for old in [j for j in self.queue if j.family == job.family and j.purpose == "robustness" and j.version not in current]:
+                for old in [j for j in self.queue if j.family == job.family and j.purpose == "robustness" and j.version not in current
+                            and not j.incubator]:
                     self.queue.remove(old)
                     self._fail(old, "superseded by a newer best before it ran")
             self.queue.append(job)

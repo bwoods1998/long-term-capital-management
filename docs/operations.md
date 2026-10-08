@@ -272,7 +272,8 @@ budget in `<state>/fast-lane-report.json` (`probe_budget`), each band row's buy-
 **Stated consequences.**
 - The incubator route stays off: with the drift screen off, `incubator.facts` never marks `train_passed`, so the route
   (off since 15:53Z Oct 7 for this reason) has no candidate; restoring it needs a "drift does not refuse" switch, not
-  built here.
+  built here. (Oct 8, 2026: restored without one. The incubator's mark now evaluates the drift screen itself at its
+  default thresholds while the tournament's screen is off; see **The incubator** below.)
 - The practice caps (`:o`) keep the Probe's sizing from before the fast lane, 5% of the practice capital a structure
   with the $100 one-structure floor (`shadow.PRACTICE_SHARE`, `PRACTICE_FLOOR_USD`); only their open count and family
   share read the Probe row (unchanged at 3 and 15%). Practice evidence (sizes, how many opens run at once) does not move
@@ -2151,9 +2152,13 @@ structure as null (the site's schema has only the eleven order types) and each o
   (`observe_shed` in the live state, so a restart keeps it; one `live.observe` {shed, effective_cap, why} and one
   alert). Validated pins are never shed. The next session admits surviving frozen cohorts at the full caps.
 - **Frozen cohorts.** Research retirement and newer revisions do not terminate a cohort. It finishes between sessions
-  after at least three observed sessions and ten program closes while flat; otherwise its maximum is ten session days,
-  extended to cover the program's declared DTE horizon plus three sessions, bounded at sixty. An expired snapshot never
-  rejoins; a newer eligible version may. Switches, caps and pressure can still wind it down. These are practice durations,
+  after at least three observed sessions and ten program closes while flat; otherwise its maximum is
+  `observe_max_sessions` session days (the step's default is ten; `league/config.json` `live.observe_max_sessions` is 30
+  since Oct 8, 2026, mirrored by `league/swarm/practice.py` `COHORT_WINDOW`), extended to cover the program's declared
+  DTE horizon plus three sessions, bounded at sixty. The House reads the window at every cohort pass and a snapshot
+  keeps only its DTE horizon, so a new window applies to the cohorts already active from the House's next start. An
+  expired snapshot never rejoins; a newer eligible version may. Switches, caps and pressure can still wind it down.
+  These are practice durations,
   not capital gates (`OptionsLive` config `observe_min_sessions`, `observe_min_trades`, `observe_max_sessions`).
   Snapshots pin the Gym bundle and fill model. If either changes, old cohorts become close-only and their wind-down
   outcomes are excluded from program feedback. The family/version ledger currently requires a newly eligible source
@@ -2168,6 +2173,43 @@ structure as null (the site's schema has only the eleven order types) and each o
 
   The cohort then reads `failed`, and its pin is freed at the next session's first pass. The store opens SQLite with a
   0.05 s timeout, so retry on "database is locked". Record it in the run record.
+- **The 30-session cohort window** (Oct 8, 2026; `league/config.json` `live.observe_max_sessions`, the owner's deploy,
+  and `practice.COHORT_WINDOW`). Under the practice cap of 3 open structures, mostly held to expiry, no cohort could
+  reach the incubator's 10 program closes inside 10-18 sessions. The verifier's replay on the House (each cohort's own
+  Gym trades under the practice caps) gave a first look inside the window with probability 0.46 / 0.24 / 0.13 at 20
+  sessions and 0.92 / 0.98 / 0.78 at 30 for the three best candidates (china-tech-us-lead-lag@16,
+  peer-skew-conduction-single@11, opening-range-highbeta-continuation@31), with expected looks around sessions 20-24.
+  So 20 is too short and 30 is the window. What it costs, and the levers:
+  - **Roots.** Frozen cohorts are pinned before any new family (`observe.cohort_candidates`), and the binding cap is
+    `live.observe_roots_max` (24). On Oct 8 the 12 active cohorts held 22 of the 24 roots; after the two barred ones end
+    at the 02:00Z hygiene, 10 hold 21. Every new family then has at most 3 new roots until the cohorts complete (Nov 19
+    for the Oct 8 batch, against Oct 22 to Nov 3 under the old window). SPY, XSP and SPXW are free, so the game's core
+    arms are not starved; families on other roots are.
+  - **Newer versions.** A family with an active cohort practises no other version for the whole window
+    (`cohort_candidates` drops its current rows). After T0 that includes the family's new best over 2022-24.
+  - **Cohorts that cannot be pinned.** Three cohorts fail the incubator's screen over the current span
+    (index-corr-dispersion-break-vertical@32 t 0.46, smci-mara-post-earnings-drift-debit@11 t 0.08,
+    semis-lead-smallcap@16 t 0.88) and alone hold IWM, MARA and SMCI. T0 judges them again over 2022-24, so they are
+    not dead for good. `tournament.keep_order` spares their families from retirement all the same (it does not ask
+    whether a cohort can be marked).
+  - **Levers.** (a) The operator ends a cohort that can never be pinned (**Ending a cohort by hand**, above), as the
+    Oct 2 "operator (v3 phase 0)" failures were recorded: the screen failures only when T0 is not near. (b) swarm.json
+    `live.observe_roots_max` (a runtime switch, 1-128), with `live.observe_read_calls` raised by 4 per root (the read
+    budget is 1 + 4 x roots + 20). (c) Owner deploys, both in walled files: `tournament.keep_order` skipping a cohort
+    whose mark is dropped for good, and `league/ops/hygiene.py` `end_cohorts` ending a demoted or lost-at-1.5x cohort
+    (not a screen failure alone).
+- **The practice-evaluator freeze** (Oct 8, 2026). A cohort ends at once when the practice evaluator moves ("evaluator
+  changed; a new version needs fresh practice"). Of the 33 cohorts ever completed on the House up to Oct 8, 30 ended
+  that way (most 0-2 days after admission, at the Oct 3 and Oct 7 releases) and 3 by an operator; none has ever reached
+  its window or its observation target. The practice evaluator is
+  `<Gym bundle>:<fill model>:<execution fingerprint>` (`league/live/step.py`): `league/gym/**` (.py and .md), the
+  LEAGUE_FILES (`league/__init__.py`, `safety.py`, `structure_core.py`, `stats.py`), `league/live/**.py`, and the
+  House's fill model (`/data/calibration/fill_model.json`, read at the House's start). The 30-session window only helps
+  if none of these moves until the Oct 8 cohorts have had their first looks (expected around sessions 20-24, Nov 4-10),
+  better until they complete (Nov 19): no release that touches those paths, no fill-model recalibration
+  (swarm.json `live.calibration` stays false and the fill model file stays as it is). Before any release, compute the
+  candidate tree's execution fingerprint and Gym bundle (`league.swarm.evaluator.execution_fingerprint`,
+  `league.gym.driver.build_bundle`) and compare them with the cohorts' `practice_evaluator`.
 - **Private receipts.** `observe.sqlite.events` records decisions, coverage, intents, rejections, orders and fills with
   leg quotes, fees and slippage against decision mid. The shadow account saves unacknowledged receipts and retries
   idempotently after a restart. Events retain 120 days; a prolonged ledger outage has a 10,000-event per-account buffer
@@ -2319,6 +2361,39 @@ never evidence.
 
   An unreadable store refuses: no pin and no open, while exits go on. B2 (#444, in Release B) writes the
   Train-and-drift pass and the incubator's reviews.
+
+  **The incubator's own drift screen** (Oct 8, 2026; `incubator.screen_verdict`). Fast lane v2 switched
+  `tournament.drift_screen` off for selection on Oct 7, and the mark read that as "never passes": no mark was written,
+  the sweep removed every mark, and no cohort could be pinned. The mark now evaluates the screen itself: the
+  tournament's screen at its own thresholds while it is on, and while it is off the screen at its default thresholds
+  (pooled t 1.0, positive in every Train year but one) and also at `tournament.drift_min_t` and
+  `drift_years_positive` wherever those are stricter (an off screen never loosens the mark). The sweep no longer removes
+  marks for an off screen. A known failure still drops the mark. The tournament's selection, validation, the gate and
+  the bands read the screen as before. A "drift" run that fails three times demotes its version only while the
+  tournament's screen is on (`researcher.robust_landed`); with it off, such a run is the incubator's alone.
+
+  **The re-runs** (Oct 8, 2026; `incubator.reruns`, asked for by the swarm loop right after each hourly tournament
+  round, `Swarm.incubator_reruns`; not in `league/swarm/tournament.py`, which is the owner's deploy). The learning
+  game's T0 (a new Train span) and a Gym image change leave every cohort version's mark stale and its runs from another
+  span or image. The researcher re-runs only a family's best or submitted version. So an active, current cohort version
+  with no current mark that waits only on Gym runs has them queued one at a time, in the order that spends nothing on a
+  version an earlier answer rules out: its Train run over the running span (recorded as a scored Train row of the
+  version, with its drift figures), then the "drift" run if a Train answer is in without figures, then its 1.5x run.
+  Never the mid run. They run at the robustness priority (`GymJob.incubator`: a newer best never supersedes them).
+  Nothing is queued for a version that failed for good (demoted, lost at 1.5x, failed the screen, barred), whose Train
+  answer over the span is ineligible, that is on D2's route, or whose cohort is failed, complete or under another
+  evaluator. A version is asked for again only once its job has landed or failed, so a failure is retried at a later
+  round and a restart, which loses queued jobs, re-queues them at its first round. Three EXECUTED failures (a run the
+  Gym ran that failed, erred, or landed without an answer under the current evaluator) under one Train objective and
+  evaluator spend the version (`incubator_reruns` in the family state), with one `swarm.status` alert
+  (`incubator_reruns_spent`); a restart, a supersession or a retirement charges nothing. Each round's result is one log
+  line ("incubator re-runs: ...") and, when anything was queued, one `swarm.robustness` event (`incubator_reruns`).
+  New re-runs are asked for only while the guard allows new research; jobs already queued are the pool's like every
+  robustness job: an asleep box's dispatcher takes a robustness head, and resumes the box, when another box is free or
+  once the job has aged (`pool._take_active`), and queued jobs keep running under the research hold (`GymPool` asks the
+  guard about `gym`, not `research`). At most one job per cohort version is
+  ever in flight, so the cost after T0 is about two Gym jobs per cohort (Train, then 1.5x). The next round's marks read
+  what landed.
 - **Pins,** at the session's first families pass. A restart reuses them, and nothing joins mid-session. At most 8
   cohorts, one per family, by first-look return on risk. Each needs:
   - the switch on and real money on;

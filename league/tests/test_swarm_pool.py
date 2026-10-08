@@ -667,5 +667,36 @@ class GamePrivateJobs(PoolCase):
         self.assertIsNone(self.pool().submit(own).error, "a 2020 span: a 2020 start is the span's")
 
 
+
+class IncubatorReruns(PoolCase):
+    """THE INCUBATOR'S RE-RUNS (`GymJob.incubator`, Oct 8, 2026): a cohort version's robustness-priority jobs are never
+    superseded by a newer best's, and supersede nothing themselves."""
+
+    def robust(self, version, *, incubator=False, stress=1.5):
+        out = job("fam", stress=stress, priority=-1.0)
+        out.purpose, out.version, out.incubator = "robustness", version, incubator
+        return out
+
+    def test_a_newer_best_never_supersedes_an_incubator_rerun_and_a_rerun_supersedes_nothing(self):
+        from league.tests.test_swarm_store import SPEC
+
+        self.store.add_family({**SPEC, "id": "fam"}, origin="test")
+        self.store.update_family("fam", best_version=3)
+        pool = self.pool()
+        stale = pool.submit(self.robust(2))                 # a best's run of a version that is no longer its best
+        rerun = pool.submit(self.robust(1, incubator=True))  # the cohort's version: not the best
+        self.assertIn(stale, pool.queue, "an incubator re-run supersedes nothing")
+        train = pool.submit(self.robust(1, incubator=True, stress=1.0))
+        research = job("fam")                               # a researcher's Train run
+        pool.submit(research)
+        self.assertIn(train, pool.queue, "a researcher's Train job never supersedes an incubator Train re-run")
+        best = pool.submit(self.robust(3))                  # the best's robustness run
+        self.assertEqual([j for j in pool.queue if j.purpose == "robustness"], [rerun, train, best])
+        self.assertEqual(stale.error, "superseded by a newer best before it ran", "the rule is unchanged for the rest")
+        self.assertIsNone(rerun.error)
+        self.assertIsNone(train.error)
+        self.assertIn(research, pool.queue)
+
+
 if __name__ == "__main__":
     unittest.main()

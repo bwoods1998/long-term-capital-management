@@ -108,6 +108,43 @@ class LoopCase(unittest.TestCase):
 
 
 class Process(LoopCase):
+    def test_the_incubators_reruns_follow_the_tournaments_round_through_the_researcher_under_the_research_guard(self):
+        # THE INCUBATOR'S RE-RUNS (Oct 8, 2026, `Swarm.incubator_reruns`): here, not in league/swarm/tournament.py (the
+        # owner's deploy), after the round on its thread, through the swarm's own Researcher, only while the guard allows
+        # new research (THE GATE'S RESERVE and the brake), and never failing the round.
+        from unittest.mock import patch
+
+        from league.swarm import incubator
+
+        sw = self.swarm()
+        calls = []
+
+        def reruns(store, settings, researcher, root, *, clock):
+            calls.append((store, researcher, Path(root)))
+            return {"owed": 1, "queued": ["a@1"], "waiting": [], "spent": []}
+
+        with patch.object(incubator, "reruns", side_effect=reruns):
+            self.assertEqual(sw.incubator_reruns()["queued"], ["a@1"])
+            self.assertEqual(calls, [(sw.store, sw.researcher, self.root)])
+            self.guard.research_held = True
+            self.assertIn("held", sw.incubator_reruns())
+            self.guard.research_held, self.guard.braked = False, True
+            self.assertIn("held", sw.incubator_reruns())
+            self.guard.braked = False
+            self.assertEqual(len(calls), 1, "held: not asked")
+            with patch.object(sw.tournament, "run", return_value={"board": []}):
+                self.assertEqual(sw.tournament_round(), {"board": []}, "the round's own row, as before")
+            self.assertEqual(len(calls), 2, "after the round")
+            with patch.object(sw.tournament, "run", side_effect=RuntimeError("the round failed")):
+                with self.assertRaises(RuntimeError):
+                    sw.tournament_round()
+            self.assertEqual(len(calls), 3, "a round that failed still leaves the cohorts' runs owed: asked all the same")
+        with patch.object(incubator, "reruns", side_effect=RuntimeError("boom")):
+            self.assertEqual(sw.incubator_reruns(), {"error": "RuntimeError"}, "an error never fails the round")
+        errors = [e for e in self.store.events_after(0) if e["payload"].get("action") == "incubator_reruns_error"]
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(sw.incubator_reruns(), {}, "nothing owed: no practice record")
+
     def test_it_seeds_the_48_founders_once(self):
         sw = self.swarm()
         born = sw.seed()
