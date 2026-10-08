@@ -18,7 +18,7 @@ def band_proof(version, *, bundle=None):
 
 
 def reviewed(sha):
-    from league.gym.review_contract import review_contract
+    from league.swarm.gate import gate_contract as review_contract
 
     contract = review_contract()["sha256"]
     return {"sha": sha, "verdict": "pass", "contract_sha": contract,

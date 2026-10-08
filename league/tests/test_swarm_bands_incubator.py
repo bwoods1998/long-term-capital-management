@@ -33,7 +33,7 @@ class FactsCase(unittest.TestCase):
         self.addCleanup(self.store.close)
         self.store.put("research_evaluator", EVALUATOR)
         self.store.put("train_objective", OBJECTIVE)
-        from league.gym.review_contract import review_contract
+        from league.swarm.gate import gate_contract as review_contract
 
         self.contract = review_contract()["sha256"]
 

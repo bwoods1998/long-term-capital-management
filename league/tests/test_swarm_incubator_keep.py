@@ -458,7 +458,7 @@ class IncubatorsCohorts(KeepCase):
         """The swarm's incubator facts admit `fid`'s program (B2's mark under the current evaluator and Train objective,
         the gate's passed review and audit), and its cohort met the sample with `total` (None: not yet): one the House
         can pin. The cohort practises `practises` (default: that program). Returns the program's run sha."""
-        from league.gym.review_contract import review_contract
+        from league.swarm.gate import gate_contract as review_contract
         from league.swarm.gate import run_sha
 
         self.store.put("research_evaluator", self.EVALUATOR)

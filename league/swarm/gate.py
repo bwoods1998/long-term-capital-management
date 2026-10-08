@@ -144,12 +144,14 @@ Standard library only.
 
 from __future__ import annotations
 
+import ast
 import datetime as dt
 import functools
 import hashlib
 import json
 import secrets
 import time
+from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from ..gym.experiment import check_experiment
@@ -160,6 +162,41 @@ from . import settings as settings_mod
 from .pool import GymJob, PoolError
 from .researcher import drift_verdict, needs_roots, running_span, version_drift
 from .store import SwarmStore, dumps, structure_text
+
+
+@functools.lru_cache(maxsize=1)
+def gate_contract() -> dict[str, Any]:
+    """THE GATE'S CONTRACT (Oct 8, 2026): `review_contract()` plus the context's COMPUTED fields. The Gym's contract
+    lists each context class's `__slots__` only, so the readers were told ChainView has no `iv`, `delta`, `gamma`,
+    `theta` or `vega` ("only the supplied context fields exist"), and judged a program that reads them a contract
+    defect (an unclear review or audit, refused after three). Those are public properties computed on first read
+    from the chain's own quotes (league/gym/ctx.py), as real as the slots. This adds every public property of `Ctx`,
+    `UnderlyingView` and `ChainView` to `context_fields`, with one fact saying so, and hashes the result: its sha is
+    the contract every review, audit and band compares. Built here, not in league/gym, so the evaluator's execution
+    fingerprint (every league/gym file) does not move."""
+    base = review_contract()
+    packet = {k: v for k, v in base.items() if k != "sha256"}
+    fields = {name: list(cols) for name, cols in (packet.get("context_fields") or {}).items()}
+    for name, props in _computed_context_fields().items():
+        fields[name] = fields.get(name, []) + [p for p in props if p not in fields.get(name, [])]
+    packet["context_fields"] = fields
+    packet["facts"] = dict(packet.get("facts") or {}, computed=(
+        "Besides each class's slots, its public properties exist too: ChainView's iv, delta, gamma, theta and vega are "
+        "arrays computed on first read from the chain's own quotes (implied vol and Black-Scholes greeks at the snapshot's "
+        "spot), read-only like every other field. Reading them is not a contract defect."))
+    return {"sha256": hashlib.sha256(json.dumps(packet, sort_keys=True).encode()).hexdigest(), **packet}
+
+
+def _computed_context_fields() -> dict[str, list[str]]:
+    """The public `@property` names of the Gym's context classes, read from league/gym/ctx.py's own source."""
+    out: dict[str, list[str]] = {}
+    for node in ast.parse((Path(__file__).resolve().parents[1] / "gym" / "ctx.py").read_text()).body:
+        if isinstance(node, ast.ClassDef) and node.name in ("Ctx", "UnderlyingView", "ChainView"):
+            out[node.name] = [child.name for child in node.body
+                              if isinstance(child, ast.FunctionDef) and not child.name.startswith("_")
+                              and any(isinstance(d, ast.Name) and d.id == "property" for d in child.decorator_list)]
+    return out
+
 
 REVIEW = """You review option-trading programs before they meet sealed data. A program is one Python file (NEEDS, PARAMS,
 decide(ctx)) that runs in a replay of recorded one-minute option quotes and then, unchanged, on live quotes and real
@@ -399,9 +436,9 @@ class Gate:
         incubator's read, `incubator_reviews`): the same question on the same routes, under its own attempt count, its own
         model-call key and its own Sail fuse (`incubator_stage`); without it, everything is the gate's own, as before."""
         user = (f"Family {fam['id']}: {fam['mechanism']}\nStructure {structure_text(fam['structure'])}, roots {', '.join(fam['roots'])}.\n\n"
-                f"Runtime contract (actual deployed source): {json.dumps(review_contract(), sort_keys=True)}\n\n"
+                f"Runtime contract (actual deployed source): {json.dumps(gate_contract(), sort_keys=True)}\n\n"
                 f"```python\n{version['code']}\n```\nPARAMS overrides: {json.dumps(version.get('params') or {})}")
-        contract = review_contract()["sha256"][:12]
+        contract = gate_contract()["sha256"][:12]
         stage, desk = incubator_stage("review", fam["id"], incubator=incubator)
         attempt_key = f"{stage}_attempt:{contract}:{fam['id']}:{version['n']}"
         answer = self.router.ask(role="review", system=REVIEW, user=user, family=fam["id"],
@@ -410,7 +447,7 @@ class Gate:
                                                                                                                    "pro_balanced")),
                                  max_output=int(self.cfg.get("review_max_output_tokens", 6000)), effort="medium", need_usd=0.5,
                                  desk=desk, cap_usd_day=float(self.cfg.get("review_usd_day", 1.0)), claude=True)
-        return grounded_answer(answer, version["code"])
+        return dict(grounded_answer(answer, version["code"]), contract_sha=gate_contract()["sha256"])
 
     # ------------------------------------------------------------------ the audit
     def audit(self, fam: Mapping[str, Any], version: Mapping[str, Any], *, attempt: int = 0,
@@ -424,15 +461,15 @@ class Gate:
         need = float(self.cfg.get("audit_need_usd", 1.0))
         use_openai = bool(model) and self.router.openai_room() >= need
         user = (f"AUDIT. Family {fam['id']}: {fam['mechanism']}\nStructure {structure_text(fam['structure'])}, roots {', '.join(fam['roots'])}.\n\n"
-                f"Runtime contract (actual deployed source): {json.dumps(review_contract(), sort_keys=True)}\n\n"
+                f"Runtime contract (actual deployed source): {json.dumps(gate_contract(), sort_keys=True)}\n\n"
                 f"```python\n{version['code']}\n```\nPARAMS overrides: {json.dumps(version.get('params') or {})}")
         answer = self.router.ask(role="audit", system=REVIEW, user=user, family=fam["id"],
-                                 key=f"swarm:{review_contract()['sha256'][:12]}:{fam['id']}:{stage}:{version['n']}:{attempt}",
+                                 key=f"swarm:{gate_contract()['sha256'][:12]}:{fam['id']}:{stage}:{version['n']}:{attempt}",
                                  openai_model=model if use_openai else None,
                                  sail_profile=str(self.cfg.get("audit_sail_profile", "k3_balanced")),
                                  max_output=int(self.cfg.get("review_max_output_tokens", 6000)), effort="high", need_usd=need,
                                  desk=desk, cap_usd_day=float(self.cfg.get("review_usd_day", 1.0)), claude=True)
-        return grounded_answer(answer, version["code"])
+        return dict(grounded_answer(answer, version["code"]), contract_sha=gate_contract()["sha256"])
 
     def outcome(self, fid: str, sha: str, result: str) -> None:
         """What the gate did with a version (refused, failed, passed, waiting, demoted): the live path runs a Gym-band
@@ -704,7 +741,7 @@ class Gate:
                 self.hold_look(fam, int(n), sha, hold, out)
                 continue
             cached = state.get("review") or {}
-            review = cached if cached.get("sha") == sha and cached.get("contract_sha") == review_contract()["sha256"] else None
+            review = cached if cached.get("sha") == sha and cached.get("contract_sha") == gate_contract()["sha256"] else None
             if review is None:  # the review, once a version (kept, so an audit asked again does not redo it)
                 if not self._review_current(fam["id"], n, image, bundle):
                     continue
@@ -717,7 +754,7 @@ class Gate:
                 self.store.event("swarm.gate", fam["id"], {"action": "review", "version": n, **review,
                                                            "not_the_plans_reviewer": review.get("route") not in ("openai", "claude")})
                 if review["verdict"] == "unclear":
-                    attempt_key = f"review_attempt:{review_contract()['sha256'][:12]}:{fam['id']}:{n}"
+                    attempt_key = f"review_attempt:{gate_contract()['sha256'][:12]}:{fam['id']}:{n}"
                     attempts = int(self.store.get(attempt_key, 0)) + 1
                     self.store.put(attempt_key, attempts)
                     if attempts < 3:
@@ -734,7 +771,7 @@ class Gate:
             if review["verdict"] == "pass" and "audit" not in review:  # the audit: a second reader, before any look
                 if not self._review_current(fam["id"], n, image, bundle):
                     continue  # the paid review remains evidence; a terminal family starts no new paid stage
-                attempt_key = f"audit_attempt:{review_contract()['sha256'][:12]}:{sha}"
+                attempt_key = f"audit_attempt:{gate_contract()['sha256'][:12]}:{sha}"
                 attempts = int(self.store.get(attempt_key, 0))
                 try:
                     audit = self.audit(fam, version, attempt=attempts)
@@ -937,7 +974,7 @@ class Gate:
             return None
         fam = self.store.family(fid) or {}
         version = self.store.version(fid, n) or {}
-        contract = review_contract()["sha256"]
+        contract = gate_contract()["sha256"]
         record = ((fam.get("state") or {}).get("incubator_reviews") or {}).get(sha)
         if not (isinstance(record, Mapping) and record.get("sha") == sha and record.get("contract_sha") == contract
                 and record.get("verdict") == "pass"):

@@ -215,7 +215,7 @@ def read(root: str | Path, *, family: str | None = None) -> list[dict[str, Any]]
             outcome = state.get("gate_outcome") or {}
             if review.get("sha") != sha or review.get("verdict") != "pass" or (review.get("audit") or {}).get("verdict") != "pass":
                 continue
-            from ..gym.review_contract import review_contract
+            from .gate import gate_contract as review_contract
 
             if review.get("contract_sha") != review_contract()["sha256"] or (review.get("audit") or {}).get("contract_sha") != review_contract()["sha256"]:
                 continue
@@ -512,7 +512,7 @@ def incubator(root: str | Path, *, family: str, version: int) -> list[dict[str, 
     if not path.exists() or n is None or not family:
         return []
     from .gate import run_sha
-    from ..gym.review_contract import review_contract
+    from .gate import gate_contract as review_contract
 
     db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1.0)
     db.row_factory = sqlite3.Row
