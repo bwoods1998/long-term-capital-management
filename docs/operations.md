@@ -2321,24 +2321,38 @@ never evidence.
   An unreadable store refuses: no pin and no open, while exits go on. B2 (#444, in Release B) writes the
   Train-and-drift pass and the incubator's reviews.
 
-  **The incubator's own drift screen** (Oct 8, 2026; `incubator.screen_settings`). Fast lane v2 switched
+  **The incubator's own drift screen** (Oct 8, 2026; `incubator.screen_verdict`). Fast lane v2 switched
   `tournament.drift_screen` off for selection on Oct 7, and the mark read that as "never passes": no mark was written,
   the sweep removed every mark, and no cohort could be pinned. The mark now evaluates the screen itself: the
-  tournament's screen at its own thresholds while it is on, and the screen at its default thresholds (pooled t 1.0,
-  positive in every Train year but one) while it is off. The sweep no longer removes marks for an off screen. A known
-  failure still drops the mark. The tournament's selection, validation, the gate and the bands read the screen as before.
+  tournament's screen at its own thresholds while it is on, and while it is off the screen at its default thresholds
+  (pooled t 1.0, positive in every Train year but one) and also at `tournament.drift_min_t` and
+  `drift_years_positive` wherever those are stricter (an off screen never loosens the mark). The sweep no longer removes
+  marks for an off screen. A known failure still drops the mark. The tournament's selection, validation, the gate and
+  the bands read the screen as before. A "drift" run that fails three times demotes its version only while the
+  tournament's screen is on (`researcher.robust_landed`); with it off, such a run is the incubator's alone.
 
-  **The re-runs** (Oct 8, 2026; `incubator.reruns`, in the tournament's hourly round after the marks). The learning
+  **The re-runs** (Oct 8, 2026; `incubator.reruns`, asked for by the swarm loop right after each hourly tournament
+  round, `Swarm.incubator_reruns`; not in `league/swarm/tournament.py`, which is the owner's deploy). The learning
   game's T0 (a new Train span) and a Gym image change leave every cohort version's mark stale and its runs from another
   span or image. The researcher re-runs only a family's best or submitted version. So an active, current cohort version
-  with no current mark that waits only on Gym runs gets the same jobs a best gets: its Train run over the running span,
-  recorded as a scored Train row of the version, and its 1.5x and mid robustness runs (the "drift" run when only the
-  figures are owed). They run at the robustness priority (`GymJob.incubator`: a newer best never supersedes them).
+  with no current mark that waits only on Gym runs has them queued one at a time, in the order that spends nothing on a
+  version an earlier answer rules out: its Train run over the running span (recorded as a scored Train row of the
+  version, with its drift figures), then the "drift" run if a Train answer is in without figures, then its 1.5x run.
+  Never the mid run. They run at the robustness priority (`GymJob.incubator`: a newer best never supersedes them).
   Nothing is queued for a version that failed for good (demoted, lost at 1.5x, failed the screen, barred), whose Train
   answer over the span is ineligible, that is on D2's route, or whose cohort is failed, complete or under another
-  evaluator. Each (version, Train objective, evaluator) is queued at most once per swarm process and at most three
-  times in all (`incubator_reruns` in the family state; a restart loses queued jobs), and only while the guard allows
-  new research. The next round's marks read what landed.
+  evaluator. A version is asked for again only once its job has landed or failed, so a failure is retried at a later
+  round and a restart, which loses queued jobs, re-queues them at its first round. Three EXECUTED failures (a run the
+  Gym ran that failed, erred, or landed without an answer under the current evaluator) under one Train objective and
+  evaluator spend the version (`incubator_reruns` in the family state), with one `swarm.status` alert
+  (`incubator_reruns_spent`); a restart, a supersession or a retirement charges nothing. Each round's result is one log
+  line ("incubator re-runs: ...") and, when anything was queued, one `swarm.robustness` event (`incubator_reruns`).
+  New re-runs are asked for only while the guard allows new research; jobs already queued are the pool's like every
+  robustness job: an asleep box's dispatcher takes a robustness head, and resumes the box, when another box is free or
+  once the job has aged (`pool._take_active`), and queued jobs keep running under the research hold (`GymPool` asks the
+  guard about `gym`, not `research`). At most one job per cohort version is
+  ever in flight, so the cost after T0 is about two Gym jobs per cohort (Train, then 1.5x). The next round's marks read
+  what landed.
 - **Pins,** at the session's first families pass. A restart reuses them, and nothing joins mid-session. At most 8
   cohorts, one per family, by first-look return on risk. Each needs:
   - the switch on and real money on;
