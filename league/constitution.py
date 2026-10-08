@@ -733,6 +733,15 @@ CONSTITUTION: dict[str, Any] = {
     #   first look is final. Incubator orders are real P&L (Profit) and NEVER strategy evidence: never a forward row,
     #   never a band move, never a promotion. D2 is the only route to Probe and Sized. Expected value is negative until
     #   a family has a real edge: at most about $650 a month on average ($750 in a five-week month) plus residuals.
+    #   THE INCUBATOR CAP (Oct 8, 2026; Claude's decision under the owner's goal of Oct 7, item 4, which allows up to 10%
+    #   of equity at risk per Probe position, about $129 at E = $1,288): `max_loss_usd` $50 -> $75, a loosening, so
+    #   lot-priced single-name programs can open at all (one-lot units at or under $50 -> $75 in the active cohorts' Gym
+    #   Train trades: semis-lead 4% -> 71%, smci-mara 40% -> 71%, opening-range 40% -> 62%, china-tech 55% -> 77%,
+    #   peer-skew 50% -> 71%). `week_loss_usd` ($150), `max_open` (4) and `contracts` (1) are unchanged, so the week's
+    #   bound and the month's ($650 on average, $750 in a five-week month) are the same and at most two $75 units are
+    #   ever open at once (three $50 ones before it). Its cost is use of that same envelope: replayed on those cohorts
+    #   with no edge after costs (-8% of maximum loss a trade), the expected real loss per first-look pass rises from
+    #   about $0.40 to $2.45 at today's practice windows and from $5.52 to $26.59 at 40-session windows.
     #   Setting `max_open`, `week_loss_usd` or `max_loss_usd` to 0 stops the route (a tightening: a new digest and a
     #   ratification).
     #
@@ -774,7 +783,7 @@ CONSTITUTION: dict[str, Any] = {
         "calibration": {"day_usd": "50"},
         "house_test": {"structure_usd": "100", "open": 3, "envelope_usd": "300", "stop_usd": "150", "sessions": 20,
                        "round_trips": 30},
-        "incubator": {"max_loss_usd": "50", "contracts": 1, "max_open": 4, "week_loss_usd": "150",
+        "incubator": {"max_loss_usd": "75", "contracts": 1, "max_open": 4, "week_loss_usd": "150",
                       "min_sessions": 3, "min_trades": 10, "min_coverage": "0.80"},
         "order_path": {"max_orders_day": 250, "max_requests_minute": 150, "bp_buffer": "0.10",
                        "near_money_share": "0.01", "expiry_close_lead_minutes": 10},
@@ -852,7 +861,10 @@ OPTIONS_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
     # The incubator (the owner, Sept 29, 2026; the reading of Sept 30; `league/live/incubator.py`): the owner's terms are
     # the loose end of each range, so a row may only tighten (0 stops the route); loosening one is the owner's. The
     # practice rule's floors are the pre-registered 3 sessions, 10 program closes and 0.80 coverage.
-    "incubator.max_loss_usd": ("0", "50"),
+    # THE INCUBATOR CAP (Oct 8, 2026; under the owner's goal of Oct 7, item 4, which allows up to 10% of equity at risk
+    # per Probe position): the unit cap's loose end is $75 (from $50), a loosening reported with its cost; the weekly
+    # envelope ($150), the 4 open and the one lot are unchanged.
+    "incubator.max_loss_usd": ("0", "75"),
     "incubator.contracts": ("1", "1"),
     "incubator.max_open": ("0", "4"),
     "incubator.week_loss_usd": ("0", "150"),
@@ -948,4 +960,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '5edc8956aba636624599cd97d20f85edeb33f344dcb83c4df194f0cbf8c6acb7'
+PINNED_DIGEST = '5698a2f9a4055ed067128b5804a0fd4c2fd00b9d5b7a0a0eedeef92e29ddfda7'

@@ -2273,8 +2273,9 @@ shadow-to-real route: one lot of real money for a family whose live practice was
 never evidence.
 - **The owner's terms.** Approved Sept 29, 14:51Z; the reading was settled Sept 30. A family that passes Train and the
   drift screen on its own, shows positive live practice, and passed the gate's review and audit, trades one lot of an
-  approved real structure: at most $50 of maximum loss a structure, fees included, and at most 4 held or working. The
-  route stops for the ISO week once its net realized loss reaches $150. It never promotes: D2 is the only route to
+  approved real structure: at most $75 of maximum loss a structure, fees included ($50 until the incubator cap of Oct
+  8, 2026, below), and at most 4 held or working. The route stops for the ISO week once its net realized loss reaches
+  $150. It never promotes: D2 is the only route to
   Probe and Sized.
 - **What it trades.** The unit is a practice cohort `(family, version)`. Its frozen snapshot is the program the
   incubator trades, byte for byte, as the real, tuition-flagged instance `<family>@<version>:i`.
@@ -2327,7 +2328,7 @@ never evidence.
   - the facts, with the snapshot's run sha;
   - no D2 route for the family (`:r` > `:t` > `:i`);
   - a real structure;
-  - at least one sampled program close that one lot could open under the $50 cap.
+  - at least one sampled program close that one lot could open under the $75 cap.
 
   Every families pass checks again, and a failure sends the instance to exits only, its working opens cancelled.
   `health.json` `options_live.incubator.pins.refused` says why each passing cohort was not pinned.
@@ -2774,10 +2775,10 @@ is installed (**The settings layers**, "The reduced `swarm.json`").
 | `researcher.retire_guard_days` | `swarm.json` on the box | default 14 (Oct 1) | the validated-family guard: a researcher may not retire a family that holds a version which passed the validation line (in its state, in the tournament's verdict records, or archived by any evaluator adoption) last validated within this many days, unless a later validation of that version failed the line; a number at or below 0 turns it off; null, a boolean or a string reads as 14 | edit `swarm.json` |
 | `funding` (`enabled`, `every_seconds`, `lead_hours`, `repeat_hours`, `clear_factor`, `claude_out_usd`, `burn_window_hours`, `after_end_hours`, `fallback_every_seconds`, `fallback_flush_seconds`) | `swarm.json` on the box | defaults (Release A, #439): on, 300, per cliff, 12, 1.5, 2, 6, 48, 21600, 30 | the funding cliff alerts (**Funding cliffs and alerts**) | edit `swarm.json` |
 | `research.enabled`, `requests_day`, `family_requests_day`, `cycle_calls` | `swarm.json` on the box | defaults (Release B, #447): false, 300, 12, 2 | the research library on the House, and its lines: calls a UTC day for the floor, a family, a research cycle (**The research library**) | edit `swarm.json`; on only after the gateway and the House that carry it |
-| The money rules | `league/constitution.py` | the sprint's D4 table and the House live test's bounds (money `a3e2aa7c`); Release B adds the incubator's row (`42c4a3af`); V3-A part 1 leaves it as it is; fast lane v2 moves the Probe row (`da5c7542`) | what real money may do | owner deploy; the standing grant ratifies it when the House starts on it (`--ratify` if it refuses) |
+| The money rules | `league/constitution.py` | the sprint's D4 table and the House live test's bounds (money `a3e2aa7c`); Release B adds the incubator's row (`42c4a3af`); V3-A part 1 leaves it as it is; fast lane v2 moves the Probe row (`da5c7542`); the incubator cap moves `incubator.max_loss_usd` to $75 (`1665c385`) | what real money may do | owner deploy; the standing grant ratifies it when the House starts on it (`--ratify` if it refuses) |
 | `options_money.probe` | `league/constitution.py` | from fast lane v2: `max_loss_share` 0.10, `contracts` 1, `open_per_family` 3, `family_share` 0.15, `floor_usd` 0, `max_open` 3, `loss_budget_usd` 400 | the Probe: one structure within 10% of E, at most 3 Probe positions at once, the $400 Probe loss budget (0 in `max_open` or `loss_budget_usd` stops Probe opens) | owner deploy; the standing grant re-ratifies at the House's start |
 | `tournament.drift_screen` | `league/swarm/policy.json` and `swarm.json` on the box | false (the box since 15:53Z Oct 7; the policy from fast lane v2) | THE DRIFT SCREEN's refusal (direction counts since fast lane v2; its fit is reported by the `direction` and `fast_lane` jobs into `<state>/fast-lane-report.json`, and by `scripts/fast_lane_report.py` on copies) | edit the file; true restores the screen |
-| `options_money.incubator` | `league/constitution.py` | from Release B: `max_loss_usd` 50, `contracts` 1, `max_open` 4, `week_loss_usd` 150, `min_sessions` 3, `min_trades` 10, `min_coverage` 0.80 | the incubator's caps and its pre-registered practice rule; each row may only tighten, and 0 in `max_open`, `week_loss_usd` or `max_loss_usd` stops the route | owner deploy, then `--ratify` (no evidence reset) |
+| `options_money.incubator` | `league/constitution.py` | from Release B, with `max_loss_usd` 75 from the incubator cap (Oct 8, 2026; 50 before it): `max_loss_usd` 75, `contracts` 1, `max_open` 4, `week_loss_usd` 150, `min_sessions` 3, `min_trades` 10, `min_coverage` 0.80 | the incubator's caps and its pre-registered practice rule; each row may only tighten (`max_loss_usd` within $0-75), and 0 in `max_open`, `week_loss_usd` or `max_loss_usd` stops the route | owner deploy; the standing grant re-ratifies at the House's start (`--ratify` if it refuses; no evidence reset) |
 
 In the settings, `researcher.sail_usd_per_hour`, when set, is the researcher pace: the Sail models' spend over the
 trailing hour (0.25 since 17:23Z Oct 2; 1.3 from 02:47Z Oct 1; 12 from Sept 29), capped from A1 by the budget

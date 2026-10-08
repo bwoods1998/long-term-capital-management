@@ -722,7 +722,7 @@ spreads remove.
 | Execution tuition: 1-lot real orders before the holdout, to measure multi-leg fills (never evidence) | $200 max loss a day, $300 a week; since fast lane v2 one structure within the Probe's cap (10% of E) | $0-200 a day |
 | D3 calibration: the House's own 1-lot round trips on SPY, QQQ and IWM (never evidence) | $50 of possible loss a day | - |
 | The House live test: one frozen, pre-registered program as the House's own instance (never evidence) | a structure at most $100, 3 open, $300 at risk, no new open after a $150 loss, 20 sessions, 30 round trips | - |
-| The incubator (Release B): one lot of a real structure for a family that passed Train and the drift screen, the gate's review and audit, and a pre-registered first look at its live practice (3 sessions, 10 program closes, coverage 0.80, P&L above $0 three ways); never evidence, never a promotion | $50 max loss a structure, 4 held or working, stopped for the ISO week once its net realized loss reaches $150 | $0-50, 0-4, $0-150 (0 stops it) |
+| The incubator (Release B): one lot of a real structure for a family that passed Train and the drift screen, the gate's review and audit, and a pre-registered first look at its live practice (3 sessions, 10 program closes, coverage 0.80, P&L above $0 three ways); never evidence, never a promotion | $75 max loss a structure (from $50, Oct 8, 2026), 4 held or working, stopped for the ISO week once its net realized loss reaches $150 | $0-75, 0-4, $0-150 (0 stops it) |
 
 - **Sizing is by maximum loss**, never by premium.
 - **The order path:** the House nets every agent's intents into one order stream per contract;

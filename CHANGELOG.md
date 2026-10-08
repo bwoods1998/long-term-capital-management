@@ -79,6 +79,34 @@ Train 2022-2024. `league/swarm/game.py` (new, protected) holds the rules; the bu
   gate, the holdout look and Probe sizing are as they were. Control and legacy families, and every family with the game
   off, play main's round byte for byte (`league/tests/test_game.py` `Golden`, against `ab64c68b`).
 
+### The incubator cap, on `feat/incubator-cap-75` (unreleased; an owner deploy, money digest `da5c7542` -> `1665c385`)
+
+One money row moves: `options_money.incubator.max_loss_usd` "50" -> "75" (its bound in `OPTIONS_MONEY_BOUNDS` $0-50 ->
+$0-75). Everything else is as it was: `week_loss_usd` $150, `max_open` 4, `contracts` 1, the practice rule (3 sessions,
+10 program closes, 0.80 coverage), the Probe, tuition, calibration, the House test and the gateway's caps.
+- **Why.** The Oct 8 incubator audit found the $50 unit cap refuses most one-lot units of the single-name cohorts, so a
+  cohort that passes its first look often can never open ("could never open") or opens only its cheapest trades. Share
+  of one-lot units (maximum loss plus open and close fees) at or under $50 -> $75 in the active cohorts' Gym Train
+  trades: semis-lead-smallcap 4% -> 71%, smci-mara 40% -> 71%, opening-range 40% -> 62%, china-tech 55% -> 77%,
+  peer-skew 50% -> 71%, index-corr 83% -> 98%, earnings-gap 10% -> 17%, megacap 0% -> 3%, semis-supply 2% -> 2%. The
+  owner's goal of Oct 7 (item 4) allows up to 10% of equity at risk per Probe position (about $129 at E = $1,288); the
+  incubator's unit stays well inside it.
+- **Cost (a loosening).** The week's bound is unchanged ($150 net realized loss plus residuals; about $650 a month on
+  average, $750 in a five-week month), and at most two $75 units are open at once (three $50 ones before). What rises
+  is how much of that envelope a pass uses: replayed on the 10 live cohorts' eligible Train runs with the practice caps
+  and the route's caps, with no edge after costs (-8% of maximum loss a trade), the expected real loss per first-look
+  pass goes from about $0.40 to $2.45 at today's practice windows, and from $5.52 to $26.59 at 40-session windows
+  (maximum loss sent per pass $71 -> $164). With zero edge the means are noise around $0, but the worst simulated pass
+  over 40 sessions grows from -$310 to -$424 (several weeks, each inside $150).
+- **Identities.** Constitution digest `5edc8956` -> `5698a2f9`; money digest `da5c7542` -> `1665c385`; the execution
+  fingerprint `b4c34031` is unchanged (no `league/gym`, `league/live` or base-file change), so practice cohorts and
+  bands carry over: no evidence reset. The updater never deploys it (the constitution is protected): the owner's deploy
+  (`floor_box.py deploy`) writes the deploy row, and at the House's start the standing grant re-ratifies on `1665c385`
+  by itself (`league/ops/grant.py`, `LiveGrant.standing`: a moved digest with an owner's deploy on record); verify the
+  `grant` job's receipt says `ratified` with trigger `digest`, else `python3 scripts/live_trading.py --ratify` on the
+  box. `options_live.incubator.table.max_loss_usd` then reads 75 (`python3 -m league.live --root /workspace/state
+  --incubator`). Rolling back across it needs the grant re-ratified on `da5c7542`.
+
 ### On branches, not in V3-A part 1
 
 - `v3/wp6`, the forward ladder and its benchmark (evidence v3, the owner's D2). As first specified it does not meet its

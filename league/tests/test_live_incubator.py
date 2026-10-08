@@ -444,10 +444,11 @@ class TheCaps(unittest.TestCase):
                                 exposure=exposure or M.Exposure(), room=room)
 
     # -------------------------------------------------------------- direct cases
-    def test_one_lot_under_fifty_dollars(self):
-        self.assertEqual(self.plan("50").qty, 1)
-        self.assertEqual(self.plan("50.01").qty, 0)
-        self.assertIn("over its $50 cap", self.plan("50.01").reason)
+    def test_one_lot_under_seventy_five_dollars(self):
+        """The incubator cap (Oct 8, 2026): $75 a unit with its fees ($50 before it)."""
+        self.assertEqual(self.plan("75").qty, 1)
+        self.assertEqual(self.plan("75.01").qty, 0)
+        self.assertIn("over its $75 cap", self.plan("75.01").reason)
 
     def test_a_fifth_open_is_refused(self):
         for fam in ("a", "b", "c"):
@@ -464,12 +465,12 @@ class TheCaps(unittest.TestCase):
         self.assertIn("envelope", self.plan("10.01", "c").reason)
         self.assertEqual(self.plan("10.00", "c").qty, 1)
 
-    def test_a_family_holds_or_works_at_most_fifty_dollars(self):
+    def test_a_family_holds_or_works_at_most_seventy_five_dollars(self):
         self.position("a", loss=D("30"))
-        self.assertIn("the family already holds", self.plan("20.01", "a").reason)
-        self.assertEqual(self.plan("20", "a").qty, 1)
-        self.assertEqual(self.plan("50", "b").qty, 1, "another family's own $50")
-        self.order("a", unit=D("20"))
+        self.assertIn("the family already holds", self.plan("45.01", "a").reason)
+        self.assertEqual(self.plan("45", "a").qty, 1)
+        self.assertEqual(self.plan("75", "b").qty, 1, "another family's own $75")
+        self.order("a", unit=D("45"))
         self.assertEqual(self.plan("0.01", "a").qty, 0, "held and working together")
 
     def test_a_position_carried_into_a_new_week_counts_as_held_and_last_weeks_loss_resets_on_monday(self):
@@ -567,8 +568,8 @@ class TheCaps(unittest.TestCase):
         cases = [
             (dict(unit="1", E=D("0")), "no sizing equity"),
             (dict(unit="0"), "not positive"),
-            (dict(unit="50.01"), "over its $50 cap"),
-            (dict(unit="30", tally=full(family_held=D("30"))), "the family already holds"),
+            (dict(unit="75.01"), "over its $75 cap"),
+            (dict(unit="30", tally=full(family_held=D("45.01"))), "the family already holds"),
             (dict(unit="1", tally=full(open_n=4)), "the most it holds is 4"),
             (dict(unit="1", tally=full(realized_loss=D("150"))), "stopped for the week"),
             (dict(unit="1", tally=full(held=D("149.01"))), "envelope"),
@@ -590,7 +591,7 @@ class TheCaps(unittest.TestCase):
                                     exposure=kw.get("exposure", M.Exposure()), room=kw.get("room", D("300")))
             self.assertEqual(plan.qty, 0, why)
             self.assertIn(why, plan.reason)
-        self.assertEqual(M.plan_incubator(t, unit=D("50"), equity=E, tally=full(), exposure=M.Exposure(),
+        self.assertEqual(M.plan_incubator(t, unit=D("75"), equity=E, tally=full(), exposure=M.Exposure(),
                                           room=D("300")).qty, 1)
 
     def test_room_is_kept_for_the_probe_room_and_the_house_test(self):
@@ -613,8 +614,8 @@ class TheCaps(unittest.TestCase):
     # -------------------------------------------------------------- the property
     def test_the_invariants_hold_at_every_admitted_open_over_random_sequences(self):
         """Opens, fills and partial fills, cancels, lost opens, closes at random P&L, broken structures, restarts and ISO
-        weeks, driven through the tally and the plan: at every admitted open one lot, unit <= $50, the family's held and
-        working plus the unit <= $50, at most 4 held or working after it, R + H + W + unit <= $150; and every week's net
+        weeks, driven through the tally and the plan: at every admitted open one lot, unit <= $75, the family's held and
+        working plus the unit <= $75, at most 4 held or working after it, R + H + W + unit <= $150; and every week's net
         realized loss is at most $150 plus the residuals injected (fees above the estimate, a broken close)."""
         rng = random.Random(20261001)
         start = dt.date(2026, 9, 28)
@@ -632,13 +633,13 @@ class TheCaps(unittest.TestCase):
                 action = rng.random()
                 fam = rng.choice(("a", "b", "c", "d", "e"))
                 if action < 0.35:
-                    unit = D(rng.randrange(100, 6000)) / 100
+                    unit = D(rng.randrange(100, 9000)) / 100
                     t = self.tally(fam, today)
                     plan = self.plan(unit, fam, day=today)
                     if plan.qty:
                         self.assertEqual(plan.qty, 1)
-                        self.assertLessEqual(unit, D("50"))
-                        self.assertLessEqual(t.family_held + t.family_working + unit, D("50"))
+                        self.assertLessEqual(unit, D("75"))
+                        self.assertLessEqual(t.family_held + t.family_working + unit, D("75"))
                         self.assertLess(t.open_n, 4)
                         self.assertLessEqual(t.realized_loss + t.held + t.working + unit, D("150"))
                         self.assertLess(peak.get(week, D(0)), D("150"), "no open in a week after its net loss reached $150")
@@ -731,7 +732,7 @@ class FirstLooks(Base):
         self.assertEqual((inst.kind, inst.tuition, inst.incubator, inst.observe, inst.band), ("real", True, True, False, "gym"))
         [row] = self.opens()
         self.assertEqual((row["qty"], row["tuition"], row["instance"]), (1, 1, "fam@1:i"), "one lot, whatever it asked")
-        self.assertLessEqual(row["max_loss"] + 2 * row["fees_est"], 50.0)
+        self.assertLessEqual(row["max_loss"] + 2 * row["fees_est"], 75.0)
         self.assertTrue([p for p, a in self.ledger.of("live.incubator") if p.get("first_look") == "fam@1"])
         self.run_to(9, 40)
         self.assertEqual(self.families.forward_rows("fam"), [], "never a forward row")
@@ -892,7 +893,7 @@ class Eligibility(Base):
         self.assertEqual(self.pinned(facts_sha="another-sha"), [])
 
     def test_no_close_that_one_lot_could_open(self):
-        self.assertEqual(self.pinned(trades=winning(10, max_loss=60.0)), [])
+        self.assertEqual(self.pinned(trades=winning(10, max_loss=80.0)), [])
         self.assertTrue(self.verdicts()["fam@1"]["passed"], "its first look passed; it could never open")
         self.assertIn("could never open", self.pins()["refused"]["fam@1"])
 
