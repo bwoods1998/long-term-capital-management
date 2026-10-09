@@ -641,6 +641,214 @@ class OwnerSteps(Base):
         self.assertIsNone(ST.kill_facts(None))
 
 
+class OwnerDeployGrace(Base):
+    """The readiness audit's M12 (Oct 10, 2026): the 16:20Z Oct 9 "owner deploy waiting" mail fired inside the operator's
+    own 16:17-16:28Z deploy. A refusal counts once it has stood 45 minutes, and never while a deploy is in flight."""
+
+    OWNER = "league/ops/stall.py: this one is the owner's deploy (scripts/floor_box.py deploy)"
+
+    def refused(self, at, *rows):
+        lines = [{"at": at, "stage": "vet", "verdict": "refused", "sha": "b" * 40, "reasons": [self.OWNER]}, *rows]
+        (self.base / "deploys.jsonl").write_text("".join(json.dumps(r) + "\n" for r in lines))
+
+    def test_a_refusal_counts_only_after_45_minutes(self):
+        self.healthy()
+        self.refused("2026-10-07T09:50:00.000Z")                     # 30 minutes before NOW
+        check = self.check("owner_deploy")
+        self.assertFalse(check["stalled"])
+        self.assertIsNone(check["owner_step"])
+        self.assertIn("inside the 45-minute grace", check["what"])
+        self.assertEqual(self.notify.calls, [])
+        out, _ = self.run_at(now=NOW + 20 * 60)                      # 50 minutes
+        self.assertEqual(out["stalled"], ["owner_deploy"])
+        self.assertEqual(self.notify.entry("owner_deploy")["since"], "2026-10-07T09:50:00Z")
+
+    def test_a_deploy_in_flight_holds_it_back_and_one_that_died_does_not(self):
+        self.healthy()
+        start = {"at": "2026-10-07T10:15:00.000Z", "deploy": "r9@1", "release": "r9", "stage": "start"}
+        self.refused("2026-10-07T08:00:00.000Z", start, {"at": "2026-10-07T10:16:00.000Z", "deploy": "r9@1", "stage": "watch"})
+        check = self.check("owner_deploy")
+        self.assertFalse(check["stalled"], "the operator's own deploy is in flight")
+        self.assertTrue(check["numbers"]["deploy_in_flight"])
+        self.assertIn("a deploy is in flight", check["what"])
+        self.assertEqual(ST.deploy_flight(self.base, self.root, NOW)["deploy"], "r9@1")
+        # Its verdict (not a promotion: the canary refused it) ends the flight: the refusal stands again.
+        self.refused("2026-10-07T08:00:00.000Z", start, {"at": "2026-10-07T10:18:00.000Z", "deploy": "r9@1", "stage": "verdict",
+                                                         "verdict": "refused", "reasons": ["canary: x"]})
+        self.assertTrue(self.check("owner_deploy")["stalled"])
+        # A start with no verdict for over two hours died unjudged: no flight.
+        self.refused("2026-10-07T07:00:00.000Z", {**start, "at": "2026-10-07T08:00:00.000Z"})
+        self.assertIsNone(ST.deploy_flight(self.base, self.root, NOW))
+        self.assertTrue(self.check("owner_deploy")["stalled"])
+
+    def test_the_operators_own_nightly_stop_is_a_deploy_in_flight_for_two_hours(self):
+        self.healthy()
+        self.refused("2026-10-07T08:00:00.000Z")
+        stop = self.root / "data" / "nightly.stop"
+        stop.parent.mkdir(parents=True)
+        stop.write_text("")                                         # docs/operations.md "Deploy" step 2: a touch
+        os.utime(stop, (NOW - 30 * 60, NOW - 30 * 60))
+        self.assertFalse(self.check("owner_deploy")["stalled"])
+        stop.write_text("operator:deploy wfix")
+        os.utime(stop, (NOW - 30 * 60, NOW - 30 * 60))
+        self.assertEqual(ST.deploy_flight(self.base, self.root, NOW)["marker"], "operator:deploy wfix")
+        # The updater's own stop is the updater's deploy (its start row says so), never the operator's.
+        stop.write_text("updater:20261007T101500Z")
+        os.utime(stop, (NOW - 30 * 60, NOW - 30 * 60))
+        self.assertIsNone(ST.deploy_flight(self.base, self.root, NOW))
+        stop.write_text("")
+        os.utime(stop, (NOW - 3 * HOUR, NOW - 3 * HOUR))
+        self.assertTrue(self.check("owner_deploy")["stalled"], "a stop left over two hours is no deploy in flight")
+
+
+class LaneAndNightly(Base):
+    """The readiness audit's M6 (Oct 10, 2026): the direction lane's alarms (K5 an owner step), a Done checkpoint (told at
+    once), a pre-open FAIL and a late or stopped nightly reach the owner through the same one notice."""
+
+    def report(self, *alarms, at="2026-10-07T01:30:00Z", k5=None, mode="gate"):
+        doc = {"at": at, "lane": {"mode": mode}, "k5": k5 or {"tripped": False, "cleared": False}, "alarms": list(alarms)}
+        (self.root / "dlane-report.json").write_text(json.dumps(doc))
+
+    def run_lane(self, now=NOW, lane_on=True):
+        ctx = self.ctx(now=now)
+        ctx.lane_on = lane_on
+        return ST.run(ctx)
+
+    def test_a_warning_alarm_is_the_dlane_cause_and_an_info_one_is_not(self):
+        self.healthy()
+        self.report({"id": "A9", "level": "info", "text": "A9: every live direction program has opened nothing"})
+        out = self.run_lane()
+        self.assertEqual(out["stalled"], [])
+        self.report({"id": "A4", "level": "warning", "text": "A4: the Probe loss budget has under one unit of room"},
+                    {"id": "PL1", "level": "warning", "text": "PL1: retired swarm-side 1 programs"})
+        out = self.run_lane()
+        self.assertEqual(out["stalled"], ["dlane"])
+        check = out["checks"]["dlane"]
+        self.assertEqual(check["numbers"]["alarms"], "a4,pl1")
+        self.assertIn("A4: the Probe loss budget", check["what"])
+        self.assertIsNone(check["owner_step"], "the House acts on these by its own rules")
+        self.assertEqual(self.notify.causes(), ["dlane"])
+        self.assertEqual(self.notify.calls[-1]["notice_id"], "stall:info")
+
+    def test_k5_holding_or_disarmed_is_the_owners_step(self):
+        self.healthy()
+        self.report({"id": "K5", "level": "warning", "new": True, "text": "K5 tripped: ..."},
+                    k5={"tripped": True, "cleared": False, "at": "2026-10-07T01:30:00Z", "net": -612.0})
+        out = self.run_lane()
+        self.assertEqual(out["checks"]["dlane"]["owner_step"], ST.K5_STEP)
+        self.assertEqual(out["checks"]["dlane"]["numbers"]["k5"], "tripped")
+        self.assertEqual(self.notify.calls[-1]["notice_id"], "stall:owner:dlane")
+        self.report({"id": "K5", "level": "warning", "disarmed": True, "text": "K5 is disarmed"},
+                    k5={"tripped": False, "cleared": True})
+        self.assertEqual(self.run_lane(now=NOW + HOUR)["checks"]["dlane"]["owner_step"], ST.K5_DISARMED_STEP)
+
+    def test_a_stale_report_is_a_stopped_job_while_the_lane_is_on(self):
+        self.healthy()
+        self.report(at="2026-10-05T01:30:00Z")                       # 57 hours old
+        self.assertEqual(self.run_lane()["stalled"], ["dlane"])
+        self.assertIn("has not written it since", self.run_lane()["checks"]["dlane"]["what"])
+        self.assertEqual(self.run_lane(lane_on=False)["stalled"], [], "a lane switched off writes no report")
+
+    def test_a_done_checkpoint_is_told_at_once_as_an_owner_line(self):
+        self.healthy()
+        self.report({"id": "A8", "level": "info", "meter": "done_screen", "at_close": 30, "text": "A8: Done criteria hold"})
+        out = self.run_lane()
+        self.assertEqual(out["stalled"], ["done"])
+        self.assertIn("done_screen at close 30", out["checks"]["done"]["owner_step"])
+        self.assertEqual(self.notify.calls[-1]["notice_id"], "stall:owner:done")
+        self.assertEqual(self.notify.entry("done")["numbers"]["checkpoints"], "done_screen:30")
+        # The next day's report no longer carries it (A8 is said once): the cause clears.
+        self.report()
+        self.assertEqual(self.run_lane(now=NOW + HOUR)["cleared"], ["done"])
+
+    def preopen(self, due, status="ok", failed=(), error=None):
+        from league.ops.store import OpsStore
+
+        ops = OpsStore(self.root)
+        checks = [{"n": int(f.split()[0]), "name": f.split()[1], "ok": False, "headline": f"{f} headline"} for f in failed]
+        ops.record("preopen", due, status, due, summary={"failed": list(failed), "checks": checks}, error=error)
+        ops.close()
+
+    def test_a_preopen_fail_of_the_last_day_is_a_stall_and_an_older_one_is_not(self):
+        self.healthy()
+        self.preopen("2026-10-06T12:30:00Z", failed=["9 compute"])
+        self.preopen("2026-10-07T09:30:00Z", failed=["6 bands", "9 compute"])
+        out = self.run_lane()
+        self.assertEqual(out["stalled"], ["preopen"])
+        check = out["checks"]["preopen"]
+        self.assertEqual(check["numbers"]["failed_checks"], "6_bands,9_compute")
+        self.assertIn("6 bands: 6 bands headline", check["what"])
+        self.assertIsNone(check["owner_step"])
+        self.assertEqual(self.run_lane(now=NOW + 26 * HOUR)["checks"]["preopen"]["stalled"], False, "a day old: not read")
+        self.preopen("2026-10-08T09:30:00Z", status="failed", error="KeyError: x")
+        self.assertIn("did not run", self.run_lane(now=NOW + 26 * HOUR)["checks"]["preopen"]["what"])
+
+    def nightly(self, *, day=None, error=None, stop=None, stop_age=None):
+        if day is not None:
+            (self.root / "gym-forward.json").write_text(json.dumps({"day": day, "ready_at": f"{day}T06:14:21.81+00:00"}))
+        data = self.root / "data"
+        data.mkdir(exist_ok=True)
+        (data / "nightly.json").write_text(json.dumps({"day": day, "error": error, "retry_at": 0}))
+        if stop is not None:
+            (data / "nightly.stop").write_text(stop)
+            os.utime(data / "nightly.stop", (NOW - stop_age, NOW - stop_age))
+
+    def test_a_late_ready_file_is_the_forward_cause_once_the_day_is_ten_hours_in(self):
+        self.healthy()
+        self.nightly(day="2026-10-06")                                # Wed Oct 7 10:20Z: Tue Oct 6 is the last session
+        self.assertEqual(self.run_lane()["stalled"], [])
+        self.nightly(day="2026-10-05")
+        out = self.run_lane()
+        self.assertEqual(out["stalled"], ["forward"])
+        numbers = out["checks"]["forward"]["numbers"]
+        self.assertEqual((numbers["ready_day"], numbers["expected_day"]), ("2026-10-05", "2026-10-06"))
+        self.assertEqual(numbers["ready_at"], "2026-10-05T06:14:21Z")
+        self.assertIsNone(out["checks"]["forward"]["owner_step"])
+        # Before 10:00Z the night before's session is the one due: a Monday morning waits on Friday's, not Sunday's.
+        self.assertFalse(self.run_lane(now=at("2026-10-07T09:00:00Z"))["checks"]["forward"]["stalled"])
+        self.assertEqual(ST.last_session_before("2026-10-12"), "2026-10-09")
+
+    def test_a_nightly_error_counts_from_the_first_run_that_saw_it(self):
+        self.healthy()
+        self.nightly(day="2026-10-06", error="sip_gaps: 503")
+        self.assertFalse(self.run_lane()["checks"]["forward"]["stalled"])
+        self.assertFalse(self.run_lane(now=NOW + 5 * HOUR)["checks"]["forward"]["stalled"])
+        out = self.run_lane(now=NOW + 6 * HOUR)
+        self.assertTrue(out["checks"]["forward"]["stalled"])
+        self.assertIn("carried an error for 6.0 h", out["checks"]["forward"]["what"])
+        self.nightly(day="2026-10-06")                               # it cleared: the clock starts again
+        self.run_lane(now=NOW + 7 * HOUR)
+        self.nightly(day="2026-10-06", error="again")
+        self.assertFalse(self.run_lane(now=NOW + 8 * HOUR)["checks"]["forward"]["stalled"])
+
+    def test_a_nightly_stop_left_two_hours_is_the_owners_step(self):
+        self.healthy()
+        self.nightly(day="2026-10-06", stop="", stop_age=1 * HOUR)
+        self.assertFalse(self.run_lane()["checks"]["forward"]["stalled"])
+        self.nightly(day="2026-10-06", stop="operator:deploy", stop_age=3 * HOUR)
+        out = self.run_lane()
+        self.assertEqual(out["stalled"], ["forward"])
+        self.assertIn("remove /workspace/state/data/nightly.stop (it is the operator's)", out["checks"]["forward"]["owner_step"])
+        self.assertEqual(self.notify.entry("forward")["since"], "2026-10-07T07:20:00Z")
+        self.nightly(day="2026-10-06", stop="updater:x", stop_age=3 * HOUR)
+        self.assertIn("automation wrote it", self.run_lane(now=NOW + HOUR)["checks"]["forward"]["owner_step"])
+
+    def test_a_done_checkpoint_is_news_never_a_stall_on_the_daily_page(self):
+        from league.ops import dlane_report as R
+
+        self.assertEqual(ST.NEWS_CAUSES, R.NEWS_CAUSES)
+        stalls = {"causes": {"done": {"standing": True, "seen_at": "2026-10-07T01:50:00Z"},
+                             "forward": {"standing": True, "seen_at": "2026-10-07T10:20:00Z"}}}
+        lines = SB.funnel_lines({"day": {}}, stalls)
+        self.assertIn("Stalls standing now: forward (since 2026-10-07T10:20:00Z).", lines)
+
+    def test_every_new_cause_is_in_the_gateways_words(self):
+        source = (Path(__file__).resolve().parents[2] / "gateway" / "lib" / "email.mjs").read_text()
+        for cause in ("dlane", "done", "preopen", "forward"):
+            self.assertIn(cause, ST.CAUSES)
+            self.assertIn(f"  {cause}: '", source)
+
+
 class Wiring(Base):
     def test_registered_every_half_hour_round_the_clock_in_a_pause_too_and_unpaid(self):
         job = by_name()["stall"]

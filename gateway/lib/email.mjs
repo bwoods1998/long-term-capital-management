@@ -129,6 +129,13 @@ export const STALL_CAUSES = {
   paused: 'the floor is paused',
   grant_refused: 'the standing grant refused to re-ratify',
   kill_on: 'the kill switch is on',
+  // Oct 10, 2026 (the readiness audit's M6): the direction lane's alarms and K5, a Done checkpoint that holds (news the
+  // owner hears at once), a pre-open FAIL and a late or stopped nightly. The House sends these only once this gateway
+  // knows them: deploy the gateway first (a cause not named here makes the whole notice a 400, nothing mailed).
+  dlane: 'a direction-lane alarm',
+  done: 'a Done checkpoint holds',
+  preopen: 'a pre-open check failed',
+  forward: 'the nightly forward replay is late or stopped',
 };
 //: The most figures a stall notice lists for one cause, and the shape of a figure's name.
 const STALL_NUMBERS = 16;

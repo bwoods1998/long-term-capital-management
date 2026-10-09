@@ -199,3 +199,21 @@ test('through /v1/notify: the same owner causes every 12 hours, a new one at onc
   assert.equal((await post({ kind: 'stall', cause: 'births' }, NOW)).status, 400);
   assert.equal(sent.length, 5);
 });
+
+test('the causes of Oct 10, 2026: a Done checkpoint and K5 are owner lines; a pre-open FAIL and a late nightly are told as stalls', () => {
+  // league/ops/stall.py `_lane_checks`, `_preopen_check` and `_forward_check` (the readiness audit's M6).
+  const done = { ...BIRTHS, cause: 'done', what: 'Done criteria hold at a FINAL checkpoint (done_screen at close 30).',
+    numbers: { checkpoints: 'done_screen:30', report_at: '2026-10-20T01:30:00Z' },
+    owner_step: 'Done holds at a FINAL checkpoint (done_screen at close 30): read the claim in dlane-report.json' };
+  assert.equal(composeNotice(notice(done)).subject, 'LTCM: needs you: a Done checkpoint holds');
+  assert.ok(composeNotice(notice(done)).text.includes('- checkpoints: done_screen:30\n'));
+  const k5 = { ...BIRTHS, cause: 'dlane', numbers: { alarms: 'a4,k5', k5: 'tripped', lane_mode: 'gate' },
+    owner_step: 'the direction lane reads shadow while K5 holds: read its losses, then clear it' };
+  assert.equal(composeNotice(notice(k5, done)).subject, 'LTCM: needs you: a direction-lane alarm, a Done checkpoint holds');
+  assert.equal(stallKey(notice(k5, done)), 'stall:owner:dlane+done');
+  const preopen = { ...BIRTHS, cause: 'preopen', numbers: { failed_checks: '6_bands,9_compute' } };
+  const forward = { ...BIRTHS, cause: 'forward', numbers: { ready_day: '2026-10-08', expected_day: '2026-10-09' } };
+  const both = composeNotice(notice(preopen, forward));
+  assert.equal(both.subject, 'LTCM: stalled: a pre-open check failed, the nightly forward replay is late or stopped');
+  for (const line of ['- failed_checks: 6_bands,9_compute', '- expected_day: 2026-10-09']) assert.ok(both.text.split('\n').includes(line), line);
+});
