@@ -29,6 +29,42 @@ any other deploy.
 The running House release is `20261009T090334Z-cdbf1864a573` (main `40c39435`, release L-D, 09:04Z Oct 9, below), the
 gateway is `8072b5b1`, and the box's updater is on. What is built and not deployed is on branches.
 
+### The swarm-side readiness fixes, on `wfix/swarm` (unreleased; an owner deploy on main `cf96b72c`; no evidence reset)
+
+Four fixes from the operator's readiness audit of Oct 9 (M2, M3, M5, m3). Operator's page: **The swarm-side readiness
+fixes** at the top of `docs/operations.md`. Nothing in `league/live/`, `league/gym/` or `league/constitution.py`: the
+execution fingerprint (`31a7e921`), the money digest (`0310779c`) and the gate contract (`397b22b772b3`) do not move,
+so no Probe program leaves Probe, no family is reviewed again and no ratification is needed. An owner deploy:
+`league/swarm/gate.py`, `tournament.py`, `dlane.py`, `settings.py` and `league/ops/` are FORBIDDEN to the updater.
+- **A cut answer is no answer (M2,** `league/swarm/gate.py` `AnswerCut`, `Gate._cut_check`, `gate.cut_tries_day` 6**).**
+  A review or audit, the gate's or the incubator's, that Sail returns `incomplete` at max_output_tokens is a
+  `review_error` / `audit_error` with `cut` true. No attempt is counted and nothing is barred. It is asked again next
+  round on a new model-call key (`:cut<k>`; the Provider dedupes on the key). At most 6 cut answers a version, a stage
+  and a UTC day; the sixth raises the owner's `reader_cut` alert, and the stage waits for the next UTC day. On Oct 9
+  three cut answers in a row refused dir-qqq-ivlow-3d-call v38, a direction lineage's one try, to a token cap.
+- **The ration before the cohort keep (M3,** `league/swarm/tournament.py` `_why`**).** A direction family whose
+  lineage spent its one try or look retires even while the cohort keep holds it, which frees its population slot. At
+  20:12Z Oct 9 the keep held 8 such families. Its cost: the retired program loses the incubator route. It is listed in
+  the dlane report's `tightened`. The alpha lane and the lane-off rollback keep the keep's order exactly.
+- **A D2 entry counts (M5,** `tournament.py` `_verdict`, `researcher.record_verdict`, `league/ops/funnel.py`,
+  `scoreboard.py`, `dlane_report.py`**).** A direction verdict records `entered` and the lane's `screen` in its
+  `swarm.tournament` row and its `validation_verdicts`; `passed` stays the line. The daily funnel gains
+  `validations.entered` and `by_screen`, and the public page gains one row only when a window has a pre-check entry.
+  The dlane report's direction funnel gains `entered`. A3's gate-wait leg counts entered versions (the verdict's
+  `entered`, or `dlane_try.entered` for older entries) and never a refused one. Until now eqp-realcalm-drift-call v17
+  (at Probe) counted as a failed Validation everywhere. An alpha verdict's row and record are unchanged, key for key.
+- **R3 needs a 1.0x profit (m3,** `league/swarm/dlane.py` `robust_verdict`**).** R3 read `pnl_15 >= 0.5 x pnl_10`
+  alone, always true for a 1.0x loss once P1 holds: eqp-term-contango-pool-call v6 (1.0x -$1,778.21, 1.5x +$143.23)
+  passed and spent its lineage's try. A 1.0x P&L at or below zero now fails R3. It is a tightening, listed in the dlane
+  report's `tightened`. The researcher's brief text is unchanged: the Train map's golden pins it.
+- **Proof.** `test_swarm_gate_cut` (cut reviews, audits and incubator reviews; the new keys; the day's cap and its
+  alert; a complete unclear answer still counts), `test_dlane_gate_entries` (the verdict row and record, alpha key for
+  key, the lane off; the funnel and the page row; the dlane funnel; A3 with entries, older tries and a refusal),
+  `test_dlane` (`test_r3_needs_a_profit_at_10x`), `test_dlane_d1b` (`test_the_ration_comes_before_the_cohort_keep`,
+  replacing the test that the keep spares the ration) and `test_ops_stall` (the funnel's two new keys).
+- **Rollback.** The previous House release. Its code ignores the new verdict keys and the `*_cut:*` kv rows. The
+  families M3 retired stay retired.
+
 ### The budget split and the graveyard's report row, on `fix/budget-split-sail` (unreleased; an owner deploy on main `d70e00c3`; no evidence reset)
 
 Two operator decisions of Oct 9 (about 16:00Z). Operator's page: **The budget split** at the top of

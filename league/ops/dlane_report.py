@@ -110,7 +110,8 @@ RUN_WINDOWS = ("train", "validation", "holdout", "mechanism", "forward", "probe"
 #: A run row with one of these statuses is not a Gym evaluation (`funnel.NOT_RUN`).
 NOT_RUN = ("refused", "error")
 #: A3's waits (HARNESS section 5): a direction best that cleared every Train bar waits for its Validation more than this
-#: many hours; a direction Validation pass waits for its holdout look more than this many.
+#: many hours; a direction version that entered the gate (a Validation pass, or D2's pre-check: M5, Oct 10, 2026) waits
+#: for its holdout look more than this many.
 A3_VALIDATION_HOURS = 6.0
 A3_GATE_HOURS = 12.0
 #: A2: a direction version cleared every Train bar this long ago and no direction Validation try or look since.
@@ -238,6 +239,12 @@ TIGHTENED: tuple[str, ...] = (
     "D2 is refused unless a receipt's sha256 and its c are pinned in the repository's policy.json and CI holds the "
     "receipt to it, and unless the lane is calls only (release D-1b)",
     "E5: one lot at today's prices within 10% of equity before Validation",
+    "R3 (the readiness audit of Oct 9, m3): the 1.5x run is compared with a 1.0x Train P&L above zero; a version "
+    "that lost money on Train at 1.0x fails R3 (until then R3 always passed it: eqp-term-contango-pool-call v6, -$1,778 "
+    "at 1.0x and +$143 at 1.5x, spent its lineage's one Validation try)",
+    "the ration before the cohort keep (the readiness audit of Oct 9, M3): a direction family whose lineage spent "
+    "its one try or look retires even while the cohort keep holds it, so its slot is freed and its program loses the "
+    "incubator route; the alpha lane keeps the keep's order",
     "release D-1b: ONE Validation try and ONE holdout look per direction lineage (was: the alpha lane's three looks and "
     "tries until retirement), so a lineage's false-positive rate is the program's; a lineage that spends either without "
     "a pass still in play retires",
@@ -692,12 +699,19 @@ def funnel(store: Any, lanes: Lanes, all_closes: Sequence[Mapping[str, Any]], *,
         if row["w"] in out[lane]["gym_runs"]:
             out[lane]["gym_runs"][row["w"]] += 1
         out[lane]["program_years"] += float(row.get("program_years") or 0.0)
+    # M5 (Oct 10, 2026): the direction lane also counts the verdicts that went to the gate (`entered`: the line, or D2's
+    # Validation pre-check; the tournament's verdict row says so from that release on). The alpha lane's counts are as
+    # before: `passed` is the line's answer in both lanes.
+    out[dlane.DIRECTION]["validations"]["entered"] = 0
     for row in store._all("SELECT payload FROM events WHERE kind='swarm.tournament' AND at>=?", (since,)):
         judged = ((_loads(row.get("payload"), {}) or {}).get("validation") or {}).get("judged")
         for fid, verdict in (judged or {}).items() if isinstance(judged, Mapping) else ():
             lane = lanes.of(fid)
             out[lane]["validations"]["judged"] += 1
             out[lane]["validations"]["passed"] += 1 if isinstance(verdict, Mapping) and verdict.get("passed") is True else 0
+            if lane == dlane.DIRECTION and isinstance(verdict, Mapping) \
+                    and (verdict.get("passed") is True or verdict.get("entered") is True):
+                out[lane]["validations"]["entered"] += 1
     for row in store._all("SELECT family, payload FROM events WHERE kind='swarm.gate' AND at>=?", (since,)):
         action = (_loads(row.get("payload"), {}) or {}).get("action")
         if action in ("review", "audit") and row.get("family"):
@@ -1099,19 +1113,31 @@ def alarms(store: Any, settings: Mapping[str, Any] | None, lanes: Lanes, book: M
             continue
         if not [r for r in store.version_runs(fam["id"], n, window="validation", stress=1.0, limit=5)]:
             waits_val.append(fam["id"])
+    # M5 (Oct 10, 2026): a version that ENTERED the gate waits for its look as a line pass does. Under D2 a direction
+    # version enters by the Validation pre-check with its line failed, so this leg read `passed` alone and could never
+    # fire for the lane: the verdict's `entered` (from that release), and the lineage's try (`dlane.TRY_KEY` `entered`:
+    # every D2 entry before it, eqp-realcalm-drift-call's v17 among them), count too. A version the gate refused (a
+    # `refusals` row: the review, the audit, the rations) waits for nothing and is never counted.
+    refused = {(str(r["family"]), int(r["version"])) for r in store.refusals() if r.get("version") is not None}
     for fam in alive:
-        verdicts = (fam.get("state") or {}).get("validation_verdicts") or {}
-        for n, v in verdicts.items() if isinstance(verdicts, Mapping) else ():
-            if (isinstance(v, Mapping) and v.get("passed") is True and fam.get("band") == "gym"
-                    and str(v.get("at") or "9") <= _iso(now - A3_GATE_HOURS * 3600.0)
-                    and str(n).isdigit() and (fam["id"], int(n)) not in looked):
+        state = fam.get("state") or {}
+        verdicts = state.get("validation_verdicts") or {}
+        entries = [(n, v.get("at")) for n, v in (verdicts.items() if isinstance(verdicts, Mapping) else ())
+                   if isinstance(v, Mapping) and (v.get("passed") is True or v.get("entered") is True)]
+        held = state.get(dlane.TRY_KEY)
+        if isinstance(held, Mapping) and held.get("entered") is True and held.get("version") is not None:
+            entries.append((held["version"], held.get("at")))
+        for n, at in entries:
+            if (fam.get("band") == "gym" and str(at or "9") <= _iso(now - A3_GATE_HOURS * 3600.0)
+                    and str(n).isdigit() and (fam["id"], int(n)) not in looked and (fam["id"], int(n)) not in refused):
                 waits_gate.append(fam["id"])
     if waits_val or waits_gate:
         out.append({"id": "A3", "level": "warning", "validation": sorted(set(waits_val))[:12],
                     "gate": sorted(set(waits_gate))[:12],
                     "text": f"A3: {len(set(waits_val))} direction bests wait for Validation over "
-                            f"{A3_VALIDATION_HOURS:g} h and {len(set(waits_gate))} direction Validation passes wait for "
-                            f"their holdout look over {A3_GATE_HOURS:g} h (a stall)"})
+                            f"{A3_VALIDATION_HOURS:g} h and {len(set(waits_gate))} direction versions that entered the "
+                            f"gate (the line or D2's pre-check) wait for their holdout look over {A3_GATE_HOURS:g} h "
+                            "(a stall)"})
     # A4: room under one unit while a direction Candidate or Probe has fewer than 5 real closes.
     real_n: dict[str, int] = {}
     for cl in all_closes:

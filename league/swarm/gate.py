@@ -163,6 +163,21 @@ its result lands; one marked while D2 was in force for a version that entered by
 the rollback to "S-C", FAILS CLOSED (`PRECHECK_UNDER_LINE`): it met neither screen's rule. The look's marker records how
 the version entered (`line`).
 
+AN ANSWER CUT SHORT IS NO ANSWER (Oct 10, 2026; the readiness audit's M2, `AnswerCut`, `_cut_check`). On Oct 9 four of
+six gate reviews on the Sail stand-in (DeepSeek-V4-Pro balanced, `review_max_output_tokens` 6,000) came back `incomplete`
+at max_output_tokens, every token spent reasoning and no text; each read as "unclear", and the third cut answer to
+dir-qqq-ivlow-3d-call v38 (20:23Z) became its "fail" (the reviewer "could not reach a verdict three times"), a direction
+lineage's one try lost to a token cap, never to evidence. Now a review or an audit (the gate's, and the incubator's)
+whose answer the router marks cut (`truncated`, or `incomplete_reason` "max_output_tokens") is an error, as a reviewer
+that did not answer is: the call site records `review_error` / `audit_error` (`incubator_review_error`,
+`incubator_audit_error`) with `cut` true, no attempt is counted, nothing is barred, and the version is asked again next
+round. Each ask after a cut carries a new model-call key (`:cut<k>`; the Provider dedupes on the key, so the same key
+would return the stored cut answer); the first ask's key is as before. A version gets at most `gate.cut_tries_day` (6)
+cut answers per stage a UTC day: the sixth raises one `swarm.status` alert (`reader_cut`, the owner's: raise
+`gate.review_max_output_tokens`), and after it the stage is not asked again that day (no event, no spend), so a stuck
+model cannot spend every round; the next UTC day it is asked again (Claude's line, refilled at 00:00Z, may answer it).
+A complete answer is judged exactly as before; `grounded_answer` (league/gym) is untouched.
+
 Every step is a `swarm.gate` event; band moves are `swarm.band` events (the site's news).
 Standard library only.
 """
@@ -191,6 +206,21 @@ from .store import SwarmStore, dumps, structure_text
 #: A direction look that fails closed at its result (release D-1b, the review's finding 2): rules only, no figure.
 PRECHECK_UNDER_LINE = ("entered by D2's Validation pre-check; the screen in force when its look landed needs the "
                        "Validation line")
+
+#: AN ANSWER CUT SHORT IS NO ANSWER (the module docstring): `gate.cut_tries_day`'s default, the cut answers a version
+#: may have per stage a UTC day before that stage waits for the next day.
+CUT_TRIES_DAY = 6
+
+
+class AnswerCut(RuntimeError):
+    """A review or audit the model did not finish (`Gate._cut_check`): no verdict, so the caller records an error and
+    counts no attempt. `quiet`: today's cut answers are used and nothing was asked (the caller records nothing).
+    `detail`: what the caller's error event carries beside the words."""
+
+    def __init__(self, text: str, *, quiet: bool = False, detail: Mapping[str, Any] | None = None):
+        super().__init__(text)
+        self.quiet = quiet
+        self.detail = dict(detail or {})
 
 
 @functools.lru_cache(maxsize=1)
@@ -533,12 +563,15 @@ class Gate:
         contract = gate_contract()["sha256"][:12]
         stage, desk = incubator_stage("review", fam["id"], incubator=incubator)
         attempt_key = f"{stage}_attempt:{contract}:{fam['id']}:{version['n']}"
+        cut = self._cut_suffix(stage, contract, fam["id"], version["n"])  # AN ANSWER CUT SHORT: a new key after a cut
+        max_output = int(self.cfg.get("review_max_output_tokens", 6000))
         answer = self.router.ask(role="review", system=REVIEW, user=user, family=fam["id"],
-                                 key=f"swarm:{contract}:{fam['id']}:{stage}:{version['n']}:{self.store.get(attempt_key, 0)}",
+                                 key=f"swarm:{contract}:{fam['id']}:{stage}:{version['n']}:{self.store.get(attempt_key, 0)}{cut}",
                                  openai_model=self.cfg.get("review_openai_model"), sail_profile=str(self.cfg.get("review_sail_profile",
                                                                                                                    "pro_balanced")),
-                                 max_output=int(self.cfg.get("review_max_output_tokens", 6000)), effort="medium", need_usd=0.5,
+                                 max_output=max_output, effort="medium", need_usd=0.5,
                                  desk=desk, cap_usd_day=float(self.cfg.get("review_usd_day", 1.0)), claude=True)
+        self._cut_check(answer, stage, contract, fam["id"], version["n"], max_output)
         return dict(grounded_answer(answer, version["code"]), contract_sha=gate_contract()["sha256"])
 
     # ------------------------------------------------------------------ the audit
@@ -555,13 +588,90 @@ class Gate:
         user = (f"AUDIT. Family {fam['id']}: {fam['mechanism']}\nStructure {structure_text(fam['structure'])}, roots {', '.join(fam['roots'])}.\n\n"
                 f"Runtime contract (actual deployed source): {json.dumps(gate_contract(), sort_keys=True)}\n\n"
                 f"```python\n{version['code']}\n```\nPARAMS overrides: {json.dumps(version.get('params') or {})}")
+        contract = gate_contract()["sha256"][:12]
+        cut = self._cut_suffix(stage, contract, fam["id"], version["n"])  # AN ANSWER CUT SHORT: a new key after a cut
+        max_output = int(self.cfg.get("review_max_output_tokens", 6000))
         answer = self.router.ask(role="audit", system=REVIEW, user=user, family=fam["id"],
-                                 key=f"swarm:{gate_contract()['sha256'][:12]}:{fam['id']}:{stage}:{version['n']}:{attempt}",
+                                 key=f"swarm:{contract}:{fam['id']}:{stage}:{version['n']}:{attempt}{cut}",
                                  openai_model=model if use_openai else None,
                                  sail_profile=str(self.cfg.get("audit_sail_profile", "k3_balanced")),
-                                 max_output=int(self.cfg.get("review_max_output_tokens", 6000)), effort="high", need_usd=need,
+                                 max_output=max_output, effort="high", need_usd=need,
                                  desk=desk, cap_usd_day=float(self.cfg.get("review_usd_day", 1.0)), claude=True)
+        self._cut_check(answer, stage, contract, fam["id"], version["n"], max_output)
         return dict(grounded_answer(answer, version["code"]), contract_sha=gate_contract()["sha256"])
+
+    # ------------------------------------------------------------------ an answer cut short (M2)
+    def cut_tries_day(self) -> int:
+        """`gate.cut_tries_day` (`CUT_TRIES_DAY`, 6): a whole number of at least 1; anything else reads as the default."""
+        raw = self.cfg.get("cut_tries_day", CUT_TRIES_DAY)
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)) or not raw == raw or raw < 1 or raw == float("inf"):
+            return CUT_TRIES_DAY
+        return int(raw)
+
+    @staticmethod
+    def _cut_key(stage: str, contract: str, fid: str, n: Any) -> str:
+        """The kv key of a version's cut answers at one stage ("review", "audit" or the incubator's own: their counts are
+        each their own, as their attempt counts are)."""
+        return f"{stage}_cut:{contract}:{fid}:{n}"
+
+    def _cut_record(self, stage: str, contract: str, fid: str, n: Any) -> dict[str, Any]:
+        """{"day", "today", "total"}: the UTC day of the last cut, the cut answers that day and in all. A record that
+        cannot be read is none (the worst case is one more paid ask)."""
+        value = self.store.get(self._cut_key(stage, contract, fid, n))
+        out = {"day": None, "today": 0, "total": 0}
+        if isinstance(value, Mapping):
+            for k in ("today", "total"):
+                v = value.get(k)
+                out[k] = int(v) if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else 0
+            out["day"] = value.get("day") if isinstance(value.get("day"), str) else None
+        return out
+
+    def _utc_day(self) -> str:
+        return dt.datetime.fromtimestamp(float(self.clock()), dt.timezone.utc).date().isoformat()
+
+    def _cut_suffix(self, stage: str, contract: str, fid: str, n: Any) -> str:
+        """The model-call key's suffix after `total` cut answers (":cut<total>"; "" before any, so a first ask's key is
+        as it always was). Raises a quiet `AnswerCut` when today's `cut_tries_day` cut answers are used: not asked."""
+        record = self._cut_record(stage, contract, fid, n)
+        if record["day"] == self._utc_day() and record["today"] >= self.cut_tries_day():
+            what = stage.replace("_", " ")
+            raise AnswerCut(f"the {what}'s answers were cut short {record['today']} times today: asked again tomorrow",
+                            quiet=True)
+        return f":cut{record['total']}" if record["total"] else ""
+
+    def _cut_check(self, answer: Mapping[str, Any], stage: str, contract: str, fid: str, n: Any, max_output: int) -> None:
+        """AN ANSWER CUT SHORT IS NO ANSWER (the module docstring): an answer the router marks cut (`truncated`, or
+        `incomplete_reason` "max_output_tokens") is counted (`_cut_record`) and raised as `AnswerCut`, never judged; the
+        day's last allowed one alerts the owner once. A complete answer passes through untouched."""
+        reason = answer.get("incomplete_reason")
+        if not (answer.get("truncated") is True or reason == "max_output_tokens"):
+            return
+        day, record = self._utc_day(), self._cut_record(stage, contract, fid, n)
+        today = (record["today"] if record["day"] == day else 0) + 1
+        self.store.put(self._cut_key(stage, contract, fid, n), {"day": day, "today": today, "total": record["total"] + 1})
+        cap = self.cut_tries_day()
+        usage = answer.get("usage") if isinstance(answer.get("usage"), Mapping) else {}
+        detail = {"cut": True, "incomplete_reason": reason if isinstance(reason, str) else None,
+                  "route": answer.get("route"), "model": answer.get("model"), "max_output_tokens": int(max_output),
+                  "output_tokens": usage.get("output_tokens"), "cut_today": today, "cut_cap": cap}
+        what = stage.replace("_", " ")
+        if today == cap:
+            self.store.event("swarm.status", fid, {
+                "action": "reader_cut", "alert": True, "stage": stage, "version": n, **detail,
+                "text": (f"the {what} of {fid} v{n} was cut short at {int(max_output)} output tokens {cap} times "
+                         f"today ({answer.get('model') or 'its model'}): no verdict, no attempt counted; it is asked again "
+                         "tomorrow. Raise gate.review_max_output_tokens in swarm.json")})
+        raise AnswerCut(f"the {what}'s answer was cut short ({reason or 'incomplete'}) at {int(max_output)} output tokens "
+                        f"on {answer.get('route') or 'its route'} {answer.get('model') or ''}: no verdict, no attempt "
+                        f"counted, asked again next round ({today} of {cap} today)", detail=detail)
+
+    def read_error(self, fid: str, action: str, n: Any, exc: BaseException) -> None:
+        """A review's or an audit's error, as its `swarm.gate` event (`action`): a cut answer's figures beside the words
+        (`AnswerCut.detail`); nothing for a quiet one (today's cut answers are used and nothing was asked)."""
+        if isinstance(exc, AnswerCut) and exc.quiet:
+            return
+        self.store.event("swarm.gate", fid, {"action": action, "version": n, "error": str(exc)[:300],
+                                             **(exc.detail if isinstance(exc, AnswerCut) else {})})
 
     def outcome(self, fid: str, sha: str, result: str) -> None:
         """What the gate did with a version (refused, failed, passed, waiting, demoted): the live path runs a Gym-band
@@ -855,7 +965,7 @@ class Gate:
                 try:
                     review = self.review(fam, version)
                 except Exception as exc:  # noqa: BLE001 - no reviewer, no look
-                    self.store.event("swarm.gate", fam["id"], {"action": "review_error", "version": n, "error": str(exc)[:300]})
+                    self.read_error(fam["id"], "review_error", n, exc)  # a cut answer too: no attempt counted (M2)
                     continue
                 self._incubator_bar(fam["id"], n, sha, record=review)  # THE VERDICT FIRST: a failed review, before all else
                 self.store.event("swarm.gate", fam["id"], {"action": "review", "version": n, **review,
@@ -883,7 +993,7 @@ class Gate:
                 try:
                     audit = self.audit(fam, version, attempt=attempts)
                 except Exception as exc:  # noqa: BLE001
-                    self.store.event("swarm.gate", fam["id"], {"action": "audit_error", "version": n, "error": str(exc)[:300]})
+                    self.read_error(fam["id"], "audit_error", n, exc)  # a cut answer too: no attempt counted (M2)
                     continue
                 self._incubator_bar(fam["id"], n, sha, record={**review, "audit": audit})  # THE VERDICT FIRST: a failed audit
                 self.store.event("swarm.gate", fam["id"], {"action": "audit", "version": n, **audit})
@@ -1112,7 +1222,7 @@ class Gate:
             try:
                 review = self.review(fam, version, incubator=True)
             except Exception as exc:  # noqa: BLE001 - no reviewer: asked again next round
-                self.store.event("swarm.gate", fid, {"action": "incubator_review_error", "version": n, "error": str(exc)[:300]})
+                self.read_error(fid, "incubator_review_error", n, exc)
                 return None
             self._incubator_bar(fid, n, sha, record=review, whose="the incubator's")  # THE VERDICT FIRST: a failed review
             self.store.event("swarm.gate", fid, {"action": "incubator_review", "version": n, **review,
@@ -1140,7 +1250,7 @@ class Gate:
         try:
             audit = self.audit(fam, version, attempt=attempts, incubator=True)
         except Exception as exc:  # noqa: BLE001
-            self.store.event("swarm.gate", fid, {"action": "incubator_audit_error", "version": n, "error": str(exc)[:300]})
+            self.read_error(fid, "incubator_audit_error", n, exc)
             return None
         self._incubator_bar(fid, n, sha, record={**record, "audit": audit}, whose="the incubator's")  # THE VERDICT FIRST
         self.store.event("swarm.gate", fid, {"action": "incubator_audit", "version": n, **audit})

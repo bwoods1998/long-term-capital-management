@@ -481,13 +481,33 @@ class TheRation(RoundCase):
         self.store.set_state("d", gate_ready=False, gated_sha=sha)  # the gate refused it (a review, a duplicate)
         self.assertEqual(self.why("d"), dlane.SPENT_TRY)
 
-    def test_the_cohort_keep_spares_the_ration_as_it_spares_the_clocks(self):
+    def test_the_ration_comes_before_the_cohort_keep(self):
+        # THE RATION BEFORE THE KEEP (Oct 10, 2026; the readiness audit's M3): until then the keep spared a spent
+        # direction family as it spares the clocks ("ration"), holding its population slot with nothing left to try.
         self.answer = weak
         self.family("d", lane="direction")
+        self.family("a")
         t = self.t()
         t.validate(self.store.families(alive=True))
-        self.assertIsNone(t._why(self.store.family("d"), t.identity(), frozenset({"d"})))
-        self.assertEqual(t.keep_spared.get("d"), "ration")
+        self.assertEqual(t._why(self.store.family("d"), t.identity(), frozenset({"d", "a"})), dlane.SPENT_TRY)
+        self.assertNotIn("d", t.keep_spared, "nothing spared: it retires")
+        # The alpha lane keeps the keep's order exactly: a kept alpha family past a clock is spared, as before.
+        self.store.update_family("a", since_val_revisions=99)
+        self.assertIsNone(t._why(self.store.family("a"), t.identity(), frozenset({"d", "a"})))
+        self.assertEqual(t.keep_spared.get("a"), "revisions")
+        # The rollback reads no ration: a kept direction family is spared by the keep as before the lane.
+        self.settings["dlane"] = {"mode": "off"}
+        self.store.update_family("d", since_val_revisions=99)
+        self.assertIsNone(t._why(self.store.family("d"), t.identity(), frozenset({"d", "a"})))
+        self.assertEqual(t.keep_spared.get("d"), "revisions")
+        # And the round retires it (the hourly `retirements`, under the population floor's own rule).
+        self.settings["dlane"] = {"mode": "gate"}
+        self.settings["population"]["floor"] = 0
+        with mock.patch.object(Tournament, "incubator_keep", return_value=frozenset({"d", "a"})):
+            out = self.t().retirements(self.store.families(alive=True))
+        self.assertEqual(out, [{"family": "d", "why": dlane.SPENT_TRY}])
+        self.assertIsNotNone(self.store.family("d")["retired_at"])
+        self.assertIsNone(self.store.family("a")["retired_at"])
 
     def test_a_direction_family_never_forks_once_its_lineage_has_tried(self):
         self.answer = strong

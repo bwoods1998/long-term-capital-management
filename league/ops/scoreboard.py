@@ -222,8 +222,14 @@ def funnel_lines(funnel: Mapping[str, Any] | None, stalls: Mapping[str, Any] | N
         rows.append(("Gym runs: other windows", cells("gym_runs", "other")))
     rows += [("Gym runs refused or failed", cells("gym_not_run")),
              ("Rows copied from an identical program's verdict (no Gym run)", cells("gym_no_trial")),
-             ("Validations judged (passed)", cells("validations", "judged", pair=("validations", "passed"))),
-             ("Looks taken (passed)", cells("looks", "taken", pair=("looks", "passed"))),
+             ("Validations judged (passed)", cells("validations", "judged", pair=("validations", "passed")))]
+    # M5 (Oct 10, 2026): a direction version that missed the line can still go to the gate by D2's pre-check
+    # (`funnel.swarm_counts` `entered`). Its row shows only when a window has such an entry, so a page without one is
+    # as before. (No "validation" or "holdout" word: `public_problems` refuses them, "Validations" included as plural.)
+    if any(_dig(w, "validations", "entered") not in (None, _dig(w, "validations", "passed"))
+           for w in (day, rel) if isinstance(w, Mapping)):
+        rows.append(("Validations sent to the gate (the line, or D2's pre-check)", cells("validations", "entered")))
+    rows += [("Looks taken (passed)", cells("looks", "taken", pair=("looks", "passed"))),
              ("Moves to Candidate", cells("band_moves", "candidate")), ("Moves to Probe", cells("band_moves", "probe")),
              ("Moves to Sized", cells("band_moves", "sized")),
              ("Real orders, agent routes (filled)", cells("book", "orders", "agent", pair=("book", "filled", "agent"))),

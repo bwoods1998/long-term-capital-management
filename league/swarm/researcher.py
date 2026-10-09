@@ -1326,14 +1326,20 @@ def retire_guard_days(settings: Mapping[str, Any]) -> float:
     return max(0.0, days) if math.isfinite(days) else RETIRE_GUARD_DAYS
 
 
-def record_verdict(state: Mapping[str, Any], n: int, passed: bool, *, evaluator: Any, at: str) -> dict[str, Any]:
+def record_verdict(state: Mapping[str, Any], n: int, passed: bool, *, evaluator: Any, at: str,
+                   entered: bool | None = None, screen: str | None = None) -> dict[str, Any]:
     """The family's `VERDICTS_KEY` with version `n`'s latest verdict (`Tournament._verdict`, counted or re-judged): whether
     it passed the line (D2a's own answer, never a number), when, and the evaluator in force (`evaluator.KEY`'s value; None
-    in a store that never adopted one). The newest `VERDICTS_KEPT` versions are kept."""
+    in a store that never adopted one). The newest `VERDICTS_KEPT` versions are kept. A DIRECTION verdict (Oct 10, 2026,
+    the readiness audit's M5) also says whether the version went to the gate (`entered`: the line, or D2's Validation
+    pre-check) and the lane's screen in force (`screen`); both are written only when `screen` is given, so an alpha
+    verdict is the same record as before. `passed` keeps meaning the line: the retire guard reads it."""
     old = state.get(VERDICTS_KEY)
     kept = {str(k): v for k, v in old.items() if isinstance(v, Mapping)} if isinstance(old, Mapping) else {}
     kept.pop(str(n), None)
     kept[str(n)] = {"passed": bool(passed), "at": at, "evaluator": evaluator}
+    if screen is not None:
+        kept[str(n)].update(entered=bool(entered), screen=str(screen))
     if len(kept) > VERDICTS_KEPT:
         kept = dict(sorted(kept.items(), key=lambda kv: str(kv[1].get("at") or ""))[-VERDICTS_KEPT:])
     return kept

@@ -8,6 +8,82 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## The swarm-side readiness fixes (Oct 10, 2026): built on `wfix/swarm`, not deployed
+
+Four fixes from the operator's readiness audit of Oct 9 (its fix list's M2, M3, M5 and m3), cut from main
+`cf96b72c` (the live release `20261009T170259Z-404fe99d6c9c`). Swarm-side and ops only: nothing under `league/live/`,
+`league/gym/` or `league/constitution.py` changes, so the execution fingerprint (`31a7e921`), the money digest
+(`0310779c`) and the gate contract (`397b22b772b3`, `gate.gate_contract()`) do not move. No direction program leaves
+Probe (the audit's C0: a fingerprint move would retire every Probe program for good), no family is reviewed again, no
+ratification.
+
+**1. An answer cut short is no answer (M2; `league/swarm/gate.py` `AnswerCut`, `Gate._cut_check`).** On Oct 9 four of
+six gate reviews on the Sail stand-in came back `incomplete` at max_output_tokens with no text; each read as "unclear",
+and the third refused dir-qqq-ivlow-3d-call v38 (20:23Z), a direction lineage's one try lost to a token cap.
+- Now a review or audit (the gate's and the incubator's) whose answer is cut (`truncated`, or `incomplete_reason`
+  "max_output_tokens") is an error: a `swarm.gate` `review_error` / `audit_error` (or the incubator's) with `cut` true,
+  the route, the model and the token figures. No attempt is counted, nothing is barred, and it is asked again next
+  round.
+- Each ask after a cut carries a new model-call key (`...:<attempt>:cut<k>`): the Provider dedupes on the key, so the
+  old key would hand back the stored cut answer. A first ask's key is as before.
+- At most `gate.cut_tries_day` (6, swarm.json can set it) cut answers a version, a stage and a UTC day. The sixth
+  raises one `swarm.status` alert, `reader_cut` ("raise gate.review_max_output_tokens"); after it that stage is not
+  asked again that day (no event, no spend). The next UTC day it is asked again, when Claude's line has refilled.
+- A complete answer is judged as before: three complete unclear answers still refuse. `grounded_answer` lives in
+  league/gym and is untouched.
+- dir-qqq-ivlow-3d-call v38 stays refused (the captain's decision of Oct 9: a loss to a harness bug, not restored).
+
+**2. The ration before the cohort keep (M3; `league/swarm/tournament.py` `_why`).** A direction family whose lineage
+spent its one Validation try or its one look now retires at the hourly round even while THE COHORT KEEP holds it. The
+keep had spared 8 such families at 20:12Z Oct 9 ("ration"), each holding a population slot with nothing left to try
+while births ran 1-2 a pass. The population floor (`population.floor`, 8 in policy.json) still holds.
+- **Its cost:** a retired family's practice cohort ends, so its program loses the incubator route (most of these units
+  are over the incubator's $75 lot cap anyway). The dlane report's `tightened` lists it.
+- The alpha lane and the rollback (`dlane.mode` "off") keep the keep's order exactly: `dlane.lineage_spent` is None for
+  them.
+
+**3. A D2 entry is counted as one (M5; `tournament.py` `_verdict` and `lane_screen`, `researcher.record_verdict`,
+`league/ops/funnel.py`, `league/ops/scoreboard.py`, `league/ops/dlane_report.py`).**
+- A direction verdict now records `entered` (it went to the gate: the line, or D2's Validation pre-check) and the lane's
+  `screen` in force ("D2" or "S-C"). It does so in the round's verdict row (`swarm.tournament` `validation.judged`) and
+  in the version's `validation_verdicts` record.
+- `passed` keeps meaning the Validation line, because the retire guard, the tuition and the alpha lane read it. An alpha
+  verdict, and every verdict while the lane is off, is the record it always was.
+- **The daily funnel** gains `validations.entered` and `validations.by_screen`. The public page shows one more row,
+  "Validations sent to the gate (the line, or D2's pre-check)", only when a window has a pre-check entry. A page without
+  one is unchanged.
+- **The dlane report:** the direction lane's funnel gains `validations.entered`. A3's gate-wait leg counts a version
+  that entered the gate and has waited over 12 h for its look. Its sources are the verdict's `entered`, and the
+  lineage's try (`dlane_try.entered`), which covers every D2 entry before this release. A version the gate refused (a
+  `refusals` row) is never counted.
+- Every earlier funnel that read "direction validations passed 0" undercounted: eqp-realcalm-drift-call v17 entered by
+  the pre-check (`validation_verdicts` {"17": passed false}) and is at Probe.
+
+**4. R3 needs a 1.0x profit (m3; `league/swarm/dlane.py` `robust_verdict`).**
+- **How it read:** `robust_verdict` reads the 1.0x P&L from the version's Train score (`base["pnl"]`, `pnl_10`), and the
+  1.5x P&L summed over the 1.5x run's Train years (`pnl_15`). P1 needs the 1.5x run's own P&L above zero.
+- **The bug:** R3 was `pnl_15 >= cost_ratio x pnl_10` alone. For a 1.0x loss the right side is negative, so any 1.5x
+  run P1 passes also passed R3. eqp-term-contango-pool-call v6 (1.0x -$1,778.21, 1.5x +$143.23) passed the 1.5x rules
+  and spent its lineage's one try on Validation (-$2,360.31).
+- **Now:** a 1.0x P&L at or below zero fails R3, with the reason "it lost money on Train at 1.0x". This is a
+  tightening, listed in the dlane report's `tightened`.
+- The researcher's brief still words R3 as "at least 0.5 of the 1.0x P&L". The Train map's golden digest of the
+  map-off direction brief pins that text, so it is unchanged. The version's own `why` names the new rule.
+
+**Deploy class and rollback.** An owner deploy. `league/swarm/gate.py`, `tournament.py`, `dlane.py` and `settings.py`
+and `league/ops/` are FORBIDDEN to the updater. `league/swarm/researcher.py` is not, but it ships with the others.
+Before the deploy, check at the exact head that `execution_fingerprint()` is `31a7e921...` and the
+`gate_contract()["sha256"]` is `397b22b772b3...`. Roll back to the previous House release.
+- Its code reads the new verdict keys and the `*_cut:*` kv rows as unknown and ignores them.
+- The families M3 retired stay retired, which is a tightening.
+
+**Verify after the deploy** (read-only):
+- The next hourly tournament round retires the spent direction families the keep held. Their `swarm.retired` cause is
+  the ration's, and a `swarm.status` `incubator_keep` event has no `spared: ration`.
+- The next direction verdict in `swarm.tournament` carries `entered` and `screen`.
+- A cut review, if any, shows as `review_error` with `cut` true, and no refusal follows it.
+- `dlane-report.json` `tightened` has the R3 and ration rows.
+
 ## The budget split (Oct 9, 2026): built on `fix/budget-split-sail`, not deployed
 
 An owner deploy of two operator decisions of Oct 9 (about 16:00Z), cut from main `d70e00c3` (release L-D with D-1,
@@ -1757,7 +1833,9 @@ what the House is doing. The job moves no money, changes no setting, and starts 
 since the release)**, the last 24 hours beside the time since the running release's latest `promoted` verdict in
 `deploys.jsonl` (n/a when the record has none): births (`swarm.born`), program versions written, Gym runs by window
 (train, validations, looks, forward, probe, mechanism; refused or failed apart), validations judged and passed (the
-tournament rounds' verdicts; rows copied from an identical program's verdict, F1, are their own row and no Gym run),
+tournament rounds' verdicts; rows copied from an identical program's verdict, F1, are their own row and no Gym run;
+since the swarm-side readiness fixes, the validations sent to the gate as `entered`, split by screen, with a page row
+only when D2's pre-check sent one),
 looks taken and passed, moves to Candidate, Probe and Sized and the bands now, real orders
 (and of them filled) and real closes by route (the agents' routes against the House's, as the close economics routes
 them), research spend by meter (Sail, Claude, OpenAI) and the hours the Sail guard braked, then the stalls standing

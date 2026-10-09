@@ -347,6 +347,9 @@ DEFAULTS: dict[str, Any] = {
         "review_sail_profile": "pro_balanced",
         "review_max_output_tokens": 6000,
         "review_usd_day": 1.0,          # a family's reviews and audits a day, on their own fuse
+        # AN ANSWER CUT SHORT IS NO ANSWER (Oct 10, 2026; `gate.Gate._cut_check`): a review or audit cut at its output cap
+        # counts no attempt and is asked again next round, at most this many times a version, a stage and a UTC day.
+        "cut_tries_day": 6,
         "every_seconds": 300,
         # The incubator's review and audit (`gate.Gate.incubator_reviews`, release B2): versions read a gate round, 0 to 8
         # (0: none). Never a holdout look; the gate's reviewer and auditor, on their own tries and their own daily fuse
