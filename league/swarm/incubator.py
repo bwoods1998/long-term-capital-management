@@ -40,6 +40,15 @@ family's state. Each is bound to the evaluator it was made under, so no stale fa
    mark), and the sweep keeps the marks. Nothing the tournament, validation, the gate or the bands select by changes:
    these settings are read here only, never written back.
 
+   THE DIRECTION LANE'S MARK (release D-1, Oct 9, 2026; PLAN D5; `_direction_mark`). For a family whose lane is
+   "direction" (`dlane.lane_of`), the drift screen alone is replaced by the lane's bar, direction-v2
+   (`dlane.lane_verdict`: E1, E3, E4 and E5 on the eligible Train run, P1, R2 and R3 on the 1.5x run); the drift figures
+   are kept in the mark, reported, and it says `lane` "direction". No direction mark is made while the lane takes none
+   (`dlane.candidates_open`: "shadow", or K5), and the live side's reader refuses a direction mark meanwhile
+   (`bands.incubator`). The alpha lane's mark is unchanged, and while `dlane.mode` is "off" every family is alpha's.
+   A loosening of the owner's term "pass the drift screen alone" for the direction lane only; its cost is
+   `_direction_mark`'s.
+
    THE GATE'S BAR (`gate_bar`) is durable, so it outlives the family's `gate_outcome` and `review` moving on to a newer
    version (the live side's own check reads `gate_outcome`, which names one program a family, and counts a passed
    `review`). A program is barred when:
@@ -163,6 +172,7 @@ from typing import Any, Callable, Mapping
 
 # BAD_OUTCOMES: the gate's outcomes that bar a program, the House's reader's own list (`bands.BAD_OUTCOMES`), so the two can
 # never disagree: refused, failed, demoted and held (THE LOOK HOLDS, Oct 2, 2026).
+from . import dlane
 from .bands import BAD_OUTCOMES, demoted
 from .researcher import drift_settings, drift_verdict, robust_at_stress, row_span, running_span
 from .store import SwarmStore, dumps, loads
@@ -763,7 +773,7 @@ def mark_of(store: SwarmStore, fam: Mapping[str, Any], n: int, settings: Mapping
     else None with the reason. `drop` is True when an existing mark must go: the version failed for good (demoted, a
     loss at 1.5x, a known failed drift screen, the gate's bar). Figures only owed never drop a mark. The drift screen is
     the incubator's own (`screen_verdict`): the tournament's while it is on, else the screen at its defaults and at the
-    owner's stricter thresholds."""
+    owner's stricter thresholds. A DIRECTION family is marked by its lane's bar instead (`_direction_mark`)."""
     state = fam.get("state") or {}
     if demoted(state, n):
         return None, "demoted (a loss at 1.5x or a failed drift screen)", True
@@ -783,6 +793,9 @@ def mark_of(store: SwarmStore, fam: Mapping[str, Any], n: int, settings: Mapping
     run = eligible_train_run(store, fam, n, evaluator)
     if run is None:
         return None, "no eligible Train run under the current evaluator", False
+    if dlane.lane_of(store, fam, settings) == dlane.DIRECTION:  # release D-1: the lane's bar, not the drift screen alone
+        return _direction_mark(store, fam, n, settings, run=run, evaluator=evaluator, objective=objective,
+                               robust_pnl=stressed.get("pnl"), clock=clock)
     screen = screen_verdict(store, fam, n, settings)
     if screen is None or not screen["known"]:
         return None, "its drift figures are owed", False
@@ -793,6 +806,49 @@ def mark_of(store: SwarmStore, fam: Mapping[str, Any], n: int, settings: Mapping
             "robust_pnl": round(float(stressed["pnl"]), 2),
             "drift": {"t": None if t is None else round(float(t), 4), "positive": int(screen.get("positive") or 0),
                       "years": int(screen.get("years") or 0)},
+            "at": float(clock())}, "", False
+
+
+def _direction_mark(store: SwarmStore, fam: Mapping[str, Any], n: int, settings: Mapping[str, Any], *,
+                    run: Mapping[str, Any], evaluator: Mapping[str, Any], objective: Any, robust_pnl: Any,
+                    clock: Callable[[], float]) -> tuple[dict[str, Any] | None, str, bool]:
+    """THE DIRECTION LANE'S MARK (release D-1, Oct 9, 2026; PLAN D5, HARNESS C7): `mark_of` for a family whose lane is
+    "direction", once the conditions every mark shares hold (not demoted, a profit at 1.5x, no bar of the gate's, the
+    1.5x run and an eligible Train run under the current evaluator). In place of the drift screen alone, the lane's own
+    bar, direction-v2 (`dlane.lane_verdict`): E1, E3, E4 and E5 on that eligible Train run (E5 priced at today's closes
+    and equity), P1, R2 and R3 on the version's 1.5x run.
+    - No mark while the lane takes none (`dlane.candidates_open`: "shadow", or K5 holding a "gate" lane in shadow): a mark
+      already made stays (only the live side's reader, `bands.incubator`, refuses it meanwhile), and none is dropped.
+    - Figures owed (`known` False) never drop a mark; a known failure of E1, E3, E4 or a 1.5x rule drops it (the same
+      program fails them again); an E5 failure is today's prices', so it never drops one.
+    - The mark is the alpha mark's shape plus `lane` "direction", `bar` (the objective's name) and `direction` (its
+      figures, operator-only). Its `drift` keeps the drift screen's figures, REPORTED (the live side's reader checks only
+      that it is a mapping): {"known": False} when they are owed, which here holds nothing up.
+    LOOSENING of the owner's Sept 29-30 term "pass the drift screen alone", under the bypass-earlier-rules grant of Oct 3,
+    for the direction lane only (the alpha lane's mark is unchanged). Its cost (PLAN D5): with no edge, about -$36 a week
+    expected; at most $150 a week of the incubator's own envelope; its closes are never evidence."""
+    if not dlane.candidates_open(store, settings):
+        return None, "the direction lane takes no incubator mark while it is in shadow (dlane.mode, or K5)", False
+    verdict = dlane.lane_verdict(store, fam, n, settings, run=run)
+    if not verdict["known"]:
+        return None, f"its direction figures are owed: {verdict['why']}", False
+    if not verdict["passed"]:
+        return None, f"it fails the direction lane's bar: {verdict['why']}", bool(verdict["drop"])
+    screen = screen_verdict(store, fam, n, settings)
+    if screen is not None and screen["known"]:
+        t = screen.get("t")
+        drift = {"t": None if t is None else round(float(t), 4), "positive": int(screen.get("positive") or 0),
+                 "years": int(screen.get("years") or 0), "passed": bool(screen["passed"]), "reported": True}
+    else:
+        drift = {"known": False, "reported": True}
+    score, robust = verdict.get("score") or {}, verdict.get("robust") or {}
+    unit = score.get("unit") or {}
+    return {"evaluator": dict(evaluator), "objective": objective, "run": str(run["run_id"]),
+            "robust_pnl": round(float(robust_pnl), 2), "drift": drift, "lane": dlane.DIRECTION, "bar": dlane.OBJECTIVE,
+            "direction": {"score": score.get("score"), "active": list(score.get("active") or []),
+                          "unit": {k: unit.get(k) for k in ("scaled_usd", "cap_usd", "verdict")},
+                          "t_pool_15": robust.get("t_pool_15"), "ratio": robust.get("ratio"),
+                          "reported": {**dict(score.get("reported") or {}), **dict(robust.get("reported") or {})}},
             "at": float(clock())}, "", False
 
 
@@ -1011,7 +1067,9 @@ def owed_runs(store: SwarmStore, settings: Mapping[str, Any], root: str | Path |
         answer = train_answer(store, fam, n, evaluator)
         if answer == "ineligible":
             continue  # the Gym's answer over this span is in: it can never be marked under it
-        screen = screen_verdict(store, fam, n, settings)
+        # A direction family's mark is its lane's bar, not the drift screen (release D-1, `_direction_mark`): `mark_of`'s
+        # drop above already says when it failed for good.
+        screen = screen_verdict(store, fam, n, settings) if dlane.lane_of(store, fam, settings) != dlane.DIRECTION else None
         if screen is not None and screen["known"] and not screen["passed"]:
             continue  # its figures over this span are in and fail the screen (`mark_of` reads its 1.5x run first)
         owed = {"train": answer is None, "drift": answer is not None and version_drift(store, fam, n) is None,

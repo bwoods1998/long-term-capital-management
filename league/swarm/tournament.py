@@ -24,6 +24,11 @@
    version an alive Gym family practises in an active, current cohort is marked `train_passed` once it has an eligible
    Train run, a profitable 1.5x run, no demotion and a passed drift screen, under the current evaluator. The mark is
    a fact for the House's incubator route only (one lot, never evidence, never a promotion); nothing here reads it.
+   THE DIRECTION LANE (release D-1, Oct 9, 2026; `league/swarm/dlane.py`): the verdict also keeps the Validation run's sd
+   of P&L per dollar of maximum loss beside `typical_max_loss_usd` (`sigma_fields`, the operator's decision 4: release
+   L-D's DM1 reads it), and a direction version that missed the line goes to the gate when D2 is the lane's screen in
+   force and its Validation pre-check passes (`precheck_entry`; D2 is refused unless its receipt is pinned). While
+   `dlane.mode` is "off" neither is done.
 3. THE ALLOCATION (Release B, league/swarm/allocation.py; `allocation.mode` "value"): each family's share of researcher
    turns and Gym priority by its expected information value (the variance of its next validation's pass or fail under
    an empirical-Bayes posterior, discounted by the idea's trials, its own and those inherited at birth, by exhaustion:
@@ -133,7 +138,7 @@ import random
 import time
 from typing import Any, Callable, Mapping
 
-from . import diagnostics, evidence, game, incubator, practice
+from . import diagnostics, dlane, evidence, game, incubator, practice
 from .architect import allowed_structures
 from .pool import GymJob, PoolError
 from .researcher import (IDLE_CAUSE, MAX_ROOTS, VALIDATED_CYCLES_KEY, awaiting_validation, dormant_count, dormant_limit,
@@ -573,6 +578,8 @@ class Tournament:
         loss = typical_max_loss(result)
         if loss is not None:
             typical[str(n)] = loss
+        sigma = self.sigma_fields(state, n, summary)
+        precheck = self.precheck_entry(fam, line, summary)
         from .evaluator import KEY
 
         # THE VALIDATED-FAMILY GUARD's record (`researcher.retire_guard`): this version's latest verdict and the evaluator
@@ -584,14 +591,14 @@ class Tournament:
                              validation_verdicts=verdicts,
                              validation_image=result.get("gym_image"),
                              validation_bundle=result.get("gym_bundle"),
-                             typical_max_loss_usd=loss, typical_by_version=typical,
+                             typical_max_loss_usd=loss, typical_by_version=typical, **sigma,
                              validation_numbers={"mean": mean, "t": t, "sharpe_daily": summary.get("sharpe_daily"),
                                                  "quarters": summary.get("quarters_positive")},
                              # AN IDENTICAL PROGRAM IS VALIDATED ONCE (F1): whose validation this verdict was read from
                              # (None for the family's own), for the version `validation_version` names; its own copy
                              # of the record says so too, so a later re-judging keeps it.
                              validation_inherited=dict(source) if isinstance(source, Mapping) else None,
-                             gate_ready=bool(line["passed"]) and not self.gate_spent(fid, n, state))
+                             gate_ready=(bool(line["passed"]) or precheck) and not self.gate_spent(fid, n, state))
         out = {"version": n, "passed": line["passed"], "mean": mean, "t": t}
         if inherited is not None:
             out["inherited"] = dict(inherited)
@@ -604,6 +611,46 @@ class Tournament:
         elif change == "lapsed":
             out["extension_lapsed"] = True
         return out
+
+    def sigma_fields(self, state: Mapping[str, Any], n: int, summary: Mapping[str, Any]) -> dict[str, Any]:
+        """THE SIGMA WRITER (release D-1, Oct 9, 2026; the operator's decision 4, for release L-D's DM1, which reads it in
+        league/live/families.py `validation_r_sd`): the sd of per-trade P&L per dollar of maximum loss in version `n`'s
+        Validation run (`dlane.validation_r_sd`: |mean| x sqrt(trades) / |t|, from this run's summary), kept beside
+        `typical_max_loss_usd` in the same two shapes, so the banded version's figure survives a newer validation:
+        `validation_r_sd_by_version[str(n)]` and `validation_r_sd` (the version `validation_version` names). A figure that
+        is not finite and above zero is OMITTED: no key for `n` in the map, and the scalar left unwritten (or written None
+        over an older version's, which `validation_version` moving on to `n` would otherwise make `n`'s); DM1 then reads
+        the forward record's sd, else its fallback. While `dlane.mode` is "off" nothing is written (THE ROLLBACK). A map
+        that cannot be read starts empty."""
+        if not dlane.on(self.settings):
+            return {}
+        sd = dlane.validation_r_sd(summary)
+        held = state.get("validation_r_sd_by_version")
+        by_version = {str(k): v for k, v in held.items()} if isinstance(held, Mapping) else {}
+        if sd is None:
+            by_version.pop(str(n), None)
+        else:
+            by_version[str(n)] = sd
+        out: dict[str, Any] = {}
+        if by_version or "validation_r_sd_by_version" in state:
+            out["validation_r_sd_by_version"] = by_version
+        if sd is not None or "validation_r_sd" in state:
+            out["validation_r_sd"] = sd
+        return out
+
+    def precheck_entry(self, fam: Mapping[str, Any], line: Mapping[str, Any], summary: Mapping[str, Any]) -> bool:
+        """D2'S VALIDATION PRE-CHECK (release D-1; PLAN D6, the operator's decision 6): True when a DIRECTION family's
+        version that missed the Validation line goes to the gate all the same, because the screen in force for its lane is
+        D2 (`dlane.screen_effective` "precheck": only behind `dlane.screen` "D2" with a receipt sha256 and its `c` pinned
+        in the repository's policy.json, else refused) and the pre-check passes (`dlane.d2_precheck`). The line itself is
+        left as judged, so its tuition is not opened (`bands.read` reads `validation_line`), and the gate judges the look
+        by D2's pooled test. False for every alpha family, every version that met the line, and while the lane is off."""
+        if line.get("passed") or not dlane.on(self.settings):
+            return False
+        lane = dlane.lane_of(self.store, fam, self.settings)
+        if lane != dlane.DIRECTION or dlane.screen_effective(self.settings, lane)["validation"] != "precheck":
+            return False
+        return bool(dlane.d2_precheck(summary)["passed"])
 
     def gate_spent(self, fid: str, n: int, state: Mapping[str, Any]) -> bool:
         """The gate is done with version `n` (R4, the verification of PR #402): its holdout look was made or the gate refused
