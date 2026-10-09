@@ -863,8 +863,10 @@ CONSTITUTION: dict[str, Any] = {
     #   $800 (the 60% drawdown stop, about $773 from today's peak, binds near it); a 20-session window lets Probe
     #   trading resume after a bad stretch, as its losses age out of the window, instead of stopping for good at $400.
     #   Measured cost: see the L-D section of docs/operations.md. Its rollback, `loss_total_usd` "400" with
-    #   `loss_window_sessions` 2000 (a window that holds every close since the fast lane), is fast lane v2's single $400
-    #   budget, decision for decision (`league/tests/test_ld_release.py`).
+    #   `loss_window_sessions` 2000 (a window that holds every close since the fast lane) and `loss_basis` "gross", is
+    #   fast lane v2's single $400 budget, decision for decision (`league/tests/test_ld_release.py`); with "net" kept,
+    #   the 2000-session window's worst stretch is the Probe's drawdown from its high-water mark, so the $400 then binds
+    #   as the high-water-mark reading, tighter than NET from inception.
     "options_money": {
         "real_types": ["debit_vertical", "long_butterfly", "long_call", "long_put"],
         "credit_types": ["credit_vertical", "iron_condor", "iron_butterfly"],

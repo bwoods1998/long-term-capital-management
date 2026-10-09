@@ -193,7 +193,10 @@ the same admissions and refusals on the same rows (a refusal's words end "in any
 moves to `320899d6` (the grant re-ratifies at the House's start, as above) and the execution fingerprint does NOT move:
 no evidence reset, no band lost. The room stays capped at $400 (at 3 slots it differs only above E = $1,333.33),
 `{"natural": k}` stays, and a version DM1 demoted before the rollback stays a Candidate (`dm1_demoted`). Rolling back
-L9 alone (`loss_total_usd` "400", `loss_window_sessions` 2000, the other three rows kept) is CON-only too.
+L9 alone (`loss_total_usd` "400", `loss_window_sessions` 2000, the other three rows kept) is CON-only too, but it is
+not the L1-L8 build's rule: under "net" the 2000-session window's figure is its worst net stretch since the fast lane,
+which is the Probe's drawdown from its high-water mark, so the $400 then binds as the critic's high-water-mark
+reading (tighter than NET from inception, which the $400 total also checks); "gross" makes it fast lane v2's.
 `floor_box.py rollback` to `20261009T025942Z` instead moves the fingerprint again (one more reset: every band and
 practice cohort at that moment) and the Gym bundle back to `e1c896f8d304` (the extension holds cleared again and every
 validation re-run again), and, once release D-1 has shipped, drops D-1 too; use it only for a broken release, never to
