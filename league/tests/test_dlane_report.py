@@ -457,18 +457,23 @@ class ReportedOnly(unittest.TestCase):
         self.assertEqual((job.triggers[1].at.hour, job.triggers[1].at.minute), (1, 30))
 
     def test_the_game_report_says_what_the_lane_changed_mid_experiment_only_while_it_is_on(self):
-        """The operator's decision 1: the alpha births' fall and the ROLE prompt's change ride in the game's report."""
+        """The operator's decision 1: the alpha births' fall and the ROLE prompt's change ride in the game's report, once:
+        through `game.metrics`' `dlane` block (`game.DIRECTION_NOTES`; the integration of release D-1 kept that one
+        place and dropped the report's own copy)."""
         from league.ops import game_report
+        from league.swarm import game
 
         with tempfile.TemporaryDirectory() as tmp:
             SwarmStore(tmp).close()
             on = game_report.report(Path(tmp), settings=GATE, now=Fixture.NOW, draws=50)
             off = game_report.report(Path(tmp), settings={}, now=Fixture.NOW, draws=50)
-        self.assertEqual(on["direction_lane"], game_report.DIRECTION_LANE_NOTE)
-        self.assertIn("about 73 to about 36", on["direction_lane"]["births"])
-        self.assertIn("code paths only", on["direction_lane"]["prompt"])
-        self.assertNotIn("direction_lane", off)
-        self.assertEqual(set(on) - {"direction_lane"}, set(off))
+        notes = " ".join(on["dlane"]["notes"])
+        self.assertEqual(on["dlane"]["notes"], list(game.DIRECTION_NOTES))
+        self.assertIn("about 73 to about 36", notes)
+        self.assertIn("code paths only", notes)
+        self.assertIn("arm_fraction 0", notes)
+        self.assertNotIn("dlane", off)
+        self.assertEqual(set(on) - {"dlane"}, set(off))
 
     def test_the_contamination_statement_names_windows_and_no_figure(self):
         """The operator's rule: no private study's figure in the repository. The statement names its windows and the

@@ -20,7 +20,7 @@ from typing import Any, Mapping, Sequence
 from zoneinfo import ZoneInfo
 
 from ..live import money as M
-from . import DB_NAME, evidence, settings
+from . import DB_NAME, dlane, evidence, settings
 from .gate import run_sha
 from .store import loads, priors_of
 
@@ -173,7 +173,10 @@ def _gym(fam: Mapping, version: Mapping, families: Mapping, looks: Sequence, lin
         marker = (member["state"].get("look_inflight") or {}).get("sha")
         if member["lineage"] in linked and marker:
             reserved.add(marker)
-    alarm = evidence.leakage_alarm(len(looks), sum(bool(r["passed"]) for r in looks))
+    # THE LEAKAGE ALARM PER LANE (release D-1, `evidence.leakage_alarms`): the family's own lane's alarm, as the gate stops
+    # that lane's looks alone (the lane from the spec, `dlane.lane_of` with no store: this read opens none). While
+    # `dlane.mode` is "off" both lanes read the one count over every look, as before.
+    alarm = evidence.leakage_alarms(looks, cfg)[dlane.lane_of(None, fam, cfg)]
     if not fresh_dsr:
         blocked = "evidence_stale"
     elif not line.get("passed"):
@@ -305,7 +308,8 @@ def attach(agents: Sequence[Mapping], root: str | Path, *, live: Any = None, acc
                         for r in db.execute("SELECT id,lineage,structure,band,retired_at,best_version,validated_version,trials,state,spec FROM families")}
             versions = {(r["family"], r["n"]): {**dict(r), "params": loads(r["params"], {})}
                         for r in db.execute("SELECT family,n,sha,params FROM versions")}
-            looks = [dict(r) for r in db.execute("SELECT family,lineage,version,run_sha,passed FROM looks")]
+            looks = [{**dict(r), "detail": loads(r["detail"], {})}  # its `detail`: the lane it was judged in (release D-1)
+                     for r in db.execute("SELECT family,lineage,version,run_sha,passed,detail FROM looks")]
             links = [(r["a"], r["b"]) for r in db.execute("SELECT a,b FROM lineage_links")]
             validated = [(r["family"], r["version"]) for r in db.execute(
                 "SELECT DISTINCT family, version FROM runs WHERE window='validation' AND stress=1.0 AND trials>0 AND version IS NOT NULL")]

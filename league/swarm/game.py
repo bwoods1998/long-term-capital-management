@@ -1884,12 +1884,15 @@ def metrics(store: Any, *, settings: Mapping[str, Any] | None = None, now: float
 
 #: What the operator's report says about the game's T0 experiment while the direction lane is on (release D-1; the
 #: operator's decision 1): two changes made mid-way through it, so its arms' flow and prompts before and after the release
-#: are not one series.
+#: are not one series, and what the lane is to the game. The operator's report (league/ops/game_report.py) carries them
+#: through `metrics` (its `dlane` block), the one place they are said.
 DIRECTION_NOTES = (
     "the direction lane's birth quota (dlane.birth_share 0.5, max_share 0.6) takes up to half the births: the alpha "
     "lane's fall from about 73 to about 36 a day mid-way through the game's T0 experiment (births_24h counts them by lane)",
     "the researcher's role text became lane-aware at the same release; it is the shared prefix, so the alpha arms' "
     "prompts changed mid-experiment too: 'alpha golden' means the code paths only, not the prompts",
+    "direction lineages never play the game (dlane.arm_fraction 0: no hidden look) and their looks are kept out of R1(b) "
+    "and R2",
 )
 
 

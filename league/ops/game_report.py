@@ -40,18 +40,6 @@ GO_WIDE = 0.3
 REVERT = 0.1
 
 
-#: THE DIRECTION LANE (release D-1, Oct 9, 2026; the operator's decision 1): what the lane changed mid-way through the
-#: game's T0 experiment, in every report while the lane is on, so no reading of R1-R6 across its deploy forgets it.
-DIRECTION_LANE_NOTE = {
-    "release": "D-1 (league/swarm/dlane.py)",
-    "births": "the direction lane takes about half of the births while it is under half of the last 24 hours' (at most "
-              "60%): alpha births fall from about 73 to about 36 a day from D-1's deploy, both arms alike",
-    "prompt": "the researcher's ROLE prompt (a shared prefix) became lane-aware at D-1's deploy, for alpha researchers of "
-              "both arms too: 'alpha golden' holds for code paths only, not for what alpha researchers read",
-    "direction": "direction lineages never play the game (dlane.arm_fraction 0) and are kept out of R1(b) and R2",
-}
-
-
 def path_for(root: str | Path, day: str) -> Path:
     """`<state>/game/report-<day>.json`."""
     return Path(root) / DIR / f"report-{day}.json"
@@ -133,15 +121,10 @@ def report(root: str | Path, *, settings: Mapping[str, Any] | None = None, now: 
         from datetime import datetime
 
         days = (now - datetime.fromisoformat(str(start).replace("Z", "+00:00")).timestamp()) / 86400.0
-    out = {"day": _day(now), "t0": start, "game": {"enabled": c["enabled"], "mode": c["mode"],
-                                                   "arm_fraction": c["arm_fraction"]},
-           "draws": game.BOOT_DRAWS if draws is None else int(draws), "seed": seed, "level": game.BOOT_LEVEL,
-           "decisions": decide(metrics, days=days), "operator_only": True, **metrics}
-    from ..swarm import dlane
-
-    if dlane.on(settings):  # THE DIRECTION LANE (release D-1): what it changed mid-way through the experiment, said here
-        out["direction_lane"] = DIRECTION_LANE_NOTE
-    return out
+    return {"day": _day(now), "t0": start, "game": {"enabled": c["enabled"], "mode": c["mode"],
+                                                    "arm_fraction": c["arm_fraction"]},
+            "draws": game.BOOT_DRAWS if draws is None else int(draws), "seed": seed, "level": game.BOOT_LEVEL,
+            "decisions": decide(metrics, days=days), "operator_only": True, **metrics}
 
 
 # ------------------------------------------------------------------------------------------------- the job

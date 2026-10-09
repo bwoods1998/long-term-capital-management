@@ -2003,7 +2003,9 @@ class Researcher:
         if lessons:
             lines.append("Lessons from the graveyard when you were born:")
             lines += [f"- {diagnostics.scrub(x)}" for x in lessons[:3]]
-        card = cards.brief_text(cards.card_of(self.store, str(fam["id"])))  # "" for a family born before cards
+        # "" for a family born before cards. THE DIRECTION LANE: with the settings a direction card names its lane while
+        # the lane is on (`cards.brief_text`); an alpha card's brief, and every brief while the lane is off, is as before.
+        card = cards.brief_text(cards.card_of(self.store, str(fam["id"])), self.settings)
         if card:
             lines.append(card)
         literature = [x for x in spec.get("literature") or [] if isinstance(x, dict) and x.get("id")]

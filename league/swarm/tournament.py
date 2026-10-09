@@ -784,8 +784,15 @@ class Tournament:
                 self.store.note(child["id"], f"Forked from {fam['id']} onto {', '.join(pooled)}: its roots and {root}. Version 1 is "
                                              f"the parent's best with {root} added to NEEDS; check widths and risk_usd for {root}.")
             self.store.set_state(fam["id"], forked_at=self.clock())
-            self.store.event("swarm.born", child["id"], {"parent": fam["id"], "mechanism": fam["mechanism"],
-                                                          "structure": fam["structure"], "roots": pooled, "origin": "fork"})
+            born = {"parent": fam["id"], "mechanism": fam["mechanism"], "structure": fam["structure"], "roots": pooled,
+                    "origin": "fork"}
+            # THE DIRECTION LANE (release D-1): a direction parent's fork is a direction family (its spec, copied above,
+            # carries the lane), and its birth says so, so the births' quota and the funnel (`dlane.born_counts`, which
+            # reads a payload without a lane as alpha's) count it in its lane. An alpha fork's event is as before in every
+            # mode; while the lane is off nothing is read.
+            if dlane.lane_of(self.store, child, self.settings) == dlane.DIRECTION:
+                born["lane"] = dlane.DIRECTION
+            self.store.event("swarm.born", child["id"], born)
             return child["id"]
         return None
 
