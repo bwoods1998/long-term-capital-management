@@ -29,7 +29,10 @@ THE REPORT (`report`), JSON:
   since release L-D, its `rule` named).
 - `probe_budget`: `real.probe_tally` on the live state under the constitution's `probe.loss_basis` (gross realized Probe
   losses at fast lane v2; net since release L-D, Oct 9, 2026), with `realized_basis` naming the basis in force, at risk,
-  the open count, the room.
+  the open count, the room. THE ROLLING PROBE BUDGET (release L-D): `realized_usd` is the window's figure (the closes of
+  the last `window_sessions` New York sessions, from `window_start`, `real.probe_realized`) against `budget_usd`, and
+  `realized_total_usd` every close's against `total_budget_usd`; `room_usd` is what the tighter of the two envelopes
+  leaves and `binding` names it.
 
 CONTAMINATION, MEASURED (the review of Oct 7, 2026; goal item 5: "contamination measured and stated"). 123 of the
 holdout's 184 sessions (through 2026-06-30) are inside the training of Opus 5.5 (cutoff June 2026); the other authors'
@@ -231,7 +234,7 @@ REALIZED_BASIS = {
 
 def probe_budget(live_path: str | Path, today: str) -> dict[str, Any]:
     from ..live import money as M
-    from ..live.real import probe_tally
+    from ..live.real import probe_figures
 
     with closing(sqlite3.connect(f"file:{Path(live_path)}?mode=ro", uri=True, timeout=5)) as db:
         db.row_factory = sqlite3.Row
@@ -240,11 +243,16 @@ def probe_budget(live_path: str | Path, today: str) -> dict[str, Any]:
             return [dict(r) for r in db.execute(sql, params)]
 
         table = M.Table.from_constitution()
-        open_n, realized, at_risk = probe_tally(rows, day=today, basis=table.probe_loss_basis)
-    return {"realized_usd": str(M.cents(realized)), "realized_basis": REALIZED_BASIS[table.probe_loss_basis],
+        # The figures `RealBook.exposure` gives `money.plan_open` (release L-D: the window's and the total's).
+        open_n, window, total, at_risk, since = probe_figures(rows, day=today, table=table)
+    rooms = {"window": table.probe_loss_budget - window - at_risk, "total": table.probe_loss_total - total - at_risk}
+    binding = min(rooms, key=lambda k: (rooms[k], k != "window"))
+    return {"realized_usd": str(M.cents(window)), "realized_total_usd": str(M.cents(total)),
+            "realized_basis": REALIZED_BASIS[table.probe_loss_basis], "window_sessions": table.probe_loss_window,
+            "window_start": since,
             "at_risk_usd": str(M.cents(at_risk)), "open": open_n, "max_open": table.probe_max_open,
-            "budget_usd": str(table.probe_loss_budget),
-            "room_usd": str(M.cents(max(M.ZERO, table.probe_loss_budget - realized - at_risk)))}
+            "budget_usd": str(table.probe_loss_budget), "total_budget_usd": str(table.probe_loss_total),
+            "room_usd": str(M.cents(max(M.ZERO, rooms[binding]))), "binding": binding}
 
 
 def report(swarm_root: str | Path, live_path: str | Path | None, closes_path: str | Path, *, since: str | None = None,

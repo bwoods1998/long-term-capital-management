@@ -763,11 +763,13 @@ CONSTITUTION: dict[str, Any] = {
     # per position and a Probe loss budget up to $400 in total"): a Probe position is ONE structure (`contracts` 1) whose
     # maximum loss with its open and close fees fits `max_loss_share` (10%) of the sizing equity E, replacing 5% and the
     # $100 one-contract floor (`floor_usd` 0). At most `max_open` Probe positions held or working at once (3 at the fast
-    # lane, 8 since release L-D, below), and a Probe loss budget of `loss_budget_usd` ($400) in total: realized Probe
-    # losses since the fast lane, read by `loss_basis` (GROSS at the fast lane, each closed position a Probe family opened
-    # counting its own loss with no gain offsetting it; NET since release L-D, below), plus the maximum loss of every real
-    # position held or working (a Sized one too: a tightening), plus the new open; an open that would breach it is
-    # refused, and exits go on (`league/live/money.py` `plan_open`, `league/live/real.py` `probe_tally`). A tuition
+    # lane, 8 since release L-D, below), and a Probe loss budget of `loss_budget_usd` ($400) in total at the fast lane (in
+    # any rolling `loss_window_sessions` (20) sessions beside `loss_total_usd` ($800) in total since release L-D, below):
+    # realized Probe losses since the fast lane, read by `loss_basis` (GROSS at the fast lane, each closed position a
+    # Probe family opened counting its own loss with no gain offsetting it; NET since release L-D, below), plus the
+    # maximum loss of every real position held or working (a Sized one too: a tightening), plus the new open; an open
+    # that would breach it is refused, and exits go on (`league/live/money.py` `plan_open`, `league/live/real.py`
+    # `probe_tally`, `probe_realized`). A tuition
     # structure is held within the Probe's cap too (code, `plan_open`); tuition stays outside the count and the budget, at
     # its own caps. Each 10% position fits the gateway's per-order cap, min($1,000, 25% of E), and its day cap (100% of E).
     # At E = $1,288.40: the Probe cap $128.84, the per-order cap $322.10, the day cap $1,288.40, the book cap $1,159.56, the
@@ -776,21 +778,24 @@ CONSTITUTION: dict[str, Any] = {
     #
     # RELEASE L-D (Oct 9, 2026; Claude's decision under the owner's goal of Oct 7, item 4: "You may set Probe sizing up to
     # 10% of equity at risk per position and a Probe loss budget up to $400 in total", and its item 5: every loosened rule
-    # reported with its cost; the plan of Oct 9, "L: Release L-D", and its critic). Three rows, each a loosening of how
-    # the Probe stage is run, none of the 10% cap or the $400. Each has a value that restores the rule before it: the
-    # CON-only rollback is `loss_basis` "gross", `max_open` 3 and `demotion` "dm0", one owner deploy that moves the money
-    # digest (the standing grant re-ratifies at the House's start) and never the execution fingerprint (no evidence
-    # reset). The figures are MONEY's simulation of Oct 9 (the Probe stage alone, U10% of E, holds of 2, 3, 5 and 8
-    # sessions, no edge unless said; "Done" is 30 real closes, consistent and net positive, within the weeks named) and
-    # its critic's re-runs of MONEY's pinned paths; they are a model's, not a measurement of this account.
+    # reported with its cost; the plan of Oct 9, "L: Release L-D", and its critic; and the owner's goal as he re-set it on
+    # Oct 9, about 06:20Z, item 4, for the budget's two figures, the last row below). Five rows, each a loosening of how
+    # the Probe stage is run, none of the 10% cap. Each has a value that restores the rule before it: the CON-only
+    # rollback is `loss_basis` "gross", `max_open` 3, `demotion` "dm0", `loss_total_usd` "400" and `loss_window_sessions`
+    # 2000, one owner deploy that moves the money digest (the standing grant re-ratifies at the House's start) and never
+    # the execution fingerprint (no evidence reset). The figures are MONEY's simulation of Oct 9 (the Probe stage alone,
+    # U10% of E, holds of 2, 3, 5 and 8 sessions, no edge unless said; "Done" is 30 real closes, consistent and net
+    # positive, within the weeks named) and its critic's re-runs of MONEY's pinned paths; they are a model's, not a
+    # measurement of this account.
     #
     # - `loss_basis` "net" (allowed exactly "gross" and "net": `OPTIONS_MONEY_CHOICES`; anything else, "Net" or "" too,
     #   is refused and nothing trades on it). The realized part of the budget is max(0, -(the sum of the cash of every
     #   CLOSED position a Probe family opened)), from inception (the Probe mark of the fast lane), in place of GROSS, the
     #   sum of each such position's own loss. It REVERSES the fast lane review's deliberate GROSS choice of Oct 7 ("a net
     #   figure let a Sized gain or a Probe gain refill the budget"): a Probe gain now offsets Probe losses; a Sized gain
-    #   never does (a Sized position carries no Probe mark). The net Probe loss still never exceeds $400 (plus residuals:
-    #   broker fees above the book's estimate, a broken structure closed leg by leg). Cost (MONEY, U10%-M3, no edge, 8
+    #   never does (a Sized position carries no Probe mark). The net Probe loss still never exceeds the budget's figures
+    #   ($400 in any rolling 20 sessions and $800 in total since the last row below; $400 in total before it), plus
+    #   residuals: broker fees above the book's estimate, a broken structure closed leg by leg. Cost (MONEY, U10%-M3, no edge, 8
     #   weeks): P(net <= -$360) 0.19 -> 0.27, mean net -$8 -> -$14 (as the swarm traded, -$45 -> -$64); gain: P(Done)
     #   averaged over the holds 0.3% -> 2.6% (+5% edge). ITS MAIN EFFECT (the critic, B2, MONEY's pinned paths over 12
     #   weeks at U10%-M8-net-DM1): because NET counts from inception, Probe gains refill the budget. At 2 / 3 / 5-session
@@ -801,7 +806,8 @@ CONSTITUTION: dict[str, Any] = {
     #   NET is the loosest: 12-week Done with 3 programs at Probe, 3-session holds, zero edge: GROSS 0.5%, high-water
     #   mark 3.3%, NET 12.9% (+5% edge: 0.7%, 4.7%, 15.6%), so most of NET's gain is the re-risking of earlier Probe
     #   winnings. Chosen: NET (Claude, Oct 9: the only reading under which 30 real closes are reachable; the account's
-    #   daily and drawdown stops still bound the whole account).
+    #   daily and drawdown stops still bound the whole account). The owner's goal as re-set the same morning names the
+    #   budget net too ("realized Probe losses net of Probe gains", the last row below).
     # - `max_open` 8 (from 3; its bound 0-3 -> 0-8): the count of slots, not the dollars. "Why N = 3" was 3 x 10% = 30%
     #   of E inside the 35% daily stop; now the envelope (net realized + every real position's open maximum loss + the new
     #   open <= $400) keeps open Probe risk at or under $400, below the daily stop's $451.27 at E = $1,289.34. The dollars
@@ -829,12 +835,33 @@ CONSTITUTION: dict[str, Any] = {
     #   Before release D-1 writes the Validation sd, sigma is the forward record's own (its nightly, shadow and real
     #   days). MONEY (no edge, 8 weeks): P(net <= -$360) 0.27 -> 0.30; gain: Done 2.6% -> 3.3% (averaged over the holds,
     #   +5% edge).
+    # - THE ROLLING PROBE BUDGET: `loss_budget_usd` ($400) is now a ROLLING figure, over the last `loss_window_sessions`
+    #   (20) New York trading sessions, today included, beside the new `loss_total_usd` ($800) from inception. The
+    #   owner's goal as he re-set it on Oct 9, 2026 (about 06:20Z), item 4, verbatim: "Probe loss budget: $400 net in any
+    #   rolling 20 sessions and $800 net in total (realized Probe losses net of Probe gains, plus the maximum loss of
+    #   everything open)". The realized figure of each is `loss_basis`'s over the closed Probe positions it covers (under
+    #   "net", max(0, -their summed cash); under "gross", their losses summed): the window's those whose New York close
+    #   day is in the last 20 sessions (the repo's NYSE calendar, `ltcm.data.us_equity_session`: weekends, the computed
+    #   holidays and the special closures; `league/live/real.py` `probe_window_start`), the total's every one. A Probe
+    #   open goes only if BOTH the window's realized + every real position's open maximum loss + the open <= $400 AND
+    #   the total's realized + the same open maximum loss + the open <= $800; the refusal names the one that binds, and
+    #   exits always go on (`league/live/money.py` `plan_open`). Bounds: the window 20-2000 sessions (under "gross" a
+    #   longer window is always tighter; under "net" it also counts older gains, so past 20 it can be looser than the
+    #   owner's rolling 20, and only the rollback's 2000 with "gross" is meant there), the total $0-800. Open Probe risk
+    #   stays at or under $400 (the window's envelope alone caps every real position's open maximum loss plus the open
+    #   there), so `max_open`'s reasoning above stands and `money.probe_room` stays min(`max_open` x the Probe's cap, `loss_budget_usd`). Cost: the worst net
+    #   Probe loss rises from $400 to $800 (the 60% drawdown stop, about $773 from today's peak, binds near it); a
+    #   20-session window lets Probe trading resume after a bad stretch, as its losses age out of the window,
+    #   instead of stopping for good at $400. Measured cost: see the L-D section of docs/operations.md. Its rollback,
+    #   `loss_total_usd` "400" with `loss_window_sessions` 2000 (a window that holds every close since the fast lane),
+    #   is fast lane v2's single $400 budget, decision for decision (`league/tests/test_ld_release.py`).
     "options_money": {
         "real_types": ["debit_vertical", "long_butterfly", "long_call", "long_put"],
         "credit_types": ["credit_vertical", "iron_condor", "iron_butterfly"],
         "credit_min_equity_usd": "2000",
         "probe": {"max_loss_share": "0.10", "contracts": 1, "open_per_family": 3, "family_share": "0.15", "floor_usd": "0",
-                  "max_open": 8, "loss_budget_usd": "400", "loss_basis": "net", "demotion": "dm1"},
+                  "max_open": 8, "loss_budget_usd": "400", "loss_window_sessions": 20, "loss_total_usd": "800",
+                  "loss_basis": "net", "demotion": "dm1"},
         "sized": {"min_trades": 20, "confidence": "0.80", "kelly_fraction": "0.25", "max_loss_share": "0.10",
                   "family_share": "0.30", "min_probe_real_trades": 5, "min_probe_sessions": 1},
         "book_share": "0.90",
@@ -893,7 +920,13 @@ OPTIONS_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
     # Release L-D (Oct 9, 2026; Claude's decision under the same goal item, its cost in the table's comment): 8 Probe
     # slots (3 before it). The $400 envelope, not the count, bounds what Probe opens may lose.
     "probe.max_open": ("0", "8"),
+    # THE ROLLING PROBE BUDGET (release L-D; the owner's goal as he re-set it on Oct 9, 2026, item 4: "Probe loss budget:
+    # $400 net in any rolling 20 sessions and $800 net in total"): $400 at most over a window of at least the owner's 20
+    # sessions, and $800 at most in total. 2000 sessions is the CON-only rollback's window (every close since the fast
+    # lane); under "net" a window past 20 is not tighter (the table's comment).
     "probe.loss_budget_usd": ("0", "400"),
+    "probe.loss_window_sessions": ("20", "2000"),
+    "probe.loss_total_usd": ("0", "800"),
     "probe.open_per_family": ("1", "5"),
     "probe.family_share": ("0.08", "0.15"),
     "probe.floor_usd": ("0", "100"),
@@ -958,8 +991,9 @@ OPTIONS_SINGLE_TYPES = ("long_call", "long_put")
 OPTIONS_CREDIT_TYPES = ("credit_vertical", "iron_condor", "iron_butterfly")
 #: The rows of `options_money` that name a rule rather than a number (release L-D, Oct 9, 2026): each is EXACTLY one of
 #: its strings (case and all; "Net", "" or a missing row is refused, and nothing trades on a refused table). The first
-#: of each pair is the rule before L-D, so setting all three of L-D's rows back (`loss_basis` "gross", `probe.max_open`
-#: 3, `demotion` "dm0") is a constitution-only rollback that never moves the execution fingerprint.
+#: of each pair is the rule before L-D, so setting L-D's rows back (`loss_basis` "gross", `probe.max_open` 3, `demotion`
+#: "dm0", `probe.loss_total_usd` "400", `probe.loss_window_sessions` 2000) is a constitution-only rollback that never
+#: moves the execution fingerprint.
 #: - `probe.loss_basis`: how THE PROBE LOSS BUDGET reads realized Probe losses (`league/live/real.py` `probe_tally`):
 #:   "gross", each closed Probe position's own loss summed (fast lane v2); "net", max(0, -the closed Probe positions'
 #:   summed cash) from inception.
@@ -970,7 +1004,7 @@ OPTIONS_MONEY_CHOICES: dict[str, tuple[str, ...]] = {
     "probe.demotion": ("dm0", "dm1"),
 }
 #: Rows read as whole counts.
-_OPTIONS_COUNTS = ("probe.open_per_family", "probe.contracts", "probe.max_open", "sized.min_trades", "sized.min_probe_real_trades", "sized.min_probe_sessions", "order_path.max_orders_day", "order_path.max_requests_minute",
+_OPTIONS_COUNTS = ("probe.open_per_family", "probe.contracts", "probe.max_open", "probe.loss_window_sessions", "sized.min_trades", "sized.min_probe_real_trades", "sized.min_probe_sessions", "order_path.max_orders_day", "order_path.max_requests_minute",
                    "order_path.expiry_close_lead_minutes", "gateway.max_day_orders", "gateway.max_day_open_orders",
                    "house_test.open", "house_test.sessions", "house_test.round_trips", "incubator.contracts",
                    "incubator.max_open", "incubator.min_sessions", "incubator.min_trades")
@@ -1042,4 +1076,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '4a1705b6fc47afdaac3da102e33460e045bd1cf50895044415edc860e172ebd7'
+PINNED_DIGEST = '0adb4f0ed7d9f20fc05cb3ce73590b5a2dfdfe38e5d6aa6759e071d1beb4d5b2'

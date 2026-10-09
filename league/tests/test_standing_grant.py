@@ -378,15 +378,17 @@ class TheIncubatorCap(StandingCase):
 
 
 class TheReleaseLD(StandingCase):
-    """Release L-D (Oct 9, 2026): the Probe row's `max_open` 3 -> 8 and its new `loss_basis` "net" and `demotion` "dm1"
-    move the money digest from the incubator cap's 1665c385 to b212d4e6. A grant pinned on 1665c385 holds nothing after
-    the deploy until the standing grant re-ratifies it at the House's start, on the owner's release change only. Its
-    CON-only rollback (`loss_basis` "gross", `max_open` 3, `demotion` "dm0") is a digest of its own, 48eb2433, ratified
-    the same way on the owner's deploy of it; `floor_box.py rollback` to the release before L-D brings 1665c385 back."""
+    """Release L-D (Oct 9, 2026): the Probe row's `max_open` 3 -> 8, its new `loss_basis` "net" and `demotion` "dm1", and
+    THE ROLLING PROBE BUDGET's `loss_window_sessions` 20 and `loss_total_usd` "800" move the money digest from the
+    incubator cap's 1665c385 to fdf2ac7c. A grant pinned on 1665c385 holds nothing after the deploy until the standing
+    grant re-ratifies it at the House's start, on the owner's release change only. Its CON-only rollback (`loss_basis`
+    "gross", `max_open` 3, `demotion` "dm0", `loss_total_usd` "400", `loss_window_sessions` 2000) is a digest of its own,
+    320899d6, ratified the same way on the owner's deploy of it; `floor_box.py rollback` to the release before L-D brings
+    1665c385 back."""
 
     BEFORE = "1665c3858bce937617a339dfa56ae9a38a51e9fd763225ec10a645d3d5bafa08"
-    LD = "b212d4e60a6b2a29666fb923907b73c6ec9ee154b7be3c50fd3e9fe45408dd47"
-    CON_ROLLBACK = "48eb24333a1c3652daa66f806e09cfafd2ffb25dbedff18b9042ef67781e1f54"
+    LD = "fdf2ac7c1a446e39df9e27c8626fb86a954a3f5a939460406507a9b735f1d4c7"
+    CON_ROLLBACK = "320899d675059182509a62b67d122afd2fdc54b08c59b2053a684d88fc8b55f2"
 
     def pinned_before(self):
         with pre_ld():
@@ -415,7 +417,8 @@ class TheReleaseLD(StandingCase):
         grant = self.pinned_before()
         self.standing(grant, release="r-ld", rows=owner_deploy(self.clock() - 60, release="r-ld"))
         self.clock.advance(HOUR)
-        rollback = {"loss_basis": "gross", "max_open": 3, "demotion": "dm0"}
+        rollback = {"loss_basis": "gross", "max_open": 3, "demotion": "dm0", "loss_total_usd": "400",
+                    "loss_window_sessions": 2000}
         with patch.dict(CONSTITUTION["options_money"]["probe"], rollback):
             self.assertEqual(money_digest(), self.CON_ROLLBACK)
             self.assertFalse(grant.allows_live(2))

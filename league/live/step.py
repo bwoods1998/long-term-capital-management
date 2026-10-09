@@ -2649,7 +2649,7 @@ class OptionsLive:
             plan = M.plan_open(self.table, band=inst.band, tuition=inst.tuition, equity=sizing, unit=unit, fwd=fwd,
                                exposure=exposure)
             if plan.qty < 1 and plan.reason.startswith("probe: the loss budget"):
-                self._probe_budget_told()
+                self._probe_budget_told(exposure)
         if plan.qty < 1:
             return plan.reason
         qty = plan.qty
@@ -2704,9 +2704,10 @@ class OptionsLive:
                                              "status": sent.status, "sizing": plan.reason})
         return None if sent.status in ("working", "filled", "unknown") else f"{sent.status}: {sent.answer.get('error')}"
 
-    def _probe_budget_told(self) -> None:
+    def _probe_budget_told(self, exposure: M.Exposure) -> None:
         """THE PROBE LOSS BUDGET's alarm (fast lane v2, D4; the goal's item 6 note): once a New York day (state kv
-        `probe_budget_told`), when a Probe open is refused because the budget is spent."""
+        `probe_budget_told`), when a Probe open is refused because the budget is spent. Since release L-D it names both
+        figures of THE ROLLING PROBE BUDGET (the window's and the total's, `exposure`'s) and the basis."""
         today = ny(self.clock()).date().isoformat()
         try:
             if self.state.get("probe_budget_told") == today:
@@ -2714,11 +2715,16 @@ class OptionsLive:
             self.state.put("probe_budget_told", today)
         except Exception:  # noqa: BLE001 - the refusal stands either way; the alarm is told at the next refusal
             return
+        t = self.table
         basis = ("net realized Probe losses (Probe gains offset them; Sized gains never do)"
-                 if self.table.probe_loss_basis == "net" else "gross realized Probe losses (no gain offsets them)")
-        self.alert("warning", f"live: the Probe loss budget (${self.table.probe_loss_budget}: {basis}, plus every real "
-                              "position's maximum loss held or working, plus the open) is spent: no new Probe open; "
-                              "exits go on. Raising it is the owner's decision")
+                 if t.probe_loss_basis == "net" else "gross realized Probe losses (no gain offsets them)")
+        total = exposure.probe_realized if exposure.probe_realized_total is None else exposure.probe_realized_total
+        self.alert("warning", f"live: the Probe loss budget (${t.probe_loss_budget} in any {t.probe_loss_window} sessions "
+                              f"and ${t.probe_loss_total} in total: {basis}, plus every real position's maximum loss held "
+                              f"or working, plus the open) is spent: realized ${M.cents(exposure.probe_realized)} in the "
+                              f"window and ${M.cents(total)} in total, held or working "
+                              f"${M.cents(exposure.probe_at_risk)}: no new Probe open; exits go on. Raising it is the "
+                              "owner's decision")
 
     # ------------------------------------------------------------------ forward records
     def _export_one(self, acc: ShadowAccount) -> None:

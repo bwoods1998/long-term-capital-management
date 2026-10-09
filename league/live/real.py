@@ -44,6 +44,7 @@ entries (exits pass) and says why; two clean readings in a row lift it.
 from __future__ import annotations
 
 import datetime as dt
+import functools
 import math
 import re
 import time
@@ -165,7 +166,8 @@ def probe_tally(rows: Callable[..., list], *, day: str, basis: str) -> tuple[int
     of max(0, -cash) over those positions: one position's gain never offsets another's loss (the fast lane's review: a
     net figure let a Sized gain or a Probe gain refill the budget). "net" (release L-D, Oct 9, 2026; the constitution's
     comment has its cost): max(0, -(the sum of their cash)), from inception: a Probe gain offsets Probe losses, a Sized
-    gain still never does, and the figure is never below $0 (a net gain is no extra room).
+    gain still never does, and the figure is never below $0 (a net gain is no extra room). Every close counts: this is
+    THE ROLLING PROBE BUDGET's total (`probe.loss_total_usd`, release L-D); its window's figure is `probe_realized`'s.
 
     at_risk: each position not closed, Probe or Sized (a tightening: a Sized position fills the budget and a slot too),
     held, expiring or unpriced (its `opened_qty` units when unpriced) at its maximum loss with its fees twice, or what its
@@ -202,6 +204,64 @@ def probe_tally(rows: Callable[..., list], *, day: str, basis: str) -> tuple[int
     if basis == "net":
         realized = max(M.ZERO, -net)
     return open_n, realized, at_risk
+
+
+def probe_realized(rows: Callable[..., list], *, basis: str, since: str | None) -> Decimal:
+    """THE ROLLING PROBE BUDGET's window figure (release L-D, Oct 9, 2026; `money.plan_open`): `probe_tally`'s
+    realized_loss, by the same `basis` over the same rows (every closed `:r`, non-tuition position carrying the Probe
+    mark), over those whose New York close day (`_ny_day` of `closed_at`) is on or after `since` (ISO; None: every one,
+    `probe_tally`'s own figure). A close whose day cannot be read counts in every window (a closed position always has
+    its `closed_at`, `RealBook._close`)."""
+    if basis not in M.LOSS_BASES:
+        raise ValueError(f"the Probe loss basis {basis!r} is not one of {M.LOSS_BASES}")
+    gross = net = M.ZERO
+    for r in rows("SELECT cash, closed_at, info FROM positions WHERE substr(instance, -2)=? AND tuition=0 "
+                  "AND status='closed'", (REAL_SUFFIX,)):
+        if (loads(r["info"], {}) or {}).get("probe") is not True:
+            continue
+        closed = _ny_day(r["closed_at"])
+        if since is not None and closed is not None and closed < since:
+            continue
+        gross += max(M.ZERO, -M.D(r["cash"]))
+        net += M.D(r["cash"])
+    return max(M.ZERO, -net) if basis == "net" else gross
+
+
+@functools.lru_cache(maxsize=64)
+def probe_window_start(day: str, sessions: int) -> str | None:
+    """THE ROLLING PROBE BUDGET's window (release L-D, Oct 9, 2026; the constitution's `probe.loss_window_sessions`):
+    the first day of the last `sessions` New York trading sessions through `day` (ISO; today counted when it is one), by
+    the repo's NYSE calendar (`ltcm.data.us_equity_session`: weekends, the holidays computed by rule and the special
+    closures). None when the window reaches before the calendar's first year (2022): it holds every close then, which
+    is the CON-only rollback's 2000 sessions (every Probe close is from Oct 7, 2026 on). Pure, so cached."""
+    from ltcm.data import us_equity_session
+
+    if sessions < 1:
+        raise ValueError(f"a Probe loss window of {sessions!r} sessions")
+    d, n = dt.date.fromisoformat(day), 0
+    while True:
+        try:
+            if us_equity_session(d) is not None:
+                n += 1
+                if n == sessions:
+                    return d.isoformat()
+        except ValueError:                   # `DataError`: before the calendar's first year
+            return None
+        d -= dt.timedelta(days=1)
+
+
+def probe_figures(rows: Callable[..., list], *, day: str,
+                  table: M.Table) -> tuple[int, Decimal, Decimal, Decimal, str | None]:
+    """THE PROBE LOSS BUDGET's figures under the money table in force (`money.plan_open`'s, through `RealBook.exposure`,
+    and the fast lane report's): (open_n, window_realized, total_realized, at_risk, window_start). THE ROLLING PROBE
+    BUDGET (release L-D, Oct 9, 2026): total_realized is `probe_tally`'s figure (every close), window_realized
+    `probe_realized`'s over the closes of the last `probe.loss_window_sessions` sessions through `day`
+    (`probe_window_start`); a window that holds every close (None: the CON-only rollback's 2000 sessions) is the total's
+    own figure, read once."""
+    open_n, total, at_risk = probe_tally(rows, day=day, basis=table.probe_loss_basis)
+    since = probe_window_start(day, table.probe_loss_window)
+    window = total if since is None else probe_realized(rows, basis=table.probe_loss_basis, since=since)
+    return open_n, window, total, at_risk, since
 
 
 def _expired(legs: Any, day: str) -> bool:
@@ -547,10 +607,11 @@ class RealBook:
                 tuition_week += loss
                 if r["day"] == day:
                     tuition_day += loss
-        probe_open, probe_realized, probe_at_risk = probe_tally(self.state.rows, day=day, basis=self.table.probe_loss_basis)
+        probe_open, probe_window, probe_total, probe_at_risk, _ = probe_figures(self.state.rows, day=day, table=self.table)
         return M.Exposure(family_open=fam_open, family_loss=M.D(round(fam_loss, 2)), book_loss=M.D(round(book, 2)),
                           day_opened=day_opened, tuition_day=tuition_day, tuition_week=tuition_week,
-                          probe_open=probe_open, probe_realized=probe_realized, probe_at_risk=probe_at_risk)
+                          probe_open=probe_open, probe_realized=probe_window, probe_at_risk=probe_at_risk,
+                          probe_realized_total=probe_total)
 
     def incubator_tally(self, *, day: str, week_start: str, family: str | None = None) -> M.IncubatorTally:
         """The incubator's numbers from the live state's rows, read afresh (`incubator_tally`)."""
@@ -1201,4 +1262,5 @@ def real_legs(order: L.Order, chain: Any) -> list[RLeg]:
 
 __all__ = ["RealBook", "RLeg", "RPosition", "ROrder", "mleg_body", "single_leg_body", "single_body", "order_body", "is_single",
            "limit_price", "client_id", "structure_fill", "real_legs", "leg_fees", "PREFIX", "KNOWN_DUST", "SINGLE_TYPES",
-           "INCUBATOR_SUFFIX", "is_incubator", "incubator_tally", "REAL_SUFFIX", "probe_tally"]
+           "INCUBATOR_SUFFIX", "is_incubator", "incubator_tally", "REAL_SUFFIX", "probe_tally", "probe_realized",
+           "probe_window_start", "probe_figures"]

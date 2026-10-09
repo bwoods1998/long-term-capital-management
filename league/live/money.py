@@ -56,14 +56,19 @@ by their own unit):
   account, and THE PROBE LOSS BUDGET (D4): realized Probe losses (each closed position a Probe family opened, marked so
   at its open: `Plan.probe`, the order's and the position's `probe` mark; never a Sized position's, which carries no
   mark), read by `probe.loss_basis` (`Table.probe_loss_basis`): "gross" (fast lane v2), each such position's own loss
-  summed, never offset by a gain; "net" (since release L-D), max(0, -their summed cash) from inception, so a Probe gain
-  offsets Probe losses and a Sized gain never does; plus the maximum loss of every real position held or working
-  (`real.probe_tally`, every ":r" row: a Sized position counts here too, a tightening) plus the new open at most
-  `probe.loss_budget_usd` ($400); an open that would breach it is refused and exits go on. Under "net" the dollars bind
-  before the count (three $129 units fit the $400, eight $50 units). These two refuse a Probe family's open only, never
-  a Sized one, and come after the kill switch, the stops, the grant and reconciliation (`step._real_intent` asks
-  `real_block` first). `probe_room` is the room the other routes leave for Probe opens: min(`probe.max_open` x the
-  Probe's cap, `probe.loss_budget_usd`).
+  summed, never offset by a gain; "net" (since release L-D), max(0, -their summed cash), so a Probe gain offsets Probe
+  losses and a Sized gain never does; plus the maximum loss of every real position held or working
+  (`real.probe_tally`, every ":r" row: a Sized position counts here too, a tightening) plus the new open. Fast lane v2
+  had one envelope, all of it at most `probe.loss_budget_usd` ($400) in total. THE ROLLING PROBE BUDGET (release L-D,
+  Oct 9, 2026; the owner's goal as he re-set it that day, item 4: "$400 net in any rolling 20 sessions and $800 net in
+  total") has two, and an open must fit BOTH: the realized losses of the closes in the last `probe.loss_window_sessions`
+  (20) New York sessions (`Exposure.probe_realized`, `real.probe_realized` from `real.probe_window_start`) + every
+  real position's open maximum loss + the new open at most `probe.loss_budget_usd` ($400), and the realized losses of
+  every close (`Exposure.probe_realized_total`) + the same at most `probe.loss_total_usd` ($800). An open that would
+  breach either is refused, naming the envelope that binds, and exits go on. The dollars bind before the count (three
+  $129 units fit the $400, eight $50 units). These refuse a Probe family's open only, never a Sized one, and come after
+  the kill switch, the stops, the grant and reconciliation (`step._real_intent` asks `real_block` first). `probe_room`
+  is the room the other routes leave for Probe opens: min(`probe.max_open` x the Probe's cap, `probe.loss_budget_usd`).
 - Sized: `sized.kelly_fraction` of Kelly on the LOWER bound (`stats.quarter_kelly`: fraction x lcb / variance of the
   per-trade return on maximum loss) of `E` a structure, never above `sized.max_loss_share x E`; the family at most
   `sized.family_share x E`. C3 (the review of #362), unchanged by the fast lane: a Sized family whose Kelly stake is
@@ -170,7 +175,9 @@ class Table:
     probe_floor: Decimal
     probe_contracts: int
     probe_max_open: int
-    probe_loss_budget: Decimal
+    probe_loss_budget: Decimal       # the rolling window's (since release L-D; in total at fast lane v2)
+    probe_loss_window: int           # its window, NY sessions (release L-D: `real.probe_window_start`)
+    probe_loss_total: Decimal        # the total's (release L-D)
     probe_loss_basis: str            # "gross" | "net" (release L-D: `real.probe_tally`)
     probe_demotion: str              # "dm0" | "dm1" (release L-D: `demotion`)
     sized_min_trades: int
@@ -227,7 +234,8 @@ class Table:
             probe_share=D(probe["max_loss_share"]), probe_open=int(probe["open_per_family"]),
             probe_family_share=D(probe["family_share"]), probe_floor=D(probe["floor_usd"]),
             probe_contracts=int(probe["contracts"]), probe_max_open=int(probe["max_open"]),
-            probe_loss_budget=D(probe["loss_budget_usd"]),
+            probe_loss_budget=D(probe["loss_budget_usd"]), probe_loss_window=int(probe["loss_window_sessions"]),
+            probe_loss_total=D(probe["loss_total_usd"]),
             # Exactly one of `constitution.OPTIONS_MONEY_CHOICES` (`options_money_problems` refused anything else above).
             probe_loss_basis=str(probe["loss_basis"]), probe_demotion=str(probe["demotion"]),
             sized_min_trades=int(sized["min_trades"]), sized_confidence=float(D(sized["confidence"])),
@@ -635,10 +643,13 @@ class Exposure:
     # THE FAST LANE (D3, D4; `real.probe_tally`): the real (":r") positions held or working, the realized loss of the
     # closed ones a Probe family opened (since the fast lane: only its opens are marked), read by `probe.loss_basis`
     # (gross: each one's own loss summed; net since release L-D: max(0, -their summed cash)), and what the held and
-    # working ones could still lose (maximum loss with fees)
+    # working ones could still lose (maximum loss with fees). THE ROLLING PROBE BUDGET (release L-D): `probe_realized`
+    # is the closes' of the last `probe.loss_window_sessions` sessions (`real.probe_realized`), `probe_realized_total`
+    # every close's; None reads as `probe_realized` (a window holding every close, as fast lane v2's one figure)
     probe_open: int = 0
     probe_realized: Decimal = ZERO
     probe_at_risk: Decimal = ZERO
+    probe_realized_total: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -730,13 +741,26 @@ def plan_open(table: Table, *, band: str, tuition: bool, equity: Decimal, unit: 
             if exposure.probe_open >= table.probe_max_open:
                 return Plan(0, cap, f"probe: {exposure.probe_open} Probe positions held or working; the most at once is "
                                     f"{table.probe_max_open}")
-            # THE ENVELOPE: realized (`probe.loss_basis`) + every real position's open maximum loss + this open.
+            # THE ENVELOPES (THE ROLLING PROBE BUDGET, release L-D): realized (`probe.loss_basis`) + every real
+            # position's open maximum loss + this open, over the window's closes at most `probe.loss_budget_usd` and over
+            # every close at most `probe.loss_total_usd`. The window's is asked first: under the CON-only rollback (a
+            # window holding every close, both $400) it is fast lane v2's one envelope, its words with the window named
+            # after them, and the total's never refuses what it admitted.
+            basis = " net" if table.probe_loss_basis == "net" else ""
+            risk = unit * qty
             possible = exposure.probe_realized + exposure.probe_at_risk
-            if possible + unit * qty > table.probe_loss_budget:
-                basis = " net" if table.probe_loss_basis == "net" else ""
+            if possible + risk > table.probe_loss_budget:
                 return Plan(0, cap, f"probe: the loss budget: ${cents(possible)} could already be lost (realized{basis} "
                                     f"${cents(exposure.probe_realized)}, held or working ${cents(exposure.probe_at_risk)}) "
-                                    f"and this risks ${cents(unit * qty)}, over ${table.probe_loss_budget}")
+                                    f"and this risks ${cents(risk)}, over ${table.probe_loss_budget} in any "
+                                    f"{table.probe_loss_window} sessions")
+            total = exposure.probe_realized if exposure.probe_realized_total is None else exposure.probe_realized_total
+            possible = total + exposure.probe_at_risk
+            if possible + risk > table.probe_loss_total:
+                return Plan(0, cap, f"probe: the loss budget in total: ${cents(possible)} could already be lost "
+                                    f"(realized{basis} ${cents(total)} since the fast lane, held or working "
+                                    f"${cents(exposure.probe_at_risk)}) and this risks ${cents(risk)}, over "
+                                    f"${table.probe_loss_total} in total")
         band = limits
         fam = family_cap(table, band, equity)
         room_loss = fam - exposure.family_loss

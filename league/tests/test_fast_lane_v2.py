@@ -480,12 +480,14 @@ class TheLivePath(LiveCase):
         return [p["why"] for p, a in self.ledger.of("live.refusal")]
 
     def spend_the_budget(self, live) -> None:
-        """A closed real position that lost $400: the Probe loss budget is spent."""
+        """A closed real position that lost $400: the Probe loss budget is spent (closed on the Friday before, inside
+        THE ROLLING PROBE BUDGET's window of release L-D, so its $400 binds there as fast lane v2's $400 did)."""
         live.state.upsert("positions", {"pid": 900, "instance": "old@1:r", "family": "old", "type": "debit_vertical",
                                         "root": "SPY", "legs": "[]", "qty": 0, "opened_qty": 1, "entry": 4.0,
                                         "max_loss_share": 4.0, "collateral": 0.0, "fees": 1.0, "cash": -400.0,
                                         "opened_at": 1.0, "opened_day": "2026-09-25", "opened_minute": 1,
-                                        "status": "closed", "closed_at": 2.0, "tuition": 0,
+                                        "status": "closed", "closed_at": at(MONDAY - dt.timedelta(days=3), 15, 0),
+                                        "tuition": 0,
                                         "info": json.dumps({"order": 900, "probe": True})}, "pid")
 
     def test_a_candidate_moved_to_probe_opens_from_the_next_minute(self):
@@ -843,7 +845,7 @@ class TheFastLaneJob(RoundCase):
         live.upsert("positions", {"pid": 1, "instance": "a@1:r", "family": "a", "type": "debit_vertical", "root": "SPY",
                                   "legs": "[]", "qty": 0, "opened_qty": 1, "entry": 0.4, "max_loss_share": 0.4,
                                   "collateral": 0.0, "fees": 1.0, "cash": -20.0, "opened_at": 1.0, "opened_day": "2026-09-28",
-                                  "opened_minute": 1, "status": "closed", "closed_at": 2.0, "tuition": 0,
+                                  "opened_minute": 1, "status": "closed", "closed_at": at(MONDAY, 15, 0), "tuition": 0,
                                   "info": json.dumps({"order": 1, "probe": True})}, "pid")
         live.close()
         alerts = []
@@ -853,6 +855,7 @@ class TheFastLaneJob(RoundCase):
         doc = json.loads((self.root / FL.FILE).read_text())
         self.assertEqual((doc["window_days"], doc["reported_only"]), (FL.JOB_DAYS, True))
         self.assertEqual(doc["probe_budget"]["realized_usd"], "20.00")
+        self.assertEqual(doc["probe_budget"]["realized_total_usd"], "20.00")
         self.assertEqual({r["window"] for r in doc["screen"]}, {"validation", "holdout"})
         self.assertIn("contamination", doc)
         [(level, text)] = alerts
@@ -947,11 +950,15 @@ class ReportedOnly(RoundCase):
         live = LiveState(self.root / "live-copy.sqlite")
         base = {"type": "debit_vertical", "root": "SPY", "legs": "[]", "qty": 0, "opened_qty": 1, "entry": 0.4,
                 "max_loss_share": 0.4, "collateral": 0.0, "fees": 1.0, "opened_at": 1.0, "opened_day": "2026-09-28",
-                "opened_minute": 1, "status": "closed", "closed_at": 2.0, "tuition": 0}
+                "opened_minute": 1, "status": "closed", "closed_at": at(MONDAY, 15, 0), "tuition": 0}
         live.upsert("positions", {**base, "pid": 1, "instance": "a@1:r", "family": "a", "cash": -12.5,
                                   "info": json.dumps({"order": 1, "probe": True})}, "pid")
         live.upsert("positions", {**base, "pid": 2, "instance": "s@1:r", "family": "s", "cash": 100.0,
                                   "info": json.dumps({"order": 2})}, "pid")        # a Sized gain: never in the budget
+        # A Probe loss closed Aug 3: before the rolling window (release L-D), in the total only.
+        live.upsert("positions", {**base, "pid": 3, "instance": "a@1:r", "family": "a", "cash": -30.0,
+                                  "closed_at": at(dt.date(2026, 8, 3), 15, 0),
+                                  "info": json.dumps({"order": 3, "probe": True})}, "pid")
         live.close()
         out = module.report(self.root, self.root / "live-copy.sqlite", self.root / "direction-closes.json",
                             today="2026-09-30")
@@ -993,9 +1000,13 @@ class ReportedOnly(RoundCase):
         self.assertIsNone(band["d5"]["demoted"])
         from league.ops.fast_lane import REALIZED_BASIS
 
-        self.assertEqual(out["probe_budget"], {"realized_usd": "12.50", "realized_basis": REALIZED_BASIS["net"],
-                                               "at_risk_usd": "0.00", "open": 0, "max_open": 8, "budget_usd": "400",
-                                               "room_usd": "387.50"})
+        # THE ROLLING PROBE BUDGET (release L-D): the window's 20 sessions through Sep 30 start Sep 2 (Labor Day, Sep 7, is
+        # no session), so the Aug 3 loss is in the total only.
+        self.assertEqual(out["probe_budget"], {"realized_usd": "12.50", "realized_total_usd": "42.50",
+                                               "realized_basis": REALIZED_BASIS["net"], "window_sessions": 20,
+                                               "window_start": "2026-09-02", "at_risk_usd": "0.00", "open": 0,
+                                               "max_open": 8, "budget_usd": "400", "total_budget_usd": "800",
+                                               "room_usd": "387.50", "binding": "window"})
         self.assertTrue(REALIZED_BASIS["net"].startswith("net: "), "release L-D: the label is the basis in force")
         self.assertEqual(band["d5"]["rule"], "dm1")
         self.assertTrue(out["reported_only"])
