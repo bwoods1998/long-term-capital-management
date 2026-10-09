@@ -85,7 +85,10 @@ not measured: 123 of the holdout's 184 sessions (through 2026-06-30) are inside 
 (61 sessions) beside it (`numbers.tail`), weak in power and never a bar. The drift fit and the same-risk buy-and-hold
 are reported beside every screen result (`league/ops/direction.py`, `scripts/fast_lane_report.py`), never a bar.
 
-THE LEAKAGE ALARM: once there are at least 10 holdout looks, more than 30% passing stops the gate.
+THE LEAKAGE ALARM: once there are at least 10 holdout looks, more than 30% passing stops the gate. PER LANE since release
+D-1 (Oct 9, 2026; `leakage_alarms`): while the direction lane is on, the alpha lane's looks are counted alone at these
+numbers and the direction lane's at 10 looks and more than 60% (`dlane.leakage_alarm`), and a lane's alarm stops that
+lane's looks and incubator reads only.
 
 THE BANDIT: Thompson sampling over validation evidence, with a 25% exploration share for new families. Used only under
 `allocation.mode` "bandit" (and as the allocator's fallback); the default allocation is league/swarm/allocation.py.
@@ -457,19 +460,24 @@ def holm_passes(p_new: float, previous: Sequence[float], *, alpha: float = HOLDO
 
 
 def holdout_line(result: Mapping[str, Any], *, validation_sharpe: float | None, previous_ps: Sequence[float],
-                 seed: str, level: float = LOOK_LEVEL) -> dict[str, Any]:
+                 seed: str, level: float = LOOK_LEVEL, sharpe_share: float | None = None) -> dict[str, Any]:
     """Does a holdout result meet the line (FAST LANE V2, Oct 7, 2026)? P&L after fees above zero, the day-block
     bootstrap's one-sided p at most `level` (flat: no Holm across looks; `previous_ps` is recorded only, as
     `looks_before`), and the holdout Sharpe at least half of Validation's. The numbers carry the contamination tail
     (`CONTAMINATION_TAIL_FROM` on: its days, P&L and own bootstrap p), reported and never a check. The numbers stay with
-    the gate: the researcher hears pass or fail."""
+    the gate: the researcher hears pass or fail.
+
+    THE LANE'S SCREEN (release D-1, Oct 9, 2026; the operator's decision 6): the gate passes the direction lane's own
+    `level` and `sharpe_share` ("S-C": 0.20 and 0.25, `dlane.screen_effective`); the numbers then say the share used.
+    Without `sharpe_share` (the alpha lane, and every look while `dlane.mode` is "off") the share is
+    `HOLDOUT_SHARPE_SHARE` and the line and its numbers are the release before it's, byte for byte."""
     s = dict(result.get("summary") or {})
     pnl = _num(s.get("pnl"))
     daily = daily_pnl(result)
     boot = block_bootstrap(daily, seed=seed, draws=BOOTSTRAP_DRAWS)  # 2000 draws: the smallest p, 1/2001, is far under 0.10
     p = boot["p"] if boot else 1.0
     sharpe = stats.sharpe(daily) if len(daily) >= 2 else None
-    need = (validation_sharpe or 0.0) * HOLDOUT_SHARPE_SHARE
+    need = (validation_sharpe or 0.0) * (HOLDOUT_SHARPE_SHARE if sharpe_share is None else float(sharpe_share))
     checks = {
         "status_ok": result.get("status") == "ok",
         "pnl": pnl is not None and pnl > 0,
@@ -479,18 +487,51 @@ def holdout_line(result: Mapping[str, Any], *, validation_sharpe: float | None, 
     tail = [float(d[1]) for d in (result.get("daily") or []) if isinstance(d, (list, tuple)) and len(d) >= 2
             and _num(d[1]) is not None and str(d[0])[:10] >= CONTAMINATION_TAIL_FROM]
     tail_boot = block_bootstrap(tail, seed=f"{seed}:tail", draws=BOOTSTRAP_DRAWS)
-    return {"passed": all(checks.values()), "checks": checks, "p": p,
-            "numbers": {"pnl": pnl, "mean_daily": boot["mean"] if boot else None, "lcb95": boot["lcb95"] if boot else None,
-                        "p": p, "level": float(level), "rule": "flat", "looks_before": len(previous_ps),
-                        "sharpe_daily": sharpe, "draws": BOOTSTRAP_DRAWS, "validation_sharpe_daily": validation_sharpe,
-                        "days": len(daily),
-                        "tail": {"from": CONTAMINATION_TAIL_FROM, "days": len(tail), "pnl": round(sum(tail), 6),
-                                 "p": tail_boot["p"] if tail_boot else None}}}
+    out = {"passed": all(checks.values()), "checks": checks, "p": p,
+           "numbers": {"pnl": pnl, "mean_daily": boot["mean"] if boot else None, "lcb95": boot["lcb95"] if boot else None,
+                       "p": p, "level": float(level), "rule": "flat", "looks_before": len(previous_ps),
+                       "sharpe_daily": sharpe, "draws": BOOTSTRAP_DRAWS, "validation_sharpe_daily": validation_sharpe,
+                       "days": len(daily),
+                       "tail": {"from": CONTAMINATION_TAIL_FROM, "days": len(tail), "pnl": round(sum(tail), 6),
+                                "p": tail_boot["p"] if tail_boot else None}}}
+    if sharpe_share is not None:
+        out["numbers"]["sharpe_share"] = float(sharpe_share)
+    return out
 
 
 def leakage_alarm(looks: int, passes: int) -> bool:
-    """Stop the gate: at least 10 holdout looks and more than 30% of them passed."""
+    """Stop the gate: at least 10 holdout looks and more than 30% of them passed. THE ALPHA LANE'S, unchanged by release
+    D-1: while the direction lane is on it counts the alpha lane's looks alone (`leakage_alarms`)."""
     return looks >= ALARM_MIN_LOOKS and passes > ALARM_PASS_SHARE * looks
+
+
+def look_lane(look: Mapping[str, Any] | None) -> str:
+    """The lane a holdout look was judged in: the `lane` its line recorded (the gate writes it into the look's `detail`
+    while the direction lane is on, release D-1), "alpha" for every other look (each one made before D-1, or while the
+    lane was off, was judged by the alpha lane's line)."""
+    detail = (look or {}).get("detail") if isinstance(look, Mapping) else None
+    return "direction" if isinstance(detail, Mapping) and detail.get("lane") == "direction" else "alpha"
+
+
+def leakage_alarms(looks: Sequence[Mapping[str, Any]], settings: Mapping[str, Any] | None) -> dict[str, bool]:
+    """THE LEAKAGE ALARM PER LANE (release D-1, Oct 9, 2026; PLAN D7, the operator's decision 7): {"alpha": bool,
+    "direction": bool} over the store's holdout looks (`SwarmStore.looks`, each with its `detail`), each lane's looks
+    counted alone (`look_lane`). The alpha lane keeps `leakage_alarm` (10 looks, more than 30% passed); the direction
+    lane's is `dlane.leakage_alarm` (10 looks, more than 60%: direction passes are correlated through one market, so a
+    rising year would pass most of them together, which is market, not leakage). A lane's alarm stops that lane's looks
+    and incubator reads only (PLAN K6). Its cost: a real holdout leak in a direction program is caught later; the paid
+    review and audit, the duplicate look and the post-cutoff tail still check every look. While `dlane.mode` is "off"
+    (THE ROLLBACK) both lanes read the one count over every look, as before: the gate stops whole or not at all."""
+    from . import dlane  # dlane imports this module: read lazily
+
+    rows = list(looks or [])
+    if not dlane.on(settings):
+        one = leakage_alarm(len(rows), sum(1 for x in rows if x.get("passed")))
+        return {"alpha": one, "direction": one}
+    alpha = [x for x in rows if look_lane(x) != "direction"]
+    direction = [x for x in rows if look_lane(x) == "direction"]
+    return {"alpha": leakage_alarm(len(alpha), sum(1 for x in alpha if x.get("passed"))),
+            "direction": dlane.leakage_alarm(len(direction), sum(1 for x in direction if x.get("passed")), settings)}
 
 
 # ---------------------------------------------------------------------------- the look holds (L6)
@@ -673,7 +714,8 @@ def _allocate(draws: Mapping[str, float], total: float, out: dict[str, float]) -
         out[key] = total * (n - i) / denom
 
 
-__all__ = ["validation_line", "holdout_line", "block_bootstrap", "holm_passes", "leakage_alarm", "forward_record", "thompson",
+__all__ = ["validation_line", "holdout_line", "block_bootstrap", "holm_passes", "leakage_alarm", "leakage_alarms", "look_lane",
+           "forward_record", "thompson",
            "train_score", "years_of", "robustness_view", "traded_sharpe", "checks_passed", "quarters_positive", "daily_pnl",
            "one_record", "MIN_TRADES", "MIN_DAYS", "MIN_T", "MIN_DSR", "STRESS", "LOOKS_PER_LINEAGE", "TRAIN_YEAR_MIN_TRADES",
            "TRAIN_YEAR_MIN_DAYS", "drift_numbers", "drift_screen", "DRIFT_MIN_T", "EXPLOIT_PER_POSITIVE", "drift_lean",

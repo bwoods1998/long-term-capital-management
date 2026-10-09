@@ -2,11 +2,12 @@
 
 THE GATE (when a family's validated best meets the validation line):
 1. RATIONS: one holdout look per program version (code + parameters), at most three per LINEAGE (a fork
-   inherits its parent's looks); the leakage alarm (>= 10 looks, > 30% passing) stops the gate. THE DUPLICATE LOOK
-   (H3a, Oct 1, 2026; `duplicate_look`) comes first: a look that would repeat an earlier one is refused. THE DRIFT SCREEN
-   (Sept 27, `evidence.drift_screen`) again, in depth: a version whose Train drift-adjusted alpha fails it is refused
-   (stage "drift screen": no review is paid, no look is spent); one whose figures are owed waits. THE LOOK HOLDS (L6,
-   Oct 2, 2026; `look_hold`) come after the rations and before the review: a look the holdout cannot judge is held.
+   inherits its parent's looks); the leakage alarm (>= 10 looks, > 30% passing; per lane since release D-1) stops the
+   gate. THE DUPLICATE LOOK (H3a, Oct 1, 2026; `duplicate_look`) comes first: a look that would repeat an earlier one is
+   refused. THE DRIFT SCREEN (Sept 27, `evidence.drift_screen`) again, in depth: a version whose Train drift-adjusted
+   alpha fails it is refused (stage "drift screen": no review is paid, no look is spent); one whose figures are owed
+   waits. THE LOOK HOLDS (L6, Oct 2, 2026; `look_hold`) come after the rations and before the review: a look the
+   holdout cannot judge is held.
 2. THE REVIEW: GPT-6 Sol through the gateway when OpenAI has room (`review_openai_model`; null skips it), else
    DeepSeek-V4-Pro balanced on Sail (Claude first once "review" is in `claude.roles`, Sept 29), reads the program for
    lookahead, leakage (calendar recognition, hard-coded regimes) and fill abuse. A failed review is a recorded refusal
@@ -138,6 +139,21 @@ belt). THE INCUBATOR'S SWEEP (`incubator.sweep`) still runs at the start and the
 alarm's too), and again after an incubator read that failed, and records what it finds. Both only remove marks and
 passes and record bars, which nothing of the gate reads.
 
+THE DIRECTION LANE (release D-1, Oct 9, 2026; PLAN D6 and D7, the operator's decisions 6, 7 and 9; `league/swarm/dlane.py`).
+A family's lane (`dlane.lane_of`: "alpha" for every family while `dlane.mode` is "off") picks its screen
+(`dlane.screen_effective`, `look_line`): the alpha lane keeps "S-B" (the line above, at `evidence.LOOK_LEVEL` and half
+of Validation's Sharpe) byte for byte; the direction lane's look is "S-C", the same line at p <= 0.20 and a Sharpe share
+of 0.25; "D2" (a Validation pre-check, `Tournament._verdict`, then a pooled test) only behind `dlane.screen` "D2" with a
+receipt sha256 and its `c` pinned in the repository's policy.json, else refused (S-C). While the lane is on every look
+records its `lane`, `screen` and `receipt`, in its `detail` and its `swarm.gate` event. THE LEAKAGE ALARM counts each
+lane's looks alone (`alarms`, `evidence.leakage_alarms`): the alpha lane's at 10 looks and more than 30% passed, the
+direction lane's at 10 and more than 60%, and a lane's alarm stops that lane's looks and incubator reads only (the
+whole gate stops when both hold). THE LANE'S MODE (`lane_closed`): while the direction lane is in "shadow" (its setting,
+or K5 holding a "gate" lane in shadow, `dlane.candidates_open`) a direction family waits after the free checks (no
+review is paid, no look is spent, `gate_ready` stays), a direction look already out lands judged but makes no Candidate
+(`candidate_withheld`), and the incubator reads no direction family. While the lane is off (THE ROLLBACK) every path
+here is the release before it's, byte for byte.
+
 Every step is a `swarm.gate` event; band moves are `swarm.band` events (the site's news).
 Standard library only.
 """
@@ -157,7 +173,7 @@ from typing import Any, Callable, Mapping
 from ..gym.experiment import check_experiment
 from ..gym.review_contract import grounded_answer, review_contract
 from ..gym.safety import CodeRefused
-from . import evidence
+from . import dlane, evidence
 from . import settings as settings_mod
 from .pool import GymJob, PoolError
 from .researcher import drift_verdict, needs_roots, running_span, version_drift
@@ -415,9 +431,70 @@ class Gate:
     def due(self) -> bool:
         return self.clock() - float(self.store.get("gate_at", 0.0) or 0.0) >= float(self.cfg.get("every_seconds", 300))
 
+    def alarms(self) -> dict[str, bool]:
+        """THE LEAKAGE ALARM PER LANE (release D-1, Oct 9, 2026; `evidence.leakage_alarms`): {"alpha", "direction"}, each
+        lane's holdout looks counted alone. While `dlane.mode` is "off" both are the one count over every look, as
+        before."""
+        return evidence.leakage_alarms(self.store.looks(), self.settings)
+
     def alarm(self) -> bool:
+        """The whole gate stops: every lane's leakage alarm holds. While the direction lane is off that is the one alarm
+        over every look (10 looks, more than 30% passed), as before release D-1."""
+        return all(self.alarms().values())
+
+    def stopped_lanes(self) -> frozenset[str]:
+        """The lanes whose leakage alarm holds (PLAN K6: that lane's looks and incubator reads stop, the other lane's go
+        on). While the direction lane is off: none, or both."""
+        return frozenset(lane for lane, held in self.alarms().items() if held)
+
+    def lane_alarms(self, out: dict[str, Any]) -> frozenset[str]:
+        """The lanes whose alarm holds while the other's does not (the direction lane on; `stopped_lanes`), recorded
+        (`_record_alarms`) and named in the round's answer (`alarm_lanes`). Empty while the lane is off: the gate then
+        stops whole or not at all (`alarm`), as before."""
+        if not dlane.on(self.settings):
+            return frozenset()
+        stopped = self.stopped_lanes()
+        if stopped:
+            self._record_alarms(stopped)
+            out["alarm_lanes"] = sorted(stopped)
+        return stopped
+
+    def _record_alarms(self, stopped: frozenset[str] | None) -> None:
+        """Each alarm that holds, recorded once: the store's kv and one `swarm.gate` event (`leakage_alarm`). `stopped`
+        None (the direction lane off): the one alarm as before release D-1 (kv `leakage_alarm`, the count over every
+        look); else one record a lane in `stopped` (the alpha lane's under the same kv, the direction lane's under
+        `leakage_alarm_direction`), each with its lane and its own looks and passes."""
+        if stopped is None:
+            if not self.store.get("leakage_alarm"):
+                self.store.put("leakage_alarm", {"at": self.clock(), "looks": len(self.store.looks())})
+                self.store.event("swarm.gate", None, {"action": "leakage_alarm", "looks": len(self.store.looks()),
+                                                      "passes": sum(1 for x in self.store.looks() if x["passed"])})
+            return
         looks = self.store.looks()
-        return evidence.leakage_alarm(len(looks), sum(1 for x in looks if x["passed"]))
+        for lane in sorted(stopped):
+            key = "leakage_alarm" if lane == dlane.ALPHA else f"leakage_alarm_{lane}"
+            if self.store.get(key):
+                continue
+            mine = [x for x in looks if evidence.look_lane(x) == lane]
+            self.store.put(key, {"at": self.clock(), "looks": len(mine), "lane": lane})
+            self.store.event("swarm.gate", None, {"action": "leakage_alarm", "lane": lane, "looks": len(mine),
+                                                  "passes": sum(1 for x in mine if x["passed"])})
+
+    def lane_closed(self, fam: Mapping[str, Any], state: Mapping[str, Any]) -> str | None:
+        """Why the gate takes a DIRECTION family no further now (no review is paid, no look is spent, `gate_ready` stays),
+        or None (every alpha family, and every family while the lane is off):
+        - THE MODE (`dlane.candidates_open`): in "shadow", or while K5 holds a "gate" lane in shadow, no direction family
+          becomes a Candidate, so its look waits rather than being spent on a band it could not take;
+        - THE SCREEN'S ENTRY: under "S-C" a direction look follows the Validation line as coded; a version that entered
+          the gate by D2's Validation pre-check (`Tournament._verdict`) waits while the screen in force is not D2."""
+        if dlane.lane_of(self.store, fam, self.settings) != dlane.DIRECTION:
+            return None
+        if not dlane.candidates_open(self.store, self.settings):
+            return "the direction lane is in shadow: no direction program becomes a Candidate until it opens"
+        if dlane.screen_effective(self.settings, dlane.DIRECTION)["validation"] == "line" \
+                and not (state.get("validation_line") or {}).get("passed"):
+            return "it entered the gate by D2's Validation pre-check, and the screen in force needs the Validation line"
+        return None
 
     def tell(self, fid: str, answer: str, *, verdict: bool = False) -> None:
         """What the researcher hears (its status line): pass or fail, and for a refusal before the look, why. A VERDICT
@@ -663,13 +740,11 @@ class Gate:
         out: dict[str, Any] = {"looked": [], "refused": [], "waiting": [], "held": [], "look_held": []}
         self._incubator_owed()  # a verdict an error kept from its bar last round: recorded first
         self._incubator_sweep()  # a look that landed, or a demotion, since the last round: its mark goes first
-        if self.alarm():
-            if not self.store.get("leakage_alarm"):
-                self.store.put("leakage_alarm", {"at": self.clock(), "looks": len(self.store.looks())})
-                self.store.event("swarm.gate", None, {"action": "leakage_alarm", "looks": len(self.store.looks()),
-                                                      "passes": sum(1 for x in self.store.looks() if x["passed"])})
+        if self.alarm():  # every lane's alarm (the lane off: the one alarm over every look): the whole gate stops
+            self._record_alarms(self.stopped_lanes() if dlane.on(self.settings) else None)
             out["alarm"] = True
             return out
+        stopped = self.lane_alarms(out)  # THE LEAKAGE ALARM PER LANE: that lane's looks stop, the other's go on
         limit = settings_mod.run_timeout(self.settings) + 1200
         for fam in self.store.families():
             state = fam.get("state") or {}
@@ -690,6 +765,10 @@ class Gate:
                 # THE OPERATOR'S HOLD (`SwarmStore.hold_gate`): nothing of it is looked at (no review, audit or look), and
                 # its gate_ready stays, so it is looked at once the hold is cleared.
                 out["held"].append(fam["id"])
+                continue
+            if stopped and dlane.lane_of(self.store, fam, self.settings) in stopped:
+                # THE LEAKAGE ALARM of its lane (release D-1): nothing of it is looked at, and its gate_ready stays.
+                out.setdefault("alarm_held", []).append(fam["id"])
                 continue
             image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
             bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
@@ -739,6 +818,12 @@ class Gate:
             hold = self.look_hold(fam, n)
             if hold is not None:  # THE LOOK HOLDS: after every free check that refuses, before anything is paid or opened
                 self.hold_look(fam, int(n), sha, hold, out)
+                continue
+            closed = self.lane_closed(fam, state)
+            if closed is not None:  # THE DIRECTION LANE (release D-1): after every free check, before anything is paid
+                out["waiting"].append(fam["id"])
+                self.outcome(fam["id"], sha, "waiting")
+                self.tell(fam["id"], f"waiting ({closed})")
                 continue
             cached = state.get("review") or {}
             review = cached if cached.get("sha") == sha and cached.get("contract_sha") == gate_contract()["sha256"] else None
@@ -825,9 +910,10 @@ class Gate:
                 out["looked"].append({"family": fam["id"], "passed": look})
             if self.alarm():
                 break
+            stopped = self.lane_alarms(out)
         self._incubator_owed()  # before any incubator read: a program owed a bar is never read or passed meanwhile
-        if not self.alarm():  # the alarm stops the gate: no review of any kind starts
-            incubated = self._incubator_round()
+        if not self.alarm():  # the alarm stops the gate: no review of any kind starts (a lane's alone stops its reads)
+            incubated = self._incubator_round(self.lane_alarms(out))
             if incubated:
                 out["incubator"] = incubated
         else:
@@ -912,12 +998,13 @@ class Gate:
             self.store.event("swarm.gate", None, {"action": "incubator_sweep_error", "error": f"{type(exc).__name__}: {str(exc)[:300]}"})
             return {"error": type(exc).__name__}
 
-    def _incubator_round(self) -> dict[str, Any]:
-        """The sweep (this round's refusals, looks and reviews), then `incubator_reviews`, then the sweep again when one of
-        them failed (its mark goes within the round); never failing the gate's round (an error is one private event)."""
+    def _incubator_round(self, stopped: frozenset[str] = frozenset()) -> dict[str, Any]:
+        """The sweep (this round's refusals, looks and reviews), then `incubator_reviews` (none for a family of a lane in
+        `stopped`, whose leakage alarm holds), then the sweep again when one of them failed (its mark goes within the
+        round); never failing the gate's round (an error is one private event)."""
         self._incubator_sweep()
         try:
-            out = self.incubator_reviews()
+            out = self.incubator_reviews(stopped=stopped)
         except Exception as exc:  # noqa: BLE001 - the gate's own work is done; the incubator waits for the next round
             self.store.event("swarm.gate", None, {"action": "incubator_error", "error": f"{type(exc).__name__}: {str(exc)[:300]}"})
             return {"error": type(exc).__name__}
@@ -925,7 +1012,7 @@ class Gate:
             self._incubator_sweep()
         return out
 
-    def incubator_reviews(self) -> dict[str, Any]:
+    def incubator_reviews(self, *, stopped: frozenset[str] = frozenset()) -> dict[str, Any]:
         """THE INCUBATOR'S REVIEW AND AUDIT (`league/swarm/incubator.py`; release B2, Sept 30, 2026). The owner kept the
         gate's review and audit required for the incubator route. At most `gate.incubator_reviews` (2) of the versions
         `incubator.due_reviews` names are read a round, also when nothing is gate_ready, those this process read least
@@ -937,7 +1024,9 @@ class Gate:
         its audit is owed. A failed review or audit is final for that program. It never touches `review`, `gate_ready`,
         `gated_sha`, `gate_outcome` or the looks, spends no look, and tells the researcher nothing: the incubator is never
         evidence and never a promotion. Returns {"reviewed", "failed", "waiting"} (family@version), empty when nothing
-        was due."""
+        was due. THE LANES (release D-1): no read of a family whose lane is in `stopped` (its leakage alarm holds), nor of
+        a direction family while the direction lane takes no incubator mark (`dlane.candidates_open`: "shadow", or K5);
+        while the lane is off nothing is left out."""
         from . import incubator
 
         limit = incubator.reviews_per_round(self.settings)
@@ -945,6 +1034,11 @@ class Gate:
             return {}
         due = incubator.due_reviews(self.store, self.settings, self.store.root, clock=self.clock)
         due = [r for r in due if (str(r["family"]), str(r["sha"])) not in self.bars_owed]  # a verdict against it is owed
+        closed = set(stopped)
+        if dlane.on(self.settings) and not dlane.candidates_open(self.store, self.settings):
+            closed.add(dlane.DIRECTION)
+        if closed:
+            due = [r for r in due if dlane.lane_of(self.store, self.store.family(str(r["family"])), self.settings) not in closed]
         due = sorted(due, key=lambda r: self.incubator_tried.get(str(r["sha"]), 0.0))[:limit]  # stable: oldest cohort next
         if not due:
             return {}
@@ -1080,10 +1174,12 @@ class Gate:
             current = self.store.family(fam["id"]) or {}
             if current.get("retired_at") or (current.get("state") or {}).get("gate_hold") or self.store.looked(sha) or \
                     self.store.lineage_looks(fam["id"], include_inflight=True) >= evidence.LOOKS_PER_LINEAGE or \
-                    self.duplicate_look(current, n, sha) is not None or self.look_hold(current, n) is not None:
+                    self.duplicate_look(current, n, sha) is not None or self.look_hold(current, n) is not None or \
+                    self.lane_closed(current, current.get("state") or {}) is not None:
                 # (held by the operator meanwhile: no look is spent, gate_ready stays; a look it would repeat landed or went
                 # out meanwhile: THE DUPLICATE LOOK refuses it next round, or waits for it; a hold switched on meanwhile:
-                # THE LOOK HOLDS hold it next round. Since fast lane v2 the level is flat, so a look elsewhere moves no power)
+                # THE LOOK HOLDS hold it next round. Since fast lane v2 the level is flat, so a look elsewhere moves no power.
+                # The direction lane closed meanwhile (K5): its look waits, release D-1)
                 return None
             if not self.store.compare_and_set_state(fam["id"], {"validation_version": n, "validation_image": image, "validation_bundle": bundle,
                                                                "look_inflight": None}, gate_ready=False, look_inflight=marker):
@@ -1217,11 +1313,14 @@ class Gate:
         years = float((result.get("summary") or {}).get("days") or 0) / 252.0 * max(1, len(fam["roots"]))
         self.store.add_run(fid, n, result, window="holdout", stress=1.0, purpose="holdout", program_years=years)
         previous = [x["p_value"] for x in self.store.looks() if x["p_value"] is not None]
-        line = evidence.holdout_line(result, validation_sharpe=validation_sharpe, previous_ps=previous, seed=sha)
+        lane = dlane.lane_of(self.store, fam, self.settings)
+        screen = dlane.screen_effective(self.settings, lane)
+        line = self.look_line(fid, n, result, screen, validation_sharpe=validation_sharpe, previous=previous, seed=sha)
         self.store.add_look(fid, n, sha, passed=line["passed"], p_value=line["p"], detail=line)
         self.clear_marker(fid, sha)  # only its own: a newer version's look may be in flight
         self.store.compare_and_set_state(fid, {"validation_version": n}, gated_sha=sha)
-        self.store.event("swarm.gate", fid, {"action": "look", "version": n, "passed": line["passed"],
+        recorded = {k: line[k] for k in ("lane", "screen", "receipt") if k in line}  # release D-1: none while the lane is off
+        self.store.event("swarm.gate", fid, {"action": "look", "version": n, "passed": line["passed"], **recorded,
                                              "_line": line})  # the numbers stay private (underscore)
         self.tell(fid, "pass" if line["passed"] else "fail", verdict=True)
         self.outcome(fid, sha, "passed" if line["passed"] else "failed")
@@ -1236,6 +1335,12 @@ class Gate:
                            and (not has_bundle or (bundle is not None and result.get("gym_bundle") == bundle)))
         if line["passed"] and fam["band"] == "gym" and not fam.get("retired_at") and validation_image == image \
                 and validation_bundle == bundle and current_holdout:
+            if lane == dlane.DIRECTION and not dlane.candidates_open(self.store, self.settings):
+                # THE DIRECTION LANE'S MODE (release D-1): a look that was out when the lane went to "shadow" (K5) lands
+                # recorded and judged, and no direction family becomes a Candidate meanwhile.
+                self.store.event("swarm.gate", fid, {"action": "candidate_withheld", "version": n, "lane": lane,
+                                                     "why": "the direction lane is in shadow (dlane.mode, or K5)"})
+                return True
             from ..gym import ENGINE_VERSION
             from ..gym.experiment import CONTRACT_VERSION
             from .evaluator import execution_fingerprint
@@ -1247,6 +1352,37 @@ class Gate:
                                                    "holdout_bundle": result.get("gym_bundle"), "holdout_image": result.get("gym_image")})
             self.store.set_band(fid, "candidate", reason="passed its holdout look")
         return bool(line["passed"])
+
+    def look_line(self, fid: str, n: int, result: Mapping[str, Any], screen: Mapping[str, Any], *,
+                  validation_sharpe: Any, previous: list[Any], seed: str) -> dict[str, Any]:
+        """THE LOOK'S LINE BY LANE (release D-1, Oct 9, 2026; PLAN D6, the operator's decision 6), from the family's
+        screen (`dlane.screen_effective`):
+        - "S-B", the alpha lane's (and every look while `dlane.mode` is "off"): `evidence.holdout_line` as before, byte
+          for byte (while the lane is off the line carries nothing more);
+        - "S-C", the direction lane's: the same line at the lane's level (p <= 0.20) and Sharpe share (0.25 of
+          Validation's);
+        - "D2" (only behind `dlane.screen` "D2" with a receipt pinned in the repository's policy.json): P&L after fees above
+          zero and D2's pooled entry-day t over Validation and the holdout (`dlane.d2_pooled_t`) at least the receipt's
+          calibrated `c`; the bootstrap p and the tail are still reported.
+        While the lane is on, every look's line records its `lane`, `screen` and `receipt` (also in its `detail`: the
+        leakage alarm counts each lane's looks from it)."""
+        if not dlane.on(self.settings):  # THE ROLLBACK: the release before it's line and record
+            return evidence.holdout_line(result, validation_sharpe=validation_sharpe, previous_ps=previous, seed=seed)
+        if screen.get("screen") == "S-C":
+            line = evidence.holdout_line(result, validation_sharpe=validation_sharpe, previous_ps=previous, seed=seed,
+                                         level=float(screen["look_level"]), sharpe_share=float(screen["sharpe_share"]))
+        elif screen.get("screen") == "D2":
+            base = evidence.holdout_line(result, validation_sharpe=validation_sharpe, previous_ps=previous, seed=seed)
+            rows = self.store.version_runs(fid, int(n), window="validation", stress=1.0, limit=1)
+            pooled = dlane.d2_pooled_t((rows[0].get("summary") or {}) if rows else None, result.get("summary"))
+            c = screen.get("c")
+            checks = {"status_ok": base["checks"]["status_ok"], "pnl": base["checks"]["pnl"],
+                      "pooled": pooled is not None and c is not None and pooled >= float(c)}
+            line = {**base, "passed": all(checks.values()), "checks": checks,
+                    "numbers": {**base["numbers"], "rule": "D2", "pooled_t": pooled, "c": c}}
+        else:
+            line = evidence.holdout_line(result, validation_sharpe=validation_sharpe, previous_ps=previous, seed=seed)
+        return {**line, "lane": screen.get("lane"), "screen": screen.get("screen"), "receipt": screen.get("receipt")}
 
     # ------------------------------------------------------------------ the nightly forward
     def _current_forward_version(self, fam: Mapping[str, Any]) -> bool:
