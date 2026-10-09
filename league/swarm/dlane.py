@@ -887,11 +887,14 @@ def record(store: Any, fid: str, n: int, *, score: Mapping[str, Any] | None = No
         store.set_state(fid, **{STATE_KEY: {"objective": OBJECTIVE, "versions": {k: versions[k] for k in keep}}})
 
 
-def failure_counts(store: Any, hours: float = 48.0, *, now: float | None = None) -> dict[str, Any]:
+def failure_counts(store: Any, hours: float = 48.0, *, now: float | None = None,
+                   exclude: Iterable[str] = ()) -> dict[str, Any]:
     """The direction lane's failure counts over the last `hours`: ids and counts only, never a figure (for the architect's
     request, the strategist's inputs and the report's A6/A7). {hours, families, versions, eligible, fails {E1, E3, E4, E5},
     robust {P1, R2, R3}, robust_passed, reported_misses {E2, R1}, unit_only, ids}. A version counts once, by its newest
-    verdicts recorded in the window (`record`). Never raises: {} figures on a store error."""
+    verdicts recorded in the window (`record`). `exclude`: families left out (the architect's and the strategist's
+    `Architect.unseen`, THE LEARNING GAME's: a count never moves with the game arm). Never raises: {} figures on a store
+    error."""
     from .store import iso, loads
 
     now = time.time() if now is None else float(now)
@@ -904,7 +907,10 @@ def failure_counts(store: Any, hours: float = 48.0, *, now: float | None = None)
     except Exception:  # noqa: BLE001
         return out
     ids = []
+    skip = frozenset(str(x) for x in exclude)
     for row in rows:
+        if str(row.get("id")) in skip:
+            continue
         state = loads(row.get("state"), {}) or {}
         block = state.get(STATE_KEY) if isinstance(state, Mapping) else None
         versions = block.get("versions") if isinstance(block, Mapping) else None

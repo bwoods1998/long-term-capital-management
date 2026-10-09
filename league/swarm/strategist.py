@@ -54,6 +54,15 @@ on). `check_queries` keeps only plain searches (3 to 100 characters of letters, 
 URL, no year after 2024, nothing the section's D2 rule refuses; more than four refuses them all); unknown ids are
 dropped and counted. An accepted section stores both beside its text; the ids stay out of the section itself.
 
+THE DIRECTION LANE (release D-1, Oct 9, 2026; league/swarm/dlane.py; HARNESS C8). While `dlane.mode` is not "off" the
+packet gains THE TWO LANES (`lanes`): per lane the families alive, born in the last 24 hours, validated and passing the
+validation line (counts, as D2a allows; the families the architect may read only), the living direction families' ids,
+and the direction lane's Train failures over 48 hours by code (`dlane.failure_counts`: E1-E5 at 1.0x, P1, R2 and R3 at
+1.5x, E2 and R1 reported; ids and counts, never a figure), with the lane's plain statement (`dlane.ALWAYS_IN_NOTE`); and
+one line asks for each lane's own advice. Hidden looks and their tiers per lane are not among them: no direction lineage
+has a hidden look (the operator's decision 5, Oct 9), and the game arm's counts are the game's own (THE LEARNING GAME
+below). `check_section` is unchanged. With the lane off the packet is the release before's.
+
 WHEN. Just before an architect pass that has room to add families (`loop.Swarm.architect_pass`), at most every
 `strategist.every_seconds` (3 h), only while `architect.agenda_locked` is set and `strategist.enabled`. Its Claude line
 is `claude.role_usd_day["strategist"]` ($4 a UTC day by default; the router's per-role line, #416): a run whose next call
@@ -71,7 +80,7 @@ import statistics
 import time
 from typing import Any, Callable, Mapping, NamedTuple, Sequence
 
-from . import diagnostics, game
+from . import diagnostics, dlane, game
 from . import settings as settings_mod
 from .allocation import SHARE_LEGEND
 from .architect import (AGENDA_KEY, ASCII_MAP, OPERATOR_SQL, SECTION_MAX, USAGE_KEYS, Architect, GraveyardDigest, lesson_view,
@@ -653,6 +662,36 @@ class Strategist:
             return []
         return [practice.header(self.settings) + "\n" + json.dumps(table)] if table else []
 
+    def lanes(self, fams: list[dict[str, Any]]) -> dict[str, Any]:
+        """THE TWO LANES (the module docstring): counts only, over `fams` (the families the architect reads). A family's
+        lane is read only when it counts here (alive, born in the last 24 hours or validated)."""
+        since = iso(self.clock() - 86400)
+        out: dict[str, Any] = {lane: {"alive": 0, "born_24h": 0, "validated": 0, "validation_passed": 0}
+                               for lane in dlane.LANES}
+        alive_ids = []
+        for f in fams:
+            line = (f.get("state") or {}).get("validation_line")
+            validated = isinstance(line, Mapping) and isinstance(line.get("checks"), Mapping)
+            if f["retired_at"] and f["born_at"] < since and not validated:
+                continue
+            lane = dlane.lane_of(self.store, f, self.settings)
+            row = out[lane]
+            if not f["retired_at"]:
+                row["alive"] += 1
+                if lane == dlane.DIRECTION:
+                    alive_ids.append(f["id"])
+            row["born_24h"] += int(f["born_at"] >= since)
+            if validated:
+                row["validated"] += 1
+                row["validation_passed"] += int(bool(line.get("passed")))
+        out[dlane.DIRECTION]["alive_ids"] = alive_ids[:24]
+        counts = dlane.failure_counts(self.store, 48.0, now=self.clock(), exclude=self.architect.unseen())
+        out[dlane.DIRECTION]["train_48h"] = {k: counts[k] for k in ("families", "versions", "eligible", "fails", "robust",
+                                                                     "robust_passed", "reported_misses", "unit_only")}
+        out["direction_lane"] = (f"scored by {dlane.OBJECTIVE}, the pooled t of daily P&L over Train; its profit is the "
+                                 f"index's direction, reported beside the same-risk buy-and-hold: {dlane.ALWAYS_IN_NOTE}")
+        return out
+
     def _drift_and_costs(self) -> dict[str, Any]:
         ops = [r for r in self.store._all(f"SELECT family, lesson FROM graveyard WHERE {OPERATOR_SQL} ORDER BY at, family")
                if re.search(r"\b(?:drift|costs?|fees?|spreads?|natural|mid)\b", str(r["lesson"]), re.I)]
@@ -709,6 +748,12 @@ class Strategist:
             parts.append("STRUCTURE TYPES THE ARCHITECT MAY PROPOSE (a proposal of any other type is not born; the coverage "
                          "and the gaps above are of these types only): " + ", ".join(self.architect.structures())
                          + ". When a direction names a structure, name one of these.")
+        if dlane.on(self.settings):
+            # THE DIRECTION LANE: the two lanes' counts, and the one line that asks for each lane's own advice.
+            parts.append("THE TWO LANES (counts only: alive, born in the last 24 hours, validated and passing the line; the "
+                         "direction lane's Train failures over 48 hours by code, E1-E5 at 1.0x and P1, R2, R3 at 1.5x):\n"
+                         + json.dumps(self.lanes(fams))
+                         + "\nTwo lanes, alpha and direction: give each lane its own advice.")
         if sample:
             parts.append("THE GRAVEYARD (the 20 newest rows and every operator row; the rest is not shown):\n"
                          + json.dumps(self._sample()))
