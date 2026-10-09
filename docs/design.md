@@ -533,8 +533,9 @@ beside the alpha lane, whose rules do not change. It is **leveraged index beta m
 everything that shows it says so. The rules live in one module, `league/swarm/dlane.py`.
 
 - **Two lanes.** A family's lane is its card's, fixed at birth; every family before D-1 is alpha. The direction lane is
-  a box: index roots (SPY, QQQ, IWM), calls (D-1 also admitted call verticals; D-1b is calls only, every Train trade
-  a long call), holds of 2 to 8 sessions, the `equity_premium` or
+  a box: index roots (SPY, QQQ, IWM), calls (D-1 also admitted call verticals; D-1b is calls only: every Train trade
+  a long call, and a program whose text names any open but a long call is refused before it runs), holds of 2 to 8
+  sessions, the `equity_premium` or
   `trend_momentum` class, and an ablation switch that enters the same structure every session (the gate is what the
   program would add over that twin). Births are about half each while the lane is behind (at most 60% direction).
 - **Its Train bar, direction-v2.** In the market in at least 2 of the 3 Train years with 60+ entry sessions each; a

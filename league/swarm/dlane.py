@@ -887,6 +887,70 @@ def calls_only(result: Mapping[str, Any] | None, first_year: Any = None) -> bool
     return True if seen else None
 
 
+#: THE CALLS-ONLY CODE CHECK's words (release D-1b, the review's finding 3): rules only, no figure.
+CALLS_ONLY_CODE_WHY = ("the direction lane buys calls only: a direction program names no structure but long_call, no put "
+                       "and no short leg")
+#: The literals a direction program may not hold (`calls_only_code`), lower case: a put, a short leg; the structure types
+#: other than `long_call` are read from the Gym's own list (league/gym/venue.py `STRUCTURE_TYPES`) when it is checked.
+_NOT_A_CALL = ("p", "put", "short")
+
+
+def _literals(code: str) -> list[str]:
+    """The string literals of a program's code that it could open with: every one but a docstring (a string standing alone
+    as a statement), a dict key and a subscript (`ctx.params["p"]`: a name, never an order's field value)."""
+    import ast
+
+    tree = ast.parse(code)
+    skip: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
+            skip.add(id(node.value))
+        elif isinstance(node, ast.Dict):
+            skip.update(id(k) for k in node.keys if k is not None)
+        elif isinstance(node, ast.Subscript):
+            skip.add(id(node.slice))
+    return [node.value for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in skip]
+
+
+def _param_strings(value: Any) -> list[str]:
+    """The string values of a parameter override, at any depth (keys are names, never values)."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, Mapping):
+        return [s for v in value.values() for s in _param_strings(v)]
+    if isinstance(value, (list, tuple)):
+        return [s for v in value for s in _param_strings(v)]
+    return []
+
+
+def calls_only_code(code: Any, params: Mapping[str, Any] | None = None) -> str | None:
+    """THE CALLS-ONLY CODE CHECK (release D-1b, Oct 9, 2026; the review's finding 3). C1 reads the Train trades only, and
+    the Gym's Validation and holdout views carry no trades, so a `long_single` program whose code buys a put only in
+    conditions absent from 2022-24 (a crash hedge when VIX is above any 2022-24 close) passes C1 and would send puts at
+    Probe, where D2's rates were measured on long calls. This static check reads the program's text before any version,
+    job or look: a string literal of its code (`_literals`: docstrings, dict keys and subscripts aside) or of its parameter
+    overrides that names an open of any structure type but `long_call`, a put ("P", "put") or a short leg ("short"),
+    whatever its case, refuses it. Why that suffices for a literal: a `long_call` open is ONE LONG CALL wherever the Gym's
+    classifier judges it, and the live path resolves an intent with the same module (league/gym/legs.py `classify`), so a
+    program that names no other type opens nothing else. What it cannot see: a type assembled at run time from pieces that
+    are not these words, and the live path has no direction calls-only check of its own (release L-D; league/live is
+    frozen here): docs/operations.md states both. Returns the refusal's words (`CALLS_ONLY_CODE_WHY` and the literal it
+    found), or None. Code that does not parse is None here (`check_experiment` refuses it first)."""
+    from ..gym.venue import STRUCTURE_TYPES
+
+    banned = set(_NOT_A_CALL) | {t for t in STRUCTURE_TYPES if t != "long_call"}
+    try:
+        words = _literals(str(code or ""))
+    except (SyntaxError, ValueError):
+        return None
+    words += _param_strings(dict(params or {}))
+    for word in words:
+        if word.strip().lower() in banned:
+            return f"{CALLS_ONLY_CODE_WHY} (it names {word.strip()!r})"
+    return None
+
+
 def beside(result: Mapping[str, Any], first_year: Any = None) -> dict[str, Any]:
     """The drift figures reported beside a direction score, never a bar: {beta_per_1pct (dollars per 1% move of the held
     roots), drift_share, alpha_t (the drift-adjusted alpha's pooled t), always_in_usd (the same exposure held every
@@ -1534,6 +1598,44 @@ def first_try(store: Any, fid: str, n: Any, settings: Mapping[str, Any] | None) 
         return False
 
 
+def try_owed(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any] | None, *, image: Any = None,
+             bundle: Any = None) -> int | None:
+    """THE LINEAGE'S TRY, VALIDATED AGAIN (release D-1b, Oct 9, 2026; the review's finding 1): the version of `fam` that is
+    its direction lineage's one Validation try, when the tournament owes that try a verdict on the Gym in use (`image`,
+    `bundle`) although the family's candidate has moved on to a version that can never be validated (`try_open`). Owed:
+    - the try has NO VERDICT (no `TRY_KEY` for it): its result was dropped as stale (a new Gym image or bundle while its job
+      was out) or never judged, so the run spent the lineage's try with nothing judged;
+    - or its verdict ENTERED THE GATE (`TRY_KEY` `entered`), the gate is not done with it (no look, no refusal:
+      `gated_sha`) and the verdict is on another Gym image or bundle, which the gate never looks past (`Gate.run`).
+    Why the try's version and not the candidate: the run is the lineage's try whatever happens (`lineage_tries`), so the
+    false-positive accounting stays conservative, and judging that very version is the only verdict the lineage can still
+    have. None for every alpha family, while the lane is off, for a lineage whose try is another family's, and on any
+    store error (no try is bought by an error)."""
+    if lane_of(store, fam, settings) != DIRECTION:
+        return None
+    try:
+        fid = str(fam["id"])
+        mine = [t for t in lineage_tries(store, fid)[:int(cfg(settings)["val_tries"])] if t["family"] == fid]
+        if not mine:
+            return None
+        n = int(mine[0]["version"])
+        state = fam.get("state") or {}
+        held = state.get(TRY_KEY) if isinstance(state.get(TRY_KEY), Mapping) else {}
+        if held.get("version") != n:
+            return n
+        if held.get("entered") is not True:
+            return None  # judged, and it did not enter the gate: the try is spent
+        if state.get("validation_image") == image and state.get("validation_bundle") == bundle:
+            return None  # its verdict is on the Gym in use: the gate has it
+        version = store.version(fid, n)
+        sha = _run_sha(version) if version is not None and version.get("sha") else None
+        if sha is None or store.looked(sha) or state.get("gated_sha") == sha:
+            return None  # the gate is done with it
+        return n
+    except Exception:  # noqa: BLE001 - an unreadable lineage buys nothing
+        return None
+
+
 def _run_sha(version: Mapping[str, Any]) -> str:
     """`gate.run_sha` (a version's program as the gate marks and looks at it: its code sha and its params), computed here
     because the gate imports this module (a test holds the two equal)."""
@@ -1548,9 +1650,11 @@ def lineage_spent(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any
     is off):
     - `SPENT_LOOK`: its connected lineage's holdout looks (in flight too) reach `looks_per_lineage` (a passed look moved
       its family out of the Gym band; every other member can have none);
-    - `SPENT_TRY`: its lineage's Validation tries reach `val_tries`, unless the family holds the lineage's try itself,
-      that try entered the gate (`TRY_KEY` `entered`: the line, or D2's pre-check) and the gate has not finished with it
-      (no look, no refusal: `gated_sha`), so it waits for its one look even while a new Gym image has it validated again.
+    - `SPENT_TRY`: its lineage's Validation tries reach `val_tries`, unless the family holds the lineage's try itself
+      and either that try has NO VERDICT yet (the review's finding 1: its result was dropped as stale, and `try_owed` has
+      it judged; the run still counts as the try) or it entered the gate (`TRY_KEY` `entered`: the line, or D2's
+      pre-check) and the gate has not finished with it (no look, no refusal: `gated_sha`), so it waits for its one look
+      even while a new Gym image has it validated again.
     The tournament asks after the gate's own holds (`gate_ready`, a look in flight). Never raises: None on a store error."""
     try:
         if lane_of(store, fam, settings) != DIRECTION:
@@ -1565,6 +1669,8 @@ def lineage_spent(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any
         mine = [t for t in tries[:c["val_tries"]] if t["family"] == fid]
         state = fam.get("state") or {}
         held = state.get(TRY_KEY) if isinstance(state.get(TRY_KEY), Mapping) else {}
+        if mine and held.get("version") != mine[0]["version"]:
+            return None  # its own try has no verdict yet: it is owed one (`try_owed`), not retired unjudged
         if mine and held.get("entered") is True and held.get("version") == mine[0]["version"]:
             version = store.version(fid, mine[0]["version"])
             sha = _run_sha(version) if version is not None and version.get("sha") else None
@@ -1887,7 +1993,10 @@ def brief_text(settings: Mapping[str, Any] | None, roots: Iterable[str] | None =
     # CALLS ONLY (release D-1b): with the lane's structures single calls alone, the brief says so and names C1; a lane
     # that still admits verticals keeps D-1's words.
     calls = all(s in D2_STRUCTURES for s in c["structures"])
-    what = ("and nothing else (no put, no vertical, no short leg: a Train trade holding one fails C1): one out-of-the-money "
+    # The review's finding 3: a program whose code names a put, a short leg or any open but long_call is refused before it
+    # runs (`calls_only_code`), in any condition, not only the Train years' (C1).
+    what = ("and nothing else, in any condition (no put, no vertical, no short leg: a program whose code names one, or any "
+            "open but long_call, is refused before it runs, and a Train trade holding one fails C1): one out-of-the-money "
             "call near 0.20-0.30 delta fits the unit" if calls else
             "one out-of-the-money call near 0.20-0.30 delta fits the unit (the lane steers to single calls; narrow "
             "verticals rarely fit after costs)")
@@ -2048,5 +2157,5 @@ __all__ = ["OBJECTIVE", "ALPHA", "DIRECTION", "LANES", "MODES", "SCREENS", "ALPH
            # release D-1b
            "TRY_KEY", "D2_STRUCTURES", "D2_RATES", "D2_INTERVALS", "fp_beside", "fp_of_look", "d2_verdict", "d2_pooled_t_low",
            "GYM_MEAN_ROUNDING", "GYM_T_ROUNDING", "NOT_A_TRY", "SPENT_LOOK",
-           "SPENT_TRY", "lineage_tries", "looks_ration", "try_open", "first_try", "lineage_spent", "calls_only",
+           "SPENT_TRY", "lineage_tries", "looks_ration", "try_open", "first_try", "try_owed", "lineage_spent", "calls_only",
            "CALLS_ONLY_WHY", "ration_text"]

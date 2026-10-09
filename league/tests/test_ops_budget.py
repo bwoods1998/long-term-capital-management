@@ -1843,6 +1843,34 @@ class TwoDayLead(unittest.TestCase):
         calm = B.compute(inputs(claude=5.0 + 90.0, need_claude=7 * 4.0), now=NOW)["meters"]["claude"]
         self.assertEqual((calm["burn_usd_day"], calm["out_in_days"]), (10.0, 4.0))
 
+    def test_a_notice_fired_by_the_burn_states_the_burn_and_its_date(self):
+        """The review's finding 4: the gateway composes the mail from `notice_facts` alone (its own deploy, untouched), so
+        a meter spent faster than the rule holds it states its burn there. Before, an over-burn notice said a runway of
+        weeks, a late add-by date, and "Nothing stops if no card is added" (the composer says it when the current runway
+        is at the card line or over), and mailed that every day."""
+        # Claude holds 195 above its reserve: 19.5 days at its wanted 10 a day, but it spent 210 over the last 7 days.
+        doc = B.compute(inputs(claude=5.0 + 195.0, need_claude=210.0), now=NOW)
+        row = doc["meters"]["claude"]
+        self.assertEqual((row["card_runway_days"], row["burn_usd_day"], row["burn_runway_days"], row["out_in_days"]),
+                         (19.5, 30.0, 6.5, 1.5))
+        self.assertEqual((row["out_on"], row["card_date"]), ("2026-10-21", "2026-11-03"))
+        self.assertEqual(B.short(doc), ["claude"])
+        facts = B.notice_facts(doc, "claude", NOW)
+        self.assertEqual((facts["current_usd_day"], facts["current_research_usd_day"], facts["current_runway_days"]),
+                         ("30.00", "30.00", "6.5"), "the mail's now sentence and its no-card sentence: the burn")
+        self.assertEqual(facts["card_date"], "2026-10-21", "add it by the day research runs out at the burn")
+        self.assertLess(float(facts["current_runway_days"]), facts["card_line_days"], "so never 'Nothing stops'")
+        self.assertEqual((facts["usd_day"], facts["research_usd_day"], facts["runway_days"], facts["runs_out_on"],
+                          facts["topup_usd"]), ("10.00", "10.00", "19.5", row["card_runs_out_on"], "70.00"),
+                         "the figures at the rate the rule wants are unchanged, and true")
+        # The facts' names are the gateway's (its test holds its composer to exactly this set).
+        calm = B.compute(inputs(claude=5.0 + 65.0), now=NOW)
+        self.assertEqual(sorted(facts), sorted(B.notice_facts(calm, "claude", NOW)))
+        # A meter at the rule's rate: the facts as before (the card line's date, the rule's rate).
+        before = B.notice_facts(calm, "claude", NOW)
+        self.assertEqual((before["current_usd_day"], before["current_runway_days"], before["card_date"]),
+                         ("10.00", "6.5", calm["meters"]["claude"]["card_date"]))
+
     def test_an_unreadable_burn_falls_back_to_the_card_line(self):
         # A meter whose balance the rule could not read for research has a card line from another reading and no burn.
         doc = {"meters": {"sail": {"card_runway_days": 6.0}, "claude": {"card_runway_days": 8.0}}}

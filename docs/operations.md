@@ -36,6 +36,22 @@ constitution digest (`5698a2f9`) do not move.
   put. D2 is refused (S-C instead) whenever the lane admits any other structure, because it was measured on single calls.
   A new Train bar, **C1**, fails a direction program whose Train trades hold a put or a short leg (a `long_single` card
   may send a put by its code). The brief and the architect's LANES block say "no put, no vertical, no short leg".
+  C1 reads only the Train (2022-24) trades, and the Gym's Validation and holdout views carry no trades, so a program
+  that buys a put only in conditions 2022-24 never saw (a crash hedge above any 2022-24 VIX close) would pass it. So
+  **the calls-only code check** (`dlane.calls_only_code`, the review's finding 3) reads the program's text: a string
+  literal of its code or of its parameter overrides (docstrings, dict keys and subscripts aside) that names any open but
+  `long_call`, a put ("P", "put") or a short leg ("short"), in any case, refuses it:
+  - the researcher's `gym_run` and `gym_sweep` refuse it before any version, job or trial;
+  - the tournament never validates such a direction version (`calls_refused`, which the stall alarm reads as owed
+    nothing), so it spends no try and opens no tuition;
+  - the gate refuses it at stage "calls only" before a review is paid, and the incubator's review fails it with no
+    model read.
+
+  A `long_call` open is one long call wherever the Gym's classifier judges it, and the live path resolves an intent with
+  the same module, so a program that names no other open sends none by a literal. **What is still open:** the check
+  cannot see an open type assembled at run time from pieces other than those words, and `league/live` has no
+  direction calls-only check of its own (a live-side guard is scheduled for release L-D; `league/live` is frozen in
+  D-1b).
 - **One Validation try and one holdout look per direction lineage** (`dlane.val_tries`, `dlane.looks_per_lineage`, both
   fixed at 1). This keeps a lineage's false-positive rate equal to the program's. With two tries it is 16.4% on mixed
   worlds (the receipt's per-lineage reading A). How it works:
@@ -49,6 +65,12 @@ constitution digest (`5698a2f9`) do not move.
     look, retires. The public cause names the rule and no figure. THE COHORT KEEP and the operator's extension hold
     spare a family from this rule as they spare it from the others; its ration is enforced all the same.
   - A direction family never forks once its lineage has tried.
+  - **The try is always judged** (the review's finding 1). The lineage's first try is judged even when the researcher
+    moved the family's candidate on (a submit, a better Train run) while its job was out; before, its verdict was
+    dropped as stale, the run still counted as the try, and the family retired unjudged. The gate looks at the try's
+    own version. A try with no verdict (its result came back from another Gym image), or whose verdict entered the gate
+    on another Gym image before its look, is validated again as that very version (`dlane.try_owed`), never the new
+    candidate, and spends no new try. A family whose own try has no verdict yet is not retired.
 
   The alpha lane keeps its counts: tries until retirement, and three looks.
 - **The false-positive rate beside every look and every Probe trade** (operator-facing only, never in a prompt):
@@ -57,8 +79,9 @@ constitution digest (`5698a2f9`) do not move.
   - Each band row of the fast lane's report carries `fp`, the screen that admitted its banded version.
   - The `dlane` report's new `fp_beside_trades` lists every real Probe trade (`:r`, open or closed) and every agent real
     close. Each row gives its program's screen and rates, and the contamination statement rides beside the list. An
-    alpha (S-B) row states FAST_LANE_SCREEN_1's bound, at most 2%. A tuition or incubator close says no screen admitted
-    it.
+    alpha (S-B) row states FAST_LANE_SCREEN_1's bound, at most 2%. Only a Probe or Sized trade (`:r`) opened at or after
+    its version's passed look carries that look's screen (the review's finding 5). A tuition or incubator close, even of
+    a version that later passed, and a position opened before the look say that no screen admitted them (`fp_why`).
 - **The meter warning, two days ahead, once a day.** The `budget` job tells the owner, through the existing `funding`
   notice and the gateway's mail, when research on a meter (Sail or Claude) runs out within 2 days at its current burn.
   The fields are in `budget.json`:
@@ -68,6 +91,13 @@ constitution digest (`5698a2f9`) do not move.
     same 7-day card line as before.
   - The notice goes out at most once a day per meter: a day less an hour after the last, under the id
     `funding:<meter>:<UTC day>:r2`, which the gateway dedupes. It was once a week.
+  - A meter spent faster than the rule holds it (its burn above the rule's rate) can be short while its card line still
+    reads weeks. Its notice then states the burn in the facts the gateway's mail reads (the review's finding 4): the
+    "now" figures (`current_*`) are the burn's dollars a day and days above the reserve, and the add-by date
+    (`card_date`) is the day research runs out at the burn. So the mail never says "Nothing stops if no card is added"
+    or gives a late date while research runs out within the lead. The figures at the rate the rule wants are unchanged.
+    The facts' names and the gateway's composer are unchanged; until a composer words the burn as a spend, the mail's
+    "held to" sentence reads the burn's dollars.
 
   "Runs out" means research, not the balance: while research tapers, each day spends a fifth of what is left above the
   reserve, so the balance never reaches it.
@@ -88,7 +118,9 @@ constitution digest (`5698a2f9`) do not move.
 **Roll back.**
 - **D2 to S-C, at once and a tightening:** set `dlane.screen` "S-C" in `swarm.json`. It is read on the next loop with no
   restart. A setting can always choose S-C and can never pin a receipt. A version that entered the gate by D2's
-  pre-check waits there until D2 is back. The ration and calls only stay.
+  pre-check waits there until D2 is back. One whose look was already out when S-C came in fails that look closed (the
+  review's finding 2: the screen is read when the result lands, and it met neither screen's rule; the look's `why`
+  says so). The ration and calls only stay.
 - **The lane off:** set `dlane.mode` "off" (D-1's rollback, below). It also turns off the ration, C1, the FP keys and
   the report.
 - **The meter warning:** the code rollback (`floor_box.py rollback`). The notice's channel and facts did not change.
@@ -1483,7 +1515,9 @@ research_m    = min(floor_m + earned_m, max(0, balance_m − reserve_m − 60·f
   wanted one and the current one, each with its runway), the amount that buys 7 more days and the card date. It goes
   at most once a day per meter (a day less an hour since the last; `funding:<meter>:<UTC day>:r2`, which the gateway
   dedupes); before D-1b it was once a week. The mail names both rates: the rate the rule holds the meter to now (its fixed cost
-  plus the day's research budget; a ceiling, not a metered spend) and the rate the rule wants for it. Each runway is
+  plus the day's research budget; a ceiling, not a metered spend) and the rate the rule wants for it. A meter spent
+  faster than the rule holds it states its burn as the "now" rate, and its card date is the day research runs out at
+  that burn (release D-1b, the review's finding 4). Each runway is
   days until the meter's reserve, not until it is empty, and the mail says it as days above the reserve. It says that
   nothing stops without a card only when the figures sent show it (research above zero and the runway at the current
   rate at or over the card line: the rule goes on throttling research). Otherwise it says how long the meter lasts at

@@ -44,6 +44,16 @@ DIRECTION_SPEC = {"id": "spy-drift-gate", "mechanism": "One out-of-the-money SPY
 #: An invented Train year set an alpha score and S_D order differently: steady (every year up, the alpha score's
 #: favourite) against always-in (the pooled t's, with an in-market losing year).
 STEADY = {"2022": (900.0, 1.0, {}), "2023": (1000.0, 1.1, {}), "2024": (1100.0, 1.2, {})}
+#: The founder's program with its one open made a long call (release D-1b, the review's finding 3): a direction program
+#: names no other open, no put and no short leg (`dlane.calls_only_code`), so the direction cases run this one.
+_CONDOR_LEGS = '''    return "iron_condor", [
+        {"side": "long", "right": "P", "rel": 1, "offset": -p["width"]},
+        {"side": "short", "right": "P", "dte": dte, "delta": p["short_delta"]},
+        {"side": "short", "right": "C", "dte": dte, "delta": p["short_delta"]},
+        {"side": "long", "right": "C", "rel": 2, "offset": p["width"]}]'''
+assert _CONDOR_LEGS in program_for(SEED)[0]
+CALLS_CODE = program_for(SEED)[0].replace(
+    _CONDOR_LEGS, '''    return "long_call", [{"side": "long", "right": "C", "dte": dte, "delta": p["short_delta"]}]''')
 ALWAYS_IN = {"2022": (-1500.0, -3.9, {}), "2023": (2600.0, 2.1, {}), "2024": (2400.0, 1.9, {})}
 
 
@@ -99,8 +109,9 @@ class Case(unittest.TestCase):
 
     def gym_run(self, researcher: Researcher, fid: str, params: dict, code: str | None = None) -> dict:
         out: dict = {}
-        code = code or program_for(SEED)[0]
-        return researcher._gym_run(researcher.store.family(fid), {"code": code, "params": params}, out, author="synthetic")
+        fam = researcher.store.family(fid)
+        code = code or (CALLS_CODE if (fam.get("spec") or {}).get("lane") == "direction" else program_for(SEED)[0])
+        return researcher._gym_run(fam, {"code": code, "params": params}, out, author="synthetic")
 
 
 # ------------------------------------------------------------------------------------------------ the role
@@ -471,6 +482,35 @@ class WhatAgentsRead(Case):
 
 
 # ------------------------------------------------------------------------------------------------ the sweep
+class CallsOnlyCode(Case):
+    """THE CALLS-ONLY CODE CHECK (release D-1b, the review's finding 3; `dlane.calls_only_code`): a direction family's run
+    or sweep whose program names a put, a short leg or any open but `long_call` is refused before any version, job or
+    trial. An alpha family's, and every family's while the lane is off, runs as before."""
+
+    def test_a_direction_run_or_sweep_naming_another_open_is_refused_before_any_version(self):
+        store, researcher, env = self.make("gate")
+        fid = store.add_family(DIRECTION_SPEC, origin="architect")["id"]
+        condor = program_for(SEED)[0]
+        for view in (self.gym_run(researcher, fid, {"vrp_min": 1.5}, code=condor),
+                     researcher._gym_sweep(store.family(fid), {"code": condor,
+                                                               "variants": [{"vrp_min": 1.3}, {"vrp_min": 1.5}]},
+                                           {}, author="synthetic"),
+                     self.gym_run(researcher, fid, {"vrp_min": 1.5}, code=CALLS_CODE.replace('"long_call"', '"long_put"'))):
+            self.assertEqual(view["status"], "refused")
+            self.assertTrue(view["reason"].startswith(dlane.CALLS_ONLY_CODE_WHY), view["reason"])
+            self.assertIn("long_call only", view["hint"])
+        self.assertEqual((store.versions(fid), env["pool"].jobs), ([], []), "no version, no job, no trial")
+        self.assertEqual(self.gym_run(researcher, fid, {"vrp_min": 1.5})["status"], "ok", "a calls-only program runs")
+
+    def test_an_alpha_family_and_the_rollback_run_as_before(self):
+        store, researcher, env = self.make("gate")
+        alpha = store.add_family(family_spec(SEED), origin="seed")["id"]
+        self.assertEqual(self.gym_run(researcher, alpha, {"vrp_min": 1.5})["status"], "ok")
+        store, researcher, env = self.make("off")
+        fid = store.add_family(DIRECTION_SPEC, origin="architect")["id"]
+        self.assertEqual(self.gym_run(researcher, fid, {"vrp_min": 1.5}, code=program_for(SEED)[0])["status"], "ok")
+
+
 class Sweep(Case):
     def test_a_direction_sweep_is_sorted_by_s_d_with_the_lanes_cells(self):
         table = {1.1: ("steady", STEADY), 1.3: ("always", ALWAYS_IN),
@@ -481,7 +521,7 @@ class Sweep(Case):
         store, researcher, env = self.make("gate", by_params(table))
         fid = store.add_family(DIRECTION_SPEC, origin="architect")["id"]
         out: dict = {}
-        view = researcher._gym_sweep(store.family(fid), {"code": program_for(SEED)[0],
+        view = researcher._gym_sweep(store.family(fid), {"code": CALLS_CODE,
                                                          "variants": [{"vrp_min": v} for v in (1.1, 1.3, 1.5, 1.7)]},
                                      out, author="synthetic")
         s_d = {v: dlane.train_score(train(n, y), first_year=2022, settings={"dlane": GATE})["score"] for v, (n, y) in table.items()}

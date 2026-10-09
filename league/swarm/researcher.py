@@ -2734,6 +2734,22 @@ class Researcher:
             refused[n] = {k: v for k, v in answer.items() if v is not None}
         return refused
 
+    def _calls_only(self, fam: Mapping[str, Any], code: str, variants: list[Mapping[str, Any]]) -> dict[str, Any] | None:
+        """THE CALLS-ONLY CODE CHECK (release D-1b, Oct 9, 2026; the review's finding 3; `dlane.calls_only_code`): a
+        DIRECTION family's program, or one of its variants, that names a put, a short leg or any structure but
+        `long_call` is refused before any version, job or trial (C1 reads only the Train trades, so a put the program sends
+        only outside 2022-24 would pass it). The refusal's words are rules only. None for every alpha family and while the
+        lane is off."""
+        if not in_direction(self.store, fam, self.settings):
+            return None
+        for params in variants:
+            why = dlane.calls_only_code(code, params)
+            if why is not None:
+                return {"status": "refused", "reason": why[:600],
+                        "hint": "a direction program opens long_call only, one long call: no put, no vertical, no short "
+                                "leg, in any condition; no version, job or trial was created"}
+        return None
+
     def _gym_run(self, fam: Mapping[str, Any], args: Mapping[str, Any], out: dict[str, Any], *, author: str,
                  advisories: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         if self._terminal(fam["id"], out):
@@ -2769,6 +2785,9 @@ class Researcher:
         except (CodeRefused, ValueError, TypeError) as exc:
             return self._refusal(out, {"status": "refused", "reason": str(exc)[:600],
                                        "hint": "repair the experiment contract before replay; no version, job or trial was created"})
+        calls = self._calls_only(fam, code, [params])
+        if calls is not None:
+            return self._refusal(out, calls)
         stress = float(args.get("stress") or 1.0)
         if stress not in (1.0, 1.5):
             stress = 1.0
@@ -3690,6 +3709,9 @@ class Researcher:
         except (CodeRefused, ValueError, TypeError) as exc:
             return self._refusal(out, {"status": "refused", "reason": str(exc)[:600],
                                        "hint": "repair every variant before replay; no version, job or trial was created"})
+        calls = self._calls_only(fam, code, variants)
+        if calls is not None:
+            return self._refusal(out, calls)
         # NO DUPLICATE RUNS: a variant the family already evaluated (any earlier run or sweep, or this very sweep's variant
         # that landed after the Gym gave up on it) is read back from the store, never run again, and needs no room.
         run_roots = roots if change else fam["roots"]

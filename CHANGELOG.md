@@ -63,8 +63,23 @@ money digest (`1665c385`) and the constitution digest (`5698a2f9`) do not move.
   and the contamination statement.
 - **The meter warning:** the `budget` job's `funding` notice now goes when research on a meter runs out within 2 days
   at its current burn (`out_in_days`, `burn_usd_day` in `budget.json`; at the ceiling the same 7-day card line). It
-  goes at most once a day per meter (it was once a week), under a per-day notice id. The channel and the facts are
-  unchanged.
+  goes at most once a day per meter (it was once a week), under a per-day notice id. The channel and the facts' names
+  are unchanged.
+- **The review's fixes** (Oct 9, on the D-1b build):
+  - *The try is always judged.* A direction lineage's first Validation try is judged even when the researcher moved the
+    candidate on while its job was out (it was dropped as stale, spent the try and retired the family unjudged). A try
+    with no verdict, or whose verdict in the gate is on another Gym image, is validated again as that version
+    (`dlane.try_owed`). A family whose own try has no verdict is not retired.
+  - *The screen at the result.* A direction look that entered by D2's pre-check alone and lands after the rollback to
+    S-C fails closed (`gate.PRECHECK_UNDER_LINE`); the look's marker records how the version entered.
+  - *The calls-only code check* (`dlane.calls_only_code`): a direction program whose text names a put, a short leg or
+    any open but `long_call` is refused by the researcher before any version, never validated by the tournament
+    (`calls_refused`), refused by the gate ("calls only") and failed by the incubator's review. Still open: a type built
+    at run time from other pieces, and no live-side calls-only guard (release L-D).
+  - *The burn in the mail.* A notice fired by the burn states the burn as the mail's "now" figures and the day research
+    runs out at it as the add-by date, so it never says "Nothing stops" while research runs out within 2 days.
+  - *A screen beside Probe trades only.* The `dlane` report states a look's screen only beside a `:r` trade opened at or
+    after that look; tuition and incubator closes state none.
 
 ### Release D-1, the direction lane, on `release/dlane-d1` (unreleased; an owner deploy after release L-D; no evidence reset)
 

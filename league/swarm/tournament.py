@@ -36,7 +36,11 @@
    a family whose lineage's try is used is owed none (`spent_lane`, which the ops' stall check reads). The backstop: a
    verdict that is not its lineage's first try (a result that raced past the guard, landing late) is recorded as rows and
    trials and never judged into the family's state (`lane_try`), so it can never enter the gate. The lineage's try is kept
-   in the family's state (`dlane.TRY_KEY`: did it enter the gate). RETIREMENT (`_why`, `dlane.lineage_spent`): a Gym
+   in the family's state (`dlane.TRY_KEY`: did it enter the gate). THE TRY IS ALWAYS JUDGED (the review's finding 1): the
+   lineage's first try is judged even when the researcher moved the candidate on while its job was out (`judge`), and a
+   try with no verdict, or whose verdict entered the gate on another Gym image, is validated again as that very version
+   (`dlane.try_owed`), never the candidate, so no lineage dies with its try spent unjudged.
+   RETIREMENT (`_why`, `dlane.lineage_spent`): a Gym
    direction family whose lineage has used its try or its look, with no try of its own still waiting for its look,
    retires (THE COHORT KEEP spares it as it spares the clocks); a direction family never forks once its lineage's try is
    used (`lane_forks`). The alpha lane keeps its counts; with the lane off nothing here is read.
@@ -346,6 +350,7 @@ class Tournament:
         # (`lane_lines`: the connected lineages that already have a job, a twin or a verdict this round).
         spent_lane: list[str] = []
         lane_waiting: list[str] = []
+        calls_refused: list[str] = []  # a direction candidate whose code names another open (owed no Validation)
         lane_lines: set[str] = set()
         drift: dict[str, list[str]] = {"waiting": [], "failed": []}
         image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
@@ -367,12 +372,21 @@ class Tournament:
                 waiting_game.append(fam["id"])
                 continue  # THE LEARNING GAME: its Validation tries are used
             lines = self.lane_lines(fam)
+            again = False  # the lineage's own try validated again in place of a candidate that moved on (below)
             if lines is not None:
                 # THE DIRECTION LANE'S RATION (release D-1b): one Validation try a direction lineage (`dlane.try_open`: a
                 # version already its lineage's try may be validated again on a new Gym image), and one a round.
                 if not dlane.try_open(self.store, fam, n, self.settings):
-                    spent_lane.append(fam["id"])
-                    continue
+                    # THE LINEAGE'S TRY, VALIDATED AGAIN (release D-1b, the review's finding 1, Oct 9, 2026): the researcher
+                    # moved the candidate on (a submit, a better Train run) while the try's job was out or before its look,
+                    # and the try is owed a verdict on the Gym in use (`dlane.try_owed`: its result was stale, or the
+                    # verdict that entered the gate is on another image). That version is validated, never the candidate,
+                    # and no new try is spent: the try's Train checks below were met when it was first sent.
+                    owed = dlane.try_owed(self.store, fam, self.settings, image=image, bundle=bundle)
+                    if owed is None:
+                        spent_lane.append(fam["id"])
+                        continue
+                    n, again = owed, True
                 if lines & lane_lines:
                     lane_waiting.append(fam["id"])
                     continue
@@ -382,7 +396,7 @@ class Tournament:
             # A startup adoption clears cached bests. Defense in depth for an old submission
             # restored or arriving late: no current validation is bought with stale Train evidence.
             current_evaluator = self.store.get(KEY)
-            if current_evaluator is not None:
+            if current_evaluator is not None and not again:
                 run_ids = [state.get("submitted_run"), state.get("best_train_run")]
                 if played:  # THE LEARNING GAME: the seen Train run its ladder look recorded
                     run_ids.append(self._game_read(game.look_seen_run, fam, n))
@@ -391,7 +405,7 @@ class Tournament:
                 if not eligible_train:
                     waiting.append(fam["id"])
                     continue
-            if self.cfg.get("require_robustness", True) and not robust_at_stress(state, n) \
+            if not again and self.cfg.get("require_robustness", True) and not robust_at_stress(state, n) \
                     and not (played and self._game_read(game.seen_robust_ok, fam, n)):
                 waiting.append(fam["id"])  # its robustness run at 1.5x has not landed (or lost): not validated yet
                 continue
@@ -412,6 +426,13 @@ class Tournament:
             if version is None or not version.get("code"):
                 continue
             if lines is not None:
+                # THE CALLS-ONLY CODE CHECK (release D-1b, the review's finding 3; `dlane.calls_only_code`): a direction
+                # version whose code names a put, a short leg or any open but long_call is never validated, so it spends
+                # no try, opens no tuition (tuition reads the Validation line) and never reaches the gate. The researcher
+                # refuses such a program before any version; this holds for one made while the lane was off.
+                if dlane.calls_only_code(version["code"], version.get("params") or {}) is not None:
+                    calls_refused.append(fam["id"])
+                    continue
                 lane_lines.update(lines)  # this direction lineage's try for the round (whichever way it is judged below)
             recorded = self.recorded_validation(fam["id"], n)
             if recorded is not None:  # validated before (a best submitted again): judged from its result, no new trial
@@ -471,6 +492,8 @@ class Tournament:
             out["spent_lane"] = spent_lane
         if lane_waiting:  # another member of its direction lineage took this round's try: the next round reads its verdict
             out["waiting_lane"] = lane_waiting
+        if calls_refused:  # its candidate names another open than a long call: owed no Validation until a calls-only one
+            out["calls_refused"] = calls_refused
         return out
 
     def lane_lines(self, fam: Mapping[str, Any]) -> set[str] | None:
@@ -585,7 +608,14 @@ class Tournament:
             fam = self.store.family(fid) or fam
             image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
             bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
-            if fam.get("retired_at") or self.candidate_version(fam) != int(n) or result.get("gym_image") != image or result.get("gym_bundle") != bundle:
+            # THE DIRECTION LANE'S RATION (release D-1b, the review's finding 1, Oct 9, 2026): a direction lineage's one
+            # Validation try is judged even when the researcher moved the family's candidate on while its job was out.
+            # Its run is the lineage's try whatever happens (`dlane.lineage_tries`), so dropping its verdict as stale
+            # spent the try with no verdict and no look, and retired the family (SPENT_TRY). The gate looks at the
+            # version validated (`validation_version`), so the try's own version goes to the gate. A result from another
+            # Gym image or bundle is still stale (`dlane.try_owed` has the try validated again on the current one).
+            moved = self.candidate_version(fam) != int(n) and self.lane_try(fid, fam, n, result) is not True
+            if fam.get("retired_at") or moved or result.get("gym_image") != image or result.get("gym_bundle") != bundle:
                 return None  # stale: its trials count, its verdict does not
             return self._verdict(fid, fam, n, result, counted=record or inherited is not None, inherited=inherited)
 

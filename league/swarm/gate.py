@@ -158,6 +158,10 @@ review is paid, no look is spent, `gate_ready` stays), a direction look already 
 here is the release before it's, byte for byte, but for one thing on a store that holds direction looks: the one
 leakage alarm counts the looks the alpha lane's line judged, never a direction look judged on S-C (the review of Oct 9:
 correlated direction passes would otherwise stop every alpha look).
+THE SCREEN AT THE RESULT (release D-1b, the review's finding 2): a direction look is judged by the screen in force when
+its result lands; one marked while D2 was in force for a version that entered by D2's pre-check alone, and landing after
+the rollback to "S-C", FAILS CLOSED (`PRECHECK_UNDER_LINE`): it met neither screen's rule. The look's marker records how
+the version entered (`line`).
 
 Every step is a `swarm.gate` event; band moves are `swarm.band` events (the site's news).
 Standard library only.
@@ -183,6 +187,10 @@ from . import settings as settings_mod
 from .pool import GymJob, PoolError
 from .researcher import drift_verdict, needs_roots, running_span, version_drift
 from .store import SwarmStore, dumps, structure_text
+
+#: A direction look that fails closed at its result (release D-1b, the review's finding 2): rules only, no figure.
+PRECHECK_UNDER_LINE = ("entered by D2's Validation pre-check; the screen in force when its look landed needs the "
+                       "Validation line")
 
 
 @functools.lru_cache(maxsize=1)
@@ -809,6 +817,10 @@ class Gate:
             except CodeRefused as exc:
                 self.refuse(fam, n, sha, "experiment contract", [str(exc)], out)
                 continue  # a known invalid variant pays for neither model review nor a holdout look
+            calls = self.calls_only_why(fam, version)
+            if calls is not None:  # THE CALLS-ONLY CODE CHECK (release D-1b, the review's finding 3): before anything paid
+                self.refuse(fam, n, sha, "calls only", [calls], out)
+                continue
             screen = drift_verdict(self.store, fam, n, self.settings)
             if screen is not None and not screen["passed"]:  # defense in depth: the tournament validates none of these
                 if screen["known"]:
@@ -1082,14 +1094,20 @@ class Gate:
         record = ((fam.get("state") or {}).get("incubator_reviews") or {}).get(sha)
         if not (isinstance(record, Mapping) and record.get("sha") == sha and record.get("contract_sha") == contract
                 and record.get("verdict") == "pass"):
+            bad: tuple[str, str] | None = None
             try:
                 check_experiment(version["code"], version.get("params") or {})
             except CodeRefused as exc:  # a known invalid variant pays for no model read
+                bad = ("experiment contract", str(exc))
+            if bad is None:  # THE CALLS-ONLY CODE CHECK (release D-1b, the review's finding 3): a direction program, too
+                calls = self.calls_only_why(fam, version)
+                bad = ("calls only", calls) if calls is not None else None
+            if bad is not None:
                 incubator.put_review(self.store, fid, sha, {
-                    "sha": sha, "version": n, "verdict": "fail", "stage": "experiment contract", "reasons": [str(exc)[:500]],
+                    "sha": sha, "version": n, "verdict": "fail", "stage": bad[0], "reasons": [bad[1][:500]],
                     "model": None, "route": None, "contract_sha": contract, "at": self.clock()}, clock=self.clock)
                 self.store.event("swarm.gate", fid, {"action": "incubator_review", "version": n, "verdict": "fail",
-                                                     "stage": "experiment contract", "reasons": [str(exc)[:300]]})
+                                                     "stage": bad[0], "reasons": [bad[1][:300]]})
                 return "fail"
             try:
                 review = self.review(fam, version, incubator=True)
@@ -1192,6 +1210,9 @@ class Gate:
                 # THE LOOK HOLDS hold it next round. Since fast lane v2 the level is flat, so a look elsewhere moves no power.
                 # The direction lane closed meanwhile (K5): its look waits, release D-1)
                 return None
+            # How the version entered the gate (release D-1b, the review's finding 2): by the Validation line, or by D2's
+            # pre-check alone. `_finish` reads it when the result lands, under the screen in force THEN.
+            marker["line"] = bool(((current.get("state") or {}).get("validation_line") or {}).get("passed"))
             if not self.store.compare_and_set_state(fam["id"], {"validation_version": n, "validation_image": image, "validation_bundle": bundle,
                                                                "look_inflight": None}, gate_ready=False, look_inflight=marker):
                 return None
@@ -1327,6 +1348,15 @@ class Gate:
         lane = dlane.lane_of(self.store, fam, self.settings)
         screen = dlane.screen_effective(self.settings, lane)
         line = self.look_line(fid, n, result, screen, validation_sharpe=validation_sharpe, previous=previous, seed=sha)
+        if lane == dlane.DIRECTION and screen.get("validation") == "line" and not self.entered_by_line(fam, n, marker):
+            # THE SCREEN AT THE RESULT (release D-1b, the review's finding 2, Oct 9, 2026): the screen is read when the
+            # look lands, not when it was marked. A direction version that entered the gate by D2's pre-check alone, whose
+            # look was out when the operator rolled the lane back to "S-C", met neither S-C's rule (the Validation line,
+            # then its holdout test) nor D2's (judged by its pooled test): S-C's holdout test alone would admit it at a
+            # rate no receipt measured. The sealed data is opened, so the look is spent, and it FAILS CLOSED.
+            # (`lane_closed` holds such a version back before its look is marked; this is the look already out.)
+            line = {**line, "passed": False, "checks": {**(line.get("checks") or {}), "validation_line": False},
+                    "why": PRECHECK_UNDER_LINE}
         self.store.add_look(fid, n, sha, passed=line["passed"], p_value=line["p"], detail=line)
         self.clear_marker(fid, sha)  # only its own: a newer version's look may be in flight
         self.store.compare_and_set_state(fid, {"validation_version": n}, gated_sha=sha)
@@ -1365,6 +1395,30 @@ class Gate:
                                                    "holdout_bundle": result.get("gym_bundle"), "holdout_image": result.get("gym_image")})
             self.store.set_band(fid, "candidate", reason="passed its holdout look")
         return bool(line["passed"])
+
+    def calls_only_why(self, fam: Mapping[str, Any], version: Mapping[str, Any]) -> str | None:
+        """THE CALLS-ONLY CODE CHECK at the gate and the incubator's review (release D-1b, the review's finding 3;
+        `dlane.calls_only_code`): the refusal's words for a DIRECTION family's version whose code or parameters name a
+        put, a short leg or any open but `long_call`, else None (every alpha family; the lane off). Defense in depth: the
+        researcher refuses such a program before any version (`Researcher._calls_only`), so this finds only a version made
+        before the check or while the lane was off."""
+        if dlane.lane_of(self.store, fam, self.settings) != dlane.DIRECTION:
+            return None
+        return dlane.calls_only_code(version.get("code"), version.get("params") or {})
+
+    def entered_by_line(self, fam: Mapping[str, Any], n: int, marker: Mapping[str, Any] | None) -> bool:
+        """Did version `n` enter the gate by the Validation line (release D-1b, the review's finding 2), rather than by D2's
+        pre-check alone? The look's marker says so (`line`, written when the look was marked, `look`); a look with no such
+        marker (marked before the fix, or a result finished by hand) reads the version's latest verdict
+        (`validation_verdicts`), else the family's line while it is `n`'s. False when nothing says it met the line."""
+        if isinstance(marker, Mapping) and isinstance(marker.get("line"), bool):
+            return marker["line"]
+        state = fam.get("state") or {}
+        verdicts = state.get("validation_verdicts")
+        verdict = verdicts.get(str(n)) if isinstance(verdicts, Mapping) else None
+        if isinstance(verdict, Mapping) and isinstance(verdict.get("passed"), bool):
+            return verdict["passed"]
+        return state.get("validation_version") == n and bool((state.get("validation_line") or {}).get("passed"))
 
     def look_line(self, fid: str, n: int, result: Mapping[str, Any], screen: Mapping[str, Any], *,
                   validation_sharpe: Any, previous: list[Any], seed: str) -> dict[str, Any]:
@@ -1599,4 +1653,4 @@ class Gate:
 
 __all__ = ["Gate", "run_sha", "incubator_stage", "REVIEW", "DUPLICATE_STAGE", "VALIDATION_IDENTITY", "validation_identity",
            "duplicate_words", "HOLD_DRIFT_STAGE", "HOLD_POWER_STAGE", "HOLD_WORDS", "HOLD_OUTCOME", "look_hold_settings",
-           "holdout_sessions", "sessions_between", "reader", "same_reader"]
+           "holdout_sessions", "sessions_between", "reader", "same_reader", "PRECHECK_UNDER_LINE"]

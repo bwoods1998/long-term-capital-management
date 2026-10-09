@@ -29,6 +29,7 @@ from unittest import mock
 
 from league.gym import results as GR
 from league.swarm import cards, dlane, evidence
+from league.swarm import gate as gate_mod
 from league.swarm import settings as S
 from league.swarm.gate import Gate, run_sha
 from league.swarm.tournament import Tournament
@@ -284,6 +285,43 @@ class CallsOnly(unittest.TestCase):
                 store.close()
         self.assertEqual((counts["versions"], counts["unit_only"], counts["fails"]["E5"]), (2, 1, 2))
 
+    #: A calls-only program (the review's finding 3): its literals name only a long call; a param named "p" and a
+    #: docstring that names a put are no open.
+    CALLS = ('NEEDS = {"roots": ["SPY"]}\n'
+             'PARAMS = {"p": 0.25, "kind": "long_call"}\n'
+             'def decide(ctx):\n'
+             '    """Never a long_put, never a short leg."""\n'
+             '    p = ctx.params\n'
+             '    return [{"open": p["kind"], "root": "SPY", "qty": 1,\n'
+             '             "legs": [{"side": "long", "right": "C", "dte": 7, "delta": p["p"]}]}]\n')
+
+    def test_the_code_check_refuses_a_put_a_short_leg_or_any_open_but_a_long_call_in_any_condition(self):
+        from league.gym.experiment import check_experiment
+        from league.gym.venue import STRUCTURE_TYPES
+
+        check_experiment(self.CALLS, {"p": 0.3})
+        self.assertIsNone(dlane.calls_only_code(self.CALLS, {"p": 0.3}))
+        bad = {
+            # The finding's crash hedge: a put only when VIX is above any 2022-24 close.
+            "a put in a condition": self.CALLS.replace('"right": "C"', '"right": "P" if ctx.vix > 40 else "C"'),
+            "a short leg": self.CALLS.replace('"side": "long"', '"side": "short"'),
+            "a put by name": self.CALLS.replace('"right": "C"', '"right": "put"'),
+            "a type built from pieces": self.CALLS.replace('p["kind"]', '"long_" + ("put" if ctx.vix > 40 else "call")'),
+            "a put in the defaults": self.CALLS.replace('"kind": "long_call"', '"kind": "Long_Put"'),
+        }
+        bad.update({f"open {t}": self.CALLS.replace('"kind": "long_call"', f'"kind": "{t}"')
+                    for t in STRUCTURE_TYPES if t != "long_call"})
+        for what, code in bad.items():
+            why = dlane.calls_only_code(code, {})
+            self.assertIsNotNone(why, what)
+            self.assertTrue(why.startswith(dlane.CALLS_ONLY_CODE_WHY), what)
+            self.assertFalse(any(ch.isdigit() for ch in why), (what, "rules only"))
+        # A parameter override is read too, at any depth; its keys are names.
+        self.assertIsNotNone(dlane.calls_only_code(self.CALLS, {"kind": "long_put"}))
+        self.assertIsNotNone(dlane.calls_only_code(self.CALLS, {"legs": [{"side": "short"}]}))
+        self.assertIsNone(dlane.calls_only_code(self.CALLS, {"short": 1, "put": 2}))
+        self.assertIsNone(dlane.calls_only_code("def decide(ctx)", {}), "code that does not parse: the contract's refusal")
+
     def test_the_brief_and_the_lanes_block_say_calls_only_and_the_ration_with_no_figure(self):
         brief = dlane.brief_text(COMMITTED, ["SPY"])
         lanes = dlane.lanes_text(COMMITTED)
@@ -462,6 +500,107 @@ class TheRation(RoundCase):
         born = t.forks(self.store.families(alive=True))
         self.assertTrue(born and all(self.store.family(f)["parent"] == "a" for f in born), born)
 
+    # The review's finding 1: the lineage's try is judged even when the researcher moved the candidate on meanwhile.
+    def assert_the_try_is_judged_and_waits_for_its_look(self, fid="d"):
+        fam = self.store.family(fid)
+        self.assertEqual((fam["best_version"], fam["validated_version"], fam["state"]["validation_version"]), (2, 1, 1))
+        self.assertEqual({k: fam["state"][dlane.TRY_KEY][k] for k in ("version", "first", "entered")},
+                         {"version": 1, "first": True, "entered": True})
+        self.assertTrue(fam["state"]["gate_ready"])
+        self.assertIsNone(self.why(fid), "its try entered the gate and waits for its one look")
+        jobs = len(self.pool.jobs)
+        out = self.t().validate(self.store.families(alive=True))
+        self.assertEqual((out.get("spent_lane"), len(self.pool.jobs)), ([fid], jobs), "the new candidate gets no try")
+        # The gate looks at the try's own version.
+        self.answer = lambda job: (result(job.name, daily=HOLDOUT_DAILY, window="holdout") if job.window == "holdout"
+                                   else strong(job))
+        self.replies = [PASS] * 2
+        Gate(self.store, self.pool, self.router, self.settings).run()
+        self.assertEqual([(x["family"], x["version"]) for x in self.store.looks()], [(fid, 1)])
+
+    def test_a_try_whose_candidate_moved_while_its_job_ran_is_judged(self):
+        self.family("d", lane="direction")
+
+        def moving(job):  # the researcher submits v2 while v1's Validation job runs
+            if job.window == "validation" and job.version == 1 and self.store.family("d")["best_version"] == 1:
+                self.new_best("d")
+            return strong(job)
+        self.answer = moving
+        out = self.t().validate(self.store.families(alive=True))
+        self.assertTrue(out["judged"]["d"]["passed"])
+        self.assert_the_try_is_judged_and_waits_for_its_look()
+
+    def test_a_try_landing_late_after_the_candidate_moved_is_judged(self):
+        self.family("d", lane="direction")
+        self.pool.slow.add("d")
+        self.assertIn("d", self.t().validate(self.store.families(alive=True))["errors"])
+        self.new_best("d")
+        [(job, late)] = self.pool.landing
+        self.assertTrue(late(strong(job))["passed"], "judged, not dropped as stale")
+        self.pool.slow.clear()
+        self.assert_the_try_is_judged_and_waits_for_its_look()
+
+    def test_an_alpha_verdict_for_a_moved_candidate_is_still_stale(self):
+        self.family("a")
+        self.pool.slow.add("a")
+        self.t().validate(self.store.families(alive=True))
+        self.new_best("a")
+        [(job, late)] = self.pool.landing
+        self.assertIsNone(late(strong(job)), "the alpha lane as before: its trials count, its verdict does not")
+        self.assertNotIn("validation_line", self.store.family("a")["state"])
+
+    def test_a_try_dropped_as_stale_is_owed_its_verdict_and_never_retired_unjudged(self):
+        """A Gym image deploy while the try's job was out, and the candidate moved too: the result is stale (another
+        image's), the run is still the lineage's try (conservative), and the try's own version is validated again on the
+        new image instead of the lineage dying unjudged."""
+        self.pool.image = lambda kind: "img0"
+        self.answer = lambda job: {**strong(job), "gym_image": "img0"}
+        self.family("d", lane="direction")
+        self.pool.slow.add("d")
+        self.t().validate(self.store.families(alive=True))
+        self.new_best("d")
+        self.pool.image = lambda kind: "img1"
+        [(job, late)] = self.pool.landing
+        self.assertIsNone(late({**strong(job), "gym_image": "img0"}), "another image's result: stale")
+        self.assertEqual([t["version"] for t in dlane.lineage_tries(self.store, "d")], [1], "its run is the try")
+        self.assertNotIn(dlane.TRY_KEY, self.store.family("d")["state"])
+        self.assertIsNone(self.why("d"), "never retired with its try unjudged")
+        self.assertEqual(dlane.try_owed(self.store, self.store.family("d"), self.settings, image="img1"), 1)
+        self.assertFalse(dlane.try_open(self.store, self.store.family("d"), 2, self.settings))
+        self.pool.slow.clear()
+        self.answer = lambda job: {**strong(job), "gym_image": "img1"}
+        jobs = len(self.pool.jobs)
+        out = self.t().validate(self.store.families(alive=True))
+        self.assertEqual([(j.family, j.version) for j in self.pool.jobs[jobs:]], [("d", 1)], "the try's version, again")
+        self.assertTrue(out["judged"]["d"]["passed"])
+        state = self.store.family("d")["state"]
+        self.assertEqual((state["validation_version"], state["validation_image"], state[dlane.TRY_KEY]["version"]),
+                         (1, "img1", 1))
+        self.assertEqual(len(dlane.lineage_tries(self.store, "d")), 1, "the same try")
+
+    def test_a_try_in_the_gate_is_validated_again_on_a_new_image_after_the_candidate_moved(self):
+        """The try entered the gate on one Gym image; the researcher moved on; a new image came before its look. The gate
+        looks at nothing validated on another image, so the try's own version is validated again there (no new try)."""
+        self.pool.image = lambda kind: "img0"
+        self.answer = lambda job: {**strong(job), "gym_image": self.pool.image("gym")}
+        self.family("d", lane="direction")
+        self.t().validate(self.store.families(alive=True))
+        self.new_best("d")
+        self.assertIsNone(dlane.try_owed(self.store, self.store.family("d"), self.settings, image="img0"), "current")
+        self.pool.image = lambda kind: "img1"
+        jobs = len(self.pool.jobs)
+        out = self.t().validate(self.store.families(alive=True))
+        self.assertEqual([(j.family, j.version) for j in self.pool.jobs[jobs:]], [("d", 1)])
+        self.assertTrue(out["judged"]["d"]["passed"])
+        state = self.store.family("d")["state"]
+        self.assertEqual((state["validation_version"], state["validation_image"], state["gate_ready"]), (1, "img1", True))
+        # Once the gate is done with it, nothing is owed: a failed try is spent.
+        self.store.set_state("d", gated_sha=run_sha(self.store.version("d", 1)), gate_ready=False)
+        self.pool.image = lambda kind: "img2"
+        self.assertIsNone(dlane.try_owed(self.store, self.store.family("d"), self.settings, image="img2"))
+        self.assertEqual(self.t().validate(self.store.families(alive=True))["spent_lane"], ["d"])
+        self.assertEqual(self.why("d"), dlane.SPENT_TRY)
+
 
 # ================================================================================================== 4. FP beside
 class FalsePositiveBesideTheLook(RoundCase):
@@ -505,9 +644,153 @@ class FalsePositiveBesideTheLook(RoundCase):
         self.assertFalse({"fp_lane_mixed", "fp_lane_2224", "screen"} & (set(detail) | set(event)))
 
 
+class CallsOnlyAtTheGate(RoundCase):
+    """The review's finding 3, defense in depth: a direction version whose code names another open (one made before the
+    researcher's check, or while the lane was off) is refused at the gate before anything is paid, and fails the
+    incubator's review without a model read."""
+
+    def setUp(self):
+        super().setUp()
+        self.settings["dlane"] = {"mode": "gate"}
+        self.settings["researcher"]["extension_hold_checks"] = 0
+
+    def put_family(self, fid, lane="direction"):
+        self.store.add_family({"id": fid, "mechanism": "a mechanism sentence long enough for the store",
+                               "structure": "long_single", "roots": ["SPY"], "lane": lane}, origin="architect")
+        code = f"# {fid}\n" + CallsOnly.CALLS.replace('"right": "C"', '"right": "P" if ctx.vix > 40 else "C"')
+        v = self.store.add_version(fid, code, {}, author="before the check")
+        self.store.update_family(fid, best_version=v["n"])
+        return v
+
+    def test_the_tournament_never_validates_it_and_no_try_is_spent(self):
+        self.put_family("d")
+        self.put_family("a", lane="alpha")
+        out = Tournament(self.store, self.pool, self.settings).validate(self.store.families(alive=True))
+        self.assertEqual(out["calls_refused"], ["d"])
+        self.assertEqual(([j.family for j in self.pool.jobs], sorted(out["judged"])), (["a"], ["a"]),
+                         "the alpha lane as before")
+        self.assertEqual(dlane.lineage_tries(self.store, "d"), [], "no try spent")
+        self.assertNotIn("validation_line", self.store.family("d")["state"], "no line, so no tuition")
+        self.settings["dlane"] = {"mode": "off"}  # the rollback reads nothing of it
+        out = Tournament(self.store, self.pool, self.settings).validate(self.store.families(alive=True))
+        self.assertNotIn("calls_refused", out)
+
+    def test_the_gate_refuses_it_before_a_review_is_paid(self):
+        self.put_family("d")
+        # A version validated before the check (or while the lane was off): its verdict is already in the gate.
+        self.store.set_state("d", gate_ready=True, validation_version=1, validation_line={"passed": True},
+                             validation_image=None, validation_bundle=None)
+        self.store.update_family("d", validated_version=1)
+        out = Gate(self.store, self.pool, self.router, self.settings).run()
+        self.assertEqual((out["refused"], out["looked"]), (["d"], []))
+        [refusal] = self.store.refusals("d")
+        self.assertEqual(refusal["stage"], "calls only")
+        self.assertTrue(refusal["reason"].startswith(dlane.CALLS_ONLY_CODE_WHY))
+        self.assertEqual((self.sail.bodies, self.store.looks()), ([], []), "no review paid, no look spent")
+
+    def test_an_alpha_family_and_the_rollback_are_not_read(self):
+        gate = Gate(self.store, self.pool, self.router, self.settings)
+        self.put_family("a", lane="alpha")
+        self.put_family("d")
+        self.assertIsNone(gate.calls_only_why(self.store.family("a"), self.store.version("a", 1)))
+        self.assertIsNotNone(gate.calls_only_why(self.store.family("d"), self.store.version("d", 1)))
+        self.settings["dlane"] = {"mode": "off"}
+        self.assertIsNone(gate.calls_only_why(self.store.family("d"), self.store.version("d", 1)))
+
+    def test_the_incubators_review_fails_it_without_a_model_read(self):
+        from league.swarm import incubator
+
+        self.put_family("d")
+        sha = run_sha(self.store.version("d", 1))
+        with mock.patch.object(incubator, "reviewable", return_value=True):
+            verdict = Gate(self.store, self.pool, self.router, self.settings)._incubator_review("d", 1, sha)
+        self.assertEqual(verdict, "fail")
+        [event] = [e["payload"] for e in self.store.events_after(0) if e["kind"] == "swarm.gate"
+                   and e["payload"].get("action") == "incubator_review"]
+        self.assertEqual(event["stage"], "calls only")
+        self.assertEqual(self.sail.bodies, [], "no model read")
+
+
+class TheScreenAtTheResult(RoundCase):
+    """The review's finding 2: a direction look is judged by the screen in force when its result lands. A version that
+    entered the gate by D2's pre-check alone, whose look was out when the operator rolled the lane back to "S-C", met
+    neither screen's rule: its look fails closed rather than pass on S-C's holdout test alone."""
+
+    D2 = {"mode": "gate", "screen": "D2", "structures": ["long_single"]}
+    S_C = {"mode": "gate", "screen": "S-C", "structures": ["long_single"]}
+
+    def setUp(self):
+        super().setUp()
+        self.settings["researcher"]["extension_hold_checks"] = 0
+
+    def look_out(self, validation):
+        """Family "d" validated under D2 by `validation`, its look marked and out (the round stopped waiting)."""
+        self.answer = lambda job: (result(job.name, daily=HOLDOUT_DAILY, window="holdout") if job.window == "holdout"
+                                   else validation(job))
+        self.settings["dlane"] = dict(self.D2)
+        self.family("d", lane="direction")
+        Tournament(self.store, self.pool, self.settings).validate(self.store.families(alive=True))
+        self.assertTrue(self.store.family("d")["state"]["gate_ready"])
+        self.pool.slow.add("d")
+        self.replies = [PASS] * 2
+        self.assertEqual(Gate(self.store, self.pool, self.router, self.settings).run()["looked"], [])
+        [(job, late)] = self.pool.landing
+        return job, late
+
+    def test_a_pre_check_entrants_look_landing_after_the_rollback_fails_closed(self):
+        with mock.patch.object(S, "read_policy", committed_policy):
+            job, late = self.look_out(lambda job: result(job.name, window=job.window, t=0.5, mean=0.01, quarters="1/4"))
+            state = self.store.family("d")["state"]
+            self.assertFalse(state["validation_line"]["passed"], "it entered by D2's pre-check alone")
+            self.assertIs(state["look_inflight"]["line"], False, "the marker says how it entered")
+            self.settings["dlane"] = dict(self.S_C)  # the operator's instant rollback, while the look is out
+            self.assertFalse(late(self.answer(job)))
+        [look] = self.store.looks()
+        detail = look["detail"]
+        self.assertEqual((look["passed"], detail["screen"], detail["passed"]), (0, "S-C", False))
+        self.assertEqual(detail["why"], gate_mod.PRECHECK_UNDER_LINE)
+        self.assertIs(detail["checks"]["validation_line"], False)
+        self.assertTrue(all(v for k, v in detail["checks"].items() if k != "validation_line"),
+                        "S-C's holdout test alone would have admitted it: what the fix stops")
+        self.assertEqual(self.store.family("d")["band"], "gym", "no Candidate, no Probe")
+        self.assertFalse(any(ch.isdigit() for ch in gate_mod.PRECHECK_UNDER_LINE.replace("D2", "")), "rules only")
+
+    def test_a_line_entrants_look_landing_after_the_rollback_is_judged_by_s_c(self):
+        with mock.patch.object(S, "read_policy", committed_policy):
+            job, late = self.look_out(lambda job: result(job.name, window=job.window, sharpe_daily=3.0))
+            self.assertIs(self.store.family("d")["state"]["look_inflight"]["line"], True)
+            self.settings["dlane"] = dict(self.S_C)
+            self.assertTrue(late(self.answer(job)))
+        [look] = self.store.looks()
+        self.assertEqual((look["detail"]["screen"], look["detail"]["passed"]), ("S-C", True))
+        self.assertNotIn("why", look["detail"])
+        self.assertEqual(self.store.family("d")["band"], "candidate")
+
+    def test_a_look_with_no_marker_reads_the_versions_verdict(self):
+        gate = Gate(self.store, self.pool, self.router, self.settings)
+        fam = {"state": {"validation_verdicts": {"2": {"passed": False}}, "validation_version": 2,
+                         "validation_line": {"passed": True}}}
+        self.assertFalse(gate.entered_by_line(fam, 2, None), "the version's own verdict first")
+        self.assertTrue(gate.entered_by_line(fam, 2, {"line": True}), "the marker, when it says")
+        line = {"state": {"validation_version": 3, "validation_line": {"passed": True}}}
+        self.assertTrue(gate.entered_by_line(line, 3, {}), "the family's line while it is the version's")
+        self.assertFalse(gate.entered_by_line({"state": {}}, 3, None), "nothing says it met the line")
+
+
 class FalsePositiveBesideEveryTrade(ReportFixture):
     D2_DETAIL = {"lane": "direction", "screen": "D2", "receipt": RECEIPT_SHA, "fp_lane_mixed": 0.1037,
                  "fp_lane_2224": 0.1239}
+    #: Before the fixture's trades (they open on Oct 5): a look that admits a trade comes before it.
+    LOOKED = dt.datetime(2026, 10, 1, 16, 0, tzinfo=dt.timezone.utc).timestamp()
+
+    def looked_before_the_trades(self, *looks):
+        """Each (family, version, sha, detail, p) a passed look made on Oct 1, before the fixture's trades open."""
+        now, self.now = self.now, self.LOOKED
+        try:
+            for fid, n, sha, detail, p in looks:
+                self.store.add_look(fid, n, sha, passed=True, p_value=p, detail=detail)
+        finally:
+            self.now = now
 
     def test_every_probe_trade_and_every_real_close_carries_its_screen_and_rates(self):
         from league.ops import dlane_report as R
@@ -515,8 +798,7 @@ class FalsePositiveBesideEveryTrade(ReportFixture):
         self.fam("dir-a", lane="direction", band="probe", banded_version=1)
         self.fam("alp-b", band="probe", banded_version=2)
         self.fam("tui-c")
-        self.store.add_look("dir-a", 1, "sha-a", passed=True, p_value=0.2, detail=self.D2_DETAIL)
-        self.store.add_look("alp-b", 2, "sha-b", passed=True, p_value=0.05, detail={})
+        self.looked_before_the_trades(("dir-a", 1, "sha-a", self.D2_DETAIL, 0.2), ("alp-b", 2, "sha-b", {}, 0.05))
         self.close("dir-a", route=":r", pnl=-12.0)
         self.close("dir-a", route=":r", status="open", closed_at=None, qty=1)
         self.close("alp-b", route=":r", pnl=8.0, version=2)
@@ -538,7 +820,7 @@ class FalsePositiveBesideEveryTrade(ReportFixture):
         self.assertEqual(sorted(closes), ["alp-b", "dir-a", "tui-c"])
         self.assertEqual(closes["dir-a"]["fp_lane_2224"], 0.1239)
         self.assertIsNone(closes["tui-c"]["screen"])
-        self.assertIn("no passed holdout look", closes["tui-c"]["fp_why"])
+        self.assertIn("no screen admits it", closes["tui-c"]["fp_why"])
         # A Probe family's row in `probes` states the same rates.
         probes = {r["family"]: r for r in self.report()["probes"]}
         self.assertEqual((probes["dir-a"]["fp_lane_mixed"], probes["dir-a"]["fp_lane_2224"]), (0.1037, 0.1239))
@@ -551,6 +833,34 @@ class FalsePositiveBesideEveryTrade(ReportFixture):
             self.assertIsNone(dlane.fp_of_look({"screen": "D2", "receipt": "e" * 64}, COMMITTED)["fp_lane_mixed"],
                               "another receipt's rates are not this one's")
         self.assertEqual(dlane.fp_of_look({}, COMMITTED)["screen"], "S-B")
+
+    def test_a_close_no_screen_admitted_states_none_though_its_version_later_passed(self):
+        """The review's finding 5: a passed look's screen goes beside a Probe/Sized trade (`:r`) opened at or after that
+        look only. A tuition or incubator close (tuition runs while the version waits in the gate) and a position opened
+        before the look were admitted by no screen, whatever the version did later."""
+        self.fam("dir-t", lane="direction", band="probe", banded_version=1)
+        before = {route: self.close("dir-t", route=route, pnl=-2.0, day="2026-10-05") for route in (":t", ":i", ":r")}
+        after = {route: self.close("dir-t", route=route, pnl=1.0, day="2026-10-12") for route in (":t", ":i", ":r")}
+        now, self.now = self.now, dt.datetime(2026, 10, 8, 16, 0, tzinfo=dt.timezone.utc).timestamp()
+        self.store.add_look("dir-t", 1, "sha-t", passed=True, p_value=0.2, detail=self.D2_DETAIL)  # Oct 8: between them
+        self.now = now
+        with mock.patch.object(S, "read_policy", committed_policy):
+            out = self.report()["fp_beside_trades"]
+        rows = {r["pid"]: r for r in out["closes"]}
+        self.assertEqual({k: rows[after[":r"]][k] for k in ("screen", "fp_lane_mixed", "fp_lane_2224", "receipt")},
+                         {"screen": "D2", "fp_lane_mixed": 0.1037, "fp_lane_2224": 0.1239, "receipt": RECEIPT_SHA},
+                         "a Probe trade opened after its look: that look's screen")
+        for pid, words in ((before[":t"], "no screen admits it"), (before[":i"], "no screen admits it"),
+                           (after[":t"], "no screen admits it"), (after[":i"], "no screen admits it"),
+                           (before[":r"], "not on record before this position opened")):
+            row = rows[pid]
+            self.assertEqual((row["screen"], row["fp_lane_mixed"], row["fp_lane_2224"], row["receipt"]),
+                             (None, None, None, None), (pid, row["route"]))
+            self.assertIn(words, row["fp_why"])
+        trades = {r["pid"]: r for r in out["probe_trades"]}
+        self.assertEqual(sorted(trades), sorted([before[":r"], after[":r"]]), "the Probe route's positions only")
+        self.assertIsNone(trades[before[":r"]]["screen"])
+        self.assertEqual(trades[after[":r"]]["screen"], "D2")
 
     def test_each_band_row_carries_its_screen_and_rates_only_while_the_lane_is_on(self):
         from league.ops import direction as DIR

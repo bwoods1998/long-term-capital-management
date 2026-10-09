@@ -858,7 +858,10 @@ class Wall(unittest.TestCase):
     def test_standard_library_and_the_packages_own_modules_only(self):
         source = (Path(ci.REPO) / "league" / "swarm" / "dlane.py").read_text()
         imports = re.findall(r"^\s*(?:from|import) ([\w.]+)", source, re.M)
-        allowed = {"__future__", "hashlib", "json", "math", "re", "time", "pathlib", "typing", ".", "..gym.results", ".store"}
+        # Release D-1b's calls-only code check (the review's finding 3) parses a program (`ast`) and reads the Gym's own
+        # structure list (league/gym/venue.py: standard library only, no numpy).
+        allowed = {"__future__", "hashlib", "json", "math", "re", "time", "pathlib", "typing", ".", "..gym.results",
+                   ".store", "ast", "..gym.venue"}
         self.assertEqual(set(imports) - allowed, set())
 
     def test_the_done_rule_is_pinned_not_a_setting(self):

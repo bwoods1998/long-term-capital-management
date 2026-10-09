@@ -763,8 +763,10 @@ def trade_screens(store: Any, lanes: Lanes, settings: Mapping[str, Any] | None, 
     every agent real close (every route, the Done rule's set), each with its program's screen (the passed holdout look of
     the version the position trades: its recorded line) and that screen's rates at zero edge, {screen, fp_lane_mixed,
     fp_lane_2224, receipt} (`dlane.fp_of_look`), the alpha screen's bound beside an S-B row (`ALPHA_FP`), the lane's
-    label beside a direction row; a version with no passed look on record (a tuition or incubator close) says so, never
-    an invented screen. The contamination statement rides beside them."""
+    label beside a direction row. Only a Probe/Sized trade (`d2_real`) opened at or after its version's passed look carries
+    that look's screen (the review's finding 5): a tuition or incubator close, a close with no passed look on record, and
+    a position opened before the look say so (`fp_why`), never an invented screen. The contamination statement rides
+    beside them."""
     from ..swarm import dlane
     from .economics import route_of
 
@@ -773,13 +775,25 @@ def trade_screens(store: Any, lanes: Lanes, settings: Mapping[str, Any] | None, 
         if look.get("passed"):
             passed[(str(look["family"]), int(look["version"]))] = look
 
-    def screen_of(family: str, version: int | None) -> dict[str, Any]:
+    def screen_of(family: str, version: int | None, route: str, opened_at: float | None) -> dict[str, Any]:
+        # A SCREEN ADMITS A PROBE TRADE ONLY (release D-1b, the review's finding 5, Oct 9, 2026): a passed look's screen is
+        # stated beside a close or a position only when it is on the Probe/Sized route (`d2_real`, `:r`) and opened at
+        # or after that look. A tuition or incubator close of a version that LATER passed its look was admitted by no
+        # screen (tuition runs while a validated version waits in the gate), so it keeps the no-screen row.
         look = passed.get((family, int(version))) if isinstance(version, int) else None
         lane = lanes.of(family)
-        if look is None:
+        look_at = _epoch(look.get("at")) if look is not None else None
+        why = None
+        if route != "d2_real":
+            why = (f"the {route} route: no screen admits it (tuition and the incubator trade beside the gate, never by "
+                   "its look)")
+        elif look is None:
+            why = "no passed holdout look of this version is on record"
+        elif opened_at is None or look_at is None or look_at > opened_at:
+            why = "its version's passed holdout look is not on record before this position opened"
+        if why is not None or look is None:
             out = {"screen": None, "fp_lane_mixed": None, "fp_lane_2224": None, "receipt": None, "look_at": None,
-                   "fp_why": "no passed holdout look of this version is on record (a route no screen admits: tuition, "
-                             "the incubator)"}
+                   "fp_why": why}
         else:
             detail = look.get("detail") or {}
             out = {**dlane.fp_of_look(detail, settings), "look_at": look.get("at"),
@@ -800,10 +814,10 @@ def trade_screens(store: Any, lanes: Lanes, settings: Mapping[str, Any] | None, 
         probe_trades.append({"pid": int(p["pid"]), "family": family, "instance": str(p.get("instance") or ""),
                              "version": version, "status": str(p.get("status") or ""), "opened_at": _iso(opened),
                              "closed_at": _iso(_num(p.get("closed_at"))), "root": str(p.get("root") or "").upper(),
-                             "type": str(p.get("type") or ""), **screen_of(family, version)})
+                             "type": str(p.get("type") or ""), **screen_of(family, version, "d2_real", opened)})
     closes_rows = [{"pid": c["pid"], "family": c["family"], "route": c.get("code") or c["route"], "version": c["version"],
                     "closed_at": _iso(c["closed_at"]), "pnl_usd": _usd(c["pnl_usd"]), "fee_basis": c["fee_basis"],
-                    **screen_of(c["family"], c["version"])}
+                    **screen_of(c["family"], c["version"], str(c["route"]), _num(c.get("opened_at")))}
                    for c in all_closes if not c["house"]]
     return {"probe_trades": probe_trades, "closes": closes_rows, "contamination": CONTAMINATION,
             "note": "each row's rates are its screen's per program at zero edge, measured on historical worlds (a property "

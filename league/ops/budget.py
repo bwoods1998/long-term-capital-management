@@ -131,7 +131,10 @@ ceiling that is the card line `NOTICE_DAYS` = `RUNWAY_DAYS` + 2, the same instan
 kind `funding` (`notice_facts`: the meter, its balance, the $/day it wants, those days, the amount that buys
 `TOPUP_DAYS` more of them and the dates), at most ONCE A DAY per meter (`NOTICE_EVERY_SECONDS`, a day less an hour;
 it was once a week; notice id `funding:<meter>:<UTC day>:r<rule version>`, which the gateway dedupes too, so never two
-mails on one UTC day; `<state>/budget-notices.json` remembers what this version of the rule sent). The channel, the facts and the gateway's mail are as before. Why "runs out" is
+mails on one UTC day; `<state>/budget-notices.json` remembers what this version of the rule sent). The channel, the
+facts' names and the gateway's composer are as before; a meter spent faster than the rule holds it states its burn in the
+facts the mail reads (`notice_facts`: `current_*` at the burn, and the add-by `card_date` the day research runs out at
+it), so the mail never says "nothing stops" or gives a late date while research runs out within the lead. Why "runs out" is
 research's and not the balance's: while research tapers each day spends a fifth of what is left above the reserve, so
 the balance never reaches it (Claude, with no fixed cost, never would) and a notice at "two days before the balance is
 gone" would never be sent. The amount and its days go out under this rule's names (`topup_usd`, `topup_days`)
@@ -1330,10 +1333,12 @@ def notice_facts(doc: Mapping[str, Any], meter: str, now: float, *, test: bool =
     """The `funding` notice's facts (the gateway composes the words): decimals as strings. The $/day, the runway and the
     date it runs out are at the rate the meter WANTS (fixed + its share of the ceiling: `usd_day`, `research_usd_day`,
     `runway_days`, its days of research left at the ceiling, `runs_out_on`); `current_*` are at the rate the rule holds
-    it to now (the same while it runs at the ceiling, less once it tapers). `topup_usd` buys `topup_days` more days at
-    the wanted rate; `card_line_days` is the line those days are under; `card_date` is the day the taper starts.
-    `restore_usd` and `restore_days` are the same amount and days under RULE_VERSION 1's names: a gateway still on that
-    rule's composer reads only those, and must never mail "add unknown"."""
+    it to now (the same while it runs at the ceiling, less once it tapers), or AT THE CURRENT BURN when the meter is spent
+    faster than that (release D-1b, the review's finding 4: `burn_usd_day`, `burn_runway_days`). `topup_usd` buys
+    `topup_days` more days at the wanted rate; `card_line_days` is the line those days are under; `card_date` is the day
+    the taper starts, or the day research runs out at the current burn when that is earlier (`out_on`: the two-day
+    lead's own date). `restore_usd` and `restore_days` are the same amount and days under RULE_VERSION 1's names: a
+    gateway still on that rule's composer reads only those, and must never mail "add unknown"."""
     row = (doc.get("meters") or {}).get(meter) or {}
 
     def money(value: Any) -> str | None:
@@ -1352,15 +1357,36 @@ def notice_facts(doc: Mapping[str, Any], meter: str, now: float, *, test: bool =
     # which remembers funding ids for 8 days, delivers each day's and answers a second one the same day `duplicate`.
     notice_id = (f"funding-test:{meter}:{_week(now)}:{int(now // 60)}" if test
                  else f"funding:{meter}:{_day(now).isoformat()}:r{RULE_VERSION}")
+    # THE BURN IN THE MAIL (release D-1b, the review's finding 4, Oct 9, 2026). The two-day lead fires on the CURRENT BURN
+    # (`_burn`), and a meter spent faster than the rule holds it (`burn_usd_day` above `total_usd_day`) can be short while
+    # its card line still reads weeks. The gateway composes the mail from these facts alone and is its own deploy (not
+    # touched here), so the facts it reads say the burn: `current_*` (the mail's "now" sentence and its no-card sentence)
+    # are the burn's dollars a day, research share and days above the reserve, and `card_date` (the subject's and the
+    # body's "add it by") is the day research runs out at the burn when that comes first (`out_on`). The figures at the
+    # rate the rule WANTS (`usd_day`, `runway_days`, `runs_out_on`, `topup_usd`) are unchanged and true. So the mail never
+    # says "Nothing stops if no card is added" (it needs the current runway at the card line or over) nor gives a late
+    # date while research runs out within the lead. The fact NAMES are unchanged: the gateway's own test holds its
+    # composer to exactly this key set (gateway/test/funding-notice.test.mjs), so the burn's own names (`burn_usd_day`,
+    # `out_on`, ...) wait for a composer that words the burn as a spend (a gateway release). Its one imprecision until
+    # then: the mail's "held to" sentence reads the burn's dollars a day, which the desk spends rather than is held to.
+    current_usd, current_research = row.get("total_usd_day"), row.get("research_usd_day")
+    current_days = row.get("runway_days")
+    burn, rate = _finite(row.get("burn_usd_day")), _finite(row.get("total_usd_day"))
+    over = burn is not None and rate is not None and fixed is not None and burn > rate + EPSILON
+    if over:
+        current_usd, current_research, current_days = burn, burn - fixed, row.get("burn_runway_days")
+    card_date = row.get("card_date")
+    if isinstance(row.get("out_on"), str) and (not isinstance(card_date, str) or row["out_on"] < card_date):
+        card_date = row["out_on"]
     return {"kind": "funding", "notice_id": notice_id, "meter": meter,
             "balance_usd": money(balance), "usd_day": money(demand), "fixed_usd_day": money(fixed),
             "research_usd_day": money(None if demand is None or fixed is None else demand - fixed),
             "runway_days": days(row.get("card_runway_days")), "runs_out_on": row.get("card_runs_out_on"),
-            "current_usd_day": money(row.get("total_usd_day")), "current_research_usd_day": money(row.get("research_usd_day")),
-            "current_runway_days": days(row.get("runway_days")),
+            "current_usd_day": money(current_usd), "current_research_usd_day": money(current_research),
+            "current_runway_days": days(current_days),
             "topup_usd": money(row.get("topup_usd")), "topup_days": TOPUP_DAYS, "card_line_days": NOTICE_DAYS,
             "restore_usd": money(row.get("topup_usd")), "restore_days": TOPUP_DAYS,
-            "card_date": row.get("card_date"), "at": _iso(now), "test": bool(test)}
+            "card_date": card_date, "at": _iso(now), "test": bool(test)}
 
 
 def _sent(answer: Any) -> bool:

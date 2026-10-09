@@ -235,6 +235,22 @@ class Causes(Base):
         self.assertFalse(births["stalled"])
         self.assertEqual((births["numbers"]["births_12h"], births["numbers"]["last_birth_at"]), (1, child["born_at"]))
 
+    def test_a_direction_lineages_spent_try_and_a_refused_put_program_are_owed_nothing(self):
+        """Release D-1b: a direction family whose lineage's one try is used or taken this round (`spent_lane`,
+        `waiting_lane`), or whose candidate's code names another open than a long call (`calls_refused`, the review's
+        finding 3), is owed no Validation."""
+        self.healthy(validation_hours=30)
+        for fid in ("spent", "waiting", "puts"):
+            self.family(fid, best_version=1, best_train=0.5)
+        self.assertEqual(self.check("validations")["numbers"]["owed_validation"], 3)
+        self.ago(1)
+        self.store.event("swarm.tournament", None, {"validation": {"queued": 0, "judged": {}, "errors": {},
+                                                                    "spent_lane": ["spent"], "waiting_lane": ["waiting"],
+                                                                    "calls_refused": ["puts"]}})
+        validations = self.check("validations")
+        self.assertFalse(validations["stalled"])
+        self.assertEqual(validations["numbers"]["owed_validation"], 0)
+
     def test_validations_a_verdict_read_from_an_identical_program_or_judged_in_a_round_is_a_verdict(self):
         self.family("twin", best_version=1, best_train=0.5)
         self.ago(3)
