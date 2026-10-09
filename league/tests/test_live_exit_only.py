@@ -37,12 +37,16 @@ def opens_sent(venue):
 @unittest.skipUnless(HAVE, "numpy not installed")
 class ExitOnly(LiveCase):
     def demote(self, live):
-        """The family's forward record turns negative: its real instance goes to exits only at the next minute's pass."""
+        """The family's forward record turns negative: its real instance goes to exits only at the next minute's pass
+        (under `probe.demotion` "dm0", release L-D's rollback, on which these tests run: under "dm1" a negative record
+        no longer ends a Probe band, `test_ld_release`)."""
         self.families.rows["opener"]["forward"] = {"trades": 25, "negative": True}
         live._families_at = float("-inf")
 
     def test_its_opens_are_dropped_silently_and_counted_while_its_closes_go(self):
-        live = self.make([family("opener", OPENER, band="probe", params={"hold": 2})])
+        from league.tests.money_fakes import rollback_table
+
+        live = self.make([family("opener", OPENER, band="probe", params={"hold": 2})], table=rollback_table())
         self.run_to(9, 31)
         self.assertEqual(len(opens_sent(self.venue)), 1, "the live instance opened")
         told = []

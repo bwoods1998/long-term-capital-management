@@ -311,13 +311,30 @@ class TheRule(StandingCase):
             self.assertTrue(LiveGrant(self.root / STORE, clock=self.clock).allows_live(3), "another process sees it")
 
 
+#: The Probe row before release L-D (Oct 9, 2026): the incubator cap's (1665c385) and fast lane v2's.
+PRE_LD_PROBE = {"max_loss_share": "0.10", "contracts": 1, "open_per_family": 3, "family_share": "0.15", "floor_usd": "0",
+                "max_open": 3, "loss_budget_usd": "400"}
+
+
+def pre_ld():
+    """The constitution's Probe row as it was before release L-D (its three rule rows gone, three slots)."""
+    return patch.dict(CONSTITUTION["options_money"]["probe"], PRE_LD_PROBE, clear=True)
+
+
 class TheIncubatorCap(StandingCase):
     """The incubator cap (Oct 8, 2026): `incubator.max_loss_usd` $50 -> $75 moves the money digest from fast lane v2's
     da5c7542 to 1665c385. A grant pinned on the $50 row holds nothing on the $75 one until the standing grant re-ratifies
-    it, which it does by itself only on an owner's release change (`floor_box.py deploy`, or its rollback back across it)."""
+    it, which it does by itself only on an owner's release change (`floor_box.py deploy`, or its rollback back across it).
+    Run on the Probe row before release L-D (`pre_ld`), which moved the digest again (`TheReleaseLD`)."""
 
     FAST_LANE = "da5c7542d7b78f967c12c3b2d98140153026c98b5fea9de27b6cf912eff85694"
     CAP = "1665c3858bce937617a339dfa56ae9a38a51e9fd763225ec10a645d3d5bafa08"
+
+    def setUp(self):
+        super().setUp()
+        patcher = pre_ld()
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def at_fifty(self):
         return patch.dict(CONSTITUTION["options_money"]["incubator"], max_loss_usd="50")
@@ -357,6 +374,57 @@ class TheIncubatorCap(StandingCase):
             out = self.standing(grant, release="r-fast-lane", rows=back)
             self.assertEqual(out["action"], "ratified")
             self.assertEqual(grant.current()["policy"]["constitution_digest"], self.FAST_LANE)
+            self.assertTrue(grant.allows_live(2))
+
+
+class TheReleaseLD(StandingCase):
+    """Release L-D (Oct 9, 2026): the Probe row's `max_open` 3 -> 8, its new `loss_basis` "net" and `demotion` "dm1", and
+    THE ROLLING PROBE BUDGET's `loss_window_sessions` 20 and `loss_total_usd` "400" (the operator's setting of Oct 9,
+    inside the owner's $800 ceiling) move the money digest from the incubator cap's 1665c385 to 0310779c. A grant pinned on 1665c385 holds nothing after the deploy until the standing
+    grant re-ratifies it at the House's start, on the owner's release change only. Its CON-only rollback (`loss_basis`
+    "gross", `max_open` 3, `demotion` "dm0", `loss_total_usd` "400", `loss_window_sessions` 2000) is a digest of its own,
+    320899d6, ratified the same way on the owner's deploy of it; `floor_box.py rollback` to the release before L-D brings
+    1665c385 back."""
+
+    BEFORE = "1665c3858bce937617a339dfa56ae9a38a51e9fd763225ec10a645d3d5bafa08"
+    LD = "0310779c2f58eaf453835f1c989f130cf92a74198198b624cf021298a9e43945"
+    CON_ROLLBACK = "320899d675059182509a62b67d122afd2fdc54b08c59b2053a684d88fc8b55f2"
+
+    def pinned_before(self):
+        with pre_ld():
+            self.assertEqual(money_digest(), self.BEFORE)
+            grant = self.enabled()
+        self.assertEqual(money_digest(), self.LD)
+        self.assertEqual(grant.current()["policy"]["constitution_digest"], self.BEFORE)
+        return grant
+
+    def test_the_owners_deploy_re_ratifies_it_at_the_houses_start(self):
+        grant = self.pinned_before()
+        self.assertFalse(grant.allows_live(2), "real entries are held until it is ratified")
+        out = self.standing(grant, release="r-ld", rows=owner_deploy(self.clock() - 60, release="r-ld"))
+        self.assertEqual((out["action"], out["triggers"]), ("ratified", ["digest"]))
+        self.assertIn(f"money digest {self.BEFORE[:12]} -> {self.LD[:12]}", grant.ratifications()[-1]["why"])
+        self.assertEqual(grant.current()["policy"]["constitution_digest"], self.LD)
+        self.assertTrue(grant.allows_live(2))
+
+    def test_the_updater_alone_never_ratifies_it(self):
+        grant = self.pinned_before()
+        out = self.standing(grant, release="main-abcdef123456", rows=updater_deploy(self.clock() - 60))
+        self.assertEqual(out["action"], "refused")
+        self.assertFalse(grant.allows_live(2))
+
+    def test_the_con_only_rollback_is_ratified_on_the_owners_deploy_of_it(self):
+        grant = self.pinned_before()
+        self.standing(grant, release="r-ld", rows=owner_deploy(self.clock() - 60, release="r-ld"))
+        self.clock.advance(HOUR)
+        rollback = {"loss_basis": "gross", "max_open": 3, "demotion": "dm0", "loss_total_usd": "400",
+                    "loss_window_sessions": 2000}
+        with patch.dict(CONSTITUTION["options_money"]["probe"], rollback):
+            self.assertEqual(money_digest(), self.CON_ROLLBACK)
+            self.assertFalse(grant.allows_live(2))
+            out = self.standing(grant, release="r-ld-con", rows=owner_deploy(self.clock() - 60, release="r-ld-con"))
+            self.assertEqual(out["action"], "ratified")
+            self.assertEqual(grant.current()["policy"]["constitution_digest"], self.CON_ROLLBACK)
             self.assertTrue(grant.allows_live(2))
 
 

@@ -675,8 +675,9 @@ class Report(CalibrationCase):
         self.assertEqual(report["plan"]["symbols"], ["SPY", "QQQ", "IWM"])
         self.assertEqual(report["plan"]["works_minutes"]["open"], {"mid": 5, "mid+1": 5, "mid25": 25, "mid25+1": 5})
         self.assertEqual(report["plan"]["repriced_as"], {"mid": "mid+1", "mid25": "mid25+1"})
-        self.assertEqual(report["plan"]["leaves_families"], {"day_cap_probe_room": "probe.max_open x probe.max_loss_share x E",
-                                                            "no_new_trip_from_legs": 80})
+        self.assertEqual(report["plan"]["leaves_families"],
+                         {"day_cap_probe_room": "min(probe.max_open x probe.max_loss_share x E, probe.loss_budget_usd)",
+                          "no_new_trip_from_legs": 80})
         self.assertEqual(len(report["cells"]), 21, "3 symbols x (4 open + 3 close cells)")
         for symbol in C.SYMBOLS:
             cell = report["cells"][f"{symbol}:open:mid25"]
@@ -730,7 +731,23 @@ class TheReviewOf407(CalibrationCase):
         # dispatched open counts its whole maximum loss toward it, filled or not. A heavy day (every calibration mid
         # unfilled, every re-price filled) once took $426 of a $481.63 cap; the calibration leaves the Probe room: since
         # THE FAST LANE (Oct 7, 2026) 3 Probe positions at 10% of E, $180 here (two $100 floors before it). At $600 the
-        # family's one structure fits the Probe's $60 cap (at $481.63 its $48.16 would refuse it).
+        # family's one structure fits the Probe's $60 cap (at $481.63 its $48.16 would refuse it). Fast lane v2's three
+        # slots: the CON-only rollback of release L-D, byte for byte.
+        from league.tests.money_fakes import rollback_table
+
+        live, dispatched, room = self.heavy_day(rollback_table())
+        self.assertEqual(room, D("180"))                                # 3 x 10% x E
+        self.assertGreater(dispatched, D("180"), "a heavy day: the calibration used what it may")
+
+    def test_at_eight_probe_slots_it_leaves_the_budget_not_eight_caps(self):
+        """Release L-D (Oct 9, 2026; the critic, B1): at `probe.max_open` 8 the room is min(8 x 10% x E, $400) = $400 at
+        E $600, never $480; the calibration still trades in what is left and the family's open still goes."""
+        live, dispatched, room = self.heavy_day(None)
+        self.assertEqual(live.table.probe_max_open, 8)
+        self.assertEqual(room, D("400"))
+        self.assertGreater(dispatched, D("0"), "the calibration still trades")
+
+    def heavy_day(self, table):
         self.grant.capital = "600"
         n = {"cal_open": 0}
 
@@ -744,7 +761,7 @@ class TheReviewOf407(CalibrationCase):
                 self.venue.fill = "limit"
 
         self.venue.on_submit = hook
-        live = self.start([family("late", LATE, band="probe")], real_money=True)
+        live = self.start([family("late", LATE, band="probe")], real_money=True, table=table)
         whys = set()
         while self.minute_of(self.clock()) <= 15 * 60 + 25:
             live.minute()
@@ -753,18 +770,17 @@ class TheReviewOf407(CalibrationCase):
         today = MONDAY.isoformat()
         cap = live.table.gateway_day_share * live.sizing_equity()
         self.assertEqual(cap, D("600"))
-        room = M.probe_room(live.table, live.sizing_equity())          # 3 x 10% x E
-        self.assertEqual(room, D("180"))
+        room = M.probe_room(live.table, live.sizing_equity())
         rows = live.state.rows("SELECT max_loss, answer FROM orders WHERE family=? AND action='open'", (C.FAMILY,))
         dispatched = sum(D(str(r["max_loss"])) for r in rows if json.loads(r["answer"]).get("dispatched"))
-        self.assertGreater(dispatched, D("180"), "a heavy day: the calibration used what it may")
         self.assertLessEqual(dispatched + room, cap, "never past the cap less the families' room")
         self.assertTrue(any(w and "kept for the families' opens" in w for w in whys), whys)
         # The family's late open still goes: the day cap has room for it.
         [fam] = live.state.rows("SELECT status, max_loss FROM orders WHERE family='late' AND action='open'")
         self.assertEqual(fam["status"], "filled")
         self.assertLessEqual(live.book.exposure("late", day=today, week_start=today).day_opened, cap)
-        self.assertEqual(C.FAMILY_ROOM_RULE, "probe.max_open x probe.max_loss_share x E")
+        self.assertEqual(C.FAMILY_ROOM_RULE, "min(probe.max_open x probe.max_loss_share x E, probe.loss_budget_usd)")
+        return live, dispatched, room
 
     def test_no_round_trip_starts_once_its_own_legs_today_reach_the_cap(self):
         # The day's count is 250 legs, a cancel's counted too; the calibration's own are counted as the House counts

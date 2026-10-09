@@ -25,13 +25,25 @@ BANDS (the live path owns candidate <-> probe <-> sized; the swarm owns gym <-> 
 - A family whose REAL trades alone lose (`REAL_MIN_TRADES` or more, mean at or below zero) is held at Probe, and a
   Sized one goes back to Probe.
 - A Probe or Sized family whose forward record turns negative (the swarm's `forward.negative`, or this record's own:
-  20 trades and a mean below zero) loses its band: back to Candidate, its real instance on exits only.
+  20 trades and a mean below zero) loses its band: back to Candidate, its real instance on exits only. Under DM1 (below)
+  this holds for a Candidate only.
 - D5, DEMOTION BY LIVE RESULTS (fast lane v2, Oct 7, 2026; `demotion`, pre-registered bounds chosen, not measured): a
   Candidate or Probe whose version's realized real P&L is below -`DEMOTE_LOSS_MULTIPLE` (3) x the mean maximum loss of
   its real positions, or whose live fills ran below its nightly replay of the same days by more than `REPLAY_GAP_BOUND`
   (0.20) a dollar of maximum loss over at least `REPLAY_GAP_MIN_TRADES` (5) real trades, is (or stays) a Candidate, its
   real instance on exits only. Sticky: the version's real rows persist (a new version starts its own record), and the
-  record keeps it (the swarm's band event and `live.band` carry the reason). Sizing up is unchanged (Sized rules).
+  record keeps it (the swarm's band event and `live.band` carry the reason). Sizing up is unchanged (Sized rules). This
+  is the constitution's `probe.demotion` "dm0".
+- DM1 (release L-D, Oct 9, 2026; `probe.demotion` "dm1", `Table.probe_demotion`): for a family at Probe or Sized, D5's
+  loss leg and the forward-negative demotion are off; it is demoted (sticky, exits only, D5's mechanics: back to
+  Candidate) when its version has at least `DM1_MIN_REAL_TRADES` (10) real trades and their returns on maximum loss sum
+  to less than -`DM1_Z` (1.645) x sigma x sqrt(n). Sigma (`dm1_sigma`): the sd of that return in the banded version's
+  Validation run (the live row's `validation_r_sd`, `league/live/families.py`), else the forward record's sd at
+  `DM1_SIGMA_MIN_TRADES` (10) or more trades, else `DM1_FALLBACK_SIGMA` (2.0). D5's replay-gap leg (Candidate and Probe)
+  and the real_bad hold are kept; a Candidate keeps every "dm0" check, and DM1 too. Sticky: DM1's line moves with
+  sigma, so the live path also keeps the version it demoted (`step.OptionsLive._dm1_sticky`, the live state's
+  `dm1_demoted`) and holds it at Candidate whatever sigma or the rule reads later. It applies to every Probe or Sized
+  family, alpha too: the live row carries no lane.
 
 SIZING a real open (`plan_open`), by maximum loss, never premium. `unit` is one structure's maximum loss at its limit
 plus its open and close fees, from the ORDER's own type and legs (a `long_single` family's call and put are each sized
@@ -40,14 +52,26 @@ by their own unit):
 - Probe (THE FAST LANE, Oct 7, 2026; the owner's goal item 4): ONE structure (`probe.contracts`) whose unit is at most
   the cap `probe.max_loss_share x E` (10%); a structure over it is refused (the old $100 one-contract floor is $0). At
   most `probe.open_per_family` open structures, the family's open maximum loss at most `probe.family_share x E`. At
-  most `probe.max_open` (3) Probe positions held or working at once across the account, and THE PROBE LOSS BUDGET:
-  realized Probe losses since this release, GROSS (each closed position a Probe family opened, marked so at its open:
-  `Plan.probe`, the order's and the position's `probe` mark; its loss, never offset by a gain of another position, and
-  never a Sized position's) plus the maximum loss of every real position held or working (`real.probe_tally`, every
-  ":r" row: a Sized position counts here too, a tightening) plus the new open at most `probe.loss_budget_usd` ($400);
-  an open that would breach it is refused and exits go on. These two refuse a Probe family's open only, never a Sized
-  one, and come after the kill switch, the stops, the grant and reconciliation (`step._real_intent` asks `real_block`
-  first). `probe_room` is the room the other routes leave for Probe opens.
+  most `probe.max_open` (D3: 3; 8 since release L-D, Oct 9, 2026) Probe positions held or working at once across the
+  account, and THE PROBE LOSS BUDGET (D4): realized Probe losses (each closed position a Probe family opened, marked so
+  at its open: `Plan.probe`, the order's and the position's `probe` mark; never a Sized position's, which carries no
+  mark), read by `probe.loss_basis` (`Table.probe_loss_basis`): "gross" (fast lane v2), each such position's own loss
+  summed, never offset by a gain; "net" (since release L-D), max(0, -their summed cash), so a Probe gain offsets Probe
+  losses and a Sized gain never does; plus the maximum loss of every real position held or working
+  (`real.probe_tally`, every ":r" row: a Sized position counts here too, a tightening) plus the new open. Fast lane v2
+  had one envelope, all of it at most `probe.loss_budget_usd` ($400) in total. THE ROLLING PROBE BUDGET (release L-D,
+  Oct 9, 2026; the owner's goal as he re-set it that day, item 4: "$400 net in any rolling 20 sessions and $800 net in
+  total") has two, and an open must fit BOTH: the realized losses of the closes in the last `probe.loss_window_sessions`
+  (20) New York sessions (`Exposure.probe_realized`, `real.probe_realized` from `real.probe_window_start`; under "net"
+  the window's WORST NET STRETCH, from any of its sessions to today, so a Probe gain offsets only the losses closed
+  before it and the $400 holds over every 20-session window, not only at each open) + every real position's open
+  maximum loss + the new open at most `probe.loss_budget_usd` ($400), and the realized losses of every close, from
+  inception (`Exposure.probe_realized_total`) + the same at most `probe.loss_total_usd` ($400 as set on Oct 9, inside
+  the owner's $800 ceiling). An open that would breach either is refused, naming the envelope that binds, and exits go
+  on. The dollars bind before the count (three $129 units fit the $400, eight $50 units). These refuse a Probe
+  family's open only, never a Sized one, and come after the kill switch, the stops, the grant and reconciliation
+  (`step._real_intent` asks `real_block` first). `probe_room` is the room the other routes leave for Probe opens:
+  min(`probe.max_open` x the Probe's cap, `probe.loss_budget_usd`).
 - Sized: `sized.kelly_fraction` of Kelly on the LOWER bound (`stats.quarter_kelly`: fraction x lcb / variance of the
   per-trade return on maximum loss) of `E` a structure, never above `sized.max_loss_share x E`; the family at most
   `sized.family_share x E`. C3 (the review of #362), unchanged by the fast lane: a Sized family whose Kelly stake is
@@ -154,7 +178,11 @@ class Table:
     probe_floor: Decimal
     probe_contracts: int
     probe_max_open: int
-    probe_loss_budget: Decimal
+    probe_loss_budget: Decimal       # the rolling window's (since release L-D; in total at fast lane v2)
+    probe_loss_window: int           # its window, NY sessions (release L-D: `real.probe_window_start`)
+    probe_loss_total: Decimal        # the total's (release L-D)
+    probe_loss_basis: str            # "gross" | "net" (release L-D: `real.probe_tally`)
+    probe_demotion: str              # "dm0" | "dm1" (release L-D: `demotion`)
     sized_min_trades: int
     sized_confidence: float
     kelly_fraction: float
@@ -209,7 +237,10 @@ class Table:
             probe_share=D(probe["max_loss_share"]), probe_open=int(probe["open_per_family"]),
             probe_family_share=D(probe["family_share"]), probe_floor=D(probe["floor_usd"]),
             probe_contracts=int(probe["contracts"]), probe_max_open=int(probe["max_open"]),
-            probe_loss_budget=D(probe["loss_budget_usd"]),
+            probe_loss_budget=D(probe["loss_budget_usd"]), probe_loss_window=int(probe["loss_window_sessions"]),
+            probe_loss_total=D(probe["loss_total_usd"]),
+            # Exactly one of `constitution.OPTIONS_MONEY_CHOICES` (`options_money_problems` refused anything else above).
+            probe_loss_basis=str(probe["loss_basis"]), probe_demotion=str(probe["demotion"]),
             sized_min_trades=int(sized["min_trades"]), sized_confidence=float(D(sized["confidence"])),
             kelly_fraction=float(D(sized["kelly_fraction"])), sized_share=D(sized["max_loss_share"]),
             sized_family_share=D(sized["family_share"]), min_probe_real_trades=int(sized["min_probe_real_trades"]),
@@ -283,6 +314,36 @@ REAL_MIN_TRADES = 10
 DEMOTE_LOSS_MULTIPLE = 3
 REPLAY_GAP_BOUND = 0.20
 REPLAY_GAP_MIN_TRADES = 5
+#: DM1 (release L-D, Oct 9, 2026; the constitution's `probe.demotion` "dm1"; the plan of Oct 9, "L3", MONEY's pre-registered
+#: rule set and its critic): a family at Probe or Sized is demoted (sticky, exits only, D5's mechanics) when its version
+#: has at least `DM1_MIN_REAL_TRADES` real trades and their returns on maximum loss r (a trade's P&L per dollar of its
+#: maximum loss) sum to less than -`DM1_Z` x sigma x sqrt(n): a one-sided 5% band below zero for a sum of n returns of sd
+#: sigma (1.645 is the normal's 95th percentile), so a program with no edge crosses it about 5% of the time at any one
+#: n. SIGMA (`dm1_sigma`), the first that is known: the sd of r over the banded version's Validation run (the live row's
+#: `validation_r_sd`, read by `league/live/families.py` from the swarm's family state, which the tournament writes from
+#: release D-1; before it, absent); else the sd of r over the version's forward record once it has `DM1_SIGMA_MIN_TRADES`
+#: trades; else `DM1_FALLBACK_SIGMA`, the census sd of r of 0.20- and 0.30-delta index calls (about two maximum losses a
+#: trade: a one-lot call is lottery-shaped). The version's real trades are rows of its forward record, so once DM1 can
+#: fire (10 real trades) the record has 10 trades too: until the swarm writes the Validation sd, sigma is the record's
+#: own (its nightly, shadow and real days), and the fallback is reached only when that sd is zero or not finite.
+#: Chosen and pre-registered, not fitted to any family's result. ITS MEASURED COST (the critic of Oct 9: 4,000 bootstrap
+#: paths of 30 closes from each of the 29 census cells the direction bar admits, each path one program's next 30 closes
+#: drawn from the cell's own trade returns, recentred on the edge named): DM1 fires within 30 closes 6.5-13% of the time
+#: at zero edge, 14-22% at -0.10 a dollar of maximum loss and 29-36% at -0.25 (the low end with sigma the cell's own sd,
+#: the high end with 2.0), against D5's 77%, 83% and 90%; with sigma 2.0 it needs 11 or more closes that are nearly all
+#: losers. So a losing program trades longer, and the shared $400 envelope (THE PROBE LOSS BUDGET), not demotion, is
+#: what mostly stops it: one bad program can spend every program's room. MONEY (U10% of E, no edge, 8 weeks): P(net <=
+#: -$360) 0.27 -> 0.30; Done 2.6% -> 3.3%.
+DM1_MIN_REAL_TRADES = 10
+DM1_Z = 1.645
+DM1_FALLBACK_SIGMA = 2.0
+DM1_SIGMA_MIN_TRADES = 10
+#: The constitution's `probe.demotion` values (`constitution.OPTIONS_MONEY_CHOICES`): "dm0" is fast lane v2's D5 and the
+#: forward-negative demotion, "dm1" the band above.
+DEMOTION_RULES = ("dm0", "dm1")
+#: The constitution's `probe.loss_basis` values: how THE PROBE LOSS BUDGET reads realized Probe losses
+#: (`real.probe_tally`): "gross" (fast lane v2), "net" (release L-D).
+LOSS_BASES = ("gross", "net")
 #: Per market day, the one source counted: real fills first, then the live shadow book, then the nightly replay.
 SOURCE_ORDER = ("real", "shadow", "nightly")
 
@@ -305,6 +366,8 @@ class Forward:
     real_max_loss: float | None = None
     replay_gap: float | None = None
     replay_n: int = 0
+    # DM1 (release L-D): the sum of the real trades' returns on maximum loss (`real_n` of them; real_mean x real_n).
+    real_r_sum: float = 0.0
 
     @property
     def variance(self) -> float | None:
@@ -408,7 +471,7 @@ def forward_stats(rows: Sequence[Mapping[str, Any]], confidence: float, *, negat
                    negative=bool(negative) or own_negative, real_n=len(real),
                    real_mean=(sum(real) / len(real)) if real else None, real_pnl=real_pnl,
                    real_max_loss=(sum(losses) / len(losses)) if losses else None, replay_gap=replay_gap,
-                   replay_n=replay_n)
+                   replay_n=replay_n, real_r_sum=sum(real))
 
 
 def _finite_positive(value: Any) -> bool:
@@ -419,19 +482,79 @@ def _finite_positive(value: Any) -> bool:
     return math.isfinite(x) and x > 0
 
 
-def demotion(fwd: Forward) -> str | None:
-    """D5 (fast lane v2, Oct 7, 2026): why a Probe program's live results end its Probe, or None. Its realized real P&L
-    below -`DEMOTE_LOSS_MULTIPLE` x the mean maximum loss of its real positions, or its live fills below its nightly replay
-    of the same days by more than `REPLAY_GAP_BOUND` a dollar of maximum loss over at least `REPLAY_GAP_MIN_TRADES` real
-    trades. Sticky: the version's real rows persist, so a demoted version stays a Candidate (a new version starts its own
-    record). The bounds are pre-registered and chosen, not measured."""
-    if fwd.real_n and fwd.real_max_loss and fwd.real_pnl < -DEMOTE_LOSS_MULTIPLE * fwd.real_max_loss:
-        return (f"D5: its {fwd.real_n} real trades realized ${fwd.real_pnl:.2f}, below -{DEMOTE_LOSS_MULTIPLE} x its mean "
-                f"maximum loss ${fwd.real_max_loss:.2f}: exits only")
-    if fwd.replay_n >= REPLAY_GAP_MIN_TRADES and fwd.replay_gap is not None and fwd.replay_gap > REPLAY_GAP_BOUND:
-        return (f"D5: its live fills ran {fwd.replay_gap:.3f} a dollar of maximum loss below its replay of the same days "
-                f"over {fwd.replay_n} real trades (bound {REPLAY_GAP_BOUND}): exits only")
+def positive_sd(value: Any) -> float | None:
+    """A standard deviation as a row or a family's state carries it (DM1's `validation_r_sd`): a finite int or float above
+    zero, else None, read as ABSENT: missing, a bool, a string, NaN, an infinity, zero or a negative number."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    x = float(value)
+    return x if math.isfinite(x) and x > 0 else None
+
+
+def dm1_sigma(fwd: Forward, validation_r_sd: Any = None) -> tuple[float, str]:
+    """DM1's sigma and where it came from (the constants' comment): the banded version's Validation run's sd of r (the
+    live row's `validation_r_sd`, `positive_sd`), else the forward record's at `DM1_SIGMA_MIN_TRADES` or more trades,
+    else `DM1_FALLBACK_SIGMA`."""
+    sd = positive_sd(validation_r_sd)
+    if sd is not None:
+        return sd, "the sd of r in its banded version's Validation run"
+    forward = positive_sd(fwd.sd)
+    if fwd.n >= DM1_SIGMA_MIN_TRADES and forward is not None:
+        return forward, f"the sd of r in its forward record of {fwd.n} trades"
+    return DM1_FALLBACK_SIGMA, "the census sd of r of 0.20-0.30 delta index calls (no Validation sd, no forward sd yet)"
+
+
+def demotion(fwd: Forward, *, band: str = "probe", rule: str = "dm0", validation_r_sd: Any = None) -> str | None:
+    """Why a program's live results end its band, or None; `rule` is the constitution's `probe.demotion`
+    (`Table.probe_demotion`), `band` the family's money band.
+
+    "dm0", D5 (fast lane v2, Oct 7, 2026), whatever the band (its callers ask it for a Candidate or a Probe): its realized
+    real P&L below -`DEMOTE_LOSS_MULTIPLE` x the mean maximum loss of its real positions, or its live fills below its
+    nightly replay of the same days by more than `REPLAY_GAP_BOUND` a dollar of maximum loss over at least
+    `REPLAY_GAP_MIN_TRADES` real trades. The bounds are pre-registered and chosen, not measured.
+
+    "dm1" (release L-D, Oct 9, 2026): D5's loss leg for a Candidate only; DM1's band for every band (the constants'
+    comment: at least `DM1_MIN_REAL_TRADES` real trades whose returns on maximum loss sum below -`DM1_Z` x sigma x
+    sqrt(n), sigma `dm1_sigma`); D5's replay-gap leg for a Candidate or a Probe, as under "dm0". A Candidate's real
+    trades are a version's that was at Probe or Sized (tuition and the incubator are never forward rows), so DM1 there
+    only keeps a version it demoted a Candidate.
+
+    Sticky either way: the version's real rows persist, so a demoted version stays a Candidate (a new version starts its
+    own record)."""
+    if rule not in DEMOTION_RULES:
+        raise ValueError(f"the demotion rule {rule!r} is not one of {DEMOTION_RULES}")
+    if rule == "dm0" or band == "candidate":
+        if fwd.real_n and fwd.real_max_loss and fwd.real_pnl < -DEMOTE_LOSS_MULTIPLE * fwd.real_max_loss:
+            return (f"D5: its {fwd.real_n} real trades realized ${fwd.real_pnl:.2f}, below -{DEMOTE_LOSS_MULTIPLE} x its "
+                    f"mean maximum loss ${fwd.real_max_loss:.2f}: exits only")
+    if rule == "dm1" and fwd.real_n >= DM1_MIN_REAL_TRADES:
+        sigma, source = dm1_sigma(fwd, validation_r_sd)
+        line = -DM1_Z * sigma * math.sqrt(fwd.real_n)
+        if fwd.real_r_sum < line:
+            return (f"DM1: its {fwd.real_n} real trades returned {fwd.real_r_sum:.3f} maximum losses in sum, below "
+                    f"-{DM1_Z} x sigma {sigma:.3f} x sqrt({fwd.real_n}) = {line:.3f} (sigma: {source}): exits only")
+    if rule == "dm0" or band in ("candidate", "probe"):
+        if fwd.replay_n >= REPLAY_GAP_MIN_TRADES and fwd.replay_gap is not None and fwd.replay_gap > REPLAY_GAP_BOUND:
+            return (f"D5: its live fills ran {fwd.replay_gap:.3f} a dollar of maximum loss below its replay of the same "
+                    f"days over {fwd.replay_n} real trades (bound {REPLAY_GAP_BOUND}): exits only")
     return None
+
+
+def negative_demotes(table: Table, band: str) -> bool:
+    """Whether a forward record that turned negative takes a family at `band` back to Candidate: always under "dm0";
+    under "dm1" a Candidate's only (DM1 replaces it for Probe and Sized). The live path's band (`band_for`), its open
+    refusal (`step._real_intent`) and its admission (`families._entry_matches`, via the open's `negative_ok`) read this
+    one answer, so they never disagree."""
+    return not (table.probe_demotion == "dm1" and band in BANDS_REAL)
+
+
+def live_demotion(table: Table, band: str, fwd: Forward, validation_r_sd: Any = None) -> str | None:
+    """The live-results demotion in force for a family at `band` (`demotion` under `table.probe_demotion`): under "dm0",
+    D5 for a Candidate or a Probe and nothing for a Sized family (fast lane v2's calls, unchanged); under "dm1", every
+    band's (`demotion`'s docstring)."""
+    if table.probe_demotion == "dm0":
+        return demotion(fwd) if band in ("candidate", "probe") else None
+    return demotion(fwd, band=band, rule=table.probe_demotion, validation_r_sd=validation_r_sd)
 
 
 # --------------------------------------------------------------------------------------------------------- bands
@@ -446,11 +569,19 @@ def probe_cap(table: Table, equity: Decimal) -> Decimal:
 
 
 def probe_room(table: Table, equity: Decimal | None) -> Decimal:
-    """THE FAST LANE's room for the families' Probe opens (Oct 7, 2026): `probe.max_open` Probe positions at the Probe's
-    cap, `probe.max_open x probe.max_loss_share x E` ($386.52 at E $1,288.40). The routes that share the account's day
-    and book caps (the calibration, the incubator, the House live test) leave this much of them to the families; it
-    replaces two $100 Probe floors ($200), which the floor at $0 would make $0."""
-    return ZERO if equity is None else table.probe_max_open * probe_cap(table, equity)
+    """THE FAST LANE's room for the families' Probe opens (Oct 7, 2026): what Probe opens can hold at once, the lower of
+    `probe.max_open` Probe positions at the Probe's cap and THE PROBE LOSS BUDGET (`probe.loss_budget_usd`), which every
+    Probe open must fit with everything real held or working. The routes that share the account's day and book caps
+    (the calibration, the incubator, the House live test) leave this much of them to the families; it replaced two $100
+    Probe floors ($200), which the floor at $0 would make $0.
+
+    Release L-D (Oct 9, 2026; the plan's critic, B1): the budget's ceiling is new. At `probe.max_open` 3 the room is
+    3 x 10% x E, under $400 at any E to $1,333.33, so it is what it was ($386.80 at E $1,289.34); at 8 slots, 8 x 10% x
+    E ($1,031.47 at that E) would claim room no Probe open can use and refuse every incubator open and most of the House
+    live test's and the calibration's; capped, it is $400."""
+    if equity is None:
+        return ZERO
+    return min(table.probe_max_open * probe_cap(table, equity), table.probe_loss_budget)
 
 
 def fits_probe(table: Table, equity: Decimal, unit: Decimal) -> bool:
@@ -460,19 +591,20 @@ def fits_probe(table: Table, equity: Decimal, unit: Decimal) -> bool:
 
 def band_for(table: Table, row: Mapping[str, Any], equity: Decimal, fwd: Forward, *, probe_sessions: int = 0) -> tuple[str, str]:
     """The money band a live family should be in now, and why: "candidate" (shadow only), "probe" or "sized". Only for
-    a family the swarm has at candidate, probe or sized. `probe_sessions`: whole sessions it has spent at Probe."""
+    a family the swarm has at candidate, probe or sized. `probe_sessions`: whole sessions it has spent at Probe. The
+    row's `validation_r_sd` (`league/live/families.py`) is DM1's sigma when it is a positive number (`dm1_sigma`)."""
     band = str(row.get("band") or "")
     if band not in ("candidate", "probe", "sized"):
         return band, "not a Candidate"
     if not row.get("holdout_passed"):
         return "candidate", "has not passed the holdout"
-    if fwd.negative:
+    if fwd.negative and negative_demotes(table, band):
         return "candidate", f"its forward record turned negative ({fwd.n} trades, ${fwd.pnl:.2f})"
-    if band in ("candidate", "probe"):
-        # D5, DEMOTION BY LIVE RESULTS (fast lane v2): exits only, and sticky for the version (`demotion`).
-        why = demotion(fwd)
-        if why:
-            return "candidate", why
+    # D5, DEMOTION BY LIVE RESULTS (fast lane v2; for a Candidate or a Probe), or DM1 (release L-D; `probe.demotion`
+    # "dm1": for a Probe or Sized family, a Candidate's D5 kept): exits only, and sticky for the version (`demotion`).
+    why = live_demotion(table, band, fwd, row.get("validation_r_sd"))
+    if why:
+        return "candidate", why
     why = table.family_allowed(str(row.get("structure") or ""), equity)
     if why:
         return "candidate", why
@@ -511,12 +643,17 @@ class Exposure:
     day_opened: Decimal = ZERO       # today's opening maximum loss sent (the gateway's day cap counts it)
     tuition_day: Decimal = ZERO      # tuition maximum loss opened today / this week
     tuition_week: Decimal = ZERO
-    # THE FAST LANE (D3, D4; `real.probe_tally`): the real (":r") positions held or working, the gross realized loss of the
-    # closed ones a Probe family opened (since this release: only its opens are marked), and what the held and working
-    # ones could still lose (maximum loss with fees)
+    # THE FAST LANE (D3, D4; `real.probe_tally`): the real (":r") positions held or working, the realized loss of the
+    # closed ones a Probe family opened (since the fast lane: only its opens are marked), read by `probe.loss_basis`
+    # (gross: each one's own loss summed; net since release L-D: max(0, -their summed cash)), and what the held and
+    # working ones could still lose (maximum loss with fees). THE ROLLING PROBE BUDGET (release L-D): `probe_realized`
+    # is the closes' of the last `probe.loss_window_sessions` sessions (`real.probe_realized`; under "net" the window's
+    # worst net stretch), `probe_realized_total` every close's; None reads as `probe_realized` (a window holding every
+    # close, as fast lane v2's one figure)
     probe_open: int = 0
     probe_realized: Decimal = ZERO
     probe_at_risk: Decimal = ZERO
+    probe_realized_total: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -525,7 +662,8 @@ class Plan:
     cap: Decimal                     # the per-structure cap it was sized against
     reason: str                      # why this size (or why none)
     #: A Probe family's open (`plan_open`, band "probe"): the order and its position are marked so, and THE PROBE LOSS
-    #: BUDGET counts the position's realized loss (`real.probe_tally`). Never a Sized open, tuition or another route's.
+    #: BUDGET counts the position's realized P&L (`real.probe_tally`: its loss under "gross"; under "net", since release
+    #: L-D, its cash with every other marked position's). Never a Sized open, tuition or another route's.
     probe: bool = False
 
 
@@ -607,11 +745,26 @@ def plan_open(table: Table, *, band: str, tuition: bool, equity: Decimal, unit: 
             if exposure.probe_open >= table.probe_max_open:
                 return Plan(0, cap, f"probe: {exposure.probe_open} Probe positions held or working; the most at once is "
                                     f"{table.probe_max_open}")
+            # THE ENVELOPES (THE ROLLING PROBE BUDGET, release L-D): realized (`probe.loss_basis`) + every real
+            # position's open maximum loss + this open, over the window's closes at most `probe.loss_budget_usd` and over
+            # every close at most `probe.loss_total_usd`. The window's is asked first: under the CON-only rollback (a
+            # window holding every close, both $400) it is fast lane v2's one envelope, its words with the window named
+            # after them, and the total's never refuses what it admitted.
+            basis = " net" if table.probe_loss_basis == "net" else ""
+            risk = unit * qty
             possible = exposure.probe_realized + exposure.probe_at_risk
-            if possible + unit * qty > table.probe_loss_budget:
-                return Plan(0, cap, f"probe: the loss budget: ${cents(possible)} could already be lost (realized "
+            if possible + risk > table.probe_loss_budget:
+                return Plan(0, cap, f"probe: the loss budget: ${cents(possible)} could already be lost (realized{basis} "
                                     f"${cents(exposure.probe_realized)}, held or working ${cents(exposure.probe_at_risk)}) "
-                                    f"and this risks ${cents(unit * qty)}, over ${table.probe_loss_budget}")
+                                    f"and this risks ${cents(risk)}, over ${table.probe_loss_budget} in any "
+                                    f"{table.probe_loss_window} sessions")
+            total = exposure.probe_realized if exposure.probe_realized_total is None else exposure.probe_realized_total
+            possible = total + exposure.probe_at_risk
+            if possible + risk > table.probe_loss_total:
+                return Plan(0, cap, f"probe: the loss budget in total: ${cents(possible)} could already be lost "
+                                    f"(realized{basis} ${cents(total)} since the fast lane, held or working "
+                                    f"${cents(exposure.probe_at_risk)}) and this risks ${cents(risk)}, over "
+                                    f"${table.probe_loss_total} in total")
         band = limits
         fam = family_cap(table, band, equity)
         room_loss = fam - exposure.family_loss
@@ -1024,4 +1177,6 @@ class FlowBook:
 __all__ = ["Table", "DECLARED_TYPES", "order_types", "Forward", "forward_stats", "one_record", "kelly_cap", "sizing_band", "REAL_MIN_TRADES", "band_for", "fits_probe", "probe_cap", "structure_cap", "family_cap",
            "Exposure", "Plan", "plan_open", "Stops", "FlowBook", "D", "cents", "sized_ok", "IncubatorTally", "practice_ok",
            "plan_incubator", "INCUBATOR_DAY_LEGS", "INCUBATOR_DAY_OPEN_SHARE", "probe_room", "demotion",
-           "DEMOTE_LOSS_MULTIPLE", "REPLAY_GAP_BOUND", "REPLAY_GAP_MIN_TRADES"]
+           "DEMOTE_LOSS_MULTIPLE", "REPLAY_GAP_BOUND", "REPLAY_GAP_MIN_TRADES", "DM1_MIN_REAL_TRADES", "DM1_Z",
+           "DM1_FALLBACK_SIGMA", "DM1_SIGMA_MIN_TRADES", "DEMOTION_RULES", "LOSS_BASES", "positive_sd", "dm1_sigma",
+           "negative_demotes", "live_demotion"]

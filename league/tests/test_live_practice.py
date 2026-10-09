@@ -519,8 +519,8 @@ class Embargo(LiveCase):
 
     RETURNS = [0.30, 0.10, 0.20, -0.10, 0.25] * 5
 
-    def probe(self, created, *, returns=None, real=True):
-        live = self.make([dict(family("vert", VERTICAL, band="probe"), version_created_at=created)])
+    def probe(self, created, *, returns=None, real=True, table=None):
+        live = self.make([dict(family("vert", VERTICAL, band="probe"), version_created_at=created)], table=table)
         self.families.add_forward("vert", "shadow", [{"id": f"s{i}", "day": f"2026-09-{i % 25 + 1:02d}", "pnl": r * 100.0,
                                                        "max_loss": 100.0} for i, r in enumerate(returns or self.RETURNS)])
         if real:
@@ -545,9 +545,18 @@ class Embargo(LiveCase):
         self.assertEqual(len([p for p, _ in self.ledger.of("live.band") if p.get("held")]), 1, "said once a day")
 
     def test_the_same_rows_still_count_toward_negative(self):
-        self.probe("2026-09-26T00:00:00Z", returns=[-0.2, 0.1, -0.3, -0.1] * 6)
+        """Under `probe.demotion` "dm0" (release L-D's rollback): a negative whole record ends the Probe. Under "dm1" it
+        does not (DM1 reads the real trades alone), and the embargo still holds the family at Probe."""
+        from league.tests.money_fakes import rollback_table
+
+        self.probe("2026-09-26T00:00:00Z", returns=[-0.2, 0.1, -0.3, -0.1] * 6, table=rollback_table())
         self.run_to(9, 31)
         self.assertEqual(self.families.rows["vert"]["band"], "candidate", "demoted on the whole record")
+
+    def test_under_dm1_the_negative_whole_record_keeps_the_probe(self):
+        self.probe("2026-09-26T00:00:00Z", returns=[-0.2, 0.1, -0.3, -0.1] * 6)
+        self.run_to(9, 31)
+        self.assertEqual(self.families.rows["vert"]["band"], "probe")
 
     def test_selection_of_an_old_version_restarts_the_fresh_evaluation_window(self):
         self.probe("2026-08-31T12:00:00Z")

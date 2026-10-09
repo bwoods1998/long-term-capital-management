@@ -26,10 +26,168 @@ any other deploy.
 
 ## Not yet deployed
 
-The running House release is `20261008T124025Z-a9686c7cfcfd` (main `ab64c68b`, 12:41Z Oct 8, below), the gateway is
-`f63dd354`, and the box's updater is on. What is built and not deployed is on branches.
+The running House release is `20261009T025942Z-376c84971b5e` (main `ccfa48d5`, 03:00Z Oct 9, below), the gateway is
+`8072b5b1`, and the box's updater is on. What is built and not deployed is on branches.
 
-### The learning game v1, on `release/learning-game` (unreleased; an owner deploy)
+### Release L-D, on `release/ld-net-budget` (unreleased; an owner deploy, evidence reset 5; money digest `1665c385` -> `0310779c`)
+
+The one planned evidence reset of Oct 9 (the plan of Oct 9, "L: Release L-D", and its critic). Claude's decisions under
+the owner's goal of Oct 7, item 4 (Probe sizing up to 10% of equity a position, a Probe loss budget up to $400 in total)
+and item 5 (every loosened rule reported with its cost), and, for the budget's two figures (L9), the owner's goal as he
+re-set it on Oct 9 (about 06:20Z), item 4: "Probe loss budget: $400 net in any rolling 20 sessions and $800 net in
+total (realized Probe losses net of Probe gains, plus the maximum loss of everything open)". The 10% is unchanged.
+Operator's page: **Release L-D** at the top of `docs/operations.md`.
+- **L1, the budget read NET** (`options_money.probe.loss_basis` "net"; allowed exactly "gross" and "net"). THE PROBE LOSS
+  BUDGET's realized part is max(0, -(the summed cash of every closed position a Probe family opened)) from inception, in
+  place of GROSS (`real.probe_tally`, now told the basis by `money.Table`; the envelope: realized + every real
+  position's open maximum loss + the new open <= $400, two envelopes since L9). A Probe gain offsets Probe losses; a
+  Sized gain never does.
+  It reverses the fast lane review's deliberate GROSS choice of Oct 7. The refusal, the House warning and the fast lane
+  report's `realized_basis` name the basis in force. Cost (MONEY, U10%-M3, no edge, 8 weeks): P(net <= -$360) 0.19 ->
+  0.27, mean net -$8 -> -$14 (as traded -$45 -> -$64); Done 0.3% -> 2.6% (+5% edge, averaged over holds). Its main
+  effect (the critic, B2, 12 weeks): gross Probe losses pass $400 on 46-72% of paths by hold (p95 $1,318-2,088), the
+  Probe's realized drawdown passes $400 on 32-48% (worst $2,385), net Probe < -$400 on at most 0.5-2.5%; under GROSS all
+  stay at or under about $440. NET is the loosest of GROSS / a high-water mark / NET (12-week Done at zero edge, 3
+  programs, 3-session holds: 0.5% / 3.3% / 12.9%).
+- **L2, 8 Probe slots** (`probe.max_open` 3 -> 8, bound 0-3 -> 0-8). The $400 envelope, not the count, bounds open Probe
+  risk (three $129 units fit, eight $50 ones). Cost: P(net <= -$360) 0.30 -> 0.35, P(net < -$400) 2.1% (through Sized,
+  outside the budget); Done 3.3% -> 6.3%. **The Probe room** the incubator, the House live test and the calibration keep
+  is now min(`max_open` x 10% x E, $400) (`money.probe_room`; the critic, B1: 8 x 10% x E, $1,031.47 at E $1,289.34,
+  would refuse every incubator open); at 3 slots it is fast lane v2's at any E up to $1,333.33.
+- **L3, DM1 demotion** (`probe.demotion` "dm1"; allowed exactly "dm0" and "dm1"). For Probe and Sized families, D5's loss
+  leg and the forward-negative demotion are off; demoted (sticky, exits only) at 10+ real trades whose returns on
+  maximum loss sum below -1.645 x sigma x sqrt(n), sigma the banded version's Validation sd (read from the swarm's state
+  by `league/live/families.py` `validation_r_sd`; its writer ships with release D-1), else the forward record's sd, else
+  2.0. The replay-gap leg and the real_bad hold are kept; a Candidate keeps every "dm0" check; the live state keeps
+  the version DM1 demoted (`dm1_demoted`), held at Candidate whatever sigma or the rule reads later. The band, the open's refusal and the admission read one rule. Every Probe or Sized family,
+  alpha too. Cost (the critic, 4,000 bootstrap paths): fires within 30 closes 6.5-13% at zero edge, 14-22% at -0.10,
+  29-36% at -0.25 (D5: 77/83/90%): the $400 envelope, not demotion, mostly stops a losing program. MONEY: P(net <=
+  -$360) 0.27 -> 0.30; Done 2.6% -> 3.3%.
+- **L9, THE ROLLING PROBE BUDGET** (the owner's goal of Oct 9, item 4). `probe.loss_budget_usd` ($400) is now over the
+  last `probe.loss_window_sessions` (20) New York sessions, today included (the repo's NYSE calendar,
+  `ltcm.data.us_equity_session`; `real.probe_window_start`), beside the new `probe.loss_total_usd` from inception, set
+  to $400: the owner's $400 a window is a wall, read as its worst net stretch, and his $800 in total a ceiling (the
+  operator's decision of Oct 9, after the budget simulation's worst-stretch run); each realized figure read by
+  `loss_basis` (`real.probe_realized`, `real.probe_figures`). Under "net" the window's figure is its WORST NET STRETCH
+  (the review of L-D: with the window's plain net a gain that aged out left more than $400 net in a later 20-session
+  window, every open having passed), so a Probe gain offsets only the losses closed before it there and the $400 holds
+  over every 20-session window as an outcome; the total is the net from inception. A Probe open must fit BOTH
+  envelopes, each with every real position's open maximum loss and the open (`money.plan_open`); the refusal names the
+  one that binds; exits go on. The House warning and the fast lane report (`realized_total_usd`, `total_budget_usd`,
+  `window_sessions`, `window_start`, `binding`) show both figures with the basis. Bounds: window 20-2000 sessions (a
+  longer window is never looser), total $0-800 (raising it to $800 later is CON-only: a money-digest move, no
+  fingerprint move). Cost, as set: the worst net Probe loss from inception stays $400, and the window adds a second
+  wall; a bad stretch that ages out of the window frees no room in the total. Measured (budget simulation, Oct 9,
+  worst-stretch variants, seed 202610097, post-hoc, as traded, holds 2 / 3 / 5): P(Done) 6.0 / 3.3 / 1.0% at 12 weeks
+  and 11.1 / 8.7 / 5.9% at 24, P(net Probe < -$400 within 12 weeks) 0.9-2.1%, P(the 60% drawdown stop by 24 weeks)
+  3.0-8.3%; with an $800 total 7.0 / 3.7 / 1.1%, 14.0 / 10.9 / 7.2%, 37.6-39.2% and 41-46%; with the $400 total and no
+  window 10.0 / 7.6 / 4.5%, 11.0 / 9.0 / 7.6%, 1.3-2.8% and 8.2-13.0% (the table is in `docs/operations.md`).
+- **L5, the marketable natural limit `{"natural": k}`, dropped** (the operator's decision, Oct 9 about 07:40Z). It
+  changed `league/gym/legs.py` and `league/gym/PROGRAM.md`, which moved the Gym bundle (`gym-engine-4-e1c896f8d304` ->
+  `gym-engine-4-460b332db232`), so at the adoption no stored Train or Validation result would have been reused (every
+  one re-run on the 2 Gym boxes the direction lane shipping that day needs) and the 2017-19 extension holds would have
+  been cleared; `{"price": v}` already lets a program pay through. It waits for a planned Gym release (rule F0).
+- **Not done: the narrower fingerprint** (the critic, N8): `league/live/money.py` stays hashed, because the practice
+  book's caps read `money.Table` and the incubator's first-look rule lives there.
+- **Identities.** Constitution digest `5698a2f9` -> `ca89ff8a`; money digest `1665c385` -> `0310779c` (the standing
+  grant re-ratifies at the House's start on the owner's deploy); the execution fingerprint `b4c34031` -> `31a7e921`
+  (league/live changed): the evaluator adoption re-derives every family's bests, and every active practice cohort is
+  completed ("evaluator changed"), the 10 still active of the 12 admitted Oct 8 among them (their incubator first looks
+  were expected about Nov 4-10). No family is banded. The Gym bundle does not move (`gym-engine-4-e1c896f8d304`,
+  production's), so, as at fast lane v2, the re-derivation reuses recorded Train and Validation results and the
+  extension holds stand.
+- **Rollback.** CON-only: `loss_basis` "gross", `max_open` 3, `demotion` "dm0", `loss_total_usd` "400" (the value in
+  force), `loss_window_sessions` 2000 (money digest `320899d6`, constitution `c9d8ef5b`), one owner deploy and no fingerprint
+  move; each value runs fast lane v2's rule, decision for decision (`league/tests/test_ld_release.py`, against a frozen
+  copy of `ccfa48d5`'s code; the 2000-session window holds every close since the fast lane). `floor_box.py rollback`
+  moves the fingerprint again and, after D-1, drops D-1.
+
+### On branches, not in V3-A part 1
+
+- `v3/wp6`, the forward ladder and its benchmark (evidence v3, the owner's D2). As first specified it does not meet its
+  benchmark rule. A tighter design was frozen before any confirmation run; the confirmation, under a rule
+  pre-registered before it, has not been run. It changes `league/live/` and the constitution: an owner deploy and one
+  more evidence reset.
+- `v3/wp7`, credit types at $2,000 of equity or more and a paper proof per type (money rules v3, D3), with the
+  gateway's credit list: an owner deploy and a money-digest move. With the ladder it is V3-A part 2.
+- `v3/b1` (research v3), `v3/b23` (births from the mechanism library, the Train kill tests as code, the strategist's
+  whole agenda), `v3/b4` (the weekly post-mortem and the monthly cost review), `v3/b5` (the engineer and the reviewer).
+  Each changes a protected file as it stands (`league/swarm/settings.py`, the store, the evidence and tournament
+  modules, `league/ops/`), so each is an owner deploy, not an updater release.
+
+## 2026-10-09
+
+### 03:00Z, the cohort keep blocks every retire: House release `20261009T025942Z-376c84971b5e` (main `ccfa48d5`; PR #516)
+
+While the saved incubator keep holds a family, its researcher's retire is not offered (the guard `cohort_keep`), the
+mechanism test's retirement is deferred and the diagnostician's retire defers: after T0 researchers had self-refuted
+three of the twelve cohorts' families, and the incubator pins only a living family's cohort. Swarm-side only: the
+execution fingerprint `b4c34031` and the money digest `1665c385` are unchanged. Local full suites green on 3.11 and 3.14
+(7,642 + 2,005), main's Checks green on the exact head; no open order at 02:59Z (the House test's QQQ position only,
+market closed); PROMOTED 03:00:25Z; previous `20261008T225723Z-dea5c1d54c52`.
+
+## 2026-10-08
+
+### 22:58Z, the incubator unblock, the incubator cap and the contract's natural limit: House release `20261008T225723Z-dea5c1d54c52` (main `a5ff6f9e`; PRs #513, #514, #515), money digest `da5c7542` -> `1665c385`
+
+Owner deploy. Main's Checks green on the exact head (gateway, 3.11, 3.14); local full suites green on both Pythons (7,639
++ 2,005). No order in flight at 22:57Z (the House test's QQQ position only, market closed); PROMOTED 22:58:10Z; previous
+`20261008T190618Z-96ea9c702b14`. The `grant` job ratified on `1665c385` (trigger `digest`); `health.json` reads the
+incubator table's `max_loss_usd` "75". The execution fingerprint `b4c34031` is unchanged: the twelve practice cohorts
+carried over, under the 30-session window.
+- **#513** (`league/CONTRACT.md`): "natural" is priced at the decision minute and rests when the market moves the
+  program's way; to pay through, send `{"price": v}`.
+- **#514, the incubator unblock**: the incubator's mark evaluates the drift screen itself at its defaults while the
+  tournament's screen is off; a practice cohort's window is 30 sessions (`live.observe_max_sessions`, `practice.py`
+  `COHORT_WINDOW`); the swarm loop queues Train and 1.5x re-runs for active cohort versions without a current mark.
+- **#515, the incubator cap**, as built:
+
+One money row moves: `options_money.incubator.max_loss_usd` "50" -> "75" (its bound in `OPTIONS_MONEY_BOUNDS` $0-50 ->
+$0-75), Claude's decision under the owner's goal of Oct 7 (item 4 allows up to 10% of equity at risk per Probe position,
+about $129 at E = $1,288; item 5 asks every loosened rule reported with its cost). Everything else is as it was:
+`week_loss_usd` $150, `max_open` 4, `contracts` 1, the practice rule (3 sessions, 10 program closes, 0.80 coverage), the
+Probe, tuition, calibration, the House test and the gateway's caps. Operator's page: **The incubator cap** in
+`docs/operations.md`.
+- **Why.** The Oct 8 incubator audit found the $50 unit cap refuses most one-lot units of the single-name cohorts, so a
+  cohort that passes its first look often can never open ("could never open") or opens only its cheapest trades. Share
+  of one-lot units (maximum loss plus open and close fees) at or under $50 -> $75 in the active cohorts' Gym Train
+  trades: semis-lead-smallcap 4% -> 71%, smci-mara 40% -> 71%, opening-range 40% -> 62%, china-tech 55% -> 77%,
+  peer-skew 50% -> 71%, index-corr 83% -> 98%, earnings-gap 10% -> 17%, megacap 0% -> 3%, semis-supply 2% -> 2%.
+- **Cost (a loosening).** The row is two caps: a structure's maximum loss with fees, and a family's held and working,
+  each $50 -> $75. The week's bound is unchanged ($150 net realized loss plus residuals; about $650 a month on average,
+  $750 in a five-week month), and at most two $75 units are open at once (three $50 ones before). What rises is how
+  much of that envelope a pass uses: replayed on the 10 live cohorts' eligible Train runs with the practice caps and the
+  route's caps, with no edge after costs (-8% of maximum loss a trade), the expected real loss per first-look pass goes
+  from about $0.40 to $2.45 at today's practice windows, from $2.22 to $25.53 at 30-session windows and from $5.52 to
+  $26.59 at 40-session windows (maximum loss sent per pass $53 -> $145 and $71 -> $164); the worst simulated pass grows
+  from -$272 to -$419 over 30 sessions and from -$310 to -$424 over 40 (several weeks, each inside $150). With zero edge
+  the means are noise around $0. Alone it opens nothing: on this tree no cohort holds a Train-and-drift mark (the
+  drift screen is off), and in the audit's replay 11 of 12 cohorts never reach the first look's 10 program closes
+  inside today's windows.
+- **Identities.** Constitution digest `5edc8956` -> `5698a2f9`; money digest `da5c7542` -> `1665c385`; the execution
+  fingerprint `b4c34031` is unchanged (no `league/gym`, `league/live` or base-file change), so practice cohorts and
+  bands carry over: no evidence reset. The updater never deploys it (the constitution is protected), and merging it
+  holds the updater's later heads until the owner deploys main's head: deploy it right after the merge. The owner's
+  deploy (`floor_box.py deploy`) writes the deploy row, and at the House's start the standing grant re-ratifies on
+  `1665c385` by itself (`league/ops/grant.py`, `LiveGrant.standing`: a moved digest with an owner's deploy on record;
+  `league/tests/test_standing_grant.py` `TheIncubatorCap`); verify the `grant` job's receipt says `ratified` with
+  trigger `digest`, else `python3 scripts/live_trading.py --ratify` on the box. `health.json`
+  `options_live.incubator.table.max_loss_usd` then reads "75". A rollback across it (`floor_box.py rollback`, an
+  owner's release change) re-ratifies on `da5c7542` the same way.
+
+### 22:17Z, the learning game's T0 (no deploy)
+
+After the M0b retro's GO (c +0.44 [0.15, 0.68]), the operator's `t0_apply.py apply gate` at 22:17:02Z: `swarm.json`'s
+`gym.train_from` deleted (the policy's 2022-01-03 applies), `game.mode` "gate", agenda v19 locked, the 2022 input card
+installed (backups `swarm.json.before-t0-20261008T221702Z`, `input-capabilities.json.before-t0-*`). kv `game_t0`
+"2026-10-08T22:17:18Z". The twelve practice cohorts carried over.
+
+### 19:07-19:18Z, the learning game v1 (dormant until T0): House release `20261008T190618Z-96ea9c702b14` (main `7b71cb1a`; PR #512), gateway `8072b5b1`
+
+Owner deploy. Main's Checks green on the exact head (gateway, 3.11, 3.14); local full suites green (2,005 + 7,619). No
+order or position open at 19:06Z; PROMOTED 19:07:43Z; previous `20261008T124025Z-a9686c7cfcfd`. Money digest `da5c7542`
+and the execution fingerprint unchanged. Gateway `8072b5b1-13af-4cf2-a47e-fd40b5b76b27` at 19:18Z (rollback `f63dd354`;
+412/412): `protected.mjs` lists `league/swarm/game.py`. As built:
 
 From T0 no agent sees 2020 or 2021 again; those two years, scored privately at 1.5x the half-spread and net of each
 program's own exposure's drift, decide which programs reproduce and which reach Validation. Researchers keep working on
@@ -78,56 +236,6 @@ Train 2022-2024. `league/swarm/game.py` (new, protected) holds the rules; the bu
   or the store: the execution fingerprint and the money digest are unchanged, no evaluator adoption, and Validation, the
   gate, the holdout look and Probe sizing are as they were. Control and legacy families, and every family with the game
   off, play main's round byte for byte (`league/tests/test_game.py` `Golden`, against `ab64c68b`).
-
-### The incubator cap, on `feat/incubator-cap-75` (unreleased; an owner deploy, money digest `da5c7542` -> `1665c385`)
-
-One money row moves: `options_money.incubator.max_loss_usd` "50" -> "75" (its bound in `OPTIONS_MONEY_BOUNDS` $0-50 ->
-$0-75), Claude's decision under the owner's goal of Oct 7 (item 4 allows up to 10% of equity at risk per Probe position,
-about $129 at E = $1,288; item 5 asks every loosened rule reported with its cost). Everything else is as it was:
-`week_loss_usd` $150, `max_open` 4, `contracts` 1, the practice rule (3 sessions, 10 program closes, 0.80 coverage), the
-Probe, tuition, calibration, the House test and the gateway's caps. Operator's page: **The incubator cap** at the top of
-`docs/operations.md`.
-- **Why.** The Oct 8 incubator audit found the $50 unit cap refuses most one-lot units of the single-name cohorts, so a
-  cohort that passes its first look often can never open ("could never open") or opens only its cheapest trades. Share
-  of one-lot units (maximum loss plus open and close fees) at or under $50 -> $75 in the active cohorts' Gym Train
-  trades: semis-lead-smallcap 4% -> 71%, smci-mara 40% -> 71%, opening-range 40% -> 62%, china-tech 55% -> 77%,
-  peer-skew 50% -> 71%, index-corr 83% -> 98%, earnings-gap 10% -> 17%, megacap 0% -> 3%, semis-supply 2% -> 2%.
-- **Cost (a loosening).** The row is two caps: a structure's maximum loss with fees, and a family's held and working,
-  each $50 -> $75. The week's bound is unchanged ($150 net realized loss plus residuals; about $650 a month on average,
-  $750 in a five-week month), and at most two $75 units are open at once (three $50 ones before). What rises is how
-  much of that envelope a pass uses: replayed on the 10 live cohorts' eligible Train runs with the practice caps and the
-  route's caps, with no edge after costs (-8% of maximum loss a trade), the expected real loss per first-look pass goes
-  from about $0.40 to $2.45 at today's practice windows, from $2.22 to $25.53 at 30-session windows and from $5.52 to
-  $26.59 at 40-session windows (maximum loss sent per pass $53 -> $145 and $71 -> $164); the worst simulated pass grows
-  from -$272 to -$419 over 30 sessions and from -$310 to -$424 over 40 (several weeks, each inside $150). With zero edge
-  the means are noise around $0. Alone it opens nothing: on this tree no cohort holds a Train-and-drift mark (the
-  drift screen is off), and in the audit's replay 11 of 12 cohorts never reach the first look's 10 program closes
-  inside today's windows.
-- **Identities.** Constitution digest `5edc8956` -> `5698a2f9`; money digest `da5c7542` -> `1665c385`; the execution
-  fingerprint `b4c34031` is unchanged (no `league/gym`, `league/live` or base-file change), so practice cohorts and
-  bands carry over: no evidence reset. The updater never deploys it (the constitution is protected), and merging it
-  holds the updater's later heads until the owner deploys main's head: deploy it right after the merge. The owner's
-  deploy (`floor_box.py deploy`) writes the deploy row, and at the House's start the standing grant re-ratifies on
-  `1665c385` by itself (`league/ops/grant.py`, `LiveGrant.standing`: a moved digest with an owner's deploy on record;
-  `league/tests/test_standing_grant.py` `TheIncubatorCap`); verify the `grant` job's receipt says `ratified` with
-  trigger `digest`, else `python3 scripts/live_trading.py --ratify` on the box. `health.json`
-  `options_live.incubator.table.max_loss_usd` then reads "75". A rollback across it (`floor_box.py rollback`, an
-  owner's release change) re-ratifies on `da5c7542` the same way.
-
-### On branches, not in V3-A part 1
-
-- `v3/wp6`, the forward ladder and its benchmark (evidence v3, the owner's D2). As first specified it does not meet its
-  benchmark rule. A tighter design was frozen before any confirmation run; the confirmation, under a rule
-  pre-registered before it, has not been run. It changes `league/live/` and the constitution: an owner deploy and one
-  more evidence reset.
-- `v3/wp7`, credit types at $2,000 of equity or more and a paper proof per type (money rules v3, D3), with the
-  gateway's credit list: an owner deploy and a money-digest move. With the ladder it is V3-A part 2.
-- `v3/b1` (research v3), `v3/b23` (births from the mechanism library, the Train kill tests as code, the strategist's
-  whole agenda), `v3/b4` (the weekly post-mortem and the monthly cost review), `v3/b5` (the engineer and the reviewer).
-  Each changes a protected file as it stands (`league/swarm/settings.py`, the store, the evidence and tournament
-  modules, `league/ops/`), so each is an owner deploy, not an updater release.
-
-## 2026-10-08
 
 ### 12:40Z, even pacing: House release `20261008T124025Z-a9686c7cfcfd` (main `ab64c68b`; PR #510)
 

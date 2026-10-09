@@ -60,7 +60,8 @@ WHAT IT LEAVES THE FAMILIES (the review of #407): every dispatched open, filled 
 loss toward the account-wide day cap (`gateway.day_equity_share` x sizing equity, the lower of the account's equity and
 the grant's capital: $481.63 on Sept 28, 2026), and six slots can dispatch twelve opens of $35-50. So a calibration
 open (the re-price too) goes only while it leaves the families' Probe room (`money.probe_room`: `probe.max_open` x
-`probe.max_loss_share` x E, $386.52 at E $1,288.40 since THE FAST LANE of Oct 7, 2026; two $100 Probe floors before it)
+`probe.max_loss_share` x E, $386.52 at E $1,288.40 since THE FAST LANE of Oct 7, 2026, and at most
+`probe.loss_budget_usd` since release L-D of Oct 9, $400 at 8 slots; two $100 Probe floors before it)
 of that cap for the families' opens. And no round trip starts once the calibration's own legs today (orders and cancels, as
 the House counts them: `day_legs`) reach `DAY_LEGS` (80): a round trip is 4 legs when both mids fill and about 30 at
 its slowest (the open and its cancel, the re-price, six close attempts and their cancels), so the calibration takes at
@@ -154,8 +155,9 @@ REJECT_BACKOFF_MINUTES = 5.0
 #: What a calibration open leaves the families of the account-wide day cap (`gateway.day_equity_share` x sizing
 #: equity, which every dispatched open fills by its whole maximum loss, filled or not): the Probe room
 #: (`money.probe_room`, `probe.max_open` x `probe.max_loss_share` x E; THE FAST LANE, Oct 7, 2026, in place of two $100
-#: Probe floors). The review of #407: six slots' opens could otherwise take $430 of the $481.63 cap on a heavy day.
-FAMILY_ROOM_RULE = "probe.max_open x probe.max_loss_share x E"
+#: Probe floors; at most `probe.loss_budget_usd` since release L-D, Oct 9, 2026). The review of #407: six slots' opens
+#: could otherwise take $430 of the $481.63 cap on a heavy day.
+FAMILY_ROOM_RULE = "min(probe.max_open x probe.max_loss_share x E, probe.loss_budget_usd)"
 #: No new round trip once the calibration's own legs today (its orders and their cancels, as the House counts the day's
 #: 250) reach this: a round trip is 4 legs when both mids fill and about 30 at its slowest, so the day stays under about
 #: 110 of the 250 (the review of #407; before the House's own backstop closes).

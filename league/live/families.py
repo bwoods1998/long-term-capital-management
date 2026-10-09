@@ -5,7 +5,8 @@ The options-swarm run, Wave 5 (Sept 26, 2026), the interface agreed with Wave 4 
 - `league.swarm.bands.read(root)` -> one row per family the live path may run: {family, band ("gym" | "candidate" |
   "probe" | "sized"), structure, roots, holdout_passed, validation_passed, version, code, params, run_sha,
   typical_max_loss_usd (one structure's median maximum loss in its validation run, or None), seed_era, forward
-  (the nightly + shadow + real record, with `negative`)}.
+  (the nightly + shadow + real record, with `negative`)}. `SwarmFamilies.read` adds, for a Candidate, Probe or Sized
+  row, `validation_r_sd` (`validation_r_sd`, below: DM1's sigma, release L-D, Oct 9, 2026).
 - `SwarmStore(root).add_forward(family, "shadow" | "real", trades)`: the live path's forward trades, each once by id, each
   carrying its program `version` (a new version starts its own record).
 - `SwarmStore(root).forward(family)`: the whole forward record, one row a trade ({pnl, max_loss, source, ...}).
@@ -29,6 +30,15 @@ The options-swarm run, Wave 5 (Sept 26, 2026), the interface agreed with Wave 4 
   pin, no incubator open; exits unaffected).
 
 `MemoryFamilies` is the same API in memory, for tests and for a House without the swarm.
+
+DM1'S SIGMA (release L-D, Oct 9, 2026; `money.demotion`): the sd of r (P&L per dollar of maximum loss, a trade) in the
+banded version's Validation run, read from the swarm's family state the way `typical_max_loss_usd` reaches the band
+(the same two keys' shape, read for the row, then checked again by `confirm_band` before a band is written), here in
+the live path (`SwarmFamilies.read` adds it to `bands.read`'s row, which does not carry it):
+`validation_r_sd_by_version[str(version)]`, else `validation_r_sd` while `validation_version` is that version. The
+WRITER is the swarm's tournament beside `typical_max_loss_usd` (`league/swarm/tournament.py`, release D-1); until it
+ships the state has neither key, the row's value is None, and DM1 takes the forward record's sd or its 2.0 fallback
+(`money.dm1_sigma`). A missing, non-numeric, non-finite, zero or negative value reads as absent (`money.positive_sd`).
 """
 
 from __future__ import annotations
@@ -38,6 +48,21 @@ from contextlib import contextmanager
 import threading
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
+
+from .money import positive_sd
+
+
+def validation_r_sd(state: Any, version: Any) -> float | None:
+    """DM1's sigma for `version` from a family's swarm state (the module docstring), or None when it is absent: the
+    per-version map's value, else the scalar while `validation_version` is `version` (as `typical_max_loss_usd`), read
+    by `money.positive_sd` (a positive finite number, else absent). A map that is not a map reads as empty."""
+    if not isinstance(state, Mapping):
+        return None
+    by_version = state.get("validation_r_sd_by_version")
+    by_version = by_version if isinstance(by_version, Mapping) else {}
+    value = by_version.get(str(version),
+                           state.get("validation_r_sd") if state.get("validation_version") == version else None)
+    return positive_sd(value)
 
 
 def _entry_matches(row: Mapping[str, Any] | None, expected: Mapping[str, Any], real: bool) -> bool:
@@ -67,7 +92,10 @@ def _entry_matches(row: Mapping[str, Any] | None, expected: Mapping[str, Any], r
         return False
     if expected.get("tuition"):
         return band == "gym" and bool(row.get("validation_passed")) and not row.get("holdout_passed")
-    return band in ("probe", "sized") and bool(row.get("holdout_passed")) and not (row.get("forward") or {}).get("negative")
+    # `negative_ok` (release L-D): the open's own reading of `money.negative_demotes` under `probe.demotion` "dm1", where a
+    # Probe or Sized family's negative forward record no longer ends its band (DM1 does); True only from the live path.
+    return (band in ("probe", "sized") and bool(row.get("holdout_passed"))
+            and (expected.get("negative_ok") is True or not (row.get("forward") or {}).get("negative")))
 
 
 class SwarmFamilies:
@@ -86,6 +114,23 @@ class SwarmFamilies:
         return self._store
 
     def read(self, family: str | None = None) -> list[dict]:
+        """`bands.read`'s rows, a Candidate's, Probe's or Sized's with its `validation_r_sd` (DM1's sigma, the module
+        docstring), read under the lock; a state that cannot be read gives None, which `confirm_band` then refuses
+        whenever the state holds a value (no band is written on a sigma it did not check)."""
+        rows = self._rows(family)
+        banded = [row for row in rows if row.get("band") in ("candidate", "probe", "sized")]
+        if banded:
+            with self.lock:
+                for row in banded:
+                    try:
+                        fam = self._db().family(str(row["family"]))
+                        row["validation_r_sd"] = validation_r_sd((fam or {}).get("state") or {}, row.get("version"))
+                    except Exception:  # noqa: BLE001 - absent; `confirm_band` refuses a mismatch
+                        row["validation_r_sd"] = None
+        return rows
+
+    def _rows(self, family: str | None = None) -> list[dict]:
+        """`bands.read`'s rows as they are (an admission's: it holds the lock and needs no sigma)."""
         from ..swarm import bands
 
         return [dict(row) for row in bands.read(self.root, family=family)]
@@ -133,7 +178,7 @@ class SwarmFamilies:
             yield _entry_matches(row, expected, False)
             return
         with self.lock, self._db().atomic():
-            row = next((r for r in self.read(family) if r["family"] == family), None)
+            row = next((r for r in self._rows(family) if r["family"] == family), None)
             evidence_current = (not real or expected.get("tuition") or
                                 self._db().forward(family) == expected.get("forward_rows"))
             yield _entry_matches(row, expected, real) and evidence_current
@@ -176,6 +221,7 @@ class SwarmFamilies:
                 typical = (state.get("typical_by_version") or {}).get(str(version),
                     state.get("typical_max_loss_usd") if state.get("validation_version") == version else None)
                 if (typical != expected.get("typical_max_loss_usd")
+                        or validation_r_sd(state, version) != expected.get("validation_r_sd")
                         or state.get("forward") != expected.get("forward")
                         or store.forward(fam["id"]) != list(forward)):
                     return False
