@@ -29,6 +29,39 @@ any other deploy.
 The running House release is `20261009T090334Z-cdbf1864a573` (main `40c39435`, release L-D, 09:04Z Oct 9, below), the
 gateway is `8072b5b1`, and the box's updater is on. What is built and not deployed is on branches.
 
+### The direction lane's graveyard, on `fix/dlane-graveyard` (unreleased; an updater release on top of D-1, live since 10:37Z Oct 9 as main `2b60d94a`; no evidence reset)
+
+The operator's decision after the House's architect pass of 11:32Z Oct 9, **a reported loosening**. Operator's page:
+**The graveyard** in the Release D-1 section of `docs/operations.md`. Swarm-side only (`league/swarm/cards.py`,
+`league/swarm/architect.py`, tests, docs): no `league/live/`, `league/gym/`, `league/constitution.py` or other
+protected path, so the updater ships it. The execution fingerprint (`31a7e921`), the money digest (`0310779c`) and the
+constitution digest (`ca89ff8a`) do not move.
+- **What was wrong.** Live D-1 refused direction cards on alpha graveyard rows: low-iv-drift-call and
+  calm-trend-drift-call were refused because their mechanism text reads as the trend_momentum cell, which holds dead
+  alpha rows (the refusal: 15 rows, 7 that need a claim, the newest persistent-ceiling-rejection-put, REFUTED). Those
+  verdicts judged timing edges against drift under the alpha rules. They say nothing about a direction program, which
+  direction-v2 judges as labelled beta, under the lane's own multiplicity control (one Validation try and one look per
+  lineage, D2's false-positive rate measured per program).
+- **The rule.** While `dlane.mode` is not "off", a DIRECTION card is bound only by the graveyard rows of DIRECTION
+  families. A row's lane is read the way D-1 stores it: the family's spec `lane`, else its card's `lane`, else its
+  `card_sha`'s card for a fork. A family with no lane is alpha. DRIFT rows still never bind a direction card. A
+  direction family's REFUTED, MECHANISM or other verdict row still needs the full rebirth claim with its budgets. A
+  claim a direction card makes on an alpha row is checked as one on a DRIFT row: a rebirth only when it holds, otherwise
+  dropped. Alpha cards are unchanged: every row binds them.
+- **The architect's view.** The LANES block and the BIRTH CELLS header say what binds a direction card. Each cell line a
+  direction card may land in counts the rows that bind one, so no alpha row reads as closing a direction cell. `closed`
+  (no paid pass without a cell) follows the same rule. A direction birth's `swarm.born` card carries `alpha_rows`.
+- **Its cost.** More direction births may retry ideas similar to dead alpha ones. Each such lineage still gets one
+  Validation try and one holdout look, at D2's measured false-positive rate of 10.4% per program (mixed worlds). The
+  `dlane` report's loosened-rules header (`league/ops/`, an owner-deploy path) does not list it yet.
+- **Proof.** `test_dlane_graveyard`: a direction card in a cell of alpha REFUTED and MECHANISM rows only is admitted
+  (the live example among them); a direction family's REFUTED row still needs a claim; alpha cards' verdicts and every
+  reading with `dlane.mode` "off" equal main `2b60d94a`'s on a fixture store (golden digests computed on that commit).
+- **Rollback.** Revert the commit (`dlane.mode` "off" rolls back the whole lane).
+- **Known, not changed:** with `architect.max_rebirths_per_cell` 0, a claim that passes every other test raises
+  `KeyError` in `RebirthIndex._claim` (it reads `cell_births[cell]` for a cell with no rebirth yet). No deployed
+  setting reaches it (policy.json sets 12).
+
 ### Release D-1b, the direction lane on D2, on `release/dlane-d1` (unreleased; in D-1's owner deploy; no evidence reset)
 
 On top of D-1, same branch, same deploy. It switches the direction lane to the D2 screen and meets the owner's goal of

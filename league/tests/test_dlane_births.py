@@ -161,7 +161,8 @@ class CardsInTheLane(unittest.TestCase):
 
 
 class DriftRows(Case):
-    """A DRIFT row binds no direction card; every other verdict binds both lanes (HARNESS 2.1, 7.4)."""
+    """A DRIFT row binds no direction card; every other verdict of a direction family binds both lanes (HARNESS 2.1, 7.4;
+    since Oct 9 an alpha family's row binds no direction card: test_dlane_graveyard)."""
 
     def setUp(self):
         super().setUp()
@@ -185,13 +186,18 @@ class DriftRows(Case):
         self.assertFalse(refused["ok"])
         self.assertEqual(refused["tag"], "DRIFT")
 
-    def test_every_other_verdict_binds_a_direction_card(self):
+    def test_every_other_verdict_of_a_direction_family_binds_a_direction_card(self):
         self.bury("stress-trend", self.alpha_trend, reason=idle_cause("stress"), structure="long_single",
                   mechanism="Index trend continuation calls held a week after a breakout, again.")
+        admitted = self.index().check(self.trend, "long_single", "Index trend continuation calls held a week.")
+        self.assertEqual((admitted["ok"], admitted["drift_lane"], admitted["alpha_rows"]), (True, True, 2),
+                         "an alpha family's STRESS row binds no direction card (Oct 9)")
+        self.bury("stress-trend-dir", self.trend, reason=idle_cause("stress"), structure="long_single",
+                  mechanism="Index trend continuation calls held a week after a breakout, in the lane.")
         refused = self.index().check(self.trend, "long_single", "Index trend continuation calls held a week.")
         self.assertFalse(refused["ok"])
-        self.assertEqual((refused["tag"], refused["need"]), ("STRESS", 1))
-        self.assertIn("(a DRIFT row binds no direction card)", refused["reason"])
+        self.assertEqual((refused["row"], refused["tag"], refused["need"]), ("stress-trend-dir", "STRESS", 1))
+        self.assertIn("(only a direction family's row binds a direction card, and never a DRIFT row)", refused["reason"])
         ep, _ = cards.validate(DIR, "long_single", roots=["SPY"], settings=self.settings)
         self.bury("mech-ep", {**ep, "inputs": ["implied_vol", "underlying_price"]},
                   reason=mechanism.MECHANISM_CAUSE.format(n=3), structure="long_single", mechanism=DMECH)

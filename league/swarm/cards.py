@@ -98,14 +98,39 @@ vocabulary, the cells and every reader of the eleven classes stay as they were. 
 card (`"lane": "direction"`, inside its canonical JSON and so its sha; a fork or a game child reads it through the
 sha): an alpha card's canonical JSON, and so its sha, is byte for byte the release before's. A DRIFT row never binds a
 direction card (`RebirthIndex.needs_claim`: the drift screen charges the profit of exposure, and in the direction lane that
-profit is what counts, reported beside the same-risk buy-and-hold); every other mechanism verdict binds both lanes as
-before, and direction rows bind alpha cards as any row does. A claim a direction card makes on a DRIFT row anyway is a
+profit is what counts, reported beside the same-risk buy-and-hold); every other mechanism verdict of a DIRECTION family
+binds direction cards (since Oct 9 an alpha family's row binds none: the next section), and direction rows bind alpha
+cards as any row does. A claim a direction card makes on a DRIFT row anyway is a
 rebirth only when it holds, and then spends the row's and the cell's rebirth budgets (such an idea returns once each, as
 `architect.max_rebirths_per_row` allows); one that does not hold is stripped before the card is stored (`dropped`), as in
 an open cell. The BIRTH CELLS gain the lane's own cells (`equity_premium / directional / <each of the lane's holdings>`),
 so a pass the old cells would have closed still asks for direction cards. Its cost (HARNESS 7.4): direction ideas the
 drift screen buried may be born again, once each within the rebirth budgets. With `dlane.mode` "off" none of this acts:
 `lane` is ignored as any unknown key is, and the vocabulary, the cells and every check are the release before's.
+
+THE DIRECTION LANE'S GRAVEYARD (Oct 9, 2026; the operator's decision after the House's architect pass of 11:32Z, A
+REPORTED LOOSENING). WHY: with D-1 live (10:37Z, main 2b60d94a) direction cards were refused by alpha rows. The live
+refusal of low-iv-drift-call (and of calm-trend-drift-call alike): "its cell (equity_premium / directional / days_4_10 /
+clock+implied_vol+underlying_price), and the trend_momentum cell its own mechanism text reads as, hold 15 graveyard
+row(s) killed by a mechanism verdict, the newest persistent-ceiling-rejection-put (REFUTED) of the 7 that need a claim".
+Those verdicts judged timing edges against drift under the alpha rules; they say nothing about a direction program,
+which is judged as labelled beta by direction-v2, and the direction lane has its own multiplicity control (one
+Validation try and one holdout look per lineage; D2's false-positive rate measured per program). THE RULE: while the
+lane is on, a DIRECTION card is bound only by the graveyard rows of DIRECTION families (`RebirthIndex.binds_direction`,
+`needs_claim`). A row's lane is read the way D-1 stores it (`row_lane`): its family's spec's `lane`, else its card's,
+else, for a fork without a card of its own, the card its spec's `card_sha` names; a family with none of these is alpha.
+A DRIFT row still never binds a direction card. A direction family's row with any other mechanism verdict binds as
+before, through the whole rebirth claim (a valid `rebirth`, the row's and the cell's budgets). An alpha family's row
+is still MATCHED (so a claim a direction card makes on one is checked, as on a DRIFT row: a rebirth only when it
+holds, spending the budgets, else `dropped`), and `check` counts such rows (`alpha_rows`). Alpha cards are judged
+exactly as before: every row binds them, a direction family's included. The architect's view follows the rule: the
+LANES block says it (architect.py `lanes_block`), each BIRTH CELLS line of a cell a direction card may be declared in
+(`direction_cells`) says how many of its rows bind a direction card (`cells`), and `bearable` (so `Architect.closed`)
+reads a cell whose rows bind no direction card as one a direction card can bear. ITS COST: more direction births may
+retry ideas similar to dead alpha ones (a call that rents a calm trend reads as the trend_momentum cell's dead timing
+edges); each such lineage still gets one Validation try and one holdout look, at D2's measured false-positive rate of
+10.4% per program on mixed worlds. With `dlane.mode` "off" nothing here acts (no row carries a lane, and a direction
+card, which the architect never admits then, is read as D-1 read it).
 
 Standard library only.
 """
@@ -256,6 +281,34 @@ def lane_cells(settings: Mapping[str, Any] | None, families: Iterable[str]) -> l
         return []
     c = dlane.cfg(settings)
     return [(k, "directional", h) for k in LANE_CLASSES if k in c["classes"] for h in c["holding"] if h in HOLDING]
+
+
+def direction_cells(settings: Mapping[str, Any] | None) -> set[tuple[str, str, str]]:
+    """THE DIRECTION LANE'S GRAVEYARD (Oct 9, 2026): every cell a direction card may be declared in (the lane's classes,
+    `trend_momentum` included, by its holdings, in the directional family: `dlane.card_errors`' box) while the lane is
+    on; empty otherwise. Their BIRTH CELLS lines say how many rows bind a direction card (`RebirthIndex.cells`)."""
+    if not dlane.on(settings):
+        return set()
+    c = dlane.cfg(settings)
+    return {(k, "directional", h) for k in c["classes"] for h in c["holding"]}
+
+
+def row_lane(fam: Mapping[str, Any] | None, card: Any, lanes_by_sha: Mapping[str, str]) -> str:
+    """THE DIRECTION LANE'S GRAVEYARD (Oct 9, 2026): a graveyard row's lane, read the way release D-1 stores it
+    (`dlane.declared_lane`, from rows already in hand): its family's spec's `lane`, else its own card's (`card`), else
+    (a fork) the card its spec's `card_sha` names (`lanes_by_sha`: each stored card's lane by sha), else "alpha": every
+    family born before the lane, or without a lane, is alpha."""
+    raw = fam.get("spec") if isinstance(fam, Mapping) else None
+    try:
+        spec = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        spec = None
+    spec = spec if isinstance(spec, Mapping) else {}
+    if spec.get("lane") in dlane.LANES:
+        return str(spec["lane"])
+    if isinstance(card, Mapping):
+        return dlane.lane_value(card)[0]
+    return lanes_by_sha.get(str(spec.get("card_sha") or ""), dlane.ALPHA)
 
 
 # ----------------------------------------------------------------------------------------------------------- the schema
@@ -818,12 +871,19 @@ class RebirthIndex:
         self._yields: dict[tuple[str, str, str], dict[str, int]] | None = yields if self.yield_cfg is not None else None
         self.yield_error: str | None = None
         self.exclude = frozenset(exclude)
+        # THE DIRECTION LANE'S GRAVEYARD (Oct 9, 2026): while the lane is on each row carries its family's lane
+        # (`row_lane`), read from the card table here (a fork's card by its spec's `card_sha`: `lanes_by_sha`).
+        self.lane_on = dlane.on(self.settings)
         cards: dict[str, dict[str, Any]] = {}
+        lanes_by_sha: dict[str, str] = {}
         if _tables(store):
-            for r in store._all("SELECT family, card, key, at FROM family_cards ORDER BY at, family"):
+            for r in store._all("SELECT family, sha, card, key, at FROM family_cards ORDER BY at, family"):
+                card = json.loads(r["card"])
+                if self.lane_on and r["sha"] not in lanes_by_sha:  # the oldest card of a sha, as `card_of` reads a fork's
+                    lanes_by_sha[r["sha"]] = dlane.lane_value(card)[0]
                 if r["family"] in self.exclude:
                     continue
-                cards[r["family"]] = {"key": json.loads(r["key"]), "card": json.loads(r["card"]), "at": r["at"]}
+                cards[r["family"]] = {"key": json.loads(r["key"]), "card": card, "at": r["at"]}
         families = {f["id"]: f for f in store._all("SELECT id, lineage, retire_reason, spec FROM families")}
         self.rows: list[dict[str, Any]] = []
         for g in store._all("SELECT family, at, mechanism, structure, roots, lesson FROM graveyard ORDER BY at, family"):
@@ -845,10 +905,13 @@ class RebirthIndex:
                 key, legacy = infer_key(g["mechanism"], g["structure"], dte), True
             if key is None:
                 continue
-            self.rows.append({"row": g["family"], "at": g["at"], "tag": tag, "key": key, "legacy": legacy,
-                              "inputs": sorted(key["inputs"]) if key.get("inputs") is not None else infer_inputs(g["mechanism"]),
-                              "structure": g["structure"], "mechanism": _text(g["mechanism"])[:300],
-                              "lesson": lesson_view(g["lesson"])[:400]})
+            row = {"row": g["family"], "at": g["at"], "tag": tag, "key": key, "legacy": legacy,
+                   "inputs": sorted(key["inputs"]) if key.get("inputs") is not None else infer_inputs(g["mechanism"]),
+                   "structure": g["structure"], "mechanism": _text(g["mechanism"])[:300],
+                   "lesson": lesson_view(g["lesson"])[:400]}
+            if self.lane_on:
+                row["lane"] = row_lane(fam, carded["card"] if carded is not None else None, lanes_by_sha)
+            self.rows.append(row)
         self.by_id = {r["row"]: r for r in self.rows}
         # The rebirths born so far: by the row each named (for ever) and by that row's cell (within the window).
         cutoff = None
@@ -920,11 +983,18 @@ class RebirthIndex:
         cfg = self.yield_cfg or CELL_YIELD_DEFAULTS
         return tally["births"] >= int(cfg["min_births"]) and wilson_upper(tally["passed"], tally["births"]) < float(cfg["floor"])
 
+    def binds_direction(self, row: Mapping[str, Any]) -> bool:
+        """THE DIRECTION LANE'S GRAVEYARD (Oct 9, 2026): may `row` bind a direction card at all: while the lane is on,
+        only a direction family's row (`row_lane`); while it is off, every row (D-1's reading, which excused DRIFT
+        alone)."""
+        return not self.lane_on or row.get("lane") == dlane.DIRECTION
+
     def needs_claim(self, row: Mapping[str, Any], lane: str | None = None) -> bool:
         """Does a matched row by itself need a rebirth claim: every mechanism-verdict row while `architect.cell_yield` is
         off; with it on, every row of an exhausted cell and, in an open cell, every row but the `YIELD_EXCUSED`. `lane`
-        (THE DIRECTION LANE, `lane_of_card`): a DRIFT row never needs one from a direction card."""
-        if lane == dlane.DIRECTION and row["tag"] == "DRIFT":
+        (THE DIRECTION LANE, `lane_of_card`): a DRIFT row never needs one from a direction card, and (THE DIRECTION
+        LANE'S GRAVEYARD, Oct 9, 2026) neither does an alpha family's row (`binds_direction`)."""
+        if lane == dlane.DIRECTION and (row["tag"] == "DRIFT" or not self.binds_direction(row)):
             return False
         return row["tag"] not in YIELD_EXCUSED or self.exhausted(cell_of(row["key"]))
 
@@ -993,29 +1063,35 @@ class RebirthIndex:
         lesson}. ok with no match; ok with a match only through a valid `rebirth` (the module docstring). THE CELL'S
         YIELD: ok with "open" when every matched row is one an open cell excuses; "dropped" (why) when the card's claim
         there did not hold and must be stripped before the card is stored. THE DIRECTION LANE: ok with "drift_lane" (in
-        place of "open") when a direction card matched rows only its lane excuses (DRIFT: `needs_claim`), "dropped" alike."""
+        place of "open") when a direction card matched rows only its lane excuses (DRIFT and, THE DIRECTION LANE'S
+        GRAVEYARD, an alpha family's rows: `needs_claim`), "dropped" alike; "alpha_rows", for a direction card, the
+        matched rows of alpha families (none binds it), on every verdict that matched one."""
         hit, text_class = self.matched(card, structure, mechanism, dte)
         if not hit:
             return {"ok": True, "matched": []}
         lane = lane_of_card(card)
         need = [r for r in hit if self.needs_claim(r, lane)]
+        # THE DIRECTION LANE'S GRAVEYARD: how many matched rows its lane read as alpha (0, and no key, for an alpha card
+        # and with the lane off).
+        alpha = sum(1 for r in hit if not self.binds_direction(r)) if lane == dlane.DIRECTION else 0
+        extra = {"alpha_rows": alpha} if alpha else {}
         if not need:
             # THE CELL'S YIELD: only an open cell's self-refuted and drift rows matched, and they need no claim. A claim
             # made anyway is a rebirth only when it holds (every test below, budgets included); else the proposal is born
             # without it (`dropped`: the architect strips it before the card is stored), so no unchecked claim links a
-            # lineage or spends a budget. THE DIRECTION LANE: a direction card's DRIFT rows the same way ("drift_lane"
-            # when its lane, not the cell's yield, excused them).
+            # lineage or spends a budget. THE DIRECTION LANE: a direction card's DRIFT rows, and its alpha families'
+            # rows, the same way ("drift_lane" when its lane, not the cell's yield, excused them).
             ids = [r["row"] for r in hit]
             why = "drift_lane" if lane is not None and any(self.needs_claim(r) for r in hit) else "open"
             out = {"ok": True, "matched": ids[-12:], "count": len(hit), why: True,
-                   **({"text_class": text_class} if text_class else {})}
+                   **({"text_class": text_class} if text_class else {}), **extra}
             if isinstance(card, Mapping) and isinstance(card.get("rebirth"), Mapping):
                 claim = self._claim(card, structure, hit, text_class)
                 if claim["ok"]:
-                    return {**claim, why: True}
+                    return {**claim, why: True, **extra}
                 out["dropped"] = claim["reason"]
             return out
-        return self._claim(card, structure, hit, text_class, need if len(need) < len(hit) else None)
+        return {**self._claim(card, structure, hit, text_class, need if len(need) < len(hit) else None), **extra}
 
     def _claim(self, card: Mapping[str, Any], structure: Any, hit: list[dict[str, Any]], text_class: str | None,
                need: list[dict[str, Any]] | None = None) -> dict[str, Any]:
@@ -1032,8 +1108,10 @@ class RebirthIndex:
                  f"{newest['row']} ({newest['tag']})")
         if need is not None:
             out["need"] = len(need)
-            if lane_of_card(card) == dlane.DIRECTION:  # THE DIRECTION LANE: its DRIFT rows were the ones excused
-                where = (f"{where} of the {len(need)} that need a claim (a DRIFT row binds no direction card"
+            if lane_of_card(card) == dlane.DIRECTION:  # THE DIRECTION LANE: its DRIFT rows (and alpha rows) were excused
+                where = (f"{where} of the {len(need)} that need a claim ("
+                         + ("only a direction family's row binds a direction card, and never a DRIFT row" if self.lane_on
+                            else "a DRIFT row binds no direction card")
                          + ("; an open cell's self-refuted and drift rows need none)" if self.yield_cfg is not None else ")"))
             else:
                 where = (f"{where} of the {len(need)} that need a claim (an open cell's self-refuted and drift rows alone need "
@@ -1113,7 +1191,7 @@ class RebirthIndex:
         """Can a birth land in `cell` now (`rows`: its mechanism-verdict rows): no row needs a claim there (an empty cell,
         or THE CELL'S YIELD's open one), or it has rebirth room and a row a claim may still name (one that has backed
         fewer than `architect.max_rebirths_per_row` rebirths). `lane` "direction": a direction card's birth (its DRIFT rows
-        need no claim)."""
+        and, THE DIRECTION LANE'S GRAVEYARD, its alpha families' rows need no claim: `needs_claim`)."""
         if not any(self.needs_claim(r, lane) for r in rows):
             return True
         return self.room(cell) > 0 and any(self.backed.get(r["row"], 0) < self.per_row for r in rows)
@@ -1129,7 +1207,11 @@ class RebirthIndex:
         now, while `architect.structures` leaves any type out): every cell of those families and no other (`grid`: the
         ones with rebirth room first, then the ones no row is in, then the ones at room 0), whatever `limit` says; a
         cell no row is in says a card there needs no rebirth. `chars` (with `families`): the most characters the lines
-        may run to; past it the last cells of the list give up their claimable rows, never their line."""
+        may run to; past it the last cells of the list give up their claimable rows, never their line. THE DIRECTION
+        LANE'S GRAVEYARD (Oct 9, 2026; while the lane is on): each line of a cell a direction card may be declared in
+        (`direction_cells`) that has rows also says how many of them bind a direction card (`needs_claim` with the
+        lane: a direction family's row that is not DRIFT), so no alpha row reads as closing a direction cell."""
+        lane_box = direction_cells(self.settings)
         if families is not None:
             ranked = self.grid(families)
         else:
@@ -1150,6 +1232,11 @@ class RebirthIndex:
             if self.yield_cfg is not None:
                 line += ("; exhausted: every row needs a claim" if self.exhausted(cell)
                          else f"; open: {need} of its rows need a claim" if need else "; open: no row needs a claim")
+            if cell in lane_box:  # THE DIRECTION LANE'S GRAVEYARD: what binds a direction card here
+                bind = sum(1 for r in rows if self.needs_claim(r, dlane.DIRECTION))
+                verb = "binds" if bind == 1 else "bind"
+                line += (f"; a direction card: {bind} of its rows {verb} one (direction families')" if bind
+                         else "; a direction card: no row binds one (alpha families' and DRIFT rows never do)")
             named = []
             if claimable > 0 and room > 0 and need:
                 named = [r for r in reversed(rows) if self.backed.get(r["row"], 0) < self.per_row][:claimable]
@@ -1171,4 +1258,4 @@ __all__ = ["MECHANISM_CLASSES", "LANE_CLASSES", "mechanism_classes", "lane_of_ca
            "validate", "canonical", "card_sha", "structure_family", "flat_allowed", "key_of", "key_text", "ensure", "put",
            "card_of", "add_evidence", "evidence", "vocabulary_text", "brief_text", "infer_key", "infer_inputs", "match_inputs",
            "match_keys", "matches", "cell_of", "RebirthIndex", "YIELD_EXCUSED", "CELL_YIELD_DEFAULTS", "WILSON_Z",
-           "wilson_upper", "cell_yield_settings", "cell_yields"]
+           "wilson_upper", "cell_yield_settings", "cell_yields", "direction_cells", "row_lane"]
