@@ -362,6 +362,10 @@ DEFAULTS: dict[str, Any] = {
     },
     "forward": {
         "every_seconds": 3600,          # look for a new forward day on the gate image this often
+        # THE PER-CLOSE FILL REPLAY (Oct 10, 2026; league/ops/twins.py; the readiness audit's B1 (c)): each real close's
+        # own orders replayed on the gate image, at most `max_jobs` Gym jobs a pass, a failed job asked again at most
+        # `attempts` times. null (or false) switches it off: no job, no read of the live book.
+        "twins": {"max_jobs": 12, "attempts": 3},
     },
     "guard": {
         "every_seconds": 180,

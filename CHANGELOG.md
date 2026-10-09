@@ -29,6 +29,31 @@ any other deploy.
 The running House release is `20261009T090334Z-cdbf1864a573` (main `40c39435`, release L-D, 09:04Z Oct 9, below), the
 gateway is `8072b5b1`, and the box's updater is on. What is built and not deployed is on branches.
 
+### The per-close fill replay, on `wfix/replay` (unreleased; an owner deploy on main `cf96b72c`; no evidence reset)
+
+The readiness audit of Oct 9, blocker B1 (c). Operator's page: **The per-close fill replay** at the top of
+`docs/operations.md`. Every real close of an agent program gets its own replay twin: the real trade's own orders (its
+contracts, the open's decision minute, limit, size and time in force, each close order the venue received), replayed by
+a fixed Gym program on the gate image with the Gym's own engine and fill model, one gate job a close over the trade's own
+sessions. Done item 4 then compares each close with its own twin instead of a nightly replay that may not trade the day
+the real program did (pid 41 has no nightly match: v17's replay holds Oct 8 to Oct 12).
+- **New:** `league/ops/twins.py` (the puppet program, the plan from the live book read-only, the verdict, the round);
+  `league/swarm/loop.py` runs it as its own round after the nightly forward; `league/swarm/settings.py`
+  `forward.twins` {max_jobs 12, attempts 3}, null or false is off. Records in the swarm store's kv `close_twins`.
+- **The report:** `league/ops/dlane_report.py` `replay_gap` matches a close with a priced twin to it, never matches a
+  close with a final unpriced twin (no_fill, no_contract, unpriceable) to the nightly replay instead, and falls back to
+  the nightly (version, day) match only for a close with no record; with no record the figures are D5's key for key.
+  `replay_twins` lists every counted close with its verdict, both returns on maximum loss, the gap and both exits.
+- **Walls.** Nothing in `league/live/`, `league/gym/` or `league/constitution.py`: the execution fingerprint
+  (`31a7e921`), the money digest (`0310779c`) and the gate contract sha (`397b22b772b3`) do not move (checked at the
+  branch head). No band, forward record, trial count or money moves; a twin is not a research run.
+- **Proof.** `league/tests/test_close_twins.py`: the plan on the live book's own shapes (pid 14's and pid 41's), the
+  puppet through the real batch runner on a synthetic gate store (the exact contract among decoys, the Gym's expiry
+  close, a program close on its day and minute, a vertical left to expire, the model's no-fill, a contract missing at the
+  minute, an image without the entry day), the round (one gate job a close, no run row, only once the image holds the
+  exit day, never a House route, retries per ready day, the switch), the loop's round, and the report's matching.
+- **Rollback.** The previous House release: it never reads `close_twins`.
+
 ### The budget split and the graveyard's report row, on `fix/budget-split-sail` (unreleased; an owner deploy on main `d70e00c3`; no evidence reset)
 
 Two operator decisions of Oct 9 (about 16:00Z). Operator's page: **The budget split** at the top of

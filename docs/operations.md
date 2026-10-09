@@ -8,6 +8,64 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## The per-close fill replay (Oct 10, 2026): built on `wfix/replay`, not deployed
+
+The readiness audit of Oct 9 (blocker B1): the Done rule's item 4, "live fills consistent with their replay", could pass
+with no replay evidence. A real close was matched to its program's NIGHTLY forward replay by (version, entry day), and
+that replay drifts out of phase with the real account for good. Direction v17 holds one position to expiry, so its
+replay, which entered Oct 8 and holds to Oct 12, could not enter on Oct 9, the day pid 41 opened: pid 41 has no match.
+The amendment A1.1 (pinned Oct 9) now requires measured matches; this release makes one for every real close.
+
+**What a twin is** (`league/ops/twins.py`). The real trade's OWN orders, replayed on the gate image by the Gym's own engine
+and fill model:
+- A fixed Gym program (the puppet; its sha is in every record) holds one real position in its PARAMS: the contracts
+  (strike, right, side, ratio, days to expiry on the entry day), the open order's decision minute, limit, size and time in
+  force, and every later close order the venue received, at its own day and minute. It finds each contract by exact
+  strike, right and expiry at the entry minute and sends the same open at the same limit.
+- The House's expiry close is never replayed: the Gym's venue makes its own on the expiry day (the live path's rule). A
+  close the gateway or the House refused never reached the venue and is not replayed either. A House-forced close on
+  another day (an orphan's) is replayed at the natural.
+- One Gym job a close, window "forward" cut to the trade's own sessions, on the gate box (the gate's own reason, as the
+  nightly forward), at priority 4 (under the nightly forward's 5). No `runs` row and no trial: a twin is not research,
+  and nothing an agent reads changes.
+- The verdict: `priced` (one trade entered on the real entry day, over exactly the trade's NYSE sessions); `no_fill` (the
+  model would not fill the real open: counted, never a gap); `no_contract` (the image has no two-sided quote of a leg at
+  the decision minute, or lacks the entry day); `unpriceable` (a leg past 60 days, a broken structure closed leg by leg,
+  a day missing inside the trade's sessions); `failed` (the job failed, or the image stops before the trade's last day:
+  asked again up to 3 times a ready day, and again on the next day's image). Everything else is final once judged.
+- A priced twin's gap is live minus twin, each P&L over its own maximum loss (the book's cash, as D5 reads it), with both
+  exits classified (`exit_agrees`).
+
+**Where it runs.** Its own round in the swarm's loop, after the nightly forward (`league/swarm/loop.py`), once per
+`forward.every_seconds` (an hour) per ready day, only while the guard allows the Gym. A close is twinned once the image
+holds its exit day: pid 14 (the Oct 8 tuition close, GOOGL, Sept 30 to Oct 7) on the first pass; pid 41 (SPY, Oct 9 to
+its Oct 12 expiry) after the Oct 13 data night (about 06:15Z). Cost: one short single-root batch a close on the gate box
+(cents a day).
+
+**What reads it.** The swarm store's kv `close_twins` ({pid: record}). The `dlane` report's Done meter
+(`replay_gap`): a close with a priced twin is matched to it and pooled with the rest as D5's ratio of sums; a close
+whose twin is final but unpriced is counted by verdict (`twin_unpriced`) and never matched to the nightly replay
+instead; a close with no record is matched to the nightly replay exactly as before (with no record at all, the
+figures are D5's, key for key). `dlane-report.json` `replay_twins` lists every counted close with its verdict, live and
+twin return on maximum loss, the gap and both exits.
+
+**The switch.** `swarm.json` `{"forward": {"twins": null}}` (or `false`) turns it off: no job, no read of the live book.
+`{"forward": {"twins": {"max_jobs": 12, "attempts": 3}}}` are the defaults. Deleting the kv `close_twins` puts every close
+back on the nightly match.
+
+**Walls.** Nothing under `league/live/`, `league/gym/` or `league/constitution.py`: the execution fingerprint
+(`31a7e921`), the money digest (`0310779c`) and the gate contract (`397b22b772b3`) do not move, so no Probe program is
+sent back to the Gym (C0). The code lives in `league/ops/` (FORBIDDEN to the updater) because it is the Done meter's
+input: only the owner's deploy changes how a twin is made or judged.
+
+**Deploy class and rollback.** An owner deploy (`league/ops/` and `league/swarm/settings.py` are FORBIDDEN to the
+updater). Roll back to the previous House release: it never reads `close_twins`, and the kv is inert.
+
+**Verify after the deploy** (read-only): the swarm log has a `twins:` line after the next ready day; `swarm.sqlite`
+events of kind `swarm.twin` (action "round"); kv `close_twins` holds pid 14 with a verdict; `dlane-report.json`
+`replay_twins.by_status` counts it. After Oct 13 ~06:15Z, pid 41's record: `priced` with `twin.exit` "house_close"
+expected (the House's expiry close Monday 15:15-15:25 ET, as the Gym's).
+
 ## The budget split (Oct 9, 2026): built on `fix/budget-split-sail`, not deployed
 
 An owner deploy of two operator decisions of Oct 9 (about 16:00Z), cut from main `d70e00c3` (release L-D with D-1,
@@ -446,7 +504,8 @@ writes nothing (a `skipped` receipt). The fast lane's report rows gain `lane` wh
   realized after all fees (the broker's posted fees where they have posted, the book's estimate otherwise, labelled per
   close; an unpriced close makes the net unknown); `done_screen` (`:r` only) and `done_all` (all three); the bar is 30
   closes, 5 closes from each of 2 programs, net > 0; every program with 5+ matched closes (a close on a day its
-  version's nightly replay also traded) has a mean live-minus-replay gap within +/-0.10 a dollar of maximum loss, and a
+  version's nightly replay also traded; from the per-close fill replay of Oct 10, a close with a priced twin of its
+  own, at the top of this page) has a mean live-minus-replay gap within +/-0.10 a dollar of maximum loss, and a
   program under 5 is listed with its gap, never dropped. It is READ only at the 30th close and every 10th after, each
   reading over exactly the first K closes; the running figures between are counts, never a reading. Beside it always:
   P(Done | zero edge) 0.13 (MONEY's simulation under this rule), the same-risk buy-and-hold two ways (delta-matched:

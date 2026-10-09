@@ -37,6 +37,14 @@ constants), read exactly as pinned:
   also traded: D5's measure, `money.forward_stats`, read here live minus replay and pooled over the program's versions)
   has a mean gap within +/-0.10 a dollar of maximum loss. A program under 5 matched closes is listed with its gap,
   never dropped.
+  THE PER-CLOSE TWIN (Oct 10, 2026; the readiness audit's B1 (c); `league/ops/twins.py`): a close whose own replay
+  twin is priced (the real trade's own orders replayed on the gate image by the Gym's engine and fill model, the swarm's
+  kv `close_twins`) is matched to that twin, live minus twin per dollar of each one's maximum loss, pooled with the rest
+  as D5's ratio of sums; a close whose twin is final but unpriced (the model did not fill the real open, the image lacks
+  the contract or the day, the trade cannot be replayed) is counted by its verdict and never matched to the nightly
+  replay instead; a close with no twin record (none yet, or the twins switched off) is matched by (version, entry day)
+  to the nightly replay exactly as before. With no twin record at all a program's figures are exactly D5's, key for key.
+  `replay_twins` lists every counted close with its twin's verdict.
 - READ ONLY AT CHECKPOINTS: the 30th counted close, then every 10th; each reading is over exactly the first K closes in
   close order (`checkpoints`). The running figures between checkpoints are counts, never a reading. A8 (an `info` alert)
   names a checkpoint that holds the first time a report sees it.
@@ -534,13 +542,31 @@ def nightly_rows(store: Any, fid: str) -> list[dict[str, Any]]:
         return []
 
 
+def twin_records(store: Any) -> dict[str, dict[str, Any]]:
+    """The per-close twins (`league/ops/twins.py`: the swarm store's kv `close_twins`, {str(pid): record}); {} when
+    there are none or they cannot be read (every close then falls back to the nightly replay)."""
+    from .twins import records
+
+    return records(store)
+
+
 def replay_gap(program_closes: Sequence[Mapping[str, Any]], nightly: Sequence[Mapping[str, Any]], *,
-               limit: float, min_matched: int) -> dict[str, Any]:
+               limit: float, min_matched: int, twins: Mapping[str, Mapping[str, Any]] | None = None) -> dict[str, Any]:
     """D5's measure, live minus replay, pooled over the program's versions: on every (version, day) on which the program's
     counted closes (by their entry day, as the forward record dates a real trade) and its version's nightly replay both
     traded, sum(live P&L) / sum(live maximum loss) - sum(replay P&L) / sum(replay maximum loss), over the BOOK's cash (as
     D5 reads it). {matched, gap, consistent}: consistent is None under `min_matched` matched closes (listed, never
-    dropped), else |gap| <= `limit`."""
+    dropped), else |gap| <= `limit`.
+
+    THE PER-CLOSE TWIN (Oct 10, 2026; `league/ops/twins.py`, the module docstring): `twins` ({str(pid): record}) puts a
+    close with a PRICED twin into the same sums against its own twin (the twin's P&L and maximum loss, one trade), and
+    keeps a close whose twin is final but unpriced out of every sum (counted in `twin_unpriced` by verdict, never matched
+    to the nightly replay instead); a close with no record, or a "failed" one still to be asked again, is matched to the
+    nightly replay as before. When any of the program's closes has a record the answer also carries `twinned`,
+    `nightly_matched` and `twin_unpriced`; when none has, it is D5's three keys exactly."""
+    from .twins import FINAL
+
+    twins = twins or {}
     replay: dict[tuple[int, str], list[Mapping[str, Any]]] = {}
     for r in nightly:
         v = r.get("version")
@@ -548,14 +574,35 @@ def replay_gap(program_closes: Sequence[Mapping[str, Any]], nightly: Sequence[Ma
             continue
         replay.setdefault((int(v), str(r.get("day") or "")), []).append(r)
     live_pnl = live_loss = replay_pnl = replay_loss = 0.0
-    matched = 0
+    matched = twinned = 0
+    unpriced: dict[str, int] = {}
+    seen_twins = False
     cells: set[tuple[int, str]] = set()
     for c in program_closes:
+        rec = twins.get(str(c.get("pid")))
+        seen_twins = seen_twins or rec is not None
+        cash = _num(c.get("cash_usd"))
+        loss = _num(c.get("max_loss_usd"))
+        status = (rec or {}).get("status")
+        if status == "priced":
+            twin = rec.get("twin") or {}
+            p, m = _num(twin.get("pnl")), _num(twin.get("max_loss"))
+            if cash is None or loss is None or loss <= 0 or p is None or m is None or m <= 0:
+                unpriced["unreadable"] = unpriced.get("unreadable", 0) + 1
+                continue
+            matched += 1
+            twinned += 1
+            live_pnl += cash
+            live_loss += loss
+            replay_pnl += p
+            replay_loss += m
+            continue
+        if status in FINAL:
+            unpriced[str(status)] = unpriced.get(str(status), 0) + 1
+            continue
         key = (c.get("version"), str(c.get("opened_day") or ""))
         if key[0] is None or key not in replay:
             continue
-        cash = _num(c.get("cash_usd"))
-        loss = _num(c.get("max_loss_usd"))
         if cash is None or loss is None or loss <= 0:
             continue
         matched += 1
@@ -570,11 +617,39 @@ def replay_gap(program_closes: Sequence[Mapping[str, Any]], nightly: Sequence[Ma
                 replay_loss += m
     gap = (live_pnl / live_loss - replay_pnl / replay_loss) if matched and live_loss > 0 and replay_loss > 0 else None
     consistent = None if matched < min_matched or gap is None else abs(gap) <= limit
-    return {"matched": matched, "gap": None if gap is None else round(gap, 4), "consistent": consistent}
+    out = {"matched": matched, "gap": None if gap is None else round(gap, 4), "consistent": consistent}
+    if seen_twins:
+        out.update(twinned=twinned, nightly_matched=matched - twinned, twin_unpriced=dict(sorted(unpriced.items())))
+    return out
+
+
+def replay_twins(counted: Sequence[Mapping[str, Any]], twins: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    """THE PER-CLOSE TWIN beside the meter (`league/ops/twins.py`): every counted agent close with its twin's verdict
+    ({pid, family, route, status, live_r, twin_r, gap_r, live_exit, twin_exit, exit_agrees, why}) and the counts by verdict
+    ("none": no record yet, or the twins are off)."""
+    rows, by_status = [], {}
+    for c in counted:
+        rec = twins.get(str(c.get("pid"))) or {}
+        status = str(rec.get("status") or "none")
+        by_status[status] = by_status.get(status, 0) + 1
+        cash, loss = _num(c.get("cash_usd")), _num(c.get("max_loss_usd"))
+        live_r = round(cash / loss, 5) if cash is not None and loss and loss > 0 else None
+        twin = rec.get("twin") or {}
+        twin_r = _num(twin.get("r"))
+        rows.append({"pid": c.get("pid"), "family": c.get("family"), "route": c.get("code") or c.get("route"),
+                     "status": status, "live_r": live_r, "twin_r": twin_r,
+                     "gap_r": round(live_r - twin_r, 5) if live_r is not None and twin_r is not None else None,
+                     "live_exit": (rec.get("live") or {}).get("exit"), "twin_exit": twin.get("exit"),
+                     "exit_agrees": rec.get("exit_agrees"), "why": rec.get("why")})
+    return {"closes": len(rows), "priced": by_status.get("priced", 0), "by_status": dict(sorted(by_status.items())),
+            "rows": rows,
+            "basis": "each real close's own orders replayed on the gate image by the Gym's engine and fill model "
+                     "(league/ops/twins.py); live minus twin per dollar of each one's maximum loss, the book's cash"}
 
 
 def reading(counted: Sequence[Mapping[str, Any]], store: Any, *, nightly_cache: dict[str, list] | None = None,
-            done: Mapping[str, Any] | None = None, lanes: Lanes | None = None) -> dict[str, Any]:
+            done: Mapping[str, Any] | None = None, lanes: Lanes | None = None,
+            twins: Mapping[str, Mapping[str, Any]] | None = None) -> dict[str, Any]:
     """The Done rule over exactly `counted` (the meter's closes, in close order): {closes, programs, net_usd, net_known,
     estimate_closes, unpriced, per_program_ok, consistent_ok, holds, why, by_route, by_program, bh}."""
     from ..swarm import dlane
@@ -590,7 +665,8 @@ def reading(counted: Sequence[Mapping[str, Any]], store: Any, *, nightly_cache: 
     for fid, rows in sorted(by_program.items()):
         if fid not in cache:
             cache[fid] = nightly_rows(store, fid)
-        gap = replay_gap(rows, cache[fid], limit=float(rule["gap_limit"]), min_matched=int(rule["gap_min_matched"]))
+        gap = replay_gap(rows, cache[fid], limit=float(rule["gap_limit"]), min_matched=int(rule["gap_min_matched"]),
+                         twins=twins)
         routes: dict[str, int] = {}
         for c in rows:
             routes[c.get("code") or c["route"]] = routes.get(c.get("code") or c["route"], 0) + 1
@@ -640,7 +716,8 @@ def reading(counted: Sequence[Mapping[str, Any]], store: Any, *, nightly_cache: 
 
 
 def meter(all_closes: Sequence[Mapping[str, Any]], routes: Sequence[str], store: Any, *,
-          nightly_cache: dict[str, list] | None = None, lanes: Lanes | None = None) -> dict[str, Any]:
+          nightly_cache: dict[str, list] | None = None, lanes: Lanes | None = None,
+          twins: Mapping[str, Mapping[str, Any]] | None = None) -> dict[str, Any]:
     """One Done meter (`done_screen` or `done_all`): the agent closes on `routes`, the running figures (never a reading),
     and a reading at every checkpoint reached (the first K closes, K = 30, 40, ...: `dlane.DONE`)."""
     from ..swarm import dlane
@@ -648,11 +725,11 @@ def meter(all_closes: Sequence[Mapping[str, Any]], routes: Sequence[str], store:
     rule = dlane.DONE
     counted = [c for c in all_closes if not c["house"] and c.get("code") in routes]
     cache = nightly_cache if nightly_cache is not None else {}
-    running = reading(counted, store, nightly_cache=cache, lanes=lanes)
+    running = reading(counted, store, nightly_cache=cache, lanes=lanes, twins=twins)
     checkpoints = []
     k = int(rule["first_checkpoint"])
     while k <= len(counted):
-        at = reading(counted[:k], store, nightly_cache=cache, lanes=lanes)
+        at = reading(counted[:k], store, nightly_cache=cache, lanes=lanes, twins=twins)
         checkpoints.append({"at_close": k, "closed_at": _iso(counted[k - 1]["closed_at"]), "holds": at["holds"],
                             "why": at["why"], "closes": at["closes"], "programs": at["programs"],
                             "programs_with_min_closes": at["programs_with_min_closes"], "net_usd": at["net_usd"],
@@ -1245,8 +1322,9 @@ def report(root: str | Path, *, settings: Mapping[str, Any] | None = None, now: 
             if not c["house"]:
                 c["bh"] = buy_and_hold(c, closes_doc)
         cache: dict[str, list] = {}
-        done = {"all": meter(every, dlane.DONE["routes_all"], store, nightly_cache=cache, lanes=lanes),
-                "screen": meter(every, dlane.DONE["routes_screen"], store, nightly_cache=cache, lanes=lanes)}
+        twins = twin_records(store)
+        done = {"all": meter(every, dlane.DONE["routes_all"], store, nightly_cache=cache, lanes=lanes, twins=twins),
+                "screen": meter(every, dlane.DONE["routes_screen"], store, nightly_cache=cache, lanes=lanes, twins=twins)}
         other = [c for c in every if not c["house"] and c.get("code") is None]
         direction = [c for c in every if not c["house"] and c.get("lane") == dlane.DIRECTION and c.get("code")]
         known = [c["pnl_usd"] for c in direction if c.get("pnl_usd") is not None]
@@ -1281,6 +1359,8 @@ def report(root: str | Path, *, settings: Mapping[str, Any] | None = None, now: 
             "direction_net": lane_net,
             "account": account(root, every, activity, previous, now=now),
             "costs": costs(store, since=start, lane_since=_epoch(started) if isinstance(started, str) else None),
+            "replay_twins": replay_twins([c for c in every if not c["house"] and c.get("code") in dlane.DONE["routes_all"]],
+                                         twins),
             "k5": dict(k5),
         }
         out["alarms"] = alarms(store, settings, lanes, book, every, envelope, done, k5, unit, previous, now=now,
@@ -1360,5 +1440,6 @@ def run(ctx: Any) -> dict[str, Any]:
 
 
 __all__ = ["run", "report", "FILE", "CONTAMINATION", "LOOSENED", "TIGHTENED", "closes", "meter", "reading", "replay_gap",
+           "replay_twins", "twin_records",
            "buy_and_hold", "entry_delta", "funnel", "probes", "probe_envelope", "alarms", "fee_corrections", "read_book",
            "version_of", "inception", "Lanes", "ZERO_EDGE_LABEL", "trade_screens", "ALPHA_FP"]
