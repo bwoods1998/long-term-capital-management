@@ -41,8 +41,32 @@ COMMITTED = {"dlane": copy.deepcopy(POLICY["dlane"])}
 #: The committed lane with the map switched off (what swarm.json `dlane.train_map` false reads).
 MAP_OFF = {"dlane": {**copy.deepcopy(POLICY["dlane"]), "train_map": False}}
 ROOT_SETS = (["SPY"], ["QQQ"], ["IWM"], ["SPY", "QQQ"], ["SPY", "QQQ", "IWM"], None)
-#: Figures that must never reach an agent: the account's equity and unit cap, `TRAIN_CLOSE_2024`'s levels.
-PRIVATE = ("1,288", "1288", "128.8", "540.9", "464.4", "211.0", "541", "464", "211")
+#: Figures that must never reach an agent and that the repo already states elsewhere: the account's equity and unit cap
+#: (docs/operations.md) and `TRAIN_CLOSE_2024`'s levels.
+PUBLIC_FIGURES = ("1,288", "1288", "128.8", "540.9", "464.4", "211.0", "541", "464", "211")
+#: The operator's private figures (the census's private notes) are never committed, not even here as a test fixture:
+#: they live in an operator-local file outside the repo that the environment variable `LTCM_PRIVATE_FIGURES` names (one
+#: figure per line, "#" starts a comment). When it is set they join `leaks` and `PrivateFigures` checks them; when it is
+#: not, that test is skipped and the generic checks below (no price-like decimal, no dollar sign) still refuse them.
+PRIVATE_ENV = "LTCM_PRIVATE_FIGURES"
+
+
+def private_figures_file() -> Path | None:
+    """The operator-local private figures file, or None when `LTCM_PRIVATE_FIGURES` is unset or names no file."""
+    name = os.environ.get(PRIVATE_ENV, "").strip()
+    return Path(name) if name and Path(name).is_file() else None
+
+
+def private_figures() -> tuple[str, ...]:
+    """The figures in the operator-local file (none without it)."""
+    path = private_figures_file()
+    if path is None:
+        return ()
+    lines = path.read_text(encoding="utf-8").splitlines()
+    return tuple(f for f in (line.split("#", 1)[0].strip() for line in lines) if f)
+
+
+PRIVATE = PUBLIC_FIGURES + private_figures()
 
 # ---------------------------------------------------------------------------------------- the secrecy checks (tests')
 #: Any year an agent may not read, anywhere, even inside a longer digit run.
@@ -492,6 +516,39 @@ class Wall(unittest.TestCase):
         self.assertTrue(ci.guard(["league/swarm/dlane_map.json"], None))
         self.assertTrue(ci.guard(["league/swarm/dlane_map.json"], "engineer/memory"))
         self.assertEqual(dlane.MAP_PATH, Path(ci.REPO) / "league" / "swarm" / "dlane_map.json")
+
+
+# ------------------------------------------------------------------------------------- 8. the operator's private figures
+class PrivateFigures(unittest.TestCase):
+    def test_the_operators_private_figures_never_reach_an_agent_or_the_repo(self):
+        path = private_figures_file()
+        if path is None:
+            self.skipTest(f"no operator-local private figures file (${PRIVATE_ENV} unset or no file)")
+        self.assertFalse(path.resolve().is_relative_to(Path(ci.REPO).resolve()), "the private file sits outside the repo")
+        figures = private_figures()
+        self.assertTrue(figures, "the private file names figures")
+        texts = {"architect": dlane.train_map_text(COMMITTED)}
+        for roots in ROOT_SETS:
+            texts[f"brief {roots}"] = dlane.brief_text(COMMITTED, roots)
+        # The files this map adds to the repo: the map itself and these tests (their fixtures use other figures).
+        texts["dlane_map.json"] = dlane.MAP_PATH.read_text(encoding="utf-8")
+        texts["test_dlane_trainmap.py"] = Path(__file__).read_text(encoding="utf-8")
+        for name, text in texts.items():
+            for figure in figures:
+                self.assertIsNone(re.search(rf"(?<![\d.,]){re.escape(figure)}(?![\d])", text), (name, "a private figure"))
+
+    def test_the_private_figures_reader(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "figures.txt"
+            p.write_text("# the operator's\n9.87  # a ratio\n\n6,543\n", encoding="utf-8")
+            with mock.patch.dict(os.environ, {PRIVATE_ENV: str(p)}):
+                self.assertEqual(private_figures_file(), p)
+                self.assertEqual(private_figures(), ("9.87", "6,543"))
+            with mock.patch.dict(os.environ, {PRIVATE_ENV: str(Path(d) / "nope.txt")}):
+                self.assertIsNone(private_figures_file())
+                self.assertEqual(private_figures(), ())
+            with mock.patch.dict(os.environ, {PRIVATE_ENV: ""}):
+                self.assertEqual(private_figures(), ())
 
 
 if __name__ == "__main__":
