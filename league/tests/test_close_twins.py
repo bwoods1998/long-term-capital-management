@@ -25,6 +25,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import shutil
+import signal
 import tempfile
 import threading
 import unittest
@@ -49,6 +50,25 @@ if HAVE:
     from league.gym import synth
 
 REPO = Path(__file__).resolve().parents[2]
+_ALARM: dict = {}
+
+
+def setUpModule():
+    if HAVE and hasattr(signal, "SIGALRM"):
+        _ALARM.update(handler=signal.getsignal(signal.SIGALRM), installed=RT._ALARM_INSTALLED)
+
+
+def tearDownModule():
+    # The Gym's runtime installs its SIGALRM handler once a process (`runtime._can_alarm`) and trusts it to stay. These
+    # tests run Gym programs in the main thread earlier in the suite's order than any Gym test did, and a later module's
+    # run of `league/runner.py` installs that runner's handler: the Gym's two timeout tests then met its alarm (Oct 10,
+    # 2026, the full suite). So the process is put back as these tests found it, the Gym's flag included.
+    if "installed" in _ALARM:
+        signal.setitimer(signal.ITIMER_REAL, 0.0)
+        signal.signal(signal.SIGALRM, _ALARM["handler"])
+        RT._ALARM_INSTALLED = _ALARM["installed"]
+
+
 D1, D2, D3, D4, D5 = (dt.date(2026, 10, 9), dt.date(2026, 10, 12), dt.date(2026, 10, 13), dt.date(2026, 10, 14),
                       dt.date(2026, 10, 16))
 NY = T.NY
