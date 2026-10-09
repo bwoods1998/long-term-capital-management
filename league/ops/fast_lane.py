@@ -27,6 +27,10 @@ THE REPORT (`report`), JSON:
   source "real", that version, net of fees) with `bh` and `drift_window` over its live sessions since `live_promoted_at`
   (zeros included); `live_vs_holdout`; its D5 status (`money.demotion`).
 - `probe_budget`: `real.probe_tally` on the live state: gross realized Probe losses, at risk, the open count, the room.
+- THE DIRECTION LANE (release D-1, Oct 9, 2026; league/swarm/dlane.py): while the lane is on (`dlane.mode` "shadow" or
+  "gate"), every screen row and band row also names its family's `lane` ("alpha" or "direction", `dlane.lane_of`), so
+  the `dlane` report (league/ops/dlane_report.py) reads the contamination measures per lane. With the lane off the
+  report is byte for byte the one before (no `lane` key).
 
 CONTAMINATION, MEASURED (the review of Oct 7, 2026; goal item 5: "contamination measured and stated"). 123 of the
 holdout's 184 sessions (through 2026-06-30) are inside the training of Opus 5.5 (cutoff June 2026); the other authors'
@@ -231,9 +235,10 @@ def probe_budget(live_path: str | Path, today: str) -> dict[str, Any]:
 
 
 def report(swarm_root: str | Path, live_path: str | Path | None, closes_path: str | Path, *, since: str | None = None,
-           today: str | None = None) -> dict[str, Any]:
+           today: str | None = None, settings: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """The report (the module docstring), from the swarm store at `swarm_root` (opened read-only), the live state at
-    `live_path` (read-only; None leaves the budget out) and the closes file."""
+    `live_path` (read-only; None leaves the budget out) and the closes file. `settings` (the swarm's) only names each
+    row's lane while the direction lane is on; None or the lane off leaves the rows as they were."""
     from ..swarm.store import SwarmStore
     from . import direction as DIR
 
@@ -254,6 +259,12 @@ def report(swarm_root: str | Path, live_path: str | Path | None, closes_path: st
                 screen.append(look_row(store, families.get(look["family"]), look, closes))
         bands = [band_row(store, fam, screen, closes, today) for fam in families.values()
                  if fam.get("band") in ("candidate", "probe", "sized") and not fam.get("retired_at")]
+        from ..swarm import dlane
+
+        if dlane.on(settings):  # THE DIRECTION LANE: each row names its lane (off: no key, the rows as before)
+            lane = {fid: dlane.lane_of(store, fam, settings) for fid, fam in families.items()}
+            for row in screen + bands:
+                row["lane"] = lane.get(row["family"], dlane.ALPHA)
     finally:
         store.close()
     out: dict[str, Any] = {"at": today, "since": since, "closes": str(closes_path), "screen": screen,
@@ -273,8 +284,14 @@ def run(ctx: Any) -> dict[str, Any]:
     today = now.date().isoformat()
     since = (now - timedelta(days=JOB_DAYS)).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
     live = root / "live.sqlite"
+    try:  # the swarm's settings name each row's lane while the direction lane is on (read before the read-only guard)
+        from ..swarm import settings as settings_mod
+
+        settings = settings_mod.load(root, config=getattr(ctx, "config", None))
+    except Exception:  # noqa: BLE001 - no settings: no lane keys, the report as before
+        settings = None
     with guard.readonly():
-        out = report(root, live if live.exists() else None, root / DIR.FILE, since=since, today=today)
+        out = report(root, live if live.exists() else None, root / DIR.FILE, since=since, today=today, settings=settings)
     out["window_days"] = JOB_DAYS
     write_json(root / FILE, out)
     bare = sorted({b["family"] for b in out["bands"] if b["band"] in ("probe", "sized")
