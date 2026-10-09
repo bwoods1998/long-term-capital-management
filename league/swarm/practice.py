@@ -36,9 +36,10 @@ cohorts and their records before today, and the tournament spares at most `tourn
 families with an active cohort (whatever its record before the incubator's sample, and a record that is not negative
 once it meets it) from its revision, evaluation and idle retirement rules until the cohort's window ends
 (`Tournament.incubator_keep`); what it keeps is saved (`KEEP_KV`) so that a kept family's researcher is not urged to
-retire it for being idle (`kept_version`). It never spares a family from the deflated-Sharpe rule, its researcher's or
-the diagnostician's own retire, the population floor or the operator's gate hold, and no trial count, look, validation,
-gate, band or money rule reads it (`league/tests/test_swarm_incubator_keep.py`).
+retire it for being idle (`kept_version`), and its researcher's, the mechanism test's and the diagnostician's own retire
+wait for it (THE KEEP WAITS FOR RETIREMENT, Oct 9, researcher.py). It never spares a family from the deflated-Sharpe rule,
+the population floor or the operator's gate hold, and no trial count, look, validation, gate, band or money rule reads it
+(`league/tests/test_swarm_incubator_keep.py`).
 
 `practice.feedback` false (swarm.json, no deploy) turns all three off (not the keep: `tournament.incubator_keep_max` 0
 does). Standard library only.

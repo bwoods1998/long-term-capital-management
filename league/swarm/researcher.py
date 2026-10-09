@@ -127,6 +127,20 @@ tournament's own rules, operator retirements and the population floor are unaffe
 not refuse: a 1.5x run that never lands would otherwise make a family no rule could retire. Validation is still the
 hourly round's (queueing it when a new best lands is a scheduling change, not this one).
 
+THE KEEP WAITS FOR RETIREMENT (Oct 9). The incubator pins only a living family's cohort (`bands.incubator`: alive), and
+THE COHORT KEEP (L1) held families alive against the tournament's rules but not against their own researcher. After the
+learning game's T0 moved Train to 2022-24 (Oct 8, 22:17Z), researchers retired three of the twelve cohorts' families
+within four hours, megacap-post-earnings-drift-single at 02:11Z Oct 9 with its cohort's version 8 kept and freshly
+passing the drift screen on 2022-24: a retired family's cohort practises on and can never be pinned. A family's reading
+of its later versions on Train never outranks the forward test of the version already practising. So while the
+tournament's saved keep holds the family (`cohort_kept`, `practice.kept_version`), `retire` is not offered
+(`can_retire`), a call is refused with the reason (guard "cohort_keep", `kept_words`, the cycle's record
+`retire_kept`), the status says so in place of any offer, the mechanism test's retirement is deferred (its verdict stays
+in the record) and the diagnostician's retire defers the same way (league/swarm/diagnostician.py). A held family is
+parked at no cost until news (EVENT-DRIVEN HOLDS), so the keep costs research nothing while the researcher has no idea to
+test. The cohort's end (complete, failed or its window), or a keep older than `practice.KEEP_KV_SECONDS`, ends it. The
+tournament's deflated-Sharpe rule, operator retirements and the population floor are unaffected.
+
 THE OPERATOR'S RUN (Oct 1). The operator revives a retired family as a lineage fork whose version 1 (author
 "operator-revive", `OPERATOR_AUTHORS`) is the old validated program WITH its params, to be re-run unchanged on the current
 evaluator. Until Oct 1 no revival ran that program: a `gym_run` with no code reran the latest code with no params (`{}`,
@@ -1132,6 +1146,14 @@ VERDICT_TAG = re.compile(r"\bIdle verdict (DRIFT|STRESS|THIN|EXHAUSTED|UNRESOLVE
 SELF_REFUTED = "Self-refuted by its researcher"
 
 
+def kept_words(version: Any) -> str:
+    """THE KEEP WAITS FOR RETIREMENT's words to the researcher (its status line and the retire tool's refusal)."""
+    return (f"Your family's version {version} is practising live in a cohort, the forward test that can lead to real "
+            "money, and the tournament keeps the family alive while it runs: retire waits for the cohort to end, whatever "
+            "Train says now. Keep researching if you have an idea to test; otherwise hold (a held family is parked at no "
+            "cost until news). Being idle or holding is no reason to retire it.")
+
+
 def idle_cause(screen: str) -> str:
     """The idle rule's words for a death whose Train record shows `screen` (`train_record`): IDLE_CAUSE for an untested
     family, else SCREENED and the verdict."""
@@ -1863,9 +1885,9 @@ class Researcher:
             parts.append(awaiting_words(fam))
         elif kept_version(self.store, str(fam["id"]), now=self.clock()) is not None:
             # THE COHORT KEEP (L1, `tournament.py`): the tournament holds the family alive while its practice cohort runs,
-            # so idleness is not urged as a reason to retire it; the retire tool stays offered (`can_retire`).
-            parts.append("Your family is in a live practice cohort, so the tournament keeps it alive while the cohort runs: "
-                         "being idle or holding is no reason to retire it now.")
+            # so idleness is not urged as a reason to retire it, and the retire tool waits for the cohort (THE KEEP WAITS
+            # FOR RETIREMENT, `can_retire`).
+            parts.append(kept_words(kept_version(self.store, str(fam["id"]), now=self.clock())))
         elif dead:
             parts.append(f"Your family {dead}. If its mechanism is dead, call retire with your reason when the tool is offered "
                          "rather than re-running a placeholder: its slot goes to a new idea.")
@@ -2124,13 +2146,21 @@ class Researcher:
     def can_retire(self, fam: Mapping[str, Any]) -> bool:
         """An evidence-backed abandonment (`retire_earned`) may use the atomic population floor, including on REVISE.
         Pending independent evidence (a version at the gate, a holdout look out, a best Train version that awaits
-        validation: THE VALIDATION WAIT) and operator extension holds remain protected.
+        validation: THE VALIDATION WAIT), operator extension holds and a version practising live (THE KEEP WAITS FOR
+        RETIREMENT: `cohort_kept`) remain protected.
         """
         state = fam.get("state") or {}
         if (fam.get("band") != "gym" or held_at_gate(fam) or state.get("gate_ready") or state.get("look_inflight")
-                or extension_held(fam) or awaiting_validation(fam)):
+                or extension_held(fam) or awaiting_validation(fam) or self.cohort_kept(fam) is not None):
             return False
         return self.retire_earned(fam)
+
+    def cohort_kept(self, fam: Mapping[str, Any]) -> int | None:
+        """THE KEEP WAITS FOR RETIREMENT (Oct 9): the version THE COHORT KEEP holds this family alive for
+        (`practice.kept_version`, the tournament's saved keep), or None. Never raises."""
+        from .practice import kept_version
+
+        return kept_version(self.store, str(fam.get("id")), now=float(self.clock()))
 
     def guarded(self, fam: Mapping[str, Any]) -> dict[str, Any] | None:
         """THE VALIDATED-FAMILY GUARD (`retire_guard`) on this researcher's clock: why `retire` refuses, or None. It leaves
@@ -3152,6 +3182,10 @@ class Researcher:
             return None
         with self.store.atomic():
             current = self.store.family(fid) or fam
+            if self.cohort_kept(current) is not None:
+                # THE KEEP WAITS FOR RETIREMENT: the verdict stands in the record; the family stays for its cohort.
+                out["mechanism_retire_deferred"] = "a version of this family practises live in a cohort (the cohort keep)"
+                return None
             result = self.store.retire_gym(fid, reason, floor=self.retire_floor(current), source="the mechanism test")
         if result.get("status") != "retired" or result.get("already_retired"):
             out["mechanism_retire_deferred"] = result.get("deferred") or result.get("reason")
@@ -3665,6 +3699,12 @@ class Researcher:
                     out["retire_refused"] = True
                     return {"status": "refused", "guard": "awaiting_validation", "version": out["retire_awaiting"],
                             "reason": wait}
+                kept = self.cohort_kept(current)
+                if kept is not None and current.get("band") == "gym":
+                    # THE KEEP WAITS FOR RETIREMENT: its version practises live (the forward test), whatever Train says.
+                    out["retire_refused"] = True
+                    out["retire_kept"] = kept
+                    return {"status": "refused", "guard": "cohort_keep", "version": kept, "reason": kept_words(kept)}
                 if not self.can_retire(current):
                     out["retire_refused"] = True
                     return {"status": "refused", "reason": "retire is not available to your family now (it needs at least two "

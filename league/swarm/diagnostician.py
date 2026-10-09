@@ -370,13 +370,15 @@ class Diagnostician:
             # Start is the architect's refill target, not a second floor (start == ceiling otherwise makes this
             # decision unreachable). The store serializes concurrent retirements against the actual floor.
             floor = int(population.get("floor", 16))
+            from .practice import kept_version
             from .researcher import awaiting_validation, extension_held
             with self.store.atomic():
                 current = self.store.family(fid) or fam
                 state = current.get("state") or {}
-                # THE VALIDATION WAIT (researcher.py): a best the tournament owes a verdict is pending evidence too.
+                # THE VALIDATION WAIT (researcher.py): a best the tournament owes a verdict is pending evidence too, and so
+                # is a version practising live (THE KEEP WAITS FOR RETIREMENT, researcher.py: the cohort keep).
                 if (extension_held(current) or state.get("gate_ready") or state.get("look_inflight")
-                        or awaiting_validation(current)):
+                        or awaiting_validation(current) or kept_version(self.store, fid, now=float(self.clock())) is not None):
                     out.update(outcome="retire_refused", reason="independent evidence is pending or held")
                     self.store.note(fid, f"The diagnostician recommends retiring this family after its pending evidence: {lesson}")
                     return self._record(out, began)

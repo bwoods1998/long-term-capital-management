@@ -1,8 +1,9 @@
 """THE COHORT KEEP (L1, release B, Sept 30; `Tournament.incubator_keep`, `practice.cohort_status`): a Gym family with an
 active practice cohort is spared the revision, evaluation and idle retirement rules until its cohort completes, fails or
 reaches its session window, on the cohort's realized record before today (the incubator's own basis): whatever that record
-before the incubator's sample, and only while it is not negative once the sample is met. The deflated-Sharpe rule, its
-researcher's own retire and the population floor still apply; a cohort the House is not practising is not kept; at most
+before the incubator's sample, and only while it is not negative once the sample is met. The deflated-Sharpe rule and the
+population floor still apply, and its researcher's own retire waits for it (Oct 9); a cohort the House is not practising
+is not kept; at most
 `tournament.incubator_keep_max` (12) families, 0 turning it off. Research attention only: the keep reads the House's
 practice record read-only and writes nothing but its saved keep (`practice.KEEP_KV`, read by the researchers' status) and
 its one private round event."""
@@ -788,7 +789,9 @@ class Reads(KeepCase):
 
 # ------------------------------------------------------------------------------------------------ its researcher
 class OwnRetire(ResearcherCase):
-    def test_a_researchers_own_retire_still_retires_a_kept_family(self):
+    def test_a_researchers_own_retire_waits_for_a_kept_family(self):
+        # Oct 9: researchers retired three of the twelve cohorts' families within four hours of T0, one of them with its
+        # kept version freshly passing the drift screen; the incubator pins only a living family's cohort.
         self.settings["population"].update(floor=0, start=0)
         self.store.update_family(self.fam["id"], validations=2)
         self.store.add_version(self.fam["id"], CODE, {}, author="seed")
@@ -799,13 +802,25 @@ class OwnRetire(ResearcherCase):
         t = Tournament(self.store, self.pool, self.settings, clock=self.clock)
         self.assertEqual(t.incubator_keep(), frozenset({self.fam["id"]}))
         self.pool.cancel_family = lambda fid: None
+        r = self.researcher()
+        self.assertEqual(r.cohort_kept(self.store.family(self.fam["id"])), 1)
+        self.assertFalse(r.can_retire(self.store.family(self.fam["id"])), "not offered while kept")
         out: dict = {}
-        result = self.researcher()._execute(self.store.family(self.fam["id"]), "retire",
-                                            {"reason": "Costs defeated the mechanism."}, out, author="test")
+        result = r._execute(self.store.family(self.fam["id"]), "retire", {"reason": "Costs defeated the mechanism."}, out,
+                            author="test")
+        self.assertEqual((result["status"], result["guard"], result["version"]), ("refused", "cohort_keep", 1))
+        self.assertIn("practising live in a cohort", result["reason"])
+        self.assertEqual((out["retire_refused"], out["retire_kept"]), (True, 1))
+        self.assertIsNone(self.store.family(self.fam["id"])["retired_at"], "the family lives on for its cohort")
+        # The keep lapses (the cohort ended, or the tournament has not saved one for KEEP_KV_SECONDS): retire is back.
+        self.clock.advance(practice.KEEP_KV_SECONDS + 1)
+        self.assertIsNone(r.cohort_kept(self.store.family(self.fam["id"])))
+        result = r._execute(self.store.family(self.fam["id"]), "retire", {"reason": "Costs defeated the mechanism."}, {},
+                            author="test")
         self.assertEqual(result["status"], "retired")
         self.assertIsNotNone(self.store.family(self.fam["id"])["retired_at"])
 
-    def test_a_kept_familys_researcher_is_not_urged_to_retire_it_and_may_still(self):
+    def test_a_kept_familys_researcher_is_not_urged_to_retire_it_and_is_told_retire_waits(self):
         # Review of Sept 30: the status line urged a kept, idle family's researcher to retire it every cycle.
         self.settings["population"].update(floor=0, start=0)
         fid = self.fam["id"]
@@ -817,13 +832,22 @@ class OwnRetire(ResearcherCase):
         self.store.put(practice.KEEP_KV, {"at": self.clock(), "families": {fid: 1}})
         text = r.status(self.store.family(fid))
         self.assertNotIn("If its mechanism is dead", text)
-        self.assertIn("Your family is in a live practice cohort", text)
-        self.assertTrue(r.can_retire(self.store.family(fid)), "the retire tool stays offered")
-        self.assertIn("If you abandon the entire mechanism, call retire with your reason.", text)
+        self.assertIn("Your family's version 1 is practising live in a cohort", text)
+        self.assertIn("retire waits for the cohort to end", text)
+        self.assertFalse(r.can_retire(self.store.family(fid)), "the retire tool waits for the cohort")
+        self.assertNotIn("If you abandon the entire mechanism, call retire with your reason.", text)
         self.clock.advance(practice.KEEP_KV_SECONDS + 1)
         self.assertIn("If its mechanism is dead, call retire", r.status(self.store.family(fid)), "a lapsed keep")
+        self.assertTrue(r.can_retire(self.store.family(fid)), "offered again once the keep lapses")
         self.store.put(practice.KEEP_KV, "not a keep")
         self.assertIn("If its mechanism is dead, call retire", r.status(self.store.family(fid)), "never raises")
+        self.assertIsNone(r.cohort_kept(self.store.family(fid)))
+
+    def test_the_words_never_name_a_figure(self):
+        from league.swarm.researcher import kept_words
+        text = kept_words(7)
+        self.assertIn("version 7", text)
+        self.assertNotRegex(text.replace("version 7", ""), r"\d", "no Validation, holdout or practice figure")
 
 
 if __name__ == "__main__":
