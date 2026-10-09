@@ -1,7 +1,7 @@
-"""The `dlane` job (at the House's start and daily 01:30Z) and THE DIRECTION LANE's report (release D-1, Oct 9, 2026;
-`league/swarm/dlane.py`; the plan of Oct 9, D8 and its section 6; the operator's decisions 8 and 9): one operator-only
-file, `<state>/dlane-report.json`, that says each day what the two research lanes did, what the Probe envelope holds,
-where the goal's Done stands under its pinned reading rule, and which of the lane's alarms hold.
+"""The `dlane` job (at the House's start, daily 01:30Z and before each open) and THE DIRECTION LANE's report (release
+D-1, Oct 9, 2026; `league/swarm/dlane.py`; the plan of Oct 9, D8 and its section 6; the operator's decisions 8 and 9):
+one operator-only file, `<state>/dlane-report.json`, that says each day what the two research lanes did, what the Probe
+envelope holds, where the goal's Done stands under its pinned reading rule, and which of the lane's alarms hold.
 
 OPERATOR-ONLY AND REPORTED: no agent reads it, and no module of league/swarm, league/live or league/gym imports this
 module or names its file (`league/tests/test_dlane_report.py` pins that). It changes no site data contract: the website
@@ -22,7 +22,16 @@ trade, never an order. The second write (DONE-RULE-A1 A1.3, Oct 10, 2026; `retir
 Probe net is at or below the program loss line (`dlane.program_loss_usd`, -$200, half the $400 Probe total) is retired
 swarm-side, in the same writable open after the report; its real positions exit by the House's rules (alarm PL1).
 
-WITH THE LANE OFF (`dlane.mode` "off", THE ROLLBACK) the job writes nothing and returns a `skipped` receipt.
+WITH THE LANE OFF (`dlane.mode` "off", THE ROLLBACK) the job writes no report and returns a `skipped` receipt, but for
+the program loss line: since the review of the weekend fixes (Oct 10, 2026) it still reads each program's realized Probe
+net and retires a due one (`lane_off`; A1.3 names one program whatever its lane, and the rollback is the lane's, not the
+pinned rule's), each PL1 a House warning and the receipt carrying the figures.
+
+WHEN IT RUNS: at the House's start, daily at 01:30Z, and since the review of the weekend fixes (Oct 10, 2026) on each
+trading day 30 minutes before the open. A Probe position held to expiry is `awaiting_expiry` until the House's quiet
+passes reconcile the broker's expiry; pid 14's (Oct 7) landed at 01:11Z, minutes before the 01:30Z run, and from Nov 1
+(New York on standard time) the same 21:11 New York time is 02:11Z, after it. Without the pre-open run a program whose
+expiry carried it past the program loss line would trade one more session before the next 01:30Z run retired it.
 
 THE DONE METER (DONE-RULE.md, pinned Oct 9, 2026 before release L-D or D-1 shipped; `dlane.DONE` holds its sha256 and
 constants), read exactly as pinned:
@@ -43,7 +52,8 @@ constants), read exactly as pinned:
   closes, matched closes and gap (each checkpoint's `by_program`, `replay_coverage`), never dropped.
 - RESEARCH 24/7 (DONE-RULE item 7; `Research247`, Oct 10, 2026): births, Gym runs and Validations every UTC day of the
   checkpoint's window (its last 7 days for the first, every day since the one before for the rest), at the research
-  budget, with no owner step waiting (the `stall` job's receipts); the operator's edits listed beside it.
+  budget, with no owner step waiting (the `stall` job's receipts: a day with none is not held); the operator's edits
+  listed beside it.
   THE PER-CLOSE TWIN (Oct 10, 2026; the readiness audit's B1 (c); `league/ops/twins.py`): a close whose own replay
   twin is priced (the real trade's own orders replayed on the gate image by the Gym's engine and fill model, the swarm's
   kv `close_twins`) is matched to that twin, live minus twin per dollar of each one's maximum loss, pooled with the rest
@@ -967,11 +977,15 @@ class Research247:
     - `at_budget`: every `budget` receipt of the day (ops.sqlite) has every meter's day figure `limited_by` "ceiling" (no
       taper; None with no receipt that day);
     - `owner`: the causes with an owner step that any `stall` receipt of the day found standing (but the news causes,
-      `NEWS_CAUSES`).
-    A day holds when births, Gym runs and Validations are each above 0, `at_budget` is True and `owner` is empty; the
-    window holds when every day does. The operator's edits of swarm.json and budget.json in the window are LISTED
-    (`edits`, from their before-copies) beside it: the pinned rule reads "no captain" as no owner step waiting, so they are
-    reported, never a bar. Days are cached across checkpoints."""
+      `NEWS_CAUSES`);
+    - `stall_receipts`: how many `stall` receipts (status ok) the day has. Since the review of the weekend fixes (Oct 10,
+      2026) a day with none is not held ("no stall receipt"), as a day with no budget receipt is not: the stall job
+      failing all day (an unreadable swarm store) or missed is a day nobody looked for an owner step, never a day with
+      none waiting.
+    A day holds when births, Gym runs and Validations are each above 0, `at_budget` is True, the day has a stall receipt
+    and `owner` is empty; the window holds when every day does. The operator's edits of swarm.json and budget.json in the
+    window are LISTED (`edits`, from their before-copies) beside it: the pinned rule reads "no captain" as no owner step
+    waiting, so they are reported, never a bar. Days are cached across checkpoints."""
 
     def __init__(self, store: Any, root: Path):
         self.store, self.root = store, Path(root)
@@ -1042,6 +1056,8 @@ class Research247:
             whys.append("no budget receipt")
         elif not at_budget:
             whys.append(f"research under the ceiling ({', '.join(sorted(limits - {'ceiling'}))})")
+        if stalls == 0:
+            whys.append("no stall receipt")
         if owner:
             whys.append(f"an owner step waiting ({', '.join(sorted(owner))})")
         out = {"day": day, "births": births, "gym_runs": gym, "validations": validation_rows + judged,
@@ -1217,7 +1233,8 @@ def program_losses(positions: Sequence[Mapping[str, Any]], corrections: Mapping[
     Probe close of it is priced (an unpriced one may still be a gain: it waits for the House's reconciliation) and that
     net is at or below the program loss line (`dlane.program_loss_usd`, -$200: half the $400 Probe total). The `dlane` job
     retires a due program swarm-side (`run`): a tightening, never a trade; its real positions exit by the House's rules.
-    Every lane: the pinned rule names one program, whatever its lane. {line_usd, total_usd, programs: [...], due}."""
+    Every lane: the pinned rule names one program, whatever its lane, and the line holds with the direction lane off too
+    (`lane_off`). {line_usd, total_usd, programs: [...], due}."""
     from ..live import money as M
     from ..swarm import dlane
     from .economics import route_of
@@ -1811,16 +1828,7 @@ def alarms(store: Any, settings: Mapping[str, Any] | None, lanes: Lanes, book: M
             out.append({"id": "A9", "level": "info", "families": sorted(live_programs)[:12],
                         "text": f"A9: every live direction program ({len(live_programs)}) has opened nothing for "
                                 f"{A9_SESSIONS} sessions: the lane is flat by design"})
-    # PL1 (DONE-RULE-A1 A1.3, Oct 10, 2026): a program's own realized Probe net at or below the program loss line. The
-    # job retires it swarm-side (`run`, which rewrites this text once it has); exits go on.
-    due = [p for p in (losses or {}).get("programs") or [] if p.get("due")]
-    if due:
-        line = _num((losses or {}).get("line_usd"))
-        out.append({"id": "PL1", "level": "warning", "families": [p["family"] for p in due][:12], "line_usd": line,
-                    "text": f"PL1: {len(due)} programs' own realized Probe net is at or below the program loss line "
-                            f"(${line or 0:,.2f}, half the Probe total; DONE-RULE-A1 A1.3): "
-                            + ", ".join(f"{p['family']} ${p['probe_net_usd']:,.2f}" for p in due[:6])
-                            + ". The dlane job retires them swarm-side; their real positions exit by the House's rules"})
+    out += pl1_alarms(losses)
     # K5.
     if k5.get("tripped"):
         out.append({"id": "K5", "level": "warning", "new": bool(k5.get("new")),
@@ -1837,6 +1845,20 @@ def alarms(store: Any, settings: Mapping[str, Any] | None, lanes: Lanes, book: M
                                if not k5.get("set") and not k5.get("trip_open") else
                                "the dlane job records the clear on its next run; then take dlane.k5_clear out")})
     return out
+
+
+def pl1_alarms(losses: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+    """PL1 (DONE-RULE-A1 A1.3, Oct 10, 2026): a program's own realized Probe net at or below the program loss line. The
+    job retires it swarm-side (`run`, which rewrites this text once it has); exits go on. [] when none is due."""
+    due = [p for p in (losses or {}).get("programs") or [] if p.get("due")]
+    if not due:
+        return []
+    line = _num((losses or {}).get("line_usd"))
+    return [{"id": "PL1", "level": "warning", "families": [p["family"] for p in due][:12], "line_usd": line,
+             "text": f"PL1: {len(due)} programs' own realized Probe net is at or below the program loss line "
+                     f"(${line or 0:,.2f}, half the Probe total; DONE-RULE-A1 A1.3): "
+                     + ", ".join(f"{p['family']} ${p['probe_net_usd']:,.2f}" for p in due[:6])
+                     + ". The dlane job retires them swarm-side; their real positions exit by the House's rules"}]
 
 
 def zero_edge(settings: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -1957,7 +1979,8 @@ def report(root: str | Path, *, settings: Mapping[str, Any] | None = None, now: 
 def run(ctx: Any) -> dict[str, Any]:
     """The job: the report written atomically to `<state>/dlane-report.json`, read-only on every store; then K5's writes
     (the operator's clear recorded, `dlane.k5_rearm`, then the trip when its line is crossed, `dlane.k5_trip`), each only
-    when due; then each alarm a House alert (warning, or info for A8 and A9)."""
+    when due; then the program loss line's retirements (`retire_due`); then each alarm a House alert (warning, or info
+    for A8 and A9). With the lane off, the program loss line alone and no report (`lane_off`)."""
     from ..swarm import dlane
     from ..swarm import settings as settings_mod
     from ..swarm.store import SwarmStore
@@ -1967,7 +1990,7 @@ def run(ctx: Any) -> dict[str, Any]:
     root = Path(ctx.root)
     settings = settings_mod.load(root, config=getattr(ctx, "config", None))
     if not dlane.on(settings):
-        return {"status": "skipped", "why": "the direction lane is off (dlane.mode): nothing to report"}
+        return lane_off(ctx, root, settings)
     previous = read_json(root / FILE, None)
     with guard.readonly():
         out = report(root, settings=settings, now=ctx.now(), previous=previous if isinstance(previous, Mapping) else None)
@@ -2011,15 +2034,7 @@ def run(ctx: Any) -> dict[str, Any]:
                                           "its line; the lane reads shadow (no new direction Candidate, no incubator "
                                           "direction mark) until the operator clears it (swarm.json dlane.k5_clear, or "
                                           "the kv dlane_k5)"})
-    try:
-        retired = retire_due(root, out, settings)
-    except Exception as exc:  # noqa: BLE001 - the report is written whatever: the retirement is tried again next run
-        retired = []
-        why = f"{type(exc).__name__}: {str(exc)[:200]}"
-        out.setdefault("program_loss", {})["error"] = why
-        out["alarms"].append({"id": "PL1", "level": "warning", "error": why,
-                              "text": f"PL1: a program due at the program loss line could not be retired ({why}); the next "
-                                      "run tries again"})
+    retired = _retire(root, out, settings)
     write_json(root / FILE, out)
     for alarm in out["alarms"]:
         ctx.alert(alarm["level"], f"dlane: {alarm['text']}")
@@ -2079,9 +2094,62 @@ def retire_due(root: Path, out: dict[str, Any], settings: Mapping[str, Any] | No
     return retired
 
 
+def _retire(root: Path, out: dict[str, Any], settings: Mapping[str, Any] | None) -> list[str]:
+    """`retire_due`, never raising: a retirement that fails is a PL1 warning naming why, tried again at the next run."""
+    try:
+        return retire_due(root, out, settings)
+    except Exception as exc:  # noqa: BLE001 - the report is written whatever: the retirement is tried again next run
+        why = f"{type(exc).__name__}: {str(exc)[:200]}"
+        out.setdefault("program_loss", {})["error"] = why
+        out.setdefault("alarms", []).append({
+            "id": "PL1", "level": "warning", "error": why,
+            "text": f"PL1: a program due at the program loss line could not be retired ({why}); the next run tries "
+                    "again"})
+        return []
+
+
+LANE_OFF_WHY = "the direction lane is off (dlane.mode): no report written"
+
+
+def lane_off(ctx: Any, root: Path, settings: Mapping[str, Any] | None) -> dict[str, Any]:
+    """THE PROGRAM LOSS LINE WITH THE LANE OFF (the review of the weekend fixes, Oct 10, 2026). DONE-RULE-A1 A1.3 names
+    one program whatever its lane, and `dlane.mode` "off" rolls back the direction lane, not the pinned rule: before this
+    the job returned at once, so with the lane rolled back an alpha Probe program (or a direction family gone back to
+    alpha) could lose past the line and drain the shared $400 Probe total with no PL1 and no retirement. So the job still
+    reads each program's own realized Probe net (`program_losses`, read-only as the report is) and retires a due one
+    (`retire_due`), each PL1 a House warning. It writes no report: `dlane-report.json` is left as the lane last wrote it
+    (the `stall` job does not read it while the lane is off), and the receipt carries the figures. Nothing due (or no
+    swarm store) is the `skipped` receipt it always was."""
+    from ..swarm.store import SwarmStore
+    from . import guard
+    from .funnel import SWARM_DB
+
+    if not (root / SWARM_DB).exists():
+        return {"status": "skipped", "why": f"{LANE_OFF_WHY}; no swarm store, so no program loss line to read"}
+    with guard.readonly():
+        activity = fee_corrections(root)
+        book = read_book(root / LIVE_DB)
+        store = SwarmStore(root, readonly=True)
+        try:
+            losses = program_losses(book["positions"], activity["by_pid"], store, settings, since=inception())
+        finally:
+            store.close()
+    if not losses["due"]:
+        return {"status": "skipped", "why": f"{LANE_OFF_WHY}; the program loss line (DONE-RULE-A1 A1.3) is read: none due",
+                "program_loss": {"line_usd": losses["line_usd"], "due": [], "programs": len(losses["programs"])}}
+    out: dict[str, Any] = {"program_loss": losses, "alarms": pl1_alarms(losses)}
+    retired = _retire(root, out, settings)
+    for alarm in out["alarms"]:
+        ctx.alert(alarm["level"], f"dlane: {alarm['text']} (the direction lane is off: no report written)")
+    return {"ok": True, "lane": "off", "why": f"{LANE_OFF_WHY}; the program loss line (DONE-RULE-A1 A1.3) acted on",
+            "program_loss": {"line_usd": losses["line_usd"], "due": losses["due"], "retired": retired,
+                             "error": losses.get("error")},
+            "alarms": [a["id"] for a in out["alarms"]], "retired": retired}
+
+
 __all__ = ["run", "report", "FILE", "CONTAMINATION", "LOOSENED", "TIGHTENED", "closes", "meter", "reading", "replay_gap",
            "replay_twins", "twin_records",
            "buy_and_hold", "entry_delta", "funnel", "probes", "probe_envelope", "alarms", "fee_corrections", "read_book",
            "version_of", "inception", "Lanes", "ZERO_EDGE_LABEL", "trade_screens", "ALPHA_FP", "finality",
            "research_window", "Research247", "operator_edits", "program_losses", "dm1_reach", "net_after_costs",
-           "zero_edge", "retire_due", "GAP_MEASURE", "NEWS_CAUSES", "E0_BASIS"]
+           "zero_edge", "retire_due", "GAP_MEASURE", "NEWS_CAUSES", "E0_BASIS", "pl1_alarms", "lane_off"]

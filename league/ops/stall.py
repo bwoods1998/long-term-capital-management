@@ -43,8 +43,14 @@ dead nightly reached a ledger row no mail carries):
 - `dlane`: the direction lane's report (`<state>/dlane-report.json`, the `dlane` job) carries a warning-level alarm
   (A1-A7, PL1 the program loss line, K5), or it is older than `DLANE_STALE_HOURS` while the lane is on. K5 holding (the
   lane reads shadow until it is cleared) or disarmed (`dlane.k5_clear` left true) is the owner's step;
-- `done`: the report's A8, a FINAL Done checkpoint that holds, newly seen. News the owner hears at once (an owner
-  line), never an owner step WAITING: the Done meter's item 7 does not count it (`dlane_report.NEWS_CAUSES`);
+- `done`: a FINAL Done checkpoint that holds (the report's `done.<meter>.checkpoints`, final and holding: frozen from
+  report to report) that no SENT notice has told yet (`stall.json` `done_told`, which a notice carrying the cause adds
+  to once the gateway says it sent it). News the owner hears at once (an owner line), never an owner step WAITING: the
+  Done meter's item 7 does not count it (`dlane_report.NEWS_CAUSES`). Until the review of the weekend fixes (Oct 10,
+  2026) it read the report's A8, which one report says once: a House start or a failed notice before the next stall
+  run lost the claim;
+- while the lane is off (`dlane.mode` "off": the dlane job writes no report, so its last one stays on disk) neither
+  `dlane` nor `done` reads the report (the same review: the last report's K5 or A8 was mailed at every run for good);
 - `preopen`: the latest pre-open receipt (ops.sqlite, at most `PREOPEN_HOURS` old) failed a check, or the job failed or
   was missed;
 - `forward`: the nightly's ready file (`<state>/gym-forward.json`) does not carry the last session before today once
@@ -64,9 +70,9 @@ The gateway holds the same pace by its own clock (it keys an owner notice on the
 for 12 h, and one with none on `stall:info` for 24 h), so a lost state file never mails twice. A notice counts as told
 only once the gateway says it SENT it: a `duplicate` answer (told inside the gateway's own window) is tried at the next
 run. Each cause standing is also one House warning at most every `WARN_EVERY_SECONDS` (12 h). `<state>/stall.json`
-(private) remembers each cause (since when it stands, when it was last warned of, when it cleared) and the notices (when
-the last of each kind was sent, which owner causes it told). A cause that clears is named in the receipt. The receipt
-carries every check, stalled or not, with its numbers.
+(private) remembers each cause (since when it stands, when it was last warned of, when it cleared), the notices (when
+the last of each kind was sent, which owner causes it told) and the Done checkpoints told (`done_told`). A cause that
+clears is named in the receipt. The receipt carries every check, stalled or not, with its numbers.
 
 HOW LONG: from the record when it says (the last birth, the last Validation verdict, the start of the guard's brake, the
 first refusal of the owner's deploy or of the grant, the pause file, the kill), else from when this job first saw the
@@ -129,7 +135,8 @@ NIGHTLY_RECORD = Path("data") / "nightly.json"
 FORWARD_DUE_HOUR = 10
 #: A nightly error standing this long is the `forward` cause.
 NIGHTLY_ERROR_HOURS = 6.0
-#: The direction lane's report (league/ops/dlane_report.py, written at the House's start and daily at 01:30Z).
+#: The direction lane's report (league/ops/dlane_report.py, written at the House's start, daily at 01:30Z and 30 minutes
+#: before each open).
 DLANE_REPORT = "dlane-report.json"
 DLANE_STALE_HOURS = 30.0
 #: The latest pre-open receipt is read while it is at most this old (the job runs an hour before each open).
@@ -451,14 +458,25 @@ def deploy_flight(base: str | Path, root: str | Path, now: float) -> dict[str, A
 
 
 def dlane_facts(root: str | Path) -> dict[str, Any] | None:
-    """The direction lane's report as the `dlane` and `done` causes read it: {at, alarms, k5, mode}, None with no report."""
+    """The direction lane's report as the `dlane` and `done` causes read it: {at, alarms, k5, mode, done_final}, None with
+    no report. `done_final` is every FINAL checkpoint that holds ({meter, at_close}: `done.<all|screen>.checkpoints` with
+    `final` and `holds` true), the report's own record of a Done claim: a final reading is frozen from report to report
+    (DONE-RULE-A1 A1.4), where its A8 alarm is said by one report only."""
     doc = read_json(Path(root) / DLANE_REPORT, None)
     if not isinstance(doc, Mapping):
         return None
     alarms = [a for a in doc.get("alarms") or [] if isinstance(a, Mapping) and a.get("id")]
     k5 = doc.get("k5") if isinstance(doc.get("k5"), Mapping) else {}
+    done = doc.get("done") if isinstance(doc.get("done"), Mapping) else {}
+    final = []
+    for name in ("all", "screen"):
+        meter = done.get(name) if isinstance(done.get(name), Mapping) else {}
+        for cp in meter.get("checkpoints") or []:
+            if isinstance(cp, Mapping) and cp.get("holds") is True and cp.get("final") is True:
+                final.append({"meter": f"done_{name}", "at_close": cp.get("at_close")})
     return {"at": S.epoch(doc.get("at")), "alarms": alarms, "k5": dict(k5),
-            "mode": ((doc.get("lane") or {}) if isinstance(doc.get("lane"), Mapping) else {}).get("mode")}
+            "mode": ((doc.get("lane") or {}) if isinstance(doc.get("lane"), Mapping) else {}).get("mode"),
+            "done_final": final}
 
 
 def preopen_facts(root: str | Path) -> dict[str, Any] | None:
@@ -586,7 +604,7 @@ def checks(swarm: Mapping[str, Any], *, now: float, ceiling: int | None, budget:
            grant: Mapping[str, Any] | None = None, kill: Mapping[str, Any] | None = None,
            flight: Mapping[str, Any] | None = None, dlane: Mapping[str, Any] | None = None, lane_on: bool | None = None,
            preopen: Mapping[str, Any] | None = None, forward: Mapping[str, Any] | None = None,
-           nightly_error_since: float | None = None) -> dict[str, dict[str, Any]]:
+           nightly_error_since: float | None = None, done_told: Any = ()) -> dict[str, dict[str, Any]]:
     """Every cause's check: {stalled, what, numbers, doing, owner_step, onset (epoch or None)}. Pure."""
     out: dict[str, dict[str, Any]] = {}
     guard_now = swarm.get("guard") or {}
@@ -770,7 +788,7 @@ def checks(swarm: Mapping[str, Any], *, now: float, ceiling: int | None, budget:
                     "killed_at": None if not kill or kill.get("since") is None else S.iso(kill["since"])},
         "doing": "Research that calls no Claude model goes on; Claude research, real entries and the engineer's merges wait.",
         "owner_step": KILL_STEP if killed else None, "onset": (kill or {}).get("since")}
-    out.update(_lane_checks(now, dlane, lane_on))
+    out.update(_lane_checks(now, dlane, lane_on, done_told))
     out["preopen"] = _preopen_check(now, preopen)
     out["forward"] = _forward_check(now, forward, nightly_error_since)
     return out
@@ -780,50 +798,80 @@ K5_STEP = ("the direction lane reads shadow while K5 holds (no new direction Can
            "read its losses in dlane-report.json, then clear it if the lane should trade again (swarm.json "
            "dlane.k5_clear true for one dlane run, then take it out; or delete the swarm store's kv dlane_k5)")
 K5_DISARMED_STEP = "take dlane.k5_clear out of swarm.json: while it is true K5 cannot trip, whatever the lane loses"
+LANE_OFF_WHAT = "The direction lane is off (dlane.mode): its last report is not read."
 DONE_STEP = ("Done holds at a FINAL checkpoint ({named}): read the claim in dlane-report.json (done.<meter>.latest, beside "
              "P(Done | zero edge), the same-risk buy-and-hold and Net after costs); the plan to scale follows from it")
 
 
-def _lane_checks(now: float, dlane: Mapping[str, Any] | None, lane_on: bool | None) -> dict[str, dict[str, Any]]:
-    """`dlane` and `done` (the module docstring), from the direction lane's report (`dlane_facts`). Pure."""
+def done_key(meter: Any, at_close: Any) -> str:
+    """A Done checkpoint's key in stall.json's `done_told` ("done_all:30")."""
+    return f"{meter}:{at_close}"
+
+
+def _lane_checks(now: float, dlane: Mapping[str, Any] | None, lane_on: bool | None,
+                 done_told: Any = ()) -> dict[str, dict[str, Any]]:
+    """`dlane` and `done` (the module docstring), from the direction lane's report (`dlane_facts`) and the Done checkpoints
+    already told (`done_told`, stall.json). Pure.
+
+    THE LANE OFF (the review of the weekend fixes, Oct 10, 2026): with `dlane.mode` "off" the dlane job writes no report,
+    so the last one stays on disk for good; reading its alarms raised `dlane` (K5's owner step for a lane that is off)
+    and `done` at every run until someone deleted the file. While the lane is off neither cause reads the report.
+
+    THE DONE CLAIM, KEPT UNTIL TOLD (same review): the `done` cause read the report's A8, which one report says once (it
+    is deduplicated against the previous report), so a House start or a failed notice before the next stall run lost the
+    claim to a ledger row. It reads the report's FINAL holding checkpoints instead (frozen from report to report) and
+    stands for each one no SENT notice has told yet (`run` records them in stall.json's `done_told`)."""
     report = dict(dlane or {})
+    off = lane_on is False
     at = report.get("at")
     age = None if at is None else max(0.0, now - float(at))
-    stale = bool(report) and lane_on is not False and (age is None or age > DLANE_STALE_HOURS * 3600)
-    alarms = report.get("alarms") or []
+    stale = bool(report) and not off and (age is None or age > DLANE_STALE_HOURS * 3600)
+    alarms = [] if off else report.get("alarms") or []
     warnings = [a for a in alarms if a.get("level") == "warning"]
     k5_alarm = next((a for a in warnings if a.get("id") == "K5"), None)
-    k5 = report.get("k5") or {}
+    k5 = {} if off else report.get("k5") or {}
     step = None
     if k5_alarm is not None:
         step = K5_DISARMED_STEP if k5_alarm.get("disarmed") or (k5.get("cleared") and not k5.get("tripped")) else K5_STEP
     texts = "; ".join(f"{a.get('id')}: {str(a.get('text') or '')[:160]}" for a in warnings[:4])
+    if off:
+        what = LANE_OFF_WHAT
+    elif report:
+        what = ((f"The direction lane's report of {S.iso(at) if at is not None else 'an unknown time'} raised "
+                 f"{len(warnings)} warnings ({texts})." if warnings else "The direction lane's report raised no warning.")
+                + ((f" The report is {_hours(age)} h old" if age is not None else " The report carries no time")
+                   + ": the dlane job has not written it since." if stale else ""))
+    else:
+        what = "No direction lane report on record."
     dlane_out = {
         "stalled": bool(warnings) or stale,
-        "what": ((f"The direction lane's report of {S.iso(at) if at is not None else 'an unknown time'} raised "
-                  f"{len(warnings)} warnings ({texts})." if warnings else "The direction lane's report raised no warning.")
-                 + ((f" The report is {_hours(age)} h old" if age is not None else " The report carries no time")
-                    + ": the dlane job has not written it since." if stale else "")) if report
-                else "No direction lane report on record.",
+        "what": what,
         "numbers": {"alarms": ",".join(str(a.get("id")).lower() for a in warnings)[:80] or "none",
                     "report_at": None if at is None else S.iso(at),
                     "report_age_hours": None if age is None else round(age / 3600.0, 1),
-                    "k5": "tripped" if k5.get("tripped") else "disarmed" if k5.get("cleared") else "armed",
-                    "lane_mode": str(report.get("mode") or "unknown")[:20]},
-        "doing": ("The dlane job writes the report at the House's start and daily at 01:30Z, each alarm a House warning. "
-                  "It moves no money: K5 and the program loss line (PL1, DONE-RULE-A1 A1.3) only tighten, and exits go on."),
+                    "k5": "off" if off else "tripped" if k5.get("tripped") else "disarmed" if k5.get("cleared") else "armed",
+                    "lane_mode": "off" if off else str(report.get("mode") or "unknown")[:20]},
+        "doing": ("The dlane job writes the report at the House's start, daily at 01:30Z and 30 minutes before each open, "
+                  "each alarm a House warning. It moves no money: K5 and the program loss line (PL1, DONE-RULE-A1 A1.3) "
+                  "only tighten, and exits go on. With the lane off it writes no report and still holds the program loss "
+                  "line."),
         "owner_step": step, "onset": None}
-    a8 = [a for a in alarms if a.get("id") == "A8"] if report and not stale else []
-    named = ", ".join(f"{a.get('meter')} at close {a.get('at_close')}" for a in a8[:2])
+    told = {str(k) for k in done_told or ()}
+    pending = [] if off else [c for c in report.get("done_final") or [] if done_key(c.get("meter"), c.get("at_close"))
+                              not in told]
+    named = ", ".join(f"{c.get('meter')} at close {c.get('at_close')}" for c in pending[:2])
     done_out = {
-        "stalled": bool(a8),
+        "stalled": bool(pending),
         "what": (f"Done criteria hold at a FINAL checkpoint ({named}): DONE-RULE items 3, 4 (consistency measured, A1.1) "
-                 "and 7 (research 24/7), read on final inputs (A1.4)." if a8 else "No new Done checkpoint holds."),
-        "numbers": {"checkpoints": ",".join(f"{a.get('meter')}:{a.get('at_close')}" for a in a8)[:80] or "none",
+                 "and 7 (research 24/7), read on final inputs (A1.4)." if pending else
+                 LANE_OFF_WHAT if off else "No untold Done checkpoint holds."),
+        "numbers": {"checkpoints": ",".join(done_key(c.get("meter"), c.get("at_close")) for c in pending)[:80] or "none",
                     "report_at": None if at is None else S.iso(at)},
         "doing": "The House trades on by its pre-registered rules: no program or route is paused, slowed or stopped to "
                  "protect the figure (DONE-RULE item 5).",
-        "owner_step": DONE_STEP.format(named=named) if a8 else None, "onset": at if a8 else None}
+        "owner_step": DONE_STEP.format(named=named) if pending else None, "onset": at if pending else None,
+        # Not in the receipt: what `run` records as told once a notice carrying this cause is SENT.
+        "keys": [done_key(c.get("meter"), c.get("at_close")) for c in pending]}
     return {"dlane": dlane_out, "done": done_out}
 
 
@@ -1007,11 +1055,16 @@ def run(ctx: Any) -> dict[str, Any]:
     nightly_error = None
     if (forward or {}).get("error") is not None:
         nightly_error = {"since": seen_error.get("since") or S.iso(now)}
+    # The Done checkpoints a SENT notice has told (the review of the weekend fixes, Oct 10, 2026): `done` stands for the
+    # rest.
+    done_told = sorted({k for k in state.get("done_told") or [] if isinstance(k, str)}
+                       if isinstance(state.get("done_told"), list) else [])
     found = checks(swarm, now=now, ceiling=ceiling, budget=budget if isinstance(budget, Mapping) else None,
                    deploy=owner_deploy(base), heartbeat=read_json(root / HEARTBEAT, None), pause=pause_facts(root),
                    grant=grant, kill=kill_facts(_health(ctx)), flight=flight, dlane=dlane, lane_on=lane_on,
                    preopen=preopen, forward=forward,
-                   nightly_error_since=None if nightly_error is None else S.epoch(nightly_error["since"]))
+                   nightly_error_since=None if nightly_error is None else S.epoch(nightly_error["since"]),
+                   done_told=done_told)
 
     told = state.get("causes") if isinstance(state.get("causes"), dict) else {}
     mail = dict(state.get("mail")) if isinstance(state.get("mail"), dict) else {}
@@ -1057,6 +1110,8 @@ def run(ctx: Any) -> dict[str, Any]:
             except Exception as exc:  # noqa: BLE001 - not told: the next run tries again
                 ok, words = False, f"the notice failed ({type(exc).__name__} {getattr(exc, 'code', '') or ''})".replace(" )", ")")
             notice.update(sent=ok, why=words)
+            if ok and "done" in stalled:
+                done_told = sorted(set(done_told) | set(found["done"].get("keys") or []))
             if ok and kind == "owner":
                 # A notice for a new owner cause inside the 12 h starts them again: what both told is not told twice.
                 fresh = _within(S.epoch(mail.get("owner_at")), now, OWNER_EVERY_SECONDS)
@@ -1075,7 +1130,7 @@ def run(ctx: Any) -> dict[str, Any]:
             text += f" (notice: {notice['why']})"
         _alert(ctx, text)
     write_json(root / STATE_FILE, {"schema": 2, "at": S.iso(now), "causes": told, "mail": mail,
-                                   "nightly_error": nightly_error})
+                                   "nightly_error": nightly_error, "done_told": done_told})
     return {"stalled": stalled, "cleared": cleared, "warned": warned, "notice": notice,
             "checks": {c: {k: found[c].get(k) for k in ("stalled", "what", "numbers", "doing", "owner_step")} for c in CAUSES},
             "ceiling": ceiling, "errors": errors, "warning": bool(stalled or errors)}
@@ -1086,4 +1141,5 @@ __all__ = ["run", "checks", "swarm_facts", "owner_deploy", "pause_facts", "grant
            "VALIDATION_HOURS", "BRAKE_WINDOW_HOURS", "BRAKED_HOURS", "RUNWAY_DAYS", "PAUSED_HOURS", "OWNER_EVERY_SECONDS",
            "INFO_EVERY_SECONDS", "WARN_EVERY_SECONDS", "STATE_FILE", "deploy_flight", "dlane_facts", "preopen_facts",
            "forward_facts", "last_session_before", "OWNER_DEPLOY_GRACE", "DEPLOY_FLIGHT_SECONDS", "NIGHTLY_STOP_HOURS",
-           "NIGHTLY_ERROR_HOURS", "FORWARD_DUE_HOUR", "DLANE_STALE_HOURS", "PREOPEN_HOURS", "NEWS_CAUSES"]
+           "NIGHTLY_ERROR_HOURS", "FORWARD_DUE_HOUR", "DLANE_STALE_HOURS", "PREOPEN_HOURS", "NEWS_CAUSES", "done_key",
+           "LANE_OFF_WHAT"]

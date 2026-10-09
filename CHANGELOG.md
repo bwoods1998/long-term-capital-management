@@ -39,10 +39,28 @@ constitution digest (`ca89ff8a`) and the gate contract (`397b22b772b3`) are main
   final has its replay landed whatever the nightly has replayed; with `forward.twins` on, a close with no final twin is
   `pending_twin` and the reading is not final (no A8); with it off, the nightly's landing as before. A1.1's "replay
   untested" why now says a close matched "a replay (a twin or the nightly)".
+- **The review's five fixes** (Oct 10, 2026; `league/ops/` only):
+  - `dlane_report.Research247`: a UTC day with no `stall` receipt is not held ("no stall receipt"), as a day with no
+    `budget` receipt is not: item 7's "no owner step waiting" no longer passes on no evidence.
+  - `stall.py` `done`: reads the report's FINAL holding checkpoints (frozen) instead of the once-said A8, and stands for
+    each until a notice carrying it is SENT (`stall.json` `done_told`): a House start or a refused notice no longer
+    loses a Done claim.
+  - `dlane_report.lane_off`: with `dlane.mode` "off" the job still holds the program loss line (A1.3 retires a due
+    program, whatever its lane; PL1 a House warning, the figures in the receipt) and writes no report.
+  - `registry.py`: the `dlane` job also runs 30 minutes before each open, after the overnight expiry reconciliation (pid
+    14's landed at 01:11Z; from Nov 1 that hour is past 01:30Z), so a program an expiry carried past the line is retired
+    before the next session.
+  - `stall.py`: with the lane off neither `dlane` nor `done` reads the report the lane last wrote (its K5 and A8 were
+    mailed at every run for good).
 - **Proof.** `test_close_twins` (`test_finality_reads_a_final_twin_as_the_landed_replay`,
   `test_with_the_twins_on_a_reading_is_final_only_once_every_close_has_a_final_twin`); `test_dlane_report`'s two
-  nightly-finality tests run with the twins off (`NIGHTLY`). Both full suites (Python 3.11 and 3.14) at the head.
-- **Rollback.** The previous House release and gateway version.
+  nightly-finality tests run with the twins off (`NIGHTLY`). The review's: `test_dlane_report`
+  (`test_a_day_no_stall_receipt_read_is_not_a_day_with_no_owner_step_waiting`,
+  `test_with_the_lane_off_the_line_still_holds_and_no_report_is_written`, the registry's pre-open trigger, the stall
+  job reading a real report's final checkpoints) and `test_ops_stall`
+  (`test_an_untold_done_claim_stands_until_a_notice_is_sent`, `test_with_the_lane_off_its_last_report_is_not_read`).
+  Both full suites (Python 3.11 and 3.14) at the head.
+- **Rollback.** The previous House release and gateway version (its stall job ignores `stall.json`'s `done_told`).
 
 ### The swarm-side readiness fixes, on `wfix/swarm` (unreleased; an owner deploy on main `cf96b72c`; no evidence reset)
 

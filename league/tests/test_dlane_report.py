@@ -92,7 +92,7 @@ class Fixture(unittest.TestCase):
 
     def steady(self, first: str = "2026-09-30", last: str = "2026-10-19", *, skip: tuple = ()) -> None:
         """Research ran every UTC day from `first` to `last` but `skip` (DONE-RULE item 7): a birth, a Gym run and a
-        Validation a day, and the day's budget receipt at the ceiling."""
+        Validation a day, the day's budget receipt at the ceiling and a stall receipt with nothing standing."""
         from league.ops.store import OpsStore
 
         if self.store.family("busy") is None:
@@ -109,6 +109,7 @@ class Fixture(unittest.TestCase):
                                        stress=1.0, purpose=window, prune=False)
                 ops.record("budget", f"{d}T00:30:00Z", "ok", f"{d}T00:31:00Z",
                            summary={"meters": {"sail": {"limited_by": "ceiling"}, "claude": {"limited_by": "ceiling"}}})
+                ops.record("stall", f"{d}T00:20:00Z", "ok", f"{d}T00:20:30Z", summary={"checks": {}})
             d += dt.timedelta(days=1)
         self.now = keep
 
@@ -542,7 +543,7 @@ class TheAmendment(Fixture):
         research = R.Research247(self.store, self.root)
         out = research("2026-10-01", "2026-10-07")
         self.assertFalse(out["holds"])
-        self.assertEqual(out["why"], "2026-10-04: no births; no Gym runs; no Validations; no budget receipt")
+        self.assertEqual(out["why"], "2026-10-04: no births; no Gym runs; no Validations; no budget receipt; no stall receipt")
         self.assertTrue(research("2026-10-05", "2026-10-07")["holds"])
         ops = OpsStore(self.root)
         self.addCleanup(ops.close)
@@ -570,6 +571,24 @@ class TheAmendment(Fixture):
         self.assertEqual(out["edits_count"], 2)
         self.assertEqual(R.NEWS_CAUSES, ("done",))
 
+    def test_a_day_no_stall_receipt_read_is_not_a_day_with_no_owner_step_waiting(self):
+        """The review of the weekend fixes (Oct 10, 2026): the stall job failing all day (an unreadable swarm store) or
+        missed left `owner` empty, so the day held on no evidence; the budget leg already failed a day with no receipt."""
+        from league.ops.store import OpsStore
+
+        self.steady("2026-10-05", "2026-10-07")
+        ops = OpsStore(self.root)
+        self.addCleanup(ops.close)
+        ops.db.execute("DELETE FROM runs WHERE job='stall' AND due_at LIKE '2026-10-06%'")
+        # A failed stall run is no reading either: only a receipt the job finished counts.
+        ops.record("stall", "2026-10-06T10:20:00Z", "failed", "2026-10-06T10:20:30Z", error="OperationalError: locked")
+        out = R.Research247(self.store, self.root)("2026-10-05", "2026-10-07")
+        days = {d["day"]: d for d in out["days"]}
+        self.assertEqual((days["2026-10-06"]["holds"], days["2026-10-06"]["why"]), (False, "no stall receipt"))
+        self.assertEqual((days["2026-10-06"]["at_budget"], days["2026-10-06"]["stall_receipts"]), (True, 0))
+        self.assertTrue(days["2026-10-05"]["holds"] and days["2026-10-07"]["holds"])
+        self.assertEqual(out["why"], "2026-10-06: no stall receipt")
+
     def test_a_reading_is_final_only_on_landed_replays_and_posted_fees_and_then_frozen(self):
         self.thirty()
         # dir-a is at Probe: its nightly replay has replayed only to the 7th, the closes exit on the 8th.
@@ -596,6 +615,13 @@ class TheAmendment(Fixture):
         self.assertEqual((cp["holds"], cp["final"], cp.get("frozen")), (True, True, True))
         self.assertEqual(later["done"]["screen"]["running"]["consistent_ok"], False, "the running figure reads it now")
         self.assertNotIn("A8", [a["id"] for a in later["alarms"]])
+        # The stall job's `done` cause reads the frozen final reading, not the once-said A8 (the review of the weekend
+        # fixes, Oct 10, 2026): the later report still carries the claim for a notice that has not been sent.
+        from league.ops import stall as ST
+
+        (self.root / R.FILE).write_text(json.dumps(later, default=str))
+        self.assertEqual(ST.dlane_facts(self.root)["done_final"],
+                         [{"meter": "done_all", "at_close": 30}, {"meter": "done_screen", "at_close": 30}])
 
     def test_finality_reads_each_close(self):
         rows = [{"family": "f", "day": "2026-10-08", "pnl_usd": Decimal("1"), "fee_basis": "broker"}]
@@ -713,6 +739,29 @@ class TheProgramLossLine(Fixture):
         self.assertEqual(again["retired"], [])
         self.assertNotIn("PL1", again["alarms"])
 
+    def test_with_the_lane_off_the_line_still_holds_and_no_report_is_written(self):
+        """The review of the weekend fixes (Oct 10, 2026): `dlane.mode` "off" rolled back the lane AND the program loss line
+        (the job returned before `program_losses`), so an alpha Probe program could drain the shared $400 total. The rule
+        names one program whatever its lane: with the lane off the job still retires a due one, and writes no report."""
+        (self.root / R.FILE).write_text(json.dumps({"at": "2026-10-19T01:30:00Z", "alarms": []}))
+        before = (self.root / R.FILE).read_text()
+        self.fam("alp-a", band="probe")
+        self.fam("dir-b", lane="direction", band="probe")
+        self.close("alp-a", pnl=-120.0, probe=True)
+        self.close("dir-b", pnl=-90.0, probe=True)
+        out = R.run(self.ctx())
+        self.assertEqual(out["status"], "skipped", "nothing due: the rollback's receipt, as before")
+        self.assertEqual(out["program_loss"]["due"], [])
+        self.close("alp-a", pnl=-80.0, probe=True)
+        out = R.run(self.ctx())
+        self.assertEqual((out["ok"], out["lane"], out["retired"], out["alarms"]), (True, "off", ["alp-a"], ["PL1"]))
+        self.assertEqual(self.store.family("alp-a")["band"], "retired")
+        self.assertIsNone(self.store.family("dir-b")["retired_at"], "-$90 is above the line")
+        self.assertTrue(any(level == "warning" and "PL1: retired swarm-side 1 programs" in text and "lane is off" in text
+                            for level, text in self.alerts))
+        self.assertEqual((self.root / R.FILE).read_text(), before, "the lane off writes no report")
+        self.assertEqual(R.run(self.ctx())["status"], "skipped", "retired once: nothing due again")
+
     def test_a_setting_can_only_tighten_the_line(self):
         self.fam("dir-a", lane="direction", band="probe")
         self.close("dir-a", pnl=-150.0, probe=True)
@@ -786,8 +835,11 @@ class ReportedOnly(unittest.TestCase):
         self.assertEqual([j.name for j in JOBS].count("dlane"), 1)
         job = by_name()["dlane"]
         self.assertEqual((job.module, job.in_pause, job.paid), ("league.ops.dlane_report", True, False))
-        self.assertEqual([t.kind for t in job.triggers], ["start", "daily"])
+        self.assertEqual([t.kind for t in job.triggers], ["start", "daily", "open"])
         self.assertEqual((job.triggers[1].at.hour, job.triggers[1].at.minute), (1, 30))
+        # The review of the weekend fixes (Oct 10, 2026): 30 minutes before each open too, after the overnight expiry
+        # reconciliation (the program loss line acts before the session, A1.3).
+        self.assertEqual(job.triggers[2].offset_minutes, -30)
 
     def test_the_game_report_says_what_the_lane_changed_mid_experiment_only_while_it_is_on(self):
         """The operator's decision 1: the alpha births' fall and the ROLE prompt's change ride in the game's report, once:

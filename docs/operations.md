@@ -33,14 +33,41 @@ the join to the other, so a reading could be frozen on the nightly fallback just
   is made on it. It shows in `final_why` and in `replay_twins.by_status.failed`. Switching the twins off puts finality
   back on the nightly. This is a tightening of a Done claim's inputs, never of trading.
 
+**The review's five fixes** (Oct 10, 2026; `league/ops/` only, so the walls above still hold):
+- **Item 7 needs a stall receipt** (`Research247.day`). A UTC day with no `stall` receipt (the job failing all day, say
+  on an unreadable swarm store, or missed) read "no owner step waiting" on no evidence. It is now not held ("no stall
+  receipt"), as a day with no `budget` receipt already was not.
+- **The `done` cause keeps an untold claim** (`stall.py`). It read the report's A8, which one report says once: a House
+  start (the job's at-start run rewrites the report without it) or a notice the gateway did not send before the next
+  `dlane` run lost the claim to a ledger row. It now reads the report's FINAL holding checkpoints (frozen from report
+  to report) and stands for each one until a notice carrying it is SENT (`stall.json` `done_told`).
+- **The program loss line holds with the lane off** (`dlane_report.lane_off`). The job returned before
+  `program_losses` when `dlane.mode` is "off", so the lane's rollback switched off A1.3 for every program, alpha
+  included. With the lane off it now still retires a due program (PL1 a House warning, the figures in the receipt) and
+  writes no report; with nothing due the receipt is the `skipped` one it always was.
+- **A pre-open run** (`registry.py`: the `dlane` job also 30 minutes before each open). A Probe position held to its
+  expiry is priced by the House's overnight reconciliation: pid 14's landed at 01:11Z Oct 8, minutes before the 01:30Z
+  run, and from Nov 1 (New York on standard time) the same New York hour is 02:11Z, after it. A program that such an
+  expiry carried past the line would have traded one more session. About 30 seconds a run.
+- **The lane off reads no report** (`stall.py`). With the lane off the job writes no report, so the last one stayed on
+  disk and its K5 (an owner step for a lane that is off) and A8 were mailed at every run for good. While the lane is
+  off neither `dlane` nor `done` reads it.
+- **Costs:** an unread day now holds a checkpoint's item 7 back (no Done claim on it); a Done notice the gateway keeps
+  refusing is retried every run (inside the owner notice's 12-hour pace) until it is sent; with the lane off a
+  retirement at the line is a House warning and a receipt, not a stall notice; the extra run re-reads the report's
+  inputs once a trading day (K5 and A8 may now be raised before the open as well as at 01:30Z).
+
 **Deploy order.** (1) The gateway (`cd gateway && npm run deploy`): `gateway/lib/email.mjs` has the words for the stall
 alarm's four new causes, and a House that sends a cause an old gateway does not know gets a 400 for the whole notice.
 (2) One owner deploy of the House at the release head. The changed `league/ops/` files (`dlane_report.py`, `stall.py`,
-`twins.py`, `direction.py`, `funnel.py`, `scoreboard.py`, `__init__.py`) and `league/swarm/` files (`gate.py`,
-`tournament.py`, `dlane.py`, `settings.py`, `policy.json`, `loop.py`, `researcher.py`) ship together; the updater
-refuses the FORBIDDEN ones. Before it, assert the four identities above at the exact head.
+`twins.py`, `direction.py`, `funnel.py`, `scoreboard.py`, `registry.py`, `__init__.py`) and `league/swarm/` files
+(`gate.py`, `tournament.py`, `dlane.py`, `settings.py`, `policy.json`, `loop.py`, `researcher.py`) ship together; the
+updater refuses the FORBIDDEN ones. Before it, assert the four identities above at the exact head.
 
-**Verify after the deploy** (read-only): the three sections' lists below. Rollback: the previous House release and the
+**Verify after the deploy** (read-only): the three sections' lists below, and the review's: `stall.json` carries
+`done_told` (`[]` until a Done claim is told) and the `done` check reads "No untold Done checkpoint holds."; the
+`research_247_last_7_days` days carry `stall_receipts` above 0; the next trading day has a `dlane` receipt due 30
+minutes before the open (13:00Z Mon Oct 12, after the 12:30Z `preopen`). Rollback: the previous House release and the
 previous gateway version; each section says what its rollback leaves behind (M3's retired families stay retired).
 
 ## The swarm-side readiness fixes (Oct 10, 2026): built on `wfix/swarm`, not deployed
@@ -661,9 +688,12 @@ its rolling budget (L9, a tightening of NET: $400 of worst net stretch in any 20
 in its section and ride in the report's header too.
 
 **The report** (`league/ops/dlane_report.py`; the House's `dlane` job at its start and daily 01:30Z, after the
-`direction` closes and the fast lane's report; in a pause too; OPERATOR-ONLY, read-only on the swarm and live stores but
-for K5's kv, the trip and the clear recorded; no site data contract changes). It writes `<state>/dlane-report.json`; with `dlane.mode` "off" it
-writes nothing (a `skipped` receipt). The fast lane's report rows gain `lane` while the lane is on (off: no key).
+`direction` closes and the fast lane's report, and since the weekend fixes 30 minutes before each open; in a pause too;
+OPERATOR-ONLY, read-only on the swarm and live stores but for K5's kv, the trip and the clear recorded; no site data
+contract changes). It writes `<state>/dlane-report.json`; with `dlane.mode` "off" it writes no report (a `skipped`
+receipt) and, since the weekend fixes, still holds the program loss line (DONE-RULE-A1 A1.3: a due program is retired,
+PL1 a House warning, the receipt carrying the figures). The fast lane's report rows gain `lane` while the lane is on
+(off: no key).
 - **The header:** the pinned Done rule (its sha256 `0d007696...`), every loosened and tightened rule with its cost, the
   contamination statement, the label "direction lane: leveraged index beta minus option costs; not alpha" on every
   direction figure.
@@ -715,7 +745,7 @@ writes nothing (a `skipped` receipt). The fast lane's report rows gain `lane` wh
 | A5 | a direction Probe or Sized program's live fills below its replay by over 0.10 a dollar of maximum loss over 5+ matched closes | watch: D5 demotes at 0.20; no new Probe in that structure until the fill model is explained |
 | A6 | fewer than 1 eligible direction version per 50 direction births over 48 h (judged from 50 births) | report the failure counts; never a loosening without a new pinned measurement |
 | A7 | more than half of the direction versions that clear E1, E3 and E4 fail E5 | report today's cap and the median failing one lot |
-| A8 | a FINAL checkpoint holds (`info`, once a checkpoint; since the weekend fixes only on a final reading, naming items 3, 4 and 7) | read it with the buy-and-hold, P(Done \| zero edge), Net after costs and the contamination meters; it stops nothing. The `stall` job mails it at once (its `done` cause) |
+| A8 | a FINAL checkpoint holds (`info`, once a checkpoint; since the weekend fixes only on a final reading, naming items 3, 4 and 7) | read it with the buy-and-hold, P(Done \| zero edge), Net after costs and the contamination meters; it stops nothing. The `stall` job mails the final holding checkpoint at once (its `done` cause, which stands until a notice is sent) |
 | PL1 | a program's own realized Probe net is at or below the program loss line (`dlane.program_loss_usd`, -$200; DONE-RULE-A1 A1.3) | none: the job retires it swarm-side the same run (its real positions exit by the House's rules); the report's `program_loss.retired` names it |
 | A9 | every live direction program opened nothing for 10 sessions (`info`) | none: the lane is flat by design |
 | K5 | `dlane_k5` is set | the lane is in shadow until the operator clears it (**K5**, below) |
@@ -760,8 +790,9 @@ The tool refuses (exit 2, nothing written) a text over 4,000 characters, non-ASC
 clearing it, re-plan (the plan's K5: the lane's losses passed its line) and decide, as separate steps, whether to set
 `live.incubator` false and, in the next owner window, `probe.max_open` 0. To clear, either:
 1. set `dlane.k5_clear` true in `swarm.json` (keep a before-copy; read every loop: the lane opens at once). The `dlane`
-   job's next run (the House's start, or 01:30Z) records the clear: it deletes the kv and writes `dlane_k5_base` with
-   the lane's net then, so K5's next line is `k5_net_usd` below that net. Then take `k5_clear` out: while it is true K5
+   job's next run (the House's start, 01:30Z, or since the weekend fixes 30 minutes before an open) records the clear:
+   it deletes the kv and writes `dlane_k5_base` with the lane's net then, so K5's next line is `k5_net_usd` below that
+   net. Then take `k5_clear` out: while it is true K5
    cannot trip at all, and the report warns every run (`K5 is disarmed`); or
 2. delete the kv on the box (`cd /workspace/current && /workspace/.venv/bin/python -c "from league.swarm.store import
    SwarmStore; s=SwarmStore('/workspace/state'); s._exec(\"DELETE FROM kv WHERE key='dlane_k5'\"); s.close()"`). No
@@ -772,7 +803,8 @@ Never delete `dlane_k5_base` by hand: K5's line would go back to -$600 since inc
 **Roll back.**
 - **The lane off, at once:** `dlane.mode` `"off"` in `swarm.json` (keep a before-copy; replace atomically). Read on
   the next loop, no restart. Every family is alpha again (`lane_of`), no direction card is admitted, no quota, LANES
-  block, direction score, screen or text is used, the `dlane` job writes nothing, the fast lane's rows carry no lane, and
+  block, direction score, screen or text is used, the `dlane` job writes no report (since the weekend fixes it still
+  retires a program at the program loss line, A1.3, whatever its lane), the fast lane's rows carry no lane, and
   the agenda guard is silent: every path is the release before D-1, byte for byte. Direction families alive then go on
   as alpha families under the alpha rules (their spec and card keep `lane`, read again if the lane comes back on). A set
   K5 kv stays and is harmless while off. The leakage alarm is the one count again, over the looks the alpha line judged
@@ -1974,8 +2006,8 @@ and `data/nightly.stop`), all read-only, and names a stall by its cause:
 | `paused` | a maintenance pause (`<state>/PAUSE`) or a stopped swarm (`<state>/swarm.stop`) has stood 6 h or more (by the file's time). While either stands, `births`, `gym_runs`, `validations` and `braked` are not raised: a pause stops research by design | "lift the maintenance pause once its work is done (`scripts/floor_box.py maintenance off`)", or "remove state/swarm.stop" |
 | `grant_refused` | the standing grant refused to re-ratify since the `grant` job's last `ok` run (its receipts: `standing grant refused`; a failure to read the account is no refusal) | "ratify the grant by hand on the box (`python3 scripts/live_trading.py --ratify`)", with the grant's own reason |
 | `kill_on` | the gateway's kill switch is on (`/v1/health` `kill_switch`; since its latest `kill` in `admin_log`): no real order, no Claude call, no merge. An unreadable health is no cause | "lift the gateway's kill switch once its cause is fixed (`python3 scripts/gateway_admin.py unkill`, your admin token)" |
-| `dlane` (weekend fixes) | `<state>/dlane-report.json` carries a warning-level alarm (A1-A7, PL1, K5), or it is older than 30 h while the lane is on (the `dlane` job stopped) | K5 holding: "the direction lane reads shadow while K5 holds ...: read its losses, then clear it"; K5 disarmed: "take dlane.k5_clear out of swarm.json"; none for the rest |
-| `done` (weekend fixes) | the report's A8: a FINAL Done checkpoint holds, newly seen | an owner LINE, told at once: "Done holds at a FINAL checkpoint ...: read the claim in dlane-report.json". News, never an owner step waiting: the Done meter's item 7 does not count it |
+| `dlane` (weekend fixes) | `<state>/dlane-report.json` carries a warning-level alarm (A1-A7, PL1, K5), or it is older than 30 h while the lane is on (the `dlane` job stopped). With `dlane.mode` "off" the report is not read at all (the job writes none, so the last one would otherwise be mailed for good) | K5 holding: "the direction lane reads shadow while K5 holds ...: read its losses, then clear it"; K5 disarmed: "take dlane.k5_clear out of swarm.json"; none for the rest |
+| `done` (weekend fixes) | a FINAL Done checkpoint holds (the report's `done.<meter>.checkpoints`, final and holding: frozen from report to report) that no SENT notice has told yet (`stall.json` `done_told`, added to only when the gateway says it sent the notice). Not read with the lane off. Until the review of the weekend fixes it read the report's A8, which one report says once, so a House start or a failed notice before the next stall run lost the claim | an owner LINE, told at once: "Done holds at a FINAL checkpoint ...: read the claim in dlane-report.json". News, never an owner step waiting: the Done meter's item 7 does not count it |
 | `preopen` (weekend fixes) | the latest pre-open receipt (`ops.sqlite`, at most 24 h old) failed a check, or the job failed or was missed | none: each FAIL is a House warning, and the checks run again before the next open |
 | `forward` (weekend fixes) | the nightly's ready file (`gym-forward.json`) does not carry the last session before today once the UTC day is 10 h in; `data/nightly.json` has carried an error 6 h or more (from the first run that saw it, kept in `stall.json`); or `data/nightly.stop` has stood 2 h or more | for a stop: "remove /workspace/state/data/nightly.stop ... the nightly forward replay, and with it the Done meter's replay twins, waits while it stands"; none for the rest |
 

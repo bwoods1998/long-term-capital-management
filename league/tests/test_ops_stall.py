@@ -705,9 +705,18 @@ class LaneAndNightly(Base):
     """The readiness audit's M6 (Oct 10, 2026): the direction lane's alarms (K5 an owner step), a Done checkpoint (told at
     once), a pre-open FAIL and a late or stopped nightly reach the owner through the same one notice."""
 
-    def report(self, *alarms, at="2026-10-07T01:30:00Z", k5=None, mode="gate"):
+    def report(self, *alarms, at="2026-10-07T01:30:00Z", k5=None, mode="gate", done=None):
         doc = {"at": at, "lane": {"mode": mode}, "k5": k5 or {"tripped": False, "cleared": False}, "alarms": list(alarms)}
+        if done is not None:
+            doc["done"] = done
         (self.root / "dlane-report.json").write_text(json.dumps(doc))
+
+    @staticmethod
+    def done(*checkpoints, meter="screen"):
+        """A report's `done` block: `checkpoints` (at_close, holds, final) on `meter`, none on the other."""
+        rows = [{"at_close": k, "holds": holds, "final": final, "items": {"3": holds, "4": holds, "7": holds}}
+                for k, holds, final in checkpoints]
+        return {meter: {"checkpoints": rows}, ("all" if meter == "screen" else "screen"): {"checkpoints": []}}
 
     def run_lane(self, now=NOW, lane_on=True):
         ctx = self.ctx(now=now)
@@ -751,15 +760,68 @@ class LaneAndNightly(Base):
 
     def test_a_done_checkpoint_is_told_at_once_as_an_owner_line(self):
         self.healthy()
-        self.report({"id": "A8", "level": "info", "meter": "done_screen", "at_close": 30, "text": "A8: Done criteria hold"})
+        a8 = {"id": "A8", "level": "info", "meter": "done_screen", "at_close": 30, "text": "A8: Done criteria hold"}
+        # A provisional holding reading may still flip: nothing is told (DONE-RULE-A1 A1.4).
+        self.report(a8, done=self.done((30, True, False)))
+        self.assertEqual(self.run_lane()["stalled"], [])
+        self.report(a8, done=self.done((30, True, True)))
         out = self.run_lane()
         self.assertEqual(out["stalled"], ["done"])
         self.assertIn("done_screen at close 30", out["checks"]["done"]["owner_step"])
         self.assertEqual(self.notify.calls[-1]["notice_id"], "stall:owner:done")
         self.assertEqual(self.notify.entry("done")["numbers"]["checkpoints"], "done_screen:30")
-        # The next day's report no longer carries it (A8 is said once): the cause clears.
-        self.report()
+        self.assertEqual(json.loads((self.root / "stall.json").read_text())["done_told"], ["done_screen:30"])
+        # The next day's report no longer carries A8 (said once) but keeps the final reading (frozen): told, it clears.
+        self.report(done=self.done((30, True, True)))
         self.assertEqual(self.run_lane(now=NOW + HOUR)["cleared"], ["done"])
+        self.assertEqual(len(self.notify.calls), 1)
+
+    def test_an_untold_done_claim_stands_until_a_notice_is_sent(self):
+        """The review of the weekend fixes (Oct 10, 2026): the cause read the report's A8, which one report says once. A
+        House start (the dlane job's at-start run rewrites the report without it) or a notice the gateway did not send
+        before the next dlane run left the claim in a ledger row only."""
+        self.healthy()
+        # The report the stall run first reads has no A8 at all (a restart rewrote it): the final reading is the record.
+        self.report(done=self.done((30, True, True), meter="all"))
+        self.notify.answer = OSError("the gateway did not answer")
+        out = self.run_lane()
+        self.assertEqual((out["stalled"], out["notice"]["sent"]), (["done"], False))
+        self.assertEqual(json.loads((self.root / "stall.json").read_text())["done_told"], [], "not told until SENT")
+        self.notify.answer = {"sent": False, "reason": "400 unknown stall cause"}             # an old gateway
+        self.assertEqual(self.run_lane(now=NOW + HOUR)["stalled"], ["done"])
+        self.notify.answer = {"sent": True}
+        out = self.run_lane(now=NOW + 2 * HOUR)
+        self.assertEqual((out["stalled"], out["notice"]["sent"]), (["done"], True))
+        self.assertEqual(self.notify.entry("done")["numbers"]["checkpoints"], "done_all:30")
+        self.assertEqual(self.run_lane(now=NOW + 3 * HOUR)["stalled"], [], "told once")
+        # The next checkpoint that holds is a new claim; inside the owner notice's 12 h it waits for the pace, standing.
+        self.report(done=self.done((30, True, True), (40, True, True), meter="all"))
+        out = self.run_lane(now=NOW + 4 * HOUR)
+        self.assertEqual((out["stalled"], out["notice"]["sent"]), (["done"], False))
+        self.assertEqual(out["checks"]["done"]["numbers"]["checkpoints"], "done_all:40")
+        out = self.run_lane(now=NOW + 15 * HOUR)
+        self.assertTrue(out["notice"]["sent"])
+        self.assertEqual(json.loads((self.root / "stall.json").read_text())["done_told"], ["done_all:30", "done_all:40"])
+
+    def test_with_the_lane_off_its_last_report_is_not_read(self):
+        """The review of the weekend fixes (Oct 10, 2026): `dlane.mode` "off" writes no report, so the last one stayed:
+        its K5 mailed an owner step for a lane that is off, and its A8 a Done claim, at every run for good."""
+        self.healthy()
+        self.report({"id": "K5", "level": "warning", "new": True, "text": "K5 tripped: ..."},
+                    {"id": "A8", "level": "info", "meter": "done_all", "at_close": 30, "text": "A8: Done criteria hold"},
+                    k5={"tripped": True, "cleared": False}, done=self.done((30, True, True), meter="all"))
+        out = self.run_lane(lane_on=False)
+        self.assertEqual(out["stalled"], [])
+        self.assertEqual(self.notify.calls, [])
+        late = self.run_lane(now=NOW + 90 * 24 * HOUR, lane_on=False)       # births and Gym runs stall by then
+        self.assertFalse({"dlane", "done"} & set(late["stalled"]), "never, however long the lane stays off")
+        self.assertEqual(out["checks"]["dlane"]["what"], ST.LANE_OFF_WHAT)
+        self.assertEqual((out["checks"]["dlane"]["numbers"]["lane_mode"], out["checks"]["dlane"]["owner_step"]), ("off", None))
+        self.assertEqual(out["checks"]["done"]["what"], ST.LANE_OFF_WHAT)
+        # The lane back on: the same report is read again (and is stale by then).
+        out = self.run_lane(now=NOW, lane_on=True)
+        self.assertEqual(out["stalled"], ["dlane", "done"])
+        self.assertEqual(out["checks"]["dlane"]["owner_step"], ST.K5_STEP)
 
     def preopen(self, due, status="ok", failed=(), error=None):
         from league.ops.store import OpsStore
