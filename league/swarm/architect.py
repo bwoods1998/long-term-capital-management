@@ -150,7 +150,8 @@ default, or "direction": cards.py, `dlane.card_errors`):
     what a direction family is scored by (direction-v2), a direction long_single buys calls only, and the card schema line
     carries "lane". The alpha lane's words are unchanged, word for word.
   - THE REQUEST: a LANES block right after the BIRTH QUOTAS (`lanes_block`): each lane's rules (`dlane.lanes_text`), that a
-    DRIFT row binds no direction card, the direction quota of this pass (`dlane.DirectionQuota.text`), the last pass's
+    DRIFT row binds no direction card and (since Oct 9, THE DIRECTION LANE'S GRAVEYARD in cards.py) that only a direction
+    family's row binds one, the direction quota of this pass (`dlane.DirectionQuota.text`), the last pass's
     direction births, refusals and shortfall (kv `LANE_LAST_KEY`), and the direction lane's failure counts over 48 hours
     (`dlane.failure_counts`: codes and counts only, never a figure; the unit's rule when a version failed E5, alarm A7's
     self-action, never today's dollar cap). A pass that left reserved direction births unfilled makes the next request
@@ -169,8 +170,11 @@ default, or "direction": cards.py, `dlane.card_errors`):
   - A BIRTH: a direction family's spec carries `lane` "direction" (its card does too); its `swarm.born` payload carries
     `lane` (every birth's, while the lane is on). An alpha card and spec never carry a lane, so alpha card shas are the
     release before's.
-  - NO PAID PASS WITHOUT A CELL (`closed`) reads a cell whose only rows are DRIFT rows as one a direction card can bear,
-    and the BIRTH CELLS gain the lane's own cells (cards.py `lane_cells`).
+  - NO PAID PASS WITHOUT A CELL (`closed`) reads a cell whose rows bind no direction card (DRIFT rows and, since Oct 9,
+    alpha families' rows) as one a direction card can bear, and the BIRTH CELLS gain the lane's own cells (cards.py
+    `lane_cells`); since Oct 9 their header says what binds a direction card (`LANE_CELLS_NOTE`) and each line of a cell
+    a direction card may be in counts the rows that bind one (cards.py `direction_cells`). A direction birth that matched
+    alpha rows records how many in its `swarm.born` card (`alpha_rows`).
 With `dlane.mode` "off" (THE ROLLBACK, also the code's default) none of this acts: the system prompt, the request, the
 admission, the events and every kv are the release before's (ccfa48d5), byte for byte.
 
@@ -1331,6 +1335,9 @@ YIELD_CELLS_NOTE = ("; each cell is marked open or exhausted by how often its re
                     "open cell a card that matches only its self-refuted and drift rows needs no \"rebirth\" (one given there "
                     "is kept only if it holds, else dropped), and a card matching any other row of it needs one as above; in "
                     "an exhausted cell every row needs one")
+#: THE DIRECTION LANE'S GRAVEYARD (Oct 9, 2026; cards.py): the cells' header while the direction lane is on. Words only.
+LANE_CELLS_NOTE = ("; a DIRECTION card is bound only by the rows of direction families, never by an alpha family's row "
+                   "or a DRIFT row: each line of a cell a direction card may be in says how many of its rows bind one")
 #: With `architect.claimable_rows`: what a cell's claimable rows are.
 CLAIMABLE_NOTE = ("; \"claimable\" lists rows a rebirth may name, newest first, each with the inputs it read: your card's "
                   "inputs must add one it did not read, and a carded row is matched only when your inputs overlap what it read")
@@ -1704,9 +1711,13 @@ class Architect:
             return ""
         c = dlane.cfg(self.settings)
         lines = [dlane.lanes_text(self.settings),
-                 "- THE GRAVEYARD AND THE LANES: a DRIFT row (its versions failed the drift screen, which charges the profit "
-                 "of exposure) never binds a direction card, so a direction card needs no rebirth claim for one; every "
-                 "other verdict binds both lanes. The lane's own cells: " + ", ".join(
+                 "- THE GRAVEYARD AND THE LANES: a direction card is bound only by the graveyard rows of DIRECTION "
+                 "families. An alpha family's row (every family born outside the direction lane: its verdict judged a "
+                 "timing edge under the alpha rules) never binds a direction card, and neither does a DRIFT row (its "
+                 "versions failed the drift screen, which charges the profit of exposure), so a direction card needs no "
+                 "rebirth claim for one; a direction family's row with any other verdict binds direction cards, and "
+                 "every row binds alpha cards. Each BIRTH CELLS line of a cell a direction card may be in says how many "
+                 "of its rows bind one. The lane's own cells: " + ", ".join(
                      f"{k} / directional / {h}" for k, _, h in cards.lane_cells(self.settings, ["directional"])) + "."]
         if quota is not None and quota.text():
             lines.append(quota.text())
@@ -1895,7 +1906,8 @@ class Architect:
             if any(index.bearable(cell, rows) for cell, rows in grid):
                 return None
             if dlane.on(self.settings):
-                # THE DIRECTION LANE: a cell of the lane's whose only rows are DRIFT rows can bear a direction card.
+                # THE DIRECTION LANE: a cell of the lane's whose rows bind no direction card (DRIFT rows and, since
+                # Oct 9, alpha families' rows: `cards.RebirthIndex.needs_claim`) can bear a direction card.
                 c = dlane.cfg(self.settings)
                 if any(index.bearable(cell, rows, dlane.DIRECTION) for cell, rows in grid
                        if cell[0] in c["classes"] and cell[1] == "directional" and cell[2] in c["holding"]):
@@ -1946,6 +1958,8 @@ class Architect:
                     self.pass_yields = yields if index.yield_error is None else None
                 if claimable:
                     extra += CLAIMABLE_NOTE
+                if dlane.on(self.settings):
+                    extra += LANE_CELLS_NOTE  # THE DIRECTION LANE'S GRAVEYARD (Oct 9, 2026)
             if cells and families is not None:
                 parts.append(BIRTH_CELLS_HEADER + extra + ":\n" + "\n".join(cells))
             elif cells:
@@ -2165,10 +2179,12 @@ class Architect:
                     if verdict.get("dropped"):
                         born_payload["card"]["claim_dropped"] = str(verdict["dropped"])[:300]
                         dropped.append({"family": fam["id"], "why": str(verdict["dropped"])[:300]})
-                if verdict and verdict.get("drift_lane"):  # THE DIRECTION LANE: only DRIFT rows, which bind no direction card
+                if verdict and verdict.get("drift_lane"):  # THE DIRECTION LANE: only rows that bind no direction card
                     born_payload["card"]["drift_lane"] = True
                     if verdict.get("dropped"):
                         born_payload["card"]["claim_dropped"] = str(verdict["dropped"])[:300]
+                if verdict and verdict.get("alpha_rows"):  # THE DIRECTION LANE'S GRAVEYARD: alpha rows it matched
+                    born_payload["card"]["alpha_rows"] = int(verdict["alpha_rows"])
             if literature:
                 born_payload["literature"] = [x["id"] for x in literature]
             if lane_on:

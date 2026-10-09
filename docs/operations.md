@@ -167,7 +167,38 @@ money-safety fix (rule F0: its cost is those bands, which go back to the Gym).
   card's sha is byte-identical (no `lane` key is ever written for alpha). A direction card must be inside the lane's
   box: mechanism class `equity_premium` (new) or `trend_momentum`; structure `long_single` (calls only) or
   `debit_vertical`; roots SPY, QQQ, IWM; holding `days_1_3` or `days_4_10`; an ablation switch that enters the same
-  structure every session (never flat). Graveyard rows whose only verdict is DRIFT do not bind a direction card.
+  structure every session (never flat). Graveyard rows whose only verdict is DRIFT do not bind a direction card, and
+  since Oct 9 neither does any alpha family's row (**The graveyard**, next).
+- **The graveyard** (Oct 9, 2026, after D-1 went live at 10:37Z as main `2b60d94a`; branch `fix/dlane-graveyard`, not
+  deployed; the operator's decision, **a reported loosening**). A direction card is bound only by the graveyard rows of
+  direction families (`league/swarm/cards.py` `RebirthIndex.binds_direction`, `needs_claim`).
+  - Why: the House's architect pass of 11:32Z had its direction cards refused by alpha rows, for example
+    low-iv-drift-call: "its cell (equity_premium / directional / days_4_10 / clock+implied_vol+underlying_price), and
+    the trend_momentum cell its own mechanism text reads as, hold 15 graveyard row(s) ..., the newest
+    persistent-ceiling-rejection-put (REFUTED) of the 7 that need a claim". calm-trend-drift-call was refused the same
+    way. Those verdicts judged timing edges against drift under the alpha rules. They say nothing about a direction
+    program, which direction-v2 judges as labelled beta. The lane has its own multiplicity control: one Validation try
+    and one holdout look per lineage, and D2's false-positive rate measured per program.
+  - How a row's lane is read (`cards.row_lane`), the way D-1 stores it: the family's spec `lane`, else its card's
+    `lane`, else (a fork with no card of its own) the card its spec's `card_sha` names. A family with none of these is
+    alpha, which covers every family born before D-1.
+  - What still binds: a DRIFT row binds no direction card (unchanged). A direction family's row with any other
+    mechanism verdict needs the full rebirth claim (a valid `rebirth`, the row's and the cell's budgets). An alpha
+    row is still matched, so a claim a direction card makes on one is checked as on a DRIFT row: a rebirth only when
+    it holds, otherwise dropped. The verdict counts alpha rows (`alpha_rows`; the `swarm.born` card carries it).
+  - Alpha cards are judged byte for byte as before: every row binds them, direction rows included. `dlane.mode` "off"
+    is byte for byte main `2b60d94a`. `test_dlane_graveyard` pins both to that commit's output on a fixture store.
+  - The architect's view: the LANES block says a direction card is bound only by direction families' rows. The BIRTH
+    CELLS header says so too (`LANE_CELLS_NOTE`), and each line of a cell a direction card may be in
+    (`cards.direction_cells`: the lane's classes by its holdings) counts the rows that bind one. `closed` reads a lane
+    cell whose rows bind no direction card as one a direction card can bear.
+  - Its cost: more direction births may retry ideas similar to dead alpha ones (a call renting a calm trend reads as
+    the trend_momentum cell's dead timing edges). Each such lineage still gets one Validation try and one holdout look,
+    at D2's measured false-positive rate of 10.4% per program (mixed worlds).
+  - Deploy class: the updater (`cards.py` and `architect.py` are not protected paths). Rollback: revert the commit;
+    `dlane.mode` "off" rolls back the whole lane. The `dlane` report's loosened-rules header
+    (`league/ops/dlane_report.py` `LOOSENED`) does not list this rule yet: `league/ops/` is an owner-deploy path, so
+    the row joins it at the next owner deploy. The table below lists it now.
 - **Births.** While the lane holds under `birth_share` (half) of the last 24 hours' births and fewer than `max_alive`
   direction families live, a pass reserves at least half its births for direction (never filled with alpha); the lane
   never holds more than `max_share` (60%) of the window, so alpha keeps at least 40%. The architect's request carries a
@@ -257,6 +288,7 @@ every `dlane` report, `dlane_report.LOOSENED`):
 | The leakage alarm | one count: 10 looks, over 30% | per lane; direction over 60% | a real direction holdout leak trips later; the paid review, the audit and the post-cutoff tail still check every look |
 | The incubator mark | the drift screen alone (the owner's term, Sept 29-30) | direction-v2 for direction families | with no edge about -$36 a week expected, at most $150 a week (about $650 a month); its closes are never evidence |
 | Graveyard DRIFT rows | bind every card | not a direction card | buried direction ideas may return, once each, inside the rebirth budgets |
+| Graveyard alpha rows (Oct 9, `fix/dlane-graveyard`) | bind every card | alpha cards only: a direction card is bound only by direction families' rows (DRIFT never) | more direction births may retry ideas similar to dead alpha ones; each lineage still gets one Validation try and one holdout look at D2's measured 10.4% false-positive rate per program (mixed worlds); not yet in the `dlane` report's header (an owner-deploy path) |
 | The birth quota | no lane | direction about half while behind, at most 60% | alpha births fall from about 73 to about 36 a day mid-way through the game's T0 experiment; the researcher's ROLE prompt (a shared prefix) changes for alpha researchers too, so "alpha golden" holds for code paths only (the game's report says so while the lane is on) |
 | The unit | MONEY's pre-registered $75 lane cap | 10% of equity (E5), as the live side | Probe-stage Done averaged over holds 6.3% against 7.8%; P(net <= -$360 in 8 weeks) 0.35 against 0.27 |
 | K5's clear | no K5 before D-1 | `dlane.k5_clear` true clears a set K5 at once and disarms K5 while it stays true; the job's next run records the clear and re-arms K5 at -$600 below the net then (deleting the kv clears the same way) | while `k5_clear` stays true the lane can lose past any line with no K5 (the report warns every run); after a clear K5 measures a further -$600 from the net at clearing, not from inception |
