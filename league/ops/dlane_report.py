@@ -7,7 +7,8 @@ OPERATOR-ONLY AND REPORTED: no agent reads it, and no module of league/swarm, le
 module or names its file (`league/tests/test_dlane_report.py` pins that). It changes no site data contract: the website
 reads nothing new. It is written whatever the figures say; it never pauses, slows or stops a program or a route.
 
-READ-ONLY, BUT FOR K5. The swarm store is opened read-only and the live book through `guard.read` (`mode=ro`), inside
+READ-ONLY, BUT FOR K5 AND THE PROGRAM LOSS LINE. The swarm store is opened read-only and the live book through
+`guard.read` (`mode=ro`), inside
 `guard.readonly()` (every SQLite open in the child is a `mode=ro` URI). The one write is K5's (decision 9): when the
 direction lane's realized net over every route since the options swarm began is at or below K5's line (`dlane.k5_line`:
 `dlane.k5_net_usd`, -$600, below the net at the operator's last clear; -$600 itself before any), the job writes the swarm
@@ -17,7 +18,9 @@ operator clears it (swarm.json `dlane.k5_clear` true, or deleting the kv). The j
 (`dlane.k5_rearm`, before the trip check: the kv deleted, the kv `dlane_k5_base` at the net then), so the clear holds
 and K5 is armed again at -$600 below that net (the review of Oct 9, 2026). While `dlane.k5_clear` is true K5 can
 neither hold nor trip: the report raises a K5 warning every run until the operator takes it out. A tightening, never a
-trade, never an order.
+trade, never an order. The second write (DONE-RULE-A1 A1.3, Oct 10, 2026; `retire_due`): a program whose own realized
+Probe net is at or below the program loss line (`dlane.program_loss_usd`, -$200, half the $400 Probe total) is retired
+swarm-side, in the same writable open after the report; its real positions exit by the House's rules (alarm PL1).
 
 WITH THE LANE OFF (`dlane.mode` "off", THE ROLLBACK) the job writes nothing and returns a `skipped` receipt.
 
@@ -34,16 +37,25 @@ constants), read exactly as pinned:
 - TWO METERS: `done_screen` (`:r` only, the evidence route) and `done_all` (`:r` + `:t` + `:i`, the goal's letter).
 - THE BAR: at least 30 closes, at least 5 closes from each of at least 2 programs, and net > 0 after fees.
 - CONSISTENT WITH REPLAY: every program with 5 or more MATCHED closes (closes of a version on a day its nightly replay
-  also traded: D5's measure, `money.forward_stats`, read here live minus replay and pooled over the program's versions)
-  has a mean gap within +/-0.10 a dollar of maximum loss. A program under 5 matched closes is listed with its gap,
-  never dropped.
+  also traded: D5's measure, `money.forward_stats`, read here live minus replay and pooled over the program's versions;
+  `GAP_MEASURE` says it is a ratio of sums) has a gap within +/-0.10 a dollar of maximum loss, AND (DONE-RULE-A1 A1.1,
+  Oct 10, 2026) at least 2 programs are so measured: zero matched closes never passes. Every program is listed with its
+  closes, matched closes and gap (each checkpoint's `by_program`, `replay_coverage`), never dropped.
+- RESEARCH 24/7 (DONE-RULE item 7; `Research247`, Oct 10, 2026): births, Gym runs and Validations every UTC day of the
+  checkpoint's window (its last 7 days for the first, every day since the one before for the rest), at the research
+  budget, with no owner step waiting (the `stall` job's receipts); the operator's edits listed beside it.
 - READ ONLY AT CHECKPOINTS: the 30th counted close, then every 10th; each reading is over exactly the first K closes in
-  close order (`checkpoints`). The running figures between checkpoints are counts, never a reading. A8 (an `info` alert)
-  names a checkpoint that holds the first time a report sees it.
-- BESIDE IT, ALWAYS: P(Done | zero edge) (`dlane.done_zero_edge_p`, MONEY's simulation of this same reading rule,
-  labelled as such); the same-risk buy-and-hold two ways (below); the world-conditional false-positive rate beside the
-  unconditional one for the screen that admitted each Candidate, Probe or Sized family (`probes`); every loosened rule
-  with its cost (`LOOSENED`); the contamination statement (`CONTAMINATION`); and `dlane.LABEL` on every direction figure.
+  close order (`checkpoints`); it holds when items 3, 4 and 7 hold. The running figures between checkpoints are counts,
+  never a reading. FINAL READINGS (DONE-RULE-A1 A1.4; `finality`): a reading is final once every counted close's
+  nightly replay has landed and its broker fees have posted (and the research window has ended); a final reading is
+  frozen (carried from the previous report as it was). A Done claim is a holding FINAL checkpoint (the meter's `holds`);
+  A8 (an `info` alert) names one the first time a report sees it final.
+- BESIDE IT, ALWAYS: P(Done | zero edge) (`dlane.done_zero_edge_p`, labelled as a simulation; since DONE-RULE-A1 A1.2
+  the pinned 2.4% with its horizon, holds, budget and source, `zero_edge`); Net after costs (`net_after_costs`, from the
+  close economics over the same days); the same-risk buy-and-hold two ways (below); the world-conditional
+  false-positive rate beside the unconditional one for the screen that admitted each Candidate, Probe or Sized family
+  (`probes`, with each program's own realized Probe net and when DM1 can first fire, A1.3); every loosened rule with its
+  cost (`LOOSENED`); the contamination statement (`CONTAMINATION`); and `dlane.LABEL` on every direction figure.
 
 THE SAME-RISK BUY-AND-HOLD (the plan's section 6, item 3), per counted close, summed beside each meter and checkpoint.
 Both are labelled approximations from the `direction` job's daily closes (`direction-closes.json`):
@@ -70,14 +82,18 @@ THE REST OF THE REPORT:
 - `account`: the equity change since E0 (the first equity reading this report saw: it is written into the file and read
   back next day) beside the agents' and the House's realized closes since then and the account's other activity; what
   is left is labelled unexplained (open positions' marks included).
-- `costs`: the swarm's research spend by meter since the options swarm began and since the lane started: LTCM's profit is
-  trading net minus these, and the report says so (the gateway's own spend is the gateway's meter, not read here).
+- `costs`: the swarm's BOOKED research spend by meter since the options swarm began and since the lane started,
+  comparison only since Oct 10, 2026: the Net beside the meter is `done.net_after_costs` (every input cost on the close
+  economics' billed and metered basis, the gateway's Claude meter included).
+- `program_loss` (DONE-RULE-A1 A1.3): each program's own realized Probe net against the program loss line, the programs
+  due and the ones this run retired.
 - `contamination.meters`: (a) the holdout's head-minus-tail Sharpe gap per lane (`fast_lane.pooled_contamination` over
   the fast lane report's looks), (b) the mean excess over the same-risk buy-and-hold in the known window (Validation)
   against the unknown one (live), per lane, (c) live against the holdout per band (the fast lane report's rows).
-- `alarms`: A1-A9 and K5 (HARNESS section 5, as amended by the plan and the operator's decisions; K5 also while
-  `dlane.k5_clear` disarms it), each a House alert through `ctx.alert` (warning, or info for A8 and A9), never an action
-  on money.
+- `alarms`: A1-A9, PL1 (the program loss line) and K5 (HARNESS section 5, as amended by the plan and the operator's
+  decisions; K5 also while `dlane.k5_clear` disarms it), each a House alert through `ctx.alert` (warning, or info for A8
+  and A9), never an action on money. The `stall` job reads the warnings and A8 from this file and mails them (its
+  `dlane` and `done` causes).
 
 Standard library only, except the Probe envelope's figures (`fast_lane.probe_budget` and `real.probe_figures` read
 `league.live.real`, whose Gym legs need numpy, as the House box has): they are an `error` entry where that cannot load.
@@ -243,6 +259,13 @@ TIGHTENED: tuple[str, ...] = (
     "a pass still in play retires",
     "release D-1b: calls only: dlane.structures [\"long_single\"] (no debit vertical, no put) and every Train trade a long "
     "call (bar C1)",
+    # DONE-RULE-A1 (pinned Oct 9, 2026 ~20:50Z, before the first Probe close; read by the code since the weekend fixes).
+    "DONE-RULE-A1 A1.1: a Done claim also needs 2 programs with 5+ matched replay closes each, every one within the gap: "
+    "zero replay evidence never passes (it did: B1)",
+    "DONE-RULE-A1 A1.3: a program whose own realized Probe net is at or below dlane.program_loss_usd (-$200, half the $400 "
+    "total) is retired swarm-side by the dlane job (exits go on), since DM1 cannot fire before about 17 real trades",
+    "DONE-RULE-A1 A1.4 and item 7: a checkpoint holds only with research 24/7 read per UTC day, and a Done claim is made "
+    "only on a FINAL reading (replays landed, broker fees posted), frozen once final",
     "release L-D's rolling Probe budget (L9, beside NET above): the $400 is a wall over any 20 New York sessions, read "
     "as the window's worst net stretch, AND $400 net in total from inception (the owner's ceiling is $800; raising it "
     "is CON-only); a bad stretch that ages out of the window frees no room in the total. Measured cost (the budget "
@@ -428,13 +451,12 @@ def closes(positions: Sequence[Mapping[str, Any]], corrections: Mapping[int, Dec
 
 # ------------------------------------------------------------------------------------------------- buy-and-hold
 def _close_on(series: Mapping[str, float], day: str | None) -> float | None:
-    """The symbol's close on `day`, else its last close before it (None without one)."""
-    if not series or not day:
+    """The symbol's close on `day` exactly, None without one. Until Oct 10, 2026 a missing day took the last close
+    before it, silently (the readiness audit's m11): an exit the direction job had not fetched yet was then priced to an
+    older close. The caller says why (`buy_and_hold`)."""
+    if not series or not day or day not in series:
         return None
-    if day in series:
-        return _num(series[day])
-    before = [d for d in series if d <= day]
-    return _num(series[max(before)]) if before else None
+    return _num(series[day])
 
 
 def entry_delta(close: Mapping[str, Any], spot: float) -> float | None:
@@ -501,7 +523,11 @@ def buy_and_hold(close: Mapping[str, Any], closes_doc: Mapping[str, Mapping[str,
     start, end = _close_on(series, close.get("opened_day")), _close_on(series, close.get("day"))
     out: dict[str, Any] = {"delta_usd": None, "risk_usd": None, "why": None}
     if start is None or end is None or start <= 0:
-        out["why"] = f"no daily close of {symbol or 'its root'} for its days (the direction job's file)"
+        # AN EXACT CLOSE OR A WHY (Oct 10, 2026; the readiness audit's m11): never a stand-in close from another day.
+        missing = [d for d, v in ((close.get("opened_day"), start), (close.get("day"), end)) if v is None]
+        last = max(series) if series else None
+        out["why"] = (f"no daily close of {symbol or 'its root'} on {', '.join(str(d) for d in missing) or 'its days'} "
+                      f"in the direction job's file (its last close: {last or 'none'}); the next run fills it")
         return out
     out["risk_usd"] = round(float(close.get("max_loss_usd") or 0.0) * (end / start - 1.0), 2)
     if root in PROXY:
@@ -604,7 +630,17 @@ def reading(counted: Sequence[Mapping[str, Any]], store: Any, *, nightly_cache: 
         programs.append(row)
     enough = [p for p in programs if p["closes"] >= int(rule["min_closes_per_program"])]
     per_program_ok = len(enough) >= int(rule["min_programs"])
-    inconsistent = [p["family"] for p in programs if p["replay"]["consistent"] is False]
+    # CONSISTENCY MUST BE MEASURED (DONE-RULE-A1 A1.1, pinned Oct 9, 2026; the readiness audit's B1): item 4 alone held
+    # with ZERO replay evidence, since a program under 5 matched closes is never inconsistent. Now a reading also needs
+    # `min_measured_programs` (2) programs with `gap_min_matched` (5) or more matched closes and a gap measured, and every
+    # such program within the gap. Zero matched closes never passes; every program is listed with its closes, matched
+    # closes and gap (`by_program`).
+    min_matched = int(rule["gap_min_matched"])
+    need_measured = int(rule.get("min_measured_programs", dlane.DONE["min_measured_programs"]))
+    measured = [p for p in programs if p["replay"]["matched"] >= min_matched and p["replay"]["gap"] is not None]
+    inconsistent = [p["family"] for p in measured if p["replay"]["consistent"] is False]
+    measured_ok = len(measured) >= need_measured
+    matched_total = sum(int(p["replay"]["matched"]) for p in programs)
     net_known = unpriced == 0
     whys = []
     if len(counted) < int(rule["min_closes"]):
@@ -616,8 +652,14 @@ def reading(counted: Sequence[Mapping[str, Any]], store: Any, *, nightly_cache: 
         whys.append(f"{unpriced} closes the book could not price: the net is unknown")
     elif net <= 0:
         whys.append("the net after fees is not above $0")
+    if not measured_ok:
+        whys.append(f"replay untested: {matched_total} of {len(counted)} closes matched a nightly replay; "
+                    f"{len(measured)} programs with {min_matched}+ matched closes of the {need_measured} needed "
+                    "(DONE-RULE-A1 A1.1)")
     if inconsistent:
         whys.append(f"live fills inconsistent with replay: {', '.join(inconsistent[:8])}")
+    item3 = len(counted) >= int(rule["min_closes"]) and per_program_ok and net_known and net > 0
+    item4 = measured_ok and not inconsistent
     by_route: dict[str, dict[str, Any]] = {}
     for c in counted:
         key = c.get("code") or c["route"]
@@ -631,7 +673,10 @@ def reading(counted: Sequence[Mapping[str, Any]], store: Any, *, nightly_cache: 
     return {"closes": len(counted), "programs": len(programs), "programs_with_min_closes": len(enough),
             "net_usd": _usd(net) if net_known else None, "net_known": net_known, "unpriced": unpriced,
             "estimate_closes": sum(1 for c in counted if c.get("priced") and c.get("fee_basis") == "estimate"),
-            "per_program_ok": per_program_ok, "consistent_ok": not inconsistent,
+            "per_program_ok": per_program_ok, "consistent_ok": item4, "measured_programs": len(measured),
+            "replay_coverage": {"matched": matched_total, "closes": len(counted),
+                                "share": round(matched_total / len(counted), 4) if counted else None},
+            "items": {"3": item3, "4": item4},
             "holds": not whys, "why": "; ".join(whys) or None,
             "by_route": {k: {"closes": v["closes"], "programs": len(v["programs"]),
                              "net_usd": None if v["unpriced"] else _usd(v["net"]), "unpriced": v["unpriced"]}
@@ -639,38 +684,298 @@ def reading(counted: Sequence[Mapping[str, Any]], store: Any, *, nightly_cache: 
             "by_program": programs, "bh": _bh_sum(counted)}
 
 
+#: THE GAP'S MEASURE, said beside every reading (the readiness audit's done-meter note: the rule says "mean ... gap", D5
+#: reads a ratio of sums).
+GAP_MEASURE = ("ratio of sums, D5's measure: over the (version, entry day) cells where a counted close and its "
+               "version's nightly replay both traded, sum(live P&L) / sum(live maximum loss) - sum(replay P&L) / "
+               "sum(replay maximum loss), the live side at the book's cash")
+#: The first checkpoint's research window (DONE-RULE item 7): its last this many UTC days; a later checkpoint's is every
+#: UTC day since the one before it.
+RESEARCH_FIRST_DAYS = 7
+
+
+def finality(counted: Sequence[Mapping[str, Any]], *, replay_days: Mapping[str, Mapping[str, Any]] | None,
+             fees_as_of: str | None) -> dict[str, Any]:
+    """FINAL READINGS (DONE-RULE-A1 A1.4, pinned Oct 9, 2026; the readiness audit's M8). A checkpoint's inputs are final
+    when, for every counted close:
+    - THE REPLAY LANDED: its program's nightly replay has replayed the close's exit day (the family's own
+      `forward_replay` target day, `replay_days`), or the program is no longer replayed (not alive in a Candidate, Probe
+      or Sized band: its replay rows are frozen, so they can no longer change). Nightly rows are re-run and replaced
+      each night (league/swarm/gate.py `record_forward`), so a reading taken before the exit day is replayed compares a
+      live close with a replay that may still move.
+    - THE BROKER'S FEES POSTED: its fee basis is the broker's (`fees_by_pid`) and the saved activity reading is from a
+      New York day after the close's exit day (option fees post the next session; a position whose opening fees posted
+      may still have its closing ones to come, so the basis alone is not enough).
+    - it is priced (an unpriced close is never final).
+    {final, pending_replay, pending_fees, unpriced, why}. Pure."""
+    replay_days = replay_days or {}
+    pending_replay = pending_fees = unpriced = 0
+    for c in counted:
+        exit_day = str(c.get("day") or "")
+        if c.get("pnl_usd") is None:
+            unpriced += 1
+        state = replay_days.get(str(c.get("family") or "")) or {}
+        if state.get("replayed") and not (state.get("day") and str(state["day"]) >= exit_day):
+            pending_replay += 1
+        if c.get("fee_basis") != "broker" or not fees_as_of or fees_as_of <= exit_day:
+            pending_fees += 1
+    whys = []
+    if pending_replay:
+        whys.append(f"the nightly replay has not yet replayed the exit day of {pending_replay} closes")
+    if pending_fees:
+        whys.append(f"the broker's fees have not posted for {pending_fees} closes (the activity reading is of "
+                    f"{fees_as_of or 'no day'})")
+    if unpriced:
+        whys.append(f"{unpriced} closes are not priced")
+    return {"final": not whys, "pending_replay": pending_replay, "pending_fees": pending_fees, "unpriced": unpriced,
+            "why": "; ".join(whys) or None}
+
+
+def research_window(counted: Sequence[Mapping[str, Any]], k: int, previous_k: int | None) -> tuple[str, str]:
+    """The UTC days (first, last) DONE-RULE item 7 is read over at the checkpoint of close `k` (the readiness audit's M7):
+    the last `RESEARCH_FIRST_DAYS` days ending on the day of the K-th close for the first checkpoint; for a later one,
+    every day after the previous checkpoint's day through its own (at least its own day)."""
+    last = time.strftime("%Y-%m-%d", time.gmtime(float(counted[k - 1]["closed_at"])))
+    end = datetime.fromisoformat(last).date()
+    if previous_k is None:
+        first = (end - timedelta(days=RESEARCH_FIRST_DAYS - 1)).isoformat()
+    else:
+        before = datetime.fromisoformat(time.strftime("%Y-%m-%d", time.gmtime(float(counted[previous_k - 1]["closed_at"])))
+                                        ).date()
+        first = min(end, before + timedelta(days=1)).isoformat()
+    return first, last
+
+
 def meter(all_closes: Sequence[Mapping[str, Any]], routes: Sequence[str], store: Any, *,
-          nightly_cache: dict[str, list] | None = None, lanes: Lanes | None = None) -> dict[str, Any]:
+          nightly_cache: dict[str, list] | None = None, lanes: Lanes | None = None,
+          previous: Mapping[str, Any] | None = None, research: Any = None,
+          replay_days: Mapping[str, Mapping[str, Any]] | None = None, fees_as_of: str | None = None,
+          now: float | None = None) -> dict[str, Any]:
     """One Done meter (`done_screen` or `done_all`): the agent closes on `routes`, the running figures (never a reading),
-    and a reading at every checkpoint reached (the first K closes, K = 30, 40, ...: `dlane.DONE`)."""
+    and a reading at every checkpoint reached (the first K closes, K = 30, 40, ...: `dlane.DONE`).
+
+    Each checkpoint (Oct 10, 2026; DONE-RULE-A1 and the readiness audit's B1, M7 and M8) lists every counted program with
+    its closes, matched replay closes and gap (`by_program`), reads DONE-RULE item 7 over its research window
+    (`research_247`, from `research(first_day, last_day)`; with none handed in, item 7 is unread and the checkpoint does
+    not hold), and says whether its inputs are FINAL (`finality`; `final_why` otherwise). It HOLDS when items 3, 4 (A1.1)
+    and 7 all hold; a Done claim is made only on a holding FINAL checkpoint (the meter's `holds`; alarm A8). A final
+    reading is FROZEN: when the `previous` report's meter has the checkpoint final, it is carried forward as it was,
+    whatever the inputs say now (nightly rows are replaced each night; the reading may not flip after A8)."""
     from ..swarm import dlane
 
     rule = dlane.DONE
     counted = [c for c in all_closes if not c["house"] and c.get("code") in routes]
     cache = nightly_cache if nightly_cache is not None else {}
     running = reading(counted, store, nightly_cache=cache, lanes=lanes)
+    frozen = {int(cp["at_close"]): cp for cp in ((previous or {}).get("checkpoints") or [])
+              if isinstance(cp, Mapping) and cp.get("final") is True and isinstance(cp.get("at_close"), int)}
     checkpoints = []
     k = int(rule["first_checkpoint"])
+    prev_k = None
     while k <= len(counted):
+        if k in frozen:
+            checkpoints.append({**frozen[k], "frozen": True})
+            prev_k, k = k, k + int(rule["checkpoint_every"])
+            continue
         at = reading(counted[:k], store, nightly_cache=cache, lanes=lanes)
-        checkpoints.append({"at_close": k, "closed_at": _iso(counted[k - 1]["closed_at"]), "holds": at["holds"],
-                            "why": at["why"], "closes": at["closes"], "programs": at["programs"],
+        first_day, last_day = research_window(counted, k, prev_k)
+        r247 = {"holds": False, "first_day": first_day, "last_day": last_day, "why": "research 24/7 was not read"}
+        if callable(research):
+            try:
+                r247 = research(first_day, last_day)
+            except Exception as exc:  # noqa: BLE001 - unread is not held: the checkpoint does not hold, the report goes on
+                r247 = {**r247, "why": f"research 24/7 could not be read ({type(exc).__name__}: {str(exc)[:120]})"}
+        fin = finality(counted[:k], replay_days=replay_days, fees_as_of=fees_as_of)
+        day_ended = now is None or now >= _epoch(f"{last_day}T00:00:00Z") + 86400.0
+        if not day_ended:
+            fin = {**fin, "final": False, "why": "; ".join(w for w in (fin["why"], f"the research window's last day "
+                                                                                  f"({last_day}) has not ended") if w)}
+        item7 = r247.get("holds") is True
+        whys = [w for w in (at["why"], None if item7 else f"research 24/7 (item 7): {r247.get('why') or 'not held'}") if w]
+        programs = [{"family": p["family"], "lane": p["lane"], "closes": p["closes"], "matched": p["replay"]["matched"],
+                     "gap": p["replay"]["gap"], "consistent": p["replay"]["consistent"], "net_usd": p["net_usd"],
+                     **({"label": p["label"]} if p.get("label") else {})} for p in at["by_program"]]
+        checkpoints.append({"at_close": k, "closed_at": _iso(counted[k - 1]["closed_at"]),
+                            "holds": at["holds"] and item7, "why": "; ".join(whys) or None,
+                            "items": {**at["items"], "7": item7}, "final": fin["final"], "final_why": fin["why"],
+                            "closes": at["closes"], "programs": at["programs"],
                             "programs_with_min_closes": at["programs_with_min_closes"], "net_usd": at["net_usd"],
-                            "consistent_ok": at["consistent_ok"], "by_route": at["by_route"], "bh": at["bh"]})
-        k += int(rule["checkpoint_every"])
+                            "consistent_ok": at["consistent_ok"], "measured_programs": at["measured_programs"],
+                            "replay_coverage": at["replay_coverage"], "by_program": programs,
+                            "research_247": r247, "by_route": at["by_route"], "bh": at["bh"]})
+        prev_k, k = k, k + int(rule["checkpoint_every"])
     nxt = int(rule["first_checkpoint"]) if not checkpoints else checkpoints[-1]["at_close"] + int(rule["checkpoint_every"])
+    latest = checkpoints[-1] if checkpoints else None
     return {"routes": list(routes), "running": {**running, "holds": None, "reading": False,
                                                 "note": "counts between checkpoints are never a Done reading"},
-            "checkpoints": checkpoints, "latest": checkpoints[-1] if checkpoints else None,
-            "holds": bool(checkpoints and checkpoints[-1]["holds"]), "next_checkpoint": nxt,
+            "checkpoints": checkpoints, "latest": latest,
+            # A Done claim: the latest checkpoint holds AND is final (A1.4); a holding provisional one says so apart.
+            "holds": bool(latest and latest["holds"] and latest.get("final")),
+            "provisional": bool(latest and latest["holds"] and not latest.get("final")),
+            "next_checkpoint": nxt, "gap_measure": GAP_MEASURE,
             "closes": [{"pid": c["pid"], "family": c["family"], "route": c.get("code") or c["route"], "lane": c.get("lane"),
                         "closed_at": _iso(c["closed_at"]), "pnl_usd": _usd(c["pnl_usd"]), "fee_basis": c["fee_basis"],
                         "bh": c.get("bh")} for c in counted]}
 
 
+# ------------------------------------------------------------------------------------------------- research 24/7
+#: The stall causes that are news to the owner, not a step he must take for research to go on (league/ops/stall.py): a
+#: Done checkpoint that holds is told at once, and is no owner step WAITING for DONE-RULE item 7.
+NEWS_CAUSES = ("done",)
+OPS_DB = "ops.sqlite"
+#: The operator's edits listed beside item 7 at most (the newest; `edits_count` counts them all).
+EDITS_LISTED = 40
+
+
+def operator_edits(root: Path, first_day: str, last_day: str) -> list[dict[str, Any]]:
+    """The operator's edits of `swarm.json` and `budget.json` in the UTC days [first_day, last_day], as their before-copies
+    record them (`<file>.before-<what>-<YYYYMMDDTHHMMSSZ>`, the operator's tools' naming): [{file, what, at}], oldest first.
+    A hand edit with no before-copy is not seen."""
+    import re
+
+    pattern = re.compile(r"^(swarm|budget)\.json\.before-(.*?)-?(\d{8}T\d{6}Z)$")
+    out = []
+    try:
+        names = [p.name for p in Path(root).iterdir() if p.name.startswith(("swarm.json.before", "budget.json.before"))]
+    except OSError:
+        return []
+    for name in names:
+        m = pattern.match(name)
+        if not m:
+            continue
+        stamp = m.group(3)
+        day = f"{stamp[:4]}-{stamp[4:6]}-{stamp[6:8]}"
+        if first_day <= day <= last_day:
+            out.append({"file": f"{m.group(1)}.json", "what": m.group(2) or None,
+                        "at": f"{day}T{stamp[9:11]}:{stamp[11:13]}:{stamp[13:15]}Z"})
+    return sorted(out, key=lambda e: e["at"])
+
+
+class Research247:
+    """DONE-RULE ITEM 7, READ (Oct 10, 2026; the readiness audit's M7): "research runs 24/7 at budget with no captain",
+    as the pinned rule reads it: births, Gym runs and Validations every UTC day, at the research budget, with no owner step
+    waiting. For each UTC day of a window, from the House's own records (read-only):
+    - `births`: `swarm.born` events and the learning game's children (families of origin "game", which emit none);
+    - `gym_runs`: `runs` rows the Gym evaluated (a trial, neither refused nor an error);
+    - `validations`: Validation rows with a verdict (`runs` window "validation", not refused nor an error: the Gym's or
+      one read from an identical program) and the verdicts the tournament's rounds judged;
+    - `at_budget`: every `budget` receipt of the day (ops.sqlite) has every meter's day figure `limited_by` "ceiling" (no
+      taper; None with no receipt that day);
+    - `owner`: the causes with an owner step that any `stall` receipt of the day found standing (but the news causes,
+      `NEWS_CAUSES`).
+    A day holds when births, Gym runs and Validations are each above 0, `at_budget` is True and `owner` is empty; the
+    window holds when every day does. The operator's edits of swarm.json and budget.json in the window are LISTED
+    (`edits`, from their before-copies) beside it: the pinned rule reads "no captain" as no owner step waiting, so they are
+    reported, never a bar. Days are cached across checkpoints."""
+
+    def __init__(self, store: Any, root: Path):
+        self.store, self.root = store, Path(root)
+        self.days: dict[str, dict[str, Any]] = {}
+        self._ops: dict[str, list[dict[str, Any]]] | None = None
+
+    def _receipts(self) -> dict[str, list[dict[str, Any]]]:
+        """The `budget` and `stall` receipts of ops.sqlite (read-only), {job: rows}; {} with no store."""
+        if self._ops is None:
+            from . import guard
+
+            path = self.root / OPS_DB
+            self._ops = {"budget": [], "stall": []}
+            if path.exists():
+                try:
+                    rows = guard.read(path, lambda db: guard.rows(
+                        db, "SELECT job, due_at, finished_at, summary_json FROM runs WHERE job IN ('budget', 'stall') "
+                            "AND status='ok' ORDER BY due_at"))
+                except Exception:  # noqa: BLE001 - unreadable receipts: the days read unknown, never held
+                    rows = []
+                for row in rows:
+                    self._ops.setdefault(str(row["job"]), []).append(row)
+        return self._ops
+
+    def day(self, day: str) -> dict[str, Any]:
+        if day in self.days:
+            return self.days[day]
+        start, end = f"{day}T00:00:00Z", (datetime.fromisoformat(day) + timedelta(days=1)).date().isoformat() + "T00:00:00Z"
+        one = lambda sql, params: int((self.store._all(sql, params) or [{"n": 0}])[0]["n"] or 0)  # noqa: E731
+        marks = ",".join("?" * len(NOT_RUN))
+        births = one("SELECT count(*) AS n FROM events WHERE kind='swarm.born' AND at>=? AND at<?", (start, end))
+        births += one("SELECT count(*) AS n FROM families WHERE origin='game' AND born_at>=? AND born_at<?", (start, end))
+        gym = one(f"SELECT count(*) AS n FROM runs WHERE at>=? AND at<? AND status NOT IN ({marks}) AND trials > 0",
+                  (start, end, *NOT_RUN))
+        validation_rows = one(f"SELECT count(*) AS n FROM runs WHERE \"window\"='validation' AND at>=? AND at<? AND "
+                              f"status NOT IN ({marks})", (start, end, *NOT_RUN))
+        judged = 0
+        for row in self.store._all("SELECT payload FROM events WHERE kind='swarm.tournament' AND at>=? AND at<?",
+                                   (start, end)):
+            verdicts = ((_loads(row.get("payload"), {}) or {}).get("validation") or {}).get("judged")
+            judged += len(verdicts) if isinstance(verdicts, (Mapping, list)) else 0
+        receipts = self._receipts()
+        budgets = [r for r in receipts.get("budget", []) if str(r.get("due_at") or "")[:10] == day]
+        at_budget = None
+        limits: set[str] = set()
+        for r in budgets:
+            meters = (_loads(r.get("summary_json"), {}) or {}).get("meters") or {}
+            for row in meters.values() if isinstance(meters, Mapping) else ():
+                limits.add(str((row or {}).get("limited_by")))
+        if budgets:
+            at_budget = limits == {"ceiling"}
+        owner: set[str] = set()
+        stalls = 0
+        for r in receipts.get("stall", []):
+            if str(r.get("due_at") or "")[:10] != day:
+                continue
+            stalls += 1
+            checks = (_loads(r.get("summary_json"), {}) or {}).get("checks") or {}
+            for cause, check in checks.items() if isinstance(checks, Mapping) else ():
+                if (isinstance(check, Mapping) and check.get("stalled") and check.get("owner_step")
+                        and cause not in NEWS_CAUSES):
+                    owner.add(str(cause))
+        whys = []
+        for name, n in (("births", births), ("Gym runs", gym), ("Validations", validation_rows + judged)):
+            if n <= 0:
+                whys.append(f"no {name}")
+        if at_budget is None:
+            whys.append("no budget receipt")
+        elif not at_budget:
+            whys.append(f"research under the ceiling ({', '.join(sorted(limits - {'ceiling'}))})")
+        if owner:
+            whys.append(f"an owner step waiting ({', '.join(sorted(owner))})")
+        out = {"day": day, "births": births, "gym_runs": gym, "validations": validation_rows + judged,
+               "validation_rows": validation_rows, "judged": judged, "at_budget": at_budget,
+               "limited_by": sorted(limits), "owner": sorted(owner), "stall_receipts": stalls,
+               "holds": not whys, "why": "; ".join(whys) or None}
+        self.days[day] = out
+        return out
+
+    def __call__(self, first_day: str, last_day: str) -> dict[str, Any]:
+        days, d = [], datetime.fromisoformat(first_day).date()
+        end = datetime.fromisoformat(last_day).date()
+        while d <= end:
+            try:
+                days.append(self.day(d.isoformat()))
+            except Exception as exc:  # noqa: BLE001 - a day that cannot be read is not held, never skipped
+                days.append({"day": d.isoformat(), "holds": False,
+                             "why": f"its records could not be read ({type(exc).__name__}: {str(exc)[:120]})"})
+            d += timedelta(days=1)
+        failing = [x for x in days if not x["holds"]]
+        # The House kept 120 before-copies of swarm.json by Oct 9 (a busy captain): the newest `EDITS_LISTED` are listed.
+        edits = operator_edits(self.root, first_day, last_day)
+        return {"first_day": first_day, "last_day": last_day, "holds": bool(days) and not failing,
+                "why": None if days and not failing else
+                ("; ".join(f"{x['day']}: {x['why']}" for x in failing[:6]) + (f"; and {len(failing) - 6} more days"
+                                                                              if len(failing) > 6 else "")
+                 if failing else "no day in the window"),
+                "days": days, "edits": edits[-EDITS_LISTED:], "edits_count": len(edits),
+                "note": "DONE-RULE item 7 as pinned: births, Gym runs and Validations every UTC day, at the research "
+                        "budget (no taper), with no owner step waiting; the operator's edits of swarm.json and "
+                        "budget.json are listed beside it, never a bar"}
+
+
 # ------------------------------------------------------------------------------------------------- the funnel
-def funnel(store: Any, lanes: Lanes, all_closes: Sequence[Mapping[str, Any]], *, now: float, hours: float) -> dict[str, Any]:
-    """Each lane's counts over the last `hours` (the module docstring), from the swarm store opened read-only."""
+def funnel(store: Any, lanes: Lanes, all_closes: Sequence[Mapping[str, Any]], *, now: float, hours: float,
+           positions: Sequence[Mapping[str, Any]] = ()) -> dict[str, Any]:
+    """Each lane's counts over the last `hours` (the module docstring), from the swarm store opened read-only. Since Oct
+    10, 2026 (the readiness audit's m11) the agents' real OPENS by route too (`real_opens`, from the live book's
+    `positions`): the first real Probe trade was in no dlane funnel count until it closed."""
     from ..swarm import dlane
 
     since = _iso(now - hours * 3600.0)
@@ -678,7 +983,8 @@ def funnel(store: Any, lanes: Lanes, all_closes: Sequence[Mapping[str, Any]], *,
                                   "validations": {"judged": 0, "passed": 0}, "reviews": 0, "audits": 0,
                                   "looks": {"taken": 0, "passed": 0, "by_screen": {}},
                                   "band_moves": {"candidate": 0, "probe": 0, "sized": 0},
-                                  "real_closes": {":r": 0, ":t": 0, ":i": 0, "other": 0}}
+                                  "real_closes": {":r": 0, ":t": 0, ":i": 0, "other": 0},
+                                  "real_opens": {":r": 0, ":t": 0, ":i": 0, "other": 0}}
                            for lane in dlane.LANES}
     for row in store._all("SELECT family, payload FROM events WHERE kind='swarm.born' AND at>=?", (since,)):
         payload = _loads(row.get("payload"), {}) or {}
@@ -719,6 +1025,14 @@ def funnel(store: Any, lanes: Lanes, all_closes: Sequence[Mapping[str, Any]], *,
         if c["house"] or c["closed_at"] < edge:
             continue
         out[c.get("lane") or dlane.ALPHA]["real_closes"][c.get("code") or "other"] += 1
+    from .economics import route_of
+
+    for p in positions:
+        opened = _num(p.get("opened_at"))
+        route = route_of(p)
+        if opened is None or opened < edge or route in HOUSE_ROUTES:
+            continue
+        out[lanes.of(p.get("family"))]["real_opens"][ROUTE_CODES.get(route) or "other"] += 1
     for lane in out.values():
         lane["program_years"] = round(lane["program_years"], 2)
     out[dlane.DIRECTION]["train_bar"] = dlane.failure_counts(store, hours, now=now)
@@ -737,11 +1051,16 @@ def bands_now(store: Any, lanes: Lanes) -> dict[str, dict[str, int]]:
 
 
 # ------------------------------------------------------------------------------------------------- Probes and screens
-def probes(store: Any, lanes: Lanes, settings: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+def probes(store: Any, lanes: Lanes, settings: Mapping[str, Any] | None, positions: Sequence[Mapping[str, Any]] = (),
+           losses: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:
     """Every living Candidate, Probe or Sized family with the screen that admitted it (its banded version's newest
     passing look: the screen the look recorded, else its lane's) and that screen's false-positive rates, the
-    world-conditional one (both windows rose) beside the unconditional one (decision 8)."""
+    world-conditional one (both windows rose) beside the unconditional one (decision 8). Beside each (DONE-RULE-A1 A1.3,
+    Oct 10, 2026): its own realized Probe net and closes, its share of the Probe total used, the program loss line
+    (`program_losses`), and the trade count at which DM1 can first fire (`dm1_reach`)."""
     from ..swarm import dlane
+
+    by_family = {r["family"]: r for r in (losses or {}).get("programs") or []}
 
     c = dlane.cfg(settings)
     looks: dict[tuple[str, int], Mapping[str, Any]] = {}
@@ -769,8 +1088,112 @@ def probes(store: Any, lanes: Lanes, settings: Mapping[str, Any] | None) -> list
             row.update(ALPHA_FP)
         if lane == dlane.DIRECTION:
             row["label"] = dlane.LABEL
+        own = by_family.get(fam["id"]) or {}
+        row.update(probe_net_usd=own.get("probe_net_usd", 0.0), probe_closes=own.get("probe_closes", 0),
+                   probe_unpriced=own.get("unpriced", 0), share_of_probe_total=own.get("share_of_total", 0.0),
+                   program_loss_line_usd=(losses or {}).get("line_usd"), dm1=dm1_reach(store, fam, positions))
         out.append(row)
     return out
+
+
+def program_losses(positions: Sequence[Mapping[str, Any]], corrections: Mapping[int, Decimal], store: Any,
+                   settings: Mapping[str, Any] | None, *, since: float) -> dict[str, Any]:
+    """ONE PROGRAM CANNOT DRAIN THE SHARED BUDGET (DONE-RULE-A1 A1.3, pinned Oct 9, 2026; the readiness audit's M11). Each
+    agent program's own realized PROBE net: its closed Probe-marked positions on the Probe/Sized route (`:r`, not
+    tuition, `info.probe` true, as the money table's Probe tally marks them) since `since`, the book's cash plus the
+    broker's posted fee correction, beside its open Probe positions' maximum loss. A program is DUE when it is alive, every
+    Probe close of it is priced (an unpriced one may still be a gain: it waits for the House's reconciliation) and that
+    net is at or below the program loss line (`dlane.program_loss_usd`, -$200: half the $400 Probe total). The `dlane` job
+    retires a due program swarm-side (`run`): a tightening, never a trade; its real positions exit by the House's rules.
+    Every lane: the pinned rule names one program, whatever its lane. {line_usd, total_usd, programs: [...], due}."""
+    from ..live import money as M
+    from ..swarm import dlane
+    from .economics import route_of
+
+    line = dlane.cfg(settings)["program_loss_usd"]
+    total = float(M.Table.from_constitution().probe_loss_total)
+    rows: dict[str, dict[str, Any]] = {}
+    for p in positions:
+        if route_of(p) != "d2_real" or int(p.get("tuition") or 0):
+            continue
+        if (_loads(p.get("info"), {}) or {}).get("probe") is not True:
+            continue
+        opened = _num(p.get("opened_at"))
+        if opened is None or opened < since:
+            continue
+        fid = str(p.get("family") or "")
+        row = rows.setdefault(fid, {"family": fid, "probe_closes": 0, "unpriced": 0, "net": Decimal(0), "open": 0,
+                                    "open_max_loss_usd": 0.0})
+        status = str(p.get("status") or "")
+        if status == "open":
+            row["open"] += 1
+            row["open_max_loss_usd"] += (_num(p.get("max_loss_share")) or 0.0) * 100.0 * int(p.get("qty") or 0)
+            continue
+        cash = _dec(p.get("cash"))
+        if status == "closed" and cash is not None and int(p.get("qty") or 0) == 0:
+            row["probe_closes"] += 1
+            row["net"] += cash + corrections.get(int(p["pid"]), Decimal(0))
+        else:
+            row["unpriced"] += 1  # an unpriced close or one awaiting its expiry's reconciliation
+    out = []
+    for fid, row in sorted(rows.items()):
+        try:
+            fam = store.family(fid)
+        except Exception:  # noqa: BLE001 - an unreadable family is retired by no one
+            fam = None
+        alive = bool(fam is not None and not fam.get("retired_at"))
+        net = float(row["net"])
+        out.append({"family": fid, "alive": alive, "band": (fam or {}).get("band"), "probe_closes": row["probe_closes"],
+                    "unpriced": row["unpriced"], "probe_net_usd": round(net, 2), "open": row["open"],
+                    "open_max_loss_usd": round(row["open_max_loss_usd"], 2),
+                    "share_of_total": round(max(0.0, -net) / total, 4) if total > 0 else None,
+                    "due": alive and row["unpriced"] == 0 and row["probe_closes"] > 0 and net <= line})
+    return {"line_usd": line, "total_usd": total, "programs": out, "due": [r["family"] for r in out if r["due"]],
+            "rule": "DONE-RULE-A1 A1.3: a program whose own realized Probe net is at or below the line is retired "
+                    "swarm-side by this job; exits go on"}
+
+
+#: A long single's (or a debit vertical's) return on maximum loss is bounded below near -1: the whole premium plus the
+#: fees. Without a position to read it from, -1 itself (DM1's first n is then the earliest it could be).
+R_FLOOR_DEFAULT = 1.0
+
+
+def dm1_reach(store: Any, fam: Mapping[str, Any], positions: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """WHEN DM1 CAN FIRST FIRE for a banded program (DONE-RULE-A1 A1.3; the readiness audit's M11), beside its Probe row.
+    DM1 (league/live/money.py `demotion`, read here, never changed) demotes when the version's `DM1_MIN_REAL_TRADES`+
+    real trades' returns on maximum loss sum below -`DM1_Z` x sigma x sqrt(n). A trade's return is bounded below by
+    -r_floor (the premium plus the fees, over the maximum loss: about 1.0012 for a $0.43 call), so the sum of n trades
+    is at least -n x r_floor, and DM1 can fire only once n x r_floor > z x sigma x sqrt(n): n > (z x sigma / r_floor)^2.
+    Sigma is DM1's own (`money.dm1_sigma`: the banded version's Validation sd of r, else the forward record's, else 2.0).
+    r_floor is the largest (premium x 100 x lots + fees) / maximum loss over the program's Probe/Sized positions.
+    {version, sigma, sigma_source, r_floor, real_trades, real_r_sum, line_now, first_fire_at, trades_to_first_fire}."""
+    from ..live import money as M
+    from ..live.families import validation_r_sd
+
+    n = (fam.get("state") or {}).get("banded_version")
+    out: dict[str, Any] = {"version": n}
+    if not isinstance(n, int):
+        return {**out, "why": "no banded version"}
+    try:
+        fwd = M.forward_stats(store.forward(fam["id"]), M.Table.from_constitution().sized_confidence, version=n)
+    except Exception as exc:  # noqa: BLE001 - an unreadable record: no figure, never an invented one
+        return {**out, "why": f"the forward record could not be read ({type(exc).__name__})"}
+    sigma, source = M.dm1_sigma(fwd, validation_r_sd(fam.get("state") or {}, n))
+    floors = []
+    for p in positions:
+        if str(p.get("family") or "") != fam["id"] or not str(p.get("instance") or "").endswith(":r"):
+            continue
+        lots, share, entry = int(p.get("opened_qty") or 0), _num(p.get("max_loss_share")), _num(p.get("entry"))
+        loss = (share or 0.0) * 100.0 * lots
+        if lots > 0 and loss > 0 and entry is not None:
+            floors.append((entry * 100.0 * lots + (_num(p.get("fees")) or 0.0)) / loss)
+    r_floor = max([R_FLOOR_DEFAULT, *floors])
+    first = max(M.DM1_MIN_REAL_TRADES, math.floor((M.DM1_Z * sigma / r_floor) ** 2) + 1)
+    return {**out, "sigma": round(sigma, 6), "sigma_source": source, "r_floor": round(r_floor, 6),
+            "real_trades": fwd.real_n, "real_r_sum": round(fwd.real_r_sum, 4),
+            "line_now": round(-M.DM1_Z * sigma * math.sqrt(fwd.real_n), 4) if fwd.real_n else None,
+            "first_fire_at": first, "trades_to_first_fire": max(0, first - fwd.real_n),
+            "note": f"DM1 cannot fire before n = {first} real trades of this version (league/live/money.py, read only)"}
 
 
 #: The alpha screen's (S-B) false-positive figure, stated beside an alpha program's Probe trade (release D-1b): it has no
@@ -945,6 +1368,10 @@ def _health(root: Path) -> dict[str, Any]:
     return out
 
 
+E0_BASIS = ("the first equity reading this report saw, kept from report to report; not release L-D's deploy reading "
+            "(the plan's E0)")
+
+
 def account(root: Path, all_closes: Sequence[Mapping[str, Any]], activity: Mapping[str, Any],
             previous: Mapping[str, Any] | None, *, now: float) -> dict[str, Any]:
     """The account beside the trading figures (the module docstring)."""
@@ -952,8 +1379,11 @@ def account(root: Path, all_closes: Sequence[Mapping[str, Any]], activity: Mappi
     equity, at = health.get("equity_usd"), health.get("equity_at")
     e0 = ((previous or {}).get("account") or {}).get("e0") if isinstance(previous, Mapping) else None
     if not (isinstance(e0, Mapping) and _num(e0.get("usd")) is not None and e0.get("at")):
-        e0 = {"usd": equity, "at": at or _iso(now),
-              "basis": "the first equity reading the dlane report saw (release L-D's deploy reading is the plan's E0)"}
+        e0 = {"usd": equity, "at": at or _iso(now)}
+    # THE BASIS SAID AS IT IS (Oct 10, 2026; the readiness audit's m11): E0 is the first equity reading this report saw,
+    # kept from report to report. The old words read as if it were release L-D's deploy reading, the plan's E0; it is
+    # not (the House's E0 here is 2026-10-08T19:54Z, before L-D's deploy at 09:04Z Oct 9). A kept E0 is relabelled.
+    e0 = {**dict(e0), "basis": E0_BASIS}
     out: dict[str, Any] = {"e0": e0, "equity_usd": equity, "equity_at": at, "sod_equity_usd": health.get("sod_equity_usd"),
                            "change_usd": None, "agents_usd": None, "house_usd": None, "other_activity": activity.get("other"),
                            "other_as_of": activity.get("as_of"), "unexplained_usd": None}
@@ -991,8 +1421,58 @@ def costs(store: Any, *, since: float, lane_since: float | None) -> dict[str, An
         return {**{m: round(v, 2) for m, v in meters.items()}, "total": round(sum(meters.values()), 2)}
 
     return {"since_inception": spent(since), "since_lane_start": spent(lane_since),
-            "note": "LTCM's profit is trading net minus these costs; the gateway's own spend is the gateway's meter, not "
-                    "read here"}
+            "basis": "comparison only: the swarm's BOOKED research spend (`spend` rows); the Net beside the meter is "
+                     "`net_after_costs`, on the close economics' billed and metered basis (every input cost, the gateway's "
+                     "Claude meter included)",
+            "note": "LTCM's profit is trading net minus every cost: see net_after_costs"}
+
+
+#: A close economics summary older than this is said stale beside Net after costs (the job runs after every close).
+ECONOMICS_STALE_SECONDS = 4 * 86400.0
+
+
+def net_after_costs(root: Path, all_closes: Sequence[Mapping[str, Any]], *, now: float) -> dict[str, Any]:
+    """NET AFTER COSTS BESIDE THE METER (DONE-RULE item 2: "Reported as the account shows it, with Net after costs
+    (research, Sail, gateway spend over the same days) beside it"; the readiness audit's M9, Oct 10, 2026). From the
+    newest close economics summary (`economics.latest`: every input cost since T0 2026-09-26T06:23:14Z on its stated,
+    conservative basis: Sail billed or metered, the larger; Claude through the gateway's meter; OpenAI; the market data;
+    TypeSafe's gateway meter; any the owner declared), over the same days as the meters (the Done rule's inception is
+    06:23Z the same morning): each meter's realized net of the closes up to the economics cutoff, the costs, and their
+    difference; the economics Net (every route, the House's included) beside it. The swarm's booked spend (`costs`) is
+    comparison only."""
+    from ..swarm import dlane
+    from . import economics
+
+    out: dict[str, Any] = {
+        "label": "Net after costs: a meter's realized net (after fees) to the economics cutoff less every input cost "
+                 "since T0 (research, Sail, Claude through the gateway, OpenAI, market data, TypeSafe) on the close "
+                 "economics' basis",
+        "cutoff": None, "cost_start": None, "costs_usd": None, "costs_by_service": [], "economics_net_usd": None,
+        "economics_realized_usd": None, "stale": None, "done_all": None, "done_screen": None, "why": None}
+    try:
+        summary = economics.latest(root)
+    except Exception as exc:  # noqa: BLE001 - no figure, never an invented one
+        summary, out["why"] = None, f"the close economics could not be read ({type(exc).__name__})"
+    if not isinstance(summary, Mapping) or _epoch(summary.get("cutoff")) is None:
+        out["why"] = out["why"] or "no close economics summary yet (the economics job runs ten minutes after each close)"
+        return out
+    cut = float(_epoch(summary["cutoff"]))
+    costs = _dec(summary.get("total_costs_usd"))
+    out.update(cutoff=summary.get("cutoff"), cost_start=summary.get("cost_start"), costs_usd=_usd(costs),
+               costs_by_service=[{"service": c.get("service"), "usd": c.get("usd")} for c in summary.get("costs") or []
+                                 if isinstance(c, Mapping)],
+               economics_net_usd=(summary.get("net") or {}).get("net_usd"),
+               economics_realized_usd=(summary.get("realized") or {}).get("realized_options_pnl_usd"),
+               stale=now - cut > ECONOMICS_STALE_SECONDS)
+    for name, key in (("done_all", "routes_all"), ("done_screen", "routes_screen")):
+        rows = [c for c in all_closes if not c["house"] and c.get("code") in dlane.DONE[key] and c["closed_at"] <= cut]
+        known = all(c.get("pnl_usd") is not None for c in rows)
+        net = sum((c["pnl_usd"] for c in rows if c.get("pnl_usd") is not None), Decimal(0))
+        out[name] = {"closes_to_cutoff": len(rows), "net_usd_to_cutoff": _usd(net) if known else None,
+                     "net_after_costs_usd": _usd(net - costs) if known and costs is not None else None}
+    if costs is None:
+        out["why"] = "the economics summary carries no total cost"
+    return out
 
 
 # ------------------------------------------------------------------------------------------------- contamination
@@ -1049,9 +1529,9 @@ def _sessions_back(today: str, n: int) -> str:
 def alarms(store: Any, settings: Mapping[str, Any] | None, lanes: Lanes, book: Mapping[str, Any],
            all_closes: Sequence[Mapping[str, Any]], envelope: Mapping[str, Any], done: Mapping[str, Any],
            k5: Mapping[str, Any], unit: Mapping[str, Any], previous: Mapping[str, Any] | None, *, now: float,
-           today: str) -> list[dict[str, Any]]:
-    """A1-A9 and K5 (HARNESS section 5 as amended; the module docstring): [{id, level, text, ...}]. Each names counts and
-    family ids, never a hidden-year figure."""
+           today: str, losses: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:
+    """A1-A9, PL1 and K5 (HARNESS section 5 as amended; the module docstring): [{id, level, text, ...}]. Each names counts
+    and family ids, never a hidden-year figure."""
     from ..live import money as M
     from ..swarm import dlane
 
@@ -1176,19 +1656,26 @@ def alarms(store: Any, settings: Mapping[str, Any] | None, lanes: Lanes, book: M
                             f"the unit (E5): today's cap is "
                             f"{'unknown' if unit.get('cap_usd') is None else '$' + format(unit['cap_usd'], '.2f')}"
                             + (f", the median failing one lot ${median:.2f}" if median is not None else "")})
-    # A8: a checkpoint holds that no earlier report saw (info; it stops nothing).
+    # A8: a FINAL checkpoint holds that no earlier report saw final and holding (info; it stops nothing). Since Oct 10,
+    # 2026 (DONE-RULE-A1 A1.4, the readiness audit's M7 and M8): only a final reading (the night's replay landed, the
+    # broker's fees posted, the research window ended) can raise it, and a checkpoint holds only when items 3, 4 (A1.1)
+    # and 7 all hold; the text names them. A provisional holding reading raises nothing: it may still flip.
     seen = set()
     for meter_name in ("all", "screen"):
         for cp in (((previous or {}).get("done") or {}).get(meter_name) or {}).get("checkpoints") or []:
-            if cp.get("holds"):
+            if cp.get("holds") and cp.get("final") is True:
                 seen.add((meter_name, cp.get("at_close")))
     for meter_name in ("all", "screen"):
         for cp in done[meter_name]["checkpoints"]:
-            if cp["holds"] and (meter_name, cp["at_close"]) not in seen:
+            if cp["holds"] and cp.get("final") is True and (meter_name, cp["at_close"]) not in seen:
+                items = cp.get("items") or {}
+                held = ", ".join(f"item {k}" for k in ("3", "4", "7") if items.get(k)) or "none named"
                 out.append({"id": "A8", "level": "info", "meter": f"done_{meter_name}", "at_close": cp["at_close"],
-                            "text": f"A8: Done criteria hold for done_{meter_name} at the checkpoint of close "
-                                    f"{cp['at_close']} (read beside the same-risk buy-and-hold and P(Done | zero edge); "
-                                    "it stops nothing)"})
+                            "items": dict(items),
+                            "text": f"A8: Done criteria hold for done_{meter_name} at the FINAL checkpoint of close "
+                                    f"{cp['at_close']} ({held} of DONE-RULE + A1: the bar, consistency measured on "
+                                    f"{cp.get('measured_programs')} programs, research 24/7; read beside the same-risk "
+                                    "buy-and-hold, P(Done | zero edge) and Net after costs; it stops nothing)"})
     # A9: every live direction program opened nothing for 10 sessions.
     since_day = _sessions_back(today, A9_SESSIONS)
     live_programs = {i["family"] for i in book.get("instances") or []
@@ -1200,6 +1687,16 @@ def alarms(store: Any, settings: Mapping[str, Any] | None, lanes: Lanes, book: M
             out.append({"id": "A9", "level": "info", "families": sorted(live_programs)[:12],
                         "text": f"A9: every live direction program ({len(live_programs)}) has opened nothing for "
                                 f"{A9_SESSIONS} sessions: the lane is flat by design"})
+    # PL1 (DONE-RULE-A1 A1.3, Oct 10, 2026): a program's own realized Probe net at or below the program loss line. The
+    # job retires it swarm-side (`run`, which rewrites this text once it has); exits go on.
+    due = [p for p in (losses or {}).get("programs") or [] if p.get("due")]
+    if due:
+        line = _num((losses or {}).get("line_usd"))
+        out.append({"id": "PL1", "level": "warning", "families": [p["family"] for p in due][:12], "line_usd": line,
+                    "text": f"PL1: {len(due)} programs' own realized Probe net is at or below the program loss line "
+                            f"(${line or 0:,.2f}, half the Probe total; DONE-RULE-A1 A1.3): "
+                            + ", ".join(f"{p['family']} ${p['probe_net_usd']:,.2f}" for p in due[:6])
+                            + ". The dlane job retires them swarm-side; their real positions exit by the House's rules"})
     # K5.
     if k5.get("tripped"):
         out.append({"id": "K5", "level": "warning", "new": bool(k5.get("new")),
@@ -1215,6 +1712,22 @@ def alarms(store: Any, settings: Mapping[str, Any] | None, lanes: Lanes, book: M
                                + ("unknown" if line is None else f"${line:,.2f}") + "): take dlane.k5_clear out"
                                if not k5.get("set") and not k5.get("trip_open") else
                                "the dlane job records the clear on its next run; then take dlane.k5_clear out")})
+    return out
+
+
+def zero_edge(settings: Mapping[str, Any] | None) -> dict[str, Any]:
+    """P(Done | zero edge) beside the meter (decision 8; DONE-RULE-A1 A1.2, the readiness audit's M10): the setting's
+    figure, and when it is the pinned one (`dlane.ZERO_EDGE`, 2.4%) what it is: its horizon, holds, the budget variant
+    and its source. Another figure is a setting's and says so: the claim states the figure for the rules in force."""
+    from ..swarm import dlane
+
+    value = dlane.cfg(settings)["done_zero_edge_p"]
+    out: dict[str, Any] = {"value": value, "label": ZERO_EDGE_LABEL}
+    if abs(value - float(dlane.ZERO_EDGE["value"])) < 1e-9:
+        out.update({k: v for k, v in dlane.ZERO_EDGE.items() if k != "value"})
+    else:
+        out["note"] = (f"a setting's figure (dlane.done_zero_edge_p), not the pinned {dlane.ZERO_EDGE['value']} of "
+                       "DONE-RULE-A1 A1.2: its horizon and budget are not said here")
     return out
 
 
@@ -1245,8 +1758,22 @@ def report(root: str | Path, *, settings: Mapping[str, Any] | None = None, now: 
             if not c["house"]:
                 c["bh"] = buy_and_hold(c, closes_doc)
         cache: dict[str, list] = {}
-        done = {"all": meter(every, dlane.DONE["routes_all"], store, nightly_cache=cache, lanes=lanes),
-                "screen": meter(every, dlane.DONE["routes_screen"], store, nightly_cache=cache, lanes=lanes)}
+        # A1.4's inputs (Oct 10, 2026): each replayed program's last replayed day (the family's own `forward_replay`
+        # target: the nightly replays a Candidate, Probe or Sized family only), and the day of the broker's fee reading.
+        replay_days: dict[str, dict[str, Any]] = {}
+        for fam in store.families(alive=True):
+            if fam.get("band") in ("candidate", "probe", "sized"):
+                target = (((fam.get("state") or {}).get("forward_replay") or {}).get("target") or {})
+                replay_days[str(fam["id"])] = {"replayed": True, "day": target.get("day")}
+        fees_as_of = _ny_day(_epoch(activity.get("as_of"))) if activity.get("as_of") else None
+        research = Research247(store, root)
+        prev_done = ((previous or {}).get("done") or {}) if isinstance(previous, Mapping) else {}
+        common = dict(store=store, nightly_cache=cache, lanes=lanes, research=research, replay_days=replay_days,
+                      fees_as_of=fees_as_of, now=now)
+        done = {"all": meter(every, dlane.DONE["routes_all"], previous=prev_done.get("all"), **common),
+                "screen": meter(every, dlane.DONE["routes_screen"], previous=prev_done.get("screen"), **common)}
+        losses = program_losses(book["positions"], activity["by_pid"], store, settings, since=start)
+        yesterday = datetime.fromisoformat(time.strftime("%Y-%m-%d", time.gmtime(now))).date() - timedelta(days=1)
         other = [c for c in every if not c["house"] and c.get("code") is None]
         direction = [c for c in every if not c["house"] and c.get("lane") == dlane.DIRECTION and c.get("code")]
         known = [c["pnl_usd"] for c in direction if c.get("pnl_usd") is not None]
@@ -1267,16 +1794,21 @@ def report(root: str | Path, *, settings: Mapping[str, Any] | None = None, now: 
                      "screen": dlane.screen_effective(settings), "always_in_note": dlane.ALWAYS_IN_NOTE},
             "loosened": [dict(r) for r in LOOSENED], "tightened": list(TIGHTENED),
             "contamination": {"statement": CONTAMINATION, "meters": contamination_meters(root, lanes)},
-            "funnel": {name: funnel(store, lanes, every, now=now, hours=hours) for name, hours in WINDOWS.items()},
+            "funnel": {name: funnel(store, lanes, every, now=now, hours=hours, positions=book["positions"])
+                       for name, hours in WINDOWS.items()},
             "bands_now": bands_now(store, lanes),
             "probe_envelope": envelope, "unit": {k: unit.get(k) for k in ("known", "cap_usd", "equity_usd", "closes",
                                                                           "close_day", "why")},
-            "done": {**done, "p_done_zero_edge": {"value": dlane.cfg(settings)["done_zero_edge_p"], "label": ZERO_EDGE_LABEL},
+            "done": {**done, "p_done_zero_edge": zero_edge(settings),
+                     "net_after_costs": net_after_costs(root, every, now=now),
+                     "research_247_last_7_days": research((yesterday - timedelta(days=RESEARCH_FIRST_DAYS - 1)).isoformat(),
+                                                          yesterday.isoformat()),
                      "other_routes": [{"pid": c["pid"], "family": c["family"], "instance": c["instance"],
                                        "route": c["route"], "pnl_usd": _usd(c["pnl_usd"])} for c in other],
                      "inception": dlane.DONE["inception"],
                      "fees": {"as_of": activity["as_of"], "why": activity["why"]}},
-            "probes": probes(store, lanes, settings),
+            "probes": probes(store, lanes, settings, book["positions"], losses),
+            "program_loss": losses,
             "fp_beside_trades": trade_screens(store, lanes, settings, book["positions"], every, since=start),
             "direction_net": lane_net,
             "account": account(root, every, activity, previous, now=now),
@@ -1284,7 +1816,7 @@ def report(root: str | Path, *, settings: Mapping[str, Any] | None = None, now: 
             "k5": dict(k5),
         }
         out["alarms"] = alarms(store, settings, lanes, book, every, envelope, done, k5, unit, previous, now=now,
-                               today=today)
+                               today=today, losses=losses)
     finally:
         store.close()
     return out
@@ -1348,6 +1880,15 @@ def run(ctx: Any) -> dict[str, Any]:
                                           "its line; the lane reads shadow (no new direction Candidate, no incubator "
                                           "direction mark) until the operator clears it (swarm.json dlane.k5_clear, or "
                                           "the kv dlane_k5)"})
+    try:
+        retired = retire_due(root, out, settings)
+    except Exception as exc:  # noqa: BLE001 - the report is written whatever: the retirement is tried again next run
+        retired = []
+        why = f"{type(exc).__name__}: {str(exc)[:200]}"
+        out.setdefault("program_loss", {})["error"] = why
+        out["alarms"].append({"id": "PL1", "level": "warning", "error": why,
+                              "text": f"PL1: a program due at the program loss line could not be retired ({why}); the next "
+                                      "run tries again"})
     write_json(root / FILE, out)
     for alarm in out["alarms"]:
         ctx.alert(alarm["level"], f"dlane: {alarm['text']}")
@@ -1356,9 +1897,59 @@ def run(ctx: Any) -> dict[str, Any]:
                              "name: listed apart in the report, never counted or dropped silently")
     return {"ok": True, "path": str(root / FILE), "closes_all": len(out["done"]["all"]["closes"]),
             "closes_screen": len(out["done"]["screen"]["closes"]), "alarms": [a["id"] for a in out["alarms"]],
-            "k5_tripped": bool(out["k5"].get("tripped")), "k5_new": tripped, "k5_rearmed": rearmed is not None}
+            "k5_tripped": bool(out["k5"].get("tripped")), "k5_new": tripped, "k5_rearmed": rearmed is not None,
+            "retired": retired}
+
+
+#: The public cause of a program-loss retirement (a `swarm.retired` event feeds the site's tape): words, no figure.
+PROGRAM_LOSS_PUBLIC = "retired: its own realized Probe losses reached the program loss line, half the shared Probe budget"
+
+
+def retire_due(root: Path, out: dict[str, Any], settings: Mapping[str, Any] | None) -> list[str]:
+    """THE PROGRAM LOSS LINE, ACTED ON (DONE-RULE-A1 A1.3, Oct 10, 2026): every program the report found due
+    (`program_losses`: alive, every Probe close priced, its own realized Probe net at or below `dlane.program_loss_usd`)
+    is retired swarm-side (`SwarmStore.retire`: band "retired", a `swarm.retired` event with words and no figure, a
+    notebook line and one private `swarm.dlane` event with the figures), in a writable open of the swarm store AFTER the
+    read-only report, as K5's writes. Nothing else: the live path sees the family gone from the bands and puts its real
+    instance on exits only, so its open positions close by their own program and the House's rules (exits go on). A
+    tightening, never a trade or an order. The report's PL1 alarm and `program_loss.retired` say what was done. Returns
+    the families retired by this call ([] when none was due, or each was retired already)."""
+    from ..swarm.store import SwarmStore
+
+    losses = out.get("program_loss") or {}
+    rows = {r["family"]: r for r in losses.get("programs") or [] if r.get("due")}
+    retired: list[str] = []
+    if not rows:
+        losses["retired"] = retired
+        return retired
+    line = _num(losses.get("line_usd"))
+    store = SwarmStore(root)
+    try:
+        for fid, row in sorted(rows.items()):
+            why = (f"DONE-RULE-A1 A1.3: its own realized Probe net ${row['probe_net_usd']:,.2f} over "
+                   f"{row['probe_closes']} Probe closes is at or below the program loss line ${line or 0:,.2f} (half the "
+                   "$400 Probe total): retired swarm-side by the dlane job; its real positions exit by the House's rules")
+            if store.retire(fid, why, public_reason=PROGRAM_LOSS_PUBLIC):
+                store.note(fid, f"Retired by the dlane job: {why}")
+                store.event("swarm.dlane", fid, {"action": "program_loss_retire", "probe_net_usd": row["probe_net_usd"],
+                                                 "probe_closes": row["probe_closes"], "line_usd": line,
+                                                 "rule": "DONE-RULE-A1 A1.3"})
+                retired.append(fid)
+    finally:
+        store.close()
+    losses["retired"] = retired
+    for alarm in out.get("alarms") or []:
+        if alarm.get("id") == "PL1":
+            alarm["retired"] = list(retired)
+            alarm["text"] = (f"PL1: retired swarm-side {len(retired)} programs whose own realized Probe net is at or below "
+                             f"the program loss line (${line or 0:,.2f}, half the Probe total; DONE-RULE-A1 A1.3): "
+                             + (", ".join(f"{f} ${rows[f]['probe_net_usd']:,.2f}" for f in retired[:6]) or "none new")
+                             + ". Their real positions exit by the House's rules; nothing else is touched")
+    return retired
 
 
 __all__ = ["run", "report", "FILE", "CONTAMINATION", "LOOSENED", "TIGHTENED", "closes", "meter", "reading", "replay_gap",
            "buy_and_hold", "entry_delta", "funnel", "probes", "probe_envelope", "alarms", "fee_corrections", "read_book",
-           "version_of", "inception", "Lanes", "ZERO_EDGE_LABEL", "trade_screens", "ALPHA_FP"]
+           "version_of", "inception", "Lanes", "ZERO_EDGE_LABEL", "trade_screens", "ALPHA_FP", "finality",
+           "research_window", "Research247", "operator_edits", "program_losses", "dm1_reach", "net_after_costs",
+           "zero_edge", "retire_due", "GAP_MEASURE", "NEWS_CAUSES", "E0_BASIS"]

@@ -15,6 +15,7 @@ import json
 import os
 import tempfile
 import unittest
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
@@ -72,17 +73,52 @@ class Fixture(unittest.TestCase):
 
     def close(self, family: str, *, route: str = ":r", pnl: float = -10.0, max_loss: float = 50.0, version: int = 1,
               day: str = "2026-10-05", closed_at: float | None = None, status: str = "closed", probe: bool = False,
-              root: str = "SPY", legs: list | None = None, entry: float = 0.5, qty: int = 0) -> int:
+              root: str = "SPY", legs: list | None = None, entry: float = 0.5, qty: int = 0, fees: float = 0.13,
+              opened: float | None = None) -> int:
         self.pid += 1
-        opened = ny(day, 10, 0)
+        opened = ny(day, 10, 0) if opened is None else opened
         self.live.upsert("positions", {
             "pid": self.pid, "instance": f"{family}@{version}{route}", "family": family, "type": "long_call", "root": root,
             "legs": json.dumps(legs or []), "qty": qty, "opened_qty": 1, "entry": entry, "max_loss_share": max_loss / 100.0,
-            "collateral": 0.0, "fees": 0.13, "cash": pnl, "opened_at": opened, "opened_day": day, "opened_minute": 30,
-            "status": status, "closed_at": closed_at if closed_at is not None else opened + 3 * 86400.0 + self.pid,
+            "collateral": 0.0, "fees": fees, "cash": pnl, "opened_at": opened, "opened_day": day, "opened_minute": 30,
+            "status": status, "closed_at": None if status == "open" else
+            closed_at if closed_at is not None else opened + 3 * 86400.0 + self.pid,
             "tuition": 1 if route in (":t", ":i") else 0,
             "info": json.dumps({"order": self.pid, **({"probe": True} if probe else {})})}, "pid")
         return self.pid
+
+    def steady(self, first: str = "2026-09-30", last: str = "2026-10-19", *, skip: tuple = ()) -> None:
+        """Research ran every UTC day from `first` to `last` but `skip` (DONE-RULE item 7): a birth, a Gym run and a
+        Validation a day, and the day's budget receipt at the ceiling."""
+        from league.ops.store import OpsStore
+
+        if self.store.family("busy") is None:
+            self.fam("busy")
+        ops = OpsStore(self.root)
+        self.addCleanup(ops.close)
+        keep, d = self.now, dt.date.fromisoformat(first)
+        while d <= dt.date.fromisoformat(last):
+            if d.isoformat() not in skip:
+                self.now = dt.datetime(d.year, d.month, d.day, 12, tzinfo=dt.timezone.utc).timestamp()
+                self.store.event("swarm.born", "busy", {"lane": "alpha"})
+                for window in ("train", "validation"):
+                    self.store.add_run("busy", 1, {"run_id": f"{d}-{window}", "status": "ok", "trials": 1}, window=window,
+                                       stress=1.0, purpose=window, prune=False)
+                ops.record("budget", f"{d}T00:30:00Z", "ok", f"{d}T00:31:00Z",
+                           summary={"meters": {"sail": {"limited_by": "ceiling"}, "claude": {"limited_by": "ceiling"}}})
+            d += dt.timedelta(days=1)
+        self.now = keep
+
+    def posted(self, as_of: str = "2026-10-20T15:00:00Z", pids=None) -> None:
+        """The broker's fees posted for `pids` (every position by default), the activity reading of `as_of`."""
+        pids = range(1, self.pid + 1) if pids is None else pids
+        (self.root / "publish.json").write_text(json.dumps({"activity": {"read_at": self.now - 60, "reading": {
+            "as_of": as_of, "fees_by_pid": {str(p): "0.00" for p in pids}, "fees_usd": "0", "crypto_usd": "0",
+            "interest_usd": "0", "misc_usd": "0", "unreconciled_usd": "0"}}}))
+
+    def replays(self, fid: str, days, *, version: int = 1, pnl: float = 5.0, max_loss: float = 50.0) -> None:
+        self.store.add_forward(fid, "nightly", [{"id": f"{fid}{i}", "day": d, "pnl": pnl, "max_loss": max_loss}
+                                                for i, d in enumerate(days)], version=version)
 
     def report(self, settings=GATE, previous=None) -> dict:
         return R.report(self.root, settings=settings, now=self.now, previous=previous)
@@ -118,7 +154,12 @@ class TheDoneMeter(Fixture):
         self.assertNotIn("house:rebound-live", families)
         self.assertIn("tuition-before-d1", families)
         self.assertEqual(out["rule"]["sha256"], "0d007696c9a6a1cbbd7d2cc345811359ab1cec389cf88f75ceff295bbbc48dca")
-        self.assertEqual(out["done"]["p_done_zero_edge"], {"value": 0.13, "label": "P(Done | zero edge), simulation"})
+        # DONE-RULE-A1 A1.2: 2.4% at 12 weeks, 3-session holds, under the budget in force, said with its source.
+        zero = out["done"]["p_done_zero_edge"]
+        self.assertEqual((zero["value"], zero["label"], zero["horizon"], zero["holds"]),
+                         (0.024, "P(Done | zero edge), simulation", "12 weeks", "3-session holds"))
+        self.assertIn("A1.2", zero["source"])
+        self.assertEqual(out["rule"]["amendment_sha256"], dlane.DONE["amendment_sha256"])
         self.assertIsNone(out["done"]["all"]["latest"], "no reading before the 30th close")
         self.assertEqual(out["done"]["all"]["next_checkpoint"], 30)
         # Every direction figure carries the label; the alpha program's does not.
@@ -134,12 +175,18 @@ class TheDoneMeter(Fixture):
         for i in range(15):
             self.close("dir-a", pnl=5.0)
             self.close("dir-b", pnl=5.0)
+        self.replays("dir-a", ["2026-10-05"])
+        self.replays("dir-b", ["2026-10-05"])
+        self.steady()
+        self.posted()
         for _ in range(4):
             self.close("dir-a", pnl=-100.0)           # closes 31-34: after the checkpoint
         out = self.report()["done"]["screen"]
         self.assertEqual(len(out["checkpoints"]), 1)
         cp = out["checkpoints"][0]
-        self.assertEqual((cp["at_close"], cp["closes"], cp["net_usd"], cp["holds"]), (30, 30, 150.0, True))
+        self.assertEqual((cp["at_close"], cp["closes"], cp["net_usd"], cp["holds"], cp["final"]), (30, 30, 150.0, True, True))
+        self.assertEqual(cp["items"], {"3": True, "4": True, "7": True})
+        self.assertEqual(cp["research_247"]["first_day"], "2026-10-02", "the first checkpoint reads its last 7 UTC days")
         self.assertTrue(out["holds"])
         self.assertEqual(out["running"]["net_usd"], -250.0)
         self.assertIsNone(out["running"]["holds"], "a running figure is never a reading")
@@ -346,10 +393,19 @@ class TheAlarms(Fixture):
         self.assertIn("$128.90", a["text"])
 
     def test_a8_a_holding_checkpoint_is_said_once(self):
-        done = {"all": {"checkpoints": [{"at_close": 30, "holds": True}]}, "screen": {"checkpoints": []}}
+        items = {"3": True, "4": True, "7": True}
+        done = {"all": {"checkpoints": [{"at_close": 30, "holds": True, "final": True, "items": items,
+                                         "measured_programs": 2}]}, "screen": {"checkpoints": []}}
         a = self.alarms(done=done)["A8"]
         self.assertEqual((a["level"], a["meter"], a["at_close"]), ("info", "done_all", 30))
+        self.assertIn("FINAL checkpoint of close 30 (item 3, item 4, item 7", a["text"])
         self.assertNotIn("A8", self.alarms(done=done, previous={"done": done}))
+        # DONE-RULE-A1 A1.4: a provisional holding reading raises nothing; it is said once it is final, even if an earlier
+        # report saw it holding provisionally.
+        provisional = {"all": {"checkpoints": [{"at_close": 30, "holds": True, "final": False, "items": items}]},
+                       "screen": {"checkpoints": []}}
+        self.assertNotIn("A8", self.alarms(done=provisional))
+        self.assertIn("A8", self.alarms(done=done, previous={"done": provisional}))
 
     def test_a9_every_live_direction_program_flat_for_ten_sessions(self):
         self.fam("dir-a", lane="direction")
@@ -436,6 +492,279 @@ class TheJob(Fixture):
         self.close("alp-b", route=":q", pnl=-3.0)
         R.run(self.ctx())
         self.assertTrue(any("a route the Done rule does not name" in text for _, text in self.alerts))
+
+
+# ================================================================================================== DONE-RULE-A1 (Oct 10)
+class TheAmendment(Fixture):
+    """DONE-RULE-A1 (pinned Oct 9, 2026, sha 333bad06) and the readiness audit's B1, M7, M8 and M9, read by the meter:
+    consistency must be measured (A1.1), item 7 is read per UTC day, a reading is FINAL only on landed replays and posted
+    fees and is then frozen (A1.4), and Net after costs rides beside the meter."""
+
+    def thirty(self, *, replay=("dir-a", "dir-b")) -> None:
+        self.fam("dir-a", lane="direction")
+        self.fam("dir-b", lane="direction")
+        for _ in range(15):
+            self.close("dir-a", pnl=5.0)
+            self.close("dir-b", pnl=5.0)
+        for fid in replay:
+            self.replays(fid, ["2026-10-05"])
+        self.steady()
+        self.posted()
+
+    def test_zero_replay_evidence_never_passes(self):
+        self.thirty(replay=())
+        cp = self.report()["done"]["screen"]["latest"]
+        self.assertFalse(cp["holds"], "B1's local repro: 30 closes, 2 programs, no replay row held before A1.1")
+        self.assertEqual(cp["items"], {"3": True, "4": False, "7": True})
+        self.assertIn("replay untested: 0 of 30 closes matched a nightly replay; 0 programs with 5+ matched closes of the 2 "
+                      "needed (DONE-RULE-A1 A1.1)", cp["why"])
+        self.assertEqual(cp["replay_coverage"], {"matched": 0, "closes": 30, "share": 0.0})
+        self.assertEqual([(p["family"], p["closes"], p["matched"], p["gap"]) for p in cp["by_program"]],
+                         [("dir-a", 15, 0, None), ("dir-b", 15, 0, None)], "every program listed, never dropped")
+        self.assertEqual(self.report()["done"]["screen"]["gap_measure"], R.GAP_MEASURE)
+
+    def test_one_measured_program_is_not_enough(self):
+        self.thirty(replay=("dir-a",))
+        cp = self.report()["done"]["screen"]["latest"]
+        self.assertFalse(cp["holds"])
+        self.assertEqual(cp["measured_programs"], 1)
+        self.assertIn("1 programs with 5+ matched closes of the 2 needed", cp["why"])
+        self.replays("dir-b", ["2026-10-05"])
+        self.assertTrue(self.report()["done"]["screen"]["latest"]["holds"])
+
+    def test_research_247_needs_every_day_at_budget_with_no_owner_step_waiting(self):
+        from league.ops.store import OpsStore
+
+        self.steady("2026-10-01", "2026-10-07", skip=("2026-10-04",))
+        research = R.Research247(self.store, self.root)
+        out = research("2026-10-01", "2026-10-07")
+        self.assertFalse(out["holds"])
+        self.assertEqual(out["why"], "2026-10-04: no births; no Gym runs; no Validations; no budget receipt")
+        self.assertTrue(research("2026-10-05", "2026-10-07")["holds"])
+        ops = OpsStore(self.root)
+        self.addCleanup(ops.close)
+        # A Done checkpoint told at once is news, never an owner step waiting; a top-up asked for is one.
+        ops.record("stall", "2026-10-05T10:20:00Z", "ok", "2026-10-05T10:20:30Z", summary={"checks": {
+            "done": {"stalled": True, "owner_step": "Done holds: read the claim"}, "births": {"stalled": True, "owner_step": None}}})
+        ops.record("stall", "2026-10-06T10:20:00Z", "ok", "2026-10-06T10:20:30Z", summary={"checks": {
+            "runway_sail": {"stalled": True, "owner_step": "top up Sail"}}})
+        # The budget tapered on the 7th: research under the ceiling.
+        ops.record("budget", "2026-10-07T20:10:00Z", "ok", "2026-10-07T20:10:30Z",
+                   summary={"meters": {"sail": {"limited_by": "runway"}, "claude": {"limited_by": "ceiling"}}})
+        for name in ("swarm.json.before-set-20261006T120000Z", "budget.json.before-sailraise-20261005T143356Z",
+                     "swarm.json.before-set-20260920T000000Z", "swarm.json.before-train2020"):
+            (self.root / name).write_text("{}")
+        out = R.Research247(self.store, self.root)("2026-10-05", "2026-10-07")
+        days = {d["day"]: d for d in out["days"]}
+        self.assertTrue(days["2026-10-05"]["holds"], "the done cause is news")
+        self.assertEqual(days["2026-10-06"]["why"], "an owner step waiting (runway_sail)")
+        self.assertEqual(days["2026-10-07"]["why"], "research under the ceiling (runway)")
+        self.assertEqual((days["2026-10-05"]["births"], days["2026-10-05"]["gym_runs"], days["2026-10-05"]["validations"]),
+                         (1, 2, 1))
+        self.assertEqual(out["edits"], [
+            {"file": "budget.json", "what": "sailraise", "at": "2026-10-05T14:33:56Z"},
+            {"file": "swarm.json", "what": "set", "at": "2026-10-06T12:00:00Z"}], "listed beside it, never a bar")
+        self.assertEqual(out["edits_count"], 2)
+        self.assertEqual(R.NEWS_CAUSES, ("done",))
+
+    def test_a_reading_is_final_only_on_landed_replays_and_posted_fees_and_then_frozen(self):
+        self.thirty()
+        # dir-a is at Probe: its nightly replay has replayed only to the 7th, the closes exit on the 8th.
+        self.store.set_band("dir-a", "probe", reason="fixture")
+        self.store.set_state("dir-a", forward_replay={"target": {"day": "2026-10-07"}, "version": 1})
+        out = self.report()
+        cp, meter = out["done"]["screen"]["latest"], out["done"]["screen"]
+        self.assertEqual((cp["holds"], cp["final"], meter["holds"], meter["provisional"]), (True, False, False, True))
+        self.assertIn("the nightly replay has not yet replayed the exit day of 15 closes", cp["final_why"])
+        self.assertNotIn("A8", [a["id"] for a in out["alarms"]], "never on a provisional reading")
+        self.store.set_state("dir-a", forward_replay={"target": {"day": "2026-10-08"}, "version": 1})
+        self.posted(as_of="2026-10-08T21:00:00Z")
+        self.assertIn("broker's fees have not posted for 30 closes", self.report()["done"]["screen"]["latest"]["final_why"],
+                      "fees post the session after the exit: a reading of the exit day is not final")
+        self.posted()
+        final = self.report(previous=out)
+        self.assertTrue(final["done"]["screen"]["holds"])
+        self.assertEqual([a["id"] for a in final["alarms"] if a["id"] == "A8"], ["A8", "A8"], "done_all and done_screen")
+        # Frozen: the nightly rows are replaced each night; a final reading does not flip after A8.
+        self.store.replace_forward("dir-b", "nightly", [], version=1)
+        later = self.report(previous=final)
+        cp = later["done"]["screen"]["latest"]
+        self.assertEqual((cp["holds"], cp["final"], cp.get("frozen")), (True, True, True))
+        self.assertEqual(later["done"]["screen"]["running"]["consistent_ok"], False, "the running figure reads it now")
+        self.assertNotIn("A8", [a["id"] for a in later["alarms"]])
+
+    def test_finality_reads_each_close(self):
+        rows = [{"family": "f", "day": "2026-10-08", "pnl_usd": Decimal("1"), "fee_basis": "broker"}]
+        self.assertTrue(R.finality(rows, replay_days={"f": {"replayed": True, "day": "2026-10-08"}},
+                                   fees_as_of="2026-10-09")["final"])
+        self.assertFalse(R.finality(rows, replay_days={"f": {"replayed": True, "day": None}}, fees_as_of="2026-10-09")["final"])
+        self.assertTrue(R.finality(rows, replay_days={}, fees_as_of="2026-10-09")["final"],
+                        "a program no longer replayed: its rows are frozen, they cannot change")
+        unpriced = R.finality([{**rows[0], "pnl_usd": None}], replay_days={}, fees_as_of="2026-10-09")
+        self.assertEqual((unpriced["final"], unpriced["unpriced"]), (False, 1))
+
+    def test_net_after_costs_is_the_meter_less_every_cost_over_the_same_days(self):
+        self.fam("dir-a", lane="direction")
+        self.close("dir-a", pnl=-10.0)
+        self.close("dir-a", route=":t", pnl=4.0)
+        self.close("dir-a", pnl=99.0, day="2026-10-19", closed_at=ny("2026-10-20", 11))   # after the cutoff
+        self.assertIn("no close economics summary", self.report()["done"]["net_after_costs"]["why"])
+        folder = self.root / "economics" / "20261019-close"
+        folder.mkdir(parents=True)
+        (folder / "summary.json").write_text(json.dumps({
+            "cutoff": "2026-10-19T20:00:00Z", "cost_start": "2026-09-26T06:23:14Z", "total_costs_usd": "700.00",
+            "costs": [{"service": "Sail (models + boxes)", "usd": "400.00", "basis": "x"},
+                      {"service": "Claude (Anthropic via the gateway)", "usd": "300.00", "basis": "y"}],
+            "net": {"net_usd": "-760.00"}, "realized": {"realized_options_pnl_usd": "-60.00"}}))
+        out = self.report()
+        n = out["done"]["net_after_costs"]
+        self.assertEqual((n["cutoff"], n["costs_usd"], n["economics_net_usd"], n["stale"]),
+                         ("2026-10-19T20:00:00Z", 700.0, "-760.00", False))
+        self.assertEqual(n["done_all"], {"closes_to_cutoff": 2, "net_usd_to_cutoff": -6.0, "net_after_costs_usd": -706.0})
+        self.assertEqual(n["done_screen"]["net_after_costs_usd"], -710.0)
+        self.assertEqual([c["service"] for c in n["costs_by_service"]], ["Sail (models + boxes)",
+                                                                         "Claude (Anthropic via the gateway)"])
+        self.assertIn("comparison only", out["costs"]["basis"])
+
+    def test_dm1s_first_firing_rides_beside_the_probe_row(self):
+        self.fam("eqp-real", lane="direction", band="probe", banded_version=17,
+                 validation_r_sd_by_version={"17": 2.458545})
+        self.close("eqp-real", version=17, status="open", qty=1, entry=0.43, max_loss=43.0, fees=0.05, probe=True,
+                   day="2026-10-19")
+        row = next(p for p in self.report()["probes"] if p["family"] == "eqp-real")
+        dm1 = row["dm1"]
+        self.assertEqual((dm1["first_fire_at"], dm1["trades_to_first_fire"], dm1["real_trades"], dm1["sigma"]),
+                         (17, 17, 0, 2.458545), "the audit's n >= 17 at the live sigma")
+        self.assertAlmostEqual(dm1["r_floor"], 43.05 / 43.0, places=5)
+        self.assertEqual((row["probe_net_usd"], row["probe_closes"], row["program_loss_line_usd"]), (0.0, 0, -200.0))
+        self.store.set_state("eqp-real", validation_r_sd_by_version={})
+        self.assertEqual(R.dm1_reach(self.store, self.store.family("eqp-real"), [])["first_fire_at"], 11,
+                         "DM1's fallback sigma 2.0: (1.645 x 2)^2 = 10.8")
+
+    def test_a_zero_edge_figure_the_amendment_did_not_pin_says_so(self):
+        out = R.zero_edge({"dlane": {"mode": "gate", "done_zero_edge_p": 0.13}})
+        self.assertEqual(out["value"], 0.13)
+        self.assertIn("not the pinned 0.024", out["note"])
+        self.assertNotIn("horizon", out)
+
+
+class TheProgramLossLine(Fixture):
+    """DONE-RULE-A1 A1.3 (Oct 9, 2026): one program's own realized Probe net at or below -$200 (half the $400 Probe total)
+    retires it swarm-side; its real positions exit by the House's rules."""
+
+    def ctx(self):
+        self.alerts: list[tuple[str, str]] = []
+        return SimpleNamespace(root=self.root, now=lambda: self.now, config={},
+                               alert=lambda level, text: self.alerts.append((level, text)))
+
+    def gate(self, **extra) -> None:
+        (self.root / "swarm.json").write_text(json.dumps({"dlane": {"mode": "gate", **extra}}))
+
+    def test_due_at_the_line_from_priced_probe_closes_only(self):
+        self.fam("dir-a", lane="direction", band="probe")
+        self.fam("dir-b", lane="direction", band="probe")
+        self.close("dir-a", pnl=-150.0, probe=True)
+        self.close("dir-a", pnl=-49.99, probe=True)
+        self.close("dir-a", route=":t", pnl=-500.0)               # tuition is no Probe loss
+        self.close("dir-a", pnl=-80.0)                            # a Sized close (no probe mark) is no Probe loss
+        self.close("dir-b", pnl=-300.0, probe=True)
+        self.close("dir-b", pnl=0.0, probe=True, status="unpriced_close", qty=1)
+        out = self.report()
+        rows = {r["family"]: r for r in out["program_loss"]["programs"]}
+        self.assertEqual((rows["dir-a"]["probe_net_usd"], rows["dir-a"]["due"]), (-199.99, False))
+        self.assertEqual((rows["dir-b"]["unpriced"], rows["dir-b"]["due"]), (1, False), "an unpriced close may be a gain")
+        probe = next(p for p in out["probes"] if p["family"] == "dir-a")
+        self.assertEqual((probe["probe_net_usd"], probe["share_of_probe_total"]), (-199.99, 0.5))
+        self.assertNotIn("PL1", [a["id"] for a in out["alarms"]])
+        self.close("dir-a", pnl=-0.01, probe=True)
+        out = self.report()
+        self.assertEqual(out["program_loss"]["due"], ["dir-a"])
+        self.assertIn("dir-a $-200.00", next(a for a in out["alarms"] if a["id"] == "PL1")["text"])
+
+    def test_the_job_retires_it_swarm_side_once_and_says_so(self):
+        self.gate()
+        self.fam("dir-a", lane="direction", band="probe")
+        self.fam("alp-c", band="probe")
+        self.close("dir-a", pnl=-210.0, probe=True)
+        self.close("alp-c", pnl=-150.0, probe=True)
+        self.close("dir-a", pnl=0.0, probe=True, status="open", qty=1, day="2026-10-19")   # its exit goes on
+        out = R.run(self.ctx())
+        self.assertEqual(out["retired"], ["dir-a"])
+        fam = self.store.family("dir-a")
+        self.assertEqual((fam["band"], bool(fam["retired_at"])), ("retired", True))
+        self.assertIn("DONE-RULE-A1 A1.3", fam["retire_reason"])
+        self.assertIsNone(self.store.family("alp-c")["retired_at"], "-$150 is above the line")
+        public = [e for e in self.store._all("SELECT kind, payload FROM events WHERE family='dir-a'") if e["kind"] == "swarm.retired"]
+        self.assertEqual(json.loads(public[0]["payload"])["cause"], R.PROGRAM_LOSS_PUBLIC)
+        self.assertFalse(any(ch.isdigit() for ch in R.PROGRAM_LOSS_PUBLIC), "the site's tape carries words, no figure")
+        private = [json.loads(e["payload"]) for e in self.store._all("SELECT kind, payload FROM events WHERE family='dir-a'")
+                   if e["kind"] == "swarm.dlane"]
+        self.assertEqual(private[0]["probe_net_usd"], -210.0)
+        doc = json.loads((self.root / R.FILE).read_text())
+        self.assertEqual(doc["program_loss"]["retired"], ["dir-a"])
+        self.assertTrue(any("PL1: retired swarm-side 1 programs" in text for _, text in self.alerts))
+        # Nothing else is touched: the live book's open position is the House's to close.
+        self.assertEqual(self.live.rows("SELECT count(*) AS n FROM positions WHERE status='open'")[0]["n"], 1)
+        again = R.run(self.ctx())
+        self.assertEqual(again["retired"], [])
+        self.assertNotIn("PL1", again["alarms"])
+
+    def test_a_setting_can_only_tighten_the_line(self):
+        self.fam("dir-a", lane="direction", band="probe")
+        self.close("dir-a", pnl=-150.0, probe=True)
+        self.assertEqual(self.report(settings={"dlane": {"mode": "gate", "program_loss_usd": -100}})["program_loss"]["due"],
+                         ["dir-a"])
+        loose = self.report(settings={"dlane": {"mode": "gate", "program_loss_usd": -1000}})["program_loss"]
+        self.assertEqual((loose["line_usd"], loose["due"]), (-200.0, []))
+
+
+class TheReportFixes(Fixture):
+    """The readiness audit's m11 (Oct 10, 2026): an exact close or a why; real opens in the funnel; E0 said as it is."""
+
+    def test_the_buy_and_hold_never_takes_another_days_close(self):
+        close = {"root": "SPY", "opened_day": "2026-10-05", "day": "2026-10-08", "max_loss_usd": 100.0, "opened_qty": 1,
+                 "legs": [], "entry": 0.5, "opened_at": ny("2026-10-05")}
+        bh = R.buy_and_hold(close, {"SPY": {"2026-10-02": 495.0, "2026-10-05": 500.0}})
+        self.assertEqual((bh["risk_usd"], bh["delta_usd"]), (None, None))
+        self.assertIn("on 2026-10-08", bh["why"])
+        self.assertIn("its last close: 2026-10-05", bh["why"])
+
+    def test_the_direction_job_keeps_only_finished_sessions(self):
+        from league.ops import direction as DIR
+
+        friday = dt.datetime(2026, 10, 9, 17, 5, tzinfo=dt.timezone.utc).timestamp()     # 13:05 ET, in session
+        self.assertFalse(DIR.session_closed("2026-10-09", friday))
+        self.assertTrue(DIR.session_closed("2026-10-09", friday + 3 * 3600 + 15 * 60))
+        self.assertTrue(DIR.session_closed("2026-10-10", friday), "a Saturday has no bar to be partial")
+
+        class Gateway:
+            def get(self, path, params=None):
+                return {"bars": {"SPY": [{"t": "2026-10-08T04:00:00Z", "c": 770.0}, {"t": "2026-10-09T04:00:00Z", "c": 778.35}]},
+                        "next_page_token": None}
+
+        (self.root / "swarm.json").write_text(json.dumps({"gym": {"roots": ["SPY"]}}))
+        for now, want in ((friday, {"2026-10-08": 770.0}), (friday + 4 * 3600, {"2026-10-08": 770.0, "2026-10-09": 778.35})):
+            out = DIR.run(SimpleNamespace(root=self.root, now=lambda now=now: now, gateway=Gateway()))
+            self.assertTrue(out["ok"], out)
+            self.assertEqual(DIR.load_closes(self.root / DIR.FILE)["SPY"], want)
+
+    def test_the_funnel_counts_real_opens_by_route(self):
+        self.fam("dir-a", lane="direction")
+        self.close("dir-a", status="open", qty=1, day="2026-10-20", opened=self.now - 3600, probe=True)
+        self.close("house:calibration", route=":c", status="open", qty=1, day="2026-10-20", opened=self.now - 3600)
+        funnel = self.report()["funnel"]
+        self.assertEqual(funnel["24h"]["direction"]["real_opens"], {":r": 1, ":t": 0, ":i": 0, "other": 0})
+        self.assertEqual(funnel["24h"]["direction"]["real_closes"][":r"], 0)
+        self.assertEqual(sum(funnel["24h"]["alpha"]["real_opens"].values()), 0, "the House's routes are never counted")
+
+    def test_e0_is_said_as_what_it_is(self):
+        (self.root / "health.json").write_text(json.dumps({"options_live": {"stops": {
+            "sod_equity": "1300.00", "last_reading": [self.now - 60, "1335.01", "2026-10-20"]}}}))
+        previous = {"account": {"e0": {"usd": 1295.11, "at": "2026-10-08T19:54:03Z",
+                                       "basis": "the first equity reading the dlane report saw (release L-D's deploy "
+                                                "reading is the plan's E0)"}}}
+        e0 = self.report(previous=previous)["account"]["e0"]
+        self.assertEqual((e0["usd"], e0["at"], e0["basis"]), (1295.11, "2026-10-08T19:54:03Z", R.E0_BASIS))
 
 
 class ReportedOnly(unittest.TestCase):

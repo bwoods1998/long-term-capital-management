@@ -131,7 +131,16 @@ class Settings(unittest.TestCase):
         self.assertEqual((c["val_tries"], c["looks_per_lineage"]), (1, 1))
         self.assertEqual((dlane.DEFAULTS["screen"], dlane.DEFAULTS["screens"]["D2"]), ("S-C", {"receipt_sha256": None}))
         self.assertEqual((c["alarm_min_looks"], c["alarm_pass_share"]), (10, 0.6))
-        self.assertEqual((c["done_zero_edge_p"], c["k5_net_usd"], c["k5_clear"]), (0.13, -600.0, False))
+        # DONE-RULE-A1 (Oct 9, 2026): A1.2's zero-edge figure and A1.3's program loss line.
+        self.assertEqual((c["done_zero_edge_p"], c["k5_net_usd"], c["k5_clear"]), (0.024, -600.0, False))
+        self.assertEqual(c["program_loss_usd"], -200.0)
+
+    def test_the_program_loss_line_can_only_be_tightened(self):
+        """DONE-RULE-A1 A1.3 (Oct 9, 2026): -$200, half the $400 Probe total; a setting may raise it toward zero (to -$25),
+        never loosen it, and a malformed one is the default."""
+        line = lambda v: dlane.cfg({"dlane": {"mode": "gate", "program_loss_usd": v}})["program_loss_usd"]  # noqa: E731
+        self.assertEqual((line(-100), line(-300), line(-10), line("x"), line(True)), (-100.0, -200.0, -25.0, -200.0, -200.0))
+        self.assertEqual(dlane.ZERO_EDGE["value"], dlane.DEFAULTS["done_zero_edge_p"])
 
     def test_a_malformed_value_is_its_default_and_a_number_past_a_bound_is_the_bound(self):
         c = dlane.cfg({"dlane": {"mode": "on", "birth_share": "half", "max_share": 0.2, "min_per_pass": 1.5,
@@ -867,6 +876,9 @@ class Wall(unittest.TestCase):
 
     def test_the_done_rule_is_pinned_not_a_setting(self):
         self.assertEqual(dlane.DONE["rule_sha256"], "0d007696c9a6a1cbbd7d2cc345811359ab1cec389cf88f75ceff295bbbc48dca")
+        # DONE-RULE-A1.md (pinned Oct 9, 2026 ~20:50Z): its sha256, and A1.1's two measured programs.
+        self.assertEqual(dlane.DONE["amendment_sha256"], "333bad0679fb9c9a76c1cc0b5248d52c5f84c96e0cff5376f9c8d446a4c4ff0b")
+        self.assertEqual(dlane.DONE["min_measured_programs"], 2)
         self.assertEqual((dlane.DONE["min_closes"], dlane.DONE["min_programs"], dlane.DONE["min_closes_per_program"]), (30, 2, 5))
         self.assertEqual((dlane.DONE["gap_limit"], dlane.DONE["gap_min_matched"]), (0.10, 5))
         self.assertEqual((dlane.DONE["first_checkpoint"], dlane.DONE["checkpoint_every"]), (30, 10))

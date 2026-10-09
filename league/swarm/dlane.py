@@ -87,12 +87,15 @@ below the net at the operator's last clear), a "gate" lane reads "shadow"; only 
 2026; `k5_rearm`): the job's next run records it (kv `dlane_k5_base`: the net then) and re-arms K5 at `k5_net_usd`
 below that net, so a cleared K5 neither trips again at once on the same losses nor stays off for good. While
 `k5_clear` is true K5 cannot trip at all: that is a loosening while it stays, and the report warns every run until the
-operator takes it out.
+operator takes it out. THE PROGRAM LOSS LINE (DONE-RULE-A1 A1.3, Oct 9, 2026; `program_loss_usd`, -$200, half the $400
+Probe total): the `dlane` report job retires, swarm-side, any program whose own realized Probe net is at or below it, so
+one program cannot drain the shared Probe budget before DM1 can fire (about 17 real trades). Its real positions exit by
+the House's rules. A tightening, never a trade.
 
 SETTINGS. Every default is in league/swarm/policy.json's "dlane" block (the owner's deploy); swarm.json overrides it; each
 value is held inside its bound here (`cfg`): a malformed value is its default, a number past a bound is the bound. The
-evidence numbers (the screen, the leakage alarm, K5) are bounded so that a setting can only TIGHTEN them past the reviewed
-policy.
+evidence numbers (the screen, the leakage alarm, K5, the program loss line) are bounded so that a setting can only
+TIGHTEN them past the reviewed policy.
 
 WHAT AGENTS SEE. Rules and Train-year (2022-24) facts only: never a hidden-year figure, never a Validation or holdout
 figure, never a number from the operator's private studies but THE TRAIN MAP's, below (`brief_text`, `status_text`,
@@ -203,7 +206,21 @@ DONE: dict[str, Any] = {
     "min_closes": 30, "min_programs": 2, "min_closes_per_program": 5,
     "gap_limit": 0.10, "gap_min_matched": 5,     # consistent: mean live-minus-replay gap within +/-0.10 over 5+ matched
     "first_checkpoint": 30, "checkpoint_every": 10,
+    # AMENDMENT A1 (DONE-RULE-A1.md, pinned Oct 9, 2026 ~20:50Z, before the first Probe close; tightenings only; the
+    # readiness audit's B1, M10, M11 and M8). A1.1: item 4 held with ZERO replay evidence (a program under 5 matched
+    # closes was never inconsistent), so a claim also needs at least `min_measured_programs` programs with
+    # `gap_min_matched` or more matched closes each, every one of them within the gap. A1.4: a checkpoint is read only
+    # once its inputs are final (the night's replay landed and the broker's fees posted for every counted close). A1.2
+    # and A1.3 are figures and a policy setting (`ZERO_EDGE`, `program_loss_usd`).
+    "amendment_sha256": "333bad0679fb9c9a76c1cc0b5248d52c5f84c96e0cff5376f9c8d446a4c4ff0b",
+    "min_measured_programs": 2,
 }
+#: A1.2 (DONE-RULE-A1.md): P(Done | zero edge) under the budget in force, the figure beside every claim. It replaced 0.13,
+#: MONEY's figure for the NET-total rules L-D retired. The study's 12-week, 3-session-hold cell of variant (i).
+ZERO_EDGE = {"value": 0.024, "horizon": "12 weeks", "holds": "3-session holds",
+             "variant": "(i) $400 worst net stretch in any 20 sessions + $400 net in total (release L-D's budget, D2)",
+             "source": "the operator's budget simulation (dlane-1009/budget/RESULT.md, worst-stretch section, variant i, "
+                       "zero edge; 6.0% at 24 weeks), pinned by DONE-RULE-A1 A1.2 (sha 333bad06)"}
 
 DEFAULTS: dict[str, Any] = {
     # The code's default is the rollback; policy.json switches the lane on ("gate").
@@ -233,10 +250,17 @@ DEFAULTS: dict[str, Any] = {
     "val_tries": 1, "looks_per_lineage": 1,
     # THE LEAKAGE ALARM of the direction lane (decision 7; the alpha lane's is `evidence.leakage_alarm`, unchanged).
     "alarm_min_looks": 10, "alarm_pass_share": 0.60,
-    # THE DONE METER's zero-edge figure (decision 8: "P(Done | zero edge), simulation").
-    "done_zero_edge_p": 0.13,
+    # THE DONE METER's zero-edge figure (decision 8: "P(Done | zero edge), simulation"). 0.024 since DONE-RULE-A1 A1.2
+    # (Oct 9, 2026): 0.13 described the NET-total rules release L-D retired (`ZERO_EDGE` says what 0.024 is).
+    "done_zero_edge_p": 0.024,
     # K5 (decision 9).
     "k5_net_usd": -600, "k5_clear": False,
+    # ONE PROGRAM CANNOT DRAIN THE SHARED BUDGET (DONE-RULE-A1 A1.3, Oct 9, 2026; the readiness audit's M11): DM1 cannot
+    # fire before about 17 real trades at the live sigma, while the Probe total is $400 for every program together. The
+    # `dlane` report job retires, swarm-side, a program whose own realized Probe net is at or below this line (half the
+    # $400 total); its real positions exit by the House's rules (exits go on). A tightening: a setting can only raise it
+    # toward zero (-200 to -25), never loosen it.
+    "program_loss_usd": -200,
     # THE TRAIN MAP (Oct 9, 2026; `train_map`): shown to the architect and direction researchers only when true. The
     # code's default is off (a dropped policy layer shows nothing); policy.json sets it true; swarm.json false hides it.
     "train_map": False,
@@ -262,7 +286,8 @@ def cfg(settings: Mapping[str, Any] | None) -> dict[str, Any]:
     "off" (the rollback); a malformed one is "shadow". Lists keep only the lane's own words (`ROOTS`, `STRUCTURES`,
     `CLASSES`, `HOLDINGS`) and an empty one is the default. `max_share` is never under `birth_share`. The screen, the
     leakage alarm and K5 can only be TIGHTENED past the policy's (`look_level` <= 0.20, `sharpe_share` >= 0.25,
-    `alarm_pass_share` <= 0.60, `k5_net_usd` >= -600). A direction lineage's Validation tries and holdout looks
+    `alarm_pass_share` <= 0.60, `k5_net_usd` >= -600, `program_loss_usd` >= -200: DONE-RULE-A1 A1.3). A direction
+    lineage's Validation tries and holdout looks
     (`val_tries`, `looks_per_lineage`, release D-1b) are 1 whatever is written: D2's measured rate is per program."""
     raw = (settings or {}).get("dlane") if isinstance(settings, Mapping) else None
     raw = raw if isinstance(raw, Mapping) else {}
@@ -329,6 +354,7 @@ def cfg(settings: Mapping[str, Any] | None) -> dict[str, Any]:
         "done_zero_edge_p": number("done_zero_edge_p", 0.0, 1.0),
         "k5_net_usd": number("k5_net_usd", -600.0, -50.0),
         "k5_clear": raw.get("k5_clear") is True,
+        "program_loss_usd": number("program_loss_usd", -200.0, -25.0),
         "train_map": raw.get("train_map") is True,
     }
 
