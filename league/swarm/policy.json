@@ -118,7 +118,8 @@
     "alarm_pass_share": 0.6,
     "done_zero_edge_p": 0.13,
     "k5_net_usd": -600,
-    "k5_clear": false
+    "k5_clear": false,
+    "train_map": true
   },
   "engineer": {
     "enabled": true

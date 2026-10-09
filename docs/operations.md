@@ -197,8 +197,69 @@ money-safety fix (rule F0: its cost is those bands, which go back to the Gym).
     at D2's measured false-positive rate of 10.4% per program (mixed worlds).
   - Deploy class: the updater (`cards.py` and `architect.py` are not protected paths). Rollback: revert the commit;
     `dlane.mode` "off" rolls back the whole lane. The `dlane` report's loosened-rules header
-    (`league/ops/dlane_report.py` `LOOSENED`) does not list this rule yet: `league/ops/` is an owner-deploy path, so
-    the row joins it at the next owner deploy. The table below lists it now.
+    (`league/ops/dlane_report.py` `LOOSENED`) lists this rule from the Train map's owner deploy (`feat/dlane-trainmap`,
+    next): `league/ops/` is an owner-deploy path. The table below lists it now.
+- **The Train map** (Oct 9, 2026; branch `feat/dlane-trainmap`, not deployed; an owner deploy). The architect and the
+  direction researchers are shown which call shapes pass direction-v2 on the Train years, so births aim at shapes that
+  pass instead of searching for them. After the first direction program reached real money (2.4 h after D-1b), 7 of the
+  8 other direction families had no eligible version, mostly on E1 (in the market too few years).
+  - **Where it comes from.** The operator's census of call shapes: every SPY, QQQ, IWM and one-on-each-root call cell
+    by delta (0.20-0.50), expiry rule (nearest covering, 2-5, 6-10 or 11-20 DTE), hold (2, 3, 5, 8 sessions),
+    entry minute (10:30, 15:30 ET) and gate (every session, ivlow, contango, trend and their pairs), one lot at natural
+    prices, a new lot every qualifying session. It was scored by the House's own `dlane.train_score` and
+    `robust_verdict` (main `d70e00c3`, the committed `dlane` settings) on 2022-24 data only; the dates were filtered
+    before any row was read. Of 3,136 cells, 30 pass. Every passer is a 0.20-delta call held 2 to 5 sessions, in the
+    market all three Train years: 12 enter every session, 14 under one volatility filter and 4 under both (all
+    5-session holds entered at 15:30; stacking both thins 2022 below E4's 60 entry sessions in 308 of the 448 stacked
+    cells). 23 of the 30 fit the unit only borderline. IWM alone has none (it loses at 1.5x), and the price-trend gate
+    passes none (it sits out 2022 and fails E3). The writer computes every count in the lessons from the census, and
+    `test_dlane_trainmap` checks each lesson's claims about the passers against the file's rows.
+  - **The file:** `league/swarm/dlane_map.json`, protected like `dlane.py` (`league/ci.py` FORBIDDEN and the gateway's
+    `protected.mjs`). It holds only what agents may see: each passing shape in the census's words (roots, delta,
+    expiry rule, hold, entry, gate), its pooled S_D to one decimal, the unit's verdict as a word ("fits the unit at
+    today's prices: yes/no/borderline"), in-market years, and the census's three lessons. Its header carries the label,
+    `built_at`, `inputs_sha256` (the census inputs' manifest), `source_sha256`, the commit and `dlane.py` sha it was
+    scored with, and the bar settings it was scored under. There is no dollar unit, price level, price ratio, per-year
+    P&L or year outside 2022-24. E5's verdict word rests on the operator's assumed index level (the House prices E5
+    live), so a borderline shape can flip either way.
+  - **The label**, on every text that shows it: "in-sample: Train years 2022-24, from the operator's census at one-lot
+    natural prices; the screen decides", with the lane's note that an always-in call program can pass this bar.
+  - **Who sees what** (`dlane.train_map_text`, `train_map_brief`). The architect's LANES block (`lanes_block`, after
+    the lane's rules and the graveyard line, before the direction quota) gets every passing shape on one line (at most
+    30), the lessons, and "aim direction cards at these shapes and vary the gate, the hold or the root". A direction
+    researcher's brief (`dlane.brief_text`, after D-1's words, unchanged) gets the lessons and the 5 best passing shapes
+    on its family's roots, then the best on other roots when it has fewer. An IWM family sees 0 of its own and 5 others.
+    The researcher has no lane-facts tool; adding one would change every researcher's shared tool prefix, the alpha
+    lane's included. A shortfall request's opening line points at the map too.
+  - **The reader** (`dlane.train_map`) is cached on the file's size and mtime and never raises. A missing, unreadable or
+    malformed file is no map. So is one that is unsafe: every text field (`map_text_problems`) must be one-line ASCII,
+    with no `$`, no grouped number, no digit run of four or more but 2022-24, none of 2017-21 or 2025-26 anywhere, no
+    three-digit number outside an "N of M" count, and no decimal but a delta target or a one-decimal figure. The label
+    must be the code's word for word, the objective direction-v2, and every row in the lane's vocabulary. If the bar's
+    settings differ from the ones it was scored under, the text says so.
+  - **Its cost:** births aim at in-sample winners. The screen's false-positive rate per program is unchanged (Train is
+    in-sample; D2 measured its rate per program, and the ration stays one try and one look a lineage). More programs
+    reach the screen, so there are more false passes in count, and more paid reviews and audits. The `dlane` report's
+    loosened-rules header lists it (`LOOSENED`), beside the graveyard row that joins it at this deploy.
+  - **Switch:** policy.json `dlane.train_map` true. swarm.json `dlane.train_map` false hides it on the next loop (no
+    restart), and `dlane.mode` "off" hides it with the lane. The code's default is false: a dropped policy layer shows
+    nothing. Off, every text is main `d70e00c3`'s byte for byte (`test_dlane_trainmap`'s golden digests, computed on
+    that commit). The alpha lane is untouched: an alpha family's brief and the architect's request with the lane off
+    match main's digests.
+  - **Deploy:** an owner deploy (`dlane.py`, `policy.json`, `ci.py`, `league/ops/`, `CHANGELOG.md` are protected), in
+    the money path's window. Gateway first: `protected.mjs` gains `league/swarm/dlane_map.json`, which needs
+    `npx wrangler@4.129.1 deploy`. Until then the deployed merge route does not refuse an edit to the map, but the
+    updater does (`ci.FORBIDDEN` ships with the release). Then `floor_box.py deploy`. Nothing under `league/live/`,
+    `league/gym/` or `league/constitution.py` changes: the execution fingerprint `31a7e921` and the money digest
+    `0310779c` do not move, so there is no evidence reset and no re-ratification. Verify: the first architect pass's
+    request carries "TRAIN MAP (in-sample"; a new direction family's brief carries its lessons. Rollback: swarm.json
+    `dlane.train_map` false (instant), or `floor_box.py rollback`.
+  - **Rebuilding the map** (operator only, never from the box): re-run the census scorer on 2022-24 inputs, reduce it
+    with the operator's reducer (scratch `tmap-1009/reduce_map.py`: it verifies the pinned input hashes and writes
+    only the agent-safe fields), then run `test_dlane_trainmap` with `LTCM_PRIVATE_FIGURES` naming the operator's
+    private figures file (outside the repo, never committed) so its private-figures check runs; without it that
+    test is skipped. A new bar (a `dlane.py` change to `train_score`) needs a new map; until then the header's `bar`
+    and `scored_with` say what it was scored under.
 - **Births.** While the lane holds under `birth_share` (half) of the last 24 hours' births and fewer than `max_alive`
   direction families live, a pass reserves at least half its births for direction (never filled with alpha); the lane
   never holds more than `max_share` (60%) of the window, so alpha keeps at least 40%. The architect's request carries a
@@ -274,6 +335,7 @@ screen, the alarm and K5 can only be TIGHTENED by a setting.
 | `dlane.alarm_min_looks`, `alarm_pass_share` | 10, 0.60 | >= 10; <= 0.60 (tighten only) |
 | `dlane.done_zero_edge_p` | 0.13 | reported beside every Done figure: "P(Done \| zero edge), simulation" |
 | `dlane.k5_net_usd`, `k5_clear` | -600, false | -600 to -50 (tighten only); `k5_clear` true clears a set K5 and DISARMS K5 while it stays true (a loosening: the report warns every run; take it out once the clear is recorded) |
+| `dlane.train_map` | `true` (Oct 9, `feat/dlane-trainmap`) | true shows **The Train map** to the architect and direction researchers while the lane is on; false (swarm.json) hides it at once; the code's default and any value but `true` are false |
 
 **Every loosened rule, with its cost** (the operator's measurements: MONEY's simulation and the critic's; the header of
 every `dlane` report, `dlane_report.LOOSENED`):
@@ -288,7 +350,8 @@ every `dlane` report, `dlane_report.LOOSENED`):
 | The leakage alarm | one count: 10 looks, over 30% | per lane; direction over 60% | a real direction holdout leak trips later; the paid review, the audit and the post-cutoff tail still check every look |
 | The incubator mark | the drift screen alone (the owner's term, Sept 29-30) | direction-v2 for direction families | with no edge about -$36 a week expected, at most $150 a week (about $650 a month); its closes are never evidence |
 | Graveyard DRIFT rows | bind every card | not a direction card | buried direction ideas may return, once each, inside the rebirth budgets |
-| Graveyard alpha rows (Oct 9, `fix/dlane-graveyard`) | bind every card | alpha cards only: a direction card is bound only by direction families' rows (DRIFT never) | more direction births may retry ideas similar to dead alpha ones; each lineage still gets one Validation try and one holdout look at D2's measured 10.4% false-positive rate per program (mixed worlds); not yet in the `dlane` report's header (an owner-deploy path) |
+| Graveyard alpha rows (Oct 9, `fix/dlane-graveyard`) | bind every card | alpha cards only: a direction card is bound only by direction families' rows (DRIFT never) | more direction births may retry ideas similar to dead alpha ones; each lineage still gets one Validation try and one holdout look at D2's measured 10.4% false-positive rate per program (mixed worlds); in the `dlane` report's header from the Train map's owner deploy |
+| The Train map (Oct 9, `feat/dlane-trainmap`) | agents read the lane's rules and their own runs, never an operator study's figure | the architect sees the call shapes that pass direction-v2 on the Train years in the operator's census and its lessons; a direction researcher the lessons and the 5 best on its roots; labelled in-sample | births aim at in-sample winners; the screen's false-positive rate per program is unchanged; more programs reach the screen, so more false passes in count (more paid reviews and audits) |
 | The birth quota | no lane | direction about half while behind, at most 60% | alpha births fall from about 73 to about 36 a day mid-way through the game's T0 experiment; the researcher's ROLE prompt (a shared prefix) changes for alpha researchers too, so "alpha golden" holds for code paths only (the game's report says so while the lane is on) |
 | The unit | MONEY's pre-registered $75 lane cap | 10% of equity (E5), as the live side | Probe-stage Done averaged over holds 6.3% against 7.8%; P(net <= -$360 in 8 weeks) 0.35 against 0.27 |
 | K5's clear | no K5 before D-1 | `dlane.k5_clear` true clears a set K5 at once and disarms K5 while it stays true; the job's next run records the clear and re-arms K5 at -$600 below the net then (deleting the kv clears the same way) | while `k5_clear` stays true the lane can lose past any line with no K5 (the report warns every run); after a clear K5 measures a further -$600 from the net at clearing, not from inception |

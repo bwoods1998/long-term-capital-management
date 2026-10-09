@@ -116,9 +116,10 @@ class Settings(unittest.TestCase):
         d2 = {"receipt_sha256": "c36059470d00241db67e1542361097e397289b87f024261b96da2db323c63b5b", "c": 1.0,
               "fp_lane_mixed": 0.1037, "fp_lane_2224": 0.1239, "power10": 0.1995, "fp_unconditional": None,
               "fp_both_windows_rose": None, "fp_lane_ci_mixed": [0.0957, 0.1116], "fp_lane_cluster_mixed": [0.079, 0.1276]}
+        # THE TRAIN MAP (Oct 9, 2026): the policy shows it (the code's default is off; test_dlane_trainmap).
         self.assertEqual(dlane.cfg({"dlane": policy}),
                          {**defaults, "mode": "gate", "structures": ["long_single"], "screen": "D2",
-                          "screens": {"S-C": defaults["screens"]["S-C"], "D2": d2}},
+                          "screens": {"S-C": defaults["screens"]["S-C"], "D2": d2}, "train_map": True},
                          "the committed block is the defaults, switched on in gate mode, with D-1b's deploy")
         c = dlane.cfg({"dlane": policy})
         # The operator's decisions of Oct 9, 05:30Z, as committed.

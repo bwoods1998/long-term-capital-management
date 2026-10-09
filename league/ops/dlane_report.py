@@ -203,6 +203,21 @@ LOOSENED: tuple[dict[str, str], ...] = (
      "cost": "while dlane.k5_clear stays true the lane can lose past any line with no K5 (the report warns every run "
              "until it is taken out); after a clear, K5 measures a further -$600 from the net at clearing, not from "
              "inception"},
+    # Release D-1's graveyard fix (main d70e00c3, an updater release) joins the header at this owner deploy, as its
+    # CHANGELOG entry said it would; then THE TRAIN MAP (Oct 9, 2026).
+    {"rule": "graveyard alpha rows (fix/dlane-graveyard)", "was": "bind every card",
+     "now": "alpha cards only: a direction card is bound only by direction families' rows (DRIFT rows never)",
+     "cost": "more direction births may retry ideas similar to dead alpha ones; each lineage still gets one Validation "
+             "try and one holdout look at D2's measured 10.4% false-positive rate per program (mixed worlds)"},
+    {"rule": "the TRAIN MAP (dlane.train_map)",
+     "was": "agents read the lane's rules and their own runs, never an operator study's figure",
+     "now": "the architect's LANES block lists the call shapes that pass direction-v2 on the Train years in the "
+            "operator's census (one line each: S_D to one decimal, the unit's verdict as a word) and the census's "
+            "lessons; a direction researcher's brief the lessons and the 5 best passing shapes on its roots; labelled "
+            "in-sample (league/swarm/dlane_map.json); swarm.json dlane.train_map false hides it",
+     "cost": "births aim at in-sample winners, so more programs whose Train profit is index beta reach the screen; the "
+             "screen's false-positive rate per program is unchanged (Train is in-sample), and more programs screened "
+             "means more false passes in count (more paid reviews and audits)"},
     {"rule": "release L-D: the Probe budget read NET", "was": "GROSS: a gain never offsets a loss",
      "now": "NET over closed Probe positions (Sized never offsets): in the window its worst net stretch (a gain offsets "
             "only the losses closed before it), in total from inception",

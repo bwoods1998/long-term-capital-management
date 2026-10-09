@@ -146,8 +146,10 @@ FORBIDDEN: tuple[str, ...] = (
     # one-shot CONFIRM read on the way to Validation (league/swarm/game.py): a judge, like the evidence lines.
     "league/swarm/game.py",
     # THE DIRECTION LANE (release D-1, Oct 9, 2026): its Train bar (direction-v2), the unit it must fit, the screen its
-    # holdout look uses and its birth quota (league/swarm/dlane.py): selection constants, like the evidence lines.
-    "league/swarm/dlane.py",
+    # holdout look uses and its birth quota (league/swarm/dlane.py): selection constants, like the evidence lines. Its
+    # TRAIN MAP (Oct 9, 2026; league/swarm/dlane_map.json): what the architect and the direction researchers are shown
+    # of the operator's census, held to the lane's secrecy rules; an edit could steer births or leak a hidden figure.
+    "league/swarm/dlane.py", "league/swarm/dlane_map.json",
     # How the House is deployed and the House itself (its tick calls the updater).
     "scripts/floor_box.py", "league/house.py", "CHANGELOG.md",
 )
