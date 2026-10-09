@@ -40,7 +40,9 @@ The score S_D is the pooled t of daily P&L over the Train years at 1.0x. On the 
 demotion when it fails:
   P1  the run's P&L above zero (the House's existing 1.5x rule, unchanged);
   R2  E1 and E3 hold at 1.5x;
-  R3  the 1.5x P&L at least `cost_ratio` (0.5) x the 1.0x P&L (both summed over the Train years).
+  R3  the 1.5x P&L at least `cost_ratio` (0.5) x the 1.0x P&L (both summed over the Train years), and (Oct 10, 2026,
+      the readiness audit's m3, a tightening) the 1.0x P&L above zero: until then a version that lost money at 1.0x
+      passed R3 whenever its 1.5x run made any money.
 REPORTED, NEVER A BAR (decision 2): E2 (every ACTIVE year t >= 0), R1 (the pooled t at 1.5x against `c_train`, 1.5) and
 the mechanism or ablation figures. Holds of 2 to 8 sessions are all admissible: there is no hold bar. Every view, brief
 and status line says plainly that AN ALWAYS-IN CALL PROGRAM CAN PASS THIS BAR, the gate is not tested by it, and profit
@@ -1014,7 +1016,7 @@ def robust_verdict(base: Mapping[str, Any] | None, result_15: Mapping[str, Any],
 
     P1 the run's P&L above zero (its summary's `pnl`, the House's existing rule); R2 E1 and E3 at 1.5x (a year's trade
     and entry-day counts the 1.5x run does not carry are the 1.0x run's: the same program); R3 the 1.5x P&L summed over
-    the Train years at least `cost_ratio` x the 1.0x's. R1 (the pooled t at 1.5x against `c_train`) is reported, never a
+    the Train years at least `cost_ratio` x the 1.0x's, which must be above zero (m3, Oct 10, 2026). R1 (the pooled t at 1.5x against `c_train`) is reported, never a
     bar. `known` is False when the run did not complete or lacks the figures, or there is no 1.0x score: nothing to
     demote on (the run is owed again), and `passed` is False."""
     c = cfg(settings)
@@ -1067,10 +1069,20 @@ def robust_verdict(base: Mapping[str, Any] | None, result_15: Mapping[str, Any],
         return out
     out["known"] = True
     out["ratio"] = round(pnl_15 / pnl_10, 4) if pnl_10 > 0 else None
-    r3 = pnl_15 >= c["cost_ratio"] * pnl_10
+    # R3 NEEDS A 1.0x PROFIT (Oct 10, 2026; the readiness audit's m3, a TIGHTENING listed in the dlane report). R3 read
+    # `pnl_15 >= cost_ratio x pnl_10` alone, which is always true when the 1.0x P&L is below zero and P1 holds (the 1.5x
+    # run above zero), so a version that LOST money at 1.0x passed the 1.5x rules on a 1.5x run whose fills happened to
+    # differ: eqp-term-contango-pool-call v6 (1.0x -$1,778.21, 1.5x +$143.23) passed and spent its lineage's one
+    # Validation try (-$2,360.31). A 1.0x P&L at or below zero now fails R3: the cost ratio is a share of a profit.
+    if pnl_10 <= 0:
+        r3 = False
+        whys.append(("R3", f"it lost money on Train at 1.0x ({_usd(pnl_10)}): R3 needs a 1.0x profit for its 1.5x run to "
+                           "keep a share of"))
+    else:
+        r3 = pnl_15 >= c["cost_ratio"] * pnl_10
+        if not r3:
+            whys.append(("R3", f"its 1.5x P&L ({_usd(pnl_15)}) is under {c['cost_ratio']:g} of its 1.0x P&L ({_usd(pnl_10)})"))
     out["checks"]["R3"] = r3
-    if not r3:
-        whys.append(("R3", f"its 1.5x P&L ({_usd(pnl_15)}) is under {c['cost_ratio']:g} of its 1.0x P&L ({_usd(pnl_10)})"))
     out["fails"] = [rule for rule, _ in whys]
     if whys:
         out["why"] = f"fails {whys[0][0]}: {whys[0][1]}"

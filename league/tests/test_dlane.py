@@ -404,6 +404,23 @@ class RobustVerdict(unittest.TestCase):
         self.assertEqual(r3["fails"], ["R3"], "1,600 is under half of 3,500")
         self.assertFalse(r3["passed"])
 
+    def test_r3_needs_a_profit_at_10x(self):
+        # m3 (Oct 10, 2026): R3 read `pnl_15 >= 0.5 x pnl_10` alone, always true for a 1.0x loss once P1 holds, so
+        # eqp-term-contango-pool-call v6 (1.0x -$1,778.21, 1.5x +$143.23) passed the 1.5x rules and spent its try.
+        r15 = run({"2022": (-1800.0, -4.2, {}), "2023": (1000.0, 1.4, {}), "2024": (943.23, 1.3, {})})
+        for pnl_10 in (-1778.21, 0.0):
+            out = dlane.robust_verdict({**self.base, "pnl": pnl_10}, r15, settings=GATE)
+            self.assertTrue(out["known"])
+            self.assertEqual((out["checks"], out["fails"], out["passed"]),
+                             ({"P1": True, "R2": True, "R3": False}, ["R3"], False), pnl_10)
+            self.assertTrue(out["why"].startswith("fails R3: it lost money on Train at 1.0x"), out["why"])
+            self.assertIsNone(out["ratio"])
+        # A 1.0x profit is judged by the cost ratio exactly as before.
+        out = dlane.robust_verdict({**self.base, "pnl": 286.0}, r15, settings=GATE)
+        self.assertEqual((out["checks"]["R3"], out["passed"]), (True, True), "143.23 is at least half of 286")
+        out = dlane.robust_verdict({**self.base, "pnl": 287.0}, r15, settings=GATE)
+        self.assertEqual(out["fails"], ["R3"], "143.23 is under half of 287")
+
     def test_counts_the_15x_run_lacks_are_the_10x_runs(self):
         r15 = run({"2022": (-1800.0, -4.2, {}), "2023": (2100.0, 1.4, {}), "2024": (1900.0, 1.3, {})})
         r15["by_year"] = {y: {"pnl": row["pnl"], "trades": row["trades"]} for y, row in r15["by_year"].items()}

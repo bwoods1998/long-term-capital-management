@@ -723,7 +723,7 @@ class Funnel(Base):
         self.assertEqual(day["gym_runs"], {"train": 3, "validation": 2, "holdout": 1, "forward": 1, "probe": 0, "mechanism": 0,
                                            "other": 1})
         self.assertEqual((day["gym_runs_total"], day["gym_not_run"]), (8, 2))
-        self.assertEqual(day["validations"], {"judged": 2, "passed": 1})
+        self.assertEqual(day["validations"], {"judged": 2, "passed": 1, "entered": 1, "by_screen": {}})  # M5's two keys
         self.assertEqual(day["looks"], {"taken": 2, "passed": 1})
         self.assertEqual(day["band_moves"], {"candidate": 1, "probe": 1, "sized": 0})
         self.assertEqual(day["spend_usd"], {"sail": 0.75, "claude": 2.0, "openai": 0.0})

@@ -42,8 +42,10 @@
    (`dlane.try_owed`), never the candidate, so no lineage dies with its try spent unjudged.
    RETIREMENT (`_why`, `dlane.lineage_spent`): a Gym
    direction family whose lineage has used its try or its look, with no try of its own still waiting for its look,
-   retires (THE COHORT KEEP spares it as it spares the clocks); a direction family never forks once its lineage's try is
-   used (`lane_forks`). The alpha lane keeps its counts; with the lane off nothing here is read.
+   retires, THE COHORT KEEP's or not (THE RATION BEFORE THE KEEP, Oct 10, 2026, the readiness audit's M3: until then the
+   keep spared it as it spares the clocks, holding a population slot with nothing left to validate); a direction family
+   never forks once its lineage's try is used (`lane_forks`). The alpha lane keeps its counts; with the lane off nothing
+   here is read.
 3. THE ALLOCATION (Release B, league/swarm/allocation.py; `allocation.mode` "value"): each family's share of researcher
    turns and Gym priority by its expected information value (the variance of its next validation's pass or fail under
    an empirical-Bayes posterior, discounted by the idea's trials, its own and those inherited at birth, by exhaustion:
@@ -110,8 +112,9 @@
    (at most `KEEP_CEILING`), so the keep never holds fewer families than the House can have pinned, and a pinned
    family (retired, its incubation would go to exits only) is never dropped for a higher return. The swarm never reads
    the House's live state, so it holds every cohort that could be pinned. It never spares a family from the
-   deflated-Sharpe rule, the population floor or the operator's gate hold. Research attention only: no trial count,
-   look, validation, gate, band or money rule reads it. The keep is saved at each read (`practice.KEEP_KV`, the
+   deflated-Sharpe rule, the population floor or the operator's gate hold, nor (since Oct 10, 2026) a direction family
+   from its lineage's ration. Research attention only: no trial count, look, validation, gate, band or money rule reads
+   it. The keep is saved at each read (`practice.KEEP_KV`, the
    incubator's cohorts' families too), so a kept family's researcher is not urged to retire it for being idle, and its
    researcher's, the mechanism test's and the diagnostician's own retire wait for it (THE KEEP WAITS FOR RETIREMENT,
    Oct 9, researcher.py: a retired family's cohort can never be pinned). A record that cannot be read leaves the last
@@ -668,7 +671,16 @@ class Tournament:
         # THE VALIDATED-FAMILY GUARD's record (`researcher.retire_guard`): this version's latest verdict and the evaluator
         # it was judged under, kept across adoptions, so a version's pass archived by one is known refuted only by a
         # failure under the evaluator in force, even after another version's validation replaced the line below.
-        verdicts = record_verdict(state, n, bool(line["passed"]), evaluator=self.store.get(KEY), at=self.store.now())
+        # A DIRECTION VERDICT SAYS HOW IT WAS SCREENED (Oct 10, 2026; the readiness audit's M5): `passed` stays the
+        # Validation line's answer (the guard, the tuition and the alpha lane read it), and a direction family's verdict
+        # also records `entered` (the line, or D2's Validation pre-check: it went to the gate) and the lane's `screen` in
+        # force ("D2" or "S-C"). Until now a D2 pre-check entry read as a failed Validation everywhere it was counted
+        # (eqp-realcalm-drift-call reached Probe with `validation_verdicts` {"17": passed false}): the daily funnel
+        # (league/ops/funnel.py), the dlane report's lane funnel and its A3 gate-wait alarm. An alpha family's verdict,
+        # and every verdict while the lane is off, is written exactly as before.
+        screened = self.lane_screen(fam)
+        verdicts = record_verdict(state, n, bool(line["passed"]), evaluator=self.store.get(KEY), at=self.store.now(),
+                                  **({"entered": entered, "screen": screened} if screened is not None else {}))
         source = inherited if inherited is not None else summary.get("inherited")
         self.store.set_state(fid, validation_view=view, validation_line=line, validation_version=n,
                              validation_verdicts=verdicts,
@@ -683,6 +695,8 @@ class Tournament:
                              validation_inherited=dict(source) if isinstance(source, Mapping) else None,
                              gate_ready=entered and not self.gate_spent(fid, n, state), **lane_fields)
         out = {"version": n, "passed": line["passed"], "mean": mean, "t": t}
+        if screened is not None:  # M5 (above): the round's verdict row, which the funnels count
+            out.update(entered=entered, screen=screened)
         if inherited is not None:
             out["inherited"] = dict(inherited)
         # THE EXTENSION HOLD (R11-4's swarm rule): a version that met `researcher.extension_hold_checks` of the line's checks
@@ -745,6 +759,17 @@ class Tournament:
         if lane != dlane.DIRECTION or dlane.screen_effective(self.settings, lane)["validation"] != "precheck":
             return False
         return bool(dlane.d2_precheck(summary)["passed"])
+
+    def lane_screen(self, fam: Mapping[str, Any]) -> str | None:
+        """The screen a DIRECTION family's verdict is recorded under (M5, `_verdict`): the lane's screen in force
+        (`dlane.screen_effective`: "D2", or "S-C" when D2 is not chosen or is refused). None for every alpha family and
+        while the lane is off, whose verdicts carry no screen."""
+        if not dlane.on(self.settings):
+            return None
+        lane = dlane.lane_of(self.store, fam, self.settings)
+        if lane != dlane.DIRECTION:
+            return None
+        return str(dlane.screen_effective(self.settings, lane)["screen"])
 
     def gate_spent(self, fid: str, n: int, state: Mapping[str, Any]) -> bool:
         """The gate is done with version `n` (R4, the verification of PR #402): its holdout look was made or the gate refused
@@ -917,9 +942,10 @@ class Tournament:
         return out
 
     def _why(self, fam: Mapping[str, Any], current: tuple[Any, Any], kept: frozenset[str] | None = None) -> str | None:
-        """The hourly round's reason to retire a family (its rules in order, the idle rule last), or None. A family THE
-        COHORT KEEP holds (`kept`, else `incubator_keep`) answers to the deflated-Sharpe rule alone; the rule it was
-        spared is recorded (`keep_spared`)."""
+        """The hourly round's reason to retire a family (its rules in order, the idle rule last), or None. A direction
+        family's spent ration comes first (THE RATION BEFORE THE KEEP, M3); after it, a family THE COHORT KEEP holds
+        (`kept`, else `incubator_keep`) answers to the deflated-Sharpe rule alone; the rule it was spared is recorded
+        (`keep_spared`)."""
         if fam["band"] != "gym":
             return None  # a Candidate or better is judged by its forward record, not here
         state = fam.get("state") or {}
@@ -938,10 +964,17 @@ class Tournament:
                 return why
         # THE DIRECTION LANE'S RATION (release D-1b): a direction lineage that has used its one Validation try or its one
         # holdout look without a pass still in play retires (`dlane.lineage_spent`: words only, never a figure). After the
-        # gate's own holds above; never for an alpha family, nor while the lane is off. THE COHORT KEEP spares it below as
-        # it spares the clocks: the ration itself is enforced where a try or a look is spent (`dlane.try_open`,
-        # `first_try`, `looks_ration`), so a kept family researches on with nothing left to validate until its cohort ends.
+        # gate's own holds above; never for an alpha family, nor while the lane is off.
+        # THE RATION BEFORE THE KEEP (Oct 10, 2026; the readiness audit's M3): it is asked BEFORE THE COHORT KEEP, which
+        # until now spared it as it spares the clocks. A spent direction family has nothing left to validate or look at,
+        # so the keep held its population slot for nothing: at 20:12Z Oct 9 the keep (cap 12) spared 8 direction families
+        # by the ration while births ran 1-2 a pass under `population.start` 16. It now retires and frees the slot; its
+        # practice cohort ends with it, so its program loses the incubator route (a tightening of a money route, listed in
+        # the dlane report's TIGHTENED). `lineage_spent` is None for every alpha family and while the lane is off, so the
+        # alpha lane and the rollback keep THE COHORT KEEP's order exactly.
         spent = dlane.lineage_spent(self.store, fam, self.settings)
+        if spent:
+            return spent
         clock: tuple[str, str] | None = None
         if int(fam.get("since_val_revisions") or 0) >= int(self.cfg.get("retire_revisions", 30)):
             clock = ("revisions", f"no validation improvement in {fam['since_val_revisions']} revisions")
@@ -957,13 +990,11 @@ class Tournament:
         if fam["id"] in (self.incubator_keep() if kept is None else kept):
             # THE COHORT KEEP (L1): its practice cohort is still running and not losing. Evidence still retires it.
             if dsr is None:
-                spared = ("ration" if spent else clock[0] if clock
+                spared = (clock[0] if clock
                           else ("idle" if idle_dead(fam, self.settings, current=current) else None))
                 if spared:
                     self.keep_spared[fam["id"]] = spared
             return dsr
-        if spent:
-            return spent
         why = clock[1] if clock else dsr
         if not why:
             # The fallback for a dead family that never called retire (R3): Train figures only in the reason.

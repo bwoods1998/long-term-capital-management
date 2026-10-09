@@ -11,7 +11,12 @@ Each count comes from the record that is the event itself, never from a summary 
   counted apart as `not_run`; the rows with no trial that a verdict read from an identical program's validation writes,
   F1, apart as `no_trial`). A validation is two rows (its 1.5x stress twin is a second trial);
 - validations judged and passed: the tournament rounds' verdicts (`swarm.tournament` events, `validation.judged`), a
-  verdict read from an identical program's validation included (F1: no Gym run);
+  verdict read from an identical program's validation included (F1: no Gym run). `passed` is the Validation line's
+  answer, as always; `entered` (Oct 10, 2026, the readiness audit's M5) counts the verdicts that went to the gate: a
+  line pass, or a direction version that missed the line and entered by D2's Validation pre-check (the verdict row's
+  `entered`, written from that release on; until then such an entry counted as a failed validation and nowhere else).
+  `by_screen` splits the verdicts that record a screen (direction verdicts: "D2" or "S-C") into judged, passed and
+  entered; an alpha verdict, and one written before that release, records none and is not split;
 - looks and passes: the `looks` table (the holdout ration);
 - band moves to Candidate, Probe and Sized: `swarm.band` events; the bands now: the living families' `band`;
 - research spend by meter: the `spend` table (Sail: `sail_model` and `gym_box`; Claude: `claude`; OpenAI apart, closed);
@@ -101,13 +106,22 @@ def swarm_counts(db: sqlite3.Connection, start: float, end: float) -> dict[str, 
     out["gym_runs_total"] = sum(runs.values()) + other
     out["gym_not_run"] = not_run
     out["gym_no_trial"] = no_trial
-    judged = passed = 0
+    judged = passed = entered = 0
+    by_screen: dict[str, dict[str, int]] = {}
     for verdicts in json_rows(db, "swarm.tournament", "$.validation.judged", a, b):
         if isinstance(verdicts, Mapping):
             for verdict in verdicts.values():
+                row = verdict if isinstance(verdict, Mapping) else {}
+                line, went = row.get("passed") is True, row.get("passed") is True or row.get("entered") is True
                 judged += 1
-                passed += 1 if isinstance(verdict, Mapping) and verdict.get("passed") is True else 0
-    out["validations"] = {"judged": judged, "passed": passed}
+                passed += 1 if line else 0
+                entered += 1 if went else 0
+                if isinstance(row.get("screen"), str):
+                    screen = by_screen.setdefault(row["screen"], {"judged": 0, "passed": 0, "entered": 0})
+                    screen["judged"] += 1
+                    screen["passed"] += 1 if line else 0
+                    screen["entered"] += 1 if went else 0
+    out["validations"] = {"judged": judged, "passed": passed, "entered": entered, "by_screen": dict(sorted(by_screen.items()))}
     looks = guard.rows(db, "SELECT count(*) AS n, coalesce(sum(passed), 0) AS passed FROM looks WHERE at>=? AND at<?", (a, b))
     out["looks"] = {"taken": int(looks[0]["n"] or 0), "passed": int(looks[0]["passed"] or 0)}
     moves = {band: 0 for band in BANDS}
