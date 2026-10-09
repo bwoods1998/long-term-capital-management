@@ -62,8 +62,11 @@ THE REST OF THE REPORT:
   and every agent real close, each with its program's screen and that screen's false-positive rates at zero edge
   ({screen, fp_lane_mixed, fp_lane_2224, receipt}: the passed look of the version it trades, `trade_screens`), and the
   contamination statement beside them.
-- `probe_envelope`: THE PROBE LOSS BUDGET as the code in force reads it (`fast_lane.probe_budget`, which names its basis),
-  with the GROSS and the NET realized figures beside it (release L-D reads NET) and the room in units of today's cap.
+- `probe_envelope`: THE PROBE LOSS BUDGET as release L-D's money table reads it from the constitution (`loss_basis`
+  "net", $400 of worst net stretch in any `loss_window_sessions` 20 sessions AND $400 net in total, `max_open`,
+  `demotion`): the code in force's own figure (`fast_lane.probe_budget`, which names its basis and the envelope that
+  binds), and under each basis, GROSS and NET, the window's and the total's realized figures (`real.probe_figures`, told
+  the basis by name), both rooms, the binding one and the room in units of today's cap.
 - `account`: the equity change since E0 (the first equity reading this report saw: it is written into the file and read
   back next day) beside the agents' and the House's realized closes since then and the account's other activity; what
   is left is labelled unexplained (open positions' marks included).
@@ -76,8 +79,8 @@ THE REST OF THE REPORT:
   `dlane.k5_clear` disarms it), each a House alert through `ctx.alert` (warning, or info for A8 and A9), never an action
   on money.
 
-Standard library only, except the Probe envelope's code-in-force figure (`fast_lane.probe_budget` reads
-`league.live.real`, whose Gym legs need numpy, as the House box has): it is an `error` entry where that cannot load.
+Standard library only, except the Probe envelope's figures (`fast_lane.probe_budget` and `real.probe_figures` read
+`league.live.real`, whose Gym legs need numpy, as the House box has): they are an `error` entry where that cannot load.
 """
 from __future__ import annotations
 
@@ -174,7 +177,8 @@ LOOSENED: tuple[dict[str, str], ...] = (
              "adoption rule (every upper bound at most 12%): a post-hoc loosening of that ceiling. The lane's rate "
              "stays under the owner's 15% per program; all cells (verticals included) reach 15.01% at the upper bound "
              "on 2022-24 worlds, which is why D2 runs only while the lane is calls only. Weak discrimination: it "
-             "passes mostly programs whose screen windows rose; the $400 net Probe budget bounds the money"},
+             "passes mostly programs whose screen windows rose; the Probe loss budget (release L-D: $400 of worst net "
+             "stretch in any 20 sessions and $400 net in total) bounds the money"},
     {"rule": "the leakage alarm", "was": "one count over every look: 10 looks, over 30% passing",
      "now": "per lane: alpha unchanged; direction 10 looks, over 60% passing",
      "cost": "a real holdout leak in a direction program trips later; the paid review and audit and the post-cutoff "
@@ -200,15 +204,16 @@ LOOSENED: tuple[dict[str, str], ...] = (
              "until it is taken out); after a clear, K5 measures a further -$600 from the net at clearing, not from "
              "inception"},
     {"rule": "release L-D: the Probe budget read NET", "was": "GROSS: a gain never offsets a loss",
-     "now": "NET over closed Probe positions (Sized never offsets)",
+     "now": "NET over closed Probe positions (Sized never offsets): in the window its worst net stretch (a gain offsets "
+            "only the losses closed before it), in total from inception",
      "cost": "P(net <= -$360 in 8 weeks, no edge) 0.19 -> 0.27; gross Probe losses can pass $400"},
-    {"rule": "release L-D: Probe slots", "was": "3", "now": "8 (the $400 envelope binds first)",
+    {"rule": "release L-D: Probe slots", "was": "3", "now": "8 (the $400 envelopes bind first)",
      "cost": "P(net <= -$360) 0.30 -> 0.35; P(net < -$400) 2.1%, through Sized"},
     {"rule": "release L-D: DM1 demotion", "was": "D5's loss leg (-3 x mean maximum loss)",
      "now": "sticky demotion when 10+ real trades sum below -1.645 sigma sqrt(n)",
      "cost": "a losing program trades longer: P(net <= -$360) 0.27 -> 0.30"},
 )
-#: And what D-1 TIGHTENED (said beside the loosenings).
+#: And what D-1 TIGHTENED (said beside the loosenings), with release L-D's rolling budget, a tightening of its NET.
 TIGHTENED: tuple[str, ...] = (
     "K5: the lane reads shadow (no new direction Candidate, no incubator direction mark) once its realized net over every "
     "route is at or below -$600 (after a clear: -$600 below the net at clearing), until the operator clears it",
@@ -223,6 +228,11 @@ TIGHTENED: tuple[str, ...] = (
     "a pass still in play retires",
     "release D-1b: calls only: dlane.structures [\"long_single\"] (no debit vertical, no put) and every Train trade a long "
     "call (bar C1)",
+    "release L-D's rolling Probe budget (L9, beside NET above): the $400 is a wall over any 20 New York sessions, read "
+    "as the window's worst net stretch, AND $400 net in total from inception (the owner's ceiling is $800; raising it "
+    "is CON-only); a bad stretch that ages out of the window frees no room in the total. Measured cost (the budget "
+    "simulation, post-hoc, as traded, holds 2/3/5): P(Done) at 12 weeks 6.0/3.3/1.0% against 10.0/7.6/4.5% with the "
+    "$400 total alone, at 24 weeks 11.1/8.7/5.9% against 11.0/9.0/7.6%",
 )
 
 
@@ -827,40 +837,82 @@ def trade_screens(store: Any, lanes: Lanes, settings: Mapping[str, Any] | None, 
 # ------------------------------------------------------------------------------------------------- the envelope
 def probe_envelope(live_path: Path, positions: Sequence[Mapping[str, Any]], *, today: str, unit_usd: float | None
                    ) -> dict[str, Any]:
-    """THE PROBE LOSS BUDGET: the code in force's own figure (`fast_lane.probe_budget`, its basis named), with the GROSS
-    and NET realized Probe figures beside it (every closed `:r` position a Probe family opened: its info's `probe` mark)
-    and the room in units of today's cap under each."""
+    """THE PROBE LOSS BUDGET as the money table in force reads it (release L-D, live since 09:04Z Oct 9, 2026; THE ROLLING
+    PROBE BUDGET): the constitution's `options_money.probe` row through `money.Table` (`constitution`: `loss_basis`,
+    `loss_budget_usd` over the last `loss_window_sessions` New York sessions, `loss_total_usd` from inception, `max_open`,
+    `demotion`), never a figure of its own, and the realized figures `real.probe_figures` gives `money.plan_open` (through
+    `RealBook.exposure`), each read in one read-only transaction of the live book with the basis named:
+    - `in_force`: the fast lane report's own figure (`fast_lane.probe_budget`: the basis in force, the window's and the
+      total's figures, `room_usd` and the envelope that binds);
+    - `by_basis`: under each basis ("gross" and "net"; `basis_in_force` is the table's, the other rides beside it), the
+      window's figure (`window_usd`: `real.probe_realized` from `window_start`, under "net" the window's WORST NET
+      STRETCH), the total's (`total_usd`: `real.probe_tally`, from inception), both rooms (`fast_lane.probe_rooms`: each
+      envelope's budget less its figure less every real position's open maximum loss), the room left (the tighter
+      envelope's, floored at $0), which envelope binds, and that room in units of today's cap;
+    - `window_<basis>_usd`, `realized_<basis>_usd` (the total, from inception, as before release L-D's window),
+      `room_<basis>_usd` and `room_<basis>_units` repeat each basis's figures (alarm A4 reads the basis in force).
+    `probe_closes` counts the closed Probe-marked `:r` positions. A book that is absent leaves every figure None; one
+    that cannot be read (the House box has numpy; a test or a laptop may not) is an `error` entry."""
+    from dataclasses import replace
+
     from ..live import money as M
 
-    gross = net_cash = Decimal(0)
-    marked = 0
-    for p in positions:
-        if (p.get("status") != "closed" or not str(p.get("instance") or "").endswith(":r") or int(p.get("tuition") or 0)
-                or (_loads(p.get("info"), {}) or {}).get("probe") is not True):
-            continue
-        cash = _dec(p.get("cash")) or Decimal(0)
-        gross += max(Decimal(0), -cash)
-        net_cash += cash
-        marked += 1
-    net = max(Decimal(0), -net_cash)
     table = M.Table.from_constitution()
-    out: dict[str, Any] = {"budget_usd": _usd(table.probe_loss_budget), "max_open": table.probe_max_open,
-                           "realized_gross_usd": _usd(gross), "realized_net_usd": _usd(net), "probe_closes": marked,
-                           "basis_in_force": getattr(table, "probe_loss_basis", "gross"), "unit_usd": unit_usd,
-                           "in_force": None}
+    marked = sum(1 for p in positions
+                 if p.get("status") == "closed" and str(p.get("instance") or "").endswith(":r")
+                 and not int(p.get("tuition") or 0) and (_loads(p.get("info"), {}) or {}).get("probe") is True)
+    out: dict[str, Any] = {
+        "constitution": {"loss_basis": table.probe_loss_basis, "loss_budget_usd": _usd(table.probe_loss_budget),
+                         "loss_window_sessions": table.probe_loss_window, "loss_total_usd": _usd(table.probe_loss_total),
+                         "max_open": table.probe_max_open, "demotion": table.probe_demotion},
+        "basis_in_force": table.probe_loss_basis, "budget_usd": _usd(table.probe_loss_budget),
+        "window_sessions": table.probe_loss_window, "total_budget_usd": _usd(table.probe_loss_total),
+        "max_open": table.probe_max_open, "probe_closes": marked, "unit_usd": unit_usd, "in_force": None,
+        "window_start": None, "at_risk_usd": None, "open": None, "binding": None, "by_basis": None}
+    for basis in M.LOSS_BASES:
+        for key in ("window", "realized", "room"):
+            out[f"{key}_{basis}_usd"] = None
+        out[f"room_{basis}_units"] = None
+    path = Path(live_path)
+    if not path.exists():
+        return out
     try:
         from . import fast_lane
 
-        in_force = fast_lane.probe_budget(live_path, today) if Path(live_path).exists() else None
+        out["in_force"] = fast_lane.probe_budget(path, today)
     except Exception as exc:  # noqa: BLE001 - the House box has numpy; a test or a laptop may not
-        in_force = {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
-    out["in_force"] = in_force
-    at_risk = _dec((in_force or {}).get("at_risk_usd")) if isinstance(in_force, Mapping) else None
-    out["at_risk_usd"] = _usd(at_risk)
-    for basis, realized in (("gross", gross), ("net", net)):
-        room = None if at_risk is None else max(Decimal(0), table.probe_loss_budget - realized - at_risk)
-        out[f"room_{basis}_usd"] = _usd(room)
-        out[f"room_{basis}_units"] = (round(float(room) / unit_usd, 2) if room is not None and unit_usd else None)
+        out["in_force"] = {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
+    try:
+        from ..live.real import probe_figures
+        from . import guard
+
+        def read(db: Any) -> dict[str, tuple]:
+            def rows(sql: str, params: Sequence[Any] = ()) -> list[dict[str, Any]]:
+                return guard.rows(db, sql, params)
+
+            # The table in force with each basis in turn: the code path `RealBook.exposure` takes, the basis named.
+            return {basis: probe_figures(rows, day=today, table=replace(table, probe_loss_basis=basis))
+                    for basis in M.LOSS_BASES}
+
+        figures = guard.read(path, read)
+    except Exception as exc:  # noqa: BLE001 - as above: no figure, never an invented one
+        out["error"] = f"{type(exc).__name__}: {str(exc)[:160]}"
+        return out
+    from .fast_lane import probe_rooms
+
+    by_basis: dict[str, Any] = {}
+    for basis, (open_n, window, total, at_risk, since) in figures.items():
+        rooms, binding = probe_rooms(table, window, total, at_risk)
+        room = max(M.ZERO, rooms[binding])
+        units = round(float(room) / unit_usd, 2) if unit_usd else None
+        by_basis[basis] = {"window_usd": _usd(window), "total_usd": _usd(total), "room_window_usd": _usd(rooms["window"]),
+                           "room_total_usd": _usd(rooms["total"]), "room_usd": _usd(room), "binding": binding,
+                           "room_units": units}
+        out[f"window_{basis}_usd"], out[f"realized_{basis}_usd"] = _usd(window), _usd(total)
+        out[f"room_{basis}_usd"], out[f"room_{basis}_units"] = _usd(room), units
+    open_n, _, _, at_risk, since = figures[table.probe_loss_basis]
+    out.update(by_basis=by_basis, window_start=since, at_risk_usd=_usd(at_risk), open=open_n,
+               binding=by_basis[table.probe_loss_basis]["binding"])
     return out
 
 
@@ -1051,13 +1103,20 @@ def alarms(store: Any, settings: Mapping[str, Any] | None, lanes: Lanes, book: M
         if cl.get("code") == ":r":
             real_n[cl["family"]] = real_n.get(cl["family"], 0) + 1
     young = sorted(f["id"] for f in alive if f.get("band") in ("candidate", "probe") and real_n.get(f["id"], 0) < 5)
+    # The room is the tighter of release L-D's two envelopes under the basis in force (`probe_envelope`: the
+    # constitution's `loss_budget_usd` over `loss_window_sessions` sessions and `loss_total_usd` in total, `loss_basis`).
     basis = str(envelope.get("basis_in_force") or "gross")
     units = envelope.get(f"room_{basis}_units")
     if young and units is not None and units < 1:
-        out.append({"id": "A4", "level": "warning", "families": young[:12],
-                    "text": f"A4: the Probe loss budget has under one unit of room ({basis} basis) while "
-                            f"{len(young)} direction Candidates or Probes have fewer than 5 real closes: no path to Sized "
-                            "(release L-D's NET envelope is what reopens it)"})
+        binding = ((envelope.get("by_basis") or {}).get(basis) or {}).get("binding")
+        which = {"window": (f"the window's: ${_num(envelope.get('budget_usd')) or 0:,.2f} in any "
+                            f"{envelope.get('window_sessions')} sessions binds"),
+                 "total": f"the total's: ${_num(envelope.get('total_budget_usd')) or 0:,.2f} in total binds"}.get(binding)
+        out.append({"id": "A4", "level": "warning", "families": young[:12], "basis": basis, "binding": binding,
+                    "text": f"A4: the Probe loss budget has under one unit of room ({basis} basis"
+                            + (f"; {which}" if which else "") + f") while {len(young)} direction Candidates or "
+                            "Probes have fewer than 5 real closes: no path to Sized (a Probe gain, or under the "
+                            "window a loss leaving its sessions, frees room)"})
     # A5: a direction Probe or Sized program's live fills below its replay by more than 0.10 over 5+ matched closes.
     table = M.Table.from_constitution()
     gaps = []
@@ -1072,10 +1131,13 @@ def alarms(store: Any, settings: Mapping[str, Any] | None, lanes: Lanes, book: M
         if fwd.replay_n >= M.REPLAY_GAP_MIN_TRADES and fwd.replay_gap is not None and fwd.replay_gap > dlane.DONE["gap_limit"]:
             gaps.append(fam["id"])
     if gaps:
-        out.append({"id": "A5", "level": "warning", "families": gaps[:12],
+        # The demotion in force is the constitution's `probe.demotion` (release L-D): D5's replay-gap leg demotes a
+        # Candidate or a Probe under "dm0" and "dm1" alike, never a Sized family.
+        out.append({"id": "A5", "level": "warning", "families": gaps[:12], "demotion": table.probe_demotion,
                     "text": f"A5: {len(gaps)} direction Probe or Sized programs' live fills run more than "
                             f"{dlane.DONE['gap_limit']:g} a dollar of maximum loss below their replay over "
-                            f"{M.REPLAY_GAP_MIN_TRADES}+ matched closes (D5 demotes at {M.REPLAY_GAP_BOUND:g})"})
+                            f"{M.REPLAY_GAP_MIN_TRADES}+ matched closes (D5's replay-gap leg demotes a Probe at "
+                            f"{M.REPLAY_GAP_BOUND:g} under probe.demotion \"{table.probe_demotion}\")"})
     # A6: under 1 eligible direction version per 50 direction births over 48 h (judged from 50 births).
     born48 = sum(1 for r in births if str(r.get("at") or "") >= _iso(now - A6_HOURS * 3600.0))
     if born48 >= A6_BIRTHS and counts48["eligible"] * A6_BIRTHS < born48:

@@ -240,6 +240,15 @@ REALIZED_BASIS = {
 }
 
 
+def probe_rooms(table: Any, window: Any, total: Any, at_risk: Any) -> tuple[dict[str, Any], str]:
+    """THE ROLLING PROBE BUDGET's two rooms (release L-D) and the one that binds: {"window": `probe.loss_budget_usd` less
+    the window's realized figure, "total": `probe.loss_total_usd` less the total's}, each less every real position's open
+    maximum loss (`at_risk`), unfloored; the binding envelope is the tighter (the window on a tie). `probe_budget` and the
+    `dlane` report (league/ops/dlane_report.py `probe_envelope`) read the same rooms from the same table."""
+    rooms = {"window": table.probe_loss_budget - window - at_risk, "total": table.probe_loss_total - total - at_risk}
+    return rooms, min(rooms, key=lambda k: (rooms[k], k != "window"))
+
+
 def probe_budget(live_path: str | Path, today: str) -> dict[str, Any]:
     from ..live import money as M
     from ..live.real import probe_figures
@@ -253,8 +262,7 @@ def probe_budget(live_path: str | Path, today: str) -> dict[str, Any]:
         table = M.Table.from_constitution()
         # The figures `RealBook.exposure` gives `money.plan_open` (release L-D: the window's and the total's).
         open_n, window, total, at_risk, since = probe_figures(rows, day=today, table=table)
-    rooms = {"window": table.probe_loss_budget - window - at_risk, "total": table.probe_loss_total - total - at_risk}
-    binding = min(rooms, key=lambda k: (rooms[k], k != "window"))
+    rooms, binding = probe_rooms(table, window, total, at_risk)
     return {"realized_usd": str(M.cents(window)), "realized_total_usd": str(M.cents(total)),
             "realized_basis": REALIZED_BASIS[table.probe_loss_basis], "window_sessions": table.probe_loss_window,
             "window_start": since,
