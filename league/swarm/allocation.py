@@ -107,6 +107,15 @@ architect's request shows the counts and which families are full (while `archite
 families of its types: `BirthQuota.text(allowed)`); a refused proposal is counted in the pass's event
 (`structure_capped`).
 
+THE DIRECTION QUOTA (release D-1, Oct 9, 2026; `DirectionQuota`, re-exported here beside `BirthQuota` from
+league/swarm/dlane.py, the direction lane's protected home). Across the two research lanes rather than the structure
+families: while the direction lane is behind `dlane.birth_share` (0.5) of the last `dlane.window_hours` (24) of births and
+fewer than `dlane.max_alive` (24) direction families live, the first max(`dlane.min_per_pass`, ceil(0.5 x want)) births
+of a pass are reserved for direction and never filled with alpha; the lane never holds more than `dlane.max_share` (0.6)
+of the window (once it holds `dlane.min_window` births) nor of the pass. It reads the `lane` of the window's `swarm.born`
+payloads (absent: alpha). The architect holds a pass to both quotas (`Architect.lane_quota`); with `dlane.mode` "off" it
+builds none, so every birth is admitted as before.
+
 THE LEARNING GAME (Oct 8, 2026; league/swarm/game.py). A game-arm family in mode "gate" never feeds its Validation t into
 its own row (`row_of`'s `blind`, set by `allocate_from_store`): its share comes from its class prior and the discounts
 alone, so compute never follows a version the game's private confirmation sent to Validation. Its depth reads its
@@ -125,6 +134,7 @@ import time
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from . import evidence, game
+from .dlane import DirectionQuota  # THE DIRECTION QUOTA (the module docstring), beside `BirthQuota`; its code is dlane.py's
 
 # ---------------------------------------------------------------------------------------------------------------- settings
 DEFAULTS: dict[str, Any] = {
@@ -901,4 +911,5 @@ class BirthQuota:
 
 __all__ = ["DEFAULTS", "RESEARCH_SPEND", "SHARE_LEGEND", "cfg", "Posterior", "row_of", "value_of", "fresh_value", "value_shares",
            "allocate_from_store", "gate_spent", "looks_from_store", "classes_from_store", "StrideTurns", "legacy_order", "queued_useful",
-           "effective_concurrency", "concurrency_bounds", "STRUCTURE_BUCKETS", "bucket_of", "BirthQuota", "mechanism_class"]
+           "effective_concurrency", "concurrency_bounds", "STRUCTURE_BUCKETS", "bucket_of", "BirthQuota", "DirectionQuota",
+           "mechanism_class"]
