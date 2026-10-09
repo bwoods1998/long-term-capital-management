@@ -29,16 +29,19 @@ any other deploy.
 The running House release is `20261009T025942Z-376c84971b5e` (main `ccfa48d5`, 03:00Z Oct 9, below), the gateway is
 `8072b5b1`, and the box's updater is on. What is built and not deployed is on branches.
 
-### Release L-D, on `release/ld-net-budget` (unreleased; an owner deploy, evidence reset 5; money digest `1665c385` -> `b212d4e6`)
+### Release L-D, on `release/ld-net-budget` (unreleased; an owner deploy, evidence reset 5; money digest `1665c385` -> `fdf2ac7c`)
 
 The one planned evidence reset of Oct 9 (the plan of Oct 9, "L: Release L-D", and its critic). Claude's decisions under
 the owner's goal of Oct 7, item 4 (Probe sizing up to 10% of equity a position, a Probe loss budget up to $400 in total)
-and item 5 (every loosened rule reported with its cost); the 10% and the $400 are unchanged. Operator's page: **Release
-L-D** at the top of `docs/operations.md`.
+and item 5 (every loosened rule reported with its cost), and, for the budget's two figures (L9), the owner's goal as he
+re-set it on Oct 9 (about 06:20Z), item 4: "Probe loss budget: $400 net in any rolling 20 sessions and $800 net in
+total (realized Probe losses net of Probe gains, plus the maximum loss of everything open)". The 10% is unchanged.
+Operator's page: **Release L-D** at the top of `docs/operations.md`.
 - **L1, the budget read NET** (`options_money.probe.loss_basis` "net"; allowed exactly "gross" and "net"). THE PROBE LOSS
   BUDGET's realized part is max(0, -(the summed cash of every closed position a Probe family opened)) from inception, in
-  place of GROSS (`real.probe_tally`, now told the basis by `money.Table`; the envelope is unchanged: realized + every
-  real position's open maximum loss + the new open <= $400). A Probe gain offsets Probe losses; a Sized gain never does.
+  place of GROSS (`real.probe_tally`, now told the basis by `money.Table`; the envelope: realized + every real
+  position's open maximum loss + the new open <= $400, two envelopes since L9). A Probe gain offsets Probe losses; a
+  Sized gain never does.
   It reverses the fast lane review's deliberate GROSS choice of Oct 7. The refusal, the House warning and the fast lane
   report's `realized_basis` name the basis in force. Cost (MONEY, U10%-M3, no edge, 8 weeks): P(net <= -$360) 0.19 ->
   0.27, mean net -$8 -> -$14 (as traded -$45 -> -$64); Done 0.3% -> 2.6% (+5% edge, averaged over holds). Its main
@@ -60,19 +63,30 @@ L-D** at the top of `docs/operations.md`.
   alpha too. Cost (the critic, 4,000 bootstrap paths): fires within 30 closes 6.5-13% at zero edge, 14-22% at -0.10,
   29-36% at -0.25 (D5: 77/83/90%): the $400 envelope, not demotion, mostly stops a losing program. MONEY: P(net <=
   -$360) 0.27 -> 0.30; Done 2.6% -> 3.3%.
+- **L9, THE ROLLING PROBE BUDGET** (the owner's goal of Oct 9, item 4). `probe.loss_budget_usd` ($400) is now over the
+  last `probe.loss_window_sessions` (20) New York sessions, today included (the repo's NYSE calendar,
+  `ltcm.data.us_equity_session`; `real.probe_window_start`), beside the new `probe.loss_total_usd` ($800) from
+  inception; each realized figure read by `loss_basis` (`real.probe_realized`, `real.probe_figures`). A Probe open
+  must fit BOTH envelopes, each with every real position's open maximum loss and the open (`money.plan_open`); the
+  refusal names the one that binds; exits go on. The House warning and the fast lane report (`realized_total_usd`,
+  `total_budget_usd`, `window_sessions`, `window_start`, `binding`) show both figures with the basis. Bounds: window
+  20-2000 sessions, total $0-800. Cost: the worst net Probe loss rises from $400 to $800 (the 60% drawdown stop, about
+  $773 from today's peak, binds near it); the window lets trading resume after a bad stretch as its losses age out,
+  instead of stopping for good. The measured cost is in `docs/operations.md` (budget simulation, Oct 9: pending).
 - **L5, the marketable natural limit**: `"limit": {"natural": k}` (k 0-10, whole), the decision minute's natural moved k
   ticks against the trader, exactly `{"price": v}` with that v in the Gym, the shadow book and real money
   (`league/gym/legs.py`; `league/CONTRACT.md` and `league/gym/PROGRAM.md` say so).
 - **Not done: the narrower fingerprint** (the critic, N8): `league/live/money.py` stays hashed, because the practice
   book's caps read `money.Table` and the incubator's first-look rule lives there.
-- **Identities.** Constitution digest `5698a2f9` -> `4a1705b6`; money digest `1665c385` -> `b212d4e6` (the standing
-  grant re-ratifies at the House's start on the owner's deploy); the execution fingerprint `b4c34031` -> `faba3d25`
+- **Identities.** Constitution digest `5698a2f9` -> `0adb4f0e`; money digest `1665c385` -> `fdf2ac7c` (the standing
+  grant re-ratifies at the House's start on the owner's deploy); the execution fingerprint `b4c34031` -> `791cd059`
   (league/live and league/gym changed): the evaluator adoption re-derives every family's bests, and every active
   practice cohort is completed ("evaluator changed"), the 10 still active of the 12 admitted Oct 8 among them (their
   incubator first looks were expected about Nov 4-10). No family is banded.
-- **Rollback.** CON-only: `loss_basis` "gross", `max_open` 3, `demotion` "dm0" (money digest `48eb2433`), one owner deploy
-  and no fingerprint move; each value is fast lane v2's code byte for byte (`league/tests/test_ld_release.py`, against
-  a frozen copy). `floor_box.py rollback` moves the fingerprint again and, after D-1, drops D-1.
+- **Rollback.** CON-only: `loss_basis` "gross", `max_open` 3, `demotion` "dm0", `loss_total_usd` "400",
+  `loss_window_sessions` 2000 (money digest `320899d6`, constitution `c9d8ef5b`), one owner deploy and no fingerprint
+  move; each value runs fast lane v2's rule, decision for decision (`league/tests/test_ld_release.py`, against a frozen
+  copy of `ccfa48d5`'s code; the 2000-session window holds every close since the fast lane). `floor_box.py rollback` moves the fingerprint again and, after D-1, drops D-1.
 
 ### On branches, not in V3-A part 1
 
