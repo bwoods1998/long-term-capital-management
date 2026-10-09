@@ -1099,7 +1099,7 @@ def robust_verdict(base: Mapping[str, Any] | None, result_15: Mapping[str, Any],
     # `pnl_15 >= cost_ratio x pnl_10` alone, which is always true when the 1.0x P&L is below zero and P1 holds (the 1.5x
     # run above zero), so a version that LOST money at 1.0x passed the 1.5x rules on a 1.5x run whose fills happened to
     # differ: eqp-term-contango-pool-call v6 (1.0x -$1,778.21, 1.5x +$143.23) passed and spent its lineage's one
-    # Validation try (-$2,360.31). A 1.0x P&L at or below zero now fails R3: the cost ratio is a share of a profit.
+    # Validation try. A 1.0x P&L at or below zero now fails R3: the cost ratio is a share of a profit.
     if pnl_10 <= 0:
         r3 = False
         whys.append(("R3", f"it lost money on Train at 1.0x ({_usd(pnl_10)}): R3 needs a 1.0x profit for its 1.5x run to "

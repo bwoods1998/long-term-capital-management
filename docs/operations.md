@@ -126,7 +126,7 @@ while births ran 1-2 a pass. The population floor (`population.floor`, 8 in poli
   1.5x P&L summed over the 1.5x run's Train years (`pnl_15`). P1 needs the 1.5x run's own P&L above zero.
 - **The bug:** R3 was `pnl_15 >= cost_ratio x pnl_10` alone. For a 1.0x loss the right side is negative, so any 1.5x
   run P1 passes also passed R3. eqp-term-contango-pool-call v6 (1.0x -$1,778.21, 1.5x +$143.23) passed the 1.5x rules
-  and spent its lineage's one try on Validation (-$2,360.31).
+  and spent its lineage's one try on Validation.
 - **Now:** a 1.0x P&L at or below zero fails R3, with the reason "it lost money on Train at 1.0x". This is a
   tightening, listed in the dlane report's `tightened`.
 - The researcher's brief still words R3 as "at least 0.5 of the 1.0x P&L". The Train map's golden digest of the
