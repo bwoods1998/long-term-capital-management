@@ -29,6 +29,61 @@ any other deploy.
 The running House release is `20261008T124025Z-a9686c7cfcfd` (main `ab64c68b`, 12:41Z Oct 8, below), the gateway is
 `f63dd354`, and the box's updater is on. What is built and not deployed is on branches.
 
+### Release D-1, the direction lane, on `release/dlane-d1` (unreleased; an owner deploy after release L-D; no evidence reset)
+
+A DIRECTION research lane beside the unchanged ALPHA lane, in which profit from the index's direction counts, reported
+beside the same-risk buy-and-hold and never called alpha: it is leveraged index beta minus option costs, and an
+always-in call program can pass its bar. Claude's decisions under the owner's goal of Oct 7 (items 4 and 5), after the
+plan of Oct 9 and its critic. Operator's page: **Release D-1, the direction lane** at the top of `docs/operations.md`;
+the design is in `docs/design.md`. Swarm-side only: no `league/live/`, `league/gym/` or `league/constitution.py` change,
+so the execution fingerprint (`b4c34031`), the money digest (`1665c385`) and the constitution digest (`5698a2f9`) do not
+move: no evidence reset, no evaluator adoption, no re-ratification.
+- **The lane's core** (`league/swarm/dlane.py`, new, protected: `league/ci.py` FORBIDDEN and the gateway's
+  `protected.mjs`, so the gateway is deployed first): settings and bounds (`policy.json` "dlane", mode "gate"; the code's
+  default "off" is the rollback), the lane, the Train bar direction-v2 (E1, E3, E4, E5 at 1.0x; P1, R2, R3 at 1.5x; E2,
+  R1 and the mechanism test reported only), the live unit (today's closes and equity; "unknown" passes), the incubator's
+  direction mark, the screen (S-C for direction; S-B for alpha byte for byte; D2 refused until a receipt is pinned), the
+  direction leakage alarm (10 looks, over 60%), K5, the birth quota, the agents' text and the pinned Done rule's
+  constants.
+- **Cards, architect, allocation, strategist:** `card.lane` and the `equity_premium` class; graveyard DRIFT rows do not
+  bind a direction card; the architect's LANES block, `DirectionQuota` (direction about half of births while behind, at
+  most 60%) and the `lane_only` request after 12 h without a direction birth; the strategist's inputs per lane.
+- **Researcher:** a direction family is scored by direction-v2 and demoted on a failed 1.5x rule; its brief, status and
+  views carry the lane's text; the ROLE prompt is lane-aware.
+- **Game, gate, evidence, incubator, tournament:** no hidden look for a direction lineage (`dlane.arm_fraction` 0) and
+  direction kept out of the game's R1(b) and R2; the look's screen per lane, recorded on each look event (lane, screen,
+  receipt); the leakage alarm per lane; the incubator's direction mark (refused while the lane is not "gate"); the
+  tournament writes `validation_r_sd` beside `typical_max_loss_usd` for L-D's DM1.
+- **The `dlane` job and report** (`league/ops/dlane_report.py`, new; at the House's start and daily 01:30Z; in a pause
+  too; operator-only; read-only but for K5's kv; no site data contract change): `<state>/dlane-report.json` with the
+  funnel per lane (24 h, 7 d), the Probe envelope (in force, GROSS and NET), THE DONE METER of the pinned rule
+  (DONE-RULE sha256 `0d007696...`: `done_screen` `:r`, `done_all` `:r`+`:t`+`:i`; 30 closes, 5 from each of 2 programs,
+  net > 0 after fees, consistency over 5+ matched closes, read only at the 30th close and every 10th; beside it P(Done |
+  zero edge) 0.13, the same-risk buy-and-hold delta-matched and in dollars at risk, the screen's world-conditional
+  false-positive rate, every loosened rule with its cost and the contamination statement), the account and the research
+  costs, the contamination meters per lane, and alarms A1-A9 and K5 as House alerts. K5 is automated: at a direction
+  realized net at or below -$600 the job sets the kv `dlane_k5` and the lane reads "shadow" until the operator clears it.
+  `league/ops/fast_lane.py`'s rows gain `lane` while the lane is on; the learning game's report says what the lane
+  changed mid-experiment.
+- **The agenda guard** (D9): the swarm warns the House at its start, and whenever it changes, when `swarm.json`'s locked
+  preamble or fallback agenda is over 4,000 characters, not ASCII or names a hidden year; the new operator tool
+  `scripts/agenda_install.py` (check, apply) refuses such a text and installs a good one with a before-copy, an atomic
+  replace and the strategist's section cleared.
+- **Every loosened rule, with its cost** (the operator's measurements): beat-your-exposure for alpha only; direction-v2
+  in place of the worst year (more null programs reach Validation; the false-positive rate per program screened is
+  unchanged); no hidden look (the lane's false-positive rate at zero edge 0.02% -> 0.70%); S-C (the lane 0.70% -> 1.41%,
+  2.22% when both windows rose; power at +10% 1.68% -> 3.22%); the direction leakage alarm at 60% (a leak trips later);
+  the incubator's direction mark (with no edge about -$36 a week, at most $150 a week, never evidence); DRIFT rows not
+  binding direction cards; **the birth quota: alpha births fall from about 73 to about 36 a day mid-way through the
+  learning game's T0 experiment, and the ROLE prompt change reaches alpha researchers too (a shared prefix), so "alpha
+  golden" holds for code paths only**; the unit at 10% of equity rather than MONEY's $75 (Probe-stage Done 6.3% against
+  7.8%, P(net <= -$360 in 8 weeks) 0.35 against 0.27).
+- **Owner steps, in order** (docs/operations.md): L-D deployed and verified; CI green on main's head; the gateway
+  (`protected.mjs`) deployed; `floor_box.py deploy` in the money path's window with no order in flight; verify (no
+  fingerprint or digest move, `lane_births` on the first pass, the `dlane` report written); install agenda v21 with
+  `scripts/agenda_install.py`. Rollback: `dlane.mode` "off" in `swarm.json` (read every loop, no restart; every path as
+  before D-1), agenda v19.1 back with the same tool, then `floor_box.py rollback` if the code must go.
+
 ### The learning game v1, on `release/learning-game` (unreleased; an owner deploy)
 
 From T0 no agent sees 2020 or 2021 again; those two years, scored privately at 1.5x the half-spread and net of each

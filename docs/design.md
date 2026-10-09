@@ -519,6 +519,51 @@ spreads remove.
   start after T0 under a span that shows the hidden years voids the epoch: the next T0 starts a new one, every family
   alive across the break legacy.
 
+## The direction lane (release D-1, Oct 9, 2026)
+
+Built on `release/dlane-d1`, not deployed (the owner's deploy; how to run it is in [operations.md](operations.md),
+**Release D-1, the direction lane**). Across 534 pre-registered tests no options alpha survived one-lot costs. The only
+after-cost profit ever measured is index direction carried by cheap out-of-the-money calls held a few sessions, and no
+affordable structure beat holding the same delta in the stock. The owner's goal of Oct 7 counts direction profit when it
+is reported beside the same-risk buy-and-hold. Until D-1 every judge the swarm read still charged drift: the
+researcher's role said drift is never validated, the worst-year Train score ranked a long program by its worst year,
+and the game's F = min(t_net, t_alpha) scores an always-long program at about zero by construction; since fast lane v2
+over a hundred direction births refuted themselves and none reached Validation. So D-1 opens a second research lane
+beside the alpha lane, whose rules do not change. It is **leveraged index beta minus option costs, not alpha**, and
+everything that shows it says so. The rules live in one module, `league/swarm/dlane.py`.
+
+- **Two lanes.** A family's lane is its card's, fixed at birth; every family before D-1 is alpha. The direction lane is
+  a box: index roots (SPY, QQQ, IWM), calls or call verticals, holds of 2 to 8 sessions, the `equity_premium` or
+  `trend_momentum` class, and an ablation switch that enters the same structure every session (the gate is what the
+  program would add over that twin). Births are about half each while the lane is behind (at most 60% direction).
+- **Its Train bar, direction-v2.** In the market in at least 2 of the 3 Train years with 60+ entry sessions each; a
+  year mostly out loses no worse than t -1 and half an average in-market year; one lot at today's prices within 10% of
+  equity; at 1.5x the half-spread still profitable, the same year rules, and at least half the 1.0x P&L. The score is the
+  pooled t over Train, not the worst year. An always-in call program can pass it: the bar does not test the gate, and
+  every view says so. Train is in-sample; the false-positive rate that matters is the out-of-sample chain's, so a looser
+  Train bar costs paid reviews, not screened false positives.
+- **Its screen.** The Validation line as coded, then one holdout look at p <= 0.20 with a Sharpe share of 0.25 (S-C);
+  its false-positive rate at zero edge is 1.41% a program, 2.22% in a world where both windows rose (the operator's
+  simulation). No hidden look: the game's look cost the lane most of its power for a false-positive gain under 1%. A
+  pooled screen (D2) is coded and refused until a receipt is pinned in the repository. Each lane has its own leakage
+  alarm (direction trips at 10 looks and over 60%: its passes are correlated through one market).
+- **Its money.** The same routes and the same walls as alpha: the incubator (a direction mark in place of the drift
+  screen), tuition, Probe and Sized under the constitution's table; K5 puts the lane in shadow once its realized net is
+  at or below -$600, until the operator clears it.
+- **What Done means here.** The goal's Done is read by a rule pinned before D-1 shipped (DONE-RULE, sha256
+  `0d007696...`): every agent real close on Probe/Sized, tuition and the incubator since the options swarm began, 30 of
+  them from at least 2 programs with 5 each, net positive after fees, live consistent with replay, read only at the 30th
+  close and every 10th. If Done comes through this lane it will mostly certify a rising market, not skill: the
+  `dlane` report carries P(Done | zero edge) (13%, a simulation), the same-risk buy-and-hold two ways, the screen's
+  world-conditional false-positive rate and the contamination statement beside every figure.
+- **Contamination.** Train, Validation and most of the holdout lie inside every author's training data, the operators'
+  who designed this lane included; the 2017-19 census is spent for the lane as a whole. The clean evidence is the
+  holdout's tail after 2026-07-01 and the live record.
+- **What does not move.** Nothing in `league/live/`, `league/gym/` or the constitution: no evidence reset. The alpha
+  lane's game, screen, Train objective, leakage alarm and incubator mark are as they were, byte for byte in code (the
+  researcher's role prompt, a shared prefix, now names both lanes). `dlane.mode` "off" is the rollback: every path as
+  before D-1.
+
 ## Evidence
 
 - **Every Gym evaluation is a trial**, counted per lineage (forks inherit their parent's count and
