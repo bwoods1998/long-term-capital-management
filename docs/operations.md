@@ -8,6 +8,73 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## The weekend fixes, ops side (Oct 10, 2026): built on `wfix/ops`, not deployed
+
+The readiness audit of Oct 9 (`scratch/ready-1009/FIXLIST.md`) found that no alarm reached the owner (M6), that the
+"owner deploy waiting" mail fired inside the operator's own deploy (M12), and that the Done meter could pass with no
+replay evidence (B1), ignored item 7 (M7), read checkpoints before their inputs were final (M8) and had no Net after
+costs beside it (M9). The pinned amendment DONE-RULE-A1 (sha256 `333bad06...`, before the first Probe close) tightened
+the reading. This branch builds the ops side. Base: main `cf96b72c` (the running release). Nothing under
+`league/live/`, `league/gym/` or `league/constitution.py` changes: the execution fingerprint (`31a7e921`), the money
+digest (`0310779c`), the constitution digest (`ca89ff8a`) and the gate contract (`397b22b7`) do not move (rule F0: a
+fingerprint move would retire every Probe program for good).
+
+**1. The stall alarm** (`league/ops/stall.py`; the cause table under **The stall alarm and the funnel**, below):
+- new causes `dlane` (a warning-level alarm in `dlane-report.json`, or the report 30 h stale; K5 holding or disarmed is
+  the owner's step), `done` (A8: a FINAL Done checkpoint holds; an owner line told at once, never an owner step
+  waiting), `preopen` (the latest pre-open receipt failed a check, or did not run) and `forward` (the ready file late
+  after 10:00Z, a nightly error for 6 h, a nightly stop for 2 h: the stop is the owner's step);
+- `owner_deploy` gets a 45-minute grace and is skipped while a deploy is in flight (a `start` row with no verdict, or
+  the operator's own nightly stop, each at most 2 h old). Oct 9's 16:20Z mail would not have been sent.
+- `gateway/lib/email.mjs` `STALL_CAUSES` gains the four causes' words. **Deploy the gateway first:** a House that sends
+  a cause the gateway does not know gets a 400 for the whole notice, and nothing is mailed.
+- The daily page's "Stalls standing now" (`league/ops/scoreboard.py`) leaves out `done` (`stall.NEWS_CAUSES`): a Done
+  claim is the owner's to make, with its evidence, never a "stall" on the public page.
+
+**2. The Done meter** (`league/ops/dlane_report.py`, DONE-RULE + A1):
+- **A1.1, consistency measured.** A checkpoint also needs 2 programs with 5+ matched replay closes, each within
+  +/-0.10; zero matched closes never passes ("replay untested: k of n closes matched"). Every checkpoint lists every
+  program with its closes, matched closes and gap (`by_program`), and `replay_coverage`.
+- **Item 7, read** (`research_247`): births, Gym runs and Validations every UTC day of the checkpoint's window (its
+  last 7 days for the first checkpoint, every day since the one before for the rest), every `budget` receipt of the
+  day at the ceiling (no taper), and no owner step in any `stall` receipt of the day (the `done` cause excepted). The
+  operator's edits of `swarm.json` and `budget.json` in the window are listed from their before-copies, never a bar
+  (the pinned rule reads "no captain" as no owner step waiting). A checkpoint holds when items 3, 4 and 7 hold.
+- **A1.4, final readings.** A reading is FINAL when every counted close's program has been replayed through its exit
+  day (or is no longer replayed), its broker fees have posted (fee basis broker, and the activity reading is of a later
+  New York day), and the research window has ended. A final reading is frozen (carried from the previous report as it
+  was). The meter's `holds` (a Done claim) needs a final reading; `provisional` says when a holding one is not yet
+  final. A8 fires only on a final one and names the items.
+- **M9, Net after costs** (`done.net_after_costs`): each meter's realized net to the close economics' cutoff, less
+  every input cost since T0 on the economics job's basis (Sail billed or metered, Claude through the gateway, OpenAI,
+  market data, TypeSafe), and the economics Net beside it. The swarm's booked spend (`costs`) is "comparison only".
+- **A1.2:** P(Done | zero edge) is 0.024 with its horizon (12 weeks), holds (3 sessions), budget variant and source
+  (`dlane.ZERO_EDGE`); `policy.json` `dlane.done_zero_edge_p` 0.13 -> 0.024. Any other setting says it is not pinned.
+- **A1.3, the program loss line** (`dlane.program_loss_usd`, -200 in `policy.json`; a setting can only tighten it, to
+  -25): each Probe row carries its program's own realized Probe net and closes, its share of the $400 total, and when DM1
+  can first fire (`dm1`: n > (1.645 sigma / r_floor)^2, 17 at the live sigma 2.46). The `dlane` job retires, swarm-side,
+  any program (every lane: the pinned rule names one program) whose realized Probe net is at or below the line, every
+  Probe close priced: `SwarmStore.retire`, a public `swarm.retired` cause in words, a notebook line and a private
+  `swarm.dlane` event with the figures. The live path then puts its real instance on exits only, so its positions close
+  by the House's rules. Alarm PL1 says it; the report's `program_loss.retired` names it.
+- **m11:** a same-risk buy-and-hold uses the exact entry and exit days' closes or says why (never an older close);
+  the `direction` job keeps today's daily bar only once the session has closed (15 minutes after); the funnel counts
+  real opens by route; E0's basis says it is the first reading the report saw, not release L-D's deploy reading.
+
+**Not in this branch:** the unpriced and awaiting-expiry rows (m2), the envelope's equity (m5) and the review routes
+(m8) of the audit; the per-close fill replay (B1 c); the swarm side (M2, M3, M5, m3).
+
+**Deploy class and order.** (1) A gateway deploy of `gateway/lib/email.mjs` (`cd gateway && npm run deploy`), so the
+new causes have words. (2) An owner deploy of the House (`league/ops/` and `league/swarm/policy.json` are FORBIDDEN to
+the updater; `league/swarm/dlane.py` too), after asserting the four identities above on the exact head. No
+ratification. Rollback: the previous House release (its stall job reads the same `stall.json`, ignoring the new
+`nightly_error` key; its report ignores the new keys of the previous report) and the previous gateway version.
+
+**Verify after the deploy** (read-only): the next `stall` receipt's `checks` has `dlane`, `done`, `preopen` and
+`forward`; the next `dlane` run's `dlane-report.json` has `done.net_after_costs` with the latest economics cutoff,
+`done.p_done_zero_edge.value` 0.024, `program_loss.line_usd` -200, and on `probes[eqp-realcalm-drift-call]` a
+`dm1.first_fire_at` of 17; `research_247_last_7_days` lists the days.
+
 ## The budget split (Oct 9, 2026): built on `fix/budget-split-sail`, not deployed
 
 An owner deploy of two operator decisions of Oct 9 (about 16:00Z), cut from main `d70e00c3` (release L-D with D-1,
@@ -446,18 +513,23 @@ writes nothing (a `skipped` receipt). The fast lane's report rows gain `lane` wh
   realized after all fees (the broker's posted fees where they have posted, the book's estimate otherwise, labelled per
   close; an unpriced close makes the net unknown); `done_screen` (`:r` only) and `done_all` (all three); the bar is 30
   closes, 5 closes from each of 2 programs, net > 0; every program with 5+ matched closes (a close on a day its
-  version's nightly replay also traded) has a mean live-minus-replay gap within +/-0.10 a dollar of maximum loss, and a
-  program under 5 is listed with its gap, never dropped. It is READ only at the 30th close and every 10th after, each
-  reading over exactly the first K closes; the running figures between are counts, never a reading. Beside it always:
-  P(Done | zero edge) 0.13 (MONEY's simulation under this rule), the same-risk buy-and-hold two ways (delta-matched:
+  version's nightly replay also traded) has a live-minus-replay gap within +/-0.10 a dollar of maximum loss (a ratio of
+  sums, D5's measure, `gap_measure`), and since the weekend fixes (DONE-RULE-A1 A1.1) at least 2 programs must be so
+  measured: zero matched closes never passes. Every program is listed at each checkpoint with its closes, matched closes
+  and gap (`by_program`, `replay_coverage`), never dropped. Item 7 is read per UTC day (`research_247`, below). It is
+  READ only at the 30th close and every 10th after, each reading over exactly the first K closes; it holds when items 3,
+  4 and 7 hold, and a Done claim needs it FINAL (A1.4: every counted close's nightly replay landed and its broker fees
+  posted; then frozen); the running figures between are counts, never a reading. Beside it always: P(Done | zero edge)
+  (2.4% at 12 weeks with 3-session holds under the budget in force, DONE-RULE-A1 A1.2; it was 0.13), Net after costs
+  (`done.net_after_costs`, from the close economics), the same-risk buy-and-hold two ways (delta-matched:
   the entry delta held in the stock; dollars at risk held in the index; approximations from daily closes), and, for
   each Candidate, Probe or Sized family, the screen that admitted it with its unconditional and both-windows-rose
   false-positive rates. A Done claim names which meter holds, at which checkpoint, from which routes. No program or route
   is paused, slowed or stopped to protect a figure.
 - **The account and the costs:** the equity change since E0 (the first equity reading the report saw, kept in the
-  file) beside the agents' and the House's realized closes and the account's other activity, the rest labelled
-  unexplained; the research spend by meter since the options swarm began and since the lane started (LTCM's profit is
-  trading net minus these; the gateway's own spend is its meter).
+  file; not release L-D's deploy reading) beside the agents' and the House's realized closes and the account's other
+  activity, the rest labelled unexplained; the swarm's BOOKED research spend by meter since the options swarm began and
+  since the lane started, comparison only (the Net is `done.net_after_costs`, on the close economics' basis).
 - **The contamination meters,** per lane: (a) the holdout's head-minus-tail Sharpe gap pooled over the looks, (b) the
   mean excess over the same-risk buy-and-hold on Validation (known) against live (unknown), (c) live against the holdout
   per band.
@@ -473,7 +545,8 @@ writes nothing (a `skipped` receipt). The fast lane's report rows gain `lane` wh
 | A5 | a direction Probe or Sized program's live fills below its replay by over 0.10 a dollar of maximum loss over 5+ matched closes | watch: D5 demotes at 0.20; no new Probe in that structure until the fill model is explained |
 | A6 | fewer than 1 eligible direction version per 50 direction births over 48 h (judged from 50 births) | report the failure counts; never a loosening without a new pinned measurement |
 | A7 | more than half of the direction versions that clear E1, E3 and E4 fail E5 | report today's cap and the median failing one lot |
-| A8 | a checkpoint holds (`info`, once a checkpoint) | read it with the buy-and-hold, P(Done \| zero edge) and the contamination meters; it stops nothing |
+| A8 | a FINAL checkpoint holds (`info`, once a checkpoint; since the weekend fixes only on a final reading, naming items 3, 4 and 7) | read it with the buy-and-hold, P(Done \| zero edge), Net after costs and the contamination meters; it stops nothing. The `stall` job mails it at once (its `done` cause) |
+| PL1 | a program's own realized Probe net is at or below the program loss line (`dlane.program_loss_usd`, -$200; DONE-RULE-A1 A1.3) | none: the job retires it swarm-side the same run (its real positions exit by the House's rules); the report's `program_loss.retired` names it |
 | A9 | every live direction program opened nothing for 10 sessions (`info`) | none: the lane is flat by design |
 | K5 | `dlane_k5` is set | the lane is in shadow until the operator clears it (**K5**, below) |
 | K5 (disarmed) | `dlane.k5_clear` is true | no loss trips K5 while it is: once the report shows the clear recorded (`k5.last_clear`, the new `k5.line`), take `k5_clear` out of `swarm.json` |
@@ -1716,8 +1789,9 @@ no birth and nobody was told: the House's only alarm (a pre-open FAIL) went to a
 
 **The `stall` job** (`league/ops/stall.py`, every 30 minutes at :20 and :50, round the clock, a maintenance pause
 included: it is read-only like `preopen` and `clock`). It reads the swarm store, `budget.json`, the swarm's heartbeat,
-`deploys.jsonl`, the pause files, the `grant` job's receipts in `ops.sqlite` and the gateway's `/v1/health`, all
-read-only, and names a stall by its cause:
+`deploys.jsonl`, the pause files, the `grant` job's receipts in `ops.sqlite` and the gateway's `/v1/health` (since the
+weekend fixes also `dlane-report.json`, the `preopen` receipts and the nightly's `gym-forward.json`, `data/nightly.json`
+and `data/nightly.stop`), all read-only, and names a stall by its cause:
 
 | Cause | Raised when | The owner step it names |
 |---|---|---|
@@ -1726,10 +1800,14 @@ read-only, and names a stall by its cause:
 | `validations` | no Validation verdict in the last 24 h (no validation the Gym evaluated, no verdict read from an identical program, nothing a tournament round judged) while a living family is owed one: its candidate (the submitted best, else the Train best the researcher picked by score, `state.best_train_version`, as `Tournament.candidate_version` reads it) is not its validated version, and the last round within the 24 h did not leave it waiting on its 1.5x robustness run or the drift screen (those are counted apart) | as `births` |
 | `braked` | the Sail guard braked 12 or more of the last 24 h, whatever the cause (the budget's daily stop reached by noon keeps research from running round the clock as surely as a low balance) | "top up Sail" for `under_line`, "free disk" for `disk`; none for the budget's own stop |
 | `runway_sail`, `runway_claude` | the meter's days of research left at the ceiling (`budget.json` `card_runway_days`, the figure the funding notice reads) under 3; a `budget.json` older than 36 h is not read | "top up Sail" or "top up Claude (Anthropic)", with the budget's own amount for 7 more days |
-| `owner_deploy` | the updater refused main's head as the owner's deploy (a `deploys.jsonl` `vet` refusal naming a protected file, the workflows or `real_money`) and no release was promoted since: main's head and the running release differ in a file only the owner deploys | both ways out, since the record does not say which side is ahead: "if main is ahead, deploy it yourself (`scripts/floor_box.py deploy`); if the running release is ahead, merge it to main instead", naming the files |
+| `owner_deploy` | the updater refused main's head as the owner's deploy (a `deploys.jsonl` `vet` refusal naming a protected file, the workflows or `real_money`) and no release was promoted since: main's head and the running release differ in a file only the owner deploys. Since the weekend fixes (the readiness audit's M12) a refusal counts only once it has stood 45 minutes, and never while a deploy is in flight (a `deploys.jsonl` `start` row with no verdict yet, at most 2 h old, or the operator's own `data/nightly.stop`, the deploy's step 2, at most 2 h old) | both ways out, since the record does not say which side is ahead: "if main is ahead, deploy it yourself (`scripts/floor_box.py deploy`); if the running release is ahead, merge it to main instead", naming the files |
 | `paused` | a maintenance pause (`<state>/PAUSE`) or a stopped swarm (`<state>/swarm.stop`) has stood 6 h or more (by the file's time). While either stands, `births`, `gym_runs`, `validations` and `braked` are not raised: a pause stops research by design | "lift the maintenance pause once its work is done (`scripts/floor_box.py maintenance off`)", or "remove state/swarm.stop" |
 | `grant_refused` | the standing grant refused to re-ratify since the `grant` job's last `ok` run (its receipts: `standing grant refused`; a failure to read the account is no refusal) | "ratify the grant by hand on the box (`python3 scripts/live_trading.py --ratify`)", with the grant's own reason |
 | `kill_on` | the gateway's kill switch is on (`/v1/health` `kill_switch`; since its latest `kill` in `admin_log`): no real order, no Claude call, no merge. An unreadable health is no cause | "lift the gateway's kill switch once its cause is fixed (`python3 scripts/gateway_admin.py unkill`, your admin token)" |
+| `dlane` (weekend fixes) | `<state>/dlane-report.json` carries a warning-level alarm (A1-A7, PL1, K5), or it is older than 30 h while the lane is on (the `dlane` job stopped) | K5 holding: "the direction lane reads shadow while K5 holds ...: read its losses, then clear it"; K5 disarmed: "take dlane.k5_clear out of swarm.json"; none for the rest |
+| `done` (weekend fixes) | the report's A8: a FINAL Done checkpoint holds, newly seen | an owner LINE, told at once: "Done holds at a FINAL checkpoint ...: read the claim in dlane-report.json". News, never an owner step waiting: the Done meter's item 7 does not count it |
+| `preopen` (weekend fixes) | the latest pre-open receipt (`ops.sqlite`, at most 24 h old) failed a check, or the job failed or was missed | none: each FAIL is a House warning, and the checks run again before the next open |
+| `forward` (weekend fixes) | the nightly's ready file (`gym-forward.json`) does not carry the last session before today once the UTC day is 10 h in; `data/nightly.json` has carried an error 6 h or more (from the first run that saw it, kept in `stall.json`); or `data/nightly.stop` has stood 2 h or more | for a stop: "remove /workspace/state/data/nightly.stop ... the nightly forward replay, and with it the Done meter's replay twins, waits while it stands"; none for the rest |
 
 **The notice.** One `POST /v1/notify` kind `stall` a run at most, through the budget's own gateway client, listing
 EVERY cause standing, owner steps first: the subject `LTCM: needs you: <the causes with an owner step>` or `LTCM: stalled:
@@ -2160,7 +2238,9 @@ and the daily page; its CHANGELOG entry is written when the record is next broug
    a rollback would go. Check that the tree adds no notice at error level whose condition is the calendar: a canary is
    a fresh House and would raise it at every release after that date ("A canary is a fresh House", above).
 2. **Stop the nightly forward daemon while it is idle**, so a release change never lands mid-job. On the box:
-   `touch /workspace/state/data/nightly.stop`, then wait until `/workspace/state/data/nightly.lock` is free. The House's
+   `touch /workspace/state/data/nightly.stop` (or write `operator:<why>` into it: the stall alarm names it), then wait
+   until `/workspace/state/data/nightly.lock` is free. While this stop is under 2 hours old the `stall` job reads it as
+   the owner's deploy in flight and mails no "owner deploy waiting"; at 2 hours it is the `forward` cause. The House's
    step stops the daemon while the file is there (`league/data_job.py`), and a wake that falls in the stop is skipped.
 3. **A read-only lineage snapshot** of `swarm.sqlite`: trials, inherited trials and looks by lineage, and the run count.
 4. **Deploy:** `python3 scripts/floor_box.py deploy` (it refuses while another deploy is in flight, the updater's

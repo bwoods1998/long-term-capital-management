@@ -29,6 +29,27 @@ any other deploy.
 The running House release is `20261009T090334Z-cdbf1864a573` (main `40c39435`, release L-D, 09:04Z Oct 9, below), the
 gateway is `8072b5b1`, and the box's updater is on. What is built and not deployed is on branches.
 
+### The weekend fixes, ops side, on `wfix/ops` (unreleased; a gateway deploy FIRST, then an owner deploy on main `cf96b72c`; no evidence reset)
+
+The readiness audit of Oct 9 (`scratch/ready-1009/FIXLIST.md`: M6, M7, M8, M9, M12, m11) and the pinned amendment
+DONE-RULE-A1 (sha256 `333bad06...`: A1.1-A1.4). Operator's page: **The weekend fixes, ops side** at the top of
+`docs/operations.md`. Nothing in `league/live/`, `league/gym/` or `league/constitution.py`: the execution fingerprint
+(`31a7e921`), the money digest (`0310779c`), the constitution digest (`ca89ff8a`) and the gate contract (`397b22b7`)
+do not move, so no ratification and no Probe program leaves its band.
+- **The stall alarm** (`league/ops/stall.py`, `gateway/lib/email.mjs`): four causes, `dlane` (the lane's warning alarms;
+  K5 the owner's step), `done` (A8, told at once), `preopen` (a pre-open FAIL) and `forward` (a late ready file, a
+  nightly error 6 h, a nightly stop 2 h); `owner_deploy` waits 45 minutes and is skipped while a deploy is in flight.
+- **The Done meter** (`league/ops/dlane_report.py`): consistency must be measured on 2 programs (A1.1); item 7 read per
+  UTC day from the swarm store and the `budget` and `stall` receipts, the operator's edits listed (M7); a reading is
+  final only once its replays landed and its broker fees posted, then frozen, and A8 fires only on a final one (A1.4,
+  M8); Net after costs from the close economics beside each meter (M9); P(Done | zero edge) 0.024 with its horizon and
+  source (A1.2; `policy.json` 0.13 -> 0.024).
+- **The program loss line** (A1.3; `league/swarm/dlane.py` `program_loss_usd`, `policy.json` -200): each Probe row
+  carries its program's realized Probe net and when DM1 can first fire (17 trades at the live sigma); the `dlane` job
+  retires swarm-side a program whose realized Probe net is at or below -$200 (exits go on; alarm PL1).
+- **The report's m11:** exact closes for the buy-and-hold or a why, finished sessions only in the `direction` job's
+  file, real opens in the funnel, E0's basis said as it is.
+
 ### The budget split and the graveyard's report row, on `fix/budget-split-sail` (unreleased; an owner deploy on main `d70e00c3`; no evidence reset)
 
 Two operator decisions of Oct 9 (about 16:00Z). Operator's page: **The budget split** at the top of
