@@ -20,7 +20,7 @@ disagree, the code is right and this page is fixed. How to operate it is in
 | Fast lane v2 (Oct 7, 2026) | `release/fast-lane-v2` | deployed 19:13Z Oct 7 (House release `20261007T191231Z`, main `cd58fc8f`): the screen (t 1.65, 2 of 4 quarters, N = 1, one flat look at p <= 0.10), direction counts (the drift screen's refusal and the look holds off by setting; the drift fit and the same-risk buy-and-hold reported), a one-structure Probe within 10% of E with at most 3 Probe positions and a $400 Probe loss budget (gross realized Probe losses, every real position at risk), same-minute entry, D5 demotion; after its review: tuition held within the Probe's cap, a paid review's or audit's failure binding across the deploy's adoption, the report written daily by the `fast_lane` job with contamination measured, C3, the practice caps and the grant's $100 smallest stake kept as they were. Money digest `42c4a3af` -> `da5c7542` (constitution `595228a6` -> `5edc8956`): the standing grant re-ratifies at the House's start on the owner's deploy; the execution fingerprint moves (league/live changed), so its deploy is an evidence reset (no family is banded) |
 | The learning game v1 (Oct 8, 2026) | `release/learning-game` | deployed Oct 8 (House release `20261008T190618Z`, main `7b71cb1a`; T0 22:17Z, gate mode): from T0 no agent sees 2020-21; private hidden-year looks decide which game-arm programs reproduce and reach Validation, a concurrent control arm on the same seen years (2022-2024), the architect and the strategist blind to the game arm, practice feedback off, a daily operator-only report. No `league/gym/`, `league/live/` or constitution change: the fingerprint and the money digest do not move; the span switch to 2022-2024 is its one evidence reset (**The learning game v1**, below) |
 | The incubator cap (Oct 8, 2026) | `feat/incubator-cap-75` | deployed Oct 8 (House release `20261008T225723Z`, main `a5ff6f9e`): `options_money.incubator.max_loss_usd` $50 -> $75 and nothing else (week $150, 4 open, one lot unchanged; at most two $75 units open), so lot-priced single-name cohorts can open; a loosening, its cost in the CHANGELOG. Money digest `da5c7542` -> `1665c385` (constitution `5edc8956` -> `5698a2f9`): the standing grant re-ratifies at the House's start on the owner's deploy; the execution fingerprint is unchanged, so no evidence reset |
-| Release L-D (Oct 9, 2026) | `release/ld-net-budget` | built, not deployed (the owner's deploy; the one evidence reset of Oct 9): the Probe loss budget read NET from inception (`probe.loss_basis` "net"; a Probe gain offsets Probe losses, a Sized gain never does), 8 Probe slots inside the $400 envelope (`probe.max_open`), the budget's $400 over any rolling 20 sessions beside $400 in total (the owner's goal of Oct 9 allows $800 in total; the operator set $400; `probe.loss_window_sessions`, `probe.loss_total_usd`; a Probe open fits both; under NET the window's figure is its worst net stretch, so the $400 holds over every 20-session window), the Probe room the other routes keep capped at the $400, and DM1 demotion for Probe and Sized families (`probe.demotion` "dm1": 10+ real trades summing below -1.645 sigma sqrt(n); D5's loss leg and the negative record off for them, the replay gap and the real_bad hold kept; sigma read from the swarm's state by `league/live/families.py`, its writer in release D-1). The marketable natural limit `{"natural": k}` (L5) was dropped on Oct 9: it moved the Gym bundle, which would have re-run every stored Train and Validation result and cleared the extension holds; it waits for a planned Gym release. Money digest `1665c385` -> `0310779c` (constitution `5698a2f9` -> `ca89ff8a`); the execution fingerprint `b4c34031` -> `31a7e921` (every practice cohort completes); the Gym bundle unchanged (`e1c896f8d304`). Rollback: `loss_basis` "gross", `max_open` 3, `demotion` "dm0", `loss_total_usd` "400", `loss_window_sessions` 2000, a constitution-only deploy with no fingerprint move (money digest `320899d6`; operations.md, **Release L-D**) |
+| Release L-D (Oct 9, 2026) | `release/ld-net-budget` | deployed 09:04Z Oct 9 (House release `20261009T090334Z`, main `40c39435`; the one evidence reset of Oct 9): the Probe loss budget read NET from inception (`probe.loss_basis` "net"; a Probe gain offsets Probe losses, a Sized gain never does), 8 Probe slots inside the $400 envelope (`probe.max_open`), the budget's $400 over any rolling 20 sessions beside $400 in total (the owner's goal of Oct 9 allows $800 in total; the operator set $400; `probe.loss_window_sessions`, `probe.loss_total_usd`; a Probe open fits both; under NET the window's figure is its worst net stretch, so the $400 holds over every 20-session window), the Probe room the other routes keep capped at the $400, and DM1 demotion for Probe and Sized families (`probe.demotion` "dm1": 10+ real trades summing below -1.645 sigma sqrt(n); D5's loss leg and the negative record off for them, the replay gap and the real_bad hold kept; sigma read from the swarm's state by `league/live/families.py`, its writer in release D-1). The marketable natural limit `{"natural": k}` (L5) was dropped on Oct 9: it moved the Gym bundle, which would have re-run every stored Train and Validation result and cleared the extension holds; it waits for a planned Gym release. Money digest `1665c385` -> `0310779c` (constitution `5698a2f9` -> `ca89ff8a`); the execution fingerprint `b4c34031` -> `31a7e921` (every practice cohort completes); the Gym bundle unchanged (`e1c896f8d304`). Rollback: `loss_basis` "gross", `max_open` 3, `demotion` "dm0", `loss_total_usd` "400", `loss_window_sessions` 2000, a constitution-only deploy with no fingerprint move (money digest `320899d6`; operations.md, **Release L-D**) |
 | The public page | blakewoods.us/capital | the owner's (`personal-site`, revamped by the owner on Oct 2); the House's publisher feeds it |
 
 This is observed state, not completion of the design below. Broad universe discovery, covered strategies, the
@@ -519,6 +519,66 @@ spreads remove.
   (8), a shadow PASS is read at the first gate round, and the game's Validation tries count CONFIRMED versions only. A
   start after T0 under a span that shows the hidden years voids the epoch: the next T0 starts a new one, every family
   alive across the break legacy.
+
+## The direction lane (release D-1, Oct 9, 2026)
+
+Built on `release/dlane-d1`, not deployed (the owner's deploy; how to run it is in [operations.md](operations.md),
+**Release D-1, the direction lane**). Across 534 pre-registered tests no options alpha survived one-lot costs. The only
+after-cost profit ever measured is index direction carried by cheap out-of-the-money calls held a few sessions, and no
+affordable structure beat holding the same delta in the stock. The owner's goal of Oct 7 counts direction profit when it
+is reported beside the same-risk buy-and-hold. Until D-1 every judge the swarm read still charged drift: the
+researcher's role said drift is never validated, the worst-year Train score ranked a long program by its worst year,
+and the game's F = min(t_net, t_alpha) scores an always-long program at about zero by construction; since fast lane v2
+over a hundred direction births refuted themselves and none reached Validation. So D-1 opens a second research lane
+beside the alpha lane, whose rules do not change. It is **leveraged index beta minus option costs, not alpha**, and
+everything that shows it says so. The rules live in one module, `league/swarm/dlane.py`.
+
+- **Two lanes.** A family's lane is its card's, fixed at birth; every family before D-1 is alpha. The direction lane is
+  a box: index roots (SPY, QQQ, IWM), calls (D-1 also admitted call verticals; D-1b is calls only: every Train trade
+  a long call, and a program whose text names any open but a long call is refused before it runs), holds of 2 to 8
+  sessions, the `equity_premium` or
+  `trend_momentum` class, and an ablation switch that enters the same structure every session (the gate is what the
+  program would add over that twin). Births are about half each while the lane is behind (at most 60% direction).
+- **Its Train bar, direction-v2.** In the market in at least 2 of the 3 Train years with 60+ entry sessions each; a
+  year mostly out loses no worse than t -1 and half an average in-market year; one lot at today's prices within 10% of
+  equity; at 1.5x the half-spread still profitable, the same year rules, and at least half the 1.0x P&L. The score is the
+  pooled t over Train, not the worst year. An always-in call program can pass it: the bar does not test the gate, and
+  every view says so. Train is in-sample; the false-positive rate that matters is the out-of-sample chain's, so a looser
+  Train bar costs paid reviews, not screened false positives.
+- **Its screen.** The Validation line as coded, then one holdout look at p <= 0.20 with a Sharpe share of 0.25 (S-C);
+  its false-positive rate at zero edge is 1.41% a program, 2.22% in a world where both windows rose (the operator's
+  simulation). No hidden look: the game's look cost the lane most of its power for a false-positive gain under 1%.
+  RELEASE D-1b switches the lane to the pooled screen D2, with its receipt pinned in the repository. D2 is a
+  Validation pre-check, then the pooled entry-day t over Validation and the holdout at least 1.00 with the holdout's
+  P&L above zero. Its false-positive rate is 10.37% a program on mixed worlds and 12.39% on 2022-24 worlds, and its
+  power at +10% is 19.95%. That is a reported loosening, adopted after it failed the operator's own 12% rule. The lane
+  is calls only. A direction lineage gets ONE Validation try and ONE holdout look, so its rate is the program's. The
+  rate is stated beside every look and every Probe trade in the operator's reports, and swarm.json `dlane.screen`
+  "S-C" is the instant rollback. Each lane has its own leakage
+  alarm (direction trips at 10 looks and over 60%: its passes are correlated through one market); with the lane off,
+  the one alarm counts only the looks the alpha line judged. A direction family never plays the learning game, even
+  when it is born into a lineage that has an arm.
+- **Its money.** The same routes and the same walls as alpha: the incubator (a direction mark in place of the drift
+  screen), tuition, Probe and Sized under the constitution's table, whose Probe loss budget is release L-D's ($400 of
+  worst net stretch in any 20 sessions and $400 net in total; the `dlane` report reads both envelopes from it); K5 puts
+  the lane in shadow once its realized net is at or below -$600, until the operator clears it (a clear re-arms K5 at
+  -$600 below the net at clearing). The live side has no calls-only check of its own: a `long_single` family may still
+  send a put there, so the lane's calls-only rule rests on the swarm's refusals until a `league/live` release (an
+  evidence reset) adds the guard.
+- **What Done means here.** The goal's Done is read by a rule pinned before D-1 shipped (DONE-RULE, sha256
+  `0d007696...`): every agent real close on Probe/Sized, tuition and the incubator since the options swarm began, 30 of
+  them from at least 2 programs with 5 each, net positive after fees, live consistent with replay, read only at the 30th
+  close and every 10th. If Done comes through this lane it will mostly certify a rising market, not skill: the
+  `dlane` report carries P(Done | zero edge) (13%, a simulation), the same-risk buy-and-hold two ways, the screen's
+  world-conditional false-positive rate and the contamination statement beside every figure.
+- **Contamination.** Train, Validation and most of the holdout lie inside every author's training data, the operators'
+  who designed this lane included; the 2017-19 census is spent for the lane as a whole. The clean evidence is the
+  holdout's tail after 2026-07-01 and the live record.
+- **What does not move.** Nothing in `league/live/`, `league/gym/` or the constitution: no evidence reset (the execution
+  fingerprint, the money digest and the constitution digest stay release L-D's: `31a7e921`, `0310779c`, `ca89ff8a`). The
+  alpha lane's game, screen, Train objective, leakage alarm and incubator mark are as they were, byte for byte in code
+  (the researcher's role prompt, a shared prefix, now names both lanes). `dlane.mode` "off" is the rollback: every path
+  as before D-1.
 
 ## Evidence
 

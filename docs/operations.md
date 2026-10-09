@@ -8,7 +8,388 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
-## Release L-D (Oct 9, 2026): built on `release/ld-net-budget`, not deployed
+## Release D-1b, the direction lane on D2 (Oct 9, 2026): built on `release/dlane-d1` on top of D-1, not deployed
+
+D-1b switches the direction lane's screen to **D2** and meets the reporting terms of the owner's goal of Oct 9: item 4,
+"a pre-registered screen whose false-positive rate you have measured, at most 15% per program at zero edge, stated
+beside every Probe trade", and item 3, "Tell me 2 days before Sail or Claude runs out". It is Claude's decision
+DSCREEN-ADOPT, and it is **a reported loosening** (the cost is below). It ships in the same owner deploy as D-1 (its
+section follows), on top of release L-D (deployed 09:04Z Oct 9; its section is below D-1's, and `release/dlane-d1`
+carries it: main `40c39435` merged in). Like D-1 it is swarm-side and ops only. Nothing under `league/live/`,
+`league/gym/` or `league/constitution.py` changes, so the execution fingerprint (`31a7e921`), the money digest
+(`0310779c`) and the constitution digest (`ca89ff8a`) stay release L-D's, the ones in production.
+
+**What it does:**
+- **D2 is the direction lane's screen.** `policy.json` sets `dlane.screen` "D2" and pins DSCREEN-2's receipt in
+  `dlane.screens.D2`: sha256 `c3605947...` and c 1.00, with the lane's figures. CI holds that sha to
+  `docs/benchmarks/direction_screen_2.json`, which is the receipt copied byte for byte. It holds aggregate figures, the
+  rule and the shas only (test_dlane `Screen`). The rule was pre-registered before any real world was run:
+  - On Validation at 1.0x: at least 50 trades on at least 25 entry days, and a mean entry-day return above zero.
+  - After the one sealed look: the pooled entry-day t over the Validation and holdout entry days is at least 1.00,
+    AND the holdout's P&L is above zero.
+
+  On exact figures the code's statistic is DSCREEN-2's own, to 3e-15. The Gym's summaries round the daily mean to 6
+  decimals and the t to 4, so the gate judges the statistic's **lower bound** over that rounding
+  (`dlane.d2_pooled_t_low`). A pass is therefore always a pass of the exact statistic. On 20,000 fixtures there were 0
+  extra passes and 3 conservative misses: 1 within 2e-5 of c, and 2 where a window's mean or t rounded to zero. The
+  pre-check never opens tuition. The alpha lane keeps S-B byte for byte.
+- **Calls only.** `dlane.structures` is `["long_single"]`, so the card check refuses a direction debit vertical and a
+  put. D2 is refused (S-C instead) whenever the lane admits any other structure, because it was measured on single calls.
+  A new Train bar, **C1**, fails a direction program whose Train trades hold a put or a short leg (a `long_single` card
+  may send a put by its code). The brief and the architect's LANES block say "no put, no vertical, no short leg".
+  C1 reads only the Train (2022-24) trades, and the Gym's Validation and holdout views carry no trades, so a program
+  that buys a put only in conditions 2022-24 never saw (a crash hedge above any 2022-24 VIX close) would pass it. So
+  **the calls-only code check** (`dlane.calls_only_code`, the review's finding 3) reads the program's text: a string
+  literal of its code or of its parameter overrides (docstrings, dict keys and subscripts aside) that names any open but
+  `long_call`, a put ("P", "put") or a short leg ("short"), in any case, refuses it:
+  - the researcher's `gym_run` and `gym_sweep` refuse it before any version, job or trial;
+  - the tournament never validates such a direction version (`calls_refused`, which the stall alarm reads as owed
+    nothing), so it spends no try and opens no tuition;
+  - the gate refuses it at stage "calls only" before a review is paid, and the incubator's review fails it with no
+    model read.
+
+  A `long_call` open is one long call wherever the Gym's classifier judges it, and the live path resolves an intent with
+  the same module, so a program that names no other open sends none by a literal. **What is still open:** the check
+  cannot see an open type assembled at run time from pieces other than those words, and **`league/live` has no
+  direction calls-only check of its own**. D-1b scheduled that guard for release L-D, and L-D shipped (09:04Z Oct 9)
+  without it: the live path still admits a `long_put` for a `long_single` family (`money.DECLARED_TYPES`), so such a
+  program at Probe could send a real put. The guard is a `league/live` change, which moves the execution fingerprint
+  (an evidence reset: every banded family back to the Gym, rule F0), so it is not in D-1 or D-1b and waits for the
+  next planned `league/live` release. Until then the four swarm-side refusals above are the whole wall.
+- **One Validation try and one holdout look per direction lineage** (`dlane.val_tries`, `dlane.looks_per_lineage`, both
+  fixed at 1). This keeps a lineage's false-positive rate equal to the program's. With two tries it is 16.4% on mixed
+  worlds (the receipt's per-lineage reading A). How it works:
+  - The tournament validates a direction version only while its connected lineage has no try yet, or when the version
+    is that try already (validated again on a new Gym image). It runs one member of a lineage a round (`waiting_lane`),
+    and a family whose lineage's try is used is owed none (`spent_lane`; the stall alarm reads it).
+  - A late second try is recorded as rows and trials but never judged into the family's state, so it cannot reach the
+    gate (`lane_try_refused`). The gate's look ration for a direction lineage is 1 (refusal "rations": "the direction
+    lineage's one holdout look is spent").
+  - A Gym direction family whose lineage has used its try or its look, with no try of its own still waiting for its
+    look, retires. The public cause names the rule and no figure. THE COHORT KEEP and the operator's extension hold
+    spare a family from this rule as they spare it from the others; its ration is enforced all the same.
+  - A direction family never forks once its lineage has tried.
+  - **The try is always judged** (the review's finding 1). The lineage's first try is judged even when the researcher
+    moved the family's candidate on (a submit, a better Train run) while its job was out; before, its verdict was
+    dropped as stale, the run still counted as the try, and the family retired unjudged. The gate looks at the try's
+    own version. A try with no verdict (its result came back from another Gym image), or whose verdict entered the gate
+    on another Gym image before its look, is validated again as that very version (`dlane.try_owed`), never the new
+    candidate, and spends no new try. A family whose own try has no verdict yet is not retired.
+
+  The alpha lane keeps its counts: tries until retirement, and three looks.
+- **The false-positive rate beside every look and every Probe trade** (operator-facing only, never in a prompt):
+  - Each direction look's line and its `swarm.gate` event carry `screen`, `fp_lane_mixed`, `fp_lane_2224` and `receipt`.
+    Under D2 these are 0.1037, 0.1239 and `c3605947...`; under S-C they are 0.0141 and 0.0209.
+  - Each band row of the fast lane's report carries `fp`, the screen that admitted its banded version.
+  - The `dlane` report's new `fp_beside_trades` lists every real Probe trade (`:r`, open or closed) and every agent real
+    close. Each row gives its program's screen and rates, and the contamination statement rides beside the list. An
+    alpha (S-B) row states FAST_LANE_SCREEN_1's bound, at most 2%. Only a Probe or Sized trade (`:r`) opened at or after
+    its version's passed look carries that look's screen (the review's finding 5). A tuition or incubator close, even of
+    a version that later passed, and a position opened before the look say that no screen admitted them (`fp_why`).
+- **The meter warning, two days ahead, once a day.** The `budget` job tells the owner, through the existing `funding`
+  notice and the gateway's mail, when research on a meter (Sail or Claude) runs out within 2 days at its current burn.
+  The fields are in `budget.json`:
+  - `burn_usd_day` is the larger of the rate the rule holds the meter to and its spend over the last 7 days.
+  - `out_in_days` counts the days until the lower of the runway at that burn and the days of research left at the
+    ceiling falls to the rule's 5-day runway term, where the taper starts cutting research. At the ceiling this is the
+    same 7-day card line as before.
+  - The notice goes out at most once a day per meter: a day less an hour after the last, under the id
+    `funding:<meter>:<UTC day>:r2`, which the gateway dedupes. It was once a week.
+  - A meter spent faster than the rule holds it (its burn above the rule's rate) can be short while its card line still
+    reads weeks. Its notice then states the burn in the facts the gateway's mail reads (the review's finding 4): the
+    "now" figures (`current_*`) are the burn's dollars a day and days above the reserve, and the add-by date
+    (`card_date`) is the day research runs out at the burn. So the mail never says "Nothing stops if no card is added"
+    or gives a late date while research runs out within the lead. The figures at the rate the rule wants are unchanged.
+    The facts' names and the gateway's composer are unchanged; until a composer words the burn as a spend, the mail's
+    "held to" sentence reads the burn's dollars.
+
+  "Runs out" means research, not the balance: while research tapers, each day spends a fifth of what is left above the
+  reserve, so the balance never reaches it.
+
+**The loosening, with its cost** (from the receipt; also the header of every `dlane` report):
+- The lane's false-positive rate per program at zero edge goes from S-C's 1.41% to **10.37%** on mixed worlds (95%
+  world interval 9.57-11.16%, cluster 7.90-12.76%). It is **12.39%** on 2022-24 worlds (upper bound 13.29%).
+- All census cells: 13.37% (upper bound 14.08%), and 14.11% on 2022-24 worlds (upper bound 15.01%). That is why D2 runs
+  only while the lane is calls only.
+- Swarm placebos: 4.76%. Power at +10% of maximum loss a trade: 3.22% to 19.95%.
+- D2 FAILED the operator's own pre-registered adoption rule (every upper bound at most 12%). Adopting it after seeing
+  that result is a post-hoc loosening of that ceiling. The lane's rate stays under the owner's 15%.
+- Discrimination is weak: D2 passes mostly programs whose two screen windows rose.
+- The Probe loss budget, not the screen, bounds the money: release L-D's $400 of worst net stretch in any 20 sessions
+  and $400 net in total (`options_money.probe`).
+- Contamination: every author knows whether those windows rose. The rate is a property of the procedure across
+  historical worlds, not a guarantee in this one.
+
+**Roll back.**
+- **D2 to S-C, at once and a tightening:** set `dlane.screen` "S-C" in `swarm.json`. It is read on the next loop with no
+  restart. A setting can always choose S-C and can never pin a receipt. A version that entered the gate by D2's
+  pre-check waits there until D2 is back. One whose look was already out when S-C came in fails that look closed (the
+  review's finding 2: the screen is read when the result lands, and it met neither screen's rule; the look's `why`
+  says so). The ration and calls only stay.
+- **The lane off:** set `dlane.mode` "off" (D-1's rollback, below). It also turns off the ration, C1, the FP keys and
+  the report.
+- **The meter warning:** the code rollback (`floor_box.py rollback`). The notice's channel and facts did not change.
+
+**Verify after the deploy** (beside D-1's list):
+- `screen_effective` reads "D2" with receipt `c3605947...` on the box. Run `python -c "from league.swarm import dlane,
+  settings; print(dlane.screen_effective(settings.load('/workspace/state'), 'direction'))"` from `/workspace/current`.
+- The first direction look's `swarm.gate` event carries `fp_lane_mixed`.
+- `<state>/dlane-report.json` has `fp_beside_trades`, and the loosened list names D2.
+- Its `probe_envelope.constitution` reads release L-D's row ("net", 400 over 20 sessions, 400 in total, 8, "dm1"),
+  `by_basis` holds both bases with no `error`, and its `in_force` reads as `<state>/fast-lane-report.json`'s
+  `probe_budget` of the same night (both run outside market hours).
+- `<state>/budget.json` meters carry `out_in_days`.
+
+## Release D-1, the direction lane (Oct 9, 2026): built on `release/dlane-d1`, not deployed
+
+A DIRECTION lane beside the unchanged ALPHA lane: research in which profit from the index's direction counts, reported
+beside the same-risk buy-and-hold and never called alpha. Claude's decisions under the owner's goal of Oct 7 (item 4:
+direction profit counts when reported beside the same-risk buy-and-hold; item 5: every loosened rule reported with its
+cost), after the plan of Oct 9 and its critic. Across 534 pre-registered tests no options alpha survived one-lot costs;
+the only after-cost profit ever measured is index direction carried by cheap out-of-the-money calls held a few sessions,
+and no affordable structure beat holding the same delta in the stock. So the lane is **leveraged index beta minus option
+costs, not alpha**, and every view, brief, status line and report says so: an always-in call program can pass its bar,
+and the gate is not tested by it. The code is `league/swarm/dlane.py` (new, protected: its docstring states every rule);
+the operator's report is `league/ops/dlane_report.py`.
+
+**It is swarm-side only.** Nothing under `league/live/` or `league/gym/` and nothing in `league/constitution.py`
+changes: the execution fingerprint (`31a7e921`), the money digest (`0310779c`) and the constitution digest (`ca89ff8a`)
+stay release L-D's, in production since 09:04Z Oct 9, so there is no evidence reset, no evaluator adoption and no
+re-ratification. (Built on `ccfa48d5`, D-1 moved none of `ccfa48d5`'s `b4c34031` / `1665c385` / `5698a2f9`; the branch
+now carries L-D, main `40c39435`.) It ships by the owner's deploy (`dlane.py`, `league/swarm/policy.json`, `league/ops/`
+and the gateway's protected list change) AFTER release L-D (the one evidence reset of Oct 9, deployed 09:04Z, below): no
+league/live or league/gym release may ship while a direction family is a Candidate, Probe or Sized, except a
+money-safety fix (rule F0: its cost is those bands, which go back to the Gym).
+
+**What it does** (the switches are in the table below):
+- **The lane.** A family's lane is its card's (`card.lane`; "alpha" by default, "direction" declared by the architect),
+  kept in its spec, inherited by a fork or a child, never changed. Every family born before D-1 is alpha, and an alpha
+  card's sha is byte-identical (no `lane` key is ever written for alpha). A direction card must be inside the lane's
+  box: mechanism class `equity_premium` (new) or `trend_momentum`; structure `long_single` (calls only) or
+  `debit_vertical`; roots SPY, QQQ, IWM; holding `days_1_3` or `days_4_10`; an ablation switch that enters the same
+  structure every session (never flat). Graveyard rows whose only verdict is DRIFT do not bind a direction card.
+- **Births.** While the lane holds under `birth_share` (half) of the last 24 hours' births and fewer than `max_alive`
+  direction families live, a pass reserves at least half its births for direction (never filled with alpha); the lane
+  never holds more than `max_share` (60%) of the window, so alpha keeps at least 40%. The architect's request carries a
+  LANES block and the lane's 48-hour failure counts; after 12 hours with no direction birth (the quota open) its next
+  pass asks for direction proposals only (`lane_only`). The pass event carries `lane_births`, `lane_refused`,
+  `lane_short` (and `lane_class_capped` when the class cap refused direction cards); `swarm.born` payloads carry `lane`
+  for direction, a direction parent's fork included.
+- **The Train bar, direction-v2** (in place of the worst-year score, for direction families only). On the 1.0x Train run
+  (2022-24): E1 in the market in at least 2 of the 3 years; E3 a year mostly out loses no worse than t -1.0 and half its
+  average in-market year; E4 60+ entry sessions in each in-market year; E5 one lot's maximum loss with fees at TODAY's
+  prices (the House's last closes, `direction-closes.json`) within 10% of equity (`health.json`), "unknown" passing
+  (the live path prices every real open again). The score climbed is S_D, the pooled t of daily P&L at 1.0x. On the
+  1.5x run, each a demotion: P1 P&L above zero, R2 E1 and E3 again, R3 at least half the 1.0x P&L. Reported, never a
+  bar: E2 (every in-market year t >= 0), R1 (the pooled t at 1.5x against 1.5) and the mechanism or ablation test.
+  Holds of 2 to 8 sessions are all admissible.
+- **No hidden look.** A direction lineage never plays the learning game (`dlane.arm_fraction` 0), and a direction
+  family born into a lineage that already has an arm (a control-arm parent, a game lineage's member from before T0, or
+  an alpha family given an arm in a direction lineage) sits it out too; direction looks stay out of the game's R1(b) and
+  R2. The alpha game is unchanged.
+- **The screen** (release D-1b switches it to D2: the section above). The direction lane's holdout look is S-C: the
+  Validation line as coded, then p <= 0.20 with a holdout Sharpe at least 0.25 of Validation's. The alpha lane keeps S-B (p <= 0.10, 0.5) byte for byte. D2 (a pre-check, then a
+  pooled test) is coded but REFUSED unless a receipt's sha256 and its calibrated c are pinned in the repository's own
+  `policy.json` (`dlane.screens.D2`) and CI holds the receipt (`docs/benchmarks/direction_screen_2.json`) to that sha;
+  under D2 the Validation pre-check never opens tuition. Every look event records `lane`, `screen` and `receipt`.
+- **The leakage alarm per lane.** Alpha unchanged (10 looks, over 30% passing); direction 10 looks, over 60%. With the
+  lane off the one alarm counts only the looks the alpha line judged (a look's `detail.lane`), so direction looks made
+  while the lane was on never stop the alpha lane. The public checklist's `gate_paused` follows the family's own lane's
+  alarm (the site contract is unchanged).
+- **The drift screen is a brake on direction:** if `tournament.drift_screen` is switched back on, the researcher's
+  screen and the gate's drift defense, which do not know the lanes, refuse direction programs (their profit is drift by
+  design) and close the lane's route to Validation. Keep it off while the lane is on.
+- **The incubator mark** for a direction family is the direction-v2 verdict in place of the drift screen alone; the
+  incubator refuses a direction mark unless the lane's effective mode is "gate". Alpha marks are unchanged.
+- **The sigma writer** (for L-D's DM1): the tournament writes `validation_r_sd` (the sd of per-trade P&L per dollar of
+  maximum loss in the version's Validation run) beside `typical_max_loss_usd`; L-D's `league/live/families.py` reads it.
+  The keys are the reader's exactly: `validation_r_sd_by_version` {str(version): sd} and `validation_r_sd` for
+  `validation_version`, a finite float above zero or nothing. `test_dlane_ld_joins` holds the join end to end on the
+  merged tree: the figure the tournament writes is the one `SwarmFamilies.read` puts in the band row and DM1 reads.
+- **K5, automated** (a tightening): the `dlane` job sets the swarm store's kv `dlane_k5` {at, net, line} once when the
+  direction lane's realized net over every route (`:r`, `:t`, `:i`) since the options swarm began is at or below K5's
+  line: `dlane.k5_net_usd` (-$600), or after a clear `k5_net_usd` below the net at clearing (kv `dlane_k5_base`). While
+  it is set the lane reads "shadow": no new direction Candidate, no incubator direction mark. Only the operator clears
+  it (**K5**, below); the job's next run records the clear and re-arms K5.
+- **What agents see of the unit (E5):** its verdict only (fits, over the cap with a scale-free hint, or unknown). Today's
+  price scale and the cap (a share of the account's equity) are 2026 figures: they stay in the family state and this
+  report, never in a view, status line, sweep row, run summary or the architect's request.
+- **The class cap and the quota:** the births reserved for direction never exceed the room left under
+  `architect.max_alive_per_class` in the classes a direction card can be in (`long_single x etf`, `debit_vertical x etf`);
+  a direction card the class cap refused is counted apart in the pass event (`lane_class_capped`) and named in the next
+  request.
+- **The agenda guard** (D9): the swarm warns the House at its start, and whenever it changes, when `swarm.json`'s
+  `architect.agenda_locked` or `architect.agenda` is longer than the architect reads (4,000 characters: it cuts the rest
+  silently), not ASCII, or names a hidden year; `scripts/agenda_install.py` refuses such a text before writing it.
+
+**The switches** (`league/swarm/policy.json` "dlane"; `<state>/swarm.json` wins over it; `dlane.cfg` holds each inside
+its bound: a malformed value is its default, a number past a bound is the bound; a malformed `mode` reads "shadow"). The
+screen, the alarm and K5 can only be TIGHTENED by a setting.
+
+| Key | Committed | Bounds and notes |
+|---|---|---|
+| `dlane.mode` | `"gate"` | `"off"`: THE ROLLBACK (every path as before D-1, byte for byte; also the code's default); `"shadow"`: births, research and Validation run, no direction Candidate, no incubator direction mark; `"gate"`: everything |
+| `dlane.roots`, `structures`, `classes`, `holding` | SPY, QQQ, IWM; long_single (D-1b: calls only; D-1 had debit_vertical too); equity_premium, trend_momentum; days_1_3, days_4_10 | only the lane's own words; `long_call` is also allowed as a structure; D2 is refused while a structure other than `long_single` or `long_call` is admitted |
+| `dlane.birth_share`, `max_share`, `min_per_pass`, `max_alive` | 0.5, 0.6, 1, 24 | 0-0.6; >= birth_share, <= 0.8; 0-3; 0-96 |
+| `dlane.window_hours`, `min_window`, `lane_only_hours` | 24, 10, 12 | 1-168; 1-1000; 1-168 |
+| `dlane.active_share`, `min_active_years`, `out_t_floor`, `out_loss_share`, `min_entry_days` | 0.5, 2, -1.0, 0.5, 60 | 0.3-0.8; 2-3; -1.5-0; 0-1; 40-200 |
+| `dlane.cost_ratio`, `c_train` | 0.5, 1.5 | 0.3-1.0; 1.28-3.0 (R1, reported only) |
+| `dlane.unit_cap_usd`, `unit_share`, `unit_pref_usd` | null, 0.10, 75 | null or 25-129 (never above the share); 0.01-0.10; 25-129 |
+| `dlane.arm_fraction` | 0.0 | 0-1 (0: no direction lineage plays the game) |
+| `dlane.screen` | `"D2"` (D-1b; D-1 had `"S-C"`) | `"S-C"` or `"D2"` (D2 only with a pinned receipt and a calls-only lane; else S-C and the reason). `"S-C"` in `swarm.json` is the instant rollback |
+| `dlane.screens.S-C` | look_level 0.20, sharpe_share 0.25, fp_unconditional 0.0141, fp_both_windows_rose 0.0222, fp_lane_2224 0.0209 | look_level <= 0.20; sharpe_share >= 0.25 (tighten only); the fp figures are reported beside each look |
+| `dlane.screens.D2` | receipt_sha256 `c3605947...`, c 1.0, fp_lane_mixed 0.1037, fp_lane_2224 0.1239, fp_lane_ci_mixed [0.0957, 0.1116], fp_lane_cluster_mixed [0.079, 0.1276], power10 0.1995 (D-1b) | read from the repository's policy.json only, never swarm.json; CI holds the sha to `docs/benchmarks/direction_screen_2.json` and every figure to the receipt's |
+| `dlane.val_tries`, `looks_per_lineage` | 1, 1 (D-1b) | fixed at 1: one Validation try and one holdout look per direction lineage |
+| `dlane.alarm_min_looks`, `alarm_pass_share` | 10, 0.60 | >= 10; <= 0.60 (tighten only) |
+| `dlane.done_zero_edge_p` | 0.13 | reported beside every Done figure: "P(Done \| zero edge), simulation" |
+| `dlane.k5_net_usd`, `k5_clear` | -600, false | -600 to -50 (tighten only); `k5_clear` true clears a set K5 and DISARMS K5 while it stays true (a loosening: the report warns every run; take it out once the clear is recorded) |
+
+**Every loosened rule, with its cost** (the operator's measurements: MONEY's simulation and the critic's; the header of
+every `dlane` report, `dlane_report.LOOSENED`):
+
+| Loosened | Was | Now | Cost |
+|---|---|---|---|
+| Beat your own exposure | every family (agenda v19 item 2) | the alpha lane only | programs whose profit is index beta reach Validation; reported beside the same-risk buy-and-hold, never called alpha |
+| The Train objective | the worst Train year's t | direction-v2 (above) for direction | an always-in call program can pass and the gate is not tested by it; more null programs reach Validation (more paid reviews and audits, more false passes in count); the false-positive rate per program screened is unchanged (Train is in-sample) |
+| The hidden look | every core-five lineage may play | no direction lineage plays | the game's selection pressure is lost for direction; the lane's false-positive rate at zero edge 0.02% -> 0.70% before the screen change |
+| The holdout look (S-C) | p <= 0.10, Sharpe share 0.5 | direction only: p <= 0.20, 0.25 (since D-1b the rollback screen) | false-positive rate at zero edge: the lane 0.70% -> 1.41% (cluster interval 0.54-2.43%), all cells 0.80% -> 1.53%, swarm placebos 0.18% -> 0.27%; 2.22% when both windows rose; power at +10% 1.68% -> 3.22% |
+| The holdout look (D2, release D-1b) | S-C | direction only, calls only: the pre-check, then the pooled entry-day t at least 1.00 and the holdout's P&L above zero | the lane 1.41% -> 10.37% on mixed worlds (9.57-11.16%; cluster 7.90-12.76%), 12.39% on 2022-24 worlds (upper bound 13.29%); all cells 13.37% / 14.11% (upper bounds 14.08% / 15.01%); swarm placebos 4.76%; power at +10% 3.22% -> 19.95%; adopted after it failed the operator's own 12% adoption rule (post-hoc); the section above |
+| The leakage alarm | one count: 10 looks, over 30% | per lane; direction over 60% | a real direction holdout leak trips later; the paid review, the audit and the post-cutoff tail still check every look |
+| The incubator mark | the drift screen alone (the owner's term, Sept 29-30) | direction-v2 for direction families | with no edge about -$36 a week expected, at most $150 a week (about $650 a month); its closes are never evidence |
+| Graveyard DRIFT rows | bind every card | not a direction card | buried direction ideas may return, once each, inside the rebirth budgets |
+| The birth quota | no lane | direction about half while behind, at most 60% | alpha births fall from about 73 to about 36 a day mid-way through the game's T0 experiment; the researcher's ROLE prompt (a shared prefix) changes for alpha researchers too, so "alpha golden" holds for code paths only (the game's report says so while the lane is on) |
+| The unit | MONEY's pre-registered $75 lane cap | 10% of equity (E5), as the live side | Probe-stage Done averaged over holds 6.3% against 7.8%; P(net <= -$360 in 8 weeks) 0.35 against 0.27 |
+| K5's clear | no K5 before D-1 | `dlane.k5_clear` true clears a set K5 at once and disarms K5 while it stays true; the job's next run records the clear and re-arms K5 at -$600 below the net then (deleting the kv clears the same way) | while `k5_clear` stays true the lane can lose past any line with no K5 (the report warns every run); after a clear K5 measures a further -$600 from the net at clearing, not from inception |
+
+Tightened: K5 (above); the screen, the alarm and K5's line can only tighten by a setting (the one setting that loosens
+K5 is `k5_clear`, in the table above); D2 refused without a pinned receipt;
+E5 prices one lot at today's prices before Validation. Release L-D's own loosenings (the NET budget, 8 slots, DM1) and
+its rolling budget (L9, a tightening of NET: $400 of worst net stretch in any 20 sessions beside $400 net in total) are
+in its section and ride in the report's header too.
+
+**The report** (`league/ops/dlane_report.py`; the House's `dlane` job at its start and daily 01:30Z, after the
+`direction` closes and the fast lane's report; in a pause too; OPERATOR-ONLY, read-only on the swarm and live stores but
+for K5's kv, the trip and the clear recorded; no site data contract changes). It writes `<state>/dlane-report.json`; with `dlane.mode` "off" it
+writes nothing (a `skipped` receipt). The fast lane's report rows gain `lane` while the lane is on (off: no key).
+- **The header:** the pinned Done rule (its sha256 `0d007696...`), every loosened and tightened rule with its cost, the
+  contamination statement, the label "direction lane: leveraged index beta minus option costs; not alpha" on every
+  direction figure.
+- **The funnel per lane**, 24 hours and 7 days: births, Gym runs by window and their program-years (the Gym is shared:
+  direction runs slow alpha's), Validation tries and passes, reviews and audits, holdout looks and passes by the screen
+  each recorded, band moves, real closes by route; the bands now; the direction lane's Train-bar failure counts.
+- **The Probe envelope** (`probe_envelope`): release L-D's budget as `money.Table` reads it from the constitution
+  (`constitution`: `loss_basis`, `loss_budget_usd` over `loss_window_sessions`, `loss_total_usd`, `max_open`,
+  `demotion`; today "net", $400 in any 20 sessions, $400 in total, 8, "dm1"), never a figure of its own; the fast lane
+  report's own figure (`in_force`); and under each basis, GROSS and NET (`by_basis`, from `real.probe_figures` told the
+  basis by name), the window's realized figure (under NET its worst net stretch) and the total's, both rooms, the one
+  that binds and the room in units of today's cap (10% of equity). A4 reads the room under the basis in force and names
+  the binding envelope; A5 names `probe.demotion`.
+- **THE DONE METER** (the pinned rule, read exactly): every real close of an agent program (never calibration, the House
+  live test or `house:*`) since 2026-09-26T06:23Z on `:r`, `:t` and `:i`, the one agent real close before D-1 (tuition, Oct 8) included;
+  realized after all fees (the broker's posted fees where they have posted, the book's estimate otherwise, labelled per
+  close; an unpriced close makes the net unknown); `done_screen` (`:r` only) and `done_all` (all three); the bar is 30
+  closes, 5 closes from each of 2 programs, net > 0; every program with 5+ matched closes (a close on a day its
+  version's nightly replay also traded) has a mean live-minus-replay gap within +/-0.10 a dollar of maximum loss, and a
+  program under 5 is listed with its gap, never dropped. It is READ only at the 30th close and every 10th after, each
+  reading over exactly the first K closes; the running figures between are counts, never a reading. Beside it always:
+  P(Done | zero edge) 0.13 (MONEY's simulation under this rule), the same-risk buy-and-hold two ways (delta-matched:
+  the entry delta held in the stock; dollars at risk held in the index; approximations from daily closes), and, for
+  each Candidate, Probe or Sized family, the screen that admitted it with its unconditional and both-windows-rose
+  false-positive rates. A Done claim names which meter holds, at which checkpoint, from which routes. No program or route
+  is paused, slowed or stopped to protect a figure.
+- **The account and the costs:** the equity change since E0 (the first equity reading the report saw, kept in the
+  file) beside the agents' and the House's realized closes and the account's other activity, the rest labelled
+  unexplained; the research spend by meter since the options swarm began and since the lane started (LTCM's profit is
+  trading net minus these; the gateway's own spend is its meter).
+- **The contamination meters,** per lane: (a) the holdout's head-minus-tail Sharpe gap pooled over the looks, (b) the
+  mean excess over the same-risk buy-and-hold on Validation (known) against live (unknown), (c) live against the holdout
+  per band.
+
+**The alarms** (each a House alert through the job; never an action on money):
+
+| # | Condition | What to do |
+|---|---|---|
+| A1 | no direction birth in 12 h, the quota open, the lane started 12 h ago or more | nothing: the architect's next pass asks for direction proposals only; if it repeats, read the pass events' `lane_refused` |
+| A2 | a direction version cleared every Train bar 24 h ago or more, and no direction Validation try or look since | plumbing: read the tournament's candidate and the gate's holds for those families |
+| A3 | a cleared direction best waits for Validation over 6 h, or a direction Validation pass waits for its look over 12 h | a stall: the tournament round or the gate (its review, audit or look hold) |
+| A4 | Probe budget room under one unit while a direction Candidate or Probe has fewer than 5 real closes | no path to Sized: report; the budget is never topped up by hand |
+| A5 | a direction Probe or Sized program's live fills below its replay by over 0.10 a dollar of maximum loss over 5+ matched closes | watch: D5 demotes at 0.20; no new Probe in that structure until the fill model is explained |
+| A6 | fewer than 1 eligible direction version per 50 direction births over 48 h (judged from 50 births) | report the failure counts; never a loosening without a new pinned measurement |
+| A7 | more than half of the direction versions that clear E1, E3 and E4 fail E5 | report today's cap and the median failing one lot |
+| A8 | a checkpoint holds (`info`, once a checkpoint) | read it with the buy-and-hold, P(Done \| zero edge) and the contamination meters; it stops nothing |
+| A9 | every live direction program opened nothing for 10 sessions (`info`) | none: the lane is flat by design |
+| K5 | `dlane_k5` is set | the lane is in shadow until the operator clears it (**K5**, below) |
+| K5 (disarmed) | `dlane.k5_clear` is true | no loss trips K5 while it is: once the report shows the clear recorded (`k5.last_clear`, the new `k5.line`), take `k5_clear` out of `swarm.json` |
+
+Stop conditions beyond the code's: K8, 7 days after D-1 with no direction look pass: if D2's receipt qualified and D2 is
+not on, pin it (an owner deploy of `policy.json`); otherwise report "the screen route is closed in this world" and keep
+the incubator route. K9, Nov 9 with fewer than 2 programs at Probe: re-plan and report that Done is not reachable inside
+the walls on this evidence. Neither is ever a forced or hand-placed trade.
+
+**The owner's deploy, in order** (the money path's window, 20:05-13:25Z on a trading day; never 12:55-20:05Z; no order in
+flight; L-D deployed and verified first: done, 09:04Z Oct 9, House release `20261009T090334Z-cdbf1864a573`):
+1. CI green on main's head with D-1 merged (`gateway`, `tests (3.11)`, `tests (3.14)`); the alpha golden tests in it.
+   Merging holds the updater's later heads until the owner deploys main's head.
+2. The gateway first: `protected.mjs` gains `league/swarm/dlane.py` (its parity test green), then
+   `npx wrangler@4.129.1 deploy` (**The protected paths**).
+3. `floor_box.py deploy` from `~/Work/ltcm-deploy` (a clean detached checkout of main's head); rollback ready.
+4. Verify: the release id; `floor_box.py status` `current`; the money digest unmoved (L-D's `0310779c`) and the
+   execution fingerprint unmoved (L-D's `31a7e921`: `python3 -c "from league.swarm.evaluator import
+   execution_fingerprint; print(execution_fingerprint())"` on both trees; the kv `research_evaluator` unchanged: no
+   adoption ran); the first architect pass's `swarm.architect` event carries `lane_births`; the first direction births'
+   `swarm.born` payloads carry `lane`; the `dlane` job's first receipt is `ok` and `<state>/dlane-report.json` reads
+   `lane.mode_effective` "gate".
+5. Install agenda v21 (below), then nothing else: `policy.json` already sets `dlane.mode` "gate", so the plan's N2
+   override in `swarm.json` is not needed (set `dlane.mode` "shadow" there for a staged start).
+
+**Install agenda v21** (the operator's private file; the public repository never holds an agenda), on the box, right
+after D-1 verifies and never before (before D-1, `equity_premium` is no class and the lane field is dropped):
+1. Copy the pinned file to the box (it never enters the repository), e.g. `/workspace/state/agenda-v21.txt` (mode 600).
+2. `cd /workspace/current && /workspace/.venv/bin/python scripts/agenda_install.py check /workspace/state/agenda-v21.txt`:
+   exit 0 and `"problems": []` (at most 4,000 characters, ASCII, no hidden year); its `sha256` is the pinned one.
+3. `... scripts/agenda_install.py apply /workspace/state/agenda-v21.txt`: it keeps `swarm.json.before-agenda-<stamp>`,
+   writes the text into `architect.agenda_locked` and `architect.agenda` (temporary file, read back, mode 600, atomic
+   replace) and clears the strategist's section (`architect_agenda_section`; `--keep-section` leaves it). The swarm
+   reads it on its next loop: no restart.
+4. Verify: the tool's `written` lengths and sha256 are the file's; the next architect pass ran (`swarm.architect`,
+   with `lane_births`); the swarm raised no "agenda guard" warning.
+The tool refuses (exit 2, nothing written) a text over 4,000 characters, non-ASCII, empty or naming a hidden year.
+
+**K5.** Read the kv: `sqlite3 'file:/workspace/state/swarm.sqlite?mode=ro' "SELECT key, value FROM kv WHERE key IN
+('dlane_k5','dlane_k5_base')"` (or the report's `k5` block: `line`, `base_net`, `trip_open`, `last_clear`). Before
+clearing it, re-plan (the plan's K5: the lane's losses passed its line) and decide, as separate steps, whether to set
+`live.incubator` false and, in the next owner window, `probe.max_open` 0. To clear, either:
+1. set `dlane.k5_clear` true in `swarm.json` (keep a before-copy; read every loop: the lane opens at once). The `dlane`
+   job's next run (the House's start, or 01:30Z) records the clear: it deletes the kv and writes `dlane_k5_base` with
+   the lane's net then, so K5's next line is `k5_net_usd` below that net. Then take `k5_clear` out: while it is true K5
+   cannot trip at all, and the report warns every run (`K5 is disarmed`); or
+2. delete the kv on the box (`cd /workspace/current && /workspace/.venv/bin/python -c "from league.swarm.store import
+   SwarmStore; s=SwarmStore('/workspace/state'); s._exec(\"DELETE FROM kv WHERE key='dlane_k5'\"); s.close()"`). No
+   setting is needed: the job's next run sees the open trip with no kv and records the clear the same way (at the net
+   then; until that run nothing trips, as only the job trips K5).
+Never delete `dlane_k5_base` by hand: K5's line would go back to -$600 since inception and trip again at once.
+
+**Roll back.**
+- **The lane off, at once:** `dlane.mode` `"off"` in `swarm.json` (keep a before-copy; replace atomically). Read on
+  the next loop, no restart. Every family is alpha again (`lane_of`), no direction card is admitted, no quota, LANES
+  block, direction score, screen or text is used, the `dlane` job writes nothing, the fast lane's rows carry no lane, and
+  the agenda guard is silent: every path is the release before D-1, byte for byte. Direction families alive then go on
+  as alpha families under the alpha rules (their spec and card keep `lane`, read again if the lane comes back on). A set
+  K5 kv stays and is harmless while off. The leakage alarm is the one count again, over the looks the alpha line judged
+  (direction looks made while the lane was on are left out).
+- **Shadow** (`"shadow"`): births, research and Validation go on; no direction Candidate, no incubator direction mark.
+- **Agenda v21 back to v19.1:** `scripts/agenda_install.py apply` the v19.1 file (or restore the tool's before-copy of
+  `swarm.json` with the same atomic replace). Do this with the lane off: v21 names `equity_premium` and the lane field,
+  which the alpha rules refuse.
+- **The code:** `floor_box.py rollback` (it restores code only). No re-ratification (the money digest did not move).
+  Set `dlane.mode` "off" or agenda v19.1 first, as above: the previous release has no `dlane` block and ignores it, but
+  its architect would read v21's lane words and refuse every direction proposal. The previous release's leakage alarm
+  counts EVERY look, the direction lane's S-C looks included: once direction looks exist, check the pooled pass share
+  first (`sqlite3 'file:/workspace/state/swarm.sqlite?mode=ro' "SELECT count(*), sum(passed) FROM looks"`; at 10 or
+  more looks with over 30% passed the old code stops the whole gate and writes the kv `leakage_alarm`), and prefer
+  `dlane.mode` "off" on this release, which counts only the alpha line's looks.
+
+## Release L-D (Oct 9, 2026): deployed 09:04Z Oct 9 (House release `20261009T090334Z`, main `40c39435`)
 
 The one planned evidence reset of Oct 9 (the plan of Oct 9, "L: Release L-D", and its critic). Claude's decisions under
 the owner's goal of Oct 7: item 4 ("You may set Probe sizing up to 10% of equity at risk per position and a Probe loss
@@ -1328,13 +1709,18 @@ research_m    = min(floor_m + earned_m, max(0, balance_m − reserve_m − 60·f
   passes every 4 hours at most, and the Claude roles (the gate's review and audit, the strategist) share the Claude
   dollars of the day. A cut shows in `budget.json` (`limited_by`: `floor`, `sustainable`, `W` or `unreadable`) and in
   the daily page; the way to more research is realized profit or the owner's top-up, never a setting.
-- **The funding notice** is computed at the rate the meter WANTS (its fixed cost plus its full floor share plus its
-  earned share), not at the rate the rule throttled it to: the throttled rate keeps the runway at 60 days or more by
-  construction, so it would never say a prefund is short. When the runway at the wanted rate is under 60 days the House
-  posts one `POST /v1/notify` kind `funding` with the meter, the balance, both rates (the wanted one and the current
-  one, each with its runway), the amount that restores 90 days and the card date; at most once a meter every 7 days
-  (`funding:<meter>:<ISO week>`). The mail names both rates: the rate the rule holds the meter to now (its fixed cost
-  plus the day's research budget; a ceiling, not a metered spend) and the rate the rule wants for it. Each runway is
+- **The funding notice** is computed at the rate the meter WANTS, not at the rate the rule throttled it to: the
+  throttled rate keeps the runway near the rule's runway term by construction, so it would never say a prefund is
+  short. (Rule version 2, Oct 3, and release D-1b, Oct 9: the module docstring of `league/ops/budget.py` is the rule.)
+  When research on a meter runs out within 2 days at its current burn (`out_in_days` in `budget.json`: the lower of
+  the runway at its burn and its days of research left at the ceiling, less the 5-day runway term; at the ceiling the
+  7-day card line), the House posts one `POST /v1/notify` kind `funding` with the meter, the balance, both rates (the
+  wanted one and the current one, each with its runway), the amount that buys 7 more days and the card date. It goes
+  at most once a day per meter (a day less an hour since the last; `funding:<meter>:<UTC day>:r2`, which the gateway
+  dedupes); before D-1b it was once a week. The mail names both rates: the rate the rule holds the meter to now (its fixed cost
+  plus the day's research budget; a ceiling, not a metered spend) and the rate the rule wants for it. A meter spent
+  faster than the rule holds it states its burn as the "now" rate, and its card date is the day research runs out at
+  that burn (release D-1b, the review's finding 4). Each runway is
   days until the meter's reserve, not until it is empty, and the mail says it as days above the reserve. It says that
   nothing stops without a card only when the figures sent show it (research above zero and the runway at the current
   rate at or over the card line: the rule goes on throttling research). Otherwise it says how long the meter lasts at
@@ -2315,14 +2701,14 @@ contracts already attributed to another family. Missing fill values leave an exp
 `unpriced_close` row, release stale exposure and block new entries until venue fills or expiry events
 resolve the accounting; estimated intrinsic values never become forward evidence.
 
-The checked-in deployment has `real_money: true`, the grant is active on the money digest in force (`1665c385` since
-the incubator cap's deploy of Oct 8, re-ratified by the standing grant; `0310779c` once release L-D ships, the same
-way), and the gateway's `OPTION_STRUCTURES_REAL` names the four debit types. The gateway still admits paper
-structures and verified closes of held real positions; `off` is still a permitted stricter setting in `league.ci`. The
-paper route proof runs from 09:35 ET until it has passed, even with no real-account client, grant or eligible family,
-and keeps an unfinished attempt's identity and owned contracts through restarts. Both proofs (the multi-leg vertical and
-the single-leg call) passed on Sept 28; a passed proof is not run again. Passing records paper execution evidence, never
-a family's evidence.
+The checked-in deployment has `real_money: true`, the grant is active on the money digest in force (`0310779c` since
+release L-D's deploy of 09:04Z Oct 9, re-ratified by the standing grant at the House's start; `1665c385` before it, from
+the incubator cap's deploy of Oct 8), and the gateway's `OPTION_STRUCTURES_REAL` names the four debit types. The gateway
+still admits paper structures and verified closes of held real positions; `off` is still a permitted stricter setting in
+`league.ci`. The paper route proof runs from 09:35 ET until it has passed, even with no real-account client, grant or
+eligible family, and keeps an unfinished attempt's identity and owned contracts through restarts. Both proofs (the
+multi-leg vertical and the single-leg call) passed on Sept 28; a passed proof is not run again. Passing records paper
+execution evidence, never a family's evidence.
 
 **The money table (the sprint, owner decision D4, Sept 26, 2026; the Probe rows since fast lane v2, Oct 7, 2026, and
 release L-D, Oct 9, 2026)**: real types under $2,000 of equity are exactly `debit_vertical`, `long_butterfly`,

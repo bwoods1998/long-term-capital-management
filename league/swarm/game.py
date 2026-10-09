@@ -104,6 +104,17 @@ trigger, so `store.py` is unchanged: `game_looks` (one row a look), `game_result
 row: "ok" with both years' figures and the SELECT tier, "failed" or "cancelled"), `game_confirms` (the one CONFIRM read
 of a look), `game_children` and `game_arms` (each playing family's first arm). No module but this one reads them.
 
+THE DIRECTION LANE (release D-1, Oct 9, 2026; PLAN D4, the operator's decision 5; `league/swarm/dlane.py`). A family
+whose declared lane is "direction" sits the game out (`_sits_out`): `arm` is None for its lineage, the legacy route,
+today's rules with no hidden look, unless `dlane.arm_fraction` (0) admits its lineage to the game's own split. The
+alpha lane's game is unchanged (`arm_fraction` 0.5, F = min(t_net, t_alpha), SELECT then CONFIRM). Why, and its cost,
+are `_sits_out`'s. A family that was given an arm keeps it (a direction family given one while the lane was off keeps
+playing the game's own rules); a direction family never takes its LINEAGE's kept arm (`_arm_of` asks `_sits_out`
+first: the review of Oct 9), so one born into an armed lineage is legacy too. The operator's metrics keep direction looks out of R1(b) and R2 and say what the release
+changed mid-way through the T0 experiment (`DIRECTION_NOTES`: the birth quota halves the alpha lane's births; the
+researcher's shared role text changed every arm's prompt). While `dlane.mode` is "off" (THE ROLLBACK) every path here is
+the release before it's, byte for byte: no lane is read.
+
 Standard library only.
 """
 
@@ -119,7 +130,7 @@ import threading
 import time
 from typing import Any, Callable, Mapping, Sequence
 
-from . import canary, cards, evidence
+from . import canary, cards, dlane, evidence
 from . import settings as settings_mod
 from .pool import GymJob
 
@@ -138,6 +149,9 @@ EPOCHS_KEY = "game_t0_before"
 #: The canary key of the arm split (`canary.in_arm(salt, ARM_KEY, lineage, arm_fraction)`) and the fold's salt.
 ARM_KEY = "game-v1"
 FOLD_SALT = "ltcm-game-v1"
+#: THE DIRECTION LANE's own canary key (release D-1): the share `dlane.arm_fraction` of direction lineages that enter the
+#: game's split at all (`_sits_out`; 0 by the operator's decision 5, so none does).
+DIRECTION_ARM_KEY = "game-v1-direction"
 MODES = ("shadow", "gate")
 ARMS = ("game", "control")
 #: A ladder look (the version beat its family's last looked score) or control's record of a validated version.
@@ -416,27 +430,38 @@ def arm(store: Any, fam: Mapping[str, Any] | None, settings: Mapping[str, Any] |
     start = live_t0(store)
     if start is None or not seen_only(store, settings):
         return None
-    return _arm(store, fam, c, start)
+    return _arm(store, fam, c, start, settings)
 
 
-def _arm(store: Any, fam: Mapping[str, Any], c: Mapping[str, Any], start: str) -> str | None:
-    """The family's arm under the live T0 `start`, kept the first time it is given."""
+def _arm(store: Any, fam: Mapping[str, Any], c: Mapping[str, Any], start: str,
+         settings: Mapping[str, Any] | None = None) -> str | None:
+    """The family's arm under the live T0 `start`, kept the first time it is given. A direction lineage that sits the
+    game out (`_sits_out`, read from `settings`) is legacy: None, and nothing is kept."""
     fid = str(fam.get("id") or "")
     born = str(fam.get("born_at") or "")
     if not born or born < start:
         return None
     lineage = str(fam.get("lineage") or fid)
     registry = _registry(store, fid, lineage)
-    side = _arm_of(fam, c, start, registry)
+    side = _arm_of(fam, c, start, registry, sits_out=lambda: _sits_out(store, fam, settings, c))
     if side is not None and fid not in registry[0]:
         _register(store, [(fid, lineage, side)])
     return side
 
 
 def _arm_of(fam: Mapping[str, Any], c: Mapping[str, Any], start: str | None,
-            registry: tuple[Mapping[str, str], Mapping[str, str]] | None = None) -> str | None:
+            registry: tuple[Mapping[str, str], Mapping[str, str]] | None = None, *,
+            sits_out: Callable[[], bool] | None = None) -> str | None:
     """The arm of a family under `start` (a pure read of the family, the settings and `registry`, the kept arms by family
-    and by lineage): its kept arm, else its lineage's, else the hash's."""
+    and by lineage): its kept arm, else None when `sits_out` says it is a direction family that sits the game out (asked
+    after its own kept arm and the core-five check, so a family with a kept arm, or a root outside the core five, reads
+    nothing for it), else its lineage's kept arm, else the hash's. `sits_out` comes BEFORE the lineage's arm (the review
+    of release D-1, Oct 9, 2026): a direction family born into a lineage that already has an arm would otherwise inherit
+    it and play (or run control's private looks), against decision 5. The architect never reads a game-arm family, but it
+    reads a control-arm one and a game-arm lineage's members born before T0, and either can be a birth's parent (named,
+    matched by its idea, or a living long_single twin); an alpha family born into a direction lineage is given the
+    lineage's arm too. Such a lineage then holds legacy direction members beside its armed ones, as it holds members born
+    before T0. While the lane is off `sits_out` is False with no read, so the order is the release before it's."""
     if start is None:
         return None
     born = str(fam.get("born_at") or "")
@@ -451,9 +476,37 @@ def _arm_of(fam: Mapping[str, Any], c: Mapping[str, Any], start: str | None,
     if not roots or any(r not in core for r in roots):
         return None
     unit = str(fam.get("lineage") or fid)
+    if sits_out is not None and sits_out():
+        return None
     if unit in by_lineage:
         return by_lineage[unit]
     return "game" if canary.in_arm(c["salt"], ARM_KEY, unit, c["arm_fraction"]) else "control"
+
+
+def _sits_out(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any] | None, c: Mapping[str, Any]) -> bool:
+    """THE DIRECTION LANE SITS THE GAME OUT (release D-1, Oct 9, 2026; PLAN D4, the operator's decision 5): a family
+    whose declared lane is "direction" (`dlane.lane_of`: its spec's `lane`, else its card's) is legacy, today's rules
+    with no hidden look, unless its LINEAGE falls in the share `dlane.arm_fraction` of direction lineages that enter the
+    game's own split (`DIRECTION_ARM_KEY`; 0, so none does). Why: in the operator's measurement the hidden look cost the
+    lane most of its power to buy a false-positive rate that was already small, and F = min(t_net, t_alpha) scores an
+    always-long program at about zero by construction (t_alpha is about zero for it). Its cost: the game's selection
+    pressure is lost for direction, and the lane's screen is the gate's (`dlane.screen_effective`). A direction lineage a
+    non-zero share admits plays the game's own rules (the alpha fitness): the direction ladder is deferred. A direction
+    family sits out whatever arm its lineage was given by others (`_arm_of` asks this before the lineage's kept arm;
+    only the family's own kept arm comes first). While the lane is off nothing sits out (`dlane.lane_of` reads "alpha" with no store read): THE ROLLBACK, byte for byte. Never
+    raises (an unreadable lane is alpha's)."""
+    if not dlane.on(settings):
+        return False
+    spec = fam.get("spec")
+    spec = _loads(spec, {}) if isinstance(spec, str) else spec
+    try:
+        lane = dlane.lane_of(store, {**dict(fam), "spec": spec if isinstance(spec, Mapping) else {}}, settings)
+    except Exception:  # noqa: BLE001 - an unreadable lane is alpha's
+        return False
+    if lane != dlane.DIRECTION:
+        return False
+    unit = str(fam.get("lineage") or fam.get("id") or "")
+    return not canary.in_arm(c["salt"], DIRECTION_ARM_KEY, unit, dlane.cfg(settings)["arm_fraction"])
 
 
 def _birth_roots(fam: Mapping[str, Any]) -> list[str]:
@@ -775,7 +828,7 @@ def _ladder(store: Any, settings: Mapping[str, Any], pool: Any, fid: str, n: int
         return None
     fam = store.family(fid)
     start = live_t0(store)
-    side = _arm(store, fam, c, start) if fam is not None and not fam.get("retired_at") and start is not None else None
+    side = _arm(store, fam, c, start, settings) if fam is not None and not fam.get("retired_at") and start is not None else None
     if side is None:
         return None
     state = fam.get("state") or {}
@@ -1353,7 +1406,7 @@ def _hidden(store: Any, settings: Mapping[str, Any] | None) -> tuple[str | None,
                             (live,)):
             if str(f["id"]) in by_family:
                 continue
-            side = _arm_of(f, c, live, (by_family, by_lineage))
+            side = _arm_of(f, c, live, (by_family, by_lineage), sits_out=lambda f=f: _sits_out(store, f, settings, c))
             if side is None:
                 continue
             fresh.append((str(f["id"]), str(f["lineage"]), side))
@@ -1646,12 +1699,16 @@ def metrics(store: Any, *, settings: Mapping[str, Any] | None = None, now: float
                       "role": r["role"], "version": int(r["version"]), "sha": str(r["sha"]), "generation": int(r["generation"]),
                       "tier": r["tier"], "seen": _num(r["seen_score"]), "seen_f": _num(r["seen_f"]), "sel": f_sel,
                       "conf": f_conf, "at": r["result_at"]})
+    # THE DIRECTION LANE (release D-1; PLAN D4): its looks (a direction lineage a non-zero `dlane.arm_fraction` admitted,
+    # or one whose arm was kept from before) are kept out of R1(b), whose D1 needs a random fold, and out of R2, whose
+    # selection carry needs a CONFIRM year the lane has no use for. None while the lane is off.
+    direction = _direction_families(store, {x["family"] for x in looks}, settings)
 
     # R1: plumbing. D1 by LINEAGE: the roles are the lineage's, so every look of one (and of versions of one program) shares
     # its sign of F2020 - F2021; each lineage's mean is one draw, and the SE is over the lineages.
     founders: dict[str, list[float]] = {}
     for x in looks:
-        if x["generation"] == 0 and x["sel"] is not None and x["conf"] is not None:
+        if x["generation"] == 0 and x["sel"] is not None and x["conf"] is not None and x["family"] not in direction:
             founders.setdefault(x["lineage"], []).append(x["sel"] - x["conf"])
     by_lineage = [sum(d) / len(d) for _, d in sorted(founders.items())]
     d_mean = _mean(by_lineage)
@@ -1673,7 +1730,8 @@ def metrics(store: Any, *, settings: Mapping[str, Any] | None = None, now: float
                          "flag": bool(years) and ineligible / len(years) > 0.5}}
 
     # R2: does one hidden year predict the other better than the seen years do (the same looks, both arms).
-    both = [x for x in looks if x["sel"] is not None and x["conf"] is not None and x["seen"] is not None]
+    both = [x for x in looks if x["sel"] is not None and x["conf"] is not None and x["seen"] is not None
+            and x["family"] not in direction]
 
     def carry(items: list[Mapping[str, Any]]) -> float | None:
         hidden = spearman([x["sel"] for x in items], [x["conf"] for x in items])
@@ -1780,7 +1838,8 @@ def metrics(store: Any, *, settings: Mapping[str, Any] | None = None, now: float
     if settings is not None:
         start, registry = live_t0(store), _registry(store)
         for fam in store.families():
-            side = _arm_of(fam, c, start, registry) if c["enabled"] else None
+            side = _arm_of(fam, c, start, registry, sits_out=lambda f=fam: _sits_out(store, f, settings, c)) \
+                if c["enabled"] else None
             if side is not None:
                 arms[str(fam["id"])] = side
     confirmed_versions = {(str(r["family"]), int(r["version"])) for r in rows if (r.get("confirm") or {}).get("confirmed")}
@@ -1820,8 +1879,44 @@ def metrics(store: Any, *, settings: Mapping[str, Any] | None = None, now: float
                     "holdout_looks": sum(1 for x in holdout if str(x["family"]) in names),
                     "holdout_passes": sum(1 for x in holdout if str(x["family"]) in names and x["passed"]),
                     "probes": sum(1 for f in fams if f.get("band") in ("probe", "sized"))}
-    return {"at": _iso(now), "looks": len(rows), "landed": len(landed_rows), "R1": r1, "R2": r2, "R3": r3, "R4": r4, "R5": r5,
-            "R6": r6}
+    out = {"at": _iso(now), "looks": len(rows), "landed": len(landed_rows), "R1": r1, "R2": r2, "R3": r3, "R4": r4, "R5": r5,
+           "R6": r6}
+    if dlane.on(settings):
+        out["dlane"] = {
+            "label": dlane.LABEL, "excluded_from": ["R1.d1_founders", "R2"],
+            "excluded_families": len(direction), "excluded_looks": sum(1 for x in looks if x["family"] in direction),
+            "births_24h": dlane.born_counts(store, 24.0, now=now),
+            "notes": list(DIRECTION_NOTES)}
+    return out
+
+
+#: What the operator's report says about the game's T0 experiment while the direction lane is on (release D-1; the
+#: operator's decision 1): two changes made mid-way through it, so its arms' flow and prompts before and after the release
+#: are not one series, and what the lane is to the game. The operator's report (league/ops/game_report.py) carries them
+#: through `metrics` (its `dlane` block), the one place they are said.
+DIRECTION_NOTES = (
+    "the direction lane's birth quota (dlane.birth_share 0.5, max_share 0.6) takes up to half the births: the alpha "
+    "lane's fall from about 73 to about 36 a day mid-way through the game's T0 experiment (births_24h counts them by lane)",
+    "the researcher's role text became lane-aware at the same release; it is the shared prefix, so the alpha arms' "
+    "prompts changed mid-experiment too: 'alpha golden' means the code paths only, not the prompts",
+    "direction lineages never play the game (dlane.arm_fraction 0: no hidden look) and their looks are kept out of R1(b) "
+    "and R2",
+)
+
+
+def _direction_families(store: Any, ids: Any, settings: Mapping[str, Any] | None) -> frozenset[str]:
+    """The families among `ids` whose lane is "direction" now (`dlane.lane_of`); empty while the lane is off (no store
+    read: THE ROLLBACK). Never raises (an unreadable family is alpha's)."""
+    if not dlane.on(settings):
+        return frozenset()
+    out = set()
+    for fid in sorted({str(i) for i in ids}):
+        try:
+            if dlane.lane_of(store, store.family(fid), settings) == dlane.DIRECTION:
+                out.add(fid)
+        except Exception:  # noqa: BLE001
+            continue
+    return frozenset(out)
 
 
 __all__ = ["SWITCH_AT", "HIDDEN", "HIDDEN_YEARS", "SEEN_FROM", "CORE", "DEFAULTS", "DIRECTIVES", "ROTATION", "GAME_SQL", "HIDDEN_SPLIT",
@@ -1830,4 +1925,4 @@ __all__ = ["SWITCH_AT", "HIDDEN", "HIDDEN_YEARS", "SEEN_FROM", "CORE", "DEFAULTS
            "confirm_waiting", "requeue_stale", "recheck", "shadow_validated", "candidate", "validations_left",
            "seen_robust_ok", "look_seen_run", "in_flight", "looks_used", "retire_reason", "retire_rule", "parents",
            "reproduce", "visible_families", "visible_graveyard", "quarantined", "visible_shares", "unrelated_children",
-           "shown_trials", "status_text", "brief_text", "spearman", "metrics"]
+           "shown_trials", "status_text", "brief_text", "spearman", "metrics", "DIRECTION_ARM_KEY", "DIRECTION_NOTES"]

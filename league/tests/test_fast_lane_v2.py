@@ -875,7 +875,21 @@ class ReportedOnly(RoundCase):
             text = path.read_text(encoding="utf-8")
             for needle in ("ops.direction", "ops import direction", "direction-closes", "same_risk_bh", "daily_fit(",
                            "ops.fast_lane", "ops import fast_lane", "fast-lane-report", "pooled_contamination"):
+                if needle == "direction-closes" and path.relative_to(repo).as_posix() == "league/swarm/dlane.py":
+                    # THE DIRECTION LANE (release D-1, Oct 9, 2026; the operator's decision 3): the lane's unit rule E5
+                    # reads the House's last CLOSES from the file (its price scale), never the drift fit or the
+                    # buy-and-hold figures, which stay reported only (the needles above; held below for dlane.py too).
+                    continue
                 self.assertNotIn(needle, text, f"{path.relative_to(repo)} reads {needle}")
+
+    def test_the_direction_lane_reads_only_the_closes_from_the_direction_file(self):
+        """The one exemption above: league/swarm/dlane.py names the closes file for E5's price scale and reads only its
+        `closes` (no same-risk buy-and-hold, no drift fit, no report)."""
+        text = (Path(__file__).resolve().parents[2] / "league" / "swarm" / "dlane.py").read_text(encoding="utf-8")
+        self.assertIn('CLOSES_FILE = "direction-closes.json"', text)
+        self.assertEqual(text.count("direction-closes"), 1, "named once, as the unit's file")
+        for needle in ("same_risk_bh", "daily_fit(", "fast-lane-report", "ops.direction", "ops import direction"):
+            self.assertNotIn(needle, text)
 
     def outcome(self, *, closes: bool, report: bool) -> dict:
         case = RoundCase("run")

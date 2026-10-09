@@ -60,7 +60,9 @@ retired and revived family's stale mark never passes) and showing a positive 1.5
 figures, the family is not on D2's route (no validated version that met the validation line: its tuition row comes
 first, even when `read` cannot be read), the gate's review AND audit passed on `n`'s run sha under the current review
 contract (`state.review`, or `state.incubator_reviews[sha]`), and the gate did not refuse, fail, demote or hold that
-sha (`BAD_OUTCOMES`).
+sha (`BAD_OUTCOMES`). A DIRECTION mark (release D-1, Oct 9, 2026: `lane` "direction", made by the lane's bar in place
+of the drift screen alone, `incubator._direction_mark`) is accepted only while the direction lane takes marks
+(`_lane_marks_open`: its effective mode "gate", so not in "shadow", not while K5 holds, not while the lane is off).
 THE READER'S BELT (`incubator_refusal`; Oct 1, 2026, the owner's term that a program whose review or audit failed never
 trades the incubator) comes first and does not rely on the mark: no row for a program the swarm barred
 (`incubator_barred`, kept for good), one the gate's `review` names without a readable pass and passed audit, one whose
@@ -502,6 +504,25 @@ def _program_rows(db: sqlite3.Connection, fid: str, code_sha: str, sha: str) -> 
     return ruled, list(others.items())
 
 
+def _lane_marks_open(root: str | Path, lane: Any, k5: Any) -> bool:
+    """THE DIRECTION LANE'S MARK at the reader (release D-1, Oct 9, 2026; PLAN D5, the operator's decision 9): a mark
+    that names a lane (`incubator._direction_mark` writes `lane` "direction"; an alpha mark names none) is accepted only
+    while that lane is "direction" and takes marks: its effective mode is "gate" (`dlane.candidates_open`), read from
+    the swarm's own settings for this state directory (policy.json, then `<root>/swarm.json`, as `read` reads the image)
+    and the store's K5 kv (`dlane_k5`, read in this reader's own connection; the operator's `dlane.k5_clear` in swarm.json
+    lifts it). So "shadow", K5 and the lane off (THE ROLLBACK) refuse every direction mark, and accept no new one either.
+    Fail-closed: settings that cannot be read accept no direction mark (an alpha mark never reads them)."""
+    from . import dlane
+
+    if lane != dlane.DIRECTION:
+        return False
+    try:
+        conf = settings.load(root)
+    except Exception:  # noqa: BLE001 - fail-closed
+        return False
+    return dlane.candidates_open({} if k5 is None else {dlane.K5_KEY: k5}, conf)
+
+
 def incubator(root: str | Path, *, family: str, version: int) -> list[dict[str, Any]]:
     """The incubator's facts for version `version` of `family` (the module docstring): one row, or []. Standard library
     and read-only (`mode=ro`, a one-second timeout); RAISES `sqlite3.Error` when the store cannot be read (fail-closed:
@@ -522,7 +543,7 @@ def incubator(root: str | Path, *, family: str, version: int) -> list[dict[str, 
             return []
         fam = fams[0]
         kv = {str(r["key"]): loads(r["value"], None) for r in db.execute(
-            "SELECT key, value FROM kv WHERE key IN ('research_evaluator', 'train_objective')")}
+            "SELECT key, value FROM kv WHERE key IN ('research_evaluator', 'train_objective', 'dlane_k5')")}
         row = db.execute("SELECT n, sha, params FROM versions WHERE family=? AND n=?", (fam["id"], n)).fetchone()
         if row is None:
             return []
@@ -560,6 +581,8 @@ def incubator(root: str | Path, *, family: str, version: int) -> list[dict[str, 
     robust = _finite(mark.get("robust_pnl"))
     if robust is None or robust <= 0 or not isinstance(mark.get("drift"), Mapping):
         return []  # a belt: the mark itself shows a profit at 1.5x the half-spread and the drift screen's figures
+    if mark.get("lane") is not None and not _lane_marks_open(root, mark.get("lane"), kv.get("dlane_k5")):
+        return []  # THE DIRECTION LANE's mark (release D-1) while its lane takes none: "shadow", K5, or the lane off
     contract = review_contract()["sha256"]
     reviews = state.get("incubator_reviews") or {}
     if not (_review_passed(state.get("review"), sha, contract) or _review_passed(reviews.get(sha), sha, contract)):

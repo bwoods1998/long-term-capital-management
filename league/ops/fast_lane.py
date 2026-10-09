@@ -33,6 +33,12 @@ THE REPORT (`report`), JSON:
   the last `window_sessions` New York sessions, from `window_start`, `real.probe_realized`) against `budget_usd`, and
   `realized_total_usd` every close's against `total_budget_usd`; `room_usd` is what the tighter of the two envelopes
   leaves and `binding` names it.
+- THE DIRECTION LANE (release D-1, Oct 9, 2026; league/swarm/dlane.py): while the lane is on (`dlane.mode` "shadow" or
+  "gate"), every screen row and band row also names its family's `lane` ("alpha" or "direction", `dlane.lane_of`), so
+  the `dlane` report (league/ops/dlane_report.py) reads the contamination measures per lane, and (release D-1b) every
+  band row carries `fp`: {screen, fp_lane_mixed, fp_lane_2224, receipt, look_recorded}, the screen that admitted its
+  banded version and that screen's measured false-positive rates (the owner's goal of Oct 9, item 4). With the lane off
+  the report is byte for byte the one before (no `lane` or `fp` key).
 
 CONTAMINATION, MEASURED (the review of Oct 7, 2026; goal item 5: "contamination measured and stated"). 123 of the
 holdout's 184 sessions (through 2026-06-30) are inside the training of Opus 5.5 (cutoff June 2026); the other authors'
@@ -234,6 +240,15 @@ REALIZED_BASIS = {
 }
 
 
+def probe_rooms(table: Any, window: Any, total: Any, at_risk: Any) -> tuple[dict[str, Any], str]:
+    """THE ROLLING PROBE BUDGET's two rooms (release L-D) and the one that binds: {"window": `probe.loss_budget_usd` less
+    the window's realized figure, "total": `probe.loss_total_usd` less the total's}, each less every real position's open
+    maximum loss (`at_risk`), unfloored; the binding envelope is the tighter (the window on a tie). `probe_budget` and the
+    `dlane` report (league/ops/dlane_report.py `probe_envelope`) read the same rooms from the same table."""
+    rooms = {"window": table.probe_loss_budget - window - at_risk, "total": table.probe_loss_total - total - at_risk}
+    return rooms, min(rooms, key=lambda k: (rooms[k], k != "window"))
+
+
 def probe_budget(live_path: str | Path, today: str) -> dict[str, Any]:
     from ..live import money as M
     from ..live.real import probe_figures
@@ -247,8 +262,7 @@ def probe_budget(live_path: str | Path, today: str) -> dict[str, Any]:
         table = M.Table.from_constitution()
         # The figures `RealBook.exposure` gives `money.plan_open` (release L-D: the window's and the total's).
         open_n, window, total, at_risk, since = probe_figures(rows, day=today, table=table)
-    rooms = {"window": table.probe_loss_budget - window - at_risk, "total": table.probe_loss_total - total - at_risk}
-    binding = min(rooms, key=lambda k: (rooms[k], k != "window"))
+    rooms, binding = probe_rooms(table, window, total, at_risk)
     return {"realized_usd": str(M.cents(window)), "realized_total_usd": str(M.cents(total)),
             "realized_basis": REALIZED_BASIS[table.probe_loss_basis], "window_sessions": table.probe_loss_window,
             "window_start": since,
@@ -258,9 +272,10 @@ def probe_budget(live_path: str | Path, today: str) -> dict[str, Any]:
 
 
 def report(swarm_root: str | Path, live_path: str | Path | None, closes_path: str | Path, *, since: str | None = None,
-           today: str | None = None) -> dict[str, Any]:
+           today: str | None = None, settings: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """The report (the module docstring), from the swarm store at `swarm_root` (opened read-only), the live state at
-    `live_path` (read-only; None leaves the budget out) and the closes file."""
+    `live_path` (read-only; None leaves the budget out) and the closes file. `settings` (the swarm's) only names each
+    row's lane while the direction lane is on; None or the lane off leaves the rows as they were."""
     from ..swarm.store import SwarmStore
     from . import direction as DIR
 
@@ -281,6 +296,21 @@ def report(swarm_root: str | Path, live_path: str | Path | None, closes_path: st
                 screen.append(look_row(store, families.get(look["family"]), look, closes))
         bands = [band_row(store, fam, screen, closes, today) for fam in families.values()
                  if fam.get("band") in ("candidate", "probe", "sized") and not fam.get("retired_at")]
+        from ..swarm import dlane
+
+        if dlane.on(settings):  # THE DIRECTION LANE: each row names its lane (off: no key, the rows as before)
+            lane = {fid: dlane.lane_of(store, fam, settings) for fid, fam in families.items()}
+            for row in screen + bands:
+                row["lane"] = lane.get(row["family"], dlane.ALPHA)
+            # THE FALSE-POSITIVE RATE BESIDE EVERY BAND ROW (release D-1b; the owner's goal of Oct 9, item 4): the screen
+            # that admitted its banded version (its passed look's recorded line) and that screen's lane rates at zero
+            # edge, {screen, fp_lane_mixed, fp_lane_2224, receipt} (`dlane.fp_of_look`; the alpha lane's S-B has no lane
+            # rate). Under `fp`: the row's `screen` key is its screen rows.
+            passed = {(x["family"], int(x["version"])): x.get("detail") for x in store.looks() if x.get("passed")}
+            for row in bands:
+                n = row.get("version")
+                detail = passed.get((row["family"], int(n))) if isinstance(n, int) else None
+                row["fp"] = {**dlane.fp_of_look(detail, settings), "look_recorded": detail is not None}
     finally:
         store.close()
     out: dict[str, Any] = {"at": today, "since": since, "closes": str(closes_path), "screen": screen,
@@ -300,8 +330,14 @@ def run(ctx: Any) -> dict[str, Any]:
     today = now.date().isoformat()
     since = (now - timedelta(days=JOB_DAYS)).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
     live = root / "live.sqlite"
+    try:  # the swarm's settings name each row's lane while the direction lane is on (read before the read-only guard)
+        from ..swarm import settings as settings_mod
+
+        settings = settings_mod.load(root, config=getattr(ctx, "config", None))
+    except Exception:  # noqa: BLE001 - no settings: no lane keys, the report as before
+        settings = None
     with guard.readonly():
-        out = report(root, live if live.exists() else None, root / DIR.FILE, since=since, today=today)
+        out = report(root, live if live.exists() else None, root / DIR.FILE, since=since, today=today, settings=settings)
     out["window_days"] = JOB_DAYS
     write_json(root / FILE, out)
     bare = sorted({b["family"] for b in out["bands"] if b["band"] in ("probe", "sized")

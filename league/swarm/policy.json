@@ -51,6 +51,75 @@
     "per_round": 6,
     "usd_day": 60
   },
+  "dlane": {
+    "mode": "gate",
+    "roots": [
+      "SPY",
+      "QQQ",
+      "IWM"
+    ],
+    "structures": [
+      "long_single"
+    ],
+    "classes": [
+      "equity_premium",
+      "trend_momentum"
+    ],
+    "holding": [
+      "days_1_3",
+      "days_4_10"
+    ],
+    "birth_share": 0.5,
+    "max_share": 0.6,
+    "min_per_pass": 1,
+    "max_alive": 24,
+    "window_hours": 24,
+    "min_window": 10,
+    "lane_only_hours": 12,
+    "active_share": 0.5,
+    "min_active_years": 2,
+    "out_t_floor": -1.0,
+    "out_loss_share": 0.5,
+    "min_entry_days": 60,
+    "cost_ratio": 0.5,
+    "c_train": 1.5,
+    "unit_cap_usd": null,
+    "unit_share": 0.1,
+    "unit_pref_usd": 75,
+    "arm_fraction": 0.0,
+    "screen": "D2",
+    "screens": {
+      "S-C": {
+        "look_level": 0.2,
+        "sharpe_share": 0.25,
+        "fp_unconditional": 0.0141,
+        "fp_both_windows_rose": 0.0222,
+        "fp_lane_2224": 0.0209
+      },
+      "D2": {
+        "c": 1.0,
+        "receipt_sha256": "c36059470d00241db67e1542361097e397289b87f024261b96da2db323c63b5b",
+        "fp_lane_mixed": 0.1037,
+        "fp_lane_2224": 0.1239,
+        "fp_lane_ci_mixed": [
+          0.0957,
+          0.1116
+        ],
+        "fp_lane_cluster_mixed": [
+          0.079,
+          0.1276
+        ],
+        "power10": 0.1995
+      }
+    },
+    "val_tries": 1,
+    "looks_per_lineage": 1,
+    "alarm_min_looks": 10,
+    "alarm_pass_share": 0.6,
+    "done_zero_edge_p": 0.13,
+    "k5_net_usd": -600,
+    "k5_clear": false
+  },
   "engineer": {
     "enabled": true
   },

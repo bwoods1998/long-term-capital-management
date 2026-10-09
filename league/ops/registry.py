@@ -101,6 +101,14 @@ JOBS: tuple[Job, ...] = (
         owner="learning game",
         what="the learning game's report (read-only, operator-only): R1-R6 of its measurement plan and the pre-registered "
              "decisions, into <state>/game/report-<day>.json"),
+    # THE DIRECTION LANE (release D-1, Oct 9, 2026): the operator's daily report at the House's start and 01:30Z, after the
+    # `direction` closes (01:00Z) and the fast lane's report it reads; read-only like theirs but for K5's kv (the trip,
+    # `dlane_k5`, and the operator's clear recorded, `dlane_k5_base`), so it runs in a pause too. With `dlane.mode` "off" it writes nothing (a `skipped` receipt).
+    Job("dlane", "league.ops.dlane_report", (S.at_start(), S.daily(1, 30)), grace=3 * HOUR, cpu=600, wall=1200,
+        in_pause=True, owner="direction lane",
+        what="the direction lane's report (operator-only): the funnel per lane, the Probe envelope, the DONE meter of the "
+             "pinned rule (done_screen, done_all) beside the same-risk buy-and-hold, alarms A1-A9 and K5, into "
+             "<state>/dlane-report.json"),
 )
 
 

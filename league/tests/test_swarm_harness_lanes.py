@@ -273,8 +273,8 @@ class Frozen(unittest.TestCase):
         self.assertNotEqual(loosened, researcher)
         with self.assertRaisesRegex(labmod.ImprovementError, "eligible_run is frozen"):
             lanes.symbol_guard("league/swarm/researcher.py", researcher, loosened)
-        skipped = researcher.replace("        recorded, robust = self._with_score(result, stress)  # the run's row keeps its score (`submit` reads it)\n",
-                                     "        recorded, robust = self._with_score(result, stress)  # the run's row keeps its score (`submit` reads it)\n"
+        skipped = researcher.replace("        recorded, robust = self._with_score(result, stress, fam)  # the run's row keeps its score (`submit` reads it)\n",
+                                     "        recorded, robust = self._with_score(result, stress, fam)  # the run's row keeps its score (`submit` reads it)\n"
                                      "        if result.get(\"status\") == \"disqualified\":\n            return {}\n", 1)
         self.assertNotEqual(skipped, researcher)
         with self.assertRaisesRegex(labmod.ImprovementError, "_gym_run writes trial"):

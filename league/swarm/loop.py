@@ -31,6 +31,10 @@ first start with `game.enabled` whose running Train span is the seen span (2022-
 With the game on under a span that shows the hidden years, it waits (a House warning); a start under such a span after T0
 voids the epoch (a House warning), and the next start under the seen span with the game on writes a new T0.
 
+THE AGENDA GUARD (release D-1, Oct 9, 2026, while the direction lane is on): at the start and whenever it changes, one House
+warning when `swarm.json`'s locked preamble or fallback agenda is longer than the architect reads, not ASCII, or names a
+hidden year (`agenda_alert`); the operator's tool `scripts/agenda_install.py` refuses such a text before it is written.
+
 The heartbeat (`<root>/swarm.heartbeat`, JSON) carries the pid, the release directory, the time, and a live
 status (families, cycles and spend in the last hour by kind, the guard, the pool): the House's `SwarmStep`
 reads it to supervise the process and the operator reads it to see the swarm.
@@ -139,6 +143,32 @@ def architect_spent(store: SwarmStore, kinds: Any, since: float) -> float:
     row = store._one(f"SELECT COALESCE(SUM(usd),0) AS usd FROM spend WHERE kind IN ({','.join('?' * len(kinds))}) AND epoch>=? "
                      "AND instr(detail, ?) > 0", (*kinds, float(since), ARCHITECT_KEY))
     return float(row["usd"]) if row else 0.0
+
+
+def agenda_alert(settings: Mapping[str, Any]) -> dict[str, Any] | None:
+    """THE AGENDA GUARD (release D-1, Oct 9, 2026; the plan's D9): the `swarm.status` alert's payload when the operator's
+    locked preamble (`architect.agenda_locked`) or the fallback agenda (`architect.agenda`) is one the architect would
+    read wrong (`dlane.agenda_problems`): longer than `architect.AGENDA_LOCKED_MAX` (it reads the first 4,000 characters
+    and silently drops the rest: agenda v19's last item and a half went unread from T0 until v19.1), not ASCII, or naming
+    a hidden year. None when both are fine or empty, and while the direction lane is off (THE ROLLBACK: no new alert).
+    The operator's tool, `scripts/agenda_install.py`, refuses such a text before it is written; this is the House's
+    warning for one that reached `swarm.json` another way. Lengths and reasons only, never the agenda's words."""
+    from . import dlane
+
+    if not dlane.on(settings):
+        return None
+    block = settings.get("architect") if isinstance(settings.get("architect"), Mapping) else {}
+    problems: dict[str, list[str]] = {}
+    for key in ("agenda_locked", "agenda"):
+        text = str(block.get(key) or "").strip()  # as the architect reads it (`architect.locked_text`)
+        found = dlane.agenda_problems(text) if text else []
+        if found:
+            problems[key] = found
+    if not problems:
+        return None
+    text = ("the agenda guard: " + "; ".join(f"architect.{key}: {', '.join(found)}" for key, found in problems.items())
+            + " (fix swarm.json with scripts/agenda_install.py, which refuses such a text)")
+    return {"action": "agenda_guard", "alert": True, "problems": problems, "text": text}
 
 
 #: PARKED DORMANCY (F1): `Scheduler.count_parked` reads the parked families at most this often.
@@ -881,6 +911,20 @@ class Swarm:
         log(text)
         return payload
 
+    def agenda_notice(self) -> dict[str, Any] | None:
+        """THE AGENDA GUARD's House warning (`agenda_alert`): one `swarm.status` alert (and a log line) at the swarm's start
+        when the agendas in `swarm.json` have a problem, and again whenever the problem changes, never one a loop.
+        Returns the event's payload when one was raised."""
+        payload = agenda_alert(self.settings)
+        seen = None if payload is None else json.dumps(payload["problems"], sort_keys=True)
+        if seen is None or seen == getattr(self, "_agenda_seen", None):
+            self._agenda_seen = seen
+            return None
+        self._agenda_seen = seen
+        self.store.event("swarm.status", None, payload)
+        log(payload["text"])
+        return payload
+
     def step(self) -> None:
         """One pass of the main loop (tests call it directly)."""
         fresh = settings_mod.load(self.root, config=self.config)
@@ -895,6 +939,10 @@ class Swarm:
             pass
         try:
             self.gate_chain_notice()
+        except Exception:  # noqa: BLE001 - a notice never stops the loop
+            pass
+        try:
+            self.agenda_notice()
         except Exception:  # noqa: BLE001 - a notice never stops the loop
             pass
         if getattr(self.guard, "due", lambda: True)():
