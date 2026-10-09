@@ -94,6 +94,12 @@ def run(ctx: Any) -> dict[str, Any]:
         closes = fetch(ctx.gateway, symbols, FIRST_DAY, today)
     except Exception as exc:  # noqa: BLE001 - a gateway error writes nothing: a failed receipt, retried in its grace
         return {"status": "failed", "ok": False, "error": f"{type(exc).__name__}: {str(exc)[:200]}"}
+    # FINISHED SESSIONS ONLY (Oct 10, 2026; the readiness audit's m11): the run at the House's start inside a session
+    # stored today's PARTIAL daily bar as its close (13:05 ET Oct 9: SPY 778.35), and a same-risk buy-and-hold read it
+    # as an exit's close. Today's bar is kept only once its session has closed (and `CLOSE_SETTLE_SECONDS` more).
+    if not session_closed(today, ctx.now()):
+        for series in closes.values():
+            series.pop(today, None)
     doc = {"schema": SCHEMA, "at": datetime.fromtimestamp(ctx.now(), NEW_YORK).isoformat(), "feed": "sip",
            "adjustment": "split", "proxy": proxy, "closes": {s: dict(sorted(v.items())) for s, v in sorted(closes.items())}}
     write_json(Path(ctx.root) / FILE, doc)
@@ -185,6 +191,22 @@ def train_fit(store: Any, fam: Mapping[str, Any], n: Any) -> dict[str, Any]:
             "basis": "train-held-hours"}
 
 
+#: A session's daily bar is final this long after its close (the SIP's closing prints settle).
+CLOSE_SETTLE_SECONDS = 15 * 60
+
+
+def session_closed(day: str, now: float) -> bool:
+    """`day`'s session has closed by `now` (with `CLOSE_SETTLE_SECONDS` to settle); True for a day with no session (no
+    bar to be partial)."""
+    from ltcm.data import us_equity_session
+
+    session = us_equity_session(day)
+    if session is None:
+        return True
+    close = datetime.fromisoformat(str(session.close_at).replace("Z", "+00:00")).timestamp()
+    return float(now) >= close + CLOSE_SETTLE_SECONDS
+
+
 def sessions(first: str, last: str) -> list[str]:
     """The NYSE sessions from `first` to `last` (ISO days, both included)."""
     from ltcm.data import us_equity_session
@@ -198,4 +220,4 @@ def sessions(first: str, last: str) -> list[str]:
 
 
 __all__ = ["run", "fetch", "load_closes", "market_returns", "same_risk_bh", "daily_fit", "train_fit", "sessions",
-           "symbols_of", "PROXY", "FILE"]
+           "session_closed", "symbols_of", "PROXY", "FILE"]

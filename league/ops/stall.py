@@ -27,13 +27,30 @@ a STALL by its cause:
   `RUNWAY_DAYS`. The owner step is the top-up, with the budget's own amount;
 - `owner_deploy`: main's head and the running release differ in a file only the owner's deploy may change (the updater
   refused main's head as the owner's deploy, `deploys.jsonl` stage `vet`) and no release was promoted since. Either side
-  may be ahead, so the owner step names both ways out;
+  may be ahead, so the owner step names both ways out. Since Oct 10, 2026 (the readiness audit's M12: the mail fired at
+  16:20Z Oct 9 inside the operator's own 16:17-16:28Z deploy) a refusal counts only once it has stood
+  `OWNER_DEPLOY_GRACE` (45 minutes), and not at all while a deploy is in flight (`deploy_flight`: a `deploys.jsonl`
+  `start` row with no verdict yet, or the operator's own nightly stop, the owner deploy's step 2, under 2 hours old);
 - `paused`: a maintenance pause (`<state>/PAUSE`) or a stopped swarm (`<state>/swarm.stop`) has stood `PAUSED_HOURS` or
   more. While either stands, births, Gym runs, Validations and the brake are not raised: a pause stops them by design;
 - `grant_refused`: the standing grant refused to re-ratify (the `grant` job's receipts in `ops.sqlite`: a refusal since
   its last `ok` run). New real entries stay held until the owner ratifies;
 - `kill_on`: the gateway's kill switch is on (`GET /v1/health` `kill_switch`): no real order, no Claude call and no merge
   until the owner lifts it. An unreadable health is no cause.
+
+Since Oct 10, 2026 (the readiness audit's M6: the direction lane's alarms, K5, a Done checkpoint, a pre-open FAIL and a
+dead nightly reached a ledger row no mail carries):
+- `dlane`: the direction lane's report (`<state>/dlane-report.json`, the `dlane` job) carries a warning-level alarm
+  (A1-A7, PL1 the program loss line, K5), or it is older than `DLANE_STALE_HOURS` while the lane is on. K5 holding (the
+  lane reads shadow until it is cleared) or disarmed (`dlane.k5_clear` left true) is the owner's step;
+- `done`: the report's A8, a FINAL Done checkpoint that holds, newly seen. News the owner hears at once (an owner
+  line), never an owner step WAITING: the Done meter's item 7 does not count it (`dlane_report.NEWS_CAUSES`);
+- `preopen`: the latest pre-open receipt (ops.sqlite, at most `PREOPEN_HOURS` old) failed a check, or the job failed or
+  was missed;
+- `forward`: the nightly's ready file (`<state>/gym-forward.json`) does not carry the last session before today once
+  the UTC day is `FORWARD_DUE_HOUR` hours in, the nightly's record (`<state>/data/nightly.json`) has carried an error
+  `NIGHTLY_ERROR_HOURS` or more, or a nightly stop (`<state>/data/nightly.stop`) has stood `NIGHTLY_STOP_HOURS` or more
+  (that one is the owner's step: the replay twins of the Done meter wait while it stands).
 
 THE NOTICE: one `POST /v1/notify` kind `stall` a run at most, listing EVERY cause standing (`cause_facts` each: the
 cause, the numbers, how long, what the House is doing about it, the owner step when one is needed), owner steps first,
@@ -92,14 +109,43 @@ BUDGET_STALE_SECONDS = 36 * 3600
 STATE_FILE = "stall.json"
 HEARTBEAT = "swarm.heartbeat"
 OPS_DB = "ops.sqlite"
+#: THE OWNER DEPLOY'S GRACE (Oct 10, 2026; the readiness audit's M12): a refusal of main's head counts as an owner step
+#: only once it has stood this long. The operator's own release pushes main, then deploys: its refusal comes first.
+OWNER_DEPLOY_GRACE = 45 * 60
+#: A `deploys.jsonl` `start` row with no verdict is a deploy in flight this long at most (the canary, the promotion and
+#: the ten-minute watch take about 12 minutes): an older one died unjudged.
+DEPLOY_FLIGHT_SECONDS = 2 * 3600
+#: The nightly forward daemon's stop file under the state root (league/watchdog.py NIGHTLY_STOP) and the markers
+#: automation writes in it (`NIGHTLY_MARKERS`): any other content (an empty `touch`, `operator:<why>`) is the operator's.
+NIGHTLY_STOP = Path("data") / "nightly.stop"
+AUTOMATION_MARKERS = ("updater:", "drill:")
+#: The operator's nightly stop younger than this says an owner deploy is in flight (docs/operations.md "Deploy", step 2);
+#: any stop standing this long is the `forward` cause.
+NIGHTLY_STOP_HOURS = 2.0
+#: The nightly's ready file and record (scripts/data/nightly.py), under the state root.
+FORWARD_READY = "gym-forward.json"
+NIGHTLY_RECORD = Path("data") / "nightly.json"
+#: The ready file must carry the last session before today once the UTC day is this many hours in (it lands ~06:14Z).
+FORWARD_DUE_HOUR = 10
+#: A nightly error standing this long is the `forward` cause.
+NIGHTLY_ERROR_HOURS = 6.0
+#: The direction lane's report (league/ops/dlane_report.py, written at the House's start and daily at 01:30Z).
+DLANE_REPORT = "dlane-report.json"
+DLANE_STALE_HOURS = 30.0
+#: The latest pre-open receipt is read while it is at most this old (the job runs an hour before each open).
+PREOPEN_HOURS = 24.0
 #: The files that pause the floor (the House's maintenance pause, `House.paused`; the swarm's stop file) and the step that
 #: lifts each.
 PAUSE_FILES = {"PAUSE": ("maintenance", "lift the maintenance pause once its work is done (scripts/floor_box.py maintenance off)"),
                "swarm.stop": ("swarm_stop", "remove state/swarm.stop once the swarm should run again (the House starts it then)")}
 CAUSES = ("births", "gym_runs", "validations", "braked", "runway_sail", "runway_claude", "owner_deploy", "paused",
-          "grant_refused", "kill_on")
+          "grant_refused", "kill_on", "dlane", "done", "preopen", "forward")
 #: The causes a pause stops by design: not raised while the floor is paused.
 RESEARCH_CAUSES = ("births", "gym_runs", "validations", "braked")
+#: The causes that are news to the owner, not a stall nor a step WAITING (Oct 10, 2026): a Done checkpoint that holds is
+#: mailed at once as an owner line, never counted against DONE-RULE item 7 (`dlane_report.NEWS_CAUSES`, held equal by a
+#: test) nor listed among the stalls on the daily page (`scoreboard.funnel_lines`).
+NEWS_CAUSES = ("done",)
 METER_WORDS = {"sail": "Sail", "claude": "Claude (Anthropic)"}
 #: The Sail guard's causes the owner alone can clear, and the step that clears each.
 GUARD_STEPS = {"under_line": "top up Sail: the Sail guard brakes the whole swarm while the balance is under its line",
@@ -352,6 +398,127 @@ def kill_facts(health: Any) -> dict[str, Any] | None:
     return {"on": health["kill_switch"], "since": since}
 
 
+def _marker(path: Path) -> str | None:
+    """What a nightly stop says (stripped; "" for an empty `touch`), None with no stop, "?" when it cannot be read."""
+    try:
+        return path.read_bytes()[:256].decode("utf-8", "replace").strip()
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return "?"
+
+
+def deploy_flight(base: str | Path, root: str | Path, now: float) -> dict[str, Any] | None:
+    """A DEPLOY IN FLIGHT (Oct 10, 2026; the readiness audit's M12), or None: the newest `deploys.jsonl` `start` row whose
+    deploy has no `verdict` (nor `interrupted`) row yet and is at most `DEPLOY_FLIGHT_SECONDS` old (the watchdog stages,
+    canaries, promotes and watches: the owner's deploy and the updater's alike), else the operator's own nightly stop
+    (`<state>/data/nightly.stop` with no automation marker: the owner deploy's step 2) at most `NIGHTLY_STOP_HOURS` old.
+    {how, since, deploy or marker}."""
+    starts: dict[str, float] = {}
+    try:
+        with (Path(base) / "deploys.jsonl").open(encoding="utf-8") as handle:
+            for line in handle:
+                if '"start"' not in line and '"verdict"' not in line and '"interrupted"' not in line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                key, at = str(row.get("deploy") or ""), S.epoch(row.get("at"))
+                if not key or at is None:
+                    continue
+                if row.get("stage") == "start":
+                    starts[key] = at
+                elif row.get("stage") in ("verdict", "interrupted"):
+                    starts.pop(key, None)
+    except OSError:
+        pass
+    live = [(at, key) for key, at in starts.items() if 0 <= now - at <= DEPLOY_FLIGHT_SECONDS]
+    if live:
+        at, key = max(live)
+        return {"how": "a deploy is in flight (deploys.jsonl: started, no verdict yet)", "since": at, "deploy": key[:80]}
+    stop = Path(root) / NIGHTLY_STOP
+    marker = _marker(stop)
+    if marker is not None and not marker.startswith(AUTOMATION_MARKERS):
+        try:
+            since = stop.stat().st_mtime
+        except OSError:
+            return None
+        if 0 <= now - since <= NIGHTLY_STOP_HOURS * 3600:
+            return {"how": "the operator's nightly stop stands (the owner deploy's step 2)", "since": since,
+                    "marker": marker[:80]}
+    return None
+
+
+def dlane_facts(root: str | Path) -> dict[str, Any] | None:
+    """The direction lane's report as the `dlane` and `done` causes read it: {at, alarms, k5, mode}, None with no report."""
+    doc = read_json(Path(root) / DLANE_REPORT, None)
+    if not isinstance(doc, Mapping):
+        return None
+    alarms = [a for a in doc.get("alarms") or [] if isinstance(a, Mapping) and a.get("id")]
+    k5 = doc.get("k5") if isinstance(doc.get("k5"), Mapping) else {}
+    return {"at": S.epoch(doc.get("at")), "alarms": alarms, "k5": dict(k5),
+            "mode": ((doc.get("lane") or {}) if isinstance(doc.get("lane"), Mapping) else {}).get("mode")}
+
+
+def preopen_facts(root: str | Path) -> dict[str, Any] | None:
+    """The latest pre-open receipt (ops.sqlite, read-only): {due_at, status, failed, headlines, error}, None without one."""
+    path = Path(root) / OPS_DB
+    if not path.exists():
+        return None
+    rows = guard.read(path, lambda db: guard.rows(db, "SELECT due_at, status, summary_json, error FROM runs WHERE "
+                                                      "job='preopen' ORDER BY due_at DESC, id DESC LIMIT 1"))
+    if not rows:
+        return None
+    row = rows[0]
+    try:
+        summary = json.loads(row["summary_json"]) if row["summary_json"] else {}
+    except (TypeError, ValueError):
+        summary = {}
+    summary = summary if isinstance(summary, Mapping) else {}
+    failed = [str(f) for f in summary.get("failed") or []]
+    headlines = {}
+    for check in summary.get("checks") or []:
+        if isinstance(check, Mapping) and check.get("ok") is False:
+            headlines[f"{check.get('n')} {check.get('name')}"] = str(check.get("headline") or "")[:160]
+    return {"due_at": S.epoch(row["due_at"]), "status": str(row["status"] or ""), "failed": failed,
+            "headlines": headlines, "error": str(row["error"] or "")[:200] or None}
+
+
+def last_session_before(day: Any) -> str | None:
+    """The last NYSE session strictly before `day` (an ISO day or a date), None when none in 14 days."""
+    import datetime as dt
+
+    from ltcm.data import us_equity_session
+
+    d = day if isinstance(day, dt.date) else dt.date.fromisoformat(str(day))
+    for back in range(1, 15):
+        if us_equity_session(d - dt.timedelta(days=back)) is not None:
+            return (d - dt.timedelta(days=back)).isoformat()
+    return None
+
+
+def forward_facts(root: str | Path) -> dict[str, Any]:
+    """What the `forward` cause reads: the nightly's ready file's day and time, its record's error, and its stop file
+    ({ready_day, ready_at, error, record_day, stop_marker, stop_since}); each absent part None."""
+    root = Path(root)
+    ready = read_json(root / FORWARD_READY, None)
+    record = read_json(root / NIGHTLY_RECORD, None)
+    out: dict[str, Any] = {"ready_day": None, "ready_at": None, "error": None, "record_day": None,
+                           "stop_marker": _marker(root / NIGHTLY_STOP), "stop_since": None}
+    if isinstance(ready, Mapping):
+        out["ready_day"], out["ready_at"] = ready.get("day"), ready.get("ready_at")
+    if isinstance(record, Mapping):
+        out["error"] = None if record.get("error") in (None, "") else str(record.get("error"))[:200]
+        out["record_day"] = record.get("day")
+    if out["stop_marker"] is not None:
+        try:
+            out["stop_since"] = (root / NIGHTLY_STOP).stat().st_mtime
+        except OSError:
+            pass
+    return out
+
+
 def _health(ctx: Any) -> Any:
     """The gateway's `/v1/health` (a GET with the House's token), or None when it cannot be read; a context may hand in
     `health` (tests)."""
@@ -361,6 +528,24 @@ def _health(ctx: Any) -> Any:
     try:
         return ctx.gateway.get("/v1/health")
     except Exception:  # noqa: BLE001 - an unreadable health raises no kill cause
+        return None
+
+
+def _lane_on(ctx: Any, root: Path) -> bool | None:
+    """The direction lane is on (`dlane.mode` not "off", as the swarm loads its settings), None when that cannot be read;
+    a context may hand in `lane_on` (tests)."""
+    given = _get(ctx, "lane_on")
+    if given is not None:
+        return bool(given)
+    try:
+        from ..swarm import dlane as dlane_mod
+        from ..swarm import settings as settings_mod
+
+        config = _get(ctx, "config")
+        with guard.readonly():
+            loaded = settings_mod.load(root, config=config if isinstance(config, Mapping) else None)
+        return dlane_mod.on(loaded)
+    except Exception:  # noqa: BLE001 - unknown: a stale report is still said
         return None
 
 
@@ -398,7 +583,10 @@ def _guard_words(guard_now: Mapping[str, Any]) -> str:
 
 def checks(swarm: Mapping[str, Any], *, now: float, ceiling: int | None, budget: Mapping[str, Any] | None,
            deploy: Mapping[str, Any] | None, heartbeat: Mapping[str, Any] | None, pause: Mapping[str, float] | None = None,
-           grant: Mapping[str, Any] | None = None, kill: Mapping[str, Any] | None = None) -> dict[str, dict[str, Any]]:
+           grant: Mapping[str, Any] | None = None, kill: Mapping[str, Any] | None = None,
+           flight: Mapping[str, Any] | None = None, dlane: Mapping[str, Any] | None = None, lane_on: bool | None = None,
+           preopen: Mapping[str, Any] | None = None, forward: Mapping[str, Any] | None = None,
+           nightly_error_since: float | None = None) -> dict[str, dict[str, Any]]:
     """Every cause's check: {stalled, what, numbers, doing, owner_step, onset (epoch or None)}. Pure."""
     out: dict[str, dict[str, Any]] = {}
     guard_now = swarm.get("guard") or {}
@@ -512,20 +700,29 @@ def checks(swarm: Mapping[str, Any], *, now: float, ceiling: int | None, budget:
                       + ". It never raises a cap or moves money."),
             "owner_step": step if short else None, "onset": None}
 
-    # owner_deploy: which side is ahead is not in the record, so the step names both ways out.
+    # owner_deploy: which side is ahead is not in the record, so the step names both ways out. THE GRACE AND THE FLIGHT
+    # (Oct 10, 2026; the readiness audit's M12): a refusal counts once it has stood `OWNER_DEPLOY_GRACE`, and never while
+    # a deploy is in flight (`deploy_flight`), so the operator's own release (push main, then deploy) mails nothing.
     files = (deploy or {}).get("files") or []
     named = f"{', '.join(files[:3])}{' and more' if len(files) > 3 else ''}"
+    young = bool(deploy) and now - float(deploy["first_at"]) < OWNER_DEPLOY_GRACE
+    waiting = deploy is not None and not young and not flight
+    held = ("" if not deploy or waiting else
+            f" Not an owner step yet: {flight['how']} since {S.iso(flight['since'])}." if flight else
+            f" Not an owner step yet: refused {_hours(now - float(deploy['first_at']))} h ago, inside the "
+            f"{OWNER_DEPLOY_GRACE // 60}-minute grace.")
     out["owner_deploy"] = {
-        "stalled": deploy is not None,
+        "stalled": waiting,
         "what": ("Main's head and the running release differ in files only the owner's deploy may change: the updater "
-                 "refuses main's head and keeps the running release." if deploy else
+                 "refuses main's head and keeps the running release." + held if deploy else
                  "No head of main waits for the owner's deploy."),
         "numbers": {} if not deploy else {
             "sha": deploy.get("sha"), "protected_files": len(files),
             "first_refused_at": S.iso(deploy["first_at"]), "last_promoted_at": None if deploy.get("promoted_at") is None
-            else S.iso(deploy["promoted_at"])},
+            else S.iso(deploy["promoted_at"]), "deploy_in_flight": bool(flight),
+            "grace_minutes": OWNER_DEPLOY_GRACE // 60},
         "doing": "The updater refuses each such head and keeps the running release; research and trading go on.",
-        "owner_step": None if not deploy else (
+        "owner_step": None if not waiting else (
             f"main's head {deploy.get('sha') or ''} and the running release differ in {named}: if main is ahead, deploy it "
             "yourself (scripts/floor_box.py deploy); if the running release is ahead, merge it to main instead"),
         "onset": None if not deploy else deploy.get("first_at")}
@@ -573,7 +770,128 @@ def checks(swarm: Mapping[str, Any], *, now: float, ceiling: int | None, budget:
                     "killed_at": None if not kill or kill.get("since") is None else S.iso(kill["since"])},
         "doing": "Research that calls no Claude model goes on; Claude research, real entries and the engineer's merges wait.",
         "owner_step": KILL_STEP if killed else None, "onset": (kill or {}).get("since")}
+    out.update(_lane_checks(now, dlane, lane_on))
+    out["preopen"] = _preopen_check(now, preopen)
+    out["forward"] = _forward_check(now, forward, nightly_error_since)
     return out
+
+
+K5_STEP = ("the direction lane reads shadow while K5 holds (no new direction Candidate, no incubator direction mark): "
+           "read its losses in dlane-report.json, then clear it if the lane should trade again (swarm.json "
+           "dlane.k5_clear true for one dlane run, then take it out; or delete the swarm store's kv dlane_k5)")
+K5_DISARMED_STEP = "take dlane.k5_clear out of swarm.json: while it is true K5 cannot trip, whatever the lane loses"
+DONE_STEP = ("Done holds at a FINAL checkpoint ({named}): read the claim in dlane-report.json (done.<meter>.latest, beside "
+             "P(Done | zero edge), the same-risk buy-and-hold and Net after costs); the plan to scale follows from it")
+
+
+def _lane_checks(now: float, dlane: Mapping[str, Any] | None, lane_on: bool | None) -> dict[str, dict[str, Any]]:
+    """`dlane` and `done` (the module docstring), from the direction lane's report (`dlane_facts`). Pure."""
+    report = dict(dlane or {})
+    at = report.get("at")
+    age = None if at is None else max(0.0, now - float(at))
+    stale = bool(report) and lane_on is not False and (age is None or age > DLANE_STALE_HOURS * 3600)
+    alarms = report.get("alarms") or []
+    warnings = [a for a in alarms if a.get("level") == "warning"]
+    k5_alarm = next((a for a in warnings if a.get("id") == "K5"), None)
+    k5 = report.get("k5") or {}
+    step = None
+    if k5_alarm is not None:
+        step = K5_DISARMED_STEP if k5_alarm.get("disarmed") or (k5.get("cleared") and not k5.get("tripped")) else K5_STEP
+    texts = "; ".join(f"{a.get('id')}: {str(a.get('text') or '')[:160]}" for a in warnings[:4])
+    dlane_out = {
+        "stalled": bool(warnings) or stale,
+        "what": ((f"The direction lane's report of {S.iso(at) if at is not None else 'an unknown time'} raised "
+                  f"{len(warnings)} warnings ({texts})." if warnings else "The direction lane's report raised no warning.")
+                 + ((f" The report is {_hours(age)} h old" if age is not None else " The report carries no time")
+                    + ": the dlane job has not written it since." if stale else "")) if report
+                else "No direction lane report on record.",
+        "numbers": {"alarms": ",".join(str(a.get("id")).lower() for a in warnings)[:80] or "none",
+                    "report_at": None if at is None else S.iso(at),
+                    "report_age_hours": None if age is None else round(age / 3600.0, 1),
+                    "k5": "tripped" if k5.get("tripped") else "disarmed" if k5.get("cleared") else "armed",
+                    "lane_mode": str(report.get("mode") or "unknown")[:20]},
+        "doing": ("The dlane job writes the report at the House's start and daily at 01:30Z, each alarm a House warning. "
+                  "It moves no money: K5 and the program loss line (PL1, DONE-RULE-A1 A1.3) only tighten, and exits go on."),
+        "owner_step": step, "onset": None}
+    a8 = [a for a in alarms if a.get("id") == "A8"] if report and not stale else []
+    named = ", ".join(f"{a.get('meter')} at close {a.get('at_close')}" for a in a8[:2])
+    done_out = {
+        "stalled": bool(a8),
+        "what": (f"Done criteria hold at a FINAL checkpoint ({named}): DONE-RULE items 3, 4 (consistency measured, A1.1) "
+                 "and 7 (research 24/7), read on final inputs (A1.4)." if a8 else "No new Done checkpoint holds."),
+        "numbers": {"checkpoints": ",".join(f"{a.get('meter')}:{a.get('at_close')}" for a in a8)[:80] or "none",
+                    "report_at": None if at is None else S.iso(at)},
+        "doing": "The House trades on by its pre-registered rules: no program or route is paused, slowed or stopped to "
+                 "protect the figure (DONE-RULE item 5).",
+        "owner_step": DONE_STEP.format(named=named) if a8 else None, "onset": at if a8 else None}
+    return {"dlane": dlane_out, "done": done_out}
+
+
+def _preopen_check(now: float, preopen: Mapping[str, Any] | None) -> dict[str, Any]:
+    """`preopen` (the module docstring), from the latest pre-open receipt (`preopen_facts`). Pure."""
+    row = dict(preopen or {})
+    due = row.get("due_at")
+    recent = due is not None and 0 <= now - float(due) <= PREOPEN_HOURS * 3600
+    broke = recent and row.get("status") in ("failed", "missed")
+    failed = list(row.get("failed") or []) if recent else []
+    lines = "; ".join(f"{name}: {line}" if line else name for name, line in list((row.get("headlines") or {}).items())[:4])
+    return {
+        "stalled": bool(broke or failed),
+        "what": (f"The pre-open checks of {S.iso(due)} did not run ({row.get('status')}: {row.get('error') or 'no detail'})."
+                 if broke else f"The pre-open checks of {S.iso(due)} failed {len(failed)} of them ({lines or ', '.join(failed)})."
+                 if failed else "The latest pre-open checks passed." if recent else "No pre-open receipt in the last day."),
+        "numbers": {"failed_checks": ",".join(f.replace(" ", "_") for f in failed)[:80] or "none",
+                    "preopen_due_at": None if due is None else S.iso(due), "preopen_status": row.get("status") or "none"},
+        "doing": ("Each FAIL is a House warning; the House trades on by its own stops and the grant (a pre-open FAIL "
+                  "blocks nothing by itself). The checks run again an hour before the next open."),
+        "owner_step": None, "onset": due if (broke or failed) else None}
+
+
+def _forward_check(now: float, forward: Mapping[str, Any] | None, error_since: float | None) -> dict[str, Any]:
+    """`forward` (the module docstring), from the nightly's files (`forward_facts`). Pure but for the session calendar."""
+    import datetime as dt
+
+    f = dict(forward or {})
+    today = dt.datetime.fromtimestamp(now, dt.timezone.utc)
+    late = expected = None
+    if f.get("ready_day"):
+        ref = today.date() if today.hour >= FORWARD_DUE_HOUR else today.date() - dt.timedelta(days=1)
+        try:
+            expected = last_session_before(ref)
+        except Exception:  # noqa: BLE001 - no calendar: no lateness raised
+            expected = None
+        late = expected is not None and str(f["ready_day"]) < expected
+    erring = f.get("error") is not None and error_since is not None and now - error_since >= NIGHTLY_ERROR_HOURS * 3600
+    stop_since = f.get("stop_since")
+    stopped = stop_since is not None and now - float(stop_since) >= NIGHTLY_STOP_HOURS * 3600
+    marker = f.get("stop_marker")
+    parts = []
+    if late:
+        parts.append(f"the nightly's ready file carries {f['ready_day']}, not the last session {expected}")
+    if erring:
+        parts.append(f"the nightly's record has carried an error for {_hours(now - float(error_since))} h "
+                     f"({str(f.get('error'))[:120]})")
+    if stopped:
+        parts.append(f"a nightly stop ({marker!r}) has stood {_hours(now - float(stop_since))} h")
+    step = None
+    if stopped:
+        who = "automation wrote it and did not lift it (check deploys.jsonl first)" if str(marker or "").startswith(
+            AUTOMATION_MARKERS) else "it is the operator's"
+        step = (f"remove /workspace/state/data/nightly.stop ({who}) once nothing needs the nightly stopped: the nightly "
+                "forward replay, and with it the Done meter's replay twins, waits while it stands")
+    onsets = [t for t, on in ((stop_since, stopped), (error_since, erring)) if on and t is not None]
+    return {
+        "stalled": bool(late or erring or stopped),
+        "what": ("The nightly forward replay is late or stopped: " + "; ".join(parts) + "." if parts else
+                 "The nightly forward replay is on time." if f.get("ready_day") else "No nightly ready file on record."),
+        "numbers": {"ready_day": f.get("ready_day"), "expected_day": expected,
+                    "ready_at": None if S.epoch(f.get("ready_at")) is None else S.iso(S.epoch(f.get("ready_at"))),
+                    "nightly_error": f.get("error") is not None, "nightly_stop": marker is not None,
+                    "nightly_stop_since": None if stop_since is None else S.iso(float(stop_since))},
+        "doing": ("The House's supervisor keeps the nightly daemon alive while no stop stands and it retries a failed night "
+                  "every five minutes. Until the session's replay lands, the Done meter's readings stay provisional "
+                  "(DONE-RULE-A1 A1.4) and its replay twins wait."),
+        "owner_step": step, "onset": min(onsets) if onsets else None}
 
 
 # ---------------------------------------------------------------------------------------------- the notice
@@ -662,12 +980,39 @@ def run(ctx: Any) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 - an unreadable receipts store raises no grant cause
         grant = None
         errors.append(f"the grant's receipts could not be read ({type(exc).__name__})")
-    found = checks(swarm, now=now, ceiling=ceiling, budget=budget if isinstance(budget, Mapping) else None,
-                   deploy=owner_deploy(base), heartbeat=read_json(root / HEARTBEAT, None), pause=pause_facts(root),
-                   grant=grant, kill=kill_facts(_health(ctx)))
-
+    # THE LANE, THE PRE-OPEN AND THE NIGHTLY (Oct 10, 2026; the readiness audit's M6 and M12): each read on its own, an
+    # unreadable one an error, never a cause.
+    lane_on, dlane, preopen, forward, flight = None, None, None, {}, None
+    try:
+        lane_on = _lane_on(ctx, root)
+        dlane = dlane_facts(root)
+    except Exception as exc:  # noqa: BLE001 - no lane cause from an unreadable report
+        errors.append(f"the direction lane's report could not be read ({type(exc).__name__})")
+    try:
+        preopen = preopen_facts(root)
+    except Exception as exc:  # noqa: BLE001 - no pre-open cause from unreadable receipts
+        errors.append(f"the pre-open receipts could not be read ({type(exc).__name__})")
+    try:
+        forward = forward_facts(root)
+    except Exception as exc:  # noqa: BLE001 - no forward cause from unreadable files
+        errors.append(f"the nightly's files could not be read ({type(exc).__name__})")
+    try:
+        flight = deploy_flight(base, root, now)
+    except Exception as exc:  # noqa: BLE001 - no flight read: the grace still holds a fresh refusal back
+        errors.append(f"whether a deploy is in flight could not be read ({type(exc).__name__})")
     state = read_json(root / STATE_FILE, {})
     state = state if isinstance(state, dict) else {}
+    # How long the nightly's record has carried an error: from the first run that saw it (kept in stall.json).
+    seen_error = state.get("nightly_error") if isinstance(state.get("nightly_error"), dict) else {}
+    nightly_error = None
+    if (forward or {}).get("error") is not None:
+        nightly_error = {"since": seen_error.get("since") or S.iso(now)}
+    found = checks(swarm, now=now, ceiling=ceiling, budget=budget if isinstance(budget, Mapping) else None,
+                   deploy=owner_deploy(base), heartbeat=read_json(root / HEARTBEAT, None), pause=pause_facts(root),
+                   grant=grant, kill=kill_facts(_health(ctx)), flight=flight, dlane=dlane, lane_on=lane_on,
+                   preopen=preopen, forward=forward,
+                   nightly_error_since=None if nightly_error is None else S.epoch(nightly_error["since"]))
+
     told = state.get("causes") if isinstance(state.get("causes"), dict) else {}
     mail = dict(state.get("mail")) if isinstance(state.get("mail"), dict) else {}
     cleared, stalled, warned, entries = [], [], [], []
@@ -729,7 +1074,8 @@ def run(ctx: Any) -> dict[str, Any]:
         if kind is not None and not notice["sent"] and notice.get("why"):
             text += f" (notice: {notice['why']})"
         _alert(ctx, text)
-    write_json(root / STATE_FILE, {"schema": 2, "at": S.iso(now), "causes": told, "mail": mail})
+    write_json(root / STATE_FILE, {"schema": 2, "at": S.iso(now), "causes": told, "mail": mail,
+                                   "nightly_error": nightly_error})
     return {"stalled": stalled, "cleared": cleared, "warned": warned, "notice": notice,
             "checks": {c: {k: found[c].get(k) for k in ("stalled", "what", "numbers", "doing", "owner_step")} for c in CAUSES},
             "ceiling": ceiling, "errors": errors, "warning": bool(stalled or errors)}
@@ -738,4 +1084,6 @@ def run(ctx: Any) -> dict[str, Any]:
 __all__ = ["run", "checks", "swarm_facts", "owner_deploy", "pause_facts", "grant_facts", "kill_facts", "cause_facts",
            "notice_facts", "notice_id", "due_notice", "candidate", "CAUSES", "BIRTH_HOURS", "GYM_HOURS", "MIN_GYM_RUNS",
            "VALIDATION_HOURS", "BRAKE_WINDOW_HOURS", "BRAKED_HOURS", "RUNWAY_DAYS", "PAUSED_HOURS", "OWNER_EVERY_SECONDS",
-           "INFO_EVERY_SECONDS", "WARN_EVERY_SECONDS", "STATE_FILE"]
+           "INFO_EVERY_SECONDS", "WARN_EVERY_SECONDS", "STATE_FILE", "deploy_flight", "dlane_facts", "preopen_facts",
+           "forward_facts", "last_session_before", "OWNER_DEPLOY_GRACE", "DEPLOY_FLIGHT_SECONDS", "NIGHTLY_STOP_HOURS",
+           "NIGHTLY_ERROR_HOURS", "FORWARD_DUE_HOUR", "DLANE_STALE_HOURS", "PREOPEN_HOURS", "NEWS_CAUSES"]

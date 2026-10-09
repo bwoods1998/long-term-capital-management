@@ -247,8 +247,13 @@ def funnel_lines(funnel: Mapping[str, Any] | None, stalls: Mapping[str, Any] | N
                   f"(of {now.get('alive', 0)} living families).", ""]
     causes = _dig(stalls, "causes")
     if isinstance(causes, Mapping):
+        # A Done checkpoint that holds is the stall job's news to the owner (`stall.NEWS_CAUSES`, Oct 10, 2026), never a
+        # stall on the public page: a Done claim is the owner's to make, with its evidence beside it.
+        from .stall import NEWS_CAUSES
+
         standing = [f"{name} (since {_cell(_dig(rec, 'seen_at'))})" for name, rec in sorted(causes.items())
-                    if isinstance(rec, Mapping) and rec.get("standing") and re.fullmatch(r"[a-z_]{1,40}", str(name))]
+                    if isinstance(rec, Mapping) and rec.get("standing") and re.fullmatch(r"[a-z_]{1,40}", str(name))
+                    and name not in NEWS_CAUSES]
         lines += [f"Stalls standing now: {', '.join(standing) if standing else 'none'}.", ""]
     return lines
 
