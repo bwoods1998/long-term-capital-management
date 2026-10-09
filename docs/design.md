@@ -546,10 +546,12 @@ everything that shows it says so. The rules live in one module, `league/swarm/dl
   its false-positive rate at zero edge is 1.41% a program, 2.22% in a world where both windows rose (the operator's
   simulation). No hidden look: the game's look cost the lane most of its power for a false-positive gain under 1%. A
   pooled screen (D2) is coded and refused until a receipt is pinned in the repository. Each lane has its own leakage
-  alarm (direction trips at 10 looks and over 60%: its passes are correlated through one market).
+  alarm (direction trips at 10 looks and over 60%: its passes are correlated through one market); with the lane off,
+  the one alarm counts only the looks the alpha line judged. A direction family never plays the learning game, even
+  when it is born into a lineage that has an arm.
 - **Its money.** The same routes and the same walls as alpha: the incubator (a direction mark in place of the drift
   screen), tuition, Probe and Sized under the constitution's table; K5 puts the lane in shadow once its realized net is
-  at or below -$600, until the operator clears it.
+  at or below -$600, until the operator clears it (a clear re-arms K5 at -$600 below the net at clearing).
 - **What Done means here.** The goal's Done is read by a rule pinned before D-1 shipped (DONE-RULE, sha256
   `0d007696...`): every agent real close on Probe/Sized, tuition and the incubator since the options swarm began, 30 of
   them from at least 2 programs with 5 each, net positive after fees, live consistent with replay, read only at the 30th

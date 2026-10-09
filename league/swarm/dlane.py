@@ -68,9 +68,13 @@ It is also the code's default, so a missing or dropped policy layer is the rollb
 policy layer) run the release before it unless they switch the lane on. "shadow": births, the direction objective,
 research and Validation run; no direction family becomes a Candidate and the incubator takes no direction mark.
 "gate": everything. A malformed `mode` reads "shadow". K5 (decision 9): while the store's kv `dlane_k5` is set (the
-`dlane` report job sets it when the lane's realized net over every route is at or below `k5_net_usd`, -$600), a "gate"
-lane reads "shadow"; only the operator clears it (swarm.json `dlane.k5_clear` true, or deleting the kv). A tightening, never
-a trade.
+`dlane` report job sets it when the lane's realized net over every route is at or below its line, `k5_net_usd`, -$600,
+below the net at the operator's last clear), a "gate" lane reads "shadow"; only the operator clears it (swarm.json
+`dlane.k5_clear` true, or deleting the kv). A tightening, never a trade. THE CLEAR IS DURABLE (the review of Oct 9,
+2026; `k5_rearm`): the job's next run records it (kv `dlane_k5_base`: the net then) and re-arms K5 at `k5_net_usd`
+below that net, so a cleared K5 neither trips again at once on the same losses nor stays off for good. While
+`k5_clear` is true K5 cannot trip at all: that is a loosening while it stays, and the report warns every run until the
+operator takes it out.
 
 SETTINGS. Every default is in league/swarm/policy.json's "dlane" block (the owner's deploy); swarm.json overrides it; each
 value is held inside its bound here (`cfg`): a malformed value is its default, a number past a bound is the bound. The
@@ -79,7 +83,9 @@ policy.
 
 WHAT AGENTS SEE. Rules and Train-year (2022-24) facts only: never a hidden-year figure, never a Validation or holdout
 figure, never a number from the operator's private studies (`brief_text`, `status_text`, `view`, `lanes_text` are tested
-for it).
+for it). E5 is shown as its verdict alone (`UNIT_HINT`, the review of Oct 9, 2026): today's price scale (the House's
+last closes over 2024's) and the unit cap (a share of the account's equity) are 2026 figures, kept in the family state
+and the operator's report only.
 
 Standard library only (the House box runs it without numpy).
 """
@@ -130,9 +136,18 @@ CLOSES_FILE = "direction-closes.json"
 HEALTH_FILE = "health.json"
 #: The family state's key of the lane's verdicts (`record`), and how many versions it keeps.
 STATE_KEY = "dlane"
+#: What an agent is told when E5 fails (the review of Oct 9, 2026): the verdict and this scale-free hint, never a figure
+#: priced at today's closes or the account's equity (`unit_of`'s `why`, `view`, `status_text`, the architect's LANES
+#: block). A dollar figure at today's prices over a 2024 one is today's index level against 2024's, a 2026 market figure
+#: (the holdout's tail included), and the cap is a share of the account's equity, a 2026 P&L figure; agents may read rules
+#: and Train-year (2022-24) facts only. The figures stay in the family state (`record`) and the operator's report.
+UNIT_HINT = ("choose a further out-of-the-money strike or a nearer expiry: one lot's premium is its maximum loss, and the "
+             "cap is a share of the account")
 VERSIONS_KEPT = 12
-#: The store's kv keys: K5 (`k5_state`), the lane's first switch-on (`started_at`) and the last `lane_only` request.
+#: The store's kv keys: K5 (`k5_state`), K5's re-arm base (`k5_rearm`: the net at the operator's last clear, and the trip
+#: not yet cleared), the lane's first switch-on (`started_at`) and the last `lane_only` request.
 K5_KEY = "dlane_k5"
+K5_BASE_KEY = "dlane_k5_base"
 STARTED_KEY = "dlane_started_at"
 LANE_ONLY_KEY = "dlane_lane_only_at"
 #: ACTIVE's frequency floor: the Train score's own (40 trades on 20 traded days).
@@ -302,35 +317,109 @@ def candidates_open(store: Any, settings: Mapping[str, Any] | None) -> bool:
 
 
 # ----------------------------------------------------------------------------------------------------------- K5
+def _k5_base(store: Any) -> dict[str, Any]:
+    """K5's re-arm base (kv `K5_BASE_KEY`): {net, at, trip, cleared}. `net` is the lane's realized net at the operator's
+    last clear (0.0 before any: the line is then `k5_net_usd` itself), `trip` the trip not yet cleared ({at, net}, or
+    None), `cleared` the last clear ({trip, how, at}, or None). A missing, malformed or unreadable base is the inception's.
+    Never raises."""
+    try:
+        value = store.get(K5_BASE_KEY) if store is not None else None
+    except Exception:  # noqa: BLE001 - an unreadable store: the inception's base
+        value = None
+    value = value if isinstance(value, Mapping) else {}
+    trip = value.get("trip") if isinstance(value.get("trip"), Mapping) else None
+    cleared = value.get("cleared") if isinstance(value.get("cleared"), Mapping) else None
+    return {"net": _num(value.get("net")) or 0.0, "at": value.get("at"), "trip": dict(trip) if trip else None,
+            "cleared": dict(cleared) if cleared else None}
+
+
+def k5_line(store: Any, settings: Mapping[str, Any] | None) -> float:
+    """K5's line now: `k5_net_usd` (-$600) below the net at the operator's last clear (`_k5_base`; 0.0 before any, so the
+    first line is -$600 since the options swarm began)."""
+    return round(_k5_base(store)["net"] + cfg(settings)["k5_net_usd"], 2)
+
+
 def k5_state(store: Any, settings: Mapping[str, Any] | None) -> dict[str, Any]:
-    """{tripped, at, net, cleared}: K5 holds while the store's kv `K5_KEY` is set and swarm.json's `dlane.k5_clear` is not
-    true. A kv that is set but malformed holds (fail-closed); a store that cannot be read holds nothing (it is read again on
-    the next call). Never raises."""
+    """{tripped, at, net, cleared, set, line, base_net, trip_open, last_clear}: K5 holds (`tripped`) while the store's kv
+    `K5_KEY` is `set` and swarm.json's `dlane.k5_clear` is not true (`cleared`; while it is, K5 can neither hold nor trip:
+    `k5_trip`). `line` is the line a trip is judged by (`k5_line`), `base_net` the net it is measured from, `trip_open`
+    a trip the job has not yet seen cleared (`k5_rearm`), `last_clear` the last clear it recorded. A kv that is set but
+    malformed holds (fail-closed); a store that cannot be read holds nothing (it is read again on the next call). Never
+    raises."""
     cleared = cfg(settings)["k5_clear"]
     try:
         value = store.get(K5_KEY) if store is not None else None
     except Exception:  # noqa: BLE001 - an unreadable store: nothing to hold yet
         value = None
+    base = _k5_base(store)
+    out = {"tripped": False, "at": None, "net": None, "cleared": cleared, "set": value is not None,
+           "line": round(base["net"] + cfg(settings)["k5_net_usd"], 2), "base_net": base["net"],
+           "trip_open": base["trip"] is not None, "last_clear": base["cleared"]}
     if value is None:
-        return {"tripped": False, "at": None, "net": None, "cleared": cleared}
+        return out
     at = value.get("at") if isinstance(value, Mapping) else None
     net = _num(value.get("net")) if isinstance(value, Mapping) else None
-    return {"tripped": not cleared, "at": at, "net": net, "cleared": cleared}
+    return {**out, "tripped": not cleared, "at": at, "net": net}
 
 
 def k5_trip(store: Any, settings: Mapping[str, Any] | None, net_usd: Any, *, at: str | None = None) -> bool:
-    """K5 (decision 9), for the `dlane` report job: write the kv {at, net} when the direction lane's realized net over every
-    route is at or below `k5_net_usd`, it is not set already and the operator has not cleared it. True when this call wrote
-    it. A tightening only: it never trades, and nothing here ever clears it."""
+    """K5 (decision 9), for the `dlane` report job: write the kv {at, net, line} when the direction lane's realized net over
+    every route is at or below K5's line (`k5_line`: `k5_net_usd` below the net at the last clear), it is not set already
+    and `dlane.k5_clear` is not true (while it is, K5 is disarmed: the report says so every run). The trip is also kept in
+    the re-arm base (`trip`), so that the job sees it cleared however the operator clears it (`k5_rearm`). A trip the base
+    holds open with no kv is a clear by hand that `k5_rearm` has not recorded yet: nothing is written then (the job
+    records the clear first). True when this call wrote it. A tightening only: it never trades, and nothing here ever
+    clears it."""
     c = cfg(settings)
     net = _num(net_usd)
-    if net is None or net > c["k5_net_usd"] or c["k5_clear"] or getattr(store, "readonly", False):
+    if net is None or c["k5_clear"] or getattr(store, "readonly", False):
         return False
     with store.atomic():
-        if store.get(K5_KEY) is not None:
+        line = k5_line(store, settings)
+        if net > line or store.get(K5_KEY) is not None or _k5_base(store)["trip"] is not None:
             return False
-        store.put(K5_KEY, {"at": at or store.now(), "net": round(net, 2), "line": c["k5_net_usd"]})
+        stamp = at or store.now()
+        store.put(K5_KEY, {"at": stamp, "net": round(net, 2), "line": line})
+        base = _k5_base(store)
+        store.put(K5_BASE_KEY, {**base, "trip": {"at": stamp, "net": round(net, 2)}})
     return True
+
+
+def k5_rearm(store: Any, settings: Mapping[str, Any] | None, net_usd: Any, *, at: str | None = None) -> dict[str, Any] | None:
+    """THE OPERATOR'S CLEAR, MADE DURABLE (the review of release D-1, Oct 9, 2026), for the `dlane` job before `k5_trip`:
+    when the operator has cleared a trip, by `dlane.k5_clear` true while the kv is set or by deleting the kv (a trip the
+    base still holds open, `trip`, with no kv), the clear is recorded: the kv is deleted (so taking `k5_clear` out does
+    not bring the old trip back) and the base becomes the lane's realized net now (`net_usd`; the trip's own net when it
+    is unknown, which re-arms sooner), so K5's next line is `k5_net_usd` below the net at clearing. Without this, the net
+    since inception never resets: a deleted kv was written again on the next run while the net stayed under -$600, and
+    the only lasting clear was leaving `k5_clear` true, which disarmed K5 for every later loss. Returns the new base, or
+    None when there is nothing to record (or the store is read-only). Never trades."""
+    c = cfg(settings)
+    if getattr(store, "readonly", False):
+        return None
+    with store.atomic():
+        value = store.get(K5_KEY)
+        base = _k5_base(store)
+        if value is not None and c["k5_clear"]:
+            how = "dlane.k5_clear"
+            trip = ({"at": value.get("at"), "net": _num(value.get("net"))} if isinstance(value, Mapping)
+                    else {"at": None, "net": None})
+        elif value is None and base["trip"] is not None:
+            how = "the kv deleted"
+            trip = base["trip"]
+        else:
+            return None
+        net = _num(net_usd)
+        if net is None:
+            net = _num(trip.get("net"))
+        if net is None:
+            net = base["net"]
+        stamp = at or store.now()
+        record = {"net": round(net, 2), "at": stamp, "trip": None, "cleared": {"trip": trip, "how": how, "at": stamp}}
+        if value is not None:
+            store._exec("DELETE FROM kv WHERE key=?", (K5_KEY,))
+        store.put(K5_BASE_KEY, record)
+    return record
 
 
 # ----------------------------------------------------------------------------------------------------------- the lane
@@ -605,7 +694,8 @@ def unit_of(result: Mapping[str, Any], unit: Mapping[str, Any] | None, *, median
     maximum loss with fees ((max_loss + fees) / qty) of its trades entered in 2024, times the largest price scale over the
     roots those trades were in (`unit_context`). A run row whose trades were pruned passes its stored `median_2024_usd`,
     `n_2024` and `roots` instead (`lane_verdict`). verdict "pass", "fail", or "unknown" (no 2024 trade, a root without a
-    close, or no cap), which passes."""
+    close, or no cap), which passes. `scale`, `scaled_usd` and `cap_usd` are today's figures: kept for the code, the
+    family state (`record`) and the operator's report, never shown to an agent (`UNIT_HINT`); `why` names no figure."""
     if median_2024_usd is None:
         per, traded = [], set()
         for t in (result.get("trades") or []) if isinstance(result, Mapping) else []:
@@ -644,8 +734,8 @@ def unit_of(result: Mapping[str, Any], unit: Mapping[str, Any] | None, *, median
         out["verdict"] = "pass"
     else:
         out["verdict"] = "fail"
-        out["why"] = (f"one lot's maximum loss with fees at today's prices is ${out['scaled_usd']:.2f}, over the unit cap "
-                      f"of ${out['cap_usd']:.2f}")
+        # Figure-free (`UNIT_HINT`): this `why` reaches the agents (a score's `why`, a sweep row, a view, a status line).
+        out["why"] = f"one lot's maximum loss with fees at today's index prices is over the unit cap: {UNIT_HINT}"
     return out
 
 
@@ -840,19 +930,23 @@ def sort_key(score: Mapping[str, Any] | None) -> float:
 
 
 # ----------------------------------------------------------------------------------------------------------- records
-def compact(score: Mapping[str, Any] | None) -> dict[str, Any] | None:
+def compact(score: Mapping[str, Any] | None, *, priced: bool = False) -> dict[str, Any] | None:
     """A direction score as a run row's summary or the family state keeps it (no per-trade data): {objective, score,
-    eligible, fails, why, pnl, active, years, unit, reported}."""
+    eligible, fails, why, pnl, active, years, unit, reported}. Its `unit` keeps the 2024 facts E5 is re-priced from
+    (`median_2024_usd`, `n_2024`, `roots`) and the verdict; today's figures (`scaled_usd`, `cap_usd`) only with `priced`
+    (the family state, `record`, which the operator's report reads): a run row's summary is not, because a researcher
+    reads it back (`read_run` of a pruned run) and no agent sees a figure priced today (`UNIT_HINT`)."""
     if not isinstance(score, Mapping):
         return None
     unit = score.get("unit") if isinstance(score.get("unit"), Mapping) else {}
+    keys = ("median_2024_usd", "n_2024", "roots", "scaled_usd", "cap_usd", "verdict") if priced else \
+        ("median_2024_usd", "n_2024", "roots", "verdict")
     return {"objective": score.get("objective", OBJECTIVE), "score": score.get("score"),
             "eligible": bool(score.get("eligible")), "fails": list(score.get("fails") or []), "why": score.get("why"),
             "pnl": score.get("pnl"), "active": list(score.get("active") or []),
             "years": {y: {k: r.get(k) for k in ("active", "t", "exposure", "pnl", "trades", "days_traded")}
                       for y, r in (score.get("years") or {}).items() if isinstance(r, Mapping)},
-            "unit": {k: unit.get(k) for k in ("median_2024_usd", "n_2024", "roots", "scaled_usd", "cap_usd", "verdict")},
-            "reported": dict(score.get("reported") or {})}
+            "unit": {k: unit.get(k) for k in keys}, "reported": dict(score.get("reported") or {})}
 
 
 def compact_robust(robust: Mapping[str, Any] | None) -> dict[str, Any] | None:
@@ -878,7 +972,7 @@ def record(store: Any, fid: str, n: int, *, score: Mapping[str, Any] | None = No
         versions = dict((block or {}).get("versions") or {}) if isinstance(block, Mapping) else {}
         row = dict(versions.get(str(int(n))) or {})
         if score is not None:
-            row["train"] = compact(score)
+            row["train"] = compact(score, priced=True)  # today's unit figures too: the operator's report (A7) reads them
         if robust is not None:
             row["robust"] = compact_robust(robust)
         row["at"] = store.now()
@@ -1266,10 +1360,19 @@ class DirectionQuota:
       window holds `min_window` births), or past `max_alive` living direction families, or past the pass's own direction
       cap, max(floor, `min_per_pass`, floor(`max_share` x want));
     - while the lane is off it refuses every direction birth and limits no alpha birth (the architect then never builds
-      one: the rollback is byte for byte)."""
+      one: the rollback is byte for byte).
+
+    THE CLASS CAP (the review of release D-1, Oct 9, 2026). The architect's `max_alive_per_class` (12 living families a
+    mechanism class, structure x root group) refuses a proposal before this quota is asked, and every direction card falls
+    in one of the lane's few classes (`Architect.lane_classes`: long_single or debit_vertical on the ETF roots), which
+    alpha's core five births share. `class_room` ({class: free places at the pass's start}, from the architect; None: no
+    cap) bounds the reservation: the floor is never more than the room, and as births of either lane fill those classes within the
+    pass (`born(lane, cls)`) the births still reserved shrink with it (`reserved`), so alpha is never refused places no
+    direction card could take. A direction card the class cap refused is counted apart (`capped_by_class`; the event's
+    `lane_class_capped`), so the next request names the full classes rather than blaming the card's form."""
 
     def __init__(self, store: Any, settings: Mapping[str, Any] | None, *, now: float | None = None, want: int = 0,
-                 alive: int | None = None):
+                 alive: int | None = None, class_room: Mapping[str, int] | None = None, class_cap: int | None = None):
         from .store import iso
 
         c = cfg(settings)
@@ -1283,15 +1386,43 @@ class DirectionQuota:
             for row in _born(store, iso(now - c["window_hours"] * 3600.0)):
                 self.window[row["lane"]] += 1
         self.alive = (int(alive) if alive is not None else alive_direction(store, settings)) if self.on else 0
+        # THE CLASS CAP's room in the lane's classes (None: no cap read, the quota as built before the review).
+        self.class_room = ({str(k): max(0, int(v)) for k, v in class_room.items()}
+                           if isinstance(class_room, Mapping) and self.on else None)
+        self.class_cap = int(class_cap) if class_cap else None
+        self.class_capped = 0
         total = sum(self.window.values())
         behind = total < c["min_window"] or self.window[DIRECTION] < c["birth_share"] * total
         self.floor = 0
         if self.on and self.want and self.alive < c["max_alive"] and behind and not self._full(0, 0):
             self.floor = min(self.want, max(c["min_per_pass"], math.ceil(c["birth_share"] * self.want - 1e-9)))
+            if self.class_room is not None:
+                self.floor = min(self.floor, self.room())
         self.pass_cap = max(self.floor, c["min_per_pass"], math.floor(c["max_share"] * self.want + 1e-9)) if self.on else 0
         self.passed = {ALPHA: 0, DIRECTION: 0}
         self.refused = {ALPHA: 0, DIRECTION: 0}
         self.reasons: list[str] = []
+
+    def room(self) -> int:
+        """The places left now in the lane's classes under the class cap (a large number when no cap was read)."""
+        return sum(self.class_room.values()) if self.class_room is not None else 10 ** 9
+
+    def reserved(self) -> int:
+        """The pass's births reserved for direction now: the floor, less any the lane's classes can no longer hold (the
+        class cap; the review of Oct 9). The floor itself while no cap was read."""
+        if self.class_room is None:
+            return self.floor
+        return min(self.floor, self.passed[DIRECTION] + self.room())
+
+    def full_classes(self) -> list[str]:
+        """The lane's classes with no place left under the class cap, sorted ([] while no cap was read)."""
+        return sorted(k for k, v in (self.class_room or {}).items() if v <= 0)
+
+    def capped_by_class(self, lane: str) -> None:
+        """A proposal the architect's class cap refused (before this quota was asked): counted when it is a direction
+        card (the event's `lane_class_capped`)."""
+        if lane == DIRECTION:
+            self.class_capped += 1
 
     def _full(self, direction: int, total: int) -> bool:
         """One more direction birth would put the lane over `max_share` of the window and the pass (once the window and
@@ -1303,17 +1434,21 @@ class DirectionQuota:
     def why_not(self, lane: str) -> str | None:
         """Why one more birth of `lane` may not be born in this pass, or None when it may."""
         if lane != DIRECTION:
-            if not self.on or not self.floor:
+            reserved = self.reserved() if self.on else 0
+            if not self.on or not reserved:
                 return None
-            if self.passed[ALPHA] >= self.want - self.floor:
-                return (f"the pass's {self.floor} reserved direction births are never filled with alpha "
+            if self.passed[ALPHA] >= self.want - reserved:
+                return (f"the pass's {reserved} reserved direction births are never filled with alpha "
                         f"(dlane.birth_share {self.c['birth_share']:g})")
             return None
         if not self.on:
             return "the direction lane is off (dlane.mode)"
         if self.alive + self.passed[DIRECTION] >= self.c["max_alive"]:
             return f"{self.c['max_alive']} direction families live already (dlane.max_alive)"
-        if self.passed[DIRECTION] < self.floor:
+        if self.class_room is not None and self.room() <= 0:
+            return (f"the lane's classes are full under the class cap (architect.max_alive_per_class"
+                    + (f" {self.class_cap}" if self.class_cap else "") + f": {', '.join(self.full_classes())})")
+        if self.passed[DIRECTION] < self.reserved():
             return None
         if self.passed[DIRECTION] >= self.pass_cap:
             return f"the pass's direction cap of {self.pass_cap} is reached"
@@ -1331,16 +1466,26 @@ class DirectionQuota:
             self.reasons.append(f"{lane}: {why}")
         return why is None
 
-    def born(self, lane: str) -> None:
+    def born(self, lane: str, cls: str | None = None) -> None:
+        """A birth of `lane` in mechanism class `cls`: a birth of either lane in one of the lane's classes takes a place
+        under the class cap (`reserved`)."""
         self.passed[DIRECTION if lane == DIRECTION else ALPHA] += 1
+        if self.class_room is not None and cls is not None and str(cls) in self.class_room:
+            self.class_room[str(cls)] = max(0, self.class_room[str(cls)] - 1)
 
     def short(self) -> int:
-        """The pass's reserved direction births left unfilled (its event's `lane_short`)."""
-        return max(0, self.floor - self.passed[DIRECTION])
+        """The pass's reserved direction births left unfilled (its event's `lane_short`): only those the lane's classes
+        still had room for (`reserved`)."""
+        return max(0, self.reserved() - self.passed[DIRECTION])
 
     def event(self) -> dict[str, Any]:
-        """The pass event's lane keys: {lane_births, lane_refused, lane_short}."""
-        return {"lane_births": dict(self.passed), "lane_refused": dict(self.refused), "lane_short": self.short()}
+        """The pass event's lane keys: {lane_births, lane_refused, lane_short}, and `lane_class_capped` (direction cards
+        the class cap refused, with the lane's classes then full) when there were any."""
+        out: dict[str, Any] = {"lane_births": dict(self.passed), "lane_refused": dict(self.refused),
+                               "lane_short": self.short()}
+        if self.class_capped:
+            out["lane_class_capped"] = {"cards": self.class_capped, "full": self.full_classes()}
+        return out
 
     def text(self) -> str:
         """The architect's request's quota lines for the direction lane ("" while it is off)."""
@@ -1352,13 +1497,20 @@ class DirectionQuota:
         lines = [f"DIRECTION QUOTA (the last {self.c['window_hours']:g} h of births): direction {d} of {total} ({share:.0f}%); "
                  f"the lane holds at most {self.c['max_share']:.0%} of births and aims at {self.c['birth_share']:.0%}. "
                  f"Direction families alive: {self.alive} of at most {self.c['max_alive']}."]
+        full = self.full_classes()
         if self.floor:
             lines.append(f"This pass: at least {self.floor} of its {self.want} births are DIRECTION and are never filled with "
                          f"alpha; up to {self.pass_cap} may be.")
         elif self.alive >= self.c["max_alive"]:
             lines.append("This pass: the lane is full; propose alpha.")
+        elif self.class_room is not None and self.room() <= 0:
+            lines.append("This pass: no direction birth: every class a direction card can be in is full under the class "
+                         f"cap ({', '.join(full)}); propose alpha.")
         else:
             lines.append(f"This pass: up to {self.pass_cap} direction births, none reserved (the lane is at its share).")
+        if full and self.class_room is not None and self.room() > 0:
+            lines.append(f"Full under the class cap (no birth of these classes, either lane): {', '.join(full)}; a direction "
+                         "card of another structure has room.")
         if self.mode == "shadow":
             lines.append("The lane is in shadow: its families research and validate, and none becomes a Candidate yet.")
         return "\n".join(lines)
@@ -1400,8 +1552,9 @@ def brief_text(settings: Mapping[str, Any] | None, roots: Iterable[str] | None =
     return (
         f"YOUR LANE: DIRECTION ({OBJECTIVE}). Profit from the index's direction counts in this lane, and every figure of it is "
         f"reported beside the same-risk buy-and-hold, never hidden: {ALWAYS_IN_NOTE}. Your program buys calls on "
-        f"{', '.join(names)}: one out-of-the-money call near 0.20-0.30 delta fits the unit (1-3 point verticals lost to "
-        "cost on Train), one lot per entry, never sized by capital, held 2 to 8 sessions. YOUR TRAIN SCORE is the pooled t "
+        f"{', '.join(names)}: one out-of-the-money call near 0.20-0.30 delta fits the unit (the lane steers to single calls; "
+        "narrow verticals rarely fit after costs), one lot per entry, never sized by capital, held 2 to 8 sessions. YOUR "
+        "TRAIN SCORE is the pooled t "
         "of your daily P&L over the Train years at 1.0x the half-spread, not the worst year. A version is eligible when "
         f"(E1) it is in the market in at least {c['min_active_years']} of the 3 Train years (in the market: "
         f"{ACTIVE_MIN_TRADES}+ trades on {ACTIVE_MIN_DAYS}+ days and at least {c['active_share']:.0%} of its busiest year's "
@@ -1449,12 +1602,14 @@ def status_text(score: Mapping[str, Any] | None, robust: Mapping[str, Any] | Non
                      f"{r.get('days_traded') if r.get('days_traded') is not None else 'n/a'}")
     if years:
         parts.append("; ".join(years) + ".")
+    # THE UNIT (E5): its verdict only, never a figure priced today (`UNIT_HINT`; the review of Oct 9, 2026).
     unit = score.get("unit") if isinstance(score.get("unit"), Mapping) else {}
-    if unit.get("verdict") == "unknown":
-        parts.append(f"Unit: unknown today ({unit.get('why') or 'no live context'}); the live path prices every open.")
+    if unit.get("verdict") == "pass":
+        parts.append("Unit: one lot fits the unit cap at today's index prices.")
+    elif unit.get("verdict") == "fail":
+        parts.append(f"Unit: one lot is OVER the unit cap at today's index prices: {UNIT_HINT}.")
     else:
-        parts.append(f"Unit: one lot ${_num(unit.get('scaled_usd')) or 0:.2f} at today's prices "
-                     f"(cap ${_num(unit.get('cap_usd')) or 0:.2f}): {'fits' if unit.get('verdict') == 'pass' else 'OVER the cap'}.")
+        parts.append(f"Unit: unknown today ({unit.get('why') or 'no live context'}); the live path prices every open.")
     if isinstance(robust, Mapping) and robust.get("known"):
         checks = robust.get("checks") or {}
         parts.append(f"At 1.5x: P&L {_usd(robust.get('pnl_15'))} (P1 {_yes(checks.get('P1'))}), the years rules again "
@@ -1493,7 +1648,9 @@ def view(score: Mapping[str, Any] | None, robust: Mapping[str, Any] | None = Non
          mechanism: str | None = None) -> dict[str, Any] | None:
     """The `lane` block a direction family's `gym_run` view carries (Train-year figures only): {lane, objective, score,
     t_pool, t_pool_15, years {y: {active, t, exposure, pnl, entry_days}}, unit, verdict, why, fails, reported, beside,
-    note}. None without a direction score."""
+    note}. Its `unit` is E5's verdict alone ({verdict}, and `hint` on a fail): no figure priced at today's closes or the
+    account's equity (`UNIT_HINT`; the review of Oct 9, 2026 overrides HARNESS 6's `scale` here on secrecy grounds).
+    None without a direction score."""
     if not isinstance(score, Mapping) or score.get("objective") != OBJECTIVE:
         return None
     unit = score.get("unit") if isinstance(score.get("unit"), Mapping) else {}
@@ -1507,7 +1664,7 @@ def view(score: Mapping[str, Any] | None, robust: Mapping[str, Any] | None = Non
                                                                else None)
     return {"lane": DIRECTION, "objective": OBJECTIVE, "score": score.get("score"), "t_pool": score.get("t_pool"),
             "t_pool_15": rob.get("t_pool_15"), "years": years,
-            "unit": {k: unit.get(k) for k in ("median_2024_usd", "scale", "scaled_usd", "cap_usd", "verdict")},
+            "unit": {"verdict": unit.get("verdict"), **({"hint": UNIT_HINT} if unit.get("verdict") == "fail" else {})},
             "verdict": "eligible" if eligible else "not eligible", "why": why,
             "fails": list(score.get("fails") or []) + list(rob.get("fails") or []),
             "reported": {"E2": (score.get("reported") or {}).get("E2"), "R1": (rob.get("reported") or {}).get("R1"),
@@ -1537,8 +1694,9 @@ def agenda_problems(text: Any, *, limit: int = AGENDA_MAX) -> list[str]:
 
 __all__ = ["OBJECTIVE", "ALPHA", "DIRECTION", "LANES", "MODES", "SCREENS", "ALPHA_SCREEN", "FIRST_YEAR", "LAST_YEAR",
            "TRAIN_CLOSE_2024", "ROOTS", "STRUCTURES", "CLASSES", "EQUITY_PREMIUM", "HOLDINGS", "ALWAYS_IN_NOTE", "LABEL",
-           "CLOSES_FILE", "HEALTH_FILE", "STATE_KEY", "K5_KEY", "STARTED_KEY", "LANE_ONLY_KEY", "AGENDA_MAX", "DONE",
-           "DEFAULTS", "cfg", "on", "mode_effective", "candidates_open", "k5_state", "k5_trip", "lane_value",
+           "CLOSES_FILE", "HEALTH_FILE", "STATE_KEY", "UNIT_HINT", "K5_KEY", "STARTED_KEY", "LANE_ONLY_KEY", "AGENDA_MAX", "DONE",
+           "DEFAULTS", "cfg", "on", "mode_effective", "candidates_open", "k5_state", "k5_trip", "k5_line", "k5_rearm",
+           "K5_BASE_KEY", "lane_value",
            "declared_lane", "lane_of", "card_errors", "exposure", "year_rows", "unit_context", "unit_of", "train_score",
            "beside", "robust_verdict", "sort_key", "compact", "compact_robust", "record", "failure_counts", "lane_verdict",
            "screen_effective", "receipt_sha256", "d2_precheck", "d2_pooled_t", "validation_r_sd", "leakage_alarm", "born_counts",

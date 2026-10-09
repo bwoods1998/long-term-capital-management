@@ -175,7 +175,7 @@ def _gym(fam: Mapping, version: Mapping, families: Mapping, looks: Sequence, lin
             reserved.add(marker)
     # THE LEAKAGE ALARM PER LANE (release D-1, `evidence.leakage_alarms`): the family's own lane's alarm, as the gate stops
     # that lane's looks alone (the lane from the spec, `dlane.lane_of` with no store: this read opens none). While
-    # `dlane.mode` is "off" both lanes read the one count over every look, as before.
+    # `dlane.mode` is "off" both lanes read the one count, as before, over the looks the alpha lane's line judged.
     alarm = evidence.leakage_alarms(looks, cfg)[dlane.lane_of(None, fam, cfg)]
     if not fresh_dsr:
         blocked = "evidence_stale"

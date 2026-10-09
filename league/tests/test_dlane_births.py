@@ -402,7 +402,9 @@ class Request(LaneCase):
                       "Train years (1)", prompt)
         self.assertIn("DIRECTION FAILURES (the last 48 h; counts only, the lane's own families): 1 families, 2 scored "
                       "versions, 0 eligible. Train bars: E1 1, E3 0, E4 0, E5 2 (E5 alone: 1)", prompt)
-        self.assertIn("THE UNIT TODAY (E5): one lot's maximum loss with fees at today's index prices at most $99", prompt)
+        self.assertIn("THE UNIT (E5): one lot's maximum loss with fees at today's index prices within the unit cap (at most "
+                      "10% of the account's equity)", prompt)
+        self.assertNotIn("$99", prompt, "the review of Oct 9: never today's cap (a share of the account's equity)")
         self.assertIn("THE LAST PASS (", prompt)
         self.assertIn("reserved direction births left unfilled: 2.", prompt)
 

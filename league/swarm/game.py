@@ -108,8 +108,9 @@ THE DIRECTION LANE (release D-1, Oct 9, 2026; PLAN D4, the operator's decision 5
 whose declared lane is "direction" sits the game out (`_sits_out`): `arm` is None for its lineage, the legacy route,
 today's rules with no hidden look, unless `dlane.arm_fraction` (0) admits its lineage to the game's own split. The
 alpha lane's game is unchanged (`arm_fraction` 0.5, F = min(t_net, t_alpha), SELECT then CONFIRM). Why, and its cost,
-are `_sits_out`'s. A family that was given an arm keeps it (a direction lineage given one while the lane was off keeps
-playing the game's own rules). The operator's metrics keep direction looks out of R1(b) and R2 and say what the release
+are `_sits_out`'s. A family that was given an arm keeps it (a direction family given one while the lane was off keeps
+playing the game's own rules); a direction family never takes its LINEAGE's kept arm (`_arm_of` asks `_sits_out`
+first: the review of Oct 9), so one born into an armed lineage is legacy too. The operator's metrics keep direction looks out of R1(b) and R2 and say what the release
 changed mid-way through the T0 experiment (`DIRECTION_NOTES`: the birth quota halves the alpha lane's births; the
 researcher's shared role text changed every arm's prompt). While `dlane.mode` is "off" (THE ROLLBACK) every path here is
 the release before it's, byte for byte: no lane is read.
@@ -452,9 +453,15 @@ def _arm_of(fam: Mapping[str, Any], c: Mapping[str, Any], start: str | None,
             registry: tuple[Mapping[str, str], Mapping[str, str]] | None = None, *,
             sits_out: Callable[[], bool] | None = None) -> str | None:
     """The arm of a family under `start` (a pure read of the family, the settings and `registry`, the kept arms by family
-    and by lineage): its kept arm, else its lineage's, else None when `sits_out` says it is a direction lineage that
-    sits the game out (asked last, so a family with a kept arm, or a root outside the core five, reads nothing for it),
-    else the hash's."""
+    and by lineage): its kept arm, else None when `sits_out` says it is a direction family that sits the game out (asked
+    after its own kept arm and the core-five check, so a family with a kept arm, or a root outside the core five, reads
+    nothing for it), else its lineage's kept arm, else the hash's. `sits_out` comes BEFORE the lineage's arm (the review
+    of release D-1, Oct 9, 2026): a direction family born into a lineage that already has an arm would otherwise inherit
+    it and play (or run control's private looks), against decision 5. The architect never reads a game-arm family, but it
+    reads a control-arm one and a game-arm lineage's members born before T0, and either can be a birth's parent (named,
+    matched by its idea, or a living long_single twin); an alpha family born into a direction lineage is given the
+    lineage's arm too. Such a lineage then holds legacy direction members beside its armed ones, as it holds members born
+    before T0. While the lane is off `sits_out` is False with no read, so the order is the release before it's."""
     if start is None:
         return None
     born = str(fam.get("born_at") or "")
@@ -469,10 +476,10 @@ def _arm_of(fam: Mapping[str, Any], c: Mapping[str, Any], start: str | None,
     if not roots or any(r not in core for r in roots):
         return None
     unit = str(fam.get("lineage") or fid)
-    if unit in by_lineage:
-        return by_lineage[unit]
     if sits_out is not None and sits_out():
         return None
+    if unit in by_lineage:
+        return by_lineage[unit]
     return "game" if canary.in_arm(c["salt"], ARM_KEY, unit, c["arm_fraction"]) else "control"
 
 
@@ -484,8 +491,9 @@ def _sits_out(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any] | 
     lane most of its power to buy a false-positive rate that was already small, and F = min(t_net, t_alpha) scores an
     always-long program at about zero by construction (t_alpha is about zero for it). Its cost: the game's selection
     pressure is lost for direction, and the lane's screen is the gate's (`dlane.screen_effective`). A direction lineage a
-    non-zero share admits plays the game's own rules (the alpha fitness): the direction ladder is deferred. While the
-    lane is off nothing sits out (`dlane.lane_of` reads "alpha" with no store read): THE ROLLBACK, byte for byte. Never
+    non-zero share admits plays the game's own rules (the alpha fitness): the direction ladder is deferred. A direction
+    family sits out whatever arm its lineage was given by others (`_arm_of` asks this before the lineage's kept arm;
+    only the family's own kept arm comes first). While the lane is off nothing sits out (`dlane.lane_of` reads "alpha" with no store read): THE ROLLBACK, byte for byte. Never
     raises (an unreadable lane is alpha's)."""
     if not dlane.on(settings):
         return False

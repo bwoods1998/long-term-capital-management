@@ -152,9 +152,10 @@ default, or "direction": cards.py, `dlane.card_errors`):
   - THE REQUEST: a LANES block right after the BIRTH QUOTAS (`lanes_block`): each lane's rules (`dlane.lanes_text`), that a
     DRIFT row binds no direction card, the direction quota of this pass (`dlane.DirectionQuota.text`), the last pass's
     direction births, refusals and shortfall (kv `LANE_LAST_KEY`), and the direction lane's failure counts over 48 hours
-    (`dlane.failure_counts`: codes and counts only, never a figure; the unit cap at today's prices when a version failed
-    E5, alarm A7's self-action). A pass that left reserved direction births unfilled makes the next request OPEN with that
-    shortfall and the top failure reasons (`lane_lead`).
+    (`dlane.failure_counts`: codes and counts only, never a figure; the unit's rule when a version failed E5, alarm A7's
+    self-action, never today's dollar cap). A pass that left reserved direction births unfilled makes the next request
+    OPEN with that shortfall and the top failure reasons (`lane_lead`), and names the direction cards the class cap
+    refused apart (`lane_class_capped`) so that a full class is not read as a card error.
   - THE QUOTA (`dlane.DirectionQuota`, one a pass like `pass_quota`, `pass_lane_quota`; allocation.py re-exports it):
     while the lane is behind `dlane.birth_share` (0.5) of the last 24 h of births and fewer than `dlane.max_alive` (24)
     direction families live, about half of a pass's births are reserved for direction and never filled with alpha; the
@@ -1604,9 +1605,33 @@ class Architect:
         if self.pass_lane_quota is not None:
             return self.pass_lane_quota
         try:
-            return DirectionQuota(self.store, self.settings, now=self.clock(), want=self.want())
+            # THE CLASS CAP (the review of Oct 9): the room left in the classes a direction card can be in bounds the births
+            # reserved for it, so alpha is never refused places no direction card could take.
+            per_class = self.class_cap()
+            room = None
+            if per_class:
+                counts = self.classes()
+                room = {cls: max(0, per_class - counts.get(cls, 0)) for cls in self.lane_classes()}
+            return DirectionQuota(self.store, self.settings, now=self.clock(), want=self.want(), class_room=room,
+                                  class_cap=per_class or None)
         except Exception:  # noqa: BLE001 - a quota is a lane's pressure, never a reason to stop births
             return None
+
+    def lane_classes(self) -> list[str]:
+        """The mechanism classes (`strategist.mechanism_class`: structure x root group) a direction card can be in: each
+        of the lane's structures (`dlane.structures`) on each non-empty set of its roots (`dlane.roots`; SPY, QQQ and IWM
+        are all ETF roots, so today "debit_vertical x etf" and "long_single x etf"). [] while the lane is off. THE CLASS
+        CAP's room in them bounds the direction quota's reservation (`lane_quota`; the review of Oct 9, 2026)."""
+        from itertools import combinations
+
+        from .strategist import mechanism_class  # a local import: the strategist imports this module
+
+        if not dlane.on(self.settings):
+            return []
+        c = dlane.cfg(self.settings)
+        roots = list(c["roots"])
+        return sorted({mechanism_class(s, list(group)) for s in c["structures"]
+                       for k in range(1, len(roots) + 1) for group in combinations(roots, k)})
 
     def lane_only(self) -> str | None:
         """Why this pass asks for direction proposals only (`lane_only`, alarm A1's self-action: `dlane.lane_only_due`),
@@ -1658,16 +1683,23 @@ class Architect:
         if short <= 0:
             return ""
         top = self.top_failures(self.lane_failures())
+        capped = (last.get("lane_class_capped") or {}) if isinstance(last.get("lane_class_capped"), dict) else {}
+        full = ", ".join(str(x) for x in capped.get("full") or [])
+        why = ("no direction card the lane's box and the class cap admitted"
+               if int(capped.get("cards") or 0) else "no well-formed direction card for them")
         return (f"THE DIRECTION LANE WAS SHORT: the last pass ({last.get('at')}) left {short} of its reserved direction births "
-                "unfilled (no well-formed direction card for them), and no alpha family took them."
+                f"unfilled ({why}), and no alpha family took them."
+                + (f" The class cap refused {int(capped['cards'])} of its direction cards"
+                   + (f" (full: {full}): propose a direction structure whose class has room" if full else "") + "."
+                   if int(capped.get("cards") or 0) else "")
                 + (f" The recent direction families' top failures (48 h): {top}." if top else "")
                 + " Propose direction cards that fit the lane's box and its bar (the LANES block below).\n\n")
 
     def lanes_block(self, quota: Any = None) -> str:
         """THE LANES block of the request, after the BIRTH QUOTAS (HARNESS C3): each lane's rules (`dlane.lanes_text`), the
         graveyard's DRIFT rule, this pass's direction quota (`quota`, `dlane.DirectionQuota.text`), the last pass's
-        direction births and refusals, and the lane's failure counts over 48 hours (codes and counts only; the unit cap at
-        today's prices when a version failed E5). "" while the lane is off."""
+        direction births and refusals (the class cap's apart), and the lane's failure counts over 48 hours (codes and
+        counts only; the unit's rule, never today's dollar cap, when a version failed E5). "" while the lane is off."""
         if not dlane.on(self.settings):
             return ""
         c = dlane.cfg(self.settings)
@@ -1681,10 +1713,14 @@ class Architect:
         last = self.store.get(LANE_LAST_KEY)
         if isinstance(last, dict) and isinstance(last.get("lane_births"), dict):
             born, refused = last.get("lane_births") or {}, last.get("lane_refused") or {}
+            capped = last.get("lane_class_capped") if isinstance(last.get("lane_class_capped"), dict) else {}
             lines.append(f"THE LAST PASS ({last.get('at')}): direction born {int(born.get(dlane.DIRECTION) or 0)}, alpha born "
                          f"{int(born.get(dlane.ALPHA) or 0)}; refused by the lane quota: direction "
                          f"{int(refused.get(dlane.DIRECTION) or 0)}, alpha {int(refused.get(dlane.ALPHA) or 0)}; reserved "
-                         f"direction births left unfilled: {int(last.get('lane_short') or 0)}.")
+                         f"direction births left unfilled: {int(last.get('lane_short') or 0)}."
+                         + (f" Direction cards refused by the class cap: {int(capped.get('cards') or 0)}"
+                            + (f" (full: {', '.join(str(x) for x in capped.get('full') or [])})" if capped.get("full") else "")
+                            + "." if int(capped.get("cards") or 0) else ""))
         counts = self.lane_failures()
         if counts and counts.get("versions"):
             fails, robust, rep = counts["fails"], counts["robust"], counts["reported_misses"]
@@ -1697,12 +1733,12 @@ class Architect:
                 + f", passed {counts['robust_passed']}. Reported, never bars: E2 missed {rep.get('E2', 0)}, R1 missed "
                 f"{rep.get('R1', 0)}." + (f" Top reasons: {top}." if (top := self.top_failures(counts)) else ""))
             if int(fails.get("E5") or 0) > 0:
-                unit = dlane.unit_context(self.store, self.settings)
-                cap = unit.get("cap_usd") if isinstance(unit, Mapping) else None
-                if isinstance(cap, (int, float)) and not isinstance(cap, bool):
-                    lines.append(f"THE UNIT TODAY (E5): one lot's maximum loss with fees at today's index prices at most "
-                                 f"${float(cap):.0f}; ${c['unit_pref_usd']:.0f} or less also fits the incubator. An "
-                                 "out-of-the-money call near 0.20-0.30 delta fits it; an at-the-money call usually does not.")
+                # THE UNIT (E5) as a rule, never today's dollar cap: the cap is a share of the account's equity, a 2026
+                # figure no agent reads (`dlane.UNIT_HINT`; the review of Oct 9, 2026).
+                lines.append(f"THE UNIT (E5): one lot's maximum loss with fees at today's index prices within the unit cap "
+                             f"(at most {c['unit_share']:.0%} of the account's equity); ${c['unit_pref_usd']:.0f} or less also "
+                             "fits the incubator. An out-of-the-money call near 0.20-0.30 delta fits it; an at-the-money "
+                             "call usually does not.")
         return "\n".join(lines) + "\n\n"
 
     def structures_text(self) -> str:
@@ -1989,6 +2025,8 @@ class Architect:
             cls = mechanism_class(structure, roots)
             if per_class and classes.get(cls, 0) >= per_class:
                 self.capped[cls] = self.capped.get(cls, 0) + 1
+                if lane_quota is not None:  # THE DIRECTION LANE: a direction card refused here is named apart (its class)
+                    lane_quota.capped_by_class(cards.lane_of_card(row.get("card")) or dlane.ALPHA)
                 continue
             # The same idea on the same roots among the living singles (one born earlier in this pass too): a one-sided
             # single is refused beside a living long_single or the other side of that idea (review of #425: the prompt
@@ -2105,7 +2143,7 @@ class Architect:
                 if quota is not None:
                     quota.born(structure)
                 if lane_quota is not None:
-                    lane_quota.born(lane)
+                    lane_quota.born(lane, cls)
             if spec["sketch"]:
                 self.store.note(fam["id"], f"The architect's sketch: {spec['sketch']}")
             for item in cited:

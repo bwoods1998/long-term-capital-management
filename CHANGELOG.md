@@ -62,7 +62,8 @@ move: no evidence reset, no evaluator adoption, no re-ratification.
   zero edge) 0.13, the same-risk buy-and-hold delta-matched and in dollars at risk, the screen's world-conditional
   false-positive rate, every loosened rule with its cost and the contamination statement), the account and the research
   costs, the contamination meters per lane, and alarms A1-A9 and K5 as House alerts. K5 is automated: at a direction
-  realized net at or below -$600 the job sets the kv `dlane_k5` and the lane reads "shadow" until the operator clears it.
+  realized net at or below -$600 the job sets the kv `dlane_k5` and the lane reads "shadow" until the operator clears it;
+  the job's next run records the clear and re-arms K5 at -$600 below the net at clearing (kv `dlane_k5_base`).
   `league/ops/fast_lane.py`'s rows gain `lane` while the lane is on; the learning game's report says what the lane
   changed mid-experiment.
 - **The agenda guard** (D9): the swarm warns the House at its start, and whenever it changes, when `swarm.json`'s locked
@@ -77,7 +78,19 @@ move: no evidence reset, no evaluator adoption, no re-ratification.
   binding direction cards; **the birth quota: alpha births fall from about 73 to about 36 a day mid-way through the
   learning game's T0 experiment, and the ROLE prompt change reaches alpha researchers too (a shared prefix), so "alpha
   golden" holds for code paths only**; the unit at 10% of equity rather than MONEY's $75 (Probe-stage Done 6.3% against
-  7.8%, P(net <= -$360 in 8 weeks) 0.35 against 0.27).
+  7.8%, P(net <= -$360 in 8 weeks) 0.35 against 0.27); **K5's clear: `dlane.k5_clear` true disarms K5 while it stays
+  set** (the report warns every run until it is taken out).
+- **The review's fixes (Oct 9, before any deploy):** with the lane off, the one leakage alarm counts only the looks the
+  alpha line judged (direction looks judged on S-C never stop the alpha lane; a code rollback to the release before
+  counts every look, so `docs/operations.md` says to check the pooled pass share first); a direction family never takes
+  its lineage's game or control arm (born under a control-arm parent, a game lineage's member from before T0, or left in
+  a lineage an alpha family was given an arm in); K5's clear is durable and re-arms from the net at clearing; the
+  direction quota reserves no more births than the room left under `architect.max_alive_per_class` in the lane's classes
+  (`long_single x etf`, `debit_vertical x etf`), and class-capped direction cards are named apart (`lane_class_capped`);
+  no agent text carries a figure priced at today's closes or the account's equity (E5 is its verdict and a scale-free
+  hint: this overrides HARNESS 6's `scale` in the view on secrecy grounds); the brief's vertical guidance is a lane rule
+  with no Train provenance. Joins from the integration: the public checklist's `gate_paused` reads the family's own
+  lane's alarm, and a direction parent's fork carries `lane` in its `swarm.born`.
 - **Owner steps, in order** (docs/operations.md): L-D deployed and verified; CI green on main's head; the gateway
   (`protected.mjs`) deployed; `floor_box.py deploy` in the money path's window with no order in flight; verify (no
   fingerprint or digest move, `lane_births` on the first pass, the `dlane` report written); install agenda v21 with

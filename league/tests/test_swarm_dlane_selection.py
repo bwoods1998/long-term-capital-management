@@ -349,17 +349,24 @@ class GateLane(RoundCase):
         [event] = self.events("leakage_alarm")
         self.assertEqual((event["lane"], event["looks"], event["passes"]), ("direction", 10, 7))
 
-    def test_sixty_percent_is_no_direction_alarm_and_the_rollback_counts_every_look_as_before(self):
+    def test_sixty_percent_is_no_direction_alarm_and_the_rollback_counts_the_alpha_lines_looks_as_before(self):
         self.ready("d", lane="direction")
         for i in range(10):
             self.store.add_look("old-d", 1, f"dsha{i}", passed=i < 6, p_value=0.01, detail={"lane": "direction"})
         self.assertEqual(self.gate().alarms(), {"alpha": False, "direction": False})
         self.settings["dlane"] = {"mode": "off"}
-        self.assertEqual(self.gate().alarms(), {"alpha": True, "direction": True}, "one count over every look: 6 of 10")
+        # THE ROLLBACK (the review of Oct 9): the direction lane's looks were judged on S-C, so they are left out of the
+        # one count; 6 of its 10 passing must not stop the alpha lane.
+        self.assertEqual(self.gate().alarms(), {"alpha": False, "direction": False}, "no look the alpha line judged")
+        for i in range(10):  # ten looks the alpha line judged (no lane recorded), four passed: the one count, as before
+            self.store.add_look("old-a", 1, f"asha{i}", passed=i < 4, p_value=0.01, detail={})
+        self.assertEqual(self.gate().alarms(), {"alpha": True, "direction": True}, "one count: 4 of the alpha line's 10")
         out = self.gate().run()
         self.assertTrue(out["alarm"])
         self.assertEqual(self.store.get("leakage_alarm")["looks"], 10)
         self.assertNotIn("lane", self.store.get("leakage_alarm"))
+        [event] = self.events("leakage_alarm")
+        self.assertEqual((event["looks"], event["passes"]), (10, 4), "the alpha line's looks, not the direction lane's")
 
     def test_the_alpha_lanes_alarm_is_unchanged_over_its_own_looks(self):
         self.ready("d", lane="direction")
@@ -368,8 +375,8 @@ class GateLane(RoundCase):
         for i in range(5):
             self.store.add_look("old-d", 1, f"dsha{i}", passed=False, p_value=0.5, detail={"lane": "direction"})
         self.assertEqual(self.gate().alarms(), {"alpha": True, "direction": False})
-        self.assertEqual(evidence.leakage_alarms(self.store.looks(), {}), {"alpha": False, "direction": False},
-                         "the rollback: one count over every look, 4 of 15 is not over 30%")
+        self.assertEqual(evidence.leakage_alarms(self.store.looks(), {}), {"alpha": True, "direction": True},
+                         "the rollback: the one count over the alpha line's looks (4 of 10), the direction looks left out")
         self.replies = [PASS] * 2
         out = self.gate().run()
         self.assertEqual(out["alarm_lanes"], ["alpha"])

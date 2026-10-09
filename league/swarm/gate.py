@@ -152,7 +152,9 @@ whole gate stops when both hold). THE LANE'S MODE (`lane_closed`): while the dir
 or K5 holding a "gate" lane in shadow, `dlane.candidates_open`) a direction family waits after the free checks (no
 review is paid, no look is spent, `gate_ready` stays), a direction look already out lands judged but makes no Candidate
 (`candidate_withheld`), and the incubator reads no direction family. While the lane is off (THE ROLLBACK) every path
-here is the release before it's, byte for byte.
+here is the release before it's, byte for byte, but for one thing on a store that holds direction looks: the one
+leakage alarm counts the looks the alpha lane's line judged, never a direction look judged on S-C (the review of Oct 9:
+correlated direction passes would otherwise stop every alpha look).
 
 Every step is a `swarm.gate` event; band moves are `swarm.band` events (the site's news).
 Standard library only.
@@ -433,13 +435,13 @@ class Gate:
 
     def alarms(self) -> dict[str, bool]:
         """THE LEAKAGE ALARM PER LANE (release D-1, Oct 9, 2026; `evidence.leakage_alarms`): {"alpha", "direction"}, each
-        lane's holdout looks counted alone. While `dlane.mode` is "off" both are the one count over every look, as
-        before."""
+        lane's holdout looks counted alone. While `dlane.mode` is "off" both are the one count, as before, over the looks
+        the alpha lane's line judged (every look on a store with no direction look)."""
         return evidence.leakage_alarms(self.store.looks(), self.settings)
 
     def alarm(self) -> bool:
         """The whole gate stops: every lane's leakage alarm holds. While the direction lane is off that is the one alarm
-        over every look (10 looks, more than 30% passed), as before release D-1."""
+        (10 looks, more than 30% passed), as before release D-1, over the looks the alpha lane's line judged."""
         return all(self.alarms().values())
 
     def stopped_lanes(self) -> frozenset[str]:
@@ -461,14 +463,16 @@ class Gate:
 
     def _record_alarms(self, stopped: frozenset[str] | None) -> None:
         """Each alarm that holds, recorded once: the store's kv and one `swarm.gate` event (`leakage_alarm`). `stopped`
-        None (the direction lane off): the one alarm as before release D-1 (kv `leakage_alarm`, the count over every
-        look); else one record a lane in `stopped` (the alpha lane's under the same kv, the direction lane's under
+        None (the direction lane off): the one alarm as before release D-1 (kv `leakage_alarm`, the count over the looks
+        the alpha lane's line judged: every look on a store with no direction look, `evidence.leakage_alarms`); else one
+        record a lane in `stopped` (the alpha lane's under the same kv, the direction lane's under
         `leakage_alarm_direction`), each with its lane and its own looks and passes."""
         if stopped is None:
             if not self.store.get("leakage_alarm"):
-                self.store.put("leakage_alarm", {"at": self.clock(), "looks": len(self.store.looks())})
-                self.store.event("swarm.gate", None, {"action": "leakage_alarm", "looks": len(self.store.looks()),
-                                                      "passes": sum(1 for x in self.store.looks() if x["passed"])})
+                judged = [x for x in self.store.looks() if evidence.look_lane(x) != dlane.DIRECTION]
+                self.store.put("leakage_alarm", {"at": self.clock(), "looks": len(judged)})
+                self.store.event("swarm.gate", None, {"action": "leakage_alarm", "looks": len(judged),
+                                                      "passes": sum(1 for x in judged if x["passed"])})
             return
         looks = self.store.looks()
         for lane in sorted(stopped):
@@ -740,7 +744,7 @@ class Gate:
         out: dict[str, Any] = {"looked": [], "refused": [], "waiting": [], "held": [], "look_held": []}
         self._incubator_owed()  # a verdict an error kept from its bar last round: recorded first
         self._incubator_sweep()  # a look that landed, or a demotion, since the last round: its mark goes first
-        if self.alarm():  # every lane's alarm (the lane off: the one alarm over every look): the whole gate stops
+        if self.alarm():  # every lane's alarm (the lane off: the one alarm, alpha-line looks): the whole gate stops
             self._record_alarms(self.stopped_lanes() if dlane.on(self.settings) else None)
             out["alarm"] = True
             return out

@@ -83,7 +83,10 @@ class ChecklistAlarmLane(ProgressCase):
         self.mode("gate")
         self.assertEqual(self.read()["blocked"], "holdout_pending", "the alpha lane's gate still runs")
         self.mode("off")
-        self.assertEqual(self.read()["blocked"], "gate_paused", "THE ROLLBACK: the one count over every look, as before")
+        self.assertEqual(self.read()["blocked"], "holdout_pending",
+                         "THE ROLLBACK: the one count over the alpha line's looks; S-C direction looks never pause alpha")
+        self.looks("alpha", 4)  # the alpha line's own looks (10, more than 30% passed): the one alarm, as before D-1
+        self.assertEqual(self.read()["blocked"], "gate_paused")
 
     def test_a_direction_familys_checklist_reads_the_direction_lanes_alarm(self):
         self.family()

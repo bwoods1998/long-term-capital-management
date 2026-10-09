@@ -8,12 +8,16 @@ module or names its file (`league/tests/test_dlane_report.py` pins that). It cha
 reads nothing new. It is written whatever the figures say; it never pauses, slows or stops a program or a route.
 
 READ-ONLY, BUT FOR K5. The swarm store is opened read-only and the live book through `guard.read` (`mode=ro`), inside
-`guard.readonly()` (every SQLite open in the child is a `mode=ro` URI). The one write is K5 (decision 9): when the
-direction lane's realized net over every route since the options swarm began is at or below `dlane.k5_net_usd` (-$600),
-the job writes the swarm store's kv `dlane_k5` {at, net} once (`dlane.k5_trip`, a writable open AFTER the read-only
-report). While it is set the lane reads "shadow" (`dlane.mode_effective`: no new direction Candidate, no incubator
-direction mark) until the operator clears it (swarm.json `dlane.k5_clear` true, or deleting the kv). A tightening, never
-a trade, never an order.
+`guard.readonly()` (every SQLite open in the child is a `mode=ro` URI). The one write is K5's (decision 9): when the
+direction lane's realized net over every route since the options swarm began is at or below K5's line (`dlane.k5_line`:
+`dlane.k5_net_usd`, -$600, below the net at the operator's last clear; -$600 itself before any), the job writes the swarm
+store's kv `dlane_k5` {at, net, line} once (`dlane.k5_trip`, a writable open AFTER the read-only report). While it is
+set the lane reads "shadow" (`dlane.mode_effective`: no new direction Candidate, no incubator direction mark) until the
+operator clears it (swarm.json `dlane.k5_clear` true, or deleting the kv). The job records a clear on its next run
+(`dlane.k5_rearm`, before the trip check: the kv deleted, the kv `dlane_k5_base` at the net then), so the clear holds
+and K5 is armed again at -$600 below that net (the review of Oct 9, 2026). While `dlane.k5_clear` is true K5 can
+neither hold nor trip: the report raises a K5 warning every run until the operator takes it out. A tightening, never a
+trade, never an order.
 
 WITH THE LANE OFF (`dlane.mode` "off", THE ROLLBACK) the job writes nothing and returns a `skipped` receipt.
 
@@ -64,8 +68,9 @@ THE REST OF THE REPORT:
 - `contamination.meters`: (a) the holdout's head-minus-tail Sharpe gap per lane (`fast_lane.pooled_contamination` over
   the fast lane report's looks), (b) the mean excess over the same-risk buy-and-hold in the known window (Validation)
   against the unknown one (live), per lane, (c) live against the holdout per band (the fast lane report's rows).
-- `alarms`: A1-A9 and K5 (HARNESS section 5, as amended by the plan and the operator's decisions), each a House alert
-  through `ctx.alert` (warning, or info for A8 and A9), never an action on money.
+- `alarms`: A1-A9 and K5 (HARNESS section 5, as amended by the plan and the operator's decisions; K5 also while
+  `dlane.k5_clear` disarms it), each a House alert through `ctx.alert` (warning, or info for A8 and A9), never an action
+  on money.
 
 Standard library only, except the Probe envelope's code-in-force figure (`fast_lane.probe_budget` reads
 `league.live.real`, whose Gym legs need numpy, as the House box has): it is an `error` entry where that cannot load.
@@ -172,6 +177,12 @@ LOOSENED: tuple[dict[str, str], ...] = (
     {"rule": "the unit", "was": "MONEY's pre-registered $75 lane cap",
      "now": "10% of equity on the swarm side (E5) as on the live side",
      "cost": "Probe-stage Done averaged over holds 6.3% against 7.8%; P(net <= -$360 in 8 weeks) 0.35 against 0.27"},
+    {"rule": "K5's clear (dlane.k5_clear)", "was": "no K5 before D-1",
+     "now": "true clears a set K5 at once and disarms K5 while it stays set; the job's next run records the clear and "
+            "re-arms K5 at -$600 below the net then (deleting the kv clears the same way, with no setting)",
+     "cost": "while dlane.k5_clear stays true the lane can lose past any line with no K5 (the report warns every run "
+             "until it is taken out); after a clear, K5 measures a further -$600 from the net at clearing, not from "
+             "inception"},
     {"rule": "release L-D: the Probe budget read NET", "was": "GROSS: a gain never offsets a loss",
      "now": "NET over closed Probe positions (Sized never offsets)",
      "cost": "P(net <= -$360 in 8 weeks, no edge) 0.19 -> 0.27; gross Probe losses can pass $400"},
@@ -184,8 +195,10 @@ LOOSENED: tuple[dict[str, str], ...] = (
 #: And what D-1 TIGHTENED (said beside the loosenings).
 TIGHTENED: tuple[str, ...] = (
     "K5: the lane reads shadow (no new direction Candidate, no incubator direction mark) once its realized net over every "
-    "route is at or below -$600, until the operator clears it",
-    "the screen, the leakage alarm and K5 can only be tightened by a setting (dlane.cfg's bounds)",
+    "route is at or below -$600 (after a clear: -$600 below the net at clearing), until the operator clears it",
+    "the screen, the leakage alarm and K5's line can only be tightened by a setting (dlane.cfg's bounds); the one "
+    "setting that loosens K5 is dlane.k5_clear, which disarms it while it is true (listed with its cost among the "
+    "loosened rules)",
     "D2 is refused unless a receipt's sha256 and its c are pinned in the repository's policy.json and CI holds the "
     "receipt to it",
     "E5: one lot at today's prices within 10% of equity before Validation",
@@ -1016,6 +1029,15 @@ def alarms(store: Any, settings: Mapping[str, Any] | None, lanes: Lanes, book: M
                     "text": "K5 tripped: the direction lane's realized net over every route is at or below its line; "
                             "the lane reads shadow (no new direction Candidate, no incubator direction mark) until the "
                             "operator clears it (swarm.json dlane.k5_clear, or the kv dlane_k5)"})
+    elif k5.get("cleared"):
+        # THE CLEAR'S LOOSENING (the review of Oct 9): while `dlane.k5_clear` is true K5 can neither hold nor trip.
+        line = _num(k5.get("line"))
+        out.append({"id": "K5", "level": "warning", "new": False, "disarmed": True,
+                    "text": "K5 is disarmed: dlane.k5_clear is true in swarm.json, so no loss trips it; "
+                            + ("the clear is recorded (the next line is "
+                               + ("unknown" if line is None else f"${line:,.2f}") + "): take dlane.k5_clear out"
+                               if not k5.get("set") and not k5.get("trip_open") else
+                               "the dlane job records the clear on its next run; then take dlane.k5_clear out")})
     return out
 
 
@@ -1054,7 +1076,7 @@ def report(root: str | Path, *, settings: Mapping[str, Any] | None = None, now: 
         lane_net = {"closes": len(direction), "net_usd": _usd(sum(known, Decimal(0))), "unpriced": len(direction) - len(known),
                     "by_route": {code: _usd(sum((c["pnl_usd"] for c in direction if c["code"] == code and c["pnl_usd"]
                                                  is not None), Decimal(0))) for code in dlane.DONE["routes_all"]},
-                    "bh": _bh_sum(direction), "label": dlane.LABEL, "k5_line_usd": dlane.cfg(settings)["k5_net_usd"]}
+                    "bh": _bh_sum(direction), "label": dlane.LABEL, "k5_line_usd": dlane.k5_line(store, settings)}
         envelope = probe_envelope(root / LIVE_DB, book["positions"], today=today, unit_usd=unit.get("cap_usd"))
         k5 = dlane.k5_state(store, settings)
         started = store.get(dlane.STARTED_KEY)
@@ -1092,8 +1114,9 @@ def report(root: str | Path, *, settings: Mapping[str, Any] | None = None, now: 
 
 # ------------------------------------------------------------------------------------------------- the job
 def run(ctx: Any) -> dict[str, Any]:
-    """The job: the report written atomically to `<state>/dlane-report.json`, read-only on every store; then K5's one
-    write when its line is crossed; then each alarm a House alert (warning, or info for A8 and A9)."""
+    """The job: the report written atomically to `<state>/dlane-report.json`, read-only on every store; then K5's writes
+    (the operator's clear recorded, `dlane.k5_rearm`, then the trip when its line is crossed, `dlane.k5_trip`), each only
+    when due; then each alarm a House alert (warning, or info for A8 and A9)."""
     from ..swarm import dlane
     from ..swarm import settings as settings_mod
     from ..swarm.store import SwarmStore
@@ -1109,13 +1132,38 @@ def run(ctx: Any) -> dict[str, Any]:
         out = report(root, settings=settings, now=ctx.now(), previous=previous if isinstance(previous, Mapping) else None)
     net = out["direction_net"]["net_usd"]
     tripped = False
-    if net is not None and net <= dlane.cfg(settings)["k5_net_usd"] and not out["k5"].get("tripped"):
+    k5 = out["k5"]
+    # K5's writes, each only when due (the store is opened writable for nothing else): a clear the operator made since
+    # the last run (`k5_clear` true while the kv is set, or the kv deleted while a trip is open), then a trip.
+    clear_due = (k5.get("set") and k5.get("cleared")) or (not k5.get("set") and k5.get("trip_open"))
+    line = _num(k5.get("line"))
+    trip_due = (net is not None and not k5.get("set") and not k5.get("cleared")
+                and net <= (line if line is not None else dlane.cfg(settings)["k5_net_usd"]))
+    rearmed = None
+    if clear_due or trip_due:
         store = SwarmStore(root)
         try:
+            rearmed = dlane.k5_rearm(store, settings, net, at=out["at"])
             tripped = dlane.k5_trip(store, settings, net, at=out["at"])
             out["k5"] = {**dlane.k5_state(store, settings), "new": tripped}
+            if rearmed is not None:
+                out["k5"]["rearmed"] = rearmed
+                out["direction_net"]["k5_line_usd"] = dlane.k5_line(store, settings)
         finally:
             store.close()
+        if rearmed is not None:
+            out["alarms"] = [a for a in out["alarms"] if a["id"] != "K5"]
+            if out["k5"].get("cleared"):
+                out["alarms"].append({"id": "K5", "level": "warning", "new": False, "disarmed": True,
+                                      "text": "K5 is disarmed: dlane.k5_clear is true in swarm.json, so no loss trips "
+                                              f"it; the clear is recorded (the next line is ${out['k5']['line']:,.2f}): "
+                                              "take dlane.k5_clear out"})
+            else:
+                out["alarms"].append({"id": "K5", "level": "info", "new": True, "rearmed": True,
+                                      "text": f"K5 cleared ({rearmed['cleared']['how']}) and re-armed: its next line is "
+                                              f"${out['k5']['line']:,.2f}, "
+                                              f"${abs(dlane.cfg(settings)['k5_net_usd']):,.0f} below the lane's net at "
+                                              "clearing"})
         if tripped and not any(a["id"] == "K5" for a in out["alarms"]):
             out["alarms"].append({"id": "K5", "level": "warning", "new": True,
                                   "text": "K5 tripped: the direction lane's realized net over every route is at or below "
@@ -1130,7 +1178,7 @@ def run(ctx: Any) -> dict[str, Any]:
                              "name: listed apart in the report, never counted or dropped silently")
     return {"ok": True, "path": str(root / FILE), "closes_all": len(out["done"]["all"]["closes"]),
             "closes_screen": len(out["done"]["screen"]["closes"]), "alarms": [a["id"] for a in out["alarms"]],
-            "k5_tripped": bool(out["k5"].get("tripped")), "k5_new": tripped}
+            "k5_tripped": bool(out["k5"].get("tripped")), "k5_new": tripped, "k5_rearmed": rearmed is not None}
 
 
 __all__ = ["run", "report", "FILE", "CONTAMINATION", "LOOSENED", "TIGHTENED", "closes", "meter", "reading", "replay_gap",

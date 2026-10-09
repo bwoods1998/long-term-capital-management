@@ -88,7 +88,8 @@ are reported beside every screen result (`league/ops/direction.py`, `scripts/fas
 THE LEAKAGE ALARM: once there are at least 10 holdout looks, more than 30% passing stops the gate. PER LANE since release
 D-1 (Oct 9, 2026; `leakage_alarms`): while the direction lane is on, the alpha lane's looks are counted alone at these
 numbers and the direction lane's at 10 looks and more than 60% (`dlane.leakage_alarm`), and a lane's alarm stops that
-lane's looks and incubator reads only.
+lane's looks and incubator reads only; while it is off (the rollback) the one count is over the looks the alpha lane's
+line judged, so a direction look made while the lane was on never stops the alpha lane.
 
 THE BANDIT: Thompson sampling over validation evidence, with a 25% exploration share for new families. Used only under
 `allocation.mode` "bandit" (and as the allocator's fallback); the default allocation is league/swarm/allocation.py.
@@ -501,7 +502,7 @@ def holdout_line(result: Mapping[str, Any], *, validation_sharpe: float | None, 
 
 def leakage_alarm(looks: int, passes: int) -> bool:
     """Stop the gate: at least 10 holdout looks and more than 30% of them passed. THE ALPHA LANE'S, unchanged by release
-    D-1: while the direction lane is on it counts the alpha lane's looks alone (`leakage_alarms`)."""
+    D-1: it counts the alpha lane's looks alone (`leakage_alarms`, the direction lane on or off)."""
     return looks >= ALARM_MIN_LOOKS and passes > ALARM_PASS_SHARE * looks
 
 
@@ -521,12 +522,17 @@ def leakage_alarms(looks: Sequence[Mapping[str, Any]], settings: Mapping[str, An
     rising year would pass most of them together, which is market, not leakage). A lane's alarm stops that lane's looks
     and incubator reads only (PLAN K6). Its cost: a real holdout leak in a direction program is caught later; the paid
     review and audit, the duplicate look and the post-cutoff tail still check every look. While `dlane.mode` is "off"
-    (THE ROLLBACK) both lanes read the one count over every look, as before: the gate stops whole or not at all."""
+    (THE ROLLBACK) both lanes read the one count, as before (the gate stops whole or not at all), over the looks judged
+    by the alpha lane's line: every family is alpha then, and a look the direction lane judged on its looser S-C line
+    while it was on is left out (the review of release D-1, Oct 9, 2026: counted in, correlated direction passes would
+    trip the alarm that stops every alpha look and incubator read, and leave the kv `leakage_alarm` behind). A store with
+    no direction look reads exactly as the release before it."""
     from . import dlane  # dlane imports this module: read lazily
 
     rows = list(looks or [])
     if not dlane.on(settings):
-        one = leakage_alarm(len(rows), sum(1 for x in rows if x.get("passed")))
+        alpha = [x for x in rows if look_lane(x) != "direction"]
+        one = leakage_alarm(len(alpha), sum(1 for x in alpha if x.get("passed")))
         return {"alpha": one, "direction": one}
     alpha = [x for x in rows if look_lane(x) != "direction"]
     direction = [x for x in rows if look_lane(x) == "direction"]
