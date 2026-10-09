@@ -41,8 +41,9 @@ class ConstitutionTest(unittest.TestCase):
         goal item) moved only `incubator.max_loss_usd`, $50 -> $75: money digest da5c7542 -> 1665c385, full digest
         5edc8956 -> 5698a2f9. Release L-D (Oct 9, 2026, under the same goal item and the owner's goal as re-set that day,
         item 4) moved only the Probe row: `max_open` 3 -> 8 and the new `loss_basis` "net", `demotion` "dm1", and THE
-        ROLLING PROBE BUDGET's `loss_window_sessions` 20 and `loss_total_usd` "800": money digest 1665c385 -> fdf2ac7c,
-        full digest 5698a2f9 -> 0adb4f0e (b212d4e6 / 4a1705b6 on the branch before the rolling budget, never deployed).
+        ROLLING PROBE BUDGET's `loss_window_sessions` 20 and `loss_total_usd` "400" (the operator's setting of Oct 9 inside
+        the owner's $800 ceiling): money digest 1665c385 -> 0310779c, full digest 5698a2f9 -> ca89ff8a (b212d4e6 /
+        4a1705b6 on the branch before the rolling budget, fdf2ac7c / 0adb4f0e with an $800 total; neither deployed).
         Its CON-only rollback (`loss_basis` "gross", `max_open` 3, `demotion` "dm0", `loss_total_usd` "400",
         `loss_window_sessions` 2000) is money digest 320899d6, full digest c9d8ef5b, digests of their own (the new keys
         stay). The standing grant re-ratifies on each at the House's start on the owner's deploy (league/ops/grant.py)."""
@@ -50,8 +51,8 @@ class ConstitutionTest(unittest.TestCase):
 
         from league.constitution import money_digest
 
-        self.assertEqual(money_digest(), "fdf2ac7c1a446e39df9e27c8626fb86a954a3f5a939460406507a9b735f1d4c7")
-        self.assertEqual(PINNED_DIGEST, "0adb4f0ed7d9f20fc05cb3ce73590b5a2dfdfe38e5d6aa6759e071d1beb4d5b2")
+        self.assertEqual(money_digest(), "0310779c2f58eaf453835f1c989f130cf92a74198198b624cf021298a9e43945")
+        self.assertEqual(PINNED_DIGEST, "ca89ff8af1dc45d58e3b6af3b8eba4f82afa4d0d73b9d2fb5d28e6d4d749aae3")
         # L-D's rows are the only money rules it moved: without them, the money digest is the incubator cap's.
         before = copy.deepcopy(CONSTITUTION)
         probe = before["options_money"]["probe"]
@@ -72,7 +73,7 @@ class ConstitutionTest(unittest.TestCase):
         self.assertEqual(CONSTITUTION["options_money"]["probe"],
                          {"max_loss_share": "0.10", "contracts": 1, "open_per_family": 3, "family_share": "0.15",
                           "floor_usd": "0", "max_open": 8, "loss_budget_usd": "400", "loss_window_sessions": 20,
-                          "loss_total_usd": "800", "loss_basis": "net", "demotion": "dm1"})
+                          "loss_total_usd": "400", "loss_basis": "net", "demotion": "dm1"})
 
     def test_the_fast_lane_probe_rows_stay_inside_the_goals_bounds(self):
         import copy

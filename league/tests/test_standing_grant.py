@@ -379,15 +379,15 @@ class TheIncubatorCap(StandingCase):
 
 class TheReleaseLD(StandingCase):
     """Release L-D (Oct 9, 2026): the Probe row's `max_open` 3 -> 8, its new `loss_basis` "net" and `demotion` "dm1", and
-    THE ROLLING PROBE BUDGET's `loss_window_sessions` 20 and `loss_total_usd` "800" move the money digest from the
-    incubator cap's 1665c385 to fdf2ac7c. A grant pinned on 1665c385 holds nothing after the deploy until the standing
+    THE ROLLING PROBE BUDGET's `loss_window_sessions` 20 and `loss_total_usd` "400" (the operator's setting of Oct 9,
+    inside the owner's $800 ceiling) move the money digest from the incubator cap's 1665c385 to 0310779c. A grant pinned on 1665c385 holds nothing after the deploy until the standing
     grant re-ratifies it at the House's start, on the owner's release change only. Its CON-only rollback (`loss_basis`
     "gross", `max_open` 3, `demotion` "dm0", `loss_total_usd` "400", `loss_window_sessions` 2000) is a digest of its own,
     320899d6, ratified the same way on the owner's deploy of it; `floor_box.py rollback` to the release before L-D brings
     1665c385 back."""
 
     BEFORE = "1665c3858bce937617a339dfa56ae9a38a51e9fd763225ec10a645d3d5bafa08"
-    LD = "fdf2ac7c1a446e39df9e27c8626fb86a954a3f5a939460406507a9b735f1d4c7"
+    LD = "0310779c2f58eaf453835f1c989f130cf92a74198198b624cf021298a9e43945"
     CON_ROLLBACK = "320899d675059182509a62b67d122afd2fdc54b08c59b2053a684d88fc8b55f2"
 
     def pinned_before(self):

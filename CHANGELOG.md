@@ -29,7 +29,7 @@ any other deploy.
 The running House release is `20261009T025942Z-376c84971b5e` (main `ccfa48d5`, 03:00Z Oct 9, below), the gateway is
 `8072b5b1`, and the box's updater is on. What is built and not deployed is on branches.
 
-### Release L-D, on `release/ld-net-budget` (unreleased; an owner deploy, evidence reset 5; money digest `1665c385` -> `fdf2ac7c`)
+### Release L-D, on `release/ld-net-budget` (unreleased; an owner deploy, evidence reset 5; money digest `1665c385` -> `0310779c`)
 
 The one planned evidence reset of Oct 9 (the plan of Oct 9, "L: Release L-D", and its critic). Claude's decisions under
 the owner's goal of Oct 7, item 4 (Probe sizing up to 10% of equity a position, a Probe loss budget up to $400 in total)
@@ -65,20 +65,23 @@ Operator's page: **Release L-D** at the top of `docs/operations.md`.
   -$360) 0.27 -> 0.30; Done 2.6% -> 3.3%.
 - **L9, THE ROLLING PROBE BUDGET** (the owner's goal of Oct 9, item 4). `probe.loss_budget_usd` ($400) is now over the
   last `probe.loss_window_sessions` (20) New York sessions, today included (the repo's NYSE calendar,
-  `ltcm.data.us_equity_session`; `real.probe_window_start`), beside the new `probe.loss_total_usd` ($800) from
-  inception; each realized figure read by `loss_basis` (`real.probe_realized`, `real.probe_figures`). Under "net" the
-  window's figure is its WORST NET STRETCH (the review of L-D: with the window's plain net a gain that aged out left
-  more than $400 net in a later 20-session window, every open having passed), so a Probe gain offsets only the losses
-  closed before it there and the $400 holds over every 20-session window as an outcome; the total is the net from
-  inception. A Probe open must fit BOTH envelopes, each with every real position's open maximum loss and the open
-  (`money.plan_open`); the refusal names the one that binds; exits go on. The House warning and the fast lane report
-  (`realized_total_usd`, `total_budget_usd`, `window_sessions`, `window_start`, `binding`) show both figures with the
-  basis. Bounds: window 20-2000 sessions (a longer window is never looser), total $0-800. Cost: the worst net Probe
-  loss rises from $400 to $800 (the 60% drawdown stop, about $773 from today's peak, binds near it); the window lets
-  trading resume after a bad stretch as its losses age out, instead of stopping for good. The measured cost is in
-  `docs/operations.md` (budget simulation, Oct 9: pending; it modelled the plain net, and a paired re-run with the
-  worst stretch puts 12-week Done as traded at 7.0 / 3.7 / 1.1% against its 11.7 / 8.6 / 3.5% and today's wall's 10.0
-  / 7.6 / 4.5%, 24-week Done about level).
+  `ltcm.data.us_equity_session`; `real.probe_window_start`), beside the new `probe.loss_total_usd` from inception, set
+  to $400: the owner's $400 a window is a wall, read as its worst net stretch, and his $800 in total a ceiling (the
+  operator's decision of Oct 9, after the budget simulation's worst-stretch run); each realized figure read by
+  `loss_basis` (`real.probe_realized`, `real.probe_figures`). Under "net" the window's figure is its WORST NET STRETCH
+  (the review of L-D: with the window's plain net a gain that aged out left more than $400 net in a later 20-session
+  window, every open having passed), so a Probe gain offsets only the losses closed before it there and the $400 holds
+  over every 20-session window as an outcome; the total is the net from inception. A Probe open must fit BOTH
+  envelopes, each with every real position's open maximum loss and the open (`money.plan_open`); the refusal names the
+  one that binds; exits go on. The House warning and the fast lane report (`realized_total_usd`, `total_budget_usd`,
+  `window_sessions`, `window_start`, `binding`) show both figures with the basis. Bounds: window 20-2000 sessions (a
+  longer window is never looser), total $0-800 (raising it to $800 later is CON-only: a money-digest move, no
+  fingerprint move). Cost, as set: the worst net Probe loss from inception stays $400, and the window adds a second
+  wall; a bad stretch that ages out of the window frees no room in the total. Measured (budget simulation, Oct 9,
+  worst-stretch variants, seed 202610097, post-hoc, as traded, holds 2 / 3 / 5): P(Done) 6.0 / 3.3 / 1.0% at 12 weeks
+  and 11.1 / 8.7 / 5.9% at 24, P(net Probe < -$400 within 12 weeks) 0.9-2.1%, P(the 60% drawdown stop by 24 weeks)
+  3.0-8.3%; with an $800 total 7.0 / 3.7 / 1.1%, 14.0 / 10.9 / 7.2%, 37.6-39.2% and 41-46%; with the $400 total and no
+  window 10.0 / 7.6 / 4.5%, 11.0 / 9.0 / 7.6%, 1.3-2.8% and 8.2-13.0% (the table is in `docs/operations.md`).
 - **L5, the marketable natural limit `{"natural": k}`, dropped** (the operator's decision, Oct 9 about 07:40Z). It
   changed `league/gym/legs.py` and `league/gym/PROGRAM.md`, which moved the Gym bundle (`gym-engine-4-e1c896f8d304` ->
   `gym-engine-4-460b332db232`), so at the adoption no stored Train or Validation result would have been reused (every
@@ -86,15 +89,15 @@ Operator's page: **Release L-D** at the top of `docs/operations.md`.
   been cleared; `{"price": v}` already lets a program pay through. It waits for a planned Gym release (rule F0).
 - **Not done: the narrower fingerprint** (the critic, N8): `league/live/money.py` stays hashed, because the practice
   book's caps read `money.Table` and the incubator's first-look rule lives there.
-- **Identities.** Constitution digest `5698a2f9` -> `0adb4f0e`; money digest `1665c385` -> `fdf2ac7c` (the standing
-  grant re-ratifies at the House's start on the owner's deploy); the execution fingerprint `b4c34031` -> `90664941`
+- **Identities.** Constitution digest `5698a2f9` -> `ca89ff8a`; money digest `1665c385` -> `0310779c` (the standing
+  grant re-ratifies at the House's start on the owner's deploy); the execution fingerprint `b4c34031` -> `31a7e921`
   (league/live changed): the evaluator adoption re-derives every family's bests, and every active practice cohort is
   completed ("evaluator changed"), the 10 still active of the 12 admitted Oct 8 among them (their incubator first looks
   were expected about Nov 4-10). No family is banded. The Gym bundle does not move (`gym-engine-4-e1c896f8d304`,
   production's), so, as at fast lane v2, the re-derivation reuses recorded Train and Validation results and the
   extension holds stand.
-- **Rollback.** CON-only: `loss_basis` "gross", `max_open` 3, `demotion` "dm0", `loss_total_usd` "400",
-  `loss_window_sessions` 2000 (money digest `320899d6`, constitution `c9d8ef5b`), one owner deploy and no fingerprint
+- **Rollback.** CON-only: `loss_basis` "gross", `max_open` 3, `demotion` "dm0", `loss_total_usd` "400" (the value in
+  force), `loss_window_sessions` 2000 (money digest `320899d6`, constitution `c9d8ef5b`), one owner deploy and no fingerprint
   move; each value runs fast lane v2's rule, decision for decision (`league/tests/test_ld_release.py`, against a frozen
   copy of `ccfa48d5`'s code; the 2000-session window holds every close since the fast lane). `floor_box.py rollback`
   moves the fingerprint again and, after D-1, drops D-1.

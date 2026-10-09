@@ -66,11 +66,12 @@ by their own unit):
   the window's WORST NET STRETCH, from any of its sessions to today, so a Probe gain offsets only the losses closed
   before it and the $400 holds over every 20-session window, not only at each open) + every real position's open
   maximum loss + the new open at most `probe.loss_budget_usd` ($400), and the realized losses of every close, from
-  inception (`Exposure.probe_realized_total`) + the same at most `probe.loss_total_usd` ($800). An open that would
-  breach either is refused, naming the envelope that binds, and exits go on. The dollars bind before the count (three
-  $129 units fit the $400, eight $50 units). These refuse a Probe family's open only, never a Sized one, and come after
-  the kill switch, the stops, the grant and reconciliation (`step._real_intent` asks `real_block` first). `probe_room`
-  is the room the other routes leave for Probe opens: min(`probe.max_open` x the Probe's cap, `probe.loss_budget_usd`).
+  inception (`Exposure.probe_realized_total`) + the same at most `probe.loss_total_usd` ($400 as set on Oct 9, inside
+  the owner's $800 ceiling). An open that would breach either is refused, naming the envelope that binds, and exits go
+  on. The dollars bind before the count (three $129 units fit the $400, eight $50 units). These refuse a Probe
+  family's open only, never a Sized one, and come after the kill switch, the stops, the grant and reconciliation
+  (`step._real_intent` asks `real_block` first). `probe_room` is the room the other routes leave for Probe opens:
+  min(`probe.max_open` x the Probe's cap, `probe.loss_budget_usd`).
 - Sized: `sized.kelly_fraction` of Kelly on the LOWER bound (`stats.quarter_kelly`: fraction x lcb / variance of the
   per-trade return on maximum loss) of `E` a structure, never above `sized.max_loss_share x E`; the family at most
   `sized.family_share x E`. C3 (the review of #362), unchanged by the fast lane: a Sized family whose Kelly stake is

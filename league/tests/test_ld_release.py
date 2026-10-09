@@ -1,7 +1,9 @@
 """RELEASE L-D (Oct 9, 2026; the plan of Oct 9, "L: Release L-D", and its critic): THE PROBE LOSS BUDGET read NET (L1), 8
 Probe slots inside the $400 envelope with the Probe room capped at the budget (L2), DM1's demotion behind its switch with
-its sigma read from the swarm's family state (L3), and THE ROLLING PROBE BUDGET, $400 in any 20 sessions beside $800 in
-total (L9). The marketable natural limit `{"natural": k}` (L5) was dropped from L-D on Oct 9 (the operator's decision,
+its sigma read from the swarm's family state (L3), and THE ROLLING PROBE BUDGET, $400 in any 20 sessions beside a total
+from inception (L9): the owner's ceiling is $800, and the constitution sets $400 (the operator's decision of Oct 9), so
+the two-envelope mechanics are checked on `table(loss_total_usd="800")` (`CEILING`) and the setting in force beside
+them. The marketable natural limit `{"natural": k}` (L5) was dropped from L-D on Oct 9 (the operator's decision,
 about 07:40Z): it changed `league/gym/legs.py` and `PROGRAM.md`, which moves the Gym bundle, so the adoption would have
 re-run every stored Train and Validation result on the Gym boxes the direction lane needs; it waits for a planned Gym
 release, and its tests went with it.
@@ -36,6 +38,9 @@ if HAVE:
     from league.tests.live_fakes import MONDAY, VERTICAL, at, family
 
 E = D("1289.34")        # the sizing equity at the start of day Oct 8, 2026 (the plan's E)
+#: THE ROLLING PROBE BUDGET at the owner's ceilings ($400 in any 20 sessions, $800 in total), the two envelopes at
+#: different figures; the constitution sets the total to $400 (Oct 9).
+CEILING = table(loss_total_usd="800")
 
 
 # ===================================================================================== fast lane v2, frozen (ccfa48d5)
@@ -138,9 +143,11 @@ class TheRows(unittest.TestCase):
         self.assertEqual((t.probe_loss_basis, t.probe_max_open, t.probe_demotion), ("net", 8, "dm1"))
         r = rollback_table()
         self.assertEqual((r.probe_loss_basis, r.probe_max_open, r.probe_demotion), ("gross", 3, "dm0"))
-        # THE ROLLING PROBE BUDGET: $400 over 20 sessions and $800 in total; the rollback's a window of 2000 and $400.
-        self.assertEqual((probe["loss_budget_usd"], probe["loss_window_sessions"], probe["loss_total_usd"]), ("400", 20, "800"))
-        self.assertEqual((t.probe_loss_budget, t.probe_loss_window, t.probe_loss_total), (D("400"), 20, D("800")))
+        # THE ROLLING PROBE BUDGET: $400 over 20 sessions and $400 in total (the operator's setting of Oct 9 inside the
+        # owner's $800 ceiling, the row's bound); the rollback's a window of 2000 and the same $400.
+        self.assertEqual((probe["loss_budget_usd"], probe["loss_window_sessions"], probe["loss_total_usd"]), ("400", 20, "400"))
+        self.assertEqual((t.probe_loss_budget, t.probe_loss_window, t.probe_loss_total), (D("400"), 20, D("400")))
+        self.assertEqual(CEILING.probe_loss_total, D("800"))
         self.assertEqual((r.probe_loss_budget, r.probe_loss_window, r.probe_loss_total), (D("400"), 2000, D("400")))
         self.assertEqual(OPTIONS_MONEY_BOUNDS["probe.loss_window_sessions"], ("20", "2000"))
         self.assertEqual(OPTIONS_MONEY_BOUNDS["probe.loss_total_usd"], ("0", "800"))
@@ -165,13 +172,15 @@ class TheRows(unittest.TestCase):
     def test_the_digests_moved(self):
         from league.constitution import PINNED_DIGEST, digest, money_digest
 
-        self.assertEqual(money_digest(), "fdf2ac7c1a446e39df9e27c8626fb86a954a3f5a939460406507a9b735f1d4c7")
+        self.assertEqual(money_digest(), "0310779c2f58eaf453835f1c989f130cf92a74198198b624cf021298a9e43945")
         self.assertEqual(digest(), PINNED_DIGEST)
         self.assertEqual(money_digest(constitution(**FAST_LANE_V2)),
                          "320899d675059182509a62b67d122afd2fdc54b08c59b2053a684d88fc8b55f2", "the CON-only rollback's")
-        for key, value in (("loss_basis", "gross"), ("max_open", 3), ("demotion", "dm0"), ("loss_total_usd", "400"),
-                           ("loss_window_sessions", 2000)):
+        for key, value in (("loss_basis", "gross"), ("max_open", 3), ("demotion", "dm0"), ("loss_window_sessions", 2000),
+                           ("loss_total_usd", "800")):
             self.assertNotEqual(money_digest(constitution(**{key: value})), money_digest(), key)
+        # The rollback's $400 total is the value in force (Oct 9): raising it to the owner's $800 is a money-digest move.
+        self.assertEqual(money_digest(constitution(loss_total_usd="400")), money_digest())
 
 
 # ================================================================================================ L1: the net budget
@@ -874,8 +883,8 @@ class TheRollingOutcome(unittest.TestCase):
     """THE ROLLING PROBE BUDGET as an OUTCOME (the review of release L-D, Oct 9, 2026): Probe opens admitted only by
     `money.plan_open` on `real.probe_figures`, closed later at a full loss, a partial one or a lottery-shaped gain (up to
     4x the maximum loss), never leave more than $400 of net realized Probe losses in ANY 20 NYSE sessions nor more than
-    $800 net from inception, under "net" with the window's worst stretch. With the window's plain net (the build before
-    the review) the same runs do breach the $400."""
+    the total net from inception, under "net" with the window's worst stretch: $800 at the owner's ceiling (`CEILING`),
+    $400 as set (Oct 9). With the window's plain net (the build before the review) the same runs do breach the $400."""
 
     setUp = TheNetTally.setUp
 
@@ -888,13 +897,12 @@ class TheRollingOutcome(unittest.TestCase):
                                         "status": "closed" if closed_at else "open", "closed_at": closed_at,
                                         "tuition": 0, "info": json.dumps({"order": pid, "probe": True})}, "pid")
 
-    def run_season(self, seed: int) -> tuple[list[str], list[tuple[str, D]], int]:
-        """One season: (its sessions, every close (day, cash) in order, the opens admitted)."""
+    def run_season(self, seed: int, t: M.Table = CEILING) -> tuple[list[str], list[tuple[str, D]], int]:
+        """One season under `t`: (its sessions, every close (day, cash) in order, the opens admitted)."""
         from league.live.real import probe_figures
         from league.ops.direction import sessions
 
         self.state.execute("DELETE FROM positions")
-        t = M.Table.from_constitution()
         rng = random.Random(seed)
         days = sessions("2026-10-05", "2027-03-31")
         held: dict[int, tuple[int, float, int, int]] = {}      # pid -> (unit, cash at its close, close session, hour)
@@ -955,6 +963,20 @@ class TheRollingOutcome(unittest.TestCase):
             reused += gross > D("400")
         self.assertGreater(reused, 0, "gains were re-risked: some window's gross Probe losses passed $400")
 
+    def test_as_set_no_20_session_window_nor_the_total_holds_more_than_400_net(self):
+        """The constitution in force (Oct 9): the same seasons with a $400 total beside the window."""
+        t = M.Table.from_constitution()
+        self.assertEqual((t.probe_loss_budget, t.probe_loss_total), (D("400"), D("400")))
+        bound = 0
+        for seed in range(8):
+            days, closes, admitted = self.run_season(seed, t)
+            window, total, _ = self.worst(days, closes)
+            self.assertGreater(admitted, 5, seed)
+            self.assertLessEqual(window, D("400"), seed)
+            self.assertLessEqual(total, D("400"), seed)
+            bound += total > D("300")
+        self.assertGreater(bound, 0, "the $400 total was reached")
+
     def test_the_windows_plain_net_breaches_the_400_on_the_same_runs(self):
         from unittest import mock
 
@@ -983,11 +1005,11 @@ class TheRollingOutcome(unittest.TestCase):
 
 
 class TheTwoEnvelopes(unittest.TestCase):
-    """`money.plan_open`: a Probe open fits BOTH the window's $400 and the total's $800, each counting every real
-    position's open maximum loss; the refusal names the one that binds."""
+    """`money.plan_open`: a Probe open fits BOTH the window's $400 and the total's (the owner's ceiling, $800, here; $400
+    as set), each counting every real position's open maximum loss; the refusal names the one that binds."""
 
     def setUp(self):
-        self.t = M.Table.from_constitution()
+        self.t = CEILING
 
     def plan(self, unit, *, table_=None, **exposure):
         values = {k: (v if k in ("family_open", "probe_open") else D(str(v))) for k, v in exposure.items()}
@@ -1005,6 +1027,22 @@ class TheTwoEnvelopes(unittest.TestCase):
         # A bad stretch that aged out of the window: trading resumes (fast lane v2's $400 in total stopped it for good).
         self.assertEqual(self.plan("128.93", probe_realized="0", probe_realized_total="400").qty, 1)
         self.assertEqual(self.plan("128.93", probe_realized="400", table_=rollback_table()).qty, 0)
+
+    def test_as_set_the_total_binds_at_400_and_an_aged_out_loss_frees_no_room(self):
+        """The constitution in force (Oct 9): both envelopes at $400."""
+        t = M.Table.from_constitution()
+        self.assertEqual(self.plan(10, table_=t, probe_realized="0", probe_realized_total="390").qty, 1, "$400 exactly")
+        refused = self.plan("10.01", table_=t, probe_realized="0", probe_realized_total="390")
+        self.assertEqual(refused.reason, "probe: the loss budget in total: $390.00 could already be lost (realized net "
+                                         "$390.00 since the fast lane, held or working $0.00) and this risks $10.01, over "
+                                         "$400 in total")
+        # A $400 net loss that aged out of the window still stops Probe opens: only Probe gains (NET) free the total.
+        self.assertEqual(self.plan("128.93", table_=t, probe_realized="0", probe_realized_total="400").qty, 0)
+        self.assertEqual(self.plan("128.93", table_=t, probe_realized="0", probe_realized_total="271.07").qty, 1)
+        # And the window still binds after earlier gains refilled the total.
+        window = self.plan(100, table_=t, probe_realized="350", probe_realized_total="50")
+        self.assertTrue(window.reason.startswith("probe: the loss budget: $350.00"), window.reason)
+        self.assertTrue(window.reason.endswith("over $400 in any 20 sessions"), window.reason)
 
     def test_the_window_binds_at_400_and_names_its_sessions(self):
         self.assertEqual(self.plan(100, probe_realized="300", probe_realized_total="300").qty, 1, "$400 exactly")
@@ -1117,12 +1155,20 @@ class TheRollingBudgetLive(LiveCase):
                                         "status": "closed", "closed_at": at(day, 15, 0), "tuition": 0,
                                         "info": json.dumps({"order": n, "probe": True})}, "pid")
 
-    def test_a_400_loss_older_than_the_window_lets_probe_trading_resume(self):
-        live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 600})])
+    def test_at_the_owners_ceiling_a_400_loss_older_than_the_window_lets_probe_trading_resume(self):
+        live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 600})], table=CEILING)
         self.lost(live, -400.0, dt.date(2026, 8, 3))           # 20 sessions before MONDAY start Aug 31
         self.run_to(9, 33)
         self.assertEqual(len(self.opens()), 1, self.refusals())
         self.assertFalse(any(w.startswith("probe: the loss budget") for w in self.refusals()), self.refusals())
+
+    def test_as_set_the_same_old_loss_stops_it_by_the_400_total(self):
+        live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 600})])
+        self.lost(live, -400.0, dt.date(2026, 8, 3))
+        self.run_to(9, 33)
+        self.assertEqual(self.opens(), [])
+        self.assertTrue(any(w.startswith("probe: the loss budget in total: $400.00") and w.endswith("over $400 in total")
+                            for w in self.refusals()), self.refusals())
 
     def test_under_the_rollback_the_same_old_loss_still_stops_it(self):
         live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 600})], table=rollback_table())
@@ -1141,7 +1187,7 @@ class TheRollingBudgetLive(LiveCase):
         self.assertTrue(any(w.startswith("probe: the loss budget in total: $790.00") for w in self.refusals()),
                         self.refusals())
         [told] = [t for lvl, t in self.alerts if "Probe loss budget" in t]
-        self.assertIn("$400 in any 20 sessions and $800 in total: net realized Probe losses", told)
+        self.assertIn("$400 in any 20 sessions and $400 in total: net realized Probe losses", told)
         self.assertIn("realized $0.00 in the window and $790.00 in total, held or working $0.00", told)
         self.assertIn("exits go on", told)
 
