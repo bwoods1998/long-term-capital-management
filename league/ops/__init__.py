@@ -11,7 +11,10 @@ else is in the modules:
 - `guard`: read-only SQLite and the habits that keep an extract from hurting the House;
 - the jobs: `preopen`, `economics`, `scoreboard`, `hygiene`, `clock`, `stall` (and `grant`, `budget`, `drills`, ... when
   present);
-- `funnel`: the research funnel's counts over a window (the daily page's Funnel table, the stall alarm).
+- `funnel`: the research funnel's counts over a window (the daily page's Funnel table, the stall alarm);
+- `twins`: THE PER-CLOSE FILL REPLAY (Oct 10, 2026): each real close's own orders replayed on the gate image. Not a House
+  job: the swarm's loop runs it (only the swarm holds the Gym pool); it lives here, behind the updater's wall, because the
+  `dlane` report's Done meter reads it.
 
 `budget` (league/ops/budget.py) is the budget rule and the funding notices: protected (`league/ci.py` FORBIDDEN), as are
 `grant`, `drills` (which asks the updater for the rollback drill rather than running it in its child) and `context`

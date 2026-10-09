@@ -516,8 +516,8 @@ class TheAmendment(Fixture):
         cp = self.report()["done"]["screen"]["latest"]
         self.assertFalse(cp["holds"], "B1's local repro: 30 closes, 2 programs, no replay row held before A1.1")
         self.assertEqual(cp["items"], {"3": True, "4": False, "7": True})
-        self.assertIn("replay untested: 0 of 30 closes matched a nightly replay; 0 programs with 5+ matched closes of the 2 "
-                      "needed (DONE-RULE-A1 A1.1)", cp["why"])
+        self.assertIn("replay untested: 0 of 30 closes matched a replay (a twin or the nightly); 0 programs with 5+ matched "
+                      "closes of the 2 needed (DONE-RULE-A1 A1.1)", cp["why"])
         self.assertEqual(cp["replay_coverage"], {"matched": 0, "closes": 30, "share": 0.0})
         self.assertEqual([(p["family"], p["closes"], p["matched"], p["gap"]) for p in cp["by_program"]],
                          [("dir-a", 15, 0, None), ("dir-b", 15, 0, None)], "every program listed, never dropped")

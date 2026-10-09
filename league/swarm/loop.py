@@ -13,7 +13,8 @@ One process beside the House loop, niced. Its threads:
 - ROUNDS on their own threads so none blocks another: the tournament (hourly; then, on its thread, THE INCUBATOR'S
   RE-RUNS, `incubator_reruns`), the idle pass between its rounds (every
   five minutes, the idle rule's retirements alone: `Tournament.idle_pass`), the gate (every few
-  minutes), the nightly forward (once a day), the architect (`architect.every_seconds`, four hours by default; THE
+  minutes), the nightly forward (once a day), THE PER-CLOSE FILL REPLAY after it (each real close's own orders on the
+  gate image, league/ops/twins.py, Oct 10, 2026), the architect (`architect.every_seconds`, four hours by default; THE
   LIBRARY's retrieval first, then the strategist, then the architect: `architect_pass`), the diagnostician (every few
   minutes, Claude on the stuck and the nearly-there families);
 - RESEEDS (the sprint, Sept 26): below `population.start` while the architect is not due, the seeds' mechanisms are
@@ -71,6 +72,7 @@ from .seeds import SEEDS, family_spec, program_for
 from .store import SwarmStore, same_slice, slice_priors
 from .strategist import PAIR_SECONDS, Strategist
 from .tournament import INDEX, NOT_ROTATED, Tournament
+from ..ops.twins import Twins
 
 CODE_DIR = Path(__file__).resolve().parents[2]
 
@@ -495,6 +497,8 @@ class Swarm:
         self.tournament = Tournament(self.store, self.pool, self.settings, clock=clock)
         self.scheduler.useful_ids = lambda: self.tournament.useful  # THE CONCURRENCY's useful experiments
         self.gate = Gate(self.store, self.pool, self.router, self.settings, clock=clock)
+        # THE PER-CLOSE FILL REPLAY (Oct 10, 2026; league/ops/twins.py): the real closes' twins on the gate image.
+        self.twins = Twins(self.store, self.pool, self.settings, root=self.root, gate=self.gate, clock=clock)
         # The whole graveyard as one sealed digest, shared by the architect and the strategist (Sept 29, 2026): one pass's
         # two Claude calls send the same bytes, so the second reads the first's cache entry.
         self.digest = GraveyardDigest(self.store, self.settings, clock=clock)
@@ -980,7 +984,11 @@ class Swarm:
                 self._round("gate", self.gate.run)
             if self.gate.forward_due():
                 self._round("forward", self.gate.forward)
-            # THE GATE'S RESERVE: the three above go on to the day's cap; what makes new research (the architect, a
+            # THE PER-CLOSE FILL REPLAY (Oct 10, 2026; league/ops/twins.py): each real close's own orders on the gate
+            # image, in its own round, so a twin's trouble never touches the nightly forward record.
+            if self.twins.due():
+                self._round("twins", self.twins.run)
+            # THE GATE'S RESERVE: the rounds above go on to the day's cap; what makes new research (the architect, a
             # reseed, the diagnostician; the researchers' cycles in `_worker`) stops at the reserve under it.
             research = self.guard.allows("research")
             # Refilling to the start population always (a birth spends nothing by itself: the pace caps all cycles);
