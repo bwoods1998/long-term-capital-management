@@ -154,7 +154,10 @@ default, or "direction": cards.py, `dlane.card_errors`):
     family's row binds one, the direction quota of this pass (`dlane.DirectionQuota.text`), the last pass's
     direction births, refusals and shortfall (kv `LANE_LAST_KEY`), and the direction lane's failure counts over 48 hours
     (`dlane.failure_counts`: codes and counts only, never a figure; the unit's rule when a version failed E5, alarm A7's
-    self-action, never today's dollar cap). A pass that left reserved direction births unfilled makes the next request
+    self-action, never today's dollar cap). THE TRAIN MAP (Oct 9, 2026; `dlane.train_map_text`, while `dlane.train_map`
+    is true): the call shapes that pass direction-v2 on the Train years in the operator's census, one line each with S_D
+    and the unit's verdict as a word, and its lessons, labelled in-sample (the screen decides), so births aim there and
+    vary the gate, the hold or the root. A pass that left reserved direction births unfilled makes the next request
     OPEN with that shortfall and the top failure reasons (`lane_lead`), and names the direction cards the class cap
     refused apart (`lane_class_capped`) so that a full class is not read as a card error.
   - THE QUOTA (`dlane.DirectionQuota`, one a pass like `pass_quota`, `pass_lane_quota`; allocation.py re-exports it):
@@ -1700,11 +1703,15 @@ class Architect:
                    + (f" (full: {full}): propose a direction structure whose class has room" if full else "") + "."
                    if int(capped.get("cards") or 0) else "")
                 + (f" The recent direction families' top failures (48 h): {top}." if top else "")
-                + " Propose direction cards that fit the lane's box and its bar (the LANES block below).\n\n")
+                + " Propose direction cards that fit the lane's box and its bar (the LANES block below"
+                + (", and its TRAIN MAP of the shapes that pass on Train"
+                   if dlane.map_on(self.settings) and dlane.train_map() is not None else "")
+                + ").\n\n")
 
     def lanes_block(self, quota: Any = None) -> str:
         """THE LANES block of the request, after the BIRTH QUOTAS (HARNESS C3): each lane's rules (`dlane.lanes_text`), the
-        graveyard's DRIFT rule, this pass's direction quota (`quota`, `dlane.DirectionQuota.text`), the last pass's
+        graveyard's DRIFT rule, the TRAIN MAP while `dlane.train_map` is on (`dlane.train_map_text`: in-sample, the screen
+        decides), this pass's direction quota (`quota`, `dlane.DirectionQuota.text`), the last pass's
         direction births and refusals (the class cap's apart), and the lane's failure counts over 48 hours (codes and
         counts only; the unit's rule, never today's dollar cap, when a version failed E5). "" while the lane is off."""
         if not dlane.on(self.settings):
@@ -1719,6 +1726,11 @@ class Architect:
                  "every row binds alpha cards. Each BIRTH CELLS line of a cell a direction card may be in says how many "
                  "of its rows bind one. The lane's own cells: " + ", ".join(
                      f"{k} / directional / {h}" for k, _, h in cards.lane_cells(self.settings, ["directional"])) + "."]
+        # THE TRAIN MAP (Oct 9, 2026; `dlane.train_map_text`): the call shapes that pass direction-v2 on Train, labelled
+        # in-sample, and the census's lessons, so direction births aim there ("" while `dlane.train_map` is off).
+        shown = dlane.train_map_text(self.settings)
+        if shown:
+            lines.append(shown)
         if quota is not None and quota.text():
             lines.append(quota.text())
         last = self.store.get(LANE_LAST_KEY)

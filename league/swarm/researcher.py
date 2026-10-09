@@ -303,8 +303,9 @@ judged by `dlane.robust_verdict` (P1 the profit, R2 E1 and E3 again, R3 at least
 profit alone: a known failure demotes the version with its why (`robust_landed`), an unknown verdict leaves the House's
 profit rule, and the game's look follows only a pass. Each verdict is kept in the family's state (`dlane.record`), what
 the architect's and the strategist's counts read. Its brief and status carry the lane's text (`dlane.brief_text`,
-`dlane.status_text`), its run views a `lane` block (`dlane.view`), and the graveyard tool labels DRIFT rows as not
-binding for it; all of it Train-year (2022-24) figures only, and all of it says that an always-in call program can pass
+`dlane.status_text`; the brief also THE TRAIN MAP's lessons and best passing shapes on its roots while
+`dlane.train_map` is on, labelled in-sample), its run views a `lane` block (`dlane.view`), and the graveyard tool labels
+DRIFT rows as not binding for it; all of it Train-year (2022-24) figures only, and all of it says that an always-in call program can pass
 the bar and that the profit is leveraged index beta minus option costs, never alpha. The ROLE becomes lane-aware
 (`ROLE_LANES`: the score is the lane's; in the alpha lane drift is not alpha, in the direction lane profit from drift
 counts, reported beside the same-risk buy-and-hold) for EVERY researcher, alpha families included: the shared cached
