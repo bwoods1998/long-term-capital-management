@@ -189,6 +189,58 @@ class Reader(unittest.TestCase):
         for key, value in raw["bar"].items():
             self.assertEqual(c[key], value, key)
 
+    def test_the_lessons_claims_agree_with_the_committed_rows(self):
+        """Every claim a lesson makes about the passers is checked against the file's own rows (the review of Oct 9:
+        LESSON 2 said every passer enters every session or under ONE volatility filter while 4 rows stack both). A lesson
+        reworded so a claim below no longer matches fails here, so the claim is checked again before it ships."""
+        raw = committed_map_file()
+        rows, lessons = raw["passing"], raw["lessons"]
+        n = len(rows)
+        joined = " ".join(lessons)
+        gates = [r["gate"] for r in rows]
+
+        def claim(pattern: str) -> tuple[int, ...]:
+            m = re.search(pattern, joined)
+            self.assertIsNotNone(m, pattern)
+            return tuple(int(g) for g in m.groups())
+
+        # Every count of all the passers is the row count; "one filter" is never said of all of them.
+        for m in re.finditer(r"\b[Aa]ll (\d+) passers\b|\bfor all (\d+)\b|\bof the (\d+) passers\b", joined):
+            self.assertEqual(int(next(g for g in m.groups() if g)), n, m.group())
+        self.assertNotRegex(joined, r"(?i)(?:every|all \d+) passers?[^.]*\bor under one\b")
+        # LESSON 1.
+        self.assertIn("Every passing cell is a 0.20-delta call held 2, 3 or 5 sessions on an expiry of at most 10 days "
+                      "(nearest covering, 2-5 or 6-10 DTE)", joined)
+        self.assertEqual({r["delta"] for r in rows}, {0.2})
+        self.assertLessEqual({r["hold"] for r in rows}, {2, 3, 5})
+        self.assertLessEqual({r["expiry"] for r in rows}, {"nearest", "2-5", "6-10"})
+        self.assertIn("no 8-session hold passes", joined)
+        (border, of) = claim(r"(\d+) of the (\d+) passers fit only borderline")
+        self.assertEqual((border, of), (sum(r["unit"] == "borderline" for r in rows), n))
+        # LESSON 2: in the market every Train year, and how they enter.
+        (all_n,) = claim(r"All (\d+) passers are in the market in all three Train years")
+        self.assertEqual(all_n, n)
+        self.assertTrue(all(r["in_market_years"] == 3 for r in rows))
+        every, one, both = claim(r"(\d+) enter every session, (\d+) under one volatility filter \([^)]*\) and (\d+) "
+                                 r"under both")
+        self.assertEqual(every, gates.count("every"))
+        self.assertEqual(one, sum(g in ("ivlow", "contango") for g in gates))
+        self.assertEqual(both, gates.count("ivlow+contango"))
+        self.assertEqual(every + one + both, n, "every passer's gate is one of the three")
+        stacked = [r for r in rows if r["gate"] == "ivlow+contango"]
+        (passing_stacked, hold) = claim(r"Stacking both volatility filters [^;]*; (\d+) pass, all (\d+)-session holds "
+                                        r"entered at 15:30")
+        self.assertEqual(passing_stacked, len(stacked))
+        self.assertTrue(stacked, "the stacked gate has passers, as the census says")
+        self.assertEqual({(r["hold"], r["entry"]) for r in stacked}, {(hold, "15:30")})
+        self.assertIn("price-trend gate", joined)
+        self.assertFalse(any("trend" in g for g in gates), "the price-trend gate passes none")
+        # LESSON 3.
+        self.assertIn("IWM calls lose at 1.5x", joined)
+        self.assertNotIn("IWM", {r["root"] for r in rows}, "IWM alone: none pass")
+        (two,) = claim(r"2-session holds [^;]*\(R3\), so only (\d+) pass")
+        self.assertEqual(two, sum(r["hold"] == 2 for r in rows))
+
     def test_every_text_field_of_the_committed_file_is_agent_safe(self):
         raw = committed_map_file()
         texts = [raw["label"], raw["how"], *raw["lessons"], *raw["words"]["expiry"].values(),

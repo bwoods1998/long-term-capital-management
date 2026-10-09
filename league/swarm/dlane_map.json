@@ -1,10 +1,10 @@
 {
  "schema": 1,
  "label": "in-sample: Train years 2022-24, from the operator's census at one-lot natural prices; the screen decides",
- "built_at": "2026-10-09T14:41:19Z",
+ "built_at": "2026-10-09T15:20:11Z",
  "inputs_sha256": "d894b09ca25aeb8904b922f4792e094b177bd241b7e2cf788294a8f745c7038f",
  "inputs": "the operator's direction census, Train years 2022-24 only (sha256 of its sorted 'path sha256' manifest)",
- "source_sha256": "adb108e1437a6be468ec0a9d9f9118f47e674565b915255d614f6737da02fcf7",
+ "source_sha256": "e9e0ae5109dafbb29a41c2a53da29e402a8875d616984bf807dbdf32bee9dc95",
  "objective": "direction-v2",
  "scored_with": {
   "commit": "d70e00c3",
@@ -67,7 +67,7 @@
  ],
  "lessons": [
   "THE UNIT DECIDES THE SHAPE: 0.20 DELTA, 2-5 SESSIONS, EXPIRY WITHIN ABOUT 10 DAYS. Every passing cell is a 0.20-delta call held 2, 3 or 5 sessions on an expiry of at most 10 days (nearest covering, 2-5 or 6-10 DTE). E5 (the unit) is the most-failed rule: no 0.40 or 0.50-delta call fits at today's prices, a 0.30-delta call fits only at 2-3 sessions (mostly IWM) and then loses on costs, and no 8-session hold passes. 23 of the 30 passers fit only borderline, so take the 0.20-delta strike and the nearest covering expiry.",
-  "ALWAYS-IN PASSES E1; A GATE THAT SITS OUT 2022 FAILS E3. All 30 passers are in the market in all three Train years, 2022 included, entering every session or under one volatility filter (implied vol below its 60-session median, or 10-day above 3-day implied vol). The price-trend gate is out of the market in 2022 in 416 of 448 cells, but the trades it still takes there lose (t below -1, or a loss over half the in-market years' mean), so it fails E3 in 381 of 448 cells and passes none; contango AND trend fails E3 in 443 of 448. Stacking two volatility filters thins 2022 below 60 entry sessions (E4). Enter EVERY qualifying session (lots overlap; do not wait for the last lot to close): the frequency floors (40+ trades on 20+ days, 60+ entry sessions, exposure at least half the busiest year's) need it.",
-  "COSTS DECIDE THE ROOT AND THE SHORTEST HOLD. IWM calls lose at 1.5x the half-spread in 765 of 784 cells (P1) and none pass; 2-session holds keep under half their 1.0x profit at 1.5x in 197 of 224 cells (R3), so only 4 pass. SPY and QQQ at 3-5 sessions are the robust core. Every passer has a losing in-market year (E2 false for all 30): the profit is leveraged index drift, so the D2 screen, not this map, decides."
+  "ALWAYS-IN PASSES E1; A GATE THAT SITS OUT 2022 FAILS E3. All 30 passers are in the market in all three Train years, 2022 included: 12 enter every session, 14 under one volatility filter (implied vol below its 60-session median, or 10-day above 3-day implied vol) and 4 under both. The price-trend gate is out of the market in 2022 in 416 of 448 cells, but the trades it still takes there lose (t below -1, or a loss over half the in-market years' mean), so it fails E3 in 381 of 448 cells and passes none; contango AND trend fails E3 in 443 of 448. Stacking both volatility filters thins 2022 below 60 entry sessions (E4) in 308 of 448 cells; 4 pass, all 5-session holds entered at 15:30. Enter EVERY qualifying session (lots overlap; do not wait for the last lot to close): the frequency floors (40+ trades on 20+ days, 60+ entry sessions, exposure at least half the busiest year's) need it.",
+  "COSTS DECIDE THE ROOT AND THE SHORTEST HOLD. IWM calls lose at 1.5x the half-spread in 765 of 784 cells (P1) and none pass; 0.20-delta 2-session holds keep under half their 1.0x profit at 1.5x in 197 of 224 cells (R3), so only 4 pass. SPY and QQQ at 3-5 sessions are the robust core. Every passer has a losing in-market year (E2 false for all 30): the profit is leveraged index drift, so the D2 screen, not this map, decides."
  ]
 }

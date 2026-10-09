@@ -209,9 +209,11 @@ money-safety fix (rule F0: its cost is those bands, which go back to the Gym).
     prices, a new lot every qualifying session. It was scored by the House's own `dlane.train_score` and
     `robust_verdict` (main `d70e00c3`, the committed `dlane` settings) on 2022-24 data only; the dates were filtered
     before any row was read. Of 3,136 cells, 30 pass. Every passer is a 0.20-delta call held 2 to 5 sessions, in the
-    market all three Train years, entering every session or under one volatility filter; 23 of the 30 fit the unit only
-    borderline. IWM alone has none (it loses at 1.5x), and the price-trend gate passes none (it sits out 2022 and fails
-    E3).
+    market all three Train years: 12 enter every session, 14 under one volatility filter and 4 under both (all
+    5-session holds entered at 15:30; stacking both thins 2022 below E4's 60 entry sessions in 308 of the 448 stacked
+    cells). 23 of the 30 fit the unit only borderline. IWM alone has none (it loses at 1.5x), and the price-trend gate
+    passes none (it sits out 2022 and fails E3). The writer computes every count in the lessons from the census, and
+    `test_dlane_trainmap` checks each lesson's claims about the passers against the file's rows.
   - **The file:** `league/swarm/dlane_map.json`, protected like `dlane.py` (`league/ci.py` FORBIDDEN and the gateway's
     `protected.mjs`). It holds only what agents may see: each passing shape in the census's words (roots, delta,
     expiry rule, hold, entry, gate), its pooled S_D to one decimal, the unit's verdict as a word ("fits the unit at
@@ -254,8 +256,10 @@ money-safety fix (rule F0: its cost is those bands, which go back to the Gym).
     `dlane.train_map` false (instant), or `floor_box.py rollback`.
   - **Rebuilding the map** (operator only, never from the box): re-run the census scorer on 2022-24 inputs, reduce it
     with the operator's reducer (scratch `tmap-1009/reduce_map.py`: it verifies the pinned input hashes and writes
-    only the agent-safe fields), then run `test_dlane_trainmap`. A new bar (a `dlane.py` change to `train_score`)
-    needs a new map; until then the header's `bar` and `scored_with` say what it was scored under.
+    only the agent-safe fields), then run `test_dlane_trainmap` with `LTCM_PRIVATE_FIGURES` naming the operator's
+    private figures file (outside the repo, never committed) so its private-figures check runs; without it that
+    test is skipped. A new bar (a `dlane.py` change to `train_score`) needs a new map; until then the header's `bar`
+    and `scored_with` say what it was scored under.
 - **Births.** While the lane holds under `birth_share` (half) of the last 24 hours' births and fewer than `max_alive`
   direction families live, a pass reserves at least half its births for direction (never filled with alpha); the lane
   never holds more than `max_share` (60%) of the window, so alpha keeps at least 40%. The architect's request carries a

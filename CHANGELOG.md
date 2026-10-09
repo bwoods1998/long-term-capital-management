@@ -60,8 +60,10 @@ mostly on E1. Operator's page: **The Train map** in the Release D-1 section of `
   refuse an edit to the map, but the updater does. The execution fingerprint (`31a7e921`), the money digest
   (`0310779c`) and the constitution digest (`ca89ff8a`) do not move.
 - **Proof.** `test_dlane_trainmap` covers the switch, the reader's refusals, the secrecy of every text (no
-  dollar-looking or price-looking digit run, no year but 2022-24, no provenance hash), length bounds, the alpha and
-  rollback goldens, the report row and the wall. `test_dlane`'s committed-settings test gains `train_map`.
+  dollar-looking or price-looking digit run, no year but 2022-24, no provenance hash), each lesson's claims about the
+  passers against the file's rows, length bounds, the alpha and rollback goldens, the report row and the wall. The
+  operator's private figures are never in the repo: the tests read them from the file `LTCM_PRIVATE_FIGURES` names
+  (skipped without it). `test_dlane`'s committed-settings test gains `train_map`.
 - **Rollback.** swarm.json `dlane.train_map` false (instant), or `floor_box.py rollback`.
 
 ### The direction lane's graveyard, on `fix/dlane-graveyard` (unreleased; an updater release on top of D-1, live since 10:37Z Oct 9 as main `2b60d94a`; no evidence reset)
