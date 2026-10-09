@@ -293,6 +293,26 @@ its sweep table) count its lineage's trials without the game's children beside i
 and its hypothesis's record across its lineage (`mechanism_lineage`) leaves those children out too: a parent never reads
 that it bred. The input card reads the running span (`inputs.context`'s `span`) once the game has started.
 
+THE DIRECTION LANE (release D-1, Oct 9, 2026; league/swarm/dlane.py, PLAN D3). A family whose card declares the direction
+lane (`dlane.lane_of`) climbs the lane's own Train objective, direction-v2, in place of the worst-year score: every Train
+run of it is scored by `dlane.train_score` (`_robust_of(result, fam)`: S_D, the pooled t of daily P&L over Train at 1.0x,
+eligible when E1, E3, E4 and E5 hold, the unit priced at today's closes and equity, `dlane.unit_context`), so its best,
+its candidates, its sweep table (sorted by S_D) and `submit` all read S_D, and its run row keeps the compact score
+(`dlane.compact`, summary key `dlane.STATE_KEY`) beside `train_score` so a pruned run is still judged. Its 1.5x run is
+judged by `dlane.robust_verdict` (P1 the profit, R2 E1 and E3 again, R3 at least half the 1.0x P&L) in place of the
+profit alone: a known failure demotes the version with its why (`robust_landed`), an unknown verdict leaves the House's
+profit rule, and the game's look follows only a pass. Each verdict is kept in the family's state (`dlane.record`), what
+the architect's and the strategist's counts read. Its brief and status carry the lane's text (`dlane.brief_text`,
+`dlane.status_text`), its run views a `lane` block (`dlane.view`), and the graveyard tool labels DRIFT rows as not
+binding for it; all of it Train-year (2022-24) figures only, and all of it says that an always-in call program can pass
+the bar and that the profit is leveraged index beta minus option costs, never alpha. The ROLE becomes lane-aware
+(`ROLE_LANES`: the score is the lane's; in the alpha lane drift is not alpha, in the direction lane profit from drift
+counts, reported beside the same-risk buy-and-hold) for EVERY researcher, alpha families included: the shared cached
+prefix changes once, so an alpha golden holds for code paths, not for that text. The tournament's drift screen (off in the
+committed policy since fast lane v2) is a brake the lane does not lift: switched back on, it binds a direction version as
+any other. With `dlane.mode` "off" (THE ROLLBACK) every family is alpha and every path, the prompt included, is the
+release before it (ccfa48d5).
+
 Every cycle is a `swarm.cycle` event; a notebook entry becomes a public `swarm.note` (the site's tape,
 masked there for quotes) at most every `note_every_cycles` cycles. Standard library only.
 """
@@ -312,6 +332,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 from . import cards, diagnostics, evidence, inputs, mechanism, public
 from . import game
+from . import dlane
 from . import settings as settings_mod
 from .claude_research import ClaudeSession, ClaudeTurn, anthropic_tools, sail_items, tool_calls
 from .library import LIBRARY_RULE, LITERATURE_TOOL
@@ -474,7 +495,33 @@ THE CONTRACT (league/CONTRACT.md)
 
 """
 
-CODE_BLOCK = re.compile(r"```(?:python)?\s*\n(.*?)```", re.S)
+#: THE TWO LANES (release D-1, Oct 9, 2026; PLAN D3, MAP B5). ROLE's two paragraphs on the score and on drift, as every
+#: researcher reads them while `dlane.mode` is on (`Researcher.prompt`). Since fast lane v2 (Oct 7) switched the drift
+#: screen off, "DRIFT IS NOT AN EDGE ... never your best and is never validated" stated a rule the code no longer enforced,
+#: and it is why direction births refuted themselves (115 born, none reached Validation). The rewrite says what each lane
+#: counts: in the alpha lane drift is not alpha; in the direction lane profit from drift counts, reported beside the
+#: same-risk buy-and-hold and never called alpha. It is shared text (ROLE is the cached prefix of every researcher), so the
+#: alpha lane's prompt changes too, once, when the lane is switched on; with the lane off ROLE is read byte for byte.
+ROLE_SCORE_LANES = """TWO LANES. Your brief names your family's lane; a brief that names none is the ALPHA lane. THE TRAIN SCORE you
+climb is your lane's. ALPHA: your WORST Train year's daily t, times the share of Train quarters that were positive; a
+version counts only with at least 40 trades on at least 20 days in EVERY Train year. DIRECTION: the pooled t of your
+daily P&L over the Train years, under the bar your brief gives. In both lanes a version never counts if it fails at 1.5x
+the half-spread (the Gym re-runs each new best at 1.5x and at the mid; the results come back in your status). Seek a
+mechanism that earns in every year it is in the market, not a filter that shines in one.
+"""
+ROLE_DRIFT_LANES = """DRIFT. Long calls (or short puts) in a rising year make money whatever the signal says. Every Train run's
+`drift` splits each year's P&L into drift (what your exposure, measured on the days you held, earns at the roots' average
+return over the hours you held) and drift-adjusted alpha (what your choice of days added beyond it, after costs, with its
+t). ALPHA lane: drift is not alpha; your edge is the drift-adjusted alpha, and a placebo row that holds the same exposure
+on random days earns the drift and nothing else. DIRECTION lane: profit from drift counts; it is leveraged index beta
+minus option costs, never called alpha, and every figure of it is reported beside the same-risk buy-and-hold. While the
+drift screen is on (your status then gives its line), a version whose alpha fails it is never your best and is never
+validated.
+"""
+_ROLE_REPLACED = ROLE[ROLE.index("THE TRAIN SCORE you climb"):ROLE.index("Your family trades one to five")]
+ROLE_LANES = ROLE.replace(_ROLE_REPLACED, ROLE_SCORE_LANES + ROLE_DRIFT_LANES, 1)
+
+CODE_BLOCK =re.compile(r"```(?:python)?\s*\n(.*?)```", re.S)
 _YEAR_TEXT = re.compile(r"(?<![0-9])(?:19|20)[0-9]{2}[-/.][01]?[0-9][-/.][0-3]?[0-9](?![0-9])|(?<![0-9])20(?:19|2[0-9]|30)(?![0-9])")
 
 
@@ -501,6 +548,36 @@ def _round(value: Any, places: int) -> Any:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     return round(float(value), places) if math.isfinite(float(value)) else None
+
+
+def in_direction(store: Any, fam: Mapping[str, Any] | None, settings: Mapping[str, Any] | None) -> bool:
+    """THE DIRECTION LANE: the family is judged in the direction lane now (`dlane.lane_of`: never while `dlane.mode` is
+    off, which reads the settings alone, with no store read). False on any error: the alpha lane's paths are the
+    default."""
+    if fam is None or not dlane.on(settings):
+        return False
+    try:
+        return dlane.lane_of(store, fam, settings) == dlane.DIRECTION
+    except Exception:  # noqa: BLE001 - an unreadable lane is the alpha lane's
+        return False
+
+
+def lane_cells(score: Any) -> dict[str, Any] | None:
+    """THE DIRECTION LANE's cells of a sweep row (HARNESS C5) from a direction score, full (`dlane.train_score`) or compact
+    (`dlane.compact`, a pruned row's): {t_pool (S_D, the pooled t at 1.0x), years_in (in the market of the Train years),
+    worst_in_t (the worst in-market year's t), out_t (the worst out-of-market year's t; a flat year reads 0), unit (E5:
+    pass, fail or unknown), verdict, fails}. Train years (2022-24) only. None for any other score."""
+    if not isinstance(score, Mapping) or score.get("objective") != dlane.OBJECTIVE:
+        return None
+    years = [r for y, r in sorted((score.get("years") or {}).items())
+             if str(y).isdigit() and dlane.FIRST_YEAR <= int(y) <= dlane.LAST_YEAR and isinstance(r, Mapping)]
+    ins = [r["t"] for r in years if r.get("active") and isinstance(r.get("t"), (int, float))]
+    outs = [r["t"] if isinstance(r.get("t"), (int, float)) else 0.0 for r in years if not r.get("active")]
+    unit = score.get("unit") if isinstance(score.get("unit"), Mapping) else {}
+    return {"t_pool": _round(score.get("score"), 2), "years_in": f"{sum(1 for r in years if r.get('active'))}/{len(years)}",
+            "worst_in_t": _round(min(ins), 2) if ins else None, "out_t": _round(min(outs), 2) if outs else None,
+            "unit": unit.get("verdict"), "verdict": "eligible" if score.get("eligible") else "not eligible",
+            "fails": list(score.get("fails") or [])}
 
 
 def needs_of(code: str) -> dict[str, Any] | None:
@@ -1711,6 +1788,9 @@ class Researcher:
         self.clock = clock
         self.contract = contract if contract is not None else CONTRACT.read_text(encoding="utf-8")
         self.system = ROLE + self.contract
+        #: THE DIRECTION LANE's role (`ROLE_LANES`), the prompt while `dlane.mode` is on (`prompt`): one string, so the
+        #: cached prefix stays the same object between calls as `system` does.
+        self.system_lanes = ROLE_LANES + self.contract
         self.starter = starter
         self.background = background
         #: THE PREFLIGHT (`league/swarm/preflight.py`): a new Train run's program on synthetic sessions in the decider's
@@ -1751,17 +1831,159 @@ class Researcher:
         return int(self.train_span()[:4])
 
     def prompt(self) -> str:
-        """The researcher's system prompt with Train's span (the same string while Train is 2022-2024)."""
-        return settings_mod.train_span_text(self.system, dt.date.fromisoformat(self.train_span()))
+        """The researcher's system prompt with Train's span (the same string while Train is 2022-2024). THE DIRECTION LANE:
+        `system_lanes` (ROLE_LANES) for every family while `dlane.mode` is on, read from the live settings (a switch takes
+        effect on the next cycle, no restart); `system`, byte for byte, while it is off (THE ROLLBACK)."""
+        system = self.system_lanes if dlane.on(self.settings) else self.system
+        return settings_mod.train_span_text(system, dt.date.fromisoformat(self.train_span()))
 
     def run_timeout(self) -> float:
         """How long a Train run may take on the Gym (the span's, unless the operator set `gym.run_timeout_seconds`)."""
         return settings_mod.run_timeout(self.settings, dt.date.fromisoformat(self.train_span()))
 
-    def _robust_of(self, result: Mapping[str, Any]) -> dict[str, Any]:
+    def _robust_of(self, result: Mapping[str, Any], fam: Mapping[str, Any] | None = None) -> dict[str, Any]:
         """A Train result's score over ITS OWN span (`span_of`: the years from its first day on, and a 2020-21 year only
-        when every root of its had data): what its row records. Whether it may count now is `_counts_now`."""
+        when every root of its had data): what its row records. Whether it may count now is `_counts_now`. THE DIRECTION
+        LANE: a direction family's (`fam`, `_direction`) is direction-v2's (`dlane.train_score`: S_D, the Train years
+        2022-24 only, its unit priced at today's closes and equity, `dlane.unit_context`), with the same keys the view and
+        `_scored` read; every other family's, and every family's while the lane is off, is `evidence.train_score`."""
+        if fam is not None and self._direction(fam):
+            return dlane.train_score(result, first_year=int(span_of(result)[:4]),
+                                     unit=dlane.unit_context(self.store, self.settings), settings=self.settings)
         return evidence.train_score(result, first_year=int(span_of(result)[:4]))
+
+    # ------------------------------------------------------------------ THE DIRECTION LANE (release D-1)
+    def _direction(self, fam: Mapping[str, Any] | None) -> bool:
+        """The family is judged in the direction lane now (`in_direction`)."""
+        return in_direction(self.store, fam, self.settings)
+
+    def _dlane_record(self, fid: str, n: Any, *, score: Mapping[str, Any] | None = None,
+                      robust: Mapping[str, Any] | None = None) -> None:
+        """A direction verdict that landed (a 1.0x score, a 1.5x verdict) into the family's state (`dlane.record`): what
+        the architect's and the strategist's counts and the `dlane` report read. An alpha score is never recorded; a
+        failure to record never breaks a run's landing (often on the pool's dispatcher thread)."""
+        if score is not None and score.get("objective") != dlane.OBJECTIVE:
+            score = None
+        if (score is None and robust is None) or n is None:
+            return
+        try:
+            dlane.record(self.store, str(fid), int(n), score=score, robust=robust)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _dlane_kept(self, fam: Mapping[str, Any], n: Any) -> dict[str, Any]:
+        """Version `n`'s direction verdicts as the family's state keeps them (`dlane.record`): {train, robust, at} or {}."""
+        block = (fam.get("state") or {}).get(dlane.STATE_KEY)
+        versions = block.get("versions") if isinstance(block, Mapping) else None
+        row = versions.get(str(int(n))) if isinstance(versions, Mapping) and n is not None else None
+        return dict(row) if isinstance(row, Mapping) else {}
+
+    def _dlane_base(self, fam: Mapping[str, Any], n: int) -> Mapping[str, Any] | None:
+        """Version `n`'s 1.0x direction score, the base its 1.5x verdict compares with (`dlane.robust_verdict` reads its
+        P&L and its years' trade and entry-session counts): the one the family's state keeps, else one scored from its
+        newest normal-spread Train row over the running span (its full result, else the compact score its row keeps).
+        None when there is none: the verdict is then unknown and nothing is demoted for it."""
+        kept = self._dlane_kept(fam, n).get("train")
+        if isinstance(kept, Mapping) and kept.get("objective") == dlane.OBJECTIVE and kept.get("pnl") is not None:
+            return kept
+        for row in self.store.version_runs(fam["id"], int(n), window="train", stress=1.0, limit=20):
+            if row.get("status") != "ok" or row.get("purpose") not in DRIFT_PURPOSES or row_span(row) != self.train_span():
+                continue
+            full = self.store.run_result(row["run_id"])
+            if full is not None:
+                score = dlane.train_score(full, first_year=int(span_of(full)[:4]), settings=self.settings)
+                if score.get("pnl") is not None:
+                    return score
+            stored = (row.get("summary") or {}).get(dlane.STATE_KEY)
+            if isinstance(stored, Mapping) and stored.get("objective") == dlane.OBJECTIVE and stored.get("pnl") is not None:
+                return stored
+        return None
+
+    def _dlane_stored(self, summary: Mapping[str, Any]) -> dict[str, Any] | None:
+        """A direction score rebuilt from a run row whose full result was pruned (its summary's compact `dlane.STATE_KEY`),
+        its unit priced again at today's context; None without one."""
+        try:
+            return dlane._score_from_compact(summary.get(dlane.STATE_KEY), dlane.unit_context(self.store, self.settings),
+                                             self.settings)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _dlane_mechanism(self, fam: Mapping[str, Any]) -> str | None:
+        """The direction card's gate against its every-session twin (the card's ablation: the mechanism test) as a direction
+        view may say it: "passed" or "failed" in the test's GATE mode only; None (not tested) otherwise. SHADOW IS BLIND
+        (mechanism.py MODES): a shadow verdict is never shown, nor anything that depends on one."""
+        try:
+            cfg = mechanism.config(self.settings)
+            if not cfg["enabled"] or cfg["mode"] != "gate":
+                return None
+            entry = cards.card_of(self.store, str(fam["id"]))
+            if entry is None:
+                return None
+            if self.mechanism_lineage(str(fam["id"]), entry)["passed"]:
+                return "passed"
+            last = self.mechanism_record(fam).get("last") or {}
+            return "failed" if last.get("verdict") == "failed" else None
+        except Exception:  # noqa: BLE001 - not tested, as far as the view can tell
+            return None
+
+    @staticmethod
+    def _dlane_checks(robust: Mapping[str, Any] | None) -> Mapping[str, Any] | None:
+        """A kept compact 1.5x verdict (`dlane.compact_robust`) with its checks again (P1, R2 and R3 each held unless named
+        in its fails: a known verdict tested all three), as `dlane.status_text` reads them."""
+        if not isinstance(robust, Mapping):
+            return None
+        out = dict(robust)
+        if out.get("known") and "checks" not in out:
+            fails = list(out.get("fails") or [])
+            out["checks"] = {rule: rule not in fails for rule in ("P1", "R2", "R3")}
+        return out
+
+    def _dlane_version(self, fam: Mapping[str, Any], n: Any) -> tuple[dict[str, Any] | None, Mapping[str, Any] | None]:
+        """(version `n`'s direction score, its 1.5x verdict) for the status: the score from its newest normal-spread Train
+        row over the running span (its full result, with the figures reported beside it and the unit at today's prices;
+        else its row's compact score; else the family state's), the verdict as the state keeps it (`dlane.record`), else
+        from its newest completed 1.5x row's full result. (None, None) on an error."""
+        try:
+            n = int(n)
+            unit = dlane.unit_context(self.store, self.settings)
+            score = None
+            for row in self.store.version_runs(fam["id"], n, window="train", stress=1.0, limit=20):
+                if row.get("status") != "ok" or row.get("purpose") not in DRIFT_PURPOSES or row_span(row) != self.train_span():
+                    continue
+                full = self.store.run_result(row["run_id"])
+                if full is not None:
+                    score = dlane.train_score(full, first_year=int(span_of(full)[:4]), unit=unit, settings=self.settings)
+                else:
+                    score = dlane._score_from_compact((row.get("summary") or {}).get(dlane.STATE_KEY), unit, self.settings)
+                if score is not None:
+                    break
+            kept = self._dlane_kept(fam, n)
+            if score is None:
+                score = dlane._score_from_compact(kept.get("train"), unit, self.settings)
+            robust = self._dlane_checks(kept.get("robust"))
+            if robust is None and score is not None:
+                for row in self.store.version_runs(fam["id"], n, window="train", stress=evidence.STRESS, limit=5):
+                    full = self.store.run_result(row["run_id"]) if row.get("status") == "ok" else None
+                    if full is not None:
+                        robust = dlane.robust_verdict(score, full, first_year=int(span_of(full)[:4]), settings=self.settings)
+                        break
+            return score, robust
+        except Exception:  # noqa: BLE001 - the status goes without the figures
+            return None, None
+
+    def dlane_status(self, fam: Mapping[str, Any]) -> str:
+        """The direction objective's status line ("" for an alpha family, or while the lane is off): the version the
+        tournament validates next (the submitted best, else the best by Train score), Train-year figures only
+        (`dlane.status_text`)."""
+        if not self._direction(fam):
+            return ""
+        state = fam.get("state") or {}
+        n = fam.get("best_version") or state.get("best_train_version")
+        score, robust = self._dlane_version(fam, n) if n is not None else (None, None)
+        try:
+            return dlane.status_text(score, robust, version=n, mechanism=self._dlane_mechanism(fam), settings=self.settings)
+        except Exception:  # noqa: BLE001
+            return ""
 
     def _counts_now(self, span: Any) -> bool:
         """A score over `span` may enter the family's candidates and best only while it is the running swarm's span."""
@@ -1794,6 +2016,10 @@ class Researcher:
             change = ""
         if change:
             lines.append(change)
+        if self._direction(fam):  # THE DIRECTION LANE: its objective, its bar and what is reported beside it (static)
+            lane = dlane.brief_text(self.settings, fam.get("roots"))
+            if lane:
+                lines.append(lane)
         return "\n".join(lines)
 
     def _game_started(self) -> bool:
@@ -1840,6 +2066,9 @@ class Researcher:
         robust = self.robustness_text(fam)
         if robust:
             parts.append(robust)
+        lane = self.dlane_status(fam)  # THE DIRECTION LANE's objective line ("" for an alpha family, or the lane off)
+        if lane:
+            parts.append(lane)
         drift = self.drift_text(fam)
         if drift:
             parts.append(drift)
@@ -1998,14 +2227,20 @@ class Researcher:
             if fam is not None and dormant_count(fam):
                 self.store.set_state(fid, dormant_cycles=0)
 
-    def _with_score(self, result: Mapping[str, Any], stress: float) -> tuple[Mapping[str, Any], dict[str, Any] | None]:
+    def _with_score(self, result: Mapping[str, Any], stress: float,
+                    fam: Mapping[str, Any] | None = None) -> tuple[Mapping[str, Any], dict[str, Any] | None]:
         """(the result as its run's row records it, its Train score): at the normal spread the row keeps the score and
         eligibility over the result's own span, and the span (`train_from`): `submit` reads them, and a stored result whose
-        full result was pruned is scored from them; `_counts_now` decides whether they may count."""
-        robust = self._robust_of(result) if stress == 1.0 else None
+        full result was pruned is scored from them; `_counts_now` decides whether they may count. A direction family's
+        (`fam`) row also keeps its compact direction score (`dlane.compact`, under `dlane.STATE_KEY`): its bars and its
+        unit's median, so the incubator's mark and a pruned run are still judged."""
+        robust = self._robust_of(result, fam) if stress == 1.0 else None
         if robust is not None and isinstance(result.get("summary"), Mapping):
-            return {**result, "summary": {**result["summary"], "train_score": robust["score"],
-                                          "train_eligible": robust["eligible"], "train_from": span_of(result)}}, robust
+            summary = {**result["summary"], "train_score": robust["score"], "train_eligible": robust["eligible"],
+                       "train_from": span_of(result)}
+            if robust.get("objective") == dlane.OBJECTIVE:
+                summary[dlane.STATE_KEY] = dlane.compact(robust)
+            return {**result, "summary": summary}, robust
         return result, robust
 
     @property
@@ -2063,7 +2298,11 @@ class Researcher:
             out.append("Versions that can never be your best (the next eligible one took their place): " + "; ".join(
                 f"version {v} {whys.get(str(v), 'lost money on Train at 1.5x the half-spread')}" for v in failed[-8:]) + ".")
         elif rows and not landed(rows.get("stress_1.5")):
-            out.append(f"Your best (version {n}) is validated once its 1.5x robustness run comes back with a profit.")
+            if self._direction(fam):  # THE DIRECTION LANE: its 1.5x rules, not the profit alone
+                out.append(f"Your best (version {n}) is validated once its 1.5x robustness run comes back passing the direction "
+                           "objective's 1.5x rules (P1 a profit, R2 the years rules again, R3 at least half the 1.0x P&L).")
+            else:
+                out.append(f"Your best (version {n}) is validated once its 1.5x robustness run comes back with a profit.")
         return " ".join(out)
 
     def drift_text(self, fam: Mapping[str, Any]) -> str:
@@ -2594,8 +2833,10 @@ class Researcher:
                 # Landed after the wait gave up: a trial, its row scored as a run's (asked for again, it is scored from the
                 # row even once its full result is pruned), and a new evaluation for the dormancy clause.
                 days = float((result.get("summary") or {}).get("days") or 0)
-                self.store.add_run(fid, n, self._with_score(result, stress)[0], window="train", stress=stress, purpose="train",
+                recorded, scored = self._with_score(result, stress, fam)
+                self.store.add_run(fid, n, recorded, window="train", stress=stress, purpose="train",
                                    program_years=days / 252.0 * max(1, len(fam["roots"])), key=self._result_key(job, result))
+                self._dlane_record(fid, n, score=scored)  # THE DIRECTION LANE: its verdicts, kept (none for alpha)
                 self._restart_dormancy(fid, result)
 
             if self._terminal(fam["id"], out):
@@ -2613,9 +2854,10 @@ class Researcher:
         if isinstance(batch, Mapping) and batch.get("wall_seconds") is not None:
             out["gym_box_seconds"] = round(float(batch["wall_seconds"]) / max(1, int(batch.get("programs_in_batch") or 1)), 2)
         years = float((result.get("summary") or {}).get("days") or 0) / 252.0 * max(1, len(fam["roots"]))
-        recorded, robust = self._with_score(result, stress)  # the run's row keeps its score (`submit` reads it)
+        recorded, robust = self._with_score(result, stress, fam)  # the run's row keeps its score (`submit` reads it)
         run = self.store.add_run(fam["id"], version["n"], recorded, window="train", stress=stress, purpose="train",
                                  program_years=years, key=self._result_key(job, result))
+        self._dlane_record(fam["id"], version["n"], score=robust)  # THE DIRECTION LANE: its verdicts, kept (none for alpha)
         self._restart_dormancy(fam["id"], result)  # before the READ turn: a family that ran something new is not dead
         out["run_id"] = run["run_id"]
         # This evaluation's trials (the row's own count also holds earlier identical evaluations of a row recorded before keys).
@@ -3280,6 +3522,16 @@ class Researcher:
                 view["train_score"]["why_not_eligible"] = f"this version {failed_why(state, n)}"
             elif blocked:
                 view["train_score"]["why_not_eligible"] = f"this version fails the drift screen: {blocked}"
+            if robust.get("objective") == dlane.OBJECTIVE:
+                # THE DIRECTION LANE: the run's direction block (Train years only), with the version's 1.5x verdict when
+                # it is kept, and the plain statement of what the bar does not test.
+                try:
+                    lane = dlane.view(robust, self._dlane_kept(current, n).get("robust"),
+                                      mechanism=self._dlane_mechanism(current or fam))
+                except Exception:  # noqa: BLE001 - the view goes without it
+                    lane = None
+                if lane is not None:
+                    view["lane"] = lane
         if best:
             self.queue_robustness(fam["id"], n, code, params, needs_roots(code, fam["roots"]))
         return None if blocked else score
@@ -3297,7 +3549,7 @@ class Researcher:
         span = span_of(full) if full is not None else str(summary.get("train_from") or CORE_SPAN)
         if full is not None:
             view = diagnostics.train_view(full, lineage_trials=self.shown_trials(fid), screen=drift_settings(self.settings))
-            robust = self._robust_of(full) if stress == 1.0 else None
+            robust = self._robust_of(full, fam) if stress == 1.0 else None
         else:
             view = {"run_id": run["run_id"], "status": run.get("status"), "window": "train", "stress": run.get("stress"),
                     "summary": {k: summary[k] for k in diagnostics.SUMMARY_KEYS if k in summary},
@@ -3306,6 +3558,8 @@ class Researcher:
             robust = None
             if stress == 1.0 and summary.get("train_score") is not None:
                 robust = {"score": summary["train_score"], "eligible": bool(summary.get("train_eligible")), "why": None}
+                if self._direction(fam):  # THE DIRECTION LANE: its kept compact score, the unit priced again today
+                    robust = self._dlane_stored(summary) or robust
             drift = diagnostics.drift_view(summary.get("drift"), screen=drift_settings(self.settings),
                                            first_year=int(str(summary.get("train_from") or CORE_SPAN)[:4]))
             if drift is not None:  # the row keeps the figures (`SwarmStore.add_run`)
@@ -3344,19 +3598,23 @@ class Researcher:
         return answer
 
     def _record_variant(self, job: GymJob, result: Mapping[str, Any], robust: Mapping[str, Any] | None = None, *,
-                        sweep: str, prune: bool = True) -> dict[str, Any]:
+                        sweep: str, prune: bool = True, fam: Mapping[str, Any] | None = None) -> dict[str, Any]:
         """One sweep variant's Train result, recorded as its own run of its own version (a trial, as every Gym evaluation
         is): its row keeps its Train score and eligibility (`submit` reads them), its params and its sweep. A sweep records
-        its variants unpruned (`prune=False`) and prunes once at its end, keeping all its rows for `read_run`."""
-        robust = robust if robust is not None else self._robust_of(result)
+        its variants unpruned (`prune=False`) and prunes once at its end, keeping all its rows for `read_run`. A direction
+        family's (`fam`) row keeps its compact direction score too, and the verdict is kept in its state (`_with_score`)."""
+        robust = robust if robust is not None else self._robust_of(result, fam)
         recorded = dict(result)
         if isinstance(result.get("summary"), Mapping):
             recorded["summary"] = {**result["summary"], "train_score": robust["score"], "train_eligible": robust["eligible"],
                                    "train_from": span_of(result), "params": dict(job.params or {}), "sweep": sweep}
+            if robust.get("objective") == dlane.OBJECTIVE:
+                recorded["summary"][dlane.STATE_KEY] = dlane.compact(robust)
         days = float((result.get("summary") or {}).get("days") or 0)
         run = self.store.add_run(job.family, job.version, recorded, window="train", stress=1.0, purpose="train",
                                  program_years=days / 252.0 * max(1, len(job.roots)), prune=prune,
                                  key=self._result_key(job, result))
+        self._dlane_record(job.family, job.version, score=robust)  # THE DIRECTION LANE (none for alpha)
         self._restart_dormancy(job.family, result)  # landed in the sweep or late: a new evaluation (DORMANCY)
         return run
 
@@ -3380,7 +3638,9 @@ class Researcher:
         return {"job": job, "run_id": str(run_id), "status": status, "reason": reason, "score": score, "eligible": eligible,
                 "why": why, "years": years, "trades": summary.get("trades"), "days": summary.get("days_traded"),
                 "pnl": _round(summary.get("pnl"), 2), "fill_rate": _round(fill_rate, 3), "trials": int(trials), "reused": reused,
-                "drift": compact, "figures": numbers, "span": str(span or summary.get("train_from") or CORE_SPAN)}
+                "drift": compact, "figures": numbers, "span": str(span or summary.get("train_from") or CORE_SPAN),
+                # THE DIRECTION LANE's cells (None for an alpha score): the table shows them for a direction family only.
+                "lane": lane_cells(robust if robust is not None else summary.get(dlane.STATE_KEY))}
 
     def _sweep_group(self, fid: str, code: str, variants: list[dict[str, Any]], roots: Any) -> str:
         """A sweep's group id is its content (the family, the code, the variants, the roots, the Gym's image and engine): the
@@ -3505,7 +3765,7 @@ class Researcher:
         timeout = self.run_timeout() + 120
 
         def late(job: GymJob) -> Callable[[Mapping[str, Any]], None]:
-            return lambda result: self._record_variant(job, result, sweep=group)  # a trial whenever it lands
+            return lambda result: self._record_variant(job, result, sweep=group, fam=fam)  # a trial whenever it lands
 
         if self._terminal(fid, out):
             return {"status": "retired", "reason": "the family is retired; no run started"}
@@ -3517,7 +3777,7 @@ class Researcher:
             full = self.store.run_result(run["run_id"])
             if full is not None:
                 rows.append(self._variant_row(job, run["run_id"], full.get("status"), full.get("summary") or {},
-                                              robust=self._robust_of(full), fill_rate=(full.get("fills") or {}).get("fill_rate"),
+                                              robust=self._robust_of(full, fam), fill_rate=(full.get("fills") or {}).get("fill_rate"),
                                               reused=True, drift=full.get("drift"), span=span_of(full)))
             else:
                 rows.append(self._variant_row(job, run["run_id"], run.get("status"), run.get("summary") or {}, robust=None,
@@ -3525,7 +3785,7 @@ class Researcher:
 
         def land(job: GymJob, result: Mapping[str, Any]) -> None:
             # Recorded as it lands; only its compact row stays in memory (many sweeps in flight must not hold every trade).
-            robust = self._robust_of(result)
+            robust = self._robust_of(result, fam)
             run = self._record_variant(job, result, robust, sweep=group, prune=False)
             rows.append(self._variant_row(job, run["run_id"], result.get("status"), result.get("summary") or {}, robust=robust,
                                           fill_rate=(result.get("fills") or {}).get("fill_rate"), reason=result.get("reason"),
@@ -3587,8 +3847,11 @@ class Researcher:
             return row["status"] == "ok" and row["eligible"] and row["score"] is not None and version not in demoted \
                 and version not in blocked and self._counts_now(row["span"]) and row["evaluator_current"]
 
+        # The table's order: completed, then counting, then by Train score. A direction family's score IS S_D (`_robust_of`:
+        # the pooled t at 1.0x, `dlane.sort_key`), so its sweep is sorted by S_D with no other change.
         rows.sort(key=lambda r: (r["status"] != "ok", not counts(r), -(r["score"] if r["score"] is not None else -math.inf),
                                  r["job"].id))
+        direction = self._direction(fam)
         out["trials"] = out.get("trials", 0) + sum(r["trials"] for r in rows)
         new_best, best_score = None, None
         with self.store.atomic():
@@ -3625,6 +3888,8 @@ class Researcher:
                 "trades": r["trades"], "days": r["days"], "pnl": r["pnl"], "fill_rate": r["fill_rate"], "years": r["years"]}
             if r.get("drift"):
                 row["drift"] = r["drift"]
+            if direction and r.get("lane"):  # THE DIRECTION LANE: S_D, years in, worst in-market t, out-year t, unit, verdict
+                row["lane"] = r["lane"]
             if not r["evaluator_current"]:
                 row["why_not"] = "it used another evaluator; rerun it on the current Gym"
             elif r["eligible"] and r["status"] == "ok" and not ok and not self._counts_now(r["span"]):
@@ -3657,6 +3922,9 @@ class Researcher:
             "variants": len(variants), "completed": out["sweep"]["completed"], "eligible": eligible, "positive_score": positive,
             "table": table, "lineage_trials": self.shown_trials(fid),
             "next": "submit the best ROBUST row's run_id (a plateau of positive neighbours beats a lone peak), or read_run it"}
+        if direction:
+            view["lane"] = {"lane": dlane.DIRECTION, "objective": dlane.OBJECTIVE,
+                            "sorted_by": "score: the pooled t of daily P&L over Train at 1.0x", "note": dlane.ALWAYS_IN_NOTE}
         if not todo:
             view["already_run"] = ALREADY_RUN
             view["next"] = ("every variant already ran on this window, roots and Gym: no new run, no trial. Submit a row, sweep "
@@ -3772,8 +4040,22 @@ class Researcher:
                                               settings=getattr(self, "settings", None))
             except Exception:  # noqa: BLE001 - fail closed: never the unfiltered read
                 rows = []
-            return {"lessons": [{"family": r["family"], "mechanism": r["mechanism"][:200], "structure": r["structure"],
-                                 "roots": r["roots"], "lesson": lesson_view(r["lesson"])[:600]} for r in rows]}
+            lessons = [{"family": r["family"], "mechanism": r["mechanism"][:200], "structure": r["structure"],
+                        "roots": r["roots"], "lesson": lesson_view(r["lesson"])[:600]} for r in rows]
+            # THE DIRECTION LANE: a death for drift alone is no refutation of a direction program (read through `in_direction`,
+            # like the game's filter through `getattr`: the game's quarantine tests call this tool on a bare namespace).
+            if in_direction(getattr(self, "store", None), fam, getattr(self, "settings", None)):
+                from .architect import tag_of
+
+                for r, lesson in zip(rows, lessons):
+                    try:
+                        drift = tag_of(r, self.store.family(str(r["family"]))) == "DRIFT"
+                    except Exception:  # noqa: BLE001 - unlabelled
+                        drift = False
+                    if drift:
+                        lesson["lane"] = ("DRIFT: not binding for the direction lane (it died for failing the drift screen; "
+                                          "in your lane profit from drift counts, reported beside the same-risk buy-and-hold)")
+            return {"lessons": lessons}
         if name == "submit":
             run = self.store.run(str(args.get("run_id") or ""))
             if run is None or run["family"] != fam["id"] or run["window"] != "train" or run["version"] is None:
@@ -3816,11 +4098,15 @@ class Researcher:
             return False, (f"it was scored on Train from {span}, and Train now starts {self.train_span()}: run the version "
                            "again to score it on the whole of Train")
         if "train_eligible" in summary:
+            if not summary["train_eligible"] and self._direction(current):  # THE DIRECTION LANE: the bar it failed
+                kept = summary.get(dlane.STATE_KEY)
+                why = kept.get("why") if isinstance(kept, Mapping) else None
+                return False, f"it is not eligible under the direction objective: {why or 'its Train bars do not hold'}"
             return (True, "") if summary["train_eligible"] else (False, "it is not eligible under the Train score (40 trades on "
                                                                          "20 days in every Train year)")
         if result is None:
             return False, "its full result is no longer kept, so its Train score cannot be checked: run it again"
-        robust = self._robust_of(result)
+        robust = self._robust_of(result, current)
         return (True, "") if robust["eligible"] else (False, str(robust["why"]))
 
     # ------------------------------------------------------------------ robustness runs
@@ -3998,8 +4284,13 @@ class Researcher:
         it. It changes no best and no candidate, and it is no researcher's evaluation (the dormancy clause is untouched)."""
         try:
             days = float((result.get("summary") or {}).get("days") or 0)
-            self.store.add_run(fid, int(n), self._with_score(result, 1.0)[0], window="train", stress=1.0, purpose="train",
+            # THE DIRECTION LANE: a direction family's row keeps its direction score (`incubator.mark_of` reads it through
+            # `dlane.lane_verdict`); the family is read only while the lane is on.
+            fam = self.store.family(fid) if dlane.on(self.settings) else None
+            recorded, scored = self._with_score(result, 1.0, fam)
+            self.store.add_run(fid, int(n), recorded, window="train", stress=1.0, purpose="train",
                                program_years=days / 252.0 * max(1, len(job.roots)), key=self._result_key(job, result))
+            self._dlane_record(fid, n, score=scored)
             self.store.event("swarm.robustness", fid, {"version": int(n), "action": "incubator_train",
                                                        "status": str(result.get("status") or "")[:40]})
         except Exception:  # noqa: BLE001 - on the dispatcher's thread: a record never breaks the pool
@@ -4037,6 +4328,14 @@ class Researcher:
                     (stress is not None and not self._counts_now(span_of(result))):
                 return  # another span/evaluator: a historical trial, never current robustness or drift
             view.update({name: result[name] for name in ("gym_image", "gym_bundle") if name in result})
+            # THE DIRECTION LANE (PLAN D3): a direction version's 1.5x run is judged by direction-v2's rules (P1 its profit,
+            # R2 E1 and E3 again, R3 at least `cost_ratio` of its 1.0x P&L) against its 1.0x score, in place of the profit
+            # alone. A known failure demotes it with its why; an unknown verdict (no 1.0x score, no figures) demotes
+            # nothing of its own: the House's profit rule stands, and the game's look waits for a pass.
+            verdict = None
+            if label == "stress_1.5" and ok and stress is not None and self._direction(fam):
+                verdict = dlane.robust_verdict(self._dlane_base(fam, int(n)), result, first_year=int(span_of(result)[:4]),
+                                               settings=self.settings)
             demoted = None
             with self.store.atomic():
                 fam = self.store.family(fid) or fam
@@ -4051,7 +4350,9 @@ class Researcher:
                 self.store.set_state(fid, robustness=rows)
                 pnl = view.get("pnl")
                 why = None
-                if label == "stress_1.5" and ok and isinstance(pnl, (int, float)) and pnl <= 0:
+                if verdict is not None and verdict["known"] and not verdict["passed"]:
+                    why = str(verdict["why"] or "fails the direction objective at 1.5x the half-spread")
+                elif label == "stress_1.5" and ok and isinstance(pnl, (int, float)) and pnl <= 0:
                     why = "lost money on Train at 1.5x the half-spread"
                 elif label == "stress_1.5" and int(tries.get(label) or 0) >= ROBUSTNESS_ATTEMPTS:
                     why = f"its 1.5x run failed {ROBUSTNESS_ATTEMPTS} times"
@@ -4063,7 +4364,10 @@ class Researcher:
                     why = f"its Train run for the drift figures failed {ROBUSTNESS_ATTEMPTS} times"
                 if why and not fam.get("retired_at"):
                     demoted = self._demote(fam, n, why=why)
-            if label == "stress_1.5" and ok and isinstance(pnl, (int, float)) and pnl > 0 and demoted is None:
+            if verdict is not None and verdict["known"]:
+                self._dlane_record(fid, n, robust=verdict)
+            if label == "stress_1.5" and ok and isinstance(pnl, (int, float)) and pnl > 0 and demoted is None \
+                    and (verdict is None or verdict["passed"]):  # a direction version: only after its 1.5x rules pass
                 try:  # THE LEARNING GAME's ladder: a private look at this version when every trigger holds (never raises)
                     game.maybe_look(self, fid, int(n), result)
                 except Exception:  # noqa: BLE001 - on the dispatcher's thread: the game never breaks the pool
@@ -4792,7 +5096,10 @@ def migrate_objective(store: SwarmStore, *, beat: Callable[[], None] | None = No
     THE 2020-21 SWITCH (Sept 27): `settings` names the objective (`objective_for`). When Train's first day changes, the
     pass runs again: only runs over the new span (their result's `train_from`) are candidates, each scored from the span's
     first year, so a 2022-2024 score never meets a 2020-2024 one. The selection it replaces goes to `previous_best` (the
-    Sept 26 `legacy_best` stays as it is), the family's robustness runs start over, and its notebook says why."""
+    Sept 26 `legacy_best` stays as it is), the family's robustness runs start over, and its notebook says why.
+
+    THE DIRECTION LANE (release D-1): a direction family's runs (`dlane.lane_of`, never while the lane is off) are scored by
+    its own objective, `dlane.train_score` (S_D), so its best is never chosen by the worst-year score."""
     since = store.get("train_objective")
     running = settings_mod.objective_span(since)  # an ignored or missing setting keeps it (never a silent switch back)
     objective = objective_for(settings, running)
@@ -4822,6 +5129,11 @@ def migrate_objective(store: SwarmStore, *, beat: Callable[[], None] | None = No
         # The first pass (Sept 26) keeps its `legacy_best`; every later one (a span change) writes `previous_best`.
         key = "previous_best" if since is not None or "legacy_best" in state else "legacy_best"
         try:
+            # THE DIRECTION LANE: a direction family's best is chosen anew under its own objective (S_D, `dlane.train_score`),
+            # never the worst-year score; every family's while the lane is off.
+            unit = None
+            if dlane.lane_of(store, fam, settings) == dlane.DIRECTION:
+                unit = dlane.unit_context(store, settings)
             rows: list[list[Any]] = []
             for run in store.runs(fid, window="train", limit=1000):
                 if run["status"] != "ok" or float(run["stress"] or 1.0) != 1.0 or run.get("purpose") == "robustness" or not run.get("path"):
@@ -4837,7 +5149,12 @@ def migrate_objective(store: SwarmStore, *, beat: Callable[[], None] | None = No
                 if result is not None and span_of(result) != span:
                     continue  # run over another Train span: its score never stands beside this span's
                 try:
-                    robust = evidence.train_score(result, first_year=first.year) if result is not None else None
+                    if result is None:
+                        robust = None
+                    elif unit is not None:
+                        robust = dlane.train_score(result, first_year=first.year, unit=unit, settings=settings)
+                    else:
+                        robust = evidence.train_score(result, first_year=first.year)
                 except Exception:  # noqa: BLE001 - a malformed result is no candidate
                     robust = None
                 if robust is not None and robust["eligible"] and run.get("version") is not None:
@@ -4894,4 +5211,5 @@ __all__ = ["Researcher", "TOOLS", "TOOLS_READ", "TOOLS_REVISE", "RUNS", "needs_o
            "record_verdict", "validation_refuted", "validated_at", "guard_words", "adoption_archives",
            "ADOPTED_ACTION",
            "short_dead", "short_left", "dead_slot", "floor_counts", "kept_families", "RETIRE_SHORT_CHECKS",
-           "RETIRE_SHORT_CYCLES", "VALIDATED_CYCLES_KEY"]
+           "RETIRE_SHORT_CYCLES", "VALIDATED_CYCLES_KEY", "ROLE_LANES", "ROLE_SCORE_LANES", "ROLE_DRIFT_LANES", "in_direction",
+           "lane_cells"]
