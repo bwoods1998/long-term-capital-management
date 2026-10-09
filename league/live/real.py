@@ -151,16 +151,21 @@ def incubator_tally(rows: Callable[..., list], *, day: str, week_start: str, fam
                             week_peak_loss=peak)
 
 
-def probe_tally(rows: Callable[..., list], *, day: str) -> tuple[int, Decimal, Decimal]:
+def probe_tally(rows: Callable[..., list], *, day: str, basis: str) -> tuple[int, Decimal, Decimal]:
     """THE FAST LANE's Probe figures (D3, D4, Oct 7, 2026; `money.plan_open`): (open_n, realized_loss, at_risk) from the
     live state's own rows, selected by the instance suffix `:r` and `tuition = 0` only, so a restart reads the same numbers
-    (`rows(sql, params)` returns dicts, as `incubator_tally`'s). `day`: today (New York), ISO.
+    (`rows(sql, params)` returns dicts, as `incubator_tally`'s). `day`: today (New York), ISO. `basis`: the constitution's
+    `probe.loss_basis` (`money.Table.probe_loss_basis`), exactly "gross" or "net" (ValueError otherwise: no figure, no
+    Probe open). Both read the same rows: every closed position a Probe family opened (its info's `probe` mark, copied
+    from its opening order's, which `money.Plan.probe` set). A Sized position carries no mark, so its gain never counts
+    under either. Cash is the book's, fees included (their estimate until the broker's post). "Since the fast lane" is
+    enforced by the mark: no order before fast lane v2 carried one.
 
-    realized_loss: GROSS realized Probe losses, the sum of max(0, -cash) over every closed position a Probe family opened
-    (its info's `probe` mark, copied from its opening order's, which `money.Plan.probe` set): one position's gain never
-    offsets another's loss, and a Sized position's never counts (the fast lane's review, Oct 7, 2026: a net figure let a
-    Sized gain or a Probe gain refill the budget). Cash is the book's, fees included (their estimate until the broker's
-    post). "Since this release" is enforced by the mark: no order before this release carried one.
+    realized_loss, "gross" (fast lane v2, Oct 7, 2026; the rollback of release L-D): GROSS realized Probe losses, the sum
+    of max(0, -cash) over those positions: one position's gain never offsets another's loss (the fast lane's review: a
+    net figure let a Sized gain or a Probe gain refill the budget). "net" (release L-D, Oct 9, 2026; the constitution's
+    comment has its cost): max(0, -(the sum of their cash)), from inception: a Probe gain offsets Probe losses, a Sized
+    gain still never does, and the figure is never below $0 (a net gain is no extra room).
 
     at_risk: each position not closed, Probe or Sized (a tightening: a Sized position fills the budget and a slot too),
     held, expiring or unpriced (its `opened_qty` units when unpriced) at its maximum loss with its fees twice, or what its
@@ -170,15 +175,19 @@ def probe_tally(rows: Callable[..., list], *, day: str) -> tuple[int, Decimal, D
     lost open may have filled and lost. open_n: positions not closed, and pending, working or unknown opens without a
     position; a lost open without a position holds its slot until its first leg's expiry has passed (after that it can
     hold nothing; its maximum loss stays counted in at_risk)."""
+    if basis not in M.LOSS_BASES:
+        raise ValueError(f"the Probe loss basis {basis!r} is not one of {M.LOSS_BASES}")
     like = REAL_SUFFIX                       # substr(instance, -2): exact and case-sensitive (LIKE is neither)
     at_risk = M.ZERO
     realized = M.ZERO
+    net = M.ZERO                             # "net": the closed Probe positions' cash, summed
     open_n = 0
     for r in rows("SELECT qty, opened_qty, max_loss_share, fees, cash, status, info FROM positions "
                   "WHERE substr(instance, -2)=? AND tuition=0", (like,)):
         if r["status"] == "closed":
             if (loads(r["info"], {}) or {}).get("probe") is True:
                 realized += max(M.ZERO, -M.D(r["cash"]))
+                net += M.D(r["cash"])
             continue
         units = int(r["opened_qty"]) if r["status"] == "unpriced_close" else max(0, int(r["qty"]))
         at_risk += max(M.D(r["max_loss_share"]) * V.MULTIPLIER * units + 2 * M.D(r["fees"]), -M.D(r["cash"]))
@@ -190,6 +199,8 @@ def probe_tally(rows: Callable[..., list], *, day: str) -> tuple[int, Decimal, D
         at_risk += (M.D(r["max_loss"]) + 2 * M.D(r["fees_est"])) * M.D(remaining) / max(1, int(r["qty"]))
         if r["pid"] is None and not (lost and _expired(r["legs"], day)):
             open_n += 1
+    if basis == "net":
+        realized = max(M.ZERO, -net)
     return open_n, realized, at_risk
 
 
@@ -536,7 +547,7 @@ class RealBook:
                 tuition_week += loss
                 if r["day"] == day:
                     tuition_day += loss
-        probe_open, probe_realized, probe_at_risk = probe_tally(self.state.rows, day=day)
+        probe_open, probe_realized, probe_at_risk = probe_tally(self.state.rows, day=day, basis=self.table.probe_loss_basis)
         return M.Exposure(family_open=fam_open, family_loss=M.D(round(fam_loss, 2)), book_loss=M.D(round(book, 2)),
                           day_opened=day_opened, tuition_day=tuition_day, tuition_week=tuition_week,
                           probe_open=probe_open, probe_realized=probe_realized, probe_at_risk=probe_at_risk)

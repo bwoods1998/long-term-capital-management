@@ -43,10 +43,12 @@ class TheTable(unittest.TestCase):
         t = M.Table.from_constitution()
         self.assertEqual(t.real_types, ("debit_vertical", "long_butterfly", "long_call", "long_put"))
         self.assertEqual(t.credit_types, ("credit_vertical", "iron_condor", "iron_butterfly"))
-        # THE FAST LANE (Oct 7, 2026; the owner's goal item 4): one structure within 10% of E, no floor, at most 3 Probe
-        # positions at once, a $400 Probe loss budget.
+        # THE FAST LANE (Oct 7, 2026; the owner's goal item 4): one structure within 10% of E, no floor, a $400 Probe loss
+        # budget; since release L-D (Oct 9, 2026) at most 8 Probe positions at once (3 before), the budget read NET and
+        # DM1's demotion.
         self.assertEqual((t.probe_share, t.probe_open, t.probe_family_share, t.probe_floor), (D("0.10"), 3, D("0.15"), D("0")))
-        self.assertEqual((t.probe_contracts, t.probe_max_open, t.probe_loss_budget), (1, 3, D("400")))
+        self.assertEqual((t.probe_contracts, t.probe_max_open, t.probe_loss_budget), (1, 8, D("400")))
+        self.assertEqual((t.probe_loss_basis, t.probe_demotion), ("net", "dm1"))
         self.assertEqual((t.sized_min_trades, t.sized_confidence, t.kelly_fraction), (20, 0.8, 0.25))
         self.assertEqual((t.sized_share, t.sized_family_share, t.book_share), (D("0.10"), D("0.30"), D("0.90")))
         self.assertEqual((t.daily_stop_share, t.drawdown_stop_share), (D("0.35"), D("0.60")))
@@ -62,15 +64,24 @@ class TheTable(unittest.TestCase):
         # The Probe's 10% cap fits the gateway's per-order cap, min($1,000, 25% of E), at every equity to $10,000.
         for equity in ("481.63", "1288.40", "10000"):
             self.assertLessEqual(M.probe_cap(t, D(equity)), min(t.gateway_order_max_loss, t.gateway_order_share * D(equity)))
-        # N = 3 at 10% is 30% of E: inside the 35% daily stop and the 60% drawdown stop.
-        self.assertLess(t.probe_max_open * t.probe_share, t.daily_stop_share)
+        # Fast lane v2's N = 3 at 10% was 30% of E, inside the 35% daily stop at any E. Since release L-D the envelope binds
+        # what Probe opens may hold: at most the $400 budget (`probe_room`), under the daily stop's line at E = $1,289.34
+        # (start of day Oct 8) and at every E from $1,142.86 ($400 / 0.35); 8 x 10% alone would be 80% of E.
+        from league.tests.money_fakes import rollback_table
+
+        r = rollback_table()
+        self.assertLess(r.probe_max_open * r.probe_share, r.daily_stop_share)
+        for equity in ("1142.86", "1289.34", "5000"):
+            self.assertLessEqual(M.probe_room(t, D(equity)), t.probe_loss_budget)
+            self.assertLessEqual(M.probe_room(t, D(equity)), t.daily_stop_share * D(equity))
+        self.assertGreater(M.probe_room(t, D("1142.85")), t.daily_stop_share * D("1142.85"), "below it, the stop's line is lower")
 
     def test_every_d4_row_is_at_the_bold_end_and_inside_the_plans_range(self):
         c = CONSTITUTION["options_money"]
         self.assertEqual(c["probe"]["floor_usd"], "0", "the fast lane: no one-contract floor")
         self.assertEqual(OPTIONS_MONEY_BOUNDS["probe.max_loss_share"], ("0.02", "0.10"), "the goal's 10%")
         for path, value in (("probe.max_loss_share", "0.10"), ("probe.family_share", "0.15"),
-                            ("probe.max_open", 3), ("probe.loss_budget_usd", "400"),
+                            ("probe.max_open", 8), ("probe.loss_budget_usd", "400"),
                             ("book_share", "0.90"), ("daily_stop_share", "0.35"), ("drawdown_stop_share", "0.60"),
                             ("tuition.day_usd", "200"), ("calibration.day_usd", "50")):
             node = c
@@ -240,7 +251,11 @@ class Bands(unittest.TestCase):
         self.assertEqual(M.forward_stats(rows, 0.8, version=1).n, 24)
 
     def test_a_negative_forward_record_loses_the_band(self):
-        band, why = M.band_for(self.t, row(band="sized"), D("5000"), fwd([0.5] * 25, negative=True))
+        """Under `probe.demotion` "dm0" (fast lane v2; the CON-only rollback of release L-D). Under "dm1" a Probe or Sized
+        band is not lost on it (DM1 decides: `test_ld_release`); a Candidate's still is."""
+        from league.tests.money_fakes import rollback_table
+
+        band, why = M.band_for(rollback_table(), row(band="sized"), D("5000"), fwd([0.5] * 25, negative=True))
         self.assertEqual(band, "candidate")
         self.assertIn("negative", why)
         self.assertTrue(fwd([-0.1] * 20).negative)

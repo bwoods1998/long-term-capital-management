@@ -490,18 +490,23 @@ class TheCaps(unittest.TestCase):
 
     def test_a_seventy_five_dollar_unit_fits_every_other_cap_at_the_equity_of_the_decision(self):
         """At E = $1,288.40 (the fast lane's figure, under which the cap was decided) with the full room kept for the
-        families' Probe room and the House live test ($386.52 + $100): the book cap ($1,159.56), the incubator's share of
-        the day cap ($322.10), the gateway's per-order cap (the lower of $1,000 and 25% of E: $322.10) and its day cap
-        ($1,288.40) all admit a $75 unit, so the unit cap is the binding one; $75 stays inside the goal's 10% of E
-        ($128.84) for one Probe position."""
+        families' Probe room and the House live test ($386.52 + $100 at fast lane v2's 3 slots; $400 + $100 at release
+        L-D's 8, the room capped at the $400 budget): the book cap ($1,159.56), the incubator's share of the day cap
+        ($322.10), the gateway's per-order cap (the lower of $1,000 and 25% of E: $322.10) and its day cap ($1,288.40) all
+        admit a $75 unit, so the unit cap is the binding one; $75 stays inside the goal's 10% of E ($128.84) for one
+        Probe position."""
+        from league.tests.money_fakes import rollback_table
+
         E = D("1288.40")
-        t = self.table
-        room = M.probe_room(t, E) + t.house_test_structure
-        self.assertEqual(room, D("486.520"))
-        self.assertEqual(min(t.gateway_order_max_loss, t.gateway_order_share * E), D("322.1000"))
-        self.assertLessEqual(t.incubator_max_loss, M.probe_cap(t, E))
-        self.assertEqual(self.plan("75", E=E, room=room).qty, 1)
-        self.assertIn("over its $75 cap", self.plan("75.01", E=E, room=room).reason)
+        for t, expected in ((rollback_table(), D("486.520")), (self.table, D("500.00"))):
+            room = M.probe_room(t, E) + t.house_test_structure
+            self.assertEqual(room, expected)
+            self.assertEqual(min(t.gateway_order_max_loss, t.gateway_order_share * E), D("322.1000"))
+            self.assertLessEqual(t.incubator_max_loss, M.probe_cap(t, E))
+            plan = M.plan_incubator(t, unit=D("75"), equity=E, tally=M.IncubatorTally(), exposure=M.Exposure(), room=room)
+            self.assertEqual(plan.qty, 1, (t.probe_max_open, plan.reason))
+        self.assertEqual(self.plan("75", E=E, room=M.probe_room(self.table, E) + self.table.house_test_structure).qty, 1)
+        self.assertIn("over its $75 cap", self.plan("75.01", E=E, room=D("500")).reason)
 
     def test_a_position_carried_into_a_new_week_counts_as_held_and_last_weeks_loss_resets_on_monday(self):
         friday = at(dt.date(2026, 9, 25), 15, 0)
@@ -625,18 +630,23 @@ class TheCaps(unittest.TestCase):
                                           room=D("300")).qty, 1)
 
     def test_room_is_kept_for_the_probe_room_and_the_house_test(self):
-        """At E = $1,465: the book cap $1,318.50 and the day cap $1,465 each keep the families' Probe room (THE FAST LANE,
-        Oct 7, 2026: 3 x 10% x E = $439.50; two $100 floors before it) and the House test's $100 structure, $539.50, after
-        the incubator's open (`Incubator.room`)."""
+        """At E = $1,465: the book cap $1,318.50 and the day cap $1,465 each keep the families' Probe room and the House
+        test's $100 structure after the incubator's open (`Incubator.room`). The Probe room: THE FAST LANE (Oct 7, 2026),
+        `probe.max_open` x 10% x E (two $100 floors before it); since release L-D (Oct 9, 2026) at most the $400 Probe
+        loss budget, which every Probe open must fit: $400 at 8 slots (never 8 x $146.50 = $1,172) and at 3 (3 x $146.50
+        = $439.50 before, $39.50 of it room no Probe open could use). So $500 in all."""
+        from league.tests.money_fakes import rollback_table
+
         E = D("1465")
+        self.assertEqual(M.probe_room(rollback_table(), E), D("400"))
         room = M.probe_room(self.table, E) + self.table.house_test_structure
-        self.assertEqual(room, D("539.5"))
+        self.assertEqual(room, D("500"))
         book = self.table.book_share * E
         at_edge = M.Exposure(book_loss=book - room - D("30"))
         self.assertEqual(self.plan("30", exposure=at_edge, E=E, room=room).qty, 1)
         self.assertEqual(self.plan("30.01", exposure=at_edge, E=E, room=room).qty, 0)
         after = at_edge.book_loss + D("30")
-        self.assertGreaterEqual(book - after, room, "three Probe positions and the House test's $100 still fit")
+        self.assertGreaterEqual(book - after, room, "the Probe's $400 and the House test's $100 still fit")
         day = M.Exposure(day_opened=E - room - D("30"))
         self.assertEqual(self.plan("30", exposure=day, E=E, room=room).qty, 1)
         self.assertEqual(self.plan("30.01", exposure=day, E=E, room=room).qty, 0)

@@ -821,7 +821,8 @@ class Incubator:
     # ------------------------------------------------------------------ orders
     def room(self, equity: M.Decimal | None) -> M.Decimal:
         """What an incubator open leaves the others in the book's and the day's caps: the Probe room (`money.probe_room`,
-        `probe.max_open` x `probe.max_loss_share` x E; THE FAST LANE, Oct 7, 2026), and the House live test's structure
+        `probe.max_open` x `probe.max_loss_share` x E, THE FAST LANE, Oct 7, 2026; at most `probe.loss_budget_usd` since
+        release L-D, Oct 9, 2026), and the House live test's structure
         while it can still open (its switch on, not stopped, not ended)."""
         table, live = self.live.table, self.live
         room = M.probe_room(table, equity)

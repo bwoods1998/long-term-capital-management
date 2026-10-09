@@ -791,8 +791,11 @@ class VerificationRound(LiveCase):
 
     def test_an_exit_only_instance_promoted_again_is_live_from_the_next_minute(self):
         """THE FAST LANE (D3, Oct 7, 2026): a family the live path confirms onto Probe again trades from the next live
-        minute (before it, from the next session)."""
-        live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 600})])
+        minute (before it, from the next session). The swarm's negative forward record demotes it under `probe.demotion`
+        "dm0" (release L-D's rollback); under "dm1" it would not (`test_ld_release`)."""
+        from league.tests.money_fakes import rollback_table
+
+        live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 600})], table=rollback_table())
         self.run_to(9, 31)
         self.families.rows["vert"]["forward"] = {"trades": 25, "negative": True}
         live._families_at = float("-inf")

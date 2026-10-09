@@ -213,6 +213,9 @@ class Instance:
     retried_at: float = float("-inf")
     structure: str = ""          # the family's DECLARED structure (its swarm row's), read at each sync; "" until one is read
     incubator: bool = False      # the incubator's real instance (`<family>@<version>:i`): derived from its key alone
+    # DM1's sigma (release L-D, Oct 9, 2026): its swarm row's `validation_r_sd` (`league/live/families.py`), read at each
+    # sync as `band` is, so the open's refusal (`_real_intent`) judges by the same sigma as the band (`money.band_for`).
+    validation_r_sd: Any = None
 
     def __post_init__(self) -> None:
         # An observe instance is exactly a shadow, non-tuition instance under an observe key that was made one (the money
@@ -858,7 +861,7 @@ class OptionsLive:
                 inst = Instance(key, str(row["family"]), int(row.get("version") or 0), kind, str(row.get("code") or ""),
                                 dict(row.get("params") or {}), str(row.get("run_sha") or ""), str(row.get("band") or ""), tuition,
                                 observe=key.endswith(":o") and row.get("observe") is True and kind == "shadow" and not tuition,
-                                structure=str(row.get("structure") or ""))
+                                structure=str(row.get("structure") or ""), validation_r_sd=row.get("validation_r_sd"))
                 if key.endswith(":o") != inst.observe or (inst.observe and not inst.code):
                     continue  # an observe key is only ever an observe row's, with its program
                 if inst.observe:
@@ -877,6 +880,7 @@ class OptionsLive:
             else:
                 inst.band = str(row.get("band") or inst.band)
                 inst.structure = str(row.get("structure") or inst.structure)
+                inst.validation_r_sd = row.get("validation_r_sd")
                 if inst.mode != "live" and kind == "real" and not inst.fatal:
                     inst.mode = "live"
                     self._persist_instance(inst)
@@ -2591,10 +2595,13 @@ class OptionsLive:
         evidence = not inst.tuition and not house and not incubator
         family_rows = self.families.forward_rows(inst.family) if evidence else []
         fwd = M.forward_stats(family_rows, self.table.sized_confidence, version=inst.version) if evidence else None
-        if fwd is not None and (fwd.negative or (inst.band == "sized" and (not M.sized_ok(self.table, fwd) or fwd.real_bad))
-                                or (inst.band == "probe" and M.demotion(fwd) is not None)):
+        if fwd is not None and ((fwd.negative and M.negative_demotes(self.table, inst.band))
+                                or (inst.band == "sized" and (not M.sized_ok(self.table, fwd) or fwd.real_bad))
+                                or M.live_demotion(self.table, inst.band, fwd, inst.validation_r_sd) is not None):
             # (D5, fast lane v2: a Probe whose live results end its Probe is refused at once; the families pass, forced
-            # here, moves its band and its real instance to exits only)
+            # here, moves its band and its real instance to exits only. Release L-D: `probe.demotion` "dm1" asks DM1 of a
+            # Probe or Sized family instead of D5's loss leg and the negative record, `money.live_demotion`, the band's
+            # own rule; "dm0" asks D5 of a Probe only, as before)
             self._families_at = float("-inf")
             return "its current forward evidence no longer qualifies for this real band"
         week_start = (day.day - dt.timedelta(days=day.day.weekday())).isoformat()
@@ -2628,7 +2635,10 @@ class OptionsLive:
         if not self._instance_budget(inst.key, day):
             return f"order budget: {int(self.settings['instance_orders_day'])} orders a day (the Gym's)"
         tif = order.tif
-        identity = dict(self._entry_identity(inst), forward_rows=family_rows)
+        # `negative_ok` (release L-D): under DM1 a Probe or Sized family's negative forward record no longer refuses its
+        # open at the admission (`families._entry_matches`), as it no longer moves its band (`money.negative_demotes`).
+        identity = dict(self._entry_identity(inst), forward_rows=family_rows,
+                        negative_ok=not M.negative_demotes(self.table, inst.band))
         if house:
             admit = self.house_test.admit(day.day)
         elif incubator:
@@ -2640,7 +2650,8 @@ class OptionsLive:
         with admit as allowed:
             if allowed:
                 # A Probe family's open is marked so (`money.Plan.probe`): THE PROBE LOSS BUDGET counts its position's realized
-                # loss (`real.probe_tally`), never a Sized one's.
+                # P&L (`real.probe_tally`, by `probe.loss_basis`: its own loss under "gross", its cash netted with every other
+                # marked position's under "net", release L-D), never a Sized one's.
                 sent = book.new_order(instance=inst.key, family=inst.family, action="open", type_=order.type, root=root, legs=legs,
                                       qty=qty, limit_value=order.limit, tif=tif, day=today, minute=mi, reserve=reserve,
                                       max_loss=max_loss, fees_est=fees, tuition=inst.tuition, why=why,
@@ -2669,7 +2680,10 @@ class OptionsLive:
             self.state.put("probe_budget_told", today)
         except Exception:  # noqa: BLE001 - the refusal stands either way; the alarm is told at the next refusal
             return
-        self.alert("warning", f"live: the Probe loss budget (${self.table.probe_loss_budget}) is spent: no new Probe open; "
+        basis = ("net realized Probe losses (Probe gains offset them; Sized gains never do)"
+                 if self.table.probe_loss_basis == "net" else "gross realized Probe losses (no gain offsets them)")
+        self.alert("warning", f"live: the Probe loss budget (${self.table.probe_loss_budget}: {basis}, plus every real "
+                              "position's maximum loss held or working, plus the open) is spent: no new Probe open; "
                               "exits go on. Raising it is the owner's decision")
 
     # ------------------------------------------------------------------ forward records

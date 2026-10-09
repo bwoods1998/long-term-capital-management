@@ -14,7 +14,10 @@ one signed number is every limit, entry, mark and exit, and the P&L of a trade i
 
 The natural price of an open buys every long leg at its ask and sells every short leg at its bid;
 of a close, the reverse. Limit rules: "natural"; "mid"; {"mid": k} (k ticks from the mid toward the
-natural, never past it); {"price": v} (an explicit value). Multi-leg values trade in $0.01; a single
+natural, never past it); {"natural": k} (since release L-D, Oct 9, 2026: the decision minute's natural
+moved k ticks against the trader, k a whole number 0-10: + k ticks on an open's value, - k ticks on a
+close's; exactly {"price": v} with that v, a marketable limit); {"price": v} (an explicit value).
+Multi-leg values trade in $0.01; a single
 long call or put in its contract's tick (`venue.leg_tick`). A limit off the tick is rounded to the
 passive side (less paid on an open, more asked on a close): "mid" on a one-tick single leg is the
 touch (the bid for a buy), which fills per the fill model's touch cell (`fills.py`).
@@ -48,6 +51,9 @@ CREDIT = ("credit_vertical", "iron_condor", "iron_butterfly")
 SELECTORS = ("id", "strike", "delta", "moneyness", "atm", "rel")
 _BASE = dt.date(2000, 1, 3)  # the expiry a leg's days-to-expiry is written against for the House's classifier
 MAX_QTY = 500
+#: The most ticks `{"natural": k}` pays through the decision minute's natural (release L-D, Oct 9, 2026): k is a whole
+#: number from 0 to this.
+NATURAL_MAX_TICKS = 10
 
 
 class Refused(ValueError):
@@ -171,12 +177,24 @@ def limit_value(rule: Any, action: str, natural: float, mid: float, tick: float)
             raise Refused("limit {'mid': k} takes 0 <= k <= 100 ticks")
         target = mid + k * tick if opening else mid - k * tick
         target = min(target, natural) if opening else max(target, natural)
+    elif isinstance(rule, Mapping) and set(rule) == {"natural"}:
+        # THE MARKETABLE NATURAL LIMIT (release L-D, Oct 9, 2026): the decision minute's natural moved k ticks AGAINST the
+        # trader, so a move between the decision and the next minute's quotes of up to k ticks still meets it. On the
+        # signed value (the module docstring) that is natural + k ticks on an open (a debit pays more, a credit takes in
+        # less) and natural - k ticks on a close (a debit sold takes in less, a credit bought back pays more). It is
+        # exactly {"price": v} with that v, rounded and filled as {"price": v} is, in the Gym, the shadow book and the
+        # real order path (each resolves intents here): rounded on the natural's tick, as {"price": v} is, even where v
+        # crosses into a coarser one (a non-penny single leg at $3.00).
+        k = rule["natural"]
+        if isinstance(k, bool) or not isinstance(k, int) or not 0 <= k <= NATURAL_MAX_TICKS:
+            raise Refused(f"limit {{'natural': k}} takes a whole number k from 0 to {NATURAL_MAX_TICKS} ticks")
+        target = natural + k * tick if opening else natural - k * tick
     elif isinstance(rule, Mapping) and set(rule) == {"price"}:
         target = float(rule["price"])
         if not math.isfinite(target):
             raise Refused("limit {'price': v} needs a number")
     else:
-        raise Refused("limit is 'natural', 'mid', {'mid': k} or {'price': value}")
+        raise Refused("limit is 'natural', 'mid', {'mid': k}, {'natural': k} or {'price': value}")
     rounded = venue.round_price(target, tick, up=not opening)
     return rounded
 
