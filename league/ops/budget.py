@@ -173,7 +173,25 @@ RULE_VERSION = 2
 METERS = ("sail", "claude")
 #: THE OWNER'S CEILING (his goal of Oct 3, 2026): the most research may spend a day, every meter together, and its split.
 CEILING_USD_DAY = 25.0
-SPLIT = {"sail": 0.6, "claude": 0.4}
+#: THE SPLIT, Sail 0.8 and Claude 0.2 (the operator's decision of Oct 9, 2026, about 16:00Z, an owner deploy; Sail 0.6
+#: and Claude 0.4 from RULE_VERSION 2 of Oct 3 until then): the owner's $25 a day is Sail $20 and Claude $5 (it was $15
+#: and $10). The ceiling itself does not move. Measured in production (read-only, the House's swarm store, Oct 7 19:30Z
+#: to Oct 9 15:37Z): DeepSeek V4 Flash researched as well as Claude Sonnet 5.5 at 38x lower model cost per Train run and
+#: 3.3x (95% CI 2.2-5.1) more families reaching the Train bar per research dollar (models plus Gym boxes, both windows
+#: pooled); Claude's researchers produced no Validation pass (0 of 3 tries); the first real Probe trade
+#: (eqp-realcalm-drift-call v17, 14:26Z Oct 9) was written entirely by Flash. The operator then turned the Claude
+#: research band off (swarm.json `researcher.claude_top` 0, `claude.role_usd_day` researcher 0 and architect 0), so
+#: Claude's remaining use is the gate's review and audit and the strategist (about $2 a day or less, estimated), with
+#: the House's post-mortem and engineer inside the same meter; the unused Claude share moves to Sail, which buys the Gym
+#: boxes and the Flash research. THE COST: Sail drains faster (about $21 a day with its fixed cost at the ceiling, from
+#: about $16), so for the same balance its funding notice (two days before research runs out) comes sooner; Claude's
+#: line is $5 a day, of which the gate's two holds keep $1.95 (`GATE_HOLDS_USD`), so every other Claude role shares at
+#: most $3.05; and the floor (`FLOOR_CAP_USD_DAY` split the same way: no usable budget.json, or a stale one) is Sail $4
+#: and Claude $1, under the gate's two holds: at the floor the review finds no Claude room and runs on its Sail model,
+#: and the audit does too unless its hold is at most the $1 (a large program's is up to $1.30), each stand-in with the
+#: gate's own "not the plan's reviewer" alert (at the old floor's $2, one review and one audit of any size fitted on
+#: Claude a day).
+SPLIT = {"sail": 0.8, "claude": 0.2}
 #: The one runway term (days): research runs at the ceiling while a meter holds this many days of it above its reserve and
 #: its fixed cost, and below that spends one part in this many of what it holds above them a day.
 RUNWAY_DAYS = 5

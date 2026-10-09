@@ -189,6 +189,11 @@ LOOSENED: tuple[dict[str, str], ...] = (
              "evidence"},
     {"rule": "graveyard DRIFT rows", "was": "bind every card", "now": "do not bind a direction card",
      "cost": "direction ideas the drift screen buried may return, once each, inside the rebirth budgets"},
+    {"rule": "graveyard alpha rows (PR #519, deployed 12:44Z Oct 9)", "was": "bind every card",
+     "now": "a direction card is bound only by direction families' graveyard rows (DRIFT rows never); alpha cards are "
+            "bound by every row, as before",
+     "cost": "more direction births may retry ideas similar to dead alpha ones; each lineage still gets one Validation "
+             "try and one holdout look, at D2's measured false-positive rate of 10.4% per program (mixed worlds)"},
     {"rule": "the birth quota", "was": "no lane",
      "now": "direction gets at least half of a pass's births while under half of the last 24 hours' (at most 60%)",
      "cost": "alpha births fall from about 73 to about 36 a day mid-way through the game's T0 experiment; the "

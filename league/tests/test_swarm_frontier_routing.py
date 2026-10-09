@@ -9,8 +9,10 @@ from contextlib import contextmanager
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 from league.frontier import Frontier
+from league.ops import budget as budget_rule
 from league.swarm.models import ModelError, ModelRouter
 from league.swarm.settings import DEFAULTS
 from league.swarm.store import SwarmStore
@@ -28,8 +30,13 @@ class SwarmFrontierRouting(unittest.TestCase):
         self.addCleanup(self.store.close)
         self.settings = copy.deepcopy(DEFAULTS)
         # THE BUDGET is not what these tests judge: a paid-model line well above the holds asked here (no block is the
-        # floor, and OpenAI is admitted under that line too).
+        # floor, and OpenAI is admitted under that line too). The rule reads any block at most at Claude's share of the
+        # owner's ceiling, $5 since the split of Oct 9, 2026 ($3.05 for a role outside the gate): under the post-mortem's
+        # 64,000-token hold (about $4.90), so the share is lifted here, as the $10 share was above it.
         self.settings["budget"] = {"source": "test", "sail_usd_day": 1000.0, "claude_usd_day": 1000.0}
+        lifted = mock.patch.object(budget_rule, "ceiling_usd_day", lambda meter: 1000.0)
+        lifted.start()
+        self.addCleanup(lifted.stop)
         self.month = FakeMonth(1000)
         self.sail_calls = []
 

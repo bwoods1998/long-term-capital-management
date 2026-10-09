@@ -8,6 +8,68 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## The budget split (Oct 9, 2026): built on `fix/budget-split-sail`, not deployed
+
+An owner deploy of two operator decisions of Oct 9 (about 16:00Z), cut from main `d70e00c3` (release L-D with D-1,
+D-1b and the graveyard). PR #520, the direction Train map, was still open and is not in it. Nothing under
+`league/live/`, `league/gym/` or `league/constitution.py` changes, so the execution fingerprint (`31a7e921`), the money
+digest (`0310779c`) and the constitution digest (`ca89ff8a`) do not move: no ratification, no evidence reset.
+
+**1. The split** (`league/ops/budget.py` `SPLIT`): Sail 0.6 and Claude 0.4 become Sail 0.8 and Claude 0.2. The owner's
+ceiling stays $25 a day, now Sail $20 and Claude $5 (it was $15 and $10).
+- **Why** (measured read-only on the House's swarm store, Oct 7 19:30Z to Oct 9 15:37Z):
+  - DeepSeek V4 Flash researched as well as Claude Sonnet 5.5 at 38x lower model cost per Train run.
+  - Per research dollar (models plus Gym boxes, both windows pooled), Flash brought 3.3x (95% CI 2.2-5.1) more
+    families to the Train bar.
+  - Claude's researchers had 3 Validation tries and no pass.
+  - The first real Probe trade (eqp-realcalm-drift-call v17, 14:26Z Oct 9) was written entirely by Flash.
+  - The operator then turned the Claude research band off in `swarm.json` (`researcher.claude_top` 0,
+    `claude.role_usd_day` researcher 0 and architect 0). Claude's remaining use is the gate's review and audit and the
+    strategist (about $2 a day or less, estimated), plus the House's post-mortem and engineer. The unused share moves
+    to Sail, which buys the Gym boxes and the Flash research.
+- **What the split moves in the same release** (each derived from it, each pinned by a test):
+  - The floor (no usable `budget.json`, or a stale one): $4 of Sail and $1 of Claude a day (was $3 and $2).
+  - At the ceiling: 7 Gym boxes (was 5), a Sail model pace of $0.33 an hour (was $0.25), every Claude line at most $5
+    (was $10), and the gate's reserve on Sail $2.00 (was $1.50).
+  - Claude's room at the ceiling (`paid_model_room`): the audit $5, the review $3.70, every other role $3.05 (was $10,
+    $8.70 and $8.05).
+  - `league/swarm/policy.json`: `gym.max_boxes` 5 to 7 and `researcher.sail_usd_per_hour` 0.25 to 0.34, so the
+    policy's caps let Sail's $20 reach its knobs (5 and 0.25 were what $15 bought). `claude.role_usd_day.strategist` 6
+    to 3, so its line leaves the gate's two holds inside Claude's $5.
+  - The engineer (`league/ops/engineer.py`): `engineer.usd_day` $4 to $3 and an authoring attempt's cap $3 to $2 (the
+    review stays $1), so an attempt and its review fit in a day inside Claude's $5 less the gate's holds.
+- **Its cost:**
+  - Sail drains faster: about $21 a day with its fixed cost at the ceiling, from about $16. For the same balance, the
+    funding notice (two days before research runs out) comes sooner.
+  - Claude's $5 keeps the gate's two holds ($1.95), so the strategist, the post-mortem and the engineer share at most
+    $3.05 a day.
+  - At the floor, Claude's $1 is under the gate's holds. The review runs on its Sail model, and so does the audit unless
+    its hold is at most $1. Each raises the gate's "not the plan's reviewer" alert. At the old floor's $2, one review
+    and one audit fitted on Claude.
+  - The engineer's attempt has a third less to spend.
+- **On the box.** Its `swarm.json` wins over `policy.json`. Where it sets `gym.max_boxes` or
+  `researcher.sail_usd_per_hour` (the CHANGELOG's last record, Oct 8: 2 and 0.5), those hold Sail's spend under the $20
+  until the operator raises them there. Its `claude.role_usd_day` lines are held to $5 by the budget, and the router
+  keeps the gate's holds whatever they say.
+- **The day's figure.** The rule's version and `budget.json`'s schema stay 2, so a file from before the deploy is read
+  as it is, each meter held to its new share. Claude is at most $5 at once. Sail keeps the figure the day's first run
+  set (at most $15) until the first budget run of the next UTC day (00:30Z) sets up to $20; until then
+  `would_set_usd_day` shows it. The funding notice's id (`funding:<meter>:<UTC day>:r2`) is unchanged.
+
+**2. The `dlane` report's header** (`league/ops/dlane_report.py` `LOOSENED`) adds the direction graveyard rule (PR #519,
+deployed 12:44Z Oct 9): a direction card is bound only by direction families' graveyard rows. Its cost: more direction
+births may retry ideas similar to dead alpha ones. Each lineage still gets one Validation try and one holdout look, at
+D2's measured false-positive rate of 10.4% per program (mixed worlds). The Train map (PR #520) is not in this
+release's base, so the header does not list it.
+
+**Deploy class and rollback.** An owner deploy: `league/ops/` and `league/swarm/policy.json` are FORBIDDEN to the
+updater (`league/ci.py`). Roll back to the previous House release. Its code reads this release's `budget.json` (the
+same schema) held to the old shares, so neither rule's ceiling is passed.
+
+**Verify after the deploy** (read-only): `budget.json` `rule.split` is {sail 0.8, claude 0.2} after the next budget run,
+`meters.claude.research_usd_day` is at most 5, and `meters.sail.would_set_usd_day` is up to 20 (the day's figure from
+00:30Z the next day). `dlane-report.json` `loosened` names "graveyard alpha rows".
+
 ## Release D-1b, the direction lane on D2 (Oct 9, 2026): built on `release/dlane-d1` on top of D-1, not deployed
 
 D-1b switches the direction lane's screen to **D2** and meets the reporting terms of the owner's goal of Oct 9: item 4,
@@ -169,9 +231,9 @@ money-safety fix (rule F0: its cost is those bands, which go back to the Gym).
   `debit_vertical`; roots SPY, QQQ, IWM; holding `days_1_3` or `days_4_10`; an ablation switch that enters the same
   structure every session (never flat). Graveyard rows whose only verdict is DRIFT do not bind a direction card, and
   since Oct 9 neither does any alpha family's row (**The graveyard**, next).
-- **The graveyard** (Oct 9, 2026, after D-1 went live at 10:37Z as main `2b60d94a`; branch `fix/dlane-graveyard`, not
-  deployed; the operator's decision, **a reported loosening**). A direction card is bound only by the graveyard rows of
-  direction families (`league/swarm/cards.py` `RebirthIndex.binds_direction`, `needs_claim`).
+- **The graveyard** (Oct 9, 2026, after D-1 went live at 10:37Z as main `2b60d94a`; PR #519 from `fix/dlane-graveyard`,
+  deployed 12:44Z Oct 9; the operator's decision, **a reported loosening**). A direction card is bound only by the
+  graveyard rows of direction families (`league/swarm/cards.py` `RebirthIndex.binds_direction`, `needs_claim`).
   - Why: the House's architect pass of 11:32Z had its direction cards refused by alpha rows, for example
     low-iv-drift-call: "its cell (equity_premium / directional / days_4_10 / clock+implied_vol+underlying_price), and
     the trend_momentum cell its own mechanism text reads as, hold 15 graveyard row(s) ..., the newest
@@ -197,8 +259,8 @@ money-safety fix (rule F0: its cost is those bands, which go back to the Gym).
     at D2's measured false-positive rate of 10.4% per program (mixed worlds).
   - Deploy class: the updater (`cards.py` and `architect.py` are not protected paths). Rollback: revert the commit;
     `dlane.mode` "off" rolls back the whole lane. The `dlane` report's loosened-rules header
-    (`league/ops/dlane_report.py` `LOOSENED`) does not list this rule yet: `league/ops/` is an owner-deploy path, so
-    the row joins it at the next owner deploy. The table below lists it now.
+    (`league/ops/dlane_report.py` `LOOSENED`, an owner-deploy path) lists this rule from the budget-split release
+    (**The budget split**, top of this page; not deployed yet). The table below lists it now.
 - **Births.** While the lane holds under `birth_share` (half) of the last 24 hours' births and fewer than `max_alive`
   direction families live, a pass reserves at least half its births for direction (never filled with alpha); the lane
   never holds more than `max_share` (60%) of the window, so alpha keeps at least 40%. The architect's request carries a
@@ -288,7 +350,7 @@ every `dlane` report, `dlane_report.LOOSENED`):
 | The leakage alarm | one count: 10 looks, over 30% | per lane; direction over 60% | a real direction holdout leak trips later; the paid review, the audit and the post-cutoff tail still check every look |
 | The incubator mark | the drift screen alone (the owner's term, Sept 29-30) | direction-v2 for direction families | with no edge about -$36 a week expected, at most $150 a week (about $650 a month); its closes are never evidence |
 | Graveyard DRIFT rows | bind every card | not a direction card | buried direction ideas may return, once each, inside the rebirth budgets |
-| Graveyard alpha rows (Oct 9, `fix/dlane-graveyard`) | bind every card | alpha cards only: a direction card is bound only by direction families' rows (DRIFT never) | more direction births may retry ideas similar to dead alpha ones; each lineage still gets one Validation try and one holdout look at D2's measured 10.4% false-positive rate per program (mixed worlds); not yet in the `dlane` report's header (an owner-deploy path) |
+| Graveyard alpha rows (PR #519, deployed 12:44Z Oct 9) | bind every card | alpha cards only: a direction card is bound only by direction families' rows (DRIFT never) | more direction births may retry ideas similar to dead alpha ones; each lineage still gets one Validation try and one holdout look at D2's measured 10.4% false-positive rate per program (mixed worlds); in the `dlane` report's header from the budget-split release (an owner deploy) |
 | The birth quota | no lane | direction about half while behind, at most 60% | alpha births fall from about 73 to about 36 a day mid-way through the game's T0 experiment; the researcher's ROLE prompt (a shared prefix) changes for alpha researchers too, so "alpha golden" holds for code paths only (the game's report says so while the lane is on) |
 | The unit | MONEY's pre-registered $75 lane cap | 10% of equity (E5), as the live side | Probe-stage Done averaged over holds 6.3% against 7.8%; P(net <= -$360 in 8 weeks) 0.35 against 0.27 |
 | K5's clear | no K5 before D-1 | `dlane.k5_clear` true clears a set K5 at once and disarms K5 while it stays true; the job's next run records the clear and re-arms K5 at -$600 below the net then (deleting the kv clears the same way) | while `k5_clear` stays true the lane can lose past any line with no K5 (the report warns every run); after a clear K5 measures a further -$600 from the net at clearing, not from inception |
@@ -1519,7 +1581,8 @@ it). Check 6 counts the practice rows the swarm offers, not the cohorts the live
 The self-running release (Oct 7, 2026) carries the two House jobs that report on the floor and improve it, ported from
 `v3/b4` and `v3/b5`. Both are protected (`league/ops/`), so they reach the House only by the owner's deploy. Both spend
 Claude through the swarm's router: every call is a `spend` row in `swarm.sqlite`, admitted inside budget rule v2's Claude
-meter (the day's Claude research dollars, $10 at the owner's ceiling, less the gate's two holds, $1.95).
+meter (the day's Claude research dollars, $5 at the owner's ceiling from the budget split, $10 before, less the gate's
+two holds, $1.95).
 
 **The post-mortem** (`league/ops/postmortem.py`, Saturdays 14:00Z). Code reads the week's receipts, read-only: real
 orders by outcome and route with the rejection and refusal reasons; the calibration round trips' real fills against
@@ -1540,7 +1603,8 @@ feeds research: no swarm role reads the post-mortem.
 **The engineer** (`league/ops/engineer.py` with `author.py` and `reviewer.py`; daily 04:00Z it may author, hourly at
 :40 the candidate in flight moves on). One candidate at a time walks `playbooks/harness-improvement.md`: the top
 captured bottleneck of an engineer lane (`research`, `memory`, `data`) with its predeclared metric frozen; a change on
-the running release's commit, written by Claude Opus 5.5 (role `engineer`, at most $3 an attempt) through confined
+the running release's commit, written by Claude Opus 5.5 (role `engineer`, at most $2 an attempt from the budget split,
+$3 before) through confined
 tools; the static guards; a pull request through the gateway's engineer role; green CI on the exact head; an
 adversarial review of the exact diff (role `reviewer`, at most $1), its verdict posted to `/v1/github/review` (a CI
 failure or a reject goes back once); the gateway's merge (at most 2 a New York day, never a protected path, never with
@@ -1560,11 +1624,12 @@ What the self-running release adds to `v3/b5`:
   `{"jobs": {"engineer": {"enabled": false}}}` stops the job. The job serves its own two roles (`engineer`, `reviewer`,
   on Claude Opus 5.5 unless `claude.role_model` names one) in its copy of the settings, since the box's `swarm.json`
   replaces `claude.roles` whole.
-- **$4 a UTC day** (`engineer.usd_day`): the engineer and the reviewer together, holds included. An attempt is capped at
-  what is left, and no attempt or review starts with less than its own cap: one attempt and its review a day, 40% of
-  the Claude meter at the ceiling. It authors at most once a UTC day (its 04:00Z occurrence's own day: 04:00Z is New
-  York's midnight in summer and 23:00 the day before in winter, so a New York day skipped one authoring a year) and
-  only with nothing in flight, so most days cost a review, a revision or nothing.
+- **$3 a UTC day** (`engineer.usd_day`; $4 before the budget split): the engineer and the reviewer together, holds
+  included. An attempt is capped at what is left, and no attempt or review starts with less than its own cap: one
+  attempt ($2) and its review ($1) a day, inside the Claude meter at the ceiling ($5) less the gate's two holds. It
+  authors at most once a UTC day (its 04:00Z occurrence's own day: 04:00Z is New York's midnight in summer and 23:00
+  the day before in winter, so a New York day skipped one authoring a year) and only with nothing in flight, so most
+  days cost a review, a revision or nothing.
 - **Research-class only:** a lane file the live path loads is held (`RELEASE_CLASSES`; on this tree
   `league/swarm/researcher.py` and `claude_research.py`): the tools refuse it, the brief names it held, and a candidate
   whose tree classifies as money-path or evidence-reset is closed before its pull request. The gateway holds the same
@@ -1695,19 +1760,22 @@ process died after the promotion is recovered by the House it left running (`dri
 
 ### The budget rule (D4)
 
-`league/ops/budget.py`, protected; constants changed only by an owner deploy. For each meter m in {sail, claude}:
-`balance_m` (Sail: the guard's last good provider reading, at most 6 hours old; Claude: the gateway's funded total
-left), `fixed_m` (Sail: the House and data boxes' own billing a day over the trailing 7 days, never below
-`guard.house_burn_usd_day`; Claude: 0), `reserve_m` (Sail $10, Claude $5); and `p30`, the trailing 30-day realized
+`league/ops/budget.py`, protected; constants changed only by an owner deploy (rule version 2 since Oct 3; the module
+docstring is the rule). For each meter m in {sail, claude}: `balance_m` (Sail: the guard's last good provider reading,
+at most 6 hours old; Claude: the gateway's funded total left), `fixed_m` (Sail: the House and data boxes' own billing a
+day over the trailing 7 days, never below `guard.house_burn_usd_day`; Claude: 0), `reserve_m` (Sail: the Sail guard's
+own release line, $37 at the configured burn, never under $10; Claude $5); and `p30`, the trailing 30-day realized
 options P&L, fees in, every real route. Marks never fund research.
 
 ```
-sustainable_m = max(0, balance_m − reserve_m − 90·fixed_m) / 90
-floor_m       = min(sustainable_m, $5/day × split_m)          split: sail 0.6, claude 0.4
-earned        = 0.5 × max(0, p30) / 30, split by each meter's research spend over 7 days (the floor's split when none)
-research_m    = min(floor_m + earned_m, max(0, balance_m − reserve_m − 60·fixed_m) / 60)
+ceiling_m  = $25/day × split_m              split: sail 0.8, claude 0.2 = $20 and $5 (0.6 and 0.4, $15 and $10, before)
+runway_m   = max(0, balance_m − reserve_m − 5·fixed_m) / 5
+research_m = min(ceiling_m, runway_m)       set once a UTC day by its first run, from the balance as the day began
+earned     = 0.5 × max(0, p30) / 30         written, inside the ceiling: it lifts no meter
 ```
 
+- **The split** is Sail 0.8 and Claude 0.2 from the budget-split release (**The budget split**, top of this page; not
+  deployed: production still runs 0.6 and 0.4). The owner's ceiling stays $25 a day.
 - **`p30` is the live book's own read first.** The rule reads the closed real positions and the broker's posted fee
   corrections itself. The close economics can only cut that number: its `p30` is used when its summary is the latest
   close and its number is smaller, never when it is larger. Unknown stays unknown: while a position is closed but not
@@ -1716,14 +1784,15 @@ research_m    = min(floor_m + earned_m, max(0, balance_m − reserve_m − 60·f
   summary (none yet, a stale one, one that cannot be read) the book's read stands alone and each run says so in a
   warning.
 - **The no-forward-edge stop:** once 60 sessions have closed since Oct 5, 2026 (or since the day after the last
-  promotion to Probe by the forward ladder) with no such promotion, `earned` is 0 and the state says "no forward edge;
-  research at floor". Only the ladder's own promotion counts, and the ladder is not in A1: until the ladder release the
-  count runs from Oct 5 and reaches 60 at the close of Dec 29, 2026.
-- **Unknown is never money:** an unreadable balance or fixed cost gives its meter no research; an unreadable `p30`
-  earns nothing; a rule that cannot run at all is no research on either meter.
-- **Output:** `<state>/budget.json` (private): the inputs, each meter's research $/day, the knobs, the direction against
-  the last file (`cut`, `raise`, `same`), each meter's runway at the rate the rule holds it to, its runway at the rate
-  it wants and its card date (when that runway falls to 60 days), and why.
+  promotion to Probe: the forward ladder's, or the Money table's move after a passed holdout look) with no such
+  promotion, `earned` is 0 and the state says "no forward edge". `earned` sits inside the ceiling, so today the stop
+  cuts no research.
+- **Unknown is never money:** an unreadable balance, fixed cost or reserve gives its meter no research; an unreadable
+  `p30` earns nothing; a rule that cannot run at all is no research on either meter.
+- **Output:** `<state>/budget.json` (private): the inputs, each meter's research $/day and the day's figure, the knobs,
+  the direction against the last file (`cut`, `raise`, `same`), each meter's runway at the rate the rule holds it to,
+  its days of research left at the ceiling and its card date (when those days fall to 5: the day the taper starts),
+  the amount that buys 7 more days, and why.
 - **Enforcement, tighten-only** (the last step of `settings.load`): min() against `researcher.sail_usd_per_hour`
   (Sail research × 0.4 / 24), `gym.max_boxes` (Sail research × 0.6 over $0.20 an hour × 8 busy hours, at least 1),
   every `claude.role_usd_day` line and `population.ceiling` (a family a dollar a day, at least 8 and never below
@@ -1732,15 +1801,20 @@ research_m    = min(floor_m + earned_m, max(0, balance_m − reserve_m − 60·f
   no research dollars). The Sail guard's daily cap is the budget's: the swarm's booked Sail under the Sail research
   $/day, and Sail's own meter under that plus fixed. Claude's room is also capped by the budget's Claude $/day less
   today's paid-model spend, each model's spend counted on its own and never under 0, so a hold one model released
-  never pays for another's spend. OpenAI is closed (`guard.openai_cap_usd` 0): it is not a meter of the rule.
-- **No file, a bad file, a stale file.** A missing, unreadable or malformed `budget.json` is the floor ($3 a day of
-  Sail research, $2 of Claude). One older than 36 hours never loosens: each meter is the lower of the floor and what
-  the stale file said, with a warning. A research budget of 0 brakes the Sail guard at once.
-- **At the floor, research is small by design.** With no realized profit to share, each meter gets at most its part of
-  the $5 a day and only what its balance sustains for 90 days above its reserve and fixed cost; the architect then
-  passes every 4 hours at most, and the Claude roles (the gate's review and audit, the strategist) share the Claude
-  dollars of the day. A cut shows in `budget.json` (`limited_by`: `floor`, `sustainable`, `W` or `unreadable`) and in
-  the daily page; the way to more research is realized profit or the owner's top-up, never a setting.
+  never pays for another's spend, and less the gate's holds by stage (every role but the gate's two leaves the
+  review's $0.65 and the audit's $1.30; the review leaves the audit's). OpenAI is closed (`guard.openai_cap_usd` 0): it is not a meter of the rule. At Sail's $20 the knobs are 7
+  Gym boxes and a Sail model pace of $0.33 an hour; the committed `policy.json` caps (7 boxes, $0.34) let it reach
+  them, and the box's own `swarm.json` wins over `policy.json`.
+- **No file, a bad file, a stale file.** A missing, unreadable or malformed `budget.json` is the floor ($5 a day split
+  as the ceiling is: $4 of Sail research and $1 of Claude; $3 and $2 before the split). One older than 36 hours never
+  loosens: each meter is the lower of the floor and what the stale file said, with a warning. A research budget of 0
+  brakes the Sail guard at once. At the floor Claude's $1 is under the gate's two holds: the review runs on its Sail
+  model, and the audit too unless its hold is at most $1, each with the gate's "not the plan's reviewer" alert.
+- **The taper is the rule.** A meter runs at its share of the ceiling while it holds 5 days of it above its reserve
+  and 5 days of its fixed cost; under that it spends a fifth a day of what it holds above them, so research tapers by
+  itself and ends before the balance meets the Sail guard's brake. A cut shows in `budget.json` (`limited_by`:
+  `ceiling`, `runway` or `unreadable`) and in the daily page; the way to more research is the owner's top-up, never a
+  setting.
 - **The funding notice** is computed at the rate the meter WANTS, not at the rate the rule throttled it to: the
   throttled rate keeps the runway near the rule's runway term by construction, so it would never say a prefund is
   short. (Rule version 2, Oct 3, and release D-1b, Oct 9: the module docstring of `league/ops/budget.py` is the rule.)

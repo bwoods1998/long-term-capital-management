@@ -98,9 +98,10 @@ operations are House jobs; one funding action a year, not one a week; an honest 
   post-mortem and a monthly cost review as House jobs; an engineer that proposes one lane change at a time, an
   automated reviewer, the gateway's merge, the updater's canary, and retain or revert by a predeclared metric. In that
   release the engineer is on (`engineer.enabled` in `policy.json`), spends at most $4 a day inside budget rule v2's
-  Claude meter, and stays research-class: it never changes a module the live path loads (the House holds them, and the
-  gateway too, `ENGINEER_HELD`). It closes its own superseded and unmerged pull requests through the gateway. The
-  post-mortem reports and feeds no research role.
+  Claude meter ($3 from the budget split of Oct 9, which cuts Claude's share to $5), and stays research-class: it
+  never changes a module the live path loads (the House holds them, and the gateway too, `ENGINEER_HELD`). It closes
+  its own superseded and unmerged pull requests through the gateway. The post-mortem reports and feeds no research
+  role.
 
 ## The goal and the one number
 
@@ -823,7 +824,7 @@ everything that shows it says so. The rules live in one module, `league/swarm/dl
 | Gate audit | Claude via the gateway | `claude.role_model["audit"]` or `claude.model` (live: Opus 5.5); GPT-6 Astra while the September month has room (off live), then a second Sail model, as fallbacks | inside Claude's funded total |
 | Diagnostician | Claude via the gateway | `claude.model` | `diagnostician.usd_day`; off live since Sept 30 |
 | Weekly post-mortem | Claude via the gateway (ported from `v3/b4` to the self-running release) | Opus 5.5, role `postmortem`, one call a week; until the self-running release is deployed the operator writes the post-mortem (the release that runs today skips the job: its module is absent) | at most $1 a week inside the budget's Claude dollars |
-| The engineer and its reviewer | Claude via the gateway (the self-running release) | Opus 5.5, roles `engineer` (at most $3 an attempt) and `reviewer` (at most $1); research-class lanes only | at most $4 a UTC day together (`engineer.usd_day`), inside the budget's Claude dollars |
+| The engineer and its reviewer | Claude via the gateway (the self-running release) | Opus 5.5, roles `engineer` (at most $2 an attempt; $3 before the budget split of Oct 9) and `reviewer` (at most $1); research-class lanes only | at most $3 a UTC day together (`engineer.usd_day`; $4 before the split), inside the budget's Claude dollars |
 | The House's jobs | the House box | niced children (nice 19, 500 MB of address space over their start, CPU and wall limits) | inside the House's own box |
 | Gym | Sail boxes | 4-8 sealed size-l boxes by default; 2-6 live from Release A, 1 in `policy.json` since Oct 2, and the budget's box count when lower | $0.10-0.40 an hour each while busy; asleep when idle |
 | Data | Sail box + ThetaData | one size-l box, asleep when idle | $5-15 a day while running |

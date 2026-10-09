@@ -29,6 +29,51 @@ any other deploy.
 The running House release is `20261009T090334Z-cdbf1864a573` (main `40c39435`, release L-D, 09:04Z Oct 9, below), the
 gateway is `8072b5b1`, and the box's updater is on. What is built and not deployed is on branches.
 
+### The budget split and the graveyard's report row, on `fix/budget-split-sail` (unreleased; an owner deploy on main `d70e00c3`; no evidence reset)
+
+Two operator decisions of Oct 9 (about 16:00Z). Operator's page: **The budget split** at the top of
+`docs/operations.md`. Base: main `d70e00c3` (release L-D, D-1, D-1b and the graveyard); PR #520 (the direction Train
+map) was still open and is not in it. Nothing in `league/live/`, `league/gym/` or `league/constitution.py`: the
+execution fingerprint (`31a7e921`), the money digest (`0310779c`) and the constitution digest (`ca89ff8a`) do not
+move, so no ratification. An owner deploy: `league/ops/` and `league/swarm/policy.json` are FORBIDDEN to the updater.
+- **The split** (`league/ops/budget.py` `SPLIT`): Sail 0.6 / Claude 0.4 -> Sail 0.8 / Claude 0.2. THE OWNER'S CEILING
+  stays $25 a day: Sail $20 and Claude $5 (was $15 and $10). Why, measured read-only on the House's swarm store (Oct 7
+  19:30Z to Oct 9 15:37Z): DeepSeek V4 Flash researched as well as Claude Sonnet 5.5 at 38x lower model cost per Train
+  run and 3.3x (95% CI 2.2-5.1) more families reaching the Train bar per research dollar; Claude's researchers had no
+  Validation pass (0 of 3); the first real Probe trade (eqp-realcalm-drift-call v17, 14:26Z Oct 9) was written entirely
+  by Flash. The operator turned the Claude research band off in `swarm.json` (`researcher.claude_top` 0,
+  `claude.role_usd_day` researcher 0, architect 0), leaving Claude the gate's review and audit and the strategist
+  (about $2 a day or less, estimated), so the unused Claude share moves to Sail (Gym boxes and Flash research).
+- **Derived in the same release:** the floor $4 Sail / $1 Claude (was $3 / $2); at the ceiling 7 Gym boxes and $0.33 an
+  hour of Sail model pace (was 5 and $0.25), every Claude line at most $5, Sail's gate reserve $2.00 (was $1.50),
+  Claude's room $5 for the audit, $3.70 for the review and $3.05 for every other role (was $10, $8.70, $8.05).
+  `policy.json`: `gym.max_boxes` 5 -> 7 and `researcher.sail_usd_per_hour` 0.25 -> 0.34 (so the policy lets Sail's $20
+  reach its knobs), `claude.role_usd_day.strategist` 6 -> 3 (its line leaves the gate's holds inside $5). The engineer:
+  `usd_day` $4 -> $3 and an attempt's cap $3 -> $2 (review $1), so an attempt and its review fit a day.
+- **Its cost.** Sail drains faster: about $21 a day with its fixed cost at the ceiling (from about $16), so for the
+  same balance the owner's two-day funding notice comes sooner. Claude's line is $5, of which the gate's holds keep
+  $1.95: the strategist, the post-mortem and the engineer share at most $3.05. At the floor Claude's $1 is under the
+  gate's holds, so the review (and the audit, unless its hold is at most $1) runs on its Sail model with the gate's
+  "not the plan's reviewer" alert; at the old $2 one review and one audit fitted. The engineer's attempt is a third
+  smaller. The box's `swarm.json` wins over `policy.json`: where it sets `gym.max_boxes` or
+  `researcher.sail_usd_per_hour` (last recorded Oct 8: 2 and 0.5) those still cap Sail's spend under the $20.
+- **The day's figure.** RULE_VERSION and the schema stay 2: an old `budget.json` is read held to the new shares, so
+  Claude is at most $5 at once and Sail keeps the day's figure (at most $15) until the next UTC day's first budget run
+  (00:30Z) sets up to $20.
+- **The `dlane` report's header** (`league/ops/dlane_report.py` `LOOSENED`, the owner's goal of Oct 9, item 5) adds the
+  direction graveyard rule (PR #519, deployed 12:44Z Oct 9) with its cost: more direction births may retry ideas
+  similar to dead alpha ones; each lineage still gets one Validation try and one look, at D2's measured
+  false-positive rate of 10.4% per program. The Train map (PR #520) is not listed: it is not in this base.
+- **Proof.** `test_ops_budget` (the ceiling $20 / $5, the floor $4 / $1 and its Claude dollar under the gate's holds,
+  the taper day by day, the day's figure, the two-day lead, Claude's room by stage), `test_swarm_settings_policy` (the
+  committed policy reaches the $20's knobs; the paid-model lines), `test_ops_jobs` (pre-open check 5 at the $4 floor),
+  `test_ops_engineer` (the $3 line, the $2 attempt) and `test_dlane_report` (the new header row). Examples that tapered
+  under the old shares were moved to balances that taper under the new ones. `test_swarm_frontier_routing` and
+  `test_swarm_graveyard_digest`, which do not judge the budget, lift Claude's share in their fixtures: $5 less the
+  gate's holds is under the post-mortem's 64,000-token OpenAI hold (about $4.90; OpenAI is closed by the budget in
+  production anyway).
+- **Rollback.** The previous House release: its code reads this release's `budget.json` held to the old shares.
+
 ### The direction lane's graveyard, on `fix/dlane-graveyard` (unreleased; an updater release on top of D-1, live since 10:37Z Oct 9 as main `2b60d94a`; no evidence reset)
 
 The operator's decision after the House's architect pass of 11:32Z Oct 9, **a reported loosening**. Operator's page:
@@ -53,7 +98,7 @@ constitution digest (`ca89ff8a`) do not move.
   (no paid pass without a cell) follows the same rule. A direction birth's `swarm.born` card carries `alpha_rows`.
 - **Its cost.** More direction births may retry ideas similar to dead alpha ones. Each such lineage still gets one
   Validation try and one holdout look, at D2's measured false-positive rate of 10.4% per program (mixed worlds). The
-  `dlane` report's loosened-rules header (`league/ops/`, an owner-deploy path) does not list it yet.
+  `dlane` report's loosened-rules header (`league/ops/`, an owner-deploy path) lists it from the budget split (above).
 - **Proof.** `test_dlane_graveyard`: a direction card in a cell of alpha REFUTED and MECHANISM rows only is admitted
   (the live example among them); a direction family's REFUTED row still needs a claim; alpha cards' verdicts and every
   reading with `dlane.mode` "off" equal main `2b60d94a`'s on a fixture store (golden digests computed on that commit).

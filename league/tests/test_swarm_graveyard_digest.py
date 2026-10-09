@@ -16,8 +16,10 @@ import io
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 from league.claude import Claude
+from league.ops import budget as budget_rule
 from league.frontier import Frontier
 from league.swarm import architect as arch
 from league.swarm.architect import (AGENDA_KEY, DIGEST_HEADER, FULL_GRAVEYARD_RULE, GRAVEYARD_POINTER, MAX_DIGEST_BYTES, SEAL_KEY,
@@ -371,7 +373,12 @@ class RouteCase(StoreCase):
     def setUp(self):
         super().setUp()
         # THE BUDGET is not what these tests judge: a line well above a day of the architect's calls (no block is the floor).
+        # The rule reads any block at most at Claude's share of the owner's ceiling: $5 since the split of Oct 9, 2026
+        # ($3.05 for the architect, under an erred Claude hold and an Astra hold together), so the share is lifted here.
         self.settings["budget"] = {"source": "test", "sail_usd_day": 1000.0, "claude_usd_day": 1000.0}
+        lifted = mock.patch.object(budget_rule, "ceiling_usd_day", lambda meter: 1000.0)
+        lifted.start()
+        self.addCleanup(lifted.stop)
         self.sail_calls = []
         self.openai = FakeOpener(*[ok(text='{"families": []}', cost="0.05") for _ in range(4)])
 

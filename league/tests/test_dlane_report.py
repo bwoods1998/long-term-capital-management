@@ -475,6 +475,17 @@ class ReportedOnly(unittest.TestCase):
         self.assertNotIn("dlane", off)
         self.assertEqual(set(on) - {"dlane"}, set(off))
 
+    def test_the_header_lists_the_graveyards_alpha_rows_with_their_cost(self):
+        """The direction graveyard rule (PR #519, deployed 12:44Z Oct 9, 2026) is a reported loosening: the header of every
+        report names it beside the DRIFT rows' with its cost (the owner's goal of Oct 9, item 5)."""
+        rules = [r["rule"] for r in R.LOOSENED]
+        [row] = [r for r in R.LOOSENED if r["rule"].startswith("graveyard alpha rows")]
+        self.assertEqual(rules.index(row["rule"]), rules.index("graveyard DRIFT rows") + 1)
+        self.assertIn("PR #519", row["rule"])
+        self.assertIn("bound only by direction families' graveyard rows", row["now"])
+        self.assertIn("retry ideas similar to dead alpha ones", row["cost"])
+        self.assertIn("10.4% per program", row["cost"])
+
     def test_the_contamination_statement_names_windows_and_no_figure(self):
         """The operator's rule: no private study's figure in the repository. The statement names its windows and the
         authors' cutoff, and no other number; the costs are ASCII (they ride in a House alert's report)."""

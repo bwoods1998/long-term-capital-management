@@ -707,12 +707,12 @@ class PreopenBrake(Base):
         g.check()
         beat()
         self.assertEqual(self.collected(), (True, "the Sail guard: balance vs line $300.00 / $32.00; braked False"))
-        store.add_spend("sail_model", 3.0)  # the floor's Sail research dollars a day
+        store.add_spend("sail_model", 4.0)  # the floor's Sail research dollars a day ($5 x 0.8)
         self.now += 180
         self.assertEqual(g.check()["causes"], ["research_budget"])
         beat()
         self.assertEqual(self.collected(), (True, "the Sail guard: balance vs line $300.00 / $32.00; braked by the day's research "
-                                                  "budget alone, as designed (today's Sail research budget is spent (3.00 of 3.00; "
+                                                  "budget alone, as designed (today's Sail research budget is spent (4.00 of 4.00; "
                                                   "floor))"))
         # The swarm goes on beating while its guard stops checking: the heartbeat is fresh, the reading in it is not.
         self.now += 599
@@ -732,21 +732,21 @@ class PreopenBrake(Base):
     def test_through_collect_sails_own_meter_at_the_accounts_cap_passes_and_is_never_said_as_designed(self):
         g, store, reading, beat = self.on_disk()
         g.check()
-        reading[0] = (296.0, 1.0)  # the account billed the day's research and fixed dollars; the swarm booked none of it
+        reading[0] = (295.0, 1.0)  # the account billed the day's research and fixed dollars; the swarm booked none of it
         self.now += 180
         self.assertEqual(g.check()["causes"], ["account_budget"])
         beat()
         ok, line = self.collected()
         self.assertTrue(ok, line)
         self.assertIn("braked by the day's account budget alone: Sail's own meter is at the day's cap for the whole account "
-                      "(today's Sail budget is spent by Sail's meter (4.00 of 4.00 for the account", line)
+                      "(today's Sail budget is spent by Sail's meter (5.00 of 5.00 for the account", line)
         self.assertNotIn("as designed", line)
 
     def test_a_guard_check_between_the_jobs_now_and_the_heartbeats_read_is_a_fresh_reading(self):
         """The job reads its clock, then the gateway (four GETs), then the heartbeat: a guard check and a heartbeat written
         in between are stamped after the job's `now`. They are aged on the clock as read once the heartbeat was."""
         g, store, reading, beat = self.on_disk()
-        store.add_spend("sail_model", 3.0)
+        store.add_spend("sail_model", 4.0)  # the floor's Sail research dollars a day
         started = self.now
         self.now = started + 3
         self.assertEqual(g.check()["causes"], ["research_budget"])

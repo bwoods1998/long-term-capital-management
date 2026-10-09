@@ -275,13 +275,15 @@ class TheCommittedPolicy(L.LoopCase):
 
     def test_at_the_owners_ceiling_it_lets_the_budget_reach_its_knobs(self):
         """The budget only tightens, so the policy's own values are caps it works inside. At the owner's $25 a day they
-        let it reach what those dollars buy: five Gym boxes, the Sail model pace, the policy's own architect cadences
-        (never the floor's four hours), 25 families and the start of 16."""
+        let it reach what those dollars buy: seven Gym boxes, the Sail model pace, the policy's own architect cadences
+        (never the floor's four hours), 25 families and the start of 16. (Sail's $20 since the operator's split of Oct 9,
+        2026: the policy's caps were five boxes and 0.25 an hour, what $15 bought.)"""
         loaded = self.at_usd_day(B.CEILING_USD_DAY)
-        knobs = B.knobs(15.0, 10.0)
-        self.assertEqual((loaded["budget"]["sail_usd_day"], loaded["budget"]["claude_usd_day"]), (15.0, 10.0))
-        self.assertEqual((loaded["gym"]["max_boxes"], knobs["gym.max_boxes"]), (5, 5), "floor(15 x 0.6 / 1.6)")
-        self.assertEqual((loaded["researcher"]["sail_usd_per_hour"], knobs["researcher.sail_usd_per_hour"]), (0.25, 0.25))
+        knobs = B.knobs(20.0, 5.0)
+        self.assertEqual((loaded["budget"]["sail_usd_day"], loaded["budget"]["claude_usd_day"]), (20.0, 5.0))
+        self.assertEqual((loaded["gym"]["max_boxes"], knobs["gym.max_boxes"]), (7, 7), "floor(20 x 0.6 / 1.6)")
+        self.assertEqual((loaded["researcher"]["sail_usd_per_hour"], knobs["researcher.sail_usd_per_hour"]),
+                         (0.333333, 0.333333), "20 x 0.4 / 24, under the policy's 0.34")
         self.assertEqual((loaded["architect"]["every_seconds"], loaded["architect"]["refill_seconds"]), (7200, 1200),
                          "the policy's own cadences: the budget's (2880 and 1152 s) are faster, so it holds neither back")
         self.assertEqual((loaded["population"]["floor"], loaded["population"]["start"], loaded["population"]["ceiling"]),
@@ -296,7 +298,7 @@ class TheCommittedPolicy(L.LoopCase):
                                     ("refill_seconds", layer["architect"]["refill_seconds"], knobs["architect.refill_seconds"])):
             self.assertGreaterEqual(cadence, knob, f"architect.{path}: the budget does not slow the policy's cadence")
         caps = B.sail_caps(loaded)
-        self.assertEqual((caps["research"], caps["account"], caps["gate_reserve"]), (15.0, 16.0, 1.5))
+        self.assertEqual((caps["research"], caps["account"], caps["gate_reserve"]), (20.0, 21.0, 2.0))
 
     def test_an_operators_tighter_setting_stands_under_the_ceiling(self):
         """swarm.json may run the swarm under what the ceiling's dollars buy (the budget only tightens, and so may the
@@ -306,16 +308,17 @@ class TheCommittedPolicy(L.LoopCase):
         loaded = self.at_usd_day(B.CEILING_USD_DAY)
         self.assertEqual((loaded["gym"]["max_boxes"], loaded["population"]["ceiling"], loaded["population"]["start"]), (2, 16, 16))
         self.assertEqual((loaded["architect"]["every_seconds"], loaded["architect"]["refill_seconds"]), (7200, 1200))
-        self.assertEqual(loaded["researcher"]["sail_usd_per_hour"], 0.25)
-        self.assertEqual(B.sail_caps(loaded)["research"], 15.0, "the day's cap is the rule's, whatever the knobs are")
+        self.assertEqual(loaded["researcher"]["sail_usd_per_hour"], 0.333333)
+        self.assertEqual(B.sail_caps(loaded)["research"], 20.0, "the day's cap is the rule's, whatever the knobs are")
 
     def test_the_paid_model_lines_are_the_gates_and_the_strategists(self):
-        """Claude's $10 a day at the ceiling: the gate's review and audit and the strategist have a line; the researchers,
-        the rewrites, the diagnostician and the architect have none (the stronger models bought no Validation pass). The
-        House's weekly post-mortem (league/ops/postmortem.py) keeps its own $1 line from the defaults: the job serves its
-        role itself, one call a week."""
+        """Claude's $5 a day at the ceiling (the operator's split of Oct 9, 2026; $10 before): the gate's review and audit
+        and the strategist have a line; the researchers, the rewrites, the diagnostician and the architect have none (the
+        stronger models bought no Validation pass). The strategist's $3 (it was $6) leaves the gate's two holds inside the
+        $5. The House's weekly post-mortem (league/ops/postmortem.py) keeps its own $1 line from the defaults: the job
+        serves its role itself, one call a week."""
         lines = self.at_usd_day(B.CEILING_USD_DAY)["claude"]["role_usd_day"]
-        self.assertEqual({r: v for r, v in lines.items() if v}, {"review": 5, "audit": 10.0, "strategist": 6,
+        self.assertEqual({r: v for r, v in lines.items() if v}, {"review": 5.0, "audit": 5.0, "strategist": 3.0,
                                                                  "postmortem": 1.0})
         self.assertEqual({r for r, v in lines.items() if not v}, {"architect", "researcher", "rewrite", "diagnostician"})
         for role, hold in B.GATE_HOLDS_USD.items():
@@ -346,8 +349,8 @@ class TheCommittedPolicy(L.LoopCase):
 
     def test_fewer_dollars_tighten_every_knob(self):
         """$12, $5 and $1 a day on the committed policy: (boxes, pace, ceiling, start, every, refill, each Claude line)."""
-        want = {12.0: (2, 0.12, 12, 12, 7200, 6000, 4.8), 5.0: (1, 0.05, 12, 12, 14400, 14400, 2.0),
-                1.0: (1, 0.01, 12, 12, 72000, 72000, 0.4)}
+        want = {12.0: (3, 0.16, 12, 12, 7200, 6000, 2.4), 5.0: (1, 0.066667, 12, 12, 14400, 14400, 1.0),
+                1.0: (1, 0.013333, 12, 12, 72000, 72000, 0.2)}
         for total, (boxes, pace, ceiling, start, every, refill, line) in want.items():
             loaded = self.at_usd_day(total)
             self.assertEqual((loaded["gym"]["max_boxes"], loaded["researcher"]["sail_usd_per_hour"]), (boxes, pace), total)

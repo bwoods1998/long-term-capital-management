@@ -17,7 +17,8 @@ journal `<state>/harness/engineer.sqlite` (mode 0600):
 2. AUTHOR (`league/ops/author.py`). The base is the running release's commit: the updater's attested sha for it in
    `<base>/deploys.jsonl` (an owner deploy's: the observer policy's `base` when its digest is this release's), fetched
    as a codeload tarball as the updater does and checked against the running tree's digest. Claude Opus 5.5 (role
-   `engineer`, effort high, at most $3 an attempt) edits it through confined tools; the static guards run git-free.
+   `engineer`, effort high, at most $2 an attempt; $3 before the budget split of Oct 9, 2026) edits it through confined
+   tools; the static guards run git-free.
 3. PULL REQUEST through the gateway (`POST /v1/github/pr`, role `engineer`, the lane named): the measurement, the
    metric, the predicted effect and the canary plan in its body. First `main`'s head is read: when it is not the base,
    each file the candidate touches must read on `main` as it does in the base (else the full-file proposal would undo
@@ -57,10 +58,12 @@ THE SELF-RUNNING RELEASE (Oct 7, 2026) adds four rules:
   job serves `ROLES` in its own copy of the settings (as the post-mortem serves its own), on `ROLE_MODEL` unless
   `claude.role_model` names one, each held to the day line below on the router too. `engineer.enabled` alone turns the
   loop on or off.
-- INSIDE THE CLAUDE METER. `usd_day` (the engineer and the reviewer together, a UTC day, holds included) is $4 by
-  default: 40% of budget rule v2's Claude share of the owner's ceiling ($10), which leaves the gate's holds and the
-  strategist's line their room. Every call is also admitted by the router inside the budget's Claude dollars left
-  today (less the gate's holds), so the engineer never spends past the meter, whatever its own line says.
+- INSIDE THE CLAUDE METER. `usd_day` (the engineer and the reviewer together, a UTC day, holds included) is $3 by
+  default: one attempt ($2) and its review ($1) a day, inside what budget rule v2's Claude share of the owner's ceiling
+  ($5 a day since the operator's split of Oct 9, 2026) holds over the gate's two holds ($1.95), so the gate's holds keep
+  their room. (It was $4, 40% of a $10 share, with $3 an attempt.) Every call is also admitted by the router inside the
+  budget's Claude dollars left today (less the gate's holds), so the engineer never spends past the meter, whatever its
+  own line says: the strategist and the post-mortem share the same dollars.
 - RESEARCH-CLASS ONLY (`RELEASE_CLASSES`). A module the live path loads (`harness_lanes.classify`: `money_path`) or an
   evidence-reset path is HELD: the author's tools refuse it, the brief does not offer it, and a candidate whose tree
   classifies outside `RELEASE_CLASSES` is closed before its pull request. Opening the money path to the engineer is a
@@ -106,8 +109,10 @@ ROLE_MODEL = "claude-opus-5-5"
 RELEASE_CLASSES = ("research",)
 #: The daily occurrence (UTC) that may author; every other occurrence only moves the candidates along.
 AUTHOR_AT = (4, 0)
-#: Hard caps whatever the settings say: an authoring attempt, a review.
-AUTHOR_USD_CAP, REVIEW_USD_CAP = 3.0, 1.0
+#: Hard caps whatever the settings say: an authoring attempt, a review. The attempt's was $3 until the budget split of
+#: Oct 9, 2026 (Claude's share of the owner's ceiling $10 -> $5): an attempt and its review now fit, with the gate's two
+#: holds, inside Claude's $5 a day.
+AUTHOR_USD_CAP, REVIEW_USD_CAP = 2.0, 1.0
 LANES_WINDOW = 86400
 ALPHA = 0.05
 GUARD_Z = 1.2816  # one-sided 10%
@@ -124,9 +129,10 @@ DEFAULTS: dict[str, Any] = {
     "max_tokens": 16000,
     "keep_usd": 5.0,
     # The engineer's and the reviewer's Claude together, a UTC day (holds included, `claude_spent`): an attempt is
-    # capped at what is left, and no attempt or review starts with less than its own cap left. $4: one attempt ($3) and
-    # its review ($1) a day, 40% of budget rule v2's $10 Claude share of the owner's ceiling.
-    "usd_day": 4.0,
+    # capped at what is left, and no attempt or review starts with less than its own cap left. $3: one attempt ($2) and
+    # its review ($1) a day, within budget rule v2's $5 Claude share of the owner's ceiling less the gate's $1.95 of
+    # holds (the operator's split of Oct 9, 2026; $4 of a $10 share before).
+    "usd_day": 3.0,
     "ranked_max_age_hours": 36,
     "cooldown_hours": 72,
     "attempts_per_base": 3,

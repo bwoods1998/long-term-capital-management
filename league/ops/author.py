@@ -23,11 +23,12 @@ record writer) and, in an arms lane, `gate_coverage` (every change sits under `c
 the old branch the baseline's own code, so the closed gate runs the baseline). They are defense in depth, never a proof:
 the reviewer (`league/ops/reviewer.py`), CI and the canary stand behind them.
 
-SPEND. An attempt stops before a turn that would take its settled spend past `usd_cap` (at most $3, and never more than
-the engineer's and the reviewer's day line has left: the next turn is estimated from the last one's settled cost and its
-growth), at `max_turns`, or at its wall-clock `deadline`. A turn whose bill is unknown
-counts at its hold. The router's own fuses (the `engineer` line a UTC day, the funded room less `keep_usd`) refuse a
-turn before it is sent; any refusal ends the attempt.
+SPEND. An attempt stops before a turn that would take its settled spend past `usd_cap` (at most $2,
+`engineer.AUTHOR_USD_CAP`, since the budget split of Oct 9, 2026, $3 before; and never more than the engineer's and the
+reviewer's day line has left: the next turn is estimated from the last one's settled cost and its growth), at
+`max_turns`, or at its wall-clock `deadline`. A turn whose bill is unknown counts at its hold. The router's own fuses
+(the `engineer` line a UTC day, the funded room less `keep_usd`) refuse a turn before it is sent; any refusal ends the
+attempt.
 
 Standard library only.
 """
