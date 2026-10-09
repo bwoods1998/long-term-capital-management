@@ -289,12 +289,15 @@ class Bounds(HouseCase):
         self.assertEqual(self.plan("57.41").qty, 0)
 
     def test_it_leaves_the_families_the_calibrations_room_of_the_day_cap(self):
+        from league.tests.money_fakes import rollback_table
+
         self.grant.capital = "481.63"
         self.install(opens=0)
-        live = self.start()
+        live = self.start(table=rollback_table())
         self.run_to(9, 31)
         # THE FAST LANE (Oct 7, 2026): the families' Probe room is 3 x 10% x E, $144.489 at $481.63 (two $100 floors
-        # before it): 481.63 - 250 - 144.489 = 87.141.
+        # before it): 481.63 - 250 - 144.489 = 87.141. Fast lane v2's three slots: release L-D's CON-only rollback, byte
+        # for byte (L-D's 8 slots: `test_ld_release`).
         exposure = M.Exposure(day_opened=D("250"))
         self.assertEqual(self.plan("87.14", exposure=exposure, equity="481.63").qty, 1)
         refused = self.plan("87.15", exposure=exposure, equity="481.63")
@@ -304,9 +307,12 @@ class Bounds(HouseCase):
 
     def test_it_leaves_the_families_the_same_room_of_the_books_cap(self):
         # Review of #411 (F2): the test's positions can be held for days, so the families keep their Probe room of the
-        # book's cap (0.90 x E) as they do of the day cap (`money.probe_room`, 3 x 10% x E since the fast lane).
+        # book's cap (0.90 x E) as they do of the day cap (`money.probe_room`, 3 x 10% x E since the fast lane; on the
+        # rollback's three slots here, byte for byte).
+        from league.tests.money_fakes import rollback_table
+
         self.install(opens=0)
-        live = self.start()
+        live = self.start(table=rollback_table())
         self.run_to(9, 31)
         book = live.table.book_share * D("481.63")                          # 433.467
         room = M.probe_room(live.table, D("481.63"))                        # 144.489
@@ -317,6 +323,21 @@ class Bounds(HouseCase):
         self.assertIn("the book's cap", refused.reason)
         self.assertIn("$144.48 is kept for the families' opens", refused.reason)
         self.assertEqual(D("250") + D("38.97") + room <= book, True)
+
+    def test_at_eight_probe_slots_it_opens_with_the_probe_idle(self):
+        """Release L-D (Oct 9, 2026; the critic, B1): at `probe.max_open` 8 the families' room is min(8 x 10% x E, $400),
+        $400 at E $1,289.34, so the test still opens with $200 of the book held; 8 x 10% x E ($1,031.47) would refuse it
+        whenever its book loss and unit passed $128.94."""
+        self.install(opens=0)
+        live = self.start()
+        self.run_to(9, 31)
+        self.assertEqual(live.table.probe_max_open, 8)
+        self.assertEqual(self.plan("100", exposure=M.Exposure(book_loss=D("200")), equity="1289.34").qty, 1)
+        self.assertEqual(self.plan("100", exposure=M.Exposure(day_opened=D("789.34")), equity="1289.34").qty, 1,
+                         "789.34 + 100 + 400 = the day cap exactly")
+        refused = self.plan("100", exposure=M.Exposure(day_opened=D("789.35")), equity="1289.34")
+        self.assertEqual(refused.qty, 0)
+        self.assertIn("$400.00 is kept for the families' opens", refused.reason)
 
     def test_the_stop_latches_at_150_for_good_and_its_exits_still_run(self):
         self.install(opens=2, hold=5)

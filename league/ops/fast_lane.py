@@ -25,8 +25,14 @@ THE REPORT (`report`), JSON:
 - `contamination`: pooled over every look in `screen` (below).
 - `bands`: every Candidate, Probe or Sized family: its banded version's screen rows; its live realized P&L (forward rows,
   source "real", that version, net of fees) with `bh` and `drift_window` over its live sessions since `live_promoted_at`
-  (zeros included); `live_vs_holdout`; its D5 status (`money.demotion`).
-- `probe_budget`: `real.probe_tally` on the live state: gross realized Probe losses, at risk, the open count, the room.
+  (zeros included); `live_vs_holdout`; its D5 status (`money.live_demotion`: D5, or DM1 under `probe.demotion` "dm1"
+  since release L-D, its `rule` named).
+- `probe_budget`: `real.probe_tally` on the live state under the constitution's `probe.loss_basis` (gross realized Probe
+  losses at fast lane v2; net since release L-D, Oct 9, 2026), with `realized_basis` naming the basis in force, at risk,
+  the open count, the room. THE ROLLING PROBE BUDGET (release L-D): `realized_usd` is the window's figure (the closes of
+  the last `window_sessions` New York sessions, from `window_start`, `real.probe_realized`) against `budget_usd`, and
+  `realized_total_usd` every close's against `total_budget_usd`; `room_usd` is what the tighter of the two envelopes
+  leaves and `binding` names it.
 - THE DIRECTION LANE (release D-1, Oct 9, 2026; league/swarm/dlane.py): while the lane is on (`dlane.mode` "shadow" or
   "gate"), every screen row and band row also names its family's `lane` ("alpha" or "direction", `dlane.lane_of`), so
   the `dlane` report (league/ops/dlane_report.py) reads the contamination measures per lane, and (release D-1b) every
@@ -200,6 +206,8 @@ def band_row(store: Any, fam: Mapping[str, Any], screen: list[dict], closes: Map
     for r in real:
         by_day[str(r["day"])] = by_day.get(str(r["day"]), 0.0) + float(r["pnl"])
     market = DIR.market_returns(closes, _roots(store, fam, int(n)) if n is not None else fam.get("roots") or (), sorted(by_day))
+    from ..live.families import validation_r_sd
+
     table = M.Table.from_constitution()
     fwd = M.forward_stats(rows, table.sized_confidence, version=n)
     out["live"] = {"realized_usd": round(sum(float(r["pnl"]) for r in real), 2), "trades": len(real), "sessions": len(days),
@@ -213,14 +221,28 @@ def band_row(store: Any, fam: Mapping[str, Any], screen: list[dict], closes: Map
     out["live_vs_holdout"] = {"live_pnl_per_max_loss": live, "holdout_pnl_per_max_loss": held,
                               "gap": (float(held) - live) if live is not None and isinstance(held, (int, float)) else None,
                               "trades": len(real)}
-    out["d5"] = {"demoted": M.demotion(fwd), "real_pnl": fwd.real_pnl, "real_max_loss": fwd.real_max_loss,
-                 "replay_gap": fwd.replay_gap, "replay_n": fwd.replay_n}
+    # The demotion in force for its band (release L-D: `probe.demotion`; DM1 reads the Validation sd the live row reads).
+    sd = validation_r_sd(state, n)
+    out["d5"] = {"demoted": M.live_demotion(table, str(fam["band"]), fwd, sd), "rule": table.probe_demotion,
+                 "real_pnl": fwd.real_pnl, "real_max_loss": fwd.real_max_loss, "replay_gap": fwd.replay_gap,
+                 "replay_n": fwd.replay_n, "real_n": fwd.real_n, "real_r_sum": fwd.real_r_sum,
+                 "sigma": M.dm1_sigma(fwd, sd)[0] if table.probe_demotion == "dm1" else None}
     return out
+
+
+#: The probe budget's `realized_basis` label for each `probe.loss_basis` (release L-D: the basis in force, never a fixed
+#: "gross" beside a net figure).
+REALIZED_BASIS = {
+    "gross": "gross: each closed Probe position's own loss",
+    "net": ("net: the closed Probe positions' losses less their gains, floored at $0: from inception for the total, "
+            "the worst stretch from a session of the window to today for the window (a gain offsets only the losses "
+            "before it there); a Sized gain never counts"),
+}
 
 
 def probe_budget(live_path: str | Path, today: str) -> dict[str, Any]:
     from ..live import money as M
-    from ..live.real import probe_tally
+    from ..live.real import probe_figures
 
     with closing(sqlite3.connect(f"file:{Path(live_path)}?mode=ro", uri=True, timeout=5)) as db:
         db.row_factory = sqlite3.Row
@@ -228,12 +250,17 @@ def probe_budget(live_path: str | Path, today: str) -> dict[str, Any]:
         def rows(sql: str, params: tuple = ()) -> list[dict]:
             return [dict(r) for r in db.execute(sql, params)]
 
-        open_n, realized, at_risk = probe_tally(rows, day=today)
-    table = M.Table.from_constitution()
-    return {"realized_usd": str(M.cents(realized)), "realized_basis": "gross: each closed Probe position's own loss",
+        table = M.Table.from_constitution()
+        # The figures `RealBook.exposure` gives `money.plan_open` (release L-D: the window's and the total's).
+        open_n, window, total, at_risk, since = probe_figures(rows, day=today, table=table)
+    rooms = {"window": table.probe_loss_budget - window - at_risk, "total": table.probe_loss_total - total - at_risk}
+    binding = min(rooms, key=lambda k: (rooms[k], k != "window"))
+    return {"realized_usd": str(M.cents(window)), "realized_total_usd": str(M.cents(total)),
+            "realized_basis": REALIZED_BASIS[table.probe_loss_basis], "window_sessions": table.probe_loss_window,
+            "window_start": since,
             "at_risk_usd": str(M.cents(at_risk)), "open": open_n, "max_open": table.probe_max_open,
-            "budget_usd": str(table.probe_loss_budget),
-            "room_usd": str(M.cents(max(M.ZERO, table.probe_loss_budget - realized - at_risk)))}
+            "budget_usd": str(table.probe_loss_budget), "total_budget_usd": str(table.probe_loss_total),
+            "room_usd": str(M.cents(max(M.ZERO, rooms[binding]))), "binding": binding}
 
 
 def report(swarm_root: str | Path, live_path: str | Path | None, closes_path: str | Path, *, since: str | None = None,

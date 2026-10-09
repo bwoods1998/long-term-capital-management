@@ -38,7 +38,8 @@ this order, fail-closed, `HouseTest.plan`):
   today's whole): the test can never lose more than that;
 - the gateway's per-order cap, as any open; and both the book's cap and the account-wide day cap less the room the
   calibration leaves the families of the day cap (the Probe room, `money.probe_room`: `probe.max_open` x
-  `probe.max_loss_share` x E since THE FAST LANE, Oct 7, 2026): the test never takes the families' last room in either.
+  `probe.max_loss_share` x E since THE FAST LANE, Oct 7, 2026, at most `probe.loss_budget_usd` since release L-D, Oct 9):
+  the test never takes the families' last room in either.
 
 It yields to the families: their real intents of each minute are applied before its own, the order path refuses its
 open on a contract a family order works, and while its open works a family's real order refused on one of that open's

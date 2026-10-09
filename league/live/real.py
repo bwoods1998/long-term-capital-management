@@ -44,6 +44,7 @@ entries (exits pass) and says why; two clean readings in a row lift it.
 from __future__ import annotations
 
 import datetime as dt
+import functools
 import math
 import re
 import time
@@ -151,16 +152,22 @@ def incubator_tally(rows: Callable[..., list], *, day: str, week_start: str, fam
                             week_peak_loss=peak)
 
 
-def probe_tally(rows: Callable[..., list], *, day: str) -> tuple[int, Decimal, Decimal]:
+def probe_tally(rows: Callable[..., list], *, day: str, basis: str) -> tuple[int, Decimal, Decimal]:
     """THE FAST LANE's Probe figures (D3, D4, Oct 7, 2026; `money.plan_open`): (open_n, realized_loss, at_risk) from the
     live state's own rows, selected by the instance suffix `:r` and `tuition = 0` only, so a restart reads the same numbers
-    (`rows(sql, params)` returns dicts, as `incubator_tally`'s). `day`: today (New York), ISO.
+    (`rows(sql, params)` returns dicts, as `incubator_tally`'s). `day`: today (New York), ISO. `basis`: the constitution's
+    `probe.loss_basis` (`money.Table.probe_loss_basis`), exactly "gross" or "net" (ValueError otherwise: no figure, no
+    Probe open). Both read the same rows: every closed position a Probe family opened (its info's `probe` mark, copied
+    from its opening order's, which `money.Plan.probe` set). A Sized position carries no mark, so its gain never counts
+    under either. Cash is the book's, fees included (their estimate until the broker's post). "Since the fast lane" is
+    enforced by the mark: no order before fast lane v2 carried one.
 
-    realized_loss: GROSS realized Probe losses, the sum of max(0, -cash) over every closed position a Probe family opened
-    (its info's `probe` mark, copied from its opening order's, which `money.Plan.probe` set): one position's gain never
-    offsets another's loss, and a Sized position's never counts (the fast lane's review, Oct 7, 2026: a net figure let a
-    Sized gain or a Probe gain refill the budget). Cash is the book's, fees included (their estimate until the broker's
-    post). "Since this release" is enforced by the mark: no order before this release carried one.
+    realized_loss, "gross" (fast lane v2, Oct 7, 2026; the rollback of release L-D): GROSS realized Probe losses, the sum
+    of max(0, -cash) over those positions: one position's gain never offsets another's loss (the fast lane's review: a
+    net figure let a Sized gain or a Probe gain refill the budget). "net" (release L-D, Oct 9, 2026; the constitution's
+    comment has its cost): max(0, -(the sum of their cash)), from inception: a Probe gain offsets Probe losses, a Sized
+    gain still never does, and the figure is never below $0 (a net gain is no extra room). Every close counts: this is
+    THE ROLLING PROBE BUDGET's total (`probe.loss_total_usd`, release L-D); its window's figure is `probe_realized`'s.
 
     at_risk: each position not closed, Probe or Sized (a tightening: a Sized position fills the budget and a slot too),
     held, expiring or unpriced (its `opened_qty` units when unpriced) at its maximum loss with its fees twice, or what its
@@ -170,15 +177,19 @@ def probe_tally(rows: Callable[..., list], *, day: str) -> tuple[int, Decimal, D
     lost open may have filled and lost. open_n: positions not closed, and pending, working or unknown opens without a
     position; a lost open without a position holds its slot until its first leg's expiry has passed (after that it can
     hold nothing; its maximum loss stays counted in at_risk)."""
+    if basis not in M.LOSS_BASES:
+        raise ValueError(f"the Probe loss basis {basis!r} is not one of {M.LOSS_BASES}")
     like = REAL_SUFFIX                       # substr(instance, -2): exact and case-sensitive (LIKE is neither)
     at_risk = M.ZERO
     realized = M.ZERO
+    net = M.ZERO                             # "net": the closed Probe positions' cash, summed
     open_n = 0
     for r in rows("SELECT qty, opened_qty, max_loss_share, fees, cash, status, info FROM positions "
                   "WHERE substr(instance, -2)=? AND tuition=0", (like,)):
         if r["status"] == "closed":
             if (loads(r["info"], {}) or {}).get("probe") is True:
                 realized += max(M.ZERO, -M.D(r["cash"]))
+                net += M.D(r["cash"])
             continue
         units = int(r["opened_qty"]) if r["status"] == "unpriced_close" else max(0, int(r["qty"]))
         at_risk += max(M.D(r["max_loss_share"]) * V.MULTIPLIER * units + 2 * M.D(r["fees"]), -M.D(r["cash"]))
@@ -190,7 +201,93 @@ def probe_tally(rows: Callable[..., list], *, day: str) -> tuple[int, Decimal, D
         at_risk += (M.D(r["max_loss"]) + 2 * M.D(r["fees_est"])) * M.D(remaining) / max(1, int(r["qty"]))
         if r["pid"] is None and not (lost and _expired(r["legs"], day)):
             open_n += 1
+    if basis == "net":
+        realized = max(M.ZERO, -net)
     return open_n, realized, at_risk
+
+
+def probe_realized(rows: Callable[..., list], *, basis: str, since: str | None) -> Decimal:
+    """THE ROLLING PROBE BUDGET's window figure (release L-D, Oct 9, 2026; `money.plan_open`), by the same `basis` over
+    the same rows as `probe_tally`'s realized_loss (every closed `:r`, non-tuition position carrying the Probe mark),
+    over those whose New York close day (`_ny_day` of `closed_at`) is on or after `since` (ISO; None: every one). A
+    close whose day cannot be read counts in every window and every stretch of it, as if it closed today (a closed
+    position always has its `closed_at`, `RealBook._close`).
+
+    "gross": their losses summed (with `since` None, `probe_tally`'s own figure). "net": THE WORST NET STRETCH of the
+    window (the review of release L-D, Oct 9, 2026): the largest max(0, -(the summed cash of the closes on or after s))
+    over every session s from `since` to today, so a Probe gain offsets only the Probe losses closed before it inside
+    the window (a loss after it starts a stretch of its own, which a later window may hold without the gain). The
+    window's plain net (s = `since` alone) let a gain early in the window admit later opens against it; once that gain
+    aged out, a later 20-session window held more than the budget in net Probe losses although every open had passed (a
+    +$300 close, then $700 of losses admitted against it: $700 net in the next window). With the worst stretch, "the
+    budget net in ANY rolling window" holds as an outcome, not only at each open: for any window, the last open whose
+    position closes in it was checked against the stretch from that window's first session to the open (inside its own
+    window) plus every position then open at its maximum loss, which covers every later close in that window
+    (residuals aside: fees above the book's estimate, a structure broken leg by leg). Under "gross" every stretch's sum
+    is at most the whole window's, so the figure is the plain sum, code for code (the CON-only rollback), and under
+    either basis a longer window is never looser."""
+    if basis not in M.LOSS_BASES:
+        raise ValueError(f"the Probe loss basis {basis!r} is not one of {M.LOSS_BASES}")
+    gross = M.ZERO
+    by_day: dict[str, Decimal] = {}                  # "net": each close day's summed cash ("~": a day not readable)
+    for r in rows("SELECT cash, closed_at, info FROM positions WHERE substr(instance, -2)=? AND tuition=0 "
+                  "AND status='closed'", (REAL_SUFFIX,)):
+        if (loads(r["info"], {}) or {}).get("probe") is not True:
+            continue
+        closed = _ny_day(r["closed_at"])
+        if since is not None and closed is not None and closed < since:
+            continue
+        gross += max(M.ZERO, -M.D(r["cash"]))
+        key = "~" if closed is None else closed      # "~" sorts after every ISO day: in every stretch
+        by_day[key] = by_day.get(key, M.ZERO) + M.D(r["cash"])
+    if basis == "gross":
+        return gross
+    # Every stretch starts on a close day (a stretch from a session with no close equals the one from the next close day
+    # after it), so the latest days first: the running sum is each stretch's cash, its most negative point the figure.
+    worst = running = M.ZERO
+    for day in sorted(by_day, reverse=True):
+        running += by_day[day]
+        worst = max(worst, -running)
+    return worst
+
+
+@functools.lru_cache(maxsize=64)
+def probe_window_start(day: str, sessions: int) -> str | None:
+    """THE ROLLING PROBE BUDGET's window (release L-D, Oct 9, 2026; the constitution's `probe.loss_window_sessions`):
+    the first day of the last `sessions` New York trading sessions through `day` (ISO; today counted when it is one), by
+    the repo's NYSE calendar (`ltcm.data.us_equity_session`: weekends, the holidays computed by rule and the special
+    closures). None when the window reaches before the calendar's first year (2022): it holds every close then, which
+    is the CON-only rollback's 2000 sessions (every Probe close is from Oct 7, 2026 on). Pure, so cached."""
+    from ltcm.data import us_equity_session
+
+    if sessions < 1:
+        raise ValueError(f"a Probe loss window of {sessions!r} sessions")
+    d, n = dt.date.fromisoformat(day), 0
+    while True:
+        try:
+            if us_equity_session(d) is not None:
+                n += 1
+                if n == sessions:
+                    return d.isoformat()
+        except ValueError:                   # `DataError`: before the calendar's first year
+            return None
+        d -= dt.timedelta(days=1)
+
+
+def probe_figures(rows: Callable[..., list], *, day: str,
+                  table: M.Table) -> tuple[int, Decimal, Decimal, Decimal, str | None]:
+    """THE PROBE LOSS BUDGET's figures under the money table in force (`money.plan_open`'s, through `RealBook.exposure`,
+    and the fast lane report's): (open_n, window_realized, total_realized, at_risk, window_start). THE ROLLING PROBE
+    BUDGET (release L-D, Oct 9, 2026): total_realized is `probe_tally`'s figure (every close, from inception),
+    window_realized `probe_realized`'s over the closes of the last `probe.loss_window_sessions` sessions through `day`
+    (`probe_window_start`; under "net" its worst net stretch). Under "gross" a window that holds every close (None: the
+    CON-only rollback's 2000 sessions) is the total's own figure, read once; under "net" the window's figure is always
+    read (its worst stretch is not the total's net)."""
+    open_n, total, at_risk = probe_tally(rows, day=day, basis=table.probe_loss_basis)
+    since = probe_window_start(day, table.probe_loss_window)
+    window = (total if since is None and table.probe_loss_basis == "gross"
+              else probe_realized(rows, basis=table.probe_loss_basis, since=since))
+    return open_n, window, total, at_risk, since
 
 
 def _expired(legs: Any, day: str) -> bool:
@@ -536,10 +633,11 @@ class RealBook:
                 tuition_week += loss
                 if r["day"] == day:
                     tuition_day += loss
-        probe_open, probe_realized, probe_at_risk = probe_tally(self.state.rows, day=day)
+        probe_open, probe_window, probe_total, probe_at_risk, _ = probe_figures(self.state.rows, day=day, table=self.table)
         return M.Exposure(family_open=fam_open, family_loss=M.D(round(fam_loss, 2)), book_loss=M.D(round(book, 2)),
                           day_opened=day_opened, tuition_day=tuition_day, tuition_week=tuition_week,
-                          probe_open=probe_open, probe_realized=probe_realized, probe_at_risk=probe_at_risk)
+                          probe_open=probe_open, probe_realized=probe_window, probe_at_risk=probe_at_risk,
+                          probe_realized_total=probe_total)
 
     def incubator_tally(self, *, day: str, week_start: str, family: str | None = None) -> M.IncubatorTally:
         """The incubator's numbers from the live state's rows, read afresh (`incubator_tally`)."""
@@ -1190,4 +1288,5 @@ def real_legs(order: L.Order, chain: Any) -> list[RLeg]:
 
 __all__ = ["RealBook", "RLeg", "RPosition", "ROrder", "mleg_body", "single_leg_body", "single_body", "order_body", "is_single",
            "limit_price", "client_id", "structure_fill", "real_legs", "leg_fees", "PREFIX", "KNOWN_DUST", "SINGLE_TYPES",
-           "INCUBATOR_SUFFIX", "is_incubator", "incubator_tally", "REAL_SUFFIX", "probe_tally"]
+           "INCUBATOR_SUFFIX", "is_incubator", "incubator_tally", "REAL_SUFFIX", "probe_tally", "probe_realized",
+           "probe_window_start", "probe_figures"]

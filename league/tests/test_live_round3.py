@@ -166,7 +166,10 @@ class Recovery(LiveCase):
         self.assertTrue(any("five minutes" in text for _, text in self.alerts))
 
     def test_demotion_cancels_working_opens_before_they_can_fill(self):
-        live = self.make([family("rest", RESTER, params={"hold": 600})])
+        from league.tests.money_fakes import rollback_table
+
+        # The negative record demotes a Probe under `probe.demotion` "dm0" (release L-D's rollback).
+        live = self.make([family("rest", RESTER, params={"hold": 600})], table=rollback_table())
         self.run_to(9, 31)
         [order] = list(live.book.orders.values())
         self.families.rows["rest"]["forward"] = {"negative": True}
@@ -315,11 +318,11 @@ class Recovery(LiveCase):
 
 @unittest.skipUnless(HAVE, "numpy not installed")
 class BandRace(LiveCase):
-    def swarm_live(self, band="candidate"):
+    def swarm_live(self, band="candidate", table=None):
         from league.live.families import SwarmFamilies
         from league.swarm.store import SwarmStore
 
-        live = self.make([])
+        live = self.make([], table=table)
         store, other = SwarmStore(self.root), SwarmStore(self.root)
         self.addCleanup(store.close)
         self.addCleanup(other.close)
@@ -464,19 +467,36 @@ class BandRace(LiveCase):
         self.assertEqual((self.venue.sent, live.book.positions), ([], {}))
 
     def test_new_negative_evidence_during_a_real_decision_refuses_its_returned_open(self):
-        live, store, other = self.swarm_live("probe")
+        # Under `probe.demotion` "dm0" (release L-D's rollback): under "dm1" a negative record no longer ends a Probe band,
+        # and DM1's own evidence is raced below.
+        from league.tests.money_fakes import rollback_table
+
+        live, store, other = self.swarm_live("probe", table=rollback_table())
         self.on_decision(live, "vert@1:r", lambda: other.set_state("vert", forward={"negative": True}))
         self.run_to(9, 31)
         self.assertEqual(store.family("vert")["band"], "probe")
         self.assertEqual((self.venue.sent, live.book.positions), ([], {}))
 
     def test_new_negative_raw_trades_during_a_decision_refuse_entry_before_summary_refresh(self):
-        live, store, other = self.swarm_live("probe")
+        from league.tests.money_fakes import rollback_table
+
+        live, store, other = self.swarm_live("probe", table=rollback_table())
         self.on_decision(live, "vert@1:r", lambda: other.add_forward("vert", "nightly", [
             {"id": str(i), "day": "2026-09-28", "pnl": -10, "max_loss": 50, "version": 1} for i in range(20)]))
         self.run_to(9, 31)
         self.assertFalse(store.family("vert")["state"]["forward"]["negative"], "the cached summary is still stale")
         self.assertEqual((self.venue.sent, live.book.positions), ([], {}))
+
+    def test_real_trades_crossing_dm1_during_a_decision_refuse_its_returned_open(self):
+        """Release L-D: under `probe.demotion` "dm1", real trades that put the version below DM1's line while it decides
+        refuse its open at once (the raw rows, before any summary refresh), as a negative record did under "dm0"."""
+        live, store, other = self.swarm_live("probe")
+        self.on_decision(live, "vert@1:r", lambda: other.add_forward("vert", "real", [
+            {"id": f"r{i}", "day": f"2026-09-{10 + i:02d}", "pnl": -50.0 + 5.0 * (i % 2), "max_loss": 50.0, "version": 1}
+            for i in range(10)]))
+        self.run_to(9, 31)
+        self.assertEqual((self.venue.sent, live.book.positions), ([], {}))
+        self.assertIn("no longer qualifies", self.ledger.of("live.refusal")[-1][0]["why"])
 
     def test_forward_rows_changing_between_sizing_and_admission_refuse_the_stale_order(self):
         live, store, other = self.swarm_live("probe")

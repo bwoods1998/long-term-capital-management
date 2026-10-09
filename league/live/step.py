@@ -213,6 +213,9 @@ class Instance:
     retried_at: float = float("-inf")
     structure: str = ""          # the family's DECLARED structure (its swarm row's), read at each sync; "" until one is read
     incubator: bool = False      # the incubator's real instance (`<family>@<version>:i`): derived from its key alone
+    # DM1's sigma (release L-D, Oct 9, 2026): its swarm row's `validation_r_sd` (`league/live/families.py`), read at each
+    # sync as `band` is, so the open's refusal (`_real_intent`) judges by the same sigma as the band (`money.band_for`).
+    validation_r_sd: Any = None
 
     def __post_init__(self) -> None:
         # An observe instance is exactly a shadow, non-tuition instance under an observe key that was made one (the money
@@ -858,7 +861,7 @@ class OptionsLive:
                 inst = Instance(key, str(row["family"]), int(row.get("version") or 0), kind, str(row.get("code") or ""),
                                 dict(row.get("params") or {}), str(row.get("run_sha") or ""), str(row.get("band") or ""), tuition,
                                 observe=key.endswith(":o") and row.get("observe") is True and kind == "shadow" and not tuition,
-                                structure=str(row.get("structure") or ""))
+                                structure=str(row.get("structure") or ""), validation_r_sd=row.get("validation_r_sd"))
                 if key.endswith(":o") != inst.observe or (inst.observe and not inst.code):
                     continue  # an observe key is only ever an observe row's, with its program
                 if inst.observe:
@@ -877,6 +880,7 @@ class OptionsLive:
             else:
                 inst.band = str(row.get("band") or inst.band)
                 inst.structure = str(row.get("structure") or inst.structure)
+                inst.validation_r_sd = row.get("validation_r_sd")
                 if inst.mode != "live" and kind == "real" and not inst.fatal:
                     inst.mode = "live"
                     self._persist_instance(inst)
@@ -1132,6 +1136,9 @@ class OptionsLive:
             # would only be undone (since THE FAST LANE a confirmed Probe trades from the next live minute, `_real_eligible`).
             return band
         new, why = M.band_for(self.table, row, equity, fwd, probe_sessions=self._probe_sessions(fid, band))
+        sticky = self._dm1_sticky(fid, row.get("version"))
+        if sticky is not None and new != "candidate":
+            new, why = "candidate", sticky
         embargoed = False
         if new == "sized":
             held = self._embargoed(row, forward)
@@ -1145,6 +1152,8 @@ class OptionsLive:
         if not confirmed:
             self._families_at = float("-inf")
             return "stale"
+        if new == "candidate" and why.startswith("DM1:"):
+            self._dm1_record(fid, row.get("version"), why)
         if new != band:
             try:
                 self.record("live.band", {"family": fid, "from": band, "to": new, "why": why}, agent=fid)
@@ -1165,6 +1174,35 @@ class OptionsLive:
                 self.state.put("held_told", told)
                 self.record("live.band", {"family": fid, "from": band, "to": band, "held": True, "why": why}, agent=fid)
         return new
+
+    def _dm1_sticky(self, fid: str, version: Any) -> str | None:
+        """DM1 IS STICKY FOR ITS VERSION (release L-D, Oct 9, 2026; `money.demotion`): why a version DM1 demoted stays a
+        Candidate, or None. D5's demotion is sticky by its evidence (the version's real rows, which a Candidate adds no
+        more of); DM1's line moves with sigma, which can grow after the demotion (the Candidate's shadow days keep adding
+        to the forward record, and the swarm's Validation sd arrives with release D-1), so the version it demoted is kept
+        in the live state (`dm1_demoted`: {family: {version, why, at}}) and held at Candidate whatever its sigma reads
+        later, and whatever `probe.demotion` reads (a rule change never undoes a demotion). A new version starts its own
+        record. An unreadable state holds nothing here; `money.demotion`'s DM1 check on a Candidate still applies."""
+        try:
+            rec = (self.state.get("dm1_demoted", {}) or {}).get(fid)
+        except Exception:  # noqa: BLE001 - the Candidate's own DM1 check stands
+            return None
+        if not isinstance(rec, Mapping) or rec.get("version") is None or str(rec.get("version")) != str(version):
+            return None
+        return (f"DM1 demoted version {version} for good (sticky: a new version starts its own record): "
+                f"{str(rec.get('why') or '')[:400]}")
+
+    def _dm1_record(self, fid: str, version: Any, why: str) -> None:
+        """Keep a DM1 demotion of `version` (`_dm1_sticky`), once; a failed write is told and tried at the next pass."""
+        try:
+            demoted = dict(self.state.get("dm1_demoted", {}) or {})
+            rec = demoted.get(fid)
+            if isinstance(rec, Mapping) and str(rec.get("version")) == str(version):
+                return
+            demoted[fid] = {"version": version, "why": str(why)[:400], "at": self.clock()}
+            self.state.put("dm1_demoted", demoted)
+        except Exception as exc:  # noqa: BLE001 - the band is already Candidate; the next pass writes it again
+            self.alert("warning", f"live: {fid}'s DM1 demotion could not be kept ({type(exc).__name__}); retried next pass")
 
     def _embargoed(self, row: Mapping[str, Any], forward: Iterable[Mapping[str, Any]]) -> str | None:
         """THE FORWARD EMBARGO (the module docstring): why a Sized answer is held at Probe, or None. Sized also needs the
@@ -2591,10 +2629,13 @@ class OptionsLive:
         evidence = not inst.tuition and not house and not incubator
         family_rows = self.families.forward_rows(inst.family) if evidence else []
         fwd = M.forward_stats(family_rows, self.table.sized_confidence, version=inst.version) if evidence else None
-        if fwd is not None and (fwd.negative or (inst.band == "sized" and (not M.sized_ok(self.table, fwd) or fwd.real_bad))
-                                or (inst.band == "probe" and M.demotion(fwd) is not None)):
+        if fwd is not None and ((fwd.negative and M.negative_demotes(self.table, inst.band))
+                                or (inst.band == "sized" and (not M.sized_ok(self.table, fwd) or fwd.real_bad))
+                                or M.live_demotion(self.table, inst.band, fwd, inst.validation_r_sd) is not None):
             # (D5, fast lane v2: a Probe whose live results end its Probe is refused at once; the families pass, forced
-            # here, moves its band and its real instance to exits only)
+            # here, moves its band and its real instance to exits only. Release L-D: `probe.demotion` "dm1" asks DM1 of a
+            # Probe or Sized family instead of D5's loss leg and the negative record, `money.live_demotion`, the band's
+            # own rule; "dm0" asks D5 of a Probe only, as before)
             self._families_at = float("-inf")
             return "its current forward evidence no longer qualifies for this real band"
         week_start = (day.day - dt.timedelta(days=day.day.weekday())).isoformat()
@@ -2608,7 +2649,7 @@ class OptionsLive:
             plan = M.plan_open(self.table, band=inst.band, tuition=inst.tuition, equity=sizing, unit=unit, fwd=fwd,
                                exposure=exposure)
             if plan.qty < 1 and plan.reason.startswith("probe: the loss budget"):
-                self._probe_budget_told()
+                self._probe_budget_told(exposure)
         if plan.qty < 1:
             return plan.reason
         qty = plan.qty
@@ -2628,7 +2669,10 @@ class OptionsLive:
         if not self._instance_budget(inst.key, day):
             return f"order budget: {int(self.settings['instance_orders_day'])} orders a day (the Gym's)"
         tif = order.tif
-        identity = dict(self._entry_identity(inst), forward_rows=family_rows)
+        # `negative_ok` (release L-D): under DM1 a Probe or Sized family's negative forward record no longer refuses its
+        # open at the admission (`families._entry_matches`), as it no longer moves its band (`money.negative_demotes`).
+        identity = dict(self._entry_identity(inst), forward_rows=family_rows,
+                        negative_ok=not M.negative_demotes(self.table, inst.band))
         if house:
             admit = self.house_test.admit(day.day)
         elif incubator:
@@ -2640,7 +2684,8 @@ class OptionsLive:
         with admit as allowed:
             if allowed:
                 # A Probe family's open is marked so (`money.Plan.probe`): THE PROBE LOSS BUDGET counts its position's realized
-                # loss (`real.probe_tally`), never a Sized one's.
+                # P&L (`real.probe_tally`, by `probe.loss_basis`: its own loss under "gross", its cash netted with every other
+                # marked position's under "net", release L-D), never a Sized one's.
                 sent = book.new_order(instance=inst.key, family=inst.family, action="open", type_=order.type, root=root, legs=legs,
                                       qty=qty, limit_value=order.limit, tif=tif, day=today, minute=mi, reserve=reserve,
                                       max_loss=max_loss, fees_est=fees, tuition=inst.tuition, why=why,
@@ -2659,9 +2704,10 @@ class OptionsLive:
                                              "status": sent.status, "sizing": plan.reason})
         return None if sent.status in ("working", "filled", "unknown") else f"{sent.status}: {sent.answer.get('error')}"
 
-    def _probe_budget_told(self) -> None:
+    def _probe_budget_told(self, exposure: M.Exposure) -> None:
         """THE PROBE LOSS BUDGET's alarm (fast lane v2, D4; the goal's item 6 note): once a New York day (state kv
-        `probe_budget_told`), when a Probe open is refused because the budget is spent."""
+        `probe_budget_told`), when a Probe open is refused because the budget is spent. Since release L-D it names both
+        figures of THE ROLLING PROBE BUDGET (the window's and the total's, `exposure`'s) and the basis."""
         today = ny(self.clock()).date().isoformat()
         try:
             if self.state.get("probe_budget_told") == today:
@@ -2669,8 +2715,19 @@ class OptionsLive:
             self.state.put("probe_budget_told", today)
         except Exception:  # noqa: BLE001 - the refusal stands either way; the alarm is told at the next refusal
             return
-        self.alert("warning", f"live: the Probe loss budget (${self.table.probe_loss_budget}) is spent: no new Probe open; "
-                              "exits go on. Raising it is the owner's decision")
+        t = self.table
+        # Under "net" the window's figure is its worst net stretch (`real.probe_realized`): a gain offsets only the
+        # Probe losses closed before it there, and every one in the total.
+        basis = ("net realized Probe losses (a Probe gain offsets the window's losses before it and the total's; "
+                 "Sized gains never do)" if t.probe_loss_basis == "net"
+                 else "gross realized Probe losses (no gain offsets them)")
+        total = exposure.probe_realized if exposure.probe_realized_total is None else exposure.probe_realized_total
+        self.alert("warning", f"live: the Probe loss budget (${t.probe_loss_budget} in any {t.probe_loss_window} sessions "
+                              f"and ${t.probe_loss_total} in total: {basis}, plus every real position's maximum loss held "
+                              f"or working, plus the open) is spent: realized ${M.cents(exposure.probe_realized)} in the "
+                              f"window and ${M.cents(total)} in total, held or working "
+                              f"${M.cents(exposure.probe_at_risk)}: no new Probe open; exits go on. Raising it is the "
+                              "owner's decision")
 
     # ------------------------------------------------------------------ forward records
     def _export_one(self, acc: ShadowAccount) -> None:

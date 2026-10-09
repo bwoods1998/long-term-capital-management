@@ -1,7 +1,11 @@
 """FAST LANE V2 (Oct 7, 2026; the owner's goal of Oct 7, item 4): the screen (the Validation line and one flat holdout look
 a program), direction counts (the drift screen's refusal and the look holds off by setting), the one-structure Probe
 within 10% of E with at most 3 Probe positions and the $400 Probe loss budget, same-minute entry, and the rooms the
-other routes keep for Probe opens. Every figure is invented."""
+other routes keep for Probe opens. Every figure is invented.
+
+Release L-D (Oct 9, 2026) moved three of these rows (`loss_basis` "net", `max_open` 8, `demotion` "dm1"): the tests of
+fast lane v2's gross budget, three slots and D5 run on the CON-only rollback's table (`money_fakes.rollback_table`),
+which pins that rollback to fast lane v2's behaviour; L-D's own rules are tested in `test_ld_release.py`."""
 
 from __future__ import annotations
 
@@ -22,6 +26,7 @@ from league.swarm.gate import DUPLICATE_STAGE, Gate, look_hold_settings
 from league.swarm.researcher import drift_settings
 from league.swarm.tournament import Tournament
 from league.tests import REAL_POLICY_PATH
+from league.tests.money_fakes import rollback_table
 from league.tests.swarm_fakes import result
 from league.tests.test_live_step import HAVE, LiveCase
 from league.tests.test_swarm_look_holds import PASS, HoldCase, lean
@@ -289,19 +294,21 @@ class TheProbe(unittest.TestCase):
     def setUp(self):
         self.t = M.Table.from_constitution()
 
-    def plan(self, unit, *, band="probe", equity=E, fwd=None, **exposure):
+    def plan(self, unit, *, band="probe", equity=E, fwd=None, table=None, **exposure):
         values = {k: (v if k in ("family_open", "probe_open") else D(str(v))) for k, v in exposure.items()}
-        return M.plan_open(self.t, band=band, tuition=False, equity=D(str(equity)), unit=D(str(unit)), fwd=fwd,
+        return M.plan_open(table or self.t, band=band, tuition=False, equity=D(str(equity)), unit=D(str(unit)), fwd=fwd,
                            exposure=M.Exposure(**values))
 
     def test_the_table(self):
         self.assertEqual((self.t.probe_share, self.t.probe_contracts, self.t.probe_max_open, self.t.probe_loss_budget,
-                          self.t.probe_floor), (D("0.10"), 1, 3, D("400"), D("0")))
+                          self.t.probe_floor), (D("0.10"), 1, 8, D("400"), D("0")))
         self.assertEqual(options_money_problems(), [])
-        self.assertEqual(CONSTITUTION["options_money"]["probe"]["max_open"], 3)
-        # At E = $1,288.40: the Probe cap $128.84; N x cap $386.52 <= $400; inside the daily stop's $450.94.
+        self.assertEqual(CONSTITUTION["options_money"]["probe"]["max_open"], 8, "release L-D (3 at the fast lane)")
+        # At E = $1,288.40: the Probe cap $128.84; at the fast lane's 3 slots the room was N x cap, $386.52 <= $400; at
+        # L-D's 8 it is the budget, $400 (never 8 x $128.84 = $1,030.72); both inside the daily stop's $450.94.
         self.assertEqual(M.cents(M.probe_cap(self.t, E)), D("128.84"))
-        self.assertEqual(M.cents(M.probe_room(self.t, E)), D("386.52"))
+        self.assertEqual(M.cents(M.probe_room(rollback_table(), E)), D("386.52"))
+        self.assertEqual(M.cents(M.probe_room(self.t, E)), D("400.00"))
         self.assertLessEqual(M.probe_room(self.t, E), self.t.probe_loss_budget)
         self.assertLess(M.probe_room(self.t, E), self.t.daily_stop_share * E)
         self.assertEqual(M.probe_room(self.t, None), M.ZERO)
@@ -322,8 +329,9 @@ class TheProbe(unittest.TestCase):
         self.assertIn("over the Probe's cap of $128.84", refused.reason)
 
     def test_at_most_three_probe_positions(self):
-        self.assertEqual(self.plan(40, probe_open=2).qty, 1)
-        refused = self.plan(40, probe_open=3)
+        """Fast lane v2's three slots (the CON-only rollback of release L-D; L-D's 8: `test_ld_release`)."""
+        self.assertEqual(self.plan(40, probe_open=2, table=rollback_table()).qty, 1)
+        refused = self.plan(40, probe_open=3, table=rollback_table())
         self.assertEqual(refused.qty, 0)
         self.assertIn("3 Probe positions held or working; the most at once is 3", refused.reason)
 
@@ -332,7 +340,9 @@ class TheProbe(unittest.TestCase):
         refused = self.plan("40.01", probe_realized="300", probe_at_risk="60")
         self.assertEqual(refused.qty, 0)
         self.assertTrue(refused.reason.startswith("probe: the loss budget"), refused.reason)
-        self.assertIn("realized $300.00, held or working $60.00", refused.reason)
+        self.assertIn("realized net $300.00, held or working $60.00", refused.reason)
+        gross = self.plan("40.01", probe_realized="300", probe_at_risk="60", table=rollback_table())
+        self.assertIn("realized $300.00, held or working $60.00", gross.reason, "the rollback's words, as before")
         self.assertEqual(self.plan(40, probe_realized="400").qty, 0, "spent")
         self.assertEqual(self.plan(40, probe_at_risk="380").qty, 0, "held and working count whole")
 
@@ -394,8 +404,9 @@ class TheTally(unittest.TestCase):
                                      "filled_qty": filled, "max_loss": max_loss, "fees_est": fees, "tuition": tuition,
                                      "answer": json.dumps({"dispatched": True}), "updated_at": 1.0}, "oid")
 
-    def tally(self, state=None):
-        return probe_tally((state or self.state).rows, day="2026-10-07")
+    def tally(self, state=None, basis="gross"):
+        """Fast lane v2's GROSS figure by default (the CON-only rollback of release L-D); NET: `test_ld_release`."""
+        return probe_tally((state or self.state).rows, day="2026-10-07", basis=basis)
 
     def test_it_counts_real_positions_and_orders_only(self):
         self.position("a@1:r", share=0.40, status="closed", cash=-50.0)       # a Probe loss of $50
@@ -425,7 +436,7 @@ class TheTally(unittest.TestCase):
             self.position(f"p{i}@1:r", share=1.20, status="closed", cash=-121.0)
         open_n, realized, at_risk = self.tally()
         self.assertEqual((open_n, realized, at_risk), (0, D("605"), M.ZERO))
-        t = M.Table.from_constitution()
+        t = rollback_table()
         plan = M.plan_open(t, band="probe", tuition=False, equity=E, unit=D("121"), fwd=None,
                            exposure=M.Exposure(probe_open=open_n, probe_realized=realized, probe_at_risk=at_risk))
         self.assertEqual(plan.qty, 0)
@@ -454,7 +465,7 @@ class TheTally(unittest.TestCase):
         self.state.close()
         again = LiveState(self.path)
         self.addCleanup(again.close)
-        self.assertEqual(probe_tally(again.rows, day="2026-10-07"), before)
+        self.assertEqual(probe_tally(again.rows, day="2026-10-07", basis="gross"), before)
 
     def tearDown(self):
         try:
@@ -469,12 +480,14 @@ class TheLivePath(LiveCase):
         return [p["why"] for p, a in self.ledger.of("live.refusal")]
 
     def spend_the_budget(self, live) -> None:
-        """A closed real position that lost $400: the Probe loss budget is spent."""
+        """A closed real position that lost $400: the Probe loss budget is spent (closed on the Friday before, inside
+        THE ROLLING PROBE BUDGET's window of release L-D, so its $400 binds there as fast lane v2's $400 did)."""
         live.state.upsert("positions", {"pid": 900, "instance": "old@1:r", "family": "old", "type": "debit_vertical",
                                         "root": "SPY", "legs": "[]", "qty": 0, "opened_qty": 1, "entry": 4.0,
                                         "max_loss_share": 4.0, "collateral": 0.0, "fees": 1.0, "cash": -400.0,
                                         "opened_at": 1.0, "opened_day": "2026-09-25", "opened_minute": 1,
-                                        "status": "closed", "closed_at": 2.0, "tuition": 0,
+                                        "status": "closed", "closed_at": at(MONDAY - dt.timedelta(days=3), 15, 0),
+                                        "tuition": 0,
                                         "info": json.dumps({"order": 900, "probe": True})}, "pid")
 
     def test_a_candidate_moved_to_probe_opens_from_the_next_minute(self):
@@ -562,7 +575,8 @@ class TheLivePath(LiveCase):
         self.assertEqual(live.incubator.room(E) - (live.table.house_test_structure
                                                    if live.switches().get("house_test") else M.ZERO),
                          M.probe_room(live.table, E))
-        self.assertEqual(M.cents(M.probe_room(live.table, E)), D("386.52"))
+        self.assertEqual(M.cents(M.probe_room(live.table, E)), D("400.00"), "release L-D: 8 slots, capped at the budget")
+        self.assertEqual(M.cents(M.probe_room(rollback_table(), E)), D("386.52"), "fast lane v2's 3 x 10% x E")
 
 
 # ======================================================================================= D5: demotion by live results
@@ -583,8 +597,10 @@ def matched(n, *, gap, max_loss=50.0):
 
 
 class TheDemotion(unittest.TestCase):
+    """D5 as fast lane v2 built it: `probe.demotion` "dm0", the CON-only rollback of release L-D (DM1: `test_ld_release`)."""
+
     def setUp(self):
-        self.t = M.Table.from_constitution()
+        self.t = rollback_table()
 
     def band(self, rows, band="probe"):
         row = {"family": "f", "band": band, "structure": "debit_vertical", "holdout_passed": True,
@@ -624,7 +640,7 @@ class TheDemotionLive(LiveCase):
         return [p["why"] for p, a in self.ledger.of("live.refusal")]
 
     def test_a_demoted_record_refuses_the_next_open_at_once_and_the_real_instance_goes_exit_only(self):
-        live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 3, "opens": 3})])
+        live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 3, "opens": 3})], table=rollback_table())
         self.run_to(9, 31)
         self.assertEqual(len(self.venue.sent), 1)
         self.families.add_forward("vert", "real", [dict(r, id=f"d5-{i}") for i, r in enumerate(real_rows(4, pnl=-60.0))])
@@ -646,7 +662,7 @@ class TheDemotionLive(LiveCase):
         from league.swarm.store import SwarmStore
         from league.tests.evaluator_fakes import band_proof
 
-        live = self.make([])
+        live = self.make([], table=rollback_table())
         store = SwarmStore(self.root)
         self.addCleanup(store.close)
         store.add_family({"id": "vert", "mechanism": "An invented mechanism for the demotion test.",
@@ -829,7 +845,7 @@ class TheFastLaneJob(RoundCase):
         live.upsert("positions", {"pid": 1, "instance": "a@1:r", "family": "a", "type": "debit_vertical", "root": "SPY",
                                   "legs": "[]", "qty": 0, "opened_qty": 1, "entry": 0.4, "max_loss_share": 0.4,
                                   "collateral": 0.0, "fees": 1.0, "cash": -20.0, "opened_at": 1.0, "opened_day": "2026-09-28",
-                                  "opened_minute": 1, "status": "closed", "closed_at": 2.0, "tuition": 0,
+                                  "opened_minute": 1, "status": "closed", "closed_at": at(MONDAY, 15, 0), "tuition": 0,
                                   "info": json.dumps({"order": 1, "probe": True})}, "pid")
         live.close()
         alerts = []
@@ -839,6 +855,7 @@ class TheFastLaneJob(RoundCase):
         doc = json.loads((self.root / FL.FILE).read_text())
         self.assertEqual((doc["window_days"], doc["reported_only"]), (FL.JOB_DAYS, True))
         self.assertEqual(doc["probe_budget"]["realized_usd"], "20.00")
+        self.assertEqual(doc["probe_budget"]["realized_total_usd"], "20.00")
         self.assertEqual({r["window"] for r in doc["screen"]}, {"validation", "holdout"})
         self.assertIn("contamination", doc)
         [(level, text)] = alerts
@@ -947,11 +964,15 @@ class ReportedOnly(RoundCase):
         live = LiveState(self.root / "live-copy.sqlite")
         base = {"type": "debit_vertical", "root": "SPY", "legs": "[]", "qty": 0, "opened_qty": 1, "entry": 0.4,
                 "max_loss_share": 0.4, "collateral": 0.0, "fees": 1.0, "opened_at": 1.0, "opened_day": "2026-09-28",
-                "opened_minute": 1, "status": "closed", "closed_at": 2.0, "tuition": 0}
+                "opened_minute": 1, "status": "closed", "closed_at": at(MONDAY, 15, 0), "tuition": 0}
         live.upsert("positions", {**base, "pid": 1, "instance": "a@1:r", "family": "a", "cash": -12.5,
                                   "info": json.dumps({"order": 1, "probe": True})}, "pid")
         live.upsert("positions", {**base, "pid": 2, "instance": "s@1:r", "family": "s", "cash": 100.0,
                                   "info": json.dumps({"order": 2})}, "pid")        # a Sized gain: never in the budget
+        # A Probe loss closed Aug 3: before the rolling window (release L-D), in the total only.
+        live.upsert("positions", {**base, "pid": 3, "instance": "a@1:r", "family": "a", "cash": -30.0,
+                                  "closed_at": at(dt.date(2026, 8, 3), 15, 0),
+                                  "info": json.dumps({"order": 3, "probe": True})}, "pid")
         live.close()
         out = module.report(self.root, self.root / "live-copy.sqlite", self.root / "direction-closes.json",
                             today="2026-09-30")
@@ -991,9 +1012,17 @@ class ReportedOnly(RoundCase):
         self.assertEqual(band["live_vs_holdout"]["live_pnl_per_max_loss"], -12.5 / 40.0)
         self.assertEqual(band["live_vs_holdout"]["holdout_pnl_per_max_loss"], 0.08)
         self.assertIsNone(band["d5"]["demoted"])
-        self.assertEqual(out["probe_budget"], {"realized_usd": "12.50", "realized_basis": "gross: each closed Probe position's own loss",
-                                               "at_risk_usd": "0.00", "open": 0, "max_open": 3, "budget_usd": "400",
-                                               "room_usd": "387.50"})
+        from league.ops.fast_lane import REALIZED_BASIS
+
+        # THE ROLLING PROBE BUDGET (release L-D): the window's 20 sessions through Sep 30 start Sep 2 (Labor Day, Sep 7, is
+        # no session), so the Aug 3 loss is in the total only; the total in force is $400 (Oct 9), so it binds.
+        self.assertEqual(out["probe_budget"], {"realized_usd": "12.50", "realized_total_usd": "42.50",
+                                               "realized_basis": REALIZED_BASIS["net"], "window_sessions": 20,
+                                               "window_start": "2026-09-02", "at_risk_usd": "0.00", "open": 0,
+                                               "max_open": 8, "budget_usd": "400", "total_budget_usd": "400",
+                                               "room_usd": "357.50", "binding": "total"})
+        self.assertTrue(REALIZED_BASIS["net"].startswith("net: "), "release L-D: the label is the basis in force")
+        self.assertEqual(band["d5"]["rule"], "dm1")
         self.assertTrue(out["reported_only"])
 
     def test_the_verdicts_are_the_same_with_and_without_the_figures(self):
