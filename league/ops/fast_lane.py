@@ -29,8 +29,10 @@ THE REPORT (`report`), JSON:
 - `probe_budget`: `real.probe_tally` on the live state: gross realized Probe losses, at risk, the open count, the room.
 - THE DIRECTION LANE (release D-1, Oct 9, 2026; league/swarm/dlane.py): while the lane is on (`dlane.mode` "shadow" or
   "gate"), every screen row and band row also names its family's `lane` ("alpha" or "direction", `dlane.lane_of`), so
-  the `dlane` report (league/ops/dlane_report.py) reads the contamination measures per lane. With the lane off the
-  report is byte for byte the one before (no `lane` key).
+  the `dlane` report (league/ops/dlane_report.py) reads the contamination measures per lane, and (release D-1b) every
+  band row carries `fp`: {screen, fp_lane_mixed, fp_lane_2224, receipt, look_recorded}, the screen that admitted its
+  banded version and that screen's measured false-positive rates (the owner's goal of Oct 9, item 4). With the lane off
+  the report is byte for byte the one before (no `lane` or `fp` key).
 
 CONTAMINATION, MEASURED (the review of Oct 7, 2026; goal item 5: "contamination measured and stated"). 123 of the
 holdout's 184 sessions (through 2026-06-30) are inside the training of Opus 5.5 (cutoff June 2026); the other authors'
@@ -265,6 +267,15 @@ def report(swarm_root: str | Path, live_path: str | Path | None, closes_path: st
             lane = {fid: dlane.lane_of(store, fam, settings) for fid, fam in families.items()}
             for row in screen + bands:
                 row["lane"] = lane.get(row["family"], dlane.ALPHA)
+            # THE FALSE-POSITIVE RATE BESIDE EVERY BAND ROW (release D-1b; the owner's goal of Oct 9, item 4): the screen
+            # that admitted its banded version (its passed look's recorded line) and that screen's lane rates at zero
+            # edge, {screen, fp_lane_mixed, fp_lane_2224, receipt} (`dlane.fp_of_look`; the alpha lane's S-B has no lane
+            # rate). Under `fp`: the row's `screen` key is its screen rows.
+            passed = {(x["family"], int(x["version"])): x.get("detail") for x in store.looks() if x.get("passed")}
+            for row in bands:
+                n = row.get("version")
+                detail = passed.get((row["family"], int(n))) if isinstance(n, int) else None
+                row["fp"] = {**dlane.fp_of_look(detail, settings), "look_recorded": detail is not None}
     finally:
         store.close()
     out: dict[str, Any] = {"at": today, "since": since, "closes": str(closes_path), "screen": screen,

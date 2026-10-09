@@ -93,6 +93,15 @@ def visible_text(*parts) -> str:
     return "\n".join(json.dumps(p, default=str) if not isinstance(p, str) else p for p in parts)
 
 
+def _keys(doc) -> list:
+    """Every key of a JSON document, at every depth."""
+    if isinstance(doc, dict):
+        return [k for key, value in doc.items() for k in (key, *_keys(value))]
+    if isinstance(doc, list):
+        return [k for value in doc for k in _keys(value)]
+    return []
+
+
 # ------------------------------------------------------------------------------------------------ 1. settings
 class Settings(unittest.TestCase):
     def test_the_code_default_is_the_rollback_and_the_policy_switches_the_lane_on(self):
@@ -100,15 +109,26 @@ class Settings(unittest.TestCase):
         self.assertFalse(dlane.on(None))
         self.assertFalse(dlane.on({"dlane": {}}))
         policy = json.loads((Path(ci.REPO) / "league" / "swarm" / "policy.json").read_text())["dlane"]
-        self.assertEqual(dlane.cfg({"dlane": policy}), {**dlane.cfg({"dlane": {**dlane.DEFAULTS}}), "mode": "gate"},
-                         "the committed block is the defaults, switched on in gate mode")
+        defaults = dlane.cfg({"dlane": {**dlane.DEFAULTS}})
+        # The committed block is the defaults, switched on in gate mode, with release D-1b's deploy (DSCREEN-ADOPT): calls
+        # only, and D2 chosen with DSCREEN-2's receipt pinned. The code's defaults stay D-1's (S-C, no pin): a dropped
+        # policy layer is the rollback whatever else it held.
+        d2 = {"receipt_sha256": "c36059470d00241db67e1542361097e397289b87f024261b96da2db323c63b5b", "c": 1.0,
+              "fp_lane_mixed": 0.1037, "fp_lane_2224": 0.1239, "power10": 0.1995, "fp_unconditional": None,
+              "fp_both_windows_rose": None, "fp_lane_ci_mixed": [0.0957, 0.1116], "fp_lane_cluster_mixed": [0.079, 0.1276]}
+        self.assertEqual(dlane.cfg({"dlane": policy}),
+                         {**defaults, "mode": "gate", "structures": ["long_single"], "screen": "D2",
+                          "screens": {"S-C": defaults["screens"]["S-C"], "D2": d2}},
+                         "the committed block is the defaults, switched on in gate mode, with D-1b's deploy")
         c = dlane.cfg({"dlane": policy})
         # The operator's decisions of Oct 9, 05:30Z, as committed.
         self.assertEqual((c["birth_share"], c["max_share"], c["min_per_pass"]), (0.5, 0.6, 1))
-        self.assertEqual((c["arm_fraction"], c["screen"]), (0.0, "S-C"))
+        self.assertEqual((c["arm_fraction"], c["screen"]), (0.0, "D2"))
         self.assertEqual(c["screens"]["S-C"], {"look_level": 0.2, "sharpe_share": 0.25, "fp_unconditional": 0.0141,
-                                               "fp_both_windows_rose": 0.0222})
-        self.assertEqual(c["screens"]["D2"]["receipt_sha256"], None)
+                                               "fp_both_windows_rose": 0.0222, "fp_lane_2224": 0.0209})
+        self.assertEqual(c["screens"]["D2"]["receipt_sha256"], d2["receipt_sha256"])
+        self.assertEqual((c["val_tries"], c["looks_per_lineage"]), (1, 1))
+        self.assertEqual((dlane.DEFAULTS["screen"], dlane.DEFAULTS["screens"]["D2"]), ("S-C", {"receipt_sha256": None}))
         self.assertEqual((c["alarm_min_looks"], c["alarm_pass_share"]), (10, 0.6))
         self.assertEqual((c["done_zero_edge_p"], c["k5_net_usd"], c["k5_clear"]), (0.13, -600.0, False))
 
@@ -145,7 +165,13 @@ class Settings(unittest.TestCase):
 
     def test_d2_block_keeps_only_a_well_formed_receipt(self):
         self.assertEqual(dlane.cfg({"dlane": {"screens": {"D2": {"receipt_sha256": "ABC", "c": 9}}}})["screens"]["D2"],
-                         {"receipt_sha256": None, "c": None, "fp_unconditional": None, "fp_both_windows_rose": None})
+                         {"receipt_sha256": None, "c": None, "fp_unconditional": None, "fp_both_windows_rose": None,
+                          "fp_lane_mixed": None, "fp_lane_2224": None, "power10": None, "fp_lane_ci_mixed": None,
+                          "fp_lane_cluster_mixed": None})
+        bad = dlane.cfg({"dlane": {"screens": {"D2": {"fp_lane_mixed": 1.5, "fp_lane_ci_mixed": [0.2, 0.1],
+                                                      "fp_lane_cluster_mixed": [0.1], "power10": True}}}})["screens"]["D2"]
+        self.assertEqual((bad["fp_lane_mixed"], bad["fp_lane_ci_mixed"], bad["fp_lane_cluster_mixed"], bad["power10"]),
+                         (None, None, None, None), "a rate outside [0, 1] or an interval out of order is no figure")
         sha = "a" * 64
         self.assertEqual(dlane.cfg({"dlane": {"screens": {"D2": {"receipt_sha256": sha, "c": 1.7}}}})["screens"]["D2"]["c"], 1.7)
 
@@ -663,7 +689,7 @@ class Records(unittest.TestCase):
 
 # ------------------------------------------------------------------------------------------------ 12. the screen
 class Screen(unittest.TestCase):
-    D2 = {"dlane": {"mode": "gate", "screen": "D2"}}
+    D2 = {"dlane": {"mode": "gate", "screen": "D2", "structures": ["long_single"]}}
 
     def test_alpha_is_the_evidence_lines_exactly_and_sc_is_the_direction_lanes(self):
         alpha = dlane.screen_effective(GATE, "alpha")
@@ -693,20 +719,48 @@ class Screen(unittest.TestCase):
         self.assertEqual((d2["screen"], d2["receipt"], d2["c"], d2["validation"]), ("D2", sha, 1.5, "precheck"))
         self.assertEqual(dlane.screen_effective(GATE, "direction", policy=pinned)["screen"], "S-C", "only when chosen")
         self.assertEqual(dlane.screen_effective(self.D2, "alpha", policy=pinned)["screen"], "S-B")
+        # Release D-1b: D2 was measured on single calls, so it runs only while the lane is calls only.
+        wide = {"dlane": {**self.D2["dlane"], "structures": ["long_single", "debit_vertical"]}}
+        refused = dlane.screen_effective(wide, "direction", policy=pinned)
+        self.assertEqual(refused["screen"], "S-C")
+        self.assertIn("measured on single calls", refused["why"])
+        self.assertEqual(dlane.screen_effective({"dlane": {**self.D2["dlane"], "structures": ["long_call"]}}, "direction",
+                                                policy=pinned)["screen"], "D2", "long calls are calls")
 
     def test_the_committed_receipt_matches_its_benchmark_file(self):
-        """CI's pin (decision 6): a D2 receipt sha in the committed policy.json must be the sha256 of
-        docs/benchmarks/direction_screen_2.json; with none pinned, the committed policy runs S-C."""
+        """CI's pin (decision 6; release D-1b): a D2 receipt sha in the committed policy.json must be the sha256 of
+        docs/benchmarks/direction_screen_2.json (DSCREEN-2's receipt, copied byte for byte), and every figure the policy
+        states beside it must be that receipt's (its `c`, and its lane figures at four decimals); with none pinned, the
+        committed policy runs S-C. The receipt is public: aggregate figures, the rule and the shas only, so no per-cell
+        result and no figure of a hidden or a later year (2020, 2021, 2025, 2026) beyond the window labels."""
         policy = json.loads((Path(ci.REPO) / "league" / "swarm" / "policy.json").read_text())
         pinned = dlane._policy_d2(policy)
         receipt = Path(ci.REPO) / "docs" / "benchmarks" / "direction_screen_2.json"
         if pinned["receipt_sha256"] is None:
             self.assertEqual(dlane.screen_effective({"dlane": {**policy["dlane"], "screen": "D2"}}, "direction",
                                                     policy=policy)["screen"], "S-C")
-        else:
-            self.assertTrue(receipt.exists(), "a pinned receipt needs its file")
-            self.assertEqual(dlane.receipt_sha256(receipt), pinned["receipt_sha256"])
-            self.assertEqual(json.loads(receipt.read_text()).get("status"), "MEASURED")
+            return
+        self.assertTrue(receipt.exists(), "a pinned receipt needs its file")
+        self.assertEqual(dlane.receipt_sha256(receipt), pinned["receipt_sha256"])
+        doc = json.loads(receipt.read_text())
+        self.assertEqual(set(doc), {"c", "fp_zero_edge", "fp_zero_edge_per_lineage_lane", "power_lane", "rule", "sha256"})
+        self.assertEqual(doc["c"], pinned["c"])
+        lane = doc["fp_zero_edge"]["lane"]
+        self.assertEqual(pinned["fp_lane_mixed"], round(lane["mixed_worlds"]["rate"], 4))
+        self.assertEqual(pinned["fp_lane_2224"], round(lane["blocks_2022_24"]["rate"], 4))
+        self.assertEqual(pinned["fp_lane_ci_mixed"], [round(x, 4) for x in lane["mixed_worlds"]["ci95_worlds"]])
+        self.assertEqual(pinned["fp_lane_cluster_mixed"], [round(x, 4) for x in lane["mixed_worlds"]["ci95_cluster"]])
+        self.assertEqual(pinned["power10"], round(doc["power_lane"]["plus10"]["mixed_worlds"]["rate"], 4))
+        self.assertLessEqual(lane["mixed_worlds"]["rate"], 0.15, "the owner's ceiling: at most 15% per program")
+        self.assertLessEqual(lane["blocks_2022_24"]["ci95_worlds"][1], 0.15)
+        text = receipt.read_text()
+        self.assertIsNone(re.search(r"20(?:20|21|25|26)", text), "no figure of a hidden or a later year")
+        self.assertNotIn("cell", json.dumps(sorted(_keys(doc))).replace("all_eligible_cells", ""),
+                         "aggregates only: no per-cell key")
+        # The committed policy runs D2 on that receipt, calls only.
+        live = dlane.screen_effective({"dlane": policy["dlane"]}, "direction", policy=policy)
+        self.assertEqual((live["screen"], live["receipt"], live["c"]), ("D2", pinned["receipt_sha256"], 1.0))
+        self.assertEqual((live["fp_lane_mixed"], live["fp_lane_2224"]), (0.1037, 0.1239))
 
     def test_d2_statistics_fail_closed(self):
         val = {"trades": 60, "days_traded": 40, "mean_return_on_max_loss_daily": 0.05, "t_daily": 1.0}

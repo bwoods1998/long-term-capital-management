@@ -1702,7 +1702,7 @@ class Job(unittest.TestCase):
         store.put("guard", {"last": {"balance": balance, "at": at_}})
         store.close()
 
-    def test_a_short_meter_is_told_once_a_week_and_only_when_sent(self):
+    def test_a_short_meter_is_told_once_a_day_and_only_when_sent(self):
         self.reading(60.0, NOW - 60)
         self.answer = {"sent": False, "reason": "no mail binding"}
         receipt = B.run(self.ctx())
@@ -1710,7 +1710,7 @@ class Job(unittest.TestCase):
         self.assertFalse(receipt["notices"][0]["sent"])
         facts = self.sent[0]
         self.assertEqual(facts["kind"], "funding")
-        self.assertEqual(facts["notice_id"], "funding:sail:2026-W43:r2", "the meter, the ISO week and the rule's version")
+        self.assertEqual(facts["notice_id"], "funding:sail:2026-10-20:r2", "the meter, the UTC day and the rule's version")
         # At the rate it wants: 1.5 fixed + its 15 of the ceiling (the 39.98 of profit is inside the ceiling): 23 above
         # the reserve (the Sail guard's release line, 37) is 1.4 days of research left at the ceiling.
         self.assertEqual((facts["meter"], facts["balance_usd"], facts["usd_day"], facts["research_usd_day"], facts["runway_days"]),
@@ -1733,19 +1733,22 @@ class Job(unittest.TestCase):
         self.answer = {"sent": True}
         B.run(self.ctx(now=NOW + 3600))
         self.assertEqual(len(self.sent), 2, "not told yet: tried again")
-        self.reading(59.0, NOW + 2 * DAY - 60)
-        B.run(self.ctx(now=NOW + 2 * DAY))
-        self.assertEqual(len(self.sent), 2, "told: at most once every 7 days")
-        self.assertIn("at most once", self.doc()["notices"][0]["why"])
-        self.reading(58.0, NOW + 8 * DAY - 60)
-        B.run(self.ctx(now=NOW + 8 * DAY))
+        # Release D-1b: at most once a DAY (it was once a week): the next UTC day's 00:30 run (3 h on) and the close's
+        # (22 h on) are inside the day; the day after's 00:30 run tells again while the meter is still short.
+        for hours in (4.0, 23.0):
+            self.reading(59.0, NOW + hours * 3600 - 60)
+            B.run(self.ctx(now=NOW + hours * 3600))
+            self.assertEqual(len(self.sent), 2, f"told {hours - 1:g} h ago: at most once a day")
+            self.assertIn("at most once a day", self.doc()["notices"][0]["why"])
+        self.reading(58.0, NOW + 3600 + DAY - 60)
+        B.run(self.ctx(now=NOW + 3600 + DAY))
         self.assertEqual(len(self.sent), 3)
-        self.assertEqual(self.sent[-1]["notice_id"], "funding:sail:2026-W44:r2")
+        self.assertEqual(self.sent[-1]["notice_id"], "funding:sail:2026-10-21:r2", "the next day's own id")
 
     def test_what_another_version_of_the_rule_told_is_not_this_rules_notice(self):
         """The first run after the rule's change: version 1 told this meter yesterday (its 60-day line, its amount for 90
         days). This rule's days and amount are other ones, so the owner is told again, under an id the gateway has not
-        seen this week; from then on at most once every 7 days, as ever."""
+        seen today; from then on at most once a day (release D-1b; it was once a week)."""
         self.reading(60.0, NOW - 60)
         for record in ({"sent_at": NOW - DAY, "notice_id": "funding:sail:2026-W43"},
                        {"sent_at": NOW - DAY, "notice_id": "funding:sail:2026-W43", "rule_version": 1}):
@@ -1753,11 +1756,11 @@ class Job(unittest.TestCase):
             (self.root / B.NOTICES_FILE).write_text(json.dumps({"sail": record}))
             receipt = B.run(self.ctx())
             self.assertEqual([(n["meter"], n["sent"]) for n in receipt["notices"]], [("sail", True)], record)
-            self.assertEqual(self.sent[0]["notice_id"], "funding:sail:2026-W43:r2")
+            self.assertEqual(self.sent[0]["notice_id"], "funding:sail:2026-10-20:r2")
             told = json.loads((self.root / B.NOTICES_FILE).read_text())["sail"]
             self.assertEqual((told["sent_at"], told["rule_version"]), (NOW, B.RULE_VERSION))
         B.run(self.ctx(now=NOW + 3600))
-        self.assertEqual(len(self.sent), 1, "this rule's own notice: at most once every 7 days")
+        self.assertEqual(len(self.sent), 1, "this rule's own notice: at most once a day")
 
     def test_a_failing_gateway_is_an_error_not_a_crash(self):
         self.reading(60.0, NOW - 60)
@@ -1796,6 +1799,59 @@ class Job(unittest.TestCase):
         self.assertEqual(B._claude_balance({"claude": {"cap_usd": 300, "spent_usd": 185, "inflight_usd": 10}}), 115.0)
         self.assertIsNone(B._claude_balance({"claude": {"configured": False}}))
         self.assertIsNone(B._claude_balance({"claude": {"cap_usd": "x", "spent_usd": 1}}))
+
+
+class TwoDayLead(unittest.TestCase):
+    """THE TWO-DAY LEAD (release D-1b, Oct 9, 2026; the owner's goal of Oct 9, item 3: "Tell me 2 days before Sail or
+    Claude runs out and I top it up"): a meter is short when research on it runs out within `NOTICE_LEAD_DAYS` at its
+    current burn (`out_in_days`): the day the lower of its runway at that burn and its days of research left at the
+    ceiling falls to `RUNWAY_DAYS`, where the taper cuts research. The notice's channel and facts are unchanged."""
+
+    def test_the_lead_is_two_days_before_the_taper_and_the_card_line_is_that_instant_at_the_ceiling(self):
+        self.assertEqual((B.NOTICE_LEAD_DAYS, B.RUNWAY_DAYS, B.NOTICE_DAYS), (2, 5, 7))
+        self.assertEqual(B.NOTICE_EVERY_SECONDS, 23 * 3600, "at most once a day (a day less an hour), not once a week")
+        # Claude at the ceiling (10 a day, no fixed cost, reserve 5): 7.5 days left at the ceiling: research runs out in
+        # 2.5 days (not told); 6.5 days left: in 1.5 (told).
+        far = B.compute(inputs(claude=5.0 + 75.0), now=NOW)["meters"]["claude"]
+        self.assertEqual((far["limited_by"], far["burn_usd_day"], far["card_runway_days"], far["out_in_days"]),
+                         ("ceiling", 10.0, 7.5, 2.5))
+        self.assertEqual(far["out_on"], "2026-10-22")
+        near = B.compute(inputs(claude=5.0 + 65.0), now=NOW)
+        self.assertEqual(near["meters"]["claude"]["out_in_days"], 1.5)
+        self.assertEqual(B.short(near), ["claude"])
+        self.assertEqual(B.short(B.compute(inputs(claude=5.0 + 75.0), now=NOW)), [])
+        # Sail at the ceiling (1.5 fixed + 15): 7 days and a bit is not short; under 7 is.
+        self.assertEqual(B.short(B.compute(inputs(sail=5.0 + 10.0 + 16.5 * 7.2), now=NOW)), [])
+        self.assertEqual(B.short(B.compute(inputs(sail=10.0 + 16.5 * 6.9), now=NOW)), ["sail"])
+
+    def test_a_tapering_meter_is_running_out_now(self):
+        """The taper holds the balance's own runway at about RUNWAY_DAYS (it spends a fifth of what is above the reserve
+        a day), so the balance never reaches the reserve: research is what runs out, and it is being cut already."""
+        row = B.compute(inputs(claude=5.0 + 30.0), now=NOW)["meters"]["claude"]
+        self.assertEqual((row["limited_by"], row["runway_days"], row["out_in_days"]), ("runway", 5.0, 0.0))
+        self.assertEqual(B.short(B.compute(inputs(claude=5.0 + 30.0), now=NOW)), ["claude"])
+
+    def test_a_meter_spent_faster_than_the_rule_holds_it_is_read_at_its_burn(self):
+        # Claude holds 9 days at the ceiling, but its research spend over the last 7 days was 20 a day (twice its share):
+        # at that burn it has 4.5 days, so research runs out at once.
+        doc = B.compute(inputs(claude=5.0 + 90.0, need_claude=7 * 20.0), now=NOW)
+        row = doc["meters"]["claude"]
+        self.assertEqual((row["card_runway_days"], row["burn_usd_day"], row["burn_runway_days"], row["out_in_days"]),
+                         (9.0, 20.0, 4.5, 0.0))
+        self.assertEqual(B.short(doc), ["claude"])
+        # Spent at or under its rate: the rate the rule holds it to is its burn.
+        calm = B.compute(inputs(claude=5.0 + 90.0, need_claude=7 * 4.0), now=NOW)["meters"]["claude"]
+        self.assertEqual((calm["burn_usd_day"], calm["out_in_days"]), (10.0, 4.0))
+
+    def test_an_unreadable_burn_falls_back_to_the_card_line(self):
+        # A meter whose balance the rule could not read for research has a card line from another reading and no burn.
+        doc = {"meters": {"sail": {"card_runway_days": 6.0}, "claude": {"card_runway_days": 8.0}}}
+        self.assertEqual(B.short(doc), ["sail"])
+        given = inputs(sail=None)
+        given["meters"]["sail"]["notice_balance_usd"] = 10.0 + 16.5 * 6.0
+        row = B.compute(given, now=NOW)["meters"]["sail"]
+        self.assertNotIn("out_in_days", row)
+        self.assertEqual(B.short(B.compute(given, now=NOW)), ["sail"])
 
 
 if __name__ == "__main__":

@@ -58,6 +58,10 @@ THE REST OF THE REPORT:
   cost (the Gym is shared: direction runs slow alpha's), Validation tries and passes (`swarm.tournament`), reviews and
   audits (`swarm.gate`), holdout looks and passes by the screen each look recorded, band moves, real closes by route; the
   bands now; and the direction lane's Train-bar failure counts (`dlane.failure_counts`).
+- `fp_beside_trades` (release D-1b; the owner's goal of Oct 9, item 4): every real Probe trade (`:r`, open or closed)
+  and every agent real close, each with its program's screen and that screen's false-positive rates at zero edge
+  ({screen, fp_lane_mixed, fp_lane_2224, receipt}: the passed look of the version it trades, `trade_screens`), and the
+  contamination statement beside them.
 - `probe_envelope`: THE PROBE LOSS BUDGET as the code in force reads it (`fast_lane.probe_budget`, which names its basis),
   with the GROSS and the NET realized figures beside it (release L-D reads NET) and the room in units of today's cap.
 - `account`: the equity change since E0 (the first equity reading this report saw: it is written into the file and read
@@ -154,11 +158,23 @@ LOOSENED: tuple[dict[str, str], ...] = (
      "cost": "the game's selection pressure is lost for direction; the lane's false-positive rate at zero edge rises "
              "from 0.02% to 0.70% before the screen change below"},
     {"rule": "the holdout look (screen S-C)", "was": "p <= 0.10 and a Sharpe of at least 0.5 of Validation's (S-B)",
-     "now": "direction lane only: p <= 0.20 and a Sharpe share of 0.25; the Validation line as coded; D2 refused "
-            "until a receipt is pinned",
+     "now": "direction lane only: p <= 0.20 and a Sharpe share of 0.25; the Validation line as coded (since release "
+            "D-1b the rollback screen: swarm.json dlane.screen \"S-C\")",
      "cost": "false-positive rate at zero edge: the lane 0.70% -> 1.41% (cluster interval 0.54-2.43%), all cells "
              "0.80% -> 1.53%, swarm placebos 0.18% -> 0.27%; 2.22% when both windows rose; power at +10%: "
              "1.68% -> 3.22%"},
+    {"rule": "the holdout look (screen D2, release D-1b)", "was": "S-C (above)",
+     "now": "direction lane only, calls only: on Validation at least 50 trades on 25 entry days with a mean entry-day "
+            "return above zero; after the one look, the pooled entry-day t over Validation and the holdout at least "
+            "c = 1.00 and the holdout's P&L above zero (receipt docs/benchmarks/direction_screen_2.json, sha c3605947)",
+     "cost": "the lane's false-positive rate per program at zero edge 1.41% -> 10.37% on mixed worlds (95% world "
+             "interval 9.57-11.16%, cluster 7.90-12.76%) and 12.39% on 2022-24 worlds (upper bound 13.29%); all "
+             "census cells 13.37% (upper bound 14.08%) and 14.11% on 2022-24 worlds (upper bound 15.01%); swarm "
+             "placebos 4.76%; power at +10% 3.22% -> 19.95%. Adopted AFTER it failed the operator's own pre-registered "
+             "adoption rule (every upper bound at most 12%): a post-hoc loosening of that ceiling. The lane's rate "
+             "stays under the owner's 15% per program; all cells (verticals included) reach 15.01% at the upper bound "
+             "on 2022-24 worlds, which is why D2 runs only while the lane is calls only. Weak discrimination: it "
+             "passes mostly programs whose screen windows rose; the $400 net Probe budget bounds the money"},
     {"rule": "the leakage alarm", "was": "one count over every look: 10 looks, over 30% passing",
      "now": "per lane: alpha unchanged; direction 10 looks, over 60% passing",
      "cost": "a real holdout leak in a direction program trips later; the paid review and audit and the post-cutoff "
@@ -200,8 +216,13 @@ TIGHTENED: tuple[str, ...] = (
     "setting that loosens K5 is dlane.k5_clear, which disarms it while it is true (listed with its cost among the "
     "loosened rules)",
     "D2 is refused unless a receipt's sha256 and its c are pinned in the repository's policy.json and CI holds the "
-    "receipt to it",
+    "receipt to it, and unless the lane is calls only (release D-1b)",
     "E5: one lot at today's prices within 10% of equity before Validation",
+    "release D-1b: ONE Validation try and ONE holdout look per direction lineage (was: the alpha lane's three looks and "
+    "tries until retirement), so a lineage's false-positive rate is the program's; a lineage that spends either without "
+    "a pass still in play retires",
+    "release D-1b: calls only: dlane.structures [\"long_single\"] (no debit vertical, no put) and every Train trade a long "
+    "call (bar C1)",
 )
 
 
@@ -716,12 +737,77 @@ def probes(store: Any, lanes: Lanes, settings: Mapping[str, Any] | None) -> list
                "screen": screen, "receipt": detail.get("receipt"), "screen_recorded": bool(detail.get("screen")),
                "fp_unconditional": figures.get("fp_unconditional"),
                "fp_both_windows_rose": figures.get("fp_both_windows_rose")}
+        if look is not None:  # release D-1b: the lane rates of the screen that admitted it (`dlane.fp_of_look`)
+            row.update({k: v for k, v in dlane.fp_of_look(detail, settings).items() if k.startswith("fp_")})
         if screen == dlane.ALPHA_SCREEN:
             row["fp_why"] = "the alpha screen's (S-B) rates are FAST_LANE_SCREEN_1's receipt (docs/benchmarks), not the lane's"
+            row.update(ALPHA_FP)
         if lane == dlane.DIRECTION:
             row["label"] = dlane.LABEL
         out.append(row)
     return out
+
+
+#: The alpha screen's (S-B) false-positive figure, stated beside an alpha program's Probe trade (release D-1b): it has no
+#: lane rate; its pre-registered benchmark's acceptance bound held (FAST_LANE_SCREEN_1, Oct 7, 2026).
+ALPHA_FP = {"fp_upper_bound": 0.02,
+            "fp_source": "FAST_LANE_SCREEN_1 (docs/benchmarks/fast_lane_screen_1.json): the per-program rate's one-sided 95% "
+                         "upper bound at most 2% in every null world"}
+
+
+def trade_screens(store: Any, lanes: Lanes, settings: Mapping[str, Any] | None, positions: Sequence[Mapping[str, Any]],
+                  all_closes: Sequence[Mapping[str, Any]], *, since: float) -> dict[str, Any]:
+    """THE FALSE-POSITIVE RATE BESIDE EVERY PROBE TRADE AND EVERY REAL CLOSE (release D-1b; the owner's goal of Oct 9,
+    item 4: "a pre-registered screen whose false-positive rate you have measured ... stated beside every Probe trade").
+    `probe_trades`: every real position on the Probe/Sized route `:r` opened since `since`, open or closed; `closes`:
+    every agent real close (every route, the Done rule's set), each with its program's screen (the passed holdout look of
+    the version the position trades: its recorded line) and that screen's rates at zero edge, {screen, fp_lane_mixed,
+    fp_lane_2224, receipt} (`dlane.fp_of_look`), the alpha screen's bound beside an S-B row (`ALPHA_FP`), the lane's
+    label beside a direction row; a version with no passed look on record (a tuition or incubator close) says so, never
+    an invented screen. The contamination statement rides beside them."""
+    from ..swarm import dlane
+    from .economics import route_of
+
+    passed: dict[tuple[str, int], Mapping[str, Any]] = {}
+    for look in store.looks():
+        if look.get("passed"):
+            passed[(str(look["family"]), int(look["version"]))] = look
+
+    def screen_of(family: str, version: int | None) -> dict[str, Any]:
+        look = passed.get((family, int(version))) if isinstance(version, int) else None
+        lane = lanes.of(family)
+        if look is None:
+            out = {"screen": None, "fp_lane_mixed": None, "fp_lane_2224": None, "receipt": None, "look_at": None,
+                   "fp_why": "no passed holdout look of this version is on record (a route no screen admits: tuition, "
+                             "the incubator)"}
+        else:
+            detail = look.get("detail") or {}
+            out = {**dlane.fp_of_look(detail, settings), "look_at": look.get("at"),
+                   "screen_recorded": bool(detail.get("screen"))}
+            if out["screen"] == dlane.ALPHA_SCREEN:
+                out.update(ALPHA_FP)
+        out["lane"] = lane
+        if lane == dlane.DIRECTION:
+            out["label"] = dlane.LABEL
+        return out
+
+    probe_trades = []
+    for p in positions:
+        opened = _num(p.get("opened_at"))
+        if route_of(p) != "d2_real" or opened is None or opened < since:
+            continue
+        family, version = str(p.get("family") or ""), version_of(p.get("instance"))
+        probe_trades.append({"pid": int(p["pid"]), "family": family, "instance": str(p.get("instance") or ""),
+                             "version": version, "status": str(p.get("status") or ""), "opened_at": _iso(opened),
+                             "closed_at": _iso(_num(p.get("closed_at"))), "root": str(p.get("root") or "").upper(),
+                             "type": str(p.get("type") or ""), **screen_of(family, version)})
+    closes_rows = [{"pid": c["pid"], "family": c["family"], "route": c.get("code") or c["route"], "version": c["version"],
+                    "closed_at": _iso(c["closed_at"]), "pnl_usd": _usd(c["pnl_usd"]), "fee_basis": c["fee_basis"],
+                    **screen_of(c["family"], c["version"])}
+                   for c in all_closes if not c["house"]]
+    return {"probe_trades": probe_trades, "closes": closes_rows, "contamination": CONTAMINATION,
+            "note": "each row's rates are its screen's per program at zero edge, measured on historical worlds (a property "
+                    "of the procedure, not a guarantee in this world); reported, never a bar"}
 
 
 # ------------------------------------------------------------------------------------------------- the envelope
@@ -1100,6 +1186,7 @@ def report(root: str | Path, *, settings: Mapping[str, Any] | None = None, now: 
                      "inception": dlane.DONE["inception"],
                      "fees": {"as_of": activity["as_of"], "why": activity["why"]}},
             "probes": probes(store, lanes, settings),
+            "fp_beside_trades": trade_screens(store, lanes, settings, book["positions"], every, since=start),
             "direction_net": lane_net,
             "account": account(root, every, activity, previous, now=now),
             "costs": costs(store, since=start, lane_since=_epoch(started) if isinstance(started, str) else None),
@@ -1183,4 +1270,4 @@ def run(ctx: Any) -> dict[str, Any]:
 
 __all__ = ["run", "report", "FILE", "CONTAMINATION", "LOOSENED", "TIGHTENED", "closes", "meter", "reading", "replay_gap",
            "buy_and_hold", "entry_delta", "funnel", "probes", "probe_envelope", "alarms", "fee_corrections", "read_book",
-           "version_of", "inception", "Lanes", "ZERO_EDGE_LABEL"]
+           "version_of", "inception", "Lanes", "ZERO_EDGE_LABEL", "trade_screens", "ALPHA_FP"]

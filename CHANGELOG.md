@@ -29,6 +29,43 @@ any other deploy.
 The running House release is `20261008T124025Z-a9686c7cfcfd` (main `ab64c68b`, 12:41Z Oct 8, below), the gateway is
 `f63dd354`, and the box's updater is on. What is built and not deployed is on branches.
 
+### Release D-1b, the direction lane on D2, on `release/dlane-d1` (unreleased; in D-1's owner deploy; no evidence reset)
+
+On top of D-1, same branch, same deploy. It switches the direction lane to the D2 screen and meets the owner's goal of
+Oct 9: item 4, a pre-registered screen whose measured false-positive rate is at most 15% per program, stated beside
+every Probe trade; and item 3, "Tell me 2 days before Sail or Claude runs out". It is Claude's decision DSCREEN-ADOPT,
+**a reported loosening**. Operator's page: **Release D-1b** at the top of `docs/operations.md`. Swarm-side and ops
+only: no `league/live/`, `league/gym/` or `league/constitution.py` change. The execution fingerprint (`b4c34031`), the
+money digest (`1665c385`) and the constitution digest (`5698a2f9`) do not move.
+- **D2 on** (`policy.json` `dlane.screen` "D2"; receipt `docs/benchmarks/direction_screen_2.json`, sha `c3605947`,
+  pinned in `dlane.screens.D2` with c 1.00 and the lane's figures; CI holds the sha and every figure to the receipt).
+  - The rule: on Validation, 50+ trades on 25+ entry days and a mean entry-day return above zero; after the one look,
+    the pooled entry-day t over Validation and the holdout at least 1.00 and the holdout's P&L above zero.
+  - The statistic is DSCREEN-2's own on exact figures (to 3e-15). On the Gym's rounded summaries the gate judges its
+    lower bound over the rounding, so no pass comes from rounding.
+  - The rollback is swarm.json `dlane.screen` "S-C", at once. The alpha lane is untouched.
+- **Its cost, measured** (the receipt): the lane's false-positive rate per program at zero edge goes from S-C's 1.41% to
+  10.37% on mixed worlds (9.57-11.16%) and 12.39% on 2022-24 worlds (upper bound 13.29%). All cells reach 13.37% and
+  14.11% (upper bounds 14.08% and 15.01%). Power at +10% goes from 3.22% to 19.95%. D2 was adopted after it failed the
+  operator's own 12% adoption rule: a post-hoc loosening, listed in every `dlane` report's header.
+- **Calls only:** `dlane.structures` ["long_single"] (no direction debit vertical, no put), and D2 runs only while the
+  lane is calls only. New Train bar C1: a direction program whose Train trades hold a put or a short leg fails it.
+- **One Validation try and one holdout look per direction lineage** (`dlane.val_tries`, `looks_per_lineage`, fixed at
+  1), so a lineage's false-positive rate is the program's.
+  - The tournament guards the try (`dlane.try_open`; one lineage member a round; `spent_lane` and `waiting_lane`, which
+    the stall alarm reads). As a backstop, a late second try never reaches the gate.
+  - The gate's ration is 1 for a direction lineage. A lineage that has used either without a pass still in play
+    retires (`dlane.lineage_spent`), and a direction family never forks once its lineage has tried.
+  - The alpha lane keeps its counts.
+- **The false-positive rate beside every trade** (operator-facing only): each direction look's line and event carry
+  `screen`, `fp_lane_mixed`, `fp_lane_2224` and `receipt`. The fast lane's band rows carry `fp`. The `dlane` report's
+  new `fp_beside_trades` lists every real Probe trade and every agent real close with its program's screen, its rates
+  and the contamination statement.
+- **The meter warning:** the `budget` job's `funding` notice now goes when research on a meter runs out within 2 days
+  at its current burn (`out_in_days`, `burn_usd_day` in `budget.json`; at the ceiling the same 7-day card line). It
+  goes at most once a day per meter (it was once a week), under a per-day notice id. The channel and the facts are
+  unchanged.
+
 ### Release D-1, the direction lane, on `release/dlane-d1` (unreleased; an owner deploy after release L-D; no evidence reset)
 
 A DIRECTION research lane beside the unchanged ALPHA lane, in which profit from the index's direction counts, reported

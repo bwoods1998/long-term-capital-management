@@ -57,8 +57,8 @@ under an empirical-Bayes posterior, times three discounts:
     0.35% over its first ten trials to 0.20% at 40-80 and none past 80, and first validations were 12.6% at t >= 1
     against 5% for second looks and 0 of 6 after (breadth beats depth; the Sept 29 ROI study: heavily worked versions
     validate weaker).
-  - EXHAUSTION = 0 when the lineage has spent its holdout looks (`evidence.LOOKS_PER_LINEAGE`: the gate can never look
-    again), 0.5 when its validated version failed the drift screen, 0.5 when THE GATE IS DONE WITH ITS VALIDATED
+  - EXHAUSTION = 0 when the lineage has spent its holdout looks (`evidence.LOOKS_PER_LINEAGE`, a direction lineage's
+    one since release D-1b, `dlane.looks_ration`: the gate can never look again), 0.5 when its validated version failed the drift screen, 0.5 when THE GATE IS DONE WITH ITS VALIDATED
     VERSION (`gate_spent`: its holdout look failed, or the review refused it for lookahead, leakage or fill abuse; its t
     is then no evidence of the next look, so the family reads as an unvalidated one of its class, at half), 0.5 while
     its researcher holds in a streak (`hold_streak` >= 3: it says it has nothing to run). A family at the gate, with a
@@ -133,7 +133,7 @@ import math
 import time
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
-from . import evidence, game
+from . import dlane, evidence, game
 from .dlane import DirectionQuota  # THE DIRECTION QUOTA (the module docstring), beside `BirthQuota`; its code is dlane.py's
 
 # ---------------------------------------------------------------------------------------------------------------- settings
@@ -692,7 +692,8 @@ def allocate_from_store(store: Any, fams: Sequence[Mapping[str, Any]], settings:
     for fam in fams:
         fid = str(fam["id"])
         try:
-            spent = store.lineage_looks(fid, include_inflight=True) >= evidence.LOOKS_PER_LINEAGE
+            # The lineage's look ration: one for a direction lineage (release D-1b, `dlane.looks_ration`), else three.
+            spent = store.lineage_looks(fid, include_inflight=True) >= dlane.looks_ration(store, fam, settings)
         except Exception:  # noqa: BLE001 - an unreadable lineage is not a spent one
             spent = False
         try:  # THE LEARNING GAME: no trial of a child the game bore beside it (`game.shown_trials`; the store's count else)

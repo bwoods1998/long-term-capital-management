@@ -145,7 +145,10 @@ A family's lane (`dlane.lane_of`: "alpha" for every family while `dlane.mode` is
 of Validation's Sharpe) byte for byte; the direction lane's look is "S-C", the same line at p <= 0.20 and a Sharpe share
 of 0.25; "D2" (a Validation pre-check, `Tournament._verdict`, then a pooled test) only behind `dlane.screen` "D2" with a
 receipt sha256 and its `c` pinned in the repository's policy.json, else refused (S-C). While the lane is on every look
-records its `lane`, `screen` and `receipt`, in its `detail` and its `swarm.gate` event. THE LEAKAGE ALARM counts each
+records its `lane`, `screen` and `receipt`, in its `detail` and its `swarm.gate` event. RELEASE D-1b (Oct 9, 2026): D2 is
+the direction lane's screen (policy.json pins DSCREEN-2's receipt; swarm.json `dlane.screen` "S-C" is the instant
+rollback), a direction look also records its screen's false-positive rates (`fp_lane_mixed`, `fp_lane_2224`), and a
+direction lineage's look ration is ONE (`dlane.looks_ration`; the alpha lane keeps `evidence.LOOKS_PER_LINEAGE`). THE LEAKAGE ALARM counts each
 lane's looks alone (`alarms`, `evidence.leakage_alarms`): the alpha lane's at 10 looks and more than 30% passed, the
 direction lane's at 10 and more than 60%, and a lane's alarm stops that lane's looks and incubator reads only (the
 whole gate stops when both hold). THE LANE'S MODE (`lane_closed`): while the direction lane is in "shadow" (its setting,
@@ -813,9 +816,12 @@ class Gate:
                 else:
                     out["waiting"].append(fam["id"])  # figures owed (a Train run from before them): no look, no refusal
                 continue
-            if self.store.lineage_looks(fam["id"], include_inflight=True) >= evidence.LOOKS_PER_LINEAGE:
-                if self.store.lineage_looks(fam["id"]) >= evidence.LOOKS_PER_LINEAGE:
-                    self.refuse(fam, n, sha, "rations", ["the lineage's three holdout looks are spent"], out)
+            ration = dlane.looks_ration(self.store, fam, self.settings)  # 3; a direction lineage's 1 (release D-1b)
+            if self.store.lineage_looks(fam["id"], include_inflight=True) >= ration:
+                if self.store.lineage_looks(fam["id"]) >= ration:
+                    self.refuse(fam, n, sha, "rations", ["the lineage's three holdout looks are spent"
+                                                         if ration == evidence.LOOKS_PER_LINEAGE else
+                                                         "the direction lineage's one holdout look is spent"], out)
                 else:
                     out["waiting"].append(fam["id"])
                 continue
@@ -1177,7 +1183,8 @@ class Gate:
         with self.store.atomic():
             current = self.store.family(fam["id"]) or {}
             if current.get("retired_at") or (current.get("state") or {}).get("gate_hold") or self.store.looked(sha) or \
-                    self.store.lineage_looks(fam["id"], include_inflight=True) >= evidence.LOOKS_PER_LINEAGE or \
+                    self.store.lineage_looks(fam["id"], include_inflight=True) >= dlane.looks_ration(self.store, current,
+                                                                                                      self.settings) or \
                     self.duplicate_look(current, n, sha) is not None or self.look_hold(current, n) is not None or \
                     self.lane_closed(current, current.get("state") or {}) is not None:
                 # (held by the operator meanwhile: no look is spent, gate_ready stays; a look it would repeat landed or went
@@ -1323,7 +1330,9 @@ class Gate:
         self.store.add_look(fid, n, sha, passed=line["passed"], p_value=line["p"], detail=line)
         self.clear_marker(fid, sha)  # only its own: a newer version's look may be in flight
         self.store.compare_and_set_state(fid, {"validation_version": n}, gated_sha=sha)
-        recorded = {k: line[k] for k in ("lane", "screen", "receipt") if k in line}  # release D-1: none while the lane is off
+        # release D-1: none while the lane is off; release D-1b: a direction look also states its screen's false-positive
+        # rates (`fp_lane_mixed`, `fp_lane_2224`; the FP beside every look and every Probe trade).
+        recorded = {k: line[k] for k in ("lane", "screen", "receipt", "fp_lane_mixed", "fp_lane_2224") if k in line}
         self.store.event("swarm.gate", fid, {"action": "look", "version": n, "passed": line["passed"], **recorded,
                                              "_line": line})  # the numbers stay private (underscore)
         self.tell(fid, "pass" if line["passed"] else "fail", verdict=True)
@@ -1365,11 +1374,13 @@ class Gate:
           for byte (while the lane is off the line carries nothing more);
         - "S-C", the direction lane's: the same line at the lane's level (p <= 0.20) and Sharpe share (0.25 of
           Validation's);
-        - "D2" (only behind `dlane.screen` "D2" with a receipt pinned in the repository's policy.json): P&L after fees above
-          zero and D2's pooled entry-day t over Validation and the holdout (`dlane.d2_pooled_t`) at least the receipt's
-          calibrated `c`; the bootstrap p and the tail are still reported.
+        - "D2" (only behind `dlane.screen` "D2" with a receipt pinned in the repository's policy.json; ON since release D-1b):
+          DSCREEN-2's rule (`dlane.d2_verdict`): the Validation pre-check held again, P&L after fees above zero and D2's
+          pooled entry-day t over Validation and the holdout (`dlane.d2_pooled_t`) at least the receipt's calibrated `c`;
+          the bootstrap p and the tail are still reported.
         While the lane is on, every look's line records its `lane`, `screen` and `receipt` (also in its `detail`: the
-        leakage alarm counts each lane's looks from it)."""
+        leakage alarm counts each lane's looks from it), and a direction look its screen's false-positive rates
+        (`fp_lane_mixed`, `fp_lane_2224`, release D-1b: the operator's report states them beside every Probe trade)."""
         if not dlane.on(self.settings):  # THE ROLLBACK: the release before it's line and record
             return evidence.holdout_line(result, validation_sharpe=validation_sharpe, previous_ps=previous, seed=seed)
         if screen.get("screen") == "S-C":
@@ -1378,15 +1389,19 @@ class Gate:
         elif screen.get("screen") == "D2":
             base = evidence.holdout_line(result, validation_sharpe=validation_sharpe, previous_ps=previous, seed=seed)
             rows = self.store.version_runs(fid, int(n), window="validation", stress=1.0, limit=1)
-            pooled = dlane.d2_pooled_t((rows[0].get("summary") or {}) if rows else None, result.get("summary"))
-            c = screen.get("c")
-            checks = {"status_ok": base["checks"]["status_ok"], "pnl": base["checks"]["pnl"],
-                      "pooled": pooled is not None and c is not None and pooled >= float(c)}
+            # DSCREEN-2's rule after the look (`dlane.d2_verdict`, release D-1b): the Validation pre-check held again, the
+            # holdout's P&L above zero and the pooled entry-day t at least the receipt's c.
+            d2 = dlane.d2_verdict((rows[0].get("summary") or {}) if rows else None, result.get("summary"), screen.get("c"))
+            checks = {"status_ok": base["checks"]["status_ok"], **d2["checks"]}
             line = {**base, "passed": all(checks.values()), "checks": checks,
-                    "numbers": {**base["numbers"], "rule": "D2", "pooled_t": pooled, "c": c}}
+                    "numbers": {**base["numbers"], "rule": "D2", "pooled_t": d2["pooled_t"], "pooled_t_low": d2["pooled_t_low"],
+                                "c": d2["c"]}}
         else:
             line = evidence.holdout_line(result, validation_sharpe=validation_sharpe, previous_ps=previous, seed=seed)
-        return {**line, "lane": screen.get("lane"), "screen": screen.get("screen"), "receipt": screen.get("receipt")}
+        out = {**line, "lane": screen.get("lane"), "screen": screen.get("screen"), "receipt": screen.get("receipt")}
+        if screen.get("lane") == dlane.DIRECTION:  # release D-1b: the screen's false-positive rates beside the look
+            out.update({k: v for k, v in dlane.fp_beside(screen).items() if k.startswith("fp_")})
+        return out
 
     # ------------------------------------------------------------------ the nightly forward
     def _current_forward_version(self, fam: Mapping[str, Any]) -> bool:

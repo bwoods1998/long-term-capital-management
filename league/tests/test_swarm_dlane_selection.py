@@ -300,7 +300,7 @@ class GateLane(RoundCase):
         """D2 behind `dlane.screen` "D2": refused (S-C, the coded Validation line) unless the repository's policy pins a
         receipt and its `c`; with one, a direction version that missed the line but passes the pre-check reaches the gate
         WITHOUT opening tuition, and its look is judged by the pooled test and records the receipt."""
-        self.settings["dlane"] = {"mode": "gate", "screen": "D2"}
+        self.settings["dlane"] = {"mode": "gate", "screen": "D2", "structures": ["long_single"]}  # D2 is calls only (D-1b)
         weak = lambda job: (result(job.name, window=job.window, t=0.5, mean=0.01, quarters="1/4")  # noqa: E731
                             if job.window == "validation" else result(job.name, daily=HOLDOUT_DAILY, window=job.window))
         self.answer = weak
@@ -325,12 +325,12 @@ class GateLane(RoundCase):
         detail = self.looks()["d"]["detail"]
         self.assertEqual({k: detail[k] for k in LANE_KEYS}, {"lane": "direction", "screen": "D2", "receipt": sha})
         self.assertEqual(detail["numbers"]["rule"], "D2")
-        self.assertEqual(set(detail["checks"]), {"status_ok", "pnl", "pooled"})
+        self.assertEqual(set(detail["checks"]), {"status_ok", "precheck", "pnl", "pooled"})
         self.assertGreaterEqual(detail["numbers"]["pooled_t"], 1.0)
         self.assertEqual((fam["band"], self.store.family("d")["band"]), ("gym", "candidate"))
         # Pinned while the operator later moves the screen back to S-C: a pre-check entry waits for the coded line.
         self.store.set_state("d", gate_ready=True, gated_sha=None)
-        self.settings["dlane"] = {"mode": "gate"}
+        self.settings["dlane"] = {"mode": "gate", "structures": ["long_single"]}
         self.assertIn("pre-check", self.gate().lane_closed(self.store.family("d"), self.store.family("d")["state"]))
 
     def test_the_leakage_alarm_counts_each_lane_alone(self):

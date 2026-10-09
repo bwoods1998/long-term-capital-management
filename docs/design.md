@@ -533,7 +533,8 @@ beside the alpha lane, whose rules do not change. It is **leveraged index beta m
 everything that shows it says so. The rules live in one module, `league/swarm/dlane.py`.
 
 - **Two lanes.** A family's lane is its card's, fixed at birth; every family before D-1 is alpha. The direction lane is
-  a box: index roots (SPY, QQQ, IWM), calls or call verticals, holds of 2 to 8 sessions, the `equity_premium` or
+  a box: index roots (SPY, QQQ, IWM), calls (D-1 also admitted call verticals; D-1b is calls only, every Train trade
+  a long call), holds of 2 to 8 sessions, the `equity_premium` or
   `trend_momentum` class, and an ablation switch that enters the same structure every session (the gate is what the
   program would add over that twin). Births are about half each while the lane is behind (at most 60% direction).
 - **Its Train bar, direction-v2.** In the market in at least 2 of the 3 Train years with 60+ entry sessions each; a
@@ -544,8 +545,14 @@ everything that shows it says so. The rules live in one module, `league/swarm/dl
   Train bar costs paid reviews, not screened false positives.
 - **Its screen.** The Validation line as coded, then one holdout look at p <= 0.20 with a Sharpe share of 0.25 (S-C);
   its false-positive rate at zero edge is 1.41% a program, 2.22% in a world where both windows rose (the operator's
-  simulation). No hidden look: the game's look cost the lane most of its power for a false-positive gain under 1%. A
-  pooled screen (D2) is coded and refused until a receipt is pinned in the repository. Each lane has its own leakage
+  simulation). No hidden look: the game's look cost the lane most of its power for a false-positive gain under 1%.
+  RELEASE D-1b switches the lane to the pooled screen D2, with its receipt pinned in the repository. D2 is a
+  Validation pre-check, then the pooled entry-day t over Validation and the holdout at least 1.00 with the holdout's
+  P&L above zero. Its false-positive rate is 10.37% a program on mixed worlds and 12.39% on 2022-24 worlds, and its
+  power at +10% is 19.95%. That is a reported loosening, adopted after it failed the operator's own 12% rule. The lane
+  is calls only. A direction lineage gets ONE Validation try and ONE holdout look, so its rate is the program's. The
+  rate is stated beside every look and every Probe trade in the operator's reports, and swarm.json `dlane.screen`
+  "S-C" is the instant rollback. Each lane has its own leakage
   alarm (direction trips at 10 looks and over 60%: its passes are correlated through one market); with the lane off,
   the one alarm counts only the looks the alpha line judged. A direction family never plays the learning game, even
   when it is born into a lineage that has an arm.

@@ -185,7 +185,9 @@ def _gym(fam: Mapping, version: Mapping, families: Mapping, looks: Sequence, lin
         blocked = "gate_paused"
     elif looked:
         blocked = "evidence_stale" if looked["passed"] else "holdout_failed"
-    elif not looked and sha not in reserved and len(reserved) >= evidence.LOOKS_PER_LINEAGE:
+    elif not looked and sha not in reserved and len(reserved) >= dlane.looks_ration(None, fam, cfg):
+        # The lineage's look ration (release D-1b: one for a direction lineage, `dlane.looks_ration` from the spec with no
+        # store read; `evidence.LOOKS_PER_LINEAGE` for every other and while the lane is off). The same closed blocker.
         blocked = "look_limit"
     elif state.get("gate_hold"):
         # Held by the operator (`SwarmStore.hold_gate`): the site's closed list of blockers has no key of its own for it, and

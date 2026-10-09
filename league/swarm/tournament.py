@@ -29,6 +29,17 @@
    L-D's DM1 reads it), and a direction version that missed the line goes to the gate when D2 is the lane's screen in
    force and its Validation pre-check passes (`precheck_entry`; D2 is refused unless its receipt is pinned). While
    `dlane.mode` is "off" neither is done.
+   THE DIRECTION LANE'S RATION (release D-1b, Oct 9, 2026; DSCREEN-ADOPT): ONE Validation try and ONE holdout look per
+   direction lineage (`dlane.val_tries`, `dlane.looks_per_lineage`), so D2's measured false-positive rate per program is
+   the lineage's. A direction version is validated only while its connected lineage has no try yet, or when it is that
+   try already (validated again on a new Gym image: `dlane.try_open`); one member of a lineage a round (`waiting_lane`);
+   a family whose lineage's try is used is owed none (`spent_lane`, which the ops' stall check reads). The backstop: a
+   verdict that is not its lineage's first try (a result that raced past the guard, landing late) is recorded as rows and
+   trials and never judged into the family's state (`lane_try`), so it can never enter the gate. The lineage's try is kept
+   in the family's state (`dlane.TRY_KEY`: did it enter the gate). RETIREMENT (`_why`, `dlane.lineage_spent`): a Gym
+   direction family whose lineage has used its try or its look, with no try of its own still waiting for its look,
+   retires (THE COHORT KEEP spares it as it spares the clocks); a direction family never forks once its lineage's try is
+   used (`lane_forks`). The alpha lane keeps its counts; with the lane off nothing here is read.
 3. THE ALLOCATION (Release B, league/swarm/allocation.py; `allocation.mode` "value"): each family's share of researcher
    turns and Gym priority by its expected information value (the variance of its next validation's pass or fail under
    an empirical-Bayes posterior, discounted by the idea's trials, its own and those inherited at birth, by exhaustion:
@@ -330,6 +341,12 @@ class Tournament:
         twins: list[tuple[dict[str, Any], int, dict[str, Any]]] = []
         waiting: list[str] = []
         waiting_game: list[str] = []  # THE LEARNING GAME: no CONFIRMED version, or its tries used (owed no Validation)
+        # THE DIRECTION LANE'S RATION (release D-1b): a direction lineage whose one Validation try is used is owed none
+        # (`spent_lane`); and one try a lineage a round, so two members of one lineage never validate side by side
+        # (`lane_lines`: the connected lineages that already have a job, a twin or a verdict this round).
+        spent_lane: list[str] = []
+        lane_waiting: list[str] = []
+        lane_lines: set[str] = set()
         drift: dict[str, list[str]] = {"waiting": [], "failed": []}
         image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
         bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
@@ -349,6 +366,16 @@ class Tournament:
             if played and not self.game_try_left(fam, n):
                 waiting_game.append(fam["id"])
                 continue  # THE LEARNING GAME: its Validation tries are used
+            lines = self.lane_lines(fam)
+            if lines is not None:
+                # THE DIRECTION LANE'S RATION (release D-1b): one Validation try a direction lineage (`dlane.try_open`: a
+                # version already its lineage's try may be validated again on a new Gym image), and one a round.
+                if not dlane.try_open(self.store, fam, n, self.settings):
+                    spent_lane.append(fam["id"])
+                    continue
+                if lines & lane_lines:
+                    lane_waiting.append(fam["id"])
+                    continue
             state = fam.get("state") or {}
             from .evaluator import KEY, row_matches
 
@@ -384,6 +411,8 @@ class Tournament:
             version = self.store.version(fam["id"], n)
             if version is None or not version.get("code"):
                 continue
+            if lines is not None:
+                lane_lines.update(lines)  # this direction lineage's try for the round (whichever way it is judged below)
             recorded = self.recorded_validation(fam["id"], n)
             if recorded is not None:  # validated before (a best submitted again): judged from its result, no new trial
                 row = self.judge(fam["id"], n, recorded, record=False)
@@ -438,7 +467,19 @@ class Tournament:
             out.update(inherited=inherited, waiting_twin=waiting_twin)
         if waiting_game:  # the ops' stall check reads it: a game-arm best is owed no Validation without a CONFIRM
             out["waiting_game"] = waiting_game
+        if spent_lane:  # THE DIRECTION LANE'S RATION (release D-1b): its lineage's one try is used: owed no Validation
+            out["spent_lane"] = spent_lane
+        if lane_waiting:  # another member of its direction lineage took this round's try: the next round reads its verdict
+            out["waiting_lane"] = lane_waiting
         return out
+
+    def lane_lines(self, fam: Mapping[str, Any]) -> set[str] | None:
+        """THE DIRECTION LANE'S RATION (release D-1b): a direction family's connected lineages (the set its tries and looks
+        are counted over), or None for every alpha family and every family while the lane is off (nothing is read)."""
+        if dlane.lane_of(self.store, fam, self.settings) != dlane.DIRECTION:
+            return None
+        row = self.store._one("SELECT lineage FROM families WHERE id=?", (fam["id"],))
+        return set(self.store._connected_lineages(row["lineage"])) if row else {str(fam["id"])}
 
     def _game_read(self, read: Callable[..., Any], fam: Mapping[str, Any], n: Any) -> Any:
         """One of the game's reads of a version (`game.look_seen_run`, `game.seen_robust_ok`), None on an error."""
@@ -550,6 +591,14 @@ class Tournament:
 
     def _verdict(self, fid: str, fam: Mapping[str, Any], n: int, result: Mapping[str, Any], *, counted: bool,
                  inherited: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        lane_try = self.lane_try(fid, fam, n, result)
+        if lane_try is False:
+            # THE DIRECTION LANE'S RATION, the backstop (release D-1b): a second try of a direction lineage that raced past
+            # `dlane.try_open` (a result landing late) is recorded (its rows and trials, above) and never judged into the
+            # family's state, so it can neither enter the gate nor displace the lineage's own try there.
+            self.store.event("swarm.status", fid, {"action": "lane_try_refused", "version": int(n),
+                                                   "why": "not its direction lineage's one Validation try"})
+            return {"version": n, "passed": False, "refused": "not its direction lineage's one Validation try"}
         stressed = evidence.stressed_of(result)
         validated, sharpes = 1, []  # FAST LANE V2 (D1): the deflated Sharpe's N is the program itself, never the lineage's history
         line = evidence.validation_line(result, stressed, validated_versions=validated, version_sharpes=sharpes,
@@ -580,6 +629,10 @@ class Tournament:
             typical[str(n)] = loss
         sigma = self.sigma_fields(state, n, summary)
         precheck = self.precheck_entry(fam, line, summary)
+        entered = bool(line["passed"]) or precheck
+        lane_fields: dict[str, Any] = {}
+        if lane_try is True:  # the lineage's one try (release D-1b): what `dlane.lineage_spent` reads
+            lane_fields[dlane.TRY_KEY] = {"version": int(n), "at": self.store.now(), "first": True, "entered": entered}
         from .evaluator import KEY
 
         # THE VALIDATED-FAMILY GUARD's record (`researcher.retire_guard`): this version's latest verdict and the evaluator
@@ -598,7 +651,7 @@ class Tournament:
                              # (None for the family's own), for the version `validation_version` names; its own copy
                              # of the record says so too, so a later re-judging keeps it.
                              validation_inherited=dict(source) if isinstance(source, Mapping) else None,
-                             gate_ready=(bool(line["passed"]) or precheck) and not self.gate_spent(fid, n, state))
+                             gate_ready=entered and not self.gate_spent(fid, n, state), **lane_fields)
         out = {"version": n, "passed": line["passed"], "mean": mean, "t": t}
         if inherited is not None:
             out["inherited"] = dict(inherited)
@@ -611,6 +664,17 @@ class Tournament:
         elif change == "lapsed":
             out["extension_lapsed"] = True
         return out
+
+    def lane_try(self, fid: str, fam: Mapping[str, Any], n: int, result: Mapping[str, Any]) -> bool | None:
+        """THE DIRECTION LANE'S RATION at a verdict (release D-1b): None for every alpha family, every family while the lane
+        is off and a run the Gym could not make (`dlane.NOT_A_TRY`: no try); True when version `n` is its direction
+        lineage's one Validation try (`dlane.first_try`, its rows already recorded); False for any other try (it raced
+        past `dlane.try_open`: `_verdict` records nothing of it)."""
+        if dlane.lane_of(self.store, fam, self.settings) != dlane.DIRECTION:
+            return None
+        if str(result.get("status") or "") in dlane.NOT_A_TRY:
+            return None
+        return dlane.first_try(self.store, fid, n, self.settings)
 
     def sigma_fields(self, state: Mapping[str, Any], n: int, summary: Mapping[str, Any]) -> dict[str, Any]:
         """THE SIGMA WRITER (release D-1, Oct 9, 2026; the operator's decision 4, for release L-D's DM1, which reads it in
@@ -735,6 +799,8 @@ class Tournament:
                 continue  # its validated version failed the drift screen: nothing to fork
             if self.played(fam):
                 continue  # THE LEARNING GAME: the game's own children replace forks for the game arm (`game.reproduce`)
+            if not self.lane_forks(fam):
+                continue  # THE DIRECTION LANE'S RATION (release D-1b): a fork would join a lineage with no try left
             if fam["structure"] not in allowed:
                 continue  # THE STRUCTURES (`architect.structures`): a type no birth may be does not breed; it researches on
             nums = (fam.get("state") or {}).get("validation_numbers") or {}
@@ -754,6 +820,19 @@ class Tournament:
             if child:
                 born.append(child)
         return born
+
+    def lane_forks(self, fam: Mapping[str, Any]) -> bool:
+        """May `fam` fork under THE DIRECTION LANE'S RATION (release D-1b)? Always for an alpha family and while the lane is
+        off. A direction family only while its lineage has a Validation try left (`dlane.lineage_tries` under
+        `val_tries`): a fork joins its parent's lineage (its tries and its looks), so once the lineage's one try is used a
+        fork could never be validated. A fork is offered only to a validated parent, so with one try a direction family
+        never forks."""
+        if dlane.lane_of(self.store, fam, self.settings) != dlane.DIRECTION:
+            return True
+        try:
+            return len(dlane.lineage_tries(self.store, fam["id"])) < dlane.cfg(self.settings)["val_tries"]
+        except Exception:  # noqa: BLE001 - an unreadable lineage forks nothing
+            return False
 
     def fork(self, fam: Mapping[str, Any]) -> str | None:
         """A child on the parent's roots plus the next root of the rotation the parent does not trade (never XSP; index
@@ -827,6 +906,12 @@ class Tournament:
                 why = None
             if why:
                 return why
+        # THE DIRECTION LANE'S RATION (release D-1b): a direction lineage that has used its one Validation try or its one
+        # holdout look without a pass still in play retires (`dlane.lineage_spent`: words only, never a figure). After the
+        # gate's own holds above; never for an alpha family, nor while the lane is off. THE COHORT KEEP spares it below as
+        # it spares the clocks: the ration itself is enforced where a try or a look is spent (`dlane.try_open`,
+        # `first_try`, `looks_ration`), so a kept family researches on with nothing left to validate until its cohort ends.
+        spent = dlane.lineage_spent(self.store, fam, self.settings)
         clock: tuple[str, str] | None = None
         if int(fam.get("since_val_revisions") or 0) >= int(self.cfg.get("retire_revisions", 30)):
             clock = ("revisions", f"no validation improvement in {fam['since_val_revisions']} revisions")
@@ -842,10 +927,13 @@ class Tournament:
         if fam["id"] in (self.incubator_keep() if kept is None else kept):
             # THE COHORT KEEP (L1): its practice cohort is still running and not losing. Evidence still retires it.
             if dsr is None:
-                spared = clock[0] if clock else ("idle" if idle_dead(fam, self.settings, current=current) else None)
+                spared = ("ration" if spent else clock[0] if clock
+                          else ("idle" if idle_dead(fam, self.settings, current=current) else None))
                 if spared:
                     self.keep_spared[fam["id"]] = spared
             return dsr
+        if spent:
+            return spent
         why = clock[1] if clock else dsr
         if not why:
             # The fallback for a dead family that never called retire (R3): Train figures only in the reason.

@@ -34,6 +34,8 @@ has at least 40 trades on 20 traded days (`evidence.TRAIN_YEAR_MIN_TRADES`, `TRA
       the unit cap (`unit_cap_usd`, else `unit_share` (10%) of the equity the live path last wrote to `health.json`). Read
       live, never a fixed scale (decision 3); a missing closes file, equity or 2024 trade reads "unknown", which PASSES:
       the live path prices every real open again (`unit_context`).
+  C1  CALLS ONLY (release D-1b, Oct 9, 2026): every Train trade's legs are long calls (`calls_only`; D2 was measured on
+      long calls and a `long_single` program may send a put by its code). Judged first.
 The score S_D is the pooled t of daily P&L over the Train years at 1.0x. On the 1.5x run (`robust_verdict`), each a
 demotion when it fails:
   P1  the run's P&L above zero (the House's existing 1.5x rule, unchanged);
@@ -50,10 +52,21 @@ it was (its cost is more paid reviews and audits).
 THE SCREEN (`screen_effective`; decision 6). The direction lane's holdout look is "S-C": the Validation line as coded,
 then one look at p <= 0.20 (`look_level`) with a holdout Sharpe at least 0.25 (`sharpe_share`) of Validation's; the alpha
 lane keeps "S-B" (`evidence.LOOK_LEVEL` 0.10, `HOLDOUT_SHARPE_SHARE` 0.5) byte for byte. "D2" (a pre-check then a pooled
-test) is coded but REFUSED unless a receipt's sha256 is pinned in the repository's own policy.json
+test) is REFUSED unless a receipt's sha256 is pinned in the repository's own policy.json
 (`dlane.screens.D2.receipt_sha256`, read from the file, never from the box's swarm.json) together with its calibrated `c`;
 CI holds that sha to `docs/benchmarks/direction_screen_2.json` (`docs/benchmarks/` never reaches the box). Every look
 event records the lane, the screen and the receipt the effective screen names.
+D2 IS ON (release D-1b, Oct 9, 2026; the operator's decision DSCREEN-ADOPT, a REPORTED LOOSENING): policy.json sets
+`dlane.screen` "D2" and pins the receipt of DSCREEN-2 (sha c3605947, c 1.00). The rule, exactly as pre-registered
+(`d2_precheck`, `d2_pooled_t`, the gate's `look_line`): on Validation at 1.0x at least 50 trades on at least 25 entry
+days with a mean entry-day return above zero; after the one sealed look, the pooled entry-day t over the Validation and
+holdout entry days at least `c` AND the holdout's P&L above zero. Its measured false-positive rate per program at zero
+edge is 10.37% on mixed worlds and 12.39% on 2022-24 worlds (the receipt's lane figures; the owner's ceiling is 15%),
+stated beside every look and every Probe trade (`fp_lane_mixed`, `fp_lane_2224`). It is adopted for a CALLS-ONLY lane:
+D2 is refused while `dlane.structures` admits anything but single calls (`D2_STRUCTURES`). TIGHTENED with it: one
+Validation try and one holdout look per direction lineage (`val_tries`, `looks_per_lineage`; `lineage_tries`,
+`try_open`, `lineage_spent`), so a lineage's false-positive rate is the program's. THE ROLLBACK is instant and is a
+tightening: swarm.json `dlane.screen` "S-C" (a setting may always choose S-C; it can never pin a receipt).
 
 THE BIRTH QUOTA (`DirectionQuota`; decision 1). While the lane is behind `birth_share` (0.5) of the last
 `window_hours` (24) of births and fewer than `max_alive` (24) direction families live, at least
@@ -119,6 +132,11 @@ TRAIN_CLOSE_2024: dict[str, float] = {"SPY": 540.9, "QQQ": 464.4, "IWM": 211.0}
 ROOTS = tuple(TRAIN_CLOSE_2024)
 #: The structures a direction card may name (a direction `long_single` buys calls only: the agenda and the brief say so).
 STRUCTURES = ("long_single", "debit_vertical", "long_call")
+#: THE CALLS-ONLY LANE (release D-1b, Oct 9, 2026): D2 was measured on, and adopted for, single calls (DSCREEN-2's lane:
+#: 0.20/0.30-delta calls held 5 or 8 sessions). While `dlane.structures` names any other (a debit vertical), D2 is
+#: refused and the lane's look is S-C (`screen_effective`). A put is no lane structure at all; a direction program's
+#: Train trades must all be long calls (`calls_only`, the bar C1).
+D2_STRUCTURES = ("long_single", "long_call")
 #: The mechanism classes of the lane. `equity_premium` is NEW (cards.MECHANISM_CLASSES gains it with this sentence).
 CLASSES = ("equity_premium", "trend_momentum")
 EQUITY_PREMIUM = ("the equity risk premium: index ETFs drift up on average because holders are paid to bear market risk; "
@@ -136,6 +154,10 @@ CLOSES_FILE = "direction-closes.json"
 HEALTH_FILE = "health.json"
 #: The family state's key of the lane's verdicts (`record`), and how many versions it keeps.
 STATE_KEY = "dlane"
+#: The family state's key of its direction lineage's Validation try (release D-1b, `Tournament._verdict`): {version, at,
+#: first, entered}: the version judged, whether it was its lineage's FIRST try (only the first may enter the gate) and
+#: whether it entered the gate (met the line, or D2's pre-check while D2 was in force). `lineage_spent` reads it.
+TRY_KEY = "dlane_try"
 #: What an agent is told when E5 fails (the review of Oct 9, 2026): the verdict and this scale-free hint, never a figure
 #: priced at today's closes or the account's equity (`unit_of`'s `why`, `view`, `status_text`, the architect's LANES
 #: block). A dollar figure at today's prices over a 2024 one is today's index level against 2024's, a 2026 market figure
@@ -185,10 +207,17 @@ DEFAULTS: dict[str, Any] = {
     "unit_cap_usd": None, "unit_share": 0.10, "unit_pref_usd": 75,
     # No hidden look for direction (decision 5): `game._arm` returns None for a direction lineage.
     "arm_fraction": 0.0,
-    # THE SCREEN (decision 6).
+    # THE SCREEN (decision 6). S-C's `fp_unconditional` is its lane false-positive rate at zero edge on MONEY's mixed worlds
+    # (1.41%), so it is also its `fp_lane_mixed`; `fp_lane_2224` is S-C's lane rate on DSCREEN-2's 2022-24 worlds (2.09%,
+    # measured beside D2 on the same worlds, not a decision input): each look and each Probe trade states both.
     "screen": "S-C",
-    "screens": {"S-C": {"look_level": 0.20, "sharpe_share": 0.25, "fp_unconditional": 0.0141, "fp_both_windows_rose": 0.0222},
+    "screens": {"S-C": {"look_level": 0.20, "sharpe_share": 0.25, "fp_unconditional": 0.0141, "fp_both_windows_rose": 0.0222,
+                        "fp_lane_2224": 0.0209},
                 "D2": {"receipt_sha256": None}},
+    # ONE TRY AND ONE LOOK PER DIRECTION LINEAGE (release D-1b, Oct 9, 2026; DSCREEN-ADOPT): D2's false-positive rate is
+    # the program's; a lineage that could try again would multiply it (DSCREEN-2's per-lineage reading A, two tries:
+    # 16.4% on mixed worlds). Bounded at 1: a setting can never loosen them (the alpha lane keeps `evidence`'s counts).
+    "val_tries": 1, "looks_per_lineage": 1,
     # THE LEAKAGE ALARM of the direction lane (decision 7; the alpha lane's is `evidence.leakage_alarm`, unchanged).
     "alarm_min_looks": 10, "alarm_pass_share": 0.60,
     # THE DONE METER's zero-edge figure (decision 8: "P(Done | zero edge), simulation").
@@ -217,7 +246,8 @@ def cfg(settings: Mapping[str, Any] | None) -> dict[str, Any]:
     "off" (the rollback); a malformed one is "shadow". Lists keep only the lane's own words (`ROOTS`, `STRUCTURES`,
     `CLASSES`, `HOLDINGS`) and an empty one is the default. `max_share` is never under `birth_share`. The screen, the
     leakage alarm and K5 can only be TIGHTENED past the policy's (`look_level` <= 0.20, `sharpe_share` >= 0.25,
-    `alarm_pass_share` <= 0.60, `k5_net_usd` >= -600)."""
+    `alarm_pass_share` <= 0.60, `k5_net_usd` >= -600). A direction lineage's Validation tries and holdout looks
+    (`val_tries`, `looks_per_lineage`, release D-1b) are 1 whatever is written: D2's measured rate is per program."""
     raw = (settings or {}).get("dlane") if isinstance(settings, Mapping) else None
     raw = raw if isinstance(raw, Mapping) else {}
 
@@ -274,8 +304,10 @@ def cfg(settings: Mapping[str, Any] | None) -> dict[str, Any]:
                     "fp_unconditional": number("fp_unconditional", 0.0, 1.0, block=sc_raw,
                                                default=sc_default["fp_unconditional"]),
                     "fp_both_windows_rose": number("fp_both_windows_rose", 0.0, 1.0, block=sc_raw,
-                                                   default=sc_default["fp_both_windows_rose"])},
+                                                   default=sc_default["fp_both_windows_rose"]),
+                    "fp_lane_2224": number("fp_lane_2224", 0.0, 1.0, block=sc_raw, default=sc_default["fp_lane_2224"])},
             "D2": _d2_block(d2_raw)},
+        "val_tries": whole("val_tries", 1, 1), "looks_per_lineage": whole("looks_per_lineage", 1, 1),
         "alarm_min_looks": whole("alarm_min_looks", 10, 1000),
         "alarm_pass_share": number("alarm_pass_share", 0.30, 0.60),
         "done_zero_edge_p": number("done_zero_edge_p", 0.0, 1.0),
@@ -284,16 +316,28 @@ def cfg(settings: Mapping[str, Any] | None) -> dict[str, Any]:
     }
 
 
+#: The figures a D2 block carries beside its sha and `c` (release D-1b: the receipt's lane figures, reported only, never
+#: a bar): the lane's false-positive rate at zero edge on mixed worlds and on 2022-24 worlds, its 95% world-bootstrap and
+#: cluster-bootstrap intervals on mixed worlds, and the lane's power at +10% of maximum loss a trade (mixed worlds).
+D2_RATES = ("fp_lane_mixed", "fp_lane_2224", "power10", "fp_unconditional", "fp_both_windows_rose")
+D2_INTERVALS = ("fp_lane_ci_mixed", "fp_lane_cluster_mixed")
+
+
 def _d2_block(raw: Mapping[str, Any]) -> dict[str, Any]:
     """The D2 screen's block as written: a receipt sha (64 lower-case hex, else None), its calibrated pooled-t bar `c`
-    (0.5-4.0, else None) and the false-positive figures its receipt measured (reported only)."""
+    (0.5-4.0, else None) and the figures its receipt measured (`D2_RATES`, each in [0, 1], else None; `D2_INTERVALS`, each
+    [low, high] in [0, 1] with low <= high, else None), reported only."""
     sha = raw.get("receipt_sha256")
     sha = sha if isinstance(sha, str) and _SHA.match(sha) else None
     c = _num(raw.get("c"))
-    out = {"receipt_sha256": sha, "c": c if c is not None and 0.5 <= c <= 4.0 else None}
-    for key in ("fp_unconditional", "fp_both_windows_rose"):
+    out: dict[str, Any] = {"receipt_sha256": sha, "c": c if c is not None and 0.5 <= c <= 4.0 else None}
+    for key in D2_RATES:
         v = _num(raw.get(key))
         out[key] = v if v is not None and 0.0 <= v <= 1.0 else None
+    for key in D2_INTERVALS:
+        pair = raw.get(key)
+        lo, hi = (_num(pair[0]), _num(pair[1])) if isinstance(pair, (list, tuple)) and len(pair) == 2 else (None, None)
+        out[key] = [lo, hi] if lo is not None and hi is not None and 0.0 <= lo <= hi <= 1.0 else None
     return out
 
 
@@ -746,8 +790,8 @@ def train_score(result: Mapping[str, Any], *, first_year: Any = None, unit: Mapp
     {objective, score, eligible, why, fails, t_pool, pnl, years, active, worst_year, quarters, unit, reported, beside}.
 
     score = S_D, the pooled t of daily P&L over the Train years (set whenever it can be computed, eligible or not);
-    eligible = E1, E3, E4 and E5 hold (E5 "unknown" holds) and S_D exists; `fails` names the failing bars in order and
-    `why` the first. `years` {year: {active, t, exposure, pnl, trades, days_traded, entry_days, t_daily}}; `reported` E2
+    eligible = C1 (calls only, release D-1b: `calls_only`), E1, E3, E4 and E5 hold (E5 "unknown" and C1 unread hold) and
+    S_D exists; `fails` names the failing bars in order and `why` the first. `years` {year: {active, t, exposure, pnl, trades, days_traded, entry_days, t_daily}}; `reported` E2
     (every ACTIVE year t >= 0; never a bar) and R1 (None until `robust_verdict`); `beside` the drift figures (beta per 1%
     move, drift share, drift-adjusted alpha t, the same exposure held every session). `worst_year` (the lowest-t ACTIVE
     year) and `quarters` keep the shape the researcher's view reads from `evidence.train_score`. `unit` is
@@ -788,6 +832,8 @@ def train_score(result: Mapping[str, Any], *, first_year: Any = None, unit: Mapp
         out["reported"]["E2"] = False
     out["beside"] = beside(result, first_year)
     whys: list[tuple[str, str]] = []
+    if calls_only(result, first_year) is False:
+        whys.append(("C1", CALLS_ONLY_WHY))
     if len(out["active"]) < c["min_active_years"]:
         whys.append(("E1", f"it is in the market in {len(out['active'])} of {len(rows)} Train years; the lane needs "
                            f"{c['min_active_years']} (in the market: {ACTIVE_MIN_TRADES}+ trades on {ACTIVE_MIN_DAYS}+ days and "
@@ -810,6 +856,35 @@ def train_score(result: Mapping[str, Any], *, first_year: Any = None, unit: Mapp
     else:
         out["eligible"] = True
     return out
+
+
+#: C1's words (release D-1b): rules only, no figure.
+CALLS_ONLY_WHY = "the direction lane buys calls only: a Train trade held a put or a short leg"
+
+
+def calls_only(result: Mapping[str, Any] | None, first_year: Any = None) -> bool | None:
+    """THE CALLS-ONLY BAR, C1 (release D-1b, Oct 9, 2026): D2 was measured on long calls, and a `long_single` card may send
+    a put by its code, so a direction program whose Train trades (2022-24: `_span`) include a leg that is not a long call
+    (`right` "C", `side` "long", as the Gym writes each trade's legs) fails it. True when every leg read is a long call,
+    None when nothing can be read (no trade list, no Train-year trade, or no legs written: a stored score or a fixture),
+    which is no failure."""
+    trades = result.get("trades") if isinstance(result, Mapping) else None
+    if not isinstance(trades, list):
+        return None
+    lo, hi = _span(first_year)
+    seen = False
+    for trade in trades:
+        if not isinstance(trade, Mapping):
+            continue
+        year = str(trade.get("day") or "")[:4]
+        legs = trade.get("legs")
+        if not (year.isdigit() and lo <= int(year) <= hi) or not isinstance(legs, list) or not legs:
+            continue
+        for leg in legs:
+            if not isinstance(leg, Mapping) or leg.get("right") != "C" or leg.get("side") != "long":
+                return False
+        seen = True
+    return True if seen else None
 
 
 def beside(result: Mapping[str, Any], first_year: Any = None) -> dict[str, Any]:
@@ -1022,7 +1097,7 @@ def failure_counts(store: Any, hours: float = 48.0, *, now: float | None = None,
                 out["fails"][f] += 1
             if train.get("eligible"):
                 out["eligible"] += 1
-            if fails == ["E5"]:
+            if list(train.get("fails") or []) == ["E5"]:  # E5 alone (a C1 failure beside it is not the unit only)
                 out["unit_only"] += 1
             if (train.get("reported") or {}).get("E2") is False:
                 out["reported_misses"]["E2"] += 1
@@ -1139,36 +1214,85 @@ def _score_from_compact(stored: Any, unit: Mapping[str, Any] | None, settings: M
 def screen_effective(settings: Mapping[str, Any] | None, lane: str = DIRECTION, *,
                      policy: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """The holdout look a family's lane uses (decision 6): {lane, screen, look_level, sharpe_share, receipt, c,
-    fp_unconditional, fp_both_windows_rose, validation, why}.
+    fp_unconditional, fp_both_windows_rose, fp_lane_mixed, fp_lane_2224, fp_lane_ci_mixed, fp_lane_cluster_mixed,
+    power10, validation, why}.
 
-    - alpha, or any lane while the lane is "off": "S-B", `evidence.LOOK_LEVEL` and `HOLDOUT_SHARPE_SHARE`, exactly;
-    - direction: "S-C" (`dlane.screens.S-C`: p <= 0.20, a Sharpe share of 0.25; the Validation line as coded);
+    - alpha, or any lane while the lane is "off": "S-B", `evidence.LOOK_LEVEL` and `HOLDOUT_SHARPE_SHARE`, exactly (its
+      rates are FAST_LANE_SCREEN_1's, not a lane's: every `fp_*` is None);
+    - direction: "S-C" (`dlane.screens.S-C`: p <= 0.20, a Sharpe share of 0.25; the Validation line as coded), its lane
+      rates `fp_lane_mixed` (= its `fp_unconditional`, MONEY's mixed worlds) and `fp_lane_2224`;
     - direction with `dlane.screen` "D2": D2 only when the REPOSITORY's policy.json (`policy`: its parsed `dlane` block;
-      default the file `settings.read_policy` reads, never swarm.json) pins a receipt sha256 and a calibrated `c`; CI holds
-      that sha to `docs/benchmarks/direction_screen_2.json`. Otherwise S-C, and `why` says D2 was refused. Under D2
-      `validation` is "precheck" (`d2_precheck`), which never opens tuition: tuition stays on the coded Validation line.
-    Every look event records `lane`, `screen` and `receipt` from here."""
+      default the file `settings.read_policy` reads, never swarm.json) pins a receipt sha256 and a calibrated `c`, and
+      the lane is calls only (`dlane.structures` inside `D2_STRUCTURES`, release D-1b: D2 was measured on single calls);
+      CI holds that sha to `docs/benchmarks/direction_screen_2.json`. Otherwise S-C, and `why` says D2 was refused. Under
+      D2 `validation` is "precheck" (`d2_precheck`), which never opens tuition: tuition stays on the coded Validation
+      line; every figure is the pinned receipt's (from the repository's policy.json, never a setting's).
+    Every look event records `lane`, `screen` and `receipt` from here, and a direction look its `fp_lane_mixed` and
+    `fp_lane_2224` too (release D-1b: the false-positive rate beside every look and every Probe trade)."""
+    rates = {"fp_lane_mixed": None, "fp_lane_2224": None, "fp_lane_ci_mixed": None, "fp_lane_cluster_mixed": None,
+             "power10": None}
     alpha = {"lane": ALPHA, "screen": ALPHA_SCREEN, "look_level": evidence.LOOK_LEVEL,
              "sharpe_share": evidence.HOLDOUT_SHARPE_SHARE, "receipt": None, "c": None, "fp_unconditional": None,
-             "fp_both_windows_rose": None, "validation": "line", "why": None}
+             "fp_both_windows_rose": None, **rates, "validation": "line", "why": None}
     if lane != DIRECTION or not on(settings):
         return alpha
     c = cfg(settings)
     sc = c["screens"]["S-C"]
     out = {"lane": DIRECTION, "screen": "S-C", "look_level": sc["look_level"], "sharpe_share": sc["sharpe_share"],
            "receipt": None, "c": None, "fp_unconditional": sc["fp_unconditional"],
-           "fp_both_windows_rose": sc["fp_both_windows_rose"], "validation": "line", "why": None}
+           "fp_both_windows_rose": sc["fp_both_windows_rose"],
+           **rates, "fp_lane_mixed": sc["fp_unconditional"], "fp_lane_2224": sc["fp_lane_2224"],
+           "validation": "line", "why": None}
     if c["screen"] != "D2":
         return out
     pinned = _policy_d2(policy)
+    wider = [s for s in c["structures"] if s not in D2_STRUCTURES]
     if pinned["receipt_sha256"] is None:
         out["why"] = "D2 refused: no receipt sha256 is pinned in the repository's policy.json"
     elif pinned["c"] is None:
         out["why"] = "D2 refused: the pinned receipt has no calibrated c in the repository's policy.json"
+    elif wider:
+        out["why"] = (f"D2 refused: it was measured on single calls and the lane admits {', '.join(wider)} "
+                      "(dlane.structures)")
     else:
+        # `fp_unconditional` keeps D-1's meaning (the lane's rate at zero edge, unconditional on the market): the
+        # receipt's mixed-world lane rate unless the block names its own.
+        unconditional = pinned["fp_unconditional"] if pinned["fp_unconditional"] is not None else pinned["fp_lane_mixed"]
         out.update(screen="D2", receipt=pinned["receipt_sha256"], c=pinned["c"], look_level=None, sharpe_share=None,
-                   fp_unconditional=pinned["fp_unconditional"], fp_both_windows_rose=pinned["fp_both_windows_rose"],
-                   validation="precheck")
+                   fp_unconditional=unconditional, fp_both_windows_rose=pinned["fp_both_windows_rose"],
+                   **{k: pinned[k] for k in rates}, validation="precheck")
+    return out
+
+
+def fp_beside(screen: Mapping[str, Any] | None) -> dict[str, Any]:
+    """THE FALSE-POSITIVE RATE BESIDE A LOOK OR A PROBE TRADE (release D-1b; the owner's goal of Oct 9, item 4: "stated
+    beside every Probe trade"): {screen, fp_lane_mixed, fp_lane_2224, receipt} of a `screen_effective` answer (or a look's
+    recorded detail). Operator-facing only: the figures are measured on worlds built from 2017-19 and 2022-24 blocks, so
+    no prompt, view, brief, status or agenda carries them."""
+    s = screen if isinstance(screen, Mapping) else {}
+    return {"screen": s.get("screen"), "fp_lane_mixed": s.get("fp_lane_mixed"), "fp_lane_2224": s.get("fp_lane_2224"),
+            "receipt": s.get("receipt")}
+
+
+def fp_of_look(detail: Mapping[str, Any] | None, settings: Mapping[str, Any] | None, *,
+               policy: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """`fp_beside` for the look that admitted a program (its `detail`, the gate's recorded line), for the operator's
+    reports (release D-1b): the rates the look recorded; for a direction look made before D-1b recorded them, its
+    screen's rates now ("S-C": `dlane.screens.S-C`; "D2": the repository policy's pinned figures, only when its receipt is
+    the one the look recorded, else None); a look with no screen recorded is the alpha lane's "S-B" (no lane rate: its
+    figure is FAST_LANE_SCREEN_1's bound, which the report states beside it)."""
+    d = detail if isinstance(detail, Mapping) else {}
+    if "fp_lane_mixed" in d or "fp_lane_2224" in d:
+        return fp_beside(d)
+    screen = d.get("screen") or ALPHA_SCREEN
+    out = {"screen": screen, "fp_lane_mixed": None, "fp_lane_2224": None, "receipt": d.get("receipt")}
+    if screen == "S-C":
+        sc = cfg(settings)["screens"]["S-C"]
+        out.update(fp_lane_mixed=sc["fp_unconditional"], fp_lane_2224=sc["fp_lane_2224"])
+    elif screen == "D2":
+        pinned = _policy_d2(policy)
+        if pinned["receipt_sha256"] is not None and pinned["receipt_sha256"] == d.get("receipt"):
+            out.update(fp_lane_mixed=pinned["fp_lane_mixed"], fp_lane_2224=pinned["fp_lane_2224"])
     return out
 
 
@@ -1202,8 +1326,10 @@ D2_MIN_DAYS = evidence.MIN_DAYS
 
 
 def d2_precheck(summary: Mapping[str, Any] | None) -> dict[str, Any]:
-    """D2's Validation pre-check (provisional until J3's receipt pins the statistic): {passed, checks}. It never opens
-    tuition (decision 6)."""
+    """D2's Validation pre-check, as DSCREEN-2 pre-registered it (PREREG section 2; dscreen2.py `p_`): {passed, checks}:
+    at least 50 trades, at least 25 entry days and a mean entry-day return on maximum loss above zero, on the Validation
+    run at 1.0x (the Gym's `trades`, `days_traded`, `mean_return_on_max_loss_daily`). It never opens tuition (decision
+    6)."""
     s = summary if isinstance(summary, Mapping) else {}
     mean = evidence.daily_mean(s)
     checks = {"trades": int(s.get("trades") or 0) >= D2_MIN_TRADES, "days": int(s.get("days_traded") or 0) >= D2_MIN_DAYS,
@@ -1211,26 +1337,108 @@ def d2_precheck(summary: Mapping[str, Any] | None) -> dict[str, Any]:
     return {"passed": all(checks.values()), "checks": checks}
 
 
-def d2_pooled_t(validation: Mapping[str, Any] | None, holdout: Mapping[str, Any] | None) -> float | None:
-    """D2's pooled entry-day t over Validation and the holdout (provisional until J3's receipt pins the statistic): the t of
-    the mean of both windows' entry-day returns on maximum loss together, from each summary's mean
-    (`mean_return_on_max_loss_daily`), t (`t_daily`) and entry days (`days_traded`). None when either cannot be read
-    (fail-closed)."""
-    parts = []
-    for s in (validation, holdout):
-        s = s if isinstance(s, Mapping) else {}
-        m, t, k = evidence.daily_mean(s), evidence.daily_t(s), int(s.get("days_traded") or 0)
-        if m is None or t is None or t == 0 or k < 2:
-            return None
-        sd = abs(m) * math.sqrt(k) / abs(t)
-        parts.append((k, m * k, (k - 1) * sd * sd + k * m * m))
+def _entry_moments(summary: Mapping[str, Any] | None) -> tuple[int, float, float] | None:
+    """A window's entry-day returns on maximum loss as (k, their sum, the sum of their squares), from its Gym summary: k
+    the entry days (`days_traded`), m their mean (`mean_return_on_max_loss_daily`) and t their one-sample t (`t_daily`,
+    sd with ddof 1), so sd = |m| sqrt(k) / |t|. One entry day is exact (no t: the Gym has none under two points). None
+    when the sd cannot be had from the figures (FAIL-CLOSED, release D-1b): no entry day or no mean; a t of None over
+    two or more days (the Gym gives none when the returns do not vary); a mean or a t that is zero as the summary rounds
+    it (6 and 4 decimals), which leaves the sd undetermined."""
+    s = summary if isinstance(summary, Mapping) else {}
+    m, t = evidence.daily_mean(s), evidence.daily_t(s)
+    raw = s.get("days_traded")
+    k = int(raw) if isinstance(raw, (int, float)) and not isinstance(raw, bool) and float(raw).is_integer() else 0
+    if k < 1 or m is None:
+        return None
+    if k == 1:
+        return 1, m, m * m
+    if t is None or t == 0 or m == 0:
+        return None
+    sd = abs(m) * math.sqrt(k) / abs(t)
+    return k, m * k, (k - 1) * sd * sd + k * m * m
+
+
+def _pooled(parts: Sequence[tuple[int, float, float]]) -> float | None:
+    """The pooled one-sample t of windows given as (k, sum, sum of squares): mean / sd(ddof 1) x sqrt(n). None under two
+    returns, with no variance or not finite."""
     n = sum(p[0] for p in parts)
+    if n < 2:
+        return None
     total = sum(p[1] for p in parts)
     sq = sum(p[2] for p in parts)
     var = (sq - total * total / n) / (n - 1)
-    if var <= 0:
+    if not var > 0:
         return None
-    return (total / n) / math.sqrt(var / n)
+    t = (total / n) / math.sqrt(var / n)
+    return t if math.isfinite(t) else None
+
+
+def d2_pooled_t(validation: Mapping[str, Any] | None, holdout: Mapping[str, Any] | None) -> float | None:
+    """D2's statistic, as DSCREEN-2 pre-registered it (PREREG section 2; dscreen2.py `eval_world2`, MONEY's
+    `mlib.entry_moments`): the pooled entry-day t over the Validation and holdout entry days together,
+    t = mean / sd(ddof 1) x sqrt(n), every entry day one return (an entry day of both windows counts twice). Built from
+    each window's sufficient figures (`_entry_moments`), so on exact figures it IS that statistic (BUILD.md's fixtures:
+    within 3e-15 of dscreen2's own code); on the Gym's summaries, which round the mean to 6 decimals and the t to 4, it
+    is their point estimate (`d2_pooled_t_low` bounds it from below). None when either window cannot give its moments,
+    or the pooled returns do not vary (fail-closed: D2 then fails, as dscreen2's -inf does)."""
+    parts = [_entry_moments(validation), _entry_moments(holdout)]
+    if any(p is None for p in parts):
+        return None
+    return _pooled(parts)  # type: ignore[arg-type]
+
+
+#: The Gym's summary rounds a window's daily mean on maximum loss to 6 decimals and its daily t to 4
+#: (league/gym/results.py `summarize`): half a unit of each is the most either figure is off.
+GYM_MEAN_ROUNDING = 5e-7
+GYM_T_ROUNDING = 5e-5
+
+
+def _corners(summary: Mapping[str, Any] | None) -> list[tuple[int, float, float]] | None:
+    """A window's (k, sum, sum of squares) at the corners of its summary's rounding (`GYM_MEAN_ROUNDING`,
+    `GYM_T_ROUNDING`), as `_entry_moments` reads it (None where it does)."""
+    if _entry_moments(summary) is None:
+        return None
+    s = summary if isinstance(summary, Mapping) else {}
+    m, t, k = evidence.daily_mean(s), evidence.daily_t(s), int(s.get("days_traded"))  # type: ignore[arg-type]
+    means = (m - GYM_MEAN_ROUNDING, m + GYM_MEAN_ROUNDING)  # type: ignore[operator]
+    if k == 1:
+        return [(1, mm, mm * mm) for mm in means]
+    out = []
+    for mm in means:
+        for tt in (abs(t) - GYM_T_ROUNDING, abs(t) + GYM_T_ROUNDING):  # type: ignore[arg-type]
+            sd = abs(mm) * math.sqrt(k) / tt
+            out.append((k, mm * k, (k - 1) * sd * sd + k * mm * mm))
+    return out
+
+
+def d2_pooled_t_low(validation: Mapping[str, Any] | None, holdout: Mapping[str, Any] | None) -> float | None:
+    """THE D2 STATISTIC'S LOWER BOUND ON THE GYM'S SUMMARIES (release D-1b): the least `d2_pooled_t` over the corners of
+    both windows' rounding (their means within half a unit of the 6th decimal, their t within half a unit of the 4th;
+    first-order exact over so small a box). D2 passes on it, so a pass here is a pass of DSCREEN-2's statistic on the
+    exact returns, and the two can differ only within the rounding (BUILD.md: 2,000 fixtures, median gap under 3e-5).
+    None when any corner cannot be computed (fail-closed)."""
+    a, b = _corners(validation), _corners(holdout)
+    if a is None or b is None:
+        return None
+    values = [_pooled([x, y]) for x in a for y in b]
+    return None if any(v is None for v in values) else min(values)  # type: ignore[type-var]
+
+
+def d2_verdict(validation: Mapping[str, Any] | None, holdout: Mapping[str, Any] | None, c: Any) -> dict[str, Any]:
+    """THE D2 SCREEN after its one look (release D-1b; DSCREEN-2's rule, `screen_effective` "D2"): {passed, checks:
+    {precheck, pnl, pooled}, pooled_t, pooled_t_low, c}. `precheck`: the Validation summary passes `d2_precheck` (how the
+    version entered the gate; held again here); `pnl`: the holdout's P&L after fees above zero (the Gym's summary
+    `pnl`); `pooled`: the statistic at least `c`, judged on its lower bound over the summaries' rounding
+    (`d2_pooled_t_low`; `pooled_t` is the point figure), so the Gym's rounding can never pass a program DSCREEN-2's exact
+    statistic fails. A missing figure fails its check."""
+    hold = holdout if isinstance(holdout, Mapping) else {}
+    pnl = _num(hold.get("pnl"))
+    pooled = d2_pooled_t(validation, holdout)
+    low = d2_pooled_t_low(validation, holdout)
+    bar = _num(c)
+    checks = {"precheck": bool(d2_precheck(validation)["passed"]), "pnl": pnl is not None and pnl > 0,
+              "pooled": low is not None and bar is not None and low >= bar}
+    return {"passed": all(checks.values()), "checks": checks, "pooled_t": pooled, "pooled_t_low": low, "c": bar}
 
 
 def validation_r_sd(summary: Mapping[str, Any] | None) -> float | None:
@@ -1251,6 +1459,120 @@ def leakage_alarm(looks: int, passes: int, settings: Mapping[str, Any] | None) -
     `alarm_pass_share` (60%) of them passed. The alpha lane's is `evidence.leakage_alarm`, unchanged, over alpha looks."""
     c = cfg(settings)
     return int(looks) >= c["alarm_min_looks"] and int(passes) > c["alarm_pass_share"] * int(looks)
+
+
+# ----------------------------------------------------------------------------------------------------------- the ration
+#: A Validation run that is no try: the Gym could not run it (`results.failed`, no data). A program's own errors
+#: ("disqualified") are its try.
+NOT_A_TRY = ("error", "no_data")
+#: The public causes of `lineage_spent` (a `swarm.retired` cause and a graveyard lesson): rules only, no figure.
+SPENT_LOOK = "its direction lineage has used its one holdout look (one Validation try and one look a direction lineage)"
+SPENT_TRY = "its direction lineage has used its one Validation try (one Validation try and one look a direction lineage)"
+
+
+def _connected_families(store: Any, fid: str) -> list[str]:
+    """The families of `fid`'s connected lineages: the set `SwarmStore.lineage_looks` counts holdout looks over."""
+    row = store._one("SELECT lineage FROM families WHERE id=?", (str(fid),))
+    if row is None:
+        return []
+    lines = store._connected_lineages(row["lineage"])
+    return [r["id"] for r in store._all(f"SELECT id FROM families WHERE lineage IN ({','.join('?' * len(lines))})",
+                                        tuple(lines))]
+
+
+def lineage_tries(store: Any, fid: str) -> list[dict[str, Any]]:
+    """A DIRECTION LINEAGE'S VALIDATION TRIES (release D-1b, Oct 9, 2026): [{family, version, at}], oldest first, one per
+    distinct (family, version) with a Validation run at 1.0x anywhere in `fid`'s connected lineages (the set its holdout
+    looks are counted over), its own run or an inherited verdict's rows (F1), whatever its lane or its verdict: a run the
+    Gym could not make (`NOT_A_TRY`) is none. `at` is the version's first such run: a version validated again (a new Gym
+    image, an adoption) is the same try."""
+    fams = _connected_families(store, fid)
+    if not fams:
+        return []
+    rows = store._all(f"SELECT family, version, MIN(at) AS at FROM runs WHERE family IN ({','.join('?' * len(fams))}) "
+                      "AND \"window\"='validation' AND stress=1.0 AND version IS NOT NULL "
+                      f"AND COALESCE(status, '') NOT IN ({','.join('?' * len(NOT_A_TRY))}) GROUP BY family, version",
+                      (*fams, *NOT_A_TRY))
+    out = [{"family": str(r["family"]), "version": int(r["version"]), "at": str(r["at"] or "")} for r in rows]
+    out.sort(key=lambda r: (r["at"], r["family"], r["version"]))
+    return out
+
+
+def looks_ration(store: Any, fam: Mapping[str, Any] | None, settings: Mapping[str, Any] | None) -> int:
+    """The holdout looks a family's connected lineage may spend: `looks_per_lineage` (1) for a DIRECTION lineage (release
+    D-1b), `evidence.LOOKS_PER_LINEAGE` (3) for every other, and for every family while the lane is off (THE ROLLBACK).
+    `store` None reads the lane from the spec alone (`lane_of`)."""
+    if lane_of(store, fam, settings) == DIRECTION:
+        return int(cfg(settings)["looks_per_lineage"])
+    return evidence.LOOKS_PER_LINEAGE
+
+
+def try_open(store: Any, fam: Mapping[str, Any], n: Any, settings: Mapping[str, Any] | None) -> bool:
+    """May version `n` of `fam` be validated (release D-1b)? Always for an alpha family and while the lane is off. A
+    direction family: while its lineage has a Validation try left (`lineage_tries` under `val_tries`), or when `n` is
+    one of the lineage's first `val_tries` tries already (validated again on a new Gym image: the same try). Never
+    raises (an unreadable lineage is no try)."""
+    if lane_of(store, fam, settings) != DIRECTION:
+        return True
+    try:
+        tries = lineage_tries(store, str(fam["id"]))
+        k = int(cfg(settings)["val_tries"])
+        mine = any(t["family"] == str(fam["id"]) and t["version"] == int(n) for t in tries[:k])
+        return mine or len(tries) < k
+    except Exception:  # noqa: BLE001 - an unreadable lineage buys no try
+        return False
+
+
+def first_try(store: Any, fid: str, n: Any, settings: Mapping[str, Any] | None) -> bool:
+    """Version `n` of `fid` is one of its lineage's first `val_tries` Validation tries (`lineage_tries`): only such a try may
+    enter the gate (`Tournament._verdict`'s backstop: a second try that raced past `try_open`, a result landing late, is
+    judged and recorded and never enters). False on a store error."""
+    try:
+        k = int(cfg(settings)["val_tries"])
+        return any(t["family"] == str(fid) and t["version"] == int(n) for t in lineage_tries(store, str(fid))[:k])
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _run_sha(version: Mapping[str, Any]) -> str:
+    """`gate.run_sha` (a version's program as the gate marks and looks at it: its code sha and its params), computed here
+    because the gate imports this module (a test holds the two equal)."""
+    from .store import dumps
+
+    return hashlib.sha256((str(version["sha"]) + dumps(version.get("params") or {})).encode()).hexdigest()
+
+
+def lineage_spent(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any] | None) -> str | None:
+    """THE RATION'S RETIREMENT (release D-1b): the public cause to retire a living Gym-band DIRECTION family whose lineage
+    has spent its ration without a pass that is still in play, else None (every alpha family; every family while the lane
+    is off):
+    - `SPENT_LOOK`: its connected lineage's holdout looks (in flight too) reach `looks_per_lineage` (a passed look moved
+      its family out of the Gym band; every other member can have none);
+    - `SPENT_TRY`: its lineage's Validation tries reach `val_tries`, unless the family holds the lineage's try itself,
+      that try entered the gate (`TRY_KEY` `entered`: the line, or D2's pre-check) and the gate has not finished with it
+      (no look, no refusal: `gated_sha`), so it waits for its one look even while a new Gym image has it validated again.
+    The tournament asks after the gate's own holds (`gate_ready`, a look in flight). Never raises: None on a store error."""
+    try:
+        if lane_of(store, fam, settings) != DIRECTION:
+            return None
+        c = cfg(settings)
+        fid = str(fam["id"])
+        if store.lineage_looks(fid, include_inflight=True) >= c["looks_per_lineage"]:
+            return SPENT_LOOK
+        tries = lineage_tries(store, fid)
+        if len(tries) < c["val_tries"]:
+            return None
+        mine = [t for t in tries[:c["val_tries"]] if t["family"] == fid]
+        state = fam.get("state") or {}
+        held = state.get(TRY_KEY) if isinstance(state.get(TRY_KEY), Mapping) else {}
+        if mine and held.get("entered") is True and held.get("version") == mine[0]["version"]:
+            version = store.version(fid, mine[0]["version"])
+            sha = _run_sha(version) if version is not None and version.get("sha") else None
+            if sha is not None and not store.looked(sha) and state.get("gated_sha") != sha:
+                return None
+        return SPENT_TRY
+    except Exception:  # noqa: BLE001 - a rule that cannot be read retires nothing
+        return None
 
 
 # ----------------------------------------------------------------------------------------------------------- the quota
@@ -1530,8 +1852,12 @@ def lanes_text(settings: Mapping[str, Any] | None) -> str:
         f"- DIRECTION ({OBJECTIVE}): profit from the index's direction counts and is reported beside the same-risk "
         f"buy-and-hold; {ALWAYS_IN_NOTE}. A direction card: mechanism_class {' or '.join(c['classes'])}; structure "
         f"{' or '.join(c['structures'])} (a direction long_single buys calls only: one out-of-the-money call near 0.20-0.30 "
-        f"delta fits the unit); roots from {', '.join(c['roots'])}; holding {' or '.join(c['holding'])} (2 to 8 sessions); "
-        "an ablation switch that enters the same structure every session at the same minute (never flat).",
+        f"delta fits the unit"
+        + ("; no put, no vertical, no short leg" if all(s in D2_STRUCTURES for s in c["structures"]) else "") +
+        f"); roots from {', '.join(c['roots'])}; holding {' or '.join(c['holding'])} (2 to 8 sessions); "
+        "an ablation switch that enters the same structure every session at the same minute (never flat). "
+        + ration_text(settings) + " A dead direction idea proposed again on its own slice continues its lineage, with "
+        "no try left.",
         f"- DIRECTION BAR on Train: in the market in at least {c['min_active_years']} of the 3 Train years ({ACTIVE_MIN_TRADES}+ "
         f"trades on {ACTIVE_MIN_DAYS}+ days and at least {c['active_share']:.0%} of its busiest year's exposure) with "
         f"{c['min_entry_days']}+ entry sessions in each; a year it stays mostly out loses no worse than t {c['out_t_floor']:g} "
@@ -1539,6 +1865,15 @@ def lanes_text(settings: Mapping[str, Any] | None) -> str:
         f"the half-spread: P&L above zero, the same years rules, and at least {c['cost_ratio']:g} of the 1.0x P&L. Its score is "
         "the pooled t of daily P&L at 1.0x. A gate that leaves a falling market is the edge to find; the bar does not test it.",
     ])
+
+
+def ration_text(settings: Mapping[str, Any] | None) -> str:
+    """THE RATION in words (release D-1b): rules only, no figure; "" while the lane is off."""
+    if not on(settings):
+        return ""
+    return ("ONE VALIDATION TRY AND ONE HOLDOUT LOOK A DIRECTION LINEAGE: the first version the lineage sends to Validation "
+            "is its only try, and the lineage retires when that try or its one look is spent without a pass; send the "
+            "version you would stake the lineage on.")
 
 
 def brief_text(settings: Mapping[str, Any] | None, roots: Iterable[str] | None = None) -> str:
@@ -1549,13 +1884,21 @@ def brief_text(settings: Mapping[str, Any] | None, roots: Iterable[str] | None =
         return ""
     c = cfg(settings)
     names = [str(r).upper() for r in roots or () if str(r).upper() in c["roots"]] or list(c["roots"])
+    # CALLS ONLY (release D-1b): with the lane's structures single calls alone, the brief says so and names C1; a lane
+    # that still admits verticals keeps D-1's words.
+    calls = all(s in D2_STRUCTURES for s in c["structures"])
+    what = ("and nothing else (no put, no vertical, no short leg: a Train trade holding one fails C1): one out-of-the-money "
+            "call near 0.20-0.30 delta fits the unit" if calls else
+            "one out-of-the-money call near 0.20-0.30 delta fits the unit (the lane steers to single calls; narrow "
+            "verticals rarely fit after costs)")
     return (
         f"YOUR LANE: DIRECTION ({OBJECTIVE}). Profit from the index's direction counts in this lane, and every figure of it is "
         f"reported beside the same-risk buy-and-hold, never hidden: {ALWAYS_IN_NOTE}. Your program buys calls on "
-        f"{', '.join(names)}: one out-of-the-money call near 0.20-0.30 delta fits the unit (the lane steers to single calls; "
-        "narrow verticals rarely fit after costs), one lot per entry, never sized by capital, held 2 to 8 sessions. YOUR "
+        f"{', '.join(names)} {what}, one lot per entry, never sized by capital, held 2 to 8 sessions. "
+        f"{ration_text(settings)} YOUR "
         "TRAIN SCORE is the pooled t "
         "of your daily P&L over the Train years at 1.0x the half-spread, not the worst year. A version is eligible when "
+        + ("(C1) every trade is a long call; " if calls else "") +
         f"(E1) it is in the market in at least {c['min_active_years']} of the 3 Train years (in the market: "
         f"{ACTIVE_MIN_TRADES}+ trades on {ACTIVE_MIN_DAYS}+ days and at least {c['active_share']:.0%} of its busiest year's "
         f"exposure); (E3) a year it stays mostly out loses no worse than t {c['out_t_floor']:g} and {c['out_loss_share']:g} "
@@ -1701,4 +2044,9 @@ __all__ = ["OBJECTIVE", "ALPHA", "DIRECTION", "LANES", "MODES", "SCREENS", "ALPH
            "beside", "robust_verdict", "sort_key", "compact", "compact_robust", "record", "failure_counts", "lane_verdict",
            "screen_effective", "receipt_sha256", "d2_precheck", "d2_pooled_t", "validation_r_sd", "leakage_alarm", "born_counts",
            "last_direction_birth", "alive_direction", "started_at", "lane_only_due", "lane_only_mark", "DirectionQuota",
-           "lanes_text", "brief_text", "status_text", "view", "agenda_problems"]
+           "lanes_text", "brief_text", "status_text", "view", "agenda_problems",
+           # release D-1b
+           "TRY_KEY", "D2_STRUCTURES", "D2_RATES", "D2_INTERVALS", "fp_beside", "fp_of_look", "d2_verdict", "d2_pooled_t_low",
+           "GYM_MEAN_ROUNDING", "GYM_T_ROUNDING", "NOT_A_TRY", "SPENT_LOOK",
+           "SPENT_TRY", "lineage_tries", "looks_ration", "try_open", "first_try", "lineage_spent", "calls_only",
+           "CALLS_ONLY_WHY", "ration_text"]

@@ -122,12 +122,19 @@ need and its request's own worst case): every role but the gate's two leaves the
 review leaves the audit's, so late in the day a review finds its hold and the audit still finds its own after that
 review was paid.
 
-THE FUNDING NOTICE. When a meter's days of research left at the ceiling (`card_runway_days`: at the rate it wants, its
-fixed cost plus its share of the ceiling; the tapered rate would hide a short prefund) are under `NOTICE_DAYS`, one
-`POST /v1/notify` kind `funding` (`notice_facts`: the meter, its balance, the $/day it wants, those days, the amount
-that buys `TOPUP_DAYS` more of them and the dates), at most once per meter every `NOTICE_EVERY_SECONDS` (notice id
-`funding:<meter>:<ISO week>:r<rule version>`, which the gateway dedupes too; `<state>/budget-notices.json` remembers
-what this version of the rule sent). The amount and its days go out under this rule's names (`topup_usd`, `topup_days`)
+THE FUNDING NOTICE. THE TWO-DAY LEAD (release D-1b, Oct 9, 2026; the owner's goal of Oct 9, item 3: "Tell me 2 days
+before Sail or Claude runs out and I top it up"): when research on a meter RUNS OUT within `NOTICE_LEAD_DAYS` (2) at its
+current burn (`out_in_days`, `_burn`: the burn is the larger of the rate the rule holds it to and the rate it was
+spent at over the last `NEED_WINDOW_DAYS`; research runs out when the lower of its runway at that burn and its days of
+research left at the ceiling, `card_runway_days`, falls to `RUNWAY_DAYS`, where the taper starts cutting it; at the
+ceiling that is the card line `NOTICE_DAYS` = `RUNWAY_DAYS` + 2, the same instant as before), one `POST /v1/notify`
+kind `funding` (`notice_facts`: the meter, its balance, the $/day it wants, those days, the amount that buys
+`TOPUP_DAYS` more of them and the dates), at most ONCE A DAY per meter (`NOTICE_EVERY_SECONDS`, a day less an hour;
+it was once a week; notice id `funding:<meter>:<UTC day>:r<rule version>`, which the gateway dedupes too, so never two
+mails on one UTC day; `<state>/budget-notices.json` remembers what this version of the rule sent). The channel, the facts and the gateway's mail are as before. Why "runs out" is
+research's and not the balance's: while research tapers each day spends a fifth of what is left above the reserve, so
+the balance never reaches it (Claude, with no fixed cost, never would) and a notice at "two days before the balance is
+gone" would never be sent. The amount and its days go out under this rule's names (`topup_usd`, `topup_days`)
 and, the same values, under RULE_VERSION 1's (`restore_usd`, `restore_days`): the gateway is its own deploy, and a
 gateway still on that rule's composer must never mail an amount it could not read.
 With no fresh guard reading, Sail's card line is read from the gateway's own Sail reading (`/v1/health`
@@ -203,11 +210,19 @@ _NAMED_RECEIPT = re.compile(re.escape(LADDER_MARK) + r" (\d+)")
 LOOK_BAND = "candidate"
 #: A budget.json older than this never loosens (`stale_block`: each meter the lower of the floor and what it said).
 STALE_SECONDS = 36 * 3600
-#: A funding notice per meter at most this often.
-NOTICE_EVERY_SECONDS = 7 * 86400
-#: The card line: a meter with fewer days of research left at the ceiling is told (two days before its taper starts at
-#: `RUNWAY_DAYS`), and the notice says what buys this many more days.
-NOTICE_DAYS = 7
+#: A funding notice per meter at most once a day (release D-1b, Oct 9, 2026; the owner's goal of Oct 9, item 3: "Tell me 2
+#: days before Sail or Claude runs out and I top it up"; it was once a week, `7 * 86400`, which could leave a short meter
+#: unmentioned for six days after a top-up that fell short): at least this long after the last one (a day less an hour,
+#: so the daily 00:30Z run that starts a few seconds earlier than yesterday's still tells), under its UTC day's notice id
+#: (which the gateway dedupes: never two mails on one UTC day).
+NOTICE_EVERY_SECONDS = 23 * 3600
+#: THE TWO-DAY LEAD (release D-1b): a meter is told when research on it at its current burn runs out within this many
+#: days (`out_in_days`: the day its days of research left at the burn fall to `RUNWAY_DAYS`, where the rule's taper
+#: starts cutting it), so the owner's top-up lands before research falls under the ceiling.
+NOTICE_LEAD_DAYS = 2
+#: The card line: a meter with fewer days of research left at the ceiling is told (`NOTICE_LEAD_DAYS` before its taper
+#: starts at `RUNWAY_DAYS`), and the notice says what buys this many more days.
+NOTICE_DAYS = RUNWAY_DAYS + NOTICE_LEAD_DAYS
 TOPUP_DAYS = 7
 #: THE GATE'S RESERVE on Sail: this share of the day's Sail research dollars, never under the minimum (and never more than
 #: the day's), is kept for the tournament's validation round, the gate round and the nightly forward (`gate_reserve`).
@@ -399,6 +414,23 @@ def _card(balance: float, fixed: float, demand: float, reserve: float, today: dt
             "topup_usd": round(max(0.0, -room) + TOPUP_DAYS * demand, 2)}
 
 
+def _burn(room: float, fixed: float, rate: float, need: float, card_days: float, today: dt.date) -> dict[str, Any]:
+    """THE CURRENT BURN of one readable meter (release D-1b, the two-day lead): `burn_usd_day`, the larger of the rate the
+    rule holds it to today (`rate`: its fixed cost plus the day's research figure) and the rate it was spent at (its fixed
+    cost plus its research spend over the trailing `NEED_WINDOW_DAYS` days, a day: a meter spent faster than the rule
+    holds it is read at that); `burn_runway_days`, what it holds above its reserve at that burn; and `out_in_days`, the
+    days until research on it RUNS OUT at the current burn: until the lower of that runway and its days of research left
+    at the ceiling (`card_days`) falls to `RUNWAY_DAYS`, where the taper starts cutting research (0 once it has: research
+    is being cut now), with its date `out_on`. While research tapers the balance itself never reaches the reserve (each
+    day spends a fifth of what is left above it), so "runs out" is research's, not the balance's."""
+    burn = max(rate, fixed + max(0.0, need) / NEED_WINDOW_DAYS)
+    runway = 0.0 if room <= 0 else (room / burn if burn > 0 else None)
+    left = card_days if runway is None else min(card_days, runway)
+    out = max(0.0, left - RUNWAY_DAYS)
+    return {"burn_usd_day": round(burn, 4), "burn_runway_days": None if runway is None else round(runway, 1),
+            "out_in_days": round(out, 1), "out_on": _date_after(today, out)}
+
+
 def _reserve(given: Mapping[str, Any], meter: str) -> float | None:
     """The reserve in force for `meter`: `RESERVE_USD`, or the inputs' own `reserve_usd` when that is higher (Sail's: the
     Sail guard's release line, `gather`). None when the inputs name one that is not a number: unknown is never money."""
@@ -509,6 +541,7 @@ def compute(inputs: Mapping[str, Any], *, now: float, previous: Mapping[str, Any
                    runway_days=None if runway is None else round(runway, 1),
                    runs_out_on=None if runway is None else _date_after(today, runway),
                    **_card(balance, fixed, fixed + ceiling, reserve, today))
+        row.update(_burn(room, fixed, rate, needs[m], row["card_runway_days"], today))
         if limited == "runway":
             why.append(f"{m}: under {RUNWAY_DAYS} days of the ceiling: research {research:.4f} of {ceiling:.2f} a day")
         if added > EPSILON:
@@ -543,6 +576,7 @@ def compute(inputs: Mapping[str, Any], *, now: float, previous: Mapping[str, Any
     return {"schema": SCHEMA, "rule_version": RULE_VERSION, "at": float(now), "at_iso": _iso(now),
             "rule": {"ceiling_usd_day": CEILING_USD_DAY, "split": dict(SPLIT), "runway_days": RUNWAY_DAYS,
                      "floor_cap_usd_day": FLOOR_CAP_USD_DAY, "notice_days": NOTICE_DAYS, "topup_days": TOPUP_DAYS,
+                     "notice_lead_days": NOTICE_LEAD_DAYS,
                      "profit_share": PROFIT_SHARE, "p30_days": P30_DAYS, "reserve_usd": dict(RESERVE_USD),
                      "edge_start": EDGE_START.isoformat(), "edge_sessions": EDGE_SESSIONS},
             "inputs": {"p30_usd": p30, "p30_source": inputs.get("p30_source"), "edge": edge,
@@ -1278,11 +1312,16 @@ def _week(now: float) -> str:
 
 
 def short(doc: Mapping[str, Any]) -> list[str]:
-    """The meters whose days of research left at the ceiling (`card_runway_days`) are under `NOTICE_DAYS`."""
+    """THE TWO-DAY LEAD (release D-1b): the meters on which research runs out within `NOTICE_LEAD_DAYS` at the current
+    burn (`out_in_days`, `_burn`), or, for a meter whose burn could not be read (its card line read from another balance,
+    or a budget.json from before D-1b), whose days of research left at the ceiling (`card_runway_days`) are under
+    `NOTICE_DAYS` (= `RUNWAY_DAYS` + `NOTICE_LEAD_DAYS`: the same instant at the ceiling)."""
     out = []
     for m in METERS:
-        runway = _finite(((doc.get("meters") or {}).get(m) or {}).get("card_runway_days"))
-        if runway is not None and runway < NOTICE_DAYS:
+        row = (doc.get("meters") or {}).get(m) or {}
+        lead = _finite(row.get("out_in_days"))
+        runway = _finite(row.get("card_runway_days"))
+        if (lead is not None and lead < NOTICE_LEAD_DAYS) or (lead is None and runway is not None and runway < NOTICE_DAYS):
             out.append(m)
     return out
 
@@ -1309,8 +1348,10 @@ def notice_facts(doc: Mapping[str, Any], meter: str, now: float, *, test: bool =
     # A drill's id is its own minute's (the gateway remembers funding ids for 8 days, and a second drill in the same week
     # must reach the owner again, not be answered `duplicate`). A notice's id names the rule's version: the first notice
     # under a new rule (other days, another amount) is never answered `duplicate` for the old rule's of the same week.
+    # Release D-1b: a notice's id is its UTC day's (at most once a day per meter; it was the ISO week's), so the gateway,
+    # which remembers funding ids for 8 days, delivers each day's and answers a second one the same day `duplicate`.
     notice_id = (f"funding-test:{meter}:{_week(now)}:{int(now // 60)}" if test
-                 else f"funding:{meter}:{_week(now)}:r{RULE_VERSION}")
+                 else f"funding:{meter}:{_day(now).isoformat()}:r{RULE_VERSION}")
     return {"kind": "funding", "notice_id": notice_id, "meter": meter,
             "balance_usd": money(balance), "usd_day": money(demand), "fixed_usd_day": money(fixed),
             "research_usd_day": money(None if demand is None or fixed is None else demand - fixed),
@@ -1328,10 +1369,10 @@ def _sent(answer: Any) -> bool:
 
 def send_notices(doc: Mapping[str, Any], root: Path, now: float, notify: Callable[[Mapping[str, Any]], Any] | None,
                  errors: list[str]) -> list[dict[str, Any]]:
-    """One `funding` notice per short meter, at most once per meter every `NOTICE_EVERY_SECONDS`: a meter is recorded as
-    told only when the gateway says the notice was sent (or already was). What another version of the rule told (a
-    record with no `rule_version`, or another one) is not this rule's notice: its days and its amount were another
-    rule's, so the meter is told again."""
+    """One `funding` notice per short meter (`short`: the two-day lead), at most once per meter a day (release D-1b,
+    `NOTICE_EVERY_SECONDS`; it was once every 7 days): a meter is recorded as told only when the gateway says the notice was sent (or already
+    was). What another version of the rule told (a record with no `rule_version`, or another one) is not this rule's
+    notice: its days and its amount were another rule's, so the meter is told again."""
     path = root / NOTICES_FILE
     try:
         told = json.loads(path.read_text(encoding="utf-8"))
@@ -1345,7 +1386,7 @@ def send_notices(doc: Mapping[str, Any], root: Path, now: float, notify: Callabl
             else {}
         last = _finite(mine.get("sent_at"))
         if last is not None and 0 <= now - last < NOTICE_EVERY_SECONDS:
-            out.append({"meter": meter, "sent": False, "why": f"told at {_iso(last)}: at most once every 7 days"})
+            out.append({"meter": meter, "sent": False, "why": f"told at {_iso(last)}: at most once a day"})
             continue
         facts = notice_facts(doc, meter, now)
         if notify is None:

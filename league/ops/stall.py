@@ -16,7 +16,9 @@ a STALL by its cause:
   (the version the tournament validates, `Tournament.candidate_version`: its submitted best, else the Train best the
   researcher picked by score, `state.best_train_version`) is not its validated version, and the last round within the
   window did not leave it waiting on its 1.5x robustness run or the drift screen (those are counted apart), nor named it
-  as a game-arm family that waits for a CONFIRM (`waiting_game`: the learning game validates CONFIRMED versions only);
+  as a game-arm family that waits for a CONFIRM (`waiting_game`: the learning game validates CONFIRMED versions only),
+  nor as a direction family whose lineage's one Validation try is used or taken this round (`spent_lane`, `waiting_lane`:
+  release D-1b's ration);
 - `braked`: the Sail guard was braked `BRAKED_HOURS` or more of the last `BRAKE_WINDOW_HOURS` hours, whatever the cause
   (the budget's daily stop reached by noon keeps research from running round the clock as surely as a low balance);
 - `runway_sail`, `runway_claude`: a meter's days of research left at the ceiling (`budget.json` `card_runway_days`: what it
@@ -244,6 +246,9 @@ def swarm_facts(db: Any, now: float) -> dict[str, Any]:
                   "judged": len(ids(validation.get("judged"))), "waiting_robustness": ids(validation.get("waiting_robustness")),
                   "waiting_drift": ids(validation.get("waiting_drift")), "waiting_twin": ids(validation.get("waiting_twin")),
                   "waiting_game": ids(validation.get("waiting_game")),
+                  # THE DIRECTION LANE'S RATION (release D-1b): a direction lineage's one try is used (`spent_lane`),
+                  # or another member took this round's (`waiting_lane`): owed no Validation now.
+                  "spent_lane": sorted(set(ids(validation.get("spent_lane"))) | set(ids(validation.get("waiting_lane")))),
                   "errors": len(ids(validation.get("errors")))}
     out["last_round"] = round_
     out["brake"] = F.guard_hours(db, now - BRAKE_WINDOW_HOURS * 3600, now)
@@ -444,6 +449,8 @@ def checks(swarm: Mapping[str, Any], *, now: float, ceiling: int | None, budget:
     # THE LEARNING GAME: a game-arm family in "gate" is owed a Validation only for a CONFIRMED version, so the round's
     # `waiting_game` (no CONFIRM yet, or its tries used) owes none.
     game = set(round_.get("waiting_game") or []) if recent else set()
+    # THE DIRECTION LANE'S RATION (release D-1b): a direction family whose lineage's one Validation try is used owes none.
+    game |= set(round_.get("spent_lane") or []) if recent else set()
     owed = [f for f in awaiting if f not in robust and f not in drift and f not in game]
     if round_:
         round_words = (f"The tournament's last round ({round_['at']}) queued {round_['queued']} and judged {round_['judged']}; "

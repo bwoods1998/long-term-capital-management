@@ -1,0 +1,166 @@
+{
+ "c": 1.0,
+ "fp_zero_edge": {
+  "all_eligible_cells": {
+   "blocks_2022_24": {
+    "ci95_cluster": [
+     0.120541,
+     0.164266
+    ],
+    "ci95_worlds": [
+     0.13205,
+     0.15015
+    ],
+    "rate": 0.141147
+   },
+   "mixed_worlds": {
+    "ci95_cluster": [
+     0.107251,
+     0.160392
+    ],
+    "ci95_worlds": [
+     0.126437,
+     0.140752
+    ],
+    "rate": 0.133708
+   }
+  },
+  "lane": {
+   "blocks_2022_24": {
+    "ci95_cluster": [
+     0.099498,
+     0.148465
+    ],
+    "ci95_worlds": [
+     0.114955,
+     0.13288
+    ],
+    "rate": 0.123895
+   },
+   "calibration_blocks_2017_19": {
+    "ci95_cluster": [
+     0.075228,
+     0.127655
+    ],
+    "ci95_worlds": [
+     0.092579,
+     0.107328
+    ],
+    "rate": 0.099779
+   },
+   "mixed_worlds": {
+    "ci95_cluster": [
+     0.078991,
+     0.127589
+    ],
+    "ci95_worlds": [
+     0.095706,
+     0.111563
+    ],
+    "rate": 0.103671
+   }
+  },
+  "swarm_placebos": {
+   "blocks_2022_24": {
+    "ci95_cluster": [
+     0.034804,
+     0.061237
+    ],
+    "ci95_worlds": [
+     0.046246,
+     0.049125
+    ],
+    "rate": 0.047587
+   }
+  }
+ },
+ "fp_zero_edge_per_lineage_lane": {
+  "M22_A": {
+   "ci95_worlds": [
+    0.179162,
+    0.203231
+   ],
+   "rate": 0.19216
+  },
+  "M22_B": {
+   "ci95_worlds": [
+    0.214702,
+    0.241967
+   ],
+   "rate": 0.229352
+  },
+  "MIX_A": {
+   "ci95_worlds": [
+    0.153011,
+    0.175331
+   ],
+   "rate": 0.164081
+  },
+  "MIX_B": {
+   "ci95_worlds": [
+    0.182915,
+    0.208464
+   ],
+   "rate": 0.195495
+  },
+  "note": "versions independent within a world (an upper bound); A: at most 2 Validation tries a lineage; B: tries until a pass, 3 failed looks or 2 failed Validations"
+ },
+ "power_lane": {
+  "plus10": {
+   "blocks_2022_24": {
+    "ci95_cluster": [
+     0.223683,
+     0.265707
+    ],
+    "ci95_worlds": [
+     0.228582,
+     0.25064
+    ],
+    "rate": 0.23945
+   },
+   "mixed_worlds": {
+    "ci95_cluster": [
+     0.178072,
+     0.224581
+    ],
+    "ci95_worlds": [
+     0.190208,
+     0.208964
+    ],
+    "rate": 0.199487
+   }
+  },
+  "plus5": {
+   "blocks_2022_24": {
+    "ci95_cluster": [
+     0.157489,
+     0.191504
+    ],
+    "ci95_worlds": [
+     0.163911,
+     0.184049
+    ],
+    "rate": 0.173991
+   },
+   "mixed_worlds": {
+    "ci95_cluster": [
+     0.122985,
+     0.166912
+    ],
+    "ci95_worlds": [
+     0.135761,
+     0.153301
+    ],
+    "rate": 0.144435
+   }
+  }
+ },
+ "rule": "DSCREEN-2 (screen D2, direction lane). Per program, at 1.0x costs: PRE-CHECK on the Validation window: at least 50 trades, at least 25 entry days, mean entry-day return > 0. After the sealed-holdout look: the pooled entry-day t (mean / sd(ddof 1) x sqrt(n)) over the Validation and holdout entry days >= c, AND holdout P&L > 0. c is calibrated so that the lane's pass rate at zero edge is 10% on worlds built from 2017-19 blocks only (each program centred on its 2017-19 mean), then rounded up to 0.01. ADOPT D2 only if ALL hold, each pool-A condition on BOTH measurement world sets (mixed 2017-19/2022-24 worlds centred on the six-year mean, MONEY's construction; and 2022-24-block worlds centred on the 2022-24 mean): (1) lane FP at zero edge, 95% world-bootstrap upper bound <= 12%; (2) all eligible census cells' FP at zero edge, 95% world-bootstrap upper bound <= 12%; (3) the swarm placebo programs' FP at zero edge (2022-24 worlds) <= 10%; (4) lane power at +10% of max loss a trade >= 9.7% (3 x S-C's 3.22%). Otherwise S-C stays. Cluster-bootstrap intervals are reported beside, not decision inputs. Lane = 0.20/0.30-delta calls held 5 or 8 sessions; 2,000 worlds a set; 1,000 bootstrap resamples.",
+ "sha256": {
+  "PREREG.md": "8f55db87fdbd58dfc117cd4634e984eee77506b6bf981a4913dd94a5f32f3e0d",
+  "decide2.py": "25d915f46093b2eee3eebe28fcc0e38325a37f54665a73530ec40a5acdc430f8",
+  "dscreen2.py": "6f7010e50cd74d30a3ee6097744054a7224f3d164ffc6dbaaf9da7a6a4e13910",
+  "mlib.py": "ce5d36a0289059383322673823565a9ecc33415d9eec9d2de78f6c2891788387",
+  "screen_fp.py": "3bf81a96762b7a09b744bc9fbbbe261d13440e2070c6f21d0afa1baeef6519c9"
+ }
+}
