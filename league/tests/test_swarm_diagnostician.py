@@ -277,6 +277,26 @@ class Retirement(DiagnosticianCase):
         self.assertEqual(self.store.family(self.fid)["band"], "retired")
         self.assertIn(lesson, self.store.graveyard("wings")[0]["lesson"])
 
+    def test_a_retirement_waits_for_the_cohort_keep(self):
+        """THE KEEP WAITS FOR RETIREMENT (researcher.py, Oct 9): a version of the family practises live in a cohort the
+        tournament keeps, so the retire defers as for pending evidence; once the keep lapses it is honored."""
+        from league.swarm import practice
+        self.settings["population"].update(start=96, ceiling=96, floor=0)
+        self.store.update_family(self.fid, validations=3)
+        self.store.put(practice.KEEP_KV, {"at": self.clock(), "families": {self.fid: 1}})
+        lesson = "Selling short-dated wings pays the spread twice for a premium the fills eat."
+        self.claude.script = [reply("retire", lesson=lesson)]
+        self.diagnostician().run()
+        event = self.events()[-1]
+        self.assertEqual((event["outcome"], event.get("reason")), ("retire_refused", "independent evidence is pending or held"))
+        self.assertIsNone(self.store.family(self.fid)["retired_at"])
+        self.assertIn("after its pending evidence", self.store.notebook(self.fid)[-1]["text"])
+        self.store.update_family(self.fid, validations=4)   # a new diagnosis is due
+        self.clock.advance(6 * 3600 + 1)    # past practice.KEEP_KV_SECONDS: the keep lapsed
+        self.claude.script = [reply("retire", lesson=lesson)]
+        self.diagnostician().run()
+        self.assertEqual(self.events()[-1]["outcome"], "retired")
+
     def test_a_retirement_waits_for_a_best_that_awaits_validation(self):
         """THE VALIDATION WAIT (researcher.py, Oct 1, H1): the researcher made version 2 its best since the validation the
         diagnostician read; the tournament owes it a verdict, so the retire defers as it does behind the gate."""

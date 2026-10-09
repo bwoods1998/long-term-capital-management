@@ -546,6 +546,21 @@ class ResearcherTest(ResearcherCase):
         self.assertEqual(tag_of(self.store._one("SELECT * FROM graveyard WHERE family=?", (self.fid,)), fam), "MECHANISM")
         self.assertIn("MECHANISM", str(last.get("retired")))
 
+    def test_three_hard_failures_wait_for_the_cohort_keep(self):
+        """THE KEEP WAITS FOR RETIREMENT (researcher.py, Oct 9): a version of the family practises live, so the third hard
+        failure is recorded and the retirement deferred; the family stays alive for its cohort."""
+        from league.swarm import practice
+        self.gate()
+        self.edge = -0.05
+        self.store.put(practice.KEEP_KV, {"at": self.clock(), "families": {self.fid: 1}})
+        self.run_()
+        self.run_(params={"threshold": 590})
+        _, out = self.run_(params={"threshold": 580})
+        fam = self.store.family(self.fid)
+        self.assertFalse(fam["retired_at"], "kept: no retirement")
+        self.assertEqual(len(self.researcher().mechanism_record(fam)["failed"]), 3, "the verdicts stand")
+        self.assertIn("cohort keep", out.get("mechanism_retire_deferred", ""))
+
     def test_a_verdict_that_is_not_a_hard_failure_never_retires_a_lineage_member(self):
         """Review of #446 (probe A): the parent's card holds three hard failures; a fork's first test is invalid."""
         self.gate()

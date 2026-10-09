@@ -90,10 +90,11 @@
    (at most `KEEP_CEILING`), so the keep never holds fewer families than the House can have pinned, and a pinned
    family (retired, its incubation would go to exits only) is never dropped for a higher return. The swarm never reads
    the House's live state, so it holds every cohort that could be pinned. It never spares a family from the
-   deflated-Sharpe rule, its researcher's or the diagnostician's own retire, the population floor or the operator's
-   gate hold. Research attention only: no trial count, look, validation, gate, band or money rule reads it. The keep
-   is saved at each read (`practice.KEEP_KV`, the incubator's cohorts' families too), so a kept family's researcher is
-   not urged to retire it for being idle (the retire tool stays offered). A record that cannot be read leaves the last
+   deflated-Sharpe rule, the population floor or the operator's gate hold. Research attention only: no trial count,
+   look, validation, gate, band or money rule reads it. The keep is saved at each read (`practice.KEEP_KV`, the
+   incubator's cohorts' families too), so a kept family's researcher is not urged to retire it for being idle, and its
+   researcher's, the mechanism test's and the diagnostician's own retire wait for it (THE KEEP WAITS FOR RETIREMENT,
+   Oct 9, researcher.py: a retired family's cohort can never be pinned). A record that cannot be read leaves the last
    good keep standing for `KEEP_STALE_SECONDS` (an hour), then none; a FRESH PROCESS (a deploy, a restart, the
    induced-failure kill: its idle pass runs at once) whose first read fails takes the keep the last process saved for
    the rest of that hour (the incubator's cohorts' families first, never cut by the cap) and does not overwrite it

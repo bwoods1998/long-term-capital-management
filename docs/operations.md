@@ -2573,12 +2573,18 @@ completes, fails or reaches its session window.
   retired because a cohort with a higher return took its place. If the facts cannot be read, every cohort past the
   sample is held for that read. The saved keep (`cohort_keep`) lists them under `held`, and a fresh process whose
   first read fails keeps those families first, beyond the cap.
-- **What it never spares:** the deflated-Sharpe rule, the researcher's or the diagnostician's own retire, the
-  population floor, and the operator's gate hold.
+- **What it never spares:** the deflated-Sharpe rule, the population floor, and the operator's gate hold.
+- **The keep waits for retirement** (Oct 9, `Researcher.cohort_kept`): while the saved keep holds a family, its
+  researcher's `retire` is not offered and a call is refused (guard `cohort_keep`), the mechanism test's retirement is
+  deferred, and the diagnostician's retire defers as for pending evidence. The incubator pins only a living family's
+  cohort, so a retired family's cohort practises on but can never trade. Before this, researchers retired three of the
+  twelve cohorts' families within four hours of T0 (megacap-post-earnings-drift-single at 02:11Z Oct 9, its kept
+  version 8 freshly passing the drift screen). A held family is parked at no cost until news, so the keep costs
+  research nothing while the researcher has no idea to test.
 - **Its record:** one private `swarm.status` event a round (`incubator_keep`), with each kept family, the rule it was
   spared, and `held`, the incubator's cohorts' families, when there are any.
 - **The researcher's status line.** The keep is saved (`cohort_keep` in the swarm's kv), so a kept family's researcher
-  is told that idleness is no reason to retire it. The retire tool stays offered.
+  is told that idleness is no reason to retire it, and that retire waits for the cohort.
 - **An unreadable record.** When `observe.sqlite` or the swarm's families cannot be read, the last good keep stands for
   an hour (`KEEP_STALE_SECONDS`), then none does, with one alert in the round's event. A fresh swarm process (a deploy,
   a restart, the induced-failure kill test) runs its idle pass at once; if its first read fails, it takes the keep the
