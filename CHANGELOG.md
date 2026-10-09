@@ -35,8 +35,8 @@ On top of D-1, same branch, same deploy. It switches the direction lane to the D
 Oct 9: item 4, a pre-registered screen whose measured false-positive rate is at most 15% per program, stated beside
 every Probe trade; and item 3, "Tell me 2 days before Sail or Claude runs out". It is Claude's decision DSCREEN-ADOPT,
 **a reported loosening**. Operator's page: **Release D-1b** at the top of `docs/operations.md`. Swarm-side and ops
-only: no `league/live/`, `league/gym/` or `league/constitution.py` change. The execution fingerprint (`b4c34031`), the
-money digest (`1665c385`) and the constitution digest (`5698a2f9`) do not move.
+only: no `league/live/`, `league/gym/` or `league/constitution.py` change. The execution fingerprint (`31a7e921`), the
+money digest (`0310779c`) and the constitution digest (`ca89ff8a`) stay release L-D's (deployed 09:04Z Oct 9, below).
 - **D2 on** (`policy.json` `dlane.screen` "D2"; receipt `docs/benchmarks/direction_screen_2.json`, sha `c3605947`,
   pinned in `dlane.screens.D2` with c 1.00 and the lane's figures; CI holds the sha and every figure to the receipt).
   - The rule: on Validation, 50+ trades on 25+ entry days and a mean entry-day return above zero; after the one look,
@@ -75,7 +75,9 @@ money digest (`1665c385`) and the constitution digest (`5698a2f9`) do not move.
   - *The calls-only code check* (`dlane.calls_only_code`): a direction program whose text names a put, a short leg or
     any open but `long_call` is refused by the researcher before any version, never validated by the tournament
     (`calls_refused`), refused by the gate ("calls only") and failed by the incubator's review. Still open: a type built
-    at run time from other pieces, and no live-side calls-only guard (release L-D).
+    at run time from other pieces, and no live-side calls-only guard: release L-D shipped without it, the live path
+    still admits a `long_put` for a `long_single` family, and the guard waits for the next `league/live` release (a
+    fingerprint move, rule F0).
   - *The burn in the mail.* A notice fired by the burn states the burn as the mail's "now" figures and the day research
     runs out at it as the add-by date, so it never says "Nothing stops" while research runs out within 2 days.
   - *A screen beside Probe trades only.* The `dlane` report states a look's screen only beside a `:r` trade opened at or
@@ -88,8 +90,8 @@ beside the same-risk buy-and-hold and never called alpha: it is leveraged index 
 always-in call program can pass its bar. Claude's decisions under the owner's goal of Oct 7 (items 4 and 5), after the
 plan of Oct 9 and its critic. Operator's page: **Release D-1, the direction lane** at the top of `docs/operations.md`;
 the design is in `docs/design.md`. Swarm-side only: no `league/live/`, `league/gym/` or `league/constitution.py` change,
-so the execution fingerprint (`b4c34031`), the money digest (`1665c385`) and the constitution digest (`5698a2f9`) do not
-move: no evidence reset, no evaluator adoption, no re-ratification.
+so the execution fingerprint (`31a7e921`), the money digest (`0310779c`) and the constitution digest (`ca89ff8a`) stay
+release L-D's: no evidence reset, no evaluator adoption, no re-ratification.
 - **The lane's core** (`league/swarm/dlane.py`, new, protected: `league/ci.py` FORBIDDEN and the gateway's
   `protected.mjs`, so the gateway is deployed first): settings and bounds (`policy.json` "dlane", mode "gate"; the code's
   default "off" is the rollback), the lane, the Train bar direction-v2 (E1, E3, E4, E5 at 1.0x; P1, R2, R3 at 1.5x; E2,
@@ -108,16 +110,17 @@ move: no evidence reset, no evaluator adoption, no re-ratification.
   tournament writes `validation_r_sd` beside `typical_max_loss_usd` for L-D's DM1.
 - **The `dlane` job and report** (`league/ops/dlane_report.py`, new; at the House's start and daily 01:30Z; in a pause
   too; operator-only; read-only but for K5's kv; no site data contract change): `<state>/dlane-report.json` with the
-  funnel per lane (24 h, 7 d), the Probe envelope (in force, GROSS and NET), THE DONE METER of the pinned rule
-  (DONE-RULE sha256 `0d007696...`: `done_screen` `:r`, `done_all` `:r`+`:t`+`:i`; 30 closes, 5 from each of 2 programs,
-  net > 0 after fees, consistency over 5+ matched closes, read only at the 30th close and every 10th; beside it P(Done |
-  zero edge) 0.13, the same-risk buy-and-hold delta-matched and in dollars at risk, the screen's world-conditional
-  false-positive rate, every loosened rule with its cost and the contamination statement), the account and the research
-  costs, the contamination meters per lane, and alarms A1-A9 and K5 as House alerts. K5 is automated: at a direction
-  realized net at or below -$600 the job sets the kv `dlane_k5` and the lane reads "shadow" until the operator clears it;
-  the job's next run records the clear and re-arms K5 at -$600 below the net at clearing (kv `dlane_k5_base`).
-  `league/ops/fast_lane.py`'s rows gain `lane` while the lane is on; the learning game's report says what the lane
-  changed mid-experiment.
+  funnel per lane (24 h, 7 d), the Probe envelope (release L-D's two envelopes read from the constitution through
+  `money.Table`, the window's and the total's figures under GROSS and NET, the binding room), THE DONE METER of the
+  pinned rule (DONE-RULE sha256 `0d007696...`: `done_screen` `:r`, `done_all` `:r`+`:t`+`:i`; 30 closes, 5 from each of
+  2 programs, net > 0 after fees, consistency over 5+ matched closes, read only at the 30th close and every 10th; beside
+  it P(Done | zero edge) 0.13, the same-risk buy-and-hold delta-matched and in dollars at risk, the screen's
+  world-conditional false-positive rate, every loosened rule with its cost and the contamination statement), the account
+  and the research costs, the contamination meters per lane, and alarms A1-A9 and K5 as House alerts. K5 is automated:
+  at a direction realized net at or below -$600 the job sets the kv `dlane_k5` and the lane reads "shadow" until the
+  operator clears it; the job's next run records the clear and re-arms K5 at -$600 below the net at clearing (kv
+  `dlane_k5_base`). `league/ops/fast_lane.py`'s rows gain `lane` while the lane is on; the learning game's report says
+  what the lane changed mid-experiment.
 - **The agenda guard** (D9): the swarm warns the House at its start, and whenever it changes, when `swarm.json`'s locked
   preamble or fallback agenda is over 4,000 characters, not ASCII or names a hidden year; the new operator tool
   `scripts/agenda_install.py` (check, apply) refuses such a text and installs a good one with a before-copy, an atomic
@@ -143,11 +146,16 @@ move: no evidence reset, no evaluator adoption, no re-ratification.
   hint: this overrides HARNESS 6's `scale` in the view on secrecy grounds); the brief's vertical guidance is a lane rule
   with no Train provenance. Joins from the integration: the public checklist's `gate_paused` reads the family's own
   lane's alarm, and a direction parent's fork carries `lane` in its `swarm.born`.
-- **Owner steps, in order** (docs/operations.md): L-D deployed and verified; CI green on main's head; the gateway
-  (`protected.mjs`) deployed; `floor_box.py deploy` in the money path's window with no order in flight; verify (no
-  fingerprint or digest move, `lane_births` on the first pass, the `dlane` report written); install agenda v21 with
-  `scripts/agenda_install.py`. Rollback: `dlane.mode` "off" in `swarm.json` (read every loop, no restart; every path as
-  before D-1), agenda v19.1 back with the same tool, then `floor_box.py rollback` if the code must go.
+- **Joins with release L-D** (main `40c39435` merged into `release/dlane-d1` after L-D's deploy): the `dlane` report's
+  Probe envelope reads L-D's rolling budget from the constitution (`real.probe_figures` told each basis; alarm A4 reads
+  the binding envelope's room, A5 names `probe.demotion`); the tournament's `validation_r_sd` keys are the ones
+  `league/live/families.py` reads, tested end to end (`test_dlane_ld_joins`).
+- **Owner steps, in order** (docs/operations.md): L-D deployed and verified (done 09:04Z Oct 9); CI green on main's
+  head; the gateway (`protected.mjs`) deployed; `floor_box.py deploy` in the money path's window with no order in
+  flight; verify (no fingerprint or digest move, `lane_births` on the first pass, the `dlane` report written); install
+  agenda v21 with `scripts/agenda_install.py`. Rollback: `dlane.mode` "off" in `swarm.json` (read every loop, no
+  restart; every path as before D-1), agenda v19.1 back with the same tool, then `floor_box.py rollback` if the code
+  must go.
 
 ### On branches, not in V3-A part 1
 

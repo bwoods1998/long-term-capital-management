@@ -14,9 +14,10 @@ D-1b switches the direction lane's screen to **D2** and meets the reporting term
 "a pre-registered screen whose false-positive rate you have measured, at most 15% per program at zero edge, stated
 beside every Probe trade", and item 3, "Tell me 2 days before Sail or Claude runs out". It is Claude's decision
 DSCREEN-ADOPT, and it is **a reported loosening** (the cost is below). It ships in the same owner deploy as D-1 (its
-section follows), after release L-D. Like D-1 it is swarm-side and ops only. Nothing under `league/live/`, `league/gym/`
-or `league/constitution.py` changes, so the execution fingerprint (`b4c34031`), the money digest (`1665c385`) and the
-constitution digest (`5698a2f9`) do not move.
+section follows), on top of release L-D (deployed 09:04Z Oct 9; its section is below D-1's, and `release/dlane-d1`
+carries it: main `40c39435` merged in). Like D-1 it is swarm-side and ops only. Nothing under `league/live/`,
+`league/gym/` or `league/constitution.py` changes, so the execution fingerprint (`31a7e921`), the money digest
+(`0310779c`) and the constitution digest (`ca89ff8a`) stay release L-D's, the ones in production.
 
 **What it does:**
 - **D2 is the direction lane's screen.** `policy.json` sets `dlane.screen` "D2" and pins DSCREEN-2's receipt in
@@ -49,9 +50,12 @@ constitution digest (`5698a2f9`) do not move.
 
   A `long_call` open is one long call wherever the Gym's classifier judges it, and the live path resolves an intent with
   the same module, so a program that names no other open sends none by a literal. **What is still open:** the check
-  cannot see an open type assembled at run time from pieces other than those words, and `league/live` has no
-  direction calls-only check of its own (a live-side guard is scheduled for release L-D; `league/live` is frozen in
-  D-1b).
+  cannot see an open type assembled at run time from pieces other than those words, and **`league/live` has no
+  direction calls-only check of its own**. D-1b scheduled that guard for release L-D, and L-D shipped (09:04Z Oct 9)
+  without it: the live path still admits a `long_put` for a `long_single` family (`money.DECLARED_TYPES`), so such a
+  program at Probe could send a real put. The guard is a `league/live` change, which moves the execution fingerprint
+  (an evidence reset: every banded family back to the Gym, rule F0), so it is not in D-1 or D-1b and waits for the
+  next planned `league/live` release. Until then the four swarm-side refusals above are the whole wall.
 - **One Validation try and one holdout look per direction lineage** (`dlane.val_tries`, `dlane.looks_per_lineage`, both
   fixed at 1). This keeps a lineage's false-positive rate equal to the program's. With two tries it is 16.4% on mixed
   worlds (the receipt's per-lineage reading A). How it works:
@@ -111,7 +115,8 @@ constitution digest (`5698a2f9`) do not move.
 - D2 FAILED the operator's own pre-registered adoption rule (every upper bound at most 12%). Adopting it after seeing
   that result is a post-hoc loosening of that ceiling. The lane's rate stays under the owner's 15%.
 - Discrimination is weak: D2 passes mostly programs whose two screen windows rose.
-- The $400 net Probe budget, not the screen, bounds the money.
+- The Probe loss budget, not the screen, bounds the money: release L-D's $400 of worst net stretch in any 20 sessions
+  and $400 net in total (`options_money.probe`).
 - Contamination: every author knows whether those windows rose. The rate is a property of the procedure across
   historical worlds, not a guarantee in this one.
 
@@ -130,6 +135,9 @@ constitution digest (`5698a2f9`) do not move.
   settings; print(dlane.screen_effective(settings.load('/workspace/state'), 'direction'))"` from `/workspace/current`.
 - The first direction look's `swarm.gate` event carries `fp_lane_mixed`.
 - `<state>/dlane-report.json` has `fp_beside_trades`, and the loosened list names D2.
+- Its `probe_envelope.constitution` reads release L-D's row ("net", 400 over 20 sessions, 400 in total, 8, "dm1"),
+  `by_basis` holds both bases with no `error`, and its `in_force` reads as `<state>/fast-lane-report.json`'s
+  `probe_budget` of the same night (both run outside market hours).
 - `<state>/budget.json` meters carry `out_in_days`.
 
 ## Release D-1, the direction lane (Oct 9, 2026): built on `release/dlane-d1`, not deployed
@@ -144,12 +152,14 @@ costs, not alpha**, and every view, brief, status line and report says so: an al
 and the gate is not tested by it. The code is `league/swarm/dlane.py` (new, protected: its docstring states every rule);
 the operator's report is `league/ops/dlane_report.py`.
 
-**It is swarm-side only.** Nothing under `league/live/` or `league/gym/` and nothing in `league/constitution.py` changes:
-the execution fingerprint (`b4c34031`), the money digest (`1665c385`) and the constitution digest (`5698a2f9`) do not
-move, so there is no evidence reset, no evaluator adoption and no re-ratification. It ships by the owner's deploy
-(`dlane.py`, `league/swarm/policy.json`, `league/ops/` and the gateway's protected list change) AFTER release L-D (the
-one evidence reset of Oct 9, above): no league/live or league/gym release may ship while a direction family is a
-Candidate, Probe or Sized, except a money-safety fix (rule F0: its cost is those bands, which go back to the Gym).
+**It is swarm-side only.** Nothing under `league/live/` or `league/gym/` and nothing in `league/constitution.py`
+changes: the execution fingerprint (`31a7e921`), the money digest (`0310779c`) and the constitution digest (`ca89ff8a`)
+stay release L-D's, in production since 09:04Z Oct 9, so there is no evidence reset, no evaluator adoption and no
+re-ratification. (Built on `ccfa48d5`, D-1 moved none of `ccfa48d5`'s `b4c34031` / `1665c385` / `5698a2f9`; the branch
+now carries L-D, main `40c39435`.) It ships by the owner's deploy (`dlane.py`, `league/swarm/policy.json`, `league/ops/`
+and the gateway's protected list change) AFTER release L-D (the one evidence reset of Oct 9, deployed 09:04Z, below): no
+league/live or league/gym release may ship while a direction family is a Candidate, Probe or Sized, except a
+money-safety fix (rule F0: its cost is those bands, which go back to the Gym).
 
 **What it does** (the switches are in the table below):
 - **The lane.** A family's lane is its card's (`card.lane`; "alpha" by default, "direction" declared by the architect),
@@ -193,6 +203,9 @@ Candidate, Probe or Sized, except a money-safety fix (rule F0: its cost is those
   incubator refuses a direction mark unless the lane's effective mode is "gate". Alpha marks are unchanged.
 - **The sigma writer** (for L-D's DM1): the tournament writes `validation_r_sd` (the sd of per-trade P&L per dollar of
   maximum loss in the version's Validation run) beside `typical_max_loss_usd`; L-D's `league/live/families.py` reads it.
+  The keys are the reader's exactly: `validation_r_sd_by_version` {str(version): sd} and `validation_r_sd` for
+  `validation_version`, a finite float above zero or nothing. `test_dlane_ld_joins` holds the join end to end on the
+  merged tree: the figure the tournament writes is the one `SwarmFamilies.read` puts in the band row and DM1 reads.
 - **K5, automated** (a tightening): the `dlane` job sets the swarm store's kv `dlane_k5` {at, net, line} once when the
   direction lane's realized net over every route (`:r`, `:t`, `:i`) since the options swarm began is at or below K5's
   line: `dlane.k5_net_usd` (-$600), or after a clear `k5_net_usd` below the net at clearing (kv `dlane_k5_base`). While
@@ -250,8 +263,9 @@ every `dlane` report, `dlane_report.LOOSENED`):
 
 Tightened: K5 (above); the screen, the alarm and K5's line can only tighten by a setting (the one setting that loosens
 K5 is `k5_clear`, in the table above); D2 refused without a pinned receipt;
-E5 prices one lot at today's prices before Validation. Release L-D's own loosenings (the NET budget, 8 slots, DM1) are in
-its section and ride in the report's header too.
+E5 prices one lot at today's prices before Validation. Release L-D's own loosenings (the NET budget, 8 slots, DM1) and
+its rolling budget (L9, a tightening of NET: $400 of worst net stretch in any 20 sessions beside $400 net in total) are
+in its section and ride in the report's header too.
 
 **The report** (`league/ops/dlane_report.py`; the House's `dlane` job at its start and daily 01:30Z, after the
 `direction` closes and the fast lane's report; in a pause too; OPERATOR-ONLY, read-only on the swarm and live stores but
@@ -263,8 +277,13 @@ writes nothing (a `skipped` receipt). The fast lane's report rows gain `lane` wh
 - **The funnel per lane**, 24 hours and 7 days: births, Gym runs by window and their program-years (the Gym is shared:
   direction runs slow alpha's), Validation tries and passes, reviews and audits, holdout looks and passes by the screen
   each recorded, band moves, real closes by route; the bands now; the direction lane's Train-bar failure counts.
-- **The Probe envelope:** the budget as the code in force reads it (its basis named), the GROSS and NET realized
-  figures beside it, and the room in units of today's cap (10% of equity).
+- **The Probe envelope** (`probe_envelope`): release L-D's budget as `money.Table` reads it from the constitution
+  (`constitution`: `loss_basis`, `loss_budget_usd` over `loss_window_sessions`, `loss_total_usd`, `max_open`,
+  `demotion`; today "net", $400 in any 20 sessions, $400 in total, 8, "dm1"), never a figure of its own; the fast lane
+  report's own figure (`in_force`); and under each basis, GROSS and NET (`by_basis`, from `real.probe_figures` told the
+  basis by name), the window's realized figure (under NET its worst net stretch) and the total's, both rooms, the one
+  that binds and the room in units of today's cap (10% of equity). A4 reads the room under the basis in force and names
+  the binding envelope; A5 names `probe.demotion`.
 - **THE DONE METER** (the pinned rule, read exactly): every real close of an agent program (never calibration, the House
   live test or `house:*`) since 2026-09-26T06:23Z on `:r`, `:t` and `:i`, the one agent real close before D-1 (tuition, Oct 8) included;
   realized after all fees (the broker's posted fees where they have posted, the book's estimate otherwise, labelled per
@@ -308,18 +327,18 @@ the incubator route. K9, Nov 9 with fewer than 2 programs at Probe: re-plan and 
 the walls on this evidence. Neither is ever a forced or hand-placed trade.
 
 **The owner's deploy, in order** (the money path's window, 20:05-13:25Z on a trading day; never 12:55-20:05Z; no order in
-flight; L-D deployed and verified first):
+flight; L-D deployed and verified first: done, 09:04Z Oct 9, House release `20261009T090334Z-cdbf1864a573`):
 1. CI green on main's head with D-1 merged (`gateway`, `tests (3.11)`, `tests (3.14)`); the alpha golden tests in it.
    Merging holds the updater's later heads until the owner deploys main's head.
 2. The gateway first: `protected.mjs` gains `league/swarm/dlane.py` (its parity test green), then
    `npx wrangler@4.129.1 deploy` (**The protected paths**).
 3. `floor_box.py deploy` from `~/Work/ltcm-deploy` (a clean detached checkout of main's head); rollback ready.
-4. Verify: the release id; `floor_box.py status` `current`; the money digest unmoved (L-D's) and the execution
-   fingerprint unmoved (`python3 -c "from league.swarm.evaluator import execution_fingerprint;
-   print(execution_fingerprint())"` on both trees; the kv `research_evaluator` unchanged: no adoption ran); the first
-   architect pass's `swarm.architect` event carries `lane_births`; the first direction births' `swarm.born` payloads
-   carry `lane`; the `dlane` job's first receipt is `ok` and `<state>/dlane-report.json` reads `lane.mode_effective`
-   "gate".
+4. Verify: the release id; `floor_box.py status` `current`; the money digest unmoved (L-D's `0310779c`) and the
+   execution fingerprint unmoved (L-D's `31a7e921`: `python3 -c "from league.swarm.evaluator import
+   execution_fingerprint; print(execution_fingerprint())"` on both trees; the kv `research_evaluator` unchanged: no
+   adoption ran); the first architect pass's `swarm.architect` event carries `lane_births`; the first direction births'
+   `swarm.born` payloads carry `lane`; the `dlane` job's first receipt is `ok` and `<state>/dlane-report.json` reads
+   `lane.mode_effective` "gate".
 5. Install agenda v21 (below), then nothing else: `policy.json` already sets `dlane.mode` "gate", so the plan's N2
    override in `swarm.json` is not needed (set `dlane.mode` "shadow" there for a staged start).
 
@@ -2682,14 +2701,14 @@ contracts already attributed to another family. Missing fill values leave an exp
 `unpriced_close` row, release stale exposure and block new entries until venue fills or expiry events
 resolve the accounting; estimated intrinsic values never become forward evidence.
 
-The checked-in deployment has `real_money: true`, the grant is active on the money digest in force (`1665c385` since
-the incubator cap's deploy of Oct 8, re-ratified by the standing grant; `0310779c` once release L-D ships, the same
-way), and the gateway's `OPTION_STRUCTURES_REAL` names the four debit types. The gateway still admits paper
-structures and verified closes of held real positions; `off` is still a permitted stricter setting in `league.ci`. The
-paper route proof runs from 09:35 ET until it has passed, even with no real-account client, grant or eligible family,
-and keeps an unfinished attempt's identity and owned contracts through restarts. Both proofs (the multi-leg vertical and
-the single-leg call) passed on Sept 28; a passed proof is not run again. Passing records paper execution evidence, never
-a family's evidence.
+The checked-in deployment has `real_money: true`, the grant is active on the money digest in force (`0310779c` since
+release L-D's deploy of 09:04Z Oct 9, re-ratified by the standing grant at the House's start; `1665c385` before it, from
+the incubator cap's deploy of Oct 8), and the gateway's `OPTION_STRUCTURES_REAL` names the four debit types. The gateway
+still admits paper structures and verified closes of held real positions; `off` is still a permitted stricter setting in
+`league.ci`. The paper route proof runs from 09:35 ET until it has passed, even with no real-account client, grant or
+eligible family, and keeps an unfinished attempt's identity and owned contracts through restarts. Both proofs (the
+multi-leg vertical and the single-leg call) passed on Sept 28; a passed proof is not run again. Passing records paper
+execution evidence, never a family's evidence.
 
 **The money table (the sprint, owner decision D4, Sept 26, 2026; the Probe rows since fast lane v2, Oct 7, 2026, and
 release L-D, Oct 9, 2026)**: real types under $2,000 of equity are exactly `debit_vertical`, `long_butterfly`,
