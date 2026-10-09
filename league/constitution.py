@@ -819,7 +819,8 @@ CONSTITUTION: dict[str, Any] = {
     #   its mean maximum loss) nor by a negative forward record: it is demoted (sticky, exits only, D5's mechanics) when
     #   its real trades are 10 or more and their summed return on maximum loss is below -1.645 x sigma x sqrt(n), sigma
     #   the sd of that return in the banded version's Validation run, else its forward record's at 10 or more trades,
-    #   else 2.0 (`league/live/money.py` `demotion` and its constants). D5's replay-gap leg and the real_bad hold are kept.
+    #   else 2.0 (`league/live/money.py` `demotion` and its constants); the live path keeps the version it demoted, so a
+    #   sigma that grows later never lifts it. D5's replay-gap leg and the real_bad hold are kept.
     #   It applies to every Probe or Sized family, alpha too (the live row carries no lane; no alpha family is near
     #   Probe). Cost (the critic, 4,000 bootstrap paths of 30 closes over the 29 cells the direction bar admits): DM1 fires
     #   within 30 closes 6.5-13% of the time at zero edge, 14-22% at -0.10 a dollar of maximum loss, 29-36% at -0.25

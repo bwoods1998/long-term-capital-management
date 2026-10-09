@@ -40,8 +40,10 @@ BANDS (the live path owns candidate <-> probe <-> sized; the swarm owns gym <-> 
   to less than -`DM1_Z` (1.645) x sigma x sqrt(n). Sigma (`dm1_sigma`): the sd of that return in the banded version's
   Validation run (the live row's `validation_r_sd`, `league/live/families.py`), else the forward record's sd at
   `DM1_SIGMA_MIN_TRADES` (10) or more trades, else `DM1_FALLBACK_SIGMA` (2.0). D5's replay-gap leg (Candidate and Probe)
-  and the real_bad hold are kept; a Candidate keeps every "dm0" check, and DM1 too, so a version it demoted stays a
-  Candidate. It applies to every Probe or Sized family, alpha too: the live row carries no lane.
+  and the real_bad hold are kept; a Candidate keeps every "dm0" check, and DM1 too. Sticky: DM1's line moves with
+  sigma, so the live path also keeps the version it demoted (`step.OptionsLive._dm1_sticky`, the live state's
+  `dm1_demoted`) and holds it at Candidate whatever sigma or the rule reads later. It applies to every Probe or Sized
+  family, alpha too: the live row carries no lane.
 
 SIZING a real open (`plan_open`), by maximum loss, never premium. `unit` is one structure's maximum loss at its limit
 plus its open and close fees, from the ORDER's own type and legs (a `long_single` family's call and put are each sized

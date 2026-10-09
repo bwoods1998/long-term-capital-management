@@ -643,6 +643,38 @@ class DM1Live(LiveCase):
         self.assertTrue(moved and moved[0]["why"].startswith("DM1:"), moved)
         self.assertEqual(len(self.opens()), 1, "no real open after the demotion")
 
+    def test_a_dm1_demotion_is_sticky_for_its_version_whatever_sigma_reads_later(self):
+        fam = family("vert", VERTICAL, band="probe", params={"hold": 3, "opens": 3})
+        fam["validation_r_sd"] = 0.5
+        live = self.make([fam])
+        self.run_to(9, 31)
+        self.families.add_forward("vert", "real", [dict(r, id=f"dm1-{i}") for i, r in enumerate(real_rows([-0.28] * 10))])
+        self.run_to(9, 38)
+        self.assertEqual(self.families.rows["vert"]["band"], "candidate")
+        self.assertEqual(live.state.get("dm1_demoted")["vert"]["version"], 1)
+        moved = [p for p, a in self.ledger.of("live.band") if p.get("to") == "candidate"]
+        self.assertTrue(moved and moved[0]["why"].startswith("DM1:"), moved)
+        # Sigma reads larger later (here the Validation sd; a growing shadow record does the same): the line drops to
+        # about -27, far below the record's sum (about -2.8), and D5's loss leg does not fire (about -$114 against -3 x
+        # about $40), so the band rule alone would promote the version again.
+        self.families.rows["vert"]["validation_r_sd"] = 5.0
+        fwd = M.forward_stats(self.families.forward_rows("vert"), 0.8, version=1)
+        self.assertEqual(M.band_for(live.table, self.families.rows["vert"], live.sizing_equity(), fwd)[0], "probe")
+        live._families_at = float("-inf")
+        self.run_to(9, 45)
+        self.assertEqual(self.families.rows["vert"]["band"], "candidate", "held for good")
+        held = [p for p, _ in self.ledger.of("live.band") if p.get("held")]
+        self.assertTrue(any(p["why"].startswith("DM1 demoted version 1 for good") for p in held), held)
+        self.assertEqual(len(self.opens()), 1)
+        self.assertIsNone(live._dm1_sticky("vert", 2), "a new version starts its own record")
+        # A rule change (the CON-only rollback to "dm0") never undoes it.
+        from league.tests.money_fakes import rollback_table
+
+        live.table = rollback_table()
+        live._families_at = float("-inf")
+        self.run_to(9, 47)
+        self.assertEqual(self.families.rows["vert"]["band"], "candidate")
+
 
 # ============================================================================================ L5: {"natural": k}
 @unittest.skipUnless(HAVE, "numpy not installed")

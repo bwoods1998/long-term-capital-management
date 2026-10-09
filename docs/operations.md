@@ -40,10 +40,12 @@ stage spends them loosen, the routes beside it keep their room, and programs get
   `league/live/families.py` from the swarm's state keys `validation_r_sd_by_version` and `validation_r_sd`; the swarm's
   WRITER ships with release D-1, so until then it is absent), else the forward record's sd (its nightly, shadow and real
   days; with 10 real trades the record always has 10), else 2.0. D5's replay-gap leg and the real_bad hold are kept; a
-  Candidate keeps every "dm0" check (the negative record included) and DM1 too, so a version DM1 demoted stays a
-  Candidate. The live path's band, its open refusal and its admission read one answer (`money.negative_demotes`,
-  `money.live_demotion`). It applies to every Probe or Sized family, alpha too: the live row carries no lane (no alpha
-  family is near Probe).
+  Candidate keeps every "dm0" check (the negative record included) and DM1 too. Sticky: DM1's line moves with sigma
+  (the Candidate's shadow days keep adding to its record; D-1 brings the Validation sd), so the live path keeps the
+  version it demoted (live state `dm1_demoted`) and holds it at Candidate for good, whatever sigma or `probe.demotion`
+  reads later (`live.band` held rows: "DM1 demoted version N for good"); a new version starts its own record. The live
+  path's band, its open refusal and its admission read one answer (`money.negative_demotes`, `money.live_demotion`). It
+  applies to every Probe or Sized family, alpha too: the live row carries no lane (no alpha family is near Probe).
 - **L5, the marketable natural limit** (`league/gym/legs.py`). A program may send `"limit": {"natural": k}`, k a whole
   number 0-10: the decision minute's natural moved k ticks against it (+ k ticks on an open's signed value, - k on a
   close's: a debit pays more, a credit takes in less, a close receives less or pays more). It is exactly `{"price": v}`
@@ -92,7 +94,7 @@ that qualify under the new evaluator. After L-D, rule F0 holds: no `league/live/
 family (direction or alpha) is Candidate, Probe or Sized, except a money-safety fix, whose cost is that band.
 
 **Identities.** Constitution digest `5698a2f9` -> `4a1705b6`; money digest `1665c385` -> `b212d4e6`; the execution
-fingerprint `b4c34031` -> `2364ce5d` (check a tree with `python3 -c "from league.swarm.evaluator import
+fingerprint `b4c34031` -> `faba3d25` (check a tree with `python3 -c "from league.swarm.evaluator import
 execution_fingerprint; print(execution_fingerprint())"`; the CON-only rollback's money digest is `48eb2433`).
 
 **The owner's deploy, in order.** (1) CI green on the exact head; rollback ready (`floor_box.py rollback` to
@@ -108,8 +110,8 @@ completed, reason "evaluator changed; a new version needs fresh practice". (5) T
 `demotion` "dm0" in `league/constitution.py` (re-pin `PINNED_DIGEST`), one owner deploy. Each value runs fast lane v2's
 code for that rule byte for byte (`league/tests/test_ld_release.py` checks it against a frozen copy); the money digest
 moves to `48eb2433` (the grant re-ratifies at the House's start, as above) and the execution fingerprint does NOT move:
-no evidence reset, no band lost. The room stays capped at $400 (at 3 slots it differs only above E = $1,333.33) and
-`{"natural": k}` stays. `floor_box.py rollback` to `20261009T025942Z` instead moves the fingerprint again (one more
+no evidence reset, no band lost. The room stays capped at $400 (at 3 slots it differs only above E = $1,333.33),
+`{"natural": k}` stays, and a version DM1 demoted before the rollback stays a Candidate (`dm1_demoted`). `floor_box.py rollback` to `20261009T025942Z` instead moves the fingerprint again (one more
 reset: every band and practice cohort at that moment) and, once release D-1 has shipped, drops D-1 too; use it only
 for a broken release, never to undo a rule.
 

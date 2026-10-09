@@ -1136,6 +1136,9 @@ class OptionsLive:
             # would only be undone (since THE FAST LANE a confirmed Probe trades from the next live minute, `_real_eligible`).
             return band
         new, why = M.band_for(self.table, row, equity, fwd, probe_sessions=self._probe_sessions(fid, band))
+        sticky = self._dm1_sticky(fid, row.get("version"))
+        if sticky is not None and new != "candidate":
+            new, why = "candidate", sticky
         embargoed = False
         if new == "sized":
             held = self._embargoed(row, forward)
@@ -1149,6 +1152,8 @@ class OptionsLive:
         if not confirmed:
             self._families_at = float("-inf")
             return "stale"
+        if new == "candidate" and why.startswith("DM1:"):
+            self._dm1_record(fid, row.get("version"), why)
         if new != band:
             try:
                 self.record("live.band", {"family": fid, "from": band, "to": new, "why": why}, agent=fid)
@@ -1169,6 +1174,35 @@ class OptionsLive:
                 self.state.put("held_told", told)
                 self.record("live.band", {"family": fid, "from": band, "to": band, "held": True, "why": why}, agent=fid)
         return new
+
+    def _dm1_sticky(self, fid: str, version: Any) -> str | None:
+        """DM1 IS STICKY FOR ITS VERSION (release L-D, Oct 9, 2026; `money.demotion`): why a version DM1 demoted stays a
+        Candidate, or None. D5's demotion is sticky by its evidence (the version's real rows, which a Candidate adds no
+        more of); DM1's line moves with sigma, which can grow after the demotion (the Candidate's shadow days keep adding
+        to the forward record, and the swarm's Validation sd arrives with release D-1), so the version it demoted is kept
+        in the live state (`dm1_demoted`: {family: {version, why, at}}) and held at Candidate whatever its sigma reads
+        later, and whatever `probe.demotion` reads (a rule change never undoes a demotion). A new version starts its own
+        record. An unreadable state holds nothing here; `money.demotion`'s DM1 check on a Candidate still applies."""
+        try:
+            rec = (self.state.get("dm1_demoted", {}) or {}).get(fid)
+        except Exception:  # noqa: BLE001 - the Candidate's own DM1 check stands
+            return None
+        if not isinstance(rec, Mapping) or rec.get("version") is None or str(rec.get("version")) != str(version):
+            return None
+        return (f"DM1 demoted version {version} for good (sticky: a new version starts its own record): "
+                f"{str(rec.get('why') or '')[:400]}")
+
+    def _dm1_record(self, fid: str, version: Any, why: str) -> None:
+        """Keep a DM1 demotion of `version` (`_dm1_sticky`), once; a failed write is told and tried at the next pass."""
+        try:
+            demoted = dict(self.state.get("dm1_demoted", {}) or {})
+            rec = demoted.get(fid)
+            if isinstance(rec, Mapping) and str(rec.get("version")) == str(version):
+                return
+            demoted[fid] = {"version": version, "why": str(why)[:400], "at": self.clock()}
+            self.state.put("dm1_demoted", demoted)
+        except Exception as exc:  # noqa: BLE001 - the band is already Candidate; the next pass writes it again
+            self.alert("warning", f"live: {fid}'s DM1 demotion could not be kept ({type(exc).__name__}); retried next pass")
 
     def _embargoed(self, row: Mapping[str, Any], forward: Iterable[Mapping[str, Any]]) -> str | None:
         """THE FORWARD EMBARGO (the module docstring): why a Sized answer is held at Probe, or None. Sized also needs the

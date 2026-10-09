@@ -55,8 +55,8 @@ L-D** at the top of `docs/operations.md`.
   leg and the forward-negative demotion are off; demoted (sticky, exits only) at 10+ real trades whose returns on
   maximum loss sum below -1.645 x sigma x sqrt(n), sigma the banded version's Validation sd (read from the swarm's state
   by `league/live/families.py` `validation_r_sd`; its writer ships with release D-1), else the forward record's sd, else
-  2.0. The replay-gap leg and the real_bad hold are kept; a Candidate keeps every "dm0" check, and DM1 keeps a version
-  it demoted a Candidate. The band, the open's refusal and the admission read one rule. Every Probe or Sized family,
+  2.0. The replay-gap leg and the real_bad hold are kept; a Candidate keeps every "dm0" check; the live state keeps
+  the version DM1 demoted (`dm1_demoted`), held at Candidate whatever sigma or the rule reads later. The band, the open's refusal and the admission read one rule. Every Probe or Sized family,
   alpha too. Cost (the critic, 4,000 bootstrap paths): fires within 30 closes 6.5-13% at zero edge, 14-22% at -0.10,
   29-36% at -0.25 (D5: 77/83/90%): the $400 envelope, not demotion, mostly stops a losing program. MONEY: P(net <=
   -$360) 0.27 -> 0.30; Done 2.6% -> 3.3%.
@@ -66,7 +66,7 @@ L-D** at the top of `docs/operations.md`.
 - **Not done: the narrower fingerprint** (the critic, N8): `league/live/money.py` stays hashed, because the practice
   book's caps read `money.Table` and the incubator's first-look rule lives there.
 - **Identities.** Constitution digest `5698a2f9` -> `4a1705b6`; money digest `1665c385` -> `b212d4e6` (the standing
-  grant re-ratifies at the House's start on the owner's deploy); the execution fingerprint `b4c34031` -> `2364ce5d`
+  grant re-ratifies at the House's start on the owner's deploy); the execution fingerprint `b4c34031` -> `faba3d25`
   (league/live and league/gym changed): the evaluator adoption re-derives every family's bests, and every active
   practice cohort is completed ("evaluator changed"), the 10 still active of the 12 admitted Oct 8 among them (their
   incubator first looks were expected about Nov 4-10). No family is banded.
