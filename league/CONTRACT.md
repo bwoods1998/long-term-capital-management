@@ -187,7 +187,7 @@ A multi-leg example using the same intent interface:
           {"side": "short", "right": "C", "dte": 0, "delta": 0.15},
           {"side": "long",  "right": "C", "rel": 2, "offset": 1.0}],
  "max_loss": 150.0,            # or "qty": 1
- "limit": "natural",           # or "mid", {"mid": k}, {"natural": k}, {"price": value}
+ "limit": "natural",           # or "mid", {"mid": k}, {"price": value}
  "tif": 10,                    # minutes to work; "day" (default) or "ioc"
  "tag": "vrp", "note": "iv over realized"}
 ```
@@ -227,15 +227,9 @@ An order meets the quotes of the minute AFTER your decision, and every chance in
   `"natural"` entry on a move already under way misses exactly the trades that go your way and gets
   the ones that reverse (in the swarm's own runs, 71% of directional entries were priced this way and
   none of 836 such fills caught a first-minute move). For a signal that is a move in progress, pay
-  through: `{"natural": k}` (k a whole number of ticks, 0 to 10) is the decision minute's natural moved k
-  ticks against you, a few ticks above the package's ask-side value on an open and below its bid-side
-  value on a close: exactly `{"price": v}` with that v, so it fills at the next minute's natural whenever
-  that natural has moved at most k ticks past the one you decided on (the ask rose by at most k ticks
-  under a buy), and otherwise rests at v. A single option whose tick coarsens at $3.00 (XSP, SPXW) and
-  is moved across it gets v on the coarser tick, rounded in your favour (an ask of 2.98 on XSP with k 5
-  is 3.00, not 3.03): the venue takes no other price. Use it with a short `tif`
-  (or send `{"price": v}` yourself); check `fills.fill_rate` and the open slippage in your results to see
-  what it cost. The same rule runs in the Gym, the shadow book and real money.
+  through: choose the strikes yourself from `ctx.chains` and send `{"price": v}` a few ticks above the
+  package's ask-side value at the decision minute (below it for a sale), with a short `tif`; check
+  `fills.fill_rate` and the open slippage in your results to see what it cost.
 - **Patient pricing is modelled, and it is often cheaper than the natural.** A limit short of the
   natural (`{"mid": k}`: k ticks from the mid toward the natural; `"mid"`; `{"price": v}`) works for
   its `tif` minutes (`"day"` by default). Each minute it has not filled, it fills AT ITS LIMIT if

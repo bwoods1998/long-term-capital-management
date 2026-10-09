@@ -16,11 +16,11 @@ budget up to $400 in total") and item 5 (every loosened rule reported with its c
 (L9), the owner's goal as he re-set it on Oct 9 (about 06:20Z), item 4: "Probe loss budget: $400 net in any rolling 20
 sessions and $800 net in total (realized Probe losses net of Probe gains, plus the maximum loss of everything open)".
 Production runs main `ccfa48d5` (House release `20261009T025942Z`) until it ships. The 10% cap is unchanged; the $400
-becomes a rolling 20-session figure beside an $800 total; three rules of how the Probe stage spends them loosen, the
-routes beside it keep their room, and programs get a marketable limit. It changes
-`league/live/` and `league/gym/` (`legs.py` and `PROGRAM.md`): the execution fingerprint moves (an evidence reset) and
-so does the Gym bundle, the first Gym change since Release A (**What the deploy resets**, below); and
-`league/constitution.py` (the money digest moves: the standing grant re-ratifies by itself at the House's start).
+becomes a rolling 20-session figure beside an $800 total; three rules of how the Probe stage spends them loosen, and the
+routes beside it keep their room. It changes `league/live/`: the execution fingerprint moves (an evidence reset); the
+Gym bundle does not (L5, the marketable natural limit, was dropped on Oct 9 for that reason: **What the deploy
+resets**, below); and `league/constitution.py` (the money digest moves: the standing grant re-ratifies by itself at the
+House's start).
 
 - **L1, the budget read NET** (`options_money.probe.loss_basis` "net"; allowed exactly "gross" and "net",
   `OPTIONS_MONEY_CHOICES`: "Net", "" or a missing row is refused and nothing trades). The realized part of THE PROBE
@@ -77,17 +77,6 @@ so does the Gym bundle, the first Gym change since Release A (**What the deploy 
   loss rises from $400 to $800 (the 60% drawdown stop, about $773 from today's peak, binds near it); a 20-session
   window lets Probe trading resume after a bad stretch, as its losses age out, instead of stopping for good at $400.
   Its measured cost is under **Cost**, below.
-- **L5, the marketable natural limit** (`league/gym/legs.py`). A program may send `"limit": {"natural": k}`, k a whole
-  number 0-10: the decision minute's natural moved k ticks against it (+ k ticks on an open's signed value, - k on a
-  close's: a debit pays more, a credit takes in less, a close receives less or pays more). It is exactly `{"price": v}`
-  with that v, so it fills as that does in the Gym, the shadow book and real money (all three resolve intents in
-  `legs.py`); `league/CONTRACT.md` and `league/gym/PROGRAM.md` say so. The moved price is rounded passively on the tick
-  it lands on (`legs.limit_value`'s `tick_at`, which `resolve_open` and `resolve_close` pass; the review of L-D): a
-  single leg moved across $3.00 on a root whose tick coarsens there (XSP, SPXW, SPX, VIX) lands on the coarser tick
-  (an XSP ask of 2.98 with k 5 is 3.00, not 3.03, which the venue's tick model calls off the grid and the real order
-  path would have sent as it is), and `{"price": 3.00}` gives the same. `{"price": v}`, `"mid"` and `{"mid": k}`
-  keep rounding on the natural's tick, unchanged: such a value across $3.00 can still be off the grid (an XSP `"mid"`
-  close at a 2.98 bid and 3.20 ask asks 3.09), as before L-D.
 - **Not done: the narrower fingerprint** (the critic, N8, optional). `league/live/money.py` stays in the execution
   fingerprint: the practice book's caps read `money.Table` (`shadow._probe_caps`: its open count and family share, and
   a refused table refuses every practice open), and the incubator's pre-registered first-look rule (`practice_ok`)
@@ -130,31 +119,20 @@ account's):
   early Done: a Probe gain no longer refills the window for the losses after it, so the first 12 weeks trade less;
   by 24 weeks the window has rolled and the two readings are about level.
 
-**What the deploy resets** (the evaluator adoption at the House's start: `league/live/` and `league/gym/` changed). As
-fast lane v2's: every alive family's bests, Train candidates, robustness, validation line and review are re-derived;
-looks, trials, refusals and forward rows are kept. No family is banded, so no band is lost.
+**What the deploy resets** (the evaluator adoption at the House's start: `league/live/` changed, `league/gym/` did not).
+As fast lane v2's: every alive family's bests, Train candidates, robustness, validation line and review are re-derived
+(about 15 families, about 8 Gym-hours on 2 boxes); looks, trials, refusals and forward rows are kept. No family is
+banded, so no band is lost.
 
-**The Gym bundle moves too, unlike fast lane v2 and every release since Release A** (the review of L-D, Oct 9). L5
-changes `league/gym/legs.py` and `league/gym/PROGRAM.md`, both packed by `gym.driver.build_bundle`, so the bundle goes
-`gym-engine-4-e1c896f8d304` -> `gym-engine-4-460b332db232` (the image is unchanged) and `evaluator.gym_changed` is true
-at the adoption for the first time since Release A (the last bundle change merged Sept 30). Beside the fingerprint's
-reset, that means:
-- **The extension holds are archived and cleared** (`evaluator.HOLD_KEYS`: `extension_hold`, `extension_versions`,
-  `extension_cleared`, `extension_lapsed`), the operator's clears included: a version is held again only when a
-  validation on the new bundle meets the checks, and a version the operator cleared owes its 2017-19 extension verdict
-  again under the new Gym before he clears it again.
-- **No recorded validation answers.** `Tournament.recorded_validation` and F1's `known_validation` reuse a result only on
-  the same image AND bundle, so every validation is RE-RUN on the Gym (its 1.5x twin with it) rather than re-judged from
-  its recorded result: a new job and new trials, and one more of the family's validations (the idle and retirement
-  counts and the lineage trials move as for any new evaluation).
-- **No stored Train evaluation answers either** (`researcher.eval_key` carries the bundle), so every Train run a
-  researcher asks for while re-deriving its best runs again on the Gym, as do the mechanism tests.
-- **The practice league refills only as those runs land:** a practice row needs a Train or Validation run of that
-  version on the current bundle (`bands._current_practice_run`), and a tuition row its validation on it.
-So the plan's "about 8 Gym-hours on 2 boxes" (PLAN, L-D, counting re-derived bests on reused results) is a lower bound:
-the re-derivation now pays the Gym for every Train and validation run it needs, and how long that takes is not measured
-here (watch the Gym pool's queue after the deploy). If that cost is not wanted in this reset, L5 has to ship separately,
-and any later Gym change pays it then (rule F0: after L-D, no `league/gym/` release while a family is Candidate or above). **Every active practice cohort is completed** ("evaluator changed; a new version needs
+**The Gym bundle does not move** (production's `gym-engine-4-e1c896f8d304`). L5, the marketable natural limit
+`{"natural": k}`, was dropped from L-D on Oct 9 (the operator's decision, about 07:40Z) for that reason: it changed
+`league/gym/legs.py` and `league/gym/PROGRAM.md`, which moved the bundle, so the adoption would have reused no stored
+Train or Validation result (every one re-run on the 2 Gym boxes the direction lane shipping that day needs) and cleared
+the 2017-19 extension holds, the operator's clears included; `{"price": v}` already lets a program pay through. It waits
+for a planned Gym release (rule F0, below). So, as at fast lane v2, the re-derivation reuses recorded results (the same
+image and bundle: `evaluator.gym_changed` is false), and the extension holds and their clears stand.
+
+**Every active practice cohort is completed** ("evaluator changed; a new version needs
 fresh practice", `observe.cohort_candidates`), the 10 still active of the 12 alpha cohorts admitted on Oct 8 among them:
 their incubator first looks (expected about Nov 4-10 under the 30-session window) never come, and a completed (family,
 version) never practises again (the plan weighed this: about 4-6 real closes in all, from programs with no measured
@@ -163,10 +141,10 @@ that qualify under the new evaluator. After L-D, rule F0 holds: no `league/live/
 family (direction or alpha) is Candidate, Probe or Sized, except a money-safety fix, whose cost is that band.
 
 **Identities.** Constitution digest `5698a2f9` -> `0adb4f0e`; money digest `1665c385` -> `fdf2ac7c`; the execution
-fingerprint `b4c34031` -> `8298158a` (check a tree with `python3 -c "from league.swarm.evaluator import
-execution_fingerprint; print(execution_fingerprint())"`); the Gym bundle `gym-engine-4-e1c896f8d304` ->
-`gym-engine-4-460b332db232` (`python3 -c "from league.gym.driver import build_bundle; print(build_bundle()[1])"`). The
-CON-only rollback's money digest is `320899d6`, its constitution digest `c9d8ef5b`.
+fingerprint `b4c34031` -> `90664941` (check a tree with `python3 -c "from league.swarm.evaluator import
+execution_fingerprint; print(execution_fingerprint())"`); the Gym bundle unchanged, `gym-engine-4-e1c896f8d304`
+(`python3 -c "from league.gym.driver import build_bundle; print(build_bundle()[1])"`). The CON-only rollback's money
+digest is `320899d6`, its constitution digest `c9d8ef5b`.
 
 **The owner's deploy, in order.** (1) CI green on the exact head; rollback ready (`floor_box.py rollback` to
 `20261009T025942Z`); no order in flight; never 12:55-20:05Z on a trading day. (2) `floor_box.py deploy` from
@@ -177,11 +155,9 @@ trigger `digest`; `python3 scripts/live_trading.py --ratify` on the box if it re
 `total_budget_usd` "800"; the practice cohorts active before the deploy read
 completed, reason "evaluator changed; a new version needs fresh practice"; `research_evaluator` (the swarm store's kv,
 `sqlite3 'file:/workspace/state/swarm.sqlite?mode=ro' "SELECT value FROM kv WHERE key='research_evaluator'"`) reads
-`bundle` `gym-engine-4-460b332db232`, `execution` `8298158a...` and the image unchanged; each alive family's
-`evaluator_adopted` event carries its extension records, if it had any, in `_previous_selection`; and
-`scripts/extension_hold.py --state /workspace/state` lists no hold (re-held only by new validations). (5) Tell the owner in one line the same hour
-(NET reverses a reviewed decision and loosens how his $400 is counted; the Gym bundle moved, so his cleared extension
-holds are owed again and every validation re-runs).
+`execution` `90664941...` with the `bundle` (`gym-engine-4-e1c896f8d304`) and the image unchanged, and
+`scripts/extension_hold.py --state /workspace/state` lists the holds it listed before the deploy. (5) Tell the owner in
+one line the same hour (NET reverses a reviewed decision and loosens how his $400 is counted).
 
 **Roll back.** The real rollback is CON-only: set `options_money.probe` `loss_basis` "gross", `max_open` 3, `demotion`
 "dm0", `loss_total_usd` "400" and `loss_window_sessions` 2000 in `league/constitution.py` (re-pin `PINNED_DIGEST` to
@@ -192,15 +168,14 @@ calendar's first year), so the window's figure is the total's and both envelopes
 the same admissions and refusals on the same rows (a refusal's words end "in any 2000 sessions"). The money digest
 moves to `320899d6` (the grant re-ratifies at the House's start, as above) and the execution fingerprint does NOT move:
 no evidence reset, no band lost. The room stays capped at $400 (at 3 slots it differs only above E = $1,333.33),
-`{"natural": k}` stays, and a version DM1 demoted before the rollback stays a Candidate (`dm1_demoted`). Rolling back
-L9 alone (`loss_total_usd` "400", `loss_window_sessions` 2000, the other three rows kept) is CON-only too, but it is
-not the L1-L8 build's rule: under "net" the 2000-session window's figure is its worst net stretch since the fast lane,
-which is the Probe's drawdown from its high-water mark, so the $400 then binds as the critic's high-water-mark
+and a version DM1 demoted before the rollback stays a Candidate (`dm1_demoted`). Rolling back L9 alone
+(`loss_total_usd` "400", `loss_window_sessions` 2000, the other three rows kept) is CON-only too, but it is not the
+rule of the build before L9: under "net" the 2000-session window's figure is its worst net stretch since the fast
+lane, which is the Probe's drawdown from its high-water mark, so the $400 then binds as the critic's high-water-mark
 reading (tighter than NET from inception, which the $400 total also checks); "gross" makes it fast lane v2's.
 `floor_box.py rollback` to `20261009T025942Z` instead moves the fingerprint again (one more reset: every band and
-practice cohort at that moment) and the Gym bundle back to `e1c896f8d304` (the extension holds cleared again and every
-validation re-run again), and, once release D-1 has shipped, drops D-1 too; use it only for a broken release, never to
-undo a rule.
+practice cohort at that moment) and, once release D-1 has shipped, drops D-1 too; use it only for a broken release,
+never to undo a rule.
 
 ## The incubator cap (Oct 8, 2026): deployed Oct 8 (House release `20261008T225723Z`, main `a5ff6f9e`)
 

@@ -79,27 +79,25 @@ Operator's page: **Release L-D** at the top of `docs/operations.md`.
   `docs/operations.md` (budget simulation, Oct 9: pending; it modelled the plain net, and a paired re-run with the
   worst stretch puts 12-week Done as traded at 7.0 / 3.7 / 1.1% against its 11.7 / 8.6 / 3.5% and today's wall's 10.0
   / 7.6 / 4.5%, 24-week Done about level).
-- **L5, the marketable natural limit**: `"limit": {"natural": k}` (k 0-10, whole), the decision minute's natural moved k
-  ticks against the trader, rounded passively on the tick it lands on (a single XSP or SPXW leg moved across $3.00
-  lands on the coarser tick there: the review of L-D), exactly `{"price": v}` with that v in the Gym, the shadow book
-  and real money (`league/gym/legs.py`; `league/CONTRACT.md` and `league/gym/PROGRAM.md` say so).
+- **L5, the marketable natural limit `{"natural": k}`, dropped** (the operator's decision, Oct 9 about 07:40Z). It
+  changed `league/gym/legs.py` and `league/gym/PROGRAM.md`, which moved the Gym bundle (`gym-engine-4-e1c896f8d304` ->
+  `gym-engine-4-460b332db232`), so at the adoption no stored Train or Validation result would have been reused (every
+  one re-run on the 2 Gym boxes the direction lane shipping that day needs) and the 2017-19 extension holds would have
+  been cleared; `{"price": v}` already lets a program pay through. It waits for a planned Gym release (rule F0).
 - **Not done: the narrower fingerprint** (the critic, N8): `league/live/money.py` stays hashed, because the practice
   book's caps read `money.Table` and the incubator's first-look rule lives there.
 - **Identities.** Constitution digest `5698a2f9` -> `0adb4f0e`; money digest `1665c385` -> `fdf2ac7c` (the standing
-  grant re-ratifies at the House's start on the owner's deploy); the execution fingerprint `b4c34031` -> `8298158a`
-  (league/live and league/gym changed): the evaluator adoption re-derives every family's bests, and every active
-  practice cohort is completed ("evaluator changed"), the 10 still active of the 12 admitted Oct 8 among them (their
-  incubator first looks were expected about Nov 4-10). No family is banded. **The Gym bundle moves too**
-  (`gym-engine-4-e1c896f8d304` -> `gym-engine-4-460b332db232`: L5 changed `legs.py` and `PROGRAM.md`), the first Gym
-  change since Release A, so the adoption also archives and clears the extension holds (the operator's clears
-  included: their 2017-19 verdicts are owed again), no recorded validation or Train result answers (every validation
-  and every Train run re-derivation asks for runs again on the Gym, as new trials), and the practice league refills
-  only as those runs land; the plan's "about 8 Gym-hours" is a lower bound.
+  grant re-ratifies at the House's start on the owner's deploy); the execution fingerprint `b4c34031` -> `90664941`
+  (league/live changed): the evaluator adoption re-derives every family's bests, and every active practice cohort is
+  completed ("evaluator changed"), the 10 still active of the 12 admitted Oct 8 among them (their incubator first looks
+  were expected about Nov 4-10). No family is banded. The Gym bundle does not move (`gym-engine-4-e1c896f8d304`,
+  production's), so, as at fast lane v2, the re-derivation reuses recorded Train and Validation results and the
+  extension holds stand.
 - **Rollback.** CON-only: `loss_basis` "gross", `max_open` 3, `demotion` "dm0", `loss_total_usd` "400",
   `loss_window_sessions` 2000 (money digest `320899d6`, constitution `c9d8ef5b`), one owner deploy and no fingerprint
   move; each value runs fast lane v2's rule, decision for decision (`league/tests/test_ld_release.py`, against a frozen
   copy of `ccfa48d5`'s code; the 2000-session window holds every close since the fast lane). `floor_box.py rollback`
-  moves the fingerprint and the Gym bundle again and, after D-1, drops D-1.
+  moves the fingerprint again and, after D-1, drops D-1.
 
 ### On branches, not in V3-A part 1
 

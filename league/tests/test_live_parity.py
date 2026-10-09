@@ -54,16 +54,6 @@ PROGRAM = "import numpy as np\n" + PROGRAM
 @unittest.skipUnless(HAVE, "numpy not installed")
 class GymAndLiveAgree(unittest.TestCase):
     def test_the_same_intents_and_the_same_trades(self):
-        self.both_agree(PROGRAM)
-
-    def test_the_marketable_natural_limit_agrees_too(self):
-        """Release L-D (Oct 9, 2026): `{"natural": k}` resolves to `{"price": v}`'s order in the Gym and the shadow book."""
-        source = PROGRAM.replace('"limit": "natural"', '"limit": {"natural": 2}')
-        self.assertEqual(source.count('{"natural": 2}'), 2, "the open and the close")
-        self.both_agree(source)
-
-    def both_agree(self, source: str) -> None:
-        PROGRAM = source  # noqa: N806 - the program both books run
         clock = Clock(at(MONDAY, 9, 30))
         market = Market(clock)
         day = LiveDay(MONDAY, 570, 960, trading_days=trading_days_around(MONDAY))

@@ -1,6 +1,10 @@
 """RELEASE L-D (Oct 9, 2026; the plan of Oct 9, "L: Release L-D", and its critic): THE PROBE LOSS BUDGET read NET (L1), 8
 Probe slots inside the $400 envelope with the Probe room capped at the budget (L2), DM1's demotion behind its switch with
-its sigma read from the swarm's family state (L3), and the marketable natural limit `{"natural": k}` (L5).
+its sigma read from the swarm's family state (L3), and THE ROLLING PROBE BUDGET, $400 in any 20 sessions beside $800 in
+total (L9). The marketable natural limit `{"natural": k}` (L5) was dropped from L-D on Oct 9 (the operator's decision,
+about 07:40Z): it changed `league/gym/legs.py` and `PROGRAM.md`, which moves the Gym bundle, so the adoption would have
+re-run every stored Train and Validation result on the Gym boxes the direction lane needs; it waits for a planned Gym
+release, and its tests went with it.
 
 Each L-D rule has a rollback value ("gross", 3, "dm0": the CON-only rollback, `money_fakes.rollback_table`), and each is
 checked here against a FROZEN COPY of fast lane v2's code at ccfa48d5 (`v2_probe_tally`, `v2_demotion`, `v2_band_for`):
@@ -26,11 +30,6 @@ from league.tests.money_fakes import FAST_LANE_V2, constitution, rollback_table,
 from league.tests.test_live_step import HAVE, LiveCase
 
 if HAVE:
-    import numpy as np
-
-    from league.gym import ctx as C
-    from league.gym import greeks as G
-    from league.gym import legs as L
     from league.gym import venue as V
     from league.live.real import probe_tally
     from league.live.state import LiveState, loads
@@ -687,152 +686,6 @@ class DM1Live(LiveCase):
         live._families_at = float("-inf")
         self.run_to(9, 47)
         self.assertEqual(self.families.rows["vert"]["band"], "candidate")
-
-
-# ============================================================================================ L5: {"natural": k}
-@unittest.skipUnless(HAVE, "numpy not installed")
-class TheNaturalLimit(unittest.TestCase):
-    def test_k_ticks_against_the_trader_on_the_signed_value(self):
-        nl = L.limit_value
-        self.assertEqual(nl({"natural": 3}, "open", 1.23, 1.10, 0.01), 1.26, "a debit open pays more")
-        self.assertEqual(nl({"natural": 3}, "close", 1.23, 1.30, 0.01), 1.20, "a debit close takes in less")
-        self.assertEqual(nl({"natural": 2}, "open", -1.00, -1.10, 0.01), -0.98, "a credit open takes in less")
-        self.assertEqual(nl({"natural": 2}, "close", -0.50, -0.45, 0.01), -0.52, "a credit buy-back pays more")
-        self.assertEqual(nl({"natural": 0}, "open", 1.23, 1.10, 0.01), 1.23)
-        self.assertEqual(nl({"natural": 10}, "close", 0.05, 0.03, 0.01), -0.05, "as {'price': v}: no floor here")
-        # A single leg moved across $3.00, where its tick coarsens, lands on the venue's grid there (the review of
-        # release L-D): SPXW's $0.05 below $3 and $0.10 from it; XSP's $0.01 and $0.05.
-        spxw, xsp = (lambda v: V.leg_tick("SPXW", abs(v))), (lambda v: V.leg_tick("XSP", abs(v)))
-        self.assertEqual(nl({"natural": 10}, "open", 2.95, 2.80, 0.05, spxw), 3.40, "3.45 is off SPXW's $0.10 grid")
-        self.assertEqual(nl({"natural": 2}, "open", 2.95, 2.80, 0.05, spxw), 3.00, "3.05 is off it too")
-        self.assertEqual(nl({"natural": 5}, "open", 2.98, 2.95, 0.01, xsp), 3.00, "3.03 is off XSP's $0.05 grid")
-        self.assertEqual(nl({"natural": 7}, "open", 2.98, 2.95, 0.01, xsp), 3.05)
-        self.assertEqual(nl({"natural": 2}, "close", 3.05, 3.10, 0.05, xsp), 2.95, "down across $3: the finer tick")
-        self.assertEqual(nl({"natural": 3}, "open", 1.23, 1.10, 0.01, xsp), 1.26, "no crossing: as before")
-
-    def test_k_is_a_whole_number_from_0_to_10(self):
-        for k in (11, -1, 2.5, 2.0, True, False, "3", None, float("nan"), [2]):
-            with self.assertRaises(L.Refused, msg=repr(k)) as caught:
-                L.limit_value({"natural": k}, "open", 1.23, 1.10, 0.01)
-            self.assertIn("{'natural': k} takes a whole number k from 0 to 10 ticks", str(caught.exception))
-        with self.assertRaises(L.Refused) as caught:
-            L.limit_value({"natural": 1, "price": 1.0}, "open", 1.23, 1.10, 0.01)
-        self.assertIn("{'natural': k}", str(caught.exception), "the refusal lists the rule")
-        self.assertEqual(L.NATURAL_MAX_TICKS, 10)
-
-    def test_it_is_the_price_rule_with_v_from_the_natural(self):
-        rng = random.Random(9)
-        for _ in range(2000):
-            tick = rng.choice([0.01, 0.05, 0.10])
-            natural = round(rng.randrange(-300, 600) * tick, 6)
-            mid = natural - rng.choice([1, -1]) * tick
-            k = rng.randrange(0, 11)
-            for action in ("open", "close"):
-                v = natural + k * tick if action == "open" else natural - k * tick
-                self.assertEqual(L.limit_value({"natural": k}, action, natural, mid, tick),
-                                 L.limit_value({"price": v}, action, natural, mid, tick), (natural, tick, k, action))
-
-    def test_a_single_leg_always_lands_on_the_venues_grid_passively_and_as_the_price_rule(self):
-        rng = random.Random(1009)
-        for root in ("XSP", "SPXW", "SPX", "VIX", "SPY", "QQQ", "AAPL"):
-            tick_at = (lambda v, r=root: V.leg_tick(r, abs(v)))
-            for _ in range(400):
-                natural = round(rng.uniform(2.0, 4.0), 2)
-                tick = V.leg_tick(root, natural)
-                natural = V.round_price(natural, tick, up=True)              # a quote is on its grid
-                k = rng.randrange(0, 11)
-                for action in ("open", "close"):
-                    v = L.limit_value({"natural": k}, action, natural, natural, tick, tick_at)
-                    grid = V.leg_tick(root, abs(v))
-                    self.assertAlmostEqual(v / grid, round(v / grid), places=6, msg=(root, natural, k, action, v))
-                    moved = natural + k * tick if action == "open" else natural - k * tick
-                    if action == "open":
-                        self.assertLessEqual(v, moved + 1e-9, "passive: never more paid than k ticks")
-                        self.assertGreaterEqual(v, natural - 1e-9, "never short of the natural")
-                    else:
-                        self.assertGreaterEqual(v, moved - 1e-9, "passive: never less asked than k ticks")
-                    self.assertEqual(L.limit_value({"price": v}, action, natural, natural, tick), v,
-                                     "exactly {'price': v} with that v")
-                    if V.leg_tick(root, abs(moved)) == tick:
-                        self.assertEqual(v, L.limit_value({"natural": k}, action, natural, natural, tick),
-                                         "no crossing: the natural's tick, as built")
-
-    def test_resolve_open_and_close_price_a_single_xsp_call_on_the_grid(self):
-        strikes = np.array([600.0, 605.0, 610.0])
-        snap = C.Snapshot("XSP", 700, 604.0, np.zeros(3, dtype=int), strikes, np.ones(3, dtype=bool),
-                          np.array([7.10, 2.90, 0.80]), np.array([7.20, 2.98, 0.85]), np.full(3, 50), np.full(3, 50),
-                          rate=0.04)
-        rules = V.rules_for("XSP")
-        intent = {"open": "long_call", "root": "XSP", "qty": 1, "legs": [{"side": "long", "right": "C", "dte": 0,
-                                                                         "strike": 605.0}]}
-        order = L.resolve_open(dict(intent, limit={"natural": 5}), snap, rules, buying_power=1e9)
-        self.assertEqual((order.natural, order.limit), (2.98, 3.00), "3.03 is off XSP's $0.05 grid")
-        self.assertAlmostEqual(order.max_loss_share, 3.00)
-        price = L.resolve_open(dict(intent, limit={"price": 3.00}), snap, rules, buying_power=1e9)
-        self.assertEqual((order.limit, order.max_loss_share, order.fees), (price.limit, price.max_loss_share, price.fees))
-        self.assertEqual(L.resolve_open(dict(intent, limit={"natural": 7}), snap, rules, buying_power=1e9).limit, 3.05)
-        close = L.resolve_close({"close": 1, "limit": {"natural": 3}}, order.type, order.legs, 1, snap, rules, position=1)
-        self.assertEqual((close.natural, close.limit), (2.90, 2.87), "below $3: the penny tick")
-        held = C.Snapshot("XSP", 701, 604.0, np.zeros(3, dtype=int), strikes, np.ones(3, dtype=bool),
-                          np.array([7.10, 3.05, 0.80]), np.array([7.20, 3.15, 0.85]), np.full(3, 50), np.full(3, 50),
-                          rate=0.04)
-        close = L.resolve_close({"close": 1, "limit": {"natural": 2}}, order.type, order.legs, 1, held, rules, position=1)
-        self.assertEqual((close.natural, close.limit), (3.05, 2.95), "two nickel ticks down, onto the penny side")
-
-    def chain(self, minute=700):
-        spot = 450.0
-        strikes = np.arange(440.0, 461.0)
-        dte = np.zeros(strikes.size * 2, dtype=int)
-        k = np.repeat(strikes, 2)
-        call = np.tile([True, False], strikes.size)
-        years = G.years_to_expiry(dte, minute)
-        mid = G.bs_price(spot, k, years, 0.04, 0.25, call)
-        bid = np.maximum(np.round(mid - 0.02, 2), 0.0)
-        ask = np.round(mid + 0.02, 2) + 0.01
-        return C.Snapshot("SPY", minute, spot, dte, k, call, bid, ask, np.full(k.size, 50), np.full(k.size, 50), rate=0.04)
-
-    def test_open_and_close_resolve_as_the_price_rule_does(self):
-        snap, rules = self.chain(), V.rules_for("SPY")
-        legs = [{"side": "long", "right": "C", "dte": 0, "atm": 0}, {"side": "short", "right": "C", "rel": 0, "offset": 2.0}]
-        base = {"open": "debit_vertical", "root": "SPY", "qty": 1, "legs": legs}
-        nat = L.resolve_open(dict(base, limit={"natural": 4}), snap, rules, buying_power=1e9)
-        self.assertAlmostEqual(nat.limit, round(nat.natural + 0.04, 2))
-        price = L.resolve_open(dict(base, limit={"price": nat.natural + 0.04}), snap, rules, buying_power=1e9)
-        self.assertEqual((nat.limit, nat.max_loss_share, nat.fees), (price.limit, price.max_loss_share, price.fees))
-        condor = [{"side": "long", "right": "P", "rel": 1, "offset": -1.0}, {"side": "short", "right": "P", "dte": 0, "atm": -2},
-                  {"side": "short", "right": "C", "dte": 0, "atm": 2}, {"side": "long", "right": "C", "rel": 2, "offset": 1.0}]
-        credit = L.resolve_open({"open": "iron_condor", "root": "SPY", "qty": 1, "legs": condor, "limit": {"natural": 3}},
-                                snap, rules, buying_power=1e9)
-        self.assertLess(credit.natural, 0)
-        self.assertAlmostEqual(credit.limit, round(credit.natural + 0.03, 2), msg="less credit taken in")
-        self.assertAlmostEqual(credit.max_loss_share, 1.0 + credit.limit)
-        close = L.resolve_close({"close": 1, "limit": {"natural": 2}}, nat.type, nat.legs, 1, snap, rules, position=1)
-        self.assertAlmostEqual(close.limit, round(close.natural - 0.02, 2))
-        again = L.resolve_close({"close": 1, "limit": {"price": close.natural - 0.02}}, nat.type, nat.legs, 1, snap, rules,
-                                position=1)
-        self.assertEqual(close.limit, again.limit)
-        with self.assertRaises(L.Refused):
-            L.resolve_open(dict(base, limit={"natural": 11}), snap, rules, buying_power=1e9)
-
-
-@unittest.skipUnless(HAVE, "numpy not installed")
-class TheNaturalLimitLive(LiveCase):
-    def test_the_real_order_path_prices_it_from_the_decision_minutes_natural(self):
-        code = VERTICAL.replace('"limit": "natural", "tag": "t"', '"limit": {"natural": 2}, "tag": "t"')
-        self.assertNotEqual(code, VERTICAL)
-        live = self.make([family("vert", code, band="probe", params={"hold": 600})])
-        self.run_to(9, 31)
-        [order] = live.state.rows("SELECT limit_value, limit_price, placed_minute FROM orders WHERE action='open'")
-        refusals = [p["why"] for p, a in self.ledger.of("live.refusal")]
-        self.assertEqual(refusals, [])
-        snap = live.day.snapshot("SPY", int(order["placed_minute"]))
-        intent = {"open": "debit_vertical", "root": "SPY", "qty": 1, "limit": {"natural": 2},
-                  "legs": [{"side": "long", "right": "C", "dte": 1, "atm": 0},
-                           {"side": "short", "right": "C", "rel": 0, "offset": 1.0}]}
-        gym = L.resolve_open(intent, snap, live.day.rules["SPY"], buying_power=float("inf"))
-        self.assertAlmostEqual(order["limit_value"], gym.limit)
-        self.assertAlmostEqual(gym.limit, round(gym.natural + 0.02, 2))
-        self.assertEqual(order["limit_price"], f"{gym.limit:.2f}")
 
 
 # ================================================================================== L9: THE ROLLING PROBE BUDGET
