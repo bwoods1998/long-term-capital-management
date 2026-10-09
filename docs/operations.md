@@ -8,6 +8,41 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## The weekend fixes, integrated (Oct 10, 2026): `release/weekend-fixes`, not deployed
+
+One release of the three weekend builds, merged one at a time on main `cf96b72c` (the live release
+`20261009T170259Z-404fe99d6c9c`): `wfix/swarm` (M2, M3, M5, m3), `wfix/ops` (the stall alarm's four causes and the
+owner-deploy grace, M6 and M12; the Done meter on DONE-RULE-A1, A1.1-A1.4 with M7-M9; the program loss line; m11) and
+`wfix/replay` (the per-close fill replay, B1 (c)). Each has its own section below, written on its branch: where one says
+another fix is "not in this branch", it is in this release.
+
+**The walls (C0, rule F0), checked at the release head.** Nothing under `league/live/`, `league/gym/` or
+`league/constitution.py` changes. The execution fingerprint (`31a7e921`), the money digest (`0310779c`), the
+constitution digest (`ca89ff8a`) and the gate contract (`397b22b772b3`, `gate.gate_contract()`) are main's. No Probe
+program leaves Probe, no family is reviewed again, no ratification, no evidence reset.
+
+**One join made here: A1.4's finality reads the twins** (`league/ops/dlane_report.py` `finality`). The ops build read
+"the replay landed" from the program's NIGHTLY replay; the replay build matched each close to its own twin. Each left
+the join to the other, so a reading could be frozen on the nightly fallback just before the close's twin replaced it.
+- A close whose twin is FINAL (priced, no_fill, no_contract, unpriceable: final once judged) has its replay landed,
+  whatever the nightly has replayed.
+- With the twins on (`forward.twins`, the default), a close with no final twin yet (none, or `failed` and to be asked
+  again) is `pending_twin`, and the checkpoint's `final_why` says "the per-close twin of N closes has not landed".
+- With the twins off (`forward.twins` null), such a close reads the nightly's landing exactly as the ops build did.
+- **Its cost:** a twin that keeps failing holds every reading that counts its close provisional, so no Done claim (A8)
+  is made on it. It shows in `final_why` and in `replay_twins.by_status.failed`. Switching the twins off puts finality
+  back on the nightly. This is a tightening of a Done claim's inputs, never of trading.
+
+**Deploy order.** (1) The gateway (`cd gateway && npm run deploy`): `gateway/lib/email.mjs` has the words for the stall
+alarm's four new causes, and a House that sends a cause an old gateway does not know gets a 400 for the whole notice.
+(2) One owner deploy of the House at the release head. The changed `league/ops/` files (`dlane_report.py`, `stall.py`,
+`twins.py`, `direction.py`, `funnel.py`, `scoreboard.py`, `__init__.py`) and `league/swarm/` files (`gate.py`,
+`tournament.py`, `dlane.py`, `settings.py`, `policy.json`, `loop.py`, `researcher.py`) ship together; the updater
+refuses the FORBIDDEN ones. Before it, assert the four identities above at the exact head.
+
+**Verify after the deploy** (read-only): the three sections' lists below. Rollback: the previous House release and the
+previous gateway version; each section says what its rollback leaves behind (M3's retired families stay retired).
+
 ## The swarm-side readiness fixes (Oct 10, 2026): built on `wfix/swarm`, not deployed
 
 Four fixes from the operator's readiness audit of Oct 9 (its fix list's M2, M3, M5 and m3), cut from main
@@ -653,9 +688,9 @@ writes nothing (a `skipped` receipt). The fast lane's report rows gain `lane` wh
   measured: zero matched closes never passes. Every program is listed at each checkpoint with its closes, matched closes
   and gap (`by_program`, `replay_coverage`), never dropped. Item 7 is read per UTC day (`research_247`, below). It is
   READ only at the 30th close and every 10th after, each reading over exactly the first K closes; it holds when items 3,
-  4 and 7 hold, and a Done claim needs it FINAL (A1.4: every counted close's nightly replay landed and its broker fees
-  posted; then frozen); the running figures between are counts, never a reading. Beside it always: P(Done | zero edge)
-  (2.4% at 12 weeks with 3-session holds under the budget in force, DONE-RULE-A1 A1.2; it was 0.13), Net after costs
+  4 and 7 hold, and a Done claim needs it FINAL (A1.4: every counted close's replay landed, its own twin's once the
+  twins are on, and its broker fees posted; then frozen); the running figures between are counts, never a reading.
+  Beside it always: P(Done | zero edge) (2.4% at 12 weeks with 3-session holds under the budget in force, DONE-RULE-A1 A1.2; it was 0.13), Net after costs
   (`done.net_after_costs`, from the close economics), the same-risk buy-and-hold two ways (delta-matched:
   the entry delta held in the stock; dollars at risk held in the index; approximations from daily closes), and, for
   each Candidate, Probe or Sized family, the screen that admitted it with its unconditional and both-windows-rose

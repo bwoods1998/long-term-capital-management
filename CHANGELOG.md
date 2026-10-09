@@ -29,6 +29,21 @@ any other deploy.
 The running House release is `20261009T090334Z-cdbf1864a573` (main `40c39435`, release L-D, 09:04Z Oct 9, below), the
 gateway is `8072b5b1`, and the box's updater is on. What is built and not deployed is on branches.
 
+### The weekend fixes, integrated, on `release/weekend-fixes` (unreleased; a gateway deploy FIRST, then one owner deploy on main `cf96b72c`; no evidence reset)
+
+`wfix/swarm`, `wfix/ops` and `wfix/replay` (the three entries below) merged one at a time on main `cf96b72c`.
+Operator's page: **The weekend fixes, integrated** at the top of `docs/operations.md`. Nothing in `league/live/`,
+`league/gym/` or `league/constitution.py`: the execution fingerprint (`31a7e921`), the money digest (`0310779c`), the
+constitution digest (`ca89ff8a`) and the gate contract (`397b22b772b3`) are main's, checked at the head.
+- **The finality join** (`league/ops/dlane_report.py` `finality`, `meter`, `report`): a close whose per-close twin is
+  final has its replay landed whatever the nightly has replayed; with `forward.twins` on, a close with no final twin is
+  `pending_twin` and the reading is not final (no A8); with it off, the nightly's landing as before. A1.1's "replay
+  untested" why now says a close matched "a replay (a twin or the nightly)".
+- **Proof.** `test_close_twins` (`test_finality_reads_a_final_twin_as_the_landed_replay`,
+  `test_with_the_twins_on_a_reading_is_final_only_once_every_close_has_a_final_twin`); `test_dlane_report`'s two
+  nightly-finality tests run with the twins off (`NIGHTLY`). Both full suites (Python 3.11 and 3.14) at the head.
+- **Rollback.** The previous House release and gateway version.
+
 ### The swarm-side readiness fixes, on `wfix/swarm` (unreleased; an owner deploy on main `cf96b72c`; no evidence reset)
 
 Four fixes from the operator's readiness audit of Oct 9 (M2, M3, M5, m3). Operator's page: **The swarm-side readiness

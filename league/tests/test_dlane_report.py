@@ -28,6 +28,9 @@ from league.swarm.store import SwarmStore, iso
 
 NY = ZoneInfo("America/New_York")
 GATE = {"dlane": {"mode": "gate"}}
+#: The lane on with the per-close twins switched off (`forward.twins` null): A1.4's finality reads the nightly replay's
+#: landing, as these tests were written (the integration of Oct 10, 2026; the twins' own finality is in test_close_twins).
+NIGHTLY = {**GATE, "forward": {"twins": None}}
 REPO = Path(__file__).resolve().parents[2]
 
 
@@ -181,7 +184,7 @@ class TheDoneMeter(Fixture):
         self.posted()
         for _ in range(4):
             self.close("dir-a", pnl=-100.0)           # closes 31-34: after the checkpoint
-        out = self.report()["done"]["screen"]
+        out = self.report(settings=NIGHTLY)["done"]["screen"]
         self.assertEqual(len(out["checkpoints"]), 1)
         cp = out["checkpoints"][0]
         self.assertEqual((cp["at_close"], cp["closes"], cp["net_usd"], cp["holds"], cp["final"]), (30, 30, 150.0, True, True))
@@ -572,22 +575,23 @@ class TheAmendment(Fixture):
         # dir-a is at Probe: its nightly replay has replayed only to the 7th, the closes exit on the 8th.
         self.store.set_band("dir-a", "probe", reason="fixture")
         self.store.set_state("dir-a", forward_replay={"target": {"day": "2026-10-07"}, "version": 1})
-        out = self.report()
+        out = self.report(settings=NIGHTLY)
         cp, meter = out["done"]["screen"]["latest"], out["done"]["screen"]
         self.assertEqual((cp["holds"], cp["final"], meter["holds"], meter["provisional"]), (True, False, False, True))
         self.assertIn("the nightly replay has not yet replayed the exit day of 15 closes", cp["final_why"])
         self.assertNotIn("A8", [a["id"] for a in out["alarms"]], "never on a provisional reading")
         self.store.set_state("dir-a", forward_replay={"target": {"day": "2026-10-08"}, "version": 1})
         self.posted(as_of="2026-10-08T21:00:00Z")
-        self.assertIn("broker's fees have not posted for 30 closes", self.report()["done"]["screen"]["latest"]["final_why"],
+        self.assertIn("broker's fees have not posted for 30 closes",
+                      self.report(settings=NIGHTLY)["done"]["screen"]["latest"]["final_why"],
                       "fees post the session after the exit: a reading of the exit day is not final")
         self.posted()
-        final = self.report(previous=out)
+        final = self.report(settings=NIGHTLY, previous=out)
         self.assertTrue(final["done"]["screen"]["holds"])
         self.assertEqual([a["id"] for a in final["alarms"] if a["id"] == "A8"], ["A8", "A8"], "done_all and done_screen")
         # Frozen: the nightly rows are replaced each night; a final reading does not flip after A8.
         self.store.replace_forward("dir-b", "nightly", [], version=1)
-        later = self.report(previous=final)
+        later = self.report(settings=NIGHTLY, previous=final)
         cp = later["done"]["screen"]["latest"]
         self.assertEqual((cp["holds"], cp["final"], cp.get("frozen")), (True, True, True))
         self.assertEqual(later["done"]["screen"]["running"]["consistent_ok"], False, "the running figure reads it now")

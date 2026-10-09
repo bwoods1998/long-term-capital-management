@@ -608,6 +608,60 @@ class TheReport(Fixture):
         self.assertEqual(row, {"matched": 1, "gap": 0.0, "consistent": None})
         self.assertEqual(out["replay_twins"]["by_status"], {"none": 2})
 
+    # A1.4 and the twins (the integration of the weekend fixes, Oct 10, 2026): with the twins on, a close's replay has
+    # landed when its own twin is final, never before; the nightly's landing is read only with the switch off.
+    def test_finality_reads_a_final_twin_as_the_landed_replay(self):
+        from league.ops import dlane_report as R
+
+        row = {"pid": 7, "family": "f", "day": "2026-10-08", "pnl_usd": 1, "fee_basis": "broker"}
+        lagging = {"f": {"replayed": True, "day": "2026-10-07"}}
+        for status in T.FINAL:
+            out = R.finality([row], replay_days=lagging, fees_as_of="2026-10-09", twins={"7": {"status": status}},
+                             twins_on=True)
+            self.assertEqual((out["final"], out["pending_twin"], out["pending_replay"]), (True, 0, 0), status)
+        for twins in ({}, {"7": {"status": "failed"}}):
+            out = R.finality([row], replay_days={}, fees_as_of="2026-10-09", twins=twins, twins_on=True)
+            self.assertEqual((out["final"], out["pending_twin"]), (False, 1), twins)
+            self.assertIn("the per-close twin of 1 closes has not landed", out["why"])
+        off = R.finality([row], replay_days=lagging, fees_as_of="2026-10-09", twins={"7": {"status": "failed"}})
+        self.assertEqual((off["final"], off["pending_twin"], off["pending_replay"]), (False, 0, 1),
+                         "the switch off: the nightly's landing, as before")
+
+    def test_with_the_twins_on_a_reading_is_final_only_once_every_close_has_a_final_twin(self):
+        from league.tests.test_dlane_report import NIGHTLY
+
+        self.fam("dir-a", lane="direction")
+        self.fam("dir-b", lane="direction")
+        pids = []
+        for _ in range(15):
+            pids += [self.close("dir-a", pnl=5.0), self.close("dir-b", pnl=5.0)]
+        # dir-a is at Probe and its nightly has replayed only to the 7th; every close exits on the 8th.
+        self.store.set_band("dir-a", "probe", reason="fixture")
+        self.store.set_state("dir-a", forward_replay={"target": {"day": "2026-10-07"}, "version": 1})
+        self.steady()
+        self.posted()
+        cp = self.report()["done"]["screen"]["latest"]
+        self.assertFalse(cp["final"], "the twins are on by default: no twin yet, no final reading")
+        self.assertIn("the per-close twin of 30 closes has not landed", cp["final_why"])
+        off = self.report(settings=NIGHTLY)["done"]["screen"]["latest"]
+        self.assertFalse(off["final"], "the switch off: dir-a's nightly has not replayed the exit day")
+        self.assertIn("the nightly replay has not yet replayed the exit day of 15 closes", off["final_why"])
+        self.assertNotIn("per-close twin", off["final_why"])
+        for pid in pids[:-1]:
+            self.twin(pid, "priced", pnl=5.0)
+        self.twin(pids[-1], "failed")
+        cp = self.report()["done"]["screen"]["latest"]
+        self.assertFalse(cp["final"])
+        self.assertIn("the per-close twin of 1 closes has not landed", cp["final_why"])
+        self.twin(pids[-1], "no_fill")
+        out = self.report()
+        cp = out["done"]["screen"]["latest"]
+        self.assertEqual((cp["holds"], cp["final"], out["done"]["screen"]["holds"]), (True, True, True),
+                         "every twin final: dir-a's lagging nightly no longer holds the reading back")
+        self.assertEqual(cp["replay_coverage"]["matched"], 29, "29 priced twins; the no_fill is counted, never matched")
+        self.assertTrue(self.report(settings=NIGHTLY)["done"]["screen"]["latest"]["final"],
+                        "a final twin is its close's landed replay whatever the switch says now")
+
 
 if __name__ == "__main__":
     unittest.main()

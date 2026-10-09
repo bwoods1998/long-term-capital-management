@@ -55,8 +55,8 @@ constants), read exactly as pinned:
 - READ ONLY AT CHECKPOINTS: the 30th counted close, then every 10th; each reading is over exactly the first K closes in
   close order (`checkpoints`); it holds when items 3, 4 and 7 hold. The running figures between checkpoints are counts,
   never a reading. FINAL READINGS (DONE-RULE-A1 A1.4; `finality`): a reading is final once every counted close's
-  nightly replay has landed and its broker fees have posted (and the research window has ended); a final reading is
-  frozen (carried from the previous report as it was). A Done claim is a holding FINAL checkpoint (the meter's `holds`);
+  replay has landed (its own twin final, with the twins on; else its program's nightly) and its broker fees have posted
+  (and the research window has ended); a final reading is frozen (carried from the previous report as it was). A Done claim is a holding FINAL checkpoint (the meter's `holds`);
   A8 (an `info` alert) names one the first time a report sees it final.
 - BESIDE IT, ALWAYS: P(Done | zero edge) (`dlane.done_zero_edge_p`, labelled as a simulation; since DONE-RULE-A1 A1.2
   the pinned 2.4% with its horizon, holds, budget and source, `zero_edge`); Net after costs (`net_after_costs`, from the
@@ -778,7 +778,8 @@ RESEARCH_FIRST_DAYS = 7
 
 
 def finality(counted: Sequence[Mapping[str, Any]], *, replay_days: Mapping[str, Mapping[str, Any]] | None,
-             fees_as_of: str | None) -> dict[str, Any]:
+             fees_as_of: str | None, twins: Mapping[str, Mapping[str, Any]] | None = None,
+             twins_on: bool = False) -> dict[str, Any]:
     """FINAL READINGS (DONE-RULE-A1 A1.4, pinned Oct 9, 2026; the readiness audit's M8). A checkpoint's inputs are final
     when, for every counted close:
     - THE REPLAY LANDED: its program's nightly replay has replayed the close's exit day (the family's own
@@ -790,28 +791,47 @@ def finality(counted: Sequence[Mapping[str, Any]], *, replay_days: Mapping[str, 
       New York day after the close's exit day (option fees post the next session; a position whose opening fees posted
       may still have its closing ones to come, so the basis alone is not enough).
     - it is priced (an unpriced close is never final).
-    {final, pending_replay, pending_fees, unpriced, why}. Pure."""
+
+    THE PER-CLOSE TWIN (the integration of the weekend fixes, Oct 10, 2026: the ops builder's A1.4 and the replay
+    builder's B1 (c) each left this join to the other). A close is matched to its own twin once the twin is judged
+    (`replay_gap`), so for a close with a FINAL twin record (`twins.FINAL`: priced, no_fill, no_contract, unpriceable;
+    final once judged) THE REPLAY LANDED is that record, whatever the nightly has replayed. With the twins switched on
+    (`twins_on`, `forward.twins`), a close with no final twin yet (none, or "failed" and to be asked again) is
+    `pending_twin`: its reading would otherwise be frozen on the nightly fallback the twin is about to replace. With the
+    switch off, such a close reads the nightly's landing exactly as before.
+    {final, pending_replay, pending_twin, pending_fees, unpriced, why}. Pure."""
+    from .twins import FINAL as TWIN_FINAL
+
     replay_days = replay_days or {}
-    pending_replay = pending_fees = unpriced = 0
+    twins = twins or {}
+    pending_replay = pending_twin = pending_fees = unpriced = 0
     for c in counted:
         exit_day = str(c.get("day") or "")
         if c.get("pnl_usd") is None:
             unpriced += 1
-        state = replay_days.get(str(c.get("family") or "")) or {}
-        if state.get("replayed") and not (state.get("day") and str(state["day"]) >= exit_day):
-            pending_replay += 1
+        if (twins.get(str(c.get("pid"))) or {}).get("status") in TWIN_FINAL:
+            pass
+        elif twins_on:
+            pending_twin += 1
+        else:
+            state = replay_days.get(str(c.get("family") or "")) or {}
+            if state.get("replayed") and not (state.get("day") and str(state["day"]) >= exit_day):
+                pending_replay += 1
         if c.get("fee_basis") != "broker" or not fees_as_of or fees_as_of <= exit_day:
             pending_fees += 1
     whys = []
     if pending_replay:
         whys.append(f"the nightly replay has not yet replayed the exit day of {pending_replay} closes")
+    if pending_twin:
+        whys.append(f"the per-close twin of {pending_twin} closes has not landed (none yet, or failed and to be asked "
+                    "again)")
     if pending_fees:
         whys.append(f"the broker's fees have not posted for {pending_fees} closes (the activity reading is of "
                     f"{fees_as_of or 'no day'})")
     if unpriced:
         whys.append(f"{unpriced} closes are not priced")
-    return {"final": not whys, "pending_replay": pending_replay, "pending_fees": pending_fees, "unpriced": unpriced,
-            "why": "; ".join(whys) or None}
+    return {"final": not whys, "pending_replay": pending_replay, "pending_twin": pending_twin,
+            "pending_fees": pending_fees, "unpriced": unpriced, "why": "; ".join(whys) or None}
 
 
 def research_window(counted: Sequence[Mapping[str, Any]], k: int, previous_k: int | None) -> tuple[str, str]:
@@ -833,7 +853,8 @@ def meter(all_closes: Sequence[Mapping[str, Any]], routes: Sequence[str], store:
           nightly_cache: dict[str, list] | None = None, lanes: Lanes | None = None,
           previous: Mapping[str, Any] | None = None, research: Any = None,
           replay_days: Mapping[str, Mapping[str, Any]] | None = None, fees_as_of: str | None = None,
-          now: float | None = None, twins: Mapping[str, Mapping[str, Any]] | None = None) -> dict[str, Any]:
+          now: float | None = None, twins: Mapping[str, Mapping[str, Any]] | None = None,
+          twins_on: bool = False) -> dict[str, Any]:
     """One Done meter (`done_screen` or `done_all`): the agent closes on `routes`, the running figures (never a reading),
     and a reading at every checkpoint reached (the first K closes, K = 30, 40, ...: `dlane.DONE`).
 
@@ -868,7 +889,8 @@ def meter(all_closes: Sequence[Mapping[str, Any]], routes: Sequence[str], store:
                 r247 = research(first_day, last_day)
             except Exception as exc:  # noqa: BLE001 - unread is not held: the checkpoint does not hold, the report goes on
                 r247 = {**r247, "why": f"research 24/7 could not be read ({type(exc).__name__}: {str(exc)[:120]})"}
-        fin = finality(counted[:k], replay_days=replay_days, fees_as_of=fees_as_of)
+        fin = finality(counted[:k], replay_days=replay_days, fees_as_of=fees_as_of, twins=twins,
+                       twins_on=twins_on)
         day_ended = now is None or now >= _epoch(f"{last_day}T00:00:00Z") + 86400.0
         if not day_ended:
             fin = {**fin, "final": False, "why": "; ".join(w for w in (fin["why"], f"the research window's last day "
@@ -1842,6 +1864,7 @@ def report(root: str | Path, *, settings: Mapping[str, Any] | None = None, now: 
     from ..swarm import settings as settings_mod
     from ..swarm.store import SwarmStore
     from . import direction as DIR
+    from . import twins as TW
 
     root = Path(root)
     settings = settings if settings is not None else settings_mod.load(root)
@@ -1870,10 +1893,12 @@ def report(root: str | Path, *, settings: Mapping[str, Any] | None = None, now: 
         fees_as_of = _ny_day(_epoch(activity.get("as_of"))) if activity.get("as_of") else None
         research = Research247(store, root)
         prev_done = ((previous or {}).get("done") or {}) if isinstance(previous, Mapping) else {}
-        # The per-close twins (B1 (c), Oct 10, 2026; `league/ops/twins.py`): read once, matched in each meter's replay gap.
+        # The per-close twins (B1 (c), Oct 10, 2026; `league/ops/twins.py`): read once, matched in each meter's replay gap
+        # and, with the switch on, a close's replay is final only once its twin is (A1.4, the integration of Oct 10).
         twins = twin_records(store)
+        twins_on = TW.cfg(settings) is not None
         common = dict(store=store, nightly_cache=cache, lanes=lanes, research=research, replay_days=replay_days,
-                      fees_as_of=fees_as_of, now=now, twins=twins)
+                      fees_as_of=fees_as_of, now=now, twins=twins, twins_on=twins_on)
         done = {"all": meter(every, dlane.DONE["routes_all"], previous=prev_done.get("all"), **common),
                 "screen": meter(every, dlane.DONE["routes_screen"], previous=prev_done.get("screen"), **common)}
         losses = program_losses(book["positions"], activity["by_pid"], store, settings, since=start)
