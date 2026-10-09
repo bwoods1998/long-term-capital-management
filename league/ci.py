@@ -145,6 +145,9 @@ FORBIDDEN: tuple[str, ...] = (
     # THE LEARNING GAME (Oct 8, 2026): the hidden years' folds and arms, the fitness and its selection constants, and the
     # one-shot CONFIRM read on the way to Validation (league/swarm/game.py): a judge, like the evidence lines.
     "league/swarm/game.py",
+    # THE DIRECTION LANE (release D-1, Oct 9, 2026): its Train bar (direction-v2), the unit it must fit, the screen its
+    # holdout look uses and its birth quota (league/swarm/dlane.py): selection constants, like the evidence lines.
+    "league/swarm/dlane.py",
     # How the House is deployed and the House itself (its tick calls the updater).
     "scripts/floor_box.py", "league/house.py", "CHANGELOG.md",
 )

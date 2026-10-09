@@ -51,6 +51,61 @@
     "per_round": 6,
     "usd_day": 60
   },
+  "dlane": {
+    "mode": "gate",
+    "roots": [
+      "SPY",
+      "QQQ",
+      "IWM"
+    ],
+    "structures": [
+      "long_single",
+      "debit_vertical"
+    ],
+    "classes": [
+      "equity_premium",
+      "trend_momentum"
+    ],
+    "holding": [
+      "days_1_3",
+      "days_4_10"
+    ],
+    "birth_share": 0.5,
+    "max_share": 0.6,
+    "min_per_pass": 1,
+    "max_alive": 24,
+    "window_hours": 24,
+    "min_window": 10,
+    "lane_only_hours": 12,
+    "active_share": 0.5,
+    "min_active_years": 2,
+    "out_t_floor": -1.0,
+    "out_loss_share": 0.5,
+    "min_entry_days": 60,
+    "cost_ratio": 0.5,
+    "c_train": 1.5,
+    "unit_cap_usd": null,
+    "unit_share": 0.1,
+    "unit_pref_usd": 75,
+    "arm_fraction": 0.0,
+    "screen": "S-C",
+    "screens": {
+      "S-C": {
+        "look_level": 0.2,
+        "sharpe_share": 0.25,
+        "fp_unconditional": 0.0141,
+        "fp_both_windows_rose": 0.0222
+      },
+      "D2": {
+        "receipt_sha256": null
+      }
+    },
+    "alarm_min_looks": 10,
+    "alarm_pass_share": 0.6,
+    "done_zero_edge_p": 0.13,
+    "k5_net_usd": -600,
+    "k5_clear": false
+  },
   "engineer": {
     "enabled": true
   },

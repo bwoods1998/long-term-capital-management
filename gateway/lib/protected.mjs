@@ -61,6 +61,8 @@ export const MERGE_FORBIDDEN = Object.freeze([
   // The learning game (Oct 8, 2026): the hidden years' folds and arms, the fitness and its selection constants, and the
   // one-shot CONFIRM read on the way to Validation.
   'league/swarm/game.py',
+  // The direction lane (release D-1, Oct 9, 2026): its Train bar, its unit, its holdout screen and its birth quota.
+  'league/swarm/dlane.py',
   // How the House is deployed, the House itself (its tick calls the updater), and the House's configuration.
   'deploy/', 'scripts/floor_box.py', 'league/house.py', 'league/config.json', 'CHANGELOG.md',
 ]);
