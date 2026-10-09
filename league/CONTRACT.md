@@ -231,7 +231,9 @@ An order meets the quotes of the minute AFTER your decision, and every chance in
   ticks against you, a few ticks above the package's ask-side value on an open and below its bid-side
   value on a close: exactly `{"price": v}` with that v, so it fills at the next minute's natural whenever
   that natural has moved at most k ticks past the one you decided on (the ask rose by at most k ticks
-  under a buy), and otherwise rests at v. Use it with a short `tif`
+  under a buy), and otherwise rests at v. A single option whose tick coarsens at $3.00 (XSP, SPXW) and
+  is moved across it gets v on the coarser tick, rounded in your favour (an ask of 2.98 on XSP with k 5
+  is 3.00, not 3.03): the venue takes no other price. Use it with a short `tif`
   (or send `{"price": v}` yourself); check `fills.fill_rate` and the open slippage in your results to see
   what it cost. The same rule runs in the Gym, the shadow book and real money.
 - **Patient pricing is modelled, and it is often cheaper than the natural.** A limit short of the

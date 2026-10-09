@@ -166,7 +166,9 @@ An order meets the quotes of the minute AFTER your decision, and every chance in
   moves past it in between (the ask rises under a buy), it rests. `{"natural": k}` (k a whole number
   of ticks, 0 to 10) is the decision minute's natural moved k ticks against you (+ k ticks on an
   open's value, - k on a close's): exactly `{"price": v}` with that v, so it still fills at the next
-  minute's natural after a move of up to k ticks.
+  minute's natural after a move of up to k ticks. A single option whose tick coarsens at $3.00 (XSP,
+  SPXW) and is moved across it gets v on the coarser tick, rounded in your favour (an XSP ask of 2.98
+  with k 5 is 3.00, not 3.03).
 - **Patient pricing is modelled, and it is often cheaper than the natural.** A limit short of the
   natural (`{"mid": k}`: k ticks from the mid toward the natural; `"mid"`; `{"price": v}`) works for
   its `tif` minutes (`"day"` by default). Each minute it has not filled, it fills AT ITS LIMIT if

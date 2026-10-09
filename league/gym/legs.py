@@ -16,8 +16,9 @@ The natural price of an open buys every long leg at its ask and sells every shor
 of a close, the reverse. Limit rules: "natural"; "mid"; {"mid": k} (k ticks from the mid toward the
 natural, never past it); {"natural": k} (since release L-D, Oct 9, 2026: the decision minute's natural
 moved k ticks against the trader, k a whole number 0-10: + k ticks on an open's value, - k ticks on a
-close's; exactly {"price": v} with that v, a marketable limit); {"price": v} (an explicit value).
-Multi-leg values trade in $0.01; a single
+close's, rounded passively on the tick of the price it moves to, so a single leg moved across $3.00
+lands on the coarser tick above it; exactly {"price": v} with that v, a marketable limit); {"price": v}
+(an explicit value). Multi-leg values trade in $0.01; a single
 long call or put in its contract's tick (`venue.leg_tick`). A limit off the tick is rounded to the
 passive side (less paid on an open, more asked on a close): "mid" on a one-tick single leg is the
 touch (the bid for a buy), which fills per the fill model's touch cell (`fills.py`).
@@ -38,7 +39,7 @@ import datetime as dt
 import functools
 import math
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 import numpy as np
 
@@ -164,8 +165,11 @@ def tick_of(root: str, legs: Sequence[LegFill], value: float) -> float:
 
 
 @_refusing
-def limit_value(rule: Any, action: str, natural: float, mid: float, tick: float) -> float:
-    """The limit a share for a limit rule (the module docstring), on the tick, rounded passively."""
+def limit_value(rule: Any, action: str, natural: float, mid: float, tick: float,
+                tick_at: Callable[[float], float] | None = None) -> float:
+    """The limit a share for a limit rule (the module docstring), on the tick, rounded passively. `tick` is the
+    natural's; `tick_at(v)`, when given, the tick the structure trades in at the value v (`tick_of` for its root and
+    legs: `resolve_open` and `resolve_close` pass it), which `{"natural": k}` rounds its moved price on."""
     opening = action == "open"
     if rule is None or rule == "natural":
         return natural
@@ -181,14 +185,21 @@ def limit_value(rule: Any, action: str, natural: float, mid: float, tick: float)
         # THE MARKETABLE NATURAL LIMIT (release L-D, Oct 9, 2026): the decision minute's natural moved k ticks AGAINST the
         # trader, so a move between the decision and the next minute's quotes of up to k ticks still meets it. On the
         # signed value (the module docstring) that is natural + k ticks on an open (a debit pays more, a credit takes in
-        # less) and natural - k ticks on a close (a debit sold takes in less, a credit bought back pays more). It is
-        # exactly {"price": v} with that v, rounded and filled as {"price": v} is, in the Gym, the shadow book and the
-        # real order path (each resolves intents here): rounded on the natural's tick, as {"price": v} is, even where v
-        # crosses into a coarser one (a non-penny single leg at $3.00).
+        # less) and natural - k ticks on a close (a debit sold takes in less, a credit bought back pays more), k ticks
+        # of the natural's tick. The moved price is rounded passively on the tick it lands on (`tick_at`), not the
+        # natural's (the review of release L-D, Oct 9: a single XSP call at a $2.98 ask with k 5 moved to 3.03, which
+        # the venue's own tick model, $0.05 at $3.00 and over, calls off the grid, and the real order path sends the
+        # limit as it is: the Gym and the shadow book would fill a price real money cannot send). A move across a
+        # non-penny single leg's $3.00 therefore lands on the coarser tick there (3.03 -> 3.00 on a buy), never beyond
+        # it; a multi-leg value's tick is $0.01 everywhere, so it is unchanged. The result v is on the grid, and
+        # {"price": v} gives the same v back (a value on the grid rounds to itself): the same limit and the same fills
+        # in the Gym, the shadow book and the real order path (each resolves intents here).
         k = rule["natural"]
         if isinstance(k, bool) or not isinstance(k, int) or not 0 <= k <= NATURAL_MAX_TICKS:
             raise Refused(f"limit {{'natural': k}} takes a whole number k from 0 to {NATURAL_MAX_TICKS} ticks")
         target = natural + k * tick if opening else natural - k * tick
+        if tick_at is not None:
+            tick = float(tick_at(target))
     elif isinstance(rule, Mapping) and set(rule) == {"price"}:
         target = float(rule["price"])
         if not math.isfinite(target):
@@ -424,7 +435,8 @@ def resolve_open(intent: Mapping[str, Any], snap: Snapshot, rules: venue.Rules, 
     mid = mid_value(snap, legs)
     if not (math.isfinite(natural) and math.isfinite(mid)):
         raise Refused("a leg has no quote now")
-    limit = limit_value(intent.get("limit", "natural"), "open", natural, mid, tick_of(root, legs, natural))
+    limit = limit_value(intent.get("limit", "natural"), "open", natural, mid, tick_of(root, legs, natural),
+                        functools.partial(tick_of, root, legs))
     if type_ not in CREDIT and top is not None and limit >= top - 1e-9:
         # structure_core.held_limit's rule: a debit at or over what the structure can ever be worth.
         raise Refused(f"a debit of {limit:.2f} on a {type_} worth at most {top:.2f} can never pay")
@@ -468,7 +480,8 @@ def resolve_close(intent: Mapping[str, Any], type_: str, legs: Sequence[LegFill]
     mid = mid_value(snap, legs)
     if not (math.isfinite(natural) and math.isfinite(mid)):
         raise Refused("a leg has no quote now")
-    limit = limit_value(intent.get("limit", "natural"), "close", natural, mid, tick_of(snap.root, legs, natural))
+    limit = limit_value(intent.get("limit", "natural"), "close", natural, mid, tick_of(snap.root, legs, natural),
+                        functools.partial(tick_of, snap.root, legs))
     fees = order_fees(snap.root, legs, _leg_prices(snap, legs, "close"), int(qty), "close")
     return Order("close", type_, snap.root, tuple(legs), int(qty), limit, natural, mid, 0.0, 0.0, fees, 0.0,
                  _tif(intent.get("tif")), str(intent.get("tag") or "")[:80], str(intent.get("note") or "")[:300],

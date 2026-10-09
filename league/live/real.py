@@ -207,14 +207,29 @@ def probe_tally(rows: Callable[..., list], *, day: str, basis: str) -> tuple[int
 
 
 def probe_realized(rows: Callable[..., list], *, basis: str, since: str | None) -> Decimal:
-    """THE ROLLING PROBE BUDGET's window figure (release L-D, Oct 9, 2026; `money.plan_open`): `probe_tally`'s
-    realized_loss, by the same `basis` over the same rows (every closed `:r`, non-tuition position carrying the Probe
-    mark), over those whose New York close day (`_ny_day` of `closed_at`) is on or after `since` (ISO; None: every one,
-    `probe_tally`'s own figure). A close whose day cannot be read counts in every window (a closed position always has
-    its `closed_at`, `RealBook._close`)."""
+    """THE ROLLING PROBE BUDGET's window figure (release L-D, Oct 9, 2026; `money.plan_open`), by the same `basis` over
+    the same rows as `probe_tally`'s realized_loss (every closed `:r`, non-tuition position carrying the Probe mark),
+    over those whose New York close day (`_ny_day` of `closed_at`) is on or after `since` (ISO; None: every one). A
+    close whose day cannot be read counts in every window and every stretch of it, as if it closed today (a closed
+    position always has its `closed_at`, `RealBook._close`).
+
+    "gross": their losses summed (with `since` None, `probe_tally`'s own figure). "net": THE WORST NET STRETCH of the
+    window (the review of release L-D, Oct 9, 2026): the largest max(0, -(the summed cash of the closes on or after s))
+    over every session s from `since` to today, so a Probe gain offsets only the Probe losses closed before it inside
+    the window (a loss after it starts a stretch of its own, which a later window may hold without the gain). The
+    window's plain net (s = `since` alone) let a gain early in the window admit later opens against it; once that gain
+    aged out, a later 20-session window held more than the budget in net Probe losses although every open had passed (a
+    +$300 close, then $700 of losses admitted against it: $700 net in the next window). With the worst stretch, "the
+    budget net in ANY rolling window" holds as an outcome, not only at each open: for any window, the last open whose
+    position closes in it was checked against the stretch from that window's first session to the open (inside its own
+    window) plus every position then open at its maximum loss, which covers every later close in that window
+    (residuals aside: fees above the book's estimate, a structure broken leg by leg). Under "gross" every stretch's sum
+    is at most the whole window's, so the figure is the plain sum, code for code (the CON-only rollback), and under
+    either basis a longer window is never looser."""
     if basis not in M.LOSS_BASES:
         raise ValueError(f"the Probe loss basis {basis!r} is not one of {M.LOSS_BASES}")
-    gross = net = M.ZERO
+    gross = M.ZERO
+    by_day: dict[str, Decimal] = {}                  # "net": each close day's summed cash ("~": a day not readable)
     for r in rows("SELECT cash, closed_at, info FROM positions WHERE substr(instance, -2)=? AND tuition=0 "
                   "AND status='closed'", (REAL_SUFFIX,)):
         if (loads(r["info"], {}) or {}).get("probe") is not True:
@@ -223,8 +238,17 @@ def probe_realized(rows: Callable[..., list], *, basis: str, since: str | None) 
         if since is not None and closed is not None and closed < since:
             continue
         gross += max(M.ZERO, -M.D(r["cash"]))
-        net += M.D(r["cash"])
-    return max(M.ZERO, -net) if basis == "net" else gross
+        key = "~" if closed is None else closed      # "~" sorts after every ISO day: in every stretch
+        by_day[key] = by_day.get(key, M.ZERO) + M.D(r["cash"])
+    if basis == "gross":
+        return gross
+    # Every stretch starts on a close day (a stretch from a session with no close equals the one from the next close day
+    # after it), so the latest days first: the running sum is each stretch's cash, its most negative point the figure.
+    worst = running = M.ZERO
+    for day in sorted(by_day, reverse=True):
+        running += by_day[day]
+        worst = max(worst, -running)
+    return worst
 
 
 @functools.lru_cache(maxsize=64)
@@ -254,13 +278,15 @@ def probe_figures(rows: Callable[..., list], *, day: str,
                   table: M.Table) -> tuple[int, Decimal, Decimal, Decimal, str | None]:
     """THE PROBE LOSS BUDGET's figures under the money table in force (`money.plan_open`'s, through `RealBook.exposure`,
     and the fast lane report's): (open_n, window_realized, total_realized, at_risk, window_start). THE ROLLING PROBE
-    BUDGET (release L-D, Oct 9, 2026): total_realized is `probe_tally`'s figure (every close), window_realized
-    `probe_realized`'s over the closes of the last `probe.loss_window_sessions` sessions through `day`
-    (`probe_window_start`); a window that holds every close (None: the CON-only rollback's 2000 sessions) is the total's
-    own figure, read once."""
+    BUDGET (release L-D, Oct 9, 2026): total_realized is `probe_tally`'s figure (every close, from inception),
+    window_realized `probe_realized`'s over the closes of the last `probe.loss_window_sessions` sessions through `day`
+    (`probe_window_start`; under "net" its worst net stretch). Under "gross" a window that holds every close (None: the
+    CON-only rollback's 2000 sessions) is the total's own figure, read once; under "net" the window's figure is always
+    read (its worst stretch is not the total's net)."""
     open_n, total, at_risk = probe_tally(rows, day=day, basis=table.probe_loss_basis)
     since = probe_window_start(day, table.probe_loss_window)
-    window = total if since is None else probe_realized(rows, basis=table.probe_loss_basis, since=since)
+    window = (total if since is None and table.probe_loss_basis == "gross"
+              else probe_realized(rows, basis=table.probe_loss_basis, since=since))
     return open_n, window, total, at_risk, since
 
 

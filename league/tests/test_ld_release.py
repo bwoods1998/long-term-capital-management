@@ -699,8 +699,16 @@ class TheNaturalLimit(unittest.TestCase):
         self.assertEqual(nl({"natural": 2}, "open", -1.00, -1.10, 0.01), -0.98, "a credit open takes in less")
         self.assertEqual(nl({"natural": 2}, "close", -0.50, -0.45, 0.01), -0.52, "a credit buy-back pays more")
         self.assertEqual(nl({"natural": 0}, "open", 1.23, 1.10, 0.01), 1.23)
-        self.assertEqual(nl({"natural": 10}, "open", 2.95, 2.80, 0.05), 3.45)
         self.assertEqual(nl({"natural": 10}, "close", 0.05, 0.03, 0.01), -0.05, "as {'price': v}: no floor here")
+        # A single leg moved across $3.00, where its tick coarsens, lands on the venue's grid there (the review of
+        # release L-D): SPXW's $0.05 below $3 and $0.10 from it; XSP's $0.01 and $0.05.
+        spxw, xsp = (lambda v: V.leg_tick("SPXW", abs(v))), (lambda v: V.leg_tick("XSP", abs(v)))
+        self.assertEqual(nl({"natural": 10}, "open", 2.95, 2.80, 0.05, spxw), 3.40, "3.45 is off SPXW's $0.10 grid")
+        self.assertEqual(nl({"natural": 2}, "open", 2.95, 2.80, 0.05, spxw), 3.00, "3.05 is off it too")
+        self.assertEqual(nl({"natural": 5}, "open", 2.98, 2.95, 0.01, xsp), 3.00, "3.03 is off XSP's $0.05 grid")
+        self.assertEqual(nl({"natural": 7}, "open", 2.98, 2.95, 0.01, xsp), 3.05)
+        self.assertEqual(nl({"natural": 2}, "close", 3.05, 3.10, 0.05, xsp), 2.95, "down across $3: the finer tick")
+        self.assertEqual(nl({"natural": 3}, "open", 1.23, 1.10, 0.01, xsp), 1.26, "no crossing: as before")
 
     def test_k_is_a_whole_number_from_0_to_10(self):
         for k in (11, -1, 2.5, 2.0, True, False, "3", None, float("nan"), [2]):
@@ -723,6 +731,53 @@ class TheNaturalLimit(unittest.TestCase):
                 v = natural + k * tick if action == "open" else natural - k * tick
                 self.assertEqual(L.limit_value({"natural": k}, action, natural, mid, tick),
                                  L.limit_value({"price": v}, action, natural, mid, tick), (natural, tick, k, action))
+
+    def test_a_single_leg_always_lands_on_the_venues_grid_passively_and_as_the_price_rule(self):
+        rng = random.Random(1009)
+        for root in ("XSP", "SPXW", "SPX", "VIX", "SPY", "QQQ", "AAPL"):
+            tick_at = (lambda v, r=root: V.leg_tick(r, abs(v)))
+            for _ in range(400):
+                natural = round(rng.uniform(2.0, 4.0), 2)
+                tick = V.leg_tick(root, natural)
+                natural = V.round_price(natural, tick, up=True)              # a quote is on its grid
+                k = rng.randrange(0, 11)
+                for action in ("open", "close"):
+                    v = L.limit_value({"natural": k}, action, natural, natural, tick, tick_at)
+                    grid = V.leg_tick(root, abs(v))
+                    self.assertAlmostEqual(v / grid, round(v / grid), places=6, msg=(root, natural, k, action, v))
+                    moved = natural + k * tick if action == "open" else natural - k * tick
+                    if action == "open":
+                        self.assertLessEqual(v, moved + 1e-9, "passive: never more paid than k ticks")
+                        self.assertGreaterEqual(v, natural - 1e-9, "never short of the natural")
+                    else:
+                        self.assertGreaterEqual(v, moved - 1e-9, "passive: never less asked than k ticks")
+                    self.assertEqual(L.limit_value({"price": v}, action, natural, natural, tick), v,
+                                     "exactly {'price': v} with that v")
+                    if V.leg_tick(root, abs(moved)) == tick:
+                        self.assertEqual(v, L.limit_value({"natural": k}, action, natural, natural, tick),
+                                         "no crossing: the natural's tick, as built")
+
+    def test_resolve_open_and_close_price_a_single_xsp_call_on_the_grid(self):
+        strikes = np.array([600.0, 605.0, 610.0])
+        snap = C.Snapshot("XSP", 700, 604.0, np.zeros(3, dtype=int), strikes, np.ones(3, dtype=bool),
+                          np.array([7.10, 2.90, 0.80]), np.array([7.20, 2.98, 0.85]), np.full(3, 50), np.full(3, 50),
+                          rate=0.04)
+        rules = V.rules_for("XSP")
+        intent = {"open": "long_call", "root": "XSP", "qty": 1, "legs": [{"side": "long", "right": "C", "dte": 0,
+                                                                         "strike": 605.0}]}
+        order = L.resolve_open(dict(intent, limit={"natural": 5}), snap, rules, buying_power=1e9)
+        self.assertEqual((order.natural, order.limit), (2.98, 3.00), "3.03 is off XSP's $0.05 grid")
+        self.assertAlmostEqual(order.max_loss_share, 3.00)
+        price = L.resolve_open(dict(intent, limit={"price": 3.00}), snap, rules, buying_power=1e9)
+        self.assertEqual((order.limit, order.max_loss_share, order.fees), (price.limit, price.max_loss_share, price.fees))
+        self.assertEqual(L.resolve_open(dict(intent, limit={"natural": 7}), snap, rules, buying_power=1e9).limit, 3.05)
+        close = L.resolve_close({"close": 1, "limit": {"natural": 3}}, order.type, order.legs, 1, snap, rules, position=1)
+        self.assertEqual((close.natural, close.limit), (2.90, 2.87), "below $3: the penny tick")
+        held = C.Snapshot("XSP", 701, 604.0, np.zeros(3, dtype=int), strikes, np.ones(3, dtype=bool),
+                          np.array([7.10, 3.05, 0.80]), np.array([7.20, 3.15, 0.85]), np.full(3, 50), np.full(3, 50),
+                          rate=0.04)
+        close = L.resolve_close({"close": 1, "limit": {"natural": 2}}, order.type, order.legs, 1, held, rules, position=1)
+        self.assertEqual((close.natural, close.limit), (3.05, 2.95), "two nickel ticks down, onto the penny side")
 
     def chain(self, minute=700):
         spot = 450.0
@@ -860,15 +915,21 @@ class TheRollingTally(unittest.TestCase):
         self.position("s@1:r", cash=900.0, closed="2026-10-29", probe=False)   # a Sized gain: never either
         self.position("h@1:r", cash=-75.0, closed="2026-10-15", status="open")  # held: at risk, not realized
         open_n, window, total, at_risk, since = self.figures()
-        self.assertEqual((open_n, window, total, at_risk, since), (1, D("30"), D("240"), D("75"), "2026-10-05"))
+        # The window under "net" is its worst net stretch: the stretch from Oct 29 holds the -$50 alone, the one from
+        # Oct 5 nets the +$20 against it (-$30): $50, a gain closed BEFORE a loss offsetting none of it (the window's
+        # plain net was $30). The total is from inception: -300 + 100 - 50 + 20 - 10.
+        self.assertEqual((open_n, window, total, at_risk, since), (1, D("50"), D("240"), D("75"), "2026-10-05"))
         gross = self.figures(table(loss_basis="gross"))
         self.assertEqual(gross[1:4], (D("50"), D("360"), D("75")))
-        # The window's figure is the total's over the window's closes only (`probe_realized`).
         from league.live.real import probe_realized, probe_tally
 
-        self.assertEqual(probe_realized(self.state.rows, basis="net", since=None), probe_tally(self.state.rows,
-                         day=self.DAY, basis="net")[1])
+        # "gross" over every close is the total's own figure; "net" over every close is the worst stretch from
+        # inception (Sep 1's -$300 onward: -340), never below the total's net.
+        self.assertEqual(probe_realized(self.state.rows, basis="gross", since=None), probe_tally(self.state.rows,
+                         day=self.DAY, basis="gross")[1])
+        self.assertEqual(probe_realized(self.state.rows, basis="net", since=None), D("340"))
         self.assertEqual(probe_realized(self.state.rows, basis="gross", since="2026-10-02"), D("60"))
+        self.assertEqual(probe_realized(self.state.rows, basis="net", since="2026-10-02"), D("50"))
         # The CON-only rollback's 2000 sessions hold every close: one figure, fast lane v2's.
         r = self.figures(rollback_table())
         self.assertEqual(r, (1, D("360"), D("360"), D("75"), None))
@@ -877,6 +938,72 @@ class TheRollingTally(unittest.TestCase):
     def test_a_close_whose_day_cannot_be_read_counts_in_the_window(self):
         self.position("a@1:r", cash=-40.0, closed=None)
         self.assertEqual(self.figures()[1:3], (D("40"), D("40")))
+
+    def test_under_net_the_window_is_its_worst_stretch_a_gain_offsets_only_the_losses_before_it(self):
+        from league.live.real import probe_realized
+
+        def window(basis="net"):
+            return probe_realized(self.state.rows, basis=basis, since="2026-10-05")
+
+        self.position("a@1:r", cash=-100.0, closed="2026-10-06")
+        self.position("b@1:r", cash=80.0, closed="2026-10-08")             # a gain AFTER the loss: nets it
+        self.assertEqual(window(), D("20"))
+        self.position("c@1:r", cash=-150.0, closed="2026-10-12")           # a loss after the gain: its own stretch
+        self.assertEqual(window(), D("170"), "from Oct 6: -170; from Oct 12: -150; the worst is $170")
+        self.position("d@1:r", cash=-60.0, closed="2026-10-12")            # the same day: one stretch
+        self.assertEqual(window(), D("230"))
+        self.position("e@1:r", cash=500.0, closed="2026-10-20")            # a later gain nets every stretch before it
+        self.assertEqual(window(), D("0"))
+        self.position("f@1:r", cash=-30.0, closed=None)                    # an unreadable day: in every stretch, last
+        self.assertEqual(window(), D("30"))
+        self.assertEqual(window("gross"), D("340"), "gross: the plain sum of the losses, every stretch's most")
+        self.position("s@1:r", cash=-900.0, closed="2026-10-21", probe=False)  # a Sized loss: never either
+        self.assertEqual((window(), window("gross")), (D("30"), D("340")))
+
+    def test_a_longer_window_is_never_looser_under_either_basis(self):
+        from league.live.real import probe_window_start
+
+        rng = random.Random(91)
+        days = [d.isoformat() for d in (dt.date(2026, 7, 1) + dt.timedelta(days=i) for i in range(120))]
+        for case in range(30):
+            self.state.execute("DELETE FROM positions")
+            for _ in range(rng.randrange(0, 16)):
+                self.position(f"f{rng.randrange(3)}@1:r", cash=round(rng.uniform(-130, 260), 2), closed=rng.choice(days))
+            for basis in ("gross", "net"):
+                t = {n: table(loss_basis=basis, loss_window_sessions=n) for n in (20, 40, 2000)}
+                figures = [self.figures(t[n])[1] for n in (20, 40, 2000)]
+                self.assertEqual(figures, sorted(figures), (case, basis))
+                self.assertIsNone(probe_window_start(self.DAY, 2000))
+
+    def test_the_reviews_case_a_gain_early_in_the_window_no_longer_admits_later_losses_against_it(self):
+        """The review of release L-D (Oct 9): a +$300 Probe close on Oct 5; on Oct 6 three Probe units of $128.93 go
+        ($386.79 against an empty window); they lose by Oct 7. With the window's plain net the figure on Oct 8 read
+        $86.79 and admitted more; once Oct 5 aged out, the 20 sessions from Oct 6 held their losses net of nothing."""
+        t = M.Table.from_constitution()
+        unit = D("128.93")
+
+        def plan(day):
+            from league.live.real import probe_figures
+
+            open_n, window, total, at_risk, _ = probe_figures(self.state.rows, day=day, table=t)
+            return M.plan_open(t, band="probe", tuition=False, equity=E, unit=unit, fwd=None,
+                               exposure=M.Exposure(probe_open=open_n, probe_realized=window, probe_realized_total=total,
+                                                   probe_at_risk=at_risk))
+
+        self.position("g@1:r", cash=300.0, closed="2026-10-05")
+        for _ in range(3):
+            self.assertEqual(plan("2026-10-06").qty, 1)
+            self.position("p@1:r", cash=float(-unit), closed="2026-10-07")
+        refused = plan("2026-10-08")
+        self.assertEqual(refused.qty, 0)
+        self.assertEqual(refused.reason, "probe: the loss budget: $386.79 could already be lost (realized net $386.79, "
+                                         "held or working $0.00) and this risks $128.93, over $400 in any 20 sessions")
+        from league.live.real import probe_realized
+
+        plain = -sum((D(str(r["cash"])) for r in self.state.rows("SELECT cash FROM positions")), M.ZERO)
+        self.assertEqual(plain, D("86.79"), "the window's plain net, which admitted two more units")
+        self.assertEqual(probe_realized(self.state.rows, basis="net", since="2026-10-06"), D("386.79"))
+
 
     def test_tuition_the_incubator_and_the_house_test_never_count(self):
         for other in ("t@1:t", "i@1:i", "house:rebound-live@1:h"):
@@ -887,6 +1014,119 @@ class TheRollingTally(unittest.TestCase):
             from league.live.real import probe_realized
 
             probe_realized(self.state.rows, basis="Net", since=None)
+
+
+@unittest.skipUnless(HAVE, "numpy not installed")
+class TheRollingOutcome(unittest.TestCase):
+    """THE ROLLING PROBE BUDGET as an OUTCOME (the review of release L-D, Oct 9, 2026): Probe opens admitted only by
+    `money.plan_open` on `real.probe_figures`, closed later at a full loss, a partial one or a lottery-shaped gain (up to
+    4x the maximum loss), never leave more than $400 of net realized Probe losses in ANY 20 NYSE sessions nor more than
+    $800 net from inception, under "net" with the window's worst stretch. With the window's plain net (the build before
+    the review) the same runs do breach the $400."""
+
+    setUp = TheNetTally.setUp
+
+    def put(self, pid: int, *, unit: int, cash: float, closed_at: float | None) -> None:
+        self.state.upsert("positions", {"pid": pid, "instance": f"p{pid % 5}@1:r", "family": f"p{pid % 5}",
+                                        "type": "debit_vertical", "root": "SPY", "legs": "[]",
+                                        "qty": 0 if closed_at else 1, "opened_qty": 1, "entry": unit / 100,
+                                        "max_loss_share": unit / 100, "collateral": 0.0, "fees": 0.0, "cash": cash,
+                                        "opened_at": 1.0, "opened_day": "2026-10-05", "opened_minute": 1,
+                                        "status": "closed" if closed_at else "open", "closed_at": closed_at,
+                                        "tuition": 0, "info": json.dumps({"order": pid, "probe": True})}, "pid")
+
+    def run_season(self, seed: int) -> tuple[list[str], list[tuple[str, D]], int]:
+        """One season: (its sessions, every close (day, cash) in order, the opens admitted)."""
+        from league.live.real import probe_figures
+        from league.ops.direction import sessions
+
+        self.state.execute("DELETE FROM positions")
+        t = M.Table.from_constitution()
+        rng = random.Random(seed)
+        days = sessions("2026-10-05", "2027-03-31")
+        held: dict[int, tuple[int, float, int, int]] = {}      # pid -> (unit, cash at its close, close session, hour)
+        closes: list[tuple[str, D]] = []
+        pid = admitted = 0
+
+        def close_due(i: int, hour: int) -> None:
+            for p, (unit, cash, when, h) in sorted(held.items()):
+                if when == i and h == hour:
+                    self.put(p, unit=unit, cash=cash, closed_at=at(dt.date.fromisoformat(days[i]), hour, 0))
+                    closes.append((days[i], D(str(cash))))
+                    del held[p]
+
+        for i, day in enumerate(days):
+            close_due(i, 10)
+            for _ in range(rng.randrange(0, 6)):                       # opens at 11:00
+                unit = rng.randrange(30, 129)
+                open_n, window, total, at_risk, _ = probe_figures(self.state.rows, day=day, table=t)
+                plan = M.plan_open(t, band="probe", tuition=False, equity=E, unit=D(unit), fwd=None,
+                                   exposure=M.Exposure(probe_open=open_n, probe_realized=window,
+                                                       probe_realized_total=total, probe_at_risk=at_risk))
+                if plan.qty < 1:
+                    continue
+                draw = rng.random()
+                cash = (-unit if draw < 0.5 else round(-unit * rng.random(), 2) if draw < 0.65
+                        else round(unit * rng.uniform(0.0, 4.0), 2))
+                hold = rng.randrange(0, 6)
+                pid += 1
+                admitted += 1
+                held[pid] = (unit, cash, i + hold, 15 if hold == 0 else rng.choice([10, 15]))
+                self.put(pid, unit=unit, cash=0.0, closed_at=None)
+            close_due(i, 15)
+        return days, closes, admitted
+
+    @staticmethod
+    def worst(days: list[str], closes: list[tuple[str, D]]) -> tuple[D, D, D]:
+        """(the most net realized loss in any 20 sessions, the most net from inception at any close, the most gross in
+        any 20 sessions)."""
+        window = gross = M.ZERO
+        for i in range(len(days)):
+            inside = [c for d, c in closes if days[i] <= d <= days[min(i + 19, len(days) - 1)]]
+            window = max(window, -sum(inside, M.ZERO))
+            gross = max(gross, sum((max(M.ZERO, -c) for c in inside), M.ZERO))
+        running = total = M.ZERO
+        for _, c in closes:
+            running += c
+            total = max(total, -running)
+        return window, total, gross
+
+    def test_no_20_session_window_holds_more_than_400_net_nor_the_total_more_than_800(self):
+        reused = 0
+        for seed in range(8):
+            days, closes, admitted = self.run_season(seed)
+            window, total, gross = self.worst(days, closes)
+            self.assertGreater(admitted, 15, seed)
+            self.assertLessEqual(window, D("400"), seed)
+            self.assertLessEqual(total, D("800"), seed)
+            reused += gross > D("400")
+        self.assertGreater(reused, 0, "gains were re-risked: some window's gross Probe losses passed $400")
+
+    def test_the_windows_plain_net_breaches_the_400_on_the_same_runs(self):
+        from unittest import mock
+
+        from league.live import real
+
+        def plain(rows, *, basis, since):
+            """`real.probe_realized` as built before the review: the window's plain net."""
+            gross = net = M.ZERO
+            for r in rows("SELECT cash, closed_at, info FROM positions WHERE substr(instance, -2)=? AND tuition=0 "
+                          "AND status='closed'", (real.REAL_SUFFIX,)):
+                if (loads(r["info"], {}) or {}).get("probe") is not True:
+                    continue
+                closed = real._ny_day(r["closed_at"])
+                if since is not None and closed is not None and closed < since:
+                    continue
+                gross += max(M.ZERO, -M.D(r["cash"]))
+                net += M.D(r["cash"])
+            return max(M.ZERO, -net) if basis == "net" else gross
+
+        breached = 0
+        with mock.patch.object(real, "probe_realized", plain):
+            for seed in range(8):
+                window, _, _ = self.worst(*self.run_season(seed)[:2])
+                breached += window > D("400")
+        self.assertGreater(breached, 0)
 
 
 class TheTwoEnvelopes(unittest.TestCase):

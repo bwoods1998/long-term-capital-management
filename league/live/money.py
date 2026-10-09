@@ -62,9 +62,11 @@ by their own unit):
   had one envelope, all of it at most `probe.loss_budget_usd` ($400) in total. THE ROLLING PROBE BUDGET (release L-D,
   Oct 9, 2026; the owner's goal as he re-set it that day, item 4: "$400 net in any rolling 20 sessions and $800 net in
   total") has two, and an open must fit BOTH: the realized losses of the closes in the last `probe.loss_window_sessions`
-  (20) New York sessions (`Exposure.probe_realized`, `real.probe_realized` from `real.probe_window_start`) + every
-  real position's open maximum loss + the new open at most `probe.loss_budget_usd` ($400), and the realized losses of
-  every close (`Exposure.probe_realized_total`) + the same at most `probe.loss_total_usd` ($800). An open that would
+  (20) New York sessions (`Exposure.probe_realized`, `real.probe_realized` from `real.probe_window_start`; under "net"
+  the window's WORST NET STRETCH, from any of its sessions to today, so a Probe gain offsets only the losses closed
+  before it and the $400 holds over every 20-session window, not only at each open) + every real position's open
+  maximum loss + the new open at most `probe.loss_budget_usd` ($400), and the realized losses of every close, from
+  inception (`Exposure.probe_realized_total`) + the same at most `probe.loss_total_usd` ($800). An open that would
   breach either is refused, naming the envelope that binds, and exits go on. The dollars bind before the count (three
   $129 units fit the $400, eight $50 units). These refuse a Probe family's open only, never a Sized one, and come after
   the kill switch, the stops, the grant and reconciliation (`step._real_intent` asks `real_block` first). `probe_room`
@@ -644,8 +646,9 @@ class Exposure:
     # closed ones a Probe family opened (since the fast lane: only its opens are marked), read by `probe.loss_basis`
     # (gross: each one's own loss summed; net since release L-D: max(0, -their summed cash)), and what the held and
     # working ones could still lose (maximum loss with fees). THE ROLLING PROBE BUDGET (release L-D): `probe_realized`
-    # is the closes' of the last `probe.loss_window_sessions` sessions (`real.probe_realized`), `probe_realized_total`
-    # every close's; None reads as `probe_realized` (a window holding every close, as fast lane v2's one figure)
+    # is the closes' of the last `probe.loss_window_sessions` sessions (`real.probe_realized`; under "net" the window's
+    # worst net stretch), `probe_realized_total` every close's; None reads as `probe_realized` (a window holding every
+    # close, as fast lane v2's one figure)
     probe_open: int = 0
     probe_realized: Decimal = ZERO
     probe_at_risk: Decimal = ZERO

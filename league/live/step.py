@@ -2716,8 +2716,11 @@ class OptionsLive:
         except Exception:  # noqa: BLE001 - the refusal stands either way; the alarm is told at the next refusal
             return
         t = self.table
-        basis = ("net realized Probe losses (Probe gains offset them; Sized gains never do)"
-                 if t.probe_loss_basis == "net" else "gross realized Probe losses (no gain offsets them)")
+        # Under "net" the window's figure is its worst net stretch (`real.probe_realized`): a gain offsets only the
+        # Probe losses closed before it there, and every one in the total.
+        basis = ("net realized Probe losses (a Probe gain offsets the window's losses before it and the total's; "
+                 "Sized gains never do)" if t.probe_loss_basis == "net"
+                 else "gross realized Probe losses (no gain offsets them)")
         total = exposure.probe_realized if exposure.probe_realized_total is None else exposure.probe_realized_total
         self.alert("warning", f"live: the Probe loss budget (${t.probe_loss_budget} in any {t.probe_loss_window} sessions "
                               f"and ${t.probe_loss_total} in total: {basis}, plus every real position's maximum loss held "

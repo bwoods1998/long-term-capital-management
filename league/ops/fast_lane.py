@@ -228,7 +228,9 @@ def band_row(store: Any, fam: Mapping[str, Any], screen: list[dict], closes: Map
 #: "gross" beside a net figure).
 REALIZED_BASIS = {
     "gross": "gross: each closed Probe position's own loss",
-    "net": "net: the closed Probe positions' losses less their gains, from inception, floored at $0 (a Sized gain never counts)",
+    "net": ("net: the closed Probe positions' losses less their gains, floored at $0: from inception for the total, "
+            "the worst stretch from a session of the window to today for the window (a gain offsets only the losses "
+            "before it there); a Sized gain never counts"),
 }
 
 
