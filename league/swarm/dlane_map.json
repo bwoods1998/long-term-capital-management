@@ -1,0 +1,73 @@
+{
+ "schema": 1,
+ "label": "in-sample: Train years 2022-24, from the operator's census at one-lot natural prices; the screen decides",
+ "built_at": "2026-10-09T14:41:19Z",
+ "inputs_sha256": "d894b09ca25aeb8904b922f4792e094b177bd241b7e2cf788294a8f745c7038f",
+ "inputs": "the operator's direction census, Train years 2022-24 only (sha256 of its sorted 'path sha256' manifest)",
+ "source_sha256": "adb108e1437a6be468ec0a9d9f9118f47e674565b915255d614f6737da02fcf7",
+ "objective": "direction-v2",
+ "scored_with": {
+  "commit": "d70e00c3",
+  "dlane_py_sha256": "928eb108a0d7512ad76d86e9721865dd31edd42e485cd5ab546df59acd90b771"
+ },
+ "bar": {
+  "active_share": 0.5,
+  "min_active_years": 2,
+  "out_t_floor": -1.0,
+  "out_loss_share": 0.5,
+  "min_entry_days": 60,
+  "cost_ratio": 0.5,
+  "unit_share": 0.1,
+  "unit_cap_usd": null
+ },
+ "how": "one long call, one lot, entered every qualifying session at the entry time (lots overlap), struck nearest the delta target and exited at 15:55 ET on the hold's last session; scored by the lane's own bar on the census's Train years",
+ "words": {
+  "expiry": {
+   "2-5": "2-5 days to expiry at entry, covering the exit session",
+   "6-10": "6-10 days to expiry at entry, covering the exit session",
+   "nearest": "the nearest listed expiry on or after the exit session"
+  },
+  "gate": {
+   "every": "enter every session",
+   "ivlow": "10-day at-the-money implied vol below its own median over the prior 60 sessions (same minute)",
+   "contango": "10-day implied vol above 3-day implied vol (short-dated term structure in contango)"
+  }
+ },
+ "passing": [
+  {"root": "QQQ", "delta": 0.2, "expiry": "2-5", "hold": 3, "entry": "15:30", "gate": "ivlow", "S_D": 0.5, "unit": "borderline", "in_market_years": 3},
+  {"root": "SPY", "delta": 0.2, "expiry": "6-10", "hold": 2, "entry": "10:30", "gate": "every", "S_D": 0.5, "unit": "borderline", "in_market_years": 3},
+  {"root": "SPY+QQQ+IWM", "delta": 0.2, "expiry": "2-5", "hold": 3, "entry": "15:30", "gate": "every", "S_D": 0.4, "unit": "yes", "in_market_years": 3},
+  {"root": "QQQ", "delta": 0.2, "expiry": "nearest", "hold": 3, "entry": "15:30", "gate": "every", "S_D": 0.4, "unit": "borderline", "in_market_years": 3},
+  {"root": "SPY+QQQ+IWM", "delta": 0.2, "expiry": "2-5", "hold": 3, "entry": "10:30", "gate": "every", "S_D": 0.4, "unit": "yes", "in_market_years": 3},
+  {"root": "QQQ", "delta": 0.2, "expiry": "nearest", "hold": 3, "entry": "10:30", "gate": "ivlow", "S_D": 0.4, "unit": "borderline", "in_market_years": 3},
+  {"root": "SPY", "delta": 0.2, "expiry": "6-10", "hold": 5, "entry": "15:30", "gate": "contango", "S_D": 0.4, "unit": "borderline", "in_market_years": 3},
+  {"root": "SPY", "delta": 0.2, "expiry": "6-10", "hold": 5, "entry": "10:30", "gate": "contango", "S_D": 0.4, "unit": "borderline", "in_market_years": 3},
+  {"root": "QQQ", "delta": 0.2, "expiry": "2-5", "hold": 2, "entry": "10:30", "gate": "every", "S_D": 0.4, "unit": "borderline", "in_market_years": 3},
+  {"root": "SPY+QQQ+IWM", "delta": 0.2, "expiry": "6-10", "hold": 5, "entry": "10:30", "gate": "ivlow", "S_D": 0.3, "unit": "borderline", "in_market_years": 3},
+  {"root": "SPY", "delta": 0.2, "expiry": "nearest", "hold": 5, "entry": "15:30", "gate": "contango", "S_D": 0.3, "unit": "borderline", "in_market_years": 3},
+  {"root": "SPY", "delta": 0.2, "expiry": "2-5", "hold": 3, "entry": "10:30", "gate": "every", "S_D": 0.3, "unit": "yes", "in_market_years": 3},
+  {"root": "QQQ", "delta": 0.2, "expiry": "nearest", "hold": 2, "entry": "10:30", "gate": "every", "S_D": 0.3, "unit": "borderline", "in_market_years": 3},
+  {"root": "QQQ", "delta": 0.2, "expiry": "2-5", "hold": 3, "entry": "10:30", "gate": "ivlow", "S_D": 0.3, "unit": "borderline", "in_market_years": 3},
+  {"root": "SPY", "delta": 0.2, "expiry": "nearest", "hold": 5, "entry": "10:30", "gate": "contango", "S_D": 0.3, "unit": "borderline", "in_market_years": 3},
+  {"root": "SPY", "delta": 0.2, "expiry": "2-5", "hold": 3, "entry": "15:30", "gate": "every", "S_D": 0.3, "unit": "yes", "in_market_years": 3},
+  {"root": "SPY+QQQ+IWM", "delta": 0.2, "expiry": "nearest", "hold": 5, "entry": "10:30", "gate": "ivlow", "S_D": 0.3, "unit": "borderline", "in_market_years": 3},
+  {"root": "SPY", "delta": 0.2, "expiry": "6-10", "hold": 2, "entry": "15:30", "gate": "every", "S_D": 0.3, "unit": "yes", "in_market_years": 3},
+  {"root": "SPY+QQQ+IWM", "delta": 0.2, "expiry": "6-10", "hold": 5, "entry": "15:30", "gate": "ivlow", "S_D": 0.3, "unit": "borderline", "in_market_years": 3},
+  {"root": "SPY+QQQ+IWM", "delta": 0.2, "expiry": "6-10", "hold": 5, "entry": "15:30", "gate": "contango", "S_D": 0.3, "unit": "borderline", "in_market_years": 3},
+  {"root": "SPY", "delta": 0.2, "expiry": "6-10", "hold": 5, "entry": "15:30", "gate": "ivlow+contango", "S_D": 0.3, "unit": "yes", "in_market_years": 3},
+  {"root": "SPY+QQQ+IWM", "delta": 0.2, "expiry": "nearest", "hold": 5, "entry": "15:30", "gate": "ivlow", "S_D": 0.3, "unit": "borderline", "in_market_years": 3},
+  {"root": "SPY+QQQ+IWM", "delta": 0.2, "expiry": "nearest", "hold": 5, "entry": "15:30", "gate": "contango", "S_D": 0.3, "unit": "borderline", "in_market_years": 3},
+  {"root": "SPY", "delta": 0.2, "expiry": "6-10", "hold": 3, "entry": "10:30", "gate": "every", "S_D": 0.2, "unit": "borderline", "in_market_years": 3},
+  {"root": "SPY", "delta": 0.2, "expiry": "nearest", "hold": 5, "entry": "15:30", "gate": "ivlow+contango", "S_D": 0.2, "unit": "yes", "in_market_years": 3},
+  {"root": "SPY", "delta": 0.2, "expiry": "6-10", "hold": 5, "entry": "15:30", "gate": "every", "S_D": 0.2, "unit": "borderline", "in_market_years": 3},
+  {"root": "SPY", "delta": 0.2, "expiry": "nearest", "hold": 5, "entry": "15:30", "gate": "every", "S_D": 0.2, "unit": "borderline", "in_market_years": 3},
+  {"root": "QQQ", "delta": 0.2, "expiry": "nearest", "hold": 3, "entry": "15:30", "gate": "ivlow", "S_D": 0.2, "unit": "borderline", "in_market_years": 3},
+  {"root": "SPY+QQQ+IWM", "delta": 0.2, "expiry": "6-10", "hold": 5, "entry": "15:30", "gate": "ivlow+contango", "S_D": 0.2, "unit": "borderline", "in_market_years": 3},
+  {"root": "SPY+QQQ+IWM", "delta": 0.2, "expiry": "nearest", "hold": 5, "entry": "15:30", "gate": "ivlow+contango", "S_D": 0.1, "unit": "borderline", "in_market_years": 3}
+ ],
+ "lessons": [
+  "THE UNIT DECIDES THE SHAPE: 0.20 DELTA, 2-5 SESSIONS, EXPIRY WITHIN ABOUT 10 DAYS. Every passing cell is a 0.20-delta call held 2, 3 or 5 sessions on an expiry of at most 10 days (nearest covering, 2-5 or 6-10 DTE). E5 (the unit) is the most-failed rule: no 0.40 or 0.50-delta call fits at today's prices, a 0.30-delta call fits only at 2-3 sessions (mostly IWM) and then loses on costs, and no 8-session hold passes. 23 of the 30 passers fit only borderline, so take the 0.20-delta strike and the nearest covering expiry.",
+  "ALWAYS-IN PASSES E1; A GATE THAT SITS OUT 2022 FAILS E3. All 30 passers are in the market in all three Train years, 2022 included, entering every session or under one volatility filter (implied vol below its 60-session median, or 10-day above 3-day implied vol). The price-trend gate is out of the market in 2022 in 416 of 448 cells, but the trades it still takes there lose (t below -1, or a loss over half the in-market years' mean), so it fails E3 in 381 of 448 cells and passes none; contango AND trend fails E3 in 443 of 448. Stacking two volatility filters thins 2022 below 60 entry sessions (E4). Enter EVERY qualifying session (lots overlap; do not wait for the last lot to close): the frequency floors (40+ trades on 20+ days, 60+ entry sessions, exposure at least half the busiest year's) need it.",
+  "COSTS DECIDE THE ROOT AND THE SHORTEST HOLD. IWM calls lose at 1.5x the half-spread in 765 of 784 cells (P1) and none pass; 2-session holds keep under half their 1.0x profit at 1.5x in 197 of 224 cells (R3), so only 4 pass. SPY and QQQ at 3-5 sessions are the robust core. Every passer has a losing in-market year (E2 false for all 30): the profit is leveraged index drift, so the D2 screen, not this map, decides."
+ ]
+}

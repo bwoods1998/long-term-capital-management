@@ -29,6 +29,41 @@ any other deploy.
 The running House release is `20261009T090334Z-cdbf1864a573` (main `40c39435`, release L-D, 09:04Z Oct 9, below), the
 gateway is `8072b5b1`, and the box's updater is on. What is built and not deployed is on branches.
 
+### The direction lane's Train map, on `feat/dlane-trainmap` (unreleased; an owner deploy, gateway first; no evidence reset)
+
+Births aim at the call shapes that pass direction-v2 on the Train years, instead of searching for them. After the first
+direction program reached real money (2.4 h after D-1b), 7 of the 8 other direction families had no eligible version,
+mostly on E1. Operator's page: **The Train map** in the Release D-1 section of `docs/operations.md`.
+- **The map** (`league/swarm/dlane_map.json`, new, protected). It comes from the operator's census of SPY, QQQ, IWM and
+  one-on-each-root call cells, scored by the House's own `dlane.train_score` and `robust_verdict` (main `d70e00c3`) on
+  2022-24 data only, one lot at natural prices: 30 of 3,136 cells pass. Every passer is a 0.20-delta call held 2-5
+  sessions, in the market all three Train years. The file is reduced to what agents may see: each shape in words, its
+  S_D to one decimal, the unit's verdict as a word, and three lessons. Its header carries the label, `built_at`,
+  `inputs_sha256`, `source_sha256`, and the commit, `dlane.py` sha and bar settings it was scored under. There is no
+  dollar figure, price level, price ratio, per-year P&L or year outside 2022-24.
+- **Who sees it** (`league/swarm/dlane.py` `train_map`, `train_map_text`, `train_map_brief`, `map_on`,
+  `map_text_problems`). The architect's LANES block gets every passing shape (one line each, at most 30), the lessons,
+  and "aim at these shapes and vary the gate, the hold or the root". A direction researcher's brief gets the lessons and
+  the 5 best passing shapes on its roots. Both carry the label "in-sample: Train years 2022-24, from the operator's
+  census at one-lot natural prices; the screen decides". A shortfall request's opening line points at it.
+- **The reader** is cached and never raises. A missing, malformed or unsafe file (a refused year, a `$`, a figure, a
+  wrong label or objective, one bad row) reads as no map.
+- **The switch:** `league/swarm/policy.json` `dlane.train_map` true. swarm.json false hides it at once, and the code's
+  default is false. Off, and with `dlane.mode` "off", every text is main `d70e00c3`'s byte for byte, and so is the
+  alpha lane (golden digests computed on that commit).
+- **Its cost** (a reported loosening: agents now read an operator study's Train-year figures): births aim at
+  in-sample winners. The screen's false-positive rate per program is unchanged, but more programs reach the screen, so
+  there are more false passes in count. The `dlane` report's header lists it (`league/ops/dlane_report.py`
+  `LOOSENED`), together with the graveyard row deferred to this owner deploy.
+- **Walls:** `league/ci.py` FORBIDDEN and the gateway's `protected.mjs` gain `league/swarm/dlane_map.json`, as for
+  `dlane.py`. The gateway needs `npx wrangler@4.129.1 deploy` first; until then the deployed merge route does not
+  refuse an edit to the map, but the updater does. The execution fingerprint (`31a7e921`), the money digest
+  (`0310779c`) and the constitution digest (`ca89ff8a`) do not move.
+- **Proof.** `test_dlane_trainmap` covers the switch, the reader's refusals, the secrecy of every text (no
+  dollar-looking or price-looking digit run, no year but 2022-24, no provenance hash), length bounds, the alpha and
+  rollback goldens, the report row and the wall. `test_dlane`'s committed-settings test gains `train_map`.
+- **Rollback.** swarm.json `dlane.train_map` false (instant), or `floor_box.py rollback`.
+
 ### The direction lane's graveyard, on `fix/dlane-graveyard` (unreleased; an updater release on top of D-1, live since 10:37Z Oct 9 as main `2b60d94a`; no evidence reset)
 
 The operator's decision after the House's architect pass of 11:32Z Oct 9, **a reported loosening**. Operator's page:

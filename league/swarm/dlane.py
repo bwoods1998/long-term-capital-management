@@ -95,10 +95,23 @@ evidence numbers (the screen, the leakage alarm, K5) are bounded so that a setti
 policy.
 
 WHAT AGENTS SEE. Rules and Train-year (2022-24) facts only: never a hidden-year figure, never a Validation or holdout
-figure, never a number from the operator's private studies (`brief_text`, `status_text`, `view`, `lanes_text` are tested
-for it). E5 is shown as its verdict alone (`UNIT_HINT`, the review of Oct 9, 2026): today's price scale (the House's
-last closes over 2024's) and the unit cap (a share of the account's equity) are 2026 figures, kept in the family state
-and the operator's report only.
+figure, never a number from the operator's private studies but THE TRAIN MAP's, below (`brief_text`, `status_text`,
+`view`, `lanes_text` are tested for it). E5 is shown as its verdict alone (`UNIT_HINT`, the review of Oct 9, 2026):
+today's price scale (the House's last closes over 2024's) and the unit cap (a share of the account's equity) are 2026
+figures, kept in the family state and the operator's report only.
+
+THE TRAIN MAP (Oct 9, 2026; `train_map`, `train_map_text`, `train_map_brief`). The operator's census scored every
+SPY/QQQ/IWM call shape (delta, expiry rule, hold, entry minute, gate; one lot at natural prices) by this module's own
+direction-v2 on the Train years 2022-24 only; league/swarm/dlane_map.json holds what agents may see of it: the passing
+shapes in its own words with their pooled S_D to one decimal and the unit's verdict as a word, and its lessons. While
+the lane is on and `dlane.train_map` is true (policy.json true; swarm.json false hides it at once; the code's default
+is off), the architect's LANES block lists the passing shapes and the lessons and a direction researcher's brief the
+lessons and the best passing shapes on its roots, every one labelled "in-sample: Train years 2022-24, from the
+operator's census at one-lot natural prices; the screen decides" (`MAP_LABEL`). It is the one figure from an operator
+study agents read, and it is Train-year only: no dollar figure, price level or price ratio, no per-year figure, no year
+but 2022-24 (`map_text_problems` holds every text field of the file to that, or the file is no map). Its cost: births
+aim at in-sample winners; the screen's false-positive rate per program is unchanged, and more programs reach the
+screen, so more false passes in count.
 
 Standard library only (the House box runs it without numpy).
 """
@@ -224,6 +237,9 @@ DEFAULTS: dict[str, Any] = {
     "done_zero_edge_p": 0.13,
     # K5 (decision 9).
     "k5_net_usd": -600, "k5_clear": False,
+    # THE TRAIN MAP (Oct 9, 2026; `train_map`): shown to the architect and direction researchers only when true. The
+    # code's default is off (a dropped policy layer shows nothing); policy.json sets it true; swarm.json false hides it.
+    "train_map": False,
 }
 
 _SHA = re.compile(r"^[0-9a-f]{64}$")
@@ -313,6 +329,7 @@ def cfg(settings: Mapping[str, Any] | None) -> dict[str, Any]:
         "done_zero_edge_p": number("done_zero_edge_p", 0.0, 1.0),
         "k5_net_usd": number("k5_net_usd", -600.0, -50.0),
         "k5_clear": raw.get("k5_clear") is True,
+        "train_map": raw.get("train_map") is True,
     }
 
 
@@ -1984,8 +2001,9 @@ def ration_text(settings: Mapping[str, Any] | None) -> str:
 
 def brief_text(settings: Mapping[str, Any] | None, roots: Iterable[str] | None = None) -> str:
     """A direction family's brief (static per family, so it is cached with the family's prefix): what its lane counts, the
-    bar it is judged by, what is reported beside it, and `ALWAYS_IN_NOTE`. "" while the lane is off. No figure: today's
-    unit cap is in `status_text`."""
+    bar it is judged by, what is reported beside it, and `ALWAYS_IN_NOTE`; then, while `dlane.train_map` is on, THE
+    TRAIN MAP's lessons and best passing shapes on its roots (`train_map_brief`). "" while the lane is off. No figure:
+    today's unit cap is in `status_text`."""
     if not on(settings):
         return ""
     c = cfg(settings)
@@ -2000,7 +2018,7 @@ def brief_text(settings: Mapping[str, Any] | None, roots: Iterable[str] | None =
             "call near 0.20-0.30 delta fits the unit" if calls else
             "one out-of-the-money call near 0.20-0.30 delta fits the unit (the lane steers to single calls; narrow "
             "verticals rarely fit after costs)")
-    return (
+    text = (
         f"YOUR LANE: DIRECTION ({OBJECTIVE}). Profit from the index's direction counts in this lane, and every figure of it is "
         f"reported beside the same-risk buy-and-hold, never hidden: {ALWAYS_IN_NOTE}. Your program buys calls on "
         f"{', '.join(names)} {what}, one lot per entry, never sized by capital, held 2 to 8 sessions. "
@@ -2021,6 +2039,9 @@ def brief_text(settings: Mapping[str, Any] | None, roots: Iterable[str] | None =
         "reliable, out when it is not. You know the market's history: a rule that works only because you know which years "
         "fell is not a gate. Use scale-free state (implied vol against its own trailing year, implied against realized, "
         "term structure, price against its own moving average or recent high), never price levels or dates.")
+    # THE TRAIN MAP (Oct 9, 2026): its lessons and the best passing shapes on this family's roots ("" while it is off).
+    shown = train_map_brief(settings, names)
+    return text + ("\n" + shown if shown else "")
 
 
 def _yes(v: Any) -> str:
@@ -2124,6 +2145,234 @@ def view(score: Mapping[str, Any] | None, robust: Mapping[str, Any] | None = Non
             "beside": dict(score.get("beside") or {}), "note": ALWAYS_IN_NOTE}
 
 
+# ----------------------------------------------------------------------------------------------------------- the train map
+#: THE TRAIN MAP (Oct 9, 2026, after release D-1b): which call shapes pass direction-v2 on the Train years, from the
+#: operator's census (every SPY/QQQ/IWM call cell by delta, expiry rule, hold, entry minute and gate, one lot at natural
+#: prices, scored by this module's own `train_score` and `robust_verdict` on 2022-24 only), so births aim at shapes that
+#: pass rather than search for them. IN-SAMPLE, and labelled so everywhere it is shown (`MAP_LABEL`): the D2 screen
+#: (Validation, then one sealed holdout look) decides, unchanged. The file is league/swarm/dlane_map.json (protected like
+#: this module); `train_map` reads it (cached, never raises: a missing, malformed or unsafe file is no map) and
+#: `train_map_text` (the architect's LANES block) and `train_map_brief` (a direction researcher's brief) show it, only
+#: while the lane is on and `dlane.train_map` is true (`map_on`; policy.json true, swarm.json false turns it off at once).
+#: What agents read of it: shapes in the map's own words, each with its pooled S_D to one decimal and the unit's verdict
+#: as a word ("fits the unit at today's prices: yes/no/borderline"), and the census's lessons; never a dollar figure, a
+#: price level or a price ratio, never a per-year figure, never a year but 2022-24 (`map_text_problems` holds every text
+#: field of the file to that before any of it is shown).
+MAP_PATH = Path(__file__).with_name("dlane_map.json")
+MAP_SCHEMA = 1
+MAP_LABEL = "in-sample: Train years 2022-24, from the operator's census at one-lot natural prices; the screen decides"
+#: The unit's verdict words (E5 priced at today's prices by the operator, privately; shown as a word only).
+MAP_UNITS = ("yes", "borderline", "no")
+#: The bar settings the map was scored under (the file's `bar`); a setting that differs makes the text say so.
+MAP_BAR_KEYS = ("active_share", "min_active_years", "out_t_floor", "out_loss_share", "min_entry_days", "cost_ratio",
+                "unit_share", "unit_cap_usd")
+#: Bounds: the file's rows and lessons, and what each reader shows (the architect at most `MAP_ARCHITECT_ROWS` shapes,
+#: one line each; a researcher the `MAP_BRIEF_ROWS` best on its roots).
+MAP_ROWS_MAX, MAP_LESSONS_MAX, MAP_LESSON_CHARS, MAP_WORD_CHARS, MAP_HOW_CHARS = 60, 5, 900, 160, 400
+MAP_ARCHITECT_ROWS, MAP_BRIEF_ROWS = 30, 5
+#: The only years a map text may name; a digit run of four or more is refused unless it is one of them.
+MAP_YEARS = (str(FIRST_YEAR), str(FIRST_YEAR + 1), str(LAST_YEAR))
+#: Years never named in a map text, even inside a longer digit run (the hidden years, Validation, the holdout).
+MAP_REFUSED_YEARS = ("2017", "2018", "2019", "2020", "2021", "2025", "2026")
+_MAP_NUMBER = re.compile(r"\d+(?:[.,]\d+)*")
+#: A decimal a map text may carry: a delta target (0.2, 0.20 ... 0.9) or a one-decimal figure under 10 (a t, 1.5x).
+_MAP_DECIMAL = re.compile(r"0\.[1-9]0?|\d\.\d")
+_MAP_CLOCK = re.compile(r"(?:[01]\d|2[0-3]):[0-5]\d")
+_MAP_WORD_KEY = re.compile(r"[a-z0-9][a-z0-9_-]{0,15}")
+_MAP_CACHE: dict[str, tuple[Any, Any]] = {}
+
+
+def map_text_problems(text: Any) -> list[str]:
+    """Why a map text may not reach an agent ([] when it may): it must be plain one-line ASCII and carry no dollar sign,
+    no year but 2022-24 (none of `MAP_REFUSED_YEARS` anywhere, even inside a longer digit run), no grouped number
+    (1,234), no digit run of four or more but those years, and no decimal but a delta target or a one-decimal figure
+    under 10 (`_MAP_DECIMAL`): so no dollar amount, price level or price ratio."""
+    if not isinstance(text, str) or not text.strip():
+        return ["empty"]
+    problems = []
+    if not text.isascii() or any(ord(ch) < 32 or ord(ch) == 127 for ch in text):
+        problems.append("not plain one-line ASCII")
+    if "$" in text:
+        problems.append("a dollar sign")
+    problems += [f"names {y}" for y in MAP_REFUSED_YEARS if y in text]
+    for m in _MAP_NUMBER.finditer(text):
+        tok = m.group()
+        if "," in tok:
+            problems.append(f"a grouped number ({tok})")
+        elif "." in tok:
+            if not _MAP_DECIMAL.fullmatch(tok):
+                problems.append(f"a figure ({tok})")
+        elif len(tok) > 3 and tok not in MAP_YEARS:
+            problems.append(f"a number ({tok})")
+    return problems
+
+
+def _map_words(raw: Any) -> dict[str, dict[str, str]] | None:
+    """The file's glossary {expiry: {key: words}, gate: {key: words}}, each key a short token and each text safe; None
+    when either is missing or one entry is not."""
+    if not isinstance(raw, Mapping):
+        return None
+    out: dict[str, dict[str, str]] = {}
+    for kind in ("expiry", "gate"):
+        block = raw.get(kind)
+        if not isinstance(block, Mapping) or not block or len(block) > 12:
+            return None
+        out[kind] = {}
+        for key, words in block.items():
+            if not (isinstance(key, str) and _MAP_WORD_KEY.fullmatch(key) and not map_text_problems(key)
+                    and isinstance(words, str) and len(words) <= MAP_WORD_CHARS and not map_text_problems(words)):
+                return None
+            out[kind][key] = words
+    return out
+
+
+def _map_row(raw: Any, words: Mapping[str, Mapping[str, str]]) -> dict[str, Any] | None:
+    """One passing shape, normalized, or None when any field is outside the map's vocabulary: roots from `ROOTS` joined
+    by "+", a delta target in tenths, an expiry and gates the glossary names, a hold of 1-20 sessions, an HH:MM entry,
+    S_D under 10 in size, the unit's verdict word and 0-3 in-market years."""
+    if not isinstance(raw, Mapping):
+        return None
+    roots = raw.get("root").split("+") if isinstance(raw.get("root"), str) else []
+    gates = raw.get("gate").split("+") if isinstance(raw.get("gate"), str) else []
+    delta, sd = _num(raw.get("delta")), _num(raw.get("S_D"))
+    hold, years, entry = raw.get("hold"), raw.get("in_market_years"), raw.get("entry")
+    whole = (lambda v, lo, hi: isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi)
+    if not roots or len(set(roots)) != len(roots) or any(r not in ROOTS for r in roots):
+        return None
+    if not gates or len(set(gates)) != len(gates) or any(g not in words["gate"] for g in gates):
+        return None
+    if delta is None or not 0.1 <= delta <= 0.9 or abs(delta * 10 - round(delta * 10)) > 1e-9:
+        return None
+    if sd is None or abs(sd) >= 9.95 or raw.get("expiry") not in words["expiry"] or raw.get("unit") not in MAP_UNITS:
+        return None
+    if not whole(hold, 1, 20) or not whole(years, 0, 3) or not (isinstance(entry, str) and _MAP_CLOCK.fullmatch(entry)):
+        return None
+    return {"root": "+".join(roots), "delta": round(delta, 1), "expiry": raw["expiry"], "hold": hold, "entry": entry,
+            "gate": "+".join(gates), "S_D": round(sd, 1), "unit": raw["unit"], "in_market_years": years}
+
+
+def _map_doc(raw: Any) -> dict[str, Any] | None:
+    """The map as agents may read it, or None: the schema, `MAP_LABEL` word for word and this module's `OBJECTIVE`; a
+    safe glossary, `how` and 1-`MAP_LESSONS_MAX` lessons; 1-`MAP_ROWS_MAX` passing shapes, every one well-formed (one
+    bad row and the whole map is refused), sorted by S_D, best first (the file's order among equals)."""
+    if not isinstance(raw, Mapping) or raw.get("schema") != MAP_SCHEMA or raw.get("label") != MAP_LABEL \
+            or raw.get("objective") != OBJECTIVE:
+        return None
+    words = _map_words(raw.get("words"))
+    how, lessons, passing = raw.get("how"), raw.get("lessons"), raw.get("passing")
+    if words is None or not isinstance(how, str) or len(how) > MAP_HOW_CHARS or map_text_problems(how):
+        return None
+    if not isinstance(lessons, list) or not 1 <= len(lessons) <= MAP_LESSONS_MAX or any(
+            not isinstance(x, str) or len(x) > MAP_LESSON_CHARS or map_text_problems(x) for x in lessons):
+        return None
+    if not isinstance(passing, list) or not 1 <= len(passing) <= MAP_ROWS_MAX:
+        return None
+    rows = [_map_row(r, words) for r in passing]
+    if any(r is None for r in rows):
+        return None
+    bar_raw = raw.get("bar") if isinstance(raw.get("bar"), Mapping) else {}
+    bar = {k: (None if bar_raw[k] is None else _num(bar_raw[k])) for k in MAP_BAR_KEYS if k in bar_raw}
+    return {"label": MAP_LABEL, "how": how, "words": words, "lessons": list(lessons),
+            "passing": sorted(rows, key=lambda r: -r["S_D"]), "bar": bar,
+            # The operator's provenance: never shown to an agent.
+            "built_at": str(raw.get("built_at") or ""), "inputs_sha256": str(raw.get("inputs_sha256") or "")}
+
+
+def train_map(path: str | Path | None = None) -> dict[str, Any] | None:
+    """THE TRAIN MAP as agents may read it (`_map_doc`), from `path` (default `MAP_PATH`), or None: a missing, unreadable,
+    malformed or unsafe file is no map. Cached on the file's size and mtime; never raises."""
+    try:
+        p = Path(path) if path is not None else Path(MAP_PATH)
+        st = p.stat()
+        stamp = (st.st_mtime_ns, st.st_size)
+    except Exception:  # noqa: BLE001 - no file, no map
+        return None
+    hit = _MAP_CACHE.get(str(p))
+    if hit is not None and hit[0] == stamp:
+        return hit[1]
+    try:
+        doc = _map_doc(json.loads(p.read_text(encoding="utf-8")))
+    except Exception:  # noqa: BLE001 - garbage reads as no map
+        doc = None
+    _MAP_CACHE[str(p)] = (stamp, doc)
+    return doc
+
+
+def map_on(settings: Mapping[str, Any] | None) -> bool:
+    """The map is shown: the lane is on and `dlane.train_map` is true (policy.json; swarm.json false turns it off)."""
+    return on(settings) and cfg(settings)["train_map"]
+
+
+def _map_shape(row: Mapping[str, Any]) -> str:
+    """One passing shape on one line, in the map's own words (the key line explains them)."""
+    gate = "every session" if row["gate"] == "every" else row["gate"]
+    return (f"{row['root']} {row['delta']:.2f}-delta call, expiry {row['expiry']}, hold {row['hold']}, enter "
+            f"{row['entry']} ET, gate {gate}: S_D {row['S_D']:.1f}; fits the unit at today's prices: {row['unit']}")
+
+
+def _map_key(doc: Mapping[str, Any]) -> str:
+    words = doc["words"]
+    return ("Key: " + "; ".join([f"expiry {k} = {v}" for k, v in words["expiry"].items()]
+                                + [f"gate {k} = {v}" for k, v in words["gate"].items()]
+                                + ["gate a+b = both at once", "root SPY+QQQ+IWM = one call on each root",
+                                   "hold = sessions held", "S_D = the pooled t of daily P&L over Train at 1.0x"]) + ".")
+
+
+def _map_head(doc: Mapping[str, Any], settings: Mapping[str, Any] | None) -> str:
+    c = cfg(settings)
+    changed = [k for k, v in doc["bar"].items()
+               if (c.get(k) is None) != (v is None) or (v is not None and abs(float(c[k]) - v) > 1e-9)]
+    return (f"TRAIN MAP ({MAP_LABEL}). Each shape is {doc['how']}. {ALWAYS_IN_NOTE[0].upper()}{ALWAYS_IN_NOTE[1:]}."
+            + (f" The bar's settings have changed since the map was built ({', '.join(changed)}): read it as a guide."
+               if changed else ""))
+
+
+def train_map_text(settings: Mapping[str, Any] | None) -> str:
+    """THE TRAIN MAP for the architect's LANES block: the label, the passing shapes one line each (at most
+    `MAP_ARCHITECT_ROWS`, best S_D first), the lessons, and where births should aim. "" while the lane is off, while
+    `dlane.train_map` is false, or with no map."""
+    doc = train_map() if map_on(settings) else None
+    if doc is None:
+        return ""
+    rows = doc["passing"]
+    shown = rows[:MAP_ARCHITECT_ROWS]
+    lines = [_map_head(doc, settings), _map_key(doc),
+             f"THE {len(rows)} PASSING SHAPES (best S_D first"
+             + (f"; the first {len(shown)} shown" if len(shown) < len(rows) else "") + "):"]
+    lines += [f"- {_map_shape(r)}" for r in shown]
+    lines += [f"LESSON {i}: {x}" for i, x in enumerate(doc["lessons"], 1)]
+    lines.append("AIM direction cards at these shapes and vary the gate, the hold or the root: a gate is the edge to find "
+                 "and this bar does not test it. Each version is still judged on its own Train run, and each lineage gets "
+                 "one Validation try and one holdout look: the screen decides, not this map.")
+    return "\n".join(lines)
+
+
+def train_map_brief(settings: Mapping[str, Any] | None, roots: Iterable[str] | None = None) -> str:
+    """THE TRAIN MAP for a direction researcher's brief: the label, the lessons and the `MAP_BRIEF_ROWS` best-scoring
+    passing shapes on the family's roots (a shape whose roots it all holds), then the best on other roots when it has
+    fewer. "" while the lane is off, while `dlane.train_map` is false, or with no map."""
+    doc = train_map() if map_on(settings) else None
+    if doc is None:
+        return ""
+    names = [str(r).upper() for r in roots or () if str(r).upper() in ROOTS] or list(ROOTS)
+    mine = [r for r in doc["passing"] if set(r["root"].split("+")) <= set(names)]
+    others = [r for r in doc["passing"] if r not in mine]
+    picked = mine[:MAP_BRIEF_ROWS]
+    extra = others[:MAP_BRIEF_ROWS - len(picked)]
+    head = (f"THE {len(picked) + len(extra)} BEST-SCORING PASSING SHAPES on your roots ({', '.join(names)})"
+            if not extra else
+            f"THE BEST-SCORING PASSING SHAPES: {len(picked)} on your roots ({', '.join(names)}), then {len(extra)} on "
+            "other roots")
+    lines = [_map_head(doc, settings)]
+    lines += [f"LESSON {i}: {x}" for i, x in enumerate(doc["lessons"], 1)]
+    lines.append(head + ":")
+    lines += [f"- {_map_shape(r)}" for r in picked]
+    lines += [f"- (other roots) {_map_shape(r)}" for r in extra]
+    lines.append(_map_key(doc))
+    lines.append("Your own Train run is your score; the screen decides, not this map.")
+    return "\n".join(lines)
+
+
 # ----------------------------------------------------------------------------------------------------------- the agenda
 def agenda_problems(text: Any, *, limit: int = AGENDA_MAX) -> list[str]:
     """Why an agenda text may not be installed (D9: the House warns at swarm start, the operator's tool refuses): longer
@@ -2158,4 +2407,7 @@ __all__ = ["OBJECTIVE", "ALPHA", "DIRECTION", "LANES", "MODES", "SCREENS", "ALPH
            "TRY_KEY", "D2_STRUCTURES", "D2_RATES", "D2_INTERVALS", "fp_beside", "fp_of_look", "d2_verdict", "d2_pooled_t_low",
            "GYM_MEAN_ROUNDING", "GYM_T_ROUNDING", "NOT_A_TRY", "SPENT_LOOK",
            "SPENT_TRY", "lineage_tries", "looks_ration", "try_open", "first_try", "try_owed", "lineage_spent", "calls_only",
-           "CALLS_ONLY_WHY", "ration_text"]
+           "CALLS_ONLY_WHY", "ration_text",
+           # the train map (Oct 9, 2026)
+           "MAP_PATH", "MAP_LABEL", "MAP_UNITS", "MAP_ARCHITECT_ROWS", "MAP_BRIEF_ROWS", "map_text_problems", "train_map",
+           "map_on", "train_map_text", "train_map_brief"]
