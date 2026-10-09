@@ -2178,6 +2178,8 @@ _MAP_NUMBER = re.compile(r"\d+(?:[.,]\d+)*")
 #: A decimal a map text may carry: a delta target (0.2, 0.20 ... 0.9) or a one-decimal figure under 10 (a t, 1.5x).
 _MAP_DECIMAL = re.compile(r"0\.[1-9]0?|\d\.\d")
 _MAP_CLOCK = re.compile(r"(?:[01]\d|2[0-3]):[0-5]\d")
+#: A count of three digits stands only in an "N of M" phrase (416 of 448 cells): alone it could be a price level.
+_MAP_COUNT = re.compile(r"(?<![\d.,])\d{1,3} of \d{1,3}(?!\d|[.,]\d)")
 _MAP_WORD_KEY = re.compile(r"[a-z0-9][a-z0-9_-]{0,15}")
 _MAP_CACHE: dict[str, tuple[Any, Any]] = {}
 
@@ -2185,8 +2187,9 @@ _MAP_CACHE: dict[str, tuple[Any, Any]] = {}
 def map_text_problems(text: Any) -> list[str]:
     """Why a map text may not reach an agent ([] when it may): it must be plain one-line ASCII and carry no dollar sign,
     no year but 2022-24 (none of `MAP_REFUSED_YEARS` anywhere, even inside a longer digit run), no grouped number
-    (1,234), no digit run of four or more but those years, and no decimal but a delta target or a one-decimal figure
-    under 10 (`_MAP_DECIMAL`): so no dollar amount, price level or price ratio."""
+    (1,234), no digit run of four or more but those years, no three-digit number outside an "N of M" count, and no
+    decimal but a delta target or a one-decimal figure under 10 (`_MAP_DECIMAL`): so no dollar amount, price level or
+    price ratio."""
     if not isinstance(text, str) or not text.strip():
         return ["empty"]
     problems = []
@@ -2195,6 +2198,7 @@ def map_text_problems(text: Any) -> list[str]:
     if "$" in text:
         problems.append("a dollar sign")
     problems += [f"names {y}" for y in MAP_REFUSED_YEARS if y in text]
+    counts = [m.span() for m in _MAP_COUNT.finditer(text)]
     for m in _MAP_NUMBER.finditer(text):
         tok = m.group()
         if "," in tok:
@@ -2204,6 +2208,8 @@ def map_text_problems(text: Any) -> list[str]:
                 problems.append(f"a figure ({tok})")
         elif len(tok) > 3 and tok not in MAP_YEARS:
             problems.append(f"a number ({tok})")
+        elif len(tok) == 3 and not any(a <= m.start() and m.end() <= b for a, b in counts):
+            problems.append(f"a three-digit number outside a count ({tok})")
     return problems
 
 

@@ -173,6 +173,16 @@ class Reader(unittest.TestCase):
             self.assertEqual(dlane.map_text_problems(text), [], text)
             self.assertEqual(leaks(text), [], text)
 
+    def test_the_text_rule_reads_counts_and_refuses_figures(self):
+        ok = ("765 of 784 cells (P1)", "0.20-delta, 0.40 or 0.50-delta", "1.5x the half-spread", "Train years 2022-24",
+              "10-day above 3-day implied vol", "15:30 ET", "t below -1", "40+ trades on 20+ days", "S_D 0.8")
+        for text in ok:
+            self.assertEqual(dlane.map_text_problems(text), [], text)
+        bad = ("$45", "near 540", "540.9", "1.37 times", "1,288", "12880", "0.77", "2025", "x20261", "12.5",
+               "in 2021", "caf\u00e9", "a\nb", "", "  ", None, 7)
+        for text in bad:
+            self.assertNotEqual(dlane.map_text_problems(text), [], repr(text))
+
     def test_missing_unreadable_or_garbage_reads_as_no_map_and_never_raises(self):
         for kw in ({"missing": True}, {"text": ""}, {"text": "{not json"}, {"text": "[]"}, {"text": "null"},
                    {"text": "\x00\xff"}, {"doc": {"schema": 1}}):
@@ -198,6 +208,8 @@ class Reader(unittest.TestCase):
             "a Validation year inside a run": variant(lambda d: d["lessons"].__setitem__(0, d["lessons"][0] + " x120251")),
             "a dollar figure": variant(lambda d: d["lessons"].append("One lot costs $45 today.")),
             "a price level": variant(lambda d: d["lessons"].append("SPY sits near 540.9 now.")),
+            "a price level as a whole number": variant(lambda d: d["lessons"].append("SPY sits near 540 now.")),
+            "a three-digit figure beside a count": variant(lambda d: d["lessons"].append("It passes 3 of 30 at 464.")),
             "a price ratio": variant(lambda d: d["lessons"].append("Prices are 1.37 times the Train close.")),
             "a grouped number": variant(lambda d: d["lessons"].append("Equity is 1,288.")),
             "a long digit run": variant(lambda d: d["lessons"].append("Cap 12880 here.")),

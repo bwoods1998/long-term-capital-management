@@ -231,10 +231,10 @@ money-safety fix (rule F0: its cost is those bands, which go back to the Gym).
     lane's included. A shortfall request's opening line points at the map too.
   - **The reader** (`dlane.train_map`) is cached on the file's size and mtime and never raises. A missing, unreadable or
     malformed file is no map. So is one that is unsafe: every text field (`map_text_problems`) must be one-line ASCII,
-    with no `$`, no grouped number, no digit run of four or more but 2022-24, none of 2017-21 or 2025-26 anywhere, and no
-    decimal but a delta target or a one-decimal figure. The label must be the code's word for word, the objective
-    direction-v2, and every row in the lane's vocabulary. If the bar's settings differ from the ones it was scored
-    under, the text says so.
+    with no `$`, no grouped number, no digit run of four or more but 2022-24, none of 2017-21 or 2025-26 anywhere, no
+    three-digit number outside an "N of M" count, and no decimal but a delta target or a one-decimal figure. The label
+    must be the code's word for word, the objective direction-v2, and every row in the lane's vocabulary. If the bar's
+    settings differ from the ones it was scored under, the text says so.
   - **Its cost:** births aim at in-sample winners. The screen's false-positive rate per program is unchanged (Train is
     in-sample; D2 measured its rate per program, and the ration stays one try and one look a lineage). More programs
     reach the screen, so there are more false passes in count, and more paid reviews and audits. The `dlane` report's
