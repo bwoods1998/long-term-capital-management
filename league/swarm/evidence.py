@@ -506,12 +506,18 @@ def leakage_alarm(looks: int, passes: int) -> bool:
     return looks >= ALARM_MIN_LOOKS and passes > ALARM_PASS_SHARE * looks
 
 
+#: The lanes a look's `detail` may name besides "alpha": the direction lane's (release D-1) and the equity lanes'
+#: (release E1: league/swarm/elane.py writes "beta" or "equity" with every equity look).
+_LOOK_LANES = ("direction", "beta", "equity")
+
+
 def look_lane(look: Mapping[str, Any] | None) -> str:
     """The lane a holdout look was judged in: the `lane` its line recorded (the gate writes it into the look's `detail`
-    while the direction lane is on, release D-1), "alpha" for every other look (each one made before D-1, or while the
-    lane was off, was judged by the alpha lane's line)."""
+    while the direction lane is on, release D-1; every equity look names its equity lane, release E1), "alpha" for every
+    other look (each one made before D-1, or while the lane was off, was judged by the alpha lane's line)."""
     detail = (look or {}).get("detail") if isinstance(look, Mapping) else None
-    return "direction" if isinstance(detail, Mapping) and detail.get("lane") == "direction" else "alpha"
+    lane = detail.get("lane") if isinstance(detail, Mapping) else None
+    return str(lane) if lane in _LOOK_LANES else "alpha"
 
 
 def leakage_alarms(looks: Sequence[Mapping[str, Any]], settings: Mapping[str, Any] | None) -> dict[str, bool]:
@@ -530,11 +536,12 @@ def leakage_alarms(looks: Sequence[Mapping[str, Any]], settings: Mapping[str, An
     from . import dlane  # dlane imports this module: read lazily
 
     rows = list(looks or [])
+    # An equity lane's look (release E1) is never an options lane's count: the share screen judges it, apart.
     if not dlane.on(settings):
-        alpha = [x for x in rows if look_lane(x) != "direction"]
+        alpha = [x for x in rows if look_lane(x) == "alpha"]
         one = leakage_alarm(len(alpha), sum(1 for x in alpha if x.get("passed")))
         return {"alpha": one, "direction": one}
-    alpha = [x for x in rows if look_lane(x) != "direction"]
+    alpha = [x for x in rows if look_lane(x) == "alpha"]
     direction = [x for x in rows if look_lane(x) == "direction"]
     return {"alpha": leakage_alarm(len(alpha), sum(1 for x in alpha if x.get("passed"))),
             "direction": dlane.leakage_alarm(len(direction), sum(1 for x in direction if x.get("passed")), settings)}

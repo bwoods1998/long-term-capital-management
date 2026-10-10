@@ -148,8 +148,9 @@ class Pieces(unittest.TestCase):
         self.assertEqual(set(config.HALF_SPREAD_BP), set(config.UNIVERSE))
         self.assertTrue(config.may_sell(3, 4))
         self.assertFalse(config.may_sell(4, 4))
-        self.assertTrue(config.max_hold_due(20, 20))
-        self.assertFalse(config.max_hold_due(19, 20))
+        self.assertTrue(config.max_hold_due(19, 20), "held 20 by the next open: out at it")
+        self.assertFalse(config.max_hold_due(18, 20))
+        self.assertTrue(config.max_hold_due(0, 1), "a maximum of 1: sold at the open after its entry session")
 
 
 class Golden(Case):
@@ -373,16 +374,17 @@ return out + [{'buy': 'SPY', 'share': 0.5, 'at': 'close'}]
         for trade in result["trades"]:
             self.assertEqual((trade["entry_at"], trade["exit_at"], trade["held_sessions"]), ("close", "open", 1))
 
-    def test_max_hold_exits_at_the_next_open_once_held_sessions_reaches_it(self):
+    def test_max_hold_exits_at_the_open_that_completes_it(self):
+        """A lot is held at most `max_hold_sessions` (the book's rule too: league/equity/live.py `_house_exits`)."""
         prog = program("return [{'buy': 'SPY', 'share': 0.5, 'at': 'open'}] if STATE['n'] == 1 else []", max_hold=3)
         with recorded() as seen:
             result = run(prog, self.bars)
         [trade] = result["trades"]
         self.assertEqual((trade["entry_day"], trade["exit_day"], trade["exit_at"]),
-                         (self.days[1], self.days[5], "open"))
-        self.assertEqual((trade["reason"], trade["held_sessions"]), ("max_hold", 4))
-        self.assertEqual(seen[4].positions[0]["held_sessions"], 3, "held 3 at the close before its exit")
-        self.assertEqual(seen[5].closed[0]["reason"], "max_hold")
+                         (self.days[1], self.days[4], "open"))
+        self.assertEqual((trade["reason"], trade["held_sessions"]), ("max_hold", 3))
+        self.assertEqual(seen[3].positions[0]["held_sessions"], 2, "held 2 at the close before its exit")
+        self.assertEqual(seen[4].closed[0]["reason"], "max_hold")
 
     def test_two_failed_decides_in_a_row_exit_every_lot(self):
         prog = program("""

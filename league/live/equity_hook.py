@@ -115,7 +115,7 @@ def build_book(live: Any) -> Any | None:
         from .paper import StockPaperProof
 
         families = EquityFamilies(live.root) if isinstance(live.families, SwarmFamilies) else MemoryEquityFamilies()
-        proof = (StockPaperProof(live.state, live.paper, record=live.record, clock=live.clock)
+        proof = (StockPaperProof(live.state, live.paper, record=live.record, clock=live.clock, alert=live.alert)
                  if getattr(live, "paper", None) is not None else None)
         return EquityBook(live.state, live.real, live.market, table, families, decider=live.decider, stock_proof=proof,
                           sizing_equity=live.sizing_equity, options_book=live.book, root=live.root, clock=live.clock,

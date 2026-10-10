@@ -131,10 +131,12 @@ def sell_fees(proceeds: Decimal, shares: Decimal) -> Decimal:
 
 
 def max_hold_due(held_sessions: int, max_hold_sessions: int) -> bool:
-    """THE MAXIMUM-HOLD RULE (A8.5), one predicate for the engine and the book: a lot whose `held_sessions` at a
-    decision close (`ctx.positions[i]["held_sessions"]`: sessions since its entry session, 0 at the entry session's own
-    close) has reached its program's `max_hold_sessions` exits at the next open (reason "max_hold")."""
-    return int(held_sessions) >= int(max_hold_sessions)
+    """THE MAXIMUM-HOLD RULE (A8.5), one predicate for the engine and the book (league/equity/live.py `_house_exits`):
+    a lot is held at most its program's `max_hold_sessions`. At a decision close its `held_sessions`
+    (`ctx.positions[i]["held_sessions"]`: sessions since its entry session, 0 at the entry session's own close) will be
+    one more by the next open, so the lot exits at that open (reason "max_hold") once `held_sessions` + 1 reaches the
+    maximum: a lot bought at a close with a maximum of 1 is sold at the next open."""
+    return int(held_sessions) + 1 >= int(max_hold_sessions)
 
 
 def may_sell(entry_session: int, session: int) -> bool:

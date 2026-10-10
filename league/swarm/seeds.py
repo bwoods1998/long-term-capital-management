@@ -660,8 +660,9 @@ def decide(ctx):
     intents = []
     held = {{}}
     for lot in ctx.positions:
-        # held_sessions: the sessions the lot has been held (EQUITY.md); it exits at the open h sessions after entry
-        if int(lot["held_sessions"]) >= h:
+        # held_sessions: the sessions since the lot's entry session, 0 at that session's close (EQUITY.md); the open h
+        # sessions after the entry follows the close where it is h - 1
+        if int(lot["held_sessions"]) + 1 >= h:
             intents.append({{"sell": lot["id"], "at": "open", "tag": "reversal-exit"}})
         else:
             held[lot["symbol"]] = True

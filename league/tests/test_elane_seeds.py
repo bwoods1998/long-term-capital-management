@@ -94,7 +94,9 @@ class Programs(StoreCase):
     def test_reversal_buys_after_theta_down_and_exits_h_sessions_later(self):
         decide, params = program("seed-reversal-index")
         closes = {"SPY": [100.0, 97.9], "QQQ": [100.0, 98.5], "IWM": [100.0, 90.0], "DIA": [100.0, 95.0]}
-        out = decide(ctx(params, closes, [lot(1, "IWM", held=8), lot(2, "DIA", held=3)]))
+        # h 8: the lot bought at an open is sold at the open 8 sessions later, so at the close where it was held 7
+        # (league/equity/EQUITY.md: held_sessions is 0 at the entry session's own close); held 6, it waits.
+        out = decide(ctx(params, closes, [lot(1, "IWM", held=7), lot(2, "DIA", held=6)]))
         self.assertEqual(out, [{"sell": 1, "at": "open", "tag": "reversal-exit"},
                                {"buy": "SPY", "share": 0.25, "at": "open", "tag": "reversal-entry"},
                                {"buy": "IWM", "share": 0.25, "at": "open", "tag": "reversal-entry"}],

@@ -411,6 +411,20 @@ class Limits(CalibrationCase):
         self.assertLessEqual(live.calibration.day_possible_loss(today), D("50"))
         self.assertFalse([r for r in self.samples() if r["cell"].endswith("mid25")])
 
+    def test_the_reservation_obeys_the_house_wide_cash_rule(self):
+        """A8.1 (release E1): a calibration open reserves against the lower of the options buying power and the
+        House-wide available cash (cash less the reserve and every working buy in both books), as every real option
+        open does (`RealBook.free_to_reserve`): plenty of buying power never spends cash the account does not have."""
+        self.venue.fill = "limit"
+        plain = self.venue.account
+        self.venue.account = lambda: {**plain(), "cash": "60.00"}
+        live = self.start(real_money=True)
+        self.run_to(10, 5)
+        self.assertEqual(self.opens(), [])
+        why = live.state.get("calibration")["why"]
+        self.assertIn("buying power: it reserves", why)
+        self.assertIn("(the House-wide cash)", why)
+
     def test_one_round_trip_at_a_time(self):
         self.venue.fill = "limit"
 

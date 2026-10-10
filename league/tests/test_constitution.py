@@ -140,23 +140,23 @@ class ConstitutionTest(unittest.TestCase):
 
     def test_the_equity_lane_moved_the_money_digest_to_the_one_the_grant_re_ratifies(self):
         """Release E1 (the equity lane, Oct 2026; league/equity/INTERFACES.md 7.1) added the constitution's `equity_money`
-        and moved nothing else: money digest fdf2ac7c (THE PROBE TOTAL AT $800) -> ea97607c, full digest 0adb4f0e ->
-        e38c807e. Every row of the block is a money rule (none is in `RISK_FREE`), so each moves the money digest and the
-        standing grant re-ratifies on the owner's deploy (league/tests/test_equity_money.py). Its switch-on, `enabled`
-        True, is a digest of its own (ad8c761b), ratified the same way; the rollback to a release before E1 brings
-        fdf2ac7c back."""
+        and moved nothing else: money digest fdf2ac7c (THE PROBE TOTAL AT $800) -> ad8c761b, full digest 0adb4f0e ->
+        65b0e025. Every row of the block is a money rule (none is in `RISK_FREE`), so each moves the money digest and the
+        standing grant re-ratifies on the owner's deploy (league/tests/test_equity_money.py). THE SWITCH SHIPS ON (the
+        captain's A10.2): `enabled` True is the block as deployed; its stop, `enabled` False, is a digest of its own
+        (ea97607c), ratified the same way; the rollback to a release before E1 brings fdf2ac7c back."""
         import copy
 
         from league.constitution import RISK_FREE, money_digest
 
-        self.assertEqual(money_digest(), "ea97607c87a5e6d144a9577f0f3118397f7ca1d5eff073f75b022d8e79749ab9")
-        self.assertEqual(PINNED_DIGEST, "e38c807e47fd3176ab2c3dfc5c440b94ec5b920fa8f110ab642a28c0e3f17320")
+        self.assertEqual(money_digest(), "ad8c761bccc49033c3fdeca78c7b962f58272d192a2dd6e0626682ccdf6ac367")
+        self.assertEqual(PINNED_DIGEST, "65b0e025a08d4c3a8f78e487eb1a0f83ad9bfed307563c02acbd50ac4a6308bb")
         before = copy.deepcopy(CONSTITUTION)
         del before["equity_money"]
         self.assertEqual(money_digest(before), "fdf2ac7c1a446e39df9e27c8626fb86a954a3f5a939460406507a9b735f1d4c7")
-        on = copy.deepcopy(CONSTITUTION)
-        on["equity_money"]["enabled"] = True
-        self.assertEqual(money_digest(on), "ad8c761bccc49033c3fdeca78c7b962f58272d192a2dd6e0626682ccdf6ac367")
+        off = copy.deepcopy(CONSTITUTION)
+        off["equity_money"]["enabled"] = False
+        self.assertEqual(money_digest(off), "ea97607c87a5e6d144a9577f0f3118397f7ca1d5eff073f75b022d8e79749ab9")
         self.assertFalse(any(path[0] == "equity_money" for path in RISK_FREE))
         for path, value in ((("invested_share",), "0.90"), (("cash_reserve_usd",), "60"), (("probe", "max_programs"), 2),
                             (("open_risk_weight", "etf"), "0.25"), (("demotion", "program_loss_usd"), "-200"),
@@ -167,9 +167,10 @@ class ConstitutionTest(unittest.TestCase):
                 node = node[key]
             node[path[-1]] = value
             self.assertNotEqual(money_digest(moved), money_digest(), path)
-        # The block as E1 deploys it (INTERFACES 7.1, the captain's amendments A1, A5, A8): nothing switched on.
+        # The block as E1 deploys it (INTERFACES 7.1, the captain's amendments A1, A5, A8, A10.2: the switch ships on;
+        # nothing trades until a look passes with `elane.mode` "gate" and the stock proof's BUY stage passes).
         em = CONSTITUTION["equity_money"]
-        self.assertIs(em["enabled"], False)
+        self.assertIs(em["enabled"], True)
         self.assertEqual((em["invested_share"], em["cash_reserve_usd"]), ("1.00", "50"))
         self.assertEqual(em["probe"], {"sleeve_share": "0.25", "max_programs": 3, "min_order_usd": "10"})
         self.assertEqual(em["position_share"], {"etf": "0.50", "stock": "0.20"})

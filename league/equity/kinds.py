@@ -22,9 +22,13 @@ from types import ModuleType
 KINDS: dict[str, str] = {"equity": "league.equity.child"}
 
 #: What every kind's child may import, beside the options decision's files: a path ending in "/" is every *.py file
-#: directly in that directory (documentation is never copied). Repository-relative, POSIX.
+#: directly in that directory (documentation is never copied). Repository-relative, POSIX. The three `ltcm` files are
+#: the NYSE calendar the engine's ctx reads (league/equity/store.py `nyse_sessions` imports `ltcm.data` when it runs;
+#: `ltcm.data` imports `ltcm.broker`; both are standard library only): without them a Validation run or a look fails
+#: in the root House's child at its first decision.
 RUNTIME: tuple[str, ...] = ("league/__init__.py", "league/safety.py", "league/structure_core.py", "league/stats.py",
-                            "league/gym/", "league/equity/")
+                            "league/gym/", "league/equity/", "ltcm/__init__.py", "ltcm/broker.py",
+                            "ltcm/data/__init__.py")
 
 
 def module_for(kind: str) -> ModuleType:

@@ -11,9 +11,9 @@ x (1 - k x hs) for a sell, hs = `config.half_spread(sym)`, k = `cfg.k` (1.0; 1.5
 sleeve and cash rule as live; no loss-budget room in the Gym), its quantity floored to `config.QTY_PLACES`.
 
 THE HOUSE'S EXIT RULES, identical live (A8.5): a lot is never sold in the session it was bought (`MIN_HOLD_SESSIONS`;
-a close-bought lot may sell at the next open: `config.may_sell`); a lot whose `held_sessions` at a decision close
-(sessions since its entry session; 0 at the entry session's own close) has reached `needs.max_hold_sessions` exits at
-the next open (reason "max_hold": `config.max_hold_due`); `config.FAILED_DECIDES_EXIT` sessions of failed decides in a
+a close-bought lot may sell at the next open: `config.may_sell`); a lot is held at most `needs.max_hold_sessions`: one
+whose `held_sessions` at a decision close (sessions since its entry session; 0 at the entry session's own close) will
+reach it by the next open exits at that open (reason "max_hold": `config.max_hold_due`); `config.FAILED_DECIDES_EXIT` sessions of failed decides in a
 row (an error, a timeout, a disqualified runner; never a malformed intent) exit every lot at the next open (reason
 "house"). In a phase the program's own exits go first, then the House's (a lot both name exits once, as the
 program's). An exit with no official price that session waits for the next (the House's rules name it again). The

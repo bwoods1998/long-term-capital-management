@@ -742,9 +742,11 @@ class Calibration:
             return (f"the gateway's day cap: ${M.cents(exposure.day_opened)} of ${M.cents(day_cap)} opened today, and "
                     f"${M.cents(room)} is kept for the families' opens")
         reserve = (max_loss + 2 * fees) * (1 + float(table.bp_buffer))
-        free = float(M.D(live.account_row.get("options_buying_power") or 0)) - book.reserved() if live.account_row else 0.0
+        # THE HOUSE-WIDE CASH RULE (A8.1): the options reservation's own reading, the lower of the options buying power
+        # and the House-wide available cash, as every other real option open reads it (`RealBook.free_to_reserve`).
+        free, bound = book.free_to_reserve(live.account_row) if live.account_row else (0.0, "the account (unread)")
         if reserve > free + 1e-9:
-            return f"buying power: it reserves {reserve:.2f}; {max(0.0, free):.2f} is free"
+            return f"buying power: it reserves {reserve:.2f}; {max(0.0, free):.2f} is free ({bound})"
         refusal = book.path_refusal(legs, opening=True, day=today)
         if refusal:
             return refusal

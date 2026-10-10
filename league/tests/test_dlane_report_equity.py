@@ -30,8 +30,8 @@ class EquityFixture(Fixture):
         self.lid = 0
 
     def eq_family(self, fid: str, *, lane: str = "beta", band: str = "probe") -> None:
-        # The swarm's structures on this branch are the options lanes'; the lane is what the report reads.
-        spec = {"id": fid, "mechanism": "a published overnight prior long enough for the store", "structure": "long_single",
+        # An equity-lane family declares its lane and an equity structure together (the swarm's add_family).
+        spec = {"id": fid, "mechanism": "a published overnight prior long enough for the store", "structure": "etf",
                 "roots": ["SPY"], "lane": lane}
         self.store.add_family(spec, origin="architect")
         if band != "gym":

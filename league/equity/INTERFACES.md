@@ -254,7 +254,9 @@ call in `loop.py`).
 - **config**: `DEFAULT_HISTORY` 252, `MIN_ORDER_USD` "10" (the Gym's `min_order_usd`), `CENT`, and the two hold
   predicates the book must use too: `may_sell(entry_session, session)` (min hold) and `max_hold_due(held_sessions,
   max_hold_sessions)`: `held_sessions` at a decision close = sessions since the lot's entry session (0 at the entry
-  session's own close); due when it has reached `max_hold_sessions` -> exit at the next open.
+  session's own close); due when `held_sessions` + 1 reaches `max_hold_sessions` -> exit at the next open, so a lot is
+  held at most `max_hold_sessions` (integration: the engine and the book disagreed by one session; the book's reading
+  was kept).
 - **program**: `NeedsRefused` subclasses `league.gym.runtime.NeedsRefused` (still a `CodeRefused`);
   `EquityRunner.last_failed` (the last decide raised, timed out or the runner is disqualified; a malformed intent is
   an error but never a failed decide: A8.5's count reads this).
@@ -396,10 +398,10 @@ activity types the venue refused), `eq_preopen_activities`. The book reads the h
   with `exec_day` = `schedule.next_session(t)`, plus the House exits (max hold, demoted/retired/band-dropped, 2 failed
   decides) as `kind` "house_exit". A missed decide (restart) runs as a catch-up for the last close.
 - **Pre-open (09:25)** and **the windows** as `schedule` and the module docstring say. Every open: `real_block(opening=
-  True)` is None, `table.equity.enabled`, `stock_proof.passed()`, not `frozen`, the program's band and seat, the loss
-  budget's room (`budget_room` = the lower of the window's and the total's room, from
-  `league.live.real.probe_figures` with the equity rows unioned in), `size_entry` > 0. Exits wait only on `killed()`
-  and the min hold.
+  True)` is None, `table.equity.enabled`, `stock_proof.buy_passed()` and not `stock_proof.sell_failed()` (A10.1,
+  integration), not `frozen`, the program's band and seat, the loss budget's room (`budget_room` = the lower of the
+  window's and the total's room, from `league.live.real.probe_figures` with the equity rows unioned in),
+  `size_entry` > 0. Exits wait only on `killed()`, the min hold and `stock_proof.sell_passed()` (A10.1).
 - **Exports**: a closed lot -> `families.add_forward(family, "real", [{"id": "eq-<lid>", "version", "day" (exit day),
   "opened_day", "symbol", "class", "lane", "pnl" (net cash, float), "max_loss" (entry notional, float: so generic
   readers' pnl / max_loss is the net return on notional), "notional", "fees", "div", "return", "hold_sessions",
@@ -483,11 +485,16 @@ ProbeFigures`; `working_buys_worst(rows) -> Decimal`; `orders_today(rows, day) -
   payload, state)` with `state` kept per kind in the child; `Decider._ask` reloads remembered kind loads after a
   restart, as for options programs; `InlineDecider` the same in-process. The same isolation (uid 65534, netns, rlimits,
   empty env). decider.py imports `league.equity.kinds` only.
-- **paper.py**: `StockPaperProof(state, account, *, record=None, clock=None)` with key `paper_proof_stock` (A8.7):
-  `step(now, *, market) -> dict`, `passed() -> bool`, `status() -> dict`. On `alpaca-paper`: buy a fractional SPY
-  marketable limit in the 15:55 close window, sell it at the next open, check fills, positions, activities and
-  reconciliation; it must pass once before the first real equity order; checked only by the equity book (options
-  entries never wait on it). Client ids `lq-pp-...` (never `lv-`).
+- **paper.py** (A8.7 as staged by A10.1, integration): `StockPaperProof(state, account, *, record=None, clock=None,
+  alert=None)`, attempt row kv `paper_proof_stock`, stage records `paper_proof_stock_buy` and `paper_proof_stock_sell`:
+  `step(now, *, market, window) -> dict` (`window` the book's `schedule.Moments` of the day: the proof trades in the
+  book's OPEN window), `buy_passed()`, `sell_passed()`, `sell_failed() -> str`, `passed()` (both), `status() -> dict`.
+  On `alpaca-paper`: stage BUY buys a fractional SPY marketable limit from the open window's first send to the entry
+  cut-off and passes on its fill, its lot row and the reconciled position (gates every real equity BUY); stage SELL
+  sells it in the next session's open window, first, and passes on the whole sale, the FILL activities and the
+  position back at its baseline (gates every real equity SALE); a SELL stage that ends its window unpassed is
+  "failed" (an alarm with the owner's step; new real buys stop until it passes). Checked only by the equity book
+  (options entries never wait on it). Client ids `lq-pp-...` (never `lv-`).
 - **venue.py**: `MarketData.bars(symbols, *, timeframe, start, end=None, adjustment="raw")` (the book reads "all" too).
 
 ### 6.3 `league/equity/kinds.py`, `league/equity/child.py` (stubs present)
@@ -544,7 +551,7 @@ moves and the standing grant re-ratifies at the House's start)
 
 ```python
 "equity_money": {
-    "enabled": False,                       # E1 deploys False; the switch-on (ON) sets True (CON-only)
+    "enabled": True,                        # A10.2 (integration): the switch ships on; False is the stop (CON-only)
     "universe": {"etf": ["SPY", "QQQ", "IWM", "DIA", "XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU",
                          "XLV", "XLY", "TLT", "GLD"],
                  "stock": ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "BRK.B", "JPM", "V", "UNH", "XOM", "JNJ",
@@ -861,8 +868,9 @@ look per lineage (R3), `same_lineage`, the beside-every-trade line.
   fail until that package lands; no package implements another's stub to make its tests pass (use a fake or a
   `MemoryEquityFamilies`-style double).
 - The money digest (`PINNED_DIGEST`) is re-pinned once, by money; any later constitution change goes through money.
-- Nothing here switches anything on: `equity_money.enabled` False, `elane.mode` "off", no receipt pinned. ON is a
-  later, separate step (A6).
+- A10.2 (applied at integration): `equity_money.enabled` ships True (one money-digest move with the block:
+  ad8c761b, full digest 65b0e025); `elane.mode` deploys "off" and the captain sets "gate" after the deploy is verified;
+  the S1 receipt is pinned (A9); nothing trades until a program passes its look AND the stock proof's BUY stage passes.
 
 ## 13. Where the briefs disagreed, and what this file follows
 

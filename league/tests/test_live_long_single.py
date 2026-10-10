@@ -22,7 +22,7 @@ REPO = Path(__file__).resolve().parents[2]
 #: was a3e2aa7c; the incubator's row (release B, Oct 1, 2026: `options_money.incubator`) moved it, then the incubator
 #: cap (Oct 8) to 1665c385, release L-D (Oct 9) to 0310779c, the Probe total at $800 (Oct 10, 2026) to fdf2ac7c, and
 #: release E1's `equity_money` (the equity lane) to this one.
-MONEY_DIGEST = "ea97607c87a5e6d144a9577f0f3118397f7ca1d5eff073f75b022d8e79749ab9"
+MONEY_DIGEST = "ad8c761bccc49033c3fdeca78c7b962f58272d192a2dd6e0626682ccdf6ac367"
 
 #: One program, two sides: a long call first, then (once the call is held) a long put. The side rule here is a clock so the
 #: numbers are by hand; a family's own rule is its mechanism's.

@@ -17,7 +17,7 @@ import datetime as dt
 import tempfile
 import unittest
 import uuid
-from decimal import ROUND_DOWN, Decimal as D
+from decimal import ROUND_CEILING, ROUND_DOWN, Decimal as D
 from pathlib import Path
 from unittest import mock
 from zoneinfo import ZoneInfo
@@ -281,18 +281,34 @@ class Decider:
 
 
 class Proof:
+    """`league.live.paper.StockPaperProof` at its interface (A10.1's two stages): `ok` is the BUY stage, `sell` the
+    SELL stage, `failed` a SELL stage that failed (its why)."""
+
     def __init__(self, passed: bool = True):
         self.ok = passed
+        self.sell = passed
+        self.failed = ""
         self.steps = 0
+        self.seen: list[tuple] = []
 
-    def passed(self) -> bool:
+    def buy_passed(self) -> bool:
         return self.ok
 
-    def status(self) -> dict:
-        return {"passed": self.ok}
+    def sell_passed(self) -> bool:
+        return self.sell
 
-    def step(self, now, *, market):
+    def sell_failed(self) -> str:
+        return self.failed
+
+    def passed(self) -> bool:
+        return self.ok and self.sell
+
+    def status(self) -> dict:
+        return {"passed": self.passed()}
+
+    def step(self, now, *, market, window=None):
         self.steps += 1
+        self.seen.append((now, window))
         return {"status": "waiting"}
 
 
@@ -1450,6 +1466,141 @@ class Operations(BookTest):
         h.proof.ok = True
         h.tick(15, 57)
         self.assertEqual(h.proof.steps, 2)
+
+
+class TheStagedProof(BookTest):
+    """A10.1: the proof trades in the book's own OPEN window and goes first in it; its BUY stage gates every real buy,
+    its SELL stage every real sale, and a failed SELL stage stops new real buys until it passes."""
+
+    def test_the_proof_steps_first_in_the_books_own_window(self):
+        h = self.harness()
+        inst = h.instance()
+        lot = h.lot(inst, "SPY", "0.5", "590")
+        h.intent(inst, "sell", symbol="SPY", lid=lot.lid)
+        h.proof.sell = False
+        sent_when_stepped = []
+        step = h.proof.step
+
+        def first(now, *, market, window=None):
+            sent_when_stepped.append(len(h.venue.sent))
+            return step(now, market=market, window=window)
+
+        h.proof.step = first
+        h.tick(9, 31)
+        self.assertEqual(sent_when_stepped, [0], "stepped before the windows send anything")
+        _, window = h.proof.seen[-1]
+        self.assertEqual(window, S.moments(MONDAY, h.book._offsets()), "the book's own moments of the day")
+
+    def test_real_sales_wait_for_the_sell_stage(self):
+        h = self.harness()
+        inst = h.instance()
+        lot = h.lot(inst, "SPY", "0.5", "590")
+        sale = h.intent(inst, "sell", symbol="SPY", lid=lot.lid)
+        h.proof.sell = False
+        h.tick(9, 31)
+        h.tick(9, 33)
+        self.assertEqual(h.venue.sent, [])
+        self.assertIn("SELL stage", h.get_intent(sale.iid).why)
+        self.assertEqual(h.book._lot(lot.lid).status, "open", "the lot stays held")
+        h.proof.sell = True
+        h.tick(9, 34)
+        self.assertEqual([b["side"] for b in h.venue.sent], ["sell"])
+        h.tick(9, 35)
+        self.assertEqual(h.book._lot(lot.lid).status, "closed")
+
+    def test_buys_wait_for_the_buy_stage_and_stop_on_a_failed_sell_stage(self):
+        h = self.harness()
+        inst = h.instance()
+        buy = h.intent(inst, "buy", symbol="SPY", share="0.2")
+        h.proof.ok, h.proof.sell = False, False
+        h.tick(9, 31)
+        self.assertEqual(h.venue.sent, [])
+        self.assertIn("BUY stage", h.get_intent(buy.iid).why)
+        h.proof.ok = True                                       # stage BUY passed, SELL still to come: buys may go
+        h.proof.failed = "the stock paper proof's SELL stage failed on 2026-09-28: the round trip ended without " \
+                         "activity_witness"
+        h.tick(9, 32)
+        self.assertEqual(h.venue.sent, [])
+        self.assertIn("new real equity buys stop", h.get_intent(buy.iid).why)
+        h.proof.failed = ""
+        h.tick(9, 33)
+        self.assertEqual([b["side"] for b in h.venue.sent], ["buy"])
+
+
+
+class TheBrokersFees(BookTest):
+    """The Done meter's finality (league/ops/dlane_report.py) waits for each equity close's broker fees: the book posts
+    the venue's REG and TAF rows of the exit day to that day's equity sales, pro rata by proceeds, and marks the lot's
+    `info.fee_basis` "broker"; an option's fee rows and order-attributed rows are never an equity lot's."""
+
+    def sold_monday(self, h, *symbols):
+        lots = []
+        for symbol in symbols:
+            inst = h.instance(f"fam-{symbol.lower()}")
+            lot = h.lot(inst, symbol, "0.5", "590")
+            h.intent(inst, "sell", symbol=symbol, lid=lot.lid)
+            lots.append(lot)
+        for mm in range(31, 31 + 2 * len(symbols)):
+            h.tick(9, mm)
+        for lot in lots:
+            self.assertEqual(h.book._lot(lot.lid).status, "closed")
+        return lots
+
+    def test_the_days_fee_rows_are_posted_pro_rata_and_the_lot_is_final(self):
+        h = self.harness()
+        spy, qqq = self.sold_monday(h, "SPY", "QQQ")
+        before = {x.lid: h.book._lot(x.lid) for x in (spy, qqq)}
+        self.assertEqual({x.fees for x in before.values()}, {D("0.01")}, "the book's estimate at the fill")
+        proceeds = {lid: sum((D(r["qty"]) * D(r["px"]) for r in h.state.rows(
+            "SELECT qty, px FROM eq_fills WHERE lid=?", (lid,))), D(0)) for lid in before}
+        total = sum(proceeds.values())
+        h.venue.activity_rows = [
+            {"id": "f1", "activity_type": "FEE", "date": "2026-10-12", "net_amount": "-0.03",
+             "description": f"REG fee for proceed of ${total} of 2 trades"},
+            {"id": "f2", "activity_type": "FEE", "date": "2026-10-12", "net_amount": "-0.02",
+             "description": "TAF fee for proceed of 2 trades"},
+            {"id": "f3", "activity_type": "FEE", "date": "2026-10-12", "net_amount": "-0.40",
+             "description": "OPT TAF fee for proceed of 4 contracts"},
+            {"id": "f4", "activity_type": "FEE", "date": "2026-10-12", "net_amount": "-1.00", "order_id": "x",
+             "description": "REG fee"}]
+        h.tick(9, 50)
+        self.assertNotIn("fee_basis", h.book._lot(spy.lid).info, "not before the exit day has ended")
+        h.tick(9, 31, day=TUESDAY)
+        for lid, lot in before.items():
+            now = h.book._lot(lid)
+            share = proceeds[lid] / total
+            want = (D("0.05") * share).quantize(D("0.0001"), rounding=ROUND_CEILING)
+            self.assertEqual((now.info["fee_basis"], now.fees, now.info["fees_estimate"]), ("broker", want, "0.01"))
+            self.assertEqual(now.cash, lot.cash + lot.fees - want)
+        self.assertEqual([p for k, p in h.events if k == "equity.fees_posted"], [{"lots": 2}])
+        fee_reads = lambda: [c for c in h.venue.activity_calls if c[0] == ("FEE",)]  # noqa: E731
+        calls = len(fee_reads())
+        h.tick(9, 50, day=TUESDAY)
+        self.assertEqual(len(fee_reads()), calls, "nothing left to post: no more fee reads")
+
+    def test_a_row_stating_more_proceeds_than_the_books_keeps_the_rest_for_another_sale(self):
+        h = self.harness()
+        [spy] = self.sold_monday(h, "SPY")
+        mine = sum((D(r["qty"]) * D(r["px"]) for r in h.state.rows("SELECT qty, px FROM eq_fills WHERE lid=?",
+                                                                     (spy.lid,))), D(0))
+        h.venue.activity_rows = [{"id": "f1", "activity_type": "FEE", "date": "2026-10-12", "net_amount": "-0.10",
+                                  "description": f"REG fee for proceed of ${mine * 4} of 2 trades"}]
+        h.tick(9, 31, day=TUESDAY)
+        self.assertEqual(h.book._lot(spy.lid).fees, D("0.0250"), "a quarter of the day's proceeds: a quarter of it")
+
+    def test_no_fee_row_keeps_the_estimate_and_tells_the_owner_once_after_five_sessions(self):
+        h = self.harness()
+        [spy] = self.sold_monday(h, "SPY")
+        h.tick(9, 31, day=TUESDAY)
+        self.assertNotIn("fee_basis", h.book._lot(spy.lid).info)
+        self.assertFalse([a for a in h.alerts if "fee row" in a[1]])
+        later = dt.date(2026, 10, 19)
+        h.tick(9, 31, day=later)
+        h.tick(10, 31, day=later)
+        told = [a for a in h.alerts if "fee row" in a[1]]
+        self.assertEqual(len(told), 1)
+        self.assertIn("provisional", told[0][1])
+        self.assertEqual(h.book._lot(spy.lid).fees, D("0.01"))
 
 
 if __name__ == "__main__":

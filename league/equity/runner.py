@@ -10,8 +10,9 @@ IN-PROCESS (the child's; tests call them directly):
 
     run_bars(code, params, bars, *, name, k=1.0, capital=None) -> result      # one run over a Bars slice
 
-IN THE PARENT (league/swarm/tournament.py, league/swarm/gate.py, league/swarm/elane.py, league/equity/screen.py
-`floor_inputs`):
+IN THE PARENT (league/swarm/elane.py `validate` and `look`, dispatched by league/swarm/tournament.py and
+league/swarm/gate.py; the screen's floor reads `segments` through `look`: `Isolated.segments` -> `screen.series` ->
+`screen.floor`):
 
     iso = Isolated(decider, store_root)                     # `decider`: a league.live.decider Decider/InlineDecider
     iso.train(code, params, name=..., start=..., end=..., k=1.0) -> Run

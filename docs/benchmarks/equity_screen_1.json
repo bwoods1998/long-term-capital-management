@@ -1,0 +1,724 @@
+{
+ "name": "equity_screen_1",
+ "study": "SSCREEN-1010 share screen S1, adopted Oct 10, 2026 with its review's fixes F1, D3, D5, D6",
+ "rule": "S1 (share screen), per program, one Validation try and one holdout look per lineage. Series: the program's daily P&L r_t on its equity E0 (constant weights at the goal's caps: ETF <= 0.50, stock <= 0.20, sum <= 1.00; half-spread 1 bp index ETFs / 3 bp others; SEC and FINRA TAF sell fees), effective exposure w_t, round trips RT (full exits) and invested days ID (a position held at the close). Step 0 (floor): c_p = the smallest c on the 0.01 grid with the program's pass rate <= 12% on 20,000 independent-block null worlds of its own 2022-24 series (N0: r - w*kappa, kappa = sum r / sum w over the pool), at holdout lengths 194 and 251 (the larger); c_used = max(c_R, c_p). Step 1 (pre-check, Validation window, 250 sessions): (RT >= 20 or ID >= 120) and sum r > 1e-12. Step 2 (after the one look): pooled t over the Validation + holdout daily r (mean / sd(ddof 1) * sqrt(n)) >= c_used and holdout sum r > 1e-12; sd < 1e-12 fails. Label S1-X: the same steps on x_t = r_t - w_t * mean_W(b) (b = equal-weight cost-free benchmark of the program's universe, W = the window), threshold c_X, no floor: pass = alpha, fail = beta.",
+ "fp_cap": 0.12,
+ "owner_wall": 0.15,
+ "c_R": 1.49,
+ "c_X": 0.85,
+ "precheck": {
+  "rt_min": 20,
+  "id_min": 120,
+  "rule": "(RT_V >= 20 or ID_V >= 120) and sum_V(r) > 1e-12"
+ },
+ "look": {
+  "rule": "pooled t over V+H daily r >= c_used and sum_H(r) > 1e-12 and t_H >= c_H (holdout-only guard F1); sd < 1e-12 fails"
+ },
+ "floor": {
+  "c_p": "smallest c on 0.00..5.00 (step 0.01) with share(t* >= c) <= fp_cap at BOTH L = 194 and L = 251; c_used = max(c_R, c_p)",
+  "c_H": "smallest c on the same grid with share(t_H >= c and sum_H > 0) <= fp_cap on the program's own null worlds, at both L (review fix F1: bounds FP whatever Validation shows, since 2025 is known to authors)",
+  "worlds": "IND22: 20,000 worlds, V = 250 and H = L consecutive sessions, independent uniform starts, circular in the program's own 2022-01-03..2024-12-31 pool; and IND1622 (2016-01-04..2019-12-31 plus 2022-01-03..2024-12-31) where the program has that history; c_p and c_H are the maxima over the world sets (review fix D5)",
+  "null": "N0: r0 = r - w * kappa, kappa = sum_pool(r) / sum_pool(w)",
+  "seed": "numpy default_rng([20261010, 1010, set_id, L, 0]); set_id 3 = IND22, 5 = IND1622",
+  "ineligible": "no pool of >= 300 sessions, or c_p > 5.00 or c_H > 5.00"
+ },
+ "windows": {
+  "validation": "calendar 2025 (250 sessions)",
+  "holdout": "2026-01-02 .. min(the last close before the look, 2026-12-31) (review fix D6); calibrated for 194..251 sessions"
+ },
+ "lineage": {
+  "holdout_looks": 1,
+  "validation_tries": 2,
+  "retry": "only after the first try FAILED its pre-check (no look spent), with the retry version hashed at the first try (R3)",
+  "same_lineage": "a program whose Train daily returns correlate >= 0.7 with a program already looked at, or that uses the same template, is the same lineage (review fix D3)",
+  "no_feedback": "look and Validation outcomes of share programs are never fed back to generators or the diagnostician (review fix D3)"
+ },
+ "fp_zero_edge_at_cR": {
+  "A1": {
+   "IND13|126": [
+    0.0188,
+    0.016999,
+    0.02055
+   ],
+   "IND13|194": [
+    0.0164,
+    0.014649,
+    0.01825
+   ],
+   "IND13|251": [
+    0.01715,
+    0.01545,
+    0.018851
+   ],
+   "CON13|126": [
+    0.0006,
+    0.0003,
+    0.00095
+   ],
+   "CON13|194": [
+    0.00295,
+    0.00225,
+    0.00365
+   ],
+   "CON13|251": [
+    0.00265,
+    0.002,
+    0.0034
+   ],
+   "IND22|126": [
+    0.1065,
+    0.102149,
+    0.11055
+   ],
+   "IND22|194": [
+    0.1182,
+    0.113849,
+    0.122853
+   ],
+   "IND22|251": [
+    0.11795,
+    0.113299,
+    0.12315
+   ]
+  },
+  "A2": {
+   "IND13|126": [
+    0.0247,
+    0.0226,
+    0.0269
+   ],
+   "IND13|194": [
+    0.02325,
+    0.021,
+    0.02535
+   ],
+   "IND13|251": [
+    0.0252,
+    0.02305,
+    0.0274
+   ],
+   "CON13|126": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "CON13|194": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "CON13|251": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "IND22|126": [
+    0.01205,
+    0.0106,
+    0.01355
+   ],
+   "IND22|194": [
+    0.0109,
+    0.00945,
+    0.0123
+   ],
+   "IND22|251": [
+    0.0124,
+    0.0109,
+    0.01395
+   ]
+  },
+  "A3": {
+   "IND13|126": [
+    0.0207,
+    0.019,
+    0.0227
+   ],
+   "IND13|194": [
+    0.0257,
+    0.02355,
+    0.027901
+   ],
+   "IND13|251": [
+    0.02415,
+    0.022,
+    0.0262
+   ],
+   "CON13|126": [
+    0.0211,
+    0.019,
+    0.02325
+   ],
+   "CON13|194": [
+    0.0242,
+    0.021999,
+    0.026351
+   ],
+   "CON13|251": [
+    0.0135,
+    0.011899,
+    0.01495
+   ],
+   "IND22|126": [
+    0.0733,
+    0.069549,
+    0.077001
+   ],
+   "IND22|194": [
+    0.0893,
+    0.085549,
+    0.0934
+   ],
+   "IND22|251": [
+    0.09705,
+    0.09305,
+    0.101151
+   ]
+  },
+  "A4": {
+   "IND13|126": [
+    0.0503,
+    0.047449,
+    0.05325
+   ],
+   "IND13|194": [
+    0.04775,
+    0.0449,
+    0.050701
+   ],
+   "IND13|251": [
+    0.0436,
+    0.04085,
+    0.0464
+   ],
+   "CON13|126": [
+    0.05815,
+    0.054946,
+    0.061701
+   ],
+   "CON13|194": [
+    0.02535,
+    0.02315,
+    0.0276
+   ],
+   "CON13|251": [
+    0.0264,
+    0.02415,
+    0.0288
+   ],
+   "IND22|126": [
+    0.00625,
+    0.00515,
+    0.007301
+   ],
+   "IND22|194": [
+    0.0049,
+    0.003949,
+    0.00585
+   ],
+   "IND22|251": [
+    0.0031,
+    0.00235,
+    0.00385
+   ]
+  },
+  "A5": {
+   "IND13|126": [
+    0.0204,
+    0.0186,
+    0.022251
+   ],
+   "IND13|194": [
+    0.0187,
+    0.0169,
+    0.02065
+   ],
+   "IND13|251": [
+    0.01805,
+    0.01615,
+    0.019951
+   ],
+   "CON13|126": [
+    0.0038,
+    0.00295,
+    0.0047
+   ],
+   "CON13|194": [
+    0.00095,
+    0.00055,
+    0.0014
+   ],
+   "CON13|251": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "IND22|126": [
+    0.0066,
+    0.005549,
+    0.00775
+   ],
+   "IND22|194": [
+    0.0076,
+    0.006399,
+    0.0088
+   ],
+   "IND22|251": [
+    0.00675,
+    0.00565,
+    0.007801
+   ]
+  },
+  "A6": {
+   "IND13|126": [
+    0.0199,
+    0.01785,
+    0.0219
+   ],
+   "IND13|194": [
+    0.0178,
+    0.016,
+    0.01975
+   ],
+   "IND13|251": [
+    0.0171,
+    0.015349,
+    0.0189
+   ],
+   "CON13|126": [
+    0.0312,
+    0.0289,
+    0.03365
+   ],
+   "CON13|194": [
+    0.02105,
+    0.0191,
+    0.02305
+   ],
+   "CON13|251": [
+    0.0291,
+    0.026649,
+    0.03135
+   ],
+   "IND22|126": [
+    0.0001,
+    0.0,
+    0.00025
+   ],
+   "IND22|194": [
+    0.0001,
+    0.0,
+    0.00025
+   ],
+   "IND22|251": [
+    0.0001,
+    0.0,
+    0.00025
+   ]
+  }
+ },
+ "power_at_cR": {
+  "A1": {
+   "IND13|194|N0e05": [
+    0.10775,
+    0.1036,
+    0.112052
+   ],
+   "IND13|194|N0e10": [
+    0.2839,
+    0.278099,
+    0.290201
+   ],
+   "IND13|251|N0e05": [
+    0.1118,
+    0.107499,
+    0.115953
+   ],
+   "IND13|251|N0e10": [
+    0.29405,
+    0.287749,
+    0.299951
+   ],
+   "CON13|194|N0e05": [
+    0.1265,
+    0.122149,
+    0.131252
+   ],
+   "CON13|194|N0e10": [
+    0.36735,
+    0.361399,
+    0.374001
+   ],
+   "CON13|251|N0e05": [
+    0.1171,
+    0.112748,
+    0.121251
+   ],
+   "CON13|251|N0e10": [
+    0.37545,
+    0.36885,
+    0.381855
+   ],
+   "IND22|194|N0e05": [
+    0.21215,
+    0.206349,
+    0.217855
+   ],
+   "IND22|194|N0e10": [
+    0.3176,
+    0.311447,
+    0.324103
+   ],
+   "IND22|251|N0e05": [
+    0.21475,
+    0.208848,
+    0.22085
+   ],
+   "IND22|251|N0e10": [
+    0.32835,
+    0.321149,
+    0.3351
+   ]
+  },
+  "A2": {
+   "IND13|194|N0e05": [
+    0.1399,
+    0.134947,
+    0.14445
+   ],
+   "IND13|194|N0e10": [
+    0.3318,
+    0.3252,
+    0.33815
+   ],
+   "IND13|251|N0e05": [
+    0.1497,
+    0.144799,
+    0.154701
+   ],
+   "IND13|251|N0e10": [
+    0.35765,
+    0.351549,
+    0.364105
+   ],
+   "CON13|194|N0e05": [
+    0.0794,
+    0.075849,
+    0.083001
+   ],
+   "CON13|194|N0e10": [
+    0.38645,
+    0.379999,
+    0.393451
+   ],
+   "CON13|251|N0e05": [
+    0.07645,
+    0.07295,
+    0.079955
+   ],
+   "CON13|251|N0e10": [
+    0.36045,
+    0.353797,
+    0.367054
+   ],
+   "IND22|194|N0e05": [
+    0.09915,
+    0.095047,
+    0.103403
+   ],
+   "IND22|194|N0e10": [
+    0.2706,
+    0.2645,
+    0.277004
+   ],
+   "IND22|251|N0e05": [
+    0.10825,
+    0.103799,
+    0.112751
+   ],
+   "IND22|251|N0e10": [
+    0.2926,
+    0.286595,
+    0.298751
+   ]
+  },
+  "A3": {
+   "IND13|194|N0e05": [
+    0.067,
+    0.06345,
+    0.0701
+   ],
+   "IND13|194|N0e10": [
+    0.12435,
+    0.1195,
+    0.12885
+   ],
+   "IND13|251|N0e05": [
+    0.0679,
+    0.064299,
+    0.071351
+   ],
+   "IND13|251|N0e10": [
+    0.1283,
+    0.123696,
+    0.132651
+   ],
+   "CON13|194|N0e05": [
+    0.06475,
+    0.061299,
+    0.0683
+   ],
+   "CON13|194|N0e10": [
+    0.1864,
+    0.180898,
+    0.191851
+   ],
+   "CON13|251|N0e05": [
+    0.0785,
+    0.07485,
+    0.081901
+   ],
+   "CON13|251|N0e10": [
+    0.15365,
+    0.148699,
+    0.158552
+   ],
+   "IND22|194|N0e05": [
+    0.16845,
+    0.163149,
+    0.173601
+   ],
+   "IND22|194|N0e10": [
+    0.2536,
+    0.247399,
+    0.259651
+   ],
+   "IND22|251|N0e05": [
+    0.1888,
+    0.183299,
+    0.19425
+   ],
+   "IND22|251|N0e10": [
+    0.25685,
+    0.250747,
+    0.26275
+   ]
+  },
+  "A4": {
+   "IND13|194|N0e05": [
+    0.0692,
+    0.065499,
+    0.072501
+   ],
+   "IND13|194|N0e10": [
+    0.09655,
+    0.092599,
+    0.100851
+   ],
+   "IND13|251|N0e05": [
+    0.0638,
+    0.0604,
+    0.067251
+   ],
+   "IND13|251|N0e10": [
+    0.093,
+    0.089049,
+    0.096901
+   ],
+   "CON13|194|N0e05": [
+    0.0755,
+    0.071749,
+    0.07925
+   ],
+   "CON13|194|N0e10": [
+    0.1309,
+    0.1263,
+    0.13565
+   ],
+   "CON13|251|N0e05": [
+    0.0635,
+    0.06025,
+    0.06715
+   ],
+   "CON13|251|N0e10": [
+    0.0864,
+    0.082699,
+    0.090203
+   ],
+   "IND22|194|N0e05": [
+    0.0115,
+    0.01,
+    0.01295
+   ],
+   "IND22|194|N0e10": [
+    0.0217,
+    0.0196,
+    0.0237
+   ],
+   "IND22|251|N0e05": [
+    0.0064,
+    0.00525,
+    0.00755
+   ],
+   "IND22|251|N0e10": [
+    0.0139,
+    0.012399,
+    0.015451
+   ]
+  },
+  "A5": {
+   "IND13|194|N0e05": [
+    0.0739,
+    0.070096,
+    0.077551
+   ],
+   "IND13|194|N0e10": [
+    0.20145,
+    0.19595,
+    0.206851
+   ],
+   "IND13|251|N0e05": [
+    0.07615,
+    0.072399,
+    0.079801
+   ],
+   "IND13|251|N0e10": [
+    0.21735,
+    0.211399,
+    0.22365
+   ],
+   "CON13|194|N0e05": [
+    0.05675,
+    0.053447,
+    0.0602
+   ],
+   "CON13|194|N0e10": [
+    0.2568,
+    0.250199,
+    0.263251
+   ],
+   "CON13|251|N0e05": [
+    0.05805,
+    0.054497,
+    0.06115
+   ],
+   "CON13|251|N0e10": [
+    0.2701,
+    0.264047,
+    0.276801
+   ],
+   "IND22|194|N0e05": [
+    0.04145,
+    0.0387,
+    0.044201
+   ],
+   "IND22|194|N0e10": [
+    0.13515,
+    0.130799,
+    0.1396
+   ],
+   "IND22|251|N0e05": [
+    0.03875,
+    0.035899,
+    0.04145
+   ],
+   "IND22|251|N0e10": [
+    0.14125,
+    0.13585,
+    0.14605
+   ]
+  },
+  "A6": {
+   "IND13|194|N0e05": [
+    0.0627,
+    0.059297,
+    0.065901
+   ],
+   "IND13|194|N0e10": [
+    0.1557,
+    0.15095,
+    0.160852
+   ],
+   "IND13|251|N0e05": [
+    0.06635,
+    0.06285,
+    0.069751
+   ],
+   "IND13|251|N0e10": [
+    0.16735,
+    0.16235,
+    0.172502
+   ],
+   "CON13|194|N0e05": [
+    0.0867,
+    0.0829,
+    0.0906
+   ],
+   "CON13|194|N0e10": [
+    0.20915,
+    0.20385,
+    0.214252
+   ],
+   "CON13|251|N0e05": [
+    0.10765,
+    0.103149,
+    0.111951
+   ],
+   "CON13|251|N0e10": [
+    0.22205,
+    0.21585,
+    0.227751
+   ],
+   "IND22|194|N0e05": [
+    0.00505,
+    0.004049,
+    0.00605
+   ],
+   "IND22|194|N0e10": [
+    0.0227,
+    0.0207,
+    0.0248
+   ],
+   "IND22|251|N0e05": [
+    0.0014,
+    0.0009,
+    0.00195
+   ],
+   "IND22|251|N0e10": [
+    0.02695,
+    0.02475,
+    0.0291
+   ]
+  }
+ },
+ "binding_R": [
+  "A1|IND22|194|N0"
+ ],
+ "R3_retry_permitted": true,
+ "R4_flags": {
+  "A1": [],
+  "A2": [],
+  "A3": [],
+  "A4": [],
+  "A5": [],
+  "A6": []
+ },
+ "stated_beside_every_live_trade": "S1-R, c_used = {c_used}, c_H = {c_H}, this program's FP at zero edge = {own_fp}% (cap 12%; owner's wall 15%), drift-kept pass rate = {n1}% (not a false positive: the goal counts direction); S1-X: {alpha|beta} (FP {fpx}%); contamination: 2025 and most of the 2026 holdout precede the authoring models' training cutoff",
+ "note": "rates are [point, world-bootstrap 2.5%, 97.5%]; worlds are 1-year blocks of 2010-19 and 2022-24 history; zero-edge and injected-edge rows only; no per-world, per-day or drift-kept row",
+ "sha256": {
+  "PREREG.md": "f3c7add04bf04ee8f94d3ca025b0fe76aab64ba69e284146e7ebadbb307f58c5",
+  "RESULT.md": "5bb924798fe5f51d0b975bbb6c72a059c8378d1072e9f08a35f02618d95c7532",
+  "receipt.json": "a315b003b1ddd875f12e11650464b5f134984bb8b1ca7af3390e882d7bea4394",
+  "code": {
+   "data.py": "02c325fd4bc66fdecffff0790e882431be470673954b4d7f54b6adde88381645",
+   "programs.py": "47bff82c6e62e9ebc751373a84ddee6bd445b05199d2070c26d7255cd17fc443",
+   "worlds.py": "fdfc499efc45c8034ae5da875cc93d774bb1380039e1bb7a23b441296d8d2697",
+   "screen.py": "b2061acfdc18be22c77f5345d65012d13678fb7cb5ed3bf34c070c5778cdf91d",
+   "run.py": "316bc7430f2b8550b480cc2244da3f16b20dc0e1563b0d8631406564197b3e54",
+   "decide.py": "e8bd4a2da9bab40b704d0b9c73cd60d922a11711c491da052801063554b8f085",
+   "synth.py": "350a60107e9ed4e352def91651b7bd3a5adfb5d64b42af0e0785b04e71b8dd6d",
+   "test_s1.py": "e979d5648be21c4215248c5fe0082d7bc5bce45e882e08eb32bfa82cb9436138",
+   "PREREG.md": "f3c7add04bf04ee8f94d3ca025b0fe76aab64ba69e284146e7ebadbb307f58c5"
+  }
+ }
+}

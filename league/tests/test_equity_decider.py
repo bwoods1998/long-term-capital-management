@@ -243,7 +243,8 @@ class TheTable(unittest.TestCase):
     def test_the_childs_runtime_holds_every_kind_module_and_what_it_imports(self):
         """A root House's child runs from a copy of `runtime_files()` alone: from such a copy, with the House's empty
         environment and -E -s, the child imports the decider, the kind table, every kind's module and the modules the
-        "equity" kind imports per op (the program, the ctx, the runner)."""
+        "equity" kind imports per op (the program, the ctx, the runner), and answers a "run" (the engine over a store
+        slice: its calendar is `ltcm.data`'s, imported only when a run reads it)."""
         files = D.runtime_files()
         repo = D.REPO
         for name in D.RUNTIME_FILES:
@@ -257,6 +258,19 @@ class TheTable(unittest.TestCase):
                   "for kind in kinds.KINDS:\n"
                   "    kinds.module_for(kind)\n"
                   "import league.equity.program, league.equity.ctx, league.equity.runner, league.equity.store\n"
+                  "import tempfile\n"
+                  "from league.equity import child, synth\n"
+                  "from league.equity.store import EquityStore\n"
+                  "code = (\"NEEDS = {'symbols': ['SPY'], 'history': 2}\\nPARAMS = {}\\n\"\n"
+                  "        \"def decide(ctx):\\n\"\n"
+                  "        \"    return [{'buy': 'SPY', 'share': 0.5}] if not ctx.positions else []\\n\")\n"
+                  "root = synth.constant_store(tempfile.mkdtemp(), sessions=12, step=1.0)\n"
+                  "bars = EquityStore(root).bars(['SPY'], 'validation', history=2)\n"
+                  "state = {}\n"
+                  "answer = child.handle('run', {'code': code, 'params': {}, 'name': 'p', 'bars': bars, 'k': 1.0,\n"
+                  "                              'capital': None}, state)\n"
+                  "assert answer['ok'] and answer['result']['status'] == 'ok', answer\n"
+                  "assert answer['result']['lots'], 'the run traded'\n"
                   "print('imported')\n")
         with tempfile.TemporaryDirectory() as tmp:
             for name in files:

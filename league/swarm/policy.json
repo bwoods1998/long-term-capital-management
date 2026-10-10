@@ -138,25 +138,39 @@
     "screens": {
       "beta": {
         "name": "S1",
-        "receipt_sha256": null,
-        "c_R": null,
-        "c_X": null,
-        "fp_cap": null,
-        "owner_wall": null,
-        "retry": false,
-        "r4": {},
-        "beside": null
+        "receipt_sha256": "6fb84bd5b30927064af8b7fe01fef97e3263463171ed29a5bafac79f688f9e45",
+        "c_R": 1.49,
+        "c_X": 0.85,
+        "fp_cap": 0.12,
+        "owner_wall": 0.15,
+        "retry": true,
+        "r4": {
+          "A1": [],
+          "A2": [],
+          "A3": [],
+          "A4": [],
+          "A5": [],
+          "A6": []
+        },
+        "beside": "S1-R, c_used = {c_used}, c_H = {c_H}, this program's FP at zero edge = {own_fp}% (cap 12%; owner's wall 15%), drift-kept pass rate = {n1}% (not a false positive: the goal counts direction); S1-X: {alpha|beta} (FP {fpx}%); contamination: 2025 and most of the 2026 holdout precede the authoring models' training cutoff"
       },
       "equity": {
         "name": "S1",
-        "receipt_sha256": null,
-        "c_R": null,
-        "c_X": null,
-        "fp_cap": null,
-        "owner_wall": null,
-        "retry": false,
-        "r4": {},
-        "beside": null
+        "receipt_sha256": "6fb84bd5b30927064af8b7fe01fef97e3263463171ed29a5bafac79f688f9e45",
+        "c_R": 1.49,
+        "c_X": 0.85,
+        "fp_cap": 0.12,
+        "owner_wall": 0.15,
+        "retry": true,
+        "r4": {
+          "A1": [],
+          "A2": [],
+          "A3": [],
+          "A4": [],
+          "A5": [],
+          "A6": []
+        },
+        "beside": "S1-R, c_used = {c_used}, c_H = {c_H}, this program's FP at zero edge = {own_fp}% (cap 12%; owner's wall 15%), drift-kept pass rate = {n1}% (not a false positive: the goal counts direction); S1-X: {alpha|beta} (FP {fpx}%); contamination: 2025 and most of the 2026 holdout precede the authoring models' training cutoff"
       }
     },
     "val_tries": 1,

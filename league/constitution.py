@@ -948,10 +948,13 @@ CONSTITUTION: dict[str, Any] = {
     # keeps $400 - 0.15 x E of the window ($100 at E = $2,000, nothing from E = $2,667): with the equity lane invested,
     # options Probe opens are effectively off. The kill switch, the daily stop and the drawdown stop bound both lanes.
     #
-    # - `enabled`: the House's switch for real equity OPENS. E1 deploys False; the switch-on sets True, a constitution-only
-    #   change that moves the money digest (the standing grant re-ratifies at the House's start). Exits never wait on it.
-    #   True requires the gateway's STOCK_BUYS_REAL "on" (`league.ci`); the gateway may read "on" while this is False:
-    #   this row is the switch.
+    # - `enabled`: the House's switch for real equity OPENS. THE SWITCH SHIPS ON (the captain's A10.2): E1 deploys True,
+    #   one money-digest move with the block itself (the standing grant re-ratifies at the House's start); nothing trades
+    #   until a program passes its sealed look (the swarm's `elane.mode` deploys "off" and the captain sets "gate" after
+    #   the deploy is verified) AND the stock paper proof's BUY stage passes. False is the instant stop of every equity
+    #   open, a constitution-only change that moves the money digest again. Exits never wait on it. True requires the
+    #   gateway's STOCK_BUYS_REAL "on" (`league.ci`); the gateway may read "on" while this is False: this row is the
+    #   switch.
     # - `universe`: the symbols a program may trade, by class: the gateway's STOCK_UNIVERSE exactly. No leveraged or
     #   inverse ETF: they hold borrowing or short exposure inside them.
     # - `position_share`: one instrument's cap, the account's holding of it plus every open buy of it across all programs,
@@ -993,7 +996,7 @@ CONSTITUTION: dict[str, Any] = {
     #   window (09:25 pre-open, 09:30:30 sends, entries until 09:45, exits until 15:55), THE CLOSE WINDOW (A2: 15:55:00
     #   sends, re-priced every 30 s until 15:59:30, then missed), the 16:20 bars, the 16:30 decisions and the 08:30 audit.
     "equity_money": {
-        "enabled": False,
+        "enabled": True,
         "universe": {"etf": ["SPY", "QQQ", "IWM", "DIA", "XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU",
                              "XLV", "XLY", "TLT", "GLD"],
                      "stock": ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "BRK.B", "JPM", "V", "UNH", "XOM", "JNJ",
@@ -1383,4 +1386,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = 'e38c807e47fd3176ab2c3dfc5c440b94ec5b920fa8f110ab642a28c0e3f17320'
+PINNED_DIGEST = '65b0e025a08d4c3a8f78e487eb1a0f83ad9bfed307563c02acbd50ac4a6308bb'

@@ -36,13 +36,13 @@ def problems(**rows):
 
 
 class TheTable(unittest.TestCase):
-    def test_the_block_as_e1_deploys_it_is_inside_its_bounds_and_switched_off(self):
+    def test_the_block_as_e1_deploys_it_is_inside_its_bounds_and_switched_on(self):
         self.assertEqual(equity_money_problems(), [])
         t = M.Table.from_constitution()
         e = t.equity
         self.assertIsInstance(e, M.EquityTable)
         self.assertEqual(e, M.EquityTable.from_constitution())
-        self.assertIs(e.enabled, False)
+        self.assertIs(e.enabled, True, "A10.2: the switch ships on (elane.mode off and the stock proof hold the lane)")
         self.assertEqual((e.invested_share, e.cash_reserve, e.min_order_usd), (D("1.00"), D("50"), D("10")))
         self.assertEqual((e.probe_sleeve_share, e.probe_max_programs), (D("0.25"), 3))
         self.assertEqual(dict(e.position_share), {"etf": D("0.50"), "stock": D("0.20")})
@@ -210,14 +210,15 @@ class TheCashRule(unittest.TestCase):
 
 
 class TheGrantReRatifies(StandingCase):
-    """Release E1's `equity_money` moves the money digest (THE PROBE TOTAL AT $800's fdf2ac7c -> ea97607c): a grant
-    pinned on fdf2ac7c holds nothing after the deploy until the standing grant re-ratifies it at the House's start, on
-    the owner's release change only. The switch-on (`enabled` True, a constitution-only change) is a digest of its own,
-    ratified the same way; the rollback to a release before E1 brings fdf2ac7c back on the owner's deploy of it."""
+    """Release E1's `equity_money` moves the money digest (THE PROBE TOTAL AT $800's fdf2ac7c -> ad8c761b, the block with
+    `enabled` True: the switch ships on, A10.2): a grant pinned on fdf2ac7c holds nothing after the deploy until the
+    standing grant re-ratifies it at the House's start, on the owner's release change only. The stop (`enabled` False,
+    a constitution-only change) is a digest of its own, ratified the same way; the rollback to a release before E1
+    brings fdf2ac7c back on the owner's deploy of it."""
 
     BEFORE = "fdf2ac7c1a446e39df9e27c8626fb86a954a3f5a939460406507a9b735f1d4c7"
-    E1 = "ea97607c87a5e6d144a9577f0f3118397f7ca1d5eff073f75b022d8e79749ab9"
-    ON = "ad8c761bccc49033c3fdeca78c7b962f58272d192a2dd6e0626682ccdf6ac367"
+    E1 = "ad8c761bccc49033c3fdeca78c7b962f58272d192a2dd6e0626682ccdf6ac367"
+    OFF = "ea97607c87a5e6d144a9577f0f3118397f7ca1d5eff073f75b022d8e79749ab9"
 
     def pre_e1(self):
         patcher = patch.dict(CONSTITUTION)
@@ -252,16 +253,16 @@ class TheGrantReRatifies(StandingCase):
         self.assertFalse(grant.allows_live(2))
         self.assertEqual(grant.ratifications(), [])
 
-    def test_the_switch_on_is_a_digest_of_its_own_ratified_the_same_way(self):
+    def test_the_switch_off_is_a_digest_of_its_own_ratified_the_same_way(self):
         grant = self.pinned_before()
         self.standing(grant, release="r-e1", rows=owner_deploy(self.clock() - 60, release="r-e1"))
         self.clock.advance(HOUR)
-        with patch.dict(CONSTITUTION["equity_money"], enabled=True):
-            self.assertEqual(money_digest(), self.ON)
+        with patch.dict(CONSTITUTION["equity_money"], enabled=False):
+            self.assertEqual(money_digest(), self.OFF)
             self.assertFalse(grant.allows_live(2))
-            out = self.standing(grant, release="r-on", rows=owner_deploy(self.clock() - 60, release="r-on"))
+            out = self.standing(grant, release="r-off", rows=owner_deploy(self.clock() - 60, release="r-off"))
             self.assertEqual(out["action"], "ratified")
-            self.assertEqual(grant.current()["policy"]["constitution_digest"], self.ON)
+            self.assertEqual(grant.current()["policy"]["constitution_digest"], self.OFF)
             self.assertTrue(grant.allows_live(2))
 
     def test_the_rollback_before_e1_is_ratified_on_the_owners_deploy_of_it(self):
@@ -343,13 +344,16 @@ class ThePreopenEquityCheck(unittest.TestCase):
         self.assertIn("gateway only: TQQQ (etf)", self.check(h)[1])
 
     def test_the_switch_and_the_book(self):
-        # The gateway on and the House's row off passes (A8: the row is the switch); the row on needs the gateway on.
-        self.assertTrue(self.check(self.house(gateway__stock_buys__enabled=False))[0])
+        # The gateway off and the House's row off passes (A8: the row is the switch); the row on needs the gateway on.
+        self.assertTrue(self.check(self.house(money__equity_money__enabled=False, gateway__stock_buys__enabled=False))[0])
         on = self.house(money__equity_money__enabled=True, gateway__stock_buys__enabled=False)
         self.assertIn("equity_money.enabled is true but the gateway's STOCK_BUYS_REAL admits no buy", self.check(on)[1])
         self.assertTrue(self.check(self.house(money__equity_money__enabled=True))[0])
+        self.assertIs(CONSTITUTION["equity_money"]["enabled"], True, "A10.2: the block as deployed is on")
+        self.assertIn("equity_money.enabled is true but the gateway's STOCK_BUYS_REAL admits no buy",
+                      self.check(self.house(gateway__stock_buys__enabled=False))[1], "so the deployed block needs it")
         # No book health: reported while the lane is off, a FAIL once it is on.
-        ok, _, info = self.check(self.house(release__live__equity=None))
+        ok, _, info = self.check(self.house(release__live__equity=None, money__equity_money__enabled=False))
         self.assertTrue(ok)
         self.assertIn("the equity book reports no freeze state (equity_money.enabled false: no equity open goes)", info)
         ok, headline, _ = self.check(self.house(release__live__equity=None, money__equity_money__enabled=True))

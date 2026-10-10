@@ -35,7 +35,8 @@ then recorded missed. PRE-OPEN (09:25): the day's first reconciliation reading a
 dividend posted overnight); the windows' orders are the decide's intents (`eq_intents`), each written `pending` at its
 own send with that minute's quote, never at 09:25 with a pre-open price. A missed entry is recorded, never chased; an exit the windows could not fill is recorded missed
 and carried to the next session's open (a "house_exit" intent of the same reason). MIN HOLD: a lot never sells in the
-session it was bought (kill switch and stops included; the gateway's kill blocks sells too). NO STUCK LOTS (A8.5): a
+session it was bought (kill switch and stops included; the gateway's kill blocks sells too). REAL SALES WAIT for the
+stock paper proof's SELL stage (A10.1; the practice sale goes first in its window). NO STUCK LOTS (A8.5): a
 lot held its program's `max_hold_sessions` exits at the next open; a demoted, retired or band-dropped program's lots
 exit at the next open; 2 sessions of failed decides exit the program's lots at the next open; on a restart a catch-up
 decide runs for the last close if it was missed (until the next session's close window). Limits: a buy rounds UP and a
@@ -46,7 +47,8 @@ SIZING: `league.equity.sizing.size_entry` (money's; never re-implemented here), 
 `league.live.money.available_cash` (A8.1: `working_buys_worst` the equity book's working buys, `reserved` the options
 book's working reservations, which cover its open orders' worst cost). Every real open asks `real_block(opening=True)`
 first (grant, kill switch, stops, both books' reconciliation, the assignment latch, the House pause, the account read),
-then its own gates: `equity_money.enabled`, the stock paper proof passed (`paper_proof_stock`, A8.7), its own freeze,
+then its own gates: `equity_money.enabled`, the stock paper proof's BUY stage passed and its SELL stage not failed
+(`paper_proof_stock_buy`, `paper_proof_stock_sell`: A8.7 as staged by A10.1), its own freeze,
 the program's band, the shared loss budget's room (the lower of the window's and the total's, from
 `league.live.real.probe_figures`, which unions the equity rows through the hook), applied to every equity open, Probe
 or Sized (A5: "sizing always fits the remaining loss budget").
@@ -186,6 +188,13 @@ DECIDE_MAX_ERRORS = 25
 DIVIDEND_LOOKBACK_SESSIONS = 70
 #: Closed lots exported a minute, at most.
 EXPORT_LIMIT = 50
+#: THE BROKER'S FEES (`_fees`): the venue's daily regulatory fee rows on equity sales (`FEE` activities with no order id,
+#: their description starting "REG" or "TAF"; an option's read "OPT REG", "OPT TAF", "ORF", "CAT", as
+#: league/ops/economics.py reads them), and the sales' proceeds a row states ("... of $1234.56 ...").
+FEE_LABEL = re.compile(r"^(REG|TAF)\b")
+FEE_PROCEEDS = re.compile(r"of \$(\d+(?:\.\d+)?)")
+#: Sessions after a lot's exit day without a fee row for that day before the owner is told (once a lot).
+FEES_LATE_SESSIONS = 5
 _SLUG = re.compile(r"[^a-z0-9-]+")
 
 
@@ -622,6 +631,7 @@ class EquityBook:
         self._bars: dict[str, Any] | None = None
         self._activities_at = float("-inf")
         self._watch_at = float("-inf")
+        self._fees_at = float("-inf")
         self._phase = "closed"
         self._last: dict[str, Any] = {}
         # Per minute: the readings the book made itself (`_tick_reset`).
@@ -824,8 +834,8 @@ class EquityBook:
         pre-open, the open window, the close window, the morning audit, reconciliation, activities, exports). The
         minute's own reads are passed when the options path made them (None: not read this minute; the book reads
         what it needs itself, within the Account's rate). `real_block(opening=True)`: why no real open may go now
-        (None: it may); `killed()`: the gateway's kill switch (exits wait only on it: the gateway's kill blocks sells
-        too). Never raises: an error is recorded and the next minute tries again. Returns a summary for the minute's
+        (None: it may); `killed()`: the gateway's kill switch (exits wait on it, the min hold and the stock proof's
+        SELL stage: the gateway's kill blocks sells too). Never raises: an error is recorded and the next minute tries again. Returns a summary for the minute's
         `out["equity"]`."""
         out: dict[str, Any] = {}
         if self.account is None:
@@ -846,9 +856,11 @@ class EquityBook:
                 ("reconcile", lambda: self._reconcile_step(now, m, out)),
                 ("audit", lambda: self._audit(now, m, out)),
                 ("decide", lambda: self._decide_step(now, out)),
+                # The stock proof before the windows (A10.1): in its SELL stage's window the practice sale goes first.
+                ("proof", lambda: self._proof_step(now, m, out)),
                 ("windows", lambda: self._windows(now, m, out, real_block, killed)),
                 ("exports", lambda: self._export(out)),
-                ("proof", lambda: self._proof_step(now, out)),
+                ("fees", lambda: self._fees(now, out)),
             ]
             for name, work in steps:
                 try:
@@ -1216,8 +1228,11 @@ class EquityBook:
         if self.stock_proof is None:
             return "no stock paper proof: no paper account"
         try:
-            if not self.stock_proof.passed():
-                return "the stock paper proof (paper_proof_stock) has not passed"
+            if not self.stock_proof.buy_passed():
+                return "the stock paper proof's BUY stage (paper_proof_stock_buy) has not passed"
+            failed = self.stock_proof.sell_failed()
+            if failed:
+                return f"{failed}: new real equity buys stop until it passes"
         except Exception as exc:  # noqa: BLE001
             return f"the stock paper proof could not be read ({type(exc).__name__})"
         frozen = self.frozen
@@ -1333,6 +1348,12 @@ class EquityBook:
                 intent.why = "min hold"
                 self._save_intent(intent)
             return
+        why = self._sell_proof()
+        if why:
+            if intent.why != why:
+                intent.why = why
+                self._save_intent(intent)
+            return
         try:
             stopped = bool(killed())
         except Exception:  # noqa: BLE001 - unreadable counts as engaged
@@ -1375,6 +1396,19 @@ class EquityBook:
         self._send(intent, side="sell", symbol=lot.symbol, klass=lot.klass, qty=lot.qty, limit=limit, collar=collar,
                    day=today, lid=lot.lid, replaces=current.eid if current is not None else None, probe=lot.probe,
                    why=f"exit ({reason}){' at the bid, late' if late else ''}", at="close" if in_close else "open")
+
+    def _sell_proof(self) -> str | None:
+        """Why no real equity SALE may go yet (A10.1: the stock paper proof's SELL stage gates every one; the practice
+        sale goes first in its window), or None. A House with no paper account at all (no proof object) opens nothing,
+        and its exits go: no stage can ever pass there, and a lot is never held on a proof that cannot run."""
+        if self.stock_proof is None:
+            return None
+        try:
+            if self.stock_proof.sell_passed():
+                return None
+        except Exception as exc:  # noqa: BLE001 - unreadable: the sale waits (the lot stays held)
+            return f"the stock paper proof could not be read ({type(exc).__name__}): real exits wait"
+        return "real exits wait for the stock paper proof's SELL stage (paper_proof_stock_sell, A10)"
 
     def _lost_sale_check(self, lot: Lot) -> str | None:
         """After a sale of this lot was given up as lost, it goes again only while the account still holds what the
@@ -2014,7 +2048,7 @@ class EquityBook:
                 else:
                     hold = max(1, min(cap, int(inst.max_hold or default_hold)))
                     held = S.sessions_between(lot.opened_day, day)
-                    if held + 1 >= hold:
+                    if config.max_hold_due(held, hold):
                         reason, why = "max_hold", f"held {held + 1} sessions by the next open (its maximum {hold})"
                 if reason:
                     self._plan_exit(lot, exec_day=nxt, at="open", reason=reason, why=why, decided_day=day)
@@ -2306,6 +2340,69 @@ class EquityBook:
         elif booking.kind == "spinoff":
             self.alert("warning", f"equity: {booking.why}")
 
+    def _fees(self, now: float, out: dict) -> None:
+        """THE BROKER'S FEES (the Done meter's finality, league/ops/dlane_report.py: a checkpoint holding an equity close
+        stays provisional until its lot's `info.fee_basis` is "broker"). A closed lot carries the book's estimate of its
+        sale's SEC and TAF fees (`config.sell_fees`, booked at each fill); once the venue's regulatory fee rows of the
+        lot's exit day are read (`FEE_LABEL`, every `ACTIVITIES_EVERY`), each row's dollars go to that day's equity-book
+        sales pro rata by proceeds (over the proceeds the row states when they are at least the book's own, so another
+        sale of the day, an assignment share's, keeps its part), the lot's `fees` and `cash` are set to the broker's
+        figure and `info.fee_basis` to "broker" (the estimate kept as `info.fees_estimate`). A lot with no sale (a
+        cash-out by a corporate action) owes no fee: "broker" at 0. A day still without a fee row `FEES_LATE_SESSIONS`
+        later is told to the owner once a lot (the row's shape is a fact to verify on the first round trip). Like a late
+        dividend, the posted fees reach `eq_lots` (which the Done meter and the band rules read), not the forward row
+        already exported."""
+        if now - self._fees_at < ACTIVITIES_EVERY:
+            return
+        today = S.ny_day(now).isoformat()
+        lots = [lot for lot in (Lot.of(r) for r in self.state.rows(
+            "SELECT * FROM eq_lots WHERE status='closed' AND exit_day IS NOT NULL AND exit_day<? ORDER BY exit_day, lid",
+            (today,))) if lot.info.get("fee_basis") != "broker"]
+        if not lots:
+            return
+        self._fees_at = now
+        sold = {lot.lid: sum((D(r["qty"]) * D(r["px"]) for r in self.state.rows(
+            "SELECT f.qty, f.px FROM eq_fills f JOIN eq_orders o ON o.eid=f.eid WHERE f.lid=? AND o.side='sell'",
+            (lot.lid,))), ZERO) for lot in lots}
+        unsold = [lot for lot in lots if sold[lot.lid] <= 0]
+        rows = self._read_types(("FEE",), (dt.date.fromisoformat(min(str(x.exit_day) for x in lots))
+                                           - dt.timedelta(days=1)).isoformat(), together=False) if len(unsold) < len(lots) else []
+        by_day: dict[str, list[tuple[Decimal, Decimal | None]]] = {}
+        for r in rows:
+            words = str(r.get("description") or "").strip()
+            amount, day = A.dec(r.get("net_amount")), A.activity_day(r)
+            if r.get("order_id") or not FEE_LABEL.match(words) or amount is None or day is None:
+                continue
+            stated = FEE_PROCEEDS.search(words)
+            by_day.setdefault(day, []).append((abs(amount), A.dec(stated.group(1)) if stated else None))
+        posted = 0
+        with self.state.transaction():
+            for lot in lots:
+                day = str(lot.exit_day)
+                if sold[lot.lid] > 0 and day not in by_day:
+                    if S.sessions_between(day, today) >= FEES_LATE_SESSIONS and not lot.info.get("fees_late_told"):
+                        lot.info["fees_late_told"] = True
+                        self._save_lot(lot)
+                        self.alert("warning", f"equity: no REG or TAF fee row of {day} on the account after "
+                                              f"{FEES_LATE_SESSIONS} sessions: lot {lot.lid}'s fees stay the book's "
+                                              "estimate and the Done meter's checkpoints holding it stay provisional")
+                    continue
+                book_total = sum((sold[x.lid] for x in lots if str(x.exit_day) == day), ZERO)
+                fee = ZERO
+                for amount, stated in by_day.get(day, ()):
+                    base = stated if stated is not None and stated >= book_total else book_total
+                    if base > 0:
+                        fee += amount * sold[lot.lid] / base
+                fee = fee.quantize(SUBPENNY, rounding=ROUND_CEILING) if fee > 0 else ZERO
+                lot.info.update(fee_basis="broker", fees_estimate=text(lot.fees), fees_day=day)
+                lot.cash += lot.fees - fee
+                lot.fees = fee
+                self._save_lot(lot)
+                posted += 1
+        if posted:
+            self.record("equity.fees_posted", {"lots": posted})
+            out["fees_posted"] = posted
+
     def _dividend_lots(self, activity: Mapping[str, Any], symbol: str) -> list[dict]:
         """The lots a dividend belongs to, each with the quantity it held on the ex-date as "qty": the row's ex-date
         when it states one, else the latest session (in the `DIVIDEND_LOOKBACK_SESSIONS` before the row's date) whose
@@ -2367,7 +2464,8 @@ class EquityBook:
             out["exported"] = n
 
     # ------------------------------------------------------------------ the stock paper proof (A8.7)
-    def _proof_step(self, now: float, out: dict) -> None:
+    def _proof_step(self, now: float, m: S.Moments | None, out: dict) -> None:
+        """The stock paper proof's minute (A10.1) until both its stages have passed, in this book's OPEN window (`m`)."""
         if self.stock_proof is None:
             return
         try:
@@ -2375,7 +2473,7 @@ class EquityBook:
                 return
         except Exception:  # noqa: BLE001
             return
-        answer = self.stock_proof.step(now, market=self.market)
+        answer = self.stock_proof.step(now, market=self.market, window=m)
         if isinstance(answer, Mapping) and answer.get("status"):
             out["paper_proof_stock"] = answer.get("status")
 

@@ -17,6 +17,7 @@ from league.equity import screen as S
 from league.swarm import bands, cards, dlane, elane
 from league.swarm import settings as settings_mod
 from league.swarm.gate import run_sha
+from league.swarm.store import OPTIONS_ONLY_SQL
 from league.tests import REAL_POLICY_PATH
 from league.tests.test_swarm_store import SPEC, StoreCase
 
@@ -193,6 +194,40 @@ class Lineages(StoreCase):
         self.assertEqual(elane.lineage_key(BETA, "SPY"), "beta:SPY")
         self.assertEqual(elane.lineage_key("direction", "SPY"), "SPY", "the options keys never move")
 
+    def test_the_learning_game_never_arms_an_equity_family_nor_counts_one_in_its_ceiling(self):
+        """Integration (A8.12): the options learning game hashes every family born after its T0 on a core-five root into
+        an arm, and its control arm's extra looks go to the options Gym; an equity family is never armed (whichever
+        columns the game reads: the parsed row or the raw `spec`), and the game's population ceiling counts the options
+        lanes only."""
+        from league.swarm import game
+
+        c = game.cfg({})
+        start = "2026-01-01T00:00:00Z"
+        self.store.add_family(SPEC, origin="seed")
+        self.store.add_family(equity_spec("b1"), origin="seed")
+        fam = self.store.family("b1")
+        self.assertIsNone(game._arm_of({**fam, "born_at": "2026-10-11T00:00:00Z"}, c, start))
+        raw = {"id": "b1", "lineage": "b1", "born_at": "2026-10-11T00:00:00Z", "roots": json.dumps(["SPY"]),
+               "spec": json.dumps(fam["spec"])}
+        self.assertIsNone(game._arm_of(raw, c, start), "the raw columns `_hidden` reads")
+        options = {**self.store.family("condor-vrp"), "born_at": "2026-10-11T00:00:00Z", "roots": ["SPY"],
+                   "spec": {"roots": ["SPY"]}}
+        self.assertIn(game._arm_of(options, c, start), ("game", "control"), "an options family is armed as before")
+        n = self.store._one(f"SELECT COUNT(*) AS n FROM families WHERE retired_at IS NULL AND {OPTIONS_ONLY_SQL}")["n"]
+        self.assertEqual(n, 1)
+
+    def test_an_equity_look_never_counts_in_an_options_lanes_leakage_alarm(self):
+        """Every reader of the store's looks (the gate's own reads skip them; the progress view reads them all) counts
+        an equity look in its equity lane, never in the alpha count (10 looks, more than 30% passed)."""
+        from league.swarm import evidence
+
+        equity = [{"passed": True, "detail": {"lane": lane}} for lane in (BETA, EQUITY) * 6]
+        options = [{"passed": i < 3, "detail": {}} for i in range(10)]
+        self.assertEqual({evidence.look_lane(x) for x in equity}, {BETA, EQUITY})
+        for settings in ({}, {"dlane": {"mode": "gate"}}):
+            self.assertEqual(evidence.leakage_alarms(equity + options, settings)["alpha"], False, settings)
+        self.assertTrue(evidence.leakage_alarms([{"passed": True, "detail": {}}] * 10, {})["alpha"])
+
     def test_dlane_never_reads_an_equity_family(self):
         self.store.add_family(equity_spec("b1"), origin="seed")
         self.store.event("swarm.born", "b1", {"lane": BETA})
@@ -312,7 +347,11 @@ class Receipt(StoreCase):
         self.assertIsNone(eff["receipt"])
         self.assertIn("no receipt sha256 is pinned", eff["why"])
         real, _ = settings_mod.read_policy(REAL_POLICY_PATH)
-        self.assertIsNotNone(elane.screen_effective(ON, BETA, policy=real)["why"], "E1 merges with no receipt pinned")
+        committed = hashlib.sha256((REPO / S.RECEIPT_PATH).read_bytes()).hexdigest()
+        for lane in LANES:
+            # The integrator pinned the study's receipt (A9): the committed policy reads it whole, both lanes.
+            eff = elane.screen_effective(ON, lane, policy=real)
+            self.assertEqual((eff["receipt"], eff["why"], eff["screen"]), (committed, None, "S1"), lane)
         eff = elane.screen_effective(ON, BETA, policy={"elane": {"screens": {BETA: pinned_block()}}})
         self.assertEqual((eff["receipt"], eff["why"], eff["c_R"], eff["screen"]), (SHA, None, 1.5, "S1"))
         eff = elane.screen_effective(ON, BETA, policy={"elane": {"screens": {BETA: pinned_block(c_R=None)}}})

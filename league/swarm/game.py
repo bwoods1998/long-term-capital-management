@@ -131,6 +131,7 @@ import time
 from typing import Any, Callable, Mapping, Sequence
 
 from . import canary, cards, dlane, evidence
+from .store import OPTIONS_ONLY_SQL
 from . import settings as settings_mod
 from .pool import GymJob
 
@@ -464,6 +465,8 @@ def _arm_of(fam: Mapping[str, Any], c: Mapping[str, Any], start: str | None,
     before T0. While the lane is off `sits_out` is False with no read, so the order is the release before it's."""
     if start is None:
         return None
+    if _equity_family(fam):
+        return None             # THE EQUITY LANES (release E1, A8.12): the options learning game never arms one
     born = str(fam.get("born_at") or "")
     if not born or born < start:
         return None
@@ -507,6 +510,18 @@ def _sits_out(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any] | 
         return False
     unit = str(fam.get("lineage") or fam.get("id") or "")
     return not canary.in_arm(c["salt"], DIRECTION_ARM_KEY, unit, dlane.cfg(settings)["arm_fraction"])
+
+
+def _equity_family(fam: Mapping[str, Any]) -> bool:
+    """Whether a families row (parsed, or the raw columns `_hidden` reads) is an equity lane's: its structure is an
+    equity structure, or its spec declares an equity lane (league/swarm/store.py `add_family` holds the two together)."""
+    from .store import EQUITY_STRUCTURES, lane_of_spec
+
+    if str(fam.get("structure") or "") in EQUITY_STRUCTURES:
+        return True
+    spec = fam.get("spec")
+    spec = _loads(spec, {}) if isinstance(spec, str) else spec
+    return lane_of_spec(spec) is not None
 
 
 def _birth_roots(fam: Mapping[str, Any]) -> list[str]:
@@ -1330,7 +1345,9 @@ def reproduce(store: Any, settings: Mapping[str, Any] | None, clock: Callable[[]
         if len(born) >= room:
             break
         with store.atomic():
-            if int(store._one("SELECT COUNT(*) AS n FROM families WHERE retired_at IS NULL")["n"]) >= ceiling:
+            # The options lanes' population (an equity family has its own roster: league/swarm/elane.py).
+            if int(store._one(f"SELECT COUNT(*) AS n FROM families WHERE retired_at IS NULL AND {OPTIONS_ONLY_SQL}")["n"]) \
+                    >= ceiling:
                 break
             child = _breed(store, c, parent, qualified)
         if child:

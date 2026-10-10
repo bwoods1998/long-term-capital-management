@@ -132,7 +132,8 @@ class Boundaries(unittest.TestCase):
                 self.assertEqual(bad, [])
 
 
-EQUITY_SPEC = {**SPEC, "id": "eq-beta", "lane": "beta", "mechanism": "The overnight session carries the index's drift."}
+EQUITY_SPEC = {**SPEC, "id": "eq-beta", "lane": "beta", "structure": "etf",
+               "mechanism": "The overnight session carries the index's drift."}
 
 
 class Adoption(StoreCase):

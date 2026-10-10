@@ -23,16 +23,23 @@ reconciled and closed before another attempt, at most `TRIES` opens per session.
 initial inventory are committed before dispatch; ambiguous answers and session changes never discard ownership.
 An unreadable order or position snapshot cannot pass the proof. Unrelated paper positions are left alone.
 
-THE STOCK PROOF (release E1, A8.7; `StockPaperProof`, live state kv `paper_proof_stock`): the equity book's route on the
-practice account before its first real order. One attempt a session: a FRACTIONAL share of SPY (about `STOCK_USD`) bought
-with a marketable limit (the ask plus `STOCK_COLLAR_BP`) in the close window (15:55:00 to 15:59:30 ET; cancelled if it
-has not filled by then), held overnight, and sold at the next session's open (from 09:30:30 ET, a marketable limit at
-the bid less the collar; an unfilled sale is cancelled after `STOCK_REPRICE_S` and, once the venue says it is terminal,
-sent again for what is left with a wider collar, never past `STOCK_MAX_COLLAR_BP`). It passes once every witness holds:
-the buy's fill (a fractional quantity at a price), the position (the paper account's SPY up by exactly that), the sale's
-fills (the whole lot), the account's FILL activities naming both orders for the same quantities, and reconciliation
-(the account's SPY back at its baseline). Never sold in the session it was bought. Client ids `lq-pp-...` (the equity
-book's prefix: never `lv-`). Only the equity book waits on it (`passed`); options entries never do.
+THE STOCK PROOF (release E1, A8.7 as staged by A10.1; `StockPaperProof`): the equity book's route on the practice
+account before its first real order, in two stages, each in the equity book's OPEN window (the book passes its
+`league.equity.schedule.Moments`; league/live never imports league.equity here). Stage BUY (kv `paper_proof_stock_buy`):
+a FRACTIONAL share of SPY (about `STOCK_USD`) bought with a marketable limit (the ask plus `STOCK_COLLAR_BP`) from the
+open window's first send (09:30:30 ET) to the book's entry cut-off (09:45; cancelled if it has not filled by then); it
+passes on the buy's fill (a fractional quantity at a price), the attempt's own lot row and the position reconciled to it
+(the paper account's SPY up by exactly that), and gates every REAL equity BUY. Stage SELL (kv `paper_proof_stock_sell`):
+the practice lot sold in the next session's open window (the min hold kept: never in the session it was bought; a
+marketable limit at the bid less the collar; an unfilled sale is cancelled after `STOCK_REPRICE_S` and, once the venue
+says it is terminal, sent again for what is left with a wider collar, never past `STOCK_MAX_COLLAR_BP`, until the
+window ends at 15:55); it passes once the sale's fills (the whole lot), the account's FILL activities naming both orders
+for the same quantities and reconciliation (the account's SPY back at its baseline) witness the round trip, and gates
+every REAL equity SALE (in that window the practice sale goes first: the book steps the proof before its own windows,
+and real exits wait for the pass). A SELL stage that ends its window without passing is FAILED (kv status "failed",
+an alarm with the owner's step): real lots stay held and new real buys stop until it passes; the next open window buys
+again (stage BUY stays passed) and the one after sells. The durable attempt row is kv `paper_proof_stock`. Client ids
+`lq-pp-...` (the equity book's prefix: never `lv-`). Only the equity book waits on it; options entries never do.
 """
 
 from __future__ import annotations
@@ -46,7 +53,6 @@ from zoneinfo import ZoneInfo
 
 import numpy as np
 
-from .chains import session_minutes
 from .real import RLeg, limit_price, single_body, structure_fill, ROrder
 from .state import LiveState
 from .venue import TERMINAL, Account, dec
@@ -401,8 +407,12 @@ def _single(symbol: str, action: str, price: float, cid: str) -> dict:
     return single_body(order)
 
 
-# ------------------------------------------------------------------------------------------ the stock proof (E1, A8.7)
+# ------------------------------------------------------------------------------------- the stock proof (E1, A8.7, A10)
+#: The durable attempt row (the round trip under way), and the two stages' records (A10.1): BUY gates every real equity
+#: buy, SELL every real equity sale.
 STOCK_KEY = "paper_proof_stock"
+STOCK_BUY_KEY = "paper_proof_stock_buy"
+STOCK_SELL_KEY = "paper_proof_stock_sell"
 STOCK_SYMBOL = "SPY"
 #: The proof buys about this many dollars of SPY: a fractional share.
 STOCK_USD = Decimal("25")
@@ -411,38 +421,64 @@ STOCK_PLACES, CENT = Decimal("0.000001"), Decimal("0.01")
 #: The marketable limit's collar in basis points (the equity book's ETF entry collar), widened by a step for each sale
 #: re-sent, never past the maximum (the book's ETF maximum).
 STOCK_COLLAR_BP, STOCK_COLLAR_STEP_BP, STOCK_MAX_COLLAR_BP = 10, 10, 50
-#: The windows, in seconds from the session's close or open (New York): the buy from close-5 min to close-30 s (A2:
-#: 15:55:00 to 15:59:30); the sale from open+30 s to close-5 min (09:30:30 to 15:55).
-STOCK_BUY_FROM_S, STOCK_BUY_UNTIL_S = 300, 30
-STOCK_SELL_FROM_S, STOCK_SELL_UNTIL_S = 30, 300
 #: An unfilled sale is cancelled after this long (then sent again for what is left once it is terminal).
 STOCK_REPRICE_S = 60
 STOCK_TOLERANCE = Decimal("1e-9")
+#: What each stage's pass needs (A10.1): BUY its fill, the attempt's own lot row and the position reconciled to it;
+#: SELL the whole lot sold, the account's FILL activities naming both orders, and the position back at its baseline.
+STOCK_BUY_WITNESSES = ("buy_witness", "hold_witness")
 STOCK_WITNESSES = ("buy_witness", "hold_witness", "sell_witness", "activity_witness", "recon_witness")
 NEW_YORK = ZoneInfo("America/New_York")
 
 
 class StockPaperProof:
-    """THE STOCK PROOF (the module docstring): `step(now, market=...)` once a minute (the equity book's tick), `passed()`
-    before the first real equity order, `status()` for the health page."""
+    """THE STOCK PROOF, staged (A10.1; the module docstring): `step(now, market=..., window=...)` once a minute from the
+    equity book's tick, BEFORE the book's own windows (so in the SELL stage's window the practice sale goes first);
+    `window` is the book's `league.equity.schedule.Moments` of the day (`open_send`, `entry_until`, `exit_until`; None
+    on a day without a session), so the proof trades in exactly the book's OPEN window. `buy_passed()` gates every real
+    equity BUY, `sell_passed()` every real equity SALE, `sell_failed()` names a SELL stage that failed (new real buys
+    stop until it passes); `passed()` is both; `status()` for the health page."""
 
     def __init__(self, state: LiveState, account: Account, *, record: Callable[..., Any] | None = None,
-                 clock: Callable[[], float] | None = None):
+                 clock: Callable[[], float] | None = None, alert: Callable[[str, str], Any] | None = None):
         self.state, self.account = state, account
         self.record = record or (lambda *a, **k: None)
+        self.alert = alert or (lambda *a, **k: None)
         self.clock = clock or time.time
         self.key = STOCK_KEY
 
-    def status(self) -> dict:
+    def _row(self) -> dict:
         return dict(self.state.get(self.key, {}) or {})
 
-    def passed(self) -> bool:
-        row = self.status()
+    def _stage(self, key: str) -> dict:
+        return dict(self.state.get(key, {}) or {})
+
+    def status(self) -> dict:
+        return {**self._row(), "stages": {"buy": self._stage(STOCK_BUY_KEY) or None,
+                                          "sell": self._stage(STOCK_SELL_KEY) or None}}
+
+    def buy_passed(self) -> bool:
+        """Stage BUY (A10.1): a witnessed fractional SPY buy in an open window, its position reconciled."""
+        row = self._stage(STOCK_BUY_KEY)
+        return row.get("schema") == 1 and row.get("status") == "passed" and all(row.get(k) is True
+                                                                                 for k in STOCK_BUY_WITNESSES)
+
+    def sell_passed(self) -> bool:
+        """Stage SELL (A10.1): the practice lot sold in a later session's open window, every witness agreeing."""
+        row = self._stage(STOCK_SELL_KEY)
         return row.get("schema") == 1 and row.get("status") == "passed" and all(row.get(k) is True for k in STOCK_WITNESSES)
+
+    def sell_failed(self) -> str:
+        """Why the SELL stage failed and has not passed since ("" when it has not failed): new real buys stop."""
+        row = self._stage(STOCK_SELL_KEY)
+        return str(row.get("why") or "the stock paper proof's SELL stage failed") if row.get("status") == "failed" else ""
+
+    def passed(self) -> bool:
+        return self.buy_passed() and self.sell_passed()
 
     @staticmethod
     def _new() -> dict:
-        return {"schema": 1, "status": "waiting", "attempts": 0, "orders": [], "why": "waiting for a close window"}
+        return {"schema": 1, "status": "waiting", "attempts": 0, "orders": [], "why": "waiting for an open window"}
 
     def _put(self, row: Mapping[str, Any]) -> None:
         self.state.put(self.key, dict(row))
@@ -486,6 +522,41 @@ class StockPaperProof:
             raise ValueError(f"no two-sided {STOCK_SYMBOL} quote")
         return bid, ask
 
+    # ------------------------------------------------------------------ the stages' records
+    def _pass_buy(self, row: dict, today: dt.date) -> None:
+        if self.buy_passed():
+            return
+        work = next(w for w in row["orders"] if w["action"] == "buy" and Decimal(w.get("filled") or "0") > 0)
+        self.state.put(STOCK_BUY_KEY, {"schema": 1, "status": "passed", "passed_at": self.clock(), "day": today.isoformat(),
+                                       "attempt": row.get("attempt"), "lot": {"qty": str(self._filled(row, "buy")),
+                                                                              "avg": work.get("avg"), "cid": work["cid"]},
+                                       **{k: row.get(k) is True for k in STOCK_BUY_WITNESSES}})
+        self._event("buy_passed", {"attempt": row.get("attempt"), "day": today.isoformat()})
+        self.record("live.paper_proof", {"status": "passed", "stage": "buy", "day": today.isoformat(), "kind": "stock"})
+
+    def _pass_sell(self, row: dict, today: dt.date) -> None:
+        self.state.put(STOCK_SELL_KEY, {"schema": 1, "status": "passed", "passed_at": self.clock(), "day": today.isoformat(),
+                                        "attempt": row.get("attempt"),
+                                        "failures": int(self._stage(STOCK_SELL_KEY).get("failures") or 0),
+                                        **{k: row.get(k) is True for k in STOCK_WITNESSES}})
+        self._event("passed", {k: row[k] for k in STOCK_WITNESSES})
+        self.record("live.paper_proof", {"status": "passed", "stage": "sell", "day": today.isoformat(), "kind": "stock"})
+
+    def _fail_sell(self, row: dict, today: dt.date, why: str) -> None:
+        """The SELL stage failed this session (A10.1): real lots stay held, new real buys stop until it passes, and the
+        owner is told once a failure with the step to take."""
+        before = self._stage(STOCK_SELL_KEY)
+        failures = int(before.get("failures") or 0) + 1
+        self.state.put(STOCK_SELL_KEY, {"schema": 1, "status": "failed", "failed_at": self.clock(),
+                                        "day": today.isoformat(), "attempt": row.get("attempt"), "failures": failures,
+                                        "why": f"the stock paper proof's SELL stage failed on {today.isoformat()}: {why}"})
+        self._event("sell_failed", {"attempt": row.get("attempt"), "why": why, "failures": failures})
+        self.record("live.paper_proof", {"status": "failed", "stage": "sell", "day": today.isoformat(), "kind": "stock"})
+        self.alert("error", f"equity: the stock paper proof's SELL stage failed ({why}). Real equity lots stay held and new "
+                            "real equity buys stop until it passes. Owner step: look at the practice account "
+                            f"(alpaca-paper) and its {STOCK_SYMBOL} position and orders; the proof tries again at the "
+                            "next open window.")
+
     # ------------------------------------------------------------------ orders
     def _dispatch(self, row: dict, body: dict, *, action: str) -> dict:
         work = {"action": action, "body": body, "cid": body["client_order_id"], "at": self.clock(), "status": "unknown",
@@ -504,8 +575,8 @@ class StockPaperProof:
         return row
 
     def _refresh(self, row: dict, *, late: bool) -> None:
-        """The last order brought up to the venue's answer by its client id; a buy still working when `late` (the close
-        window ends) and a sale working past `STOCK_REPRICE_S` are cancelled (at most once a minute)."""
+        """The last order brought up to the venue's answer by its client id; one still working when `late` (its window
+        ended) and a sale working past `STOCK_REPRICE_S` are cancelled (at most once a minute)."""
         work = row["orders"][-1]
         if work.get("terminal"):
             return
@@ -524,7 +595,7 @@ class StockPaperProof:
         if work["terminal"]:
             self._event("order_observed", {"cid": work["cid"], "answer": dict(answer)})
             return
-        stale = late if work["action"] == "buy" else self.clock() - float(work["at"]) >= STOCK_REPRICE_S
+        stale = late or (work["action"] == "sell" and self.clock() - float(work["at"]) >= STOCK_REPRICE_S)
         if stale and work.get("id") and self.clock() - float(work.get("cancel_at") or 0) >= 60:
             work["cancel_at"] = self.clock()
             self._put(row)  # a lost cancel answer is recovered by the order's id too
@@ -548,22 +619,21 @@ class StockPaperProof:
         return self._filled(row, "buy") > 0
 
     # ------------------------------------------------------------------ the minute
-    def step(self, now: float, *, market: Any) -> dict:
-        """Advance the one durable attempt (the module docstring). Never raises for the venue's trouble: an unreadable
-        reading is the row's `why`, and nothing new is sent without readable evidence."""
-        row = self.status()
+    def step(self, now: float, *, market: Any, window: Any = None) -> dict:
+        """Advance the one durable attempt (the module docstring) inside the book's OPEN window of the day (`window`:
+        the book's `schedule.Moments`, None on a day without a session). Never raises for the venue's trouble: an
+        unreadable reading is the row's `why`, and nothing new is sent without readable evidence."""
+        row = self._row()
         if self.passed():
             return row
         if row.get("schema") != 1:
             row = self._new()
-        local = dt.datetime.fromtimestamp(now, NEW_YORK)
-        today = local.date()
-        session = session_minutes(today)
-        secs = local.hour * 3600 + local.minute * 60 + local.second
+        today = dt.datetime.fromtimestamp(now, NEW_YORK).date()
         try:
             if row.get("orders"):
-                late = (row.get("buy_day") != today.isoformat() or session is None
-                        or secs >= session[1] * 60 - STOCK_BUY_UNTIL_S)
+                work = row["orders"][-1]
+                ends = getattr(window, "entry_until" if work["action"] == "buy" else "exit_until", None)
+                late = window is None or str(row.get(f"{work['action']}_day")) != today.isoformat() or now >= float(ends)
                 self._refresh(row, late=late)
             held = self._held()
         except Exception as exc:  # noqa: BLE001 - no new dispatch or pass without readable evidence
@@ -571,20 +641,17 @@ class StockPaperProof:
             self._put(row)
             return row
         try:
-            row = self._advance(row, held, today, session, secs, market)
+            row = self._advance(row, held, today, now, window, market)
         except Exception as exc:  # noqa: BLE001
             row["why"] = f"stock paper proof: {type(exc).__name__}: {str(exc)[:160]}"
         self._put(row)
         return row
 
-    def _advance(self, row: dict, held: Decimal, today: dt.date, session: tuple[int, int] | None, secs: int,
-                 market: Any) -> dict:
+    def _advance(self, row: dict, held: Decimal, today: dt.date, now: float, window: Any, market: Any) -> dict:
         status = row["status"]
+        opened = window is not None and float(window.open_send) <= now
         if status == "waiting":
-            if session is None or row.get("tried_day") == today.isoformat():
-                return row
-            close_s = session[1] * 60
-            if not close_s - STOCK_BUY_FROM_S <= secs < close_s - STOCK_BUY_UNTIL_S:
+            if not opened or row.get("tried_day") == today.isoformat() or now >= float(window.entry_until):
                 return row
             _, ask = self._quote(market)
             limit = (ask * (1 + Decimal(STOCK_COLLAR_BP) / 10000)).quantize(CENT, rounding=ROUND_UP)
@@ -592,7 +659,7 @@ class StockPaperProof:
             row["attempts"] = int(row.get("attempts") or 0) + 1
             attempt = f"lq-pp-{today:%Y%m%d}-{self.state.nonce}-{row['attempts']}"
             row.update(attempt=attempt, buy_day=today.isoformat(), tried_day=today.isoformat(), baseline=str(held),
-                       orders=[], **{k: False for k in STOCK_WITNESSES})
+                       orders=[], sell_day=None, **{k: False for k in STOCK_WITNESSES})
             body = {"symbol": STOCK_SYMBOL, "qty": format(qty, "f"), "side": "buy", "type": "limit", "time_in_force": "day",
                     "limit_price": format(limit, "f"), "client_order_id": attempt + "-b"}
             return self._dispatch(row, body, action="buy")
@@ -602,11 +669,11 @@ class StockPaperProof:
         if status == "buy_sent":
             bought = self._filled(row, "buy")
             if bought <= 0:
-                row.update(status="waiting", why="the buy ended unfilled: the next session's close window tries again")
+                row.update(status="waiting", why="the buy ended unfilled: the next session's open window tries again")
                 return row
             row["buy_witness"] = (bought != bought.to_integral_value() and work.get("avg") not in (None, "")
                                   and work["status"] in ("filled", "canceled", "expired", "done_for_day"))
-            row.update(status="held", why="held overnight: sold at the next session's open")
+            row.update(status="held", why="held: sold in the next session's open window")
             self._event("buy_witness", {"cid": work["cid"], "filled": str(bought), "avg": work.get("avg")})
             status = "held"
         if status == "sell_sent":
@@ -617,9 +684,18 @@ class StockPaperProof:
                 row["hold_witness"] = True
             elif not row.get("hold_witness"):
                 row["why"] = f"the paper account's {STOCK_SYMBOL} disagrees with this attempt's recorded fills"
-            if session is None or today.isoformat() <= str(row["buy_day"]):
+            if row.get("buy_witness") and row.get("hold_witness"):
+                self._pass_buy(row, today)                     # stage BUY: fill, lot row, position, reconciliation
+            if window is None or today.isoformat() <= str(row["buy_day"]):
                 return row                                   # never sold in the session it was bought
-            if not session[0] * 60 + STOCK_SELL_FROM_S <= secs < session[1] * 60 - STOCK_SELL_UNTIL_S:
+            sold_today = row.get("sell_day") == today.isoformat()
+            if now >= float(window.exit_until):
+                if sold_today:
+                    self._fail_sell(row, today, f"the practice lot was not sold by the open window's end "
+                                                f"({self._owned(row)} {STOCK_SYMBOL} left)")
+                    row["sell_day"] = None
+                return row
+            if not opened:
                 return row
             owned = self._owned(row)
             if owned <= STOCK_TOLERANCE:
@@ -632,7 +708,7 @@ class StockPaperProof:
             body = {"symbol": STOCK_SYMBOL, "qty": format(owned.normalize(), "f"), "side": "sell", "type": "limit",
                     "time_in_force": "day", "limit_price": format(limit, "f"),
                     "client_order_id": f"{row['attempt']}-s{sells + 1}"}
-            row["sold_day"] = today.isoformat()
+            row["sell_day"] = today.isoformat()
             return self._dispatch(row, body, action="sell")
         if status == "sold":
             bought, sold = self._filled(row, "buy"), self._filled(row, "sell")
@@ -642,19 +718,22 @@ class StockPaperProof:
             row["activity_witness"] = self._activities(row)
             if all(row.get(k) is True for k in STOCK_WITNESSES):
                 row.update(status="passed", passed_at=self.clock(),
-                           why=(f"a witnessed fractional {STOCK_SYMBOL} buy at the close and sale at the next open: fills, "
-                                "position, activities and reconciliation agree"))
-                self._event("passed", {k: row[k] for k in STOCK_WITNESSES})
-                self.record("live.paper_proof", {"status": "passed", "day": today.isoformat(), "kind": "stock"})
+                           why=(f"a witnessed fractional {STOCK_SYMBOL} buy in an open window and sale in the next "
+                                "session's: fills, position, activities and reconciliation agree"))
+                self._pass_sell(row, today)
                 return row
             missing = [k for k in STOCK_WITNESSES if row.get(k) is not True]
-            if today.isoformat() > str(row.get("sold_day") or today.isoformat()):
-                # The sale's session has ended without every witness: this attempt ends flat; the next close tries again.
+            ended = today.isoformat() > str(row.get("sell_day") or today.isoformat()) or (
+                window is not None and now >= float(window.exit_until))
+            if ended:
+                # The sale's window has ended without every witness: the stage fails and this attempt ends flat; the
+                # next session's open window buys again (stage BUY stays passed) and the next one sells.
                 self._event("attempt_flat", {"attempt": row.get("attempt"), "missing": missing})
+                self._fail_sell(row, today, f"the round trip ended without {', '.join(missing)}")
                 row.update(status="waiting", why=f"the last attempt ended flat without {', '.join(missing)}")
             else:
                 row["why"] = f"sold; waiting for {', '.join(missing)}"
         return row
 
 
-__all__ = ["PaperProof", "StockPaperProof", "STOCK_KEY"]
+__all__ = ["PaperProof", "StockPaperProof", "STOCK_KEY", "STOCK_BUY_KEY", "STOCK_SELL_KEY"]

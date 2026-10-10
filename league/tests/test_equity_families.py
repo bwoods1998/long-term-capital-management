@@ -38,7 +38,7 @@ class StoreBacked(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         self.store = SwarmStore(self.root)
-        fam = self.store.add_family({"id": "seed-overnight-spy", "mechanism": MECH, "structure": "long_single",
+        fam = self.store.add_family({"id": "seed-overnight-spy", "mechanism": MECH, "structure": "etf",
                                      "roots": ["SPY"], "lane": "beta"}, origin="seed")
         self.fid = fam["id"]
         self.store.set_band(self.fid, "candidate", reason="passed its look")

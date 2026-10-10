@@ -36,7 +36,7 @@ the run. Be deterministic.
 |---|---|---|
 | `symbols` | the symbols you trade and read, 1 to 20 (duplicates count once), from the lane's universe (SPY QQQ IWM DIA, the eleven SPDR sector ETFs, TLT, GLD; stocks in a later release) | required |
 | `history` | prior sessions of daily bars in `ctx.bars` (0-504) | `252` |
-| `max_hold_sessions` | the House exits any lot of yours whose `held_sessions` reaches this, at the next open (1-60) | `20` |
+| `max_hold_sessions` | the most sessions the House lets a lot of yours be held: it exits the lot at the open that would complete them (1-60) | `20` |
 
 No other key is allowed. A malformed NEEDS refuses the program.
 
@@ -92,8 +92,8 @@ the same session, a cancel, an entry sized to nothing, a session without an offi
 ## The House's exit rules (the same in the Gym)
 
 - A lot is never sold in the session it was bought (a lot bought at the close may sell at the next open).
-- A lot whose `held_sessions` at a decision close has reached `max_hold_sessions` exits at the next open (reason
-  "max_hold").
+- A lot is held at most `max_hold_sessions`: at a decision close where its `held_sessions` + 1 reaches it, the lot
+  exits at the next open (reason "max_hold"). A lot bought at a close with a maximum of 1 is sold at the next open.
 - Two sessions of failed decides in a row (an exception, a timeout, a disqualified program) exit all your lots at the
   next open (reason "house").
 - A program demoted or retired has its lots exit at the next open (live).
