@@ -76,6 +76,29 @@ PREREG-T on Oct 10 under the Probe roster R5 already live, inside the owner's go
   (the CHANGELOG entry's Proof list) move in the same commit. A tighter line alone needs no deploy:
   `dlane.program_loss_usd` -200 in the state root's `swarm.json`.
 
+## The ration at birth (Oct 10, 2026): `fix/spent-lineage-birth`, not deployed
+
+A direction card whose birth would continue a lineage that has already spent its one Validation try or its one holdout
+look is not born (`league/swarm/dlane.py` `birth_spent`, asked by `league/swarm/architect.py` `admit` before
+`add_family`). The lineage read is the one the family would join: its parent's (a declared parent on the slice, else the
+newest dead family of the same idea on the slice, else a living twin) and, for a `long_single`, every twin lineage the
+birth links; their connected component, as `lineage_tries` and `lineage_looks` read it once the family is born. A prior
+lineage (a new idea on a dead slice) is not in it. The card becomes a card refusal: the next request lists it under
+"YOUR LAST PASS'S PROPOSALS REFUSED BY THE CARD CHECKS" with the lineage and the version that spent it, and the pass's
+`swarm.architect` event counts it in `card_refused.spent_lineage` (apart from `rebirth`).
+
+- **Why:** on Oct 10 about half of the lane's births joined such a lineage, and the tournament retired them on
+  `SPENT_TRY` 15-60 minutes later without a try: research money, Gym runs and a population slot each, and the architect
+  never learned why. The false-positive accounting is unchanged: one try a lineage, and a re-proposed idea still gets none.
+- **Read it:** `card_refused.spent_lineage` in the `swarm.architect` events; kv `architect_card_refusals`. Retirements
+  on `SPENT_TRY` within an hour of birth should fall to the families whose own try failed.
+- **Unchanged:** alpha cards and the lane off (`dlane.mode` "off") are born as before; a birth with no parent (a new
+  lineage) is never refused by this rule; a store error refuses nothing (the tournament's rule still retires). Nothing
+  in `league/live/`, `league/gym/` or `league/constitution.py`.
+- **Roll back:** revert the commit (there is no setting). Swarm-side only: no fingerprint, money or constitution move.
+- **Not handled:** a lineage joined after birth by identical code (`SwarmStore._link_code`, when a version is added) can
+  still spend a newborn's try; the tournament retires that family as before.
+
 ## The Probe roster (Oct 10, 2026): deployed 03:36Z, `dlane.roster` 5 since 03:48Z
 
 `dlane.roster` in the state root's `swarm.json` (a whole number; above 50 reads as 50; absent is no roster) caps how many

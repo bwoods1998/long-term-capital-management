@@ -68,7 +68,9 @@ stated beside every look and every Probe trade (`fp_lane_mixed`, `fp_lane_2224`)
 D2 is refused while `dlane.structures` admits anything but single calls (`D2_STRUCTURES`). TIGHTENED with it: one
 Validation try and one holdout look per direction lineage (`val_tries`, `looks_per_lineage`; `lineage_tries`,
 `try_open`, `lineage_spent`), so a lineage's false-positive rate is the program's. THE ROLLBACK is instant and is a
-tightening: swarm.json `dlane.screen` "S-C" (a setting may always choose S-C; it can never pin a receipt).
+tightening: swarm.json `dlane.screen` "S-C" (a setting may always choose S-C; it can never pin a receipt). THE RATION
+AT BIRTH (Oct 10, 2026; `birth_spent`): a direction card whose birth would join a lineage that has spent its try or its
+look is refused by the architect's card checks, naming the lineage, instead of being born to retire unjudged.
 
 THE BIRTH QUOTA (`DirectionQuota`; decision 1). While the lane is behind `birth_share` (0.5) of the last
 `window_hours` (24) of births and fewer than `max_alive` (24) direction families live, at least
@@ -1616,14 +1618,20 @@ SPENT_LOOK = "its direction lineage has used its one holdout look (one Validatio
 SPENT_TRY = "its direction lineage has used its one Validation try (one Validation try and one look a direction lineage)"
 
 
+def _families_in(store: Any, lines: Sequence[str]) -> list[str]:
+    """The families of the lineages `lines`."""
+    if not lines:
+        return []
+    return [r["id"] for r in store._all(f"SELECT id FROM families WHERE lineage IN ({','.join('?' * len(lines))})",
+                                        tuple(lines))]
+
+
 def _connected_families(store: Any, fid: str) -> list[str]:
     """The families of `fid`'s connected lineages: the set `SwarmStore.lineage_looks` counts holdout looks over."""
     row = store._one("SELECT lineage FROM families WHERE id=?", (str(fid),))
     if row is None:
         return []
-    lines = store._connected_lineages(row["lineage"])
-    return [r["id"] for r in store._all(f"SELECT id FROM families WHERE lineage IN ({','.join('?' * len(lines))})",
-                                        tuple(lines))]
+    return _families_in(store, store._connected_lineages(row["lineage"]))
 
 
 def lineage_tries(store: Any, fid: str) -> list[dict[str, Any]]:
@@ -1632,7 +1640,11 @@ def lineage_tries(store: Any, fid: str) -> list[dict[str, Any]]:
     looks are counted over), its own run or an inherited verdict's rows (F1), whatever its lane or its verdict: a run the
     Gym could not make (`NOT_A_TRY`) is none. `at` is the version's first such run: a version validated again (a new Gym
     image, an adoption) is the same try."""
-    fams = _connected_families(store, fid)
+    return _tries_of(store, _connected_families(store, fid))
+
+
+def _tries_of(store: Any, fams: Sequence[str]) -> list[dict[str, Any]]:
+    """`lineage_tries` over the families `fams`."""
     if not fams:
         return []
     rows = store._all(f"SELECT family, version, MIN(at) AS at FROM runs WHERE family IN ({','.join('?' * len(fams))}) "
@@ -1761,6 +1773,67 @@ def lineage_spent(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any
         return SPENT_TRY
     except Exception:  # noqa: BLE001 - a rule that cannot be read retires nothing
         return None
+
+
+#: The card refusal of a direction birth into a spent lineage (`spent_birth_text`): rules and names only, no figure.
+SPENT_BIRTH = ("this idea continues {lineage}, whose one {what} is spent ({who}): one Validation try and one holdout look "
+               "a direction lineage, and the same idea proposed again gets no new one; propose a mechanism-level new idea "
+               "on another slice or a new mechanism")
+
+
+def birth_spent(store: Any, lines: Iterable[str], settings: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """THE RATION AT BIRTH (Oct 10, 2026): what `lineage_spent` would answer for a DIRECTION family born into `lines` (the
+    lineage it joins and every lineage its birth links to it: the architect's parent's and, for a `long_single`, its
+    twins'), read BEFORE the birth: {"spent": "look" or "try", "family", "version"} (the look or the try that spent the
+    ration; the lineage's first), else None. The set read is the one `lineage_tries` and `lineage_looks` read once the
+    family is born: the connected component of every lineage in `lines`. A prior lineage (`prior_lineage`, a new lineage
+    on a dead slice) is never in it: its trials count, its tries and looks do not. A newborn holds no try of its own, so
+    `lineage_spent`'s exceptions (its own try awaiting a verdict or a look) never apply: the ration is spent when the
+    looks reach `looks_per_lineage` (in flight too) or the tries reach `val_tries`.
+    Why: until Oct 10, 2026 about half of the lane's births joined such a lineage and the tournament retired them on
+    `SPENT_TRY` 15-60 minutes later without a try, spending research money, Gym runs and a population slot, and the
+    architect never learned why (the House's measurement). None while the lane is off, and on any store error (the
+    tournament's own rule still retires such a family)."""
+    if not on(settings):
+        return None
+    try:
+        c = cfg(settings)
+        joined = sorted({x for line in lines if line for x in store._connected_lineages(str(line))})
+        if not joined:
+            return None
+        if store.looks_over(joined, include_inflight=True) >= c["looks_per_lineage"]:
+            slots = ",".join("?" * len(joined))
+            row = store._one(f"SELECT family, version FROM looks WHERE lineage IN ({slots}) ORDER BY seq LIMIT 1",
+                             tuple(joined))
+            if row is not None:
+                return {"spent": "look", "family": str(row["family"]), "version": int(row["version"])}
+            from .store import loads
+
+            for fam in store._all(f"SELECT id, state FROM families WHERE lineage IN ({slots}) ORDER BY born_at, id",
+                                  tuple(joined)):
+                marker = (loads(fam["state"], {}) or {}).get("look_inflight") or {}
+                if marker.get("sha"):
+                    return {"spent": "look", "family": str(fam["id"]), "version": marker.get("n")}
+            return {"spent": "look", "family": None, "version": None}
+        tries = _tries_of(store, _families_in(store, joined))
+        if len(tries) >= c["val_tries"]:
+            return {"spent": "try", "family": tries[0]["family"], "version": tries[0]["version"]}
+        return None
+    except Exception:  # noqa: BLE001 - a rule that cannot be read refuses no birth
+        return None
+
+
+def spent_birth_text(spent: Mapping[str, Any], lineage: Any = None, hidden: Iterable[str] = ()) -> str:
+    """The architect's card refusal for `birth_spent`'s answer `spent`: the lineage the idea continues, what is spent and by
+    which family's version. A family or lineage in `hidden` (THE LEARNING GAME's rows the architect may not read) is never
+    named."""
+    hidden = {str(x) for x in hidden}
+    what = "holdout look" if spent.get("spent") == "look" else "Validation try"
+    fam = str(spent.get("family") or "")
+    who = ((fam + (f" v{spent['version']}" if spent.get("version") is not None else ""))
+           if fam and fam not in hidden else "by an earlier family")
+    line = f"lineage {lineage}" if lineage and str(lineage) not in hidden else "a lineage"
+    return SPENT_BIRTH.format(lineage=line, what=what, who=who)
 
 
 # ----------------------------------------------------------------------------------------------------------- the quota
@@ -2478,6 +2551,7 @@ __all__ = ["OBJECTIVE", "ALPHA", "DIRECTION", "LANES", "MODES", "SCREENS", "ALPH
            "TRY_KEY", "D2_STRUCTURES", "D2_RATES", "D2_INTERVALS", "fp_beside", "fp_of_look", "d2_verdict", "d2_pooled_t_low",
            "GYM_MEAN_ROUNDING", "GYM_T_ROUNDING", "NOT_A_TRY", "SPENT_LOOK",
            "SPENT_TRY", "lineage_tries", "looks_ration", "try_open", "first_try", "try_owed", "lineage_spent", "calls_only",
+           "SPENT_BIRTH", "birth_spent", "spent_birth_text",
            "CALLS_ONLY_WHY", "ration_text",
            # the train map (Oct 9, 2026)
            "MAP_PATH", "MAP_LABEL", "MAP_UNITS", "MAP_ARCHITECT_ROWS", "MAP_BRIEF_ROWS", "map_text_problems", "train_map",

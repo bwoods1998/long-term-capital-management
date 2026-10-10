@@ -73,6 +73,29 @@ gateway is `507b6118`, and the box's updater is on. What is built and not deploy
   `test_live_long_single`. Operator's page: **The Probe total at $800 and the program line at -$300** at the top of
   `docs/operations.md`.
 
+### The ration at birth, on `fix/spent-lineage-birth` (unreleased; an owner deploy; no evidence reset; no setting)
+
+- **Why** (measured on the House, Oct 10, 2026): about half of the direction lane's births died 15-60 minutes after
+  birth on the tournament's `dlane.SPENT_TRY` without ever taking a try. The architect resolved a parent on the slice
+  (a declared parent, a dead family of the same idea, a living twin) and, for a `long_single`, linked its twins'
+  lineages, so the family joined a connected lineage whose one direction Validation try was already spent. Right for the
+  false-positive accounting, but each such birth wasted research money, Gym runs and a population slot, and the
+  architect never learned why.
+- **The rule** (`league/swarm/dlane.py` `birth_spent`, `spent_birth_text`; `league/swarm/architect.py` `admit`): before
+  `add_family`, a direction card's birth reads the lineage it would join (the parent's and every twin's it links: the
+  set `lineage_tries` and `lineage_looks` read after the birth). When its tries reach `val_tries` or its looks reach
+  `looks_per_lineage` (in flight too), the card is refused and recorded with the card refusals: the next request names
+  the lineage and the version that spent it ("propose a mechanism-level new idea on another slice or a new mechanism"),
+  and the pass's event counts it (`card_refused.spent_lineage`). No lineage is linked for a refused card.
+  `SwarmStore.looks_over` is `lineage_looks` over a lineage set.
+- **Unchanged:** alpha cards, the lane off, births with no parent, the tournament's retirement rule and the one-try,
+  one-look accounting. Nothing in `league/live/`, `league/gym/` or `league/constitution.py`: the execution fingerprint,
+  money digest and constitution digest are main's.
+- **Rollback:** revert the commit.
+- **Proof.** `league/tests/test_dlane_spent_birth.py` (a spent lineage refused, named and fed back; a twin's spent try
+  refused; `birth_spent` agrees with `lineage_spent` after the birth on each lineage shape; a fresh idea, a lineage with
+  its try left, an alpha card and the lane off are born).
+
 ### 03:36Z Oct 10, 2026: the Probe roster (#523), House `20261010T033512Z-df7078e102a6`, main `9e2cf9fc`; `dlane.roster` 5 at 03:48Z
 
 Owner deploy (no gateway change): no order in flight at 03:35:03Z; nightly stopped, deployed, promoted 03:36:06Z (rollback

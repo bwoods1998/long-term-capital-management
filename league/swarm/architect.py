@@ -173,6 +173,10 @@ default, or "direction": cards.py, `dlane.card_errors`):
   - A BIRTH: a direction family's spec carries `lane` "direction" (its card does too); its `swarm.born` payload carries
     `lane` (every birth's, while the lane is on). An alpha card and spec never carry a lane, so alpha card shas are the
     release before's.
+  - THE RATION AT BIRTH (Oct 10, 2026; `dlane.birth_spent`): a direction card whose birth would continue a lineage (its
+    parent's, and every twin's a long_single links) that has spent its one Validation try or its one holdout look is not
+    born: it is a card refusal naming the lineage and the version that spent it (`dlane.spent_birth_text`), shown in the
+    next request, and the pass's event counts it (`card_refused.spent_lineage`). Born, it retired unjudged within the hour.
   - NO PAID PASS WITHOUT A CELL (`closed`) reads a cell whose rows bind no direction card (DRIFT rows and, since Oct 9,
     alpha families' rows) as one a direction card can bear, and the BIRTH CELLS gain the lane's own cells (cards.py
     `lane_cells`); since Oct 9 their header says what binds a direction card (`LANE_CELLS_NOTE`) and each line of a cell
@@ -2144,20 +2148,32 @@ class Architect:
             source_line = (self.store.family(reborn) or {}).get("lineage") if reborn and not parent else None
             if source_line:
                 prior = list(dict.fromkeys([*(prior or []), str(source_line)]))
+            # A long_single that continues one twin joins every other twin of its idea or its parent's, dead or alive, on
+            # its roots (review of #425: a merged pair kept one twin's trials, looks and validated versions, so relabeling
+            # bought a fresh look ration). The lineages are linked at the birth, below.
+            home = (self.store.family(parent) or {}) if parent else {}
+            twins: list[str] = []
+            if structure == LONG_SINGLE and parent:
+                ideas = (mechanism, str(home.get("mechanism") or ""))
+                of_idea = [f for f in (*dead, *alive) if f["structure"] in (LONG_SINGLE, *SINGLE_SIDES)
+                           and sorted(f["roots"]) == sorted(roots) and any(same_idea(f["mechanism"], idea) for idea in ideas)]
+                twins = list(dict.fromkeys(f["lineage"] for f in (*same, *kin, *of_idea)))
+            # THE RATION AT BIRTH (Oct 10, 2026; `dlane.birth_spent`): a DIRECTION card whose birth would join a lineage
+            # (its parent's and the twins' it links) that has spent its one Validation try or its one holdout look is not
+            # born, and the next request names the lineage among the card refusals. Born, it retired on SPENT_TRY 15-60
+            # minutes later without a try (about half of the lane's births on the House, Oct 10), spending research money,
+            # Gym runs and a population slot. A new lineage (no parent) has nothing spent; alpha and the lane off: as before.
+            if lane == dlane.DIRECTION and parent:
+                spent = dlane.birth_spent(self.store, [str(home.get("lineage") or ""), *twins], self.settings)
+                if spent is not None:
+                    self.card_refused.append({"slug": slug, "spent": spent["spent"],
+                                              "why": dlane.spent_birth_text(spent, home.get("lineage"), unseen)})
+                    continue
             with self.store.atomic():
                 if len(self.store.families(alive=True)) >= int(self.settings.get("population", {}).get("ceiling", 96)):
                     break
-                if structure == LONG_SINGLE and parent:
-                    # A long_single that continues one twin joins every other twin of its idea or its parent's, dead or
-                    # alive, on its roots (review of #425: a merged pair kept one twin's trials, looks and validated
-                    # versions, so relabeling bought a fresh look ration).
-                    home = self.store.family(parent) or {}
-                    ideas = (mechanism, str(home.get("mechanism") or ""))
-                    twins = [*same, *kin, *(f for f in (*dead, *alive) if f["structure"] in (LONG_SINGLE, *SINGLE_SIDES)
-                                            and sorted(f["roots"]) == sorted(roots)
-                                            and any(same_idea(f["mechanism"], idea) for idea in ideas))]
-                    for line in dict.fromkeys(f["lineage"] for f in twins):
-                        self.store.link_lineages(str(home.get("lineage") or ""), line)
+                for line in twins:
+                    self.store.link_lineages(str(home.get("lineage") or ""), line)
                 fam = self.store.add_family(spec, origin="architect", parent=parent, prior_lineage=prior)
                 if card is not None:
                     cards.put(self.store, fam["id"], card, structure)
@@ -2399,8 +2415,12 @@ class Architect:
         if refused_cards or self.require_card():
             # The card checks' refusals: counted in the event, and shown with their lessons in the next request.
             out["card_refused"] = {"incomplete": sum(1 for r in refused_cards if str(r["why"]).startswith("incomplete card")),
-                                   "rebirth": sum(1 for r in refused_cards if not str(r["why"]).startswith("incomplete card")),
+                                   "rebirth": sum(1 for r in refused_cards if not str(r["why"]).startswith("incomplete card")
+                                                  and not r.get("spent")),
                                    "items": [{k: r.get(k) for k in ("slug", "why", "row", "matched")} for r in refused_cards[:12]]}
+            spent = sum(1 for r in refused_cards if r.get("spent"))
+            if spent:
+                out["card_refused"]["spent_lineage"] = spent  # THE RATION AT BIRTH: direction cards into a spent lineage
             if proposed:
                 # Only a pass that proposed something replaces them: an empty, cut-to-nothing or failed answer (Oct 1,
                 # 2026: nine empty Sail passes in a row wrote []) keeps the last real refusals and their lessons.

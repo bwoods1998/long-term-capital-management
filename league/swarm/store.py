@@ -721,7 +721,14 @@ class SwarmStore:
         fam = self._one("SELECT lineage FROM families WHERE id=?", (fid,))
         if fam is None:
             return 0
-        lines = self._connected_lineages(fam["lineage"])
+        return self.looks_over(self._connected_lineages(fam["lineage"]), include_inflight=include_inflight)
+
+    def looks_over(self, lines: Sequence[str], *, include_inflight: bool = False) -> int:
+        """`lineage_looks` over the lineage set `lines` (the architect asks it of the set a direction birth would join
+        before the birth, `dlane.birth_spent`)."""
+        lines = [str(x) for x in lines]
+        if not lines:
+            return 0
         slots = ",".join("?" * len(lines))
         seen = {row["run_sha"] for row in self._all(f"SELECT run_sha FROM looks WHERE lineage IN ({slots})", lines)}
         if include_inflight:
