@@ -608,6 +608,33 @@ class OrderPath(BookTest):
         self.assertEqual(len(h.venue.sent), 1)                             # never re-sent blind
         self.assertTrue(any("lost" in text for _, text in h.alerts))
 
+    def test_a_lost_sale_goes_again_only_while_the_shares_are_still_held(self):
+        for filled in (False, True):
+            with self.subTest(filled=filled):
+                tmp = tempfile.TemporaryDirectory()
+                self.addCleanup(tmp.cleanup)
+                h = Harness(Path(tmp.name))
+                self.addCleanup(h.state.close)
+                inst = h.instance()
+                lot = h.lot(inst, "SPY", "0.5", "590")
+                h.intent(inst, "sell", symbol="SPY", lid=lot.lid)
+                h.venue.submit_mode = "lost_absent"
+                for mm in range(31, 34):
+                    h.tick(9, mm)
+                self.assertEqual(h.orders()[0].status, "unknown")
+                if filled:                                                  # it filled after all, unseen
+                    h.venue.held["SPY"] -= D("0.5")
+                h.venue.submit_mode = "ok"
+                h.tick(9, 34)                                               # lost now, and the exit decides again
+                self.assertEqual(h.orders()[0].status, "lost")
+                if filled:
+                    self.assertEqual(len(h.venue.sent), 1)
+                    self.assertTrue(any("may have filled" in text for _, text in h.alerts))
+                    self.assertEqual(h.book._lot(lot.lid).status, "closing")
+                else:
+                    self.assertEqual(len(h.venue.sent), 2)
+                    self.assertEqual(h.book._lot(lot.lid).status, "closed")
+
     def test_a_crash_between_the_row_and_the_post(self):
         h = self.harness()
         it = h.intent(h.instance(), "buy", symbol="SPY", share="0.5")

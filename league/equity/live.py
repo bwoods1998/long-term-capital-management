@@ -14,7 +14,8 @@ THE ORDER PATH (the options path's discipline): a row is written `pending` BEFOR
 `lq-<nonce>-<eid>-<family>` (`client_id`: the process nonce of `LiveState`, as the options book's ids, so a rolled-back
 state never sends an id the venue has seen); a lost answer is `unknown` and is looked up by its client id, never
 re-sent blind (an order the venue still does not show by its client id after `LOST_AFTER_S` is `lost`: an entry is then
-missed, never re-sent; an exit may go again, the reconciliation being the backstop); one working order per symbol
+missed, never re-sent; an exit goes again only while the account still holds what the book expects of the symbol,
+`_lost_sale_check`); one working order per symbol
 across BOTH books (wash-trade protection: the options book's `busy()` symbols, the venue's working orders that are not
 this book's, e.g. the House's assignment-share closes, and the equity book's). CANCEL THEN RESEND (A8.4): a
 replacement goes only once the old order is terminal (filled, canceled, expired, rejected), sized target minus filled;
@@ -1348,6 +1349,8 @@ class EquityBook:
             self._carry(intent, lot, today, f"refused {len(refused)} times: {refused[-1].answer.get('error')}")
             return
         why = self._symbol_busy(lot.symbol) or self._count_refusal(today, exit_=True)
+        if why is None and any(o.status == "lost" for o in orders):
+            why = self._lost_sale_check(lot)
         if why:
             intent.why = why
             self._save_intent(intent)
@@ -1372,6 +1375,26 @@ class EquityBook:
         self._send(intent, side="sell", symbol=lot.symbol, klass=lot.klass, qty=lot.qty, limit=limit, collar=collar,
                    day=today, lid=lot.lid, replaces=current.eid if current is not None else None, probe=lot.probe,
                    why=f"exit ({reason}){' at the bid, late' if late else ''}", at="close" if in_close else "open")
+
+    def _lost_sale_check(self, lot: Lot) -> str | None:
+        """After a sale of this lot was given up as lost, it goes again only while the account still holds what the
+        book expects of the symbol (had the lost sale filled, the account would hold less, and another sale could
+        sell another program's shares): None, or why it waits (the owner is told once)."""
+        positions = self._read_positions()
+        if positions is None:
+            return "a sale of this lot was lost: the positions could not be read to see whether it filled"
+        held = sum((A.dec(r.get("qty")) or ZERO for r in positions if str(r.get("asset_class") or "") == "us_equity"
+                    and str(r.get("symbol") or "").upper() == lot.symbol), ZERO)
+        want = self.expected_shares().get(lot.symbol, ZERO)
+        if held + SHARE_TOLERANCE >= want:
+            return None
+        why = (f"a sale of lot {lot.lid} was lost and the account holds {text(held)} {lot.symbol}, less than the book's "
+               f"{text(want)}: it may have filled; the owner looks before another sale")
+        if not lot.info.get("lost_sale_told"):
+            lot.info["lost_sale_told"] = True
+            self._save_lot(lot)
+            self.alert("error", f"equity: {why}")
+        return why
 
     def _reprice_due(self, order: Order, now: float, reprice: float, m: S.Moments) -> bool:
         """Whether a working order is re-priced now: once it is `reprice` seconds old, while its collar can still widen;
