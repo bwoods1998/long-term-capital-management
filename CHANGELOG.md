@@ -33,7 +33,7 @@ Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. 
 
 Gateway deploy only (455/455; rollback `e3f310ee`); the House unchanged.
 
-### A stock buy's fill between reads is never lost, a lagging sale is never sold twice, and a definite answer lets a hold go, on `fix/gateway-stock-read-order` (DEPLOYED 22:20Z Oct 10, gateway `95e7a8d0`;; a gateway deploy; no House change)
+### A stock buy's fill between reads is never lost, a lagging sale is never sold twice, and a definite answer lets a hold go, on `fix/gateway-stock-read-order` (DEPLOYED 22:20Z Oct 10, gateway `95e7a8d0`; a gateway deploy; no House change)
 
 - The design review of Oct 10, 2026: `realStockBuy` read the account, then the open orders, then the positions, so a buy
   that filled between the first two reads was counted nowhere, and the Gate's ledger let an answered buy go after 5 s
