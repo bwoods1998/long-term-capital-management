@@ -1,0 +1,78 @@
+{
+  "name": "equity_screen_fake",
+  "study": "FAKE: an invented receipt for league/tests/test_equity_screen.py only; not a measurement, never pinned",
+  "rule": "FAKE (the S1 rule's shape only). Step 0 (floor): c_p and c_H on the program's own null worlds; c_used = max(c_R, c_p). Step 1 (pre-check): (RT >= 20 or ID >= 120) and sum r > 1e-12. Step 2 (after the one look): pooled t >= c_used, holdout sum r > 1e-12 and t_H >= c_H. Label S1-X: the same steps on x with c_X, no floor: alpha or beta.",
+  "fp_cap": 0.12,
+  "owner_wall": 0.15,
+  "c_R": 1.25,
+  "c_X": 1.1,
+  "precheck": {
+    "rt_min": 20,
+    "id_min": 120,
+    "rule": "(RT_V >= 20 or ID_V >= 120) and sum_V(r) > 1e-12"
+  },
+  "look": {
+    "rule": "pooled t over V+H daily r >= c_used and sum_H(r) > 1e-12 and t_H >= c_H; sd < 1e-12 fails"
+  },
+  "floor": {
+    "c_p": "smallest c on 0.00..5.00 (step 0.01) with share(t* >= c) <= fp_cap at BOTH L = 194 and L = 251",
+    "c_H": "smallest c on the same grid with share(t_H >= c and sum_H > 0) <= fp_cap, at both L",
+    "worlds": "IND22 and IND1622, 20,000 worlds each, V = 250 and H = L",
+    "null": "N0: r0 = r - w * kappa, kappa = sum_pool(r) / sum_pool(w)",
+    "seed": "numpy default_rng([20261010, 1010, set_id, L, 0]); set_id 3 = IND22, 5 = IND1622",
+    "ineligible": "no pool of >= 300 sessions, or c_p > 5.00 or c_H > 5.00"
+  },
+  "windows": {
+    "validation": "the Validation window (250 sessions)",
+    "holdout": "the holdout, capped; calibrated for 194..251 sessions"
+  },
+  "lineage": {
+    "holdout_looks": 1,
+    "validation_tries": 2,
+    "retry": "only after the first try FAILED its pre-check (no look spent), the retry version hashed at the first try (R3)",
+    "same_lineage": "Train daily returns correlating >= 0.7 with a program already looked at, or the same template",
+    "no_feedback": "look and Validation outcomes never reach generators or the diagnostician"
+  },
+  "fp_zero_edge_at_cR": {
+    "A1": {
+      "FAKE|194": [
+        0.1,
+        0.09,
+        0.11
+      ]
+    }
+  },
+  "power_at_cR": {
+    "A1": {
+      "FAKE|194|N0e10": [
+        0.3,
+        0.29,
+        0.31
+      ]
+    }
+  },
+  "binding_R": [
+    "FAKE|A2|194|N0"
+  ],
+  "R3_retry_permitted": true,
+  "R4_flags": {
+    "A1": [],
+    "A2": [],
+    "A3": [
+      "FAKE: an invented wall flag"
+    ],
+    "A4": [],
+    "A5": [],
+    "A6": []
+  },
+  "stated_beside_every_live_trade": "S1-R, c_used = {c_used}, c_H = {c_H}, this program's FP at zero edge = {own_fp}% (cap 12%; owner's wall 15%), drift-kept pass rate = {n1}% (not a false positive: the goal counts direction); S1-X: {alpha|beta} (FP {fpx}%); contamination: FAKE fixture sentence",
+  "note": "FAKE: an invented receipt for league/tests/test_equity_screen.py only; not a measurement, never pinned",
+  "sha256": {
+    "PREREG.md": "0000000000000000000000000000000000000000000000000000000000000000",
+    "RESULT.md": "0000000000000000000000000000000000000000000000000000000000000000",
+    "receipt.json": "0000000000000000000000000000000000000000000000000000000000000000",
+    "code": {
+      "screen.py": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  }
+}
