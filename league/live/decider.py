@@ -28,6 +28,13 @@ The parent sends each minute's `Snapshot`s once (pickled; the House is the trust
 index), and each instance's account rows with the minute index it decides on; the child slices each instance's chain with the Gym's own `Snapshot.view(slice_index(...))`, builds the ctx with
 the Gym's own `build_ctx` and calls `Runner.decide`, exactly as `league.gym.engine.Account._decide` does, so a program
 sees the same ctx live as in the replay. `InlineDecider` is the same API in one process, for tests.
+
+THE KINDS (release E1, A8.8): the same child answers ("kind", <kind>, <op>, <payload>) for the other lanes' programs, by
+`league.equity.kinds.module_for(kind).handle(op, payload, state)` (the "equity" kind: league/equity/child.py), with
+`state` kept per kind in the child. This module imports `league.equity.kinds` only, so a later kind is a row in that
+table and needs no edit here. The parent remembers each kind load and reloads it into a restarted child before that
+kind's next request (`kind_load`), as it does for options programs; the child's read-only runtime holds the kinds'
+files too (`runtime_files`).
 """
 
 from __future__ import annotations
@@ -75,14 +82,20 @@ class ProgramRefused(ValueError):
 
 
 # ---------------------------------------------------------------------------------------------- the child's side
-def _handle(message: Any, runners: dict, reply: Any) -> bool:
-    """One message from the House; False when it says to stop. Mirrors `league.gym.engine.Account._decide`."""
+def _handle(message: Any, runners: dict, reply: Any, kinds: dict | None = None) -> bool:
+    """One message from the House; False when it says to stop. Mirrors `league.gym.engine.Account._decide`. `kinds`:
+    each request kind's own state in this child ({kind: dict}, THE KINDS)."""
     from ..gym import runtime as R
     from ..gym.ctx import build_ctx
 
     kind = message[0]
     try:
-        if kind == "load":
+        if kind == "kind":
+            _, which, op, payload = message
+            from ..equity import kinds as K
+
+            reply(K.module_for(which).handle(op, payload, (kinds if kinds is not None else {}).setdefault(which, {})))
+        elif kind == "load":
             _, key, code, params, name, timeout, max_errors = message
             program = R.load_program(code, name=name, params=params)
             runners[key] = program.start(timeout=timeout, max_errors=max_errors)
@@ -158,6 +171,7 @@ def _handle(message: Any, runners: dict, reply: Any) -> bool:
 
 def _serve(stdin: Any, stdout: Any) -> None:
     runners: dict[str, Any] = {}
+    kinds: dict[str, dict] = {}
 
     def reply(obj: Any) -> None:
         data = json.dumps(_finite(obj), default=_plain_default, allow_nan=False).encode("utf-8")
@@ -169,7 +183,7 @@ def _serve(stdin: Any, stdout: Any) -> None:
         if len(head) < HEADER.size:
             return
         (size,) = HEADER.unpack(head)
-        if not _handle(pickle.loads(stdin.read(size)), runners, reply):
+        if not _handle(pickle.loads(stdin.read(size)), runners, reply, kinds):
             return
 
 
@@ -250,6 +264,18 @@ def child_main() -> None:  # pragma: no cover - run as a subprocess
 # --------------------------------------------------------------------------------------------- the House's side
 #: The longest a minute's batch may hold the House's minute (the live step runs a few seconds past the minute).
 MAX_BATCH_SECONDS = 40.0
+#: The files an options decision's child imports (the root House copies them read-only into the child's runtime).
+RUNTIME_FILES = ("league/__init__.py", "league/safety.py", "league/structure_core.py", "league/live/__init__.py",
+                 "league/live/decider.py", "league/gym/__init__.py", "league/gym/runtime.py", "league/gym/safety.py",
+                 "league/gym/ctx.py", "league/gym/greeks.py", "league/gym/venue.py")
+
+
+def runtime_files(repo: Path = REPO) -> list[str]:
+    """Every file the child may import: `RUNTIME_FILES` and every kind's (`league.equity.kinds.runtime_files`, THE
+    KINDS), sorted, repository-relative."""
+    from ..equity import kinds as K
+
+    return sorted(set(RUNTIME_FILES) | set(K.runtime_files(repo)) | {"league/equity/__init__.py", "league/equity/kinds.py"})
 
 
 def batch_deadline(timeout: float, jobs: int, budget_seconds: float | None = None) -> float:
@@ -306,6 +332,9 @@ class _Base:
         self.timeout, self.max_errors = float(timeout), int(max_errors)
         self.loaded: dict[str, tuple[str, dict, str]] = {}
         self.info: dict[str, dict] = {}
+        #: THE KINDS' loads: (kind, key) -> the load's payload (reloaded into a restarted child), and its answer.
+        self.kind_loaded: dict[tuple[str, str], dict] = {}
+        self.kind_info: dict[tuple[str, str], dict] = {}
         self.restarts = 0
         self.lock = threading.RLock()
 
@@ -345,20 +374,51 @@ class _Base:
 
     # ------------------------------------------------------------------ the generic kinds (release E1, A8.8; owner: hooks)
     def kind_load(self, kind: str, key: str, payload: Mapping[str, Any], *, budget_seconds: float | None = None) -> dict:
-        """Load an instance of `kind` (league/equity/kinds.py `KINDS`): sends ("kind", kind, "load", {"key": key,
-        **payload}) and remembers it, so a restarted child reloads it before the kind's next request (fresh memory), as
-        `load` does for options programs. ProgramRefused when the child refuses it."""
-        raise NotImplementedError("hooks: league/live/decider.py _Base.kind_load")
+        """Load an instance of `kind` (league/equity/kinds.py `KINDS`): sends ("kind", kind, "load", {**payload, "key":
+        key}) and remembers it, so a restarted child reloads it before the kind's next request (fresh memory), as
+        `load` does for options programs. The child's answer less "ok" (for "equity": needs, sha, run_sha);
+        ProgramRefused when the child refuses it."""
+        with self.lock:
+            body = {**dict(payload), "key": key}
+            answer = self._ask(("kind", kind, "load", body),
+                               min(30.0, budget_seconds) if budget_seconds is not None else 30.0)
+            if not answer.get("ok"):
+                raise ProgramRefused(answer.get("error") or "the program did not load")
+            self.kind_loaded[(kind, key)] = body
+            self.kind_info[(kind, key)] = {k: v for k, v in answer.items() if k != "ok"}
+            return self.kind_info[(kind, key)]
 
     def kind_drop(self, kind: str, key: str, *, budget_seconds: float = 10.0) -> None:
         """Forget an instance of `kind` (in the child and for reloads)."""
-        raise NotImplementedError("hooks: league/live/decider.py _Base.kind_drop")
+        with self.lock:
+            if self.kind_loaded.pop((kind, key), None) is not None:
+                self.kind_info.pop((kind, key), None)
+                try:
+                    self._ask(("kind", kind, "drop", {"key": key}), max(0.0, min(10.0, budget_seconds)))
+                except DeciderError:
+                    pass
 
     def kind(self, kind: str, op: str, payload: Mapping[str, Any], *, budget_seconds: float | None = None) -> dict:
         """One request of `kind` (op "decide", "needs", "run", ...): sends ("kind", kind, op, payload) under the same
         isolation and deadline rules as `decide`; the child answers `league.equity.kinds.module_for(kind).handle(op,
-        payload, state)`. DeciderError when the child failed (it was restarted)."""
-        raise NotImplementedError("hooks: league/live/decider.py _Base.kind")
+        payload, state)`. DeciderError when the child failed (it was restarted).
+
+        The deadline: a "decide" is a minute's batch (`batch_deadline` of its jobs, at most `MAX_BATCH_SECONDS`); any
+        other op waits `budget_seconds` (an isolated run's own budget, league/equity/runner.py), 30 s when none is
+        given. The child's answer is returned as it is: {"ok": False, "refused": True, ...} is the program's (a refused
+        load), not the child's failure. Use "load" and "drop" through `kind_load` and `kind_drop` (they are
+        remembered for a restart)."""
+        if op in ("load", "drop"):
+            raise ValueError(f"a kind's {op} goes through kind_{op} (it is remembered for a restarted child)")
+        with self.lock:
+            if op == "decide":
+                deadline = batch_deadline(self.timeout, len((payload or {}).get("jobs") or ()), budget_seconds)
+            else:
+                deadline = float(budget_seconds) if budget_seconds is not None else 30.0
+            answer = self._ask(("kind", kind, op, dict(payload or {})), deadline)
+            if not isinstance(answer, dict):
+                raise DeciderError(f"the decider answered a {kind} {op} with {type(answer).__name__}")
+            return answer
 
     def _ask(self, message: Any, deadline: float) -> dict:  # pragma: no cover - abstract
         raise NotImplementedError
@@ -380,7 +440,8 @@ class Decider(_Base):
         self.memory_mb, self.python, self.log = int(memory_mb), python, log
         self.proc: subprocess.Popen | None = None
         self.pid: int | None = None
-        self._ready: set[str] = set()
+        #: What the live child holds: options instance keys, and ("kind", kind, key) for THE KINDS' loads.
+        self._ready: set[Any] = set()
         self.isolated = os.geteuid() == 0
         #: Off a root House a child would keep this user's files: it starts only when a test or a developer's machine
         #: says so (the module docstring).
@@ -423,10 +484,7 @@ class Decider(_Base):
         if self.isolated:
             if self._runtime is None:
                 self._runtime = Path(tempfile.mkdtemp(prefix="ltcm-decider-runtime-"))
-                files = ("league/__init__.py", "league/safety.py", "league/structure_core.py", "league/live/__init__.py",
-                         "league/live/decider.py", "league/gym/__init__.py", "league/gym/runtime.py", "league/gym/safety.py",
-                         "league/gym/ctx.py", "league/gym/greeks.py", "league/gym/venue.py")
-                for name in files:
+                for name in runtime_files():
                     path = self._runtime / name
                     path.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copyfile(REPO / name, path)
@@ -530,11 +588,25 @@ class Decider(_Base):
                     if not answer.get("ok"):
                         continue
                     self._ready.add(key)
+            elif message[0] == "kind" and message[2] not in ("load", "drop"):
+                # THE KINDS: every remembered load of this kind back into a restarted child first (fresh memory).
+                if self.proc is None or self.proc.poll() is not None:
+                    self._ready.clear()
+                for (which, key), body in list(self.kind_loaded.items()):
+                    if which != message[1] or ("kind", which, key) in self._ready:
+                        continue
+                    answer = self._raw(("kind", which, "load", body), end - time.monotonic())
+                    if answer.get("ok"):
+                        self._ready.add(("kind", which, key))
             answer = self._raw(message, end - time.monotonic())
             if message[0] == "load" and answer.get("ok"):
                 self._ready.add(message[1])
             elif message[0] == "drop":
                 self._ready.discard(message[1])
+            elif message[0] == "kind" and message[2] == "load" and answer.get("ok"):
+                self._ready.add(("kind", message[1], message[3]["key"]))
+            elif message[0] == "kind" and message[2] == "drop":
+                self._ready.discard(("kind", message[1], message[3]["key"]))
             return answer
         except BudgetSpent:
             raise  # nothing was sent: the child stays, with every program's memory
@@ -563,11 +635,13 @@ class InlineDecider(_Base):
     def __init__(self, *, timeout: float = 1.0, max_errors: int = 25):
         super().__init__(timeout=timeout, max_errors=max_errors)
         self._runners: dict[str, Any] = {}
+        self._kinds: dict[str, dict] = {}
 
     def _ask(self, message: Any, deadline: float) -> dict:
         answers: list[dict] = []
         _handle(pickle.loads(pickle.dumps(message)), self._runners,
-                lambda obj: answers.append(json.loads(json.dumps(_finite(obj), default=_plain_default, allow_nan=False))))
+                lambda obj: answers.append(json.loads(json.dumps(_finite(obj), default=_plain_default, allow_nan=False))),
+                self._kinds)
         return answers[0]
 
 
