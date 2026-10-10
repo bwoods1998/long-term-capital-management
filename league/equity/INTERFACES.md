@@ -687,6 +687,20 @@ variant="R")`, `floor(segments, *, fp_cap) -> {eligible, why, c_p, c_H, sets, ow
 `retry_permitted(receipt, *, first_precheck_failed)`, `same_lineage(train_r, other_train_r, *, same_template=False)`,
 `r4_flags(receipt, archetype=None)`.
 
+Additions by the screen package (additive; every call above is unchanged):
+- `floor(...)` also returns `fp_cap` and `curves` {set: {"194" | "251": {"R_N0", "R_N1", "X": pass counts on the c grid}}}
+  (JSON, about 10 KB, House-only like the rest of `elane_floor`), so `verdict` reads the program's own FP and drift-kept
+  rate at c_used and its S1-X FP at c_X without a second run; `fp_at(program_floor, key, c) -> float | None` reads them.
+- `verdict(...)` also returns `why` (the first failed condition), `c_X`, `n`, `look`, `windows` and `fp_cap`; it fails
+  closed (passed False) on a floor run at another fp_cap than the receipt's, and on windows outside the calibrated ones
+  (V: calendar 2025's 250 sessions; H: 194..251 sessions inside `LOOK_FIRST`..`LOOK_CAP`).
+- `retry_permitted(receipt, *, first_precheck_failed, tries=1, looks=0, retry_sha=None, recorded_sha=None)`: never a
+  third try or a retry after a look; when either hash is given, the retry must be the version hashed at the first try.
+- `look_permitted(looks, *, precheck_passed) -> bool`: one look a lineage, only after a passed pre-check.
+- `Receipt.owner_wall` is None when a policy block names none (the docstring's required fields are unchanged).
+- A close ENTRY counts 0 in w_t at its session (A2 extension: it holds no part of t's session; its half-spread is t's
+  cost); a close exit counts as held through, as the pre-registration's forced close exit.
+
 THE RULE (the receipt's `rule`, `precheck`, `look`, `floor`, `windows`, `lineage`): step 0 the floor on the program's
 own Train-era series: c_p and c_H (F1: the holdout-only t's 12% point, with sum_H > 0), each the smallest c on
 0.00..5.00 with the pass share <= fp_cap at BOTH L = 194 and 251, the maximum over IND22 and IND1622 where the program
