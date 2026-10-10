@@ -26,10 +26,23 @@ any other deploy.
 
 ## Not yet deployed
 
-The running House release is `20261010T033512Z-df7078e102a6` (main `9e2cf9fc`, the Probe roster, 03:36Z Oct 10), the
-gateway is `507b6118`, and the box's updater is on. What is built and not deployed is on branches.
+The running House release is `20261010T062000Z-1767910d2115` (main `dd196cad`, the spent-lineage refusal, 06:20Z Oct 10),
+the gateway is `507b6118`, and the box's updater is on. What is built and not deployed is on branches.
 
-### The Probe total at $800 and the program line at -$300, on `feat/probe-total-800` (unreleased; an owner deploy; money digest `0310779c` -> `fdf2ac7c`; no evidence reset)
+### 06:20Z Oct 10, 2026: the spent-lineage refusal (#526), House `20261010T062000Z-1767910d2115`, main `dd196cad`
+
+Owner deploy (no gateway change) after the 06:00Z nightly: no order in flight at 06:19:51Z; promoted (rollback
+`20261010T053556Z-6803e7940d24`), nightly back 06:31:04Z, updater repointed. Verified on the box: health clean, real money
+on, execution fingerprint `31a7e921`, money `fdf2ac7c` and constitution `0adb4f0e` unchanged from the release below.
+
+### 05:36Z Oct 10, 2026: the Probe total at $800 and the program line at -$300 (#525), House `20261010T053556Z-6803e7940d24`, main `d93a091e`
+
+Owner deploy (no gateway change): no order in flight at 05:35:44Z; promoted 05:36:40Z (rollback
+`20261010T033512Z-df7078e102a6`), nightly back 05:46:55Z, updater repointed. Verified: money digest `0310779c` ->
+`fdf2ac7c`, constitution `ca89ff8a` -> `0adb4f0e`, execution fingerprint `31a7e921` unchanged (no evidence reset), and
+the standing grant RATIFIED on `fdf2ac7c` at 05:37:13Z. The entries below describe both; they are now live.
+
+### The Probe total at $800 and the program line at -$300, on `feat/probe-total-800` (DEPLOYED 05:36Z Oct 10; money digest `0310779c` -> `fdf2ac7c`; no evidence reset)
 
 - **Why** (PREREG-T, Claude's decision pre-registered privately on Oct 10, 2026 under the Probe roster R5 already live;
   the owner's goal as re-set on Oct 9, item 4: "Probe loss budget: $400 net in any rolling 20 sessions and $800 net in
@@ -73,7 +86,7 @@ gateway is `507b6118`, and the box's updater is on. What is built and not deploy
   `test_live_long_single`. Operator's page: **The Probe total at $800 and the program line at -$300** at the top of
   `docs/operations.md`.
 
-### The ration at birth, on `fix/spent-lineage-birth` (unreleased; an owner deploy; no evidence reset; no setting)
+### The ration at birth, on `fix/spent-lineage-birth` (DEPLOYED 06:20Z Oct 10; no evidence reset; no setting)
 
 - **Why** (measured on the House, Oct 10, 2026): about half of the direction lane's births died 15-60 minutes after
   birth on the tournament's `dlane.SPENT_TRY` without ever taking a try. The architect resolved a parent on the slice

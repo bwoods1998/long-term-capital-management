@@ -8,7 +8,7 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
-## The Probe total at $800 and the program line at -$300 (Oct 10, 2026)
+## The Probe total at $800 and the program line at -$300 (Oct 10, 2026): deployed 05:36Z (money `fdf2ac7c`, grant ratified 05:37Z)
 
 Built on `feat/probe-total-800`, not deployed: one owner deploy (`league/constitution.py`, `league/swarm/policy.json`
 and `league/swarm/dlane.py`, whose line bound is the -300 default). Claude's decision, pre-registered privately as
@@ -76,7 +76,7 @@ PREREG-T on Oct 10 under the Probe roster R5 already live, inside the owner's go
   (the CHANGELOG entry's Proof list) move in the same commit. A tighter line alone needs no deploy:
   `dlane.program_loss_usd` -200 in the state root's `swarm.json`.
 
-## The ration at birth (Oct 10, 2026): `fix/spent-lineage-birth`, not deployed
+## The ration at birth (Oct 10, 2026): deployed 06:20Z
 
 A direction card whose birth would continue a lineage that has already spent its one Validation try or its one holdout
 look is not born (`league/swarm/dlane.py` `birth_spent`, asked by `league/swarm/architect.py` `admit` before
@@ -206,7 +206,7 @@ updater refuses the FORBIDDEN ones. Before it, assert the four identities above 
 minutes before the open (13:00Z Mon Oct 12, after the 12:30Z `preopen`). Rollback: the previous House release and the
 previous gateway version; each section says what its rollback leaves behind (M3's retired families stay retired).
 
-## The swarm-side readiness fixes (Oct 10, 2026): built on `wfix/swarm`, not deployed
+## The swarm-side readiness fixes (Oct 10, 2026): deployed 22:57Z Oct 9 with the weekend fixes
 
 Four fixes from the operator's readiness audit of Oct 9 (its fix list's M2, M3, M5 and m3), cut from main
 `cf96b72c` (the live release `20261009T170259Z-404fe99d6c9c`). Swarm-side and ops only: nothing under `league/live/`,
@@ -282,7 +282,7 @@ Before the deploy, check at the exact head that `execution_fingerprint()` is `31
 - A cut review, if any, shows as `review_error` with `cut` true, and no refusal follows it.
 - `dlane-report.json` `tightened` has the R3 and ration rows.
 
-## The weekend fixes, ops side (Oct 10, 2026): built on `wfix/ops`, not deployed
+## The weekend fixes, ops side (Oct 10, 2026): deployed 22:57Z Oct 9 with the weekend fixes
 
 The readiness audit of Oct 9 (`scratch/ready-1009/FIXLIST.md`) found that no alarm reached the owner (M6), that the
 "owner deploy waiting" mail fired inside the operator's own deploy (M12), and that the Done meter could pass with no
@@ -351,7 +351,7 @@ ratification. Rollback: the previous House release (its stall job reads the same
 `done.p_done_zero_edge.value` 0.024, `program_loss.line_usd` -200, and on `probes[eqp-realcalm-drift-call]` a
 `dm1.first_fire_at` of 17; `research_247_last_7_days` lists the days.
 
-## The per-close fill replay (Oct 10, 2026): built on `wfix/replay`, not deployed
+## The per-close fill replay (Oct 10, 2026): deployed 22:57Z Oct 9 with the weekend fixes
 
 The readiness audit of Oct 9 (blocker B1): the Done rule's item 4, "live fills consistent with their replay", could pass
 with no replay evidence. A real close was matched to its program's NIGHTLY forward replay by (version, entry day), and
@@ -409,7 +409,7 @@ events of kind `swarm.twin` (action "round"); kv `close_twins` holds pid 14 with
 `replay_twins.by_status` counts it. After Oct 13 ~06:15Z, pid 41's record: `priced` with `twin.exit` "house_close"
 expected (the House's expiry close Monday 15:15-15:25 ET, as the Gym's).
 
-## The budget split (Oct 9, 2026): built on `fix/budget-split-sail`, not deployed
+## The budget split (Oct 9, 2026): deployed 17:03Z Oct 9
 
 An owner deploy of two operator decisions of Oct 9 (about 16:00Z), cut from main `d70e00c3` (release L-D with D-1,
 D-1b and the graveyard). PR #520, the direction Train map, was still open and is not in it. Nothing under
