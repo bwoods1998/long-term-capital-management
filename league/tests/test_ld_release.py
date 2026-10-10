@@ -179,16 +179,23 @@ class TheRows(unittest.TestCase):
         from league.constitution import PINNED_DIGEST, digest, money_digest
 
         # L-D moved it 1665c385 -> 0310779c (Oct 9); THE PROBE TOTAL AT $800 0310779c -> fdf2ac7c (Oct 10, PREREG-T).
-        self.assertEqual(money_digest(), "fdf2ac7c1a446e39df9e27c8626fb86a954a3f5a939460406507a9b735f1d4c7")
+        # Release E1's `equity_money` (the equity lane) moved it again (league/tests/test_constitution.py): these are the
+        # digests of the constitution without that block, as L-D and the $800 total had it.
+        def pre_e1(**probe):
+            c = constitution(**probe)
+            del c["equity_money"]
+            return c
+
+        self.assertEqual(money_digest(pre_e1()), "fdf2ac7c1a446e39df9e27c8626fb86a954a3f5a939460406507a9b735f1d4c7")
         self.assertEqual(digest(), PINNED_DIGEST)
-        self.assertEqual(money_digest(constitution(**FAST_LANE_V2)),
+        self.assertEqual(money_digest(pre_e1(**FAST_LANE_V2)),
                          "320899d675059182509a62b67d122afd2fdc54b08c59b2053a684d88fc8b55f2", "the CON-only rollback's")
         for key, value in (("loss_basis", "gross"), ("max_open", 3), ("demotion", "dm0"), ("loss_window_sessions", 2000),
                            ("loss_total_usd", "400")):
             self.assertNotEqual(money_digest(constitution(**{key: value})), money_digest(), key)
         # The $800 total is the value in force (Oct 10): its rollback to L-D's $400 is L-D's money digest again.
         self.assertEqual(money_digest(constitution(loss_total_usd="800")), money_digest())
-        self.assertEqual(money_digest(constitution(loss_total_usd="400")),
+        self.assertEqual(money_digest(pre_e1(loss_total_usd="400")),
                          "0310779c2f58eaf453835f1c989f130cf92a74198198b624cf021298a9e43945", "L-D's")
 
 

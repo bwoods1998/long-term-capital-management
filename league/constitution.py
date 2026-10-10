@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from typing import Any
 
 CONSTITUTION: dict[str, Any] = {
@@ -930,6 +931,92 @@ CONSTITUTION: dict[str, Any] = {
         "gateway": {"order_max_loss_usd": "1000", "order_equity_share": "0.25", "day_equity_share": "1.0",
                     "max_day_orders": 300, "max_day_open_orders": 250},
     },
+    # ---- THE EQUITY LANE's money table (release E1, Oct 2026; the owner's goal of Oct 10, 2026: agent programs may trade
+    # ETFs, stocks and options with real money; league/equity/INTERFACES.md, section 7). `league/live/money.py`
+    # `EquityTable` is its one reader. Every row sits inside `EQUITY_MONEY_BOUNDS`, whose loose end is the owner's line
+    # (`equity_money_problems`; `league.ci` refuses a tree outside them, and holds `universe` and `enabled` to the gateway's
+    # STOCK_UNIVERSE and STOCK_BUYS_REAL). Shares are of the SIZING EQUITY E, as in `options_money`: the lower of the
+    # Brokerage Account's equity and the grant's capital. One sizing function applies them, the book's and the Gym's alike
+    # (`league/equity/sizing.py` `size_entry`).
+    #
+    # THE LOSS BUDGET IS SHARED BY BOTH LANES. `options_money.probe.loss_budget_usd` ($400 net in any rolling 20 sessions)
+    # and `loss_total_usd` ($800 net in total) bound every agent program's Probe opens, options AND equity, read by one
+    # `probe_tally` (`league/live/real.py`): an equity lot counts at `open_risk_weight` x its marked value (open risk, with
+    # every working buy), its close's net cash (fees and dividends in) joins the realized figures, and an equity program
+    # takes ONE Probe slot however many lots it holds (A8.6). There is no second budget here. While three equity programs
+    # hold their whole Probe sleeves (3 x 0.25 x E of ETFs at weight 0.20: 0.15 x E of open risk), the options Probe lane
+    # keeps $400 - 0.15 x E of the window ($100 at E = $2,000, nothing from E = $2,667): with the equity lane invested,
+    # options Probe opens are effectively off. The kill switch, the daily stop and the drawdown stop bound both lanes.
+    #
+    # - `enabled`: the House's switch for real equity OPENS. E1 deploys False; the switch-on sets True, a constitution-only
+    #   change that moves the money digest (the standing grant re-ratifies at the House's start). Exits never wait on it.
+    #   True requires the gateway's STOCK_BUYS_REAL "on" (`league.ci`); the gateway may read "on" while this is False:
+    #   this row is the switch.
+    # - `universe`: the symbols a program may trade, by class: the gateway's STOCK_UNIVERSE exactly. No leveraged or
+    #   inverse ETF: they hold borrowing or short exposure inside them.
+    # - `position_share`: one instrument's cap, the account's holding of it plus every open buy of it across all programs,
+    #   as a share of E: 0.50 an ETF, 0.20 a stock (the owner's lines). A program's own position is held to the same
+    #   share of its SLEEVE, as the Gym holds it.
+    # - `invested_share`: CASH ONLY, BY CHOICE (the captain's A1): equity long value + open equity buys + the options' open
+    #   maximum loss at most this share of E, 1.00. The goal allows margin where the account offers it (the overnight
+    #   2x); E1 does not use it, because margin interest is not metered yet (the goal forbids hidden costs) and the loss
+    #   budget binds first at this size. A later release may raise this row toward the venue's overnight multiplier once a
+    #   margin-interest row is metered: a loosening, with its bound.
+    # - `cash_reserve_usd`: THE HOUSE-WIDE CASH RULE (A8.1): no real open in EITHER lane may take available cash (cash -
+    #   |short market value| - every working buy's worst cost in both books - working reservations) below this, $50
+    #   (above the gateway's own $25 floor); while cash is below zero, or any us_equity position is short, every equity
+    #   open is refused (`league/live/money.py` `available_cash`, `league/equity/sizing.py`), so margin interest never
+    #   accrues.
+    # - `open_risk_weight`: what an equity position counts in the shared budget, as a share of its marked value (the
+    #   goal's convention: 0.20 an ETF, 0.40 a stock; only stricter).
+    # - `probe` (A5): a program that passed its lane's look takes an equity roster seat (`max_programs`, equal to the
+    #   swarm's `elane.roster`) with a sleeve of `sleeve_share` x E; an entry is cut to fit the budget's room over its
+    #   weight, and nothing under `min_order_usd` is sent.
+    # - `sized`, PRE-REGISTERED here before the first live trade (goal item 4; `league/equity/bands.py` `sized_up`,
+    #   `sized_sleeve_share`): a Probe program is Sized when its version's real closes number at least `min_trades`, their
+    #   mean net return on notional is above zero with its one-sided `confidence` lower bound above zero, its P&L beats the
+    #   same-risk buy-and-hold over the same sessions (`beat_bh`, the goal's scaling rule), and it has spent at least
+    #   `min_probe_sessions` sessions at Probe. Its sleeve is then `kelly_fraction` Kelly on that lower bound, at most
+    #   `sleeve_share` x E and never below the Probe's.
+    # - `demotion`, EDM1, PRE-REGISTERED the same way (`league/equity/bands.py` `edm1`): exits only, sticky for the
+    #   version, when its real closes are `min_trades` or more and their net returns sum below -`z` x sigma x sqrt(n)
+    #   (sigma: the per-trade sd of its Validation run); when its realized net reaches `program_loss_usd`; or when its
+    #   fills ran more than `twin_gap_bp` a side below their replay twins on average over `twin_min_closes` or more
+    #   priced closes.
+    # - `holds` (A8.5): a lot never sells in the session it was bought, the kill switch included; a program declares its
+    #   maximum hold in NEEDS (`default_max_hold_sessions` when it does not, at most `max_hold_sessions`); after
+    #   `failed_decides_exit` sessions of failed decides its lots exit at the next open. Pre-registered program rules,
+    #   identical in the Gym.
+    # - `order_path`: marketable limit day orders whose collar starts at `entry_collar_bp` and widens to `max_collar_bp`
+    #   (basis points, by class); at most `max_orders_day` equity orders a day (A8.3: the gateway's day order count is
+    #   shared with the options book); and the schedule's offsets in seconds (`league/equity/schedule.py`): the open
+    #   window (09:25 pre-open, 09:30:30 sends, entries until 09:45, exits until 15:55), THE CLOSE WINDOW (A2: 15:55:00
+    #   sends, re-priced every 30 s until 15:59:30, then missed), the 16:20 bars, the 16:30 decisions and the 08:30 audit.
+    "equity_money": {
+        "enabled": False,
+        "universe": {"etf": ["SPY", "QQQ", "IWM", "DIA", "XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU",
+                             "XLV", "XLY", "TLT", "GLD"],
+                     "stock": ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "BRK.B", "JPM", "V", "UNH", "XOM", "JNJ",
+                               "PG", "MA", "HD", "AVGO", "LLY", "COST"]},
+        "position_share": {"etf": "0.50", "stock": "0.20"},
+        "invested_share": "1.00",
+        "cash_reserve_usd": "50",
+        "open_risk_weight": {"etf": "0.20", "stock": "0.40"},
+        "probe": {"sleeve_share": "0.25", "max_programs": 3, "min_order_usd": "10"},
+        "sized": {"min_trades": 20, "confidence": "0.80", "kelly_fraction": "0.25", "sleeve_share": "0.50",
+                  "beat_bh": True, "min_probe_sessions": 5},
+        "demotion": {"rule": "edm1", "min_trades": 10, "z": "1.645", "program_loss_usd": "-300", "twin_gap_bp": "15",
+                     "twin_min_closes": 5},
+        "holds": {"min_hold_sessions": 1, "default_max_hold_sessions": 20, "max_hold_sessions": 60,
+                  "failed_decides_exit": 2},
+        "order_path": {"entry_collar_bp": {"etf": 10, "stock": 25}, "max_collar_bp": {"etf": 50, "stock": 100},
+                       "max_orders_day": 60,
+                       "preopen_before_open_s": 300, "open_send_after_open_s": 30, "exit_wait_s": 120,
+                       "entry_until_after_open_s": 900, "exit_until_before_close_s": 300,
+                       "close_send_before_close_s": 300, "close_until_before_close_s": 30,
+                       "open_reprice_s": 60, "close_reprice_s": 30, "bars_after_close_s": 1200,
+                       "decide_after_close_s": 1800, "audit_before_open_s": 3600},
+    },
 }
 
 
@@ -1109,6 +1196,172 @@ def options_money_problems(constitution: dict[str, Any] | None = None) -> list[s
         pass
     return problems
 
+#: THE EQUITY LANE's bounds (release E1; league/equity/INTERFACES.md 7.1): every tunable row of `equity_money`, `(low,
+#: high)` inclusive, with the owner's line at its LOOSE end, so a row may only tighten; loosening one past it is the
+#: owner's decision, in this file. `league.ci` refuses a constitution outside them (`equity_money_problems`).
+EQUITY_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
+    # The owner's goal of Oct 10, 2026: an ETF position at most 50% of equity, a single stock at most 20%. Above zero
+    # (`EQUITY_MONEY_ABOVE_LOW`): `enabled` False is the way to stop the lane, never a zero share.
+    "position_share.etf": ("0", "0.50"),
+    "position_share.stock": ("0", "0.20"),
+    # Cash only by choice (A1): at most 1.00 x E invested, options' open maximum loss included.
+    "invested_share": ("0", "1.00"),
+    # A8.1: at least $50 kept in cash, above the gateway's $25 floor.
+    "cash_reserve_usd": ("50", "200"),
+    # The goal's open-risk convention: an ETF counts at least 20% of its value, a stock at least 40%.
+    "open_risk_weight.etf": ("0.20", "1.00"),
+    "open_risk_weight.stock": ("0.40", "1.00"),
+    # A5: at most three Probe programs on a quarter of E each (0 stops new seats); no order under $10.
+    "probe.sleeve_share": ("0", "0.25"),
+    "probe.max_programs": ("0", "3"),
+    "probe.min_order_usd": ("10", "100"),
+    # The pre-registered sizing-up rule (the design's section 5): at least 20 closes, an 80% bound, quarter Kelly, half
+    # of E at most, five Probe sessions.
+    "sized.min_trades": ("20", "1000"),
+    "sized.confidence": ("0.80", "0.99"),
+    "sized.kelly_fraction": ("0.125", "0.25"),
+    "sized.sleeve_share": ("0", "0.50"),
+    "sized.min_probe_sessions": ("5", "60"),
+    # EDM1: demoted at 10 closes or fewer, at z 1.645 or less, at -$300 realized or sooner (the A1.3 analogue), at 15 bp
+    # a side of twin gap or less over 5 closes or fewer.
+    "demotion.min_trades": ("1", "10"),
+    "demotion.z": ("0", "1.645"),
+    "demotion.program_loss_usd": ("-300", "-25"),
+    "demotion.twin_gap_bp": ("1", "15"),
+    "demotion.twin_min_closes": ("1", "5"),
+    # A8.5: never sold in the session bought (exactly one session); a program's hold at most 60 sessions; two sessions of
+    # failed decides at most before its lots exit.
+    "holds.min_hold_sessions": ("1", "1"),
+    "holds.default_max_hold_sessions": ("1", "60"),
+    "holds.max_hold_sessions": ("1", "60"),
+    "holds.failed_decides_exit": ("1", "2"),
+    # The order path: collars in basis points (an ETF's at most 50, a stock's at most 100), and at most 60 equity
+    # orders a day (A8.3: the gateway's day count is shared with the options book's).
+    "order_path.entry_collar_bp.etf": ("1", "50"),
+    "order_path.entry_collar_bp.stock": ("1", "100"),
+    "order_path.max_collar_bp.etf": ("1", "50"),
+    "order_path.max_collar_bp.stock": ("1", "100"),
+    "order_path.max_orders_day": ("0", "60"),
+    # The schedule's offsets, seconds (league/equity/schedule.py): each inside the session or the night around it, and
+    # their order held by `equity_money_problems` (a send before its window's cut-off). At their loose ends the open
+    # window's entries (3600 s after the open) close before the close window opens (1800 s before the close) even on a
+    # 13:00 half day (12600 s).
+    "order_path.preopen_before_open_s": ("60", "1800"),
+    "order_path.open_send_after_open_s": ("0", "600"),
+    "order_path.exit_wait_s": ("0", "600"),
+    "order_path.entry_until_after_open_s": ("60", "3600"),
+    "order_path.exit_until_before_close_s": ("60", "3600"),
+    "order_path.close_send_before_close_s": ("60", "1800"),
+    "order_path.close_until_before_close_s": ("5", "600"),
+    "order_path.open_reprice_s": ("10", "600"),
+    "order_path.close_reprice_s": ("5", "300"),
+    "order_path.bars_after_close_s": ("60", "7200"),
+    "order_path.decide_after_close_s": ("60", "14400"),
+    "order_path.audit_before_open_s": ("60", "14400"),
+}
+#: The rows whose low end is EXCLUSIVE: a share of zero is no setting (the lane stops by `enabled` False).
+EQUITY_MONEY_ABOVE_LOW = ("position_share.etf", "position_share.stock", "invested_share")
+#: The rows that are EXACTLY one of their values, compared by type and value (1 is not True, "EDM1" is not "edm1").
+EQUITY_MONEY_CHOICES: dict[str, tuple[Any, ...]] = {
+    "enabled": (False, True),
+    "sized.beat_bh": (True,),
+    "demotion.rule": ("edm1",),
+}
+#: The schedule's offsets (`league/equity/schedule.py` DEFAULTS' keys), read by `league/live/money.py` `EquityTable`.
+EQUITY_ORDER_OFFSETS = ("preopen_before_open_s", "open_send_after_open_s", "exit_wait_s", "entry_until_after_open_s",
+                        "exit_until_before_close_s", "close_send_before_close_s", "close_until_before_close_s",
+                        "open_reprice_s", "close_reprice_s", "bars_after_close_s", "decide_after_close_s",
+                        "audit_before_open_s")
+#: Rows read as whole counts: the counts, the collars and the offsets.
+_EQUITY_COUNTS = ("probe.max_programs", "sized.min_trades", "sized.min_probe_sessions", "demotion.min_trades",
+                  "demotion.twin_min_closes", "holds.min_hold_sessions", "holds.default_max_hold_sessions",
+                  "holds.max_hold_sessions", "holds.failed_decides_exit", "order_path.entry_collar_bp.etf",
+                  "order_path.entry_collar_bp.stock", "order_path.max_collar_bp.etf", "order_path.max_collar_bp.stock",
+                  "order_path.max_orders_day", *(f"order_path.{name}" for name in EQUITY_ORDER_OFFSETS))
+EQUITY_CLASSES = ("etf", "stock")
+#: A ticker as the venue and the gateway's STOCK_UNIVERSE write it (a share class after a dot: BRK.B).
+_TICKER = re.compile(r"[A-Z]{1,5}(\.[A-Z])?")
+
+
+def _at(table: Any, path: str) -> Any:
+    node: Any = table
+    for key in path.split("."):
+        node = node.get(key) if isinstance(node, dict) else None
+    return node
+
+
+def equity_money_problems(constitution: dict[str, Any] | None = None) -> list[str]:
+    """Why the constitution's equity money table (`equity_money`) is outside its bounds (`EQUITY_MONEY_BOUNDS`,
+    `EQUITY_MONEY_ABOVE_LOW`, `EQUITY_MONEY_CHOICES`) or malformed, or [] when every row is inside them. A missing table is
+    a problem: the equity lane opens nothing without it (`league/live/money.py` `EquityTable`).
+
+    THE LOSS BUDGET IS SHARED: this table holds no budget of its own. Every equity Probe open is bound by
+    `options_money.probe.loss_budget_usd` ($400 net in any rolling 20 sessions) and `loss_total_usd` ($800 net in
+    total), which `options_money_problems` bounds, read for both lanes by one `probe_tally`."""
+    from decimal import Decimal, InvalidOperation
+
+    table = (constitution or CONSTITUTION).get("equity_money")
+    if not isinstance(table, dict):
+        return ["equity_money: the table is missing"]
+    problems: list[str] = []
+    values: dict[str, Decimal] = {}
+    for path, (low, high) in EQUITY_MONEY_BOUNDS.items():
+        node = _at(table, path)
+        if isinstance(node, bool) or node is None:
+            problems.append(f"equity_money.{path} is missing")
+            continue
+        try:
+            value = Decimal(str(node))
+        except (InvalidOperation, ValueError):
+            problems.append(f"equity_money.{path} = {node!r} is not a number")
+            continue
+        above = path in EQUITY_MONEY_ABOVE_LOW
+        inside = value.is_finite() and (value > Decimal(low) if above else value >= Decimal(low)) and value <= Decimal(high)
+        if not inside:
+            problems.append(f"equity_money.{path} = {node!r} is outside {'(' if above else '['}{low}, {high}]")
+        elif path in _EQUITY_COUNTS and (value != value.to_integral_value() or isinstance(node, float)):
+            problems.append(f"equity_money.{path} = {node!r} is not a whole count")
+        else:
+            values[path] = value
+    for path, allowed in EQUITY_MONEY_CHOICES.items():
+        node = _at(table, path)
+        if not any(type(node) is type(choice) and node == choice for choice in allowed):
+            problems.append(f"equity_money.{path} = {node!r} is not exactly one of {list(allowed)}")
+    universe = table.get("universe")
+    if not isinstance(universe, dict) or sorted(universe) != sorted(EQUITY_CLASSES):
+        problems.append(f"equity_money.universe lists symbols under exactly {list(EQUITY_CLASSES)}")
+    else:
+        listed: list[str] = []
+        for klass in EQUITY_CLASSES:
+            symbols = universe[klass]
+            if not isinstance(symbols, list) or any(not isinstance(s, str) or not _TICKER.fullmatch(s) for s in symbols):
+                problems.append(f"equity_money.universe.{klass} is a list of tickers: {symbols!r}")
+            else:
+                listed += symbols
+        twice = sorted({s for s in listed if listed.count(s) > 1})
+        if twice:
+            problems.append(f"equity_money.universe lists {', '.join(twice)} more than once")
+
+    def order(first: str, second: str, why: str) -> None:
+        if first in values and second in values and not values[first] < values[second]:
+            problems.append(f"equity_money.{first} ({values[first]}) must be under {second} ({values[second]}): {why}")
+
+    hold, cap = "holds.default_max_hold_sessions", "holds.max_hold_sessions"
+    if hold in values and cap in values and values[hold] > values[cap]:
+        problems.append(f"equity_money.{hold} ({values[hold]}) is above {cap} ({values[cap]}): the default hold is inside "
+                        "the lane's cap")
+    for klass in EQUITY_CLASSES:
+        first, last = f"order_path.entry_collar_bp.{klass}", f"order_path.max_collar_bp.{klass}"
+        if first in values and last in values and values[first] > values[last]:
+            problems.append(f"equity_money.{first} ({values[first]}) is above {last} ({values[last]}): a collar only widens")
+    order("order_path.open_send_after_open_s", "order_path.entry_until_after_open_s", "entries are sent before their cut-off")
+    order("order_path.close_until_before_close_s", "order_path.close_send_before_close_s",
+          "the close window is sent before its cut-off")
+    order("order_path.bars_after_close_s", "order_path.decide_after_close_s", "programs decide on the day's bars")
+    order("order_path.preopen_before_open_s", "order_path.audit_before_open_s", "the bars' audit comes before the pre-open")
+    return problems
+
+
 #: The gateway's `wrangler.jsonc` vars that repeat the money table: `league.ci` requires them equal.
 GATEWAY_VARS = {
     "MAX_ORDER_MAX_LOSS_USD": "gateway.order_max_loss_usd",
@@ -1130,4 +1383,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '0adb4f0ed7d9f20fc05cb3ce73590b5a2dfdfe38e5d6aa6759e071d1beb4d5b2'
+PINNED_DIGEST = 'e38c807e47fd3176ab2c3dfc5c440b94ec5b920fa8f110ab642a28c0e3f17320'

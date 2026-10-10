@@ -1,4 +1,4 @@
-"""The `preopen` job (each trading day, an hour before the open): the operator's nine pre-open checks, on the House.
+"""The `preopen` job (each trading day, an hour before the open): the operator's ten pre-open checks, on the House.
 
 Ported from the private laptop tool (`preopen.py`, Sept 28-Oct 2, 2026). Its House half ran on the box already; the
 laptop half read things only the laptop has (wrangler's deployed version, the box record, the site's events API), and
@@ -24,6 +24,13 @@ and went stale (GOAL Appendix C 7); here each check asks what the running House 
  8 backup    the latest House backup row is ok and at most 30 hours old
  9 compute   Sail balance above the guard's line now and, at the last hour's pace, at the close; Claude and OpenAI
              spend under their caps
+10 equity    THE EQUITY LANE (release E1): the account's cash at or above zero (no margin in use: A1, A8.1); no us_equity
+             position short; the equity book reconciled (its health names no freeze; with `equity_money.enabled` true a
+             book that reports nothing FAILS); the deployed gateway's stock route (`/v1/health` stock_buys: its list,
+             its switch, its per-symbol shares) agreeing with the constitution's `equity_money`, by the one comparison
+             `league.ci` makes of the release's files (`ci.stock_agreement`; the release's own gateway/ files too when
+             it carries them); the account's margin multiplier and its pattern-day-trader flag and day-trade count
+             REPORTED, never a bar (the venue may still flag pattern day traders: the design's fact 7)
 
 Read-only (`guard.readonly()`; GET only). Each FAIL is one House warning ("preopen 5 swarm FAIL: ..."); the receipt
 holds every line. The warning is PUBLIC (`ops.alert`) and the runner scrubs only what carries a `$`
@@ -126,7 +133,9 @@ def collect(root: Path, base: Path, release: Path, gateway: Any, *, now: float, 
                 "live": {"summary": ol.get("summary"), "blocked": ol.get("blocked"), "frozen": ol.get("frozen"),
                          "stops": {k: stops.get(k) for k in ("daily_tripped", "daily_why", "drawdown_tripped", "drawdown_why",
                                                              "provisional", "start_equity")},
-                         "instances": len(ol.get("instances") or {}), "paper_proof": ol.get("paper_proof")}}
+                         "instances": len(ol.get("instances") or {}), "paper_proof": ol.get("paper_proof"),
+                         # THE EQUITY LANE (release E1): the equity book's own health (league/equity/live.py `health`).
+                         "equity": ol.get("equity")}}
 
     def grant() -> dict:
         from .. import live_trading as LT
@@ -151,7 +160,14 @@ def collect(root: Path, base: Path, release: Path, gateway: Any, *, now: float, 
 
         t = M.Table.from_constitution()
         om = CONSTITUTION["options_money"]
-        return {"real_types": list(t.real_types), "gateway": om["gateway"], "credit_min_equity_usd": om["credit_min_equity_usd"]}
+        em = CONSTITUTION.get("equity_money")
+        # The release's own gateway files, when it carries them (the House's release trees do not: floor_box uploads
+        # league, ltcm, playbooks, scripts and deploy), judged by league.ci's comparison; None when absent.
+        from ..ci import gateway_stock_problems
+
+        files = gateway_stock_problems(release, em) if (release / "gateway").is_dir() else None
+        return {"real_types": list(t.real_types), "gateway": om["gateway"], "credit_min_equity_usd": om["credit_min_equity_usd"],
+                "equity_money": em, "equity_release_gateway": files}
 
     def gateway_() -> dict:
         def get(path: str, params: Any = None) -> dict:
@@ -165,16 +181,21 @@ def collect(root: Path, base: Path, release: Path, gateway: Any, *, now: float, 
         hb = h.get("body") if isinstance(h.get("body"), dict) else {}
         ab = a.get("body") if isinstance(a.get("body"), dict) else None
         fr = hb.get("frontier") or {}
+        sb = hb.get("stock_buys")
         return {"health_error": None if hb else h.get("error"), "kill_switch": hb.get("kill_switch"), "max_loss": hb.get("max_loss"),
                 "frontier": {k: fr.get(k) for k in ("month", "spent_usd", "cap_usd", "inflight_usd")},
                 "claude": {k: (hb.get("claude") or {}).get(k) for k in ("cap_usd", "spent_usd", "inflight_usd", "remaining_usd")},
                 "sail": hb.get("sail"),
+                # The gateway's real stock route (Oct 10, 2026; `gate.stockStatus`): its switch, list and per-symbol shares.
+                "stock_buys": {k: sb.get(k) for k in ("enabled", "symbols", "etf_equity_share", "stock_equity_share")}
+                if isinstance(sb, dict) else None,
                 "account_error": None if ab else a.get("error"),
                 "account": {k: ab.get(k) for k in ("status", "equity", "cash", "options_buying_power", "options_trading_level",
-                                                    "trading_blocked", "account_blocked")} if ab else None,
+                                                    "trading_blocked", "account_blocked", "short_market_value", "multiplier",
+                                                    "pattern_day_trader", "daytrade_count")} if ab else None,
                 "orders": [{k: x.get(k) for k in ("symbol", "side", "qty", "status")} for x in o["body"]]
                 if isinstance(o.get("body"), list) else None,
-                "positions": [{k: x.get(k) for k in ("symbol", "qty", "asset_class")} for x in p["body"]]
+                "positions": [{k: x.get(k) for k in ("symbol", "qty", "asset_class", "side")} for x in p["body"]]
                 if isinstance(p.get("body"), list) else None}
 
     def swarm() -> dict:
@@ -491,6 +512,65 @@ def check_compute(h: Mapping[str, Any], now: float) -> Check:
     return c
 
 
+def check_equity(h: Mapping[str, Any]) -> Check:
+    """Check 10 (the module docstring): THE EQUITY LANE's account, book and gateway, before the open."""
+    from ..ci import stock_agreement
+
+    c = Check(10, "equity")
+    g, m = h.get("gateway") or {}, h.get("money") or {}
+    if not m or (h.get("errors") or {}).get("money"):
+        c.req(False, f"the constitution's money tables are unreadable: {(h.get('errors') or {}).get('money') or 'no money section'}")
+        return c
+    table = m.get("equity_money")
+    if not isinstance(table, dict):
+        c.req(False, "the constitution has no equity_money table")
+        return c
+    enabled = table.get("enabled") is True
+    acct = g.get("account")
+    if not acct:
+        c.req(False, f"the account is unreadable: {g.get('account_error') or h.get('errors', {}).get('gateway')}")
+    else:
+        cash = dec(acct.get("cash"))
+        c.req(cash is not None and cash >= 0, f"account cash {usd(cash)}: "
+              + ("at or above $0, no margin in use" if cash is not None and cash >= 0 else "BELOW $0 or unreadable: margin "
+                 "in use, every open in both lanes refuses"))
+    pos = g.get("positions")
+    if pos is None:
+        c.req(False, "positions unreadable: a short us_equity position cannot be ruled out")
+    else:
+        short = sorted(str(p.get("symbol")) for p in pos
+                       if str(p.get("asset_class") or "us_equity") == "us_equity"
+                       and (str(p.get("side") or "").lower() == "short" or (dec(p.get("qty")) or Decimal(0)) < 0))
+        c.req(not short, "no us_equity position is short" if not short else f"us_equity positions held short: {', '.join(short)}")
+    book = ((h.get("release") or {}).get("live") or {}).get("equity")
+    if isinstance(book, dict) and "frozen" in book:
+        c.req(not book["frozen"], "the equity book is reconciled (no freeze)" if not book["frozen"]
+              else f"the equity book is frozen: {book['frozen']}")
+    elif enabled:
+        c.req(False, "the equity book reports no freeze state while equity_money.enabled is true")
+    else:
+        c.info("the equity book reports no freeze state (equity_money.enabled false: no equity open goes)")
+    sb = g.get("stock_buys")
+    if not isinstance(sb, dict):
+        c.req(False, f"the gateway reports no stock route (/v1/health stock_buys): {g.get('health_error') or 'missing'}")
+    else:
+        symbols = sb.get("symbols") if isinstance(sb.get("symbols"), dict) else {}
+        universe = {s: k for k in ("etf", "stock") for s in (symbols.get(k) if isinstance(symbols.get(k), list) else [])}
+        bad = stock_agreement(table, universe=universe, buys_on=sb.get("enabled") is True,
+                              shares={"etf": sb.get("etf_equity_share"), "stock": sb.get("stock_equity_share")},
+                              source="the deployed gateway")
+        c.req(not bad, "the deployed gateway's stock list, switch and shares agree with equity_money" if not bad
+              else "; ".join(bad))
+        c.info(f"gateway stock buys {'on' if sb.get('enabled') is True else 'off'}; equity_money.enabled {enabled}")
+    files = m.get("equity_release_gateway")
+    if files is not None:
+        c.req(not files, "the release's gateway files agree with equity_money" if not files else "; ".join(files))
+    if acct:
+        c.info(f"margin multiplier {acct.get('multiplier')} (reported, never a bound: E1 trades cash only); "
+               f"pattern_day_trader {acct.get('pattern_day_trader')}, daytrade_count {acct.get('daytrade_count')}")
+    return c
+
+
 def _next_close(now: float) -> float:
     from ltcm.data import DataError, next_session, to_datetime, us_equity_session
 
@@ -510,7 +590,8 @@ def checks(h: Mapping[str, Any], now: float) -> list[Check]:
     out = []
     for n, name, fn in ((1, "release", check_release), (2, "grant", check_grant), (3, "gateway", check_gateway),
                         (4, "account", check_account), (5, "swarm", check_swarm), (6, "bands", check_bands),
-                        (7, "mirror", check_mirror), (8, "backup", check_backup), (9, "compute", None)):
+                        (7, "mirror", check_mirror), (8, "backup", check_backup), (9, "compute", None),
+                        (10, "equity", check_equity)):
         try:
             out.append(check_compute(h, now) if fn is None else fn(h))
         except Exception as exc:  # noqa: BLE001 - a check that breaks is that check's FAIL

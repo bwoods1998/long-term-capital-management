@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 from ltcm.data import us_equity_session
 
+from league.constitution import CONSTITUTION
 from league.ops import clock as C
 from league.ops import hygiene as HY
 from league.ops import preopen as PO
@@ -340,6 +341,10 @@ class Scoreboard(Base):
         self.assertEqual(gateway.posts, [])
 
 
+#: The constitution's equity money table as check 10 reads it (release E1).
+EQUITY_MONEY = CONSTITUTION["equity_money"]
+
+
 def passing_house(now):
     stamp = datetime.fromtimestamp(now, timezone.utc).isoformat()
     return {
@@ -347,16 +352,22 @@ def passing_house(now):
         "errors": {},
         "release": {"current": "/workspace/releases/r1", "running": "r1", "health_age_s": 20, "release": "r1", "real_money": True,
                     "failures": [], "fill_model": {"version": "fm-1", "cells": 40}, "fill_model_file_sha256": "ab" * 32,
-                    "live": {"summary": {"state": "idle"}, "blocked": None, "frozen": None, "stops": {}, "instances": 3}},
+                    "live": {"summary": {"state": "idle"}, "blocked": None, "frozen": None, "stops": {}, "instances": 3,
+                             "equity": {"frozen": ""}}},
         "grant": {"latest": "g", "revoked": None, "active": True, "holds": True, "running_money_digest": "d" * 64,
                   "policy": {"capital_usd": "1200", "ceiling_usd": "5500", "constitution_digest": "d" * 64}, "ratifications": 2},
         "money": {"real_types": ["debit_vertical"], "credit_min_equity_usd": "2000",
-                  "gateway": {"order_equity_share": "0.25", "order_max_loss_usd": "1000", "day_equity_share": "1"}},
+                  "gateway": {"order_equity_share": "0.25", "order_max_loss_usd": "1000", "day_equity_share": "1"},
+                  "equity_money": EQUITY_MONEY, "equity_release_gateway": None},
         "gateway": {"kill_switch": False, "max_loss": {"order_equity_share": "0.25", "max_order_max_loss_usd": "1000.00",
                                                        "day_equity_share": "1", "credit_min_equity_usd": "2000.00"},
                     "frontier": {"spent_usd": "0.00", "cap_usd": "0.00"}, "claude": {"spent_usd": "10", "cap_usd": "150"},
                     "sail": {"balance_usd": "300"},
-                    "account": {"status": "ACTIVE", "equity": "1200", "options_buying_power": "1100", "options_trading_level": 3},
+                    "stock_buys": {"enabled": True, "symbols": {k: list(v) for k, v in EQUITY_MONEY["universe"].items()},
+                                   "etf_equity_share": "0.5", "stock_equity_share": "0.2"},
+                    "account": {"status": "ACTIVE", "equity": "1200", "options_buying_power": "1100", "options_trading_level": 3,
+                                "cash": "1100", "short_market_value": "0", "multiplier": "1", "pattern_day_trader": False,
+                                "daytrade_count": 0},
                     "orders": [], "positions": []},
         "swarm": {"raw_is_object": True, "raw_live": {"observe": True, "observe_max": 24, "calibration": True},
                   "defaults_live": {"observe": True, "observe_max": 48, "calibration": False},
@@ -372,10 +383,10 @@ def passing_house(now):
 
 
 class Preopen(Base):
-    def test_a_healthy_house_passes_all_nine(self):
+    def test_a_healthy_house_passes_all_ten(self):
         now = at("2026-10-05T12:30:00Z")
         done = PO.checks(passing_house(now), now)
-        self.assertEqual([(c.n, c.ok) for c in done], [(n, True) for n in range(1, 10)], [c.headline() for c in done if not c.ok])
+        self.assertEqual([(c.n, c.ok) for c in done], [(n, True) for n in range(1, 11)], [c.headline() for c in done if not c.ok])
 
     def test_each_fault_fails_its_own_check(self):
         now = at("2026-10-05T12:30:00Z")
@@ -394,8 +405,8 @@ class Preopen(Base):
         self.now = at("2026-10-05T12:30:00Z")
         ctx = self.ctx("preopen", gateway=FakeGateway({"/v1/health": GatewayError("down")}))
         out = PO.run(ctx)
-        self.assertEqual((out["passed"], out["of"]), (0, 9))
-        self.assertEqual(len(ctx.alerts), 9)
+        self.assertEqual((out["passed"], out["of"]), (0, 10))
+        self.assertEqual(len(ctx.alerts), 10)
         self.assertTrue(all(a["level"] == "warning" and a["text"].startswith("preopen ") for a in ctx.alerts))
 
     def test_the_bands_line_says_it_counts_rows_on_offer_and_passes_as_before(self):
@@ -472,7 +483,7 @@ class PreopenBrake(Base):
                                                    f"({BUDGET_SPENT})"), causes)
             self.assertEqual("as designed" in self.swarm(h)[1], causes == ["research_budget"], causes)
             self.assertIsNone(self.kept(h), "a pass says the reason on the guard's own line")
-            self.assertEqual([c.ok for c in PO.checks(h, self.now)], [True] * 9)
+            self.assertEqual([c.ok for c in PO.checks(h, self.now)], [True] * 10)
 
     def test_the_days_brake_is_no_warning_and_a_real_one_still_is(self):
         from unittest import mock
@@ -481,7 +492,7 @@ class PreopenBrake(Base):
             ctx = self.ctx("preopen", gateway=FakeGateway())
             with mock.patch.object(PO, "collect", return_value=self.braked(causes=causes)):
                 out = PO.run(ctx)
-            self.assertEqual((out["passed"], out["failed"]), (9 - len(failed), failed), causes)
+            self.assertEqual((out["passed"], out["failed"]), (10 - len(failed), failed), causes)
             self.assertEqual([a["text"].split(": ")[0] for a in ctx.alerts], [f"preopen {name} FAIL" for name in failed])
 
     def test_every_other_cause_fails(self):
