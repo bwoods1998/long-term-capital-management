@@ -71,7 +71,7 @@ import {
   createsOrder, notional, PURPOSE_HEADER, allowedVenuePath, isOptionSymbol, alpacaShapeError,
   admittedStructures, isMultiLegOrder, structureNotional, practiceOrderError, closeLegsHeldError, closedLegRows,
   shortCloseBody, longCloseBody, singleLegOpenError, realStockClose, CREDIT_STRUCTURES,
-  stockBuysEnabled, stockBuyOrder, heldShares, stockExposure, availableHeld,
+  stockBuysEnabled, stockBuyOrder, heldShares, stockExposure, closeAvailable,
 } from './caps.mjs';
 import { parsePico } from './money.mjs';
 import * as kalshi from './kalshi.mjs';
@@ -420,8 +420,8 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
       signal: AbortSignal.timeout(30000),
     });
     // A real stock buy or close the venue answered (taken or refused) is settled in the gate's in-flight ledger (Oct 10,
-    // 2026): a close leaves it once the venue's readings show it (STOCK_READ_SKEW_MS), a buy is held STOCK_LEDGER_HOLD_MS
-    // more, since the venue's account and positions can lag the order's status. One with no answer stays in it longer.
+    // 2026) and held STOCK_LEDGER_HOLD_MS more, since the venue's account and positions can lag the order's status. One
+    // with no answer is held as if answered when STOCK_PENDING_MS ran out.
     if (reservation && reservation.stock_id !== undefined) {
       try {
         await gate.stockSettle({ id: reservation.stock_id, at: now() });
@@ -487,27 +487,35 @@ async function realOrder(parsed, env, { gate, fetcher, now }) {
     // read: it is an exit, reserved at one micro-dollar like any real close, and a quote could only delay it.
     const close = realStockClose(parsed);
     if (close.error) return { response: fail(close.error, 400) };
-    // Read FRESH, never from the cache (the review of Oct 10, 2026): an isolate's cached reading may still show shares
-    // another isolate has sold, or a short it has covered, and a decision taken from it could sell what is not held (a
-    // short sale) or let a buy through as a "cover" of a short that is gone, past every stock cap.
-    const readAt = now();
-    const held = await realPositions(env, { fetcher, now, fresh: true });
-    if (held.error) return { response: refuse(`Cannot check that the real account holds these shares: ${held.error}.`, POSITIONS_UNREAD_STATUS, 'positions') };
     const symbol = close.body.legs[0].symbol;
+    // Every reading here is FRESH, never from the cache (the review of Oct 10, 2026): an isolate's cached reading may
+    // still show shares another isolate has sold, or a short it has covered, and a decision taken from it could sell what
+    // is not held (a short sale) or let a buy through as a "cover" of a short that is gone, past every stock cap.
     // While STOCK_BUYS_REAL is "on" (Oct 10, 2026), a buy of a symbol the account does not hold short opens or adds to a
     // LONG position: `realStockBuy` judges it. A buy of a symbol held short is a cover, judged below as a close (at most
     // the short), so no buy both covers and opens; a sale is always a close, so no order here is a short sale.
-    if (parsed.side === 'buy' && stockBuysEnabled(env) && heldShares(symbol, held.positions) >= 0n) {
-      return realStockBuy(parsed, env, { gate, fetcher, now });
+    if (parsed.side === 'buy' && stockBuysEnabled(env)) {
+      const first = await realPositions(env, { fetcher, now, fresh: true });
+      if (first.error) return { response: refuse(`Cannot check that the real account holds these shares: ${first.error}.`, POSITIONS_UNREAD_STATUS, 'positions') };
+      if (heldShares(symbol, first.positions) >= 0n) return realStockBuy(parsed, env, { gate, fetcher, now });
     }
+    // A close reads the open orders, then the positions (the design review of Oct 10, 2026): a close that fills between
+    // the two reads is in the open orders and already gone from the position, counted twice, never not at all.
+    const readAt = now();
+    const orders = await realOpenOrders(env, { fetcher, now });
+    if (orders.error) return { response: refuse(`Cannot read the real account's open orders: ${orders.error}.`, POSITIONS_UNREAD_STATUS, 'orders') };
+    const held = await realPositions(env, { fetcher, now, fresh: true });
+    if (held.error) return { response: refuse(`Cannot check that the real account holds these shares: ${held.error}.`, POSITIONS_UNREAD_STATUS, 'positions') };
     const refusal = closeLegsHeldError(close.body, held.positions);
     if (refusal) return { response: fail(refusal, 400) };
-    // The Gate takes the closes of these shares it admitted and the venue may not show yet off what this reading leaves
-    // available, in the step that reserves (`gate.reserveStockClose`): two closes of the same shares cannot both go.
-    const available = availableHeld(held.positions).get(symbol) ?? 0n;
+    // What this reading leaves free to close (`caps.closeAvailable`); the Gate takes off it the closes of these shares it
+    // admitted and still holds, in the step that reserves (`gate.reserveStockClose`): two closes of the same shares cannot
+    // both go, and a sale whose fill the positions do not show yet still counts.
+    const free = closeAvailable(symbol, parsed.side, held.positions, orders.orders, { ordersLimit: OPEN_ORDERS_LIMIT });
+    if (free.error) return { response: refuse(`Cannot check what the real account has free to close: ${free.error}.`, POSITIONS_UNREAD_STATUS, free.source) };
     return {
       micro: 1n, exit: true, credit: false, closeRows: null,
-      stockClose: { symbol, side: parsed.side, qty: String(parsePico(close.body.qty)), available: String(available < 0n ? -available : available), read_at: readAt },
+      stockClose: { symbol, side: parsed.side, qty: String(parsePico(close.body.qty)), available: String(free.available), read_at: readAt },
     };
   }
 

@@ -16,7 +16,7 @@ import {
   stockCaps, stockSymbolCapMicro, stockTotalCapMicro, stockDayCapMicro, stockBookMicro, multiplierMillionths, readStockAccount,
   STOCK_ETF_SHARE_MAX, STOCK_SINGLE_SHARE_MAX, STOCK_MULTIPLE_MAX, STOCK_DAY_MULTIPLE_MAX,
 } from '../lib/account.mjs';
-import { STOCK_UNIVERSE, stockKind, stockBuysEnabled, stockBuyOrder, heldShares, stockExposure, availableHeld, marginableRow } from '../lib/caps.mjs';
+import { STOCK_UNIVERSE, stockKind, stockBuysEnabled, stockBuyOrder, heldShares, stockExposure, availableHeld, closeAvailable, marginableRow } from '../lib/caps.mjs';
 import { createGate, STOCK_PENDING_KEY, STOCK_PENDING_MS, STOCK_LEDGER_HOLD_MS, DAY_KEY } from '../lib/gate.mjs';
 import { route } from '../lib/router.mjs';
 import { memoryStore, alpacaVenue, TOKEN } from './helpers.mjs';
@@ -656,36 +656,180 @@ test('two sales of the same shares at once: one goes, the other is refused in th
   assert.equal(covers.stockStatus(NOW).closes_in_flight, 0, 'all answered');
 });
 
-test('a close in flight counts until the venue can show it: five seconds after its answer, a minute with none; one that never left is given back', async () => {
+// The design review of Oct 10, 2026: the venue's positions can lag a filled sale while its order has left the open list.
+// A close is held a minute after its answer, judged against the open orders (read first) and the positions together.
+const sell = (symbol, qty, extra = {}) => ({ symbol, qty, side: 'sell', type: 'limit', limit_price: '250', time_in_force: 'day',
+  client_order_id: `sell-${symbol}-${qty}`, ...extra });
+const restingSell = (symbol, qty, extra = {}) => ({ id: `s-${symbol}-${qty}`, symbol, qty, filled_qty: '0', side: 'sell', type: 'limit',
+  limit_price: '250', order_class: 'simple', status: 'new', client_order_id: `sell-${symbol}-${qty}`, ...extra });
+/** A close refused with only what came before reserved and nothing more sent. */
+const stopped = (result, status, pattern, message = '') => {
+  assert.equal(result.status, status, `${message} ${JSON.stringify(result.body)}`);
+  if (pattern) assert.match(result.body.error, pattern, message);
+  assert.equal(result.tape.orders().length, 0, `${message}: nothing forwarded`);
+};
+
+test('a sale filled while the positions lag is not sold again within the minute: never a short sale; a cover likewise never over-buys', async () => {
+  let clock = NOW;
+  const gate = gateAt({}, () => clock);
+  const venue = () => alpacaVenue({ positions: [long('AAPL', '10', '2500.00')] });  // the 10 shares as the venue still shows them
+  assert.equal((await send(sell('AAPL', '10'), { gate, tape: venue(), clock: () => clock })).status, 200, 'the sale of all 10 goes and fills');
+  // Twenty seconds on its order has left the open list, and the positions still show the 10 shares: a reading alone
+  // would let them be sold again, which is a short sale.
+  for (const at of [NOW + 20000, NOW + STOCK_LEDGER_HOLD_MS]) {
+    clock = at;
+    for (const qty of ['10', '0.000000001']) {
+      stopped(await send(sell('AAPL', qty), { gate, tape: venue(), clock: () => clock }), 409,
+        new RegExp(`^A stock order on the real account must close shares it holds: AAPL long \\(${qty.replace('.', '\\.')} needed, 0 long left of 10 available once 10 already being closed by orders in flight are taken off\\)\\. A sale of shares not held long would be a short sale: refused\\.$`),
+        `${at - NOW} ms, ${qty}`);
+    }
+  }
+  // Once the positions show it, the reading itself refuses.
+  clock = NOW + STOCK_LEDGER_HOLD_MS + 1;
+  stopped(await send(sell('AAPL', '10'), { gate, tape: alpacaVenue({ positions: [] }), clock: () => clock }), 400, /AAPL long \(10 needed, none held\)/);
+  assert.equal(gate.status(clock).today.orders, 1, 'one sale in all');
+  // A cover: 100 short, 60 covered and filled, the positions still showing 100 short. 40 more may go, never 60.
+  clock = NOW;
+  const covers = gateAt({}, () => clock);
+  const short = () => alpacaVenue({ positions: [{ symbol: 'XOM', qty: '-100', qty_available: '-100', side: 'short', market_value: '-11000', asset_class: 'us_equity' }] });
+  const cover = qty => ({ symbol: 'XOM', qty, side: 'buy', type: 'limit', limit_price: '110', time_in_force: 'day', client_order_id: `cover-${qty}` });
+  assert.equal((await send(cover('60'), { gate: covers, tape: short(), clock: () => clock })).status, 200);
+  clock = NOW + 30000;
+  stopped(await send(cover('60'), { gate: covers, tape: short(), clock: () => clock }), 409,
+    /XOM short \(60 needed, 40 short left of 100 available once 60 already being closed by orders in flight are taken off\)\. A buy that covers no short would open a position: refused\.$/);
+  assert.equal((await send(cover('40'), { gate: covers, tape: short(), clock: () => clock })).status, 200, 'exactly the rest of the short');
+  stopped(await send(cover('0.000000001'), { gate: covers, tape: short(), clock: () => clock }), 409, /0 short left of 100 available once 100/);
+});
+
+test('a partial sale leaves exactly the rest sellable, shown or not: in flight, filled with the positions current, filled with them lagging', async () => {
+  // 10 held, 4 sold at NOW; ten seconds on, the venue shows it one of three ways. 6 more may go, and not a share past 6.
+  const cases = [
+    ['in flight: nothing shows it yet', { positions: [long('AAPL', '10', '2500.00')] }, 409],
+    ['filled, the positions current', { positions: [long('AAPL', '6', '1500.00')] }, 400],
+    ['filled, the positions lagging', { positions: [long('AAPL', '10', '2500.00')] }, 409],
+  ];
+  for (const [name, after, over] of cases) {
+    const judged = async qty => {
+      let clock = NOW;
+      const gate = gateAt({}, () => clock);
+      assert.equal((await send(sell('AAPL', '4'), { gate, tape: alpacaVenue({ positions: [long('AAPL', '10', '2500.00')] }), clock: () => clock })).status, 200);
+      clock = NOW + 10000;
+      return send(sell('AAPL', qty), { gate, tape: alpacaVenue(after), clock: () => clock });
+    };
+    stopped(await judged('6.000000001'), over, over === 409 ? /\(6\.000000001 needed, 6 long left of / : /6\.000000001 needed, 6 long held/, name);
+    assert.equal((await judged('6')).status, 200, `${name}: exactly the rest`);
+  }
+});
+
+test('a held sale the venue lists as an open order is counted once, never as held and as open both', async () => {
+  // 10 held, 4 sold at NOW as client_order_id "sell-AAPL-4"; ten seconds on the venue lists it, resting or part filled,
+  // with `qty_available` netting it or lagging it. 6 more may go every time: not 2, which is counting the 4 twice. The
+  // Gate counts a shown sale by how far what is free has fallen since it was admitted, so one sent without a
+  // client_order_id (the venue names it) is counted once too.
+  const anonymous = { client_order_id: undefined };
+  const cases = [
+    ['resting, qty_available net of it', [restingSell('AAPL', '4')], [long('AAPL', '10', '2500.00', { qty_available: '6' })], 400],
+    ['resting, qty_available lagging it', [restingSell('AAPL', '4')], [long('AAPL', '10', '2500.00')], 409],
+    ['2 of 4 filled, the positions current', [restingSell('AAPL', '4', { filled_qty: '2' })], [long('AAPL', '8', '2000.00', { qty_available: '6' })], 400],
+    ['2 of 4 filled, the positions lagging', [restingSell('AAPL', '4', { filled_qty: '2' })], [long('AAPL', '10', '2500.00', { qty_available: '8' })], 409],
+    ['resting, sent with no client_order_id', [restingSell('AAPL', '4', { client_order_id: 'venue-named' })], [long('AAPL', '10', '2500.00')], 409, anonymous],
+  ];
+  for (const [name, openOrders, positions, over, first = {}] of cases) {
+    const judged = async qty => {
+      let clock = NOW;
+      const gate = gateAt({}, () => clock);
+      assert.equal((await send(sell('AAPL', '4', first), { gate, tape: alpacaVenue({ positions: [long('AAPL', '10', '2500.00')] }), clock: () => clock })).status, 200);
+      clock = NOW + 10000;
+      return send(sell('AAPL', qty), { gate, tape: alpacaVenue({ positions, openOrders }), clock: () => clock });
+    };
+    assert.equal((await judged('6')).status, 200, `${name}: exactly the rest`);
+    stopped(await judged('6.000000001'), over, null, name);
+  }
+});
+
+test('a fill of an older sale the ledger no longer holds hides no held one; open orders are read first and fail closed', async () => {
+  // 10 held, a sale of 3 resting from long ago (the venue's qty_available nets it), and 7 sold at NOW. Then the old 3 fill
+  // and the positions show it, while the 7 have filled and do not show yet: nothing is left. Compared with the bare
+  // position (10 then, 7 now), the 3 that fell would hide the 7 still to show, and 3 more would be sold short.
+  let clock = NOW;
+  const gate = gateAt({}, () => clock);
+  const before = alpacaVenue({ openOrders: [restingSell('AAPL', '3', { client_order_id: 'long-ago' })], positions: [long('AAPL', '10', '2500.00', { qty_available: '7' })] });
+  stopped(await send(sell('AAPL', '7.000000001'), { gate, tape: before, clock: () => clock }), 400, /7\.000000001 needed, 7 long held/);
+  assert.equal((await send(sell('AAPL', '7'), { gate, tape: before, clock: () => clock })).status, 200, 'all that is free');
+  clock = NOW + 10000;
+  const after = alpacaVenue({ positions: [long('AAPL', '7', '1750.00')] });
+  stopped(await send(sell('AAPL', '0.000000001'), { gate, tape: after, clock: () => clock }), 409, /\(0\.000000001 needed, 0 long left of 7 available once 7 /);
+  // Read the open orders before the positions: an order that fills between the two reads is counted in both, never in
+  // neither. Here the old 3 fill between them: 4 are judged free, not 7.
+  let filled = false;
+  const racing = alpacaVenue({ openOrders: () => (filled ? [] : [restingSell('AAPL', '3', { client_order_id: 'long-ago' })]),
+    positions: () => (filled ? [long('AAPL', '7', '1750.00')] : [long('AAPL', '10', '2500.00', { qty_available: '7' })]) });
+  const fetcher = async (url, init = {}) => {
+    const answer = await racing.fetcher(url, init);
+    if (/\/v2\/orders\?/.test(url)) filled = true;
+    return answer;
+  };
+  const free = closeAvailable('AAPL', 'sell', [long('AAPL', '7', '1750.00')], [restingSell('AAPL', '3')]);
+  assert.deepEqual(free, { available: 4n * 10n ** 12n });
+  const race = await send(sell('AAPL', '4.000000001'), { tape: { ...racing, fetcher } });
+  stopped(race, 409, /\(4\.000000001 needed, 4 long left of 4 available once 0 /);
+  assert.deepEqual(racing.calls.map(made => new URL(made.url).pathname), ['/v2/orders', '/v2/positions'], 'the open orders, then the positions');
+  // What closeAvailable counts: open orders of the symbol on the same side, net of fills; never below zero; and it fails
+  // closed on a list that may be cut off or an open order with no qty. A cover reads the open buys.
+  const shortRow = { symbol: 'XOM', qty: '-100', qty_available: '-100', side: 'short' };
+  assert.deepEqual(closeAvailable('XOM', 'buy', [shortRow], [{ symbol: 'XOM', side: 'buy', qty: '30', filled_qty: '10' }, restingSell('XOM', '5')]),
+    { available: 80n * 10n ** 12n });
+  assert.deepEqual(closeAvailable('AAPL', 'sell', [long('AAPL', '2', '500')], [restingSell('AAPL', '3'), { ...restingSell('AAPL', '9'), side: 'buy' }, restingSell('MSFT', '1')]),
+    { available: 0n });
+  assert.equal(closeAvailable('AAPL', 'sell', [], [{ symbol: 'AAPL', side: 'sell', notional: '100' }]).source, 'orders');
+  assert.equal(closeAvailable('AAPL', 'sell', [], Array.from({ length: 500 }, () => restingSell('MSFT', '1'))).source, 'orders');
+  assert.equal(closeAvailable('AAPL', 'sell', [], {}).source, 'orders');
+  for (const [openOrders, why] of [[502, /^Cannot read the real account's open orders: venue HTTP 502\.$/],
+    [[{ symbol: 'AAPL', side: 'sell', notional: '100', id: 'n' }], /^Cannot check what the real account has free to close: the open sell order for AAPL has no qty to count it by\.$/]]) {
+    const result = await send(sell('AAPL', '1'), { tape: alpacaVenue({ openOrders, positions: [long('AAPL', '10', '2500.00')] }) });
+    refused(result, 424, 'orders', why);
+  }
+});
+
+test('a close is held a minute after its answer, two minutes with none; one that never left is given back', async () => {
   let clock = NOW;
   const gate = gateAt({}, () => clock);
   const sale = { symbol: 'AAPL', qty: '10', side: 'sell', type: 'limit', limit_price: '250', time_in_force: 'day' };
   const held = () => alpacaVenue({ positions: [long('AAPL', '10', '2500.00')] });
-  // The venue refused the first sale (an answer all the same): five seconds on, a reading that shows the 10 shares still
-  // available judges alone.
+  // The venue refused the first sale (an answer all the same). The Gate holds every answered close for STOCK_LEDGER_HOLD_MS
+  // (the design review of Oct 10, 2026): from its readings alone a refused sale and a filled one the positions do not
+  // show yet look the same. A reading begun a minute after the answer judges alone.
   const refusing = alpacaVenue({ positions: [long('AAPL', '10', '2500.00')], order: 403 });
   assert.equal((await send(sale, { gate, tape: refusing, clock: () => clock })).status, 403, 'the venue\'s own refusal');
   assert.equal((await send(sale, { gate, tape: held(), clock: () => clock })).status, 409, 'at once: it may not show yet');
   clock = NOW + 5001;
-  assert.equal((await send(sale, { gate, tape: held(), clock: () => clock })).status, 200, 'five seconds on, the venue judges');
+  assert.equal((await send(sale, { gate, tape: held(), clock: () => clock })).status, 409, 'five seconds on: still held');
+  clock = NOW + STOCK_LEDGER_HOLD_MS;
+  assert.equal((await send(sale, { gate, tape: held(), clock: () => clock })).status, 409, 'exactly a minute on: still held');
+  clock = NOW + STOCK_LEDGER_HOLD_MS + 1;
+  assert.equal((await send(sale, { gate, tape: held(), clock: () => clock })).status, 200, 'a minute on, the venue judges');
   // A resting sale shows at the venue as shares no longer available: a second sale is refused by the reading itself.
-  clock = NOW + 11000;
+  clock = NOW + STOCK_LEDGER_HOLD_MS + 6000;
   const resting = await send(sale, { gate, tape: alpacaVenue({ positions: [long('AAPL', '10', '2500.00', { qty_available: '0' })] }), clock: () => clock });
   assert.equal(resting.status, 400);
   assert.match(resting.body.error, /AAPL long \(10 needed, none held\)/);
-  // No answer: it counts for a minute.
+  // No answer: it is held as if answered when STOCK_PENDING_MS ran out, two minutes in all.
   const silent = held();
   const lost = { ...silent, fetcher: async (url, init = {}) => {
     if (init.method === 'POST') throw Object.assign(new Error('timeout'), { name: 'TimeoutError' });
     return silent.fetcher(url, init);
   } };
   const quiet = gateAt({}, () => clock);
+  const sent = clock;
   assert.equal((await send(sale, { gate: quiet, tape: lost, clock: () => clock })).status, 502);
   assert.equal(quiet.stockStatus(clock).closes_in_flight, 1);
-  clock += 30000;
+  clock = sent + 30000;
   assert.equal((await send(sale, { gate: quiet, tape: held(), clock: () => clock })).status, 409, 'at 30 s');
-  clock += 30001;
-  assert.equal((await send(sale, { gate: quiet, tape: held(), clock: () => clock })).status, 200, 'after a minute');
+  clock = sent + STOCK_PENDING_MS + 1;
+  assert.equal((await send(sale, { gate: quiet, tape: held(), clock: () => clock })).status, 409, 'after a minute: still held');
+  assert.equal(quiet.stockStatus(clock).closes_in_flight, 0, 'held, no longer in flight');
+  clock = sent + STOCK_PENDING_MS + STOCK_LEDGER_HOLD_MS + 1;
+  assert.equal((await send(sale, { gate: quiet, tape: held(), clock: () => clock })).status, 200, 'after two minutes');
   // A close that never reached the venue (refunded before any dispatch) leaves the ledger and the day's count.
   const store = memoryStore();
   const bare = createGate({ store, env: env(), now: () => NOW });

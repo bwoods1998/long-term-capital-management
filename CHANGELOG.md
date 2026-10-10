@@ -29,7 +29,7 @@ any other deploy.
 The running House release is `20261010T062000Z-1767910d2115` (main `dd196cad`, the spent-lineage refusal, 06:20Z Oct 10),
 the gateway is `507b6118`, and the box's updater is on. What is built and not deployed is on branches.
 
-### A stock buy's fill between reads is never lost, on `fix/gateway-stock-read-order` (unreleased; a gateway deploy; no House change)
+### A stock buy's fill between reads is never lost, and a lagging sale is never sold twice, on `fix/gateway-stock-read-order` (unreleased; a gateway deploy; no House change)
 
 - The design review of Oct 10, 2026: `realStockBuy` read the account, then the open orders, then the positions, so a buy
   that filled between the first two reads was counted nowhere, and the Gate's ledger let an answered buy go after 5 s
@@ -37,8 +37,15 @@ the gateway is `507b6118`, and the box's updater is on. What is built and not de
   the positions, then the account (a fill in between counts twice, never not at all; every read still fails closed), and
   the Gate holds each admitted buy `STOCK_LEDGER_HOLD_MS` (60 s) after its answer (unanswered, two minutes from
   admission), netted against the open order that lists it by `client_order_id`, so it counts once, the larger of the two.
-  Stock closes are unchanged. Docs: `gateway/README.md`, `docs/operations.md`. Proof: `gateway/test/stock-buys.test.mjs`
-  (449 of 449 in the gateway).
+  Docs: `gateway/README.md`, `docs/operations.md`. Proof: `gateway/test/stock-buys.test.mjs` (449 of 449 in the gateway).
+- The same review's close-lag risk: the Gate let a stock close go 5 s after its answer, so a filled sale the venue's
+  positions did not show yet left its shares free to sell again: a short sale. A close now reads the open orders, then the
+  positions (free to take: the lower of `qty_available` and the position less the open orders on its side,
+  `caps.closeAvailable`; `424 orders` when they cannot be read), and is held `STOCK_LEDGER_HOLD_MS` after its answer (two
+  minutes with none). From the oldest close held, the closes since count as the larger of what they ask and how far what
+  is free has fallen since it was admitted, so a close the venue shows counts once and one it does not still counts; past
+  what is left is `409 stock_close`. Covers have the mirror rule. A venue-refused close also holds its shares for the
+  minute. Proof: `gateway/test/stock-buys.test.mjs`, `gateway/test/router.test.mjs` (453 of 453 in the gateway).
 
 ### Real stock and ETF buys at the gateway, on `feat/gateway-stock-opens` (unreleased; a gateway deploy; no House change)
 

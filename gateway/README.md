@@ -100,10 +100,14 @@ account. **Reads and cancels always pass.** Deployed values (`wrangler.jsonc`, d
   fails is `503 {cap: "equity"}` (the account, or a margin account with no `regt_buying_power`) or
   `424 {cap: "orders"|"positions"}`. A buy counts as an open in the day's orders and the kill switch
   stops it; it never spends the options' opening maximum loss. Every stock order reads the positions
-  fresh, and the Gate serializes closes: a second close of shares a close in flight already takes is
-  `409 {cap: "stock_close"}`. No order is ever a short sale; crypto is refused. The running House sells
-  every stock position at market (`_close_shares`): the House release that first buys must limit that
-  to assignment shares (docs/operations.md).
+  fresh; a close reads the open orders first, and is free to take the lower of `qty_available` and the
+  position less the open orders on its side. The Gate serializes closes, each held 60 s after its answer
+  as a buy is: from the oldest held close, the closes since count as the larger of what they ask and how
+  far what is free has fallen since it was admitted (a close the venue already shows counts once, one
+  filled while the positions lag still counts). A close past what is left is `409 {cap: "stock_close"}`.
+  No order is ever a short sale; crypto is refused. The running House sells every stock position at
+  market (`_close_shares`): the House release that first buys must limit that to assignment shares
+  (docs/operations.md).
 - A refusal is `403 {error, cap}`; the kill switch is `423` and stops every order-creating call on the
   real account, exits included; an order that cannot be priced is `400`. Every refusal made before
   anything is forwarded that is a `424` or a `5xx` names its `cap` (`equity`, `positions`,

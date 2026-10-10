@@ -69,10 +69,19 @@ at most `qty_available`; a BUY of a symbol held short is only a cover, at most t
 account read). Every real stock order now reads the positions FRESH (never the router's per-isolate cache, which could
 still show shares another isolate sold or a short it covered, and so pass a short sale, or a buy as a "cover" past every
 stock cap), and the Gate keeps each admitted close in the same in-flight ledger as the buys (`gate.mjs`
-`reserveStockClose`): a close is admitted only when its qty, plus the closes of the same symbol and side admitted and not
-yet shown by the venue, is at most what the fresh reading leaves available. Two sales of the same shares, through one
-isolate or two, cannot both go: the second is `409 {cap: "stock_close"}`, nothing sent (the House reads a 4xx as a
-refusal and sends it again later). No order is ever a short sale, so margin is never used for one, and no buy both
+`reserveStockClose`). A close reads the open orders, then the positions (an order that fills between the two reads is
+counted in both, never in neither), and what is free to close is the lower of `qty_available` and the position less the
+open orders on its side (`caps.closeAvailable`). Each admitted close is held `STOCK_LEDGER_HOLD_MS` (60 s) after its
+answer, two minutes with none (the design review of Oct 10, 2026: the venue's positions can lag a filled sale while its
+order has left the open list, and until then a close was let go after 5 s, so the same shares could be sold again, short).
+From the oldest close held, every close since counts as the LARGER of what they ask together and how far what is free has
+fallen since that oldest one was admitted (it records what was free then): a close the venue shows, open or filled,
+counts once; one it does not show yet still counts; and a fill of an older order (already out of what was free) hides
+none. A close is admitted only when its qty is at most what is left. Two sales of the same shares, through one isolate or
+two, cannot both go: the second is `409 {cap: "stock_close"}`, nothing sent (the House reads a 4xx as a refusal and
+sends it again later). A held close the venue refused also holds its shares for the minute: from the readings alone it
+looks like a fill the positions do not show yet. Open orders that cannot be read, a full page of 500, or an open order on
+the close's side with no `qty` is `424 {cap: "orders"}`. No order is ever a short sale, so margin is never used for one, and no buy both
 covers and opens. With `STOCK_BUYS_REAL` anything but `on`, a real stock buy is what it was (a cover or a `400`). Crypto
 stays refused. The practice account (`alpaca-paper`) is unchanged.
 **Margin interest** on a margin account is the venue's charge on borrowed cash: the gateway does not meter it, so the

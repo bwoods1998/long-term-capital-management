@@ -703,8 +703,38 @@ export function closedLegRows(body) {
 // router's per-isolate cache (an isolate's cached reading could still show shares sold, or a short covered, through
 // another isolate), and the Gate serializes stock closes as it serializes buys (`gate.mjs` `reserveStockClose`): a close
 // is admitted only when its qty, plus the closes of the same symbol and side the Gate admitted that the reading may not
-// show yet, is at most what the fresh reading leaves available (`availableHeld`). So two sales of the same shares,
+// show yet, is at most what the fresh reading leaves available (`closeAvailable`). So two sales of the same shares,
 // through one isolate or two, cannot both go, and neither can a sale of shares already sold: nothing is a short sale.
+// The design review of Oct 10, 2026: the open orders are read before the positions, and the Gate holds each close a
+// minute after its answer, since the venue's positions can lag a filled sale while its order has left the open list.
+
+/**
+ * What a stock CLOSE of `symbol` on `side` may take by the venue's own readings (the design review of Oct 10, 2026):
+ * `{ available }` (picounits) or `{ error, source }`. A sale closes shares held long, a buy covers shares held short. It is
+ * the lower of what `positions` leave available (`availableHeld`: `qty_available`, which nets the venue's own open orders)
+ * and the whole position less the open orders on the same side for the symbol (`orders`, read BEFORE the positions: an
+ * order that fills between the two reads is counted in both, never in neither), never below zero. Fails closed: a list
+ * that may be cut off (`ordersLimit` rows), or an open order on that side with no readable qty, is an error.
+ */
+export function closeAvailable(symbol, side, positions, orders, { ordersLimit = 500 } = {}) {
+  if (!Array.isArray(orders)) return { error: 'the account\'s open orders were not a list', source: 'orders' };
+  if (orders.length >= ordersLimit) return { error: `the account has ${orders.length} or more open orders, more than one reading lists`, source: 'orders' };
+  const sign = side === 'sell' ? 1n : -1n;
+  const free = (availableHeld(positions).get(symbol) ?? 0n) * sign;
+  const whole = heldShares(symbol, positions) * sign;
+  let open = 0n;
+  for (const row of orders) {
+    if (!row || typeof row !== 'object' || row.symbol !== symbol || row.side !== side) continue;
+    const qty = parsePico(row.qty);
+    if (qty === null || qty <= 0n) return { error: `the open ${side} order for ${symbol} has no qty to count it by`, source: 'orders' };
+    const filled = parsePico(row.filled_qty ?? '0') ?? 0n;
+    const done = filled > 0n ? filled : 0n;
+    if (qty > done) open += qty - done;
+  }
+  const net = whole - open;
+  const available = free < net ? free : net;
+  return { available: available > 0n ? available : 0n };
+}
 
 /**
  * A stock order on the real account read as the close it must be: `{ body }` (a one-leg close in the shape
