@@ -451,6 +451,14 @@ def validate(raw: Any, structure: Any = None, *, roots: Any = None,
             if len(reb) == 3:
                 card["rebirth"] = reb
     if lane == dlane.DIRECTION:
+        # AN ALWAYS-IN CARD'S ABLATION IS DROPPED, not refused (Oct 10, 2026): the card template asks every card for an
+        # ablation switch, and an always-in card (declared inputs exactly ["clock"]) has no gate to switch off. Its program
+        # is held to entering on the clock alone by G1 on Train, so the switch would only describe a gate it may not have.
+        if isinstance(raw.get("inputs"), list) and [str(i).strip().lower() for i in raw["inputs"]] == ["clock"] \
+                and "ablation" in raw:
+            raw = {k: v for k, v in raw.items() if k != "ablation"}
+            card["ablation"] = dict(DEFAULT_ABLATION)          # as if it had declared none: the same card, the same sha
+            errors = [e for e in errors if not e.startswith("ablation:")]
         # THE DIRECTION LANE: inside the lane's box or refused, every reason named (the lane's reason for a field replaces
         # the general one, so a refusal stays inside what the next request quotes); the lane is part of the card (its sha).
         boxed = dlane.card_errors(raw, structure, roots, settings)

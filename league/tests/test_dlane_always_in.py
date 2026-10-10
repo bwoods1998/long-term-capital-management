@@ -136,10 +136,14 @@ class Status(unittest.TestCase):
         self.assertEqual(len(refused(probe)), 2)
         both = {**ALWAYS, "comparison": "an always-in call bought every session, with the regime gate switched off"}
         self.assertIn("never switch or turn a gate, signal or filter off", " ".join(refused(both)))
+        # AN ALWAYS-IN CARD'S ABLATION IS DROPPED, not refused (Oct 10, 2026: the card template asks every card for one).
         for ablation in (DIR["ablation"], {"param": "signal_on", "off": 0}, "flat"):
-            errors = refused({**ALWAYS, "ablation": ablation})
-            self.assertEqual(errors, ["ablation: an ALWAYS-IN card (declared inputs exactly [\"clock\"]) has no gate to "
-                                      "switch off: leave ablation out"], ablation)
+            card, problems = cards.validate({**ALWAYS, "ablation": ablation}, "long_single", roots=["SPY"], settings=LANE)
+            self.assertEqual(problems, [], ablation)
+            self.assertEqual(cards.card_sha(card), cards.card_sha(cards.validate(ALWAYS, "long_single", roots=["SPY"],
+                                                                                   settings=LANE)[0]))
+        # The lane's box itself still refuses one (a caller that skips validate cannot carry a switch in).
+        self.assertTrue(dlane.card_errors({**ALWAYS, "ablation": DIR["ablation"]}, "long_single", ["SPY"], LANE))
         for field, text in (("falsification", "it fails when its always-in call loses money on every Train year"),
                             ("comparison", "itself: there is no gate to switch off, and no gate to compare it against")):
             card, problems = cards.validate({**quiet, field: text}, "long_single", roots=["SPY"], settings=LANE)
