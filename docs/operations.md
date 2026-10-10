@@ -149,8 +149,9 @@ or only for symbols tagged as assigned. Until it does, `STOCK_BUYS_REAL` "on" is
   stop or option-intent buy is a `400` before anything is read; a market, good-till-cancelled or unlisted buy is a `400`
   once the positions (read first, as for every real stock order) show it is not a cover, before the account is read.
 - **Its price**: `qty x limit_price`, rounded up. A buy fills at its limit or better, so nothing it spends is above it.
-- **Its caps**, read fresh from the account by the gateway itself (`GET v2/account`, then `GET v2/orders?status=open`,
-  then `GET v2/positions`, each with the real keys, read-only), judged in the Gate's single step that reserves:
+- **Its caps**, read fresh from the account by the gateway itself (`GET v2/orders?status=open`, then `GET v2/positions`,
+  then `GET v2/account`, each with the real keys, read-only: in that order a buy that fills between two reads is counted
+  twice, never not at all), judged in the Gate's single step that reserves:
 
   | Cap | Refusal (`403 {cap}`) | Rule |
   |---|---|---|
@@ -164,9 +165,16 @@ or only for symbols tagged as assigned. Until it does, `STOCK_BUYS_REAL` "on" is
   or malformed reads as the ceiling. Equity and buying power are rounded down, every cap rounds down, and the order's
   price and the options' extra weight round up. A House that reprices a buy (cancel and send again) spends the day's
   cap each time: price to fill.
-- **Buys in flight**: the Gate keeps each admitted buy until its forward is answered, and for five seconds after (a
-  reading that began before the answer may not show it); one whose answer never came counts for a minute. So a burst of
-  buys cannot pass a cap between two readings, and a buy is counted once the venue shows it.
+- **Buys in flight**: the Gate holds each admitted buy for `STOCK_LEDGER_HOLD_MS` (60 s) after its forward is answered
+  (the venue's account and positions can lag an order's status); one whose answer never came, for two minutes from
+  admission. So a burst of buys cannot pass a cap between two readings, and a buy that fills while the account and
+  positions lag is still counted. One the open orders list by its `client_order_id` counts once, the larger of the two.
+  A held buy or close is let go early only on a definite answer (the House's cancel-then-resend re-prices every 30 s in
+  the close window): a submit the venue refuses with a 4xx other than 408 placed nothing and counts nothing from then;
+  and each check reads, by `client_order_id` (`GET v2/orders:by_client_order_id`, read-only, at most 10), the held
+  orders the open orders do not list: one `canceled`, `expired` or `rejected` counts only what it filled (shares the
+  positions may not show yet), learned once and never read again; one `filled` keeps its whole hold. A read that fails,
+  a 5xx, a 408 or no answer keeps the whole hold, and an order sent with no `client_order_id` can only wait it out.
 - **It is an open for the day's counts** (`MAX_DAY_OPEN_ORDERS`, `MAX_DAY_ORDERS`) and the kill switch stops it (`423`).
   It never spends the options' opening maximum loss (`MAX_DAY_USD_ALPACA`): the stock book has its own caps.
 - **Fails closed**: an account that cannot be read (or has no equity or `buying_power`, or a margin account, multiplier
@@ -179,11 +187,20 @@ at most `qty_available`; a BUY of a symbol held short is only a cover, at most t
 account read). Every real stock order now reads the positions FRESH (never the router's per-isolate cache, which could
 still show shares another isolate sold or a short it covered, and so pass a short sale, or a buy as a "cover" past every
 stock cap), and the Gate keeps each admitted close in the same in-flight ledger as the buys (`gate.mjs`
-`reserveStockClose`): a close is admitted only when its qty, plus the closes of the same symbol and side admitted and not
-yet shown by the venue, is at most what the fresh reading leaves available. Two sales of the same shares, through one
-isolate or two, cannot both go: the second is `409 {cap: "stock_close"}`, nothing sent (the House reads a 4xx as a
-refusal and sends it again later). No order is ever a short sale, so margin is never used for one, and no buy both
-covers and opens. With `STOCK_BUYS_REAL` anything but `on`, a real stock buy is what it was (a cover or a `400`). Crypto
+`reserveStockClose`). A close reads the open orders, then the positions (an order that fills between the two reads is
+counted in both, never in neither), and what is free to close is the lower of `qty_available` and the position less the
+open orders on its side (`caps.closeAvailable`). Each admitted close is held `STOCK_LEDGER_HOLD_MS` (60 s) after its
+answer, two minutes with none (the design review of Oct 10, 2026: the venue's positions can lag a filled sale while its
+order has left the open list, and until then a close was let go after 5 s, so the same shares could be sold again, short).
+From the oldest close held, every close since counts as the LARGER of what they ask together and how far what is free has
+fallen since that oldest one was admitted (it records what was free then): a close the venue shows, open or filled,
+counts once; one it does not show yet still counts; and a fill of an older order (already out of what was free) hides
+none. A close is admitted only when its qty is at most what is left. Two sales of the same shares, through one isolate or
+two, cannot both go: the second is `409 {cap: "stock_close"}`, nothing sent (the House reads a 4xx as a refusal and
+sends it again later). A close with a definite answer is let go early as a buy is (above, **Buys in flight**): refused
+with a 4xx, or read done by its `client_order_id` with only what it filled still held. Open orders that cannot be read,
+a full page of 500, or an open order on the close's side with no `qty` is `424 {cap: "orders"}`. No order is ever a
+short sale, so margin is never used for one, and no buy both covers and opens. With `STOCK_BUYS_REAL` anything but `on`, a real stock buy is what it was (a cover or a `400`). Crypto
 stays refused. The practice account (`alpaca-paper`) is unchanged.
 **Margin interest** on a margin account is the venue's charge on borrowed cash: the gateway does not meter it, so the
 House's economics must count it (no hidden costs).
@@ -199,6 +216,99 @@ npm test`, then `npx wrangler@4.129.1 deploy` in the money path's window, then `
 block): `stock_buys.enabled` true, the shares `0.5`, `0.2`, `2`, `day_equity_multiple` `4`; `max_loss` unchanged. **Roll back**: `STOCK_BUYS_REAL`
 `"off"` and deploy (closes keep working), or `npx wrangler@4.129.1 rollback` to the previous version. A stock position
 bought before a rollback stays on the account and is closed by an ordinary sale (closes go either way).
+
+## The no-captain automations (Oct 10, 2026): `feat/no-captain`, not deployed
+
+Built on `feat/no-captain`, not deployed: one gateway deploy, then one owner deploy (`league/ops/budget.py`,
+`league/ops/budget_refresh.py` (new), `league/ops/registry.py`, `league/ops/stall.py`; `gateway/lib/email.mjs`,
+`gateway/lib/gate.mjs`).
+Nothing in `league/swarm/`, `league/live/`, `league/gym/` or `league/constitution.py`; no evidence rule moves.
+
+- **Why.** The owner's Done needs "research runs 24/7 at budget with no captain" (DONE-RULE item 7, read by
+  `dlane_report.Research247`). From Oct 7 15:44Z to Oct 10 19:40Z the captain intervened by hand 59 times: 18
+  `swarm.json` edits, 11 agenda installs or reverts, 7 budget runs or hand edits of `budget.json`, 17 owner deploys and
+  5 gateway deploys, and push notes asking for top-ups. Most were found by reading the log, never by an alarm. These
+  four changes take over the ones that recur, ranked by recurrence times their cost to item 7.
+- **The top-up raise and the hourly refresh** (`budget.py` `compute` and `refresh`; the new `budget_refresh` job,
+  hourly at :35 and at each House start). The day's figure was set once: on Oct 9 a top-up at about 14:29Z left Sail
+  research tapered until 00:30Z, and the captain ran the job by hand (once without the House's environment, which
+  wrote Claude $0), edited `budget.json` by hand, saw the run after the close put the old figure back (research,
+  births and the architect stopped), and ran the job again because the stale ceiling knob held births at 16. Now a
+  run whose own reading would set more raises the day's figure to it (raise-only, never above the ceiling, from the
+  reading as it stands, `raised_from` and `raised_at` recorded; the knobs and the guard's caps follow at the swarm's
+  next loop), and `budget_refresh` reads the meters every hour, writing `budget.json` only when it raises a meter or
+  sets a day's first figure. It never lowers a figure, never writes a meter it could not read (the full job's runs
+  fail closed, as before), and sends no notice; with no usable file (none, another rule's after a deploy, stale) it is
+  the full job, so a deploy that changes the rule no longer waits for 00:30Z or a run by hand. A raise is never bought
+  by a fallback: the day's figure keeps the fixed cost and reserve it was set or last raised on (`fixed_usd_day`,
+  `reserve_usd`), and a raise is computed on the larger of those and the reading's own, so a failed box-spend read
+  (fixed cost back to `guard.house_burn_usd_day`) raises nothing. The figure also keeps the day's first figure and
+  every raise (`set_usd_day`, `raises`), which `underspend` prices hour by hour. What it does not fix:
+  a day whose first run tapered is still a taper day for item 7 (every `budget` receipt of the day must say
+  `ceiling`); only a top-up before the taper saves it.
+- **The births jam and the birth yield** (`stall.py`). From the `swarm.architect` events (`architect_tally`): a jam
+  (no birth for 6 h while at least 4 passes wanted births: asked a model, found no cell or failed) is now the
+  `births` cause with the owner's step at once, naming the main way the passes bore nothing and its lever (an agenda
+  through `scripts/agenda_install.py`, `architect.max_rebirths_per_cell`, `architect.max_alive_per_class`, the effort);
+  the new `birth_yield` cause (INFO) stands earlier: over 3 h at least 4 passes asked a model and bore at most 1, or the
+  card checks refused 80% of their proposals, or no birth in 2 h while 3 passes wanted one. Its numbers count the
+  refusals by kind, the incomplete cards' top fields and the rebirth rows pointed at. Nothing loosens the graveyard or
+  the card rule by itself. Only a jam a setting or an agenda clears is the owner's step (incomplete cards, the rebirth
+  rule, a spent lineage, a cap, no open cell, cut answers); failed model calls (a provider's outage, a poll's timeout)
+  heal by themselves and stand as the jam's INFO. The captain caught the graveyard wall of Oct 10 15:41-16:22Z (births
+  0/0/0 under agenda v21.4) inside 41 minutes and reverted it at 16:24:59Z; none of these causes would have stood that
+  soon. With nobody reading, `birth_yield` would have stood after two dry hours (INFO, mailed at once as a new cause)
+  and the jam would have been the owner's notice after six.
+- **The swarm's alerts reach the owner** (`stall.py` `swarm_alerts`). Sixteen kinds of `swarm.status` alerts
+  (`reader_cut`, `agenda_guard`, `gate_coverage`, `gate_missing_data`, `train_span_pending`, `look_failed_three_times`,
+  `game_waits`, `policy_layer`, ...) went only to the swarm's record and the private ledger: the captain found the Sail
+  reviewer cutting 4 of 6 gate reviews (a lineage's one try lost) by hand. The cause lists each kind with its count,
+  last time and own sentence; the kinds only a setting or a fix clears carry the owner's step (`ALERT_STEPS`), read
+  from the state where the swarm keeps it (`stall.alert_states`): `reader_cut` while it fired this UTC day and
+  `gate.review_max_output_tokens` is no higher than the cap it met; `agenda_guard`, `policy_layer`,
+  `train_span_pending` and `game_waits` from the settings as the swarm loads them; `gate_coverage` from the pool's
+  record of the configured gate image; `train_span_mismatch` and `gate_missing_data` while their latest alert (7 days
+  back) names the configured image. The swarm raises most of these once, so a kind stands while its condition does
+  whatever its alert's age, and clears at the next stall run once it is fixed (a fix before midnight does not fail the
+  next day). `look_failed_three_times` is not read: an owner step on the UTC day it fired only. The rest are INFO over
+  12 h, and a Sail window's fallback (`sail_window_stall`) and the funding watch's cliff never stand by themselves.
+- **Research under its budget, and the settings that bind it** (`stall.py` `underspend`, INFO). Item 7 reads a day with
+  no taper as at budget, so a `swarm.json` pin under what the dollars buy was invisible (Oct 9: `gym.max_boxes` 2 under
+  the budget's 7, half the paid Gym idle). The cause stands when Sail's booked research today is under 70% of what its
+  day's figure buys by now at the guard's even pace (each top-up raise counted from its hour; read from 6 h into the
+  day, not while the guard braked 2 h or more), or when two settings that cannot both hold bind. Claude's reading is
+  said beside it but never stands by itself: its figure is spent by its roles' calls as the gate and the strategist
+  have work (the release sets the architect's and the researchers' lines to 0), never at an even pace. It names every
+  setting that binds (`settings_binds`): a cap under the budget's knob (`gym.max_boxes`,
+  `researcher.sail_usd_per_hour`, `population.ceiling`, a slower `architect.every_seconds`, `population.start` under
+  the ceiling), a conflict (`architect.max_alive_per_class` times the direction lane's classes under
+  `dlane.max_alive`: the class cap binds the lane first; an architect Claude line above 0 but under one call's $2
+  hold), a value under the release's own (`researcher.dormant_cycles`, `architect.max_refill` under what `policy.json`
+  sets: the release's own 12 and 6 are no drift), and the Claude lines at 0. The committed `policy.json` itself holds
+  the class-cap pair (12 against 24, one class): it is named, and stands by itself only once the architect's passes of
+  the last 6 h met the class cap (`lane_class_capped`); the architect-line conflict always stands.
+- **Item 7.** The jam's owner step and the `swarm_alerts` owner kinds are owner steps, so a day on which one stood fails
+  item 7 ("an owner step waiting"): such a day needed a human. `birth_yield` and `underspend` are INFO and fail nothing.
+- **The notice's pace.** A stall needing nothing from the owner was mailed at most once a day after the last notice of
+  either kind, so one cause standing for days held every new one back up to a day (`birth_yield`'s early warning among
+  them). Now a cause no notice told in the last 24 hours is mailed at once (`stall.json` `mail.told`), the same causes
+  at most once a day; the gateway keys such a notice on its causes (`stall:info:<causes>`, 24 h) instead of one
+  `stall:info` key.
+- **Deploy order.** (1) The gateway (`cd gateway && npm run deploy`): `gateway/lib/email.mjs` has the words for
+  `birth_yield`, `swarm_alerts` and `underspend` and the `stall:info:<causes>` key (`gateway/lib/gate.mjs` keeps it
+  24 h); a cause it does not know makes the whole stall notice a 400 (nothing mailed), and an older gateway answers a
+  new cause's notice as a duplicate of the day's `stall:info` (tried again each run until the day is out), so the
+  gateway goes first. (2) One owner deploy of the House at the branch head. The runner starts `budget_refresh` from the
+  deploy (a new job is never `missed` for the days before it).
+- **Verify after the deploy** (read-only): an `ops.sqlite` `budget_refresh` receipt at the House's start and every hour
+  at :35 (`written` false with its `why` on a quiet hour); the next `stall` receipt's `checks` has `birth_yield`,
+  `swarm_alerts` and `underspend` with their numbers (`underspend` `conflicts_binding` 0 on the release's settings);
+  `stall.json` `mail.told` after the next notice; after the next top-up, `budget.json`'s
+  `meters.<meter>.day_figure.raised_from` within the hour and the swarm's `budget.knobs` following it.
+- **Rollback.** The previous House release: its `budget` job reads the raised `day_figure` as the day's figure (the
+  extra keys are ignored), its stall job ignores the new causes and `mail.told` in `stall.json`, and the runner never
+  starts the unknown `budget_refresh` job. The gateway's extra words are harmless to an older House, which mails a
+  stall needing nothing once a day by its own pace whatever key the gateway keeps.
 
 ## The always-in card (Oct 10, 2026): `fix/always-in-v2`, not deployed
 
@@ -2283,6 +2393,7 @@ occurrences past its grace has a receipt was not in the old registry.
 |---|---|---|---|---|
 | `grant` | at each House start, and hourly at :05 | 70 min | the standing grant (below) | skipped |
 | `budget` | after `economics` finishes ok, and daily 00:30 | 3 h | the budget rule and funding notices (below) | runs |
+| `budget_refresh` | at each House start, and hourly at :35 (the no-captain automations, Oct 10) | 70 min | the budget rule read again: written only when it raises a meter (the top-up raise) or sets a day's first figure; the full `budget` job when `budget.json` is unusable; never lowers a figure, never writes a meter it could not read, sends no notice | runs |
 | `hygiene` | daily 02:00 (never within 30 minutes of a session) | 3 h | end practice cohorts barred from the incubator (a retired family's cohort only when `ops.json` `hygiene.end_retired_cohorts` is true); mark `failed` pool rows `terminated` when Sail lists the box terminal or gone; the tournament's idle rule, never below `population.floor`; report stale live instances | skipped |
 | `clock` | daily 11:00 | 2 h | Alpaca's `/v2/clock` and `/v2/calendar` against the House's calendar for the next 10 sessions; a mismatch is a warning; writes `<state>/calendar.json` | runs |
 | `preopen` | trading days, open − 60 min (12:30 summer, 13:30 winter) | 40 min | the nine pre-open checks (release, grant, gateway caps, account and kill switch, swarm, bands, mirror, backup, compute), read-only; each FAIL a warning | runs |
@@ -2415,6 +2526,10 @@ and `data/nightly.stop`), all read-only, and names a stall by its cause:
 | `dlane` (weekend fixes) | `<state>/dlane-report.json` carries a warning-level alarm (A1-A7, PL1, PT1, K5), or it is older than 30 h while the lane is on (the `dlane` job stopped). With `dlane.mode` "off" the report is not read at all (the job writes none, so the last one would otherwise be mailed for good) | K5 holding: "the direction lane reads shadow while K5 holds ...: read its losses, then clear it"; K5 disarmed: "take dlane.k5_clear out of swarm.json"; none for the rest |
 | `done` (weekend fixes) | a FINAL Done checkpoint holds (the report's `done.<meter>.checkpoints`, final and holding: frozen from report to report) that no SENT notice has told yet (`stall.json` `done_told`, added to only when the gateway says it sent the notice). Not read with the lane off. Until the review of the weekend fixes it read the report's A8, which one report says once, so a House start or a failed notice before the next stall run lost the claim | an owner LINE, told at once: "Done holds at a FINAL checkpoint ...: read the claim in dlane-report.json". News, never an owner step waiting: the Done meter's item 7 does not count it |
 | `preopen` (weekend fixes) | the latest pre-open receipt (`ops.sqlite`, at most 24 h old) failed a check, or the job failed or was missed | none: each FAIL is a House warning, and the checks run again before the next open |
+| `births`, the jam (no-captain, Oct 10) | no birth for 6 h while at least 4 architect passes wanted births (asked a model, found no cell, or failed; a pass at the ceiling wants none), the population under its ceiling | at once when a setting or an agenda clears the main way they bore nothing: "the architect wanted births in N passes over the last 6 h and none was born:" and its lever (incomplete cards and the fields they lack, the rebirth rule's refuted cells, a spent lineage, a cap, no open cell, cut answers); none (INFO) for failed calls, an empty answer or another refusal |
+| `birth_yield` (no-captain) | over the last 3 h at least 4 passes asked a model and bore at most 1, or the card checks refused 80% of their proposals; or no birth in 2 h while 3 passes wanted one (from the `swarm.architect` events) | none (INFO); the jam above is the owner's step |
+| `swarm_alerts` (no-captain) | an owner kind whose condition stands now (`stall.alert_states`, from the swarm's settings and store, whatever its alert's age), or a `swarm.status` alert (`alert` true) in the last 12 h whose condition is not read or cleared, but the self-healing ones (`sail_window_stall`, `funding_alert`) alone | for `reader_cut`, `agenda_guard`, `policy_layer`, `train_span_pending`, `train_span_mismatch`, `gate_missing_data`, `gate_coverage`, `game_waits` while their condition stands, and `look_failed_three_times` on the UTC day it fired: the setting or fix each names (`stall.ALERT_STEPS`); none for the rest |
+| `underspend` (no-captain) | Sail's booked research today under 70% of what its day's figure buys by now at an even pace (from 6 h into the day, the guard braked under 2 h of it; Claude's reading is said, never a cause), or two settings that cannot both hold while they bind (`settings_binds` conflicts: the class cap once a direction card met it in the last 6 h); the settings that bind research are named either way | none (INFO): the settings named are the owner's to change |
 | `forward` (weekend fixes) | the nightly's ready file (`gym-forward.json`) does not carry the last session before today once the UTC day is 10 h in; `data/nightly.json` has carried an error 6 h or more (from the first run that saw it, kept in `stall.json`); or `data/nightly.stop` has stood 2 h or more | for a stop: "remove /workspace/state/data/nightly.stop ... the nightly forward replay, and with it the Done meter's replay twins, waits while it stands"; none for the rest |
 
 **The notice.** One `POST /v1/notify` kind `stall` a run at most, through the budget's own gateway client, listing
@@ -2521,7 +2636,8 @@ options P&L, fees in, every real route. Marks never fund research.
 ```
 ceiling_m  = $25/day × split_m              split: sail 0.8, claude 0.2 = $20 and $5 (0.6 and 0.4, $15 and $10, before)
 runway_m   = max(0, balance_m − reserve_m − 5·fixed_m) / 5
-research_m = min(ceiling_m, runway_m)       set once a UTC day by its first run, from the balance as the day began
+research_m = min(ceiling_m, runway_m)       set once a UTC day by its first run, from the balance as the day began;
+                                            raised (never lowered) by a later run whose reading sets more (a top-up)
 earned     = 0.5 × max(0, p30) / 30         written, inside the ceiling: it lifts no meter
 ```
 
@@ -2561,6 +2677,14 @@ earned     = 0.5 × max(0, p30) / 30         written, inside the ceiling: it lif
   loosens: each meter is the lower of the floor and what the stale file said, with a warning. A research budget of 0
   brakes the Sail guard at once. At the floor Claude's $1 is under the gate's two holds: the review runs on its Sail
   model, and the audit too unless its hold is at most $1, each with the gate's "not the plan's reviewer" alert.
+- **The top-up raise** (the no-captain automations, Oct 10, not deployed). A later run of the day whose own reading
+  would set more than the day's figure raises it to that reading's (raise-only, never above the ceiling, nothing added
+  back; `day_figure.raised_from` and `raised_at`, with the day's first figure and every raise, `set_usd_day` and
+  `raises`), so a top-up reaches the day's research, the knobs and the guard's caps within the hour: the
+  `budget_refresh` job reads the meters hourly and at each House start and writes `budget.json` only to raise a meter
+  or set a day's first figure. A raise is computed on the larger of the reading's fixed cost and reserve and those the
+  day's figure was set on (`day_figure.fixed_usd_day`, `reserve_usd`): a fallback reading never raises. A day whose
+  first run tapered still reads as a taper day for DONE-RULE item 7.
 - **The taper is the rule.** A meter runs at its share of the ceiling while it holds 5 days of it above its reserve
   and 5 days of its fixed cost; under that it spends a fifth a day of what it holds above them, so research tapers by
   itself and ends before the balance meets the Sail guard's brake. A cut shows in `budget.json` (`limited_by`:

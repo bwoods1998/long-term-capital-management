@@ -60,6 +60,8 @@ export class Gate extends DurableObject {
   refund(request) { return this.ctx.storage.transactionSync(() => this.gate.refund(request)); }
   // A real stock buy's forward was answered (Oct 10, 2026): it leaves the in-flight part of the stock caps.
   stockSettle(request) { return this.ctx.storage.transactionSync(() => this.gate.stockSettle(request)); }
+  // Which held stock orders a check should read the status of (read-only; the follow-up of Oct 10, 2026).
+  stockAsk(request) { return this.gate.stockAsk(request); }
   frontierReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.frontierReserve(request)); }
   frontierSettle(request) { return this.ctx.storage.transactionSync(() => this.gate.frontierSettle(request)); }
   claudeReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.claudeReserve(request)); }

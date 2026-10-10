@@ -134,12 +134,14 @@ export function fakeGitHub({ script = () => undefined, checks = { total_count: 0
 /**
  * The real Alpaca account as the gateway reads it (Sept 26, 2026 (the options-swarm run, Wave 5)). `GET v2/account`
  * answers `account` (a body, an HTTP status, or an Error to throw), `GET v2/positions` answers `positions` (the same),
- * `GET v2/orders?...` answers `openOrders` (the same; Oct 10, 2026, the stock buys), and any other call is an accepted
- * order. `orders()`, `accountReads()`, `positionReads()` and `openOrderReads()` split `calls`. `positions` and
- * `openOrders` may be functions of the call count, for a venue whose state moves between reads.
+ * `GET v2/orders?...` answers `openOrders` (the same; Oct 10, 2026, the stock buys), `GET v2/orders:by_client_order_id`
+ * answers `statuses[client_order_id]` (the same; a 404 when it names none: the follow-up of Oct 10, 2026), and any other
+ * call is an accepted order. `orders()`, `accountReads()`, `positionReads()`, `openOrderReads()` and `statusReads()`
+ * split `calls`. `positions` and `openOrders` may be functions of the call count, for a venue whose state moves between
+ * reads.
  */
 export function alpacaVenue({ equity = '5000.00', account = { equity, status: 'ACTIVE' }, positions = [], openOrders = [],
-  order = { id: 'o-1', status: 'accepted' } } = {}) {
+  statuses = {}, order = { id: 'o-1', status: 'accepted' } } = {}) {
   const calls = [];
   const answer = value => {
     if (typeof value === 'function') value = value(calls.length);
@@ -150,16 +152,22 @@ export function alpacaVenue({ equity = '5000.00', account = { equity, status: 'A
   const isAccount = url => url.endsWith('/v2/account');
   const isPositions = url => url.endsWith('/v2/positions');
   const isOpenOrders = (url, init = {}) => (init.method || 'GET') === 'GET' && /\/v2\/orders\?/.test(url);
+  const isStatus = url => /\/v2\/orders:by_client_order_id\?/.test(url);
   const fetcher = async (url, init = {}) => {
     calls.push({ url: String(url), ...init });
     if (isAccount(String(url))) return answer(account);
     if (isPositions(String(url))) return answer(positions);
     if (isOpenOrders(String(url), init)) return answer(openOrders);
+    if (isStatus(String(url))) {
+      const id = new URL(String(url)).searchParams.get('client_order_id');
+      return answer(Object.prototype.hasOwnProperty.call(statuses, id) ? statuses[id] : 404);
+    }
     return answer(order);
   };
   return {
     fetcher, calls,
-    orders: () => calls.filter(c => !isAccount(c.url) && !isPositions(c.url) && !isOpenOrders(c.url, c)),
+    orders: () => calls.filter(c => !isAccount(c.url) && !isPositions(c.url) && !isOpenOrders(c.url, c) && !isStatus(c.url)),
+    statusReads: () => calls.filter(c => isStatus(c.url)),
     accountReads: () => calls.filter(c => isAccount(c.url)),
     positionReads: () => calls.filter(c => isPositions(c.url)),
     openOrderReads: () => calls.filter(c => isOpenOrders(c.url, c)),

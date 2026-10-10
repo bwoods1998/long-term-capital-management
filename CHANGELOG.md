@@ -60,6 +60,30 @@ the gateway is `507b6118`, and the box's updater is on. What is built and not de
   route as the House sees it). Proof: `test_equity_data`, `test_equity_twins`, `test_dlane_report_equity`,
   `test_floor_box_equity`; `test_dlane_report`'s fixtures now count from the rule's inception explicitly.
 
+### A stock buy's fill between reads is never lost, a lagging sale is never sold twice, and a definite answer lets a hold go, on `fix/gateway-stock-read-order` (unreleased; a gateway deploy; no House change)
+
+- The design review of Oct 10, 2026: `realStockBuy` read the account, then the open orders, then the positions, so a buy
+  that filled between the first two reads was counted nowhere, and the Gate's ledger let an answered buy go after 5 s
+  though the venue's account and positions can lag an order's status longer. Now the open orders are read first, then
+  the positions, then the account (a fill in between counts twice, never not at all; every read still fails closed), and
+  the Gate holds each admitted buy `STOCK_LEDGER_HOLD_MS` (60 s) after its answer (unanswered, two minutes from
+  admission), netted against the open order that lists it by `client_order_id`, so it counts once, the larger of the two.
+  Docs: `gateway/README.md`, `docs/operations.md`. Proof: `gateway/test/stock-buys.test.mjs` (449 of 449 in the gateway).
+- The same review's close-lag risk: the Gate let a stock close go 5 s after its answer, so a filled sale the venue's
+  positions did not show yet left its shares free to sell again: a short sale. A close now reads the open orders, then the
+  positions (free to take: the lower of `qty_available` and the position less the open orders on its side,
+  `caps.closeAvailable`; `424 orders` when they cannot be read), and is held `STOCK_LEDGER_HOLD_MS` after its answer (two
+  minutes with none). From the oldest close held, the closes since count as the larger of what they ask and how far what
+  is free has fallen since it was admitted, so a close the venue shows counts once and one it does not still counts; past
+  what is left is `409 stock_close`. Covers have the mirror rule. Proof: `gateway/test/stock-buys.test.mjs`,
+  `gateway/test/router.test.mjs` (453 of 453 in the gateway).
+- So the House's cancel-then-resend still works (it re-prices every 30 s in the close window), a held buy or close is let
+  go early on a definite answer: a submit refused with a 4xx other than 408 counts nothing from then, and each check reads
+  by `client_order_id` (`GET v2/orders:by_client_order_id`, read-only, at most 10) the held orders the open orders do not
+  list; one `canceled`, `expired` or `rejected` counts only what it filled, learned once. A failed read, a 5xx, a 408 or
+  no answer keeps the whole hold; `filled` keeps it as before. The Durable Object gains `stockAsk` (read-only). Proof:
+  `gateway/test/stock-buys.test.mjs` (455 of 455 in the gateway).
+
 ### Real stock and ETF buys at the gateway, on `feat/gateway-stock-opens` (unreleased; a gateway deploy; no House change)
 
 - The owner's goal of Oct 10, 2026 (ETFs, stocks and options with real money). While `STOCK_BUYS_REAL` is `on` (set so
@@ -88,6 +112,42 @@ the gateway is `507b6118`, and the box's updater is on. What is built and not de
   first sends a buy must limit that to assignment and exercise shares (`docs/operations.md`). (5) Tests for buys in
   flight against the book and buying power, the admit side of every boundary, one micro-dollar over, and `"0"` end to
   end. 446 of 446 in the gateway.
+
+### The no-captain automations, on `feat/no-captain` (unreleased; a gateway deploy, then an owner deploy; no evidence reset)
+
+From the audit of every hand intervention from Oct 7 15:44Z to Oct 10 19:40Z (59 in about 76 hours), the four that
+recur without a captain and cost DONE-RULE item 7 ("research runs 24/7 at budget with no captain") the most:
+
+- `league/ops/budget.py`: THE TOP-UP RAISE. A later run of the day whose reading would set more than the day's figure
+  raises it (raise-only, never above the ceiling, from the reading as it stands; `raised_from`, `raised_at`), so a
+  top-up no longer waits for the next 00:30Z run, and the run after the close no longer puts a stale figure back.
+  `refresh` and the new job `budget_refresh` (`league/ops/budget_refresh.py`, `league/ops/registry.py`: hourly at :35
+  and at each House start) write `budget.json` only to raise a meter or set a day's first figure; with no usable file
+  (none, another rule's, stale) it runs the full job, so a deploy that changes the rule is read at once.
+- `league/ops/stall.py`: the births JAM (no birth for 6 h while 4 passes wanted births) is the owner's step at once,
+  naming the main way the passes bore nothing and its lever; the new `birth_yield` cause (INFO) reads the architect's
+  yield over 3 h (born at most 1 of 4 asking passes, or 80% of proposals refused by the card checks, or 2 dry hours) with
+  the refusals by kind, the incomplete cards' top fields and the rebirth rows; `swarm_alerts` mails the swarm's own
+  alerts (owner steps for `reader_cut`, `agenda_guard`, `gate_coverage` and the other setting-or-fix kinds); `underspend`
+  (INFO) reads each meter's booked research against what its day's figure buys by now and names the settings that bind
+  research (`settings_binds`: caps under the budget's knobs, the class cap under the direction lane's `max_alive`, an
+  architect Claude line under one call's hold, values under the code's defaults).
+- `gateway/lib/email.mjs`: the words for `birth_yield`, `swarm_alerts` and `underspend` (deploy the gateway first: an
+  unknown cause makes the stall notice a 400).
+- The review of the build: a raise is never bought by a fallback reading (the day's figure keeps the fixed cost and
+  reserve it was set on, `fixed_usd_day`, `reserve_usd`, and every raise, `set_usd_day`, `raises`, which `underspend`
+  prices hour by hour); `swarm_alerts` reads each owner kind's condition from the swarm's settings and store
+  (`alert_states`: a fix clears it at the next run, an unfixed one-shot alert stands past its 12 hours, an alert from
+  before midnight fails no next day); the jam is the owner's step only for kinds a setting or an agenda clears (failed
+  calls heal by themselves); `underspend` paces Sail only, stands on a conflict only while it binds (the release's own
+  class-cap pair once a direction card meets it) and names drift against the release's `policy.json`, not the code's
+  defaults; a new stall cause needing nothing is mailed at once (`stall.json` `mail.told`; the gateway keys such a
+  notice `stall:info:<causes>`, `gateway/lib/email.mjs` and `gateway/lib/gate.mjs`).
+- Tests: `league/tests/test_ops_budget.py` (the raise, the fallback that raises nothing, the refresh end to end, its
+  registration), `league/tests/test_ops_stall.py` (`NoCaptain`: each cause reproduces an Oct 9-10 intervention; the
+  alert before midnight, the one-shot alerts, the jam of failed calls, the brake, the real settings read;
+  `Telling`: a new cause mailed at once), `league/tests/test_ops_int_ops.py` (the job runs in a pause),
+  `gateway/test/stall-notice.test.mjs` (the key on the causes).
 
 ### An always-in card's ablation is dropped, on `fix/always-in-ablation` (unreleased; an owner deploy; no evidence reset)
 

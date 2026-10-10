@@ -85,9 +85,13 @@ account. **Reads and cancels always pass.** Deployed values (`wrangler.jsonc`, d
   size held (exits). While `STOCK_BUYS_REAL` is `on` (Oct 10, 2026), a BUY of a symbol not held short
   also goes as an OPEN when it names a symbol of `STOCK_UNIVERSE` (`lib/caps.mjs`: SPY QQQ IWM DIA, the
   eleven SPDR sector ETFs, TLT, GLD, and 18 large US stocks) and is a `limit` `day` order sized in shares
-  (fractional allowed; no `notional`), metered at `qty x limit_price`. The gateway reads the account
-  (equity, buying power, multiplier), its open orders and its positions fresh, with the real keys, and
-  the Gate refuses `403 {cap}`: `stock_order` (the order alone over 50% of equity for an ETF, 20% for a
+  (fractional allowed; no `notional`), metered at `qty x limit_price`. The gateway reads the account's
+  open orders, then its positions, then the account (equity, buying power, multiplier) fresh, with the
+  real keys: in that order a buy that fills between two reads counts twice, never not at all. "Buys in
+  flight" are the buys the Gate admitted, each held for `STOCK_LEDGER_HOLD_MS` (60 s) after the venue's
+  answer (with no answer, two minutes from admission): the venue's account and positions can lag an
+  order's status. One the open orders list by its `client_order_id` counts once, the larger of the two.
+  The Gate refuses `403 {cap}`: `stock_order` (the order alone over 50% of equity for an ETF, 20% for a
   stock), `stock_day` (the day's buys with it over 4x equity), `stock_position` (the symbol's long
   market value + its resting buys + buys in flight + this order over that share), `stock_total` (every
   long stock position + every resting stock buy + buys in flight + this order + long options counted
@@ -96,10 +100,19 @@ account. **Reads and cancels always pass.** Deployed values (`wrangler.jsonc`, d
   fails is `503 {cap: "equity"}` (the account, or a margin account with no `regt_buying_power`) or
   `424 {cap: "orders"|"positions"}`. A buy counts as an open in the day's orders and the kill switch
   stops it; it never spends the options' opening maximum loss. Every stock order reads the positions
-  fresh, and the Gate serializes closes: a second close of shares a close in flight already takes is
-  `409 {cap: "stock_close"}`. No order is ever a short sale; crypto is refused. The running House sells
-  every stock position at market (`_close_shares`): the House release that first buys must limit that
-  to assignment shares (docs/operations.md).
+  fresh; a close reads the open orders first, and is free to take the lower of `qty_available` and the
+  position less the open orders on its side. The Gate serializes closes, each held 60 s after its answer
+  as a buy is: from the oldest held close, the closes since count as the larger of what they ask and how
+  far what is free has fallen since it was admitted (a close the venue already shows counts once, one
+  filled while the positions lag still counts). A close past what is left is `409 {cap: "stock_close"}`.
+  A held buy or close is let go early only on a definite answer, so the House's cancel-then-resend
+  works: a submit the venue refuses with a 4xx (but 408) counts nothing from then, and each check reads
+  by `client_order_id` the held orders the open orders do not list (at most 10, read-only): one
+  `canceled`, `expired` or `rejected` counts only what it filled. A read that fails, a 5xx or a timeout
+  keeps the whole hold.
+  No order is ever a short sale; crypto is refused. The running House sells every stock position at
+  market (`_close_shares`): the House release that first buys must limit that to assignment shares
+  (docs/operations.md).
 - A refusal is `403 {error, cap}`; the kill switch is `423` and stops every order-creating call on the
   real account, exits included; an order that cannot be priced is `400`. Every refusal made before
   anything is forwarded that is a `424` or a `5xx` names its `cap` (`equity`, `positions`,
@@ -371,7 +384,9 @@ constant changes only by a gateway deploy):
   lower-case token, else `unknown`), how long it has stood (`hours`, `since`) and what the House is doing about it. The
   router keys the dedupe itself (`stallKey`), whatever id the House sends: `stall:owner:<the owner causes, sorted,
   joined by +>`, remembered 12 hours, so a new owner step is mailed at once and the same ones at most every 12 hours;
-  `stall:info` when none needs the owner, remembered 24 hours. `NOTIFY_MAX_PER_DAY` holds for stalls too.
+  `stall:info:<every cause, sorted, joined by +>` when none needs the owner, remembered 24 hours, so the same causes are
+  mailed at most once a day and a new one at once (Oct 10, 2026: one cause standing for days had held every new one back
+  up to a day). `NOTIFY_MAX_PER_DAY` holds for stalls too.
 - **`ENGINEER_HELD`** (`lib/github.mjs`, the self-running release): `league/swarm/researcher.py` and
   `league/swarm/claude_research.py`, the research lane's files the live path loads, are refused to every engineer
   proposal and merge (`outside_surface`, "held from the engineer in this release"), as the House's engineer holds them

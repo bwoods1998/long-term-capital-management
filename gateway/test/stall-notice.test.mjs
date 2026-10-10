@@ -154,13 +154,14 @@ test('a figure is echoed only as a decimal, a time, yes or no, or a short token;
   assert.equal(many.text.split('\n').filter(line => line.startsWith('- n')).length, 16);
 });
 
-test('the dedupe key is the owner causes, sorted, or stall:info; never the id the House sends', () => {
-  assert.equal(stallKey(notice(BIRTHS)), 'stall:info');
+test('the dedupe key is the owner causes, sorted, or stall:info and every cause; never the id the House sends', () => {
+  assert.equal(stallKey(notice(BIRTHS)), 'stall:info:births');
+  assert.equal(stallKey(notice({ ...BIRTHS, cause: 'underspend' }, BIRTHS)), 'stall:info:births+underspend');
   assert.equal(stallKey(notice(RUNWAY, BIRTHS)), 'stall:owner:runway_sail');
   const kill = { ...BIRTHS, cause: 'kill_on', owner_step: 'lift the kill switch' };
   assert.equal(stallKey(notice(RUNWAY, kill, BIRTHS)), 'stall:owner:kill_on+runway_sail');
   assert.equal(stallKey(notice(kill, RUNWAY)), 'stall:owner:kill_on+runway_sail');
-  assert.equal(stallKey(notice({ ...RUNWAY, owner_step: ' \n ' })), 'stall:info', 'a blank step is no step');
+  assert.equal(stallKey(notice({ ...RUNWAY, owner_step: ' \n ' })), 'stall:info:runway_sail', 'a blank step is no step');
 });
 
 test('through /v1/notify: the same owner causes every 12 hours, a new one at once, a stall needing nothing every 24 hours, inside the day\'s cap', async () => {
@@ -174,14 +175,18 @@ test('through /v1/notify: the same owner causes every 12 hours, a new one at onc
   const info = notice(BIRTHS);
   const first = await (await post(info, NOW)).json();
   assert.deepEqual([first.sent, first.subject], [true, 'LTCM: stalled: no births']);
-  // The House retries, loses its own record, sends another id or another cause that needs nothing: one mail a day.
-  for (const [hours, facts] of [[0.5, info], [6, { ...info, notice_id: 'stall:births:other' }], [12, notice({ ...BIRTHS, cause: 'gym_runs' })],
-    [23.9, { ...info, notice_id: undefined }]]) {
+  // The House retries, loses its own record or sends another id for the same causes: one mail a day.
+  for (const [hours, facts] of [[0.5, info], [6, { ...info, notice_id: 'stall:births:other' }], [23.9, { ...info, notice_id: undefined }]]) {
     assert.equal((await (await post(facts, NOW + hours * HOUR)).json()).duplicate, true, `${hours} h later`);
   }
   assert.equal(sent.length, 1);
-  assert.equal((await (await post(info, NOW + 24 * HOUR)).json()).sent, true);
+  // A new cause that needs nothing is not held a day behind one that stands (Oct 10, 2026); the same set again is.
+  const more = notice(BIRTHS, { ...BIRTHS, cause: 'birth_yield' });
+  assert.equal((await (await post(more, NOW + 12 * HOUR)).json()).sent, true);
+  assert.equal((await (await post(more, NOW + 20 * HOUR)).json()).duplicate, true);
   assert.equal(sent.length, 2);
+  assert.equal((await (await post(info, NOW + 24 * HOUR)).json()).sent, true);
+  assert.equal(sent.length, 3);
   // An owner step is not held behind a stall that needed nothing; the same owner causes wait 12 hours, a new one does not.
   const owner = notice(RUNWAY, BIRTHS);
   assert.equal((await (await post(owner, NOW + 25 * HOUR)).json()).sent, true);
@@ -189,15 +194,15 @@ test('through /v1/notify: the same owner causes every 12 hours, a new one at onc
   const kill = { ...BIRTHS, cause: 'kill_on', owner_step: 'lift the kill switch' };
   assert.equal((await (await post(notice(RUNWAY, kill), NOW + 31 * HOUR)).json()).sent, true);
   assert.equal((await (await post(owner, NOW + 37 * HOUR)).json()).sent, true, 'twelve hours on, the same causes again');
-  assert.equal(sent.length, 5);
+  assert.equal(sent.length, 6);
   // The day's cap holds for stalls too (here a cap of 1 on a day that has mailed already).
   const capped = await post(notice({ ...RUNWAY, cause: 'runway_claude' }), NOW + 38 * HOUR, { NOTIFY_MAX_PER_DAY: '1' });
   assert.equal(capped.status, 429);
-  assert.equal(sent.length, 5);
+  assert.equal(sent.length, 6);
   // A cause not named, or no list, is refused before anything is counted or mailed.
   assert.equal((await post(notice({ ...BIRTHS, cause: 'nonsense' }), NOW)).status, 400);
   assert.equal((await post({ kind: 'stall', cause: 'births' }, NOW)).status, 400);
-  assert.equal(sent.length, 5);
+  assert.equal(sent.length, 6);
 });
 
 test('the causes of Oct 10, 2026: a Done checkpoint and K5 are owner lines; a pre-open FAIL and a late nightly are told as stalls', () => {

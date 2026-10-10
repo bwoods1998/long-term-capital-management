@@ -63,15 +63,16 @@ test('a stock order on the real account that closes nothing is refused, whatever
   assert.equal(gate.status(NOW).today.orders, 0);
 });
 
-test('a stock close on the real account reads no quote: a market sale of shares held long goes as an exit after one positions read', async () => {
+test('a stock close on the real account reads no quote: a market sale of shares held long goes as an exit after its open orders and positions are read', async () => {
   const tape = alpacaVenue({ positions: [{ symbol: 'AAPL', qty: '100', qty_available: '100', side: 'long', asset_class: 'us_equity' }] });
   const sale = { symbol: 'AAPL', qty: '100', side: 'sell', type: 'market', time_in_force: 'day' };
   const { response, gate } = await call(ask('POST', '/v1/alpaca/v2/orders', { body: sale, headers: { 'X-LTCM-Reference-Price': '0.01' } }),
     { fetcher: tape.fetcher });
   assert.equal(response.status, 200);
-  assert.deepEqual(tape.calls.map(made => made.url), ['https://api.alpaca.markets/v2/positions', 'https://api.alpaca.markets/v2/orders']);
-  assert.equal(tape.calls[0].headers['APCA-API-KEY-ID'], 'AK-TEST-KEY', 'the positions are read with the venue credential');
-  assert.deepEqual(JSON.parse(tape.calls[1].body), sale);
+  assert.deepEqual(tape.calls.map(made => made.url), ['https://api.alpaca.markets/v2/orders?status=open&limit=500',
+    'https://api.alpaca.markets/v2/positions', 'https://api.alpaca.markets/v2/orders'], 'the open orders first, then the positions (Oct 10, 2026)');
+  assert.equal(tape.calls[1].headers['APCA-API-KEY-ID'], 'AK-TEST-KEY', 'the positions are read with the venue credential');
+  assert.deepEqual(JSON.parse(tape.calls[2].body), sale);
   assert.deepEqual((await gate.status()).today, { day: '2026-09-15', orders: 1, notional_usd: '0.01' }, 'an exit at one micro-dollar');
 });
 
@@ -815,7 +816,7 @@ test('a market order is priced by the venue quote, never by a price field or the
   const tape = alpacaVenue({ positions: [{ symbol: 'AAPL', qty: '0.1', side: 'long' }] });
   const ok = await call(ask('POST', '/v1/alpaca/v2/orders', { body: { ...aapl, qty: '0.1', side: 'sell', type: 'market' }, headers }), { fetcher: tape.fetcher });
   assert.equal(ok.response.status, 200);
-  assert.deepEqual(tape.calls.map(made => new URL(made.url).pathname), ['/v2/positions', '/v2/orders']);
+  assert.deepEqual(tape.calls.map(made => `${made.method || 'GET'} ${new URL(made.url).pathname}`), ['GET /v2/orders', 'GET /v2/positions', 'POST /v2/orders']);
   const dollars = await call(ask('POST', '/v1/alpaca/v2/orders', { body: { symbol: 'AAPL', notional: '25', side: 'sell', type: 'market', time_in_force: 'day' }, headers }), { fetcher: tape.fetcher });
   assert.equal(dollars.response.status, 400);
   assert.match(dollars.body.error, /sized in shares \(qty\), never in dollars/);

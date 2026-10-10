@@ -71,9 +71,9 @@ import {
   createsOrder, notional, PURPOSE_HEADER, allowedVenuePath, isOptionSymbol, alpacaShapeError,
   admittedStructures, isMultiLegOrder, structureNotional, practiceOrderError, closeLegsHeldError, closedLegRows,
   shortCloseBody, longCloseBody, singleLegOpenError, realStockClose, CREDIT_STRUCTURES,
-  stockBuysEnabled, stockBuyOrder, heldShares, stockExposure, availableHeld,
+  stockBuysEnabled, stockBuyOrder, heldShares, stockExposure, closeAvailable,
 } from './caps.mjs';
-import { parsePico } from './money.mjs';
+import { parsePico, mulPico, picoToMicro } from './money.mjs';
 import * as kalshi from './kalshi.mjs';
 import * as alpaca from './alpaca.mjs';
 import * as frontier from './frontier.mjs';
@@ -113,6 +113,8 @@ const EQUITY_RETRY = { 'Retry-After': '30' };
 //: The open orders a real stock buy reads (Oct 10, 2026): one page of at most this many. A full page may be cut off, so it
 //: admits no buy (`caps.stockExposure`).
 const OPEN_ORDERS_LIMIT = 500;
+//: At most this many held orders' statuses are read for one stock order (`heldStatuses`); the rest keep their whole hold.
+const STATUS_READS_MAX = 10;
 
 /**
  * A refusal made before anything is forwarded, naming why in `cap` (Sept 26, 2026 (the options-swarm run, Wave 5), the
@@ -200,8 +202,9 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
     if (!message) return fail('The notice could not be composed.', 400);
     const cap = Number(env.NOTIFY_MAX_PER_DAY || 40);
     // A stall is deduped by its own key (email.stallKey: `stall:owner:<the owner causes>` kept 12 hours by the Gate,
-    // `stall:info` 24 hours), whatever id the House sent: the same owner causes are mailed at most once every 12 hours
-    // and a stall that needs nothing from the owner at most once a day, even when the House's own record is lost.
+    // `stall:info:<the causes>` 24 hours), whatever id the House sent: the same owner causes are mailed at most once
+    // every 12 hours and the same causes that need nothing from the owner at most once a day, even when the House's own
+    // record is lost.
     const noticeId = facts.kind === 'stall' ? stallKey(facts)
       : typeof facts.notice_id === 'string' && /^[a-zA-Z0-9:_-]{1,160}$/.test(facts.notice_id) ? facts.notice_id : null;
     if (noticeId && await gate.noticeDelivered(noticeId, now())) return json({ sent: true, duplicate: true });
@@ -418,11 +421,14 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
       redirect: 'manual',
       signal: AbortSignal.timeout(30000),
     });
-    // A real stock buy or close the venue answered (taken or refused) is in its readings from now on: it leaves the gate's
-    // in-flight ledger (Oct 10, 2026). One with no answer stays in it until STOCK_PENDING_MS has passed.
+    // A real stock buy or close the venue answered is settled in the gate's in-flight ledger (Oct 10, 2026) and held
+    // STOCK_LEDGER_HOLD_MS more, since the venue's account and positions can lag the order's status. One with no answer is
+    // held as if answered when STOCK_PENDING_MS ran out. A definite refusal, a 4xx other than 408 (nothing was placed),
+    // counts nothing from now: the House's resend goes at once. A 3xx, a 5xx or a 408 may hide an order and is held whole.
     if (reservation && reservation.stock_id !== undefined) {
+      const refused = upstream.status >= 400 && upstream.status < 500 && upstream.status !== 408;
       try {
-        await gate.stockSettle({ id: reservation.stock_id, at: now() });
+        await gate.stockSettle({ id: reservation.stock_id, at: now(), ...(refused ? { refused: true } : {}) });
       } catch {
         // Unsettled, it keeps counting until it ages out: the caps err high, never low.
       }
@@ -485,27 +491,37 @@ async function realOrder(parsed, env, { gate, fetcher, now }) {
     // read: it is an exit, reserved at one micro-dollar like any real close, and a quote could only delay it.
     const close = realStockClose(parsed);
     if (close.error) return { response: fail(close.error, 400) };
-    // Read FRESH, never from the cache (the review of Oct 10, 2026): an isolate's cached reading may still show shares
-    // another isolate has sold, or a short it has covered, and a decision taken from it could sell what is not held (a
-    // short sale) or let a buy through as a "cover" of a short that is gone, past every stock cap.
-    const readAt = now();
-    const held = await realPositions(env, { fetcher, now, fresh: true });
-    if (held.error) return { response: refuse(`Cannot check that the real account holds these shares: ${held.error}.`, POSITIONS_UNREAD_STATUS, 'positions') };
     const symbol = close.body.legs[0].symbol;
+    // Every reading here is FRESH, never from the cache (the review of Oct 10, 2026): an isolate's cached reading may
+    // still show shares another isolate has sold, or a short it has covered, and a decision taken from it could sell what
+    // is not held (a short sale) or let a buy through as a "cover" of a short that is gone, past every stock cap.
     // While STOCK_BUYS_REAL is "on" (Oct 10, 2026), a buy of a symbol the account does not hold short opens or adds to a
     // LONG position: `realStockBuy` judges it. A buy of a symbol held short is a cover, judged below as a close (at most
     // the short), so no buy both covers and opens; a sale is always a close, so no order here is a short sale.
-    if (parsed.side === 'buy' && stockBuysEnabled(env) && heldShares(symbol, held.positions) >= 0n) {
-      return realStockBuy(parsed, env, { gate, fetcher, now });
+    if (parsed.side === 'buy' && stockBuysEnabled(env)) {
+      const first = await realPositions(env, { fetcher, now, fresh: true });
+      if (first.error) return { response: refuse(`Cannot check that the real account holds these shares: ${first.error}.`, POSITIONS_UNREAD_STATUS, 'positions') };
+      if (heldShares(symbol, first.positions) >= 0n) return realStockBuy(parsed, env, { gate, fetcher, now });
     }
+    // A close reads the open orders, then the positions (the design review of Oct 10, 2026): a close that fills between
+    // the two reads is in the open orders and already gone from the position, counted twice, never not at all.
+    const readAt = now();
+    const orders = await realOpenOrders(env, { fetcher, now });
+    if (orders.error) return { response: refuse(`Cannot read the real account's open orders: ${orders.error}.`, POSITIONS_UNREAD_STATUS, 'orders') };
+    const held = await realPositions(env, { fetcher, now, fresh: true });
+    if (held.error) return { response: refuse(`Cannot check that the real account holds these shares: ${held.error}.`, POSITIONS_UNREAD_STATUS, 'positions') };
     const refusal = closeLegsHeldError(close.body, held.positions);
     if (refusal) return { response: fail(refusal, 400) };
-    // The Gate takes the closes of these shares it admitted and the venue may not show yet off what this reading leaves
-    // available, in the step that reserves (`gate.reserveStockClose`): two closes of the same shares cannot both go.
-    const available = availableHeld(held.positions).get(symbol) ?? 0n;
+    // What this reading leaves free to close (`caps.closeAvailable`); the Gate takes off it the closes of these shares it
+    // admitted and still holds, in the step that reserves (`gate.reserveStockClose`): two closes of the same shares cannot
+    // both go, and a sale whose fill the positions do not show yet still counts.
+    const free = closeAvailable(symbol, parsed.side, held.positions, orders.orders, { ordersLimit: OPEN_ORDERS_LIMIT });
+    if (free.error) return { response: refuse(`Cannot check what the real account has free to close: ${free.error}.`, POSITIONS_UNREAD_STATUS, free.source) };
+    const statuses = await heldStatuses(gate, { kind: 'close', symbol, side: parsed.side, at: readAt }, orders.orders, env, { fetcher, now });
     return {
       micro: 1n, exit: true, credit: false, closeRows: null,
-      stockClose: { symbol, side: parsed.side, qty: String(parsePico(close.body.qty)), available: String(available < 0n ? -available : available), read_at: readAt },
+      stockClose: { symbol, side: parsed.side, qty: String(parsePico(close.body.qty)), available: String(free.available), read_at: readAt,
+        ...(typeof parsed.client_order_id === 'string' ? { client_order_id: parsed.client_order_id } : {}), statuses },
     };
   }
 
@@ -574,15 +590,29 @@ async function realOrder(parsed, env, { gate, fetcher, now }) {
  * A real stock or ETF BUY that opens or adds to a long position (Oct 10, 2026; `caps.stockBuyOrder`, `gate.reserveStock`):
  * `{ micro, exit: false, credit: false, closeRows: null, stock }` for the gate, or `{ response }`. Its shape first (a
  * listed symbol, a limit day order sized in shares), then three reads of the real account, each with its keys, read-only,
- * fresh: the account (equity, the lower of `buying_power` and `regt_buying_power`, multiplier; recorded in the gate as the caps' equity reading), its open
- * orders, then its positions (in that order: a buy that fills between the two reads is counted twice, never not at
- * all). Each read that fails refuses the buy with nothing reserved or sent: the account a 503 (`equity`), the orders or
- * positions a 424 (`orders`, `positions`). The gate then judges the caps in the step that reserves.
+ * fresh: its open orders, then its positions, then the account (equity, the lower of `buying_power` and
+ * `regt_buying_power`, multiplier; recorded in the gate as the caps' equity reading). In that order (the design review of
+ * Oct 10, 2026): a buy that fills between two of the reads is still in the open orders read before it and already in the
+ * positions and the account read after it, so it is counted twice, never not at all. Read the other way round (the
+ * account first, as until today), a buy that filled between the account and the open orders had left the open list while
+ * the account was read before its debit. Each read that fails refuses the buy with nothing reserved or sent: the orders
+ * or positions a 424 (`orders`, `positions`), the account a 503 (`equity`). The gate then judges the caps in the step
+ * that reserves, adding the buys it admitted and still holds (`STOCK_LEDGER_HOLD_MS`), each netted against the open order
+ * that shows it (by `client_order_id`), so none is counted both as held and as open.
  */
 async function realStockBuy(parsed, env, { gate, fetcher, now }) {
   const order = stockBuyOrder(parsed);
   if (order.error) return { response: fail(order.error, 400) };
   const readAt = now();
+  const orders = await realOpenOrders(env, { fetcher, now });
+  if (orders.error) return { response: refuse(`Cannot read the real account's open orders: ${orders.error}.`, POSITIONS_UNREAD_STATUS, 'orders') };
+  const held = await realPositions(env, { fetcher, now, fresh: true });
+  if (held.error) return { response: refuse(`Cannot read the real account's positions: ${held.error}.`, POSITIONS_UNREAD_STATUS, 'positions') };
+  const exposure = stockExposure(order.symbol, held.positions, orders.orders, { ordersLimit: OPEN_ORDERS_LIMIT });
+  if (exposure.short) return { response: fail(`A buy of ${order.symbol} is not admitted as an open: ${exposure.error}.`, 400) };
+  if (exposure.error) {
+    return { response: refuse(`Cannot size this buy against the real account: ${exposure.error}.`, POSITIONS_UNREAD_STATUS, exposure.source || 'positions') };
+  }
   const reading = await account.readStockAccount(env, { fetcher, now });
   if (reading.ok !== true) {
     return {
@@ -595,21 +625,15 @@ async function realStockBuy(parsed, env, { gate, fetcher, now }) {
   } catch {
     // The options' reading is only refreshed here as a convenience; the buy is judged by `reading` itself.
   }
-  const orders = await realOpenOrders(env, { fetcher, now });
-  if (orders.error) return { response: refuse(`Cannot read the real account's open orders: ${orders.error}.`, POSITIONS_UNREAD_STATUS, 'orders') };
-  const held = await realPositions(env, { fetcher, now, fresh: true });
-  if (held.error) return { response: refuse(`Cannot read the real account's positions: ${held.error}.`, POSITIONS_UNREAD_STATUS, 'positions') };
-  const exposure = stockExposure(order.symbol, held.positions, orders.orders, { ordersLimit: OPEN_ORDERS_LIMIT });
-  if (exposure.short) return { response: fail(`A buy of ${order.symbol} is not admitted as an open: ${exposure.error}.`, 400) };
-  if (exposure.error) {
-    return { response: refuse(`Cannot size this buy against the real account: ${exposure.error}.`, POSITIONS_UNREAD_STATUS, exposure.source || 'positions') };
-  }
+  const statuses = await heldStatuses(gate, { kind: 'buy', symbol: order.symbol, at: readAt }, orders.orders, env, { fetcher, now });
   return {
     micro: order.micro, exit: false, credit: false, closeRows: null,
     stock: {
       symbol: order.symbol, equity_micro: reading.equity_micro, buying_power_micro: reading.buying_power_micro, multiplier: reading.multiplier,
       symbol_held_micro: String(exposure.symbolMicro), total_held_micro: String(exposure.totalMicro),
       options_held_micro: String(exposure.optionsMicro), read_at: readAt,
+      open_buys: exposure.openBuys.map(row => ({ client_order_id: row.client_order_id, symbol: row.symbol, micro: String(row.micro) })),
+      ...(typeof parsed.client_order_id === 'string' ? { client_order_id: parsed.client_order_id } : {}), statuses,
     },
   };
 }
@@ -636,6 +660,63 @@ async function realOpenOrders(env, { fetcher, now }) {
   }
   if (!Array.isArray(orders)) return { error: 'the venue\'s open orders were not a list' };
   return { orders };
+}
+
+/**
+ * What the venue says now of the held stock orders the gate asks about (`gate.stockAsk`; the follow-up of Oct 10, 2026,
+ * for the House's cancel-then-resend): each read by its client_order_id (`realOrderStatus`), at most STATUS_READS_MAX,
+ * the order's own symbol first. One the open orders just read list is not read: it is open, and counted there already.
+ * `[{ client_order_id, symbol, side, status, filled_qty, filled_micro? }]` for the gate (`gate.stockLearn`). Fails
+ * closed: a question the gate cannot answer, or a read that fails, gives no status, and that order keeps its whole hold.
+ */
+async function heldStatuses(gate, ask, open, env, { fetcher, now }) {
+  let asks;
+  try {
+    asks = await gate.stockAsk(ask);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(asks)) return [];
+  const listed = new Set((Array.isArray(open) ? open : []).map(row => row?.client_order_id).filter(id => typeof id === 'string'));
+  const wanted = asks.filter(row => row && typeof row.client_order_id === 'string' && !listed.has(row.client_order_id))
+    .sort((a, b) => Number(b.symbol === ask.symbol) - Number(a.symbol === ask.symbol))
+    .slice(0, STATUS_READS_MAX);
+  const statuses = [];
+  for (const row of wanted) {
+    const status = await realOrderStatus(env, row.client_order_id, { fetcher, now });
+    if (status) statuses.push(status);
+  }
+  return statuses;
+}
+
+/**
+ * One order on the real account by its client_order_id (`GET v2/orders:by_client_order_id`, signed, read-only, never
+ * cached, no redirect followed): `{ client_order_id, symbol, side, status, filled_qty, filled_micro? }` (`filled_qty` in
+ * picounits of shares; `filled_micro`, its cost at the order's limit, rounded up as a buy is metered), or null when it
+ * cannot be read or does not answer for that client_order_id.
+ */
+async function realOrderStatus(env, clientId, { fetcher, now }) {
+  let answer;
+  try {
+    const signed = await sign({ venue: 'alpaca', path: 'v2/orders:by_client_order_id' },
+      new Request(`https://x/v2/orders:by_client_order_id?client_order_id=${encodeURIComponent(clientId)}`, { method: 'GET' }), env, { now: now() });
+    answer = await fetcher(signed.url, { method: 'GET', headers: signed.headers, signal: AbortSignal.timeout(8000), redirect: 'manual' });
+  } catch {
+    return null;
+  }
+  if (!answer.ok) return null;
+  let order;
+  try {
+    order = await answer.json();
+  } catch {
+    return null;
+  }
+  if (!order || typeof order !== 'object' || order.client_order_id !== clientId || typeof order.status !== 'string') return null;
+  const filled = parsePico(order.filled_qty ?? '0');
+  if (filled === null || filled < 0n) return null;
+  const limit = parsePico(order.limit_price);
+  return { client_order_id: clientId, symbol: String(order.symbol || ''), side: String(order.side || ''), status: order.status,
+    filled_qty: String(filled), ...(limit !== null && limit > 0n ? { filled_micro: String(picoToMicro(mulPico(filled, limit))) } : {}) };
 }
 
 /**

@@ -60,21 +60,59 @@ dead nightly reached a ledger row no mail carries):
   `NIGHTLY_ERROR_HOURS` or more, or a nightly stop (`<state>/data/nightly.stop`) has stood `NIGHTLY_STOP_HOURS` or more
   (that one is the owner's step: the replay twins of the Done meter wait while it stands).
 
+THE NO-CAPTAIN CAUSES (Oct 10, 2026; the no-captain audit of every hand intervention from Oct 7 to Oct 10: each of these
+was found by the captain reading the log, never by an alarm):
+- THE JAM, on `births`: no family born for `JAM_HOURS` (6) while at least `JAM_PASSES` (4) architect passes wanted births
+  (asked a model, found no cell, or failed: a pass at the ceiling wants none) is the owner's step at once, naming the
+  main way the passes bore nothing (`jam_kind`: the card checks' incomplete cards and the fields they lack, the rebirth
+  rule's refuted cells, a spent lineage, a cap, no open cell, failed or cut answers) and its lever (`LEVERS`: an agenda
+  through scripts/agenda_install.py, `architect.max_rebirths_per_cell`, `architect.max_alive_per_class`, the effort).
+  Only a jam a setting or an agenda clears is the owner's step (`JAM_OWNER_KINDS`): failed model calls (a provider's
+  outage) heal by themselves and stand as the jam's INFO. The House loosens nothing by itself: the graveyard binds by
+  design. The captain caught the graveyard wall of Oct 10, 15:41-16:22Z (births 0/0/0 under agenda v21.4, reverted by
+  hand at 16:24:59Z) inside 41 minutes; no alarm would have (the 12-hour INFO, then), and these causes would not have
+  either in that time (the dry window needs 2 hours, the jam 6): they catch the same wall when no captain is reading;
+- `birth_yield` (INFO): over the last `YIELD_HOURS` (3) at least `YIELD_PASSES` (4) passes asked a model and bore at most
+  `YIELD_MAX_BORN` (1), or the card checks refused at least `YIELD_REFUSED_SHARE` (80%) of their proposals; or no birth
+  in `DRY_HOURS` (2) while `DRY_PASSES` (3) passes wanted births. Its numbers count the refusals by kind, the incomplete
+  cards' top fields and the rebirth rows pointed at (`architect_tally`, from the `swarm.architect` events);
+- `swarm_alerts`: the swarm's own alerts (`swarm.status` with `alert` true), which reach the swarm's record and the
+  private ledger only: each kind with its count, last time and own sentence. The owner's step for the kinds only a
+  setting or a fix clears (`ALERT_STEPS`: reader_cut, agenda_guard, gate_coverage...), READ FROM THE STATE where the
+  swarm keeps it (`alert_states`, since the review of the no-captain build: the swarm raises most of them once, so a
+  12-hour window of alerts both failed the next UTC day after a fix and dropped an unfixed one): a kind stands while
+  its condition does, whatever its alert's age, and clears at the next run once it is fixed; a kind whose condition is
+  not read is the owner's step on the UTC day its alert fired only. INFO for the rest, over the last `ALERT_HOURS`
+  (12); the self-healing ones (`ALERT_SELF_HEALING`) never stand by themselves. Oct 9, 20:32Z: the Sail reviewer cut 4
+  of 6 gate reviews and a lineage's one try was lost before the captain read `reader_cut` in the log;
+- `underspend` (INFO): Sail's booked research today under `UNDERSPEND_SHARE` (70%) of what its day's figure buys by
+  now at the guard's even pace (each TOP-UP RAISE counted from its hour), once the day is `UNDERSPEND_MIN_HOURS` (6) in
+  and the guard braked under `UNDERSPEND_BRAKE_HOURS` (2) of it; or two settings that cannot both hold while they bind.
+  Claude's reading is said beside it and never stands by itself (`PACED_METERS`: its roles' calls come as the gate and
+  the strategist have work). It names the settings that bind research (`settings_binds`: a configured cap under what
+  the budget buys, a class cap under the direction lane's own, an architect Claude line under one call's hold, a value
+  under the release's own, the Claude lines at 0). DONE-RULE item 7 reads a day with no taper as at budget, so a
+  swarm.json pin (Oct 9: gym.max_boxes 2 under the budget's 7) was invisible.
+
 THE NOTICE: one `POST /v1/notify` kind `stall` a run at most, listing EVERY cause standing (`cause_facts` each: the
 cause, the numbers, how long, what the House is doing about it, the owner step when one is needed), owner steps first,
 through the same gateway client the budget's funding notice uses (`budget._notifier`). It is mailed:
 
 - when some standing cause has an owner step: at once when one of them was not in the last owner notice, else at most
   once every `OWNER_EVERY_SECONDS` (12 h);
-- when none has: at most once every `INFO_EVERY_SECONDS` (24 h) after the last notice of either kind.
+- when none has: at once when a standing cause was told by no notice in the last 24 h (`mail.told`; since the review
+  of the no-captain build, so one cause standing for days holds no new one back), else at most once every
+  `INFO_EVERY_SECONDS` (24 h) after the last notice of either kind.
 
 The gateway holds the same pace by its own clock (it keys an owner notice on the owner causes, `stall:owner:<causes>`,
-for 12 h, and one with none on `stall:info` for 24 h), so a lost state file never mails twice. A notice counts as told
+for 12 h, and one with none on the causes it tells, `stall:info:<causes>`, for 24 h), so a lost state file never mails
+the same causes twice. A notice counts as told
 only once the gateway says it SENT it: a `duplicate` answer (told inside the gateway's own window) is tried at the next
 run. Each cause standing is also one House warning at most every `WARN_EVERY_SECONDS` (12 h). `<state>/stall.json`
 (private) remembers each cause (since when it stands, when it was last warned of, when it cleared), the notices (when
-the last of each kind was sent, which owner causes it told) and the Done checkpoints told (`done_told`). A cause that
-clears is named in the receipt. The receipt carries every check, stalled or not, with its numbers.
+the last of each kind was sent, which owner causes it told, when each cause was last told) and the Done checkpoints
+told (`done_told`). A cause that clears is named in the receipt. The receipt carries every check, stalled or not, with
+its numbers.
 
 HOW LONG: from the record when it says (the last birth, the last Validation verdict, the start of the guard's brake, the
 first refusal of the owner's deploy or of the grant, the pause file, the kill), else from when this job first saw the
@@ -86,6 +124,7 @@ runs in a maintenance pause too (read-only, like `preopen` and `clock`), so a pa
 """
 from __future__ import annotations
 
+import datetime as dt
 import json
 import re
 from pathlib import Path
@@ -143,14 +182,74 @@ DLANE_REPORT = "dlane-report.json"
 DLANE_STALE_HOURS = 30.0
 #: The latest pre-open receipt is read while it is at most this old (the job runs an hour before each open).
 PREOPEN_HOURS = 24.0
+#: THE BIRTH YIELD (Oct 10, 2026; the no-captain audit's item 1): the window the architect's yield is read over, the passes
+#: that asked a model in it below which no yield is read, the births at or under which it is a collapse, and the share
+#: of the proposals the card checks refused at or above which it is one too.
+YIELD_HOURS = 3.0
+YIELD_PASSES = 4
+YIELD_MAX_BORN = 1
+YIELD_REFUSED_SHARE = 0.8
+#: No birth this long while at least `DRY_PASSES` architect passes wanted births (asked a model, found no cell, failed).
+DRY_HOURS = 2.0
+DRY_PASSES = 3
+#: THE JAM: no birth this long while at least `JAM_PASSES` passes wanted births is the `births` cause with an owner step
+#: (the House cannot loosen the graveyard or the card rule, nor rewrite the agenda: only the owner can).
+JAM_HOURS = 6.0
+JAM_PASSES = 4
+#: The ways a jam bears nothing that a setting or an agenda clears (`jam_kind`): only these make the jam the owner's step.
+#: Failed model calls (`failed`: a provider's outage, a poll's timeout) heal by themselves when the route answers again,
+#: and an empty answer or another refusal names no lever: those stand as the jam's INFO (the line and the kill switch,
+#: which the owner does clear, are causes of their own: `runway_claude`, `kill_on`).
+JAM_OWNER_KINDS = ("incomplete", "rebirth", "spent_lineage", "capped", "no_cell", "cut")
+#: THE SWARM'S ALERTS (the audit's item 5): the `swarm.status` events with `alert` true read over this window.
+ALERT_HOURS = 12.0
+#: The alerts that ask for a setting or a fix only the owner can make, and the step that makes each. Every other kind is
+#: told as INFO (`train_from_setting` among them: a note that gym.train_from was snapped, raised every ten minutes while
+#: it stands, on a swarm that runs on its own span).
+ALERT_STEPS = {
+    "reader_cut": "raise gate.review_max_output_tokens in swarm.json (the gate's reader was cut short: no verdict, no try)",
+    "agenda_guard": "fix the agenda with scripts/agenda_install.py (the architect reads it wrong)",
+    "policy_layer": "fix league/swarm/policy.json in a release (it is malformed or sets an owner key)",
+    "train_span_pending": "restart the swarm with the matching Gym image, or set gym.train_from back",
+    "train_span_mismatch": "adopt the Gym image built for the swarm's Train span (gym.image_checkpoint) and restart",
+    "gate_missing_data": "name a gate image that holds the missing holdouts (gym.gate_checkpoint)",
+    "gate_coverage": "name a gate image that holds every root's holdout (gym.gate_checkpoint)",
+    "look_failed_three_times": "fix the gate box, then reset look_tries for the parked version",
+    "game_waits": "set gym.train_from to the learning game's seen span and restart",
+}
+#: The alerts that heal themselves (named in the numbers, never a cause by themselves): a Sail window that did not answer
+#: falls to its fallback for an hour; the funding cliff is the budget's own funding notice's.
+ALERT_SELF_HEALING = ("sail_window_stall", "funding_alert")
+#: THE ALERTS' STATE (the review of the no-captain build, Oct 10, 2026): the owner kinds whose latest alert is read this
+#: far back (it names what its condition is about: the image, the span, the output cap), whatever `ALERT_HOURS` says.
+ALERT_LOOKBACK_KINDS = ("reader_cut", "train_span_mismatch", "gate_missing_data")
+ALERT_STATE_DAYS = 7.0
+#: THE LEARNING GAME (league/swarm/game.py, which only the modules its import wall names may import): its T0 in the
+#: swarm's kv (`T0_KEY`: a `game_waits` stands only before the first), its seen span's first day by default
+#: (`SEEN_FROM`) and the last hidden day (`HIDDEN`), under which a configured `game.seen_from` is the default.
+GAME_T0_KEY = "game_t0"
+GAME_SEEN_FROM = "2022-01-03"
+GAME_HIDDEN_END = "2021-12-31"
+#: THE UNDERSPEND (the audit's item 3): a meter's booked research today under this share of what its day's figure buys by
+#: now (the guard paces the day evenly), read once the UTC day is `UNDERSPEND_MIN_HOURS` in and at least
+#: `UNDERSPEND_MIN_USD` is due, while the guard braked under `UNDERSPEND_BRAKE_HOURS` of the day.
+UNDERSPEND_SHARE = 0.7
+UNDERSPEND_MIN_HOURS = 6.0
+UNDERSPEND_MIN_USD = 1.0
+UNDERSPEND_BRAKE_HOURS = 2.0
+#: The meters the guard paces evenly over the day (the Sail guard's `pace_day`): only these stand as an underspend.
+PACED_METERS = ("sail",)
+#: What one architect call holds on its Claude line (league/swarm/architect.py `Architect.run`, `need_usd`): a smaller line
+#: can never place one.
+ARCHITECT_HOLD_USD = 2.0
 #: The files that pause the floor (the House's maintenance pause, `House.paused`; the swarm's stop file) and the step that
 #: lifts each.
 PAUSE_FILES = {"PAUSE": ("maintenance", "lift the maintenance pause once its work is done (scripts/floor_box.py maintenance off)"),
                "swarm.stop": ("swarm_stop", "remove state/swarm.stop once the swarm should run again (the House starts it then)")}
-CAUSES = ("births", "gym_runs", "validations", "braked", "runway_sail", "runway_claude", "owner_deploy", "paused",
-          "grant_refused", "kill_on", "dlane", "done", "preopen", "forward")
+CAUSES = ("births", "birth_yield", "gym_runs", "validations", "braked", "runway_sail", "runway_claude", "owner_deploy",
+          "paused", "grant_refused", "kill_on", "dlane", "done", "preopen", "forward", "swarm_alerts", "underspend")
 #: The causes a pause stops by design: not raised while the floor is paused.
-RESEARCH_CAUSES = ("births", "gym_runs", "validations", "braked")
+RESEARCH_CAUSES = ("births", "birth_yield", "gym_runs", "validations", "braked", "underspend")
 #: The causes that are news to the owner, not a stall nor a step WAITING (Oct 10, 2026): a Done checkpoint that holds is
 #: mailed at once as an owner line, never counted against DONE-RULE item 7 (`dlane_report.NEWS_CAUSES`, held equal by a
 #: test) nor listed among the stalls on the daily page (`scoreboard.funnel_lines`).
@@ -219,6 +318,146 @@ def candidate(best_version: Any, state_text: Any) -> int | None:
         return int(value) if value else None
     except (TypeError, ValueError):
         return None
+
+
+# ---------------------------------------------------------------------------------------------- the architect's yield
+#: An incomplete card's refusal (league/swarm/architect.py `admit`: "incomplete card: " and the card checks' problems,
+#: each "<field>: ...", joined by "; ").
+INCOMPLETE_CARD = "incomplete card: "
+_FIELD = re.compile(r"([a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)?):")
+#: What the owner can do about each way the architect's passes bear nothing (`jam_kind`).
+LEVERS = {
+    "incomplete": ("the card checks refuse the architect's cards as incomplete{fields}: install an agenda whose card "
+                   "section the model can fill (scripts/agenda_install.py check, then apply; the last agenda's before-copy "
+                   "is swarm.json.before-agenda-*)"),
+    "rebirth": ("the cards land in refuted cells and their rebirth claims do not hold (the graveyard binds by design): "
+                "point the agenda at open cells (scripts/agenda_install.py), or raise architect.max_rebirths_per_cell only "
+                "if the evidence warrants spending those cells again"),
+    "spent_lineage": ("the direction cards join lineages whose one Validation try is spent or claimed: point the agenda at "
+                      "new lineages (scripts/agenda_install.py)"),
+    "capped": ("the class cap, the structure quota or the lane quota refuses the proposals: raise "
+               "architect.max_alive_per_class (it must hold dlane.max_alive while the direction lane is one class) or "
+               "change the lane's shares"),
+    "no_cell": ("no cell a birth may land in is open (every cell's rebirth room is spent): point the agenda at other cells "
+                "or roots (scripts/agenda_install.py), or raise architect.max_rebirths_per_cell"),
+    "failed": "the architect's model calls fail (the swarm.architect events' errors): check its route and its line",
+    "cut": ("the architect's answers are cut short with no family (its output spent reasoning): lower "
+            "architect.sail_effort or raise architect.max_output_tokens"),
+    "empty": "the architect's answers carry no family: read its last request and the agenda (scripts/agenda_install.py)",
+    "other": "the proposals are refused before birth by the twin, cite or lane rules: read the swarm.architect events",
+}
+
+
+def card_fields(why: Any) -> list[str]:
+    """The card fields an incomplete card's refusal names, in order, each once ("incomplete card: comparison: at least 30
+    characters (9 given); falsification: ..." -> ["comparison", "falsification"]); [] for any other refusal."""
+    text = str(why or "")
+    if not text.startswith(INCOMPLETE_CARD):
+        return []
+    out: list[str] = []
+    for part in text[len(INCOMPLETE_CARD):].split("; "):
+        found = _FIELD.match(part.strip())
+        if found and found.group(1) not in out:
+            out.append(found.group(1))
+    return out
+
+
+def _count(value: Any) -> int:
+    """A count from an event: an int, the sum of a mapping's counts, the length of a list; 0 for anything else."""
+    if isinstance(value, Mapping):
+        return sum(_count(v) for v in value.values())
+    if isinstance(value, list):
+        return len(value)
+    number = _finite(value)
+    return int(number) if number is not None and number > 0 else 0
+
+
+def architect_tally(passes: Any, since: float) -> dict[str, Any]:
+    """THE BIRTH YIELD of the architect's passes at or after `since` (`passes`: (epoch, the `swarm.architect` payload)),
+    pure: the passes; those that asked a model, found no cell (`no_cell`), met the ceiling or failed; the proposals and
+    births; the card checks' refusals by kind (`incomplete`, `rebirth`, `spent_lineage`); the proposals the class cap,
+    the structure quota or the lane quota refused (`capped`), and of those the direction cards the class cap refused
+    (`lane_class_capped`); the passes whose answer was cut (`cut`) or carried no family (`empty`); the incomplete cards'
+    fields by count (`fields`, most first) and the graveyard rows the rebirth refusals point at (`rebirth_rows`,
+    distinct)."""
+    out: dict[str, Any] = {"passes": 0, "asked": 0, "no_cell": 0, "ceiling": 0, "failed": 0, "proposed": 0, "born": 0,
+                           "incomplete": 0, "rebirth": 0, "spent_lineage": 0, "capped": 0, "cut": 0, "empty": 0,
+                           "lane_class_capped": 0}
+    fields: dict[str, int] = {}
+    rows: set[str] = set()
+    for at, row in passes or []:
+        if at is None or at < since or not isinstance(row, Mapping):
+            continue
+        out["passes"] += 1
+        out["born"] += _count(row.get("born")) if isinstance(row.get("born"), list) else 0
+        skipped = row.get("skipped")
+        if skipped in ("no_cell", "ceiling"):
+            out[skipped] += 1
+            continue
+        if row.get("error"):
+            out["failed"] += 1
+            continue
+        out["asked"] += 1
+        proposed = _count(row.get("proposed"))
+        out["proposed"] += proposed
+        out["empty"] += 1 if proposed == 0 else 0
+        out["cut"] += 1 if row.get("truncated") or row.get("incomplete_reason") else 0
+        refused = row.get("card_refused") if isinstance(row.get("card_refused"), Mapping) else {}
+        for kind in ("incomplete", "rebirth", "spent_lineage"):
+            out[kind] += _count(refused.get(kind))
+        # The class cap's refusals (`class_capped`, by class; a direction card's are named again in `lane_class_capped`,
+        # never counted twice), the birth quota's (`structure_capped`) and the lane quota's (`lane_refused`).
+        out["capped"] += sum(_count(row.get(k)) for k in ("class_capped", "structure_capped", "lane_refused"))
+        # The direction cards the class cap refused (THE DIRECTION LANE: `lane_class_capped.cards`): the class-cap conflict
+        # binds (`settings_binds`, key `class_cap`) only while these come.
+        lane_capped = row.get("lane_class_capped")
+        out["lane_class_capped"] += _count(lane_capped.get("cards")) if isinstance(lane_capped, Mapping) else 0
+        for item in refused.get("items") or []:
+            if not isinstance(item, Mapping):
+                continue
+            for name in card_fields(item.get("why")):
+                fields[name] = fields.get(name, 0) + 1
+            if item.get("row") and not str(item.get("why") or "").startswith(INCOMPLETE_CARD):
+                rows.add(str(item["row"]))
+    out["fields"] = dict(sorted(fields.items(), key=lambda kv: (-kv[1], kv[0])))
+    out["rebirth_rows"] = len(rows)
+    return out
+
+
+def wanting(tally: Mapping[str, Any]) -> int:
+    """The passes that wanted births: every pass but those the ceiling skipped (a pass with room asks a model, finds no
+    cell a birth may land in, or fails)."""
+    return int(tally.get("asked") or 0) + int(tally.get("no_cell") or 0) + int(tally.get("failed") or 0)
+
+
+def card_refusals(tally: Mapping[str, Any]) -> int:
+    return sum(int(tally.get(k) or 0) for k in ("incomplete", "rebirth", "spent_lineage"))
+
+
+def jam_kind(tally: Mapping[str, Any]) -> str:
+    """The main way the passes bore nothing (a key of `LEVERS`)."""
+    if not tally.get("asked"):
+        if not tally.get("no_cell") and not tally.get("failed"):
+            return "other"
+        return "no_cell" if int(tally.get("no_cell") or 0) >= int(tally.get("failed") or 0) else "failed"
+    if not tally.get("proposed"):
+        return "cut" if tally.get("cut") else "empty"
+    counts = {k: int(tally.get(k) or 0) for k in ("incomplete", "rebirth", "spent_lineage", "capped")}
+    kind = max(counts, key=lambda k: counts[k])
+    return kind if counts[kind] > 0 else "other"
+
+
+def lever(tally: Mapping[str, Any]) -> str:
+    """The owner's lever for the main way the passes bore nothing, naming the incomplete cards' top fields."""
+    kind = jam_kind(tally)
+    top = list((tally.get("fields") or {}).items())[:3]
+    named = f" (most often {', '.join(f'{k} {n}x' for k, n in top)})" if top else ""
+    return LEVERS[kind].format(fields=named)
+
+
+def fields_token(tally: Mapping[str, Any]) -> str:
+    """The incomplete cards' top fields as one figure the gateway echoes ("comparison:6,falsification:4")."""
+    return ",".join(f"{k}:{n}" for k, n in list((tally.get("fields") or {}).items())[:4])[:80] or "none"
 
 
 # ---------------------------------------------------------------------------------------------- the reads
@@ -320,7 +559,219 @@ def swarm_facts(db: Any, now: float) -> dict[str, Any]:
     causes = record.get("causes")
     out["guard"] = {"braked": bool(record.get("braked")), "research_held": bool(record.get("research_held")),
                     "causes": [str(c) for c in causes] if isinstance(causes, list) else []}
+    # THE NO-CAPTAIN READS (Oct 10, 2026): the architect's yield, the swarm's alerts, the day's research spend. Each one
+    # unreadable is left out (its cause reads nothing), never a failed run.
+    try:
+        out.update(_yield_facts(db, now))
+    except Exception:  # noqa: BLE001 - no yield read: birth_yield and the jam read nothing
+        pass
+    try:
+        out["alerts"] = _alert_facts(db, now)
+    except Exception:  # noqa: BLE001 - no alerts read: swarm_alerts reads nothing
+        pass
+    try:
+        out["alert_state"] = _alert_state_facts(db, now)
+    except Exception:  # noqa: BLE001 - no state read: the owner kinds are read by their window and the day rule
+        pass
+    try:
+        out.update(_spend_facts(db, now))
+    except Exception:  # noqa: BLE001 - no spend read: underspend reads nothing
+        pass
     return out
+
+
+def _yield_facts(db: Any, now: float) -> dict[str, Any]:
+    """The architect's passes over the yield's windows (`architect_tally`: `yield.jam`, `.low`, `.dry`) and the births of
+    the dry window (`births_dry`, the learning game's children included)."""
+    window = max(JAM_HOURS, YIELD_HOURS, DRY_HOURS)
+    passes = []
+    for row in guard.rows(db, "SELECT at, payload FROM events WHERE kind='swarm.architect' AND at>=? ORDER BY seq",
+                          (S.iso(now - window * 3600),)):
+        try:
+            payload = json.loads(row["payload"])
+        except (TypeError, ValueError):
+            continue
+        if isinstance(payload, Mapping):
+            passes.append((S.epoch(row["at"]), payload))
+    since = S.iso(now - DRY_HOURS * 3600)
+    born = guard.ids(db, "SELECT count(*) FROM events WHERE kind='swarm.born' AND at>=?", (since,))
+    children = guard.ids(db, "SELECT count(*) FROM families WHERE origin=? AND born_at>=?", (GAME_ORIGIN, since))
+    return {"yield": {"jam": architect_tally(passes, now - JAM_HOURS * 3600),
+                      "low": architect_tally(passes, now - YIELD_HOURS * 3600),
+                      "dry": architect_tally(passes, now - DRY_HOURS * 3600)},
+            "births_dry": int((born or [0])[0] or 0) + int((children or [0])[0] or 0)}
+
+
+def _alert_facts(db: Any, now: float) -> dict[str, dict[str, Any]]:
+    """THE SWARM'S ALERTS: the `swarm.status` events with `alert` true in the last `ALERT_HOURS` (the newest 2,000), by
+    action: {n, first_at, last_at, text} (the newest one's text, cut to 200 characters)."""
+    out: dict[str, dict[str, Any]] = {}
+    for row in guard.rows(db, "SELECT at, payload FROM events WHERE kind='swarm.status' AND at>=? ORDER BY seq DESC "
+                              "LIMIT 2000", (S.iso(now - ALERT_HOURS * 3600),)):
+        try:
+            payload = json.loads(row["payload"])
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(payload, Mapping) or payload.get("alert") is not True:
+            continue
+        action = re.sub(r"[^a-z0-9_]", "_", str(payload.get("action") or "unnamed").lower())[:40] or "unnamed"
+        if not action[0].isalpha():
+            action = "a_" + action[:38]
+        rec = out.get(action)
+        if rec is None:  # newest first: the first seen is the latest
+            out[action] = {"n": 1, "first_at": row["at"], "last_at": row["at"],
+                           "text": " ".join(str(payload.get("text") or "").split())[:200]}
+        else:
+            rec["n"] += 1
+            rec["first_at"] = row["at"]
+    return out
+
+
+def _alert_state_facts(db: Any, now: float) -> dict[str, Any]:
+    """What `alert_states` reads from the swarm's store: the latest alert of each `ALERT_LOOKBACK_KINDS` kind in the last
+    `ALERT_STATE_DAYS` ({kind: {at, payload}}), and the kv rows the conditions are kept in (`gate_coverage`, the pool's
+    record of each gate image's holdout; `train_objective`, the running Train span; the learning game's T0)."""
+    latest: dict[str, dict[str, Any]] = {}
+    patterns = [f"%{kind}%" for kind in ALERT_LOOKBACK_KINDS]
+    where = " OR ".join("payload LIKE ?" for _ in patterns)
+    for row in guard.rows(db, f"SELECT at, family, payload FROM events WHERE kind='swarm.status' AND at>=? AND ({where}) "
+                              "ORDER BY seq DESC LIMIT 500", (S.iso(now - ALERT_STATE_DAYS * 86400), *patterns)):
+        try:
+            payload = json.loads(row["payload"])
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(payload, Mapping) or payload.get("alert") is not True:
+            continue
+        action = payload.get("action")
+        if action in ALERT_LOOKBACK_KINDS and action not in latest:  # newest first
+            # The family an alert is about, while it lives (a retired one's look waits for nobody).
+            alive = None
+            if row["family"]:
+                alive = bool(guard.ids(db, "SELECT 1 FROM families WHERE id=? AND retired_at IS NULL", (row["family"],)))
+            latest[str(action)] = {"at": row["at"], "family": row["family"], "alive": alive, "payload": dict(payload)}
+    kv: dict[str, Any] = {}
+    for key in ("gate_coverage", "train_objective", GAME_T0_KEY):
+        raw = (guard.ids(db, "SELECT value FROM kv WHERE key=?", (key,)) or [None])[0]
+        try:
+            kv[key] = json.loads(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            kv[key] = None
+    return {"latest": latest, "kv": kv}
+
+
+def alert_states(loaded: Mapping[str, Any], facts: Mapping[str, Any], now: float) -> dict[str, dict[str, Any]]:
+    """THE ALERTS' STATE (the review of the no-captain build, Oct 10, 2026): for each owner kind (`ALERT_STEPS`) whose
+    condition the House can read, whether it stands NOW, from the swarm's settings as it loads them (`loaded`) and its
+    store (`_alert_state_facts`): {kind: {stands, text, at}}. A kind left out is not read (its alert's window and the day
+    rule decide, `_alerts_check`). The swarm raises most of these once (at its start, when the condition changes, once a
+    key), so the alert's 12-hour window both kept a fixed one failing the next UTC day and dropped an unfixed one:
+
+    - `reader_cut`: the latest stands while it fired this UTC day (the version is asked again the next day) and
+      `gate.review_max_output_tokens` is no higher than the cap the cut answers met (the owner's step raises it);
+    - `agenda_guard`: the agendas in swarm.json read wrong now (`loop.agenda_alert`, the swarm's own check);
+    - `policy_layer`: policy.json malformed or setting an owner key now (the settings' `_policy`);
+    - `train_span_pending`: `gym.train_from` asks for another Train span than the running swarm's (kv `train_objective`);
+    - `train_span_mismatch`: the latest (in `ALERT_STATE_DAYS`) names the configured `gym.image_checkpoint` and the running
+      span still;
+    - `gate_coverage`: the pool's record of the configured gate image (kv `gate_coverage`) lacks a root of `gym.roots`;
+    - `gate_missing_data`: the latest (in `ALERT_STATE_DAYS`) names the configured `gym.gate_checkpoint` still, and its
+      family lives (a retired family's look waits for nobody);
+    - `game_waits`: the learning game is on, has no T0, and the running span shows its hidden years.
+    `look_failed_three_times` (a parked program, reset by hand) is not read. Pure but for the swarm's own imports."""
+    from ..swarm import settings as settings_mod
+
+    out: dict[str, dict[str, Any]] = {}
+    latest = facts.get("latest") if isinstance(facts.get("latest"), Mapping) else {}
+    kv = facts.get("kv") if isinstance(facts.get("kv"), Mapping) else {}
+    gym = loaded.get("gym") if isinstance(loaded.get("gym"), Mapping) else {}
+
+    def put(kind: str, stands: bool, text: Any, at: Any = None) -> None:
+        out[kind] = {"stands": bool(stands), "text": " ".join(str(text or "").split())[:200], "at": at}
+
+    def last(kind: str) -> tuple[dict[str, Any], Any]:
+        row = latest.get(kind) if isinstance(latest.get(kind), Mapping) else {}
+        payload = row.get("payload") if isinstance(row.get("payload"), Mapping) else {}
+        return dict(payload), row.get("at")
+
+    status = loaded.get("_policy")
+    if isinstance(status, Mapping):
+        malformed = status.get("state") == "malformed"
+        ignored = [str(k) for k in status.get("ignored") or []]
+        put("policy_layer", malformed or bool(ignored),
+            f"league/swarm/policy.json was not read ({status.get('why')})" if malformed else
+            f"league/swarm/policy.json sets {', '.join(ignored)}, the owner's switches" if ignored else "")
+    try:
+        from ..swarm.loop import agenda_alert
+
+        payload = agenda_alert(loaded)
+        put("agenda_guard", payload is not None, (payload or {}).get("text"))
+    except Exception:  # noqa: BLE001 - not read: the window and the day rule decide
+        pass
+    running = settings_mod.objective_span(kv.get("train_objective"))
+    try:
+        wanted = settings_mod.train_from(loaded, running)
+        put("train_span_pending", wanted != running,
+            f"gym.train_from asks for Train from {wanted}; the running swarm scores Train from {running} until its next "
+            "start migrates")
+    except Exception:  # noqa: BLE001 - not read
+        pass
+    payload, at = last("train_span_mismatch")
+    put("train_span_mismatch", bool(payload) and str(payload.get("image")) == str(gym.get("image_checkpoint"))
+        and str(payload.get("span")) == running.isoformat(), payload.get("text"), at)
+    image = str(gym.get("gate_checkpoint") or "")
+    coverage = kv.get("gate_coverage")
+    record = coverage.get(image) if isinstance(coverage, Mapping) and image else None
+    lacking: list[str] = []
+    if isinstance(record, Mapping):
+        wanted_roots = {str(r).upper() for r in gym.get("roots") or []}
+        listed = {str(r).upper() for r in record["roots"]} if isinstance(record.get("roots"), list) else None
+        missing = {str(r).upper() for r in record.get("missing") or []} if isinstance(record.get("missing"), list) else set()
+        lacking = sorted((wanted_roots - listed if listed is not None else set()) | (wanted_roots & missing))
+    put("gate_coverage", bool(lacking), f"the gate image {image} holds no holdout for {', '.join(lacking[:8])} (gym.roots)"
+        if lacking else "")
+    payload, at = last("gate_missing_data")
+    alive = (latest.get("gate_missing_data") or {}).get("alive") if isinstance(latest.get("gate_missing_data"), Mapping) \
+        else None
+    put("gate_missing_data", bool(payload) and bool(image) and str(payload.get("image")) == image and alive is not False,
+        payload.get("text"), at)
+    payload, at = last("reader_cut")
+    fired = S.epoch(at)
+    today = S.iso(now)[:10]
+    cap = _finite((loaded.get("gate") or {}).get("review_max_output_tokens")) if isinstance(loaded.get("gate"), Mapping) else None
+    met = _finite(payload.get("max_output_tokens"))
+    raised = cap is not None and met is not None and cap > met
+    put("reader_cut", fired is not None and S.iso(fired)[:10] == today and not raised, payload.get("text"), at)
+    # THE LEARNING GAME (`game.cfg` as the swarm reads it: on only when `game.enabled` is true; the seen span never
+    # reaches back into the hidden years).
+    block = loaded.get("game") if isinstance(loaded.get("game"), Mapping) else {}
+    seen = str(block.get("seen_from") or "")
+    try:
+        seen = dt.date.fromisoformat(seen).isoformat() if seen > GAME_HIDDEN_END else GAME_SEEN_FROM
+    except ValueError:
+        seen = GAME_SEEN_FROM
+    t0 = kv.get(GAME_T0_KEY)
+    put("game_waits", block.get("enabled") is True and running.isoformat() < seen and not (isinstance(t0, str) and t0),
+        f"the learning game waits: the running Train span shows its hidden years (set gym.train_from to {seen} and "
+        "restart)")
+    return out
+
+
+def _spend_facts(db: Any, now: float) -> dict[str, Any]:
+    """The swarm's booked research of the UTC day by meter (`spent_today`: Sail's model calls and Gym boxes, Claude's
+    and OpenAI's calls, as the budget counts them) and the guard's brake of the day (`brake_today`)."""
+    import datetime as dt
+
+    day = dt.datetime.fromtimestamp(now, dt.timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+    spent = {"sail": 0.0, "claude": 0.0}
+    for row in guard.rows(db, "SELECT kind, sum(usd) AS usd FROM spend WHERE epoch>=? AND epoch<=? GROUP BY kind",
+                          (day, now)):
+        usd = _finite(row["usd"]) or 0.0
+        if row["kind"] in B.SAIL_KINDS:
+            spent["sail"] += usd
+        elif row["kind"] in B.CLAUDE_KINDS:
+            spent["claude"] += usd
+    return {"spent_today": {m: round(v, 4) for m, v in spent.items()}, "day_start": day,
+            "brake_today": F.guard_hours(db, day, now)}
 
 
 def owner_deploy(base: str | Path) -> dict[str, Any] | None:
@@ -552,38 +1003,168 @@ def _health(ctx: Any) -> Any:
         return None
 
 
-def _lane_on(ctx: Any, root: Path) -> bool | None:
+def _load(ctx: Any, root: Path) -> tuple[dict[str, Any] | None, str | None]:
+    """The swarm's settings as it loads them (`settings.load`: the budget's tightening included), read-only, or None and
+    the error's name. The job loads them once a run (`run`) for the ceiling, the lane, the settings that bind and the
+    alerts' state."""
+    try:
+        from ..swarm import settings as settings_mod
+
+        config = _get(ctx, "config")
+        with guard.readonly():
+            return settings_mod.load(root, config=config if isinstance(config, Mapping) else None), None
+    except Exception as exc:  # noqa: BLE001 - each reader says what it could not read
+        return None, type(exc).__name__
+
+
+def _lane_on(ctx: Any, root: Path, loaded: Mapping[str, Any] | None = None) -> bool | None:
     """The direction lane is on (`dlane.mode` not "off", as the swarm loads its settings), None when that cannot be read;
     a context may hand in `lane_on` (tests)."""
     given = _get(ctx, "lane_on")
     if given is not None:
         return bool(given)
+    if loaded is None:
+        loaded, _ = _load(ctx, root)
     try:
         from ..swarm import dlane as dlane_mod
-        from ..swarm import settings as settings_mod
 
-        config = _get(ctx, "config")
-        with guard.readonly():
-            loaded = settings_mod.load(root, config=config if isinstance(config, Mapping) else None)
-        return dlane_mod.on(loaded)
+        return dlane_mod.on(loaded) if loaded is not None else None
     except Exception:  # noqa: BLE001 - unknown: a stale report is still said
         return None
 
 
-def _ceiling(ctx: Any, root: Path) -> tuple[int | None, str | None]:
+def _ceiling(ctx: Any, root: Path, loaded: Mapping[str, Any] | None = None) -> tuple[int | None, str | None]:
     """`population.ceiling` as the swarm loads its settings (the budget's tightening included), or None and why."""
     given = _get(ctx, "population_ceiling")
     if given is not None:
         return int(given), None
+    error = None
+    if loaded is None:
+        loaded, error = _load(ctx, root)
     try:
-        from ..swarm import settings as settings_mod
-
-        config = _get(ctx, "config")
-        with guard.readonly():
-            loaded = settings_mod.load(root, config=config if isinstance(config, Mapping) else None)
+        if loaded is None:
+            raise RuntimeError(error)
         return int((loaded.get("population") or {}).get("ceiling")), None
     except Exception as exc:  # noqa: BLE001 - an unknown ceiling raises no births stall
-        return None, f"the population ceiling could not be read ({type(exc).__name__})"
+        return None, f"the population ceiling could not be read ({error or type(exc).__name__})"
+
+
+def release_settings() -> dict[str, Any]:
+    """The values the release itself sets: the code's DEFAULTS under the repo's policy layer (league/swarm/policy.json,
+    `settings.read_policy`; none when it does not read), without config.json, swarm.json or the budget's overlay."""
+    from ..swarm import settings as settings_mod
+
+    layer, _ = settings_mod.read_policy()
+    out = {k: dict(v) if isinstance(v, Mapping) else v for k, v in settings_mod.DEFAULTS.items()}
+    for key, value in (layer or {}).items():
+        if isinstance(value, Mapping) and isinstance(out.get(key), Mapping):
+            out[key] = {**out[key], **value}
+    return out
+
+
+def settings_binds(loaded: Any, release: Mapping[str, Any] | None = None) -> list[dict[str, str]]:
+    """THE SETTINGS THAT BIND RESEARCH (Oct 10, 2026; the no-captain audit's item 3), from the settings as the swarm loads
+    them (the budget's overlay applied: it only tightens, so a configured value under a knob the budget buys is what
+    binds). Pure but for `release` left None (`release_settings`, the repo's policy.json read). Each {kind, text}, and
+    `key` on a conflict:
+
+    - `cap`: a configured cap tighter than what the budget's dollars buy (`budget.knobs`): `gym.max_boxes`,
+      `researcher.sail_usd_per_hour`, `population.ceiling`, a slower `architect.every_seconds`; and `population.start`
+      under the ceiling (a population at its start is not refilled to the ceiling);
+    - `conflict`: two settings that cannot both hold: `architect.max_alive_per_class` under `dlane.max_alive` while the
+      direction lane is on (key `class_cap`: every direction card is one class, so the class cap binds before the lane's
+      own quota, as at 21:35Z Oct 9; the release's own values are such a pair, so `underspend` stands on it only while
+      the architect's passes meet it, `lane_class_capped`), and an architect Claude line above 0 but under the hold one
+      call needs (key `architect_line`: it can never be used);
+    - `drift`: a setting under the release's own value (`release`: the code's DEFAULTS under policy.json) that the
+      operator lowered in swarm.json (`researcher.dormant_cycles`, `architect.max_refill`): Oct 9, dormancy at 12 retired
+      families the guard was holding (the release has since set 12 itself: the drift is what goes under it);
+    - `line`: the Claude roles whose line is 0 (`claude.role_usd_day`): Claude's day figure is spent only by the other
+      roles' calls, which come when the gate and the strategist have work, never at an even pace."""
+    if not isinstance(loaded, Mapping):
+        return []
+    block = lambda name: loaded.get(name) if isinstance(loaded.get(name), Mapping) else {}  # noqa: E731
+    budget = block("budget")
+    knobs = budget.get("knobs") if isinstance(budget.get("knobs"), Mapping) else {}
+    gym, population, architect, researcher = block("gym"), block("population"), block("architect"), block("researcher")
+    out: list[dict[str, str]] = []
+
+    def add(kind: str, text: str, key: str | None = None) -> None:
+        out.append({"kind": kind, "text": text, **({"key": key} if key else {})})
+
+    def below(name: str, value: Any, knob: Any, *, slower: bool = False) -> None:
+        a, b = _finite(value), _finite(knob)
+        if a is None or b is None:
+            return
+        if (a > b + 1e-9) if slower else (a < b - 1e-9):
+            add("cap", f"{name} {a:g} {'>' if slower else '<'} {b:g} the budget buys")
+
+    below("gym.max_boxes", gym.get("max_boxes"), knobs.get("gym.max_boxes"))
+    if researcher.get("sail_usd_per_hour") is not None:
+        below("researcher.sail_usd_per_hour", researcher.get("sail_usd_per_hour"), knobs.get("researcher.sail_usd_per_hour"))
+    below("population.ceiling", population.get("ceiling"), knobs.get("population.ceiling"))
+    below("architect.every_seconds", architect.get("every_seconds"), knobs.get("architect.every_seconds"), slower=True)
+    start, ceiling = _finite(population.get("start")), _finite(population.get("ceiling"))
+    if start is not None and ceiling is not None and start < ceiling:
+        add("cap", f"population.start {start:g} < population.ceiling {ceiling:g}")
+    try:
+        from itertools import combinations
+
+        from ..swarm import dlane as dlane_mod
+        from ..swarm.strategist import mechanism_class
+
+        lane_max, classes = None, []
+        if dlane_mod.on(loaded):
+            c = dlane_mod.cfg(loaded)
+            lane_max = _finite(c.get("max_alive"))
+            roots = list(c["roots"])
+            # The classes a direction card can be in (`Architect.lane_classes`: each lane structure by root group).
+            classes = sorted({mechanism_class(s, list(g)) for s in c["structures"]
+                              for k in range(1, len(roots) + 1) for g in combinations(roots, k)})
+    except Exception:  # noqa: BLE001 - a lane block that does not read: no conflict named from it
+        lane_max, classes = None, []
+    per_class = _finite(architect.get("max_alive_per_class"))
+    if lane_max is not None and classes and per_class is not None and 0 < per_class * len(classes) < lane_max:
+        add("conflict", f"architect.max_alive_per_class {per_class:g} x {len(classes)} direction class"
+                        f"{'es' if len(classes) > 1 else ''} ({', '.join(classes)}) < dlane.max_alive {lane_max:g}: the "
+                        "class cap, shared with alpha on the same structure and roots, binds the lane first", "class_cap")
+    claude = block("claude")
+    lines = claude.get("role_usd_day") if isinstance(claude.get("role_usd_day"), Mapping) else {}
+    line = _finite(lines.get("architect"))
+    if line is not None and 0 < line < ARCHITECT_HOLD_USD:
+        add("conflict", f"claude.role_usd_day.architect {line:.2f} < the {ARCHITECT_HOLD_USD:.2f} one architect call holds "
+                        "(it can never be used: set it to 0 or to at least the hold)", "architect_line")
+    if release is None:
+        try:
+            release = release_settings()
+        except Exception:  # noqa: BLE001 - no release values read: no drift named
+            release = {}
+    for name, key, given in (("researcher.dormant_cycles", ("researcher", "dormant_cycles"), researcher.get("dormant_cycles")),
+                             ("architect.max_refill", ("architect", "max_refill"), architect.get("max_refill"))):
+        part = release.get(key[0]) if isinstance(release.get(key[0]), Mapping) else {}
+        a, b = _finite(given), _finite(part.get(key[1]))
+        if a is not None and b is not None and a < b:
+            add("drift", f"{name} {a:g} < the release's {b:g}")
+    zero = sorted(str(role) for role, usd in lines.items() if _finite(usd) == 0)
+    if zero:
+        add("line", f"claude.role_usd_day is 0 for {', '.join(zero)}")
+    return out
+
+
+def _binds(ctx: Any, root: Path, loaded: Mapping[str, Any] | None = None) -> tuple[list[dict[str, str]] | None, str | None]:
+    """`settings_binds` over the settings as the swarm loads them, or None and why; a context may hand in `binds`."""
+    given = _get(ctx, "binds")
+    if given is not None:
+        return list(given), None
+    error = None
+    if loaded is None:
+        loaded, error = _load(ctx, root)
+    try:
+        if loaded is None:
+            raise RuntimeError(error)
+        return settings_binds(loaded), None
+    except Exception as exc:  # noqa: BLE001 - no binds named: underspend still reads the spend
+        return None, f"the settings that bind research could not be read ({error or type(exc).__name__})"
 
 
 # ---------------------------------------------------------------------------------------------- the checks
@@ -607,7 +1188,9 @@ def checks(swarm: Mapping[str, Any], *, now: float, ceiling: int | None, budget:
            grant: Mapping[str, Any] | None = None, kill: Mapping[str, Any] | None = None,
            flight: Mapping[str, Any] | None = None, dlane: Mapping[str, Any] | None = None, lane_on: bool | None = None,
            preopen: Mapping[str, Any] | None = None, forward: Mapping[str, Any] | None = None,
-           nightly_error_since: float | None = None, done_told: Any = ()) -> dict[str, dict[str, Any]]:
+           nightly_error_since: float | None = None, done_told: Any = (),
+           binds: list[Mapping[str, str]] | None = None,
+           alert_states: Mapping[str, Mapping[str, Any]] | None = None) -> dict[str, dict[str, Any]]:
     """Every cause's check: {stalled, what, numbers, doing, owner_step, onset (epoch or None)}. Pure."""
     out: dict[str, dict[str, Any]] = {}
     guard_now = swarm.get("guard") or {}
@@ -621,18 +1204,43 @@ def checks(swarm: Mapping[str, Any], *, now: float, ceiling: int | None, budget:
     passes = swarm.get("architect") or {}
     alive, births = int(swarm.get("alive") or 0), int(swarm.get("births") or 0)
     last_birth = S.epoch(swarm.get("last_birth_at"))
+    room = ceiling is not None and alive < ceiling
+    # THE JAM (Oct 10, 2026; the no-captain audit's item 1): no birth for `JAM_HOURS` while the architect kept wanting
+    # births. The House cannot loosen the graveyard or the card rule, nor rewrite the agenda: the owner's step, naming
+    # the main way the passes bore nothing and its lever (Oct 10 15:41-16:22Z: births 0/0/0 under agenda v21.4, reverted
+    # by hand; the 12-hour INFO alone told nobody).
+    jam = (swarm.get("yield") or {}).get("jam") or {}
+    jammed = (room and wanting(jam) >= JAM_PASSES
+              and (last_birth is None or now - last_birth >= JAM_HOURS * 3600))
+    # Only a jam a setting or an agenda clears is the owner's step (`JAM_OWNER_KINDS`): failed calls heal by themselves.
+    jam_step = (f"the architect wanted births in {wanting(jam)} passes over the last {JAM_HOURS:g} h and none was born: "
+                + lever(jam)) if jammed and jam_kind(jam) in JAM_OWNER_KINDS else None
+    numbers = {f"births_{BIRTH_HOURS}h": births, "population": alive, "ceiling": ceiling,
+               "last_birth_at": swarm.get("last_birth_at"), f"architect_passes_{BIRTH_HOURS}h": passes.get("passes", 0)}
+    if jam:
+        numbers.update({f"wanting_passes_{JAM_HOURS:g}h": wanting(jam), f"card_refused_{JAM_HOURS:g}h": card_refusals(jam),
+                        "jam_kind": jam_kind(jam) if jammed else "none"})
     out["births"] = {
-        "stalled": births == 0 and ceiling is not None and alive < ceiling,
-        "what": f"No family was born in the last {BIRTH_HOURS} h while the population is {alive} of a ceiling of "
-                f"{'unknown' if ceiling is None else ceiling}.",
-        "numbers": {f"births_{BIRTH_HOURS}h": births, "population": alive, "ceiling": ceiling,
-                    "last_birth_at": swarm.get("last_birth_at"), f"architect_passes_{BIRTH_HOURS}h": passes.get("passes", 0)},
+        "stalled": (births == 0 and room) or jammed,
+        "what": (f"No family was born in the last {BIRTH_HOURS} h while the population is {alive} of a ceiling of "
+                 f"{'unknown' if ceiling is None else ceiling}." if births == 0 else
+                 f"No family was born in the last {_hours(now - last_birth) if last_birth is not None else 'unknown'} h "
+                 f"while the population is {alive} of a ceiling of {ceiling}.")
+                + (f" The architect wanted births in {wanting(jam)} passes over the last {JAM_HOURS:g} h: it asked a model "
+                   f"{jam.get('asked', 0)} times, proposed {jam.get('proposed', 0)}, and the card checks refused "
+                   f"{card_refusals(jam)} ({jam.get('incomplete', 0)} incomplete, {jam.get('rebirth', 0)} by the rebirth rule, "
+                   f"{jam.get('spent_lineage', 0)} into a spent lineage); {jam.get('capped', 0)} met a cap, "
+                   f"{jam.get('no_cell', 0)} passes found no cell, {jam.get('failed', 0)} failed."
+                   + ("" if jam_step else f" No owner step: {LEVERS[jam_kind(jam)].format(fields='')}; the architect asks "
+                                         "again at its own cadence.") if jammed else ""),
+        "numbers": numbers,
         "doing": (f"The architect passed {passes.get('passes', 0)} times in the last {BIRTH_HOURS} h: {passes.get('no_cell', 0)} "
                   f"found no cell a birth may land in, {passes.get('ceiling', 0)} met the ceiling, {passes.get('failed', 0)} "
                   f"failed, {passes.get('asked', 0)} asked a model and proposed {passes.get('proposed', 0)} families "
                   f"({passes.get('born', 0)} born). It passes again at its own cadence; research goes on in the living families "
                   f"({alive}); {_guard_words(guard_now)}."),
-        "owner_step": research_step, "onset": last_birth}
+        "owner_step": research_step or jam_step, "onset": last_birth}
+    out["birth_yield"] = _yield_check(now, swarm, ceiling)
 
     # gym_runs
     runs = int(swarm.get("gym_runs") or 0)
@@ -763,9 +1371,6 @@ def checks(swarm: Mapping[str, Any], *, now: float, ceiling: int | None, budget:
         "doing": ("The House keeps ticking (reconciliation, marks, exits); births, paid research and new entries wait for the "
                   "pause, so no research stall is raised while it stands."),
         "owner_step": "; ".join(steps) if long_ else None, "onset": since}
-    if since is not None:
-        for cause in RESEARCH_CAUSES:
-            out[cause].update(stalled=False, paused=True)
 
     # grant_refused
     grant = grant or {}
@@ -794,7 +1399,224 @@ def checks(swarm: Mapping[str, Any], *, now: float, ceiling: int | None, budget:
     out.update(_lane_checks(now, dlane, lane_on, done_told))
     out["preopen"] = _preopen_check(now, preopen)
     out["forward"] = _forward_check(now, forward, nightly_error_since)
+    out["swarm_alerts"] = _alerts_check(now, swarm.get("alerts"), alert_states)
+    out["underspend"] = _underspend_check(now, swarm, budget, binds)
+    if since is not None:  # the pause stops research by design: none of its causes is raised while it stands
+        for cause in RESEARCH_CAUSES:
+            out[cause].update(stalled=False, paused=True)
     return out
+
+
+def _yield_check(now: float, swarm: Mapping[str, Any], ceiling: int | None) -> dict[str, Any]:
+    """`birth_yield` (the module docstring): the architect bears (almost) nothing while it keeps asking. Pure. INFO: the
+    `births` cause carries the owner step once the jam has stood `JAM_HOURS`."""
+    tallies = swarm.get("yield") or {}
+    low, dry = tallies.get("low") or {}, tallies.get("dry") or {}
+    alive = int(swarm.get("alive") or 0)
+    room = ceiling is not None and alive < ceiling
+    born, proposed, refused = int(low.get("born") or 0), int(low.get("proposed") or 0), card_refusals(low)
+    asked = int(low.get("asked") or 0)
+    births_dry = swarm.get("births_dry")
+    is_dry = births_dry is not None and int(births_dry) == 0 and wanting(dry) >= DRY_PASSES
+    starved = asked >= YIELD_PASSES and (born <= YIELD_MAX_BORN or (proposed > 0 and refused >= YIELD_REFUSED_SHARE * proposed))
+    stalled = bool(tallies) and room and (is_dry or starved)
+    share = None if not proposed else round(refused / proposed, 2)
+    parts = []
+    if starved or not is_dry:
+        parts.append(f"The architect bore {born} of {proposed} proposals in the {asked} passes that asked a model over the "
+                     f"last {YIELD_HOURS:g} h; the card checks refused {refused} ({low.get('incomplete', 0)} incomplete, "
+                     f"{low.get('rebirth', 0)} by the rebirth rule, {low.get('spent_lineage', 0)} into a spent lineage) and "
+                     f"{low.get('capped', 0)} met a cap.")
+    if is_dry:
+        parts.append(f"No family was born in the last {DRY_HOURS:g} h while the architect wanted births in {wanting(dry)} "
+                     "passes.")
+    top = list((low.get("fields") or {}).items())[:3]
+    if top:
+        parts.append("The incomplete cards most often lacked " + ", ".join(f"{k} ({n}x)" for k, n in top) + ".")
+    kind = jam_kind(low if asked else dry)
+    return {
+        "stalled": stalled,
+        "what": " ".join(parts),
+        "numbers": {f"asked_{YIELD_HOURS:g}h": asked, f"proposed_{YIELD_HOURS:g}h": proposed, f"born_{YIELD_HOURS:g}h": born,
+                    "refused_share": share, "refused_incomplete": int(low.get("incomplete") or 0),
+                    "refused_rebirth": int(low.get("rebirth") or 0), "refused_spent": int(low.get("spent_lineage") or 0),
+                    "capped": int(low.get("capped") or 0), "cut": int(low.get("cut") or 0), "empty": int(low.get("empty") or 0),
+                    "no_cell": int(low.get("no_cell") or 0), "failed": int(low.get("failed") or 0),
+                    f"births_{DRY_HOURS:g}h": births_dry, "top_fields": fields_token(low),
+                    "rebirth_rows": int(low.get("rebirth_rows") or 0), "kind": kind},
+        "doing": ("The architect passes again at its own cadence and shows its next request the last pass's card refusals "
+                  "with their lessons; nothing loosens the graveyard or the card rule by itself. What would help: "
+                  + LEVERS[kind].format(fields="") + f". After {JAM_HOURS:g} h with no birth this is the owner's step "
+                  "(the births cause) when a setting or an agenda clears it (failed calls heal by themselves)."),
+        "owner_step": None, "onset": S.epoch(swarm.get("last_birth_at")) if is_dry else None}
+
+
+def _alerts_check(now: float, alerts: Any, states: Mapping[str, Mapping[str, Any]] | None = None) -> dict[str, Any]:
+    """`swarm_alerts` (the module docstring): the swarm's own alerts, which reach the swarm's record and the House's ledger
+    only. Pure. An owner kind (`ALERT_STEPS`) whose condition is read (`states`, `alert_states`) stands with its owner
+    step while its condition stands, whatever its alert's age, and not at all once it is cleared; one whose condition is
+    not read is the owner's step on the UTC day its alert fired only (the alert's window, `ALERT_HOURS`, may run into the
+    next day: there it is INFO), so a fix before midnight does not fail the next day's DONE-RULE item 7. The other kinds
+    stand as INFO over the window; the self-healing ones (`ALERT_SELF_HEALING`) are counted, never a cause by
+    themselves."""
+    alerts = {str(k): v for k, v in (alerts or {}).items() if isinstance(v, Mapping)} if isinstance(alerts, Mapping) else {}
+    states = {str(k): v for k, v in (states or {}).items() if isinstance(v, Mapping)} if isinstance(states, Mapping) else {}
+    today = S.iso(now)[:10]
+    standing: dict[str, dict[str, Any]] = {}
+    cleared: list[str] = []
+    for kind, rec in alerts.items():
+        if kind in ALERT_SELF_HEALING:
+            continue
+        if kind in ALERT_STEPS and kind in states and not states[kind].get("stands"):
+            cleared.append(kind)  # the alert came, its condition is gone: no cause
+            continue
+        standing[kind] = dict(rec)
+    for kind, state in states.items():
+        if kind in ALERT_STEPS and state.get("stands") and kind not in standing:
+            # A condition that stands though its alert is older than the window (the swarm raises it once).
+            standing[kind] = {"n": 0, "first_at": state.get("at"), "last_at": state.get("at"), "text": state.get("text")}
+
+    def owner_kind(kind: str) -> bool:
+        if kind not in ALERT_STEPS:
+            return False
+        if kind in states:
+            return bool(states[kind].get("stands"))
+        return str(standing[kind].get("last_at") or "")[:10] == today
+
+    ordered = sorted(standing, key=lambda k: (not owner_kind(k), -(S.epoch(standing[k].get("last_at")) or 0.0), k))
+    owner = [k for k in ordered if owner_kind(k)]
+
+    def line(kind: str) -> str:
+        rec = standing[kind]
+        text = rec.get("text") or "no text"
+        if not int(rec.get("n") or 0):
+            seen = f"; last alert {rec['last_at']}" if rec.get("last_at") else ""
+            return f"{kind} (stands now{seen}): {text}"
+        late = kind in ALERT_STEPS and kind not in states and not owner_kind(kind)
+        return (f"{kind} x{int(rec.get('n') or 0)} (last {rec.get('last_at')}"
+                + ("; an earlier UTC day's, no owner step now" if late else "") + f"): {text}")
+
+    lines = [line(k) for k in ordered[:3]]
+    numbers: dict[str, Any] = {"alert_kinds": len(alerts)}
+    for k in sorted(alerts, key=lambda k: -int(alerts[k].get("n") or 0))[:10]:
+        numbers[k[:40]] = int(alerts[k].get("n") or 0)
+    numbers.update({"standing_kinds": len(standing), "owner_kinds": len(owner), "cleared_kinds": len(cleared)})
+    firsts = [S.epoch(v.get("first_at")) for v in standing.values()]
+    count = sum(int(v.get("n") or 0) for v in standing.values())
+    return {
+        "stalled": bool(standing),
+        "what": (f"{len(standing)} of the swarm's alerts stand ({count} raised in the last {ALERT_HOURS:g} h), none of "
+                 "which reaches a mail of its own: " + "; ".join(lines)[:380] + "."
+                 + (f" Cleared since their alert: {', '.join(sorted(cleared))}." if cleared else "")
+                 if standing else f"No swarm alert stands but the self-healing ones"
+                 + (f" (cleared since their alert: {', '.join(sorted(cleared))})" if cleared else "") + "."),
+        "numbers": numbers,
+        "doing": ("Each alert is in the swarm's record (swarm.status) and the House's ledger; the swarm goes on around it. "
+                  "The owner kinds are read from the swarm's settings and store at every run, so a fix clears its cause at "
+                  "the next. A Sail window that did not answer falls to its fallback for an hour by itself."),
+        "owner_step": ("; ".join(ALERT_STEPS[k] for k in owner)[:400] or None) if owner else None,
+        "onset": min([t for t in firsts if t is not None], default=None)}
+
+
+def _expected(figure: float, raised: Mapping[str, Any] | None, day: float, now: float) -> float:
+    """What a day's figure buys by `now` at an even pace (the Sail guard's `pace_day`), each hour at the figure that held
+    then: the day's first figure until its first TOP-UP RAISE, each raise's figure from its hour (`raises`; a figure
+    with the last raise only, `raised_from` and `raised_at`, is read as one step)."""
+    raised = raised if isinstance(raised, Mapping) else {}
+    steps = []
+    for step in raised.get("raises") if isinstance(raised.get("raises"), list) else []:
+        at, before, after = (S.epoch(step.get("at")), _finite(step.get("from")), _finite(step.get("to"))) \
+            if isinstance(step, Mapping) else (None, None, None)
+        if at is not None and before is not None and after is not None and day <= at <= now:
+            steps.append((at, before, after))
+    if not steps:
+        at, before = S.epoch(raised.get("raised_at")), _finite(raised.get("raised_from"))
+        if at is not None and before is not None and day <= at <= now:
+            steps = [(at, before, figure)]
+    if not steps:
+        return figure * max(0.0, now - day) / 86400.0
+    steps.sort(key=lambda s: s[0])
+    first = _finite(raised.get("set_usd_day"))
+    level, since, total = steps[0][1] if first is None else first, day, 0.0
+    for at, _, after in steps:
+        total += level * (at - since)
+        level, since = after, at
+    return (total + figure * (now - since)) / 86400.0
+
+
+def _underspend_check(now: float, swarm: Mapping[str, Any], budget: Mapping[str, Any] | None,
+                      binds: list[Mapping[str, str]] | None) -> dict[str, Any]:
+    """`underspend` (the module docstring): Sail research books under `UNDERSPEND_SHARE` of what the day's figure buys by
+    now, or a conflict that binds. Pure. INFO: DONE-RULE item 7 reads "at budget" as no taper, so research held under its
+    dollars by a swarm.json cap is invisible there; this names it and the settings that bind.
+
+    Only Sail is paced (the Sail guard's even pace): Claude's figure is spent by the calls of its roles with a line, which
+    come when the gate and the strategist have work (the release sets the architect's and the researchers' lines to 0), so
+    its reading is said beside Sail's and never stands by itself. A conflict stands by itself only while it binds: the
+    class cap under the direction lane's quota (`class_cap`, the release's own pair) once the architect's passes of the
+    last `JAM_HOURS` met it (`lane_class_capped`), an architect line under one call's hold (`architect_line`) always."""
+    import datetime as dt
+
+    binds = [dict(b) for b in binds or [] if isinstance(b, Mapping)]
+    conflicts = [b for b in binds if b.get("kind") == "conflict"]
+    lane_capped = int(((swarm.get("yield") or {}).get("jam") or {}).get("lane_class_capped") or 0)
+    binding = [b for b in conflicts if b.get("key") != "class_cap" or lane_capped > 0]
+    spent = swarm.get("spent_today") if isinstance(swarm.get("spent_today"), Mapping) else None
+    day = _finite(swarm.get("day_start"))
+    meters = (budget or {}).get("meters") if isinstance(budget, Mapping) else None
+    today = dt.datetime.fromtimestamp(now, dt.timezone.utc).date().isoformat()
+    brake = swarm.get("brake_today") if isinstance(swarm.get("brake_today"), Mapping) else {}
+    braked = float(brake.get("hours") or 0.0)
+    short, readings, numbers = [], [], {}
+    for meter, word in METER_WORDS.items():
+        row = (meters or {}).get(meter) if isinstance(meters, Mapping) else None
+        row = row if isinstance(row, Mapping) else {}
+        figure = row.get("day_figure") if isinstance(row.get("day_figure"), Mapping) else {}
+        usd = _finite(row.get("research_usd_day"))
+        if spent is None or day is None or usd is None or usd <= 0 or figure.get("day") != today:
+            continue
+        due = _expected(usd, figure, day, now)
+        booked = float(spent.get(meter) or 0.0)
+        share = booked / due if due > 0 else None
+        numbers.update({f"{meter}_booked_today": round(booked, 2), f"{meter}_due_by_now": round(due, 2),
+                        f"{meter}_share": None if share is None else round(share, 2)})
+        if now - day >= UNDERSPEND_MIN_HOURS * 3600 and due >= UNDERSPEND_MIN_USD and share is not None \
+                and share < UNDERSPEND_SHARE:
+            reading = (f"{word} research booked {booked:.2f} of the {due:.2f} its {usd:.2f} a day buys by now "
+                       f"({share:.0%})")
+            if meter in PACED_METERS:
+                short.append(meter)
+                readings.append(reading)
+            else:
+                lines = [b["text"] for b in binds if b.get("kind") == "line"]
+                readings.append(reading + " (not paced: its calls come with the gate's and the strategist's work"
+                                + (f"; {lines[0]}" if lines else "") + ")")
+    quiet = braked < UNDERSPEND_BRAKE_HOURS
+    stalled = bool(short and quiet) or bool(binding)
+    caps = [b["text"] for b in binds if b.get("kind") == "cap"]
+    drift = [b["text"] for b in binds if b.get("kind") == "drift"]
+    what = []
+    if readings:
+        what.append("; ".join(readings) + ("." if quiet or not short else f", but the guard braked {braked:.1f} h today."))
+    if conflicts:
+        what.append("Settings that cannot both hold: " + "; ".join(
+            b["text"] + ("" if b in binding else " (not binding now: no direction card met the class cap in the last "
+                                                 f"{JAM_HOURS:g} h)") for b in conflicts) + ".")
+    if caps:
+        what.append("Settings tighter than what the budget buys: " + "; ".join(caps[:5]) + ".")
+    if drift:
+        what.append("Settings under the release's own values: " + "; ".join(drift[:3]) + ".")
+    numbers.update({"braked_hours_today": round(braked, 2), "binding_settings": len(caps), "conflicts": len(conflicts),
+                    "conflicts_binding": len(binding), f"lane_class_capped_{JAM_HOURS:g}h": lane_capped,
+                    "under_release": len(drift)})
+    return {
+        "stalled": stalled,
+        "what": " ".join(what) or "Research books what its day's figure buys, and no setting conflicts.",
+        "numbers": numbers,
+        "doing": ("The budget only ever tightens the settings: a swarm.json value under what the dollars buy binds "
+                  "silently, and DONE-RULE item 7 reads such a day as at budget. Nothing is changed by itself; the "
+                  "settings named are the owner's to change (swarm.json)."),
+        "owner_step": None, "onset": None}
 
 
 K5_STEP = ("the direction lane reads shadow while K5 holds (no new direction Candidate, no incubator direction mark): "
@@ -957,16 +1779,21 @@ def cause_facts(cause: str, check: Mapping[str, Any], since: float | None, now: 
             "doing": str(check.get("doing") or ""), "owner_step": check.get("owner_step") or None}
 
 
-def notice_id(owner: list[str]) -> str:
-    """The gateway's own dedupe key for the notice (gateway/lib/router.mjs keys it the same way, whatever id comes): the
-    owner causes it tells, or `stall:info` when none needs the owner."""
-    return "stall:owner:" + "+".join(sorted(owner)) if owner else "stall:info"
+def notice_id(owner: list[str], causes: list[str] | None = None) -> str:
+    """The gateway's own dedupe key for the notice (gateway/lib/email.mjs `stallKey` keys it the same way, whatever id
+    comes): the owner causes it tells, or, when none needs the owner, `stall:info:` and every cause it tells (since the
+    review of the no-captain build, Oct 10, 2026: a new cause needing nothing is mailed at once, so the gateway's 24-hour
+    key is the set told, not one key for every such notice)."""
+    if owner:
+        return "stall:owner:" + "+".join(sorted(owner))
+    return "stall:info:" + "+".join(sorted(causes or [])) if causes else "stall:info"
 
 
 def notice_facts(entries: list[dict[str, Any]], now: float) -> dict[str, Any]:
     """The `stall` notice's facts: every standing cause (`cause_facts`), owner steps first."""
     ordered = [e for e in entries if e.get("owner_step")] + [e for e in entries if not e.get("owner_step")]
-    return {"kind": "stall", "notice_id": notice_id([e["cause"] for e in entries if e.get("owner_step")]),
+    return {"kind": "stall", "notice_id": notice_id([e["cause"] for e in entries if e.get("owner_step")],
+                                                    [e["cause"] for e in entries]),
             "causes": ordered, "at": S.iso(now)}
 
 
@@ -996,15 +1823,30 @@ def _alert(ctx: Any, text: str) -> None:
         alert("warning", text[:900])
 
 
+def told_lately(mail: Mapping[str, Any], now: float) -> set[str] | None:
+    """The causes a SENT notice told in the last `INFO_EVERY_SECONDS` (`stall.json` `mail.told`, {cause: when}); None for
+    a state file written before the record was kept (the pace then is the 24-hour one alone)."""
+    told = mail.get("told")
+    if not isinstance(told, Mapping):
+        return None
+    return {str(c) for c, at in told.items() if _within(S.epoch(at), now, INFO_EVERY_SECONDS)}
+
+
 def due_notice(stalled: list[str], owner: list[str], mail: Mapping[str, Any], now: float) -> str | None:
-    """Why a notice is due now ("owner" or "info"), or None: the pace in the module docstring."""
+    """Why a notice is due now ("owner" or "info"), or None: the pace in the module docstring. A stall needing nothing is
+    due 24 hours after the last notice, or AT ONCE when a cause stands that no notice told in the last 24 hours (the review
+    of the no-captain build, Oct 10, 2026: one cause standing for days held every new one back up to a day, the early
+    warning of `birth_yield` among them)."""
     owner_at, info_at = S.epoch(mail.get("owner_at")), S.epoch(mail.get("info_at"))
     if owner:
         told = set(mail.get("owner_causes") or []) if _within(owner_at, now, OWNER_EVERY_SECONDS) else set()
         return "owner" if set(owner) - told else None
     if stalled:
         last = max([t for t in (owner_at, info_at) if t is not None], default=None)
-        return None if _within(last, now, INFO_EVERY_SECONDS) else "info"
+        if not _within(last, now, INFO_EVERY_SECONDS):
+            return "info"
+        told = told_lately(mail, now)
+        return "info" if told is not None and set(stalled) - told else None
     return None
 
 
@@ -1019,9 +1861,23 @@ def run(ctx: Any) -> dict[str, Any]:
         return {"status": "skipped", "why": f"no swarm store ({F.SWARM_DB}) in the state root"}
     errors: list[str] = []
     swarm = guard.read(root / F.SWARM_DB, lambda db: swarm_facts(db, now))
-    ceiling, why = _ceiling(ctx, root)
+    loaded, load_error = _load(ctx, root)
+    ceiling, why = _ceiling(ctx, root, loaded)
     if why:
         errors.append(why)
+    binds, why = _binds(ctx, root, loaded)
+    if why:
+        errors.append(why)
+    # THE SWARM'S ALERTS, READ FROM THE STATE (the review of the no-captain build): each owner kind's condition as the
+    # swarm's settings and store hold it now; none read, each kind is an owner step on the UTC day it fired only.
+    states: dict[str, dict[str, Any]] = {}
+    if loaded is not None and isinstance(swarm.get("alert_state"), Mapping):
+        try:
+            states = alert_states(loaded, swarm["alert_state"], now)
+        except Exception as exc:  # noqa: BLE001 - the alerts' window alone, with the day rule
+            errors.append(f"the swarm alerts' state could not be read ({type(exc).__name__})")
+    elif loaded is None:
+        errors.append(f"the swarm's settings could not be read ({load_error}): its alerts are read by their window alone")
     budget = read_json(root / "budget.json", None)
     if isinstance(budget, Mapping) and (_finite(budget.get("at")) is None or now - float(budget["at"]) > BUDGET_STALE_SECONDS):
         errors.append("budget.json is stale or undated: the runway is not read")
@@ -1035,7 +1891,7 @@ def run(ctx: Any) -> dict[str, Any]:
     # unreadable one an error, never a cause.
     lane_on, dlane, preopen, forward, flight = None, None, None, {}, None
     try:
-        lane_on = _lane_on(ctx, root)
+        lane_on = _lane_on(ctx, root, loaded)
         dlane = dlane_facts(root)
     except Exception as exc:  # noqa: BLE001 - no lane cause from an unreadable report
         errors.append(f"the direction lane's report could not be read ({type(exc).__name__})")
@@ -1067,7 +1923,7 @@ def run(ctx: Any) -> dict[str, Any]:
                    grant=grant, kill=kill_facts(_health(ctx)), flight=flight, dlane=dlane, lane_on=lane_on,
                    preopen=preopen, forward=forward,
                    nightly_error_since=None if nightly_error is None else S.epoch(nightly_error["since"]),
-                   done_told=done_told)
+                   done_told=done_told, binds=binds, alert_states=states)
 
     told = state.get("causes") if isinstance(state.get("causes"), dict) else {}
     mail = dict(state.get("mail")) if isinstance(state.get("mail"), dict) else {}
@@ -1115,6 +1971,11 @@ def run(ctx: Any) -> dict[str, Any]:
             notice.update(sent=ok, why=words)
             if ok and "done" in stalled:
                 done_told = sorted(set(done_told) | set(found["done"].get("keys") or []))
+            if ok:
+                # Every cause a sent notice lists is told (`told_lately`): a new one is mailed at once, the rest by the pace.
+                lately = {c: at for c, at in (mail.get("told") or {}).items()
+                          if _within(S.epoch(at), now, INFO_EVERY_SECONDS)} if isinstance(mail.get("told"), Mapping) else {}
+                mail["told"] = {**lately, **{c: S.iso(now) for c in stalled}}
             if ok and kind == "owner":
                 # A notice for a new owner cause inside the 12 h starts them again: what both told is not told twice.
                 fresh = _within(S.epoch(mail.get("owner_at")), now, OWNER_EVERY_SECONDS)
@@ -1145,4 +2006,9 @@ __all__ = ["run", "checks", "swarm_facts", "owner_deploy", "pause_facts", "grant
            "INFO_EVERY_SECONDS", "WARN_EVERY_SECONDS", "STATE_FILE", "deploy_flight", "dlane_facts", "preopen_facts",
            "forward_facts", "last_session_before", "OWNER_DEPLOY_GRACE", "DEPLOY_FLIGHT_SECONDS", "NIGHTLY_STOP_HOURS",
            "NIGHTLY_ERROR_HOURS", "FORWARD_DUE_HOUR", "DLANE_STALE_HOURS", "PREOPEN_HOURS", "NEWS_CAUSES", "done_key",
-           "LANE_OFF_WHAT"]
+           "LANE_OFF_WHAT", "architect_tally", "card_fields", "wanting", "card_refusals", "jam_kind", "lever", "LEVERS",
+           "settings_binds", "YIELD_HOURS", "YIELD_PASSES", "YIELD_MAX_BORN", "YIELD_REFUSED_SHARE", "DRY_HOURS", "DRY_PASSES",
+           "JAM_HOURS", "JAM_PASSES", "ALERT_HOURS", "ALERT_STEPS", "ALERT_SELF_HEALING", "UNDERSPEND_SHARE",
+           "UNDERSPEND_MIN_HOURS", "UNDERSPEND_MIN_USD", "UNDERSPEND_BRAKE_HOURS", "ARCHITECT_HOLD_USD", "JAM_OWNER_KINDS",
+           "PACED_METERS", "ALERT_LOOKBACK_KINDS", "ALERT_STATE_DAYS", "GAME_T0_KEY", "alert_states", "release_settings",
+           "told_lately"]
