@@ -21,34 +21,57 @@ loosening (the `dlane` report's LOOSENED row) with a behavioural check beside it
   matched those rows, and it could make no rebirth claim (a claim adds an input the dead row did not read). Direction
   births were about zero and the Probe roster (5 seats, 1 filled) could not fill.
 - **The status is declared.** A direction card whose DECLARED inputs are exactly `["clock"]` is always-in
-  (`dlane.always_in`); its comparison or falsification must say it enters every session (`dlane.card_errors`). A dead
-  row is always-in when its family's declared card was (its own card, or a fork's by `card_sha`), never by its words.
+  (`dlane.always_in`). `dlane.card_errors` asks it to say so in words no gated card uses ("always-in" or "no gate" in
+  its comparison or falsification; "every session" alone is every direction card's comparison), to name no gate,
+  signal or filter switched off, and to leave ablation out (it has no gate to switch off). A dead row is always-in
+  when its family's declared card was (its own card, or a fork's by `card_sha`), never by its words, unless its program
+  never behaved always-in (G1 refused its version due for Validation, or every version on record failed G1, and it held
+  no try).
 - **The graveyard** (`cards.RebirthIndex.check`, its direction path only, while the lane is on). An always-in card is
-  bound by the always-in direction rows on its roots, whatever their class or holding, and by no other row; no claim
-  frees it, and a claim it carries is dropped. A DRIFT row still binds no direction card. `cards.matches`, `matched`,
-  `text_cell`, the mechanism test's `mechanism_lineage` and the memory judge are unchanged: alpha cards (legacy rows
-  included) and gated direction cards are judged as on main.
+  bound by the always-in direction rows on its roots (the roots each row's family traded or was born on), whatever
+  their class or holding, and by no other row; no claim frees it, and a claim it carries is dropped. A DRIFT row still
+  binds no direction card. `cards.matches`, `matched`, `text_cell`, the mechanism test's `mechanism_lineage` and the
+  memory judge are unchanged: alpha cards (legacy rows included) and gated direction cards are judged as on main.
 - **One idea a root** (`architect.admit`). An always-in birth links its lineage to every always-in direction lineage on
-  each of its roots (`cards.always_in_families`, `store.link_lineages`), alive or dead. The ration at birth
-  (`dlane.birth_spent`, with its claimed-try rule) reads those lineages with or without a parent, so each root's
-  always-in beta has ONE Validation try and one holdout look, ever, while `dlane.val_tries` is 1: at most three in all
-  (SPY, QQQ, IWM), fewer once a family on two roots joins two of them.
-- **The behavioural check, G1** (`dlane.always_in_entries`). On each 1.0x Train run of an always-in family, over the
-  Train years and each root it traded, a root-session is flat when no position of the program on that root was open at
-  the session's start; the program must have entered on at least 90% of its flat root-sessions (one flat on fewer than
-  20 passes: it was in the market nearly every session). It reads only the trades' entry and exit days and the run's
-  sessions, which every Train result carries (the mechanism test runs on a quarter of families, in shadow), works for
-  any hold, and catches any gate (implied vol, trend, weekday, month-end). A failing version is ineligible
-  (`train_score(..., always_in=True)`, fails `G1`, kept in the compact score); the tournament validates an always-in
-  version only with a G1 pass on record (`dlane.always_in_try`; `always_in_refused` in the round, which the stall check
-  reads), and a family any version of which failed G1 retires first in `_why` (`dlane.always_in_failed`, an IDLE death:
-  no row of it binds, no try was spent). What it cannot see: a program never flat on Train could add gated entries on
-  top of its always-in position.
+  each of its roots (`cards.always_in_families`, `store.link_lineages`), alive or dead, and continues no other: its
+  parent and twins, declared or by words, are read among those always-in families alone, so a gated lineage's spent
+  try never refuses it and a gated lineage is never merged into a root's always-in try. The ration at birth
+  (`dlane.birth_spent` with `living`) reads those lineages with or without a parent, and every living member of them
+  claims the try, best or not, so a living always-in family on a root refuses the next always-in birth there. An
+  always-in family trades only the roots it was born on (`researcher._admit` refuses NEEDS naming another) and never
+  forks (`tournament.lane_forks`). So each root's always-in beta has ONE Validation try and one holdout look, ever,
+  while `dlane.val_tries` is 1: at most three in all (SPY, QQQ, IWM), fewer once a family on two roots joins two of
+  them.
+- **The behavioural check, G1** (`dlane.always_in_entries`), on each 1.0x Train run of an always-in family, over the
+  Train years and on each root it traded, in three parts:
+  - entries: a root on which it held two or more positions at the open of 10% or more of its sessions is a ladder,
+    and must have entered on 90% of ALL its Train sessions (a ladder can always add one; the review's probes, gated
+    ladders holding 2-8 sessions, were never flat and passed the flat reading; its cost: a program that opens its
+    next call a session before the last one's exit session reads as a ladder, so the brief says to roll on the exit
+    session itself); any other root on 90% of its flat sessions (none held at the open), and one flat on fewer than
+    20 held a position at nearly every open, which passes this part;
+  - size: 90% of its entries' maximum losses within 3x of their median, either way (the same contracts each entry
+    vary with the premium inside it; a gate on the size does not);
+  - hold: 90% of its closed trades held one session or more and within 2x of their median hold (a same-session exit
+    while a gate is off is not a hold).
+
+  It reads only the trades' days, exit days and maximum losses and the run's sessions, which every Train result carries
+  (the mechanism test runs on a quarter of families, in shadow), works for any hold, and a gate on the entry (implied
+  vol, trend, weekday, month-end), on the size or on the exit leaves a mark in one of the parts. A failing version is
+  ineligible (`train_score(..., always_in=True)`, fails `G1`, kept in the compact score). The tournament validates an
+  always-in version only with a G1 pass on record (`dlane.always_in_try`; `always_in_refused` in the round, which the
+  stall check reads); a family whose version due for Validation was so refused, and that holds none of its lineage's
+  tries, retires in `_why` after the ration (`dlane.always_in_failed`, an IDLE death: no row of it binds, it spent no
+  try). A G1 failure of any other version (a sweep variant, a version written after the try was sent) only makes that
+  version ineligible, and a spent try retires on the ration's own cause, so its verdict binds. What it cannot see: a
+  gate that only tilts inside the bands (a size that halves, a hold between 4 and 6 sessions, a strike that keeps the
+  risk in band).
 - **The view.** The architect's system prompt (`LANE_SYSTEM`), the BIRTH CELLS' header (`LANE_CELLS_NOTE`) and their
   last line (`cards.ALWAYS_IN_LINE`: each lane root open, bound by an always-in row, or its always-in try spent or
-  claimed) say the rule; `Architect.closed` reads a lane root still open to an always-in birth as a pass that can bear
-  one. An always-in family's card brief says G1. The golden prompt pins are unchanged (the ALWAYS-IN line is added only
-  to a list that has a cell).
+  claimed, a living member's claim included, read as `admit` reads it) say the rule; `Architect.closed` reads a lane
+  root still open to an always-in birth as a pass that can bear one. An always-in family's card brief says G1 and that
+  it trades only its birth roots. The golden prompt pins are unchanged (the ALWAYS-IN line is added only to a list that
+  has a cell).
 - **The cost.** At most one always-in Validation try per root, each the lane's D2 lottery at 10.37% per program at zero
   edge on mixed worlds (12.39% on 2022-24 worlds; higher when the screen windows rose); profit is index beta minus
   option costs, beside the same-risk buy-and-hold. A self-refuted or refuted always-in family closes its root's

@@ -78,28 +78,42 @@ league/swarm/cards.py). The lane's own instrument is an always-in call: it enter
 10 the lane's graveyard cells held 22-43 rows refuted on Train, every one a gated idea (an implied-vol, term-structure,
 trend or open-interest gate), and an always-in card could make no rebirth claim (a claim adds an input the dead row did
 not read), so it was never born. A DIRECTION card whose DECLARED inputs are exactly ["clock"] (`ALWAYS_IN_INPUTS`; never
-read from its words) is ALWAYS-IN, and its comparison or falsification says that it enters every session ("every
-session", "each session" or "always-in": `card_errors`). Three rules go with the status, while the lane is on:
+read from its words) is ALWAYS-IN; `card_errors` asks it to say so in words no gated card's comparison uses ("always-in"
+or "no gate" in its comparison or falsification: `ALWAYS_IN_WORDS`; "every session" alone is every direction card's), to
+name no gate, signal or filter switched off (`GATE_OFF`), and to have no ablation (it has no gate to turn off). Four
+rules go with the status, while the lane is on:
 - THE GRAVEYARD (cards.py `RebirthIndex.check`): an always-in card is bound by the always-in direction rows on its roots
-  (a row is always-in by its family's DECLARED card, whatever its words, class or holding) and by no other row; no claim
-  frees it (it reads nothing a claim could add). Alpha cards and gated direction cards are judged as before;
+  (a row is always-in by its family's DECLARED card, whatever its words, class or holding, unless its program never
+  behaved always-in) and by no other row; no claim frees it (it reads nothing a claim could add). Alpha cards and gated
+  direction cards are judged as before;
 - ONE IDEA A ROOT (league/swarm/architect.py `admit`): its birth links its lineage to every always-in direction family's on
-  each of its roots (`store.link_lineages`), so the ration (one Validation try and one holdout look a connected lineage;
-  `birth_spent` before the birth, its claimed-try rule included) gives each root's always-in beta ONE Validation try, ever,
-  while `val_tries` is 1;
-- THE BEHAVIOURAL CHECK, G1 (`always_in_entries`): the declared status is checked against the program. On a 1.0x Train run
-  of an always-in family, over the Train years and each root it traded, a root-session is FLAT when no position of the
-  program on that root was open at the session's start (entered on an earlier session, exited on this one or later); the
-  program must have entered on at least `ALWAYS_IN_SHARE` (90%) of its flat root-sessions, and one flat on fewer than
-  `ALWAYS_IN_MIN_FLAT` (20) was in the market at nearly every session, which passes. Why this reading: it needs only the
-  trades' entry and exit days and the run's sessions, which every Train result carries (the mechanism test's arms are a
-  sample's, and only a quarter of families take it in shadow); it holds whatever the hold (one position held 2-8
-  sessions, or a new one every session); and a gate of any kind (implied vol, trend, the weekday, the month-end) leaves
-  flat sessions without an entry. A version that fails it is ineligible (`train_score(..., always_in=True)`: fails "G1");
-  the tournament validates an always-in family's version only with a G1 pass on record (`always_in_try`: a refusal spends
-  no try) and retires a family any of whose versions failed it (`always_in_failed`, `ALWAYS_IN_CAUSE`: an untested death,
-  tagged IDLE, so no graveyard row of it binds). What it cannot see: a program that is never flat (it rolls one position
-  without a flat session) could add gated entries on top of that always-in position.
+  each of its roots, on the roots each was born on or trades (`store.link_lineages`), and continues no gated lineage by
+  its words (its parent and twins are read among those always-in families alone), so the ration (one Validation try and
+  one holdout look a connected lineage; `birth_spent` before the birth, with `living`: every living member claims the
+  try, best or not) gives each root's always-in beta ONE Validation try, ever, while `val_tries` is 1. An always-in
+  family trades only the roots it was born on (researcher.py `_admit` refuses NEEDS naming another) and never forks
+  (tournament.py `lane_forks`), so the try of one root's idea is never another's;
+- THE BEHAVIOURAL CHECK, G1 (`always_in_entries`): the declared status is checked against the program, on a 1.0x Train
+  run of an always-in family, over the Train years and on each root it traded, in three parts. ENTRIES: `held` counts
+  its positions open at each session's open; a root is a LADDER when it held two or more on `ALWAYS_IN_LADDER` (10%) of
+  its sessions, and then it must enter on `ALWAYS_IN_SHARE` (90%) of ALL its sessions (a ladder can always add one: a
+  gate on a ladder skips sessions it was never flat on, which the flat reading alone passed; its cost: a program that
+  opens its next call a session before the last one's exit session reads as one, so the brief says to roll on the exit
+  session itself); else on 90% of its FLAT sessions (none held at the open; a root flat on fewer than
+  `ALWAYS_IN_MIN_FLAT` (20) held one position at nearly every open, which passes this part). SIZE: 90% of its entries'
+  maximum losses within `ALWAYS_IN_SIZE_BAND` (3x) of their median either way (the same contracts each entry vary with
+  the premium inside it; a gate on the size does not). HOLD: 90% of its closed trades held one session or more and
+  within `ALWAYS_IN_HOLD_BAND` (2x) of their median hold (a same-session exit while a gate is off is not a hold). Why
+  this reading: it needs only the trades' days, exit days and maximum losses and the run's sessions, which every Train
+  result carries (the mechanism test's arms are a sample's, and only a quarter of families take it in shadow); it holds
+  whatever the hold (one position held 2-8 sessions, or a new one every session); and a gate on the entry (implied vol,
+  trend, the weekday, the month-end), on the size or on the exit leaves a mark in one of the three. A version that fails
+  it is ineligible (`train_score(..., always_in=True)`: fails "G1"); the tournament validates an always-in family's
+  version only with a G1 pass on record (`always_in_try`: a refusal spends no try and is recorded, `ALWAYS_IN_KEY`) and
+  retires a family whose version due for Validation was so refused and that holds no try of its lineage, after the
+  ration (`always_in_failed`, `ALWAYS_IN_CAUSE`: an untested death, tagged IDLE, so no graveyard row of it binds). What
+  it cannot see: a tilt inside the bands (a gate that only halves the size, or moves the hold between 4 and 6 sessions),
+  and a gate on the strike that keeps the risk in band.
 Its cost (the `dlane` report's LOOSENED row): at most one always-in Validation try per root (SPY, QQQ, IWM), ever, unless
 the owner changes `val_tries` (fewer when a family on two roots joins their lineages), each one D2's lottery at 10.37% per
 program at zero edge (higher when the screen windows rose), and its profit is index beta minus option costs, reported
@@ -642,17 +656,29 @@ def card_errors(card: Any, structure: Any, roots: Any, settings: Mapping[str, An
         errors.append(f"holding: a direction card holds {', '.join(c['holding'])} (2 to 8 sessions; {card.get('holding')!r} "
                       "given)")
     ablation = card.get("ablation")
-    if ablation == "flat" or (isinstance(ablation, Mapping) and ablation.get("flat") is True):
+    if always_in(card):
+        # THE ALWAYS-IN CARD (Oct 10, 2026): its declared inputs are its status, so it says what it is in words no gated
+        # card uses ("always-in" or "no gate"; "every session" alone is every direction card's comparison), names no gate
+        # switched off, and has no ablation switch (it has no gate to turn off). Its program is checked on Train (G1).
+        texts = [str(card.get(k) or "") for k in ("comparison", "falsification")]
+        if not any(ALWAYS_IN_WORDS.search(t) for t in texts):
+            errors.append("inputs: [\"clock\"] alone declares an ALWAYS-IN card (it enters every session on the clock "
+                          "alone, with no gate, at a constant size, each call held a fixed number of sessions): its "
+                          "comparison or falsification says so (\"always-in\" or \"no gate\"), and its program must "
+                          "behave so on Train (G1)")
+        if any(GATE_OFF.search(t) for t in texts):
+            errors.append("inputs: an ALWAYS-IN card (declared inputs exactly [\"clock\"]) has no gate, so its comparison "
+                          "and falsification never switch or turn a gate, signal or filter off; a gated idea declares the "
+                          "inputs its gate reads")
+        if ablation is not None:
+            errors.append("ablation: an ALWAYS-IN card (declared inputs exactly [\"clock\"]) has no gate to switch off: "
+                          "leave ablation out")
+    elif ablation == "flat" or (isinstance(ablation, Mapping) and ablation.get("flat") is True):
         errors.append("ablation: a direction card's comparison is the same structure entered every session at the same "
                       "minute (a switch that turns its regime gate off), never flat")
     elif ablation is not None and not (isinstance(ablation, Mapping) and str(ablation.get("param") or "").strip()):
         errors.append("ablation: a direction card names the PARAMS switch that turns its regime gate off "
                       "({\"param\": ..., \"off\": ...})")
-    # THE ALWAYS-IN CARD (Oct 10, 2026): its declared inputs are its status, so it says what it is.
-    if always_in(card) and not any(EVERY_SESSION.search(str(card.get(k) or "")) for k in ("comparison", "falsification")):
-        errors.append("inputs: [\"clock\"] alone declares an ALWAYS-IN card (it enters every session on the clock alone, "
-                      "no gate): its comparison or falsification says so (\"every session\"), and its program must "
-                      "behave so on Train (G1)")
     return errors
 
 
@@ -660,21 +686,37 @@ def card_errors(card: Any, structure: Any, roots: Any, settings: Mapping[str, An
 #: THE ALWAYS-IN CARD (Oct 10, 2026; the module docstring): a DIRECTION card whose DECLARED inputs are exactly these reads no
 #: state: it enters on the clock alone (the lane's own instrument, labelled index beta).
 ALWAYS_IN_INPUTS = ("clock",)
-#: What an always-in card's comparison or falsification says (`card_errors`): that it enters every session.
-EVERY_SESSION = re.compile(r"\b(?:every|each) (?:trading )?(?:session|day)\b|\balways[- ]in\b", re.I)
-#: G1, THE BEHAVIOURAL CHECK: the least share of its flat Train root-sessions an always-in program enters on, and the
-#: fewest flat root-sessions the share is read on (fewer: in the market at nearly every session, which passes).
+#: What an always-in card's comparison or falsification says (`card_errors`): words no gated direction card's comparison
+#: uses ("every session" alone is every direction card's: the same call entered every session with its gate off).
+ALWAYS_IN_WORDS = re.compile(r"\balways[- ]in\b|\bno (?:regime |entry )?gate\b", re.I)
+#: What an always-in card's comparison or falsification never says (`card_errors`): a gate, signal, filter or condition
+#: switched, turned or set off (a gated card's comparison). "no gate to switch off" is not it.
+_GATE = r"(?:gate|signal|filter|condition)s?"
+GATE_OFF = re.compile(rf"\b{_GATE} (?:is |are |was |were )?(?:switched|turned|set) off\b"
+                      rf"|\b(?:switch|turn|set)(?:es|s|ed|ing)? (?:the |its |that |a )?(?:\w+ )?{_GATE} off\b"
+                      rf"|\b{_GATE} off\b", re.I)
+#: G1, THE BEHAVIOURAL CHECK (the module docstring), each read per root on the Train years: the least share of the
+#: root-sessions it must enter on, of the entries whose risk and of the trades whose hold are in their band;
 ALWAYS_IN_SHARE = 0.90
+#: the fewest flat root-sessions a ONE-AT-A-TIME root's entry share is read on (fewer: it held a position at nearly every
+#: open, which passes);
 ALWAYS_IN_MIN_FLAT = 20
-#: The family state's key of a G1 failure the tournament read from a Train run itself (`always_in_try`), beside the ones
-#: the researcher's scores record (`record`): what `always_in_failed` reads.
+#: the share of a root's Train sessions on whose open it held two or more positions that makes it a LADDER (it must then
+#: enter on `ALWAYS_IN_SHARE` of ALL its Train sessions: a ladder can always add one);
+ALWAYS_IN_LADDER = 0.10
+#: an entry's risk (its maximum loss) is in band within this factor of the root's median entry (either way);
+ALWAYS_IN_SIZE_BAND = 3.0
+#: a trade's hold (in Train sessions) is in band at one session or more and within this factor of the root's median hold.
+ALWAYS_IN_HOLD_BAND = 2.0
+#: The family state's key of a G1 failure the tournament read at an always-in family's try (`always_in_try`): the version
+#: due for Validation and its reading; what `always_in_failed` reads.
 ALWAYS_IN_KEY = "dlane_always_in"
 #: The public cause of `always_in_failed` (a `swarm.retired` cause and a graveyard lesson): no figure in its first
 #: sentence, and the idle rule's mark (architect.py `IDLE_MARK`), so its row is IDLE and binds no card.
-ALWAYS_IN_CAUSE = ("Retired because its program did not enter on the clock alone as its always-in card declared. A Train run "
-                   "of it entered on too few of the sessions it was flat (the lane needs nine in ten), so it loses the "
-                   "always-in exemption and its lineage's Validation try is not spent; it is a rule of the card, not a "
-                   "finding that the mechanism has no edge")
+ALWAYS_IN_CAUSE = ("Retired because its program did not enter on the clock alone as its always-in card declared. The version "
+                   "due for Validation failed the lane's behavioural check on Train (it skipped sessions, or varied its size "
+                   "or its hold), so it was never validated and spent no Validation try; it loses the always-in exemption, "
+                   "a rule of the card, not a finding that the mechanism has no edge")
 
 
 def declared_inputs(card: Any) -> list[str]:
@@ -706,13 +748,19 @@ def always_in_family(store: Any, fam: Mapping[str, Any] | None, settings: Mappin
 
 
 def always_in_entries(result: Mapping[str, Any] | None, first_year: Any = None) -> dict[str, Any]:
-    """G1's reading of a Train result (the module docstring): {known, flat, entered, share, passed}. Over the run's
-    sessions (`daily`) in the Train years from `first_year` (`_span`) and each root it traded there, a root-session is flat
-    when no trade of that root was entered on an earlier session and exited on this one or later (or never: still open);
-    `entered` counts the flat ones with an entry on that root. `share` is entered / flat (None under `ALWAYS_IN_MIN_FLAT`
-    flat root-sessions, which passes); `passed` share >= `ALWAYS_IN_SHARE`. `known` False (passed None) without a trade
-    list, a daily series, a Train-year trade, or a trade's exit day (a result from before the Gym wrote it)."""
-    out: dict[str, Any] = {"known": False, "flat": None, "entered": None, "share": None, "passed": None}
+    """G1's reading of a Train result (the module docstring): {known, passed, rule, root, ladder, flat, base, entered,
+    share, roots}. Over the run's sessions (`daily`) in the Train years from `first_year` (`_span`), for each root it
+    entered on there, `held` counts its positions open at each session's open (entered on an earlier session, exited on
+    this one or later, or never). A root is a LADDER when it held two or more on `ALWAYS_IN_LADDER` of the sessions, and
+    its BASE is every session; else its base is its FLAT sessions (none held). It passes when it entered on
+    `ALWAYS_IN_SHARE` of its base (a one-at-a-time root flat on fewer than `ALWAYS_IN_MIN_FLAT` sessions passes that
+    part), `ALWAYS_IN_SHARE` of its entries' maximum losses are within `ALWAYS_IN_SIZE_BAND` of their median, and
+    `ALWAYS_IN_SHARE` of its closed trades were held one session or more and within `ALWAYS_IN_HOLD_BAND` of their median
+    hold. `roots` keeps each root's figures; `passed` is every root's; `rule` ("entries", "size" or "hold") and `root`
+    name the first failure. `known` False (passed None) without a trade list, a daily series, a Train-year trade, or a
+    trade's exit day (a result from before the Gym wrote it)."""
+    out: dict[str, Any] = {"known": False, "passed": None, "rule": None, "root": None, "ladder": False, "flat": None,
+                           "base": None, "entered": None, "share": None, "roots": {}}
     trades = result.get("trades") if isinstance(result, Mapping) else None
     daily = result.get("daily") if isinstance(result, Mapping) else None
     if not isinstance(trades, list) or not isinstance(daily, list):
@@ -726,37 +774,74 @@ def always_in_entries(result: Mapping[str, Any] | None, first_year: Any = None) 
     sessions = sorted({str(d[0])[:10] for d in daily if isinstance(d, (list, tuple)) and d and train(d[0])})
     if not sessions:
         return out
-    opened: dict[str, list[int]] = {}
-    entries: dict[str, set[int]] = {}
+    by_root: dict[str, list[Mapping[str, Any]]] = {}
     for t in trades:
         if not isinstance(t, Mapping) or not train(t.get("day")) or not str(t.get("root") or "").strip():
             continue
         if "exit_day" not in t:
             return out
-        root, day = str(t["root"]).upper(), str(t["day"])[:10]
-        after = _after(sessions, day)
-        if after and sessions[after - 1] == day:
-            entries.setdefault(root, set()).add(after - 1)
-        held = opened.setdefault(root, [0] * len(sessions))
-        end = len(sessions) if not t.get("exit_day") else _after(sessions, str(t["exit_day"])[:10])
-        for k in range(after, end):  # open at the start of each session after its entry, through its exit's
-            held[k] += 1
-    if not entries:
+        by_root.setdefault(str(t["root"]).upper(), []).append(t)
+    rows: dict[str, dict[str, Any]] = {}
+    for root, rows_of in sorted(by_root.items()):
+        held = [0] * len(sessions)
+        entries: set[int] = set()
+        risks: list[float] = []
+        holds: list[int] = []
+        for t in rows_of:
+            day = str(t["day"])[:10]
+            after = _after(sessions, day)
+            first = after - 1 if after and sessions[after - 1] == day else None
+            if first is not None:
+                entries.add(first)
+            exit_day = str(t.get("exit_day") or "")[:10]
+            end = len(sessions) if not exit_day else _after(sessions, exit_day)
+            for k in range(after, end):  # open at the start of each session after its entry, through its exit's
+                held[k] += 1
+            risk = t.get("max_loss")
+            if isinstance(risk, (int, float)) and not isinstance(risk, bool) and math.isfinite(risk) and risk > 0:
+                risks.append(float(risk))
+            if first is not None and exit_day and exit_day <= sessions[-1]:
+                holds.append(max(0, _after(sessions, exit_day) - 1 - first))
+        if not entries:
+            continue
+        ladder = sum(1 for h in held if h >= 2) >= ALWAYS_IN_LADDER * len(sessions)
+        flat = sum(1 for h in held if h == 0)
+        base = len(sessions) if ladder else flat
+        entered = len(entries) if ladder else sum(1 for k, h in enumerate(held) if h == 0 and k in entries)
+        entries_ok = (not ladder and base < ALWAYS_IN_MIN_FLAT) or entered >= ALWAYS_IN_SHARE * base
+        mid = _median(risks)
+        size_in = sum(1 for r in risks if mid / ALWAYS_IN_SIZE_BAND <= r <= mid * ALWAYS_IN_SIZE_BAND) if risks else 0
+        size_ok = not risks or size_in >= ALWAYS_IN_SHARE * len(risks)
+        typical = _median([float(h) for h in holds])
+        hold_in = sum(1 for h in holds if h >= 1 and typical / ALWAYS_IN_HOLD_BAND <= h <= typical * ALWAYS_IN_HOLD_BAND) \
+            if holds else 0
+        hold_ok = not holds or hold_in >= ALWAYS_IN_SHARE * len(holds)
+        rule = None if entries_ok and size_ok and hold_ok else ("entries" if not entries_ok else "size" if not size_ok
+                                                                 else "hold")
+        rows[root] = {"ladder": ladder, "flat": flat, "base": base, "entered": entered,
+                      "share": round(entered / base, 4) if base and (ladder or base >= ALWAYS_IN_MIN_FLAT) else None,
+                      "sized": len(risks), "size_in": size_in, "holds": len(holds), "hold_in": hold_in,
+                      "passed": rule is None, "rule": rule}
+    if not rows:
         return out
-    flat = entered = 0
-    for root, days in entries.items():
-        held = opened.get(root) or [0] * len(sessions)
-        for k, count in enumerate(held):
-            if count == 0:
-                flat += 1
-                entered += k in days
-    out.update(known=True, flat=flat, entered=entered)
-    if flat < ALWAYS_IN_MIN_FLAT:
-        out["passed"] = True
-    else:
-        out["share"] = round(entered / flat, 4)
-        out["passed"] = entered / flat >= ALWAYS_IN_SHARE
+    base = sum(r["base"] for r in rows.values())
+    entered = sum(r["entered"] for r in rows.values())
+    out.update(known=True, passed=all(r["passed"] for r in rows.values()), roots=rows,
+               ladder=any(r["ladder"] for r in rows.values()), flat=sum(r["flat"] for r in rows.values()), base=base,
+               entered=entered, share=round(entered / base, 4) if base else None)
+    failed = next((root for root, r in rows.items() if not r["passed"]), None)
+    if failed is not None:
+        out.update(rule=rows[failed]["rule"], root=failed)
     return out
+
+
+def _median(values: Sequence[float]) -> float:
+    """The median of `values` (0.0 when there are none)."""
+    ranked = sorted(values)
+    if not ranked:
+        return 0.0
+    mid = len(ranked) // 2
+    return ranked[mid] if len(ranked) % 2 else (ranked[mid - 1] + ranked[mid]) / 2
 
 
 def _after(days: Sequence[str], day: str) -> int:
@@ -772,11 +857,29 @@ def _after(days: Sequence[str], day: str) -> int:
 
 
 def always_in_why(reading: Mapping[str, Any]) -> str:
-    """G1's words to the researcher: rules and Train-year counts only (a count is written with a thousands comma, so it
-    never reads as a year)."""
-    return (f"its card is always-in (inputs: the clock alone), and its program entered on {int(reading.get('entered') or 0):,} "
-            f"of the {int(reading.get('flat') or 0):,} Train sessions it was flat on a root it trades; an always-in program "
-            f"enters every session its own open positions allow, with no gate (the lane needs {ALWAYS_IN_SHARE:.0%})")
+    """G1's words to the researcher: the first root that failed, its rule and its Train counts only (a count is written
+    with a thousands comma, so it never reads as a year)."""
+    root = str(reading.get("root") or "")
+    row = (reading.get("roots") or {}).get(root) if isinstance(reading.get("roots"), Mapping) else None
+    row = row if isinstance(row, Mapping) else reading
+    rule = reading.get("rule") or "entries"
+    if rule == "size":
+        sized = int(row.get("sized") or 0)
+        what = (f"on {root} {sized - int(row.get('size_in') or 0):,} of its {sized:,} Train entries risked under a third "
+                "or over three times its median entry")
+    elif rule == "hold":
+        holds = int(row.get("holds") or 0)
+        what = (f"on {root} {holds - int(row.get('hold_in') or 0):,} of its {holds:,} Train trades were held under half "
+                "or over twice its median hold, or closed on the session they opened")
+    elif row.get("ladder"):
+        what = (f"on {root} it holds several calls at once (a ladder can always add one), and it entered on "
+                f"{int(row.get('entered') or 0):,} of the {int(row.get('base') or 0):,} Train sessions")
+    else:
+        what = (f"on {root} it entered on {int(row.get('entered') or 0):,} of the {int(row.get('base') or 0):,} Train "
+                "sessions it held nothing there at the open")
+    return (f"its card is always-in (inputs: the clock alone), and {what}; an always-in program enters every session its "
+            "own open positions allow, at a constant size, and holds each call a fixed number of sessions, with no gate "
+            f"(the lane needs {ALWAYS_IN_SHARE:.0%} of each)")
 
 
 def _kept_g1(fam: Mapping[str, Any], n: Any = None) -> list[tuple[int, Mapping[str, Any] | None, list[str]]]:
@@ -795,11 +898,12 @@ def _kept_g1(fam: Mapping[str, Any], n: Any = None) -> list[tuple[int, Mapping[s
 
 
 def always_in_try(store: Any, fam: Mapping[str, Any], n: Any, settings: Mapping[str, Any] | None) -> str | None:
-    """G1 AT THE TRY (the tournament, before an always-in family's version is validated): None (validate) for every family
-    that is not `always_in_family`, and for a version with a G1 pass on record: its recorded score's reading (`record`),
-    else its newest completed 1.0x Train run's own (`always_in_entries` on the full result the store keeps). "failed" (no
-    try: the family retires, `always_in_failed`, which reads the failure this records in the family's state,
-    `ALWAYS_IN_KEY`) or "unknown" (no try yet: no reading could be made) otherwise. Never raises: an error is "unknown"."""
+    """G1 AT THE TRY (the tournament, before an always-in family's version `n`, the one due for Validation, is validated):
+    None (validate) for every family that is not `always_in_family`, and for a version with a G1 pass on record: its
+    recorded score's reading (`record`), else its newest completed 1.0x Train run's own (`always_in_entries` on the full
+    result the store keeps). "failed" (no try: this records the version and its reading in the family's state,
+    `ALWAYS_IN_KEY`, which `always_in_failed` retires it by) or "unknown" (no try yet: no reading could be made)
+    otherwise. Never raises: an error is "unknown"."""
     try:
         if not always_in_family(store, fam, settings):
             return None
@@ -819,21 +923,31 @@ def always_in_try(store: Any, fam: Mapping[str, Any], n: Any, settings: Mapping[
         if reading.get("passed"):
             return None
         store.set_state(str(fam["id"]), **{ALWAYS_IN_KEY: {"version": int(n), "at": store.now(),
-                                                           "flat": reading.get("flat"), "entered": reading.get("entered")}})
+                                                           "rule": reading.get("rule"), "root": reading.get("root"),
+                                                           "base": reading.get("base"), "entered": reading.get("entered")}})
         return "failed"
     except Exception:  # noqa: BLE001 - no try is bought by an error
         return "unknown"
 
 
 def always_in_failed(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any] | None) -> str | None:
-    """THE ALWAYS-IN CARD's retirement (G1): `ALWAYS_IN_CAUSE` for an `always_in_family` any of whose recorded versions
-    failed G1 (its score's `fails`, `record`) or whose try G1 refused (`ALWAYS_IN_KEY`, `always_in_try`); else None (every
-    other family, while the lane is off, and on a store error)."""
+    """THE ALWAYS-IN CARD's retirement (G1): `ALWAYS_IN_CAUSE` for an `always_in_family` whose version due for Validation
+    (its best, else its best by Train score) is the one G1 refused at the try (`ALWAYS_IN_KEY`, `always_in_try`) and
+    that holds none of its connected lineage's Validation tries (`lineage_tries`: a member that holds one is the ration's,
+    `lineage_spent`, which keeps a try in play and retires a spent one with its own cause); else None (every other family,
+    a G1 failure of another version, which only makes that version ineligible, while the lane is off, and on a store
+    error). The tournament asks it after `lineage_spent`."""
     try:
         state = fam.get("state") or {}
-        if not (isinstance(state.get(ALWAYS_IN_KEY), Mapping) or any("G1" in fails for _, _, fails in _kept_g1(fam))):
+        refused = state.get(ALWAYS_IN_KEY)
+        due = fam.get("best_version") or state.get("best_train_version")
+        if not isinstance(refused, Mapping) or not due or str(refused.get("version")) != str(due):
             return None
-        return ALWAYS_IN_CAUSE if always_in_family(store, fam, settings) else None
+        if not always_in_family(store, fam, settings):
+            return None
+        if any(t["family"] == str(fam["id"]) for t in lineage_tries(store, str(fam["id"]))):
+            return None
+        return ALWAYS_IN_CAUSE
     except Exception:  # noqa: BLE001 - a rule that cannot be read retires nothing
         return None
 
@@ -2014,7 +2128,7 @@ SPENT_BIRTH = ("this idea continues {lineage}, whose one {what} is {state} ({who
 
 
 def birth_spent(store: Any, lines: Iterable[str], settings: Mapping[str, Any] | None, *, born: Iterable[str] = (),
-                awaiting: Callable[[Mapping[str, Any]], bool] | None = None) -> dict[str, Any] | None:
+                awaiting: Callable[[Mapping[str, Any]], bool] | None = None, living: bool = False) -> dict[str, Any] | None:
     """THE RATION AT BIRTH (Oct 10, 2026): what `lineage_spent` would answer for a DIRECTION family born into `lines` (the
     lineage it joins and every lineage its birth links to it: the architect's parent's and, for a `long_single`, its
     twins'), read BEFORE the birth: {"spent": "look", "try" or "claim", "family", "version", "lineage"} (the look or the
@@ -2027,7 +2141,8 @@ def birth_spent(store: Any, lines: Iterable[str], settings: Mapping[str, Any] | 
     member born in the architect's pass, `born`, or one whose best awaits Validation by `awaiting`, its job out too)
     reach `val_tries`: the tournament gives the try to one of them and retires the other unjudged (the review of Oct
     10). `awaiting` is `researcher.awaiting_validation`, passed by the architect (this module imports no researcher);
-    None reads no such claim.
+    None reads no such claim. `living` (THE ALWAYS-IN CARD's birth, Oct 10, 2026: one program a root, so a member still
+    researching it holds the root's try as surely): every living Gym-band member with no try claims it.
     Why: until Oct 10, 2026 about half of the lane's births joined such a lineage and the tournament retired them on
     `SPENT_TRY` 15-60 minutes later without a try, spending research money, Gym runs and a population slot, and the
     architect never learned why (the House's measurement). None while the lane is off, and on any store error (the
@@ -2061,7 +2176,7 @@ def birth_spent(store: Any, lines: Iterable[str], settings: Mapping[str, Any] | 
             first = store.family(tries[0]["family"]) or {}
             return {"spent": "try", "family": tries[0]["family"], "version": tries[0]["version"],
                     "lineage": first.get("lineage")}
-        claims = _claims(store, members, tries, born, awaiting)
+        claims = _claims(store, members, tries, born, awaiting, every=living)
         if claims and len(tries) + len(claims) >= c["val_tries"]:
             return {"spent": "claim", **claims[0]}
         return None
@@ -2070,12 +2185,13 @@ def birth_spent(store: Any, lines: Iterable[str], settings: Mapping[str, Any] | 
 
 
 def _claims(store: Any, fams: Sequence[str], tries: Sequence[Mapping[str, Any]], born: Iterable[str],
-            awaiting: Callable[[Mapping[str, Any]], bool] | None) -> list[dict[str, Any]]:
+            awaiting: Callable[[Mapping[str, Any]], bool] | None, *, every: bool = False) -> list[dict[str, Any]]:
     """THE RATION AT BIRTH's claims on a lineage's try: the living Gym-band families of `fams` that hold no try and were
     born in the architect's pass (`born`: two cards of one idea in one answer) or whose best awaits Validation
     (`awaiting`: the tournament's next job of theirs, or the one out, is the lineage's try), oldest first: [{family,
     version (the best; None for a newborn), lineage, born}]. A member of an earlier pass still without a best is no
-    claim: it may die without a try."""
+    claim: it may die without a try. With `every` (`birth_spent`'s `living`: an always-in birth) it is one ({...,
+    "living": True})."""
     held = {(t["family"], t["version"]) for t in tries}
     new = {str(x) for x in born}
     living = [f for f in (store.family(fid) for fid in fams)
@@ -2087,6 +2203,9 @@ def _claims(store: Any, fams: Sequence[str], tries: Sequence[Mapping[str, Any]],
             out.append({"family": fam["id"], "version": None, "lineage": fam["lineage"], "born": True})
         elif awaiting is not None and awaiting(fam) and (fam["id"], int(n)) not in held:
             out.append({"family": fam["id"], "version": int(n), "lineage": fam["lineage"], "born": False})
+        elif every and not any(t["family"] == fam["id"] for t in tries):
+            out.append({"family": fam["id"], "version": int(n) if n else None, "lineage": fam["lineage"], "born": False,
+                        "living": True})
     return out
 
 
@@ -2100,7 +2219,8 @@ def spent_birth_text(spent: Mapping[str, Any], lineage: Any = None, hidden: Iter
     version = f" v{spent['version']}" if spent.get("version") is not None else ""
     if spent.get("spent") == "claim":
         state = "claimed"
-        who = ((fam + (", born in the same pass" if spent.get("born") else f"{version} awaits Validation"))
+        who = ((fam + (", born in the same pass" if spent.get("born")
+                       else ", alive and researching it" if spent.get("living") else f"{version} awaits Validation"))
                if fam and fam not in hidden else "by a living family")
     else:
         state = "spent"
@@ -2831,6 +2951,7 @@ __all__ = ["OBJECTIVE", "ALPHA", "DIRECTION", "LANES", "MODES", "SCREENS", "ALPH
            "MAP_PATH", "MAP_LABEL", "MAP_UNITS", "MAP_ARCHITECT_ROWS", "MAP_BRIEF_ROWS", "map_text_problems", "train_map",
            "map_on", "train_map_text", "train_map_brief",
            # the always-in card (Oct 10, 2026)
-           "ALWAYS_IN_INPUTS", "EVERY_SESSION", "ALWAYS_IN_SHARE", "ALWAYS_IN_MIN_FLAT", "ALWAYS_IN_KEY", "ALWAYS_IN_CAUSE",
+           "ALWAYS_IN_INPUTS", "ALWAYS_IN_WORDS", "GATE_OFF", "ALWAYS_IN_SHARE", "ALWAYS_IN_MIN_FLAT", "ALWAYS_IN_LADDER",
+           "ALWAYS_IN_SIZE_BAND", "ALWAYS_IN_HOLD_BAND", "ALWAYS_IN_KEY", "ALWAYS_IN_CAUSE",
            "declared_inputs", "always_in", "always_in_family", "always_in_entries", "always_in_why", "always_in_try",
            "always_in_failed"]

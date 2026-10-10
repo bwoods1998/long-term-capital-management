@@ -46,9 +46,10 @@
    keep spared it as it spares the clocks, holding a population slot with nothing left to validate); a direction family
    never forks once its lineage's try is used (`lane_forks`). The alpha lane keeps its counts; with the lane off nothing
    here is read. THE ALWAYS-IN CARD (Oct 10, 2026; dlane.py): an always-in direction family's version is validated only
-   with a G1 pass on record (`dlane.always_in_try`: the program entered on the clock alone on Train), else it waits
-   (`always_in_refused`, no try spent), and a family a version of which failed G1 retires first in `_why`
-   (`dlane.always_in_failed`, an IDLE death that binds no card).
+   with a G1 pass on record (`dlane.always_in_try`: the program behaved always-in on Train), else it waits
+   (`always_in_refused`, no try spent), and a family whose version due for Validation G1 refused retires in `_why`,
+   after the ration (`dlane.always_in_failed`, an IDLE death that binds no card); an always-in family never forks
+   (`lane_forks`: a fork adds a root, and each root's always-in idea has its own try).
 3. THE ALLOCATION (Release B, league/swarm/allocation.py; `allocation.mode` "value"): each family's share of researcher
    turns and Gym priority by its expected information value (the variance of its next validation's pass or fail under
    an empirical-Bayes posterior, discounted by the idea's trials, its own and those inherited at birth, by exhaustion:
@@ -894,10 +895,14 @@ class Tournament:
         off. A direction family only while its lineage has a Validation try left (`dlane.lineage_tries` under
         `val_tries`): a fork joins its parent's lineage (its tries and its looks), so once the lineage's one try is used a
         fork could never be validated. A fork is offered only to a validated parent, so with one try a direction family
-        never forks."""
+        never forks. An always-in direction family (THE ALWAYS-IN CARD, Oct 10, 2026) never forks."""
         if dlane.lane_of(self.store, fam, self.settings) != dlane.DIRECTION:
             return True
         try:
+            # THE ALWAYS-IN CARD (Oct 10, 2026): never for an always-in family (a fork adds a root, and each root's always-in
+            # idea has its own one try; with `val_tries` 1 no direction family forks anyway).
+            if dlane.always_in_family(self.store, fam, self.settings):
+                return False
             return len(dlane.lineage_tries(self.store, fam["id"])) < dlane.cfg(self.settings)["val_tries"]
         except Exception:  # noqa: BLE001 - an unreadable lineage forks nothing
             return False
@@ -985,15 +990,17 @@ class Tournament:
         # practice cohort ends with it, so its program loses the incubator route (a tightening of a money route, listed in
         # the dlane report's TIGHTENED). `lineage_spent` is None for every alpha family and while the lane is off, so the
         # alpha lane and the rollback keep THE COHORT KEEP's order exactly.
-        # THE ALWAYS-IN CARD (Oct 10, 2026; `dlane.always_in_failed`): an always-in family a version of which did not enter
-        # on the clock alone on Train (G1) loses the always-in exemption and retires, before the ration and the keep
-        # alike; its cause is an untested death (IDLE), so no graveyard row of it binds, and no try of its was spent.
-        failed = dlane.always_in_failed(self.store, fam, self.settings)
-        if failed:
-            return failed
+        # THE ALWAYS-IN CARD (Oct 10, 2026; `dlane.always_in_failed`): an always-in family whose version due for Validation
+        # G1 refused at the try (it did not behave always-in on Train) loses the always-in exemption and retires, after
+        # the ration (a spent lineage retires on its own cause, and a member holding the lineage's try is never retired
+        # by G1) and before the keep; its cause is an untested death (IDLE), so no graveyard row of it binds, and it spent
+        # no try. A G1 failure of any other version only makes that version ineligible (`dlane.train_score`).
         spent = dlane.lineage_spent(self.store, fam, self.settings)
         if spent:
             return spent
+        failed = dlane.always_in_failed(self.store, fam, self.settings)
+        if failed:
+            return failed
         clock: tuple[str, str] | None = None
         if int(fam.get("since_val_revisions") or 0) >= int(self.cfg.get("retire_revisions", 30)):
             clock = ("revisions", f"no validation improvement in {fam['since_val_revisions']} revisions")

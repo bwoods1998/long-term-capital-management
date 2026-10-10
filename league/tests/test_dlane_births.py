@@ -32,8 +32,9 @@ DIR = {**CARD, "lane": "direction", "mechanism_class": "equity_premium", "holdin
                      "index's drift whenever its decay is below that drift.",
        "inputs": ["implied_vol", "underlying_price"], "ablation": {"param": "gate_on", "off": 0},
        "comparison": "the same call bought at the same minute every session with the regime gate switched off"}
-#: THE ALWAYS-IN CARD (Oct 10, 2026): a direction card whose declared inputs are exactly the clock, and says so.
-ALWAYS = {**DIR, "inputs": ["clock"],
+#: THE ALWAYS-IN CARD (Oct 10, 2026): a direction card whose declared inputs are exactly the clock, says so, and has no
+#: ablation (no gate to switch off).
+ALWAYS = {**{k: v for k, v in DIR.items() if k != "ablation"}, "inputs": ["clock"],
           "hypothesis": "Index holders are paid to bear market risk, so a cheap out-of-the-money call bought every session "
                         "rents the index's drift whenever its decay is below that drift.",
           "comparison": "the same call bought at the same minute every session: an always-in program has no gate to "

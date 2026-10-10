@@ -954,6 +954,17 @@ def hold_streak(fam: Mapping[str, Any]) -> int:
     return max(0, int(raw)) if isinstance(raw, int) and not isinstance(raw, bool) else 0
 
 
+def always_in_birth_roots(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any] | None) -> list[str] | None:
+    """THE ALWAYS-IN CARD (Oct 10, 2026; dlane.py): the roots an always-in direction family was born on (`spec.roots`, else
+    its roots), the only roots it may trade (`Researcher._admit`); None for every other family and while the lane is off."""
+    if not dlane.always_in_family(store, fam, settings):
+        return None
+    spec = fam.get("spec")
+    spec = json.loads(spec) if isinstance(spec, str) else spec
+    roots = spec.get("roots") if isinstance(spec, Mapping) and spec.get("roots") else fam.get("roots")
+    return [str(r).upper() for r in roots or []]
+
+
 def awaiting_validation(fam: Mapping[str, Any]) -> bool:
     """The family's best (submitted, else by Train score: the version the tournament validates next) has not been
     validated, has not lost at 1.5x the half-spread and has not failed the drift screen (`drift_failed`: a version whose
@@ -2660,7 +2671,8 @@ class Researcher:
 
     def _admit(self, fam: Mapping[str, Any], code: str, out: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str], bool]:
         """(a refusal or None, the roots its NEEDS names, whether they change the family's): the Gym's safety check, NEEDS a
-        literal, and roots only from the admitted list, at most `MAX_ROOTS`, changed only by a Gym family."""
+        literal, and roots only from the admitted list, at most `MAX_ROOTS`, changed only by a Gym family, and an always-in
+        direction family's only within the roots it was born on (`always_in_birth_roots`)."""
         why = check_code(code)
         if why:
             out["refused"] = out.get("refused", 0) + 1
@@ -2681,6 +2693,16 @@ class Researcher:
             if fam.get("band") != "gym":
                 return {"status": "refused", "reason": f"your family trades {', '.join(fam['roots'])} in its band; only a Gym family "
                                                        "changes its roots"}, roots, change
+            # THE ALWAYS-IN CARD (Oct 10, 2026; dlane.py): one always-in idea a root, joined at birth to each of its roots'
+            # always-in lineages, so an always-in family never moves onto a root it was not born on (that root's idea has
+            # its own one Validation try, which the move would take a second of).
+            born = always_in_birth_roots(self.store, fam, self.settings)
+            if born is not None and any(r not in born for r in roots):
+                outside = [r for r in roots if r not in born]
+                return {"status": "refused", "reason": f"NEEDS names {', '.join(outside)}: your always-in family trades only the "
+                                                       f"roots it was born on ({', '.join(born)}); each root's always-in idea "
+                                                       "has its own one Validation try",
+                        "hint": f"name only {', '.join(born)} in NEEDS"}, roots, change
         return None, roots, change
 
     def _preflight(self, fam: Mapping[str, Any], code: str, variants: Sequence[Mapping[str, Any]], roots: Sequence[str],

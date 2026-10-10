@@ -2,9 +2,9 @@
 `always_in_entries`, `always_in_try`, `always_in_failed`, league/swarm/architect.py `admit`, `closed`, `card_block`,
 league/swarm/tournament.py; A REPORTED LOOSENING). A direction card whose DECLARED inputs are exactly ["clock"] is
 always-in: bound only by the always-in direction rows on its roots (any class or holding), joined at birth to every
-always-in lineage on its roots (one Validation try a root), and checked on Train (G1: it enters on 90% of the sessions
-it is flat, or it is never validated and retires). Alpha cards, legacy rows, gated direction cards and the lane off are
-judged as on main.
+always-in lineage on its roots and to no gated one (one Validation try a root, claimed by a living member, on the roots
+it was born on), and checked on Train (G1: entries, size and hold, or the version due for Validation is never validated
+and the family retires). Alpha cards, legacy rows, gated direction cards and the lane off are judged as on main.
 
 Every family, mechanism, date and figure here is invented.
 """
@@ -15,8 +15,11 @@ import datetime as dt
 import unittest
 
 from league.ops import dlane_report as R
+import math
+
 from league.swarm import cards, dlane
-from league.swarm.architect import ALWAYS_IN_SPENT, LANE_CELLS_NOTE, SYSTEM, Architect, system_text, tag_of
+from league.swarm.architect import (ALWAYS_IN_SPENT, IDLE_MARK, LANE_CELLS_NOTE, SYSTEM, Architect, same_idea, system_text,
+                                    tag_of)
 from league.swarm.tournament import Tournament
 from league.tests.test_dlane import always_in as train_years
 from league.tests import test_dlane_d1b as d1b
@@ -68,6 +71,26 @@ def train(trades: list[dict]) -> dict:
 
 
 GATED_RUN = one_at_a_time(gate=lambda i: (i // 20) % 2 == 0)
+IDLE = f"Retired idle: {IDLE_MARK}."
+
+
+def coin(i: int) -> bool:
+    """An invented gate on about half of the sessions, with no pattern (a hash of the session's index)."""
+    return (i * 2654435761) % 1000 < 500
+
+
+def up_day(i: int) -> bool:
+    """An invented trend gate: the session after an up day of an invented index (runs of ups and downs)."""
+    return math.sin(i * 0.37) + 0.4 * math.sin(i * 1.9) > 0
+
+
+def weekday(i: int) -> int:
+    return dt.date.fromisoformat(SESSIONS[i]).weekday()
+
+
+def ladder(hold: int, gate=lambda i: True, root: str = "SPY") -> list[dict]:
+    """A program that opens a new call on every session `gate` allows and holds each `hold` sessions (several at once)."""
+    return held([i for i in range(len(SESSIONS)) if gate(i)], hold, root)
 
 
 # ------------------------------------------------------------------------------------------------ B. the card's status
@@ -85,19 +108,44 @@ class Status(unittest.TestCase):
         self.assertEqual(cards.match_inputs(WORDY, AMECH), ["clock", "underlying_price"],
                          "the word reading would have called the wordy one gated")
 
-    def test_an_always_in_card_says_that_it_enters_every_session(self):
-        quiet = {**ALWAYS, "comparison": "the same call bought at the same minute with the regime gate switched off",
+    def test_an_always_in_card_says_what_it_is_in_words_no_gated_card_uses(self):
+        """The review's finding: "every session" is every direction card's comparison (the same call entered every session
+        with its gate switched off), so it never told an always-in card from a gated one."""
+        def refused(raw):
+            card, errors = cards.validate(raw, "long_single", roots=["SPY"], settings=LANE)
+            self.assertIsNone(card, raw)
+            self.assertEqual(dlane.card_errors(raw, "long_single", ["SPY"], LANE), errors, "the lane's box says it")
+            return errors
+
+        quiet = {**ALWAYS, "comparison": "the same call bought at the same minute every session",
                  "falsification": "its pooled daily t on Train is below 1 or it loses money at 1.5x the half-spread"}
-        card, errors = cards.validate(quiet, "long_single", roots=["SPY"], settings=LANE)
-        self.assertIsNone(card)
+        errors = refused(quiet)
         self.assertEqual(len(errors), 1, errors)
         self.assertTrue(errors[0].startswith("inputs: [\"clock\"] alone declares an ALWAYS-IN card"), errors)
-        self.assertEqual(dlane.card_errors(quiet, "long_single", ["SPY"], LANE), errors, "the lane's box says it")
-        for field, text in (("falsification", "it fails when its call bought each session loses money on Train"),
-                            ("comparison", "itself: an always-in program has no gate to switch off")):
+        self.assertIn("(\"always-in\" or \"no gate\")", errors[0])
+        # The gated comparison the lane asks of every direction card, under inputs ["clock"]: refused on both counts.
+        gated_words = {**ALWAYS, "comparison": DIR["comparison"]}
+        errors = refused(gated_words)
+        self.assertEqual(len(errors), 2, errors)
+        self.assertTrue(errors[0].startswith("inputs: [\"clock\"] alone declares an ALWAYS-IN card"), errors)
+        self.assertTrue(errors[1].startswith("inputs: an ALWAYS-IN card (declared inputs exactly [\"clock\"]) has no "
+                                             "gate"), errors)
+        # The review's probe: a calm-vol hypothesis with the lane's gated comparison, as an always-in card.
+        probe = {**ALWAYS, "hypothesis": "Calls are cheap while implied vol is calm against its trailing year, so buy one "
+                                         "only then and hold it a week.", "comparison": DIR["comparison"]}
+        self.assertEqual(len(refused(probe)), 2)
+        both = {**ALWAYS, "comparison": "an always-in call bought every session, with the regime gate switched off"}
+        self.assertIn("never switch or turn a gate, signal or filter off", " ".join(refused(both)))
+        for ablation in (DIR["ablation"], {"param": "signal_on", "off": 0}, "flat"):
+            errors = refused({**ALWAYS, "ablation": ablation})
+            self.assertEqual(errors, ["ablation: an ALWAYS-IN card (declared inputs exactly [\"clock\"]) has no gate to "
+                                      "switch off: leave ablation out"], ablation)
+        for field, text in (("falsification", "it fails when its always-in call loses money on every Train year"),
+                            ("comparison", "itself: there is no gate to switch off, and no gate to compare it against")):
             card, problems = cards.validate({**quiet, field: text}, "long_single", roots=["SPY"], settings=LANE)
             self.assertEqual(problems, [], field)
-        gated = {**quiet, "inputs": ["clock", "implied_vol"]}
+        self.assertEqual(cards.validate(ALWAYS, "long_single", roots=["SPY"], settings=LANE)[1], [])
+        gated = {**quiet, "inputs": ["clock", "implied_vol"], "comparison": DIR["comparison"], "ablation": DIR["ablation"]}
         self.assertEqual(dlane.card_errors(gated, "long_single", ["SPY"], LANE), [], "a gated card says nothing of it")
 
 
@@ -231,6 +279,36 @@ class Graveyard(GraveyardCase):
         self.assertFalse(index.by_id["ai-gated-in-fact"]["always_in"])
         self.assertTrue(index.check(self.card(REWORDED), "long_single", AMECH, [1, 3], roots=["SPY"])["ok"])
 
+    def test_a_g1_failure_of_one_version_beside_a_pass_keeps_the_status_so_its_verdict_binds(self):
+        """The review's finding: a sweep variant that failed G1 stripped a refuted always-in family's row of its status."""
+        self.clock.t += 60
+        card = self.card(ALWAYS)
+        self.store.add_family({"id": "ai-swept", "mechanism": AMECH, "structure": "long_single", "roots": ["SPY"],
+                               "dte": [4, 10], "lane": "direction", "card_sha": cards.card_sha(card)}, origin="architect")
+        cards.put(self.store, "ai-swept", card, "long_single")
+        dlane.record(self.store, "ai-swept", 1, score=dlane.train_score(train(one_at_a_time()), settings=LANE, always_in=True))
+        dlane.record(self.store, "ai-swept", 2, score=dlane.train_score(train(GATED_RUN), settings=LANE, always_in=True))
+        self.store.retire_gym("ai-swept", REFUTED, floor=0, source="test")
+        index = self.index()
+        self.assertTrue(index.by_id["ai-swept"]["always_in"])
+        self.assertFalse(index.check(self.card(REWORDED), "long_single", AMECH, [1, 3], roots=["SPY"])["ok"])
+
+    def test_a_row_binds_the_roots_its_family_was_born_on_and_traded(self):
+        """The review's finding: a family's roots changed after its birth; its row binds both its birth roots and its last."""
+        self.clock.t += 60
+        card = self.card(ALWAYS, ("QQQ",))
+        self.store.add_family({"id": "ai-moved", "mechanism": AMECH, "structure": "long_single", "roots": ["QQQ"],
+                               "dte": [4, 10], "lane": "direction", "card_sha": cards.card_sha(card)}, origin="architect")
+        cards.put(self.store, "ai-moved", card, "long_single")
+        self.store.update_family("ai-moved", roots=["SPY"])
+        self.assertEqual([f["family"] for f in cards.always_in_families(self.store, ["QQQ"])], ["ai-moved"])
+        self.assertEqual(cards.always_in_families(self.store, ["SPY"])[0]["roots"], ["QQQ", "SPY"])
+        self.store.retire_gym("ai-moved", REFUTED, floor=0, source="test")
+        index = self.index()
+        self.assertEqual(sorted(index.by_id["ai-moved"]["roots"]), ["QQQ", "SPY"])
+        for root in ("QQQ", "SPY"):
+            self.assertFalse(index.check(self.card(REWORDED, (root,)), "long_single", AMECH, [1, 3], roots=[root])["ok"])
+
     def test_a_drift_always_in_row_binds_none_and_a_claim_an_always_in_card_carries_is_dropped(self):
         row = self.dead("ai-drift-dead", ALWAYS, reason=DRIFT)
         index = self.index()
@@ -281,28 +359,96 @@ class OneIdeaARoot(LaneCase):
         first = payload["ai-spy"]["card"]
         self.assertEqual((first["always_in"], first["always_in_lines"]), (True, []))
         self.assertNotIn("always_in", payload["gated-spy"]["card"])
+        # A LIVING always-in family claims its root's try, best or not (the review's finding: a clone a pass otherwise),
+        # and the BIRTH CELLS' line says so: the very reading admit refuses by.
+        b = self.arch()
+        self.assertEqual(b.admit([self.always("ai-spy-2", ["SPY"], REWORDED, "Hold a call bought each session at the "
+                                              "same minute for a week, renting the drift.")]), [])
+        self.assertEqual(b.card_refused[0]["spent"], "claim")
+        self.assertIn("(ai-spy, alive and researching it)", b.card_refused[0]["why"])
+        self.assertEqual(b.always_in_ration(), {
+            "SPY": "its always-in lineage's one Validation try is claimed (ai-spy, alive and researching it)",
+            "QQQ": "its always-in lineage's one Validation try is claimed (ai-qqq, alive and researching it)"})
         # The SPY always-in try is spent: a later always-in card on SPY (any class, holding or words; a second root too)
         # is refused before birth, though no graveyard row binds it (ai-spy lives).
         self.try_of("ai-spy")
-        b = self.arch()
-        self.assertEqual(b.admit([self.always("ai-spy-iwm", ["SPY", "IWM"]),
+        c = self.arch()
+        self.assertEqual(c.admit([self.always("ai-spy-iwm", ["SPY", "IWM"]),
                                   self.always("ai-spy-short", ["SPY"], REWORDED, "Hold a call bought each session at "
                                               "the same minute to the next session.")]), [])
-        self.assertEqual([item["slug"] for item in b.card_refused], ["ai-spy-iwm", "ai-spy-short"])
-        for item in b.card_refused:
+        self.assertEqual([item["slug"] for item in c.card_refused], ["ai-spy-iwm", "ai-spy-short"])
+        for item in c.card_refused:
             self.assertEqual(item["spent"], "try")
             self.assertIn("whose one Validation try is spent (ai-spy v1)", item["why"])
-        self.assertEqual(b.admit([self.always("ai-iwm", ["IWM"])]), ["ai-iwm"])
-        # A family on two roots joins both roots' always-in lineages, so their tries count together from now on.
-        c = self.arch()
-        self.assertEqual(c.admit([self.always("ai-qqq-iwm", ["QQQ", "IWM"])]), ["ai-qqq-iwm"])
+        self.assertEqual(c.admit([self.always("ai-iwm", ["IWM"])]), ["ai-iwm"])
+        # Their QQQ and IWM families die untested (no try, no binding row): a family on both roots joins both roots'
+        # always-in lineages, so their tries count together from now on.
+        for fid in ("ai-qqq", "ai-iwm"):
+            self.store.retire_gym(fid, IDLE, floor=0, source="test")
+        d = self.arch()
+        self.assertEqual(d.admit([self.always("ai-qqq-iwm", ["QQQ", "IWM"])]), ["ai-qqq-iwm"])
         self.assertEqual(self.links(), [("ai-iwm", "ai-qqq-iwm"), ("ai-qqq", "ai-qqq-iwm")])
         payload = {e["family"]: e["payload"] for e in self.born()}
         self.assertEqual(sorted(payload["ai-qqq-iwm"]["card"]["always_in_lines"]), ["ai-iwm", "ai-qqq"])
-        self.try_of("ai-qqq")
-        self.assertEqual(dlane.lineage_spent(self.store, self.store.family("ai-iwm"), self.settings), dlane.SPENT_TRY)
-        self.assertFalse(dlane.try_open(self.store, self.store.family("ai-qqq-iwm"), 1, self.settings))
+        self.try_of("ai-qqq-iwm")
+        self.assertEqual(dlane.lineage_spent(self.store, self.store.family("ai-qqq-iwm"), self.settings), None,
+                         "its own try awaits a verdict")
+        self.store.retire_gym("ai-qqq-iwm", IDLE, floor=0, source="test")
         self.assertEqual(self.arch().admit([self.always("ai-iwm-2", ["IWM"])]), [], "IWM's try went with QQQ's")
+
+    def test_an_always_in_birth_never_continues_a_gated_lineage_by_its_words(self):
+        """The review's finding: a dead gated family on the slice whose words were near the always-in card's was taken as
+        its parent, so the birth was refused on the gated lineage's spent try (which the ALWAYS-IN line never showed), or
+        merged that gated lineage into the root's one always-in try."""
+        calm = AMECH[:-1] + ", only while implied vol is calm."
+        self.assertTrue(same_idea(calm, AMECH), "the words alone would make it the parent")
+        self.assertEqual(self.arch().admit([proposal("gated-calm", card=GATED, structure="long_single", roots=["SPY"],
+                                                     dte=[4, 10], mechanism=calm)]), ["gated-calm"])
+        self.try_of("gated-calm")
+        self.store.retire_gym("gated-calm", REFUTED, floor=0, source="test")
+        a = self.arch()
+        self.assertEqual(a.always_in_ration(), {})
+        self.assertEqual(a.admit([self.always("ai-spy", ["SPY"], mechanism=AMECH)]), ["ai-spy"], a.card_refused)
+        self.assertIsNone({e["family"]: e["payload"] for e in self.born()}["ai-spy"]["parent"])
+        self.assertEqual(self.links(), [])
+        self.assertNotEqual(self.store.family("ai-spy")["lineage"], self.store.family("gated-calm")["lineage"])
+        self.assertTrue(dlane.try_open(self.store, self.store.family("ai-spy"), 1, self.settings), "its root's own try")
+        # A parent it names is read the same way: the gated family is never its parent, the dead always-in one may be.
+        self.store.retire_gym("ai-spy", IDLE, floor=0, source="test")
+        named = {**self.always("ai-spy-named", ["SPY"], mechanism=calm), "parent": "gated-calm"}
+        self.assertEqual(self.arch().admit([named]), ["ai-spy-named"])
+        self.assertIn({e["family"]: e["payload"] for e in self.born()}["ai-spy-named"]["parent"], (None, "ai-spy"))
+        self.assertNotIn(self.store.family("gated-calm")["lineage"],
+                         self.store._connected_lineages(self.store.family("ai-spy-named")["lineage"]))
+        self.assertTrue(dlane.try_open(self.store, self.store.family("ai-spy-named"), 1, self.settings))
+
+    def test_an_always_in_family_trades_only_the_roots_it_was_born_on_and_never_forks(self):
+        """The review's finding: a QQQ-born always-in family moved onto SPY by its NEEDS took a second SPY try."""
+        from league.tests.test_swarm_researcher_dlane import Case as ResearcherCase
+
+        self.assertEqual(self.arch().admit([self.always("ai-qqq", ["QQQ"]),
+                                            proposal("gated-qqq", card=GATED, structure="long_single", roots=["QQQ"],
+                                                     dte=[4, 10], mechanism="Buy the call each session only while "
+                                                     "implied vol sits calm, held a week.")]), ["ai-qqq", "gated-qqq"])
+        case = ResearcherCase("run")
+        case.setUp()
+        self.addCleanup(case.doCleanups)
+        _, researcher, _ = case.make("gate")
+        researcher.store, researcher.settings = self.store, self.settings
+        out: dict = {}
+        on_spy = d1b.CallsOnly.CALLS
+        refusal, roots, change = researcher._admit(self.store.family("ai-qqq"), on_spy, out)
+        self.assertEqual((roots, change), (["SPY"], True))
+        self.assertEqual(refusal["reason"], "NEEDS names SPY: your always-in family trades only the roots it was born on "
+                                            "(QQQ); each root's always-in idea has its own one Validation try")
+        self.assertIsNone(researcher._admit(self.store.family("gated-qqq"), on_spy, out)[0], "a gated family moves")
+        self.assertIsNone(researcher._admit(self.store.family("ai-qqq"), on_spy.replace('"SPY"', '"QQQ"'), out)[0])
+        self.settings["dlane"] = dict(OFF)
+        self.assertIsNone(researcher._admit(self.store.family("ai-qqq"), on_spy, out)[0], "the lane off: as main")
+        self.settings["dlane"] = dict(GATE)
+        t = Tournament(self.store, None, self.settings)
+        self.assertEqual((t.lane_forks(self.store.family("ai-qqq")), t.lane_forks(self.store.family("gated-qqq"))),
+                         (False, True))
 
     def test_the_lane_off_links_nothing(self):
         self.settings["dlane"] = dict(OFF)
@@ -315,19 +461,17 @@ class Behaviour(unittest.TestCase):
     def test_the_reading_holds_for_any_hold_and_catches_any_gate(self):
         for hold in (2, 5, 8):
             got = dlane.always_in_entries(train(one_at_a_time(hold)))
-            self.assertEqual((got["known"], got["passed"], got["share"], got["flat"] == got["entered"]),
-                             (True, True, 1.0, True), hold)
-        every = dlane.always_in_entries(train(held(range(len(SESSIONS)), 3)))
-        self.assertEqual((every["known"], every["passed"], every["share"], every["flat"]), (True, True, None, 1),
-                         "a new call every session: never flat after the first, in the market every session")
+            row = got["roots"]["SPY"]
+            self.assertEqual((got["known"], got["passed"], got["ladder"], row["share"], row["flat"] == row["entered"]),
+                             (True, True, False, 1.0, True), hold)
         gated = dlane.always_in_entries(train(GATED_RUN))
-        self.assertEqual((gated["known"], gated["passed"]), (True, False))
+        self.assertEqual((gated["known"], gated["passed"], gated["rule"], gated["root"]), (True, False, "entries", "SPY"))
         self.assertLess(gated["share"], 0.5)
-        mondays = one_at_a_time(gate=lambda i: dt.date.fromisoformat(SESSIONS[i]).weekday() == 0)
-        monday = dlane.always_in_entries(train(mondays))
-        self.assertEqual(monday["passed"], False, "a weekday is a gate too (a clock-only calendar card)")
+        mondays = one_at_a_time(gate=lambda i: weekday(i) == 0)
+        self.assertEqual(dlane.always_in_entries(train(mondays))["passed"], False, "a weekday is a gate too")
         spy_qqq = dlane.always_in_entries(train(one_at_a_time() + held([10, 400], 2, "QQQ")))
-        self.assertFalse(spy_qqq["passed"], "a root it trades only now and then is gated there")
+        self.assertEqual((spy_qqq["passed"], spy_qqq["root"], spy_qqq["roots"]["SPY"]["passed"]), (False, "QQQ", True),
+                         "a root it trades only now and then is gated there")
         rare = dlane.always_in_entries(train([{**t, "exit_day": None} for t in held([0], 2)]))
         self.assertEqual((rare["flat"], rare["passed"]), (1, True), "a position never closed: never flat again")
         self.assertFalse(dlane.always_in_entries(train([{k: v for k, v in t.items() if k != "exit_day"}
@@ -338,6 +482,66 @@ class Behaviour(unittest.TestCase):
         self.assertEqual(dlane.always_in_entries(train(one_at_a_time() + older))["passed"], True,
                          "a year before Train is never read")
 
+    def test_a_ladder_must_enter_on_every_session(self):
+        """The review's probes: a program that opens a new call each session it allows and holds it several sessions was
+        never flat, so the flat-session reading passed it vacuously, however many sessions its gate skipped."""
+        for hold in (3, 8):
+            got = dlane.always_in_entries(train(ladder(hold)))
+            self.assertEqual((got["passed"], got["ladder"], got["roots"]["SPY"]["base"]), (True, True, len(SESSIONS)), hold)
+        probes = {"hold 8 after an up day (a trend gate)": ladder(8, up_day),
+                  "hold 5 on about half the sessions": ladder(5, coin),
+                  "hold 8 skipping Mondays": ladder(8, lambda i: weekday(i) != 0),
+                  "hold 2 skipping Mondays and Fridays": ladder(2, lambda i: weekday(i) not in (0, 4))}
+        for name, trades in probes.items():
+            got = dlane.always_in_entries(train(trades))
+            row = got["roots"]["SPY"]
+            self.assertEqual((got["passed"], got["rule"], row["ladder"], row["base"]), (False, "entries", True,
+                                                                                          len(SESSIONS)), name)
+            self.assertLess(row["entered"], 0.9 * len(SESSIONS), name)
+        why = dlane.always_in_why(dlane.always_in_entries(train(probes["hold 8 skipping Mondays"])))
+        self.assertIn("on SPY it holds several calls at once (a ladder can always add one), and it entered on ", why)
+        # Its cost: a program that opens its next call a session before the last one's exit session holds two at that
+        # open, so it reads as a ladder; one that rolls on the exit session itself holds one and is never flat.
+        early = held(range(0, len(SESSIONS), 4), 5)
+        same = held(range(0, len(SESSIONS), 5), 5)
+        self.assertEqual([(g["ladder"], g["passed"]) for g in map(dlane.always_in_entries, (train(early), train(same)))],
+                         [(True, False), (False, True)])
+
+    def test_size_and_hold_are_read_too(self):
+        """The review's probes: an entry on every flat session whose risk or whose hold follows a gate."""
+        regime = one_at_a_time()
+        for k, t in enumerate(regime):
+            t["max_loss"] = 700.0 if (k // 10) % 2 else 5.0
+        got = dlane.always_in_entries(train(regime))
+        self.assertEqual((got["passed"], got["rule"], got["roots"]["SPY"]["share"]), (False, "size", 1.0))
+        self.assertIn("Train entries risked under a third or over three times its median entry",
+                      dlane.always_in_why(got))
+        timed, i = [], 0
+        while i < len(SESSIONS) - 6:
+            if coin(i):
+                timed += held([i], 5)
+                i += 6
+            else:
+                timed += held([i], 0)  # a same-session exit while the gate is off
+                i += 1
+        got = dlane.always_in_entries(train(timed))
+        self.assertEqual((got["passed"], got["rule"]), (False, "hold"))
+        self.assertGreaterEqual(got["roots"]["SPY"]["share"], 0.99, "it entered on every flat session but its last few")
+        self.assertIn("were held under half or over twice its median hold, or closed on the session they opened",
+                      dlane.always_in_why(got))
+        # An always-in program's risk follows the premium (the same contracts each entry) and its hold the calendar: both
+        # stay inside their bands.
+        smooth = one_at_a_time(5)
+        for k, t in enumerate(smooth):
+            t["max_loss"] = round(50.0 + 100.0 * (0.5 + 0.5 * math.sin(k / 9.0)), 2)
+        self.assertTrue(dlane.always_in_entries(train(smooth))["passed"])
+        calendar, i, k = [], 0, 0
+        while i < len(SESSIONS) - 7:
+            hold = 4 + k % 3
+            calendar += held([i], hold)
+            i, k = i + hold + 1, k + 1
+        self.assertTrue(dlane.always_in_entries(train(calendar))["passed"])
+
     def test_g1_is_a_bar_of_an_always_in_familys_score_only(self):
         base = dlane.train_score(train(GATED_RUN), settings=LANE)
         self.assertTrue(base["eligible"], base["why"])
@@ -345,8 +549,8 @@ class Behaviour(unittest.TestCase):
         self.assertNotIn("always_in", dlane.compact(base), "a gated family's score is the release before's")
         score = dlane.train_score(train(GATED_RUN), settings=LANE, always_in=True)
         self.assertEqual((score["eligible"], score["fails"]), (False, ["G1"]))
-        self.assertTrue(score["why"].startswith("fails G1: its card is always-in (inputs: the clock alone), and its "
-                                                "program entered on"), score["why"])
+        self.assertTrue(score["why"].startswith("fails G1: its card is always-in (inputs: the clock alone), and on SPY it "
+                                                "entered on "), score["why"])
         kept = dlane.compact(score)
         self.assertEqual(kept["always_in"]["passed"], False)
         again = dlane._score_from_compact(kept, None, LANE)
@@ -355,8 +559,9 @@ class Behaviour(unittest.TestCase):
         self.assertEqual((good["eligible"], good["always_in"]["passed"]), (True, True))
 
     def test_its_words_are_counts_that_never_read_as_a_year(self):
-        text = dlane.always_in_why({"flat": 2025, "entered": 2020})
-        self.assertIn("2,020 of the 2,025 Train sessions", text)
+        text = dlane.always_in_why({"rule": "entries", "root": "SPY",
+                                    "roots": {"SPY": {"ladder": False, "base": 2025, "entered": 2020}}})
+        self.assertIn("on SPY it entered on 2,020 of the 2,025 Train sessions", text)
         self.assertNotIn("2025", text.replace(",", "|"))
 
 
@@ -412,6 +617,70 @@ class AtTheTry(RoundCase):
             self.store.families(alive=True)))
         self.assertIsNone(dlane.always_in_failed(self.store, self.store.family("ai-unread"), self.settings))
 
+    def validated(self, fid, n=1, verdict=False):
+        """A Validation run of `fid`'s version `n` (the lineage's try); with `verdict`, judged and kept out of the gate."""
+        self.store.add_run(fid, n, result(fid, window="validation"), window="validation", stress=1.0, purpose="validation")
+        if verdict:
+            self.store.set_state(fid, **{dlane.TRY_KEY: {"version": n, "entered": False}})
+
+    def test_a_g1_failure_of_another_version_retires_nothing(self):
+        """The review's finding: any recorded version's G1 failure (a sweep variant, a version written after the try was
+        sent) retired the family, so the try's own verdict was dropped and the root's one always-in try was gone."""
+        self.put("ai-x", trades=one_at_a_time())
+        self.validated("ai-x")  # its try, no verdict yet
+        v2 = self.store.add_version("ai-x", "# ai-x v2\n" + d1b.CallsOnly.CALLS, {}, author="r")
+        dlane.record(self.store, "ai-x", v2["n"], score=dlane.train_score(train(GATED_RUN), settings=self.settings,
+                                                                          always_in=True))
+        t = Tournament(self.store, self.pool, self.settings)
+        self.assertIsNone(dlane.always_in_failed(self.store, self.store.family("ai-x"), self.settings))
+        self.assertEqual(t.retirements([self.store.family("ai-x")]), [])
+        # Even a G1 refusal on record never retires a member that holds its lineage's try (the ration's to judge).
+        self.store.set_state("ai-x", **{dlane.ALWAYS_IN_KEY: {"version": 1}})
+        self.assertIsNone(dlane.always_in_failed(self.store, self.store.family("ai-x"), self.settings))
+        # A sweep variant that failed G1 beside a candidate that passes: the candidate is validated.
+        self.put("ai-swept", roots=("QQQ",), trades=one_at_a_time())
+        dlane.record(self.store, "ai-swept", 2, score=dlane.train_score(train(GATED_RUN), settings=self.settings,
+                                                                        always_in=True))
+        out = t.validate([self.store.family("ai-swept")])
+        self.assertEqual(([j.family for j in self.pool.jobs], out.get("always_in_refused")), (["ai-swept"], None))
+        self.assertIsNone(dlane.always_in_failed(self.store, self.store.family("ai-swept"), self.settings))
+
+    def test_a_spent_try_retires_on_the_ration_first_and_its_row_binds_the_root(self):
+        """The review's finding: G1 retirement ran before the ration, so a family whose try was spent and judged died IDLE
+        ("no try was spent") and left no binding row."""
+        self.put("ai-spent", trades=one_at_a_time())
+        self.validated("ai-spent", verdict=True)
+        v2 = self.store.add_version("ai-spent", "# ai-spent v2\n" + d1b.CallsOnly.CALLS, {}, author="r")
+        dlane.record(self.store, "ai-spent", v2["n"], score=dlane.train_score(train(GATED_RUN), settings=self.settings,
+                                                                              always_in=True))
+        self.store.set_state("ai-spent", **{dlane.ALWAYS_IN_KEY: {"version": 1}})
+        t = Tournament(self.store, self.pool, self.settings)
+        self.assertEqual(t.retirements([self.store.family("ai-spent")]), [{"family": "ai-spent", "why": dlane.SPENT_TRY}])
+        row = self.store._one("SELECT * FROM graveyard WHERE family=?", ("ai-spent",))
+        self.assertEqual(tag_of(row, self.store.family("ai-spent")), "REFUTED")
+        index = cards.RebirthIndex(self.store, self.settings)
+        self.assertEqual([r["row"] for r in index.always_in_bound(["SPY"])], ["ai-spent"],
+                         "a family that held a try passed G1 at it: its verdict binds, a refusal of another version aside")
+        # Without a refusal on record (v1 passed G1, v2 a variant that failed it), the spent try's row binds the root too.
+        self.put("ai-spent-2", roots=("QQQ",), trades=one_at_a_time())
+        self.validated("ai-spent-2", verdict=True)
+        dlane.record(self.store, "ai-spent-2", 2, score=dlane.train_score(train(GATED_RUN), settings=self.settings,
+                                                                          always_in=True))
+        self.assertEqual(t.retirements([self.store.family("ai-spent-2")]),
+                         [{"family": "ai-spent-2", "why": dlane.SPENT_TRY}])
+        index = cards.RebirthIndex(self.store, self.settings)
+        self.assertEqual([r["row"] for r in index.always_in_bound(["QQQ"])], ["ai-spent-2"])
+
+    def test_g1_retires_only_on_the_version_due_for_validation(self):
+        self.put("ai-moved", trades=GATED_RUN)
+        t = Tournament(self.store, self.pool, self.settings)
+        self.assertEqual(t.validate([self.store.family("ai-moved")])["always_in_refused"], ["ai-moved"])
+        self.store.update_family("ai-moved", best_version=2)  # the researcher moved its candidate on meanwhile
+        self.assertIsNone(dlane.always_in_failed(self.store, self.store.family("ai-moved"), self.settings))
+        self.store.update_family("ai-moved", best_version=1)
+        self.assertEqual(dlane.always_in_failed(self.store, self.store.family("ai-moved"), self.settings),
+                         dlane.ALWAYS_IN_CAUSE)
+
     def test_with_no_score_on_record_the_try_reads_the_train_run_itself(self):
         self.put("ai-run", trades=GATED_RUN, record=False)
         fam = self.store.family("ai-run")
@@ -449,6 +718,16 @@ class Views(GraveyardCase):
         self.assertTrue(last.endswith("By root: SPY open; QQQ bound by ai-qqq-dead (REFUTED); IWM its always-in "
                                       "lineage's one Validation try is spent (ai-iwm v1)"), last)
         self.assertEqual(a.always_in_open(cards.RebirthIndex(self.store, self.settings)), ["SPY"])
+        # A living always-in family on SPY, still without a best, claims SPY's try: the line and the pass check say so.
+        self.clock.t += 60
+        card = self.card(ALWAYS)
+        self.store.add_family({"id": "ai-spy", "mechanism": AMECH, "structure": "long_single", "roots": ["SPY"],
+                               "lane": "direction", "card_sha": cards.card_sha(card)}, origin="architect")
+        cards.put(self.store, "ai-spy", card, "long_single")
+        last = [line for line in a.card_block().split("\n\n")[1].splitlines() if line][-1]
+        self.assertIn("By root: SPY its always-in lineage's one Validation try is claimed (ai-spy, alive and researching "
+                      "it); QQQ bound by ai-qqq-dead (REFUTED)", last)
+        self.assertEqual(a.always_in_open(cards.RebirthIndex(self.store, self.settings)), [])
         off = Architect(self.store, None, {**self.settings, "dlane": OFF}, clock=self.clock).card_block()
         self.assertNotIn("ALWAYS-IN", off)
 
@@ -458,12 +737,19 @@ class Views(GraveyardCase):
     def test_the_system_prompt_says_it_while_the_lane_is_on(self):
         text = system_text(LANE)
         self.assertIn("A DIRECTION card whose declared inputs are exactly [\"clock\"] is ALWAYS-IN", text)
+        for words in ("says \"always-in\" or \"no gate\", never a gate switched off, and it has no ablation",
+                      "which a living always-in family there already claims",
+                      "a program that skips sessions or varies its size or its hold on Train is never validated (G1)"):
+            self.assertIn(words, text)
         self.assertIs(system_text({"dlane": OFF}), SYSTEM)
 
     def test_the_card_brief_says_g1_to_an_always_in_family_only(self):
         always = cards.brief_text({"card": self.card(ALWAYS)}, LANE)
         self.assertIn("- ALWAYS-IN (your card's declared inputs are the clock alone", always)
         self.assertIn("Every Train run is checked (G1)", always)
+        for words in ("at a constant size (the same contracts or the same risk each entry)",
+                      "holding several at once, on 90% of all its sessions", "It trades only the roots it was born on"):
+            self.assertIn(words, always)
         self.assertNotIn("ALWAYS-IN", cards.brief_text({"card": self.card(GATED)}, LANE))
         self.assertNotIn("ALWAYS-IN", cards.brief_text({"card": self.card(ALWAYS)}, {"dlane": OFF}))
 
@@ -477,7 +763,7 @@ class Views(GraveyardCase):
 
 
 class ClosedByTheRation(Case):
-    """NO PAID PASS WITHOUT A CELL: a lane root whose always-in try is spent bears no always-in birth either."""
+    """NO PAID PASS WITHOUT A CELL: a lane root whose always-in try is spent or claimed bears no always-in birth either."""
 
     def test_spent_always_in_tries_on_every_root_close_the_pass(self):
         self.settings["architect"].update(structures=["debit_vertical", "long_single"], max_rebirths_per_cell=0)
@@ -499,10 +785,13 @@ class ClosedByTheRation(Case):
                               origin="architect")
         cards.put(self.store, "ai-all", card, "long_single")
         v = self.store.add_version("ai-all", "# ai-all\n" + d1b.CallsOnly.CALLS, {}, author="r")
-        self.assertIsNone(a.closed(), "alive without a try or a claim: still open")
+        closed = {"cells": 46, "full": 46, "spent": 0}
+        self.assertEqual(a.closed(), closed, "alive, it claims every root's always-in try")
+        self.store.retire_gym("ai-all", IDLE, floor=0, source="test")
+        self.assertIsNone(a.closed(), "dead untested: no try, no claim, no binding row")
         self.store.add_run("ai-all", v["n"], result("ai-all", window="validation"), window="validation", stress=1.0,
                            purpose="validation")
-        self.assertEqual(a.closed(), {"cells": 46, "full": 46, "spent": 0})
+        self.assertEqual(a.closed(), closed, "its try spent")
 
 
 if __name__ == "__main__":

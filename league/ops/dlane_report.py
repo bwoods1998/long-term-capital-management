@@ -312,16 +312,20 @@ LOOSENED: tuple[dict[str, str], ...] = (
             "always-in card reads the clock, so each gated idea refuted there (22-43 rows a cell) bound it, and no "
             "claim could free it (it reads nothing a claim could add)",
      "now": "a direction card whose declared inputs are exactly [\"clock\"] (always-in: it enters every session, no "
-            "gate) is bound only by the always-in direction rows on its roots, any class or holding; its birth joins "
-            "the always-in lineage on each of its roots, ONE Validation try a root; G1: its program must enter on 90% "
-            "of the Train sessions it is flat on, or it is never validated and retires; alpha cards and gated direction "
-            "cards are judged as before",
+            "gate; its card says \"always-in\" or \"no gate\" and has no ablation) is bound only by the always-in "
+            "direction rows on its roots, any class or holding; its birth joins the always-in lineage on each of its "
+            "roots and no gated one, ONE Validation try a root, which a living always-in family there claims; it trades "
+            "only the roots it was born on and never forks; G1: on each root its program enters on 90% of the Train "
+            "sessions it is flat (90% of all of them when it holds several calls at once), with 90% of its entries' "
+            "risk within 3x of their median and 90% of its holds a session or more and within 2x of their median, or "
+            "its version due for Validation is never validated and it retires; alpha cards and gated direction cards "
+            "are judged as before",
      "cost": "at most one always-in Validation try per root (SPY, QQQ, IWM), ever, unless the owner changes "
              "dlane.val_tries (fewer when a family on two roots joins their lineages): each is the lane's D2 lottery at "
              "10.37% per program at zero edge on mixed worlds (12.39% on 2022-24 worlds; higher when the screen windows "
              "rose), so up to three more such lotteries in all; their profit is index beta minus option costs, reported "
-             "beside the same-risk buy-and-hold, never alpha; a program never flat on Train could add gated entries on "
-             "top of its always-in position, which G1 cannot see"},
+             "beside the same-risk buy-and-hold, never alpha; what G1 cannot see is a gate that only tilts inside its "
+             "bands (a size that halves, a hold between 4 and 6 sessions, a strike that keeps the risk in band)"},
 )
 #: And what D-1 TIGHTENED (said beside the loosenings), with release L-D's rolling budget, a tightening of its NET.
 TIGHTENED: tuple[str, ...] = (

@@ -140,19 +140,21 @@ clock): the lane's own instrument could not be born, and the Probe roster could 
 direction path only (`matches`, `matched`, `text_cell` and every other reader of them are unchanged: an alpha card, a
 legacy row and a gated direction card are judged exactly as before): while the lane is on, a DIRECTION card whose
 DECLARED inputs are exactly ["clock"] (`dlane.always_in`: the card's field, never its words) is bound only by the
-ALWAYS-IN direction rows on its roots (`always_in_rows`), whatever their class or holding, and by no other row; a row is
-always-in when its family is a direction family (`row_lane`) whose DECLARED card (its own, else a fork's by its spec's
-`card_sha`) is always-in, whatever its words say, and whose program never failed G1 (`_g1_failed`: such a family lost
-the status, however it died) (`row["always_in"]`). Such a row is bound under `needs_claim` (a DRIFT
-row never binds a direction card) and no claim frees it (the card reads nothing a claim could add), so the always-in
-idea on a root is refused once a mechanism verdict killed it there (a SELF-REFUTED one too: the yield's open cell aside).
-A claim an always-in card carries anyway is never a rebirth: it is `dropped`. The refusal names the row and the roots.
-The view follows: the BIRTH CELLS end with the ALWAYS-IN line (`always_in_line`: each lane root open, bound by an
-always-in row, or with its always-in lineage's try spent or claimed, which the architect reads), and `Architect.closed`
-reads a lane root still open to an always-in birth as a pass that can bear one. What else binds it: the ration (one
-Validation try a connected lineage, and its birth links it to every always-in lineage on its roots: architect.py
-`admit`) and G1 (dlane.py: a program that does not behave always-in on Train is never validated and retires). ITS COST:
-the dlane report's LOOSENED row. With the lane off nothing here acts.
+ALWAYS-IN direction rows on its roots (`always_in_rows`: the roots each row's family traded or was born on), whatever
+their class or holding, and by no other row; a row is always-in when its family is a direction family (`row_lane`) whose
+DECLARED card (its own, else a fork's by its spec's `card_sha`) is always-in, whatever its words say, unless its program
+never behaved always-in (`_g1_failed`: G1 refused its version due for Validation, or every version of it on record
+failed G1, and it held no try) (`row["always_in"]`). Such a row is bound under `needs_claim` (a DRIFT row never binds a
+direction card) and no claim frees it (the card reads nothing a claim could add), so the always-in idea on a root is
+refused once a mechanism verdict killed it there (a SELF-REFUTED one too: the yield's open cell aside). A claim an
+always-in card carries anyway is never a rebirth: it is `dropped`. The refusal names the row and the roots. The view
+follows: the BIRTH CELLS end with the ALWAYS-IN line (`always_in_line`: each lane root open, bound by an always-in row,
+or with its always-in lineage's try spent or claimed, a living member's claim included, which the architect reads), and
+`Architect.closed` reads a lane root still open to an always-in birth as a pass that can bear one. What else binds it:
+the ration (one Validation try a connected lineage; its birth links it to every always-in lineage on its roots and
+continues no gated one: architect.py `admit`, `always_in_families`) and G1 (dlane.py: a program that skips sessions, or
+varies its size or its hold, on Train is never validated and retires). ITS COST: the dlane report's LOOSENED row. With
+the lane off nothing here acts.
 
 Standard library only.
 """
@@ -605,13 +607,19 @@ def brief_text(entry: Mapping[str, Any] | None, settings: Mapping[str, Any] | No
                         f"buy-and-hold; {dlane.ALWAYS_IN_NOTE}.")
         if dlane.always_in(c):  # THE ALWAYS-IN CARD (Oct 10, 2026): its status is a promise about the program
             lines.insert(2, "- ALWAYS-IN (your card's declared inputs are the clock alone, fixed at birth): your program "
-                            "enters on the clock alone, every session its own open positions allow, with no gate of any "
-                            "kind; the lane's advice to find a regime gate is not for this family, which was born because "
-                            "no gated idea's graveyard row binds an always-in card. Every Train run is checked (G1): on each "
-                            "root it trades it must enter on at least "
-                            f"{dlane.ALWAYS_IN_SHARE:.0%} of the sessions it holds nothing there at the open, or the version "
-                            "is ineligible and the family retires before Validation. Its one Validation try is shared with "
-                            "every always-in family on its roots.")
+                            "enters on the clock alone, every session its own open positions allow, at a constant size (the "
+                            "same contracts or the same risk each entry), and holds each call a fixed number of sessions, "
+                            "with no gate of any kind; the lane's advice to find a regime gate is not for this family, which "
+                            "was born because no gated idea's graveyard row binds an always-in card. Every Train run is "
+                            "checked (G1), on each root it trades: one position at a time, it enters on at least "
+                            f"{dlane.ALWAYS_IN_SHARE:.0%} of the sessions it holds nothing there at the open; holding "
+                            f"several at once, on {dlane.ALWAYS_IN_SHARE:.0%} of all its sessions (a call opened before "
+                            "the last one's exit session counts as several: roll on that session itself); "
+                            f"{dlane.ALWAYS_IN_SHARE:.0%} of its entries risk within a third and three times their median, "
+                            f"and {dlane.ALWAYS_IN_SHARE:.0%} of its trades are held a session or more and within half and "
+                            "twice their median hold. A version that fails is ineligible, and one due for Validation that "
+                            "fails is never validated and the family retires. It trades only the roots it was born on, and "
+                            "its one Validation try is shared with every always-in family on its roots.")
     return "\n".join(lines)
 
 
@@ -883,10 +891,11 @@ def cell_yields(store: Any, settings: Mapping[str, Any] | None, since: str, *,
 
 #: THE ALWAYS-IN CARD's line of the BIRTH CELLS (`RebirthIndex.always_in_line`), before each lane root's state. Words only.
 ALWAYS_IN_LINE = ("ALWAYS-IN (a direction card whose declared inputs are exactly [\"clock\"]: it enters every session on the "
-                  "clock alone, with no gate, and its comparison or falsification says so): no cell's rows bind it, only "
-                  "the always-in direction rows on its roots, whatever their class or holding, and no claim frees it; its "
-                  "birth joins the always-in lineage on each of its roots, which has ONE Validation try; a program that "
-                  "does not enter every session it is flat on Train is never validated (G1). By root: ")
+                  "clock alone, with no gate, and its comparison or falsification says \"always-in\"): no cell's rows bind "
+                  "it, only the always-in direction rows on its roots, whatever their class or holding, and no claim frees "
+                  "it; its birth joins the always-in lineage on each of its roots, which has ONE Validation try, claimed by "
+                  "a living always-in family there; a program that skips sessions or varies its size or its hold on Train "
+                  "is never validated (G1). By root: ")
 
 
 def _spec_of(fam: Mapping[str, Any] | None) -> Mapping[str, Any]:
@@ -908,24 +917,37 @@ def _roots_of(raw: Any) -> list[str]:
 
 
 def _g1_failed(store: Any) -> frozenset[str]:
-    """THE ALWAYS-IN CARD: the retired families whose state records a G1 failure (dlane.py: `ALWAYS_IN_KEY`, or a
-    version's recorded score failing "G1"): their rows are never always-in rows, whatever their card declared (a family
-    its researcher retired before the tournament did keeps the rule). Empty on a store that cannot be read so."""
+    """THE ALWAYS-IN CARD: the retired families whose program never behaved always-in (dlane.py's G1): G1 refused the
+    version due for its Validation try (`ALWAYS_IN_KEY`), or a recorded version's score failed "G1" and none passed it
+    (a family its researcher retired before the tournament did), and it holds no Validation try of its own (a try is
+    sent only with a G1 pass: `dlane.always_in_try`). Their rows are never always-in rows, whatever their card declared.
+    A family with a G1 pass on record or a try keeps the status (a sweep variant that failed it is that variant's
+    ineligibility, not the idea's), so its verdict binds its roots. Empty on a store that cannot be read so."""
     try:
-        return frozenset(str(r["id"]) for r in store._all(
-            "SELECT f.id AS id FROM families f WHERE f.retired_at IS NOT NULL AND json_valid(f.state) AND ("
-            f"json_extract(f.state, '$.{dlane.ALWAYS_IN_KEY}') IS NOT NULL OR EXISTS (SELECT 1 FROM "
+        rows = store._all(
+            "SELECT f.id AS id, f.state AS state FROM families f WHERE f.retired_at IS NOT NULL AND json_valid(f.state) "
+            f"AND (json_extract(f.state, '$.{dlane.ALWAYS_IN_KEY}') IS NOT NULL OR EXISTS (SELECT 1 FROM "
             f"json_each(json_extract(f.state, '$.{dlane.STATE_KEY}.versions')) v, "
-            "json_each(json_extract(v.value, '$.train.fails')) x WHERE x.value = 'G1'))"))
+            "json_each(json_extract(v.value, '$.train.fails')) x WHERE x.value = 'G1'))")
+        out = set()
+        for r in rows:
+            state = json.loads(r["state"]) if isinstance(r["state"], str) else (r["state"] or {})
+            passed = any(isinstance(reading, Mapping) and reading.get("passed") is True
+                         for _, reading, _ in dlane._kept_g1({"state": state}))
+            if isinstance(state.get(dlane.ALWAYS_IN_KEY), Mapping) or not passed:
+                out.add(str(r["id"]))
+        tried = {t["family"] for t in dlane._tries_of(store, sorted(out))}
+        return frozenset(out - tried)
     except Exception:  # noqa: BLE001 - every declared always-in row then binds (the stricter reading)
         return frozenset()
 
 
 def always_in_families(store: Any, roots: Iterable[str], *, exclude: Iterable[str] = ()) -> list[dict[str, Any]]:
     """THE ALWAYS-IN CARD (Oct 10, 2026): every DIRECTION family, alive or retired, whose DECLARED card (its own, else the
-    one its spec's `card_sha` names) is always-in (`dlane.always_in`) and that names any of `roots`, oldest first: [{family,
-    lineage, roots}]. `exclude`: families left out (`Architect.unseen`). What `Architect.admit` links an always-in birth
-    to (one idea a root). Read-only; [] without the card table."""
+    one its spec's `card_sha` names) is always-in (`dlane.always_in`) and that names any of `roots` among the roots it
+    was born on (`spec.roots`, which a change of roots never moves) or trades now, oldest first: [{family, lineage,
+    roots}]. `exclude`: families left out (`Architect.unseen`). What `Architect.admit` links an always-in birth to (one
+    idea a root), and what the BIRTH CELLS' ALWAYS-IN line reads. Read-only; [] without the card table."""
     if not _tables(store):
         return []
     wanted = {str(r).upper() for r in roots}
@@ -944,7 +966,7 @@ def always_in_families(store: Any, roots: Iterable[str], *, exclude: Iterable[st
         status = by_family.get(f["id"])
         if status is None:
             status = by_sha.get(str(spec.get("card_sha") or ""), False)
-        named = _roots_of(f["roots"])
+        named = list(dict.fromkeys([*_roots_of(spec.get("roots")), *_roots_of(f["roots"])]))
         if status and wanted & set(named):
             out.append({"family": f["id"], "lineage": f["lineage"], "roots": named})
     return out
@@ -1016,11 +1038,11 @@ class RebirthIndex:
             if self.lane_on:
                 row["lane"] = row_lane(fam, carded["card"] if carded is not None else None, lanes_by_sha)
                 # THE ALWAYS-IN CARD (Oct 10, 2026): a direction family's DECLARED card (its own, else a fork's by its
-                # spec's card_sha), never its words, and the roots it traded.
+                # spec's card_sha), never its words, and the roots it traded or was born on (`always_in_families`).
                 row["always_in"] = row["lane"] == dlane.DIRECTION and g["family"] not in lost and (
                     dlane.always_in(carded["card"]) if carded is not None
                     else always_by_sha.get(str(_spec_of(fam).get("card_sha") or ""), False))
-                row["roots"] = _roots_of(g["roots"])
+                row["roots"] = list(dict.fromkeys([*_roots_of(g["roots"]), *_roots_of(_spec_of(fam).get("roots"))]))
             self.rows.append(row)
         self.by_id = {r["row"]: r for r in self.rows}
         # The rebirths born so far: by the row each named (for ever) and by that row's cell (within the window).
