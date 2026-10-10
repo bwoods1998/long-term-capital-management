@@ -14,15 +14,18 @@ The owner's goal of Oct 10, 2026, on the House's side: agent programs trade long
 money through the House's own **EquityBook** (`league/equity/live.py`; its tables `eq_lots`, `eq_orders`, `eq_fills`,
 `eq_intents`, `eq_bars`, `eq_activities`, `eq_exports`, `eq_instances` in `live.sqlite`). The lane's code is
 `league/equity/` (its own identity, `equity_fingerprint`: an equity change never resets the options evidence), its swarm
-side `league/swarm/elane.py`, its contract `league/equity/INTERFACES.md` and `league/equity/EQUITY.md`. E1 switches
-nothing on: it deploys with `equity_money.enabled` false, `elane.mode` "off" and no screen receipt pinned. In E1 the
+side `league/swarm/elane.py`, its contract `league/equity/INTERFACES.md` and `league/equity/EQUITY.md`. E1 deploys with
+`equity_money.enabled` TRUE (the captain's A10.2: the switch ships on), `elane.mode` "off" (the captain sets "gate" with
+set_swarm.py once the deploy is verified) and the S1 receipt pinned; nothing trades until a program passes its sealed
+look AND the stock paper proof's BUY stage passes. In E1 the
 lane's programs are the three captain-seeded BETA programs (`seed-overnight-spy`, `seed-overnight-qqq`,
 `seed-reversal-index`: agent-written, judged by the swarm's screen like any family, and said plainly to be seeded);
 architect and researcher births in the beta and equity lanes are E2.
 
 **The switches** (all three must be on for a real equity open; any one off stops new opens):
 - `equity_money.enabled` (league/constitution.py, a CON change: the money digest moves and the standing grant re-ratifies
-  at the House's start). False: the book keeps its tables, runs its exits and reconciles; no equity open.
+  at the House's start). E1 ships True (money digest `ad8c761b`); False (`ea97607c`) is the stop: the book keeps its
+  tables, runs its exits and reconciles; no equity open.
 - `elane.mode` (league/swarm/policy.json, swarm.json over it): "off" (the rollback: no seeded birth, no equity look) or
   "gate".
 - `STOCK_BUYS_REAL` (gateway/wrangler.jsonc): deployed "on" with PR #532; while the House's `equity_money.enabled` is
@@ -30,10 +33,17 @@ architect and researcher births in the beta and equity lanes are E2.
   either way).
 - The screen (A9): the share screen S1's receipt, copied verbatim to `docs/benchmarks/equity_screen_1.json` and pinned in
   policy.json's `elane.screens`; with no pinned receipt every equity look is refused (no look spent).
-- The stock paper proof (A8.7; `league/live/paper.py` `StockPaperProof`, kv `paper_proof_stock`): on `alpaca-paper` it
-  buys a fractional SPY marketable limit in the 15:55 ET close window and sells it at the next open, then checks fills,
-  positions, activities and reconciliation. It must pass once before the first real equity order. Only the equity book
-  waits on it (options entries never do); its client ids are `lq-pp-...`.
+- The stock paper proof, STAGED (A8.7 as amended by A10.1; `league/live/paper.py` `StockPaperProof`, run by the equity
+  book in its own OPEN window): stage BUY (kv `paper_proof_stock_buy`) buys a fractional SPY marketable limit on
+  `alpaca-paper` from 09:30:30 ET to the 09:45 entry cut-off and passes on its fill, its lot row and the reconciled
+  position: it gates every REAL equity BUY. Stage SELL (kv `paper_proof_stock_sell`) sells that lot in the next
+  session's open window, first (real exits wait for it), and passes on the whole sale, the FILL activities and the
+  position back at its baseline: it gates every REAL equity SALE. A SELL stage that ends its window unpassed is "failed":
+  an error alert with the owner's step (look at the practice account's SPY position and orders), real lots stay held
+  (the max-hold rule applies once it passes) and new real buys stop until it passes; the next open window buys again
+  and the one after sells. The attempt row is kv `paper_proof_stock`. Only the equity book waits on it (options entries
+  never do); its client ids are `lq-pp-...`. After a Sunday deploy: stage BUY at Monday 09:30:30 ET, the first real
+  close-window buy Monday 15:55 ET, stage SELL Tuesday 09:30:30 ET.
 
 **Cash only, by choice** (amendment A1). The gateway (PR #532) admits margin where the account offers it (its book cap is
 equity x min(2, the multiplier), bounded by buying power). The House's equity book in E1 does not use it: margin
@@ -58,9 +68,10 @@ by the same offsets from the 13:00 close):
 - 16:20 the bars: each live program's symbols, 1Day raw and adjustment=all through the session just closed, written to
   `eq_bars` with the arrays' sha (A8.11); 16:30 the decide: one isolated "equity" decider request a session, the intents
   recorded in `eq_intents` for the NEXT session, at its open (`"at": "open"`, the default) or its close (`"at":
-  "close"`), with the House's exits (a lot's `max_hold_sessions`, default 20, cap 60; a demoted, retired or
-  band-dropped program; 2 sessions of failed decides) as `house_exit`. A decide missed by a restart runs as a catch-up
-  for the last close.
+  "close"`), with the House's exits (a lot is held at most its program's `max_hold_sessions`, default 20, cap 60: it
+  exits at the open that completes them, the Gym's rule too; a demoted, retired or band-dropped program; 2 sessions of
+  failed decides) as `house_exit`. A decide missed by a restart runs as a catch-up for the last close. A day's bars
+  fetched again by a later decision keep their morning audit while unchanged.
 - 08:30 the morning re-fetch audits yesterday's bars against a new fetch (a mismatch is an alarm and a twin note);
   09:25 the pre-open: the account, positions and orders read, reconciliation, the plan.
 - THE OPEN: exits at 09:30:30; entries after the exits filled or 2 minutes, sized on cash after the exit fills, until
@@ -93,7 +104,11 @@ the same-risk buy-and-hold over the same sessions. The `dlane` report's Done met
 fully closed, its net cash with fees and dividends, on `:r` (both meters), matched to its own twin; beside every close
 and checkpoint ride the lane's label (MARKET BETA or EQUITY), the buy-and-hold, MTE, the S1 line recorded at the
 program's look and "profit from market direction". Done is also read without the three seeded programs
-(`done.without_seeded`, A8.12). The funnel (`league/ops/funnel.py`) counts the equity lanes apart (`equity`).
+(`done.without_seeded`, A8.12). A checkpoint holding an equity close stays provisional until its lot's broker fees are
+posted: the book reads the account's `FEE` activities (the REG and TAF rows without an order id; an option's "OPT REG",
+"OPT TAF", "ORF" rows are never an equity lot's) and posts each exit day's rows to that day's equity sales pro rata by
+proceeds (`eq_lots.info.fee_basis` "broker", the estimate kept beside); a day without a fee row five sessions on is told
+to the owner once a lot. The funnel (`league/ops/funnel.py`) counts the equity lanes apart (`equity`).
 
 **Roll back: flatten first.** In order, each step verified before the next:
 1. `elane.mode` "off" in swarm.json (no seeded birth, no equity look).

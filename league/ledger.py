@@ -165,6 +165,25 @@ KINDS: dict[str, bool] = {
     "live.expiry_reconciliation": False,  # an expired position's liquidation reconciled from the venue's fills
     # The incubator (release B, Oct 1, 2026; league/live/incubator.py). Private: first looks carry practice P&L.
     "live.incubator": False,    # a first look, an ended incubation, the session's pins, a yield or the weekly stop
+    # The equity lane's book (release E1, Oct 2026; league/equity/live.py `EquityBook.record`). Private, as the options
+    # book's live.* rows: family ids, fills and the account's activities stay on the box.
+    "equity.order": False,      # an equity order written, sent, looked up or ended, and what the venue answered
+    "equity.cancel": False,     # an equity order cancelled (a re-price, a cut-off), and why
+    "equity.fill": False,       # a fill booked to a lot
+    "equity.close": False,      # a lot closed: its net cash, fees and dividends
+    "equity.intent": False,     # a decision's intent executed, missed, refused or cancelled
+    "equity.carried": False,    # an exit the session could not fill, planned again at the next open
+    "equity.decide": False,     # a session's decide: the programs decided and the ones that failed
+    "equity.bars": False,       # the bars a decision read (their provenance sha in eq_bars)
+    "equity.bars_audit": False,  # the morning re-fetch of a decision's bars agreed or did not
+    "equity.band": False,       # the book moved an equity family between candidate, probe and sized
+    "equity.instance": False,   # an equity program instance started, updated or retired
+    "equity.house_exits": False,  # the House's exit rules planned lots out (max hold, demotion, failed decides)
+    "equity.activity": False,   # a dividend, split or corporate action booked (or frozen on)
+    "equity.freeze": False,     # equity reconciliation froze or released equity entries, and why
+    "equity.flatten": False,    # every open lot queued to exit (the rollback's first step)
+    "equity.fees_posted": False,  # the broker's REG and TAF fees posted to closed lots
+    "equity.alert": False,      # something the equity book could not explain
     # The options swarm (Sept 26, 2026; league/swarm/): its own append-only events, mirrored here by the House's swarm
     # step (`league/swarm/hook.py`), idempotent by id `swarm:<seq>`. Never the House's own agent.* or eval.* kinds: its
     # roster and evaluator read those. Public: the site's tape reads a family's birth, retirement, band move and notes

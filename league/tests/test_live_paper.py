@@ -18,6 +18,15 @@ if HAVE:
 PASSED = {"schema": 2, "status": "passed", "open_witness": True, "close_witness": True}
 
 
+def stock_proof_passed(state) -> None:
+    """The equity book's stock proof on the same practice account (release E1; league/tests/test_equity_paper.py proves
+    it) taken as passed: these tests count the options route's own orders, and it starts once their proofs pass."""
+    from league.live.paper import STOCK_BUY_KEY, STOCK_BUY_WITNESSES, STOCK_SELL_KEY, STOCK_WITNESSES
+
+    for key, witnesses in ((STOCK_BUY_KEY, STOCK_BUY_WITNESSES), (STOCK_SELL_KEY, STOCK_WITNESSES)):
+        state.put(key, {"schema": 1, "status": "passed", **{k: True for k in witnesses}})
+
+
 class PaperOnlyProof(LiveCase):
     """The multi-leg vertical's proof (the single-leg proof, which follows it, is taken as passed here: `SingleLeg`)."""
 
@@ -73,6 +82,7 @@ class DurableProof(LiveCase):
     def make_proof(self):
         live = self.make([], config={"require_paper_proof": True})
         live.state.put("paper_proof_single", PASSED)   # the vertical's proof alone (`SingleLeg` has the single's)
+        stock_proof_passed(live.state)
         return live
 
     def restart(self, hh=9, mm=36, *, day=MONDAY):
@@ -313,7 +323,7 @@ def decide(ctx):
         self.assertTrue(any("single-leg route" in p["why"] for p, a in self.ledger.of("live.refusal")))
         self.run_to(10, 0)
         self.assertTrue(live.proof_single.passed(), live.proof_single.status())
-        singles = [b for b in self.paper.sent if not b.get("legs")]
+        singles = [b for b in self.paper.sent if not b.get("legs") and len(b["symbol"]) > 6]   # an option's OCC symbol
         self.assertEqual([(b["side"], b["position_intent"], b["type"]) for b in singles],
                          [("buy", "buy_to_open", "limit"), ("sell", "sell_to_close", "limit")])
         symbol = singles[0]["symbol"]

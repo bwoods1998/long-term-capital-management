@@ -1799,9 +1799,11 @@ class EquityBook:
             inst.why = f"load: {type(exc).__name__}: {str(exc)[:200]}"
             self._save_instance(inst)
             return False
-        if not answer or not answer.get("ok"):
+        # `decider.kind_load` answers the child's load less its "ok" and raises for a refused program (above); an
+        # answer that says otherwise, or none, is a refusal.
+        if not isinstance(answer, Mapping) or answer.get("ok") is False or not isinstance(answer.get("needs"), Mapping):
             self._needs.pop(inst.id, None)
-            inst.why = f"load: {str((answer or {}).get('error') or 'refused')[:200]}"
+            inst.why = f"load: {str((answer or {}).get('error') if isinstance(answer, Mapping) else 'no answer')[:200]}"
             self._save_instance(inst)
             return False
         needs = dict(answer.get("needs") or {})
@@ -1839,11 +1841,15 @@ class EquityBook:
                     sha = _sha(series)
                     shas.setdefault(symbol, {})[name] = sha
                     for d, o, h, l, c, v in series:
+                        # A day fetched again keeps its morning audit while its row is unchanged (the twins judge
+                        # a lot on its entry and exit days' audited bars); a changed row is unaudited again.
                         self.state.execute(
                             "INSERT INTO eq_bars(day, symbol, adjustment, o, h, l, c, v, fetched_at, sha, audit) "
                             "VALUES(?,?,?,?,?,?,?,?,?,?,NULL) ON CONFLICT(day, symbol, adjustment) DO UPDATE SET "
                             "o=excluded.o, h=excluded.h, l=excluded.l, c=excluded.c, v=excluded.v, "
-                            "fetched_at=excluded.fetched_at, sha=excluded.sha, audit=NULL",
+                            "fetched_at=excluded.fetched_at, sha=excluded.sha, audit=CASE WHEN eq_bars.o IS excluded.o "
+                            "AND eq_bars.h IS excluded.h AND eq_bars.l IS excluded.l AND eq_bars.c IS excluded.c "
+                            "AND eq_bars.v IS excluded.v THEN eq_bars.audit ELSE NULL END",
                             (d, symbol, name, *(None if x is None else str(x) for x in (o, h, l, c, v)), now, sha))
             self.state.put("eq_decision", {"day": day, "start": start, "end": end, "symbols": sorted(present),
                                            "shas": shas, "audit": None, "fetched_at": now})

@@ -352,7 +352,7 @@ class TheKindsChild(unittest.TestCase):
 @unittest.skipUnless(HAVE, "numpy not installed")
 @unittest.skipUnless(sys.platform.startswith("linux"), "Linux rlimits and /proc")
 class TheEquityKindsChild(unittest.TestCase):
-    """Cross-package (core): the real "equity" kind in the House's child. Skipped until core lands."""
+    """The real "equity" kind in the House's child (core's program and ctx, hooks' child)."""
 
     CODE = '''
 import numpy as np
@@ -379,6 +379,10 @@ def decide(ctx):
             info = decider.kind_load("equity", "probe@1:r", {"code": self.CODE, "params": {}, "name": "probe",
                                                              "timeout": 0.5, "max_errors": 25})
             self.assertEqual(info["run_sha"], local.run_sha)
+            self.assertEqual(info["params"], {"share": 0.5}, "the merged PARAMS: the live ctx's, as the Gym's (I6)")
+            over = decider.kind_load("equity", "probe@2:r", {"code": self.CODE, "params": {"share": 0.25},
+                                                             "name": "probe", "timeout": 0.5, "max_errors": 25})
+            self.assertEqual(over["params"], {"share": 0.25})
             refused = decider.kind("equity", "needs", {"code": "import os\n" + self.CODE, "params": {}, "name": "bad"})
             self.assertEqual((refused["ok"], refused["refused"]), (False, True))
         finally:

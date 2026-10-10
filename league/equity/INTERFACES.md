@@ -499,7 +499,8 @@ ProbeFigures`; `working_buys_worst(rows) -> Decimal`; `orders_today(rows, day) -
 
 ### 6.3 `league/equity/kinds.py`, `league/equity/child.py` (stubs present)
 `KINDS = {"equity": "league.equity.child"}`, `module_for(kind) -> module`. `child.handle(op, payload, state) -> dict`
-with ops `load` {key, code, params, name, timeout, max_errors} -> {ok, needs, sha, run_sha}; `drop` {key}; `decide`
+with ops `load` {key, code, params, name, timeout, max_errors} -> {ok, needs, sha, run_sha, params} (integration:
+`params` the merged PARAMS the book builds the live ctx with, as the engine does: I6); `drop` {key}; `decide`
 {jobs: [{key, inputs}]} -> {ok, results: {key: {intents, stats, ctx_sha}}}; `needs` {code, params, name} -> {ok,
 needs, sha, run_sha}; `run` {code, params, name, bars, k, capital} -> {ok, result}. Refused program: {ok: False,
 refused: True, error}.

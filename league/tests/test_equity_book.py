@@ -265,7 +265,8 @@ class Decider:
         self.loads.append((key, dict(payload)))
         if key in self.refuse:
             raise ValueError("the program did not load")
-        return {"ok": True, "needs": self.needs.get(key, {"symbols": ["SPY"], "history": 5, "max_hold_sessions": 20}),
+        # As `league.live.decider._Base.kind_load` answers: the child's load less its "ok" (a refusal raises).
+        return {"needs": self.needs.get(key, {"symbols": ["SPY"], "history": 5, "max_hold_sessions": 20}),
                 "sha": "s" * 64, "run_sha": "r" * 64}
 
     def kind_drop(self, kind, key, *, budget_seconds=10.0):
@@ -1374,6 +1375,27 @@ class Audit(BookTest):
         self.assertEqual(h.state.get("eq_decision")["audit"], "ok")
         self.assertEqual(h.get_intent(buy.iid).status, "planned")
 
+    def test_a_later_fetch_keeps_an_audited_day_while_its_row_is_unchanged(self):
+        """The twins judge a lot on its entry and exit days' audited bars (league/ops/twins.py), so the next decision's
+        fetch, which writes its whole history again, keeps an unchanged day's audit; a changed row is unaudited."""
+        h, _ = self.decided()
+        h.tick(8, 31, day=TUESDAY)
+        monday = lambda: {r["audit"] for r in h.state.rows(  # noqa: E731
+            "SELECT audit FROM eq_bars WHERE day='2026-10-12' AND adjustment='raw'")}
+        self.assertEqual(monday(), {"ok"})
+        for name in ("raw", "all"):
+            last = h.market.bar_rows[name]["SPY"][-1]
+            h.market.bar_rows[name]["SPY"].append({**last, "t": "2026-10-13T04:00:00Z"})
+        h.tick(16, 31, day=TUESDAY)
+        self.assertEqual(h.state.get("eq_decision")["day"], "2026-10-13")
+        self.assertEqual(monday(), {"ok"}, "unchanged: still audited")
+        for name in ("raw", "all"):
+            rows = h.market.bar_rows[name]["SPY"]
+            rows[-2]["c"] += 1.0                                            # a correction of Monday's close
+            rows.append({**rows[-1], "t": "2026-10-14T04:00:00Z"})
+        h.tick(16, 31, day=WEDNESDAY)
+        self.assertEqual(monday(), {None}, "changed: unaudited again")
+
     def test_a_mismatch_cancels_the_decisions_buys(self):
         h, buy = self.decided()
         h.market.bar_rows["raw"]["SPY"][-1]["c"] += 1.0
@@ -1526,6 +1548,21 @@ class TheStagedProof(BookTest):
         h.tick(9, 33)
         self.assertEqual([b["side"] for b in h.venue.sent], ["buy"])
 
+
+
+class TheLedgerKinds(unittest.TestCase):
+    def test_every_kind_the_book_records_is_registered(self):
+        """The House's ledger refuses an unknown kind and the book swallows the error (`EquityBook.record`), so a kind
+        missing from league/ledger.py `KINDS` would be lost silently in production; every one is registered, private."""
+        import re
+
+        from league.ledger import KINDS
+
+        source = Path(L.__file__).read_text(encoding="utf-8")
+        kinds = set(re.findall(r'self\.record\("(equity\.[a-z_]+)"', source))
+        self.assertGreaterEqual(len(kinds), 15, kinds)
+        self.assertEqual(sorted(k for k in kinds if k not in KINDS), [])
+        self.assertFalse(any(KINDS[k] for k in kinds), "private: family ids and fills stay on the box")
 
 
 class TheBrokersFees(BookTest):

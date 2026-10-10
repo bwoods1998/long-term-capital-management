@@ -335,7 +335,7 @@ class EquityTable:
     position_share: Mapping[str, Decimal] = field(hash=False)    # class -> share of E (0.50 / 0.20)
     invested_share: Decimal                     # "1.00" (A1: cash only by choice)
     cash_reserve: Decimal                       # "50" (A8.1), above the gateway's $25 floor
-    open_risk_weight: Mapping[str, Decimal] = field(hash=False)  # class -> weight (0.20 / 0.40)
+    open_risk_weight: Mapping[str, Decimal] = field(hash=False)  # class -> its share of a mark (0.20 / 0.40)
     probe_sleeve_share: Decimal                 # "0.25" (A5)
     probe_max_programs: int                     # 3 (A5) == elane.roster
     min_order_usd: Decimal                      # "10"

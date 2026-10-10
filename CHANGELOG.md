@@ -29,7 +29,7 @@ any other deploy.
 The running House release is `20261010T062000Z-1767910d2115` (main `dd196cad`, the spent-lineage refusal, 06:20Z Oct 10),
 the gateway is `507b6118`, and the box's updater is on. What is built and not deployed is on branches.
 
-### Release E1, the equity lane: ops, data, twins and the Done meter, on `feat/equity-e1` (unreleased; an owner deploy with the rest of E1; nothing switched on)
+### Release E1, the equity lane: ops, data, twins and the Done meter, on `feat/equity-e1` (unreleased; an owner deploy with the rest of E1)
 
 - **The data job** `equity_data` (`league/ops/equity_data.py`, registered at the House's start and daily 22:30Z, in a
   pause too): Alpaca SIP daily bars of the equity universe through the gateway's bars route, adjustment=raw and
@@ -59,6 +59,37 @@ the gateway is `507b6118`, and the box's updater is on. What is built and not de
   shared budget's consequence, the schedule, the stock paper proof, the flatten-first rollback, and the gateway's stock
   route as the House sees it). Proof: `test_equity_data`, `test_equity_twins`, `test_dlane_report_equity`,
   `test_floor_box_equity`; `test_dlane_report`'s fixtures now count from the rule's inception explicitly.
+
+### Release E1 integrated: the seven packages agree, the S1 receipt pinned, the staged stock proof, the switch on, on `feat/equity-e1` (unreleased; an owner deploy; the options execution fingerprint moves once, the money digest moves, a new equity identity)
+
+- The integration of the seven E1 packages (core, money, screen, book, hooks, swarm, ops) and `origin/main`. What the
+  packages had built against each other's stubs now meets: `league/tests/test_equity_e2e.py` runs a seeded program from
+  its birth through Validation (the decider's "equity" kind), the S1 look under the pinned receipt, the band decision,
+  a live session (the 16:30 decide, Monday's 15:55 close-window buy sized by `size_entry` on the House-wide cash and the
+  shared budget, Tuesday's open sale), the morning audits, the twin and the Done meter, against a fake venue.
+- Fixed where they met: the decider child's sealed runtime lacked the engine's NYSE calendar (`ltcm/data`), so every
+  Validation run and look would have failed in the root House's child (`league/equity/kinds.py` `RUNTIME`); the child's
+  load answer now carries the program's merged PARAMS, which the live ctx needs to equal the Gym's (I6: the seeds read
+  `ctx.params` and would have failed every live decide); the book read `decider.kind_load`'s answer as refused (it
+  carries no "ok": a refusal raises), so no live program would have loaded; none of the book's `equity.*` ledger kinds
+  was registered (league/ledger.py `KINDS`: the ledger refused them and the book swallowed it); the stock proof starts
+  only once the options route's paper proofs have passed (one proof at a time on the practice account); the maximum
+  hold is one rule (`config.max_hold_due`: a lot is
+  held at most `max_hold_sessions`; the engine and the book disagreed by a session) and seed-reversal-index exits at
+  the open h sessions after its entry; a day's bars fetched again keep their morning audit while unchanged (the twins
+  need both days audited); the book posts the broker's REG and TAF fees to closed lots (`info.fee_basis`), which the Done
+  meter's finality waits for.
+- The captain's amendments applied at integration: A9, the study's receipt copied verbatim to
+  `docs/benchmarks/equity_screen_1.json` (sha256 `6fb84bd5...`) and pinned in policy.json for both lanes; A10.1, the
+  stock paper proof staged in the equity book's OPEN window (`paper_proof_stock_buy` gates real buys,
+  `paper_proof_stock_sell` real sales, the practice sale first, a failed SELL stage alarms and stops new buys);
+  A10.2, `equity_money.enabled` ships True (money digest `fdf2ac7c` -> `ad8c761b`, full digest -> `65b0e025`; the stop,
+  `enabled` False, is `ea97607c`); A8.1, the calibration's reservation reads the House-wide cash rule
+  (`RealBook.free_to_reserve`); A8.12, the options learning game never arms an equity family and its population
+  ceiling counts the options lanes, and an equity look never counts in an options lane's leakage alarm.
+- Not yet in E1: the S2 screen (A11) waits for its receipt (`equity_screen_2.json`), so S1+F1 is pinned and the captain
+  swaps before ON; the gateway's `MERGE_FORBIDDEN` lacks `league/equity/` and `league/swarm/elane.py`, and its decider
+  runtime test still reads the old in-function tuple, so the gateway CI job fails until a gateway follow-up.
 
 ### A stock buy's fill between reads is never lost, a lagging sale is never sold twice, and a definite answer lets a hold go, on `fix/gateway-stock-read-order` (unreleased; a gateway deploy; no House change)
 

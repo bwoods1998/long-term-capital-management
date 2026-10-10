@@ -157,6 +157,17 @@ class TheStockProof(unittest.TestCase):
         self.step(TUESDAY, 9, 31)
         self.assertEqual(len(self.bodies("buy")), 1)
 
+    def test_it_starts_only_once_the_practice_accounts_earlier_proofs_passed(self):
+        """One proof at a time on the practice account: the options route's paper proofs first."""
+        done = []
+        self.proof = StockPaperProof(self.state, self.paper, clock=self.clock, after=lambda: bool(done))
+        row = self.step(MONDAY, 9, 31)
+        self.assertEqual(self.paper.sent, [])
+        self.assertIn("one proof at a time", row["why"])
+        done.append(True)
+        self.step(MONDAY, 9, 32)
+        self.assertEqual(len(self.bodies("buy")), 1)
+
     def test_an_unfilled_buy_is_cancelled_at_the_entry_cut_off_and_tried_again_at_the_next_open(self):
         self.paper.stock_fill = "none"
         self.step(MONDAY, 9, 31)

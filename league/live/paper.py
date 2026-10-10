@@ -440,11 +440,15 @@ class StockPaperProof:
     stop until it passes); `passed()` is both; `status()` for the health page."""
 
     def __init__(self, state: LiveState, account: Account, *, record: Callable[..., Any] | None = None,
-                 clock: Callable[[], float] | None = None, alert: Callable[[str, str], Any] | None = None):
+                 clock: Callable[[], float] | None = None, alert: Callable[[str, str], Any] | None = None,
+                 after: Callable[[], bool] | None = None):
         self.state, self.account = state, account
         self.record = record or (lambda *a, **k: None)
         self.alert = alert or (lambda *a, **k: None)
         self.clock = clock or time.time
+        #: Whether the practice account's earlier proofs (the options route's `PaperProof`s) have passed: ONE PROOF AT A
+        #: TIME on the practice account, the options route's first; a new attempt starts only then (None: no wait).
+        self.after = after
         self.key = STOCK_KEY
 
     def _row(self) -> dict:
@@ -652,6 +656,9 @@ class StockPaperProof:
         opened = window is not None and float(window.open_send) <= now
         if status == "waiting":
             if not opened or row.get("tried_day") == today.isoformat() or now >= float(window.entry_until):
+                return row
+            if self.after is not None and not self.after():
+                row["why"] = "waiting for the options route's paper proofs on the practice account (one proof at a time)"
                 return row
             _, ask = self._quote(market)
             limit = (ask * (1 + Decimal(STOCK_COLLAR_BP) / 10000)).quantize(CENT, rounding=ROUND_UP)

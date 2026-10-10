@@ -34,7 +34,7 @@ LANES = E.LANES
 #: the venue keeps nine places of a fractional share.
 SHARE_TOLERANCE = Decimal("1e-9")
 ZERO = Decimal(0)
-#: The open risk weight of a class when the money table carries no equity block (a hand-built table): the whole mark
+#: The `open_risk_weight` of a class when the money table carries no equity block (a hand-built table): the whole mark
 #: value (fail closed: an equity lot is never free of the shared loss budget).
 FULL_WEIGHT = Decimal(1)
 #: Why the equity book cannot be read (`frozen`, `real_block`): no new real open in either lane until it can.
@@ -115,7 +115,9 @@ def build_book(live: Any) -> Any | None:
         from .paper import StockPaperProof
 
         families = EquityFamilies(live.root) if isinstance(live.families, SwarmFamilies) else MemoryEquityFamilies()
-        proof = (StockPaperProof(live.state, live.paper, record=live.record, clock=live.clock, alert=live.alert)
+        earlier = tuple(p for p in (getattr(live, "proof", None), getattr(live, "proof_single", None)) if p is not None)
+        proof = (StockPaperProof(live.state, live.paper, record=live.record, clock=live.clock, alert=live.alert,
+                                 after=lambda: all(p.passed() for p in earlier))
                  if getattr(live, "paper", None) is not None else None)
         return EquityBook(live.state, live.real, live.market, table, families, decider=live.decider, stock_proof=proof,
                           sizing_equity=live.sizing_equity, options_book=live.book, root=live.root, clock=live.clock,

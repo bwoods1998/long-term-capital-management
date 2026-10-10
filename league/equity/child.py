@@ -6,16 +6,17 @@ side). `state` is this kind's own dict in the child (its runners keyed by instan
 with the child (the parent then reloads every loaded instance before its next request, as for options programs).
 
 OPS:
-- "load"   {key, code, params, name, timeout, max_errors} -> {ok, needs, sha, run_sha} (an `EquityRunner` kept at
-           state["runners"][key]); {ok: False, refused: True, error} when the program does not load;
+- "load"   {key, code, params, name, timeout, max_errors} -> {ok, needs, sha, run_sha, params} (an `EquityRunner`
+           kept at state["runners"][key]; `params` the program's merged PARAMS, the live ctx's: I6); {ok: False,
+           refused: True, error} when the program does not load;
 - "drop"   {key} -> {ok};
 - "decide" {jobs: [{key, inputs: league.equity.ctx.Inputs}]} -> {ok, results: {key: {intents, stats, ctx_sha}}}: the
            ctx is `league.equity.ctx.build(inputs)`, exactly the Gym's (I6), and `ctx_sha` the sha256 of its
            `ctx_bytes` (the decision's provenance), taken BEFORE the program sees the ctx; a key with no loaded runner
            answers {intents: [], stats: None, missing: True}, and inputs the ctx cannot be built from {intents: [],
            stats, error} (that job only: the rest of the batch goes on);
-- "needs"  {code, params, name} -> {ok, needs, sha, run_sha} (load, read NEEDS, drop: the parent never executes a
-           program to learn what to slice);
+- "needs"  {code, params, name} -> {ok, needs, sha, run_sha, params} (load, read NEEDS, drop: the parent never
+           executes a program to learn what to slice);
 - "run"    {code, params, name, bars: league.equity.store.Bars, k, capital} -> {ok, result}
            (`league.equity.runner.run_bars`: Train, Validation, the sealed look and the screen's Train-era runs).
 
@@ -26,6 +27,7 @@ league/equity/kinds.py `RUNTIME`).
 from __future__ import annotations
 
 import hashlib
+import json
 from typing import Any, Mapping
 
 OPS = ("load", "drop", "decide", "needs", "run")
@@ -39,7 +41,11 @@ def _load(payload: Mapping[str, Any]) -> Any:
 
 
 def _identity(program: Any) -> dict[str, Any]:
-    return {"ok": True, "needs": program.needs.as_dict(), "sha": program.sha, "run_sha": program.run_sha}
+    """The loaded program's answer: its NEEDS, shas and MERGED PARAMS (its declaration with the overrides): the House
+    builds the live ctx with them (league/equity/live.py `_inputs`), as the Gym's engine does (`program.params`), so a
+    program reads the same `ctx.params` live and in replay (I6)."""
+    return {"ok": True, "needs": program.needs.as_dict(), "sha": program.sha, "run_sha": program.run_sha,
+            "params": json.loads(json.dumps(program.params))}
 
 
 def _decide(payload: Mapping[str, Any], runners: Mapping[str, Any]) -> dict[str, Any]:
