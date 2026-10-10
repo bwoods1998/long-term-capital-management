@@ -91,7 +91,8 @@ bought before a rollback stays on the account and is closed by an ordinary sale 
 ## The no-captain automations (Oct 10, 2026): `feat/no-captain`, not deployed
 
 Built on `feat/no-captain`, not deployed: one gateway deploy, then one owner deploy (`league/ops/budget.py`,
-`league/ops/budget_refresh.py` (new), `league/ops/registry.py`, `league/ops/stall.py`; `gateway/lib/email.mjs`).
+`league/ops/budget_refresh.py` (new), `league/ops/registry.py`, `league/ops/stall.py`; `gateway/lib/email.mjs`,
+`gateway/lib/gate.mjs`).
 Nothing in `league/swarm/`, `league/live/`, `league/gym/` or `league/constitution.py`; no evidence rule moves.
 
 - **Why.** The owner's Done needs "research runs 24/7 at budget with no captain" (DONE-RULE item 7, read by
@@ -109,7 +110,11 @@ Nothing in `league/swarm/`, `league/live/`, `league/gym/` or `league/constitutio
   next loop), and `budget_refresh` reads the meters every hour, writing `budget.json` only when it raises a meter or
   sets a day's first figure. It never lowers a figure, never writes a meter it could not read (the full job's runs
   fail closed, as before), and sends no notice; with no usable file (none, another rule's after a deploy, stale) it is
-  the full job, so a deploy that changes the rule no longer waits for 00:30Z or a run by hand. What it does not fix:
+  the full job, so a deploy that changes the rule no longer waits for 00:30Z or a run by hand. A raise is never bought
+  by a fallback: the day's figure keeps the fixed cost and reserve it was set or last raised on (`fixed_usd_day`,
+  `reserve_usd`), and a raise is computed on the larger of those and the reading's own, so a failed box-spend read
+  (fixed cost back to `guard.house_burn_usd_day`) raises nothing. The figure also keeps the day's first figure and
+  every raise (`set_usd_day`, `raises`), which `underspend` prices hour by hour. What it does not fix:
   a day whose first run tapered is still a taper day for item 7 (every `budget` receipt of the day must say
   `ceiling`); only a top-up before the taper saves it.
 - **The births jam and the birth yield** (`stall.py`). From the `swarm.architect` events (`architect_tally`): a jam
@@ -119,40 +124,62 @@ Nothing in `league/swarm/`, `league/live/`, `league/gym/` or `league/constitutio
   the new `birth_yield` cause (INFO) stands earlier: over 3 h at least 4 passes asked a model and bore at most 1, or the
   card checks refused 80% of their proposals, or no birth in 2 h while 3 passes wanted one. Its numbers count the
   refusals by kind, the incomplete cards' top fields and the rebirth rows pointed at. Nothing loosens the graveyard or
-  the card rule by itself. Oct 10 15:41-16:22Z (births 0/0/0 under agenda v21.4) would have been an owner notice at
-  the first stall run after the jam's sixth hour, and `birth_yield` would have stood once two hours passed with no
-  birth (INFO: told in the next notice of either kind).
+  the card rule by itself. Only a jam a setting or an agenda clears is the owner's step (incomplete cards, the rebirth
+  rule, a spent lineage, a cap, no open cell, cut answers); failed model calls (a provider's outage, a poll's timeout)
+  heal by themselves and stand as the jam's INFO. The captain caught the graveyard wall of Oct 10 15:41-16:22Z (births
+  0/0/0 under agenda v21.4) inside 41 minutes and reverted it at 16:24:59Z; none of these causes would have stood that
+  soon. With nobody reading, `birth_yield` would have stood after two dry hours (INFO, mailed at once as a new cause)
+  and the jam would have been the owner's notice after six.
 - **The swarm's alerts reach the owner** (`stall.py` `swarm_alerts`). Sixteen kinds of `swarm.status` alerts
   (`reader_cut`, `agenda_guard`, `gate_coverage`, `gate_missing_data`, `train_span_pending`, `look_failed_three_times`,
   `game_waits`, `policy_layer`, ...) went only to the swarm's record and the private ledger: the captain found the Sail
-  reviewer cutting 4 of 6 gate reviews (a lineage's one try lost) by hand. The cause lists each kind of the last 12 h
-  with its count, last time and own sentence; the kinds only a setting or a fix clears carry the owner's step
-  (`ALERT_STEPS`), the rest are INFO, and a Sail window's fallback (`sail_window_stall`) and the funding watch's cliff
-  never stand by themselves.
+  reviewer cutting 4 of 6 gate reviews (a lineage's one try lost) by hand. The cause lists each kind with its count,
+  last time and own sentence; the kinds only a setting or a fix clears carry the owner's step (`ALERT_STEPS`), read
+  from the state where the swarm keeps it (`stall.alert_states`): `reader_cut` while it fired this UTC day and
+  `gate.review_max_output_tokens` is no higher than the cap it met; `agenda_guard`, `policy_layer`,
+  `train_span_pending` and `game_waits` from the settings as the swarm loads them; `gate_coverage` from the pool's
+  record of the configured gate image; `train_span_mismatch` and `gate_missing_data` while their latest alert (7 days
+  back) names the configured image. The swarm raises most of these once, so a kind stands while its condition does
+  whatever its alert's age, and clears at the next stall run once it is fixed (a fix before midnight does not fail the
+  next day). `look_failed_three_times` is not read: an owner step on the UTC day it fired only. The rest are INFO over
+  12 h, and a Sail window's fallback (`sail_window_stall`) and the funding watch's cliff never stand by themselves.
 - **Research under its budget, and the settings that bind it** (`stall.py` `underspend`, INFO). Item 7 reads a day with
   no taper as at budget, so a `swarm.json` pin under what the dollars buy was invisible (Oct 9: `gym.max_boxes` 2 under
-  the budget's 7, half the paid Gym idle). The cause stands when a meter's booked research today is under 70% of what its
-  day's figure buys by now at the guard's even pace (a top-up raise counted from its hour; read from 6 h into the day,
-  not while the guard braked 2 h or more), or when two settings cannot both hold. It names every setting that binds
-  (`settings_binds`): a cap under the budget's knob (`gym.max_boxes`, `researcher.sail_usd_per_hour`,
-  `population.ceiling`, a slower `architect.every_seconds`, `population.start` under the ceiling), a conflict
-  (`architect.max_alive_per_class` times the direction lane's classes under `dlane.max_alive`: the class cap binds the
-  lane first; an architect Claude line above 0 but under one call's $2 hold), and a value under the code's default
-  (`researcher.dormant_cycles`, `architect.max_refill`). The committed `policy.json` itself holds the class-cap conflict
-  (12 against 24, one class), so expect `underspend` to stand until a setting changes.
+  the budget's 7, half the paid Gym idle). The cause stands when Sail's booked research today is under 70% of what its
+  day's figure buys by now at the guard's even pace (each top-up raise counted from its hour; read from 6 h into the
+  day, not while the guard braked 2 h or more), or when two settings that cannot both hold bind. Claude's reading is
+  said beside it but never stands by itself: its figure is spent by its roles' calls as the gate and the strategist
+  have work (the release sets the architect's and the researchers' lines to 0), never at an even pace. It names every
+  setting that binds (`settings_binds`): a cap under the budget's knob (`gym.max_boxes`,
+  `researcher.sail_usd_per_hour`, `population.ceiling`, a slower `architect.every_seconds`, `population.start` under
+  the ceiling), a conflict (`architect.max_alive_per_class` times the direction lane's classes under
+  `dlane.max_alive`: the class cap binds the lane first; an architect Claude line above 0 but under one call's $2
+  hold), a value under the release's own (`researcher.dormant_cycles`, `architect.max_refill` under what `policy.json`
+  sets: the release's own 12 and 6 are no drift), and the Claude lines at 0. The committed `policy.json` itself holds
+  the class-cap pair (12 against 24, one class): it is named, and stands by itself only once the architect's passes of
+  the last 6 h met the class cap (`lane_class_capped`); the architect-line conflict always stands.
 - **Item 7.** The jam's owner step and the `swarm_alerts` owner kinds are owner steps, so a day on which one stood fails
   item 7 ("an owner step waiting"): such a day needed a human. `birth_yield` and `underspend` are INFO and fail nothing.
+- **The notice's pace.** A stall needing nothing from the owner was mailed at most once a day after the last notice of
+  either kind, so one cause standing for days held every new one back up to a day (`birth_yield`'s early warning among
+  them). Now a cause no notice told in the last 24 hours is mailed at once (`stall.json` `mail.told`), the same causes
+  at most once a day; the gateway keys such a notice on its causes (`stall:info:<causes>`, 24 h) instead of one
+  `stall:info` key.
 - **Deploy order.** (1) The gateway (`cd gateway && npm run deploy`): `gateway/lib/email.mjs` has the words for
-  `birth_yield`, `swarm_alerts` and `underspend`; a cause it does not know makes the whole stall notice a 400 (nothing
-  mailed), so the gateway goes first. (2) One owner deploy of the House at the branch head. The runner starts
-  `budget_refresh` from the deploy (a new job is never `missed` for the days before it).
+  `birth_yield`, `swarm_alerts` and `underspend` and the `stall:info:<causes>` key (`gateway/lib/gate.mjs` keeps it
+  24 h); a cause it does not know makes the whole stall notice a 400 (nothing mailed), and an older gateway answers a
+  new cause's notice as a duplicate of the day's `stall:info` (tried again each run until the day is out), so the
+  gateway goes first. (2) One owner deploy of the House at the branch head. The runner starts `budget_refresh` from the
+  deploy (a new job is never `missed` for the days before it).
 - **Verify after the deploy** (read-only): an `ops.sqlite` `budget_refresh` receipt at the House's start and every hour
   at :35 (`written` false with its `why` on a quiet hour); the next `stall` receipt's `checks` has `birth_yield`,
-  `swarm_alerts` and `underspend` with their numbers; after the next top-up, `budget.json`'s
+  `swarm_alerts` and `underspend` with their numbers (`underspend` `conflicts_binding` 0 on the release's settings);
+  `stall.json` `mail.told` after the next notice; after the next top-up, `budget.json`'s
   `meters.<meter>.day_figure.raised_from` within the hour and the swarm's `budget.knobs` following it.
 - **Rollback.** The previous House release: its `budget` job reads the raised `day_figure` as the day's figure (the
-  extra keys are ignored), its stall job ignores the new causes in `stall.json`, and the runner never starts the
-  unknown `budget_refresh` job. The gateway's extra words are harmless to an older House.
+  extra keys are ignored), its stall job ignores the new causes and `mail.told` in `stall.json`, and the runner never
+  starts the unknown `budget_refresh` job. The gateway's extra words are harmless to an older House, which mails a
+  stall needing nothing once a day by its own pace whatever key the gateway keeps.
 
 ## The always-in card (Oct 10, 2026): `fix/always-in-v2`, not deployed
 
@@ -2370,10 +2397,10 @@ and `data/nightly.stop`), all read-only, and names a stall by its cause:
 | `dlane` (weekend fixes) | `<state>/dlane-report.json` carries a warning-level alarm (A1-A7, PL1, PT1, K5), or it is older than 30 h while the lane is on (the `dlane` job stopped). With `dlane.mode` "off" the report is not read at all (the job writes none, so the last one would otherwise be mailed for good) | K5 holding: "the direction lane reads shadow while K5 holds ...: read its losses, then clear it"; K5 disarmed: "take dlane.k5_clear out of swarm.json"; none for the rest |
 | `done` (weekend fixes) | a FINAL Done checkpoint holds (the report's `done.<meter>.checkpoints`, final and holding: frozen from report to report) that no SENT notice has told yet (`stall.json` `done_told`, added to only when the gateway says it sent the notice). Not read with the lane off. Until the review of the weekend fixes it read the report's A8, which one report says once, so a House start or a failed notice before the next stall run lost the claim | an owner LINE, told at once: "Done holds at a FINAL checkpoint ...: read the claim in dlane-report.json". News, never an owner step waiting: the Done meter's item 7 does not count it |
 | `preopen` (weekend fixes) | the latest pre-open receipt (`ops.sqlite`, at most 24 h old) failed a check, or the job failed or was missed | none: each FAIL is a House warning, and the checks run again before the next open |
-| `births`, the jam (no-captain, Oct 10) | no birth for 6 h while at least 4 architect passes wanted births (asked a model, found no cell, or failed; a pass at the ceiling wants none), the population under its ceiling | at once: "the architect wanted births in N passes over the last 6 h and none was born:" and the lever for the main way they bore nothing (incomplete cards and the fields they lack, the rebirth rule's refuted cells, a spent lineage, a cap, no open cell, failed or cut answers) |
+| `births`, the jam (no-captain, Oct 10) | no birth for 6 h while at least 4 architect passes wanted births (asked a model, found no cell, or failed; a pass at the ceiling wants none), the population under its ceiling | at once when a setting or an agenda clears the main way they bore nothing: "the architect wanted births in N passes over the last 6 h and none was born:" and its lever (incomplete cards and the fields they lack, the rebirth rule's refuted cells, a spent lineage, a cap, no open cell, cut answers); none (INFO) for failed calls, an empty answer or another refusal |
 | `birth_yield` (no-captain) | over the last 3 h at least 4 passes asked a model and bore at most 1, or the card checks refused 80% of their proposals; or no birth in 2 h while 3 passes wanted one (from the `swarm.architect` events) | none (INFO); the jam above is the owner's step |
-| `swarm_alerts` (no-captain) | a `swarm.status` alert (`alert` true) in the last 12 h, but the self-healing ones (`sail_window_stall`, `funding_alert`) alone | for `reader_cut`, `agenda_guard`, `policy_layer`, `train_span_pending`, `train_span_mismatch`, `gate_missing_data`, `gate_coverage`, `look_failed_three_times`, `game_waits`: the setting or fix each names (`stall.ALERT_STEPS`); none for the rest |
-| `underspend` (no-captain) | a meter's booked research today under 70% of what its day's figure buys by now at an even pace (from 6 h into the day, the guard braked under 2 h of it), or two settings that cannot both hold (`settings_binds` conflicts); the settings that bind research are named either way | none (INFO): the settings named are the owner's to change |
+| `swarm_alerts` (no-captain) | an owner kind whose condition stands now (`stall.alert_states`, from the swarm's settings and store, whatever its alert's age), or a `swarm.status` alert (`alert` true) in the last 12 h whose condition is not read or cleared, but the self-healing ones (`sail_window_stall`, `funding_alert`) alone | for `reader_cut`, `agenda_guard`, `policy_layer`, `train_span_pending`, `train_span_mismatch`, `gate_missing_data`, `gate_coverage`, `game_waits` while their condition stands, and `look_failed_three_times` on the UTC day it fired: the setting or fix each names (`stall.ALERT_STEPS`); none for the rest |
+| `underspend` (no-captain) | Sail's booked research today under 70% of what its day's figure buys by now at an even pace (from 6 h into the day, the guard braked under 2 h of it; Claude's reading is said, never a cause), or two settings that cannot both hold while they bind (`settings_binds` conflicts: the class cap once a direction card met it in the last 6 h); the settings that bind research are named either way | none (INFO): the settings named are the owner's to change |
 | `forward` (weekend fixes) | the nightly's ready file (`gym-forward.json`) does not carry the last session before today once the UTC day is 10 h in; `data/nightly.json` has carried an error 6 h or more (from the first run that saw it, kept in `stall.json`); or `data/nightly.stop` has stood 2 h or more | for a stop: "remove /workspace/state/data/nightly.stop ... the nightly forward replay, and with it the Done meter's replay twins, waits while it stands"; none for the rest |
 
 **The notice.** One `POST /v1/notify` kind `stall` a run at most, through the budget's own gateway client, listing
@@ -2523,10 +2550,12 @@ earned     = 0.5 × max(0, p30) / 30         written, inside the ceiling: it lif
   model, and the audit too unless its hold is at most $1, each with the gate's "not the plan's reviewer" alert.
 - **The top-up raise** (the no-captain automations, Oct 10, not deployed). A later run of the day whose own reading
   would set more than the day's figure raises it to that reading's (raise-only, never above the ceiling, nothing added
-  back; `day_figure.raised_from` and `raised_at`), so a top-up reaches the day's research, the knobs and the guard's caps
-  within the hour: the `budget_refresh` job reads the meters hourly and at each House start and writes `budget.json`
-  only to raise a meter or set a day's first figure. A day whose first run tapered still reads as a taper day for
-  DONE-RULE item 7.
+  back; `day_figure.raised_from` and `raised_at`, with the day's first figure and every raise, `set_usd_day` and
+  `raises`), so a top-up reaches the day's research, the knobs and the guard's caps within the hour: the
+  `budget_refresh` job reads the meters hourly and at each House start and writes `budget.json` only to raise a meter
+  or set a day's first figure. A raise is computed on the larger of the reading's fixed cost and reserve and those the
+  day's figure was set on (`day_figure.fixed_usd_day`, `reserve_usd`): a fallback reading never raises. A day whose
+  first run tapered still reads as a taper day for DONE-RULE item 7.
 - **The taper is the rule.** A meter runs at its share of the ceiling while it holds 5 days of it above its reserve
   and 5 days of its fixed cost; under that it spends a fifth a day of what it holds above them, so research tapers by
   itself and ends before the balance meets the Sail guard's brake. A cut shows in `budget.json` (`limited_by`:

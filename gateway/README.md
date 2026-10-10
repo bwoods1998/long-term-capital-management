@@ -371,7 +371,9 @@ constant changes only by a gateway deploy):
   lower-case token, else `unknown`), how long it has stood (`hours`, `since`) and what the House is doing about it. The
   router keys the dedupe itself (`stallKey`), whatever id the House sends: `stall:owner:<the owner causes, sorted,
   joined by +>`, remembered 12 hours, so a new owner step is mailed at once and the same ones at most every 12 hours;
-  `stall:info` when none needs the owner, remembered 24 hours. `NOTIFY_MAX_PER_DAY` holds for stalls too.
+  `stall:info:<every cause, sorted, joined by +>` when none needs the owner, remembered 24 hours, so the same causes are
+  mailed at most once a day and a new one at once (Oct 10, 2026: one cause standing for days had held every new one back
+  up to a day). `NOTIFY_MAX_PER_DAY` holds for stalls too.
 - **`ENGINEER_HELD`** (`lib/github.mjs`, the self-running release): `league/swarm/researcher.py` and
   `league/swarm/claude_research.py`, the research lane's files the live path loads, are refused to every engineer
   proposal and merge (`outside_surface`, "held from the engineer in this release"), as the House's engineer holds them

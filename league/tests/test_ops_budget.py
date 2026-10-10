@@ -203,7 +203,8 @@ class Rule(unittest.TestCase):
         it would have set."""
         morning_at, evening_at = at(2026, 10, 20, 0, 30), at(2026, 10, 20, 20, 10)
         morning = B.compute(inputs(sail=80.0), now=morning_at)
-        figure = {"day": "2026-10-20", "usd_day": 12.5, "limited_by": "runway", "set_at": "2026-10-20T00:30:00Z"}
+        figure = {"day": "2026-10-20", "usd_day": 12.5, "limited_by": "runway", "set_at": "2026-10-20T00:30:00Z",
+                  "fixed_usd_day": 1.5, "reserve_usd": 10.0}  # and the fixed cost and reserve it was set on
         sail = morning["meters"]["sail"]
         self.assertEqual((sail["research_usd_day"], sail["would_set_usd_day"], sail["limited_by"], sail["day_figure"]),
                          (12.5, 12.5, "runway", figure), "the first run of the day sets it: (70 - 5 x 1.5) / 5")
@@ -230,7 +231,7 @@ class Rule(unittest.TestCase):
         sail = tomorrow["meters"]["sail"]
         self.assertEqual((sail["research_usd_day"], sail["would_set_usd_day"], sail["direction"]), (10.05, 10.05, "cut"))
         self.assertEqual(sail["day_figure"], {"day": "2026-10-21", "usd_day": 10.05, "limited_by": "runway",
-                                              "set_at": "2026-10-21T00:30:00Z"})
+                                              "set_at": "2026-10-21T00:30:00Z", "fixed_usd_day": 1.5, "reserve_usd": 10.0})
         # A meter no run of the day has read yet is set by the first run that reads it.
         blind = B.compute(inputs(sail=None), now=morning_at)
         self.assertIsNone(blind["meters"]["sail"]["day_figure"])
@@ -267,8 +268,9 @@ class Rule(unittest.TestCase):
         self.assertEqual((sail["research_usd_day"], sail["would_set_usd_day"], sail["limited_by"], sail["added_back_usd"]),
                          (17.5, 17.5, "runway", 0.0), "(95 - 7.5) / 5, from the reading as it stands")
         self.assertEqual(sail["day_figure"], {"day": "2026-10-20", "usd_day": 17.5, "limited_by": "runway",
-                                              "set_at": "2026-10-20T00:30:00Z", "raised_from": 12.5,
-                                              "raised_at": "2026-10-20T14:35:00Z"})
+                                              "set_at": "2026-10-20T00:30:00Z", "fixed_usd_day": 1.5, "reserve_usd": 10.0,
+                                              "raised_from": 12.5, "raised_at": "2026-10-20T14:35:00Z", "set_usd_day": 12.5,
+                                              "raises": [{"at": "2026-10-20T14:35:00Z", "from": 12.5, "to": 17.5}]})
         self.assertEqual((part["direction"], sail["direction"]), ("raise", "raise"))
         self.assertIn("sail: the top-up raise: today's figure 12.5000 is raised to this run's reading, 17.5000 a day "
                       "(runway); a raise only, never above the ceiling", part["why"])
@@ -279,6 +281,12 @@ class Rule(unittest.TestCase):
         self.assertEqual((sail["research_usd_day"], sail["limited_by"], sail["day_figure"]["usd_day"],
                           sail["day_figure"]["raised_from"], sail["day_figure"]["set_at"]),
                          (20.0, "ceiling", 20.0, 17.5, "2026-10-20T00:30:00Z"))
+        # The day keeps its first figure and every raise (the stall job's underspend prices each hour at the figure then).
+        self.assertEqual((sail["day_figure"]["set_usd_day"], sail["day_figure"]["raises"]),
+                         (12.5, [{"at": "2026-10-20T14:35:00Z", "from": 12.5, "to": 17.5},
+                                 {"at": "2026-10-20T14:45:00Z", "from": 17.5, "to": 20.0}]))
+        self.assertEqual(B.compute(inputs(sail=560.0), now=evening_at + 3600, previous=full)["meters"]["sail"]["day_figure"],
+                         sail["day_figure"], "carried as it is by a run that raises nothing")
         # Never lowered after: a reading that has spent since sets less, and the raised figure stands.
         spent = B.compute(inputs(sail=560.0), now=evening_at + 3600, previous=full)
         self.assertEqual((spent["meters"]["sail"]["research_usd_day"], spent["meters"]["sail"]["day_figure"]["raised_from"]),
@@ -302,6 +310,41 @@ class Rule(unittest.TestCase):
         self.assertNotIn("raised_from", B.compute(inputs(sail=560.0), now=evening_at + 3600, previous=odd)["meters"]["sail"]
                          ["day_figure"])
 
+    def test_a_raise_is_never_bought_by_a_fallback_reading(self):
+        """A RAISE IS NEVER BOUGHT BY A FALLBACK (the review of the no-captain build, Oct 10, 2026). When Sail's box spend
+        cannot be read, its fixed cost falls back to `guard.house_burn_usd_day` (at or under the measured cost) and the
+        guard's release line moves with it: such a reading has more room on the same money. A raise from it would hold
+        for the rest of the day; it is computed on the day's own fixed cost and reserve instead."""
+        morning_at, read_fail, topped_at = at(2026, 10, 20, 0, 30), at(2026, 10, 20, 10, 35), at(2026, 10, 20, 12, 35)
+        morning = B.compute(inputs(sail=100.0, fixed=2.5, reserve=37.0), now=morning_at)
+        sail = morning["meters"]["sail"]
+        self.assertEqual((sail["research_usd_day"], sail["limited_by"], sail["day_figure"]["fixed_usd_day"],
+                          sail["day_figure"]["reserve_usd"]), (10.1, "runway", 2.5, 37.0), "(100 - 37 - 5 x 2.5) / 5")
+        # 10:35Z: the box spend did not read; the fallback fixed cost 1.0 (and a release line 2 lower on it) would set
+        # 11.32 from a balance that has only spent. Nothing is raised: today's figure stands, and the refresh writes nothing.
+        fallback = B.compute(inputs(sail=96.6, fixed=1.0, reserve=35.0), now=read_fail, previous=morning)
+        sail = fallback["meters"]["sail"]
+        self.assertEqual((sail["research_usd_day"], sail["would_set_usd_day"], sail["day_figure"].get("raised_from")),
+                         (10.1, 11.32, None))
+        self.assertEqual(B.refresh_changes(morning, fallback, read_fail)[0], {})
+        # 11:35Z: read again: the reading would set less, and the figure stands as before.
+        again = B.compute(inputs(sail=95.5, fixed=2.5, reserve=37.0), now=read_fail + 3600, previous=fallback)
+        self.assertEqual(again["meters"]["sail"]["research_usd_day"], 10.1)
+        # A real top-up raises, on the day's own fixed cost and reserve even when this reading falls back.
+        topped = B.compute(inputs(sail=150.0, fixed=1.0, reserve=35.0), now=topped_at, previous=again)
+        sail = topped["meters"]["sail"]
+        self.assertEqual((sail["research_usd_day"], sail["day_figure"]["raised_from"], sail["day_figure"]["fixed_usd_day"],
+                          sail["day_figure"]["reserve_usd"]), (20.0, 10.1, 2.5, 37.0), "(150 - 37 - 12.5) / 5 = 20.1: the ceiling")
+        part = B.compute(inputs(sail=120.0, fixed=1.0, reserve=35.0), now=topped_at, previous=again)["meters"]["sail"]
+        self.assertEqual((part["research_usd_day"], part["would_set_usd_day"]), (14.1, 16.0),
+                         "(120 - 37 - 12.5) / 5, not the fallback's (120 - 35 - 5) / 5")
+        # A figure written before the floors were kept reads them from the file's own row.
+        legacy = copy.deepcopy(morning)
+        for key in ("fixed_usd_day", "reserve_usd"):
+            legacy["meters"]["sail"]["day_figure"].pop(key)
+        self.assertEqual(B.compute(inputs(sail=96.6, fixed=1.0, reserve=35.0), now=read_fail, previous=legacy)
+                         ["meters"]["sail"]["research_usd_day"], 10.1)
+
     def test_a_late_first_run_of_the_day_adds_back_what_the_day_already_paid(self):
         """THE DAY'S FIRST RUN ADDS BACK WHAT THE DAY ALREADY PAID. A first run that comes late (the 00:30 run missed, a
         deploy in the evening) reads a balance that has paid for part of the day's research: computed from that reading
@@ -323,7 +366,7 @@ class Rule(unittest.TestCase):
         self.assertEqual((sail["research_usd_day"], sail["limited_by"], sail["added_back_usd"], sail["would_set_usd_day"]),
                          (11.6, "runway", 10.84, 11.6), "the cap a first run at 00:30 would have set")
         self.assertEqual(sail["day_figure"], {"day": "2026-10-20", "usd_day": 11.6, "limited_by": "runway",
-                                              "set_at": "2026-10-20T20:10:00Z"})
+                                              "set_at": "2026-10-20T20:10:00Z", "fixed_usd_day": 1.0, "reserve_usd": 37.0})
         self.assertIn("sail: the day's first run: the 10.8400 the meter has paid since 00:00 UTC is added back (the day's "
                       "figure is from the balance as the day began)", doc["why"])
         # The control: the same reading with nothing added back is under the 10.00 the day has booked.

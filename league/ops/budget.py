@@ -43,10 +43,19 @@ day's figure to that reading's own: today's research, the knobs and the guard's 
 raises (a reading that would set less leaves the figure as it is, as above), never above the meter's share of the
 ceiling, and from the reading as it stands (nothing added back: that reading has paid for the day so far, so the raise
 is never more than a first run of the day on the topped-up balance would have set). The day's figure records the
-figure it replaced and when (`raised_from`, `raised_at`; `set_at` stays the first run's). A raise does not undo the
-day's earlier receipts: a day whose first run tapered is still a taper day for DONE-RULE item 7. The House reads a
-top-up within the hour: the `budget_refresh` job (`refresh`, hourly and at the House's start) runs this same rule and
-writes budget.json only when it raises a meter or sets a day's figure no run has set yet.
+figure it replaced and when (`raised_from`, `raised_at`, the last raise; `set_usd_day`, the day's first figure, and
+`raises`, each raise's time and figures, so the stall job's `underspend` prices every hour of the day at the figure
+that held then; `set_at` stays the first run's). A raise does not undo the day's earlier receipts: a day whose first
+run tapered is still a taper day for DONE-RULE item 7. The House reads a top-up within the hour: the `budget_refresh`
+job (`refresh`, hourly and at the House's start) runs this same rule and writes budget.json only when it raises a meter
+or sets a day's figure no run has set yet.
+
+A RAISE IS NEVER BOUGHT BY A FALLBACK (the review of the no-captain build, Oct 10, 2026). Sail's fixed cost falls back to
+`guard.house_burn_usd_day` when the box spend cannot be read, and its reserve (the guard's release line) moves with it:
+a reading made on a lower fallback has more room, and a raise from it would hold for the rest of the day. So the day's
+figure keeps the fixed cost and the reserve it was set or last raised on (`fixed_usd_day`, `reserve_usd`; from the last
+file's row for a figure written before them), and a raise is computed on the larger of those and this reading's own:
+only more money, never a cheaper reading of the same money, raises the day's figure.
 
 THE DAY'S FIRST RUN ADDS BACK WHAT THE DAY ALREADY PAID. When the first run of a UTC day comes late (the 00:30 run
 missed, a deploy in the evening, a meter no earlier run could read), its reading has already paid for part of the day's
@@ -300,6 +309,8 @@ ARCHITECT_IDLE_SECONDS = 86400
 BUDGET_FILE = "budget.json"
 NOTICES_FILE = "budget-notices.json"
 EPSILON = 0.005
+#: THE TOP-UP RAISE: the raises of a day a day's figure keeps (`raises`; the refresh runs hourly, so a day has at most 25).
+RAISES_KEPT = 32
 
 
 # ---------------------------------------------------------------------------------------------- small helpers
@@ -489,10 +500,26 @@ def _day_figure(previous: Any, meter: str, today: dt.date) -> dict[str, Any] | N
         return None
     out = {"day": today.isoformat(), "usd_day": round(min(usd, ceiling_usd_day(meter)), 4),
            "limited_by": figure["limited_by"], "set_at": figure.get("set_at")}
-    # THE TOP-UP RAISE: the figure a raise replaced and when, carried with the day's figure.
+    # A RAISE IS NEVER BOUGHT BY A FALLBACK: the fixed cost and the reserve the figure was set or last raised on (a figure
+    # written before them: the last file's own row, the reading that wrote it).
+    for key in ("fixed_usd_day", "reserve_usd"):
+        value = _amount(figure.get(key))
+        value = _amount(row.get(key)) if value is None else value
+        if value is not None:
+            out[key] = round(value, 4)
+    # THE TOP-UP RAISE: the figure a raise replaced and when, carried with the day's figure; the day's first figure and
+    # every raise of the day (the stall job's `underspend` prices each hour at the figure that held then).
     raised_from = _amount(figure.get("raised_from"))
     if raised_from is not None and isinstance(figure.get("raised_at"), str):
         out.update(raised_from=round(raised_from, 4), raised_at=figure["raised_at"])
+        first = _amount(figure.get("set_usd_day"))
+        steps = [{"at": r["at"], "from": round(_amount(r.get("from")), 4), "to": round(_amount(r.get("to")), 4)}
+                 for r in (figure.get("raises") if isinstance(figure.get("raises"), list) else [])
+                 if isinstance(r, Mapping) and isinstance(r.get("at"), str) and _amount(r.get("from")) is not None
+                 and _amount(r.get("to")) is not None]
+        out.update(set_usd_day=round(first if first is not None else raised_from, 4),
+                   raises=steps[-RAISES_KEPT:] or [{"at": figure["raised_at"], "from": round(raised_from, 4),
+                                                    "to": out["usd_day"]}])
     return out
 
 
@@ -565,15 +592,28 @@ def compute(inputs: Mapping[str, Any], *, now: float, previous: Mapping[str, Any
         would_set = research
         raised = None
         if kept is None:
-            kept = {"day": today.isoformat(), "usd_day": round(research, 4), "limited_by": limited, "set_at": _iso(now)}
-        elif research > kept["usd_day"] + EPSILON:
-            # THE TOP-UP RAISE: this reading (nothing added back) would set more than the day's figure: the figure is
-            # raised to it, never above the ceiling (`research` is already held to it), and never lowered.
-            raised = kept["usd_day"]
-            kept = {"day": today.isoformat(), "usd_day": round(research, 4), "limited_by": limited,
-                    "set_at": kept.get("set_at"), "raised_from": raised, "raised_at": _iso(now)}
-        else:  # THE DAY'S FIGURE IS SET ONCE: this reading has paid for the day's research, and lowers nothing
-            research, limited = kept["usd_day"], kept["limited_by"]
+            kept = {"day": today.isoformat(), "usd_day": round(research, 4), "limited_by": limited, "set_at": _iso(now),
+                    "fixed_usd_day": round(fixed, 4), "reserve_usd": round(reserve, 4)}
+        else:
+            # THE TOP-UP RAISE, NEVER BOUGHT BY A FALLBACK: this reading's room (nothing added back) on the larger of its
+            # own fixed cost and reserve and those the day's figure was set or last raised on.
+            floor_fixed = max(fixed, _amount(kept.get("fixed_usd_day")) or 0.0)
+            floor_reserve = max(reserve, _amount(kept.get("reserve_usd")) or 0.0)
+            raise_cap = max(0.0, balance - floor_reserve - RUNWAY_DAYS * floor_fixed) / RUNWAY_DAYS
+            lifted = min(ceiling, raise_cap)
+            if lifted > kept["usd_day"] + EPSILON:
+                # The figure is raised to it, never above the ceiling (`lifted` is held to it), and never lowered.
+                raised = kept["usd_day"]
+                at_ = _iso(now)
+                steps = [dict(r) for r in kept.get("raises") or []]
+                research, limited = lifted, "ceiling" if raise_cap >= ceiling else "runway"
+                kept = {"day": today.isoformat(), "usd_day": round(research, 4), "limited_by": limited,
+                        "set_at": kept.get("set_at"), "fixed_usd_day": round(floor_fixed, 4),
+                        "reserve_usd": round(floor_reserve, 4), "raised_from": raised, "raised_at": at_,
+                        "set_usd_day": first if (first := _amount(kept.get("set_usd_day"))) is not None else raised,
+                        "raises": (steps + [{"at": at_, "from": raised, "to": round(research, 4)}])[-RAISES_KEPT:]}
+            else:  # THE DAY'S FIGURE IS SET ONCE: this reading has paid for the day's research, and lowers nothing
+                research, limited = kept["usd_day"], kept["limited_by"]
         rate = fixed + research
         if room <= 0:
             runway = 0.0
@@ -596,7 +636,7 @@ def compute(inputs: Mapping[str, Any], *, now: float, previous: Mapping[str, Any
         if raised is not None:
             why.append(f"{m}: the top-up raise: today's figure {raised:.4f} is raised to this run's reading, {research:.4f} "
                        f"a day ({limited}); a raise only, never above the ceiling")
-        if abs(would_set - research) > EPSILON:
+        if raised is None and abs(would_set - research) > EPSILON:
             why.append(f"{m}: today's figure stands ({research:.4f} a day, set at {kept['set_at']}); this run's reading "
                        f"would set {would_set:.4f}")
         meters[m] = row

@@ -416,7 +416,7 @@ class Telling(Base):
         self.assertEqual(len(self.notify.calls), 1)
         self.assertEqual(self.notify.causes(), ["births", "gym_runs"])
         facts = self.notify.calls[0]
-        self.assertEqual((facts["kind"], facts["notice_id"]), ("stall", "stall:info"))
+        self.assertEqual((facts["kind"], facts["notice_id"]), ("stall", "stall:info:births+gym_runs"))
         self.assertEqual(sorted(facts), ["at", "causes", "kind", "notice_id"])
         self.assertEqual(sorted(facts["causes"][0]), sorted(["cause", "what", "numbers", "since", "hours", "doing", "owner_step"]))
         self.assertEqual(len(ctx.alerts), 2)
@@ -543,6 +543,34 @@ class Telling(Base):
         self.assertEqual(ST.due_notice(["runway_sail"], ["runway_sail"], mail, NOW - HOUR), "owner", "a clock that went back")
         self.assertEqual(ST.notice_id(["runway_sail", "kill_on"]), "stall:owner:kill_on+runway_sail")
         self.assertEqual(ST.notice_id([]), "stall:info")
+        self.assertEqual(ST.notice_id([], ["underspend", "births"]), "stall:info:births+underspend")
+        self.assertEqual(ST.notice_id(["kill_on"], ["underspend", "kill_on"]), "stall:owner:kill_on")
+
+    def test_a_new_cause_needing_nothing_is_told_at_once_and_the_same_ones_once_a_day(self):
+        """The review of the no-captain build: a cause standing for days (the release's class-cap pair under the old
+        underspend) kept the 24-hour INFO pace running for good, so every new INFO cause, the early warning of
+        `birth_yield` among them, waited up to a day. A cause no notice told in the last 24 hours is told at once."""
+        self.stalled_store()
+        self.run_at()
+        self.assertEqual(self.notify.calls[-1]["notice_id"], "stall:info:births+gym_runs")
+        self.ago(1)
+        self.store.event("swarm.status", "f", {"action": "incubator_reruns_spent", "alert": True, "text": "spent"})
+        out, _ = self.run_at(now=NOW + 2 * HOUR)
+        self.assertEqual(len(self.notify.calls), 2)
+        self.assertEqual(self.notify.calls[-1]["notice_id"], "stall:info:births+gym_runs+swarm_alerts")
+        state = json.loads((self.root / ST.STATE_FILE).read_text())
+        self.assertEqual(sorted(state["mail"]["told"]), ["births", "gym_runs", "swarm_alerts"])
+        for later in (3, 12, 25.9):  # the alert's window ends at NOW + 11 h; the swarm_alerts cause clears and is not new
+            self.run_at(now=NOW + later * HOUR)
+            self.assertEqual(len(self.notify.calls), 2, later)
+        self.run_at(now=NOW + 26 * HOUR)
+        self.assertEqual(len(self.notify.calls), 3, "a day after the last notice: the same causes again")
+        # Pure: a record kept before the told map (a state file from before this release) keeps the 24-hour pace alone.
+        mail = {"info_at": ST.S.iso(NOW), "notice_id": "stall:info"}
+        self.assertIsNone(ST.due_notice(["births", "underspend"], [], mail, NOW + HOUR))
+        mail["told"] = {"births": ST.S.iso(NOW), "underspend": ST.S.iso(NOW - 25 * HOUR)}
+        self.assertEqual(ST.due_notice(["births", "underspend"], [], mail, NOW + HOUR), "info", "told over a day ago")
+        self.assertIsNone(ST.due_notice(["births"], [], mail, NOW + HOUR))
 
     def test_never_acts_it_writes_only_its_own_state_file(self):
         self.stalled_store()
@@ -738,7 +766,7 @@ class LaneAndNightly(Base):
         self.assertIn("A4: the Probe loss budget", check["what"])
         self.assertIsNone(check["owner_step"], "the House acts on these by its own rules")
         self.assertEqual(self.notify.causes(), ["dlane"])
-        self.assertEqual(self.notify.calls[-1]["notice_id"], "stall:info")
+        self.assertEqual(self.notify.calls[-1]["notice_id"], "stall:info:dlane")
 
     def test_k5_holding_or_disarmed_is_the_owners_step(self):
         self.healthy()
@@ -1030,9 +1058,13 @@ class NoCaptain(Base):
         self.assertIn("the card checks refused 32 (0 incomplete, 32 by the rebirth rule, 0 into a spent lineage); 8 met a "
                       "cap", births["what"])
         self.assertIn("births", self.notify.calls[-1]["notice_id"], "an owner notice, mailed at once")
-        # Three passes in six hours are no jam: the 12-hour INFO stands alone, as before.
-        fresh = Base.setUp
-        self.assertTrue(callable(fresh))
+        # Three passes in six hours are no jam: a birth in the last 12 h and three wanting passes raise nothing.
+        three = {"passes": 3, "asked": 3, "proposed": 30, "rebirth": 24}
+        swarm = {"alive": 2, "births": 1, "last_birth_at": ST.S.iso(NOW - 6.5 * HOUR), "yield": {"jam": three}}
+        quiet = ST.checks(swarm, now=NOW, ceiling=20, budget=None, deploy=None, heartbeat=None)["births"]
+        self.assertEqual((quiet["stalled"], quiet["owner_step"], quiet["numbers"]["jam_kind"]), (False, None, "none"))
+        swarm["yield"]["jam"] = {**three, "passes": 4, "asked": 4}
+        self.assertTrue(ST.checks(swarm, now=NOW, ceiling=20, budget=None, deploy=None, heartbeat=None)["births"]["owner_step"])
 
     def test_births_too_few_passes_or_a_pause_is_no_jam(self):
         self.healthy(birth_hours=7)
@@ -1050,6 +1082,118 @@ class NoCaptain(Base):
         os.utime(self.root / "PAUSE", (NOW - HOUR, NOW - HOUR))
         out, _ = self.run_at()
         self.assertEqual(out["stalled"], [], "a pause stops research by design: no jam, no yield")
+
+    def test_a_jam_of_failed_calls_is_no_owner_step(self):
+        """A provider's outage (the architect's calls fail: a Sail error after its fallback, a poll's timeout) heals when
+        the route answers again; the owner can do nothing about it, so six hours of it is the jam's INFO, never an owner
+        step that would fail DONE-RULE item 7 (the review of the no-captain build)."""
+        self.healthy(birth_hours=7)
+        for hours in (5.5, 4.0, 2.5, 1.0):
+            self.architect(hours, proposed=0, error="SailError: the window did not answer")
+        out, _ = self.run_at()
+        births = out["checks"]["births"]
+        self.assertTrue(births["stalled"])
+        self.assertIsNone(births["owner_step"])
+        self.assertEqual(births["numbers"]["jam_kind"], "failed")
+        self.assertIn("4 failed. No owner step: the architect's model calls fail", births["what"])
+        self.assertNotIn("births", self.notify.calls[-1]["notice_id"].partition("owner:")[2])
+        # A cut answer is the owner's (a setting clears it): the effort or the output cap.
+        self.architect(0.5, proposed=0, truncated=True)
+        self.architect(0.4, proposed=0, truncated=True)
+        self.architect(0.3, proposed=0, truncated=True)
+        self.architect(0.2, proposed=0, truncated=True)
+        cut = self.check("births")
+        self.assertEqual(cut["numbers"]["jam_kind"], "cut")
+        self.assertIn("lower architect.sail_effort or raise architect.max_output_tokens", cut["owner_step"])
+
+    def alert(self, when, action, family=None, **payload):
+        self.t = at(when)
+        self.store.event("swarm.status", family, {"action": action, "alert": True, "text": f"{action} text", **payload})
+
+    def test_swarm_alerts_an_alert_before_midnight_is_no_owner_step_the_next_day(self):
+        """The review of the no-captain build: `reader_cut` fired at 22:00Z (today's cut cap reached; the version is asked
+        again tomorrow) carried its owner step on every run of the next morning for twelve hours, so the next UTC day
+        failed DONE-RULE item 7 though the owner raised the cap at 22:05Z. Its condition is read now: the UTC day it
+        fired, and the cap it met."""
+        self.alert("2026-10-06T22:00:00Z", "reader_cut", "fam-1", stage="review", max_output_tokens=6000)
+        late = self.check("swarm_alerts", now=at("2026-10-06T22:20:00Z"))
+        self.assertEqual((late["stalled"], late["owner_step"]), (True, ST.ALERT_STEPS["reader_cut"]))
+        morning, _ = self.run_at(now=at("2026-10-07T00:20:00Z"))
+        alerts = morning["checks"]["swarm_alerts"]
+        self.assertEqual((alerts["stalled"], alerts["owner_step"], alerts["numbers"]["cleared_kinds"]), (False, None, 1))
+        self.assertIn("cleared since their alert: reader_cut", alerts["what"])
+        # The owner raises the cap the same evening: cleared at the next run, though the alert is in the window.
+        (self.root / "swarm.json").write_text(json.dumps({"gate": {"review_max_output_tokens": 12000}}))
+        fixed = self.check("swarm_alerts", now=at("2026-10-06T22:50:00Z"))
+        self.assertEqual((fixed["stalled"], fixed["owner_step"]), (False, None))
+        # A kind whose condition is not read (`look_failed_three_times`): the owner's step on its own UTC day only.
+        self.alert("2026-10-06T23:00:00Z", "look_failed_three_times", "fam-2", version=3, tries=3)
+        same = self.check("swarm_alerts", now=at("2026-10-06T23:20:00Z"))
+        self.assertEqual(same["owner_step"], ST.ALERT_STEPS["look_failed_three_times"])
+        next_day = self.check("swarm_alerts", now=at("2026-10-07T00:20:00Z"))
+        self.assertEqual((next_day["stalled"], next_day["owner_step"]), (True, None))
+        self.assertIn("look_failed_three_times x1 (last 2026-10-06T23:00:00Z; an earlier UTC day's, no owner step now)",
+                      next_day["what"])
+        # Unread states (no settings): every owner kind by the day rule.
+        pure = ST._alerts_check(at("2026-10-07T00:20:00Z"), {"reader_cut": {"n": 1, "first_at": "2026-10-06T22:00:00Z",
+                                                                             "last_at": "2026-10-06T22:00:00Z", "text": "x"}})
+        self.assertEqual((pure["stalled"], pure["owner_step"]), (True, None))
+
+    def test_swarm_alerts_a_one_shot_alert_stands_while_its_condition_does(self):
+        """The swarm raises `gate_coverage` once per lacking set, `agenda_guard` at its start, `train_span_mismatch` once a
+        key: twelve hours on the alert's window dropped them while the condition held. Read from the swarm's settings
+        and store, each stands until it is fixed, and clears at the next run once it is."""
+        self.healthy()
+        self.ago(20)
+        self.store.event("swarm.status", None, {"action": "gate_coverage", "alert": True, "image": "sbcp_gate-1",
+                                                "missing": ["QQQ"], "text": "the gate image sbcp_gate-1 holds no holdout"})
+        self.store.event("swarm.status", None, {"action": "train_span_mismatch", "alert": True, "image": "sbcp_gym-1",
+                                                "span": "2022-01-03", "image_train_first": "2020-01-02",
+                                                "text": "the Gym image starts Train at 2020-01-02"})
+        self.store.put("gate_coverage", {"sbcp_gate-1": {"roots": ["SPY", "IWM", "XSP", "SPXW"], "missing": []}})
+        settings = {"gym": {"gate_checkpoint": "sbcp_gate-1", "image_checkpoint": "sbcp_gym-1"},
+                    "dlane": {"mode": "gate"}, "architect": {"agenda_locked": "an agenda \u00e9"}}
+        (self.root / "swarm.json").write_text(json.dumps(settings))
+        out, _ = self.run_at()
+        alerts = out["checks"]["swarm_alerts"]
+        self.assertTrue(alerts["stalled"])
+        for kind in ("gate_coverage", "train_span_mismatch", "agenda_guard"):
+            self.assertIn(ST.ALERT_STEPS[kind], alerts["owner_step"], kind)
+        self.assertIn("gate_coverage (stands now): the gate image sbcp_gate-1 holds no holdout for QQQ (gym.roots)",
+                      alerts["what"])
+        self.assertIn("train_span_mismatch (stands now; last alert 2026-10-06T14:20:00Z)", alerts["what"])
+        self.assertEqual(alerts["numbers"]["owner_kinds"], 3)
+        self.assertIn("swarm_alerts", self.notify.calls[-1]["notice_id"])
+        # Fixed: another gate image, the image built for the span, an ASCII agenda: nothing stands at the next run.
+        settings = {"gym": {"gate_checkpoint": "sbcp_gate-2", "image_checkpoint": "sbcp_gym-2"},
+                    "dlane": {"mode": "gate"}, "architect": {"agenda_locked": "an agenda"}}
+        (self.root / "swarm.json").write_text(json.dumps(settings))
+        self.ago(0.5)
+        self.store.event("swarm.status", None, {"action": "agenda_guard", "alert": True, "text": "the agenda guard"})
+        alerts = self.check("swarm_alerts", now=NOW + 0.5 * HOUR)
+        self.assertEqual((alerts["stalled"], alerts["owner_step"], alerts["numbers"]["cleared_kinds"]), (False, None, 1))
+        # The state readers, pure.
+        from league.swarm import settings as SS
+
+        loaded = SS.load(self.root, config={})
+        loaded["gym"]["train_from"] = "2022-01-03"
+        facts = {"latest": {}, "kv": {"train_objective": "worst-train-year-v1@2020-01-02", "game_t0": None}}
+        states = ST.alert_states(loaded, facts, NOW)
+        self.assertTrue(states["train_span_pending"]["stands"], "gym.train_from asks 2022 while the swarm runs 2020")
+        self.assertFalse(states["reader_cut"]["stands"])
+        loaded["_policy"] = {"state": "ok", "ignored": ["enabled"]}
+        self.assertTrue(ST.alert_states(loaded, facts, NOW)["policy_layer"]["stands"])
+        from league.swarm import game
+
+        self.assertEqual((ST.GAME_T0_KEY, ST.GAME_SEEN_FROM, ST.GAME_HIDDEN_END), (game.T0_KEY, game.SEEN_FROM, game.HIDDEN[1]))
+        # The learning game waits (on, no T0, the running span shows its hidden years) as `game.cfg` reads it.
+        loaded["game"] = {"enabled": True, "seen_from": "2019-01-01"}
+        self.assertTrue(ST.alert_states(loaded, facts, NOW)["game_waits"]["stands"], "a seen span in the hidden years: 2022")
+        self.assertIn("set gym.train_from to 2022-01-03", ST.alert_states(loaded, facts, NOW)["game_waits"]["text"])
+        self.assertFalse(ST.alert_states(loaded, {**facts, "kv": {**facts["kv"], "game_t0": "2026-10-01T00:00:00Z"}},
+                                         NOW)["game_waits"]["stands"], "after T0 it is the void, not the wait")
+        loaded["game"]["enabled"] = "yes"
+        self.assertFalse(ST.alert_states(loaded, facts, NOW)["game_waits"]["stands"], "a malformed switch is off")
 
     def test_swarm_alerts_reach_the_owner(self):
         """Oct 9, 20:32Z: the Sail reviewer cut 4 of 6 gate reviews and a lineage's one try was lost; the `reader_cut`
@@ -1069,7 +1213,8 @@ class NoCaptain(Base):
         alerts = out["checks"]["swarm_alerts"]
         self.assertTrue(alerts["stalled"])
         self.assertEqual(alerts["owner_step"], ST.ALERT_STEPS["reader_cut"])
-        self.assertEqual(alerts["numbers"], {"alert_kinds": 2, "sail_window_stall": 2, "reader_cut": 1})
+        self.assertEqual(alerts["numbers"], {"alert_kinds": 2, "sail_window_stall": 2, "reader_cut": 1, "standing_kinds": 1,
+                                             "owner_kinds": 1, "cleared_kinds": 0})
         self.assertIn("reader_cut x1 (last 2026-10-07T07:20:00Z): the review of fam-1 v3 was cut short", alerts["what"])
         self.assertEqual(self.notify.entry("swarm_alerts")["owner_step"], ST.ALERT_STEPS["reader_cut"])
 
@@ -1108,7 +1253,7 @@ class NoCaptain(Base):
         self.spend("claude", 3.0, 2)
         self.spend("sail_model", 9.0, 30)  # yesterday's
         binds = [{"kind": "cap", "text": "gym.max_boxes 2 < 7 the budget buys"},
-                 {"kind": "drift", "text": "researcher.dormant_cycles 12 < the code's default 40"}]
+                 {"kind": "drift", "text": "researcher.dormant_cycles 6 < the release's 12"}]
         out, _ = self.run_at(binds=binds)
         check = out["checks"]["underspend"]
         self.assertTrue(check["stalled"])
@@ -1116,7 +1261,8 @@ class NoCaptain(Base):
         self.assertEqual((check["numbers"]["sail_booked_today"], check["numbers"]["sail_due_by_now"]), (3.5, due))
         self.assertIn(f"Sail research booked 3.50 of the {due:.2f} its 20.00 a day buys by now (41%)", check["what"])
         self.assertIn("Settings tighter than what the budget buys: gym.max_boxes 2 < 7 the budget buys.", check["what"])
-        self.assertIn("Settings under the code's own defaults: researcher.dormant_cycles 12", check["what"])
+        self.assertIn("Settings under the release's own values: researcher.dormant_cycles 6 < the release's 12",
+                      check["what"])
         self.assertEqual(check["numbers"]["claude_share"], 1.39, "Claude books what it buys")
         self.assertIsNone(check["owner_step"])
         # Booked at pace, no conflict: no cause. A day the guard braked two hours: the spend is the guard's doing.
@@ -1137,19 +1283,124 @@ class NoCaptain(Base):
         self.budget(day="2026-10-06")
         self.assertNotIn("sail_share", self.check("underspend")["numbers"])
 
-    def test_underspend_a_conflict_stands_by_itself(self):
+    def test_underspend_a_conflict_stands_by_itself_only_while_it_binds(self):
+        """The review of the no-captain build: the release's own settings are a class-cap pair (12 x 1 < 24), so a
+        conflict that stood by itself stood at every run, and the 24-hour INFO pace then held every new INFO cause back
+        up to a day. The class cap stands by itself only while the architect's passes meet it (`lane_class_capped`);
+        an architect line no call can use, always."""
         self.healthy()
-        conflict = {"kind": "conflict", "text": "architect.max_alive_per_class 16 x 1 direction class (long_single x etf) "
-                                                "< dlane.max_alive 24"}
+        conflict = {"kind": "conflict", "key": "class_cap",
+                    "text": "architect.max_alive_per_class 16 x 1 direction class (long_single x etf) < dlane.max_alive 24"}
+        check = self.check("underspend", binds=[conflict])
+        self.assertFalse(check["stalled"], "the class cap has not met a direction card")
+        self.assertIn("(not binding now: no direction card met the class cap in the last 6 h)", check["what"])
+        self.assertEqual((check["numbers"]["conflicts"], check["numbers"]["conflicts_binding"]), (1, 0))
+        self.architect(2.0, proposed=6, born=0, lane_class_capped={"cards": 3, "full": ["long_single x etf"]})
         check = self.check("underspend", binds=[conflict])
         self.assertTrue(check["stalled"])
+        self.assertEqual((check["numbers"]["lane_class_capped_6h"], check["numbers"]["conflicts_binding"]), (3, 1))
         self.assertIn("Settings that cannot both hold: architect.max_alive_per_class 16 x 1", check["what"])
+        self.assertNotIn("not binding now", check["what"])
+        line = {"kind": "conflict", "key": "architect_line", "text": "claude.role_usd_day.architect 1.50 < the 2.00"}
+        self.ago(0)
+        self.assertTrue(self.check("underspend", binds=[line], now=NOW + 7 * HOUR)["stalled"], "a line no call can use")
 
-    def test_the_settings_that_bind_research(self):
-        import copy
+    def test_underspend_a_brake_of_two_hours_is_the_guards_doing_and_claude_is_not_paced(self):
+        """The guard's brake of the day (`UNDERSPEND_BRAKE_HOURS`) explains a short day; Claude's figure is spent by its
+        roles' calls as work comes (the release sets the architect's and the researchers' lines to 0): said, never a
+        cause by itself (Oct 9, 01:58Z: the captain found Claude's meter far under its line on a normal day)."""
+        self.healthy()
+        self.budget()
+        self.spend("gym_box", 2.0, 8)
+        self.spend("claude", 0.5, 2)
+        lines = [{"kind": "line", "text": "claude.role_usd_day is 0 for architect, researcher"}]
+        check = self.check("underspend", binds=lines)
+        self.assertTrue(check["stalled"], "Sail booked 2.00 of 8.61 with no brake")
+        self.assertIn("Claude (Anthropic) research booked 0.50 of the 2.15 its 5.00 a day buys by now (23%) (not paced: "
+                      "its calls come with the gate's and the strategist's work; claude.role_usd_day is 0 for architect, "
+                      "researcher)", check["what"])
+        # A brake from 05:20Z to 07:50Z today: 2.5 h, the guard's doing.
+        self.ago(5)
+        self.store.event("swarm.guard", None, {"action": "brake", "causes": ["research_budget"]})
+        self.ago(2.5)
+        self.store.event("swarm.guard", None, {"action": "release", "causes": []})
+        check = self.check("underspend", binds=lines)
+        self.assertFalse(check["stalled"], "2.5 h braked today: the guard's doing")
+        self.assertEqual(check["numbers"]["braked_hours_today"], 2.5)
+        self.assertIn("but the guard braked 2.5 h today.", check["what"])
+        # No brake and Sail at pace: Claude's short day alone is no cause.
+        budget = json.loads((self.root / "budget.json").read_text())
+        swarm = {"spent_today": {"sail": 8.0, "claude": 0.5}, "day_start": at("2026-10-07T00:00:00Z"),
+                 "brake_today": {"hours": 0.0}}
+        check = ST._underspend_check(NOW, swarm, budget, lines)
+        self.assertEqual((check["stalled"], check["numbers"]["sail_share"], check["numbers"]["claude_share"]),
+                         (False, 0.93, 0.23))
+        self.assertIn("Claude (Anthropic) research booked 0.50", check["what"])
+
+    def test_underspend_reads_the_swarms_own_settings_when_no_binds_are_handed_in(self):
+        """The real read (`_binds`: the settings as the swarm loads them, the release's policy.json among them): the
+        release's class-cap pair is named and does not stand by itself; a swarm.json cap under what the budget buys is
+        named as a cap."""
+        from unittest import mock
 
         from league.ops import budget as B
         from league.swarm import settings as SS
+        from league.tests import REAL_POLICY_PATH
+
+        patch = mock.patch.object(SS, "POLICY_PATH", REAL_POLICY_PATH)
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.healthy()
+        doc = B.compute({"p30_usd": 0.0, "p30_source": "test", "edge": {"stop": False},
+                         "meters": {"sail": {"balance_usd": 900.0, "fixed_usd_day": 1.0, "need_usd": 0.0},
+                                    "claude": {"balance_usd": 200.0, "fixed_usd_day": 0.0, "need_usd": 0.0}}},
+                        now=at("2026-10-07T00:30:00Z"))
+        doc["at"] = NOW - HOUR
+        (self.root / "budget.json").write_text(json.dumps(doc))
+        self.spend("gym_box", 8.0, 2)
+        ctx = self.ctx()
+        del ctx.binds
+        out = ST.run(ctx)
+        check = out["checks"]["underspend"]
+        self.assertEqual(out["errors"], [])
+        self.assertFalse(check["stalled"], "Sail at pace; the release's class-cap pair does not bind")
+        self.assertIn("architect.max_alive_per_class 12 x 1 direction class (long_single x etf) < dlane.max_alive 24",
+                      check["what"])
+        self.assertIn("(not binding now", check["what"])
+        self.assertIn("claude.role_usd_day is 0 for architect, diagnostician, researcher, rewrite", check["what"])
+        self.assertEqual(check["numbers"]["under_release"], 0, "the release's own dormancy and refill are no drift")
+        # swarm.json is read: a class cap that holds the lane is no conflict; a dormancy under the release's is drift.
+        (self.root / "swarm.json").write_text(json.dumps({"architect": {"max_alive_per_class": 24},
+                                                          "researcher": {"dormant_cycles": 6}}))
+        ctx = self.ctx()
+        del ctx.binds
+        check = ST.run(ctx)["checks"]["underspend"]
+        self.assertEqual((check["numbers"]["conflicts"], check["numbers"]["under_release"]), (0, 1))
+        self.assertIn("researcher.dormant_cycles 6 < the release's 12", check["what"])
+
+    def test_underspend_prices_each_hour_at_the_figure_that_held_then(self):
+        """Two raises in a day (the hourly refresh raises each time a reading rises): the hours before the first at the
+        day's first figure, not at the middle one (the review of the no-captain build)."""
+        figure = {"day": "2026-10-07", "usd_day": 20.0, "raised_from": 17.5, "raised_at": "2026-10-07T10:00:00Z",
+                  "set_usd_day": 12.5, "raises": [{"at": "2026-10-07T09:00:00Z", "from": 12.5, "to": 17.5},
+                                                  {"at": "2026-10-07T10:00:00Z", "from": 17.5, "to": 20.0}]}
+        day = at("2026-10-07T00:00:00Z")
+        self.assertAlmostEqual(ST._expected(20.0, figure, day, NOW), (12.5 * 9 + 17.5 * 1 + 20.0 * 20 / 60) / 24)
+        last_only = {k: v for k, v in figure.items() if k not in ("raises", "set_usd_day")}
+        self.assertAlmostEqual(ST._expected(20.0, last_only, day, NOW), (17.5 * 10 + 20.0 * 20 / 60) / 24, msg="one step")
+        self.assertAlmostEqual(ST._expected(20.0, {}, day, NOW), 20.0 * (10 + 20 / 60) / 24)
+
+    def test_the_settings_that_bind_research(self):
+        import copy
+        from unittest import mock
+
+        from league.ops import budget as B
+        from league.swarm import settings as SS
+        from league.tests import REAL_POLICY_PATH
+
+        patch = mock.patch.object(SS, "POLICY_PATH", REAL_POLICY_PATH)  # the release's own policy.json (drift reads it)
+        patch.start()
+        self.addCleanup(patch.stop)
 
         loaded = copy.deepcopy(SS.DEFAULTS)
         loaded["budget"] = {"knobs": B.knobs(20.0, 5.0)}
@@ -1159,19 +1410,29 @@ class NoCaptain(Base):
         self.assertEqual(ST.settings_binds(loaded), [])
         loaded["gym"]["max_boxes"] = 2
         loaded["population"].update(start=16, ceiling=25)
-        loaded["architect"].update(max_alive_per_class=16, every_seconds=7200, max_refill=6)
-        loaded["researcher"]["dormant_cycles"] = 12
-        loaded["claude"]["role_usd_day"] = {"architect": 1.5, "researcher": 0}
+        loaded["architect"].update(max_alive_per_class=16, every_seconds=7200, max_refill=3)
+        loaded["researcher"]["dormant_cycles"] = 6
+        loaded["claude"]["role_usd_day"] = {"architect": 1.5, "researcher": 0, "rewrite": 0}
         loaded["dlane"] = {"mode": "gate", "roots": ["SPY", "QQQ", "IWM"], "structures": ["long_single"], "max_alive": 24}
         found = ST.settings_binds(loaded)
-        self.assertEqual([b["kind"] for b in found], ["cap", "cap", "cap", "conflict", "conflict", "drift", "drift"])
+        self.assertEqual([b["kind"] for b in found], ["cap", "cap", "cap", "conflict", "conflict", "drift", "drift", "line"])
+        self.assertEqual([b.get("key") for b in found if b["kind"] == "conflict"], ["class_cap", "architect_line"])
         texts = " | ".join(b["text"] for b in found)
         for part in ("gym.max_boxes 2 < 7 the budget buys", "architect.every_seconds 7200 > 2880 the budget buys",
                      "population.start 16 < population.ceiling 25",
                      "architect.max_alive_per_class 16 x 1 direction class (long_single x etf) < dlane.max_alive 24",
                      "claude.role_usd_day.architect 1.50 < the 2.00 one architect call holds",
-                     "researcher.dormant_cycles 12 < the code's default 40", "architect.max_refill 6 < the code's default 12"):
+                     "researcher.dormant_cycles 6 < the release's 12", "architect.max_refill 3 < the release's 6",
+                     "claude.role_usd_day is 0 for researcher, rewrite"):
             self.assertIn(part, texts)
+        # DRIFT IS AGAINST THE RELEASE (the review of the no-captain build): policy.json itself sets dormancy 12 and a
+        # refill of 6, so those are no drift; against the code's DEFAULTS alone (a release with no policy layer) they are.
+        release = ST.release_settings()
+        self.assertEqual((release["researcher"]["dormant_cycles"], release["architect"]["max_refill"]), (12, 6))
+        loaded["researcher"]["dormant_cycles"], loaded["architect"]["max_refill"] = 12, 6
+        self.assertNotIn("drift", [b["kind"] for b in ST.settings_binds(loaded)])
+        self.assertEqual([b["text"] for b in ST.settings_binds(loaded, SS.DEFAULTS) if b["kind"] == "drift"],
+                         ["researcher.dormant_cycles 12 < the release's 40", "architect.max_refill 6 < the release's 12"])
         # A class cap that holds the lane, a line of 0 or of a full hold, and the lane off: no conflict.
         loaded["architect"]["max_alive_per_class"] = 24
         loaded["claude"]["role_usd_day"] = {"architect": 0}

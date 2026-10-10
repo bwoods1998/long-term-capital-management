@@ -139,7 +139,7 @@ export const STALL_CAUSES = {
   // Oct 10, 2026 (the no-captain audit): the architect bears (almost) nothing while it keeps asking, the swarm's own
   // alerts (reader_cut, agenda_guard, gate_coverage...) that reached only its ledger, and research under its budget or
   // bound by a setting. Deploy the gateway first, as above.
-  birth_yield: 'few births: the architect\'s cards are refused',
+  birth_yield: 'few births while the architect keeps asking',
   swarm_alerts: 'the swarm raised alerts',
   underspend: 'research under its budget or bound by a setting',
 };
@@ -200,14 +200,16 @@ export function stallEntries(facts = {}) {
 /**
  * The dedupe key of a stall notice, whatever id the House sent (the router's; the Gate keeps it STALL_NOTICE_MS or
  * STALL_INFO_MS): `stall:owner:<the owner causes, sorted, joined by +>` when some cause carries an owner step, so a
- * new one is mailed at once and the same ones at most every 12 hours; `stall:info` when none does, at most every 24
- * hours. Null when the notice is not one to compose.
+ * new one is mailed at once and the same ones at most every 12 hours; `stall:info:<every cause, sorted, joined by +>`
+ * when none does, so the same causes are mailed at most every 24 hours and a new one at once (the review of the
+ * no-captain build, Oct 10, 2026: one cause standing for days held every new one back up to a day). Null when the
+ * notice is not one to compose.
  */
 export function stallKey(facts = {}) {
   const entries = stallEntries(facts);
   if (!entries) return null;
   const owner = entries.filter(item => item.step).map(item => item.cause).sort();
-  return owner.length ? `stall:owner:${owner.join('+')}` : 'stall:info';
+  return owner.length ? `stall:owner:${owner.join('+')}` : `stall:info:${entries.map(item => item.cause).sort().join('+')}`;
 }
 
 /**

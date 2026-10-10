@@ -79,9 +79,20 @@ recur without a captain and cost DONE-RULE item 7 ("research runs 24/7 at budget
   architect Claude line under one call's hold, values under the code's defaults).
 - `gateway/lib/email.mjs`: the words for `birth_yield`, `swarm_alerts` and `underspend` (deploy the gateway first: an
   unknown cause makes the stall notice a 400).
-- Tests: `league/tests/test_ops_budget.py` (the raise, the refresh end to end, its registration),
-  `league/tests/test_ops_stall.py` (`NoCaptain`: each cause reproduces an Oct 9-10 intervention),
-  `league/tests/test_ops_int_ops.py` (the job runs in a pause).
+- The review of the build: a raise is never bought by a fallback reading (the day's figure keeps the fixed cost and
+  reserve it was set on, `fixed_usd_day`, `reserve_usd`, and every raise, `set_usd_day`, `raises`, which `underspend`
+  prices hour by hour); `swarm_alerts` reads each owner kind's condition from the swarm's settings and store
+  (`alert_states`: a fix clears it at the next run, an unfixed one-shot alert stands past its 12 hours, an alert from
+  before midnight fails no next day); the jam is the owner's step only for kinds a setting or an agenda clears (failed
+  calls heal by themselves); `underspend` paces Sail only, stands on a conflict only while it binds (the release's own
+  class-cap pair once a direction card meets it) and names drift against the release's `policy.json`, not the code's
+  defaults; a new stall cause needing nothing is mailed at once (`stall.json` `mail.told`; the gateway keys such a
+  notice `stall:info:<causes>`, `gateway/lib/email.mjs` and `gateway/lib/gate.mjs`).
+- Tests: `league/tests/test_ops_budget.py` (the raise, the fallback that raises nothing, the refresh end to end, its
+  registration), `league/tests/test_ops_stall.py` (`NoCaptain`: each cause reproduces an Oct 9-10 intervention; the
+  alert before midnight, the one-shot alerts, the jam of failed calls, the brake, the real settings read;
+  `Telling`: a new cause mailed at once), `league/tests/test_ops_int_ops.py` (the job runs in a pause),
+  `gateway/test/stall-notice.test.mjs` (the key on the causes).
 
 ### An always-in card's ablation is dropped, on `fix/always-in-ablation` (unreleased; an owner deploy; no evidence reset)
 

@@ -200,8 +200,9 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
     if (!message) return fail('The notice could not be composed.', 400);
     const cap = Number(env.NOTIFY_MAX_PER_DAY || 40);
     // A stall is deduped by its own key (email.stallKey: `stall:owner:<the owner causes>` kept 12 hours by the Gate,
-    // `stall:info` 24 hours), whatever id the House sent: the same owner causes are mailed at most once every 12 hours
-    // and a stall that needs nothing from the owner at most once a day, even when the House's own record is lost.
+    // `stall:info:<the causes>` 24 hours), whatever id the House sent: the same owner causes are mailed at most once
+    // every 12 hours and the same causes that need nothing from the owner at most once a day, even when the House's own
+    // record is lost.
     const noticeId = facts.kind === 'stall' ? stallKey(facts)
       : typeof facts.notice_id === 'string' && /^[a-zA-Z0-9:_-]{1,160}$/.test(facts.notice_id) ? facts.notice_id : null;
     if (noticeId && await gate.noticeDelivered(noticeId, now())) return json({ sent: true, duplicate: true });
