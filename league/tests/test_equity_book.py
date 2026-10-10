@@ -841,6 +841,7 @@ class Windows(BookTest):
         self.assertTrue(all(o.side == "sell" for o in orders))
         self.assertIn("late", orders[5].why)                                # after 15:55: at the bid, the widest collar
         self.assertEqual(orders[5].limit_px, L.limit_for("sell", D("590.00"), 50))
+        self.assertEqual([o.at for o in orders], ["open"] * 5 + ["close"])
         self.assertEqual(h.get_intent(it.iid).status, "missed")
         carried = h.intents(kind="house_exit")
         self.assertEqual([(c.exec_day, c.at, c.tag, c.lid, c.status) for c in carried],
@@ -850,6 +851,30 @@ class Windows(BookTest):
         h.tick(9, 31, day=TUESDAY)
         self.assertEqual(h.book._lot(lot.lid).status, "closed")
         self.assertEqual(h.book._lot(lot.lid).reason, "program")
+
+    def test_a_close_exit_left_from_a_past_session_goes_at_the_open(self):
+        h = self.harness()
+        inst = h.instance()
+        lot = h.lot(inst, "SPY", "0.5", "590", opened=dt.date(2026, 10, 8))
+        h.intent(inst, "sell", symbol="SPY", lid=lot.lid, at_="close", exec_day=FRIDAY, decided=dt.date(2026, 10, 8))
+        h.tick(9, 31)
+        self.assertEqual(h.book._lot(lot.lid).status, "closed")
+        self.assertEqual(h.book._lot(lot.lid).exit_at, "open")             # the window it went in, not the intent's
+
+    def test_a_short_filled_order_ends(self):
+        h = self.harness()
+        it = h.intent(h.instance(), "buy", symbol="SPY", share="0.5")
+        h.venue.fill = "none"
+        h.tick(9, 31)
+        venue_order = h.venue.book[0]
+        venue_order.update(status="filled", filled_qty="0.4", filled_avg_price="600.10")
+        h.venue.held["SPY"] = D("0.4")
+        h.tick(9, 32)
+        order = h.orders()[0]
+        self.assertEqual((order.status, order.filled_qty), ("filled", D("0.4")))
+        self.assertIn("short_fill", order.answer)
+        self.assertEqual(h.book.busy(), set())
+        self.assertEqual(h.get_intent(it.iid).status, "done")
 
     def test_a_lot_never_sells_in_the_session_it_was_bought(self):
         h = self.harness()
@@ -1019,6 +1044,41 @@ class Activities(BookTest):
                          (D("3.000000000"), D("3.000000000"), D("300.000000"), D("900.0")))
         h.tick(9, 27)
         self.assertEqual(h.book.frozen, "")
+
+    def test_a_refused_type_never_hides_the_others(self):
+        h = self.harness()
+        inst = h.instance()
+        lot = h.lot(inst, "SPY", "2", "500", opened=dt.date(2026, 9, 28))
+        h.venue.refused_types = {"DIVTW"}                                   # the venue refuses one listed type
+        h.venue.activity_rows = [{"id": "d1", "activity_type": "DIV", "date": "2026-10-09", "symbol": "SPY",
+                                  "qty": "2", "net_amount": "1.00", "ex_date": "2026-10-08"}]
+        h.tick(9, 26)
+        self.assertEqual(h.book._lot(lot.lid).div, D("1.00"))
+        self.assertIn("DIVTW", h.state.get("eq_activity_refused"))
+
+    def test_a_booking_that_fails_is_read_again(self):
+        h = self.harness()
+        inst = h.instance()
+        lot = h.lot(inst, "SPY", "2", "500", opened=dt.date(2026, 9, 28))
+        h.venue.activity_rows = [{"id": "d1", "activity_type": "DIV", "date": "2026-10-01", "symbol": "SPY",
+                                  "qty": "2", "net_amount": "1.00", "ex_date": "2026-09-30"},
+                                 {"id": "d2", "activity_type": "DIV", "date": "2026-10-09", "symbol": "SPY",
+                                  "qty": "2", "net_amount": "2.00", "ex_date": "2026-10-08"}]
+        h.lot(inst, "QQQ", "1", "400", opened=dt.date(2026, 9, 1))
+        real = L.EquityBook._book_activity
+
+        def flaky(book, row, now, out):
+            if row["id"] == "d1":
+                raise RuntimeError("not today")
+            return real(book, row, now, out)
+
+        with mock.patch.object(L.EquityBook, "_book_activity", flaky):
+            h.tick(9, 26)
+        self.assertEqual(h.state.get("eq_activities_cursor"), "2026-10-01")  # held back to the failed row's day
+        self.assertEqual(h.book._lot(lot.lid).div, D("2.00"))
+        h.tick(9, 42)
+        self.assertEqual(h.book._lot(lot.lid).div, D("3.00"))
+        self.assertEqual(h.state.get("eq_activities_cursor"), "2026-10-09")
 
     def test_any_other_action_on_a_held_symbol_freezes_entries(self):
         h = self.harness()

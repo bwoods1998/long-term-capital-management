@@ -991,12 +991,13 @@ class EquityBook:
             final = {"filled": "filled", "canceled": "canceled", "replaced": "canceled", "stopped": "canceled",
                      "suspended": "canceled", "expired": "expired", "done_for_day": "expired",
                      "rejected": "rejected"}[status]
+            # A simple order's status and quantity come in one row: "filled" ends it whatever its quantity says (a short
+            # fill is noted, never left working: a working row would hold its symbol busy for good).
+            order.status = final
+            order.answer = {**order.answer, "final": status,
+                            "reject_reason": str(row.get("reject_reason") or "")[:200] if status == "rejected" else None}
             if final == "filled" and order.filled_qty < order.qty:
-                order.status = "working"   # the venue says filled; its quantity has not said so yet
-            else:
-                order.status = final
-                order.answer = {**order.answer, "final": status,
-                                "reject_reason": str(row.get("reject_reason") or "")[:200] if status == "rejected" else None}
+                order.answer["short_fill"] = text(order.qty - order.filled_qty)
         elif status:
             order.status = "working"
         self._save_order(order)
@@ -1067,14 +1068,16 @@ class EquityBook:
 
     # ------------------------------------------------------------------ sending
     def _send(self, intent: Intent, *, side: str, symbol: str, klass: str, qty: Decimal, limit: Decimal, collar: int,
-              day: str, lid: int | None, replaces: int | None, probe: bool, why: str) -> Order:
-        """Write the order `pending` (the intent `sent`, a sold lot `closing`) BEFORE the POST; then POST it once."""
+              day: str, lid: int | None, replaces: int | None, probe: bool, why: str, at: str | None = None) -> Order:
+        """Write the order `pending` (the intent `sent`, a sold lot `closing`) BEFORE the POST; then POST it once. `at`
+        is the window it goes in (the fill point a lot's `entry_at` / `exit_at` and its twin read), the intent's by
+        default."""
         now = self.clock()
         exit_ = side == "sell"
         with self.state.transaction():
             eid = self._next("eq_orders", "eid")
             order = Order(eid, client_id(eid, intent.family, nonce=getattr(self.state, "nonce", "")), intent.instance,
-                          intent.family, side, symbol, klass, intent.at, qty, limit, int(collar), "pending", now, day,
+                          intent.family, side, symbol, klass, at or intent.at, qty, limit, int(collar), "pending", now, day,
                           lid=lid, iid=intent.iid, replaces=replaces, probe=probe, why=why[:300])
             if exit_:
                 try:
@@ -1259,8 +1262,8 @@ class EquityBook:
                              else "its session passed before the House could send it")
         exits = [i for i in intents if i.kind in EXIT_KINDS]
         for intent in sorted(exits, key=lambda i: (i.at != "open", i.iid)):
-            if intent.at == "close" and now < m.close_send:
-                continue
+            if intent.at == "close" and intent.exec_day == today and now < m.close_send:
+                continue    # today's close exit waits for the close; one left from a past session goes now
             try:
                 self._work_exit(intent, now, m, killed, out)
             except Exception as exc:  # noqa: BLE001
@@ -1368,7 +1371,7 @@ class EquityBook:
         reason = "program" if intent.kind == "sell" else (intent.tag or "house")
         self._send(intent, side="sell", symbol=lot.symbol, klass=lot.klass, qty=lot.qty, limit=limit, collar=collar,
                    day=today, lid=lot.lid, replaces=current.eid if current is not None else None, probe=lot.probe,
-                   why=f"exit ({reason}){' at the bid, late' if late else ''}")
+                   why=f"exit ({reason}){' at the bid, late' if late else ''}", at="close" if in_close else "open")
 
     def _reprice_due(self, order: Order, now: float, reprice: float, m: S.Moments) -> bool:
         """Whether a working order is re-priced now: once it is `reprice` seconds old, while its collar can still widen;
@@ -2154,7 +2157,10 @@ class EquityBook:
     # ------------------------------------------------------------------ activities (A8.10)
     def _activities(self, now: float, m: S.Moments | None, out: dict) -> None:
         """Dividends, splits and corporate actions of held symbols, every `ACTIVITIES_EVERY` (and at the pre-open),
-        while the book holds a lot or closed one in the last 70 days (a dividend is paid weeks after its ex-date)."""
+        while the book holds a lot or closed one in the last 100 days (a dividend is paid weeks after its ex-date).
+        Read from a cursor (the latest activity day booked, less three days; each activity is booked once by its id);
+        a row whose booking failed holds the cursor back, so it is read and booked again. A type the venue refuses
+        (HTTP 422 fails a whole request) is read no more, each other type then alone (`_read_types`)."""
         preopen_due = m is not None and m.preopen <= now < m.open_at and \
             (self.state.get("eq_preopen_activities") or "") != m.day.isoformat()
         if now - self._activities_at < ACTIVITIES_EVERY and not preopen_due:
@@ -2169,36 +2175,56 @@ class EquityBook:
         first = self.state.rows("SELECT MIN(opened_day) AS d FROM eq_lots")[0]["d"]
         after = (dt.date.fromisoformat(cursor) - dt.timedelta(days=3)).isoformat() if cursor else \
             (dt.date.fromisoformat(first) - dt.timedelta(days=1)).isoformat() if first else None
-        rows = list(self.account.activities(list(A.TYPES), after=after))
+        rows = self._read_types(A.TYPES, after, together=True)
         if now - self._watch_at >= WATCH_EVERY:
             self._watch_at = now
-            refused = set(self.state.get("eq_activity_refused", []) or [])
-            for kind in A.WATCH:
-                if kind in refused:
-                    continue
-                try:
-                    rows.extend(self.account.activities([kind], after=after))
-                except Exception as exc:  # noqa: BLE001 - best effort; a type the venue refuses is skipped from now on
-                    if "422" in str(exc):
-                        refused.add(kind)
-                        self.state.put("eq_activity_refused", sorted(refused))
+            rows += self._read_types(A.WATCH, after, together=False)
         seen = {r["id"] for r in self.state.rows("SELECT id FROM eq_activities")}
-        latest = cursor
+        latest, held_back = cursor, None
         for row in sorted(rows, key=lambda r: (A.activity_day(r) or "", str(r.get("id")))):
             key = str(row.get("id") or "")
             day = A.activity_day(row) or ""
-            if day > latest:
-                latest = day
             if not key or key in seen:
+                latest = max(latest, day)
                 continue
             seen.add(key)
             try:
                 self._book_activity(row, now, out)
+                latest = max(latest, day)
             except Exception as exc:  # noqa: BLE001 - not booked: read again (and booked) next time
-                seen.discard(key)
+                held_back = day if held_back is None else min(held_back, day)
                 self._error(f"activity {key}", exc, out)
-        if latest and latest != cursor:
+        if held_back:
+            latest = min(latest, held_back) if latest else held_back
+        if latest and latest != cursor and (not cursor or latest > cursor):
             self.state.put("eq_activities_cursor", latest)
+
+    def _read_types(self, types: Sequence[str], after: str | None, *, together: bool) -> list[dict]:
+        """The activities of `types` after `after`: in one request when `together` (falling back to one request a
+        type when the venue refuses the list with HTTP 422), else one a type, best effort; a type the venue refused is
+        remembered (`eq_activity_refused`) and never asked again."""
+        refused = set(self.state.get("eq_activity_refused", []) or [])
+        wanted = [t for t in types if t not in refused]
+        if not wanted:
+            return []
+        if together:
+            try:
+                return list(self.account.activities(wanted, after=after))
+            except Exception as exc:  # noqa: BLE001
+                if "422" not in str(exc):
+                    raise
+        rows: list[dict] = []
+        for kind in wanted:
+            try:
+                rows.extend(self.account.activities([kind], after=after))
+            except Exception as exc:  # noqa: BLE001 - best effort; a type the venue refuses is skipped from now on
+                if "422" in str(exc):
+                    refused.add(kind)
+                    self.state.put("eq_activity_refused", sorted(refused))
+                    self.alert("warning", f"equity: the venue refuses the activity type {kind}; it is read no more")
+                elif together:
+                    raise
+        return rows
 
     def _book_activity(self, row: Mapping[str, Any], now: float, out: dict) -> None:
         kind = str(row.get("activity_type") or "").upper()
