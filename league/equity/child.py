@@ -11,24 +11,88 @@ OPS:
 - "drop"   {key} -> {ok};
 - "decide" {jobs: [{key, inputs: league.equity.ctx.Inputs}]} -> {ok, results: {key: {intents, stats, ctx_sha}}}: the
            ctx is `league.equity.ctx.build(inputs)`, exactly the Gym's (I6), and `ctx_sha` the sha256 of its
-           `ctx_bytes` (the decision's provenance);
+           `ctx_bytes` (the decision's provenance), taken BEFORE the program sees the ctx; a key with no loaded runner
+           answers {intents: [], stats: None, missing: True}, and inputs the ctx cannot be built from {intents: [],
+           stats, error} (that job only: the rest of the batch goes on);
 - "needs"  {code, params, name} -> {ok, needs, sha, run_sha} (load, read NEEDS, drop: the parent never executes a
            program to learn what to slice);
 - "run"    {code, params, name, bars: league.equity.store.Bars, k, capital} -> {ok, result}
            (`league.equity.runner.run_bars`: Train, Validation, the sealed look and the screen's Train-era runs).
+
+Imports are made inside `handle`, per op, so the child imports only what a request needs (its runtime is
+league/equity/kinds.py `RUNTIME`).
 """
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any, Mapping
 
 OPS = ("load", "drop", "decide", "needs", "run")
 
 
+def _load(payload: Mapping[str, Any]) -> Any:
+    from . import program as P
+
+    return P.load_program(str(payload["code"]), name=str(payload.get("name") or "program"),
+                          params=dict(payload.get("params") or {}))
+
+
+def _identity(program: Any) -> dict[str, Any]:
+    return {"ok": True, "needs": program.needs.as_dict(), "sha": program.sha, "run_sha": program.run_sha}
+
+
+def _decide(payload: Mapping[str, Any], runners: Mapping[str, Any]) -> dict[str, Any]:
+    from . import ctx as C
+
+    results: dict[str, Any] = {}
+    for job in payload.get("jobs") or ():
+        key = str(job["key"])
+        runner = runners.get(key)
+        if runner is None:
+            results[key] = {"intents": [], "stats": None, "missing": True}
+            continue
+        try:
+            ctx = C.build(job["inputs"])
+            ctx_sha = hashlib.sha256(C.ctx_bytes(ctx)).hexdigest()
+        except Exception as exc:  # noqa: BLE001 - one job's inputs never cost the batch
+            results[key] = {"intents": [], "stats": runner.stats(), "error": f"ctx: {type(exc).__name__}: {str(exc)[:300]}"}
+            continue
+        results[key] = {"intents": runner.decide(ctx), "stats": runner.stats(), "ctx_sha": ctx_sha}
+    return {"ok": True, "results": results}
+
+
 def handle(op: str, payload: Mapping[str, Any], state: dict[str, Any]) -> dict[str, Any]:
     """One request of the "equity" kind (the module docstring); {ok: False, error} for an unknown op. Never raises for
     a program's fault: a refused program is {ok: False, refused: True, error}."""
-    raise NotImplementedError("hooks: league/equity/child.py handle")
+    from ..gym.safety import CodeRefused
+
+    runners: dict[str, Any] = state.setdefault("runners", {})
+    payload = payload if isinstance(payload, Mapping) else {}
+    try:
+        if op == "load":
+            program = _load(payload)
+            runners[str(payload["key"])] = program.start(timeout=float(payload.get("timeout", 1.0)),
+                                                         max_errors=int(payload.get("max_errors", 25)),
+                                                         budget_seconds=payload.get("budget_seconds"))
+            return _identity(program)
+        if op == "drop":
+            runners.pop(str(payload.get("key")), None)
+            return {"ok": True}
+        if op == "decide":
+            return _decide(payload, runners)
+        if op == "needs":
+            return _identity(_load(payload))
+        if op == "run":
+            from . import runner as RN
+
+            result = RN.run_bars(str(payload["code"]), dict(payload.get("params") or {}), payload["bars"],
+                                 name=str(payload.get("name") or "program"), k=float(payload.get("k", 1.0)),
+                                 capital=payload.get("capital"))
+            return {"ok": True, "result": result}
+    except CodeRefused as exc:
+        return {"ok": False, "refused": True, "error": str(exc)[:500]}
+    return {"ok": False, "error": f"unknown equity op {op!r} (known: {', '.join(OPS)})"}
 
 
 __all__ = ["OPS", "handle"]

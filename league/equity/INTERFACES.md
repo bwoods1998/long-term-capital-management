@@ -447,6 +447,36 @@ total with one slot a program; the reservation obeys the cash rule; count_refusa
 on the equity freeze); the decider kind (isolation, restart reload, deadline); the I6 test (20 random days, byte for
 byte, core's helper); the isolation CI test (section 2.1); the stock paper proof.
 
+### 6.5 Additive names, as built (hooks)
+Nothing above changes; these are added beside it.
+- `equity_hook`: `SHARE_TOLERANCE` (== `league.equity.live.SHARE_TOLERANCE`, a test holds it), `UNREADABLE`,
+  `Unreadable(why)` (the book `build_book` returns when it cannot build one, or the table has no equity block, while
+  live.sqlite holds an open lot or a working equity order: `frozen` names why, `expected_shares` and `busy` raise,
+  `tick` does nothing), `health(book)`. `build_book` returns None (the lane does not run) when the table has no equity
+  block and nothing is held. The row readers answer the empty figure, without importing league.equity's row functions,
+  for a state with no `eq_lots` / `eq_orders` table. With a table that has no equity block, `probe_figures` weighs
+  every class at 1 (fail closed).
+- step.py: `_close_shares` covers a SHORT account quantity by its unattributed part (owned less the account: the buy
+  brings the account back to the equity lots, so an assignment netted against a lot never consumes it); with the
+  equity book unreadable it covers to flat and sells no long share. kv `shares_orders` {client id: {symbol, side, qty,
+  filled, at}} (the House's `lv-shares-` orders, read back by client id each reading and before each reconciliation;
+  a fill moves the ledger toward zero, never past it, and only when the order's side reduces it). `real_block` also
+  refuses while the account row's `cash` is below zero (alerted once until it clears).
+- real.py: `RealBook.free_to_reserve(account) -> (free: float, bound: str)` (the A8.1 reservation; a table without
+  the equity block keeps `options_buying_power` alone); `RealBook.house_count(day)` (both books' count; `count_today`
+  stays the options book's own, which the equity book reads); `probe_tally(..., table=None)` and
+  `probe_realized(..., table=None)` (None: the table in force). `reconcile`'s share mismatch reads "SYM: <held> shares
+  held, <want> expected (equity lots <x>, assignment shares <y>)", or "SYM: no shares held, ...".
+- decider.py: `RUNTIME_FILES`, `runtime_files(repo=REPO)` (the root House's read-only child runtime: the options files
+  plus league/equity/kinds.py `RUNTIME`); `kind()` refuses op "load" / "drop" (ValueError: use `kind_load` /
+  `kind_drop`, which a restart replays); its deadline is `batch_deadline` of the jobs for "decide", else
+  `budget_seconds` (30 s when None), so a 1200 s isolated run is not cut at `MAX_BATCH_SECONDS`.
+- kinds.py: `RUNTIME` (what every kind's child may import: the 4 `LEAGUE_FILES`, league/gym/*.py, league/equity/*.py;
+  a kind module that imports more names it here) and `runtime_files(repo)`.
+- paper.py: `STOCK_KEY`; `StockPaperProof.step` reads `market.stocks(["SPY"])`; its witnesses are `buy_witness`,
+  `hold_witness`, `sell_witness`, `activity_witness`, `recon_witness`; one attempt a session.
+- venue.py: `BAR_ADJUSTMENTS` ("raw", "all").
+
 ---
 
 ## 7. money

@@ -22,20 +22,34 @@ A timed-out or uneven order is cancelled, then read until the venue confirms it 
 reconciled and closed before another attempt, at most `TRIES` opens per session. Client ids, order bodies and the
 initial inventory are committed before dispatch; ambiguous answers and session changes never discard ownership.
 An unreadable order or position snapshot cannot pass the proof. Unrelated paper positions are left alone.
+
+THE STOCK PROOF (release E1, A8.7; `StockPaperProof`, live state kv `paper_proof_stock`): the equity book's route on the
+practice account before its first real order. One attempt a session: a FRACTIONAL share of SPY (about `STOCK_USD`) bought
+with a marketable limit (the ask plus `STOCK_COLLAR_BP`) in the close window (15:55:00 to 15:59:30 ET; cancelled if it
+has not filled by then), held overnight, and sold at the next session's open (from 09:30:30 ET, a marketable limit at
+the bid less the collar; an unfilled sale is cancelled after `STOCK_REPRICE_S` and, once the venue says it is terminal,
+sent again for what is left with a wider collar, never past `STOCK_MAX_COLLAR_BP`). It passes once every witness holds:
+the buy's fill (a fractional quantity at a price), the position (the paper account's SPY up by exactly that), the sale's
+fills (the whole lot), the account's FILL activities naming both orders for the same quantities, and reconciliation
+(the account's SPY back at its baseline). Never sold in the session it was bought. Client ids `lq-pp-...` (the equity
+book's prefix: never `lv-`). Only the equity book waits on it (`passed`); options entries never do.
 """
 
 from __future__ import annotations
 
+import datetime as dt
 import math
 import time
-from decimal import Decimal
+from decimal import ROUND_DOWN, ROUND_UP, Decimal
 from typing import Any, Callable, Mapping
+from zoneinfo import ZoneInfo
 
 import numpy as np
 
+from .chains import session_minutes
 from .real import RLeg, limit_price, single_body, structure_fill, ROrder
 from .state import LiveState
-from .venue import TERMINAL, Account
+from .venue import TERMINAL, Account, dec
 
 WAIT_MINUTES = 8
 HOLD_MINUTES = 2
@@ -387,4 +401,260 @@ def _single(symbol: str, action: str, price: float, cid: str) -> dict:
     return single_body(order)
 
 
-__all__ = ["PaperProof"]
+# ------------------------------------------------------------------------------------------ the stock proof (E1, A8.7)
+STOCK_KEY = "paper_proof_stock"
+STOCK_SYMBOL = "SPY"
+#: The proof buys about this many dollars of SPY: a fractional share.
+STOCK_USD = Decimal("25")
+#: Shares are sent to six places (league/equity/config.py `QTY_PLACES`); prices on the cent.
+STOCK_PLACES, CENT = Decimal("0.000001"), Decimal("0.01")
+#: The marketable limit's collar in basis points (the equity book's ETF entry collar), widened by a step for each sale
+#: re-sent, never past the maximum (the book's ETF maximum).
+STOCK_COLLAR_BP, STOCK_COLLAR_STEP_BP, STOCK_MAX_COLLAR_BP = 10, 10, 50
+#: The windows, in seconds from the session's close or open (New York): the buy from close-5 min to close-30 s (A2:
+#: 15:55:00 to 15:59:30); the sale from open+30 s to close-5 min (09:30:30 to 15:55).
+STOCK_BUY_FROM_S, STOCK_BUY_UNTIL_S = 300, 30
+STOCK_SELL_FROM_S, STOCK_SELL_UNTIL_S = 30, 300
+#: An unfilled sale is cancelled after this long (then sent again for what is left once it is terminal).
+STOCK_REPRICE_S = 60
+STOCK_TOLERANCE = Decimal("1e-9")
+STOCK_WITNESSES = ("buy_witness", "hold_witness", "sell_witness", "activity_witness", "recon_witness")
+NEW_YORK = ZoneInfo("America/New_York")
+
+
+class StockPaperProof:
+    """THE STOCK PROOF (the module docstring): `step(now, market=...)` once a minute (the equity book's tick), `passed()`
+    before the first real equity order, `status()` for the health page."""
+
+    def __init__(self, state: LiveState, account: Account, *, record: Callable[..., Any] | None = None,
+                 clock: Callable[[], float] | None = None):
+        self.state, self.account = state, account
+        self.record = record or (lambda *a, **k: None)
+        self.clock = clock or time.time
+        self.key = STOCK_KEY
+
+    def status(self) -> dict:
+        return dict(self.state.get(self.key, {}) or {})
+
+    def passed(self) -> bool:
+        row = self.status()
+        return row.get("schema") == 1 and row.get("status") == "passed" and all(row.get(k) is True for k in STOCK_WITNESSES)
+
+    @staticmethod
+    def _new() -> dict:
+        return {"schema": 1, "status": "waiting", "attempts": 0, "orders": [], "why": "waiting for a close window"}
+
+    def _put(self, row: Mapping[str, Any]) -> None:
+        self.state.put(self.key, dict(row))
+
+    def _event(self, what: str, detail: Mapping[str, Any]) -> None:
+        self.state.event(f"{self.key}.{what}", dict(detail))
+
+    # ------------------------------------------------------------------ evidence
+    def _held(self) -> Decimal:
+        """The paper account's signed SPY shares (0 when it holds none); raises when the positions cannot be read."""
+        rows = self.account.positions()
+        if not isinstance(rows, list):
+            raise ValueError("positions are not a list")
+        found = [r for r in rows if isinstance(r, Mapping) and str(r.get("symbol") or "").upper() == STOCK_SYMBOL]
+        if len(found) > 1:
+            raise ValueError(f"{STOCK_SYMBOL} is listed twice")
+        if not found:
+            return Decimal(0)
+        qty = dec(found[0].get("qty"))
+        if qty is None:
+            raise ValueError(f"{STOCK_SYMBOL}'s quantity is unreadable")
+        return -abs(qty) if str(found[0].get("side") or "") == "short" else qty
+
+    @staticmethod
+    def _filled(row: Mapping[str, Any], action: str) -> Decimal:
+        return sum((Decimal(w.get("filled") or "0") for w in row.get("orders") or [] if w["action"] == action), Decimal(0))
+
+    def _owned(self, row: Mapping[str, Any]) -> Decimal:
+        """What this attempt holds by its own orders' fills (never inferred from the account)."""
+        return self._filled(row, "buy") - self._filled(row, "sell")
+
+    def _reconciled(self, row: Mapping[str, Any], held: Decimal) -> bool:
+        return abs(held - Decimal(row.get("baseline") or "0") - self._owned(row)) <= STOCK_TOLERANCE
+
+    @staticmethod
+    def _quote(market: Any) -> tuple[Decimal, Decimal]:
+        """SPY's (bid, ask) now; ValueError when either is not a positive price or they cross."""
+        q = ((market.stocks([STOCK_SYMBOL]) or {}).get(STOCK_SYMBOL) or {}).get("latestQuote") or {}
+        bid, ask = dec(q.get("bp")), dec(q.get("ap"))
+        if bid is None or ask is None or bid <= 0 or ask < bid:
+            raise ValueError(f"no two-sided {STOCK_SYMBOL} quote")
+        return bid, ask
+
+    # ------------------------------------------------------------------ orders
+    def _dispatch(self, row: dict, body: dict, *, action: str) -> dict:
+        work = {"action": action, "body": body, "cid": body["client_order_id"], "at": self.clock(), "status": "unknown",
+                "filled": "0", "avg": None, "terminal": False}
+        row["orders"].append(work)
+        row.update(status=f"{action}_sent", why="awaiting the dispatched order")
+        self._put(row)  # committed before the POST: a crash at any later point looks up this same id
+        answer = self.account.submit(body, exit=action == "sell")
+        self._event(action + "_sent", {"body": body, "ok": answer.ok, "error": answer.error, "answer": answer.order})
+        if answer.ok and answer.order:
+            work["id"] = answer.order.get("id")
+        elif not answer.unknown:
+            work.update(status="rejected", terminal=True, rejected=True)
+        row["why"] = answer.error or "the order was accepted; awaiting its fill"
+        self._put(row)
+        return row
+
+    def _refresh(self, row: dict, *, late: bool) -> None:
+        """The last order brought up to the venue's answer by its client id; a buy still working when `late` (the close
+        window ends) and a sale working past `STOCK_REPRICE_S` are cancelled (at most once a minute)."""
+        work = row["orders"][-1]
+        if work.get("terminal"):
+            return
+        answer = self.account.order_by_client_id(work["cid"])
+        if answer is None:
+            row["why"] = "the dispatched order is not yet found; its outcome remains unresolved"
+            return
+        if str(answer.get("client_order_id") or "") != work["cid"]:
+            raise ValueError("the lookup returned another client order id")
+        filled = dec(answer.get("filled_qty")) or Decimal(0)
+        if filled < Decimal(work.get("filled") or "0") or filled > Decimal(work["body"]["qty"]):
+            raise ValueError("an invalid or regressed cumulative fill")
+        work.update(id=answer.get("id"), status=str(answer.get("status") or ""), filled=str(filled),
+                    avg=answer.get("filled_avg_price"))
+        work["terminal"] = work["status"] in TERMINAL
+        if work["terminal"]:
+            self._event("order_observed", {"cid": work["cid"], "answer": dict(answer)})
+            return
+        stale = late if work["action"] == "buy" else self.clock() - float(work["at"]) >= STOCK_REPRICE_S
+        if stale and work.get("id") and self.clock() - float(work.get("cancel_at") or 0) >= 60:
+            work["cancel_at"] = self.clock()
+            self._put(row)  # a lost cancel answer is recovered by the order's id too
+            ok, why = self.account.cancel(work["id"])
+            self._event("cancel", {"cid": work["cid"], "ok": ok, "why": why})
+            row["why"] = "waiting for the venue to confirm the order is terminal after its cancel"
+
+    def _activities(self, row: Mapping[str, Any]) -> bool:
+        """Whether the account's FILL activities name this attempt's buy and sale for exactly their filled quantities."""
+        after = (dt.date.fromisoformat(row["buy_day"]) - dt.timedelta(days=1)).isoformat()
+        rows = self.account.activities(["FILL"], after=after)
+        by_order: dict[str, Decimal] = {}
+        for r in rows:
+            qty = dec(r.get("qty"))
+            if r.get("order_id") and qty is not None:
+                by_order[str(r["order_id"])] = by_order.get(str(r["order_id"]), Decimal(0)) + abs(qty)
+        for work in row.get("orders") or []:
+            want = Decimal(work.get("filled") or "0")
+            if want > 0 and abs(by_order.get(str(work.get("id")), Decimal(0)) - want) > STOCK_TOLERANCE:
+                return False
+        return self._filled(row, "buy") > 0
+
+    # ------------------------------------------------------------------ the minute
+    def step(self, now: float, *, market: Any) -> dict:
+        """Advance the one durable attempt (the module docstring). Never raises for the venue's trouble: an unreadable
+        reading is the row's `why`, and nothing new is sent without readable evidence."""
+        row = self.status()
+        if self.passed():
+            return row
+        if row.get("schema") != 1:
+            row = self._new()
+        local = dt.datetime.fromtimestamp(now, NEW_YORK)
+        today = local.date()
+        session = session_minutes(today)
+        secs = local.hour * 3600 + local.minute * 60 + local.second
+        try:
+            if row.get("orders"):
+                late = (row.get("buy_day") != today.isoformat() or session is None
+                        or secs >= session[1] * 60 - STOCK_BUY_UNTIL_S)
+                self._refresh(row, late=late)
+            held = self._held()
+        except Exception as exc:  # noqa: BLE001 - no new dispatch or pass without readable evidence
+            row["why"] = f"stock paper proof evidence unreadable: {str(exc)[:160]}"
+            self._put(row)
+            return row
+        try:
+            row = self._advance(row, held, today, session, secs, market)
+        except Exception as exc:  # noqa: BLE001
+            row["why"] = f"stock paper proof: {type(exc).__name__}: {str(exc)[:160]}"
+        self._put(row)
+        return row
+
+    def _advance(self, row: dict, held: Decimal, today: dt.date, session: tuple[int, int] | None, secs: int,
+                 market: Any) -> dict:
+        status = row["status"]
+        if status == "waiting":
+            if session is None or row.get("tried_day") == today.isoformat():
+                return row
+            close_s = session[1] * 60
+            if not close_s - STOCK_BUY_FROM_S <= secs < close_s - STOCK_BUY_UNTIL_S:
+                return row
+            _, ask = self._quote(market)
+            limit = (ask * (1 + Decimal(STOCK_COLLAR_BP) / 10000)).quantize(CENT, rounding=ROUND_UP)
+            qty = (STOCK_USD / limit).quantize(STOCK_PLACES, rounding=ROUND_DOWN)
+            row["attempts"] = int(row.get("attempts") or 0) + 1
+            attempt = f"lq-pp-{today:%Y%m%d}-{self.state.nonce}-{row['attempts']}"
+            row.update(attempt=attempt, buy_day=today.isoformat(), tried_day=today.isoformat(), baseline=str(held),
+                       orders=[], **{k: False for k in STOCK_WITNESSES})
+            body = {"symbol": STOCK_SYMBOL, "qty": format(qty, "f"), "side": "buy", "type": "limit", "time_in_force": "day",
+                    "limit_price": format(limit, "f"), "client_order_id": attempt + "-b"}
+            return self._dispatch(row, body, action="buy")
+        work = row["orders"][-1] if row.get("orders") else None
+        if work is None or not work.get("terminal"):
+            return row
+        if status == "buy_sent":
+            bought = self._filled(row, "buy")
+            if bought <= 0:
+                row.update(status="waiting", why="the buy ended unfilled: the next session's close window tries again")
+                return row
+            row["buy_witness"] = (bought != bought.to_integral_value() and work.get("avg") not in (None, "")
+                                  and work["status"] in ("filled", "canceled", "expired", "done_for_day"))
+            row.update(status="held", why="held overnight: sold at the next session's open")
+            self._event("buy_witness", {"cid": work["cid"], "filled": str(bought), "avg": work.get("avg")})
+            status = "held"
+        if status == "sell_sent":
+            # Terminal (cancel then resend): what is left goes again at once, a step wider; nothing left is sold.
+            row["status"] = status = "held" if self._owned(row) > STOCK_TOLERANCE else "sold"
+        if status == "held":
+            if self._reconciled(row, held):
+                row["hold_witness"] = True
+            elif not row.get("hold_witness"):
+                row["why"] = f"the paper account's {STOCK_SYMBOL} disagrees with this attempt's recorded fills"
+            if session is None or today.isoformat() <= str(row["buy_day"]):
+                return row                                   # never sold in the session it was bought
+            if not session[0] * 60 + STOCK_SELL_FROM_S <= secs < session[1] * 60 - STOCK_SELL_UNTIL_S:
+                return row
+            owned = self._owned(row)
+            if owned <= STOCK_TOLERANCE:
+                row["status"] = "sold"
+                return row
+            bid, _ = self._quote(market)
+            sells = sum(1 for w in row["orders"] if w["action"] == "sell")
+            collar = min(STOCK_MAX_COLLAR_BP, STOCK_COLLAR_BP + STOCK_COLLAR_STEP_BP * sells)
+            limit = (bid * (1 - Decimal(collar) / 10000)).quantize(CENT, rounding=ROUND_DOWN)
+            body = {"symbol": STOCK_SYMBOL, "qty": format(owned.normalize(), "f"), "side": "sell", "type": "limit",
+                    "time_in_force": "day", "limit_price": format(limit, "f"),
+                    "client_order_id": f"{row['attempt']}-s{sells + 1}"}
+            row["sold_day"] = today.isoformat()
+            return self._dispatch(row, body, action="sell")
+        if status == "sold":
+            bought, sold = self._filled(row, "buy"), self._filled(row, "sell")
+            row["sell_witness"] = bought > 0 and abs(bought - sold) <= STOCK_TOLERANCE and all(
+                w.get("avg") not in (None, "") for w in row["orders"] if w["action"] == "sell" and Decimal(w["filled"]) > 0)
+            row["recon_witness"] = self._reconciled(row, held) and abs(held - Decimal(row["baseline"])) <= STOCK_TOLERANCE
+            row["activity_witness"] = self._activities(row)
+            if all(row.get(k) is True for k in STOCK_WITNESSES):
+                row.update(status="passed", passed_at=self.clock(),
+                           why=(f"a witnessed fractional {STOCK_SYMBOL} buy at the close and sale at the next open: fills, "
+                                "position, activities and reconciliation agree"))
+                self._event("passed", {k: row[k] for k in STOCK_WITNESSES})
+                self.record("live.paper_proof", {"status": "passed", "day": today.isoformat(), "kind": "stock"})
+                return row
+            missing = [k for k in STOCK_WITNESSES if row.get(k) is not True]
+            if today.isoformat() > str(row.get("sold_day") or today.isoformat()):
+                # The sale's session has ended without every witness: this attempt ends flat; the next close tries again.
+                self._event("attempt_flat", {"attempt": row.get("attempt"), "missing": missing})
+                row.update(status="waiting", why=f"the last attempt ended flat without {', '.join(missing)}")
+            else:
+                row["why"] = f"sold; waiting for {', '.join(missing)}"
+        return row
+
+
+__all__ = ["PaperProof", "StockPaperProof", "STOCK_KEY"]

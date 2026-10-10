@@ -57,6 +57,9 @@ TERMINAL = frozenset({"filled", "canceled", "expired", "rejected", "done_for_day
 WORKING = frozenset({"new", "accepted", "pending_new", "accepted_for_bidding", "partially_filled", "pending_cancel",
                      "pending_replace", "calculated", "held"})
 MAX_PAGES = 50
+#: The bar adjustments the House reads (`MarketData.bars`): raw prices, and splits and dividends applied (the equity
+#: book's second series, from which a program's as-of prices are built: league/equity/ctx.py).
+BAR_ADJUSTMENTS = ("raw", "all")
 
 
 class VenueError(RuntimeError):
@@ -337,13 +340,19 @@ class MarketData:
             raise VenueError("stock snapshots: not a map")
         return page
 
-    def bars(self, symbols: Iterable[str], *, timeframe: str, start: str, end: str | None = None) -> dict[str, list[dict]]:
+    def bars(self, symbols: Iterable[str], *, timeframe: str, start: str, end: str | None = None,
+             adjustment: str = "raw") -> dict[str, list[dict]]:
+        """Stock bars, every page: {symbol: [{t, o, h, l, c, v, ...}]}. `adjustment` is Alpaca's: "raw" (the options
+        path's underlyings) or "all" (splits and dividends: the equity book reads both series at 16:20 ET, release E1);
+        ValueError for any other."""
+        if adjustment not in BAR_ADJUSTMENTS:
+            raise ValueError(f"bars: adjustment {adjustment!r} is not one of {BAR_ADJUSTMENTS}")
         names = sorted({str(s).upper() for s in symbols if s})
         out: dict[str, list[dict]] = {name: [] for name in names}
         token = None
         for _ in range(MAX_PAGES):
             page = self._get("/v2/stocks/bars", {"symbols": ",".join(names), "timeframe": timeframe, "start": start,
-                                                 "end": end, "limit": 10000, "feed": self.stock_feed, "adjustment": "raw",
+                                                 "end": end, "limit": 10000, "feed": self.stock_feed, "adjustment": adjustment,
                                                  "page_token": token}, f"bars {timeframe}")
             for name, rows in ((page or {}).get("bars") or {}).items():
                 out.setdefault(name, []).extend(rows or [])
@@ -385,4 +394,5 @@ def stock_price(row: Mapping[str, Any], *, not_before: float | None = None) -> f
 
 
 __all__ = ["Account", "MarketData", "Submitted", "VenueError", "RateLimited", "Rate", "occ_parts", "occ_symbol", "quote_of",
-           "stock_price", "parse_time", "TERMINAL", "WORKING", "OPTION_EVENTS", "LIVE_BASE", "PAPER_BASE", "DATA_BASE"]
+           "stock_price", "parse_time", "TERMINAL", "WORKING", "OPTION_EVENTS", "BAR_ADJUSTMENTS", "LIVE_BASE", "PAPER_BASE",
+           "DATA_BASE"]

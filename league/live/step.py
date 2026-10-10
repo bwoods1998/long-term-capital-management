@@ -84,10 +84,22 @@ D2 families' intents go first (`:r`, `:t`), then the incubator's, then the House
 is never evidence (never a forward row, a band move or a promotion; its rows are tuition-flagged and never in tuition's
 own sums), and its positions are Profit, labelled "incubator" on the site.
 
+THE EQUITY LANE (release E1; league/equity/live.py's `EquityBook`, reached only through league/live/equity_hook.py):
+`self.equity` is built with the real book, and `minute` calls its `tick` exactly once (a CI test holds the call site
+to one), after the options path's own reads and in its own guard, so an equity failure never ends the options minute.
+The equity book asks `real_block(opening=True)` before any open, and its own freeze blocks options opens too (one
+account). Shares on the account (A8.2): what the equity book owns (its open lots and the filled part of its working
+orders) is never touched; every other us_equity quantity is UNATTRIBUTED: a short one is covered at once, a long one is
+sold after two consecutive readings with an alarm (`_close_shares`), both at market; an account below what the equity
+book owns is reconciliation's mismatch, never an order. The SHARE-EVENT LEDGER (live state kv `shares`, {symbol:
+signed Decimal string}) books 100 shares a contract for each assignment and exercise (`_activities`), moves toward zero
+as the House's own share orders (`lv-shares-`) fill, and is what reconciliation expects beside the equity lots.
+
 Real opens need every one of: `config.json` `real_money`; the grant `options-swarm-20260928` active on the money digest
-in force (`House.grant`); the gateway's kill switch off; no stop tripped (`money.Stops`); reconciliation clean; the
-paper proof passed this session or before (`live.require_paper_proof`); the House not paused; the family's band (or
-tuition) and the instance live. Exits need only the kill switch off.
+in force (`House.grant`); the gateway's kill switch off; no stop tripped (`money.Stops`); reconciliation clean (the
+equity book's too); the account's cash not below zero; the paper proof passed this session or before
+(`live.require_paper_proof`); the House not paused; the family's band (or tuition) and the instance live. Exits need
+only the kill switch off.
 """
 
 from __future__ import annotations
@@ -113,6 +125,7 @@ from ..gym import legs as L
 from ..gym.engine import settlement_level
 from ..gym import venue as V
 from ..gym.ctx import order_row, position_row
+from . import equity_hook
 from . import money as M
 from . import house_test as HT
 from .calibration import FAMILY as CALIBRATION_FAMILY, Calibration
@@ -124,7 +137,7 @@ from .paper import PaperProof
 from .real import SINGLE_TYPES, RealBook, RLeg, RPosition, is_incubator, real_legs
 from .shadow import SHADOW_FILE, ShadowAccount, ShadowBook, needs_of
 from .state import STATE_FILE, LiveState
-from .venue import OPTION_EVENTS, Account, MarketData, VenueError, occ_parts, occ_symbol, parse_time, stock_price
+from .venue import OPTION_EVENTS, WORKING, Account, MarketData, VenueError, occ_parts, occ_symbol, parse_time, stock_price
 
 NEW_YORK = ZoneInfo("America/New_York")
 FAMILIES_EVERY = 300.0
@@ -324,6 +337,9 @@ class OptionsLive:
         self._activities_at = float("-inf")
         self._activities_changed = False
         self._stock_held = False
+        self._cash_told = False
+        #: The minute's own account reads, passed to the equity book's tick: {"positions": [...], "open_orders": [...]}.
+        self._reads: dict[str, Any] = {}
         self._flows_at = float("-inf")
         self._last_minute: tuple[str, int] | None = None
         self._thread: threading.Thread | None = None
@@ -334,6 +350,9 @@ class OptionsLive:
         #: the live state so a restart does not lose one the program was told the House sends.
         self.pending_exits: dict[int, dict] = {int(k): dict(v) for k, v in (self.state.get("pending_exits", {}) or {}).items()}
         self._decision_end = time.monotonic() + MAX_BATCH_SECONDS
+        #: THE EQUITY LANE's book (league/live/equity_hook.py; None without a real account or an equity block), built
+        #: once every part it is given exists (the real book, the paper account, the decider, the account row's slot).
+        self.equity = equity_hook.build_book(self)
         self._restore_real_instances()
 
     # ------------------------------------------------------------------ plumbing
@@ -495,8 +514,25 @@ class OptionsLive:
             self.state.execute("DELETE FROM kv WHERE key IN ('assignment_latch', 'owner_clear_assignment')")
 
     def minute(self) -> dict:
-        """One pass: the session's minute, the close's bookkeeping, or the quiet hours' reconciliation."""
+        """One pass: the session's minute, the close's bookkeeping, or the quiet hours' reconciliation; then the
+        equity book's minute, whatever the options path's state (its ONE call site, A8.8; never the minute's end)."""
         now = self.clock()
+        self._reads = {}
+        out = self._options_minute(now)
+        if self.equity is not None:
+            try:
+                out["equity"] = self.equity.tick(now, account_row=self.account_row, positions=self._reads.get("positions"),
+                                                 open_orders=self._reads.get("open_orders"), real_block=self.real_block,
+                                                 killed=self._killed)
+            except Exception as exc:  # noqa: BLE001 - an equity failure never ends the options minute
+                out["equity"] = {"error": f"{type(exc).__name__}: {str(exc)[:200]}"}
+                self.alert("warning", f"live: the equity book's minute failed ({type(exc).__name__}: {str(exc)[:160]})")
+                self.state.event("live.error", {"instance": "equity", "error": f"{type(exc).__name__}: {exc}",
+                                                "trace": traceback.format_exc()[-2000:]})
+        return self._done(out)
+
+    def _options_minute(self, now: float) -> dict:
+        """The options path's pass (`minute`); its summary."""
         self._switches = None  # swarm.json's switches are read afresh each pass
         # Loads, recovery, decisions and drops share one budget; leave five seconds before the next wall minute for
         # applying answers, exports and persistence. A late data/account read consumes that same allowance.
@@ -510,12 +546,12 @@ class OptionsLive:
         if session is None:
             out["state"] = "closed"
             self._quiet(now, out)
-            return self._done(out)
+            return out
         open_min, close_min = session
         if m < open_min:
             out["state"] = "before the open"
             self._quiet(now, out)
-            return self._done(out)
+            return out
         day = self._ensure_day(today, open_min, close_min)
         mi = m - open_min
         if mi >= day.minutes - 1:
@@ -526,15 +562,15 @@ class OptionsLive:
             out["state"] = "after the close"
             self._end_of_day(day, out)
             self._quiet(now, out)
-            return self._done(out)
+            return out
         if self._last_minute == (today.isoformat(), mi):
             out["state"] = "minute already done"
-            return self._done(out)
+            return out
         self._last_minute = (today.isoformat(), mi)
         out["state"] = "session"
         out["minute"] = open_min + mi
         self._session_minute(day, mi, now, out)
-        return self._done(out)
+        return out
 
     def _done(self, out: dict) -> dict:
         if self._volume_dirty and self.day is not None:
@@ -1895,9 +1931,13 @@ class OptionsLive:
         self._activities(now)
         if self._activities_changed:
             positions = self._positions_again(out)
+        self._reads = {"positions": positions,
+                       "open_orders": None if foreign is None else [r for r in rows if str(r.get("status") or "") in WORKING]}
         if positions is not None and foreign is not None:
+            self._shares_filled_safe()
             before = book.frozen
-            book.reconcile(positions, foreign, day=day.day, after_close=False, shares=self.state.get("shares", {}) or {})
+            book.reconcile(positions, foreign, day=day.day, after_close=False, shares=self.state.get("shares", {}) or {},
+                           equity_shares=self._owned_shares())
             if book.frozen and not before:
                 self.alert("error", f"live: real entries frozen: {book.frozen}")
                 self._tell_owner("reconciliation", book.frozen)
@@ -2022,8 +2062,8 @@ class OptionsLive:
 
     def _activities(self, now: float) -> None:
         """Assignments and exercises (OPASN, OPEXC): the account now holds shares it cannot carry, and a structure is
-        broken. Real entries freeze, the owner is told, and the shares are closed at once (the only stock order the
-        live path sends)."""
+        broken. Real entries freeze, the owner is told, the shares are booked in the share-event ledger (`_book_shares`)
+        and closed (`_close_shares`: the only stock orders the options path sends)."""
         self._activities_changed = False
         if self.real is None or now - self._activities_at < ACTIVITIES_EVERY:
             return
@@ -2070,6 +2110,7 @@ class OptionsLive:
                 if found < contracts and kind != "OPEXP":
                     self.record("live.alert", {"what": f"{kind} of {contracts} {symbol}: the book held {found}"})
             if kind in ("OPASN", "OPEXC"):
+                self._book_shares(kind, symbol, contracts)
                 why = f"{'an assignment' if kind == 'OPASN' else 'an exercise'} on {symbol} ({r.get('qty')} contracts)"
                 self.state.put("assignment_latch", {"why": why, "at": now})
                 self.alert("error", f"live: {why}: real entries frozen until it is resolved; its shares are closed and the "
@@ -2106,40 +2147,159 @@ class OptionsLive:
         return max(0.0, level - strike) if is_call else max(0.0, strike - level)
 
     def _resolve_latch(self) -> None:
-        """An assignment's latch lifts by itself once it is resolved: no broken structure left, no shares held, and a
-        clean reconciliation (the owner has been told either way; `--clear-assignment` lifts it by hand)."""
+        """An assignment's latch lifts by itself once it is resolved: no broken structure left, no unattributed shares
+        held (the equity book's lots never hold it), the share-event ledger back at zero, and a clean reconciliation
+        (the owner has been told either way; `--clear-assignment` lifts it by hand)."""
         latch = self.state.get("assignment_latch")
         if not latch or self.book is None:
             return
         broken = [p for p in self.book.positions.values() if p.info.get("broken")]
         shares = self.state.get("shares", {}) or {}
-        if not broken and not any(shares.values()) and not self._stock_held and not self.book.frozen and not self.book.mismatch:
+        if (not broken and not any(M.D(v) for v in shares.values()) and not self._stock_held and not self.book.frozen
+                and not self.book.mismatch):
             self.state.execute("DELETE FROM kv WHERE key='assignment_latch'")
             self.record("live.stop", {"stop": "assignment", "released": True, "why": f"resolved: {latch.get('why')}"})
 
+    def _owned_shares(self) -> dict[str, Decimal] | None:
+        """{symbol: shares} the equity book owns now ({} with none); None when it cannot be read (A8.2: every share is
+        then unexplained, so reconciliation sees a mismatch and no long share is sold)."""
+        try:
+            return equity_hook.expected_shares(self.equity)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _book_shares(self, kind: str, symbol: str, contracts: int) -> None:
+        """THE SHARE-EVENT LEDGER (A8.2): an assignment (OPASN) or an exercise (OPEXC) of `contracts` contracts books
+        100 shares a contract on the option's underlying (an index option settles in cash: none): a call assigned or
+        a put exercised delivers them (-), a put assigned or a call exercised receives them (+)."""
+        parts = occ_parts(symbol)
+        if parts is None or not contracts or V.is_index(parts[0]):
+            return
+        root, _, is_call, _ = parts
+        sign = -1 if (kind == "OPASN") == is_call else 1
+        shares = dict(self.state.get("shares", {}) or {})
+        shares[root] = str(M.D(shares.get(root) or 0) + sign * V.MULTIPLIER * abs(int(contracts)))
+        self.state.put("shares", shares)
+        self.record("live.shares", {"symbol": root, "ledger": shares[root], "event": kind, "contract": symbol,
+                                    "contracts": int(contracts)})
+
+    def _shares_filled(self) -> None:
+        """The House's own share orders (`lv-shares-`, live state kv `shares_orders`) read back by client id: each new
+        fill moves the share-event ledger toward zero (never past it: a sale of unexplained shares books nothing), and a
+        terminal order is forgotten. An order that cannot be read is asked again at the next reading."""
+        orders = dict(self.state.get("shares_orders", {}) or {})
+        if not orders:
+            return
+        shares = dict(self.state.get("shares", {}) or {})
+        for cid, row in list(orders.items()):
+            try:
+                answer = self.real.order_by_client_id(cid)
+            except Exception:  # noqa: BLE001
+                continue
+            if answer is None:
+                if self.clock() - float(row.get("at") or 0) > 600:
+                    orders.pop(cid)          # never reached the venue (its answer was lost, its id is not there)
+                continue
+            filled = M.D(answer.get("filled_qty") or 0)
+            new = filled - M.D(row.get("filled") or 0)
+            if new > 0:
+                symbol = str(row["symbol"])
+                left = M.D(shares.get(symbol) or 0)
+                if (row.get("side") == "buy") == (left < 0):     # a cover takes delivered shares back, a sale received ones
+                    step = min(abs(left), new)
+                    shares[symbol] = str(left - step if left > 0 else left + step)
+                row["filled"] = str(filled)
+            if str(answer.get("status") or "") not in WORKING:
+                orders.pop(cid)
+            else:
+                orders[cid] = row
+        self.state.put("shares", {k: v for k, v in shares.items() if M.D(v) != 0})
+        self.state.put("shares_orders", orders)
+
     def _close_shares(self) -> None:
-        """Any stock position on the account (an assignment's or an exercise's) closed at once with a market order."""
+        """THE ACCOUNT'S SHARES (A8.2): per us_equity symbol, the unattributed quantity is the account's less what the
+        equity book owns (`equity_hook.expected_shares`: its open lots and the filled part of its working orders, read
+        after the positions in the same pass). A SHORT account quantity is covered at once, by its unattributed part
+        (the buy brings the account back to what the equity book owns, so an assignment netted against a program's lot
+        never consumes the lot); a LONG unattributed excess is sold once two consecutive readings showed one (kv
+        `unattributed_seen` {symbol: qty}), with an alarm; both with a market order, as before E1. A long account below
+        what the equity book owns is reconciliation's mismatch, never an order; a lot the equity book owns is never
+        touched, and a symbol with a working order in either book waits for the next reading. With the equity book
+        unreadable no long share is sold (what it owns cannot be told): only a short is covered, to flat."""
         if self.real is None:
             return
+        self._shares_filled_safe()
         try:
             positions = self.real.positions()
             working = {str(o.get("symbol") or "").upper() for o in self.real.orders(status="open")}
         except Exception:  # noqa: BLE001
             self._stock_held = True   # unread: not known to be clear
             return
-        self._stock_held = any(str(r.get("asset_class")) == "us_equity" and M.D(r.get("qty") or 0) != 0 for r in positions)
+        owned = self._owned_shares()
+        try:
+            working |= equity_hook.busy(self.equity)
+        except Exception:  # noqa: BLE001 - the equity book's orders unread: the venue's open orders stand alone
+            owned = None
+        seen = {str(k): M.D(v) for k, v in (self.state.get("unattributed_seen", {}) or {}).items()}
+        excess: dict[str, Decimal] = {}
+        held = False
         for row in positions:
-            if str(row.get("asset_class")) != "us_equity" or str(row.get("symbol") or "").upper() in working:
+            if str(row.get("asset_class")) != "us_equity":
                 continue
+            symbol = str(row.get("symbol") or "").upper()
             qty = M.D(row.get("qty") or 0)
-            if qty == 0:
+            signed = -abs(qty) if str(row.get("side")) == "short" else qty
+            if signed < 0:
+                held = True
+                if symbol not in working:
+                    cover = (owned or {}).get(symbol, M.ZERO) - signed
+                    self._send_shares(row, "buy", cover, why="a short share position is covered at once")
                 continue
-            side = "sell" if str(row.get("side")) != "short" and qty > 0 else "buy"
-            body = {"symbol": str(row["symbol"]), "qty": str(abs(qty)), "side": side, "type": "market", "time_in_force": "day",
-                    "client_order_id": f"lv-shares-{str(row['symbol']).lower()}-{int(self.clock())}"}
-            answer = self.real.submit(body, exit=True)
-            self.record("live.shares", {"symbol": row["symbol"], "qty": str(qty), "side": side, "ok": answer.ok,
-                                        "error": answer.error})
+            if owned is None:
+                held = held or signed != 0
+                continue
+            over = signed - owned.get(symbol, M.ZERO)
+            if over <= equity_hook.SHARE_TOLERANCE:
+                continue
+            held = True
+            if symbol in working:
+                if symbol in seen:
+                    excess[symbol] = seen[symbol]               # skipped this reading: a seen excess stays seen
+                continue
+            if symbol in seen:
+                self.alert("error", f"live: {symbol}: {over} shares no program owns, on two readings: sold at market")
+                self.record("live.alert", {"what": f"{symbol}: {over} unattributed shares sold at market (two readings)"})
+                self._send_shares(row, "sell", over, why="unattributed long shares, two readings")
+            else:
+                excess[symbol] = over
+                self.record("live.alert", {"what": f"{symbol}: {over} shares no program owns (first reading; sold at "
+                                                   "the next if still there)"})
+        self.state.put("unattributed_seen", {k: str(v) for k, v in excess.items()})
+        self._stock_held = held
+
+    def _shares_filled_safe(self) -> None:
+        try:
+            self._shares_filled()
+        except Exception as exc:  # noqa: BLE001 - the ledger is read again at the next reading
+            self.alert("warning", f"live: the share orders could not be read back ({type(exc).__name__})")
+
+    def _send_shares(self, row: Mapping[str, Any], side: str, qty: Decimal, *, why: str) -> None:
+        """One House share order at market (`lv-shares-`), remembered (kv `shares_orders`) so its fills move the
+        share-event ledger."""
+        symbol = str(row["symbol"])
+        cid = f"lv-shares-{symbol.lower()}-{int(self.clock())}"
+        text = format(qty.normalize(), "f")
+        body = {"symbol": symbol, "qty": text, "side": side, "type": "market", "time_in_force": "day",
+                "client_order_id": cid}
+        orders = dict(self.state.get("shares_orders", {}) or {})
+        orders[cid] = {"symbol": symbol.upper(), "side": side, "qty": text, "filled": "0", "at": self.clock()}
+        self.state.put("shares_orders", orders)
+        answer = self.real.submit(body, exit=True)
+        if not answer.ok and not answer.unknown:
+            orders.pop(cid, None)
+            self.state.put("shares_orders", orders)
+        self.record("live.shares", {"symbol": symbol, "qty": str(row.get("qty")), "sent": text, "side": side,
+                                    "ok": answer.ok, "error": answer.error, "why": why})
 
     def _venue_rules(self, day: LiveDay, mi: int, out: dict) -> None:
         """Expiry-day closes, the open cutoff's cancels, tif expiries, and orphans' closes (exits: the kill switch only)."""
@@ -2501,6 +2661,9 @@ class OptionsLive:
             return blocked
         if self.book is not None and self.book.frozen:
             return f"reconciliation: {self.book.frozen}"
+        frozen = equity_hook.frozen(self.equity)
+        if frozen:
+            return f"equity reconciliation: {frozen}"
         if self.state.rows("SELECT pid FROM positions WHERE status='unpriced_close' LIMIT 1"):
             return "reconciliation: expired positions are flat but their venue fill values are still unread"
         latch = self.state.get("assignment_latch")
@@ -2512,7 +2675,25 @@ class OptionsLive:
             return "the House is paused"
         if self.account_row is None:
             return "the account could not be read this minute"
-        return None
+        return self._cash_negative()
+
+    def _cash_negative(self) -> str | None:
+        """THE HOUSE-WIDE CASH RULE's floor (A8.1): with the account's cash below zero (a margin debit) every real open in
+        both lanes refuses, and the owner is alerted once until it clears. A row without a cash figure is left to the
+        reservation's own reading (`RealBook.free_to_reserve`)."""
+        cash = self.account_row.get("cash") if self.account_row is not None else None
+        try:
+            negative = cash is not None and M.D(cash) < 0
+        except (ValueError, ArithmeticError):
+            negative = False
+        if not negative:
+            self._cash_told = False
+            return None
+        why = f"the account's cash is below zero ({cash}): no real open in either lane until it is not"
+        if not self._cash_told:
+            self._cash_told = True
+            self.alert("error", f"live: {why}")
+        return why
 
     def _real_intents(self, inst: Instance, day: LiveDay, mi: int, intents: Iterable[Mapping[str, Any]], out: dict) -> None:
         book = self.book
@@ -2657,9 +2838,10 @@ class OptionsLive:
         fees = L.order_fees(root, order.legs, prices, qty, "open")
         max_loss = order.max_loss_share * V.MULTIPLIER * qty
         reserve = (max_loss + 2 * fees) * (1 + float(self.table.bp_buffer))
-        free = float(M.D(self.account_row.get("options_buying_power") or 0)) - book.reserved()
+        free, bound = book.free_to_reserve(self.account_row)
         if reserve > free + 1e-9:
-            return f"buying power: it reserves {reserve:.2f} (maximum loss, fees and {self.table.bp_buffer:.0%}); {max(0.0, free):.2f} is free"
+            return (f"buying power: it reserves {reserve:.2f} (maximum loss, fees and {self.table.bp_buffer:.0%}); "
+                    f"{max(0.0, free):.2f} is free ({bound})")
         waiting = sorted({leg.symbol for leg in legs} & self._pending_symbols())
         if waiting:
             return f"an exit is waiting for {', '.join(waiting)}: no new open on it"
@@ -2855,10 +3037,13 @@ class OptionsLive:
         if "venue_error" not in out:
             if self._activities_changed:
                 positions = self._positions_again(out)
+            self._reads = {"positions": positions, "open_orders": [r for r in rows if str(r.get("status") or "") in WORKING]}
             if positions is not None:
                 self._reconcile_expiry(rows, positions, today, out)
+                self._shares_filled_safe()
                 self.book.reconcile(positions, foreign, day=today, after_close=True,
-                                    shares=self.state.get("shares", {}) or {}, include_expired=True)
+                                    shares=self.state.get("shares", {}) or {}, include_expired=True,
+                                    equity_shares=self._owned_shares())
                 self._export_real()
 
     def _reconcile_expiry(self, orders: list[dict], positions: list[dict], today: dt.date, out: dict) -> None:
@@ -2994,6 +3179,7 @@ class OptionsLive:
                 "fill_model": {"source": str(getattr(model, "source", "")), "version": str(getattr(model, "version", "")),
                                "cells": len(getattr(model, "hazard", {}) or {})},
                 "frozen": self.book.frozen if self.book is not None else None,
+                "equity": equity_hook.health(self.equity),
                 "paper_proof": self.proof.status() if self.proof is not None else None,
                 "paper_proof_single": self.proof_single.status() if self.proof_single is not None else None,
                 "instances": {k: {"family": i.family, "kind": i.kind, "band": i.band, "mode": i.mode, "error": i.error or None,

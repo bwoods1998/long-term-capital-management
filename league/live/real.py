@@ -39,6 +39,15 @@ Reconciliation: the account's option positions per contract against this book's 
 part of working opens), and the account's working orders against this book's; the legacy LTC dust (0.000373062,
 below the venue's minimum) is a known holding outside P&L. A mismatch seen on two readings in a row freezes new real
 entries (exits pass) and says why; two clean readings in a row lift it.
+
+THE EQUITY LANE (release E1; league/live/equity_hook.py is its one door here). The equity book's orders (`lq-`) are
+never foreign (`ingest`); the account's shares are reconciled against the equity book's lots plus the share-event
+ledger's assignment and exercise shares, as Decimal within `equity_hook.SHARE_TOLERANCE` (`reconcile`); THE PROBE LOSS
+BUDGET is one budget for both lanes (`probe_tally`, `probe_realized`, `probe_figures` union the equity rows: one slot a
+program, its open lots' weighted mark value at risk, its Probe lots' net cash realized); the day's order count is the
+account's, shared by both books (`house_count`, A8.3); and an option open reserves against the lower of
+`options_buying_power` and the House-wide available cash (`free_to_reserve`, A8.1: cash less short value, both books'
+working buys and the reserve).
 """
 
 from __future__ import annotations
@@ -55,6 +64,7 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 from .. import structure_core as core
 from ..gym import legs as L
 from ..gym import venue as V
+from . import equity_hook
 from . import money as M
 from .state import LiveState, dumps, loads
 from .venue import TERMINAL, WORKING, Account, Submitted, dec, occ_parts
@@ -152,7 +162,8 @@ def incubator_tally(rows: Callable[..., list], *, day: str, week_start: str, fam
                             week_peak_loss=peak)
 
 
-def probe_tally(rows: Callable[..., list], *, day: str, basis: str) -> tuple[int, Decimal, Decimal]:
+def probe_tally(rows: Callable[..., list], *, day: str, basis: str,
+                table: M.Table | None = None) -> tuple[int, Decimal, Decimal]:
     """THE FAST LANE's Probe figures (D3, D4, Oct 7, 2026; `money.plan_open`): (open_n, realized_loss, at_risk) from the
     live state's own rows, selected by the instance suffix `:r` and `tuition = 0` only, so a restart reads the same numbers
     (`rows(sql, params)` returns dicts, as `incubator_tally`'s). `day`: today (New York), ISO. `basis`: the constitution's
@@ -176,9 +187,15 @@ def probe_tally(rows: Callable[..., list], *, day: str, basis: str) -> tuple[int
     whatever its age, until the book finds it at the venue (`ingest` takes it back): the budget is a running total, so a
     lost open may have filled and lost. open_n: positions not closed, and pending, working or unknown opens without a
     position; a lost open without a position holds its slot until its first leg's expiry has passed (after that it can
-    hold nothing; its maximum loss stays counted in at_risk)."""
+    hold nothing; its maximum loss stays counted in at_risk).
+
+    THE EQUITY LANE (release E1, A8.6): the equity book's rows join all three (`equity_hook.probe_figures` under
+    `table`'s equity weights; None: the table in force): ONE slot a program with an open or working ":r" lot (never one
+    a lot), its open risk (`open_risk_weight[class]` x mark value of each open ":r" lot, plus its working ":r" buys) at
+    risk, and each closed Probe ":r" lot's net cash (fees and dividends in) among the closes, by the same basis."""
     if basis not in M.LOSS_BASES:
         raise ValueError(f"the Probe loss basis {basis!r} is not one of {M.LOSS_BASES}")
+    equity = equity_hook.probe_figures(rows, table=table)
     like = REAL_SUFFIX                       # substr(instance, -2): exact and case-sensitive (LIKE is neither)
     at_risk = M.ZERO
     realized = M.ZERO
@@ -201,12 +218,17 @@ def probe_tally(rows: Callable[..., list], *, day: str, basis: str) -> tuple[int
         at_risk += (M.D(r["max_loss"]) + 2 * M.D(r["fees_est"])) * M.D(remaining) / max(1, int(r["qty"]))
         if r["pid"] is None and not (lost and _expired(r["legs"], day)):
             open_n += 1
+    open_n += int(equity.programs)
+    at_risk += Decimal(equity.open_risk)
+    for _, cash in equity.closes:
+        realized += max(M.ZERO, -Decimal(cash))
+        net += Decimal(cash)
     if basis == "net":
         realized = max(M.ZERO, -net)
     return open_n, realized, at_risk
 
 
-def probe_realized(rows: Callable[..., list], *, basis: str, since: str | None) -> Decimal:
+def probe_realized(rows: Callable[..., list], *, basis: str, since: str | None, table: M.Table | None = None) -> Decimal:
     """THE ROLLING PROBE BUDGET's window figure (release L-D, Oct 9, 2026; `money.plan_open`), by the same `basis` over
     the same rows as `probe_tally`'s realized_loss (every closed `:r`, non-tuition position carrying the Probe mark),
     over those whose New York close day (`_ny_day` of `closed_at`) is on or after `since` (ISO; None: every one). A
@@ -225,7 +247,11 @@ def probe_realized(rows: Callable[..., list], *, basis: str, since: str | None) 
     window) plus every position then open at its maximum loss, which covers every later close in that window
     (residuals aside: fees above the book's estimate, a structure broken leg by leg). Under "gross" every stretch's sum
     is at most the whole window's, so the figure is the plain sum, code for code (the CON-only rollback), and under
-    either basis a longer window is never looser."""
+    either basis a longer window is never looser.
+
+    THE EQUITY LANE (release E1): each closed Probe ":r" equity lot's net cash joins the closes by its New York close
+    day (`equity_hook.probe_figures` under `table`; None: the table in force), so the window and its worst stretch
+    read both lanes."""
     if basis not in M.LOSS_BASES:
         raise ValueError(f"the Probe loss basis {basis!r} is not one of {M.LOSS_BASES}")
     gross = M.ZERO
@@ -240,6 +266,12 @@ def probe_realized(rows: Callable[..., list], *, basis: str, since: str | None) 
         gross += max(M.ZERO, -M.D(r["cash"]))
         key = "~" if closed is None else closed      # "~" sorts after every ISO day: in every stretch
         by_day[key] = by_day.get(key, M.ZERO) + M.D(r["cash"])
+    for closed, cash in equity_hook.probe_figures(rows, table=table).closes:
+        if since is not None and closed is not None and closed < since:
+            continue
+        gross += max(M.ZERO, -Decimal(cash))
+        key = "~" if closed is None else str(closed)
+        by_day[key] = by_day.get(key, M.ZERO) + Decimal(cash)
     if basis == "gross":
         return gross
     # Every stretch starts on a close day (a stretch from a session with no close equals the one from the next close day
@@ -282,11 +314,11 @@ def probe_figures(rows: Callable[..., list], *, day: str,
     window_realized `probe_realized`'s over the closes of the last `probe.loss_window_sessions` sessions through `day`
     (`probe_window_start`; under "net" its worst net stretch). Under "gross" a window that holds every close (None: the
     CON-only rollback's 2000 sessions) is the total's own figure, read once; under "net" the window's figure is always
-    read (its worst stretch is not the total's net)."""
-    open_n, total, at_risk = probe_tally(rows, day=day, basis=table.probe_loss_basis)
+    read (its worst stretch is not the total's net). Both lanes' rows (`probe_tally`, `probe_realized`: release E1)."""
+    open_n, total, at_risk = probe_tally(rows, day=day, basis=table.probe_loss_basis, table=table)
     since = probe_window_start(day, table.probe_loss_window)
     window = (total if since is None and table.probe_loss_basis == "gross"
-              else probe_realized(rows, basis=table.probe_loss_basis, since=since))
+              else probe_realized(rows, basis=table.probe_loss_basis, since=since))   # the closes weigh nothing
     return open_n, window, total, at_risk, since
 
 
@@ -637,7 +669,9 @@ class RealBook:
         return M.Exposure(family_open=fam_open, family_loss=M.D(round(fam_loss, 2)), book_loss=M.D(round(book, 2)),
                           day_opened=day_opened, tuition_day=tuition_day, tuition_week=tuition_week,
                           probe_open=probe_open, probe_realized=probe_window, probe_at_risk=probe_at_risk,
-                          probe_realized_total=probe_total)
+                          probe_realized_total=probe_total,
+                          equity_open_risk=equity_hook.open_risk(self.state.rows, table=self.table),
+                          equity_invested=equity_hook.invested(self.state.rows))
 
     def incubator_tally(self, *, day: str, week_start: str, family: str | None = None) -> M.IncubatorTally:
         """The incubator's numbers from the live state's rows, read afresh (`incubator_tally`)."""
@@ -645,6 +679,28 @@ class RealBook:
 
     def reserved(self) -> float:
         return sum(o.reserve * o.remaining / max(1, o.qty) for o in self.orders.values() if o.working and o.action == "open")
+
+    def free_to_reserve(self, account: Mapping[str, Any]) -> tuple[float, str]:
+        """What a new option open may still reserve, and which bound binds: THE OPTIONS RESERVATION under THE HOUSE-WIDE
+        CASH RULE (A8.1; DESIGN 4a's row reinstated). The lower of `options_buying_power` less what working opens
+        already reserve, and the House-wide available cash (`money.available_cash`: cash less |short value|, the
+        equity book's working buys at their worst cost, the same working reservations and the constitution's
+        `equity_money.cash_reserve_usd`), so no option premium is ever paid from margin and no open in either lane
+        pushes cash below the reserve. A table without the equity block (a hand-built one; the constitution in force
+        always carries it) keeps the options bound alone, as before E1. An account whose cash cannot be read leaves
+        nothing free (fail closed)."""
+        free = float(M.D(account.get("options_buying_power") or 0)) - self.reserved()
+        equity = getattr(self.table, "equity", None)
+        if equity is None:
+            return free, "options buying power"
+        try:
+            cash = M.available_cash(account, working_buys_worst=equity_hook.working_buys_worst(self.state.rows),
+                                    reserved=M.D(round(self.reserved(), 2)), reserve_usd=equity.cash_reserve)
+        except (ValueError, ArithmeticError, TypeError) as exc:
+            return 0.0, f"the House-wide cash (unreadable: {str(exc)[:80]})"
+        if float(cash) < free:
+            return float(cash), "the House-wide cash"
+        return free, "options buying power"
 
     def held_net(self) -> dict[str, int]:
         """Contracts per OCC symbol this book holds or may hold (open positions, and working opens' remaining units),
@@ -688,6 +744,11 @@ class RealBook:
         return {leg.symbol for o in self.orders.values() if o.working for leg in o.legs}
 
     # ------------------------------------------------------------------ the order count
+    def house_count(self, day: str) -> int:
+        """THE ONE DAY ORDER COUNT (A8.3): this book's legs and cancels of `day` (`count_today`) plus the equity book's
+        orders (`equity_hook.orders_today`): the gateway's day count is the account's, shared by both books."""
+        return self.count_today(day) + equity_hook.orders_today(self.state.rows, day)
+
     def count_today(self, day: str) -> int:
         by_day = self.state.get("counts_by_day", {}) or {}
         if day in by_day:
@@ -755,19 +816,22 @@ class RealBook:
                 return (f"positions net across the account: this open takes the other side of {', '.join(sorted(set(opposite)))}, "
                         "which the account holds")
             count = len(legs) + extra_legs
-            room = self.table.max_orders_day - self.count_today(day) - self.exit_reserve()
+            sent = self.house_count(day)
+            room = self.table.max_orders_day - sent - self.exit_reserve()
             if count > room:
-                return (f"the day's order count: {self.count_today(day)} legs sent of {self.table.max_orders_day}, and "
+                return (f"the day's order count: {sent} legs sent of {self.table.max_orders_day}, and "
                         f"{self.exit_reserve()} kept for closing what is open")
         elif not house:
             return self.count_refusal(len(legs) + extra_legs, day=day)
         return None
 
     def count_refusal(self, legs: int, *, day: str) -> str | None:
-        """A program's close or cancel of `legs` legs: refused when it would eat the House's forced-exit room."""
-        room = self.table.max_orders_day - self.count_today(day) - self.forced_reserve(day)
+        """A program's close or cancel of `legs` legs: refused when it would eat the House's forced-exit room. The count
+        is both books' (`house_count`, A8.3)."""
+        sent = self.house_count(day)
+        room = self.table.max_orders_day - sent - self.forced_reserve(day)
         if legs > room:
-            return (f"the day's order count: {self.count_today(day)} legs sent of {self.table.max_orders_day}, and "
+            return (f"the day's order count: {sent} legs sent of {self.table.max_orders_day}, and "
                     f"{self.forced_reserve(day)} kept for the House's own exits (expiring and broken structures)")
         return None
 
@@ -863,6 +927,8 @@ class RealBook:
             cid = str(row.get("client_order_id") or "")
             if cid.startswith(PREFIX + "shares-"):
                 continue  # the close of an assignment's shares (`OptionsLive._close_shares`): not a structure's order
+            if equity_hook.is_equity_client_id(cid):
+                continue  # the equity book's own order (`lq-`, league/equity/live.py): never foreign
             if cid.startswith(PREFIX):
                 by_client[cid] = row
             elif str(row.get("status") or "") in WORKING:
@@ -1172,13 +1238,21 @@ class RealBook:
 
     # ------------------------------------------------------------------ reconciliation
     def reconcile(self, positions: Sequence[Mapping[str, Any]], foreign_orders: Sequence[Mapping[str, Any]], *,
-                  day: dt.date, after_close: bool, shares: Mapping[str, int] | None = None,
-                  include_expired: bool = False) -> list[str]:
+                  day: dt.date, after_close: bool, shares: Mapping[str, Any] | None = None,
+                  include_expired: bool = False, equity_shares: Mapping[str, Decimal] | None = None) -> list[str]:
         """The account against this book (the module docstring). Returns the mismatches of THIS reading; the freeze
-        follows two readings in a row."""
+        follows two readings in a row.
+
+        Shares (release E1, A8.2): each us_equity symbol's signed quantity against what is expected of it, the equity
+        book's (`equity_shares`: its open lots and the filled part of its working orders, read in the same pass) plus
+        the share-event ledger's assignment and exercise shares (`shares`: {symbol: signed Decimal string}), as
+        Decimal within `equity_hook.SHARE_TOLERANCE`; a symbol expected but not held is a mismatch too."""
         expected = self.expected_positions()
         held: dict[str, int] = {}
         problems = []
+        ledger = {str(k).upper(): M.D(v) for k, v in (shares or {}).items()}
+        owned = {str(k).upper(): Decimal(str(v)) for k, v in (equity_shares or {}).items()}
+        seen_shares: set[str] = set()
         for row in positions:
             symbol = str(row.get("symbol") or "").upper()
             klass = str(row.get("asset_class") or "")
@@ -1191,9 +1265,11 @@ class RealBook:
                 problems.append(f"{symbol}: {signed} held, a crypto position the options book never trades")
                 continue
             if klass == "us_equity":
-                want = int((shares or {}).get(symbol, 0))
-                if signed != want:
-                    problems.append(f"{symbol}: {signed} shares held, {want} expected (an assignment's shares)")
+                seen_shares.add(symbol)
+                lots, assigned = owned.get(symbol, M.ZERO), ledger.get(symbol, M.ZERO)
+                if abs(signed - lots - assigned) > equity_hook.SHARE_TOLERANCE:
+                    problems.append(f"{symbol}: {_plain(signed)} shares held, {_plain(lots + assigned)} expected (equity "
+                                    f"lots {_plain(lots)}, assignment shares {_plain(assigned)})")
                 continue
             if klass != "us_option" and occ_parts(symbol) is None:
                 problems.append(f"{symbol}: an unknown holding ({klass})")
@@ -1202,6 +1278,11 @@ class RealBook:
                 problems.append(f"{symbol}: {signed} contracts, not a whole number")
                 continue
             held[symbol] = int(signed)
+        for symbol in sorted((set(ledger) | set(owned)) - seen_shares):
+            lots, assigned = owned.get(symbol, M.ZERO), ledger.get(symbol, M.ZERO)
+            if abs(lots + assigned) > equity_hook.SHARE_TOLERANCE:
+                problems.append(f"{symbol}: no shares held, {_plain(lots + assigned)} expected (equity lots {_plain(lots)}, "
+                                f"assignment shares {_plain(assigned)})")
         for symbol in set(expected) | set(held):
             parts = occ_parts(symbol)
             if parts is not None:
@@ -1230,6 +1311,12 @@ class RealBook:
         if self.frozen != was:
             self.record("live.freeze", {"frozen": bool(self.frozen), "why": self.frozen or f"cleared (was: {was[:300]})"})
         return problems
+
+
+def _plain(value: Decimal) -> str:
+    """A share quantity as text: no exponent, no trailing zeros ("100", "0.5", "-12.345")."""
+    text = format(value, "f")
+    return (text.rstrip("0").rstrip(".") if "." in text else text) or "0"
 
 
 def _single_fill(order: ROrder, row: Mapping[str, Any]) -> tuple[int, float | None, list[float], bool] | None:
