@@ -26,8 +26,8 @@ any other deploy.
 
 ## Not yet deployed
 
-The running House release is `20261010T062000Z-1767910d2115` (main `dd196cad`, the spent-lineage refusal, 06:20Z Oct 10),
-the gateway is `507b6118`, and the box's updater is on. What is built and not deployed is on branches.
+The running House release is `20261010T180000Z-1db67896f607` (main `92518185`, the always-in direction card v2,
+18:00Z Oct 10), the gateway is `507b6118`, and the box's updater is on. What is built and not deployed is on branches.
 
 ### A stock buy's fill between reads is never lost, a lagging sale is never sold twice, and a definite answer lets a hold go, on `fix/gateway-stock-read-order` (unreleased; a gateway deploy; no House change)
 
@@ -125,7 +125,15 @@ recur without a captain and cost DONE-RULE item 7 ("research runs 24/7 at budget
   Such a card's ablation is now stored as the default (the same card and sha as one that declared none);
   `dlane.card_errors` itself still refuses one. G1 on Train still holds the program to the clock alone.
 
-### The always-in card, on `fix/always-in-v2` (unreleased; an owner deploy; no evidence reset)
+### 18:00Z Oct 10, 2026: the always-in direction card v2 (#529), House `20261010T180000Z-1db67896f607`, main `92518185`
+
+Owner deploy (no gateway change): no order in flight at 17:59:54Z; promoted (rollback `20261010T062000Z-1767910d2115`),
+nightly back 18:11:06Z, updater repointed. Verified: health clean, real money on, execution fingerprint `31a7e921`, money
+`fdf2ac7c`, constitution `0adb4f0e` unchanged; the grant holds. Agenda v21.5 in `swarm.json` at 18:11:07Z (an always-in
+card lists inputs `["clock"]`, says "always-in, no gate", and has no ablation). #528, its first cut, was closed unshipped
+after its review.
+
+### The always-in card, on `fix/always-in-v2` (DEPLOYED 18:00Z Oct 10; no evidence reset)
 
 - A direction card whose declared inputs are exactly `["clock"]` is always-in: its card says "always-in" or "no gate"
   and has no ablation; it is bound only by the always-in direction rows on its roots (`cards.RebirthIndex.check`'s
