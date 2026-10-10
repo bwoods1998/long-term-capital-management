@@ -8,7 +8,7 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
-## Real stock and ETF buys at the gateway (Oct 10, 2026): `feat/gateway-stock-opens`, not deployed
+## Real stock and ETF buys at the gateway (Oct 10, 2026): deployed 21:18Z Oct 10 (gateway `3cc811b0`, #532)
 
 The owner's goal of Oct 10, 2026: agent programs may trade ETFs, stocks and options with real money. An ETF position at
 most 50% of equity, a single stock at most 20%, at most 100% of equity invested in total, or up to the venue's overnight
@@ -105,9 +105,9 @@ block): `stock_buys.enabled` true, the shares `0.5`, `0.2`, `2`, `day_equity_mul
 `"off"` and deploy (closes keep working), or `npx wrangler@4.129.1 rollback` to the previous version. A stock position
 bought before a rollback stays on the account and is closed by an ordinary sale (closes go either way).
 
-## The no-captain automations (Oct 10, 2026): `feat/no-captain`, not deployed
+## The no-captain automations (Oct 10, 2026): deployed 21:42Z Oct 10 (House `20261010T214125Z-d4667186f969`, gateway `e3f310ee`, #533)
 
-Built on `feat/no-captain`, not deployed: one gateway deploy, then one owner deploy (`league/ops/budget.py`,
+Built on `feat/no-captain` and deployed 21:42Z Oct 10: one gateway deploy, then one owner deploy (`league/ops/budget.py`,
 `league/ops/budget_refresh.py` (new), `league/ops/registry.py`, `league/ops/stall.py`; `gateway/lib/email.mjs`,
 `gateway/lib/gate.mjs`).
 Nothing in `league/swarm/`, `league/live/`, `league/gym/` or `league/constitution.py`; no evidence rule moves.
@@ -198,7 +198,7 @@ Nothing in `league/swarm/`, `league/live/`, `league/gym/` or `league/constitutio
   starts the unknown `budget_refresh` job. The gateway's extra words are harmless to an older House, which mails a
   stall needing nothing once a day by its own pace whatever key the gateway keeps.
 
-## The always-in card (Oct 10, 2026): `fix/always-in-v2`, not deployed
+## The always-in card (Oct 10, 2026): deployed 18:00Z Oct 10 (#529)
 
 Built on `fix/always-in-v2` (the second cut; the first, PR #528, was closed on its review), not deployed: one owner
 deploy (`league/swarm/cards.py`, `dlane.py`, `architect.py`, `researcher.py`, `tournament.py`, `league/ops/stall.py`
@@ -2565,7 +2565,7 @@ earned     = 0.5 × max(0, p30) / 30         written, inside the ceiling: it lif
   loosens: each meter is the lower of the floor and what the stale file said, with a warning. A research budget of 0
   brakes the Sail guard at once. At the floor Claude's $1 is under the gate's two holds: the review runs on its Sail
   model, and the audit too unless its hold is at most $1, each with the gate's "not the plan's reviewer" alert.
-- **The top-up raise** (the no-captain automations, Oct 10, not deployed). A later run of the day whose own reading
+- **The top-up raise** (the no-captain automations, Oct 10, deployed 21:42Z). A later run of the day whose own reading
   would set more than the day's figure raises it to that reading's (raise-only, never above the ceiling, nothing added
   back; `day_figure.raised_from` and `raised_at`, with the day's first figure and every raise, `set_usd_day` and
   `raises`), so a top-up reaches the day's research, the knobs and the guard's caps within the hour: the

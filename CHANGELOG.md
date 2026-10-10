@@ -26,10 +26,14 @@ any other deploy.
 
 ## Not yet deployed
 
-The running House release is `20261010T180000Z-1db67896f607` (main `92518185`, the always-in direction card v2,
-18:00Z Oct 10), the gateway is `507b6118`, and the box's updater is on. What is built and not deployed is on branches.
+The running House release is `20261010T214125Z-d4667186f969` (main `ac6d008b`, the no-captain automations, 21:42Z
+Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. What is built and not deployed is on branches.
 
-### A stock buy's fill between reads is never lost, a lagging sale is never sold twice, and a definite answer lets a hold go, on `fix/gateway-stock-read-order` (unreleased; a gateway deploy; no House change)
+### 22:20Z Oct 10, 2026: the stock path's races (#534), gateway `95e7a8d0`, main `3177bb14`
+
+Gateway deploy only (455/455; rollback `e3f310ee`); the House unchanged.
+
+### A stock buy's fill between reads is never lost, a lagging sale is never sold twice, and a definite answer lets a hold go, on `fix/gateway-stock-read-order` (DEPLOYED 22:20Z Oct 10, gateway `95e7a8d0`;; a gateway deploy; no House change)
 
 - The design review of Oct 10, 2026: `realStockBuy` read the account, then the open orders, then the positions, so a buy
   that filled between the first two reads was counted nowhere, and the Gate's ledger let an answered buy go after 5 s
@@ -53,7 +57,25 @@ The running House release is `20261010T180000Z-1db67896f607` (main `92518185`, t
   no answer keeps the whole hold; `filled` keeps it as before. The Durable Object gains `stockAsk` (read-only). Proof:
   `gateway/test/stock-buys.test.mjs` (455 of 455 in the gateway).
 
-### Real stock and ETF buys at the gateway, on `feat/gateway-stock-opens` (unreleased; a gateway deploy; no House change)
+### 21:42Z Oct 10, 2026: the no-captain automations (#533), House `20261010T214125Z-d4667186f969`, main `ac6d008b`; gateway `e3f310ee`
+
+Gateway first (`e3f310ee`, 446/446; rollback `3cc811b0`), then the owner deploy: no order in flight at 21:41:13Z;
+promoted 21:42:18Z (rollback `main-380b280c0c65`, the updater's release of main `a927b4f1` with #531), nightly back
+21:52:54Z, updater repointed. Verified 21:53:50Z: health clean, real money on, execution fingerprint `31a7e921`,
+constitution `0adb4f0e`, money `fdf2ac7c`, gate contract `397b22b772b3` unchanged; `budget_refresh` ran at the start;
+the `stall` receipt carries `birth_yield`, `swarm_alerts` and `underspend`.
+
+### 21:18Z Oct 10, 2026: real stock and ETF buys at the gateway (#532), gateway `3cc811b0`, main `a48623e7`
+
+Gateway deploy only (446/446; rollback `507b6118`); the House unchanged and verified (health clean, ids unchanged).
+`STOCK_BUYS_REAL` is on; no House code sends a stock buy until the equity lane's release and its constitution switch.
+
+### The always-in card's ablation (#531) reached the House through the updater
+
+The updater deployed main `a927b4f1` as `main-380b280c0c65` about 20:05Z Oct 10 (#531 changes `league/swarm/cards.py`
+only); the grant re-ratified on money `fdf2ac7c` at 20:05:31Z.
+
+### Real stock and ETF buys at the gateway, on `feat/gateway-stock-opens` (DEPLOYED 21:18Z Oct 10; a gateway deploy; no House change)
 
 - The owner's goal of Oct 10, 2026 (ETFs, stocks and options with real money). While `STOCK_BUYS_REAL` is `on` (set so
   in `gateway/wrangler.jsonc`), the real account admits a LONG-ONLY buy of `STOCK_UNIVERSE` (17 ETFs: SPY QQQ IWM DIA,
@@ -82,7 +104,7 @@ The running House release is `20261010T180000Z-1db67896f607` (main `92518185`, t
   flight against the book and buying power, the admit side of every boundary, one micro-dollar over, and `"0"` end to
   end. 446 of 446 in the gateway.
 
-### The no-captain automations, on `feat/no-captain` (unreleased; a gateway deploy, then an owner deploy; no evidence reset)
+### The no-captain automations, on `feat/no-captain` (DEPLOYED 21:42Z Oct 10; a gateway deploy, then an owner deploy; no evidence reset)
 
 From the audit of every hand intervention from Oct 7 15:44Z to Oct 10 19:40Z (59 in about 76 hours), the four that
 recur without a captain and cost DONE-RULE item 7 ("research runs 24/7 at budget with no captain") the most:
@@ -118,7 +140,7 @@ recur without a captain and cost DONE-RULE item 7 ("research runs 24/7 at budget
   `Telling`: a new cause mailed at once), `league/tests/test_ops_int_ops.py` (the job runs in a pause),
   `gateway/test/stall-notice.test.mjs` (the key on the causes).
 
-### An always-in card's ablation is dropped, on `fix/always-in-ablation` (unreleased; an owner deploy; no evidence reset)
+### An always-in card's ablation is dropped, on `fix/always-in-ablation` (DEPLOYED by the updater about 20:05Z Oct 10; no evidence reset)
 
 - `league/swarm/cards.py` `validate`: the architect's card template asks every card for an `ablation` switch, so its
   always-in cards (declared inputs exactly `["clock"]`) arrived with one and were refused ("has no gate to switch off").
