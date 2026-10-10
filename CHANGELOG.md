@@ -29,6 +29,23 @@ any other deploy.
 The running House release is `20261010T062000Z-1767910d2115` (main `dd196cad`, the spent-lineage refusal, 06:20Z Oct 10),
 the gateway is `507b6118`, and the box's updater is on. What is built and not deployed is on branches.
 
+### Real stock and ETF buys at the gateway, on `feat/gateway-stock-opens` (unreleased; a gateway deploy; no House change)
+
+- The owner's goal of Oct 10, 2026 (ETFs, stocks and options with real money). While `STOCK_BUYS_REAL` is `on` (set so
+  in `gateway/wrangler.jsonc`), the real account admits a LONG-ONLY buy of `STOCK_UNIVERSE` (17 ETFs: SPY QQQ IWM DIA,
+  the eleven SPDR sectors, TLT GLD; 18 large US stocks): a `limit` `day` order sized in shares (fractional allowed, no
+  `notional`), metered at `qty x limit_price`. Caps, judged in the Gate against a fresh reading of the account, its open
+  orders and its positions made by the gateway itself: the order and the symbol's position (held + resting buys + buys
+  in flight) at most 50% of equity for an ETF and 20% for a stock (`stock_order`, `stock_position`); every long position
+  (options included) + resting stock buys + buys in flight + this order at most equity x min(2, the account's
+  multiplier) (`stock_total`); never above buying power (`buying_power`). The shares and the multiple are ceilings in
+  code (`STOCK_ETF_EQUITY_SHARE`, `STOCK_SINGLE_EQUITY_SHARE`, `STOCK_MAX_EQUITY_MULTIPLE` can only lower them). Every
+  read fails closed (`503 equity`, `424 orders`, `424 positions`); a buy is an open for the day's order counts and the
+  kill switch stops it; it never spends the options' opening maximum loss. Sales stay closes of shares held long and a
+  buy of a symbol held short stays a cover, at most the short: no short sale. The practice account is unchanged.
+  `/v1/health` gains `stock_buys`. No House code sends a real stock buy yet. Docs: `docs/operations.md` (top section and
+  **Switches**), `gateway/README.md`. Proof: `gateway/test/stock-buys.test.mjs` (24 tests; 437 of 437 in the gateway).
+
 ### An always-in card's ablation is dropped, on `fix/always-in-ablation` (unreleased; an owner deploy; no evidence reset)
 
 - `league/swarm/cards.py` `validate`: the architect's card template asks every card for an `ablation` switch, so its

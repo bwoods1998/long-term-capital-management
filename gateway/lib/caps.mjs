@@ -700,7 +700,7 @@ export function realStockClose(body) {
   if (!STOCK_SYMBOL.test(symbol)) return { error: alpacaSymbolError(symbol) || 'An Alpaca order needs a top-level symbol.' };
   if (present(body, 'position_intent')) return { error: 'A stock order carries no position_intent: that field is an option order\'s.' };
   if (present(body, 'notional')) {
-    return { error: 'A stock order on the real account is sized in shares (qty), never in dollars: it closes shares the account holds, at most what it holds.' };
+    return { error: 'A stock order on the real account is sized in shares (qty), never in dollars (notional): a close sells or covers at most what the account holds, and a buy is metered at qty x limit_price.' };
   }
   const qty = parsePico(body.qty);
   if (qty === null || qty <= 0n) return { error: 'Order qty is missing or not positive.' };
@@ -711,6 +711,163 @@ export function realStockClose(body) {
   if (body.side !== 'sell' && body.side !== 'buy') return { error: 'A stock order is a buy or a sell.' };
   const intent = body.side === 'sell' ? 'sell_to_close' : 'buy_to_close';
   return { body: { kind: 'stock', qty: body.qty, legs: [{ symbol, ratio_qty: '1', side: body.side, position_intent: intent }] } };
+}
+
+// --- stock and ETF buys on the real account: long only, allow-listed, capped by the account (Oct 10, 2026) -------------
+// The owner's goal of Oct 10, 2026: agent programs may trade ETFs, stocks and options with real money. An ETF position at
+// most 50% of equity, a single stock at most 20%, at most 100% of equity invested in total, or up to the venue's overnight
+// margin limit (2x) where the account offers margin; margin never for a short sale; no short sale at all; the kill switch,
+// the daily stop and the drawdown stop stay; no hidden costs.
+//
+// So, beside the closes above, the real account admits ONE more stock order while STOCK_BUYS_REAL is "on": a BUY that opens
+// or adds to a LONG position in a symbol of STOCK_UNIVERSE, read here from the order and judged by the router and the gate
+// against the account's own reading (`account.readStockAccount`), its open orders and its positions, never against
+// anything the House reports. The shape (`stockBuyOrder`): a limit order (a positive limit_price), time_in_force "day",
+// qty in shares (fractional allowed, at most nine decimals, as Alpaca takes for fractionable assets), never notional. It is
+// metered at qty x limit_price, rounded up: a buy fills at its limit or better, so nothing it spends is above that. The caps
+// (`account.stockCaps`, judged in the gate in the step that reserves): this order alone at most the symbol's share of
+// equity; the symbol's long market value, plus its open buy orders, plus buys admitted and not yet seen by the venue, plus
+// this order, at most the same share; every long position's market value (options included) plus every open stock buy
+// order plus this order at most equity x min(STOCK_MAX_EQUITY_MULTIPLE, the account's multiplier); and never above the
+// account's buying power. A buy of a symbol the account holds SHORT is never this path: it is a cover, judged as a close
+// above (at most the short), so no buy both covers and opens. A sale is always a close. Nothing here is ever a short sale.
+
+//: The symbols a real stock buy may name: the broad index ETFs, the eleven SPDR sector ETFs, Treasuries and gold, and a
+//: short named list of large US stocks. A constant the House and this gateway share in spirit; changing it is a reviewed
+//: code change and a gateway deploy. `etf` symbols take the ETF share of equity, `stock` symbols the single-stock share.
+export const STOCK_UNIVERSE = Object.freeze({
+  SPY: 'etf', QQQ: 'etf', IWM: 'etf', DIA: 'etf',
+  XLB: 'etf', XLC: 'etf', XLE: 'etf', XLF: 'etf', XLI: 'etf', XLK: 'etf', XLP: 'etf', XLRE: 'etf', XLU: 'etf', XLV: 'etf', XLY: 'etf',
+  TLT: 'etf', GLD: 'etf',
+  AAPL: 'stock', MSFT: 'stock', NVDA: 'stock', AMZN: 'stock', GOOGL: 'stock', META: 'stock', 'BRK.B': 'stock', JPM: 'stock',
+  V: 'stock', UNH: 'stock', XOM: 'stock', JNJ: 'stock', PG: 'stock', MA: 'stock', HD: 'stock', AVGO: 'stock', LLY: 'stock',
+  COST: 'stock',
+});
+
+/** What STOCK_UNIVERSE says a symbol is: "etf", "stock", or null when it is not on the list. */
+export const stockKind = symbol => (Object.prototype.hasOwnProperty.call(STOCK_UNIVERSE, symbol) ? STOCK_UNIVERSE[symbol] : null);
+
+/** True when STOCK_BUYS_REAL is "on": anything else, unset or a typo, admits no real stock buy (closes go either way). */
+export const stockBuysEnabled = (env = {}) => String(env.STOCK_BUYS_REAL ?? '').trim().toLowerCase() === 'on';
+
+//: A share count as the venue takes it: a plain decimal, at most nine places (Alpaca's fractional precision).
+const SHARE_QTY = /^\d{1,9}(\.\d{1,9})?$/;
+//: A stock limit price: a plain decimal, at most four places (a penny at $1 and up, a hundredth of a cent under it).
+const STOCK_LIMIT = /^\d{1,9}(\.\d{1,4})?$/;
+const plain = value => (typeof value === 'number' && Number.isFinite(value) ? String(value) : value);
+
+/**
+ * A real-account stock BUY read as the long open it must be (Oct 10, 2026): `{ symbol, kind, micro }` (`micro` is
+ * qty x limit_price in micro-dollars, rounded up) or `{ error }`. `body` has passed `alpacaShapeError` and
+ * `realStockClose`; the account, its open orders and its positions are read only after this passes.
+ */
+export function stockBuyOrder(body) {
+  if (!body || typeof body !== 'object' || body.side !== 'buy') return { error: 'A stock buy is a buy.' };
+  const symbol = String(body.symbol || '');
+  const kind = stockKind(symbol);
+  if (!kind) {
+    return { error: `${JSON.stringify(symbol.slice(0, 12))} is not on the real account's stock list: a real stock buy names one of ${Object.keys(STOCK_UNIVERSE).join(' ')}.` };
+  }
+  if (present(body, 'notional')) return { error: 'A real stock buy is sized in shares (qty), never in dollars (notional).' };
+  if (present(body, 'position_intent')) return { error: 'A stock order carries no position_intent: that field is an option order\'s.' };
+  if (body.type !== 'limit') {
+    return { error: 'A real stock buy is a limit order: a market buy has no price of its own to meter it by, and fills wherever the book is.' };
+  }
+  if (body.time_in_force !== 'day') return { error: 'A real stock buy is a day order (time_in_force "day"): nothing rests past the session it was sized in.' };
+  if (present(body, 'extended_hours') && typeof body.extended_hours !== 'boolean') return { error: 'extended_hours is true or false.' };
+  if (present(body, 'order_class') && body.order_class !== 'simple') return { error: 'A real stock buy is a simple order.' };
+  const rawQty = plain(body.qty);
+  if (typeof rawQty !== 'string' || !SHARE_QTY.test(rawQty)) {
+    return { error: 'A real stock buy\'s qty is a number of shares, at most nine decimal places (fractional shares as Alpaca takes them).' };
+  }
+  const qty = parsePico(rawQty);
+  if (qty === null || qty <= 0n) return { error: 'Order qty is missing or not positive.' };
+  const rawLimit = plain(body.limit_price);
+  if (typeof rawLimit !== 'string' || !STOCK_LIMIT.test(rawLimit)) {
+    return { error: 'A real stock buy needs a positive limit_price, at most four decimal places.' };
+  }
+  const limit = parsePico(rawLimit);
+  if (limit === null || limit <= 0n) return { error: 'A real stock buy needs a positive limit_price, at most four decimal places.' };
+  return { symbol, kind, micro: picoToMicro(mulPico(qty, limit)) };
+}
+
+/**
+ * The signed number of shares (picounits) `positions` show for `symbol`: positive long, negative short, 0n when none. Read
+ * like `closeLegsHeldError` reads a row (its `side`, else the sign of `qty`; a row that contradicts itself holds nothing),
+ * from the whole `qty`, so a cached reading a close was just taken out of (`closedLegRows`) nets it.
+ */
+export function heldShares(symbol, positions) {
+  if (!Array.isArray(positions)) return 0n;
+  let net = 0n;
+  for (const row of positions) {
+    if (!row || typeof row !== 'object' || row.symbol !== symbol) continue;
+    const amount = parsePico(row.qty);
+    if (amount === null || amount === 0n) continue;
+    if ((row.side === 'short' && amount > 0n) || (row.side === 'long' && amount < 0n)) continue;
+    net += amount;
+  }
+  return net;
+}
+
+/**
+ * What the account already holds or has asked for, by the venue's own readings (Oct 10, 2026): `{ symbolMicro, totalMicro }`
+ * or `{ error }`. `symbolMicro` is `symbol`'s long market value plus its open buy orders' remaining notional; `totalMicro`
+ * is every long position's market value (stocks, ETFs and options alike: all of it is invested) plus every open stock or
+ * ETF buy order's remaining notional (an option order is held to the option caps, and to buying power at the venue).
+ * Fails closed: a long row with no readable market value, an open buy with no price (a market or stop buy), a symbol held
+ * short, or a list that may be cut off (`ordersLimit` rows) is an error, never a guess.
+ */
+export function stockExposure(symbol, positions, orders, { ordersLimit = 500 } = {}) {
+  if (!Array.isArray(positions)) return { error: 'the account\'s positions were not a list', source: 'positions' };
+  if (!Array.isArray(orders)) return { error: 'the account\'s open orders were not a list', source: 'orders' };
+  if (orders.length >= ordersLimit) return { error: `the account has ${orders.length} or more open orders, more than one reading lists`, source: 'orders' };
+  let symbolMicro = 0n;
+  let totalMicro = 0n;
+  const short = new Set();
+  for (const row of positions) {
+    if (!row || typeof row !== 'object' || typeof row.symbol !== 'string') continue;
+    const amount = parsePico(row.qty);
+    if (amount === null || amount === 0n) continue;
+    const isShort = row.side === 'short' || (row.side !== 'long' && amount < 0n);
+    if ((row.side === 'short' && amount > 0n) || (row.side === 'long' && amount < 0n)) {
+      return { error: `the position row for ${row.symbol} contradicts itself`, source: 'positions' };
+    }
+    if (isShort) {
+      short.add(row.symbol);
+      continue;
+    }
+    const value = parsePico(row.market_value);
+    if (value === null || value < 0n) return { error: `the long position in ${row.symbol} has no readable market value`, source: 'positions' };
+    const micro = picoToMicro(value);
+    totalMicro += micro;
+    if (row.symbol === symbol) symbolMicro += micro;
+  }
+  if (short.has(symbol)) return { error: `the account holds ${symbol} short: a buy of it covers the short, at most its size, and opens nothing`, short: true };
+  for (const row of orders) {
+    if (!row || typeof row !== 'object' || row.side !== 'buy') continue;
+    const name = typeof row.symbol === 'string' ? row.symbol : '';
+    // An option order (one leg or a structure) is held to the option caps; a cover of a short opens no long exposure.
+    if (row.order_class === 'mleg' || isOptionSymbol(name) || name === '' || short.has(name)) continue;
+    let remaining;
+    const qty = parsePico(row.qty);
+    if (qty !== null && qty > 0n) {
+      const filled = parsePico(row.filled_qty ?? '0') ?? 0n;
+      const left = qty - (filled > 0n ? filled : 0n);
+      if (left <= 0n) continue;
+      const price = parsePico(row.limit_price);
+      if (price === null || price <= 0n) {
+        return { error: `the open buy order for ${name} (${String(row.type || 'unknown').slice(0, 20)}) has no limit price to count it by`, source: 'orders' };
+      }
+      remaining = picoToMicro(mulPico(left, price));
+    } else {
+      const dollars = parsePico(row.notional);
+      if (dollars === null || dollars <= 0n) return { error: `the open buy order for ${name} has neither a qty nor a notional to count it by`, source: 'orders' };
+      remaining = picoToMicro(dollars);  // the whole notional, filled or not: errs high
+    }
+    totalMicro += remaining;
+    if (name === symbol) symbolMicro += remaining;
+  }
+  return { symbolMicro, totalMicro };
 }
 
 // --- the practice account ------------------------------------------------------------------------

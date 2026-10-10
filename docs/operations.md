@@ -8,6 +8,67 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## Real stock and ETF buys at the gateway (Oct 10, 2026): `feat/gateway-stock-opens`, not deployed
+
+The owner's goal of Oct 10, 2026: agent programs may trade ETFs, stocks and options with real money. An ETF position at
+most 50% of equity, a single stock at most 20%, at most 100% of equity invested in total, or up to the venue's overnight
+margin limit (2x) where the account offers margin; never margin for a short sale; no short sales; the kill switch, the
+daily stop and the drawdown stop stay; no hidden costs. This branch is the gateway half: the boundary that holds
+whatever the House sends. **No House code sends a real stock buy yet**: until a House release does, deploying this
+changes nothing the floor does.
+
+**What the real account admits now** (`gateway/lib/caps.mjs` "stock and ETF buys on the real account", `router.mjs`
+`realStockBuy`, `gate.mjs` `reserveStock`), while `STOCK_BUYS_REAL` is `on`:
+- **A BUY of a listed symbol the account does not hold short**: `STOCK_UNIVERSE`, 17 ETFs (SPY QQQ IWM DIA; XLB XLC XLE
+  XLF XLI XLK XLP XLRE XLU XLV XLY; TLT GLD) and 18 large US stocks (AAPL MSFT NVDA AMZN GOOGL META BRK.B JPM V UNH XOM
+  JNJ PG MA HD AVGO LLY COST). Anything else is a `400`. The list is code: a change is a reviewed pull request and a
+  gateway deploy.
+- **Its shape**: `type` `limit` with a positive `limit_price` (at most four decimals), `time_in_force` `day`, `qty` in
+  shares (fractional to nine decimals; no `notional`), no `position_intent`, `extended_hours` true or false. A notional,
+  stop or option-intent buy is a `400` before anything is read; a market, good-till-cancelled or unlisted buy is a `400`
+  once the positions (read first, as for every real stock order) show it is not a cover, before the account is read.
+- **Its price**: `qty x limit_price`, rounded up. A buy fills at its limit or better, so nothing it spends is above it.
+- **Its caps**, read fresh from the account by the gateway itself (`GET v2/account`, then `GET v2/orders?status=open`,
+  then `GET v2/positions`, each with the real keys, read-only), judged in the Gate's single step that reserves:
+
+  | Cap | Refusal (`403 {cap}`) | Rule |
+  |---|---|---|
+  | one order | `stock_order` | `qty x limit` at most `STOCK_ETF_EQUITY_SHARE` (0.5) of equity for an ETF, `STOCK_SINGLE_EQUITY_SHARE` (0.2) for a stock |
+  | one position | `stock_position` | the symbol's long market value + its resting buys (unfilled part) + buys in flight + this order, at most the same share |
+  | the book | `stock_total` | every long position's market value (options included) + every resting stock buy + buys in flight + this order, at most equity x min(`STOCK_MAX_EQUITY_MULTIPLE` (2), the account's `multiplier`): 100% on a cash or limited-margin account (multiplier 1, which is also what an unreadable multiplier reads as), 2x on Reg T margin, still 2x on pattern-day-trader margin (4) |
+  | buying power | `buying_power` | buys in flight + this order at most the venue's `buying_power` (which already nets resting orders) |
+
+  The three numbers are **ceilings in the code**: a var can only lower them (`"0"` closes the route); above a ceiling
+  or malformed reads as the ceiling. Equity and buying power are rounded down, every cap rounds down, and the order's
+  price rounds up.
+- **Buys in flight**: the Gate keeps each admitted buy until its forward is answered, and for five seconds after (a
+  reading that began before the answer may not show it); one whose answer never came counts for a minute. So a burst of
+  buys cannot pass a cap between two readings, and a buy is counted once the venue shows it.
+- **It is an open for the day's counts** (`MAX_DAY_OPEN_ORDERS`, `MAX_DAY_ORDERS`) and the kill switch stops it (`423`).
+  It never spends the options' opening maximum loss (`MAX_DAY_USD_ALPACA`): the stock book has its own caps.
+- **Fails closed**: an account that cannot be read (or has no equity or `buying_power`) is `503 {cap: "equity"}` with
+  `Retry-After: 30`; open orders that cannot be read, a full page of 500, or a resting buy with no limit price (a market
+  or stop buy) is `424 {cap: "orders"}`; positions that cannot be read, or a long row with no `market_value`, is
+  `424 {cap: "positions"}`. Nothing is reserved or sent.
+
+**What did not change**: a SALE is only ever the close of shares held long, at most `qty_available`; a BUY of a symbol
+held short is only a cover, at most the short (`realStockClose`, exits, no account read): no order is ever a short sale,
+so margin is never used for one, and no buy both covers and opens. With `STOCK_BUYS_REAL` anything but `on`, a real stock
+buy is what it was (a cover or a `400`). Crypto stays refused. The practice account (`alpaca-paper`) is unchanged.
+**Margin interest** on a margin account is the venue's charge on borrowed cash: the gateway does not meter it, so the
+House's economics must count it (no hidden costs).
+
+**Health**: `/v1/health` carries `stock_buys`: `enabled`, the three shares, the list, `day_buys_usd` (today's buys at
+`qty x limit`), `in_flight`, `in_flight_usd` and `buys_admitted` (the switch, the kill switch and the day's open-order
+room; the caps themselves are judged per buy against a fresh reading).
+
+**Deploy** (an owner deploy, gateway only; no House change, no money digest, no ratify): `cd gateway && npm run check &&
+npm test`, then `npx wrangler@4.129.1 deploy` in the money path's window, then `python3 scripts/gateway_admin.py status`
+(the kill switch as it was) and `/v1/health` itself with the runtime token (`gateway_admin.py status` prints neither
+block): `stock_buys.enabled` true, the shares `0.5`, `0.2`, `2`; `max_loss` unchanged. **Roll back**: `STOCK_BUYS_REAL`
+`"off"` and deploy (closes keep working), or `npx wrangler@4.129.1 rollback` to the previous version. A stock position
+bought before a rollback stays on the account and is closed by an ordinary sale (closes go either way).
+
 ## The always-in card (Oct 10, 2026): `fix/always-in-v2`, not deployed
 
 Built on `fix/always-in-v2` (the second cut; the first, PR #528, was closed on its review), not deployed: one owner
@@ -3946,7 +4007,8 @@ before.
   once the account holds every leg, whatever `OPTION_STRUCTURES_REAL` says; close it with one
   multi-leg order. Legging out is a last resort. An assigned short leg becomes shares: an OPASN or
   OPEXC activity latches `assignment_latch`, which freezes real entries, and the owner is told. The
-  House closes the shares at once (the gateway admits stock orders only to close assigned shares) and
+  House closes the shares at once (the gateway admits a sale of shares held long and a cover of shares held short, at
+  most what is held; since Oct 10 also listed long-only buys, `STOCK_BUYS_REAL`, never a short sale) and
   closes the structure's other legs alone. The latch lifts by itself once no broken structure and no
   shares remain and reconciliation is clean; `python3 -m league.live --root /workspace/state
   --clear-assignment` lifts it by hand.
@@ -4117,6 +4179,8 @@ is installed (**The settings layers**, "The reduced `swarm.json`").
 | Kill switch | the gateway | off | every real order-creating call refused | `gateway_admin.py kill` / `unkill` |
 | `MAX_ORDER_MAX_LOSS_USD`, `MAX_ORDER_EQUITY_SHARE`, `MAX_DAY_EQUITY_SHARE`, `MAX_DAY_ORDERS`, `MAX_DAY_OPEN_ORDERS` | `gateway/wrangler.jsonc` | $1,000, 0.25, 1.0, 300, 250 | the real account's caps by maximum loss; equal to the constitution's `options_money.gateway` | gateway deploy with the matching House deploy |
 | `OPTION_STRUCTURES_REAL` | `gateway/wrangler.jsonc` | `debit_vertical,long_butterfly,long_call,long_put` | the types real money may open; must equal the constitution's `options_money.real_types` (`league.ci`) | gateway deploy with the matching House deploy and a ratify |
+| `STOCK_BUYS_REAL` | `gateway/wrangler.jsonc` | `on` on `feat/gateway-stock-opens` (not deployed; production admits stock closes only) | long-only buys of `STOCK_UNIVERSE` on the real account; anything but `on` admits none (closes go either way) | gateway deploy |
+| `STOCK_ETF_EQUITY_SHARE`, `STOCK_SINGLE_EQUITY_SHARE`, `STOCK_MAX_EQUITY_MULTIPLE` | `gateway/wrangler.jsonc` | 0.5, 0.2, 2 (the code's ceilings) | an ETF position, a single-stock position, the whole long book (x min(this, the account's multiplier)), as shares of the gateway's own equity reading; a value can only lower them | gateway deploy |
 | `LIBRARY_DAY_UPSTREAM`, the `LIBRARY` KV binding | `gateway/wrangler.jsonc` | 600; namespace `ltcm-gateway-library` (Release B) | the research library's requests to arXiv a UTC day for the whole floor (`"0"` stops them; cache hits still answer), and its cache | gateway deploy; never delete the namespace |
 | `live.observe`, `live.observe_max` | `swarm.json` on the box | true, 48 (since 13:36Z Sept 29) | the practice league (the observe band) and its instance cap (default 48); read each minute, no deploy (a swarm.json that is not a JSON object turns it off) | edit `swarm.json` |
 | `live.observe_train`, `live.observe_roots_max`, `live.observe_read_calls` | `swarm.json` on the box | defaults: true, 24, 120 (120 from V3-A part 1; 40 before) | the Train tier; the distinct roots the league may read (1-128); the minute's data calls before observe reads stop (10-200; unset: the step's own 120, room for 24 roots at the page cap after the real phase's 20); only a read skipped for this budget sheds practice instances | edit `swarm.json` |

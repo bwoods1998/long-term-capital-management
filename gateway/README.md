@@ -30,7 +30,7 @@ owner's `GATEWAY_ADMIN_TOKEN`; `/v1/kill` takes either (V3-A: stopping is never 
 |---|---|
 | `GET /v1/health` | the kill switch, caps and today's counters, the OpenAI month, the Claude meter (`claude`: funded total, spent, in flight, remaining, holds, overruns, the priced models, `by_role`, `by_agent`, stop reasons, geographies), Sail's balance and the House box's state; never reads a venue itself |
 | `POST /v1/kill`, `POST /v1/unkill` | engage the kill switch (either token), release it (owner only); both written to the admin log |
-| `/v1/alpaca/<path>` | the Brokerage Account (orders to `api.alpaca.markets`, market data to `data.alpaca.markets`) |
+| `/v1/alpaca/<path>` | the Brokerage Account (orders to `api.alpaca.markets`, market data to `data.alpaca.markets`): options under the caps by maximum loss, stock closes, and listed long-only stock and ETF buys under the stock caps (below) |
 | `/v1/alpaca-paper/<path>` | the paper account: never metered, not stopped by the kill switch, held to the same defined-risk shapes |
 | `POST /v1/frontier/responses`, `GET /v1/frontier/models` | one metered OpenAI Responses call; the models the key reaches |
 | `POST /v1/claude/messages` | one Claude Messages call, reserved and settled against the funded total; streamed when `stream: true`; stopped by the kill switch |
@@ -46,7 +46,7 @@ owner's `GATEWAY_ADMIN_TOKEN`; `/v1/kill` takes either (V3-A: stopping is never 
 
 Still in the code until the prune removes them (Wave 2b), and unused by the options House:
 `/v1/kalshi/*` and `/v1/kalshi/ws-auth`, `/v1/typesafe/systemone` (Jev), `/v1/web/fetch`,
-and the crypto and stock order paths (the close of an assignment's shares stays). `/v1/notify`
+and the crypto order path. `/v1/notify`
 mails the owner a `live_stop` notice when a real-money stop trips (Sept 26, 2026), a `funding`
 notice when the budget rule finds a prefund under its card line (V3-A, below), and a `stall` notice when
 the House's `stall` job finds the floor not improving itself (below).
@@ -66,6 +66,8 @@ account. **Reads and cancels always pass.** Deployed values (`wrangler.jsonc`, d
 | `CREDIT_MIN_EQUITY_USD` | 2000 | a credit structure (credit vertical, iron condor, iron butterfly) opens only at this equity or more |
 | `EQUITY_CAP_MAX_AGE_MS` | 120000 | the oldest equity reading an opening order is sized against |
 | `OPTION_STRUCTURES_REAL` | `debit_vertical,long_butterfly,long_call,long_put` (V3-A part 1 leaves it so; `credit_vertical,iron_condor,iron_butterfly` join it only in the credit-types release, with the constitution's list) | the types a real OPEN may be: exactly the constitution's `options_money.real_types`; the credit types only at `CREDIT_MIN_EQUITY_USD` of the gateway's own equity reading; `off` opens none. Paper structures and closes of already held real positions go whatever it says |
+| `STOCK_BUYS_REAL` | `on` (Oct 10, 2026; not yet deployed) | long-only buys of `STOCK_UNIVERSE` on the real account; anything but `on` admits none, and closes go either way |
+| `STOCK_ETF_EQUITY_SHARE`, `STOCK_SINGLE_EQUITY_SHARE`, `STOCK_MAX_EQUITY_MULTIPLE` | 0.5, 0.2, 2 (the code's ceilings) | an ETF position at most 50% of equity, a single stock 20%, the whole long book equity x min(2, the account's multiplier); a value here can only lower them |
 | `CAP_TIMEZONE` | America/New_York | the calendar the day rolls on |
 | `MAX_ORDER_USD`, `MAX_ORDER_USD_KALSHI`, `MAX_DAY_USD` | 75, 75, 4000 | Kalshi only (dead until the prune removes it); the real account's orders never spend Kalshi's day |
 
@@ -79,8 +81,19 @@ account. **Reads and cancels always pass.** Deployed values (`wrangler.jsonc`, d
   (one micro-dollar, admitted only when the account's positions hold every leg it closes). A single-leg
   `sell_to_close` or `buy_to_close` is admitted only when the account holds that contract long or short
   for its size (`qty_available`); positions that cannot be read are `424 {cap: "positions"}`.
-- **Stock orders** only close an assignment: a sale of shares held long or a buy covering shares held
-  short, at most the size held; every other stock or crypto order on the real account is refused.
+- **Stock orders** close: a sale of shares held long or a buy covering shares held short, at most the
+  size held (exits). While `STOCK_BUYS_REAL` is `on` (Oct 10, 2026), a BUY of a symbol not held short
+  also goes as an OPEN when it names a symbol of `STOCK_UNIVERSE` (`lib/caps.mjs`: SPY QQQ IWM DIA, the
+  eleven SPDR sector ETFs, TLT, GLD, and 18 large US stocks) and is a `limit` `day` order sized in shares
+  (fractional allowed; no `notional`), metered at `qty x limit_price`. The gateway reads the account
+  (equity, buying power, multiplier), its open orders and its positions fresh, with the real keys, and
+  the Gate refuses `403 {cap}`: `stock_order` (the order alone over 50% of equity for an ETF, 20% for a
+  stock), `stock_position` (the symbol's long market value + its resting buys + buys in flight + this
+  order over that share), `stock_total` (every long position, options included, + every resting stock
+  buy + buys in flight + this order over equity x min(2, the account's multiplier)), `buying_power`. A
+  read that fails is `503 {cap: "equity"}` (the account) or `424 {cap: "orders"|"positions"}`. A buy
+  counts as an open in the day's orders and the kill switch stops it; it never spends the options'
+  opening maximum loss. No order is ever a short sale; crypto is refused.
 - A refusal is `403 {error, cap}`; the kill switch is `423` and stops every order-creating call on the
   real account, exits included; an order that cannot be priced is `400`. Every refusal made before
   anything is forwarded that is a `424` or a `5xx` names its `cap` (`equity`, `positions`,
@@ -93,7 +106,8 @@ account. **Reads and cancels always pass.** Deployed values (`wrangler.jsonc`, d
   also accepts `off`, the stricter setting.
 - `/v1/health` reports `max_loss`: the equity reading and its age, the per-order cap now, today's
   opening maximum loss and its cap, `max_day_usd_alpaca`, whether opens and credit opens are admitted,
-  orders today of `max_day_open_orders` and `max_day_orders`.
+  orders today of `max_day_open_orders` and `max_day_orders`; and `stock_buys`: the switch, the three
+  shares, the list, today's buys, the buys in flight and whether a buy would be admitted now.
 
 ## The OpenAI month
 

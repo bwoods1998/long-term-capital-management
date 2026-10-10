@@ -86,6 +86,21 @@ export function freshEquity(reading, at, maxAgeMs) {
 /** Picodollars as micro, rounded DOWN (toward minus infinity): a reading of the account never errs high. */
 const floorMicro = pico => (pico >= 0n ? pico / MILLION : -((-pico + MILLION - 1n) / MILLION));
 
+/** `GET v2/account` with the real key pair, read-only, no redirect followed: the venue's account object, or a throw. */
+async function fetchAccount(env, fetcher) {
+  const headers = alpaca.authHeaders({ keyId: env.ALPACA_KEY_ID, secretKey: env.ALPACA_SECRET_KEY });
+  const response = await fetcher(alpaca.target('v2/account'), {
+    method: 'GET', headers: { Accept: 'application/json', 'User-Agent': 'ltcm-gateway/1.0', ...headers },
+    redirect: 'manual', signal: AbortSignal.timeout(TIMEOUT_MS),
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const account = await response.json().catch(() => { throw new Error('an unreadable answer'); });
+  return account && typeof account === 'object' && !Array.isArray(account) ? account : {};
+}
+
+/** An account field as picodollars, or null (`string` or `number` only). */
+const accountPico = raw => (typeof raw === 'string' || typeof raw === 'number' ? parsePico(raw) : null);
+
 /**
  * Read the real account's equity, read-only: `GET v2/account` with the real key pair, no redirect followed (the
  * request carries the real account's keys). `{ ok: true, at, equity_micro }` or `{ ok: false, at, error }`.
@@ -93,17 +108,78 @@ const floorMicro = pico => (pico >= 0n ? pico / MILLION : -((-pico + MILLION - 1
 export async function readAccountEquity(env, { fetcher = fetch, now = Date.now } = {}) {
   const at = now();
   try {
-    const headers = alpaca.authHeaders({ keyId: env.ALPACA_KEY_ID, secretKey: env.ALPACA_SECRET_KEY });
-    const response = await fetcher(alpaca.target('v2/account'), {
-      method: 'GET', headers: { Accept: 'application/json', 'User-Agent': 'ltcm-gateway/1.0', ...headers },
-      redirect: 'manual', signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const account = await response.json().catch(() => { throw new Error('an unreadable answer'); });
-    const raw = account && typeof account === 'object' ? account.equity : undefined;
-    const equity = typeof raw === 'string' || typeof raw === 'number' ? parsePico(raw) : null;
+    const equity = accountPico((await fetchAccount(env, fetcher)).equity);
     if (equity === null) throw new Error('no equity field');
     return { ok: true, at, equity_micro: String(floorMicro(equity)) };
+  } catch (error) {
+    return { ok: false, at, error: `alpaca account: ${String(error?.message || error?.name || 'read failed')}`.slice(0, 200) };
+  }
+}
+
+// --- the stock caps (Oct 10, 2026) ----------------------------------------------------------------------------------
+// The owner's goal of Oct 10, 2026 (`caps.mjs`, "stock and ETF buys on the real account"): an ETF position at most 50% of
+// equity, a single stock at most 20%, at most 100% of equity invested in total or up to the venue's overnight margin
+// limit (2x) where the account offers margin. Those are CEILINGS in this code: a var may lower a share or the multiple
+// (to close the route, "0"), never raise one past the owner's line; a malformed value reads as the ceiling's default.
+
+//: The owner's ceilings, in millionths: an ETF 50% of equity, a single stock 20%, the whole book 2x equity.
+export const STOCK_ETF_SHARE_MAX = 500000n;
+export const STOCK_SINGLE_SHARE_MAX = 200000n;
+export const STOCK_MULTIPLE_MAX = 2n * MILLION;
+
+/** A share or multiple in millionths from 0 to `max`; `max` when unset or malformed, `max` when above it. */
+function capped(raw, max) {
+  const pico = parsePico(typeof raw === 'string' ? raw.trim() : raw);
+  if (pico === null || pico < 0n) return max;
+  const millionths = pico / MILLION;
+  return millionths > max ? max : millionths;
+}
+
+/** The stock caps in force, from `vars`: STOCK_ETF_EQUITY_SHARE, STOCK_SINGLE_EQUITY_SHARE, STOCK_MAX_EQUITY_MULTIPLE. */
+export function stockCaps(env = {}) {
+  return {
+    etfShare: capped(env.STOCK_ETF_EQUITY_SHARE, STOCK_ETF_SHARE_MAX),
+    stockShare: capped(env.STOCK_SINGLE_EQUITY_SHARE, STOCK_SINGLE_SHARE_MAX),
+    maxMultiple: capped(env.STOCK_MAX_EQUITY_MULTIPLE, STOCK_MULTIPLE_MAX),
+  };
+}
+
+/** One symbol's cap: its kind's share of equity (an "etf" the ETF share, anything else the single-stock share), rounded down. */
+export function stockSymbolCapMicro(limits, kind, equityMicro) {
+  return ofEquity(equityMicro, kind === 'etf' ? limits.etfShare : limits.stockShare);
+}
+
+/**
+ * The account's multiplier as the caps take it, in millionths: Alpaca's `multiplier` ("1" a cash or limited-margin
+ * account, "2" Reg T margin, "4" pattern-day-trader margin), and 1 when it cannot be read: no margin is ever assumed.
+ */
+export function multiplierMillionths(raw) {
+  const pico = accountPico(raw);
+  if (pico === null || pico < PICO) return MILLION;
+  return pico / MILLION;
+}
+
+/** The whole book's cap: equity x the lower of STOCK_MAX_EQUITY_MULTIPLE and the account's multiplier, rounded down. */
+export function stockTotalCapMicro(limits, equityMicro, multiplier) {
+  const multiple = multiplier < limits.maxMultiple ? multiplier : limits.maxMultiple;
+  return equityMicro > 0n ? equityMicro * multiple / MILLION : 0n;
+}
+
+/**
+ * Read what a real stock buy is judged by, read-only, fresh every time (Oct 10, 2026): `{ ok: true, at, equity_micro,
+ * buying_power_micro, multiplier }` (`multiplier` in millionths, as a string) or `{ ok: false, at, error }`. Buying power
+ * is the venue's own, which nets its open orders; an account with no readable equity or buying power is no reading.
+ */
+export async function readStockAccount(env, { fetcher = fetch, now = Date.now } = {}) {
+  const at = now();
+  try {
+    const account = await fetchAccount(env, fetcher);
+    const equity = accountPico(account.equity);
+    if (equity === null) throw new Error('no equity field');
+    const power = accountPico(account.buying_power);
+    if (power === null) throw new Error('no buying_power field');
+    return { ok: true, at, equity_micro: String(floorMicro(equity)), buying_power_micro: String(floorMicro(power)),
+      multiplier: String(multiplierMillionths(account.multiplier)) };
   } catch (error) {
     return { ok: false, at, error: `alpaca account: ${String(error?.message || error?.name || 'read failed')}`.slice(0, 200) };
   }

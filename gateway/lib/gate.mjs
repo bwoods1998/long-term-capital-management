@@ -6,7 +6,7 @@
 // this module rather than in the Durable Object class is what lets every rule below be tested
 // without a Workers runtime.
 
-import { caps, venueOrderCap } from './caps.mjs';
+import { caps, venueOrderCap, STOCK_UNIVERSE, stockBuysEnabled } from './caps.mjs';
 import { monthCapMicro } from './frontier.mjs';
 import * as claude from './claude.mjs';
 import * as equity from './equity.mjs';
@@ -47,6 +47,13 @@ export const REVIEWS_KEY = 'github-reviews-v1';
 //: The engineer's pull requests (V3-A, WP8b): a New York day's count of their own, apart from the other roles' UTC day.
 export const ENGINEER_PULLS_KEY = 'github-engineer-pulls-v1';
 export const ADMIN_LOG_KEY = 'admin-log-v1';
+//: Real stock buys admitted and not yet seen by the venue (Oct 10, 2026): the in-flight part of the stock caps.
+export const STOCK_PENDING_KEY = 'stock-pending-v1';
+//: An admitted stock buy counts as in flight until its forward is answered, then until no reading started before that
+//: answer can be judged by (`STOCK_READ_SKEW_MS`); one whose answer never came counts this long (twice the forward's
+//: 30-second timeout), after which the venue's own open orders and positions show it if it exists.
+export const STOCK_PENDING_MS = 60_000;
+export const STOCK_READ_SKEW_MS = 5_000;
 //: How many recent docs commits and merges the Gate keeps (and /v1/health shows); verdicts kept with their reasons;
 //: rejected commits kept apart, longer (a reject is final for its commit, so it outlives the verdict list; past this
 //: many the oldest are forgotten and the Gate refuses an approve that a forgotten reject could have been about:
@@ -99,7 +106,7 @@ export function createGate({ store, env = {}, now = Date.now }) {
     const day = tradingDay(at, limits.timezone);
     const row = read(store, DAY_KEY, null);
     // A new trading day starts at zero; yesterday's row is simply replaced, never accumulated.
-    if (!row || row.day !== day) return { day, orders: 0, notional: 0n, alpacaOpen: 0n, alpacaNotional: 0n };
+    if (!row || row.day !== day) return { day, orders: 0, notional: 0n, alpacaOpen: 0n, alpacaNotional: 0n, alpacaStock: 0n };
     const notional = BigInt(row.notional || 0);
     const big = (value, fallback) => {
       try {
@@ -112,15 +119,17 @@ export function createGate({ store, env = {}, now = Date.now }) {
     // before it existed, or one that cannot be read, counts its whole notional instead, which errs high.
     // `alpaca_notional`: everything the real Alpaca venue added to `notional` today, so that MAX_DAY_USD counts
     // Kalshi's alone (the review's m17). A row without it counts all of `notional` as Kalshi's, which errs high.
-    return { day, orders: Number(row.orders) || 0, notional, alpacaOpen: big(row.alpaca_open, notional), alpacaNotional: big(row.alpaca_notional, 0n) };
+    // `alpaca_stock` (Oct 10, 2026): today's real stock and ETF buys, at qty x limit_price; a record for /v1/health.
+    return { day, orders: Number(row.orders) || 0, notional, alpacaOpen: big(row.alpaca_open, notional), alpacaNotional: big(row.alpaca_notional, 0n),
+      alpacaStock: big(row.alpaca_stock, 0n) };
   };
 
   const save = row => {
-    if (typeof row.alpacaOpen !== 'bigint' || typeof row.alpacaNotional !== 'bigint') {
+    if (typeof row.alpacaOpen !== 'bigint' || typeof row.alpacaNotional !== 'bigint' || typeof row.alpacaStock !== 'bigint') {
       throw new TypeError('a day row is saved with its Alpaca parts');
     }
     write(store, DAY_KEY, { day: row.day, orders: row.orders, notional: String(row.notional), alpaca_open: String(row.alpacaOpen),
-      alpaca_notional: String(row.alpacaNotional) });
+      alpaca_notional: String(row.alpacaNotional), alpaca_stock: String(row.alpacaStock) });
   };
 
   /** Today's notional on the venues MAX_DAY_USD caps: everything but the real Alpaca venue's (Kalshi's). */
@@ -254,8 +263,124 @@ export function createGate({ store, env = {}, now = Date.now }) {
     }
     const opening = exit ? 0n : amount;
     save({ day: row.day, orders: row.orders + 1, notional: row.notional + amount, alpacaOpen: row.alpacaOpen + opening,
-      alpacaNotional: row.alpacaNotional + amount });
+      alpacaNotional: row.alpacaNotional + amount, alpacaStock: row.alpacaStock });
     return { ok: true, day: row.day, micro: String(amount), venue: 'alpaca', ...(exit ? {} : { opening: String(opening) }) };
+  };
+
+  // --- real stock buys (Oct 10, 2026; caps.mjs "stock and ETF buys on the real account") --------------------------------
+
+  /**
+   * The in-flight ledger, pruned at `at`: `{ next, entries: [{ id, at, symbol, micro, settled }] }`. An entry leaves once
+   * it can no longer count (`stockCounts`): settled more than STOCK_PENDING_MS ago, or unsettled for that long.
+   */
+  const stockLedger = at => {
+    const row = read(store, STOCK_PENDING_KEY, {}) || {};
+    const entries = (Array.isArray(row.entries) ? row.entries : [])
+      .filter(entry => entry && typeof entry === 'object' && /^\d{1,18}$/.test(String(entry.micro)) && Number.isFinite(Number(entry.at)))
+      .map(entry => ({ id: Number(entry.id), at: Number(entry.at), symbol: String(entry.symbol || ''), micro: String(entry.micro),
+        settled: entry.settled === null || entry.settled === undefined || !Number.isFinite(Number(entry.settled)) ? null : Number(entry.settled) }))
+      .filter(entry => (entry.settled === null ? entry.at : entry.settled) > at - STOCK_PENDING_MS);
+    return { next: Number.isSafeInteger(Number(row.next)) && Number(row.next) > 0 ? Number(row.next) : 1, entries };
+  };
+  /** Whether an entry counts against a reading started at `readAt`: still in flight, or answered after that reading began. */
+  const stockCounts = (entry, readAt) => entry.settled === null || !Number.isFinite(readAt) || entry.settled >= readAt - STOCK_READ_SKEW_MS;
+  /** Take an entry out of the ledger (a buy that never reached the venue); the entry, or null. */
+  const stockTake = (id, at) => {
+    const ledger = stockLedger(at);
+    const entry = ledger.entries.find(row => row.id === Number(id)) || null;
+    if (entry) write(store, STOCK_PENDING_KEY, { next: ledger.next, entries: ledger.entries.filter(row => row !== entry) });
+    return entry;
+  };
+
+  /**
+   * One real stock or ETF BUY (Oct 10, 2026), judged in the step that reserves it. `stock` is what the router read from
+   * the venue for it just now: the account's `equity_micro`, `buying_power_micro` and `multiplier` (millionths), the
+   * symbol's long market value plus its open buy orders (`symbol_held_micro`), every long position plus every open stock
+   * buy (`total_held_micro`), and `read_at`, when the reading began. Added here: the buys this gate admitted that the
+   * venue may not have shown that reading (the ledger). Caps (`account.stockCaps`): the order alone at most the symbol's
+   * share of equity (`stock_order`); the symbol's position with it at most the same share (`stock_position`); the whole
+   * book with it at most equity x min(STOCK_MAX_EQUITY_MULTIPLE, the account's multiplier) (`stock_total`); never above the
+   * buying power (`buying_power`). It is an OPEN for the day's counts (MAX_DAY_OPEN_ORDERS, MAX_DAY_ORDERS) and never
+   * spends the options' opening maximum loss: the stock book has its own caps.
+   */
+  const reserveStock = ({ amount, at, stock, row }) => {
+    if (!stockBuysEnabled(env)) {
+      return { ok: false, status: 403, cap: 'stock_buys', error: 'Real stock buys are off (STOCK_BUYS_REAL is not "on"): only closes of held shares go.' };
+    }
+    const symbol = String(stock?.symbol || '');
+    const kind = Object.prototype.hasOwnProperty.call(STOCK_UNIVERSE, symbol) ? STOCK_UNIVERSE[symbol] : null;
+    const big = value => (/^-?\d{1,20}$/.test(String(value)) ? BigInt(value) : null);
+    const figures = ['equity_micro', 'buying_power_micro', 'multiplier', 'symbol_held_micro', 'total_held_micro'].map(key => big(stock?.[key]));
+    const readAt = Number(stock?.read_at);
+    if (!kind || figures.some(value => value === null) || !Number.isFinite(readAt)) {
+      return { ok: false, status: 400, cap: 'stock', error: 'A real stock buy reaches the gate with its symbol and the account\'s reading, or not at all.' };
+    }
+    const [equityMicro, powerMicro, multiplier, symbolHeld, totalHeld] = figures;
+    if (row.orders >= openOrdersCap() && openOrdersCap() < limits.maxDayOrders) {
+      return {
+        ok: false, status: 403, cap: 'day_open_orders',
+        error: `Today's ${row.orders} orders leave no room to open: the last ${limits.maxDayOrders - openOrdersCap()} of the ` +
+               `day's ${limits.maxDayOrders} are kept for exits.`,
+      };
+    }
+    if (at - readAt > maxLoss.maxAgeMs || readAt - at > STOCK_READ_SKEW_MS) {
+      return {
+        ok: false, status: 503, cap: 'equity',
+        error: `The real account was not read in the last ${Math.round(maxLoss.maxAgeMs / 1000)} seconds, so a stock buy cannot be ` +
+               'sized against it: nothing was sent. Send it again.',
+      };
+    }
+    if (row.orders + 1 > limits.maxDayOrders) {
+      return { ok: false, status: 403, cap: 'day_orders', error: `Today's order count cap of ${limits.maxDayOrders} is already reached.` };
+    }
+    const limitsNow = account.stockCaps(env);
+    const share = kind === 'etf' ? limitsNow.etfShare : limitsNow.stockShare;
+    const what = kind === 'etf' ? 'an ETF' : 'a single stock';
+    const symbolCap = account.stockSymbolCapMicro(limitsNow, kind, equityMicro);
+    const equityText = `$${account.formatUsdDown(equityMicro)} equity`;
+    if (amount > symbolCap) {
+      return {
+        ok: false, status: 403, cap: 'stock_order',
+        error: `A buy of $${formatUsd(amount)} of ${symbol} exceeds the cap for ${what} of $${account.formatUsdDown(symbolCap)} ` +
+               `(${account.percent(share)} of ${equityText}).`,
+      };
+    }
+    const ledger = stockLedger(at);
+    const counted = ledger.entries.filter(entry => stockCounts(entry, readAt));
+    const flight = counted.reduce((sum, entry) => sum + BigInt(entry.micro), 0n);
+    const flightSymbol = counted.filter(entry => entry.symbol === symbol).reduce((sum, entry) => sum + BigInt(entry.micro), 0n);
+    const held = symbolHeld + flightSymbol;
+    if (held + amount > symbolCap) {
+      return {
+        ok: false, status: 403, cap: 'stock_position',
+        error: `A buy of $${formatUsd(amount)} of ${symbol} would take the position to $${formatUsd(held + amount)}, past the cap for ` +
+               `${what} of $${account.formatUsdDown(symbolCap)} (${account.percent(share)} of ${equityText}; held and on order ` +
+               `$${formatUsd(held)}).`,
+      };
+    }
+    const totalCap = account.stockTotalCapMicro(limitsNow, equityMicro, multiplier);
+    const book = totalHeld + flight;
+    if (book + amount > totalCap) {
+      const multiple = multiplier < limitsNow.maxMultiple ? multiplier : limitsNow.maxMultiple;
+      return {
+        ok: false, status: 403, cap: 'stock_total',
+        error: `A buy of $${formatUsd(amount)} would take what the account holds and has on order to $${formatUsd(book + amount)}, past ` +
+               `its cap of $${account.formatUsdDown(totalCap)} (${account.shareText(multiple)}x ${equityText}; the account's ` +
+               `multiplier is ${account.shareText(multiplier)}, STOCK_MAX_EQUITY_MULTIPLE ${account.shareText(limitsNow.maxMultiple)}).`,
+      };
+    }
+    if (flight + amount > powerMicro) {
+      return {
+        ok: false, status: 403, cap: 'buying_power',
+        error: `A buy of $${formatUsd(amount)} exceeds the account's buying power of $${account.formatUsdDown(powerMicro)}` +
+               `${flight > 0n ? ` less $${formatUsd(flight)} of buys in flight` : ''}: no margin past what the venue offers.`,
+      };
+    }
+    const id = ledger.next;
+    write(store, STOCK_PENDING_KEY, { next: id + 1, entries: [...ledger.entries, { id, at: Number(at), symbol, micro: String(amount), settled: null }] });
+    save({ day: row.day, orders: row.orders + 1, notional: row.notional + amount, alpacaOpen: row.alpacaOpen,
+      alpacaNotional: row.alpacaNotional + amount, alpacaStock: row.alpacaStock + amount });
+    return { ok: true, day: row.day, micro: String(amount), venue: 'alpaca', stock_id: id };
   };
 
   return {
@@ -319,12 +444,15 @@ export function createGate({ store, env = {}, now = Date.now }) {
      * Refusal is `{ ok: false, status, error }`; the caller forwards nothing. On the real Alpaca venue `micro` is an
      * open's maximum loss, judged by `reserveReal` (`credit` marks a credit structure's open, Sept 26, 2026, Wave 5).
      */
-    reserve({ micro, at = now(), exit = false, venue = null, credit = false }) {
+    reserve({ micro, at = now(), exit = false, venue = null, credit = false, stock = null }) {
       if (killed()) {
         return { ok: false, status: 423, error: 'The kill switch is engaged; no orders are being forwarded.' };
       }
       const amount = BigInt(micro);
       if (amount <= 0n) return { ok: false, status: 400, cap: 'order', error: 'An order must have a positive notional.' };
+      // A real stock or ETF buy is judged by the stock caps against the account's own reading (Oct 10, 2026): always an
+      // open, whatever `exit` says.
+      if (venue === 'alpaca' && stock) return reserveStock({ amount, at, stock, row: counters(at) });
       // The real Alpaca venue is capped by maximum loss against its own equity (Sept 26, 2026, Wave 5).
       if (venue === 'alpaca') return reserveReal({ amount, at, exit: exit === true, credit: credit === true, row: counters(at) });
       // A venue may carry a tighter per-order cap than the floor's (`MAX_ORDER_USD_<VENUE>`):
@@ -353,7 +481,7 @@ export function createGate({ store, env = {}, now = Date.now }) {
         };
       }
       save({ day: row.day, orders: row.orders + 1, notional: row.notional + amount, alpacaOpen: row.alpacaOpen,
-        alpacaNotional: row.alpacaNotional });
+        alpacaNotional: row.alpacaNotional, alpacaStock: row.alpacaStock });
       return { ok: true, day: row.day, micro: String(amount) };
     },
 
@@ -362,21 +490,40 @@ export function createGate({ store, env = {}, now = Date.now }) {
      * order can exist: a venue that answered at all keeps its reservation, because an unconfirmed
      * write is an order until reconciliation says otherwise.
      */
-    refund({ day, micro, opening = null, venue = null, at = now() }) {
+    refund({ day, micro, opening = null, venue = null, stock_id = null, at = now() }) {
+      // A stock buy that never reached the venue leaves the in-flight ledger whatever day it is (Oct 10, 2026).
+      const stockEntry = stock_id === null || stock_id === undefined ? null : stockTake(stock_id, at);
       const row = counters(at);
       if (row.day !== day) return { ok: false };
       const amount = BigInt(micro);
       // An opening reservation on the real Alpaca venue gives its maximum loss back to the day's opening cap too, and
-      // any Alpaca reservation its notional back to the Alpaca record (never to Kalshi's day).
+      // any Alpaca reservation its notional back to the Alpaca record (never to Kalshi's day); a stock buy its notional
+      // back to the day's stock record.
       const open = opening === null || opening === undefined ? 0n : BigInt(opening);
       const alpaca = venue === 'alpaca' ? amount : 0n;
+      const stock = stockEntry ? BigInt(stockEntry.micro) : 0n;
       save({
         day: row.day,
         orders: Math.max(0, row.orders - 1),
         notional: row.notional > amount ? row.notional - amount : 0n,
         alpacaOpen: row.alpacaOpen > open ? row.alpacaOpen - open : 0n,
         alpacaNotional: row.alpacaNotional > alpaca ? row.alpacaNotional - alpaca : 0n,
+        alpacaStock: row.alpacaStock > stock ? row.alpacaStock - stock : 0n,
       });
+      return { ok: true };
+    },
+
+    /**
+     * A real stock buy's forward was answered (Oct 10, 2026): the venue has the order or refused it, so a reading that
+     * starts from now on sees it, and it stops counting as in flight once no reading started before now is being judged
+     * (`STOCK_READ_SKEW_MS`). Unknown or already settled ids change nothing.
+     */
+    stockSettle({ id, at = now() }) {
+      const ledger = stockLedger(at);
+      const entry = ledger.entries.find(row => row.id === Number(id));
+      if (!entry || entry.settled !== null) return { ok: false };
+      entry.settled = Number(at);
+      write(store, STOCK_PENDING_KEY, ledger);
       return { ok: true };
     },
 
@@ -466,6 +613,32 @@ export function createGate({ store, env = {}, now = Date.now }) {
         orders_today: row.orders,
         max_day_open_orders: openOrdersCap(),
         max_day_orders: limits.maxDayOrders,
+      };
+    },
+
+    /**
+     * What `/v1/health` reports of real stock buys (Oct 10, 2026): the switch, the caps as shares of equity, the list, today's
+     * buys at qty x limit_price, the buys in flight, and whether a buy would be admitted now by the switch and the day's
+     * counts (the caps themselves are judged per buy, against a fresh reading of the account).
+     */
+    stockStatus(at = now()) {
+      const row = counters(at);
+      const limitsNow = account.stockCaps(env);
+      const flight = stockLedger(at).entries.filter(entry => entry.settled === null);
+      const enabled = stockBuysEnabled(env);
+      return {
+        enabled,
+        etf_equity_share: account.shareText(limitsNow.etfShare),
+        stock_equity_share: account.shareText(limitsNow.stockShare),
+        max_equity_multiple: account.shareText(limitsNow.maxMultiple),
+        symbols: {
+          etf: Object.keys(STOCK_UNIVERSE).filter(symbol => STOCK_UNIVERSE[symbol] === 'etf'),
+          stock: Object.keys(STOCK_UNIVERSE).filter(symbol => STOCK_UNIVERSE[symbol] === 'stock'),
+        },
+        day_buys_usd: formatUsd(row.alpacaStock),
+        in_flight: flight.length,
+        in_flight_usd: formatUsd(flight.reduce((sum, entry) => sum + BigInt(entry.micro), 0n)),
+        buys_admitted: enabled && !killed() && row.orders < openOrdersCap(),
       };
     },
 
@@ -1049,6 +1222,8 @@ export function createGate({ store, env = {}, now = Date.now }) {
         caps_exhausted: row.orders >= limits.maxDayOrders || kalshiNotional(row) >= limits.maxDayMicro || realDaySpent(row, at),
         // The caps by maximum loss on the real Alpaca venue, as they stand now (Sept 26, 2026, Wave 5).
         max_loss: this.maxLossStatus(at),
+        // Real stock and ETF buys (Oct 10, 2026): whether they are on, their caps and today's record.
+        stock_buys: this.stockStatus(at),
         frontier: (() => {
           const month = this.frontierMonth(at);
           const { capMicro, parts } = this.frontierCap(at);

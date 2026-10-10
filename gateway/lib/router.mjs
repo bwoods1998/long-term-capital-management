@@ -7,8 +7,10 @@
 //                                            (both written to the admin log, with every admin-token call: V3-A)
 //   GET|POST|DELETE /v1/kalshi/<path>        signed with the Kalshi key, forwarded to the venue
 //   GET|POST|DELETE /v1/alpaca/<path>        keyed with the Alpaca headers, forwarded to the venue; its orders are
-//                                            options capped by maximum loss against the account's own equity, and
-//                                            stock only to close shares it holds (`realOrder`, Sept 26, 2026)
+//                                            options capped by maximum loss against the account's own equity, stock
+//                                            closes of shares it holds (`realOrder`, Sept 26, 2026), and, while
+//                                            STOCK_BUYS_REAL is "on", long-only buys of listed stocks and ETFs capped
+//                                            by the account's own reading (`realStockBuy`, Oct 10, 2026)
 //   GET|POST|DELETE /v1/alpaca-paper/<path>  the practice account: same paths, simulated money, no caps;
 //                                            its option orders are held to defined-risk shapes
 //   GET             /v1/kalshi/ws-auth       handshake headers for the Kalshi WebSocket, 30 s of life
@@ -69,6 +71,7 @@ import {
   createsOrder, notional, PURPOSE_HEADER, allowedVenuePath, isOptionSymbol, alpacaShapeError,
   admittedStructures, isMultiLegOrder, structureNotional, practiceOrderError, closeLegsHeldError, closedLegRows,
   shortCloseBody, longCloseBody, singleLegOpenError, realStockClose, CREDIT_STRUCTURES,
+  stockBuysEnabled, stockBuyOrder, heldShares, stockExposure,
 } from './caps.mjs';
 import * as kalshi from './kalshi.mjs';
 import * as alpaca from './alpaca.mjs';
@@ -104,6 +107,9 @@ const POSITIONS_UNREAD_STATUS = 424;
 //: options-swarm run, Wave 5)): a 503 the House sends again, with nothing reserved or sent. Only opens wait on the reading.
 const EQUITY_UNREAD_STATUS = 503;
 const EQUITY_RETRY = { 'Retry-After': '30' };
+//: The open orders a real stock buy reads (Oct 10, 2026): one page of at most this many. A full page may be cut off, so it
+//: admits no buy (`caps.stockExposure`).
+const OPEN_ORDERS_LIMIT = 500;
 
 /**
  * A refusal made before anything is forwarded, naming why in `cap` (Sept 26, 2026 (the options-swarm run, Wave 5), the
@@ -379,7 +385,8 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
       if (priced.error) return fail(priced.error, 400);
       order = { micro: priced.micro, exit, credit: false, closeRows: null };
     }
-    const decision = await gate.reserve({ micro: String(order.micro), exit: order.exit, venue: target.venue, credit: order.credit });
+    const decision = await gate.reserve({ micro: String(order.micro), exit: order.exit, venue: target.venue, credit: order.credit,
+      ...(order.stock ? { stock: order.stock } : {}) });
     if (!decision.ok) {
       return json({ error: decision.error, ...(decision.cap ? { cap: decision.cap } : {}) }, decision.status,
         decision.status === EQUITY_UNREAD_STATUS ? EQUITY_RETRY : {});
@@ -408,6 +415,15 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
       redirect: 'manual',
       signal: AbortSignal.timeout(30000),
     });
+    // A real stock buy the venue answered (taken or refused) is in its readings from now on: it leaves the gate's
+    // in-flight ledger (Oct 10, 2026). One with no answer stays in it until STOCK_PENDING_MS has passed.
+    if (reservation && reservation.stock_id !== undefined) {
+      try {
+        await gate.stockSettle({ id: reservation.stock_id, at: now() });
+      } catch {
+        // Unsettled, it keeps counting until it ages out: the caps err high, never low.
+      }
+    }
     return new Response(upstream.body, {
       status: upstream.status,
       headers: {
@@ -435,7 +451,10 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
  *  - Everything else that passes is an EXIT, read no equity and meets no dollar cap: a multi-leg close, a single-leg
  *    `buy_to_close` and a single-leg `sell_to_close` (each admitted only when the account holds what it closes; the
  *    sell_to_close since the review's m14), and a stock order that closes shares the account holds
- *    (`caps.realStockClose`): the one stock order the real account may send. Every other stock or crypto order is refused.
+ *    (`caps.realStockClose`).
+ *  - While STOCK_BUYS_REAL is "on" (Oct 10, 2026), a stock or ETF BUY of a listed symbol the account does not hold short
+ *    is an OPEN judged by the stock caps (`realStockBuy`, `gate.reserveStock`). Every other stock or crypto order is
+ *    refused.
  *  - Every refusal names its `cap` when it is a 424 or a 5xx (`refuse`): nothing was sent.
  *
  * Until today the exit header decided what a real order was; for the real account it decides nothing now. The House sets
@@ -458,12 +477,18 @@ async function realOrder(parsed, env, { gate, fetcher, now }) {
   if (single) return { response: fail(single, 400) };
 
   if (!multi && !isOptionSymbol(parsed.symbol)) {
-    // A stock (or crypto) order: only the close of shares the account holds, read from its signed positions. No quote is
+    // A stock (or crypto) order: the close of shares the account holds, read from its signed positions. No quote is
     // read: it is an exit, reserved at one micro-dollar like any real close, and a quote could only delay it.
     const close = realStockClose(parsed);
     if (close.error) return { response: fail(close.error, 400) };
     const held = await realPositions(env, { fetcher, now });
     if (held.error) return { response: refuse(`Cannot check that the real account holds these shares: ${held.error}.`, POSITIONS_UNREAD_STATUS, 'positions') };
+    // While STOCK_BUYS_REAL is "on" (Oct 10, 2026), a buy of a symbol the account does not hold short opens or adds to a
+    // LONG position: `realStockBuy` judges it. A buy of a symbol held short is a cover, judged below as a close (at most
+    // the short), so no buy both covers and opens; a sale is always a close, so no order here is a short sale.
+    if (parsed.side === 'buy' && stockBuysEnabled(env) && heldShares(close.body.legs[0].symbol, held.positions) >= 0n) {
+      return realStockBuy(parsed, env, { gate, fetcher, now });
+    }
     const refusal = closeLegsHeldError(close.body, held.positions);
     if (refusal) return { response: fail(refusal, 400) };
     return { micro: 1n, exit: true, credit: false, closeRows: closedLegRows(close.body) };
@@ -531,14 +556,83 @@ async function realOrder(parsed, env, { gate, fetcher, now }) {
 }
 
 /**
+ * A real stock or ETF BUY that opens or adds to a long position (Oct 10, 2026; `caps.stockBuyOrder`, `gate.reserveStock`):
+ * `{ micro, exit: false, credit: false, closeRows: null, stock }` for the gate, or `{ response }`. Its shape first (a
+ * listed symbol, a limit day order sized in shares), then three reads of the real account, each with its keys, read-only,
+ * fresh: the account (equity, buying power, multiplier; recorded in the gate as the caps' equity reading), its open
+ * orders, then its positions (in that order: a buy that fills between the two reads is counted twice, never not at
+ * all). Each read that fails refuses the buy with nothing reserved or sent: the account a 503 (`equity`), the orders or
+ * positions a 424 (`orders`, `positions`). The gate then judges the caps in the step that reserves.
+ */
+async function realStockBuy(parsed, env, { gate, fetcher, now }) {
+  const order = stockBuyOrder(parsed);
+  if (order.error) return { response: fail(order.error, 400) };
+  const readAt = now();
+  const reading = await account.readStockAccount(env, { fetcher, now });
+  if (reading.ok !== true) {
+    return {
+      response: refuse(`Cannot read the real account (${String(reading.error || 'unreadable')}): a stock buy is sized against its ` +
+        'equity and buying power read now, so nothing was sent. Send it again.', EQUITY_UNREAD_STATUS, 'equity', EQUITY_RETRY),
+    };
+  }
+  try {
+    await gate.recordAccountEquity({ ok: true, at: reading.at, equity_micro: reading.equity_micro });
+  } catch {
+    // The options' reading is only refreshed here as a convenience; the buy is judged by `reading` itself.
+  }
+  const orders = await realOpenOrders(env, { fetcher, now });
+  if (orders.error) return { response: refuse(`Cannot read the real account's open orders: ${orders.error}.`, POSITIONS_UNREAD_STATUS, 'orders') };
+  const held = await realPositions(env, { fetcher, now, fresh: true });
+  if (held.error) return { response: refuse(`Cannot read the real account's positions: ${held.error}.`, POSITIONS_UNREAD_STATUS, 'positions') };
+  const exposure = stockExposure(order.symbol, held.positions, orders.orders, { ordersLimit: OPEN_ORDERS_LIMIT });
+  if (exposure.short) return { response: fail(`A buy of ${order.symbol} is not admitted as an open: ${exposure.error}.`, 400) };
+  if (exposure.error) {
+    return { response: refuse(`Cannot size this buy against the real account: ${exposure.error}.`, POSITIONS_UNREAD_STATUS, exposure.source || 'positions') };
+  }
+  return {
+    micro: order.micro, exit: false, credit: false, closeRows: null,
+    stock: {
+      symbol: order.symbol, equity_micro: reading.equity_micro, buying_power_micro: reading.buying_power_micro, multiplier: reading.multiplier,
+      symbol_held_micro: String(exposure.symbolMicro), total_held_micro: String(exposure.totalMicro), read_at: readAt,
+    },
+  };
+}
+
+/**
+ * The real Alpaca account's open orders (`GET v2/orders?status=open`, one page of OPEN_ORDERS_LIMIT, signed, no redirect
+ * followed), never cached: `{orders}` or `{error}` (Oct 10, 2026).
+ */
+async function realOpenOrders(env, { fetcher, now }) {
+  let answer;
+  try {
+    const signed = await sign({ venue: 'alpaca', path: 'v2/orders' },
+      new Request(`https://x/v2/orders?status=open&limit=${OPEN_ORDERS_LIMIT}`, { method: 'GET' }), env, { now: now() });
+    answer = await fetcher(signed.url, { method: 'GET', headers: signed.headers, signal: AbortSignal.timeout(8000), redirect: 'manual' });
+  } catch (error) {
+    return { error: error?.name || 'fetch failed' };
+  }
+  if (!answer.ok) return { error: `venue HTTP ${answer.status}` };
+  let orders;
+  try {
+    orders = await answer.json();
+  } catch {
+    return { error: 'an unreadable venue answer' };
+  }
+  if (!Array.isArray(orders)) return { error: 'the venue\'s open orders were not a list' };
+  return { orders };
+}
+
+/**
  * The real Alpaca account's positions (`GET v2/positions`, signed like every other call), reused for `POSITIONS_CACHE_MS`
  * (`env.POSITIONS_CACHE_MS` overrides; 0 reads them every time): `{positions}` or `{error}`. The read never follows a
  * redirect (it carries the REAL account's key headers): a 3xx is an answer that cannot be read, and admits no close.
+ * `fresh` (a stock buy, Oct 10, 2026) reads the venue whatever the cache holds, and leaves the cache as it was: the
+ * closes taken out of it stay out.
  */
-async function realPositions(env, { fetcher, now }) {
+async function realPositions(env, { fetcher, now, fresh = false }) {
   const cacheMs = Number(env.POSITIONS_CACHE_MS ?? POSITIONS_CACHE_MS);
   if (cacheMs <= 0) positionsCache = null;
-  if (cacheMs > 0 && positionsCache && positionsCache.expires > Date.now()) return { positions: positionsCache.positions };
+  if (!fresh && cacheMs > 0 && positionsCache && positionsCache.expires > Date.now()) return { positions: positionsCache.positions };
   let answer;
   try {
     const signed = await sign({ venue: 'alpaca', path: 'v2/positions' }, new Request('https://x/v2/positions', { method: 'GET' }), env, { now: now() });
@@ -554,7 +648,7 @@ async function realPositions(env, { fetcher, now }) {
     return { error: 'an unreadable venue answer' };
   }
   if (!Array.isArray(positions)) return { error: 'the venue\'s positions were not a list' };
-  if (cacheMs > 0) positionsCache = { positions, expires: Date.now() + cacheMs };
+  if (cacheMs > 0 && !fresh) positionsCache = { positions, expires: Date.now() + cacheMs };
   return { positions };
 }
 
