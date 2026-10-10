@@ -31,10 +31,22 @@ terms (a 90-day target and a 60-day card line) are gone: this one short term is 
 THE DAY'S FIGURE IS SET ONCE. The job runs twice on a session day, and its second reading has already paid for the
 day's research: a taper recomputed from it would put the day's cap under what the day has booked, and the guard would
 brake the gate with everything else until 00:00 UTC. So a meter's research for a UTC day is what the first run of that
-day that could read the meter gave (`day_figure`). A later run the same day keeps it: it raises nothing and lowers
-nothing for today, and records what its own reading would have set (`would_set_usd_day`), which the first run of the
-next UTC day sets from its own reading. A meter that cannot be read is still no research at once (FAIL CLOSED); read
-again the same day, it is back at the day's figure. Another version of the rule's file sets no day's figure.
+day that could read the meter gave (`day_figure`). A later run the same day keeps it: it lowers nothing for today, and
+records what its own reading would have set (`would_set_usd_day`), which the first run of the next UTC day sets from its
+own reading. A meter that cannot be read is still no research at once (FAIL CLOSED); read again the same day, it is back
+at the day's figure. Another version of the rule's file sets no day's figure.
+
+THE TOP-UP RAISE (Oct 10, 2026; the no-captain audit's item 2). A later run whose own reading would set MORE than the
+day's figure (the owner topped the meter up: on Oct 9 Sail research stayed at its tapered figure for ten hours after a
+top-up, until the operator edited budget.json by hand, and the run after the close then put the old figure back) raises the
+day's figure to that reading's own: today's research, the knobs and the guard's caps follow at once. It only ever
+raises (a reading that would set less leaves the figure as it is, as above), never above the meter's share of the
+ceiling, and from the reading as it stands (nothing added back: that reading has paid for the day so far, so the raise
+is never more than a first run of the day on the topped-up balance would have set). The day's figure records the
+figure it replaced and when (`raised_from`, `raised_at`; `set_at` stays the first run's). A raise does not undo the
+day's earlier receipts: a day whose first run tapered is still a taper day for DONE-RULE item 7. The House reads a
+top-up within the hour: the `budget_refresh` job (`refresh`, hourly and at the House's start) runs this same rule and
+writes budget.json only when it raises a meter or sets a day's figure no run has set yet.
 
 THE DAY'S FIRST RUN ADDS BACK WHAT THE DAY ALREADY PAID. When the first run of a UTC day comes late (the 00:30 run
 missed, a deploy in the evening, a meter no earlier run could read), its reading has already paid for part of the day's
@@ -475,8 +487,13 @@ def _day_figure(previous: Any, meter: str, today: dt.date) -> dict[str, Any] | N
     usd = _amount(figure.get("usd_day"))
     if usd is None or figure.get("limited_by") not in ("ceiling", "runway"):
         return None
-    return {"day": today.isoformat(), "usd_day": round(min(usd, ceiling_usd_day(meter)), 4),
-            "limited_by": figure["limited_by"], "set_at": figure.get("set_at")}
+    out = {"day": today.isoformat(), "usd_day": round(min(usd, ceiling_usd_day(meter)), 4),
+           "limited_by": figure["limited_by"], "set_at": figure.get("set_at")}
+    # THE TOP-UP RAISE: the figure a raise replaced and when, carried with the day's figure.
+    raised_from = _amount(figure.get("raised_from"))
+    if raised_from is not None and isinstance(figure.get("raised_at"), str):
+        out.update(raised_from=round(raised_from, 4), raised_at=figure["raised_at"])
+    return out
 
 
 def compute(inputs: Mapping[str, Any], *, now: float, previous: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -489,7 +506,8 @@ def compute(inputs: Mapping[str, Any], *, now: float, previous: Mapping[str, Any
                         "notice_balance_usd": float | None (Sail with no guard reading: the card line only), ...sources}}}
 
     `previous` is the last budget.json: for the direction, and for THE DAY'S FIGURE (a meter an earlier run of this UTC
-    day read keeps that run's research: `_day_figure`). The run that sets a meter's figure ADDS BACK what the meter has
+    day read keeps that run's research: `_day_figure`; THE TOP-UP RAISE lifts it to this run's reading when that is
+    more). The run that sets a meter's figure ADDS BACK what the meter has
     paid since 00:00 UTC (`paid_today_usd`, never more than its share of the ceiling plus its fixed cost a day): the
     figure is from the balance as the day began, whenever in the day the first run comes. Pure: no I/O."""
     meters_in = inputs.get("meters") or {}
@@ -545,9 +563,16 @@ def compute(inputs: Mapping[str, Any], *, now: float, previous: Mapping[str, Any
         research = min(ceiling, runway_cap)  # never above the ceiling, whatever was earned
         limited = "ceiling" if runway_cap >= ceiling else "runway"  # the taper: under RUNWAY_DAYS days of the ceiling
         would_set = research
+        raised = None
         if kept is None:
             kept = {"day": today.isoformat(), "usd_day": round(research, 4), "limited_by": limited, "set_at": _iso(now)}
-        else:  # THE DAY'S FIGURE IS SET ONCE: this reading has paid for the day's research, and raises and lowers nothing
+        elif research > kept["usd_day"] + EPSILON:
+            # THE TOP-UP RAISE: this reading (nothing added back) would set more than the day's figure: the figure is
+            # raised to it, never above the ceiling (`research` is already held to it), and never lowered.
+            raised = kept["usd_day"]
+            kept = {"day": today.isoformat(), "usd_day": round(research, 4), "limited_by": limited,
+                    "set_at": kept.get("set_at"), "raised_from": raised, "raised_at": _iso(now)}
+        else:  # THE DAY'S FIGURE IS SET ONCE: this reading has paid for the day's research, and lowers nothing
             research, limited = kept["usd_day"], kept["limited_by"]
         rate = fixed + research
         if room <= 0:
@@ -568,6 +593,9 @@ def compute(inputs: Mapping[str, Any], *, now: float, previous: Mapping[str, Any
         if added > EPSILON:
             why.append(f"{m}: the day's first run: the {added:.4f} the meter has paid since 00:00 UTC is added back (the "
                        "day's figure is from the balance as the day began)")
+        if raised is not None:
+            why.append(f"{m}: the top-up raise: today's figure {raised:.4f} is raised to this run's reading, {research:.4f} "
+                       f"a day ({limited}); a raise only, never above the ceiling")
         if abs(would_set - research) > EPSILON:
             why.append(f"{m}: today's figure stands ({research:.4f} a day, set at {kept['set_at']}); this run's reading "
                        f"would set {would_set:.4f}")
@@ -1477,14 +1505,8 @@ def _alert(ctx: Any, text: str) -> None:
         pass
 
 
-def run(ctx: Any) -> dict[str, Any]:
-    """The `budget` job (league/ops: after the close economics, and daily at 00:30 UTC). `ctx` gives `root` (the House's
-    state root; or `state_root`, or `house.root`), and optionally `now` or `clock`, `config` (league/config.json),
-    `sail` (a `SailboxClient`), `gateway_health` (a callable returning `/v1/health`'s JSON) and `notify` (a callable
-    posting one notice's facts to `/v1/notify`); each one absent is built from the House's own config and environment.
-    Writes `<root>/budget.json` and returns the receipt."""
-    root, now, config = _root(ctx), _now(ctx), _config(ctx)
-    errors: list[str] = []
+def _job_inputs(ctx: Any, root: Path, now: float, config: Mapping[str, Any], errors: list[str]) -> dict[str, Any]:
+    """The rule's inputs as the job reads them (`gather`), with the job's Sail client and gateway health reader."""
     try:
         sail = _get(ctx, "sail")  # the ops context builds its client on first use: that may fail
     except Exception as exc:  # noqa: BLE001 - the configured burn stands in
@@ -1498,13 +1520,30 @@ def run(ctx: Any) -> dict[str, Any]:
         except Exception as exc:  # noqa: BLE001 - the configured burn stands in
             errors.append(f"no Sail client ({type(exc).__name__})")
     health = _get(ctx, "gateway_health") or _health_reader(config)
-    notify = _get(ctx, "notify") or _notifier(config)
-    inputs = gather(root, now, config=config, settings=_settings(root, config), sail=sail, health=health, errors=errors)
+    return gather(root, now, config=config, settings=_settings(root, config), sail=sail, health=health, errors=errors)
+
+
+def _previous(root: Path) -> dict[str, Any] | None:
+    """The last budget.json, parsed, or None."""
     try:
         previous = json.loads((root / BUDGET_FILE).read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        previous = None
-    doc = compute(inputs, now=now, previous=previous if isinstance(previous, Mapping) else None)
+        return None
+    return previous if isinstance(previous, dict) else None
+
+
+def run(ctx: Any) -> dict[str, Any]:
+    """The `budget` job (league/ops: after the close economics, and daily at 00:30 UTC). `ctx` gives `root` (the House's
+    state root; or `state_root`, or `house.root`), and optionally `now` or `clock`, `config` (league/config.json),
+    `sail` (a `SailboxClient`), `gateway_health` (a callable returning `/v1/health`'s JSON) and `notify` (a callable
+    posting one notice's facts to `/v1/notify`); each one absent is built from the House's own config and environment.
+    Writes `<root>/budget.json` and returns the receipt."""
+    root, now, config = _root(ctx), _now(ctx), _config(ctx)
+    errors: list[str] = []
+    inputs = _job_inputs(ctx, root, now, config, errors)
+    notify = _get(ctx, "notify") or _notifier(config)
+    previous = _previous(root)
+    doc = compute(inputs, now=now, previous=previous)
     doc["errors"] = list(errors)
     _write_json(root / BUDGET_FILE, doc)
     notices = send_notices(doc, root, now, notify, errors)
@@ -1520,6 +1559,92 @@ def run(ctx: Any) -> dict[str, Any]:
             "meters": {m: {k: doc["meters"][m].get(k) for k in ("research_usd_day", "would_set_usd_day", "limited_by",
                                                                "runway_days", "card_date", "direction")} for m in METERS},
             "notices": notices, "errors": errors, "warning": bool(errors)}
+
+
+# ---------------------------------------------------------------------------------------------- the refresh
+def refresh_unusable(previous: Any, now: float) -> str | None:
+    """Why the last budget.json gives the refresh nothing to build on (the full job runs in its place), or None: none,
+    another format's or another version of the rule's (a deploy that changed the rule: Oct 7, 2026, the operator ran the
+    job by hand because nothing ran it at the House's start), undated, dated in the future, stale or without meters."""
+    if not isinstance(previous, Mapping):
+        return "no budget.json"
+    if previous.get("schema") != SCHEMA or previous.get("rule_version") != RULE_VERSION:
+        return "budget.json is another version of the rule's"
+    at = _finite(previous.get("at"))
+    if at is None:
+        return "budget.json has no time"
+    if at > now + 300:
+        return "budget.json is dated in the future"
+    if now - at > STALE_SECONDS:
+        return f"budget.json is stale ({(now - at) / 3600:.0f} h old)"
+    if not isinstance(previous.get("meters"), Mapping):
+        return "budget.json has no meters"
+    return None
+
+
+def refresh_changes(previous: Mapping[str, Any], doc: Mapping[str, Any], now: float) -> tuple[dict[str, str], str | None]:
+    """What a refresh would write ({meter: "raise" | "first"}) and, when it writes nothing, why. Pure.
+
+    It writes only when every meter reads (an unreadable meter is the full job's FAIL CLOSED, never the refresh's: the
+    file stands as the last full run left it), no meter would fall under the file's figure but on the day's first figure
+    (a lower figure on a day already set is a hand edit or the full job's: the refresh never lowers one), and some meter
+    is RAISED (THE TOP-UP RAISE, or a meter read again after a run that could not read it) or gets the day's FIRST
+    figure (no run of this UTC day has set one: the 00:30 run missed, or a meter it could not read)."""
+    today = _day(now).isoformat()
+    changes: dict[str, str] = {}
+    for m in METERS:
+        new = (doc.get("meters") or {}).get(m) or {}
+        old = (previous.get("meters") or {}).get(m)
+        old = old if isinstance(old, Mapping) else {}
+        if new.get("limited_by") not in ("ceiling", "runway"):
+            return {}, f"{m} could not be read: budget.json stands as the last full run left it"
+        figure = old.get("day_figure")
+        first = not (isinstance(figure, Mapping) and figure.get("day") == today)
+        was, now_m = _amount(old.get("research_usd_day")), float(new.get("research_usd_day") or 0.0)
+        if first:
+            changes[m] = "first"
+        elif was is None or now_m > was + EPSILON:
+            changes[m] = "raise"
+        elif now_m < was - EPSILON:
+            return {}, (f"{m} would fall from {was:.4f} to {now_m:.4f} a day on a day already set: the refresh never "
+                        "lowers a figure (the full job's runs do)")
+    if not changes:
+        return {}, "no meter to raise and every day's figure set: budget.json stands"
+    return changes, None
+
+
+def refresh(ctx: Any) -> dict[str, Any]:
+    """THE `budget_refresh` JOB (Oct 10, 2026; the no-captain audit's item 2): hourly and at the House's start, the rule
+    as `run` reads it, written only when it RAISES a meter or sets a day's FIRST figure (`refresh_changes`), so a top-up
+    reaches the day's research, the knobs (`population.ceiling`, `gym.max_boxes`, the architect's cadence, the pace)
+    and the guard's caps within the hour, never at the next 00:30 run. With no usable budget.json (`refresh_unusable`:
+    none, another rule's after a deploy, stale) it is the full job (`run`, its funding notice included).
+
+    Otherwise it sends no notice and raises no House warning (the full job's runs do both), and it never writes a
+    figure lower than the file's on a day already set, nor a meter it could not read: it can only bring research up to
+    what the rule itself sets, never past the owner's ceiling. A run that writes nothing leaves budget.json untouched
+    (its receipt says why). Writes `<root>/budget.json` at most; moves no money."""
+    root, now, config = _root(ctx), _now(ctx), _config(ctx)
+    previous = _previous(root)
+    unusable = refresh_unusable(previous, now)
+    if unusable is not None:
+        out = run(ctx)
+        out.update(written=True, refresh=f"the full job: {unusable}")
+        return out
+    errors: list[str] = []
+    inputs = _job_inputs(ctx, root, now, config, errors)
+    doc = compute(inputs, now=now, previous=previous)
+    changes, why = refresh_changes(previous or {}, doc, now)
+    meters = {m: {k: doc["meters"][m].get(k) for k in ("research_usd_day", "would_set_usd_day", "limited_by")}
+              for m in METERS}
+    if why is not None:
+        return {"written": False, "why": why, "meters": meters, "errors": errors, "warning": False}
+    doc["errors"] = list(errors)
+    doc["refreshed"] = {"at": _iso(now), "meters": dict(changes)}
+    _write_json(root / BUDGET_FILE, doc)
+    return {"written": True, "changes": changes, "state": doc["state"], "research_usd_day": doc["research_usd_day"],
+            "was_usd_day": _finite((previous or {}).get("research_usd_day")), "meters": meters, "errors": errors,
+            "warning": False}
 
 
 #: The drill's synthetic fixed cost a day per meter: the production shape (Claude has none). Its cliff holds this many
@@ -1568,7 +1693,8 @@ def drill(ctx: Any, meter: str = "sail") -> dict[str, Any]:
 __all__ = ["compute", "knobs", "overlay", "read", "effective", "stale_block", "floor_block", "BIRTH_MARGIN", "sail_caps",
            "paid_model_room", "paid_model_reserve", "gate_reserve", "edge_state", "book_p30", "economics_p30",
            "economics_fresh", "ladder_promotions", "gather", "ladder_receipts", "notice_facts", "send_notices", "short",
-           "run", "drill", "floor_usd_day", "ceiling_usd_day", "METERS", "RULE_VERSION", "SCHEMA", "CEILING_USD_DAY",
+           "run", "refresh", "refresh_unusable", "refresh_changes", "drill", "floor_usd_day", "ceiling_usd_day", "METERS",
+           "RULE_VERSION", "SCHEMA", "CEILING_USD_DAY",
            "SPLIT", "RUNWAY_DAYS", "NOTICE_DAYS", "TOPUP_DAYS", "GATE_RESERVE_SHARE", "GATE_RESERVE_MIN_USD",
            "GATE_HOLDS_USD", "GATE_STAGES", "FLOOR_CAP_USD_DAY", "PROFIT_SHARE", "RESERVE_USD", "EDGE_START", "EDGE_SESSIONS",
            "STALE_SECONDS", "BUDGET_FILE", "NOTICES_FILE", "LADDER_MARK", "LOOK_BAND", "P30_FRESH_SECONDS"]

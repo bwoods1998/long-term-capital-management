@@ -199,7 +199,8 @@ class Rule(unittest.TestCase):
     def test_a_second_run_in_the_same_utc_day_keeps_the_days_figure(self):
         """THE DAY'S FIGURE IS SET ONCE. The job runs at 00:30 UTC and again after the close economics; the second reading
         has paid for the day's research, so a taper recomputed from it would put the day's cap under what the day booked.
-        A later run the same day raises nothing and lowers nothing for today, and records what it would have set."""
+        A later run the same day lowers nothing for today (a top-up raises it: THE TOP-UP RAISE, below), and records what
+        it would have set."""
         morning_at, evening_at = at(2026, 10, 20, 0, 30), at(2026, 10, 20, 20, 10)
         morning = B.compute(inputs(sail=80.0), now=morning_at)
         figure = {"day": "2026-10-20", "usd_day": 12.5, "limited_by": "runway", "set_at": "2026-10-20T00:30:00Z"}
@@ -218,11 +219,8 @@ class Rule(unittest.TestCase):
         self.assertEqual(evening["knobs"], morning["knobs"])
         # The card line is this run's own reading: the owner hears of the balance as it is.
         self.assertLess(sail["card_runway_days"], morning["meters"]["sail"]["card_runway_days"])
-        # A top-up the same day raises nothing for today either: the next day's first run sets it.
-        topped = B.compute(inputs(sail=600.0), now=evening_at + 600, previous=evening)
-        self.assertEqual((topped["meters"]["sail"]["research_usd_day"], topped["meters"]["sail"]["would_set_usd_day"]), (12.5, 20.0))
         # FAIL CLOSED at once: a meter that cannot be read is no research; read again the same day, the day's figure.
-        unread = B.compute(inputs(sail=None), now=evening_at + 1200, previous=topped)
+        unread = B.compute(inputs(sail=None), now=evening_at + 1200, previous=evening)
         self.assertEqual((unread["meters"]["sail"]["research_usd_day"], unread["meters"]["sail"]["limited_by"],
                           unread["meters"]["sail"]["day_figure"]), (0.0, "unreadable", figure))
         again = B.compute(inputs(sail=40.0), now=evening_at + 1800, previous=unread)
@@ -253,6 +251,56 @@ class Rule(unittest.TestCase):
         over = copy.deepcopy(morning)
         over["meters"]["sail"]["day_figure"]["usd_day"] = 500.0
         self.assertEqual(B.compute(inputs(sail=67.75), now=evening_at, previous=over)["meters"]["sail"]["research_usd_day"], 20.0)
+
+    def test_the_top_up_raise_lifts_todays_figure_and_never_lowers_it(self):
+        """THE TOP-UP RAISE (Oct 10, 2026; the no-captain audit's item 2). Oct 9: Sail tapered under its share of the
+        ceiling, the owner topped it up at about 14:29Z, and the day's figure set once kept research tapered until 00:30Z
+        (the operator edited budget.json by hand; the run after the close put the old figure back). A later run whose
+        reading would set more raises the day's figure to it: never above the ceiling, never lowered after."""
+        morning_at, evening_at = at(2026, 10, 20, 0, 30), at(2026, 10, 20, 14, 35)
+        morning = B.compute(inputs(sail=80.0), now=morning_at)
+        self.assertEqual((morning["meters"]["sail"]["research_usd_day"], morning["meters"]["sail"]["limited_by"]),
+                         (12.5, "runway"), "(70 - 5 x 1.5) / 5: a taper day")
+        # A part top-up: the reading as it stands (nothing added back) sets 17.5, more than 12.5: the figure follows it.
+        part = B.compute(inputs(sail=105.0), now=evening_at, previous=morning)
+        sail = part["meters"]["sail"]
+        self.assertEqual((sail["research_usd_day"], sail["would_set_usd_day"], sail["limited_by"], sail["added_back_usd"]),
+                         (17.5, 17.5, "runway", 0.0), "(95 - 7.5) / 5, from the reading as it stands")
+        self.assertEqual(sail["day_figure"], {"day": "2026-10-20", "usd_day": 17.5, "limited_by": "runway",
+                                              "set_at": "2026-10-20T00:30:00Z", "raised_from": 12.5,
+                                              "raised_at": "2026-10-20T14:35:00Z"})
+        self.assertEqual((part["direction"], sail["direction"]), ("raise", "raise"))
+        self.assertIn("sail: the top-up raise: today's figure 12.5000 is raised to this run's reading, 17.5000 a day "
+                      "(runway); a raise only, never above the ceiling", part["why"])
+        self.assertGreater(part["knobs"]["population.ceiling"], morning["knobs"]["population.ceiling"], "the knobs follow")
+        # The rest of the owner's top-up: at the ceiling, never above it, whatever the balance.
+        full = B.compute(inputs(sail=600.0), now=evening_at + 600, previous=part)
+        sail = full["meters"]["sail"]
+        self.assertEqual((sail["research_usd_day"], sail["limited_by"], sail["day_figure"]["usd_day"],
+                          sail["day_figure"]["raised_from"], sail["day_figure"]["set_at"]),
+                         (20.0, "ceiling", 20.0, 17.5, "2026-10-20T00:30:00Z"))
+        # Never lowered after: a reading that has spent since sets less, and the raised figure stands.
+        spent = B.compute(inputs(sail=560.0), now=evening_at + 3600, previous=full)
+        self.assertEqual((spent["meters"]["sail"]["research_usd_day"], spent["meters"]["sail"]["day_figure"]["raised_from"]),
+                         (20.0, 17.5))
+        low = B.compute(inputs(sail=40.0), now=evening_at + 7200, previous=full)
+        self.assertEqual((low["meters"]["sail"]["research_usd_day"], low["meters"]["sail"]["would_set_usd_day"],
+                          low["meters"]["sail"]["limited_by"]), (20.0, 4.5, "ceiling"))
+        # FAIL CLOSED still: an unreadable meter is no research at once; read again, the raised figure.
+        unread = B.compute(inputs(sail=None), now=evening_at + 7800, previous=full)
+        self.assertEqual(unread["meters"]["sail"]["research_usd_day"], 0.0)
+        self.assertEqual(B.compute(inputs(sail=500.0), now=evening_at + 8400, previous=unread)["meters"]["sail"]
+                         ["research_usd_day"], 20.0)
+        # A raise smaller than the rule's epsilon is no raise; a day's figure from a file another day wrote is none.
+        same = B.compute(inputs(sail=80.02), now=evening_at, previous=morning)["meters"]["sail"]
+        self.assertEqual((same["research_usd_day"], same["day_figure"].get("raised_from")), (12.5, None))
+        tomorrow = B.compute(inputs(sail=80.0), now=morning_at + DAY, previous=full)["meters"]["sail"]
+        self.assertEqual((tomorrow["research_usd_day"], tomorrow["day_figure"].get("raised_from")), (12.5, None))
+        # A raised figure that does not read is carried as the plain figure.
+        odd = copy.deepcopy(full)
+        odd["meters"]["sail"]["day_figure"]["raised_from"] = "lots"
+        self.assertNotIn("raised_from", B.compute(inputs(sail=560.0), now=evening_at + 3600, previous=odd)["meters"]["sail"]
+                         ["day_figure"])
 
     def test_a_late_first_run_of_the_day_adds_back_what_the_day_already_paid(self):
         """THE DAY'S FIRST RUN ADDS BACK WHAT THE DAY ALREADY PAID. A first run that comes late (the 00:30 run missed, a
@@ -1208,6 +1256,93 @@ class Job(unittest.TestCase):
         self.reading(88.9, morning + DAY - 60)
         third = B.run(self.ctx(now=morning + DAY))
         self.assertEqual((third["meters"]["sail"]["research_usd_day"], third["meters"]["sail"]["would_set_usd_day"]), (8.88, 8.88))
+
+    def test_the_refresh_reads_a_top_up_within_the_hour_and_writes_nothing_else(self):
+        """THE `budget_refresh` JOB (Oct 10, 2026; the no-captain audit's item 2): hourly and at the House's start. It
+        writes budget.json only to raise a meter (THE TOP-UP RAISE) or to set a day's first figure; it never lowers a
+        figure, never writes a meter it could not read, sends no notice and raises no House warning. With no usable
+        budget.json it is the full job."""
+        from league.ops import budget_refresh
+
+        morning = at(2026, 10, 21, 0, 30)
+        # No budget.json yet (a new state root, or a deploy that changed the rule): the full job, its notice included.
+        self.reading(100.0, morning - 60)
+        first = budget_refresh.run(self.ctx(now=morning))
+        self.assertEqual((first["written"], first["refresh"]), (True, "the full job: no budget.json"))
+        self.assertEqual((first["meters"]["sail"]["research_usd_day"], first["meters"]["sail"]["limited_by"]), (11.1, "runway"))
+        self.assertEqual(len(self.sent), 1, "the full job's funding notice: Sail tapers")
+        self.alerts.clear()  # the full job's own warnings (no close economics summary yet)
+        before = (self.root / "budget.json").read_bytes()
+        # An hour on, nothing changed: nothing written, no notice, no warning.
+        self.reading(99.0, morning + 3600 - 60)
+        quiet = budget_refresh.run(self.ctx(now=morning + 3600))
+        self.assertEqual((quiet["written"], quiet["why"]), (False, "no meter to raise and every day's figure set: budget.json "
+                                                                   "stands"))
+        self.assertEqual(((self.root / "budget.json").read_bytes(), len(self.sent)), (before, 1))
+        # 14:29Z: the owner tops Sail up. The refresh at 14:35Z raises today's figure to the ceiling, and what the swarm
+        # loads next (the knobs, the guard's caps) follows at once.
+        topped_at = at(2026, 10, 21, 14, 35)
+        self.reading(400.0, topped_at - 300)
+        raised = budget_refresh.run(self.ctx(now=topped_at))
+        self.assertEqual((raised["written"], raised["changes"]), (True, {"sail": "raise"}))
+        doc = self.doc()
+        self.assertEqual((doc["meters"]["sail"]["research_usd_day"], doc["meters"]["sail"]["limited_by"],
+                          doc["meters"]["sail"]["day_figure"]["raised_from"], doc["refreshed"]),
+                         (20.0, "ceiling", 11.1, {"at": "2026-10-21T14:35:00Z", "meters": {"sail": "raise"}}))
+        block, why = B.read(self.root, topped_at + 60)
+        self.assertIsNone(why)
+        self.assertEqual(block["sail_usd_day"], 20.0)
+        self.assertEqual(B.sail_caps({"budget": block})["research"], 20.0, "the guard's daily cap")
+        loaded = B.overlay(copy.deepcopy(S.DEFAULTS), self.root, now=topped_at + 60)
+        self.assertEqual((B.knobs(11.1, 5.0)["population.ceiling"], loaded["budget"]["knobs"]["population.ceiling"]), (16, 25),
+                         "no stale ceiling knob after a top-up (Oct 9: births capped at 16 until a run by hand)")
+        self.assertEqual(len(self.sent), 1, "the refresh sends no notice")
+        # The guard's reading goes stale: the refresh writes nothing (the full job's runs FAIL CLOSED, never this one).
+        written = (self.root / "budget.json").read_bytes()
+        self.reading(400.0, topped_at - 7 * 3600)
+        stale = budget_refresh.run(self.ctx(now=topped_at + 3600))
+        self.assertEqual((stale["written"], stale["why"]),
+                         (False, "sail could not be read: budget.json stands as the last full run left it"))
+        self.assertEqual((self.root / "budget.json").read_bytes(), written)
+        self.assertEqual(self.alerts, [], "no House warning from the refresh")
+        # The full job after the close keeps the raised figure (the run that once put the old figure back).
+        evening = at(2026, 10, 21, 20, 10)
+        self.reading(390.0, evening - 60)
+        after = B.run(self.ctx(now=evening))
+        self.assertEqual((after["meters"]["sail"]["research_usd_day"], after["meters"]["sail"]["limited_by"]), (20.0, "ceiling"))
+        # A figure edited higher by hand is never lowered by the refresh (the full job's runs do that).
+        edited = self.doc()
+        edited["meters"]["claude"]["research_usd_day"] = 5.0
+        edited["meters"]["claude"]["day_figure"]["usd_day"] = 4.0
+        (self.root / "budget.json").write_text(json.dumps(edited))
+        self.health = {"claude": {"cap_usd": 400, "spent_usd": 390, "configured": True}}  # $10 left: 1.00 a day
+        self.reading(390.0, evening + 3600 - 60)
+        kept = budget_refresh.run(self.ctx(now=evening + 3600))
+        self.assertEqual(kept["written"], False)
+        self.assertIn("claude would fall from 5.0000 to 4.0000 a day on a day already set", kept["why"])
+        # The next UTC day before its 00:30 run: no figure for the day yet, so the refresh sets it (as the 00:30 run would).
+        self.health = {"claude": {"cap_usd": 400, "spent_usd": 185, "configured": True}}
+        self.reading(380.0, morning + DAY - 30 * 60)
+        dawn = budget_refresh.run(self.ctx(now=morning + DAY - 25 * 60))
+        self.assertEqual((dawn["written"], dawn["changes"]), (True, {"sail": "first", "claude": "first"}))
+        self.assertEqual(self.doc()["meters"]["sail"]["day_figure"]["set_at"], "2026-10-22T00:05:00Z")
+        # Another version of the rule's file (a deploy that changed the rule): the full job at once, not the next 00:30.
+        other = self.doc()
+        other["rule_version"] = B.RULE_VERSION - 1
+        (self.root / "budget.json").write_text(json.dumps(other))
+        redo = budget_refresh.run(self.ctx(now=morning + DAY))
+        self.assertEqual(redo["refresh"], "the full job: budget.json is another version of the rule's")
+        self.assertEqual(self.doc()["rule_version"], B.RULE_VERSION)
+
+    def test_the_refresh_is_registered_hourly_and_at_the_houses_start(self):
+        from league.ops.registry import by_name
+
+        job = by_name()["budget_refresh"]
+        self.assertEqual(job.module, "league.ops.budget_refresh")
+        self.assertEqual(sorted((t.kind, getattr(t, "minute", None)) for t in job.triggers), [("hourly", 35), ("start", 0)])
+        self.assertTrue(job.in_pause)
+        self.assertFalse(job.paid)
+        self.assertGreaterEqual(job.grace, 3600 + 5 * 60, "an occurrence behind the longest job waits and runs")
 
     def account(self, name, *, start):
         """A state root of its own whose Sail meter the REAL guard reads (league/swarm/guard.py: its balance, its meter

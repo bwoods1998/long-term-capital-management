@@ -136,6 +136,12 @@ export const STALL_CAUSES = {
   done: 'a Done checkpoint holds',
   preopen: 'a pre-open check failed',
   forward: 'the nightly forward replay is late or stopped',
+  // Oct 10, 2026 (the no-captain audit): the architect bears (almost) nothing while it keeps asking, the swarm's own
+  // alerts (reader_cut, agenda_guard, gate_coverage...) that reached only its ledger, and research under its budget or
+  // bound by a setting. Deploy the gateway first, as above.
+  birth_yield: 'few births: the architect\'s cards are refused',
+  swarm_alerts: 'the swarm raised alerts',
+  underspend: 'research under its budget or bound by a setting',
 };
 //: The most figures a stall notice lists for one cause, and the shape of a figure's name.
 const STALL_NUMBERS = 16;

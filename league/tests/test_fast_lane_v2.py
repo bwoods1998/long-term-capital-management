@@ -822,7 +822,9 @@ class TheDirectionJob(unittest.TestCase):
                   kill=lambda p, s: None, proc=lambda pid: None, present=lambda name: True)
         self.addCleanup(ops.close)
         due = [(job.name, kind) for _, job, kind in ops.due(now, {})]
-        self.assertEqual(due[:2], [("grant", "run"), ("direction", "run")])
+        # The grant first; then (the no-captain automations, Oct 10, 2026) the budget's hourly refresh, so a deploy that
+        # changed the rule is read at once, then the direction job.
+        self.assertEqual(due[:3], [("grant", "run"), ("budget_refresh", "run"), ("direction", "run")])
 
 
 class TheFastLaneJob(RoundCase):

@@ -183,9 +183,10 @@ class RunnerHolds(unittest.TestCase):
     def test_the_registry_marks_what_runs_in_a_pause(self):
         jobs = by_name()
         # The read-only checks (the stall alarm among them: a pause left on is one of its causes), the close economics,
-        # the budget, the fast lane's direction closes and report, the learning game's report and the direction lane's.
-        self.assertEqual({j.name for j in JOBS if j.in_pause}, {"budget", "clock", "preopen", "economics", "stall",
-                                                                "direction", "fast_lane", "game", "dlane"})
+        # the budget and its hourly refresh, the fast lane's direction closes and report, the learning game's report and
+        # the direction lane's.
+        self.assertEqual({j.name for j in JOBS if j.in_pause}, {"budget", "budget_refresh", "clock", "preopen", "economics",
+                                                                "stall", "direction", "fast_lane", "game", "dlane"})
         self.assertEqual({j.name for j in JOBS if j.paid}, {"postmortem", "agenda", "engineer"})
         longest = max(j.wall for j in JOBS)
         self.assertGreaterEqual(jobs["grant"].grace, longest + 5 * 60, "an hourly grant waits behind the longest job, never missed")

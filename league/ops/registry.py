@@ -51,6 +51,15 @@ JOBS: tuple[Job, ...] = (
     Job("budget", "league.ops.budget", (S.after("economics"), S.daily(0, 30)), grace=3 * HOUR, cpu=300, wall=600,
         owner="WP3", in_pause=True,
         what="the research budget (the owner's ceiling, each meter's runway); funding notices"),
+    # THE TOP-UP RAISE's reader (Oct 10, 2026; the no-captain audit's item 2): the rule read again every hour at :35 and at
+    # the House's start, written only when it raises a meter or sets a day's first figure (the full job when budget.json
+    # is unusable: a deploy that changed the rule, a stale file). A top-up reaches research within the hour, not at the
+    # next 00:30 run. A few seconds; in session like the grant; its grace outlasts the longest job's wall, so an
+    # occurrence behind a long job waits and runs rather than being `missed`. In a pause too, like `budget`.
+    Job("budget_refresh", "league.ops.budget_refresh", (S.at_start(), S.hourly(35)), grace=70 * MINUTE, cpu=300,
+        wall=600, owner="no captain", in_pause=True,
+        what="the research budget read again: a top-up raises today's figure, the knobs and the guard's caps within the "
+             "hour (raise-only; the full job when budget.json is unusable)"),
     Job("hygiene", "league.ops.hygiene", (S.daily(2, 0),), grace=3 * HOUR, cpu=600, wall=1200,
         what="end barred practice cohorts, retire dead pool rows and idle families, report stale live instances"),
     Job("clock", "league.ops.clock", (S.daily(11, 0),), grace=2 * HOUR, cpu=120, wall=300,
@@ -70,7 +79,8 @@ JOBS: tuple[Job, ...] = (
     # maintenance pause too (read-only, like preopen and clock), so a pause left on is itself an owner step it reports.
     Job("stall", "league.ops.stall", (S.hourly(20), S.hourly(50)), grace=70 * MINUTE, cpu=120, wall=300, owner="self-running",
         in_pause=True,
-        what="the stall alarm: births, Gym runs, Validations, the guard's brake, the budget's runway, an owner deploy, a "
+        what="the stall alarm: births (and the architect's jam and yield), Gym runs, Validations, the guard's brake, the "
+             "budget's runway, research under budget, the swarm's alerts, an owner deploy, a "
              "pause, a refused grant or the kill switch waiting; one stall notice listing them all, an owner step's at "
              "once and every 12 h, the rest every 24 h"),
     # Twice: 15:00Z runs the drills and requests the rollback drill last (the updater launches it); 17:00Z checks its verdict (and runs any drill

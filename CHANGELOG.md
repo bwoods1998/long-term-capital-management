@@ -58,6 +58,31 @@ the gateway is `507b6118`, and the box's updater is on. What is built and not de
   flight against the book and buying power, the admit side of every boundary, one micro-dollar over, and `"0"` end to
   end. 446 of 446 in the gateway.
 
+### The no-captain automations, on `feat/no-captain` (unreleased; a gateway deploy, then an owner deploy; no evidence reset)
+
+From the audit of every hand intervention from Oct 7 15:44Z to Oct 10 19:40Z (59 in about 76 hours), the four that
+recur without a captain and cost DONE-RULE item 7 ("research runs 24/7 at budget with no captain") the most:
+
+- `league/ops/budget.py`: THE TOP-UP RAISE. A later run of the day whose reading would set more than the day's figure
+  raises it (raise-only, never above the ceiling, from the reading as it stands; `raised_from`, `raised_at`), so a
+  top-up no longer waits for the next 00:30Z run, and the run after the close no longer puts a stale figure back.
+  `refresh` and the new job `budget_refresh` (`league/ops/budget_refresh.py`, `league/ops/registry.py`: hourly at :35
+  and at each House start) write `budget.json` only to raise a meter or set a day's first figure; with no usable file
+  (none, another rule's, stale) it runs the full job, so a deploy that changes the rule is read at once.
+- `league/ops/stall.py`: the births JAM (no birth for 6 h while 4 passes wanted births) is the owner's step at once,
+  naming the main way the passes bore nothing and its lever; the new `birth_yield` cause (INFO) reads the architect's
+  yield over 3 h (born at most 1 of 4 asking passes, or 80% of proposals refused by the card checks, or 2 dry hours) with
+  the refusals by kind, the incomplete cards' top fields and the rebirth rows; `swarm_alerts` mails the swarm's own
+  alerts (owner steps for `reader_cut`, `agenda_guard`, `gate_coverage` and the other setting-or-fix kinds); `underspend`
+  (INFO) reads each meter's booked research against what its day's figure buys by now and names the settings that bind
+  research (`settings_binds`: caps under the budget's knobs, the class cap under the direction lane's `max_alive`, an
+  architect Claude line under one call's hold, values under the code's defaults).
+- `gateway/lib/email.mjs`: the words for `birth_yield`, `swarm_alerts` and `underspend` (deploy the gateway first: an
+  unknown cause makes the stall notice a 400).
+- Tests: `league/tests/test_ops_budget.py` (the raise, the refresh end to end, its registration),
+  `league/tests/test_ops_stall.py` (`NoCaptain`: each cause reproduces an Oct 9-10 intervention),
+  `league/tests/test_ops_int_ops.py` (the job runs in a pause).
+
 ### An always-in card's ablation is dropped, on `fix/always-in-ablation` (unreleased; an owner deploy; no evidence reset)
 
 - `league/swarm/cards.py` `validate`: the architect's card template asks every card for an `ablation` switch, so its

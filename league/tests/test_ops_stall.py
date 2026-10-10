@@ -91,10 +91,11 @@ class Base(unittest.TestCase):
         self.runs(train_runs, hours=1)
         self.runs(1, window="validation", hours=validation_hours)
 
-    def ctx(self, *, now=NOW, ceiling=20):
+    def ctx(self, *, now=NOW, ceiling=20, binds=()):
         ctx = Context("stall", root=self.root, base=self.base, due_at=now, config={}, clock=lambda: now, settings_value={})
         ctx.notify = self.notify
         ctx.population_ceiling = ceiling
+        ctx.binds = list(binds)  # the settings that bind research (`settings_binds`), handed in: none unless a test says
         return ctx
 
     def run_at(self, now=NOW, **kw):
@@ -906,9 +907,279 @@ class LaneAndNightly(Base):
 
     def test_every_new_cause_is_in_the_gateways_words(self):
         source = (Path(__file__).resolve().parents[2] / "gateway" / "lib" / "email.mjs").read_text()
-        for cause in ("dlane", "done", "preopen", "forward"):
+        for cause in ("dlane", "done", "preopen", "forward", "birth_yield", "swarm_alerts", "underspend"):
             self.assertIn(cause, ST.CAUSES)
             self.assertIn(f"  {cause}: '", source)
+
+
+def incomplete(*fields):
+    """An incomplete card's refusal as the architect writes it (league/swarm/architect.py `admit`)."""
+    return {"slug": "x", "why": "incomplete card: " + "; ".join(f"{f}: at least 30 characters (9 given)" for f in fields)}
+
+
+def refusal(row="dir-spy-3", why="a card in a refuted cell needs a rebirth that names its row"):
+    return {"slug": "y", "why": why, "row": row, "matched": 4}
+
+
+class NoCaptain(Base):
+    """THE NO-CAPTAIN CAUSES (Oct 10, 2026; the no-captain audit): the architect's birth yield and its jam, the swarm's own
+    alerts, and research under its budget or bound by a setting. Each reproduces a captain's hand intervention."""
+
+    def architect(self, hours, *, proposed=6, born=0, items=(), incomplete_n=0, rebirth_n=0, **extra):
+        self.ago(hours)
+        payload = {"born": [f"b{hours}-{i}" for i in range(born)], "proposed": proposed, "route": "sail",
+                   "card_refused": {"incomplete": incomplete_n, "rebirth": rebirth_n, "items": list(items)}, **extra}
+        self.store.event("swarm.architect", None, payload)
+
+    def test_the_tally_reads_every_kind_of_pass_and_the_fields_a_card_lacked(self):
+        passes = [(NOW - 60, {"skipped": "no_cell"}), (NOW - 50, {"skipped": "ceiling"}), (NOW - 40, {"error": "x"}),
+                  (NOW - 30, {"born": ["a"], "proposed": 5, "truncated": {"salvaged": 2}, "class_capped": {"c": 2},
+                              "lane_refused": {"alpha": 1, "direction": 0},
+                              "card_refused": {"incomplete": 2, "rebirth": 1, "spent_lineage": 1,
+                                               "items": [incomplete("comparison", "falsification"), incomplete("comparison"),
+                                                         refusal("r1"), refusal("r1"), {"why": None}, "junk"]}}),
+                  (NOW - 20, {"born": [], "proposed": 0}), (NOW - 10 * HOUR, {"born": ["old"], "proposed": 9}),
+                  (None, {"proposed": 3}), (NOW - 5, "junk")]
+        tally = ST.architect_tally(passes, NOW - HOUR)
+        self.assertEqual({k: tally[k] for k in ("passes", "asked", "no_cell", "ceiling", "failed", "proposed", "born",
+                                                "incomplete", "rebirth", "spent_lineage", "capped", "cut", "empty")},
+                         {"passes": 5, "asked": 2, "no_cell": 1, "ceiling": 1, "failed": 1, "proposed": 5, "born": 1,
+                          "incomplete": 2, "rebirth": 1, "spent_lineage": 1, "capped": 3, "cut": 1, "empty": 1})
+        self.assertEqual((tally["fields"], tally["rebirth_rows"]), ({"comparison": 2, "falsification": 1}, 1))
+        self.assertEqual((ST.wanting(tally), ST.card_refusals(tally)), (4, 4))
+        self.assertEqual(ST.card_fields("incomplete card: cost.hurdle: a fraction (2 given); inputs: a list; inputs: at most 3"),
+                         ["cost.hurdle", "inputs"])
+        self.assertEqual((ST.card_fields("a card in a refuted cell"), ST.card_fields(None)), ([], []))
+        # The main way the passes bore nothing, and its lever.
+        self.assertEqual(ST.jam_kind({"asked": 0, "no_cell": 3, "failed": 1}), "no_cell")
+        self.assertEqual(ST.jam_kind({"asked": 0, "no_cell": 0, "failed": 2}), "failed")
+        self.assertEqual(ST.jam_kind({"asked": 3, "proposed": 0, "cut": 2}), "cut")
+        self.assertEqual(ST.jam_kind({"asked": 3, "proposed": 0}), "empty")
+        self.assertEqual(ST.jam_kind({"asked": 3, "proposed": 18, "rebirth": 9, "incomplete": 4}), "rebirth")
+        self.assertEqual(ST.jam_kind({"asked": 3, "proposed": 18}), "other")
+        self.assertIn("(most often comparison 2x, falsification 1x)", ST.lever({**tally, "rebirth": 0, "spent_lineage": 0,
+                                                                                  "capped": 0}))
+
+    def test_birth_yield_a_wall_of_incomplete_cards_is_said_with_the_fields_they_lack(self):
+        """Oct 10, 13:21Z and 14:22Z: always-in cards refused 'incomplete' pass after pass (comparison 9 characters of 30,
+        falsification under 40), found by the captain's floor check, fixed by agenda v21.6."""
+        self.healthy(birth_hours=1.0)
+        for hours in (2.8, 2.1, 1.4, 0.7):
+            self.architect(hours, proposed=6, born=1 if hours == 2.8 else 0, incomplete_n=5,
+                           items=[incomplete("comparison", "falsification")] * 4 + [incomplete("comparison")])
+        out, ctx = self.run_at()
+        check = out["checks"]["birth_yield"]
+        self.assertTrue(check["stalled"])
+        self.assertIsNone(check["owner_step"], "INFO: the births cause carries the step once the jam stands")
+        self.assertEqual({k: check["numbers"][k] for k in ("asked_3h", "proposed_3h", "born_3h", "refused_share",
+                                                           "refused_incomplete", "top_fields", "kind")},
+                         {"asked_3h": 4, "proposed_3h": 24, "born_3h": 1, "refused_share": 0.83, "refused_incomplete": 20,
+                          "top_fields": "comparison:20,falsification:16", "kind": "incomplete"})
+        self.assertIn("The incomplete cards most often lacked comparison (20x), falsification (16x).", check["what"])
+        self.assertIn("install an agenda whose card section the model can fill", check["doing"])
+        self.assertFalse(out["checks"]["births"]["stalled"], "a birth an hour ago")
+        self.assertTrue(any(a["text"].startswith("stall: birth_yield: The architect bore 1 of 24 proposals")
+                            for a in ctx.alerts), "a House warning")
+        # Three passes are too few to read a yield; at the ceiling no birth is owed.
+        self.assertFalse(self.check("birth_yield", ceiling=2)["stalled"])
+
+    def test_birth_yield_two_dry_hours_while_the_architect_keeps_asking(self):
+        """Oct 9, 23:15Z: a pass proposed 6 and bore 0 (the rebirth claims failed `cards._cites`), and the next ones too."""
+        self.healthy(birth_hours=2.5)
+        for hours in (1.9, 1.2, 0.5):
+            self.architect(hours, proposed=6, rebirth_n=6, items=[refusal(f"r{hours}")] * 6)
+        check = self.check("birth_yield")
+        self.assertTrue(check["stalled"])
+        self.assertIn("No family was born in the last 2 h while the architect wanted births in 3 passes.", check["what"])
+        self.assertEqual((check["numbers"]["births_2h"], check["numbers"]["kind"], check["numbers"]["rebirth_rows"]),
+                         (0, "rebirth", 3))
+        self.assertEqual(self.notify.entry("birth_yield")["since"], "2026-10-07T07:50:00Z", "since the last birth")
+        # A birth inside the two hours, and passes that bear: no cause.
+        self.ago(0.2)
+        self.store.event("swarm.born", self.family("born-now"), {"origin": "architect"})
+        self.assertFalse(self.check("birth_yield")["stalled"])
+
+    def test_a_bearing_architect_raises_no_yield_cause(self):
+        self.healthy(birth_hours=0.5)
+        for hours in (2.5, 1.8, 1.1, 0.4):
+            self.architect(hours, proposed=8, born=3, rebirth_n=4, items=[refusal()] * 4)
+        check = self.check("birth_yield")
+        self.assertFalse(check["stalled"])
+        self.assertEqual((check["numbers"]["born_3h"], check["numbers"]["refused_share"]), (12, 0.5))
+        # The ceiling's skips are no passes that want births.
+        unknown = ST.checks({"alive": 2, "births": 0, "yield": {"low": {"asked": 9, "born": 0}, "dry": {}}}, now=NOW,
+                            ceiling=None, budget=None, deploy=None, heartbeat=None)
+        self.assertFalse(unknown["birth_yield"]["stalled"], "an unknown ceiling raises nothing")
+
+    def test_births_a_six_hour_jam_is_the_owners_step_naming_its_lever(self):
+        """Oct 10, 15:41-16:22Z: births 0/0/0 under agenda v21.4 (a graveyard wall), reverted by the captain at 16:24:59Z.
+        Without a captain the 12-hour births cause was INFO: nobody was asked. Now a jam of `JAM_HOURS` with passes that
+        kept wanting births is the owner's step, at once."""
+        self.healthy(birth_hours=6.5)
+        for hours in (5.5, 4.0, 2.5, 1.0):
+            self.architect(hours, proposed=10, rebirth_n=8, items=[refusal()] * 8, class_capped={"long_single x etf": 2})
+        out, _ = self.run_at()
+        births = out["checks"]["births"]
+        self.assertTrue(births["stalled"])
+        self.assertTrue(births["owner_step"].startswith("the architect wanted births in 4 passes over the last 6 h and none "
+                                                        "was born: the cards land in refuted cells"))
+        self.assertIn("raise architect.max_rebirths_per_cell only if the evidence warrants", births["owner_step"])
+        self.assertEqual((births["numbers"]["jam_kind"], births["numbers"]["wanting_passes_6h"],
+                          births["numbers"]["card_refused_6h"]), ("rebirth", 4, 32))
+        self.assertIn("No family was born in the last 6.5 h while the population is", births["what"])
+        self.assertIn("the card checks refused 32 (0 incomplete, 32 by the rebirth rule, 0 into a spent lineage); 8 met a "
+                      "cap", births["what"])
+        self.assertIn("births", self.notify.calls[-1]["notice_id"], "an owner notice, mailed at once")
+        # Three passes in six hours are no jam: the 12-hour INFO stands alone, as before.
+        fresh = Base.setUp
+        self.assertTrue(callable(fresh))
+
+    def test_births_too_few_passes_or_a_pause_is_no_jam(self):
+        self.healthy(birth_hours=7)
+        for hours in (5.0, 3.0, 1.0):
+            self.architect(hours, proposed=10, rebirth_n=10, items=[refusal()] * 10)
+        births = self.check("births")
+        self.assertFalse(births["stalled"], "a birth 7 h ago and three passes: neither the 12 h nor the jam")
+        self.architect(0.5, proposed=0, skipped="ceiling")
+        self.assertFalse(self.check("births")["stalled"], "a pass at the ceiling wants no birth")
+        self.architect(0.4, proposed=0, error="Sail said no")
+        jammed = self.check("births")
+        self.assertTrue(jammed["stalled"])
+        self.assertIsNotNone(jammed["owner_step"])
+        (self.root / "PAUSE").write_text("maintenance")
+        os.utime(self.root / "PAUSE", (NOW - HOUR, NOW - HOUR))
+        out, _ = self.run_at()
+        self.assertEqual(out["stalled"], [], "a pause stops research by design: no jam, no yield")
+
+    def test_swarm_alerts_reach_the_owner(self):
+        """Oct 9, 20:32Z: the Sail reviewer cut 4 of 6 gate reviews and a lineage's one try was lost; the `reader_cut`
+        alert ("Raise gate.review_max_output_tokens") reached the ledger only, and the captain found it by hand."""
+        self.healthy()
+        self.ago(3)
+        self.store.event("swarm.status", "fam-1", {"action": "reader_cut", "alert": True, "stage": "review",
+                                                   "text": "the review of fam-1 v3 was cut short at 6000 output tokens 6 times "
+                                                           "today: Raise gate.review_max_output_tokens in swarm.json"})
+        self.ago(2)
+        self.store.event("swarm.status", None, {"action": "sail_window_stall", "alert": True, "text": "x"})
+        self.store.event("swarm.status", None, {"action": "sail_window_stall", "alert": True, "text": "y"})
+        self.store.event("swarm.status", None, {"action": "heartbeat_note", "text": "not an alert"})
+        self.ago(13)
+        self.store.event("swarm.status", None, {"action": "agenda_guard", "alert": True, "text": "too old"})
+        out, _ = self.run_at()
+        alerts = out["checks"]["swarm_alerts"]
+        self.assertTrue(alerts["stalled"])
+        self.assertEqual(alerts["owner_step"], ST.ALERT_STEPS["reader_cut"])
+        self.assertEqual(alerts["numbers"], {"alert_kinds": 2, "sail_window_stall": 2, "reader_cut": 1})
+        self.assertIn("reader_cut x1 (last 2026-10-07T07:20:00Z): the review of fam-1 v3 was cut short", alerts["what"])
+        self.assertEqual(self.notify.entry("swarm_alerts")["owner_step"], ST.ALERT_STEPS["reader_cut"])
+
+    def test_swarm_alerts_the_self_healing_ones_alone_are_no_cause_and_an_info_kind_has_no_step(self):
+        self.healthy()
+        self.ago(1)
+        self.store.event("swarm.status", None, {"action": "sail_window_stall", "alert": True, "text": "x"})
+        self.assertFalse(self.check("swarm_alerts")["stalled"])
+        self.store.event("swarm.status", "f", {"action": "incubator_reruns_spent", "alert": True, "text": "spent"})
+        info = self.check("swarm_alerts")
+        self.assertTrue(info["stalled"])
+        self.assertIsNone(info["owner_step"])
+        self.store.event("swarm.status", None, {"action": "Gym Unavailable!", "alert": True, "text": "boxes"})
+        self.assertIn("gym_unavailable_", self.check("swarm_alerts")["numbers"])
+
+    def budget(self, sail=20.0, claude=5.0, *, day="2026-10-07", raised=None):
+        meters = {}
+        for meter, usd in (("sail", sail), ("claude", claude)):
+            figure = {"day": day, "usd_day": usd, "limited_by": "ceiling", "set_at": "2026-10-07T00:30:00Z"}
+            if raised and meter == "sail":
+                figure.update(raised)
+            meters[meter] = {"research_usd_day": usd, "day_figure": figure}
+        (self.root / "budget.json").write_text(json.dumps({"at": NOW - HOUR, "meters": meters}))
+
+    def spend(self, kind, usd, hours):
+        self.ago(hours)
+        self.store.add_spend(kind, usd)
+
+    def test_underspend_names_the_settings_that_bind_research(self):
+        """Oct 9, 16:55Z: swarm.json pinned gym.max_boxes 2 under the budget's 7: half the paid Gym sat idle, and nothing
+        alarmed (DONE-RULE item 7 reads a day with no taper as at budget)."""
+        self.healthy()
+        self.budget()
+        self.spend("gym_box", 2.0, 8)
+        self.spend("sail_model", 1.5, 4)
+        self.spend("claude", 3.0, 2)
+        self.spend("sail_model", 9.0, 30)  # yesterday's
+        binds = [{"kind": "cap", "text": "gym.max_boxes 2 < 7 the budget buys"},
+                 {"kind": "drift", "text": "researcher.dormant_cycles 12 < the code's default 40"}]
+        out, _ = self.run_at(binds=binds)
+        check = out["checks"]["underspend"]
+        self.assertTrue(check["stalled"])
+        due = round(20.0 * (10 + 20 / 60) / 24, 2)
+        self.assertEqual((check["numbers"]["sail_booked_today"], check["numbers"]["sail_due_by_now"]), (3.5, due))
+        self.assertIn(f"Sail research booked 3.50 of the {due:.2f} its 20.00 a day buys by now (41%)", check["what"])
+        self.assertIn("Settings tighter than what the budget buys: gym.max_boxes 2 < 7 the budget buys.", check["what"])
+        self.assertIn("Settings under the code's own defaults: researcher.dormant_cycles 12", check["what"])
+        self.assertEqual(check["numbers"]["claude_share"], 1.39, "Claude books what it buys")
+        self.assertIsNone(check["owner_step"])
+        # Booked at pace, no conflict: no cause. A day the guard braked two hours: the spend is the guard's doing.
+        self.spend("gym_box", 5.0, 1)
+        self.assertFalse(self.check("underspend", binds=binds)["stalled"])
+
+    def test_underspend_reads_the_day_once_six_hours_in_and_a_raise_from_its_hour(self):
+        self.healthy()
+        self.spend("sail_model", 1.0, 2)
+        self.budget()
+        early = self.check("underspend", now=at("2026-10-07T05:00:00Z"))
+        self.assertFalse(early["stalled"], "under six hours of the day")
+        # A top-up raise at 09:00Z from 8 to 20: what is due by 10:20Z is 9 h at 8 and 1 h 20 at 20.
+        self.budget(raised={"raised_from": 8.0, "raised_at": "2026-10-07T09:00:00Z"})
+        check = self.check("underspend")
+        self.assertEqual(check["numbers"]["sail_due_by_now"], round((8.0 * 9 + 20.0 * (80 / 60)) / 24, 2))
+        # Yesterday's figure (no run of today yet) is not read.
+        self.budget(day="2026-10-06")
+        self.assertNotIn("sail_share", self.check("underspend")["numbers"])
+
+    def test_underspend_a_conflict_stands_by_itself(self):
+        self.healthy()
+        conflict = {"kind": "conflict", "text": "architect.max_alive_per_class 16 x 1 direction class (long_single x etf) "
+                                                "< dlane.max_alive 24"}
+        check = self.check("underspend", binds=[conflict])
+        self.assertTrue(check["stalled"])
+        self.assertIn("Settings that cannot both hold: architect.max_alive_per_class 16 x 1", check["what"])
+
+    def test_the_settings_that_bind_research(self):
+        import copy
+
+        from league.ops import budget as B
+        from league.swarm import settings as SS
+
+        loaded = copy.deepcopy(SS.DEFAULTS)
+        loaded["budget"] = {"knobs": B.knobs(20.0, 5.0)}
+        loaded["population"].update(start=25, ceiling=25)  # as the budget's overlay leaves them at $25 a day
+        loaded["architect"]["every_seconds"] = 2880
+        loaded["gym"]["max_boxes"] = 7
+        self.assertEqual(ST.settings_binds(loaded), [])
+        loaded["gym"]["max_boxes"] = 2
+        loaded["population"].update(start=16, ceiling=25)
+        loaded["architect"].update(max_alive_per_class=16, every_seconds=7200, max_refill=6)
+        loaded["researcher"]["dormant_cycles"] = 12
+        loaded["claude"]["role_usd_day"] = {"architect": 1.5, "researcher": 0}
+        loaded["dlane"] = {"mode": "gate", "roots": ["SPY", "QQQ", "IWM"], "structures": ["long_single"], "max_alive": 24}
+        found = ST.settings_binds(loaded)
+        self.assertEqual([b["kind"] for b in found], ["cap", "cap", "cap", "conflict", "conflict", "drift", "drift"])
+        texts = " | ".join(b["text"] for b in found)
+        for part in ("gym.max_boxes 2 < 7 the budget buys", "architect.every_seconds 7200 > 2880 the budget buys",
+                     "population.start 16 < population.ceiling 25",
+                     "architect.max_alive_per_class 16 x 1 direction class (long_single x etf) < dlane.max_alive 24",
+                     "claude.role_usd_day.architect 1.50 < the 2.00 one architect call holds",
+                     "researcher.dormant_cycles 12 < the code's default 40", "architect.max_refill 6 < the code's default 12"):
+            self.assertIn(part, texts)
+        # A class cap that holds the lane, a line of 0 or of a full hold, and the lane off: no conflict.
+        loaded["architect"]["max_alive_per_class"] = 24
+        loaded["claude"]["role_usd_day"] = {"architect": 0}
+        self.assertNotIn("conflict", [b["kind"] for b in ST.settings_binds(loaded)])
+        loaded["architect"]["max_alive_per_class"] = 8
+        loaded["dlane"]["mode"] = "off"
+        self.assertNotIn("conflict", [b["kind"] for b in ST.settings_binds(loaded)])
+        self.assertEqual(ST.settings_binds(None), [])
 
 
 class Wiring(Base):
