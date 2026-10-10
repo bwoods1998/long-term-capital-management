@@ -515,6 +515,11 @@ DEFAULTS: dict[str, Any] = {
     # The roles whose fallback keeps their MODEL (that model's asap profile, k3_balanced to k3, whatever the map names): the
     # gate's audit is a second model, different from the review's DeepSeek-V4-Pro, on its fallback too. null: none.
     "sail_fallback_same_model": ["audit"],
+    # THE EQUITY LANES (release E1, Oct 2026; league/swarm/elane.py, which holds every value inside its bound: `cfg`).
+    # The block's defaults are elane.DEFAULTS; policy.json carries the reviewed values (its "elane" block) and swarm.json
+    # may override them, except the screens' pinned receipts, read from the repository's policy.json alone. Only "mode"
+    # is here, so the policy layer's shape holds "elane" to an object (`policy_shape`); "off" is the rollback.
+    "elane": {"mode": "off"},
     "heartbeat_seconds": 20,
     "stale_heartbeat_seconds": 240,     # the House restarts a swarm whose heartbeat is older than this
     "nice": 10,

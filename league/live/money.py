@@ -722,7 +722,13 @@ def fits_probe(table: Table, equity: Decimal, unit: Decimal) -> bool:
 def band_for(table: Table, row: Mapping[str, Any], equity: Decimal, fwd: Forward, *, probe_sessions: int = 0) -> tuple[str, str]:
     """The money band a live family should be in now, and why: "candidate" (shadow only), "probe" or "sized". Only for
     a family the swarm has at candidate, probe or sized. `probe_sessions`: whole sessions it has spent at Probe. The
-    row's `validation_r_sd` (`league/live/families.py`) is DM1's sigma when it is a positive number (`dm1_sigma`)."""
+    row's `validation_r_sd` (`league/live/families.py`) is DM1's sigma when it is a positive number (`dm1_sigma`). THE
+    EQUITY LANES (release E1, A8.8): an equity-lane row is never given an options band: its first statement forwards it to
+    `equity_hook.band_for` (its band unchanged; the EquityBook moves it, league/equity/bands.py)."""
+    from . import equity_hook  # imported here: the hook module may import league.equity, which reads this module
+
+    if row.get("lane") in equity_hook.LANES and equity_hook.is_equity_row(row):
+        return equity_hook.band_for(row)
     band = str(row.get("band") or "")
     if band not in ("candidate", "probe", "sized"):
         return band, "not a Candidate"

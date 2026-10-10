@@ -178,6 +178,17 @@ cut answers per stage a UTC day: the sixth raises one `swarm.status` alert (`rea
 model cannot spend every round; the next UTC day it is asked again (Claude's line, refilled at 00:00Z, may answer it).
 A complete answer is judged exactly as before; `grounded_answer` (league/gym) is untouched.
 
+THE EQUITY LANES (release E1, Oct 2026; league/swarm/elane.py). The options round above never sees an equity-lane family
+(`SwarmStore.families` leaves them out). The equity round (`equity_round`, while `elane.mode` is "gate") takes each
+living Gym-band equity family whose validated version entered the gate (its S1 Validation pre-check passed:
+`Tournament.equity_round`), not held by the operator, not already done with (`gated_sha`) and with no look in flight,
+and `look` dispatches it to `elane.look`: the one sealed look ON THE HOUSE, in the decider-isolated child, with a freshly
+minted `EquityGateCapability`, judged by the share screen S1 (A9); a screen with no pinned receipt in the repository's
+policy.json refuses it (the look waits, nothing is spent). The look records its lane, the screen "S1", the receipt,
+c_used and the line stated beside every live trade, in its `detail` and its `swarm.gate` event. An equity look is never
+counted by the options lanes' leakage alarms (`alarms`). A look in flight from a process that died (`look_inflight`
+older than this process) is owed again. A failure of the equity round never stops the options round.
+
 Every step is a `swarm.gate` event; band moves are `swarm.band` events (the site's news).
 Standard library only.
 """
@@ -197,7 +208,7 @@ from typing import Any, Callable, Mapping
 from ..gym.experiment import check_experiment
 from ..gym.review_contract import grounded_answer, review_contract
 from ..gym.safety import CodeRefused
-from . import dlane, evidence
+from . import dlane, elane, evidence
 from . import settings as settings_mod
 from .pool import GymJob, PoolError
 from .researcher import drift_verdict, needs_roots, running_span, version_drift
@@ -477,8 +488,15 @@ class Gate:
     def alarms(self) -> dict[str, bool]:
         """THE LEAKAGE ALARM PER LANE (release D-1, Oct 9, 2026; `evidence.leakage_alarms`): {"alpha", "direction"}, each
         lane's holdout looks counted alone. While `dlane.mode` is "off" both are the one count, as before, over the looks
-        the alpha lane's line judged (every look on a store with no direction look)."""
-        return evidence.leakage_alarms(self.store.looks(), self.settings)
+        the alpha lane's line judged (every look on a store with no direction look). THE EQUITY LANES' looks (release E1)
+        are never counted here (`options_looks`)."""
+        return evidence.leakage_alarms(self.options_looks(), self.settings)
+
+    def options_looks(self) -> list[dict[str, Any]]:
+        """The store's holdout looks of the options lanes: every look but an equity lane's (its `detail` names a lane of
+        `elane.LANES`)."""
+        return [x for x in self.store.looks() if not (isinstance(x.get("detail"), Mapping)
+                                                      and x["detail"].get("lane") in elane.LANES)]
 
     def alarm(self) -> bool:
         """The whole gate stops: every lane's leakage alarm holds. While the direction lane is off that is the one alarm
@@ -510,12 +528,12 @@ class Gate:
         `leakage_alarm_direction`), each with its lane and its own looks and passes."""
         if stopped is None:
             if not self.store.get("leakage_alarm"):
-                judged = [x for x in self.store.looks() if evidence.look_lane(x) != dlane.DIRECTION]
+                judged = [x for x in self.options_looks() if evidence.look_lane(x) != dlane.DIRECTION]
                 self.store.put("leakage_alarm", {"at": self.clock(), "looks": len(judged)})
                 self.store.event("swarm.gate", None, {"action": "leakage_alarm", "looks": len(judged),
                                                       "passes": sum(1 for x in judged if x["passed"])})
             return
-        looks = self.store.looks()
+        looks = self.options_looks()
         for lane in sorted(stopped):
             key = "leakage_alarm" if lane == dlane.ALPHA else f"leakage_alarm_{lane}"
             if self.store.get(key):
@@ -865,6 +883,12 @@ class Gate:
         out: dict[str, Any] = {"looked": [], "refused": [], "waiting": [], "held": [], "look_held": []}
         self._incubator_owed()  # a verdict an error kept from its bar last round: recorded first
         self._incubator_sweep()  # a look that landed, or a demotion, since the last round: its mark goes first
+        if elane.on(self.settings):
+            try:  # THE EQUITY LANES (release E1): their own round, apart from the options lanes' alarms
+                self.equity_round(out)
+            except Exception as exc:  # noqa: BLE001 - an equity failure never stops the options round
+                self.store.event("swarm.gate", None, {"action": "equity_round_error", "error": type(exc).__name__,
+                                                      "text": str(exc)[:300]})
         if self.alarm():  # every lane's alarm (the lane off: the one alarm, alpha-line looks): the whole gate stops
             self._record_alarms(self.stopped_lanes() if dlane.on(self.settings) else None)
             out["alarm"] = True
@@ -1294,10 +1318,42 @@ class Gate:
                     and state.get("validation_version") == n and state.get("validation_image") == image
                     and state.get("validation_bundle") == bundle)
 
+    def equity_round(self, out: dict[str, Any]) -> None:
+        """THE EQUITY LANES' round (the module docstring): each living Gym-band equity family whose validated version is
+        gate-ready goes to `look` (so to `elane.look`), one look at a time; a look in flight from a dead process is owed
+        again. Its looks are listed in `out["looked"]` with their lane."""
+        for fam in self.store.families(alive=True, lanes=elane.LANES):
+            fid = str(fam["id"])
+            state = fam.get("state") or {}
+            marker = state.get("look_inflight") or {}
+            if marker.get("sha") and float(marker.get("at") or 0) < self.started_at and not self.store.looked(marker["sha"]):
+                # Its look died with a process (the equity look runs in the round): owed again, nothing was recorded.
+                self.store.compare_and_set_state(fid, {"look_inflight": marker}, look_inflight=None, gate_ready=True)
+                self.store.event("swarm.gate", fid, {"action": "look_owed", "version": marker.get("n"), "lane": marker.get("lane")})
+                fam = self.store.family(fid) or fam
+                state = fam.get("state") or {}
+            if state.get("look_inflight") or fam["band"] != "gym" or not state.get("gate_ready"):
+                continue
+            if state.get("gate_hold"):
+                out["held"].append(fid)  # THE OPERATOR'S HOLD: nothing of it is looked at, its gate_ready stays
+                continue
+            version = self.store.version(fid, state.get("validation_version"))
+            if version is None or not version.get("code"):
+                continue
+            sha = run_sha(version)
+            if state.get("gated_sha") == sha:
+                continue
+            looked = self.look(fam, version, sha)
+            if looked is not None:
+                out["looked"].append({"family": fid, "passed": looked, "lane": elane.lane_of(self.store, fam)})
+
     def look(self, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str) -> bool | None:
         """The one holdout look. None when the gate box did not run it (no look is spent). The version is marked as
         looked at BEFORE the box runs it, so a slow look is never started twice; one that lands after the gate stopped
-        waiting is recorded and judged when it lands (`finish`), against the validation it was sent for."""
+        waiting is recorded and judged when it lands (`finish`), against the validation it was sent for. An equity-lane
+        family's look is `elane.look` (on the House, the share screen S1)."""
+        if elane.lane_of(self.store, fam) is not None:
+            return elane.look(self, fam, version, sha)
         n = int(version["n"])
         if self.holdout_gap(fam, version, sha):
             return None  # the gate image lacks a root's holdout: refused up front, no try counted

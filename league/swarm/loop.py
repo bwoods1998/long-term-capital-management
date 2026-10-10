@@ -36,6 +36,12 @@ THE AGENDA GUARD (release D-1, Oct 9, 2026, while the direction lane is on): at 
 warning when `swarm.json`'s locked preamble or fallback agenda is longer than the architect reads, not ASCII, or names a
 hidden year (`agenda_alert`); the operator's tool `scripts/agenda_install.py` refuses such a text before it is written.
 
+THE EQUITY LANES (release E1, Oct 2026; league/swarm/elane.py). At each start, beside the options evaluator's adoption,
+the equity identity's (`evaluator.adopt_equity` with `evaluator.equity_identity()`: equity families only; a failure is
+logged and never stops the start, and `bands.read` then reads no equity band as current). While `elane.mode` is "gate",
+each main-loop pass births the three captain-seeded programs not yet born (`equity_births`: `elane.birth_seeds`, once
+each, ever); their Validation and their one look are the tournament's and the gate's equity rounds.
+
 The heartbeat (`<root>/swarm.heartbeat`, JSON) carries the pid, the release directory, the time, and a live
 status (families, cycles and spend in the last hour by kind, the guard, the pool): the House's `SwarmStep`
 reads it to supervise the process and the operator reads it to see the swarm.
@@ -58,7 +64,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from . import allocation as allocation_mod
-from . import game
+from . import elane, game
 from . import HEARTBEAT, LOCK_FILE, LOG_FILE, PID_FILE, settings as settings_mod
 from .architect import AGENDA_KEY, Architect, GraveyardDigest, allowed_structures
 from .diagnostician import Diagnostician
@@ -949,6 +955,7 @@ class Swarm:
             self.agenda_notice()
         except Exception:  # noqa: BLE001 - a notice never stops the loop
             pass
+        self.equity_births()
         if getattr(self.guard, "due", lambda: True)():
             was = not self.guard.allows()
             held = bool(getattr(self.guard, "research_held", False))
@@ -1012,6 +1019,34 @@ class Swarm:
             self._beat = self.clock()
             self.heartbeat()
             self.bound_log()
+
+    def equity_births(self) -> list[str]:
+        """THE EQUITY LANES' births (release E1, A4): the captain-seeded programs not yet born, while `elane.mode` is "gate"
+        (`elane.birth_seeds`: once each, ever). Never raises: an error is logged and tried again next pass."""
+        if not elane.on(self.settings):
+            return []
+        try:
+            born = elane.birth_seeds(self.store, self.settings)
+        except Exception:  # noqa: BLE001 - a birth never stops the loop
+            log(f"equity seeds failed: {traceback.format_exc()[-600:]}")
+            return []
+        if born:
+            log(f"equity lanes: seeded {len(born)} ({', '.join(born)}; {elane.SEEDED_NOTE})")
+        return born
+
+    def adopt_equity(self) -> dict[str, Any] | None:
+        """THE EQUITY IDENTITY's adoption at the start (`evaluator.adopt_equity`, core's): equity families only. None on an
+        error (logged; `bands.read` then reads no equity band as current, so nothing equity trades on a stale band)."""
+        try:
+            from .evaluator import adopt_equity, equity_identity
+
+            adopted = adopt_equity(self.store, equity_identity())
+        except Exception:  # noqa: BLE001 - never keeps the swarm from starting
+            log(f"equity evaluator adoption failed: {traceback.format_exc()[-600:]}")
+            return None
+        if adopted.get("adopted"):
+            log(f"equity evaluator adopted: {adopted.get('families')} equity families owe fresh evidence")
+        return adopted
 
     def run(self, *, once: bool = False) -> int:
         """The process: seed, start the workers, loop until asked to stop."""
@@ -1090,6 +1125,7 @@ class Swarm:
         adopted_evaluator = adopt(self.store, evaluator)
         if adopted_evaluator["adopted"]:
             log(f"evaluator adopted: {adopted_evaluator['families']} families owe fresh evidence")
+        self.adopt_equity()  # THE EQUITY IDENTITY (release E1): equity families only, beside `adopt`
         adopted = self.pool.adopt() if hasattr(self.pool, "adopt") else 0
         self.store.event("swarm.status", None, {"action": "started", "pid": os.getpid(), "release": str(CODE_DIR), "adopted": adopted,
                                                 "families": len(self.store.families(alive=True))})

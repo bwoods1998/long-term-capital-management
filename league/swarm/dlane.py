@@ -168,6 +168,13 @@ but 2022-24 (`map_text_problems` holds every text field of the file to that, or 
 aim at in-sample winners; the screen's false-positive rate per program is unchanged, and more programs reach the
 screen, so more false passes in count.
 
+LANE SCOPING (A8.12, release E1, Oct 2026; league/swarm/elane.py). The equity lanes ("beta", "equity") are not this
+module's: no equity-lane family is ever read here as a member of a direction or alpha lineage (`_families_in`, so
+`lineage_tries`, the ration at birth `birth_spent` and the always-in claims), no equity lineage joins a lineage set read
+here (`birth_spent` reads the options lineages of `lines` alone; the store never links an equity lineage to an options
+one), and an equity birth never counts in the births' quota (`_born`). An equity family's lane is never "direction"
+(`declared_lane`).
+
 Standard library only (the House box runs it without numpy).
 """
 
@@ -607,6 +614,8 @@ def declared_lane(store: Any, fam: Mapping[str, Any] | None) -> str:
     spec = fam.get("spec")
     if isinstance(spec, Mapping) and spec.get("lane") in LANES:
         return str(spec["lane"])
+    if isinstance(spec, Mapping) and spec.get("lane") is not None and str(fam.get("structure") or "") in ("etf", "stock"):
+        return ALPHA  # LANE SCOPING (A8.12): an equity-lane family is never a direction family (its card is not read)
     fid = str(fam.get("id") or "")
     if not fid or store is None:
         return ALPHA
@@ -1965,11 +1974,13 @@ SPENT_TRY = "its direction lineage has used its one Validation try (one Validati
 
 
 def _families_in(store: Any, lines: Sequence[str]) -> list[str]:
-    """The families of the lineages `lines`."""
+    """The options families of the lineages `lines` (LANE SCOPING, A8.12: never an equity-lane family)."""
     if not lines:
         return []
-    return [r["id"] for r in store._all(f"SELECT id FROM families WHERE lineage IN ({','.join('?' * len(lines))})",
-                                        tuple(lines))]
+    from .store import OPTIONS_ONLY_SQL
+
+    return [r["id"] for r in store._all(f"SELECT id FROM families WHERE lineage IN ({','.join('?' * len(lines))}) "
+                                        f"AND {OPTIONS_ONLY_SQL}", tuple(lines))]
 
 
 def _connected_families(store: Any, fid: str) -> list[str]:
@@ -2152,6 +2163,11 @@ def birth_spent(store: Any, lines: Iterable[str], settings: Mapping[str, Any] | 
     try:
         c = cfg(settings)
         joined = sorted({x for line in lines if line for x in store._connected_lineages(str(line))})
+        # LANE SCOPING (A8.12): an equity lineage is never part of a direction birth's ration.
+        from .store import OPTIONS_ONLY_SQL
+
+        joined = [x for x in joined if store._one(f"SELECT 1 FROM families WHERE lineage=? AND NOT ({OPTIONS_ONLY_SQL})",
+                                                  (x,)) is None]
         if not joined:
             return None
         if store.looks_over(joined, include_inflight=True) >= c["looks_per_lineage"]:
@@ -2238,10 +2254,14 @@ def _born(store: Any, since: str | None = None) -> list[dict[str, Any]]:
     sql, args = "SELECT at, payload FROM events WHERE kind='swarm.born'", []
     if since is not None:
         sql, args = sql + " AND at>=?", [since]
+    from .store import EQUITY_LANES
+
     out = []
     for row in store._all(sql + " ORDER BY at, seq", tuple(args)):
         payload = loads(row.get("payload"), {}) or {}
         lane = payload.get("lane") if isinstance(payload, Mapping) else None
+        if lane in EQUITY_LANES:
+            continue  # LANE SCOPING (A8.12): an equity birth is neither lane's here (the quota is the options lanes')
         out.append({"at": row.get("at"), "lane": lane if lane in LANES else ALPHA})
     return out
 

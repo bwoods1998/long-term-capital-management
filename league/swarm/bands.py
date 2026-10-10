@@ -74,6 +74,21 @@ validation_passed False}; the live path trades the practice cohort's own snapsho
 its run sha to be this row's. `read` never returns it. Unlike `read`, an unreadable store RAISES (`sqlite3.Error`): the
 live path then takes no new incubator pin and refuses incubator opens; exits are unaffected.
 
+THE EQUITY LANES (release E1, Oct 2026; league/swarm/elane.py; league/equity/INTERFACES.md section 8.3). Every reader
+here is the options lanes' unless asked otherwise: `read(root)`, `observe` and `incubator` never return an equity-lane
+family (one whose structure is "etf" or "stock": `store.EQUITY_STRUCTURES`), so no OptionsLive instance, observe row
+or incubator row is ever made of one, and THE PROBE ROSTER's seats (`dlane.roster`) are the options lanes' alone.
+`read(root, lanes=LANES)` is the EquityBook's reader (league/equity/families.py): one row per equity-lane family in the
+Candidate, Probe or Sized band whose banded version's proof is the CURRENT equity identity (`banded_evaluator`
+{"engine": `league.equity.EQUITY_ENGINE_VERSION`, "equity_sha256": `evaluator.equity_fingerprint()`, "run_sha"}, read
+once per `BUNDLE_TTL` a process; unreadable: no row), with the options row's keys plus `lane`, `label` ("MARKET BETA" |
+"EQUITY"), `symbols`, `seeded` (one of the three captain-seeded programs, A4), `seat` ("probe" | "seated" | "sized"),
+`validation_version`, `validation_r_sd_by_version` (EDM1's sigma by version), `beside` (the screen's line stated beside
+every live trade) and `forward`. THE EQUITY ROSTER (`elane.roster`, `elane.roster_seats`, failing closed): its own seats,
+apart from `dlane.roster`: a Probe family holds one, the Candidates queue for the rest by `banded_at` (`seating` with
+`equity_seatable`), and a Candidate waiting for a seat has no row; unlike the options roster, 0 seats no equity program
+at all. `read(root, lanes="all")` is both. `roster(root, lanes=LANES)` is the equity roster for reports.
+
 `read(root, family=f)` and `observe(root, family=f)` read one family only (the live path's per-minute admissions). The
 Gym bundle's version is built once per `BUNDLE_TTL` seconds a process, not once per call (it reads and hashes every file
 of the Gym's code).
@@ -102,7 +117,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from . import DB_NAME, settings
-from .store import loads
+from .store import EQUITY_LANES, EQUITY_STRUCTURES, OPTIONS_ONLY_SQL, lane_of_spec, loads
 
 LIVE_BANDS = ("candidate", "probe", "sized")
 #: The gate's outcomes (`gate_outcome.result` naming the program) that end its execution tuition (`read`) and refuse it
@@ -155,10 +170,14 @@ def _bundle() -> str | None:
     return value
 
 
-def _families(db: sqlite3.Connection, family: str | None, *, gym_only: bool = False) -> list[dict[str, Any]]:
+def _families(db: sqlite3.Connection, family: str | None, *, gym_only: bool = False,
+              equity: bool = False) -> list[dict[str, Any]]:
+    """The living families (the Gym band's alone with `gym_only`; one with `family`): the options lanes' by default, the
+    equity lanes' alone with `equity` (THE EQUITY LANES: no options reader here ever sees an equity family)."""
     where = "retired_at IS NULL" + (" AND band='gym'" if gym_only else "") + (" AND id=?" if family is not None else "")
+    where += " AND structure IN ('etf', 'stock')" if equity else f" AND {OPTIONS_ONLY_SQL}"
     return [dict(r) for r in db.execute(f"SELECT id, band, band_since, structure, roots, state, lineage, best_version, "
-                                        f"best_train FROM families WHERE {where} ORDER BY id",
+                                        f"best_train, spec, born_at FROM families WHERE {where} ORDER BY id",
                                         (() if family is None else (str(family),)))]
 
 
@@ -197,7 +216,8 @@ def _seat_structure(structure: Any) -> bool:
         return True
 
 
-def seating(fams: Sequence[Mapping[str, Any]], seats: int) -> dict[str, list[str]]:
+def seating(fams: Sequence[Mapping[str, Any]], seats: int, *,
+            seatable: Any = None) -> dict[str, list[str]]:
     """THE PROBE ROSTER (REDESIGN-1010, Oct 10, 2026; `dlane.roster`): who holds the Probe band's seats. Pure but for the
     money table's real types (`_seat_structure`). `fams`: the alive Candidate and Probe families (id, band, band_since,
     structure, state as a dict); `seats`: the roster (0 = none, `ROSTER_CLOSED` = no new seat). Returns {probe, seated,
@@ -216,7 +236,9 @@ def seating(fams: Sequence[Mapping[str, Any]], seats: int) -> dict[str, list[str
       the ones that came back from Probe (their band moved more than `ROSTER_SLACK_S` after `banded_at`: a demotion), by
       that move's time then id. The first `seats - Probe` of the queue hold a seat (shown); the rest WAIT (no row), so a
       demoted family can come back to Probe only into a free seat.
-    With `seats` 0 nothing waits."""
+    With `seats` 0 nothing waits. `seatable` (THE EQUITY LANES: `equity_seatable`): whether a Candidate's structure can
+    hold a seat, in place of `_seat_structure`."""
+    fits = _seat_structure if seatable is None else seatable
     probe = sorted(str(f["id"]) for f in fams if f.get("band") == "probe")
     if seats == 0:
         return {"probe": probe, "seated": [], "waiting": [], "seatless": []}
@@ -229,7 +251,7 @@ def seating(fams: Sequence[Mapping[str, Any]], seats: int) -> dict[str, list[str
         fid = str(fam["id"])
         state = fam.get("state") if isinstance(fam.get("state"), Mapping) else {}
         at = _finite(state.get("banded_at"))
-        if at is None or not _seat_structure(fam.get("structure")):
+        if at is None or not fits(fam.get("structure")):
             seatless.append(fid)
             continue
         since = _epoch(fam.get("band_since"))
@@ -242,27 +264,51 @@ def seating(fams: Sequence[Mapping[str, Any]], seats: int) -> dict[str, list[str
     return {"probe": probe, "seated": queue[:free], "waiting": sorted(queue[free:]), "seatless": sorted(seatless)}
 
 
-def waiting(fams: Sequence[Mapping[str, Any]], seats: int) -> set[str]:
+def waiting(fams: Sequence[Mapping[str, Any]], seats: int, *, seatable: Any = None) -> set[str]:
     """The Candidates `seating` leaves waiting: `read` gives them no row."""
-    return set(seating(fams, seats)["waiting"])
+    return set(seating(fams, seats, seatable=seatable)["waiting"])
 
 
-def roster(root: str | Path) -> dict[str, Any] | None:
+def equity_seatable(structure: Any) -> bool:
+    """THE EQUITY ROSTER: an equity Candidate of an equity structure can hold a seat (the money table's equity block, not
+    its options types, decides what it may trade: league/equity)."""
+    return str(structure or "") in EQUITY_STRUCTURES
+
+
+def equity_seats(seats: int) -> int:
+    """`elane.roster` as `seating` reads it: a positive count is itself; 0 (no equity seat) and an unreadable setting
+    (`ROSTER_CLOSED`) both seat no new Candidate (unlike `dlane.roster`, where 0 means no roster)."""
+    return int(seats) if int(seats) > 0 else ROSTER_CLOSED
+
+
+def equity_seating(fams: Sequence[Mapping[str, Any]], seats: int) -> dict[str, list[str]]:
+    """THE EQUITY ROSTER's `seating` over the equity Candidate and Probe families (`seats`: `elane.roster_seats`)."""
+    return seating(fams, equity_seats(seats), seatable=equity_seatable)
+
+
+def roster(root: str | Path, *, lanes: Any = None) -> dict[str, Any] | None:
     """The roster as it stands, for reports: {seats, closed, probe, seated, waiting, seatless} (`seated`: the Probe
-    families and the Candidates holding a seat). None when it is off or the store cannot be read."""
-    seats = _roster_seats(root)
-    if seats == 0:
-        return None
+    families and the Candidates holding a seat). None when it is off or the store cannot be read. `lanes` (THE EQUITY
+    LANES: `LANES`): the equity roster (`elane.roster`) over the equity families, never off."""
+    equity = lanes is not None
+    if equity:
+        from . import elane
+
+        seats = elane.roster_seats(root)
+    else:
+        seats = _roster_seats(root)
+        if seats == 0:
+            return None
     try:
         db = sqlite3.connect(f"file:{Path(root) / DB_NAME}?mode=ro", uri=True, timeout=1.0)
         db.row_factory = sqlite3.Row
         try:
-            fams = _banded(db)
+            fams = _banded(db, equity=equity)
         finally:
             db.close()
     except (sqlite3.Error, OSError):
         return None
-    seat = seating(fams, seats)
+    seat = equity_seating(fams, seats) if equity else seating(fams, seats)
     return {"seats": max(seats, 0), "closed": seats == ROSTER_CLOSED, "probe": seat["probe"],
             "seated": sorted(seat["probe"] + seat["seated"]), "waiting": seat["waiting"], "seatless": seat["seatless"]}
 
@@ -301,20 +347,27 @@ def _roster_seats(root: str | Path) -> int:
         return _roster_good.get(key, ROSTER_CLOSED)
 
 
-def _banded(db: sqlite3.Connection) -> list[dict[str, Any]]:
-    """The alive Candidate and Probe families, their state parsed (the roster's input)."""
+def _banded(db: sqlite3.Connection, *, equity: bool = False) -> list[dict[str, Any]]:
+    """The alive Candidate and Probe families, their state parsed (the roster's input): the options lanes' (THE PROBE
+    ROSTER), or with `equity` the equity lanes' (THE EQUITY ROSTER), never both."""
     out = []
+    scope = "structure IN ('etf', 'stock')" if equity else OPTIONS_ONLY_SQL
     for r in db.execute("SELECT id, band, band_since, structure, state FROM families WHERE retired_at IS NULL AND band IN "
-                        "('candidate', 'probe') ORDER BY id"):
+                        f"('candidate', 'probe') AND {scope} ORDER BY id"):
         row = dict(r)
         row["state"] = loads(row["state"], {}) or {}
         out.append(row)
     return out
 
 
-def read(root: str | Path, *, family: str | None = None) -> list[dict[str, Any]]:
+def read(root: str | Path, *, family: str | None = None, lanes: Any = None) -> list[dict[str, Any]]:
     """The rows (the module docstring); `family`: that family's row only. [] when there is no store or it cannot be read
-    within a second."""
+    within a second. `lanes` (THE EQUITY LANES): None the options lanes only (every existing reader); `LANES` (or one
+    equity lane) the equity rows only (`_read_equity`); "all" both."""
+    if lanes is not None:
+        if lanes == "all":
+            return read(root, family=family) + _read_equity(root, family=family, lanes=EQUITY_LANES)
+        return _read_equity(root, family=family, lanes=lanes)
     path = Path(root) / DB_NAME
     if not path.exists():
         return []
@@ -394,6 +447,115 @@ def read(root: str | Path, *, family: str | None = None) -> list[dict[str, Any]]
             # after it (the forward embargo, Sept 29, 2026: `OptionsLive._move_band`).
             "version_created_at": v.get("created_at"),
             "version_selected_at": state.get("banded_at"),
+        })
+    return out
+
+
+#: THE EQUITY IDENTITY as `read(lanes=...)` checks a band against it (`evaluator.equity_fingerprint`), reused for
+#: `BUNDLE_TTL` seconds a process (it hashes every file of league/equity): (when, the sha or None).
+_equity_cache: tuple[float, str] | None = None
+
+
+def _equity_sha() -> str | None:
+    """The current equity fingerprint, or None when it cannot be computed (no equity row is then current)."""
+    global _equity_cache
+    now = time.monotonic()
+    with _bundle_lock:
+        cached = _equity_cache
+    if cached is not None and 0.0 <= now - cached[0] < BUNDLE_TTL:
+        return cached[1]
+    try:
+        from .evaluator import equity_fingerprint
+
+        value = str(equity_fingerprint())
+    except Exception:  # noqa: BLE001 - not cached: the next read tries again
+        return None
+    with _bundle_lock:
+        _equity_cache = (now, value)
+    return value
+
+
+def current_equity_evaluator(state: Mapping[str, Any], sha: str, equity_sha: str | None) -> bool:
+    """An equity band's proof (`banded_evaluator`, written by `elane.look` when its one look passed) names the engine,
+    the equity identity in force and the exact program (`run_sha`): an equity release that moves the identity sends the
+    band back to qualification (`evaluator.adopt_equity`), as an options release does with `current_banded_evaluator`."""
+    from ..equity import EQUITY_ENGINE_VERSION
+
+    proof = state.get("banded_evaluator") if isinstance(state.get("banded_evaluator"), Mapping) else {}
+    return (equity_sha is not None and proof.get("engine") == EQUITY_ENGINE_VERSION
+            and proof.get("equity_sha256") == equity_sha and proof.get("run_sha") == sha)
+
+
+def _read_equity(root: str | Path, *, family: str | None, lanes: Any) -> list[dict[str, Any]]:
+    """`read(root, lanes=...)`: the equity rows (the module docstring), the lanes `lanes` names. [] when there is no
+    store, it cannot be read within a second, or the equity identity cannot be computed (fail-closed)."""
+    wanted = {str(x) for x in ([lanes] if isinstance(lanes, str) else lanes)}
+    unknown = sorted(wanted - set(EQUITY_LANES))
+    if unknown:
+        raise ValueError(f"lanes: {', '.join(unknown)} is no equity lane")
+    path = Path(root) / DB_NAME
+    if not path.exists():
+        return []
+    equity_sha = _equity_sha()
+    if equity_sha is None:
+        return []
+    from . import elane
+
+    try:
+        db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1.0)
+        db.row_factory = sqlite3.Row
+        try:
+            fams = [f for f in _families(db, family, equity=True) if f["band"] in LIVE_BANDS]
+            seat = equity_seating(_banded(db, equity=True), elane.roster_seats(root)) \
+                if any(f["band"] == "candidate" for f in fams) else {"probe": [], "seated": [], "waiting": [], "seatless": []}
+            hidden = set(seat["waiting"]) | set(seat["seatless"])
+            versions = {}
+            for fam in fams:
+                fam["state"] = loads(fam["state"], {}) or {}
+                fam["spec"] = loads(fam["spec"], {}) or {}
+                if fam["id"] in hidden or lane_of_spec(fam["spec"]) not in wanted:
+                    continue  # a Candidate waiting for an equity roster seat (or holding none): no row
+                n = fam["state"].get("banded_version")
+                if not n:
+                    continue
+                row = db.execute("SELECT n, sha, params, path, created_at FROM versions WHERE family=? AND n=?",
+                                 (fam["id"], int(n))).fetchone()
+                if row is not None:
+                    versions[fam["id"]] = dict(row)
+        finally:
+            db.close()
+    except sqlite3.Error:
+        return []
+    from .gate import run_sha
+
+    out = []
+    for fam in fams:
+        v = versions.get(fam["id"])
+        if v is None:
+            continue
+        try:
+            code = (Path(root) / v["path"]).read_text(encoding="utf-8")
+        except OSError:
+            continue
+        state, spec = fam["state"], fam["spec"]
+        params = loads(v["params"], {}) or {}
+        sha = run_sha({"sha": v["sha"], "params": params})
+        if not current_equity_evaluator(state, sha, equity_sha):
+            continue  # its lots keep their exits (the EquityBook's), but no new entry under an unqualified identity
+        lane = lane_of_spec(spec)
+        symbols = [str(r).upper() for r in loads(fam["roots"], []) or []]
+        looked = state.get(elane.LOOK_KEY) if isinstance(state.get(elane.LOOK_KEY), Mapping) else {}
+        out.append({
+            "family": fam["id"], "band": fam["band"], "structure": fam["structure"], "roots": symbols, "symbols": symbols,
+            "lane": lane, "label": elane.label(lane), "seeded": spec.get("seeded") is True,
+            "seat": "sized" if fam["band"] == "sized" else "probe" if fam["band"] == "probe" else "seated",
+            "holdout_passed": True, "validation_passed": True, "version": int(v["n"]), "code": code, "params": params,
+            "run_sha": sha, "typical_max_loss_usd": None, "seed_era": True, "forward": state.get("forward"),
+            "version_created_at": v.get("created_at"), "version_selected_at": state.get("banded_at"),
+            "validation_version": state.get("validation_version"),
+            "validation_r_sd_by_version": dict(state.get(elane.SIGMA_KEY) or {})
+            if isinstance(state.get(elane.SIGMA_KEY), Mapping) else {},
+            "beside": looked.get("beside"),
         })
     return out
 
@@ -752,4 +914,5 @@ def incubator(root: str | Path, *, family: str, version: int) -> list[dict[str, 
 
 
 __all__ = ["read", "observe", "incubator", "incubator_refusal", "program_refusal", "owed_bars", "priority", "practice_tier",
-           "demoted", "LIVE_BANDS", "TIERS", "BUNDLE_TTL", "BELT_RECORDS", "BARS_OWED_FILE", "BAD_OUTCOMES"]
+           "demoted", "LIVE_BANDS", "TIERS", "BUNDLE_TTL", "BELT_RECORDS", "BARS_OWED_FILE", "BAD_OUTCOMES",
+           "seating", "waiting", "roster", "equity_seatable", "equity_seats", "equity_seating", "current_equity_evaluator"]

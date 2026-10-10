@@ -1,4 +1,4 @@
-"""The 48 founding families and their starter programs.
+"""The 48 founding families and their starter programs, and the equity lanes' three seeds (release E1, A4).
 
 A family is a MECHANISM (why the trade should make money), a structure type and a universe slice. The
 first twelve re-express the Deploy G structure founders (condor-vrp, putspread-dip, ironfly-quiet,
@@ -20,6 +20,7 @@ Standard library only.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Mapping
 
 # --------------------------------------------------------------------------- the program skeleton
@@ -608,4 +609,155 @@ def family_spec(spec: Mapping[str, Any]) -> dict[str, Any]:
             "needs": dict(spec["needs"]), "params": dict(spec.get("params") or {})}
 
 
-__all__ = ["SEEDS", "FOUNDERS", "LIBRARY", "program_for", "family_spec", "SIGNALS", "BUILDS"]
+# --------------------------------------------------------------------------- THE EQUITY SEEDS (release E1, A4)
+#: THE THREE BETA SEEDS (amendment A4; league/swarm/elane.py `birth_seeds`): each a program with a published prior,
+#: written by the captain's build agents under the EQUITY.md contract (league/equity/EQUITY.md: NEEDS, PARAMS,
+#: decide(ctx); math and numpy only, no date), before any data was seen, and judged by the swarm's screen like any
+#: family: born once as a beta-lane family (MARKET BETA), then Validation (2025) with the S1 pre-check, then one sealed
+#: look. Their cards name the prior and no figure (no census or market result: the repository is public).
+EQUITY_OVERNIGHT = '''# {fid}: MARKET BETA (the beta lane). Seeded by the captain's build agents (A4) and judged by the swarm's screen
+# like any family.
+# Prior: {prior}.
+# {rule} Written before any data was seen.
+import math
+
+NEEDS = {needs}
+PARAMS = {params}
+
+
+def decide(ctx):
+    share = float(ctx.params["share"])
+    intents = []
+    for lot in ctx.positions:
+        if lot["symbol"] == "{symbol}":
+            # bought at a close: sold at the next open (a lot bought at the close may sell at the next open)
+            intents.append({{"sell": lot["id"], "at": "open", "tag": "overnight-exit"}})
+    close = ctx.bars["{symbol}"].close
+    if len(close) < 2:
+        return intents
+    last, prior = float(close[-1]), float(close[-2])
+    if not (math.isfinite(last) and math.isfinite(prior)) or last <= 0:
+        return intents
+    if {condition}:
+        intents.append({{"buy": "{symbol}", "share": share, "at": "close", "tag": "overnight-entry"}})
+    return intents
+'''
+
+EQUITY_REVERSAL = '''# {fid}: MARKET BETA (the beta lane). Seeded by the captain's build agents (A4) and judged by the swarm's screen
+# like any family.
+# Prior: {prior}.
+# {rule} Written before any data was seen; theta and h are PARAMS.
+import math
+
+NEEDS = {needs}
+PARAMS = {params}
+
+
+def decide(ctx):
+    theta = float(ctx.params["theta"])
+    h = int(ctx.params["h"])
+    share = float(ctx.params["share"])
+    intents = []
+    held = {{}}
+    for lot in ctx.positions:
+        # held_sessions: the sessions the lot has been held (EQUITY.md); it exits at the open h sessions after entry
+        if int(lot["held_sessions"]) >= h:
+            intents.append({{"sell": lot["id"], "at": "open", "tag": "reversal-exit"}})
+        else:
+            held[lot["symbol"]] = True
+    for symbol in ctx.symbols:
+        if held.get(symbol):
+            continue
+        close = ctx.bars[symbol].close
+        if len(close) < 2:
+            continue
+        last, prior = float(close[-1]), float(close[-2])
+        if not (math.isfinite(last) and math.isfinite(prior)) or prior <= 0 or last <= 0:
+            continue
+        if last / prior - 1.0 <= -theta:
+            intents.append({{"buy": symbol, "share": share, "at": "open", "tag": "reversal-entry"}})
+    return intents
+'''
+
+_OVERNIGHT_PRIOR = ("the overnight effect: index returns accrue mostly from the close to the next open (Cliff, Cooper and "
+                    "Gulen 2008; Lou, Polk and Skouras 2019)")
+_REVERSAL_PRIOR = "short-term reversal in index ETFs after a sharp down close (Connors and Alvarez 2008)"
+_COMPARISON = ("the same-exposure buy-and-hold of the same ETFs over the same sessions (the screen's S1-X label); a pass "
+               "that does not beat it is labelled beta, never alpha")
+_FALSIFICATION = ("refuted when its one sealed look fails S1: the pooled daily t over Validation and the holdout below "
+                  "c_used, the holdout's sum not above zero, or the holdout-only t below c_H")
+
+EQUITY_SEEDS: list[dict[str, Any]] = [
+    {"id": "seed-overnight-spy", "lane": "beta", "structure": "etf", "symbols": ["SPY"], "template": "overnight",
+     "mechanism": "SPY's return accrues overnight: hold SPY from each close to the next open, every session (MARKET BETA).",
+     "prior": _OVERNIGHT_PRIOR,
+     "rule": "Buy SPY at the next close, every session; sell each lot at the following open.",
+     "needs": {"symbols": ["SPY"], "history": 2, "max_hold_sessions": 2}, "params": {"share": 0.5},
+     "condition": "True",
+     "card": {"lane": "beta", "structure": "etf", "symbols": ["SPY"],
+              "hypothesis": "Most of the index's long-run return has accrued overnight, between the close and the next "
+                            "open: holders who carry the overnight gap bear the news that arrives while the market is "
+                            "shut and are paid for it (Cliff, Cooper and Gulen 2008; Lou, Polk and Skouras 2019).",
+              "mechanism_class": "calendar_flow", "inputs": ["clock"], "holding": "days_1_3",
+              "cost": {"hurdle": 0.0003, "why": "a round trip pays two SPY half-spreads at the close and the open, and "
+                                                "the SEC and TAF fees on the sale"},
+              "comparison": _COMPARISON, "falsification": _FALSIFICATION}},
+    {"id": "seed-overnight-qqq", "lane": "beta", "structure": "etf", "symbols": ["QQQ"], "template": "overnight-down",
+     "mechanism": "QQQ's overnight return after a down close: hold QQQ from a close below the prior close to the next "
+                  "open (MARKET BETA).",
+     "prior": _OVERNIGHT_PRIOR + ", conditioned on short-term reversal (Connors and Alvarez 2008)",
+     "rule": "Buy QQQ at the next close when QQQ closed below its prior close; sell each lot at the following open.",
+     "needs": {"symbols": ["QQQ"], "history": 2, "max_hold_sessions": 2}, "params": {"share": 0.5},
+     "condition": "last < prior",
+     "card": {"lane": "beta", "structure": "etf", "symbols": ["QQQ"],
+              "hypothesis": "The overnight effect is larger after a down session: liquidity providers who absorbed the "
+                            "day's selling are paid as prices recover overnight (Cliff, Cooper and Gulen 2008; Lou, Polk "
+                            "and Skouras 2019; Connors and Alvarez 2008 on short-term reversal).",
+              "mechanism_class": "reversal_liquidity", "inputs": ["clock", "underlying_price"], "holding": "days_1_3",
+              "cost": {"hurdle": 0.0003, "why": "a round trip pays two QQQ half-spreads at the close and the open, and "
+                                                "the SEC and TAF fees on the sale"},
+              "comparison": _COMPARISON, "falsification": _FALSIFICATION}},
+    {"id": "seed-reversal-index", "lane": "beta", "structure": "etf", "symbols": ["SPY", "QQQ", "IWM", "DIA"],
+     "template": "reversal", "mechanism": "Index ETF reversal: buy SPY, QQQ, IWM or DIA at the open after a close at least "
+                                          "theta below its prior close, and sell it at the open h sessions later (MARKET "
+                                          "BETA).",
+     "prior": _REVERSAL_PRIOR,
+     "rule": "Buy a symbol at the next open after a close at least theta below its prior close; sell it at the open h "
+             "sessions later.",
+     "needs": {"symbols": ["SPY", "QQQ", "IWM", "DIA"], "history": 2, "max_hold_sessions": 10},
+     "params": {"theta": 0.02, "h": 8, "share": 0.25},
+     "card": {"lane": "beta", "structure": "etf", "symbols": ["SPY", "QQQ", "IWM", "DIA"],
+              "hypothesis": "A sharp one-day fall in a broad index ETF is partly liquidity-driven selling that later "
+                            "reverses: the buyer who supplies liquidity after the fall is paid over the next sessions "
+                            "(Connors and Alvarez 2008).",
+              "mechanism_class": "reversal_liquidity", "inputs": ["underlying_price"], "holding": "days_4_10",
+              "cost": {"hurdle": 0.0003, "why": "a round trip pays two index-ETF half-spreads at the opens, and the SEC "
+                                                "and TAF fees on the sale"},
+              "comparison": _COMPARISON, "falsification": _FALSIFICATION}},
+]
+
+
+def equity_program_for(spec: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
+    """(the seed program's source, {}) for an `EQUITY_SEEDS` spec: its defaults are the source's PARAMS (theta and h for
+    the reversal seed), the overrides dict empty, as `program_for`'s. The source passes the Gym's safety check
+    (`league.gym.safety.check_program`, which league/equity/program.py uses unchanged)."""
+    # The prior's authors in the comment, without their years: a program carries no year, even in a comment.
+    prior = re.sub(r"\s+(?:19|20)\d\d\b", "", str(spec["prior"]))
+    common = {"fid": spec["id"], "prior": prior, "rule": spec["rule"], "needs": repr(dict(spec["needs"])),
+              "params": repr(dict(spec["params"]))}
+    if spec.get("template") == "reversal":
+        return EQUITY_REVERSAL.format(**common), {}
+    return EQUITY_OVERNIGHT.format(**common, symbol=spec["symbols"][0], condition=spec["condition"]), {}
+
+
+def equity_family_spec(spec: Mapping[str, Any]) -> dict[str, Any]:
+    """The family's record (what the store keeps) from an `EQUITY_SEEDS` spec: its lane, structure and symbols (the
+    store's roots), its prior, and `seeded` (the Done meter reads the three seeds apart, A8.12)."""
+    return {"id": spec["id"], "mechanism": spec["mechanism"], "structure": spec["structure"], "roots": list(spec["symbols"]),
+            "symbols": list(spec["symbols"]), "lane": spec["lane"], "seeded": True, "template": spec["template"],
+            "prior": spec["prior"], "rejection": _FALSIFICATION, "needs": dict(spec["needs"]),
+            "params": dict(spec["params"])}
+
+
+__all__ = ["SEEDS", "FOUNDERS", "LIBRARY", "program_for", "family_spec", "SIGNALS", "BUILDS", "EQUITY_SEEDS",
+           "equity_program_for", "equity_family_spec"]

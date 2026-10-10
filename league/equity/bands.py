@@ -179,14 +179,36 @@ def next_band(row: Mapping[str, Any], record: EquityRecord | None, table: Any, *
     `sticky`: a recorded EDM1 demotion of this version (it stays "candidate"). Order: not passed its look -> candidate;
     sticky or `edm1` -> candidate; a Candidate without a free seat -> candidate; a Candidate with one -> probe; a Probe
     with `sized_up` -> sized; else as it is."""
-    raise NotImplementedError("swarm: league/equity/bands.py next_band")
+    band = str(row.get("band") or "")
+    if not row.get("holdout_passed"):
+        return "candidate", "it has not passed its lane's sealed look"
+    if sticky:
+        return "candidate", f"exits only, sticky for the version: {sticky}"
+    if record is not None:
+        why = edm1(record, table)
+        if why:
+            return "candidate", f"EDM1: {why}"
+    if band == "candidate":
+        if not seat_free:
+            return "candidate", "waiting for an equity roster seat (elane.roster)"
+        return "probe", "passed its lane's sealed look and holds an equity roster seat"
+    if band == "probe":
+        if record is not None:
+            up, why = sized_up(record, table)
+            if up:
+                return "sized", why
+            return "probe", why
+        return "probe", "at Probe (no real close yet)"
+    if band == "sized":
+        return "sized", "Sized"
+    return "candidate", f"not a live band ({band or 'none'}): no real entries"
 
 
 def band_for_row(row: Mapping[str, Any]) -> tuple[str, str]:
     """(swarm) What `league.live.money.band_for` answers for an equity-lane row (through
     `league.live.equity_hook.band_for`): the row's band unchanged, with the reason "an equity-lane family: its band is
     the EquityBook's (league/equity/bands.py)". The options path never moves an equity family's band."""
-    raise NotImplementedError("swarm: league/equity/bands.py band_for_row")
+    return str((row or {}).get("band") or ""), "an equity-lane family: its band is the EquityBook's (league/equity/bands.py)"
 
 
 __all__ = ["EquityRecord", "sized_up", "sized_sleeve_share", "edm1", "next_band", "band_for_row"]

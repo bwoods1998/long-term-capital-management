@@ -122,6 +122,47 @@
     "program_loss_usd": -300,
     "train_map": true
   },
+  "elane": {
+    "mode": "off",
+    "universe": [
+      "SPY",
+      "QQQ",
+      "IWM",
+      "DIA"
+    ],
+    "structures": [
+      "etf"
+    ],
+    "birth_share": 0.0,
+    "roster": 3,
+    "screens": {
+      "beta": {
+        "name": "S1",
+        "receipt_sha256": null,
+        "c_R": null,
+        "c_X": null,
+        "fp_cap": null,
+        "owner_wall": null,
+        "retry": false,
+        "r4": {},
+        "beside": null
+      },
+      "equity": {
+        "name": "S1",
+        "receipt_sha256": null,
+        "c_R": null,
+        "c_X": null,
+        "fp_cap": null,
+        "owner_wall": null,
+        "retry": false,
+        "r4": {},
+        "beside": null
+      }
+    },
+    "val_tries": 1,
+    "looks_per_lineage": 1,
+    "program_loss_usd": -300
+  },
   "engineer": {
     "enabled": true
   },
