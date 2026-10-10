@@ -95,6 +95,23 @@ JOBS: tuple[Job, ...] = (
         in_pause=True, owner="fast lane v2",
         what="the fast lane's report (read-only): the buy-and-hold and the drift fit beside each screen result and band "
              "row, the contamination measures, D5 and the Probe budget, into <state>/fast-lane-report.json"),
+    # THE EQUITY LANE's daily store (release E1, Oct 2026; league/ops/equity_data.py): Alpaca SIP daily bars, raw and
+    # adjustment=all, from 2016 through the gateway, audited, written atomically to <state>/equity-daily/. At the House's
+    # start (after `direction`: the grant first) and daily at 22:30Z, past the close and its settling in both seasons. It
+    # only reads the gateway and writes its own directory, so it runs in a pause too. About two dozen bar pages a run.
+    Job("equity_data", "league.ops.equity_data", (S.at_start(), S.daily(22, 30)), grace=3 * HOUR, cpu=600, wall=1800,
+        in_pause=True, owner="equity lane",
+        what="the equity lane's daily store: SIP daily bars (raw and all) from 2016, audited (calendar, sane bars, splits, "
+             "volumes, the 1Day bar's regular session), into <state>/equity-daily/"),
+    # THE EQUITY TWINS (release E1; league/ops/twins.py `run`): each closed equity lot's replay twin in closed form from
+    # the House's own official opens and closes (`eq_bars`), into the swarm store's kv `equity_twins`, final once judged.
+    # Daily at 01:15Z and 40 minutes before each open (after the book's morning re-fetch of the bars at open - 60), each
+    # before the `dlane` report that reads them; at the House's start too. Its one write is that measurement record (no
+    # band, no order, no money), so it runs in a pause like the report.
+    Job("equity_twins", "league.ops.twins", (S.at_start(), S.daily(1, 15), S.session_open(-40)), grace=3 * HOUR,
+        cpu=120, wall=300, in_pause=True, owner="equity lane",
+        what="each closed equity lot's replay twin (closed form, the engine's fill at the official open or close), the "
+             "gap in bp a side and the same-risk buy-and-hold, into the swarm store's kv equity_twins"),
     # THE LEARNING GAME (Oct 8, 2026): the operator's daily report at 00:00Z, read-only like the fast lane's; it runs in a
     # pause too (the day-1 plumbing read must not wait for one).
     Job("game", "league.ops.game_report", (S.daily(0, 0),), grace=3 * HOUR, cpu=600, wall=1200, in_pause=True,

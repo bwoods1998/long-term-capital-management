@@ -125,7 +125,10 @@ class Fixture(unittest.TestCase):
                                                 for i, d in enumerate(days)], version=version)
 
     def report(self, settings=GATE, previous=None) -> dict:
-        return R.report(self.root, settings=settings, now=self.now, previous=previous)
+        # These fixtures date their closes from early October, before the goal of Oct 10, 2026 moved the count's start
+        # (`R.DONE_FROM`, release E1): they read the pinned rule over every close since its inception, as written.
+        # test_dlane_report_equity holds the Oct 10 start and the earlier closes reported beside.
+        return R.report(self.root, settings=settings, now=self.now, previous=previous, count_from=R.inception())
 
 
 # ================================================================================================== the Done meter
@@ -473,7 +476,7 @@ class TheJob(Fixture):
         self.fam("dir-a", lane="direction")
         self.close("dir-a", pnl=-10.0)
         with guard.readonly():               # a writable SQLite open inside raises
-            out = R.report(self.root, settings=GATE, now=self.now)
+            out = R.report(self.root, settings=GATE, now=self.now, count_from=R.inception())
         self.assertEqual(out["done"]["all"]["running"]["closes"], 1)
 
     def test_k5_trips_once_at_the_line_and_holds_until_the_operator_clears_it(self):

@@ -26,6 +26,14 @@ Each count comes from the record that is the event itself, never from a summary 
   routed as the close economics routes it (`economics.route_of`): the House's routes (calibration, the House's live
   test, another House family) against the agents' (the incubator, tuition, D2 Probe/Sized, another agent route).
 
+THE EQUITY LANES (release E1, Oct 2026), apart, under `equity` (the daily page's table reads none of them):
+- per lane, "beta" and "equity" (a family's spec `lane`, `league.equity.LANES`): births (`swarm.born`, the payload's lane
+  else the family's), Validation verdicts judged and passed (the tournament's), looks taken and passed (the `looks`
+  rows), moves to Candidate, Probe and Sized (`equity_counts`); the equity families in each band now (`bands_now`'s
+  `equity`: the Probe programs among them);
+- from the live book (`book_counts`'s `equity`): the EquityBook's orders placed and filled, lots opened and closed (a
+  close is one lot fully closed), and the programs holding a lot now.
+
 READ-ONLY: every SQLite open is `mode=ro` (`guard.read`); each section that cannot be read is an `errors` entry and its
 counts None, never a zero. Standard library only.
 """
@@ -48,6 +56,8 @@ BANDS = ("candidate", "probe", "sized")
 METER_KINDS = {"sail": ("sail_model", "gym_box"), "claude": ("claude",), "openai": ("openai",)}
 HOUSE_ROUTES = ("calibration", "house_test", "house_other")
 AGENT_ROUTES = ("incubator", "tuition", "d2_real", "agent_other")
+#: The equity lanes (`league.equity.LANES`; spelled here so the funnel stays standard library only, a test holds them).
+EQUITY_LANES = ("beta", "equity")
 
 
 def _count(db: sqlite3.Connection, sql: str, params: tuple = ()) -> int:
@@ -136,15 +146,79 @@ def swarm_counts(db: sqlite3.Connection, start: float, end: float) -> dict[str, 
             if row["kind"] in kinds:
                 spend[meter] += float(row["usd"] or 0.0)
     out["spend_usd"] = {meter: round(usd, 2) for meter, usd in spend.items()}
+    out["equity"] = equity_counts(db, start, end)
+    return out
+
+
+def equity_lanes(db: sqlite3.Connection) -> dict[str, dict[str, Any]]:
+    """{family: {"lane", "band", "alive"}} of every equity-lane family (its spec's `lane` one of `EQUITY_LANES`)."""
+    out: dict[str, dict[str, Any]] = {}
+    for row in guard.rows(db, "SELECT id, spec, band, retired_at FROM families WHERE instr(spec, '\"lane\"') > 0"):
+        try:
+            spec = json.loads(row["spec"])
+        except (TypeError, ValueError):
+            continue
+        lane = spec.get("lane") if isinstance(spec, Mapping) else None
+        if lane in EQUITY_LANES:
+            out[str(row["id"])] = {"lane": lane, "band": str(row["band"]), "alive": row["retired_at"] is None}
+    return out
+
+
+def equity_counts(db: sqlite3.Connection, start: float, end: float) -> dict[str, Any]:
+    """THE EQUITY LANES' counts in `[start, end)` (the module docstring), per lane."""
+    a, b = S.iso(start), S.iso(end)
+    lanes = equity_lanes(db)
+    out: dict[str, Any] = {lane: {"births": 0, "validations": {"judged": 0, "passed": 0}, "looks": {"taken": 0, "passed": 0},
+                                  "band_moves": {band: 0 for band in BANDS}} for lane in EQUITY_LANES}
+
+    def lane_of(fid: Any, payload: Any = None) -> str | None:
+        named = payload.get("lane") if isinstance(payload, Mapping) else None
+        return named if named in EQUITY_LANES else (lanes.get(str(fid or "")) or {}).get("lane")
+
+    for row in guard.rows(db, "SELECT family, payload FROM events WHERE kind='swarm.born' AND at>=? AND at<?", (a, b)):
+        try:
+            payload = json.loads(row["payload"])
+        except (TypeError, ValueError):
+            payload = None
+        lane = lane_of(row["family"], payload)
+        if lane:
+            out[lane]["births"] += 1
+    if lanes:
+        for verdicts in json_rows(db, "swarm.tournament", "$.validation.judged", a, b):
+            for fid, verdict in (verdicts.items() if isinstance(verdicts, Mapping) else ()):
+                lane = lane_of(fid)
+                if lane:
+                    out[lane]["validations"]["judged"] += 1
+                    out[lane]["validations"]["passed"] += 1 if isinstance(verdict, Mapping) and verdict.get("passed") is True \
+                        else 0
+        for row in guard.rows(db, "SELECT family, passed FROM looks WHERE at>=? AND at<?", (a, b)):
+            lane = lane_of(row["family"])
+            if lane:
+                out[lane]["looks"]["taken"] += 1
+                out[lane]["looks"]["passed"] += 1 if row["passed"] else 0
+        for row in guard.rows(db, "SELECT family, payload FROM events WHERE kind='swarm.band' AND at>=? AND at<?", (a, b)):
+            lane = lane_of(row["family"])
+            try:
+                to = json.loads(row["payload"]).get("band_to")
+            except (TypeError, ValueError, AttributeError):
+                to = None
+            if lane and to in BANDS:
+                out[lane]["band_moves"][to] += 1
     return out
 
 
 def bands_now(db: sqlite3.Connection) -> dict[str, int]:
     """The living families by band, and `alive` (every living family)."""
-    out = {band: 0 for band in ("gym", *BANDS)}
+    out: dict[str, Any] = {band: 0 for band in ("gym", *BANDS)}
     for row in guard.rows(db, "SELECT band, count(*) AS n FROM families WHERE retired_at IS NULL GROUP BY band"):
         out[str(row["band"])] = out.get(str(row["band"]), 0) + int(row["n"] or 0)
     out["alive"] = sum(out.values())
+    # The equity lanes' living families by band (release E1; counted above with every family too): their Probe programs.
+    equity: dict[str, dict[str, int]] = {lane: {band: 0 for band in ("gym", *BANDS)} for lane in EQUITY_LANES}
+    for fam in equity_lanes(db).values():
+        if fam["alive"]:
+            equity[fam["lane"]][fam["band"]] = equity[fam["lane"]].get(fam["band"], 0) + 1
+    out["equity"] = equity
     return out
 
 
@@ -212,15 +286,15 @@ def book_counts(root: str | Path, start: float, end: float) -> dict[str, Any]:
     if not path.exists():
         return out
 
-    def read(db: sqlite3.Connection) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    def read(db: sqlite3.Connection) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any] | None]:
         tables = set(guard.ids(db, "SELECT name FROM sqlite_master WHERE type='table'"))
         orders = guard.rows(db, "SELECT family, instance, tuition, filled_qty FROM orders WHERE placed_at>=? AND placed_at<?",
                             (float(start), float(end))) if "orders" in tables else []
         closes = guard.rows(db, "SELECT family, instance, tuition FROM positions WHERE status!='open' AND closed_at IS NOT NULL "
                                 "AND closed_at>=? AND closed_at<?", (float(start), float(end))) if "positions" in tables else []
-        return orders, closes
+        return orders, closes, equity_book(db, tables, start, end)
 
-    orders, closes = guard.read(path, read)
+    orders, closes, equity = guard.read(path, read)
     side = lambda row: "house" if route_of(row) in HOUSE_ROUTES else "agent"  # noqa: E731
     for row in orders:
         out["orders"][side(row)] += 1
@@ -228,6 +302,37 @@ def book_counts(root: str | Path, start: float, end: float) -> dict[str, Any]:
             out["filled"][side(row)] += 1
     for row in closes:
         out["closes"][side(row)] += 1
+    if equity is not None:
+        out["equity"] = equity
+    return out
+
+
+def equity_book(db: sqlite3.Connection, tables: set[str], start: float, end: float) -> dict[str, Any] | None:
+    """The EquityBook's counts in `[start, end)` (release E1): orders placed and of them filled (any part), lots opened
+    and closed (a close is one lot fully closed) by lane, and the programs holding a lot now. None for a book from
+    before E1 (no `eq_lots`)."""
+    if "eq_lots" not in tables:
+        return None
+    a, b = float(start), float(end)
+    out: dict[str, Any] = {"orders": 0, "filled": 0, "opens": {lane: 0 for lane in EQUITY_LANES},
+                           "closes": {lane: 0 for lane in EQUITY_LANES}, "programs_holding": 0}
+    if "eq_orders" in tables:
+        for row in guard.rows(db, "SELECT filled_qty FROM eq_orders WHERE placed_at>=? AND placed_at<?", (a, b)):
+            out["orders"] += 1
+            try:
+                out["filled"] += 1 if float(row["filled_qty"] or 0) > 0 else 0
+            except (TypeError, ValueError):
+                pass
+    for row in guard.rows(db, "SELECT lane, count(*) AS n FROM eq_lots WHERE opened_at>=? AND opened_at<? GROUP BY lane",
+                          (a, b)):
+        if row["lane"] in EQUITY_LANES:
+            out["opens"][row["lane"]] += int(row["n"] or 0)
+    for row in guard.rows(db, "SELECT lane, count(*) AS n FROM eq_lots WHERE status='closed' AND closed_at>=? AND "
+                              "closed_at<? GROUP BY lane", (a, b)):
+        if row["lane"] in EQUITY_LANES:
+            out["closes"][row["lane"]] += int(row["n"] or 0)
+    held = guard.ids(db, "SELECT count(DISTINCT family) FROM eq_lots WHERE status IN ('open', 'closing')")
+    out["programs_holding"] = int(held[0] or 0) if held else 0
     return out
 
 
@@ -284,4 +389,5 @@ def read(root: str | Path, base: str | Path, release: str, now: float) -> dict[s
 
 
 __all__ = ["swarm_counts", "json_rows", "bands_now", "guard_hours", "book_counts", "release_start", "window", "read", "WINDOWS",
-           "NOT_RUN", "BANDS", "METER_KINDS", "HOUSE_ROUTES", "AGENT_ROUTES", "SWARM_DB", "LIVE_DB"]
+           "NOT_RUN", "BANDS", "METER_KINDS", "HOUSE_ROUTES", "AGENT_ROUTES", "SWARM_DB", "LIVE_DB", "EQUITY_LANES",
+           "equity_lanes", "equity_counts", "equity_book"]

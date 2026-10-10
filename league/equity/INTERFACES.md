@@ -693,6 +693,19 @@ look per lineage (R3), `same_lineage`, the beside-every-trade line.
   "judged_at"}` in closed form from the House's own official opens and closes (`eq_bars`, raw) with
   `league.equity.engine.fill_price` (open and close fills per A2), `config.sell_fees` and the lot's dividends; records
   under the swarm store kv `equity_twins`, final once judged. EDM1's twin leg and the Done rule's consistency read it.
+  As built (ops, additive): `equity_twin(lot, bars, *, k=1.0, settled=True, at=None)`: `bars` is {ISO day: the
+  symbol's `eq_bars` raw row}; `settled` (the exit day is `EQUITY_SETTLE_SESSIONS` 2 sessions past) makes a missing bar
+  a final "no_bar" and an unaudited one final as it is (noted); a priced twin is otherwise final once both bars'
+  `audit` is "ok" or "mismatch" (a mismatch is a `note`). `gap_bp` = (live net return - twin net return) / 2 x 10,000:
+  NEGATIVE when the real fills did worse, so EDM1's "more than 15 bp a side" reads the magnitude (money). The record
+  also carries `twin` {pnl, max_loss (its cost), r, ...}, `live`, `bh` {usd, return} (the cost-free same-risk
+  buy-and-hold over the same sessions), `entry_slip_bp`, `exit_slip_bp`, `final`. The round is a House job,
+  `equity_twins` (`league.ops.twins.run`; at the start, 01:15Z, open - 40 min), the only writer of kv `equity_twins`.
+  The Done meter reads an equity lot's fees as posted only when the book marks the lot `info.fee_basis` "broker" (book:
+  set it once the venue's SEC/TAF fees for the lot are booked; until then a checkpoint holding it stays provisional).
+  The Done meters count from Oct 10, 2026 (the goal; `dlane_report.DONE_FROM`), every lane, earlier closes beside.
+  The S1 line beside a trade is read from the passed look's `looks.detail` (`beside`, and the verdict's figures at the
+  top level or under `verdict`), else the family state's `elane_look` of that version (swarm, gate.py).
 - **funnel.py**: equity counts (births by lane, Validation tries, looks, passes, Probe programs, closes).
 - **scripts/floor_box.py** (A8.9): `deploy` and `rollback` refuse a release that lacks `EQUITY_BOOK_MARKERS =
   (("league/equity/live.py", "class EquityBook"),)` while the box's live.sqlite has an `eq_lots` row with status

@@ -52,6 +52,33 @@ automatic release (the engineer's harness change). It opens the forward days onl
 box, the gate's reason), as the nightly forward does.
 
 Standard library only (the pool's rule); the NYSE calendar from `ltcm.data` (`gate.sessions_between`'s source).
+
+THE EQUITY TWINS (release E1, Oct 2026; the design's 6e and the captain's A2; `equity_twin`, `equity_round`, the
+`equity_twins` job's `run`). An equity close needs no Gym job: its twin is computed in CLOSED FORM from the House's own
+official open and close series (`eq_bars`, adjustment raw, the bars the book's decisions used and the morning re-fetch
+audited, A8.11) with the engine's one fill function (`league.equity.engine.fill_price`): the lot's entry at the official
+open or close of its entry day x (1 + k x hs), its exit at the official open or close of its exit day x (1 - k x hs)
+(A2: either fill point, as the lot was bought and sold), hs the symbol's half-spread (`league.equity.config`), the same
+fees (`config.sell_fees`, SEC and TAF on the sale), the same dividends a share and the same split. It buys the lot's own
+entry notional. Its record ({key "eq:<lid>", status, final, live_return, twin_return, gap_bp, entry_official,
+exit_official, judged_at, ...}: `equity_twin`) carries:
+- the GAP: live net return minus the twin's, in basis points A SIDE ((live - twin) / 2 x 10,000; negative when the real
+  fills did worse than the model). EDM1's twin leg (league/equity/bands.py) and the Done meter's "consistent with replay"
+  (league/ops/dlane_report.py: live minus twin per dollar of the entry notional, pooled as D5's ratio of sums) read it;
+- the MEASURED SLIPPAGE of each real fill against its official price (`entry_slip_bp`, `exit_slip_bp`: positive when the
+  real fill was worse), the first execution figure the lane produces;
+- THE SAME-RISK BUY-AND-HOLD over the same sessions (`bh`): the entry notional held in the lot's own symbol from the
+  official price at its entry point to the official price at its exit point, its dividends included, cost-free. A long
+  lot is delta one, so this is its market direction; the lot's net minus it is its excess (MTE).
+A verdict is "priced", "no_bar" (the House holds no official price of the symbol on the entry or the exit day) or
+"unpriceable" (the lot's row cannot be read, or its symbol is outside the universe), and is FINAL once judged
+(`EQUITY_STATUSES`; never asked again). A priced twin is judged once both bars are audited by the morning re-fetch, or
+once the exit day is `EQUITY_SETTLE_SESSIONS` sessions past (then judged on the bars as they are, said in `note`); a
+missing bar is "no_bar" only from then on (until then the lot waits: the bars land at 16:20 ET of the exit day). A bar
+the re-fetch found different (`audit` "mismatch") is a twin `note` (the book raises the alarm). The records are the
+swarm store's kv `equity_twins` ({key: record}, `EQUITY_TWINS_KEY`); the `equity_twins` House job (league/ops/registry.py)
+judges every closed lot without a final record, reading the live book read-only. Nothing here moves a band, a forward
+record, a trial count or money.
 """
 
 from __future__ import annotations
@@ -62,6 +89,7 @@ import json
 import math
 import sqlite3
 import time
+from decimal import ROUND_FLOOR, Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 from zoneinfo import ZoneInfo
@@ -619,5 +647,282 @@ class Twins:
         return out
 
 
+# ------------------------------------------------------------------------------------------------- the equity twins
+EQUITY_TWINS_KEY = "equity_twins"
+#: An equity twin's verdicts; each is final once judged (`final` True in its record).
+EQUITY_STATUSES = ("priced", "no_bar", "unpriceable")
+#: A lot whose exit day is this many sessions past is judged on the bars as they are: a missing bar is then "no_bar", an
+#: unaudited one is priced and noted (the morning re-fetch runs before each open: one session is its own, the next is
+#: slack).
+EQUITY_SETTLE_SESSIONS = 2
+FILL_POINTS = ("open", "close")
+SWARM_DB = "swarm.sqlite"
+CENT = Decimal("0.01")
+EQUITY_BH_BASIS = ("the same-risk buy-and-hold of a long lot (delta one): its entry notional held in its own symbol from "
+                   "the official price at its entry point to the official price at its exit point (the House's eq_bars, "
+                   "raw), its dividends a share included, cost-free")
+
+
+def equity_key(lid: Any) -> str:
+    """The twin key of an equity lot (`eq:<lid>`), as the book's export names it (`twin_key`)."""
+    return f"eq:{int(lid)}"
+
+
+def _dec(value: Any) -> Decimal | None:
+    try:
+        out = Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+    return out if out.is_finite() else None
+
+
+def _official(row: Mapping[str, Any] | None, at: str) -> float | None:
+    if not isinstance(row, Mapping):
+        return None
+    value = _num(row.get("o" if at == "open" else "c"))
+    return value if value is not None and value > 0 else None
+
+
+def _round(value: Decimal | float | None, places: int) -> float | None:
+    return None if value is None else round(float(value), places)
+
+
+def equity_twin(lot: Mapping[str, Any], bars: Mapping[str, Mapping[str, Any]], *, k: float = 1.0, settled: bool = True,
+                at: float | None = None) -> dict[str, Any]:
+    """THE EQUITY TWIN of one closed lot (the module docstring), in closed form. `lot`: its `eq_lots` row. `bars`: {ISO day:
+    the `eq_bars` raw row of the lot's symbol} ({o, h, l, c, v, audit, sha}; Decimal strings as the book writes them).
+    `k`: the half-spread multiple (`config.K_BASE`; `K_STRESS` for the robustness twin). `settled`: the exit day is
+    `EQUITY_SETTLE_SESSIONS` sessions past (the round says; a missing bar is then final "no_bar" and an unaudited one is
+    judged as it is). `at`: the judging time (epoch; `judged_at`). Pure. {"key": "eq:<lid>", "status": "priced" |
+    "no_bar" | "unpriceable", "final", "live_return", "twin_return", "gap_bp" (a side), "entry_official",
+    "exit_official", "judged_at", ...}."""
+    from ..equity import config
+    from ..equity.engine import fill_price
+
+    lid = lot.get("lid")
+    symbol = str(lot.get("symbol") or "")
+    version = lot.get("version")
+    rec: dict[str, Any] = {
+        "key": equity_key(lid) if str(lid).lstrip("-").isdigit() else None, "lid": lid, "family": lot.get("family"),
+        "instance": lot.get("instance"), "version": int(version) if str(version).isdigit() else None,
+        "lane": lot.get("lane"), "symbol": symbol, "class": lot.get("class"), "opened_day": lot.get("opened_day"),
+        "exit_day": lot.get("exit_day") or ny_day(lot.get("closed_at")), "entry_at": lot.get("entry_at"),
+        "exit_at": lot.get("exit_at"), "k": float(k), "hs_bp": None, "status": None, "final": False, "why": None,
+        "note": None, "judged_at": None if at is None else dt.datetime.fromtimestamp(float(at), dt.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"),
+        "live_return": None, "twin_return": None, "gap_bp": None, "entry_official": None, "exit_official": None,
+        "entry_slip_bp": None, "exit_slip_bp": None, "split_factor": None, "bars_audit": None, "live": None,
+        "twin": None, "bh": None, "exit_agrees": None, "basis": EQUITY_BH_BASIS}
+
+    def unpriceable(why: str, *, final: bool = True) -> dict[str, Any]:
+        return {**rec, "status": "unpriceable", "final": final, "why": why}
+
+    if rec["key"] is None:
+        return unpriceable("the lot has no id")
+    if str(lot.get("status") or "") != "closed":
+        return unpriceable("the lot is not closed", final=False)
+    notional, cash = _dec(lot.get("entry_notional")), _dec(lot.get("cash"))
+    opened_qty, qty = _dec(lot.get("opened_qty")), _dec(lot.get("qty"))
+    fees, div = _dec(lot.get("fees") or "0"), _dec(lot.get("div") or "0")
+    entry_px, exit_px = _dec(lot.get("entry_px")), _dec(lot.get("exit_px"))
+    entry_at, exit_at = rec["entry_at"], rec["exit_at"]
+    opened_day, exit_day = str(rec["opened_day"] or ""), str(rec["exit_day"] or "")
+    if entry_at not in FILL_POINTS or exit_at not in FILL_POINTS:
+        return unpriceable(f"its fill points ({entry_at}, {exit_at}) are not the open or the close")
+    if None in (notional, cash, opened_qty, fees, div, exit_px) or notional <= 0 or opened_qty <= 0 or exit_px <= 0:
+        return unpriceable("the lot's notional, quantity, cash, fees, dividends or exit price cannot be read")
+    try:
+        dt.date.fromisoformat(opened_day)
+        dt.date.fromisoformat(exit_day)
+    except ValueError:
+        return unpriceable("the lot's entry or exit day cannot be read")
+    try:
+        hs = config.half_spread(symbol)
+    except KeyError:
+        return unpriceable(f"{symbol or 'its symbol'} is not in the universe (no half-spread)")
+    rec["hs_bp"] = round(hs * 1e4, 4)
+    # THE SPLIT between entry and exit: the shares sold over the shares bought (the lot's qty when the book keeps it at the
+    # sale; else from its proceeds: a factor within 1% of one is no split).
+    if qty is not None and qty > 0:
+        split = qty / opened_qty
+    else:
+        sold = (cash + notional + fees - div) / exit_px
+        split = sold / opened_qty if abs(sold / opened_qty - 1) > Decimal("0.01") else Decimal(1)
+    rec["split_factor"] = _round(split, 6)
+    entry_row, exit_row = bars.get(opened_day), bars.get(exit_day)
+    entry_official, exit_official = _official(entry_row, entry_at), _official(exit_row, exit_at)
+    live_return = cash / notional
+    rec["live_return"] = _round(live_return, 6)
+    rec["live"] = {"pnl": _round(cash, 2), "max_loss": _round(notional, 2), "r": _round(live_return, 6),
+                   "entry_px": _round(entry_px, 6), "exit_px": _round(exit_px, 6), "fees": _round(fees, 2),
+                   "div": _round(div, 2), "exit": exit_at}
+    if entry_official is None or exit_official is None:
+        missing = [f"{d} ({a})" for d, a, v in ((opened_day, entry_at, entry_official), (exit_day, exit_at, exit_official))
+                   if v is None]
+        return {**rec, "status": "no_bar", "final": bool(settled),
+                "why": f"no official {symbol} price in eq_bars on {', '.join(missing)}"}
+    audits = {"entry": (entry_row or {}).get("audit"), "exit": (exit_row or {}).get("audit")}
+    rec["bars_audit"] = audits
+    unaudited = [k_ for k_, v in audits.items() if v not in ("ok", "mismatch")]
+    if any(v == "mismatch" for v in audits.values()):
+        rec["note"] = ("the morning re-fetch found the bars this twin reads different from the ones the decision used "
+                       "(A8.11): " + ", ".join(k_ for k_, v in audits.items() if v == "mismatch"))
+    elif unaudited and settled:
+        rec["note"] = f"judged on bars the morning re-fetch never audited ({', '.join(unaudited)})"
+    entry_fill = Decimal(str(fill_price(entry_official, "buy", hs, float(k))))
+    exit_fill = Decimal(str(fill_price(exit_official, "sell", hs, float(k))))
+    places = Decimal(1).scaleb(-config.QTY_PLACES)
+    shares = (notional / entry_fill).quantize(places, rounding=ROUND_FLOOR)
+    if shares <= 0:
+        return unpriceable("its notional buys no share at the twin's price")
+    cost = shares * entry_fill
+    sold = (shares * split).quantize(places, rounding=ROUND_FLOOR)
+    proceeds = sold * exit_fill
+    twin_fees = config.sell_fees(proceeds.quantize(CENT, rounding=ROUND_FLOOR), sold)
+    twin_div = div * shares / opened_qty
+    twin_net = proceeds - twin_fees + twin_div - cost
+    twin_return = twin_net / cost
+    gap_bp = (live_return - twin_return) / 2 * Decimal(10_000)
+    eo, xo = Decimal(str(entry_official)), Decimal(str(exit_official))
+    bh_shares = notional / eo
+    bh_net = bh_shares * split * xo + div * bh_shares / opened_qty - notional
+    rec.update(
+        status="priced", final=bool(settled or not unaudited), why=None, twin_return=_round(twin_return, 6),
+        gap_bp=_round(gap_bp, 2), entry_official=entry_official, exit_official=exit_official, exit_agrees=True,
+        twin={"pnl": _round(twin_net, 2), "max_loss": _round(cost, 2), "r": _round(twin_return, 6),
+              "entry_px": _round(entry_fill, 6), "exit_px": _round(exit_fill, 6), "shares": str(shares),
+              "fees": _round(twin_fees, 2), "div": _round(twin_div, 2), "exit": exit_at},
+        bh={"usd": _round(bh_net, 2), "return": _round(bh_net / notional, 6), "basis": EQUITY_BH_BASIS},
+        entry_slip_bp=(_round((entry_px * split / eo - 1) * 10_000, 2) if entry_px is not None and entry_px > 0
+                       else None),
+        exit_slip_bp=_round((1 - exit_px / xo) * 10_000, 2))
+    if not rec["final"]:
+        rec["why"] = "awaiting the morning re-fetch's audit of its bars"
+    return rec
+
+
+def equity_records(store: Any) -> dict[str, dict[str, Any]]:
+    """Every equity twin record ({"eq:<lid>": record}); {} when none or unreadable."""
+    try:
+        value = store.get(EQUITY_TWINS_KEY) or {}
+    except Exception:  # noqa: BLE001 - no records: every equity close is pending
+        return {}
+    return {str(k): dict(v) for k, v in value.items() if isinstance(v, Mapping)} if isinstance(value, Mapping) else {}
+
+
+def read_equity(path: str | Path) -> dict[str, Any]:
+    """The live book's closed equity lots and the raw official bars of their symbols on their entry and exit days,
+    read-only (`mode=ro`): {"lots": [row... by lid], "bars": {symbol: {day: row}}}. A book from before E1 (no `eq_lots`)
+    is empty. Raises `sqlite3.Error` when the book cannot be read."""
+    db = sqlite3.connect(f"file:{Path(path)}?mode=ro", uri=True, timeout=5.0)
+    db.row_factory = sqlite3.Row
+    try:
+        tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "eq_lots" not in tables:
+            return {"lots": [], "bars": {}}
+        lots = [dict(r) for r in db.execute("SELECT * FROM eq_lots WHERE status='closed' ORDER BY lid")]
+        bars: dict[str, dict[str, dict[str, Any]]] = {}
+        if "eq_bars" in tables:
+            wanted: dict[str, set[str]] = {}
+            for lot in lots:
+                days = wanted.setdefault(str(lot.get("symbol") or ""), set())
+                days.update(d for d in (lot.get("opened_day"), lot.get("exit_day") or ny_day(lot.get("closed_at"))) if d)
+            for symbol, days in wanted.items():
+                days_ = sorted(days)
+                for i in range(0, len(days_), 500):
+                    chunk = days_[i:i + 500]
+                    marks = ",".join("?" * len(chunk))
+                    for r in db.execute(f"SELECT day, symbol, o, h, l, c, v, audit, sha FROM eq_bars WHERE "
+                                        f"adjustment='raw' AND symbol=? AND day IN ({marks})", (symbol, *chunk)):
+                        bars.setdefault(symbol, {})[str(r["day"])] = dict(r)
+        return {"lots": lots, "bars": bars}
+    finally:
+        db.close()
+
+
+def settled_after(exit_day: Any, now: float) -> bool:
+    """`EQUITY_SETTLE_SESSIONS` NYSE sessions have begun after `exit_day` by `now` (False when the calendar cannot say)."""
+    try:
+        day = dt.date.fromisoformat(str(exit_day))
+    except ValueError:
+        return False
+    today = dt.datetime.fromtimestamp(float(now), NY)
+    following = sessions((day + dt.timedelta(days=1)).isoformat(), today.date().isoformat())
+    if following is None:
+        return False
+    from ltcm.data import us_equity_session
+
+    begun = [d for d in following if d < today.date().isoformat()
+             or dt.datetime.fromisoformat(str(us_equity_session(d).open_at).replace("Z", "+00:00")) <= today]
+    return len(begun) >= EQUITY_SETTLE_SESSIONS
+
+
+def equity_round(root: str | Path, *, now: float, store: Any, k: float = 1.0,
+                 book: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Judge every closed equity lot without a final record (`equity_twin`) and keep the final ones in the swarm store's
+    kv `equity_twins` (`store`, writable). {"closed", "judged": {status: n}, "pending": n, "pending_why": {why: n},
+    "notes": [key...]}. A record already final is never judged again."""
+    book = book if book is not None else read_equity(Path(root) / LIVE_DB)
+    known = equity_records(store)
+    judged: dict[str, dict[str, Any]] = {}
+    pending: dict[str, int] = {}
+    for lot in book.get("lots") or []:
+        try:
+            key = equity_key(lot["lid"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if (known.get(key) or {}).get("final") is True:
+            continue
+        exit_day = lot.get("exit_day") or ny_day(lot.get("closed_at"))
+        rec = equity_twin(lot, (book.get("bars") or {}).get(str(lot.get("symbol") or ""), {}), k=k,
+                          settled=settled_after(exit_day, now), at=now)
+        if rec["final"]:
+            judged[key] = rec
+        else:
+            why = str(rec.get("why") or rec.get("status"))
+            pending[why] = pending.get(why, 0) + 1
+    if judged:
+        current = equity_records(store)
+        current.update(judged)
+        store.put(EQUITY_TWINS_KEY, current)
+    counts: dict[str, int] = {}
+    for rec in judged.values():
+        counts[rec["status"]] = counts.get(rec["status"], 0) + 1
+    return {"closed": len(book.get("lots") or []), "judged": counts, "pending": sum(pending.values()),
+            "pending_why": pending, "notes": sorted(key for key, rec in judged.items() if rec.get("note"))}
+
+
+def run(ctx: Any) -> dict[str, Any]:
+    """THE `equity_twins` JOB (league/ops/registry.py): `equity_round` over the House's state, the live book read-only, the
+    swarm store's kv written for the final records alone. Skipped with no live book, no swarm store or no closed equity
+    lot; a book that cannot be read is a failed receipt (retried in its grace). A twin judged on bars the morning
+    re-fetch found different is a House warning."""
+    from ..swarm.store import SwarmStore
+
+    root = Path(ctx.root)
+    if not (root / LIVE_DB).exists():
+        return {"status": "skipped", "why": "no live book: no equity lot has closed"}
+    if not (root / SWARM_DB).exists():
+        return {"status": "skipped", "why": "no swarm store to keep the twins in"}
+    try:
+        book = read_equity(root / LIVE_DB)
+    except sqlite3.Error as exc:
+        return {"status": "failed", "ok": False, "error": f"the live book cannot be read: {type(exc).__name__}: "
+                                                          f"{str(exc)[:200]}"}
+    if not book["lots"]:
+        return {"status": "skipped", "why": "no closed equity lot"}
+    store = SwarmStore(root)
+    try:
+        out = equity_round(root, now=ctx.now(), store=store, book=book)
+    finally:
+        store.close()
+    if out["notes"]:
+        ctx.alert("warning", f"equity_twins: {len(out['notes'])} twins judged on bars the morning re-fetch disagreed "
+                             f"with or never audited: {', '.join(out['notes'][:6])}")
+    return {"ok": True, **out}
+
+
 __all__ = ["Twins", "PUPPET", "PUPPET_SHA", "TWINS_KEY", "ATTEMPT_KEY", "GATE_REASON", "FINAL", "plan", "judge", "job_for",
-           "read_live", "records", "cfg", "twin_exit", "live_exit", "expiry_close", "sessions", "agent"]
+           "read_live", "records", "cfg", "twin_exit", "live_exit", "expiry_close", "sessions", "agent",
+           "EQUITY_TWINS_KEY", "EQUITY_STATUSES", "EQUITY_SETTLE_SESSIONS", "EQUITY_BH_BASIS", "equity_key",
+           "equity_twin", "equity_records", "read_equity", "settled_after", "equity_round", "run"]

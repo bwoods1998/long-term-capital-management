@@ -122,6 +122,30 @@ THE REST OF THE REPORT:
   `ctx.alert` (warning, or info for A8 and A9), never an action on money. The `stall` job reads the warnings and A8 from this file and mails them (its
   `dlane` and `done` causes).
 
+THE GOAL OF OCT 10, 2026 AND THE EQUITY LANES (release E1; the captain's design 6d and amendment A8):
+- DONE IS COUNTED FROM OCT 10, 2026 (the goal: "counted from Oct 10, 2026 (earlier closes reported beside, not
+  counted)"; `DONE_FROM`, 00:00 New York): both meters read only the agent closes from then on (`done.counted_from`),
+  and every earlier agent close since the rule's inception is listed beside them (`done.earlier`), never counted. The
+  Done rule itself is unchanged (30 closes, 5 from each of 2 programs, net > 0 after fees, consistent with replay,
+  research 24/7, read at the 30th close and every 10th). A frozen reading is carried only from a report that counted
+  from the same instant.
+- AN EQUITY CLOSE is one lot of the House's EquityBook (`live.sqlite` `eq_lots`, league/equity/live.py) fully closed,
+  with its net cash (fees and dividends included: the lot's `cash`), on the route its instance names (`:r`, so both
+  meters), its entry notional standing for the maximum loss (a long lot can lose at most what it paid), its key
+  `eq:<lid>` (`equity_closes`). It is matched to its own closed-form twin (league/ops/twins.py `equity_twin`, the swarm
+  store's kv `equity_twins`): there is no nightly replay of an equity program, so with no final twin its replay has
+  not landed (A1.4). Its fees are the broker's once the book marks them posted (the lot's `info.fee_basis` "broker").
+- BESIDE EVERY EQUITY CLOSE AND EVERY CHECKPOINT (`equity_beside`): the lane's label (MARKET BETA or EQUITY,
+  `league.swarm.elane.LABELS`), the same-risk buy-and-hold over the same sessions (the lot's own symbol, delta one, from
+  its twin's record) and MTE (the close's net return less it), the screen's false-positive line recorded at the
+  program's look (S1's `beside` line, league/equity/screen.py `beside_line`), "profit from market direction" said
+  plainly (`EQUITY_DIRECTION`), and whether the program was seeded by the captain's build agents.
+- DONE WITH AND WITHOUT THE THREE SEEDED PROGRAMS (A8.12): `done.without_seeded` repeats both meters over the closes of
+  every program but the seeded ones (the swarm store's kv `elane_seeds` and the book's `eq_instances.seeded`).
+- THE SHARED BUDGET'S CONSEQUENCE (A8.6): `equity.options_probe_room` says plainly that while the equity lane holds its
+  full Probe sleeves (max_programs x sleeve_share x E, open risk at the ETF weight) the options Probe lane has only
+  the rest of the $400 window: about $400 - 0.15 x E, effectively off.
+
 Standard library only, except the Probe envelope's figures (`fast_lane.probe_budget` and `real.probe_figures` read
 `league.live.real`, whose Gym legs need numpy, as the House box has): they are an `error` entry where that cannot load.
 """
@@ -167,6 +191,22 @@ A6_HOURS = 48.0
 A9_SESSIONS = 10
 #: The label of the zero-edge figure (decision 8).
 ZERO_EDGE_LABEL = "P(Done | zero edge), simulation"
+#: THE GOAL OF OCT 10, 2026: Done is counted from Oct 10, 2026, 00:00 New York; every earlier close is reported beside.
+DONE_FROM = "2026-10-10T04:00:00Z"
+#: An equity close's key: `eq:<lid>` (league/ops/twins.py `equity_key`, the book's export `twin_key`).
+EQUITY_PREFIX = "eq:"
+#: PROFIT FROM MARKET DIRECTION, said plainly beside every equity close and checkpoint (the goal of Oct 10, item 4).
+EQUITY_DIRECTION = (
+    "Profit from market direction counts and is said plainly: a long ETF or stock lot earns what its symbol did over the "
+    "sessions it was held. The same-risk buy-and-hold beside each close is that direction (its notional held in its own "
+    "symbol over the same sessions, cost-free); MTE is what the program's timing added after costs. A MARKET BETA "
+    "program's profit is the market's direction, not alpha, and a delta-one lane can reach Done whenever the market rises: "
+    "a Done read on such closes is weak evidence of skill.")
+#: A8.6: the shared loss budget's consequence for the options Probe lane, said in the report and the docs.
+EQUITY_PROBE_NOTE = (
+    "THE LOSS BUDGET IS SHARED (A8.6): the equity lane's open Probe risk counts in the same $400 window and $800 total as "
+    "the options Probe lane. While the equity lane is invested at max_programs x sleeve_share x E (3 x 0.25 E), its open "
+    "risk at the ETF weight (0.20) is 0.15 x E, and the options Probe lane has only the window's rest: effectively off.")
 #: PT1 (THE PROBE TOTAL AT $800, Oct 10, 2026): PREREG-T measured the $800 total and the -$300 program loss line at this
 #: roster alone (at no roster the operator's grid found the $800 total almost all cost), and L-D's $400 total and -$200
 #: line are the rules it measured them against.
@@ -418,6 +458,13 @@ def _ny_day(epoch: float | None) -> str | None:
         return None
 
 
+def _int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _loads(text: Any, default: Any) -> Any:
     if isinstance(text, (dict, list)):
         return text
@@ -442,15 +489,23 @@ def inception() -> float:
     return float(_epoch(dlane.DONE["inception"]))
 
 
+def done_from() -> float:
+    """Where the Done meters start counting (`DONE_FROM`, the goal of Oct 10, 2026) as epoch seconds: never before the
+    rule's inception."""
+    return max(inception(), float(_epoch(DONE_FROM)))
+
+
 # ------------------------------------------------------------------------------------------------- the lanes
 class Lanes:
-    """Each family's declared lane (`dlane.declared_lane`: its spec's, else its card's), read once a family."""
+    """Each family's declared lane (`dlane.declared_lane`: its spec's, else its card's), read once a family. An equity-lane
+    family (its spec's `lane` one of `league.equity.LANES`, release E1) is in its own lane, "beta" or "equity"."""
 
     def __init__(self, store: Any):
         self.store = store
         self.cache: dict[str, str] = {}
 
     def of(self, fid: Any, fam: Mapping[str, Any] | None = None) -> str:
+        from ..equity import LANES as EQUITY_LANES
         from ..swarm import dlane
 
         fid = str(fid or "")
@@ -459,18 +514,54 @@ class Lanes:
                 fam = fam if fam is not None else self.store.family(fid)
             except Exception:  # noqa: BLE001 - an unreadable family is alpha (the lane's default)
                 fam = None
-            self.cache[fid] = dlane.declared_lane(self.store, fam) if fam is not None else dlane.ALPHA
+            spec = (fam or {}).get("spec") if isinstance(fam, Mapping) else None
+            if isinstance(spec, Mapping) and spec.get("lane") in EQUITY_LANES:
+                self.cache[fid] = str(spec["lane"])
+            else:
+                self.cache[fid] = dlane.declared_lane(self.store, fam) if fam is not None else dlane.ALPHA
         return self.cache[fid]
+
+
+def every_family(store: Any) -> list[dict[str, Any]]:
+    """Every living family of every lane: the swarm's lane filter (`SwarmStore.families(lanes="all")`, release E1) where
+    the store has it, else `families(alive=True)`, which then holds every family already."""
+    import inspect
+
+    try:
+        takes_lanes = "lanes" in inspect.signature(store.families).parameters
+    except (TypeError, ValueError):
+        takes_lanes = False
+    return store.families(alive=True, lanes="all") if takes_lanes else store.families(alive=True)
+
+
+def all_lanes() -> tuple[str, ...]:
+    """The direction lane's two lanes and the equity lanes (release E1), each a key of the funnel and the bands."""
+    from ..equity import LANES as EQUITY_LANES
+    from ..swarm import dlane
+
+    return (*dlane.LANES, *EQUITY_LANES)
+
+
+def lane_label(lane: Any) -> str | None:
+    """The label every figure of a lane carries: the direction lane's (`dlane.LABEL`), MARKET BETA or EQUITY
+    (`elane.LABELS`); None for the alpha lane."""
+    from ..swarm import dlane, elane
+
+    if lane == dlane.DIRECTION:
+        return dlane.LABEL
+    return elane.LABELS.get(str(lane)) if lane else None
 
 
 # ------------------------------------------------------------------------------------------------- the book
 def read_book(live_path: str | Path) -> dict[str, list[dict[str, Any]]]:
-    """The live book's positions and instances (read-only; an absent book is an empty one: nothing traded)."""
+    """The live book's positions and instances, and (release E1) the EquityBook's lots and instances (`lots`,
+    `eq_instances`; empty for a book from before E1), read-only in one transaction; an absent book is an empty one:
+    nothing traded."""
     from . import guard
 
     path = Path(live_path)
     if not path.exists():
-        return {"positions": [], "instances": []}
+        return {"positions": [], "instances": [], "lots": [], "eq_instances": []}
 
     def read(db: Any) -> dict[str, list[dict[str, Any]]]:
         tables = set(guard.ids(db, "SELECT name FROM sqlite_master WHERE type='table'"))
@@ -479,7 +570,13 @@ def read_book(live_path: str | Path) -> dict[str, list[dict[str, Any]]]:
                                    "ORDER BY pid") if "positions" in tables else []
         instances = guard.rows(db, "SELECT id, family, version, band, tuition, mode, created_at, retired_at FROM instances"
                                ) if "instances" in tables else []
-        return {"positions": positions, "instances": instances}
+        lots = guard.rows(db, "SELECT lid, instance, family, version, lane, symbol, class, qty, opened_qty, entry_px, "
+                              "entry_notional, entry_at, fees, div, mark, opened_at, opened_day, status, exit_px, exit_at, "
+                              "exit_day, closed_at, cash, reason, probe, tag, info FROM eq_lots ORDER BY lid"
+                          ) if "eq_lots" in tables else []
+        eq_instances = guard.rows(db, "SELECT id, family, version, lane, band, seeded, created_at, retired_at FROM "
+                                      "eq_instances") if "eq_instances" in tables else []
+        return {"positions": positions, "instances": instances, "lots": lots, "eq_instances": eq_instances}
 
     return guard.read(path, read)
 
@@ -537,6 +634,168 @@ def closes(positions: Sequence[Mapping[str, Any]], corrections: Mapping[int, Dec
                     "fee_basis": "broker" if fix is not None else "estimate", "priced": priced, "status": status})
     out.sort(key=lambda c: (c["closed_at"], c["pid"]))
     return out
+
+
+def equity_closes(lots: Sequence[Mapping[str, Any]], *, since: float, seeded: Iterable[str] = ()
+                  ) -> list[dict[str, Any]]:
+    """EVERY EQUITY CLOSE since `since` (epoch), in close order: one EquityBook lot fully closed (`status` "closed"), as
+    a close row the meters read like an options close (`closes`): {pid "eq:<lid>", lid, family, instance, version, route
+    "d2_real" for a `:r` instance (else "agent_other": listed apart), code, house False, equity True, lane (the lot's),
+    label, seeded, closed_at, day (its exit day), opened_day, opened_at, root (its symbol), symbol, class, type
+    "equity_lot", entry_at, exit_at, max_loss_usd (its entry notional: a long lot loses at most what it paid),
+    notional, fees_usd, div_usd, cash_usd, pnl_usd (its net cash, fees and dividends included; None when it cannot be
+    read), return (net cash / notional), fee_basis ("broker" once the book marks the venue's fees posted, the lot's
+    `info.fee_basis`; else "estimate"), fees_posted, probe, priced}."""
+    seeded = set(seeded or ())
+    out = []
+    for lot in lots:
+        closed_at = _num(lot.get("closed_at"))
+        if str(lot.get("status") or "") != "closed" or closed_at is None or closed_at < since:
+            continue
+        try:
+            lid = int(lot["lid"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        instance, family = str(lot.get("instance") or ""), str(lot.get("family") or "")
+        real = instance.endswith(":r")
+        cash, notional = _dec(lot.get("cash")), _dec(lot.get("entry_notional"))
+        info = _loads(lot.get("info"), {}) or {}
+        posted = isinstance(info, Mapping) and info.get("fee_basis") == "broker"
+        priced = cash is not None and notional is not None and notional > 0
+        lane = str(lot.get("lane") or "") or None
+        out.append({"pid": f"{EQUITY_PREFIX}{lid}", "lid": lid, "family": family, "instance": instance,
+                    "version": version_of(instance) if version_of(instance) is not None else _int(lot.get("version")),
+                    "route": "d2_real" if real else "agent_other", "code": ROUTE_CODES["d2_real"] if real else None,
+                    "house": False, "equity": True, "lane": lane, "label": lane_label(lane), "seeded": family in seeded,
+                    "closed_at": closed_at, "day": str(lot.get("exit_day") or "") or _ny_day(closed_at),
+                    "opened_day": str(lot.get("opened_day") or ""), "opened_at": _num(lot.get("opened_at")),
+                    "root": str(lot.get("symbol") or "").upper(), "symbol": str(lot.get("symbol") or "").upper(),
+                    "class": lot.get("class"), "type": "equity_lot", "legs": [], "entry": _num(lot.get("entry_px")),
+                    "entry_at": lot.get("entry_at"), "exit_at": lot.get("exit_at"), "opened_qty": lot.get("opened_qty"),
+                    "max_loss_usd": _usd(notional) if notional is not None else None, "notional": notional,
+                    "fees_usd": _usd(_dec(lot.get("fees"))), "div_usd": _usd(_dec(lot.get("div"))),
+                    "cash_usd": cash, "pnl_usd": cash if priced else None,
+                    "return": round(float(cash / notional), 6) if priced else None,
+                    "fee_basis": "broker" if posted else "estimate", "fees_posted": posted,
+                    "probe": bool(int(lot.get("probe") or 0)), "priced": priced, "status": "closed"})
+    out.sort(key=lambda c: (c["closed_at"], c["lid"]))
+    return out
+
+
+def seeded_families(store: Any, book: Mapping[str, Any]) -> set[str]:
+    """The three programs the captain's build agents seeded (A4): the swarm store's kv `elane_seeds` ({seed id: family})
+    and the book's `eq_instances` rows marked `seeded`. Empty when neither can be read."""
+    from ..swarm import elane
+
+    out: set[str] = set()
+    try:
+        seeds = store.get(elane.SEEDS_KEY) or {}
+    except Exception:  # noqa: BLE001 - no record of seeds read: the book's mark alone
+        seeds = {}
+    if isinstance(seeds, Mapping):
+        out.update(str(f) for f in seeds.values() if f)
+    out.update(str(r.get("family")) for r in book.get("eq_instances") or [] if int(r.get("seeded") or 0) and r.get("family"))
+    return out
+
+
+def attach_equity(close: dict[str, Any], twin: Mapping[str, Any] | None, screens: "EquityScreens") -> dict[str, Any]:
+    """An equity close with what rides beside it: its twin's verdict and gap, its same-risk buy-and-hold (`bh`, both of
+    `_bh_sum`'s ways: a long lot is delta one), MTE (its net return less the buy-and-hold's) and its screen's line."""
+    twin = dict(twin or {})
+    bh = twin.get("bh") or {}
+    usd, ret = _num(bh.get("usd")), _num(bh.get("return"))
+    if usd is not None:
+        why = None
+    elif twin.get("status"):
+        why = f"its twin is {twin['status']}: {twin.get('why') or 'no buy-and-hold'}"
+    else:
+        why = "no twin yet: its buy-and-hold comes with it (league/ops/twins.py, the equity_twins job)"
+    close["bh"] = {"delta_usd": usd, "risk_usd": usd, "return": ret, "why": why}
+    close["mte"] = round(close["return"] - ret, 6) if close.get("return") is not None and ret is not None else None
+    close["twin"] = {k: twin.get(k) for k in ("status", "final", "gap_bp", "entry_slip_bp", "exit_slip_bp", "note")} \
+        if twin else None
+    close["fp"] = screens.of(close["family"], close.get("version"))
+    return close
+
+
+def options_probe_room(equity_usd: Any, constitution: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """A8.6 (`EQUITY_PROBE_NOTE`) in figures: the equity lane's open risk with every Probe sleeve invested
+    (`equity_money.probe.max_programs` x `sleeve_share` x E at the ETF weight `open_risk_weight.etf`), and what that leaves
+    of the options Probe lane's window (`options_money.probe.loss_budget_usd`). E is the House's sizing equity
+    (`dlane.unit_context`); the constitution's rows are read as they stand (no `equity_money` block: no figure)."""
+    if constitution is None:
+        from ..constitution import CONSTITUTION as constitution  # noqa: N811
+    em = (constitution or {}).get("equity_money") or {}
+    em = em if isinstance(em, Mapping) else {}
+    budget = _dec((((constitution or {}).get("options_money") or {}).get("probe") or {}).get("loss_budget_usd"))
+    probe = em.get("probe") or {}
+    share, weight = _dec(probe.get("sleeve_share")), _dec((em.get("open_risk_weight") or {}).get("etf"))
+    programs = _int(probe.get("max_programs"))
+    out: dict[str, Any] = {"statement": EQUITY_PROBE_NOTE, "window_budget_usd": _usd(budget), "sleeve_share": None,
+                           "max_programs": programs, "etf_weight": None, "open_risk_share_of_e": None,
+                           "sizing_equity_usd": _num(equity_usd), "equity_open_risk_usd": None,
+                           "options_window_room_usd": None}
+    if share is None or weight is None or programs is None or budget is None:
+        out["why"] = "the constitution has no equity_money probe row yet: the statement stands without figures"
+        return out
+    risk = Decimal(programs) * share * weight
+    out.update(sleeve_share=str(share), etf_weight=str(weight), open_risk_share_of_e=float(risk))
+    e = _dec(equity_usd)
+    if e is not None:
+        out["equity_open_risk_usd"] = _usd(risk * e)
+        out["options_window_room_usd"] = _usd(max(Decimal(0), budget - risk * e))
+    else:
+        out["why"] = "no sizing equity read: the share of E stands without dollars"
+    return out
+
+
+def equity_section(book: Mapping[str, Any], every: Sequence[Mapping[str, Any]], twins: Mapping[str, Mapping[str, Any]], *,
+                   count_from: float, unit: Mapping[str, Any], seeded: Iterable[str], screens: "EquityScreens"
+                   ) -> dict[str, Any]:
+    """THE EQUITY LANES in the report (release E1): every equity close with its label, seeded mark, buy-and-hold, MTE,
+    twin and screen line, and whether it counts (`count_from`); the lots open now by lane; the twins' verdicts and each
+    program's mean gap a side; the seeded programs; profit from market direction; and A8.6's options Probe room."""
+    from ..swarm import elane
+
+    rows = [c for c in every if c.get("equity")]
+    lots = list(book.get("lots") or [])
+    open_lots = [lot for lot in lots if str(lot.get("status") or "") in ("open", "closing")]
+    by_lane: dict[str, int] = {}
+    for lot in open_lots:
+        by_lane[str(lot.get("lane") or "")] = by_lane.get(str(lot.get("lane") or ""), 0) + 1
+    statuses: dict[str, int] = {}
+    gaps: dict[str, list[float]] = {}
+    for c in rows:
+        rec = twins.get(c["pid"]) or {}
+        status = str(rec.get("status") or "none") if rec.get("final") is True else "pending"
+        statuses[status] = statuses.get(status, 0) + 1
+        if status == "priced" and _num(rec.get("gap_bp")) is not None:
+            gaps.setdefault(c["family"], []).append(float(rec["gap_bp"]))
+    return {
+        "labels": dict(elane.LABELS), "beta_note": elane.BETA_NOTE, "direction": EQUITY_DIRECTION,
+        "counted_from": _iso(count_from),
+        "closes": [{"pid": c["pid"], "family": c["family"], "version": c.get("version"), "lane": c.get("lane"),
+                    "label": c.get("label"), "seeded": bool(c.get("seeded")), "counted": c["closed_at"] >= count_from,
+                    "route": c.get("code") or c["route"], "symbol": c.get("symbol"), "class": c.get("class"),
+                    "entry_at": c.get("entry_at"), "exit_at": c.get("exit_at"), "opened_day": c.get("opened_day"),
+                    "day": c.get("day"), "closed_at": _iso(c["closed_at"]), "notional_usd": c.get("max_loss_usd"),
+                    "pnl_usd": _usd(c.get("pnl_usd")), "return": c.get("return"), "fees_usd": c.get("fees_usd"),
+                    "div_usd": c.get("div_usd"), "fee_basis": c.get("fee_basis"), "probe": c.get("probe"),
+                    "bh": c.get("bh"), "mte": c.get("mte"), "twin": c.get("twin"), "fp": c.get("fp")} for c in rows],
+        "open_lots": len(open_lots), "open_by_lane": dict(sorted(by_lane.items())),
+        "twins": {"by_status": dict(sorted(statuses.items())),
+                  "mean_gap_bp": {f: round(statistics.fmean(v), 2) for f, v in sorted(gaps.items())},
+                  "basis": "live net return less the twin's, basis points a side (league/ops/twins.py equity_twin); "
+                           "EDM1 demotes past 15 bp a side over 5 priced closes"},
+        "seeded": sorted(seeded), "seeded_note": elane.SEEDED_NOTE,
+        "options_probe_room": options_probe_room((unit or {}).get("equity_usd")),
+    }
+
+
+def _order(close: Mapping[str, Any]) -> tuple:
+    """Close order across both books: the close time, then an options close before an equity close, then its id."""
+    pid = close["pid"]
+    return (close["closed_at"], isinstance(pid, str), pid if not isinstance(pid, str) else int(pid[len(EQUITY_PREFIX):]))
 
 
 # ------------------------------------------------------------------------------------------------- buy-and-hold
@@ -635,10 +894,16 @@ def _bh_sum(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
     rows = list(rows)
     d = [r["bh"]["delta_usd"] for r in rows if (r.get("bh") or {}).get("delta_usd") is not None]
     k = [r["bh"]["risk_usd"] for r in rows if (r.get("bh") or {}).get("risk_usd") is not None]
-    return {"delta_matched_usd": round(sum(d), 2) if d else None, "delta_priced": len(d),
-            "dollars_at_risk_usd": round(sum(k), 2) if k else None, "risk_priced": len(k), "closes": len(rows),
-            "basis": "approximation: daily closes of the direction job; delta from Black-Scholes at one implied "
-                     "volatility solved from the entry value, the entry day's close as the spot"}
+    out = {"delta_matched_usd": round(sum(d), 2) if d else None, "delta_priced": len(d),
+           "dollars_at_risk_usd": round(sum(k), 2) if k else None, "risk_priced": len(k), "closes": len(rows),
+           "basis": "approximation: daily closes of the direction job; delta from Black-Scholes at one implied "
+                    "volatility solved from the entry value, the entry day's close as the spot"}
+    if any(r.get("equity") for r in rows):
+        # An equity lot is delta one: both ways are its notional held in its own symbol over its own sessions.
+        from .twins import EQUITY_BH_BASIS
+
+        out["equity_basis"] = EQUITY_BH_BASIS
+    return out
 
 
 # ------------------------------------------------------------------------------------------------- the Done meter
@@ -705,7 +970,7 @@ def replay_gap(program_closes: Sequence[Mapping[str, Any]], nightly: Sequence[Ma
             replay_pnl += p
             replay_loss += m
             continue
-        if status in FINAL:
+        if status in FINAL or (rec or {}).get("final") is True:
             unpriced[str(status)] = unpriced.get(str(status), 0) + 1
             continue
         key = (c.get("version"), str(c.get("opened_day") or ""))
@@ -779,12 +1044,15 @@ def reading(counted: Sequence[Mapping[str, Any]], store: Any, *, nightly_cache: 
         for c in rows:
             routes[c.get("code") or c["route"]] = routes.get(c.get("code") or c["route"], 0) + 1
         known = [c["pnl_usd"] for c in rows if c.get("pnl_usd") is not None]
-        lane = lanes.of(fid) if lanes is not None else rows[0].get("lane")
+        # An equity program's lane is its lots' (the book's own row), whatever the swarm store still holds.
+        lane = rows[0].get("lane") if rows[0].get("equity") else lanes.of(fid) if lanes is not None else rows[0].get("lane")
         row = {"family": fid, "lane": lane, "closes": len(rows), "routes": routes,
                "net_usd": _usd(sum(known, Decimal(0))) if len(known) == len(rows) else None,
                "replay": gap, "bh": _bh_sum(rows)}
         if lane == dlane.DIRECTION:
             row["label"] = dlane.LABEL
+        elif rows[0].get("equity"):
+            row.update(label=lane_label(lane), seeded=bool(rows[0].get("seeded")))
         programs.append(row)
     enough = [p for p in programs if p["closes"] >= int(rule["min_closes_per_program"])]
     per_program_ok = len(enough) >= int(rule["min_programs"])
@@ -839,7 +1107,50 @@ def reading(counted: Sequence[Mapping[str, Any]], store: Any, *, nightly_cache: 
             "by_route": {k: {"closes": v["closes"], "programs": len(v["programs"]),
                              "net_usd": None if v["unpriced"] else _usd(v["net"]), "unpriced": v["unpriced"]}
                          for k, v in sorted(by_route.items())},
-            "by_program": programs, "bh": _bh_sum(counted)}
+            "by_program": programs, "bh": _bh_sum(counted), "equity": equity_beside(counted)}
+
+
+def equity_beside(counted: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
+    """WHAT RIDES BESIDE A READING'S EQUITY CLOSES (release E1; the design's 6d): per lane its label, closes, net, the
+    same-risk buy-and-hold summed over the priced ones and the mean MTE (each close's net return less its buy-and-hold's);
+    per program its label, whether it was seeded and the screen's false-positive line recorded at its look; and profit
+    from market direction said plainly. None when the reading holds no equity close."""
+    from ..swarm import elane
+
+    rows = [c for c in counted if c.get("equity")]
+    if not rows:
+        return None
+    lanes: dict[str, dict[str, Any]] = {}
+    programs: dict[str, dict[str, Any]] = {}
+    for c in rows:
+        lane = str(c.get("lane") or "")
+        slot = lanes.setdefault(lane, {"label": lane_label(lane), "closes": 0, "net": Decimal(0), "unpriced": 0,
+                                       "bh": [], "mte": []})
+        slot["closes"] += 1
+        if c.get("pnl_usd") is None:
+            slot["unpriced"] += 1
+        else:
+            slot["net"] += c["pnl_usd"]
+        bh = _num((c.get("bh") or {}).get("delta_usd"))
+        if bh is not None:
+            slot["bh"].append(bh)
+        if _num(c.get("mte")) is not None:
+            slot["mte"].append(float(c["mte"]))
+        prog = programs.setdefault(c["family"], {"family": c["family"], "lane": lane, "label": lane_label(lane),
+                                                 "seeded": bool(c.get("seeded")), "closes": 0, "fp": None})
+        prog["closes"] += 1
+        if c.get("fp"):
+            prog["fp"] = c["fp"]
+    return {"closes": len(rows),
+            "by_lane": {lane: {"label": v["label"], "closes": v["closes"],
+                               "net_usd": None if v["unpriced"] else _usd(v["net"]),
+                               "bh_usd": round(sum(v["bh"]), 2) if v["bh"] else None, "bh_priced": len(v["bh"]),
+                               "mte_mean": round(statistics.fmean(v["mte"]), 6) if v["mte"] else None,
+                               "mte_n": len(v["mte"])} for lane, v in sorted(lanes.items())},
+            "programs": [programs[f] for f in sorted(programs)],
+            "seeded": sorted(f for f, v in programs.items() if v["seeded"]),
+            "seeded_note": elane.SEEDED_NOTE if any(v["seeded"] for v in programs.values()) else None,
+            "direction": EQUITY_DIRECTION}
 
 
 #: THE GAP'S MEASURE, said beside every reading (the readiness audit's done-meter note: the rule says "mean ... gap", D5
@@ -884,15 +1195,21 @@ def finality(counted: Sequence[Mapping[str, Any]], *, replay_days: Mapping[str, 
         exit_day = str(c.get("day") or "")
         if c.get("pnl_usd") is None:
             unpriced += 1
-        if (twins.get(str(c.get("pid"))) or {}).get("status") in TWIN_FINAL:
+        rec = twins.get(str(c.get("pid"))) or {}
+        if rec.get("status") in TWIN_FINAL or rec.get("final") is True:
             pass
-        elif twins_on:
+        elif twins_on or c.get("equity"):
+            # An equity close has no nightly replay: its twin (league/ops/twins.py `equity_twin`) is its replay.
             pending_twin += 1
         else:
             state = replay_days.get(str(c.get("family") or "")) or {}
             if state.get("replayed") and not (state.get("day") and str(state["day"]) >= exit_day):
                 pending_replay += 1
-        if c.get("fee_basis") != "broker" or not fees_as_of or fees_as_of <= exit_day:
+        if c.get("equity"):
+            # The book marks an equity lot's fees posted once the venue's own (SEC, TAF) are booked on it.
+            if not c.get("fees_posted"):
+                pending_fees += 1
+        elif c.get("fee_basis") != "broker" or not fees_as_of or fees_as_of <= exit_day:
             pending_fees += 1
     whys = []
     if pending_replay:
@@ -982,7 +1299,8 @@ def meter(all_closes: Sequence[Mapping[str, Any]], routes: Sequence[str], store:
                             "programs_with_min_closes": at["programs_with_min_closes"], "net_usd": at["net_usd"],
                             "consistent_ok": at["consistent_ok"], "measured_programs": at["measured_programs"],
                             "replay_coverage": at["replay_coverage"], "by_program": programs,
-                            "research_247": r247, "by_route": at["by_route"], "bh": at["bh"]})
+                            "research_247": r247, "by_route": at["by_route"], "bh": at["bh"],
+                            **({"equity": at["equity"]} if at.get("equity") else {})})
         prev_k, k = k, k + int(rule["checkpoint_every"])
     nxt = int(rule["first_checkpoint"]) if not checkpoints else checkpoints[-1]["at_close"] + int(rule["checkpoint_every"])
     latest = checkpoints[-1] if checkpoints else None
@@ -995,7 +1313,9 @@ def meter(all_closes: Sequence[Mapping[str, Any]], routes: Sequence[str], store:
             "next_checkpoint": nxt, "gap_measure": GAP_MEASURE,
             "closes": [{"pid": c["pid"], "family": c["family"], "route": c.get("code") or c["route"], "lane": c.get("lane"),
                         "closed_at": _iso(c["closed_at"]), "pnl_usd": _usd(c["pnl_usd"]), "fee_basis": c["fee_basis"],
-                        "bh": c.get("bh")} for c in counted]}
+                        "bh": c.get("bh"),
+                        **({"label": c.get("label"), "seeded": bool(c.get("seeded")), "mte": c.get("mte"),
+                            "fp": c.get("fp")} if c.get("equity") else {})} for c in counted]}
 
 
 # ------------------------------------------------------------------------------------------------- research 24/7
@@ -1158,24 +1478,27 @@ class Research247:
 
 # ------------------------------------------------------------------------------------------------- the funnel
 def funnel(store: Any, lanes: Lanes, all_closes: Sequence[Mapping[str, Any]], *, now: float, hours: float,
-           positions: Sequence[Mapping[str, Any]] = ()) -> dict[str, Any]:
+           positions: Sequence[Mapping[str, Any]] = (), lots: Sequence[Mapping[str, Any]] = ()) -> dict[str, Any]:
     """Each lane's counts over the last `hours` (the module docstring), from the swarm store opened read-only. Since Oct
     10, 2026 (the readiness audit's m11) the agents' real OPENS by route too (`real_opens`, from the live book's
-    `positions`): the first real Probe trade was in no dlane funnel count until it closed."""
+    `positions`): the first real Probe trade was in no dlane funnel count until it closed. Since release E1 the equity
+    lanes ("beta", "equity") have their own rows: their families' births, Validations, looks and band moves, their
+    lots' real opens (`lots`, the EquityBook's) and closes."""
     from ..swarm import dlane
 
     since = _iso(now - hours * 3600.0)
+    every_lane = all_lanes()
     out: dict[str, Any] = {lane: {"births": 0, "gym_runs": {w: 0 for w in RUN_WINDOWS}, "program_years": 0.0,
                                   "validations": {"judged": 0, "passed": 0}, "reviews": 0, "audits": 0,
                                   "looks": {"taken": 0, "passed": 0, "by_screen": {}},
                                   "band_moves": {"candidate": 0, "probe": 0, "sized": 0},
                                   "real_closes": {":r": 0, ":t": 0, ":i": 0, "other": 0},
                                   "real_opens": {":r": 0, ":t": 0, ":i": 0, "other": 0}}
-                           for lane in dlane.LANES}
+                           for lane in every_lane}
     for row in store._all("SELECT family, payload FROM events WHERE kind='swarm.born' AND at>=?", (since,)):
         payload = _loads(row.get("payload"), {}) or {}
         lane = payload.get("lane") if isinstance(payload, Mapping) else None
-        lane = lane if lane in dlane.LANES else lanes.of(row.get("family"))
+        lane = lane if lane in every_lane else lanes.of(row.get("family"))
         out[lane]["births"] += 1
     for row in store._all('SELECT family, "window" AS w, status, trials, program_years FROM runs WHERE at>=?', (since,)):
         if row["status"] in NOT_RUN or not int(row.get("trials") or 0):
@@ -1217,7 +1540,7 @@ def funnel(store: Any, lanes: Lanes, all_closes: Sequence[Mapping[str, Any]], *,
     for c in all_closes:
         if c["house"] or c["closed_at"] < edge:
             continue
-        out[c.get("lane") or dlane.ALPHA]["real_closes"][c.get("code") or "other"] += 1
+        out[c.get("lane") if c.get("lane") in out else dlane.ALPHA]["real_closes"][c.get("code") or "other"] += 1
     from .economics import route_of
 
     for p in positions:
@@ -1226,6 +1549,11 @@ def funnel(store: Any, lanes: Lanes, all_closes: Sequence[Mapping[str, Any]], *,
         if opened is None or opened < edge or route in HOUSE_ROUTES:
             continue
         out[lanes.of(p.get("family"))]["real_opens"][ROUTE_CODES.get(route) or "other"] += 1
+    for lot in lots:
+        opened = _num(lot.get("opened_at"))
+        if opened is None or opened < edge or lot.get("lane") not in out:
+            continue
+        out[lot["lane"]]["real_opens"][":r" if str(lot.get("instance") or "").endswith(":r") else "other"] += 1
     for lane in out.values():
         lane["program_years"] = round(lane["program_years"], 2)
     out[dlane.DIRECTION]["train_bar"] = dlane.failure_counts(store, hours, now=now)
@@ -1233,10 +1561,9 @@ def funnel(store: Any, lanes: Lanes, all_closes: Sequence[Mapping[str, Any]], *,
 
 
 def bands_now(store: Any, lanes: Lanes) -> dict[str, dict[str, int]]:
-    from ..swarm import dlane
-
-    out = {lane: {"gym": 0, "candidate": 0, "probe": 0, "sized": 0, "alive": 0} for lane in dlane.LANES}
-    for fam in store.families(alive=True):
+    """The living families by lane and band, the equity lanes' included (release E1)."""
+    out = {lane: {"gym": 0, "candidate": 0, "probe": 0, "sized": 0, "alive": 0} for lane in all_lanes()}
+    for fam in every_family(store):
         lane = lanes.of(fam["id"], fam)
         out[lane][str(fam.get("band") or "gym")] = out[lane].get(str(fam.get("band") or "gym"), 0) + 1
         out[lane]["alive"] += 1
@@ -1398,7 +1725,8 @@ ALPHA_FP = {"fp_upper_bound": 0.02,
 
 
 def trade_screens(store: Any, lanes: Lanes, settings: Mapping[str, Any] | None, positions: Sequence[Mapping[str, Any]],
-                  all_closes: Sequence[Mapping[str, Any]], *, since: float) -> dict[str, Any]:
+                  all_closes: Sequence[Mapping[str, Any]], *, since: float, lots: Sequence[Mapping[str, Any]] = (),
+                  screens: "EquityScreens | None" = None) -> dict[str, Any]:
     """THE FALSE-POSITIVE RATE BESIDE EVERY PROBE TRADE AND EVERY REAL CLOSE (release D-1b; the owner's goal of Oct 9,
     item 4: "a pre-registered screen whose false-positive rate you have measured ... stated beside every Probe trade").
     `probe_trades`: every real position on the Probe/Sized route `:r` opened since `since`, open or closed; `closes`:
@@ -1457,13 +1785,81 @@ def trade_screens(store: Any, lanes: Lanes, settings: Mapping[str, Any] | None, 
                              "version": version, "status": str(p.get("status") or ""), "opened_at": _iso(opened),
                              "closed_at": _iso(_num(p.get("closed_at"))), "root": str(p.get("root") or "").upper(),
                              "type": str(p.get("type") or ""), **screen_of(family, version, "d2_real", opened)})
+    screens = screens if screens is not None else EquityScreens(store)
+
+    def equity_screen(family: str, version: int | None, lane: Any) -> dict[str, Any]:
+        # AN EQUITY TRADE (release E1, A9): beside it, the S1 line its program's one look recorded.
+        return {**screens.of(family, version), "lane": lane, "label": lane_label(lane)}
+
     closes_rows = [{"pid": c["pid"], "family": c["family"], "route": c.get("code") or c["route"], "version": c["version"],
                     "closed_at": _iso(c["closed_at"]), "pnl_usd": _usd(c["pnl_usd"]), "fee_basis": c["fee_basis"],
-                    **screen_of(c["family"], c["version"], str(c["route"]), _num(c.get("opened_at")))}
+                    **(equity_screen(c["family"], c["version"], c.get("lane")) if c.get("equity") else
+                       screen_of(c["family"], c["version"], str(c["route"]), _num(c.get("opened_at"))))}
                    for c in all_closes if not c["house"]]
-    return {"probe_trades": probe_trades, "closes": closes_rows, "contamination": CONTAMINATION,
+    equity_trades = []
+    for lot in lots:
+        opened = _num(lot.get("opened_at"))
+        if not str(lot.get("instance") or "").endswith(":r") or opened is None or opened < since:
+            continue
+        family, version = str(lot.get("family") or ""), version_of(lot.get("instance"))
+        equity_trades.append({"pid": f"{EQUITY_PREFIX}{lot.get('lid')}", "family": family,
+                              "instance": str(lot.get("instance") or ""), "version": version,
+                              "status": str(lot.get("status") or ""), "opened_at": _iso(opened),
+                              "closed_at": _iso(_num(lot.get("closed_at"))), "symbol": str(lot.get("symbol") or ""),
+                              "class": lot.get("class"), "entry_at": lot.get("entry_at"),
+                              **equity_screen(family, version, lot.get("lane"))})
+    return {"probe_trades": probe_trades, "equity_trades": equity_trades, "closes": closes_rows,
+            "contamination": CONTAMINATION,
             "note": "each row's rates are its screen's per program at zero edge, measured on historical worlds (a property "
                     "of the procedure, not a guarantee in this world); reported, never a bar"}
+
+
+class EquityScreens:
+    """THE SCREEN BESIDE EVERY EQUITY TRADE (release E1; the captain's A9: "stated beside every live trade: the
+    receipt's line, with the program's own FP, c_used, c_H, the drift-kept rate from its own floor run, the S1-X label
+    and the contamination sentence"): the line its version's one passed look recorded (the `looks` row's detail, else the
+    family state's `elane_look` of that version; league/swarm/gate.py writes both with the look, from
+    league/equity/screen.py `beside_line`), read once a program. Never computed here: the look's own figures."""
+
+    KEYS = ("passed", "c_R", "c_p", "c_H", "c_used", "own_fp", "drift_kept", "label", "fp_x")
+
+    def __init__(self, store: Any):
+        self.store = store
+        self.looks: dict[tuple[str, int], Mapping[str, Any]] | None = None
+        self.states: dict[str, Mapping[str, Any]] = {}
+
+    def of(self, family: str, version: Any) -> dict[str, Any]:
+        if self.looks is None:
+            self.looks = {}
+            try:
+                for look in self.store.looks():
+                    if look.get("passed"):
+                        self.looks[(str(look["family"]), int(look["version"]))] = look
+            except Exception:  # noqa: BLE001 - no look read: every row says so
+                pass
+        if family not in self.states:
+            try:
+                fam = self.store.family(family)
+            except Exception:  # noqa: BLE001 - an unreadable family has no recorded look
+                fam = None
+            self.states[family] = ((fam or {}).get("state") or {}) if isinstance(fam, Mapping) else {}
+        n = _int(version)
+        look = self.looks.get((family, n)) if n is not None else None
+        detail = (look or {}).get("detail") or {}
+        recorded = self.states[family].get("elane_look") or {}
+        if not isinstance(recorded, Mapping) or _int(recorded.get("version")) != n:
+            recorded = {}
+        verdict = detail.get("verdict") or recorded.get("verdict") or {}
+        verdict = verdict if isinstance(verdict, Mapping) else {}
+        beside = detail.get("beside") or recorded.get("beside")
+        out = {"screen": detail.get("screen") or verdict.get("screen") or "S1", "beside": beside,
+               "look_at": (look or {}).get("at") or recorded.get("at"),
+               "receipt": detail.get("receipt") or verdict.get("receipt"),
+               **{k: detail.get(k) if detail.get(k) is not None else verdict.get(k) for k in self.KEYS}}
+        if not beside:
+            out["fp_why"] = ("no S1 line is recorded at this version's look (league/swarm/gate.py records it with the "
+                             "look): none is stated")
+        return out
 
 
 # ------------------------------------------------------------------------------------------------- the envelope
@@ -1984,10 +2380,12 @@ def roster_now(root: str | Path) -> dict[str, Any] | None:
 
 # ------------------------------------------------------------------------------------------------- the report
 def report(root: str | Path, *, settings: Mapping[str, Any] | None = None, now: float | None = None,
-           previous: Mapping[str, Any] | None = None) -> dict[str, Any]:
+           previous: Mapping[str, Any] | None = None, count_from: float | None = None) -> dict[str, Any]:
     """The report (the module docstring), from the state root `root`: the swarm store opened read-only, the live book
-    read-only, the closes, health and publish files. `settings` the swarm's (`settings.load(root)` when None). No write."""
-    from ..swarm import dlane
+    read-only, the closes, health and publish files. `settings` the swarm's (`settings.load(root)` when None).
+    `count_from`: where the Done meters start counting (epoch; `done_from()`, the goal's Oct 10, 2026, when None). No
+    write."""
+    from ..swarm import dlane, elane
     from ..swarm import settings as settings_mod
     from ..swarm.store import SwarmStore
     from . import direction as DIR
@@ -2009,6 +2407,16 @@ def report(root: str | Path, *, settings: Mapping[str, Any] | None = None, now: 
         for c in every:
             if not c["house"]:
                 c["bh"] = buy_and_hold(c, closes_doc)
+        # THE EQUITY CLOSES (release E1): each lot fully closed, beside it its twin's buy-and-hold, MTE and its screen.
+        seeded = seeded_families(store, book)
+        eq_twins = TW.equity_records(store)
+        screens = EquityScreens(store)
+        for c in equity_closes(book.get("lots") or [], since=start, seeded=seeded):
+            every.append(attach_equity(c, eq_twins.get(c["pid"]), screens))
+        every.sort(key=_order)
+        # THE GOAL OF OCT 10, 2026: the meters count from `count_from`; every earlier agent close is reported beside.
+        count_from = done_from() if count_from is None else float(count_from)
+        counted = [c for c in every if c["closed_at"] >= count_from]
         cache: dict[str, list] = {}
         # A1.4's inputs (Oct 10, 2026): each replayed program's last replayed day (the family's own `forward_replay`
         # target: the nightly replays a Candidate, Probe or Sized family only), and the day of the broker's fee reading.
@@ -2020,14 +2428,25 @@ def report(root: str | Path, *, settings: Mapping[str, Any] | None = None, now: 
         fees_as_of = _ny_day(_epoch(activity.get("as_of"))) if activity.get("as_of") else None
         research = Research247(store, root)
         prev_done = ((previous or {}).get("done") or {}) if isinstance(previous, Mapping) else {}
+        if not isinstance(prev_done, Mapping) or (prev_done.get("counted_from") or _iso(start)) != _iso(count_from):
+            prev_done = {}  # a frozen reading is carried only from a report that counted from the same instant
         # The per-close twins (B1 (c), Oct 10, 2026; `league/ops/twins.py`): read once, matched in each meter's replay gap
         # and, with the switch on, a close's replay is final only once its twin is (A1.4, the integration of Oct 10).
-        twins = twin_records(store)
+        # The equity twins (release E1) are always on: an equity close has no nightly replay to fall back on.
+        twins = {**twin_records(store), **eq_twins}
         twins_on = TW.cfg(settings) is not None
         common = dict(store=store, nightly_cache=cache, lanes=lanes, research=research, replay_days=replay_days,
                       fees_as_of=fees_as_of, now=now, twins=twins, twins_on=twins_on)
-        done = {"all": meter(every, dlane.DONE["routes_all"], previous=prev_done.get("all"), **common),
-                "screen": meter(every, dlane.DONE["routes_screen"], previous=prev_done.get("screen"), **common)}
+        done = {"all": meter(counted, dlane.DONE["routes_all"], previous=prev_done.get("all"), **common),
+                "screen": meter(counted, dlane.DONE["routes_screen"], previous=prev_done.get("screen"), **common)}
+        # DONE WITH AND WITHOUT THE THREE SEEDED PROGRAMS (A8.12): the same meters over every other program's closes.
+        rest = [c for c in counted if c["family"] not in seeded]
+        prev_rest = prev_done.get("without_seeded") or {}
+        without = {"seeded": sorted(seeded), "note": elane.SEEDED_NOTE,
+                   "all": meter(rest, dlane.DONE["routes_all"], previous=prev_rest.get("all"), **common),
+                   "screen": meter(rest, dlane.DONE["routes_screen"], previous=prev_rest.get("screen"), **common)}
+        earlier = [c for c in every if not c["house"] and c.get("code") and c["closed_at"] < count_from]
+        earlier_known = [c["pnl_usd"] for c in earlier if c.get("pnl_usd") is not None]
         losses = program_losses(book["positions"], activity["by_pid"], store, settings, since=start)
         yesterday = datetime.fromisoformat(time.strftime("%Y-%m-%d", time.gmtime(now))).date() - timedelta(days=1)
         other = [c for c in every if not c["house"] and c.get("code") is None]
@@ -2050,13 +2469,25 @@ def report(root: str | Path, *, settings: Mapping[str, Any] | None = None, now: 
                      "screen": dlane.screen_effective(settings), "always_in_note": dlane.ALWAYS_IN_NOTE},
             "loosened": [dict(r) for r in LOOSENED], "tightened": list(TIGHTENED),
             "contamination": {"statement": CONTAMINATION, "meters": contamination_meters(root, lanes)},
-            "funnel": {name: funnel(store, lanes, every, now=now, hours=hours, positions=book["positions"])
+            "funnel": {name: funnel(store, lanes, every, now=now, hours=hours, positions=book["positions"],
+                                    lots=book.get("lots") or ())
                        for name, hours in WINDOWS.items()},
             "bands_now": bands_now(store, lanes),
             "probe_envelope": envelope, "unit": {k: unit.get(k) for k in ("known", "cap_usd", "equity_usd", "closes",
                                                                           "close_day", "why")},
-            "done": {**done, "p_done_zero_edge": zero_edge(settings),
-                     "net_after_costs": net_after_costs(root, every, now=now),
+            "done": {**done, "counted_from": _iso(count_from), "without_seeded": without,
+                     "earlier": {"closes": [{"pid": c["pid"], "family": c["family"], "route": c.get("code"),
+                                             "lane": c.get("lane"), "closed_at": _iso(c["closed_at"]),
+                                             "pnl_usd": _usd(c["pnl_usd"]), "fee_basis": c["fee_basis"]}
+                                            for c in earlier],
+                                 "net_usd": _usd(sum(earlier_known, Decimal(0))) if len(earlier_known) == len(earlier)
+                                 else None,
+                                 "note": "agent closes before the count began: reported beside, never counted (the goal "
+                                         "of Oct 10, 2026)"},
+                     "p_done_zero_edge": zero_edge(settings),
+                     "net_after_costs": {**net_after_costs(root, counted, now=now), "counted_from": _iso(count_from),
+                                         "counted_note": "the meters' closes count from counted_from; the costs are the "
+                                                         "close economics' own, since its cost_start"},
                      "research_247_last_7_days": research((yesterday - timedelta(days=RESEARCH_FIRST_DAYS - 1)).isoformat(),
                                                           yesterday.isoformat()),
                      "other_routes": [{"pid": c["pid"], "family": c["family"], "instance": c["instance"],
@@ -2066,7 +2497,10 @@ def report(root: str | Path, *, settings: Mapping[str, Any] | None = None, now: 
             "probes": probes(store, lanes, settings, book["positions"], losses),
             "roster": roster_now(root),
             "program_loss": losses,
-            "fp_beside_trades": trade_screens(store, lanes, settings, book["positions"], every, since=start),
+            "fp_beside_trades": trade_screens(store, lanes, settings, book["positions"], every, since=start,
+                                              lots=book.get("lots") or (), screens=screens),
+            "equity": equity_section(book, every, eq_twins, count_from=count_from, unit=unit, seeded=seeded,
+                                     screens=screens),
             "direction_net": lane_net,
             "account": account(root, every, activity, previous, now=now),
             "costs": costs(store, since=start, lane_since=_epoch(started) if isinstance(started, str) else None),
