@@ -8,6 +8,57 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## The Probe total at $800 and the program line at -$300 (Oct 10, 2026)
+
+Built on `feat/probe-total-800`, not deployed: one owner deploy (`league/constitution.py` and
+`league/swarm/policy.json`). Claude's decision, pre-registered privately as PREREG-T on Oct 10 under the Probe roster R5
+already live, inside the owner's goal as he re-set it on Oct 9, item 4: "Probe loss budget: $400 net in any rolling 20
+sessions and $800 net in total".
+
+- **The rule.** `options_money.probe.loss_total_usd` "400" -> "800", the owner's ceiling (a loosening), and the program
+  loss line (DONE-RULE-A1 A1.3) `dlane.program_loss_usd` -200 -> -300, its bound in `dlane.cfg` -300 to -25 (a setting
+  can still only tighten it). The Done meter's zero-edge figure moves with them: `dlane.done_zero_edge_p` 0.024 -> 0.027
+  (`dlane.ZERO_EDGE` says what it is). Unchanged: the rolling $400 in any 20 sessions, the 10% cap, `open_per_family` 3,
+  `max_open` 8, DM1, the kill switch, the daily stop and the drawdown stop. Open Probe risk stays at or under $400 (the
+  window's envelope alone caps it), so `money.probe_room` is unchanged. A Probe open must fit the window's $400 and the
+  total's $800; a bad 20-session stretch that ages out of the window now leaves room in the total for a second before
+  any Probe gain refills it.
+- **Measured** (the operator's simulation: cross-fit, the House pool, roster 5, arrivals; what it trades is index beta
+  minus option costs, not alpha):
+
+  | | $400 total, -$200 line | $800 total, -$300 line |
+  |---|---|---|
+  | P(Done) at 12 weeks | 4.6% | 5.5% (paired +0.92 points, SE 0.15) |
+  | P(Done) at 24 weeks | 11.6% | 14.4% |
+  | P(Done \| zero edge) at 12 / 24 weeks | 2.2% / 6.9% | 2.7% / 9.0% |
+  | P(the running Probe net below -$400 within 12 weeks) | 17.8% | 36.8% |
+  | P(the running Probe net below -$600 within 12 weeks) | 0.6% | 4.4% |
+  | 12-week net: 5th percentile | -$396 | -$679 |
+  | 12-week net: mean / median | +$22 / -$327 | +$25 / -$231 |
+  | P(the 60% drawdown stop trips by 24 weeks) | 21% | 48% |
+
+- **The cost:** about one point of 12-week Done and three of 24-week Done, bought with twice the chance of a net Probe
+  loss past $400 within 12 weeks, seven times the chance past $600, and more than twice the chance that the account's
+  drawdown stop trips by 24 weeks. Zero-edge Done rises with it: about half of the 12-week Done (2.7% of 5.5%) and over
+  60% of the 24-week Done (9.0% of 14.4%) would come with no edge at all. A program may lose $300 of its own realized
+  Probe net before the `dlane` job retires it, $100 more of the shared total than before.
+  The `dlane` report lists both rows among its loosened rules with these costs (`LOOSENED`).
+- **Identities.** Money digest `0310779c` -> `fdf2ac7c`; constitution digest `ca89ff8a` -> `0adb4f0e`. Nothing under
+  `league/live/` or `league/gym/` changes: the execution fingerprint (`31a7e921`), the Gym bundle and the gate contract
+  (`397b22b772b3`) do not move, so no evidence reset and no band lost.
+- **The owner's deploy.** (1) CI green on the exact head; no order in flight; never 12:55-20:05Z on a trading day. (2)
+  `floor_box.py deploy` from `~/Work/ltcm-deploy`. (3) At the House's start the `grant` job re-ratifies on `fdf2ac7c` by
+  itself (receipt `ratified`, trigger `digest`; `python3 scripts/live_trading.py --ratify` on the box if it refuses);
+  until then no real entry. (4) Verify: `fast-lane-report.json` `probe_budget` reads `budget_usd` "400" and
+  `total_budget_usd` "800"; the next `dlane-report.json` reads `probe_envelope.total_budget_usd` 800,
+  `program_loss.line_usd` -300 (a `dlane.program_loss_usd` in the state root's `swarm.json` overrides it, held to -300
+  to -25) and `done.p_done_zero_edge.value` 0.027; the House's `research_evaluator` keeps `31a7e921`.
+- **Roll back.** `loss_total_usd` "400" (re-pin `PINNED_DIGEST` to `ca89ff8a...`) and `dlane.program_loss_usd` -200 in
+  `league/swarm/policy.json`, with `dlane.done_zero_edge_p` 0.024 so the zero-edge figure matches the rules again (the
+  report then calls it a setting's figure, not the pinned one): one owner deploy; the money digest goes back to
+  `0310779c` and the grant re-ratifies at the House's start; no fingerprint move. A tighter line alone needs no deploy:
+  `dlane.program_loss_usd` -200 in the state root's `swarm.json` (a setting may only tighten it).
+
 ## The Probe roster (Oct 10, 2026): deployed 03:36Z, `dlane.roster` 5 since 03:48Z
 
 `dlane.roster` in the state root's `swarm.json` (a whole number; above 50 reads as 50; absent is no roster) caps how many
@@ -690,8 +741,9 @@ screen, the alarm and K5 can only be TIGHTENED by a setting.
 | `dlane.screens.D2` | receipt_sha256 `c3605947...`, c 1.0, fp_lane_mixed 0.1037, fp_lane_2224 0.1239, fp_lane_ci_mixed [0.0957, 0.1116], fp_lane_cluster_mixed [0.079, 0.1276], power10 0.1995 (D-1b) | read from the repository's policy.json only, never swarm.json; CI holds the sha to `docs/benchmarks/direction_screen_2.json` and every figure to the receipt's |
 | `dlane.val_tries`, `looks_per_lineage` | 1, 1 (D-1b) | fixed at 1: one Validation try and one holdout look per direction lineage |
 | `dlane.alarm_min_looks`, `alarm_pass_share` | 10, 0.60 | >= 10; <= 0.60 (tighten only) |
-| `dlane.done_zero_edge_p` | 0.13 | reported beside every Done figure: "P(Done \| zero edge), simulation" |
+| `dlane.done_zero_edge_p` | 0.027 (the Probe total at $800, Oct 10; 0.024 from DONE-RULE-A1 A1.2; 0.13 before) | reported beside every Done figure: "P(Done \| zero edge), simulation"; at `dlane.ZERO_EDGE`'s value it carries its horizon, holds, budget and source |
 | `dlane.k5_net_usd`, `k5_clear` | -600, false | -600 to -50 (tighten only); `k5_clear` true clears a set K5 and DISARMS K5 while it stays true (a loosening: the report warns every run; take it out once the clear is recorded) |
+| `dlane.program_loss_usd` | -300 (the Probe total at $800, Oct 10; -200 before) | -300 to -25 (tighten only): DONE-RULE-A1 A1.3, the `dlane` job retires a program whose own realized Probe net is at or below it |
 | `dlane.train_map` | `true` (Oct 9, `feat/dlane-trainmap`) | true shows **The Train map** to the architect and direction researchers while the lane is on; false (swarm.json) hides it at once; the code's default and any value but `true` are false |
 
 **Every loosened rule, with its cost** (the operator's measurements: MONEY's simulation and the critic's; the header of
@@ -712,12 +764,14 @@ every `dlane` report, `dlane_report.LOOSENED`):
 | The birth quota | no lane | direction about half while behind, at most 60% | alpha births fall from about 73 to about 36 a day mid-way through the game's T0 experiment; the researcher's ROLE prompt (a shared prefix) changes for alpha researchers too, so "alpha golden" holds for code paths only (the game's report says so while the lane is on) |
 | The unit | MONEY's pre-registered $75 lane cap | 10% of equity (E5), as the live side | Probe-stage Done averaged over holds 6.3% against 7.8%; P(net <= -$360 in 8 weeks) 0.35 against 0.27 |
 | K5's clear | no K5 before D-1 | `dlane.k5_clear` true clears a set K5 at once and disarms K5 while it stays true; the job's next run records the clear and re-arms K5 at -$600 below the net then (deleting the kv clears the same way) | while `k5_clear` stays true the lane can lose past any line with no K5 (the report warns every run); after a clear K5 measures a further -$600 from the net at clearing, not from inception |
+| The Probe total (PREREG-T, Oct 10) | $400 net in total (release L-D's setting) | $800, the owner's ceiling (the window's $400 and every other money row unchanged) | P(the running Probe net below -$400 within 12 weeks) 17.8% -> 36.8%, below -$600 0.6% -> 4.4%; 12-week 5th percentile -$396 -> -$679; P(drawdown stop by 24 weeks) 21% -> 48%; for P(Done) 4.6% -> 5.5% (12 weeks) and 11.6% -> 14.4% (24); zero-edge Done 2.2% -> 2.7% and 6.9% -> 9.0% (the section at the top) |
+| The program loss line (PREREG-T, Oct 10) | -$200 | -$300 | one program may spend $100 more of the shared total before it is retired; measured only together with the $800 total (the row above) |
 
 Tightened: K5 (above); the screen, the alarm and K5's line can only tighten by a setting (the one setting that loosens
-K5 is `k5_clear`, in the table above); D2 refused without a pinned receipt;
-E5 prices one lot at today's prices before Validation. Release L-D's own loosenings (the NET budget, 8 slots, DM1) and
-its rolling budget (L9, a tightening of NET: $400 of worst net stretch in any 20 sessions beside $400 net in total) are
-in its section and ride in the report's header too.
+K5 is `k5_clear`, in the table above); D2 refused without a pinned receipt; E5 prices one lot at today's prices before
+Validation. Release L-D's own loosenings (the NET budget, 8 slots, DM1) and its rolling budget (L9, a tightening of NET:
+$400 of worst net stretch in any 20 sessions beside a net total, $400 as L-D set it and $800 since Oct 10) are in its
+section and ride in the report's header too.
 
 **The report** (`league/ops/dlane_report.py`; the House's `dlane` job at its start and daily 01:30Z, after the
 `direction` closes and the fast lane's report, and since the weekend fixes 30 minutes before each open; in a pause too;
@@ -734,30 +788,31 @@ PL1 a House warning, the receipt carrying the figures). The fast lane's report r
   each recorded, band moves, real closes by route; the bands now; the direction lane's Train-bar failure counts.
 - **The Probe envelope** (`probe_envelope`): release L-D's budget as `money.Table` reads it from the constitution
   (`constitution`: `loss_basis`, `loss_budget_usd` over `loss_window_sessions`, `loss_total_usd`, `max_open`,
-  `demotion`; today "net", $400 in any 20 sessions, $400 in total, 8, "dm1"), never a figure of its own; the fast lane
-  report's own figure (`in_force`); and under each basis, GROSS and NET (`by_basis`, from `real.probe_figures` told the
-  basis by name), the window's realized figure (under NET its worst net stretch) and the total's, both rooms, the one
-  that binds and the room in units of today's cap (10% of equity). A4 reads the room under the basis in force and names
-  the binding envelope; A5 names `probe.demotion`.
+  `demotion`; on this tree "net", $400 in any 20 sessions, $800 in total, 8, "dm1"), never a figure of its own; the fast
+  lane report's own figure (`in_force`); and under each basis, GROSS and NET (`by_basis`, from `real.probe_figures` told
+  the basis by name), the window's realized figure (under NET its worst net stretch) and the total's, both rooms, the
+  one that binds and the room in units of today's cap (10% of equity). A4 reads the room under the basis in force and
+  names the binding envelope; A5 names `probe.demotion`.
 - **THE DONE METER** (the pinned rule, read exactly): every real close of an agent program (never calibration, the House
-  live test or `house:*`) since 2026-09-26T06:23Z on `:r`, `:t` and `:i`, the one agent real close before D-1 (tuition, Oct 8) included;
-  realized after all fees (the broker's posted fees where they have posted, the book's estimate otherwise, labelled per
-  close; an unpriced close makes the net unknown); `done_screen` (`:r` only) and `done_all` (all three); the bar is 30
-  closes, 5 closes from each of 2 programs, net > 0; every program with 5+ matched closes (a close on a day its
-  version's nightly replay also traded; from the per-close fill replay of Oct 10, a close with a priced twin of its
-  own, at the top of this page) has a live-minus-replay gap within +/-0.10 a dollar of maximum loss (a ratio of
-  sums, D5's measure, `gap_measure`), and since the weekend fixes (DONE-RULE-A1 A1.1) at least 2 programs must be so
+  live test or `house:*`) since 2026-09-26T06:23Z on `:r`, `:t` and `:i`, the one agent real close before D-1 (tuition,
+  Oct 8) included; realized after all fees (the broker's posted fees where they have posted, the book's estimate
+  otherwise, labelled per close; an unpriced close makes the net unknown); `done_screen` (`:r` only) and `done_all` (all
+  three); the bar is 30 closes, 5 closes from each of 2 programs, net > 0; every program with 5+ matched closes (a close
+  on a day its version's nightly replay also traded; from the per-close fill replay of Oct 10, a close with a priced
+  twin of its own, at the top of this page) has a live-minus-replay gap within +/-0.10 a dollar of maximum loss (a ratio
+  of sums, D5's measure, `gap_measure`), and since the weekend fixes (DONE-RULE-A1 A1.1) at least 2 programs must be so
   measured: zero matched closes never passes. Every program is listed at each checkpoint with its closes, matched closes
   and gap (`by_program`, `replay_coverage`), never dropped. Item 7 is read per UTC day (`research_247`, below). It is
   READ only at the 30th close and every 10th after, each reading over exactly the first K closes; it holds when items 3,
   4 and 7 hold, and a Done claim needs it FINAL (A1.4: every counted close's replay landed, its own twin's once the
   twins are on, and its broker fees posted; then frozen); the running figures between are counts, never a reading.
-  Beside it always: P(Done | zero edge) (2.4% at 12 weeks with 3-session holds under the budget in force, DONE-RULE-A1 A1.2; it was 0.13), Net after costs
-  (`done.net_after_costs`, from the close economics), the same-risk buy-and-hold two ways (delta-matched:
-  the entry delta held in the stock; dollars at risk held in the index; approximations from daily closes), and, for
-  each Candidate, Probe or Sized family, the screen that admitted it with its unconditional and both-windows-rose
-  false-positive rates. A Done claim names which meter holds, at which checkpoint, from which routes. No program or route
-  is paused, slowed or stopped to protect a figure.
+  Beside it always: P(Done | zero edge) (2.7% at 12 weeks under the budget in force, the $800 total and the -$300 line,
+  PREREG-T; 2.4% with 3-session holds under L-D's $400, DONE-RULE-A1 A1.2; 0.13 before), Net after costs
+  (`done.net_after_costs`, from the close economics), the same-risk buy-and-hold two ways (delta-matched: the entry
+  delta held in the stock; dollars at risk held in the index; approximations from daily closes), and, for each
+  Candidate, Probe or Sized family, the screen that admitted it with its unconditional and both-windows-rose
+  false-positive rates. A Done claim names which meter holds, at which checkpoint, from which routes. No program or
+  route is paused, slowed or stopped to protect a figure.
 - **The account and the costs:** the equity change since E0 (the first equity reading the report saw, kept in the
   file; not release L-D's deploy reading) beside the agents' and the House's realized closes and the account's other
   activity, the rest labelled unexplained; the swarm's BOOKED research spend by meter since the options swarm began and
@@ -778,7 +833,7 @@ PL1 a House warning, the receipt carrying the figures). The fast lane's report r
 | A6 | fewer than 1 eligible direction version per 50 direction births over 48 h (judged from 50 births) | report the failure counts; never a loosening without a new pinned measurement |
 | A7 | more than half of the direction versions that clear E1, E3 and E4 fail E5 | report today's cap and the median failing one lot |
 | A8 | a FINAL checkpoint holds (`info`, once a checkpoint; since the weekend fixes only on a final reading, naming items 3, 4 and 7) | read it with the buy-and-hold, P(Done \| zero edge), Net after costs and the contamination meters; it stops nothing. The `stall` job mails the final holding checkpoint at once (its `done` cause, which stands until a notice is sent) |
-| PL1 | a program's own realized Probe net is at or below the program loss line (`dlane.program_loss_usd`, -$200; DONE-RULE-A1 A1.3) | none: the job retires it swarm-side the same run (its real positions exit by the House's rules); the report's `program_loss.retired` names it |
+| PL1 | a program's own realized Probe net is at or below the program loss line (`dlane.program_loss_usd`, -$300 since Oct 10; -$200 before; DONE-RULE-A1 A1.3) | none: the job retires it swarm-side the same run (its real positions exit by the House's rules); the report's `program_loss.retired` names it |
 | A9 | every live direction program opened nothing for 10 sessions (`info`) | none: the lane is flat by design |
 | K5 | `dlane_k5` is set | the lane is in shadow until the operator clears it (**K5**, below) |
 | K5 (disarmed) | `dlane.k5_clear` is true | no loss trips K5 while it is: once the report shows the clear recorded (`k5.last_clear`, the new `k5.line`), take `k5_clear` out of `swarm.json` |
@@ -899,33 +954,33 @@ House's start).
   now the ROLLING figure, over the last `probe.loss_window_sessions` (20) New York trading sessions, today included,
   counted on the repo's NYSE calendar (`ltcm.data.us_equity_session`: weekends, the holidays computed by rule, the
   special closures; `real.probe_window_start`), a close's session its New York close day; beside it the new
-  `probe.loss_total_usd` from inception, set to $400: the owner's "$400 net in any rolling 20 sessions" is a wall, read
-  as the worst net stretch, and his "$800 net in total" a ceiling, so the total is a tighter setting inside it (the
-  operator's decision of Oct 9, after the budget simulation's worst-stretch run, **Cost**, below). Each realized figure
-  is `loss_basis`'s over the closed Probe positions it covers. "gross": their losses summed. "net": the total's is
-  max(0, -their summed cash) from inception, and the window's is its WORST NET STRETCH, the largest max(0, -(the summed
-  cash of the closes on or after s)) over the window's sessions s (`real.probe_realized`; the review of L-D, Oct 9): a
-  Probe gain offsets only the Probe losses closed before it in the window. With the window's plain net (the build before
-  the review) a +$300 close let $700 of later losses be admitted against it, and once the gain aged out the next 20
-  sessions held $700 net with every open having passed; with the worst stretch "$400 net in any rolling 20 sessions"
-  holds over EVERY 20-session window as an outcome, not only at each open, and the $400 total from inception (residuals
-  aside: fees above the book's estimate, a structure broken leg by leg; `test_ld_release.TheRollingOutcome` runs seasons
-  of admitted opens and checks every window). Under "gross" the worst stretch is the whole window, so the figure is the
-  plain sum. A Probe open goes only if BOTH the window's realized + every real position's open maximum loss + the open
-  <= $400 AND the total's realized + the same <= `probe.loss_total_usd`, $400 (`money.plan_open`; `real.probe_figures`
-  gives both to `RealBook.exposure`); the refusal names the envelope that binds ("probe: the loss budget: ... over $400
-  in any 20 sessions" or "probe: the loss budget in total: ... over $400 in total"), exits always go on, and the House's
-  once-a-day warning gives both budgets, both realized figures, the open maximum loss and the basis.
-  `fast-lane-report.json` `probe_budget` adds `realized_total_usd`, `total_budget_usd`, `window_sessions`,
-  `window_start` and `binding` (`realized_usd` and `room_usd` are the window's, its worst stretch under "net", and the
-  tighter envelope's). Bounds: the window 20-2000 sessions (a longer window is never looser, under either basis: more
-  losses under "gross", more stretches under "net"; 2000 is the rollback's), the total $0-800 (the owner's ceiling:
-  raising the total to $800 later is a CON-only change, the money digest moves and the fingerprint does not). Open Probe
-  risk stays at or under $400 (the window's envelope alone), so L2's reasoning and `money.probe_room` (min(`max_open` x
-  10% x E, $400)) are unchanged. Cost, as set: the worst net Probe loss from inception stays $400, as under NET alone,
-  and the window adds a second wall: no 20 sessions lose more than $400 net, even after earlier Probe gains have
-  refilled the total. A bad stretch that ages out of the window frees no room in the total; only Probe gains do. Its
-  measured cost is under **Cost**, below.
+  `probe.loss_total_usd` from inception, set to $400 ($800 since Oct 10, at the top): the owner's "$400 net in any
+  rolling 20 sessions" is a wall, read as the worst net stretch, and his "$800 net in total" a ceiling, so the total is
+  a tighter setting inside it (the operator's decision of Oct 9, after the budget simulation's worst-stretch run,
+  **Cost**, below). Each realized figure is `loss_basis`'s over the closed Probe positions it covers. "gross": their
+  losses summed. "net": the total's is max(0, -their summed cash) from inception, and the window's is its WORST NET
+  STRETCH, the largest max(0, -(the summed cash of the closes on or after s)) over the window's sessions s
+  (`real.probe_realized`; the review of L-D, Oct 9): a Probe gain offsets only the Probe losses closed before it in the
+  window. With the window's plain net (the build before the review) a +$300 close let $700 of later losses be admitted
+  against it, and once the gain aged out the next 20 sessions held $700 net with every open having passed; with the
+  worst stretch "$400 net in any rolling 20 sessions" holds over EVERY 20-session window as an outcome, not only at each
+  open, and the $400 total from inception (residuals aside: fees above the book's estimate, a structure broken leg by
+  leg; `test_ld_release.TheRollingOutcome` runs seasons of admitted opens and checks every window). Under "gross" the
+  worst stretch is the whole window, so the figure is the plain sum. A Probe open goes only if BOTH the window's
+  realized + every real position's open maximum loss + the open <= $400 AND the total's realized + the same <=
+  `probe.loss_total_usd`, $400 (`money.plan_open`; `real.probe_figures` gives both to `RealBook.exposure`); the refusal
+  names the envelope that binds ("probe: the loss budget: ... over $400 in any 20 sessions" or "probe: the loss budget
+  in total: ... over $400 in total"), exits always go on, and the House's once-a-day warning gives both budgets, both
+  realized figures, the open maximum loss and the basis. `fast-lane-report.json` `probe_budget` adds
+  `realized_total_usd`, `total_budget_usd`, `window_sessions`, `window_start` and `binding` (`realized_usd` and
+  `room_usd` are the window's, its worst stretch under "net", and the tighter envelope's). Bounds: the window 20-2000
+  sessions (a longer window is never looser, under either basis: more losses under "gross", more stretches under "net";
+  2000 is the rollback's), the total $0-800 (the owner's ceiling: raising the total to $800 later is a CON-only change,
+  the money digest moves and the fingerprint does not). Open Probe risk stays at or under $400 (the window's envelope
+  alone), so L2's reasoning and `money.probe_room` (min(`max_open` x 10% x E, $400)) are unchanged. Cost, as set: the
+  worst net Probe loss from inception stays $400, as under NET alone, and the window adds a second wall: no 20 sessions
+  lose more than $400 net, even after earlier Probe gains have refilled the total. A bad stretch that ages out of the
+  window frees no room in the total; only Probe gains do. Its measured cost is under **Cost**, below.
 - **Not done: the narrower fingerprint** (the critic, N8, optional). `league/live/money.py` stays in the execution
   fingerprint: the practice book's caps read `money.Table` (`shadow._probe_caps`: its open count and family share, and
   a refused table refuses every practice open), and the incubator's pre-registered first-look rule (`practice_ok`)
@@ -964,7 +1019,7 @@ account's):
   |---|---|---|---|---|
   | $400 net in total, no window (L1-L3 alone) | 10.0 / 7.6 / 4.5% | 11.0 / 9.0 / 7.6% | 1.3-2.8% | 8.2-13.0% |
   | $400 window + $800 total (the owner's ceiling) | 7.0 / 3.7 / 1.1% | 14.0 / 10.9 / 7.2% | 37.6-39.2% | 41-46% |
-  | **$400 window + $400 total (in force)** | 6.0 / 3.3 / 1.0% | 11.1 / 8.7 / 5.9% | 0.9-2.1% | 3.0-8.3% |
+  | **$400 window + $400 total (L-D's setting; the $800 total is in force since Oct 10, at the top)** | 6.0 / 3.3 / 1.0% | 11.1 / 8.7 / 5.9% | 0.9-2.1% | 3.0-8.3% |
 
   The window costs early Done (a Probe gain no longer refills it for the losses after it, so the first 12 weeks trade
   less). The $800 total buys 1.3-2.9 points of 24-week Done at 18-42 times the chance of a net Probe loss past $400
@@ -1017,20 +1072,20 @@ inside his $800).
 **Roll back.** The real rollback is CON-only: set `options_money.probe` `loss_basis` "gross", `max_open` 3, `demotion`
 "dm0", `loss_total_usd` "400" and `loss_window_sessions` 2000 in `league/constitution.py` (re-pin `PINNED_DIGEST` to
 `c9d8ef5b...`, the full digest `league/tests/test_constitution.py` names), one owner deploy. Each value runs fast lane
-v2's rule (`league/tests/test_ld_release.py` checks it against a frozen copy of `ccfa48d5`'s code): "gross", 3 and
-"dm0" code for code, and the 2000-session window holds every close since the fast lane (it reaches before the
-calendar's first year), so the window's figure is the total's and both envelopes are fast lane v2's one $400 envelope:
-the same admissions and refusals on the same rows (a refusal's words end "in any 2000 sessions"). The money digest
-moves to `320899d6` (the grant re-ratifies at the House's start, as above) and the execution fingerprint does NOT move:
-no evidence reset, no band lost. The room stays capped at $400 (at 3 slots it differs only above E = $1,333.33),
-and a version DM1 demoted before the rollback stays a Candidate (`dm1_demoted`). `loss_total_usd` is "400" already, so
-rolling back L9 alone (`loss_window_sessions` 2000, the other three rows kept) is CON-only too, but it is not the
-rule of the build before L9: under "net" the 2000-session window's figure is its worst net stretch since the fast
-lane, which is the Probe's drawdown from its high-water mark, so the $400 then binds as the critic's high-water-mark
-reading (tighter than NET from inception, which the $400 total also checks); "gross" makes it fast lane v2's.
-`floor_box.py rollback` to `20261009T025942Z` instead moves the fingerprint again (one more reset: every band and
-practice cohort at that moment) and, once release D-1 has shipped, drops D-1 too; use it only for a broken release,
-never to undo a rule.
+v2's rule (`league/tests/test_ld_release.py` checks it against a frozen copy of `ccfa48d5`'s code): "gross", 3 and "dm0"
+code for code, and the 2000-session window holds every close since the fast lane (it reaches before the calendar's first
+year), so the window's figure is the total's and both envelopes are fast lane v2's one $400 envelope: the same
+admissions and refusals on the same rows (a refusal's words end "in any 2000 sessions"). The money digest moves to
+`320899d6` (the grant re-ratifies at the House's start, as above) and the execution fingerprint does NOT move: no
+evidence reset, no band lost. The room stays capped at $400 (at 3 slots it differs only above E = $1,333.33), and a
+version DM1 demoted before the rollback stays a Candidate (`dm1_demoted`). With `loss_total_usd` at "400" (the $800
+total's rollback, at the top), rolling back L9 alone (`loss_window_sessions` 2000, the other three rows kept) is
+CON-only too, but it is not the rule of the build before L9: under "net" the 2000-session window's figure is its worst
+net stretch since the fast lane, which is the Probe's drawdown from its high-water mark, so the $400 then binds as the
+critic's high-water-mark reading (tighter than NET from inception, which the $400 total also checks); "gross" makes it
+fast lane v2's. `floor_box.py rollback` to `20261009T025942Z` instead moves the fingerprint again (one more reset: every
+band and practice cohort at that moment) and, once release D-1 has shipped, drops D-1 too; use it only for a broken
+release, never to undo a rule.
 
 ## The incubator cap (Oct 8, 2026): deployed Oct 8 (House release `20261008T225723Z`, main `a5ff6f9e`)
 
@@ -3188,12 +3243,13 @@ resolve the accounting; estimated intrinsic values never become forward evidence
 
 The checked-in deployment has `real_money: true`, the grant is active on the money digest in force (`0310779c` since
 release L-D's deploy of 09:04Z Oct 9, re-ratified by the standing grant at the House's start; `1665c385` before it, from
-the incubator cap's deploy of Oct 8), and the gateway's `OPTION_STRUCTURES_REAL` names the four debit types. The gateway
-still admits paper structures and verified closes of held real positions; `off` is still a permitted stricter setting in
-`league.ci`. The paper route proof runs from 09:35 ET until it has passed, even with no real-account client, grant or
-eligible family, and keeps an unfinished attempt's identity and owned contracts through restarts. Both proofs (the
-multi-leg vertical and the single-leg call) passed on Sept 28; a passed proof is not run again. Passing records paper
-execution evidence, never a family's evidence.
+the incubator cap's deploy of Oct 8; this tree's is `fdf2ac7c`, the Probe total at $800, which the grant re-ratifies at
+the House's start on the owner's deploy of it), and the gateway's `OPTION_STRUCTURES_REAL` names the four debit types.
+The gateway still admits paper structures and verified closes of held real positions; `off` is still a permitted
+stricter setting in `league.ci`. The paper route proof runs from 09:35 ET until it has passed, even with no real-account
+client, grant or eligible family, and keeps an unfinished attempt's identity and owned contracts through restarts. Both
+proofs (the multi-leg vertical and the single-leg call) passed on Sept 28; a passed proof is not run again. Passing
+records paper execution evidence, never a family's evidence.
 
 **The money table (the sprint, owner decision D4, Sept 26, 2026; the Probe rows since fast lane v2, Oct 7, 2026, and
 release L-D, Oct 9, 2026)**: real types under $2,000 of equity are exactly `debit_vertical`, `long_butterfly`,
@@ -3975,8 +4031,8 @@ is installed (**The settings layers**, "The reduced `swarm.json`").
 | `researcher.retire_guard_days` | `swarm.json` on the box | default 14 (Oct 1) | the validated-family guard: a researcher may not retire a family that holds a version which passed the validation line (in its state, in the tournament's verdict records, or archived by any evaluator adoption) last validated within this many days, unless a later validation of that version failed the line; a number at or below 0 turns it off; null, a boolean or a string reads as 14 | edit `swarm.json` |
 | `funding` (`enabled`, `every_seconds`, `lead_hours`, `repeat_hours`, `clear_factor`, `claude_out_usd`, `burn_window_hours`, `after_end_hours`, `fallback_every_seconds`, `fallback_flush_seconds`) | `swarm.json` on the box | defaults (Release A, #439): on, 300, per cliff, 12, 1.5, 2, 6, 48, 21600, 30 | the funding cliff alerts (**Funding cliffs and alerts**) | edit `swarm.json` |
 | `research.enabled`, `requests_day`, `family_requests_day`, `cycle_calls` | `swarm.json` on the box | defaults (Release B, #447): false, 300, 12, 2 | the research library on the House, and its lines: calls a UTC day for the floor, a family, a research cycle (**The research library**) | edit `swarm.json`; on only after the gateway and the House that carry it |
-| The money rules | `league/constitution.py` | the sprint's D4 table and the House live test's bounds (money `a3e2aa7c`); Release B adds the incubator's row (`42c4a3af`); V3-A part 1 leaves it as it is; fast lane v2 moves the Probe row (`da5c7542`); the incubator cap moves `incubator.max_loss_usd` to $75 (`1665c385`); release L-D moves the Probe row's `max_open` and adds `loss_basis`, `demotion`, `loss_window_sessions` and `loss_total_usd` (`0310779c`) | what real money may do | owner deploy; the standing grant ratifies it when the House starts on it (`--ratify` if it refuses) |
-| `options_money.probe` | `league/constitution.py` | from fast lane v2: `max_loss_share` 0.10, `contracts` 1, `open_per_family` 3, `family_share` 0.15, `floor_usd` 0, `loss_budget_usd` 400; from release L-D: `max_open` 8 (3 before), `loss_basis` "net" ("gross" before), `demotion` "dm1" ("dm0" before), `loss_window_sessions` 20 and `loss_total_usd` 400 (the owner's ceiling 800; the $400 in total before, with no window) | the Probe: one structure within 10% of E, at most `max_open` Probe positions at once, the Probe loss budget ($400 over the last `loss_window_sessions` NY sessions and `loss_total_usd` in total) read by `loss_basis`, live demotion by `demotion` (0 in `max_open`, `loss_budget_usd` or `loss_total_usd` stops Probe opens; "gross", 3, "dm0", a $400 total and a 2000-session window together are L-D's CON-only rollback) | owner deploy; the standing grant re-ratifies at the House's start; no fingerprint move |
+| The money rules | `league/constitution.py` | the sprint's D4 table and the House live test's bounds (money `a3e2aa7c`); Release B adds the incubator's row (`42c4a3af`); V3-A part 1 leaves it as it is; fast lane v2 moves the Probe row (`da5c7542`); the incubator cap moves `incubator.max_loss_usd` to $75 (`1665c385`); release L-D moves the Probe row's `max_open` and adds `loss_basis`, `demotion`, `loss_window_sessions` and `loss_total_usd` (`0310779c`); the Probe total at $800 moves `loss_total_usd` to 800 (`fdf2ac7c`, Oct 10) | what real money may do | owner deploy; the standing grant ratifies it when the House starts on it (`--ratify` if it refuses) |
+| `options_money.probe` | `league/constitution.py` | from fast lane v2: `max_loss_share` 0.10, `contracts` 1, `open_per_family` 3, `family_share` 0.15, `floor_usd` 0, `loss_budget_usd` 400; from release L-D: `max_open` 8 (3 before), `loss_basis` "net" ("gross" before), `demotion` "dm1" ("dm0" before), `loss_window_sessions` 20 and `loss_total_usd` 400; from the Probe total at $800 (Oct 10): `loss_total_usd` 800, the owner's ceiling (the $400 in total before L-D, with no window) | the Probe: one structure within 10% of E, at most `max_open` Probe positions at once, the Probe loss budget ($400 over the last `loss_window_sessions` NY sessions and `loss_total_usd` in total) read by `loss_basis`, live demotion by `demotion` (0 in `max_open`, `loss_budget_usd` or `loss_total_usd` stops Probe opens; "gross", 3, "dm0", a $400 total and a 2000-session window together are L-D's CON-only rollback) | owner deploy; the standing grant re-ratifies at the House's start; no fingerprint move |
 | `tournament.drift_screen` | `league/swarm/policy.json` and `swarm.json` on the box | false (the box since 15:53Z Oct 7; the policy from fast lane v2) | THE DRIFT SCREEN's refusal (direction counts since fast lane v2; its fit is reported by the `direction` and `fast_lane` jobs into `<state>/fast-lane-report.json`, and by `scripts/fast_lane_report.py` on copies) | edit the file; true restores the screen |
 | `options_money.incubator` | `league/constitution.py` | from Release B, with `max_loss_usd` 75 from the incubator cap (Oct 8, 2026; 50 before it): `max_loss_usd` 75, `contracts` 1, `max_open` 4, `week_loss_usd` 150, `min_sessions` 3, `min_trades` 10, `min_coverage` 0.80 | the incubator's caps and its pre-registered practice rule; each row may only tighten (`max_loss_usd` within $0-75), and 0 in `max_open`, `week_loss_usd` or `max_loss_usd` stops the route | owner deploy; the standing grant re-ratifies at the House's start (`--ratify` if it refuses; no evidence reset) |
 

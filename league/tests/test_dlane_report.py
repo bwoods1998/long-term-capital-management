@@ -158,11 +158,14 @@ class TheDoneMeter(Fixture):
         self.assertNotIn("house:rebound-live", families)
         self.assertIn("tuition-before-d1", families)
         self.assertEqual(out["rule"]["sha256"], "0d007696c9a6a1cbbd7d2cc345811359ab1cec389cf88f75ceff295bbbc48dca")
-        # DONE-RULE-A1 A1.2: 2.4% at 12 weeks, 3-session holds, under the budget in force, said with its source.
+        # DONE-RULE-A1 A1.2: the figure under the budget in force, said with its source: 2.7% at 12 weeks since THE
+        # PROBE TOTAL AT $800 (PREREG-T, Oct 10, 2026; 2.4% at 3-session holds under L-D's $400 total before it).
         zero = out["done"]["p_done_zero_edge"]
         self.assertEqual((zero["value"], zero["label"], zero["horizon"], zero["holds"]),
-                         (0.024, "P(Done | zero edge), simulation", "12 weeks", "3-session holds"))
+                         (0.027, "P(Done | zero edge), simulation", "12 weeks", "the House pool's own holds"))
         self.assertIn("A1.2", zero["source"])
+        self.assertIn("PREREG-T", zero["source"])
+        self.assertIn("$800 net in total", zero["variant"])
         self.assertEqual(out["rule"]["amendment_sha256"], dlane.DONE["amendment_sha256"])
         self.assertIsNone(out["done"]["all"]["latest"], "no reading before the 30th close")
         self.assertEqual(out["done"]["all"]["next_checkpoint"], 30)
@@ -666,7 +669,7 @@ class TheAmendment(Fixture):
         self.assertEqual((dm1["first_fire_at"], dm1["trades_to_first_fire"], dm1["real_trades"], dm1["sigma"]),
                          (17, 17, 0, 2.458545), "the audit's n >= 17 at the live sigma")
         self.assertAlmostEqual(dm1["r_floor"], 43.05 / 43.0, places=5)
-        self.assertEqual((row["probe_net_usd"], row["probe_closes"], row["program_loss_line_usd"]), (0.0, 0, -200.0))
+        self.assertEqual((row["probe_net_usd"], row["probe_closes"], row["program_loss_line_usd"]), (0.0, 0, -300.0))
         self.store.set_state("eqp-real", validation_r_sd_by_version={})
         self.assertEqual(R.dm1_reach(self.store, self.store.family("eqp-real"), [])["first_fire_at"], 11,
                          "DM1's fallback sigma 2.0: (1.645 x 2)^2 = 10.8")
@@ -674,13 +677,14 @@ class TheAmendment(Fixture):
     def test_a_zero_edge_figure_the_amendment_did_not_pin_says_so(self):
         out = R.zero_edge({"dlane": {"mode": "gate", "done_zero_edge_p": 0.13}})
         self.assertEqual(out["value"], 0.13)
-        self.assertIn("not the pinned 0.024", out["note"])
+        self.assertIn("not the pinned 0.027", out["note"])
         self.assertNotIn("horizon", out)
 
 
 class TheProgramLossLine(Fixture):
-    """DONE-RULE-A1 A1.3 (Oct 9, 2026): one program's own realized Probe net at or below -$200 (half the $400 Probe total)
-    retires it swarm-side; its real positions exit by the House's rules."""
+    """DONE-RULE-A1 A1.3 (Oct 9, 2026): one program's own realized Probe net at or below the program loss line (-$300
+    since THE PROBE TOTAL AT $800, PREREG-T, Oct 10, 2026; -$200 with the $400 before it) retires it swarm-side; its
+    real positions exit by the House's rules."""
 
     def ctx(self):
         self.alerts: list[tuple[str, str]] = []
@@ -693,43 +697,46 @@ class TheProgramLossLine(Fixture):
     def test_due_at_the_line_from_priced_probe_closes_only(self):
         self.fam("dir-a", lane="direction", band="probe")
         self.fam("dir-b", lane="direction", band="probe")
-        self.close("dir-a", pnl=-150.0, probe=True)
+        self.close("dir-a", pnl=-250.0, probe=True)
         self.close("dir-a", pnl=-49.99, probe=True)
         self.close("dir-a", route=":t", pnl=-500.0)               # tuition is no Probe loss
         self.close("dir-a", pnl=-80.0)                            # a Sized close (no probe mark) is no Probe loss
-        self.close("dir-b", pnl=-300.0, probe=True)
+        self.close("dir-b", pnl=-400.0, probe=True)
         self.close("dir-b", pnl=0.0, probe=True, status="unpriced_close", qty=1)
         out = self.report()
         rows = {r["family"]: r for r in out["program_loss"]["programs"]}
-        self.assertEqual((rows["dir-a"]["probe_net_usd"], rows["dir-a"]["due"]), (-199.99, False))
+        self.assertEqual((rows["dir-a"]["probe_net_usd"], rows["dir-a"]["due"]), (-299.99, False))
         self.assertEqual((rows["dir-b"]["unpriced"], rows["dir-b"]["due"]), (1, False), "an unpriced close may be a gain")
+        self.assertEqual((out["program_loss"]["line_usd"], out["program_loss"]["total_usd"]), (-300.0, 800.0))
         probe = next(p for p in out["probes"] if p["family"] == "dir-a")
-        self.assertEqual((probe["probe_net_usd"], probe["share_of_probe_total"]), (-199.99, 0.5))
+        self.assertEqual((probe["probe_net_usd"], probe["share_of_probe_total"]), (-299.99, 0.375))
         self.assertNotIn("PL1", [a["id"] for a in out["alarms"]])
         self.close("dir-a", pnl=-0.01, probe=True)
         out = self.report()
         self.assertEqual(out["program_loss"]["due"], ["dir-a"])
-        self.assertIn("dir-a $-200.00", next(a for a in out["alarms"] if a["id"] == "PL1")["text"])
+        pl1 = next(a for a in out["alarms"] if a["id"] == "PL1")["text"]
+        self.assertIn("dir-a $-300.00", pl1)
+        self.assertIn("($-300.00, dlane.program_loss_usd; DONE-RULE-A1 A1.3)", pl1)
 
     def test_the_job_retires_it_swarm_side_once_and_says_so(self):
         self.gate()
         self.fam("dir-a", lane="direction", band="probe")
         self.fam("alp-c", band="probe")
-        self.close("dir-a", pnl=-210.0, probe=True)
-        self.close("alp-c", pnl=-150.0, probe=True)
+        self.close("dir-a", pnl=-310.0, probe=True)
+        self.close("alp-c", pnl=-250.0, probe=True)
         self.close("dir-a", pnl=0.0, probe=True, status="open", qty=1, day="2026-10-19")   # its exit goes on
         out = R.run(self.ctx())
         self.assertEqual(out["retired"], ["dir-a"])
         fam = self.store.family("dir-a")
         self.assertEqual((fam["band"], bool(fam["retired_at"])), ("retired", True))
         self.assertIn("DONE-RULE-A1 A1.3", fam["retire_reason"])
-        self.assertIsNone(self.store.family("alp-c")["retired_at"], "-$150 is above the line")
+        self.assertIsNone(self.store.family("alp-c")["retired_at"], "-$250 is above the line")
         public = [e for e in self.store._all("SELECT kind, payload FROM events WHERE family='dir-a'") if e["kind"] == "swarm.retired"]
         self.assertEqual(json.loads(public[0]["payload"])["cause"], R.PROGRAM_LOSS_PUBLIC)
         self.assertFalse(any(ch.isdigit() for ch in R.PROGRAM_LOSS_PUBLIC), "the site's tape carries words, no figure")
         private = [json.loads(e["payload"]) for e in self.store._all("SELECT kind, payload FROM events WHERE family='dir-a'")
                    if e["kind"] == "swarm.dlane"]
-        self.assertEqual(private[0]["probe_net_usd"], -210.0)
+        self.assertEqual(private[0]["probe_net_usd"], -310.0)
         doc = json.loads((self.root / R.FILE).read_text())
         self.assertEqual(doc["program_loss"]["retired"], ["dir-a"])
         self.assertTrue(any("PL1: retired swarm-side 1 programs" in text for _, text in self.alerts))
@@ -741,7 +748,7 @@ class TheProgramLossLine(Fixture):
 
     def test_with_the_lane_off_the_line_still_holds_and_no_report_is_written(self):
         """The review of the weekend fixes (Oct 10, 2026): `dlane.mode` "off" rolled back the lane AND the program loss line
-        (the job returned before `program_losses`), so an alpha Probe program could drain the shared $400 total. The rule
+        (the job returned before `program_losses`), so an alpha Probe program could drain the shared total. The rule
         names one program whatever its lane: with the lane off the job still retires a due one, and writes no report."""
         (self.root / R.FILE).write_text(json.dumps({"at": "2026-10-19T01:30:00Z", "alarms": []}))
         before = (self.root / R.FILE).read_text()
@@ -752,7 +759,7 @@ class TheProgramLossLine(Fixture):
         out = R.run(self.ctx())
         self.assertEqual(out["status"], "skipped", "nothing due: the rollback's receipt, as before")
         self.assertEqual(out["program_loss"]["due"], [])
-        self.close("alp-a", pnl=-80.0, probe=True)
+        self.close("alp-a", pnl=-180.0, probe=True)
         out = R.run(self.ctx())
         self.assertEqual((out["ok"], out["lane"], out["retired"], out["alarms"]), (True, "off", ["alp-a"], ["PL1"]))
         self.assertEqual(self.store.family("alp-a")["band"], "retired")
@@ -768,7 +775,7 @@ class TheProgramLossLine(Fixture):
         self.assertEqual(self.report(settings={"dlane": {"mode": "gate", "program_loss_usd": -100}})["program_loss"]["due"],
                          ["dir-a"])
         loose = self.report(settings={"dlane": {"mode": "gate", "program_loss_usd": -1000}})["program_loss"]
-        self.assertEqual((loose["line_usd"], loose["due"]), (-200.0, []))
+        self.assertEqual((loose["line_usd"], loose["due"]), (-300.0, []))
 
 
 class TheReportFixes(Fixture):
@@ -870,6 +877,26 @@ class ReportedOnly(unittest.TestCase):
         self.assertIn("bound only by direction families' graveyard rows", row["now"])
         self.assertIn("retry ideas similar to dead alpha ones", row["cost"])
         self.assertIn("10.4% per program", row["cost"])
+
+    def test_the_header_lists_the_probe_total_and_the_program_line_with_their_costs(self):
+        """THE PROBE TOTAL AT $800 (PREREG-T, Oct 10, 2026): the total $400 -> $800 and the program loss line -$200 ->
+        -$300 are reported loosenings, each with its cost (the owner's goal of Oct 9, item 5), and the header's figures
+        follow the settings in force."""
+        from league.constitution import CONSTITUTION
+
+        rows = {r["rule"]: r for r in R.LOOSENED}
+        total = rows["the Probe total (PREREG-T, Oct 10)"]
+        line = rows["the program loss line (PREREG-T, Oct 10)"]
+        self.assertEqual(list(rows)[-2:], [total["rule"], line["rule"]])
+        self.assertEqual((total["was"][:4], total["now"][:4]), ("$400", "$800"))
+        self.assertEqual((line["was"][:5], line["now"][:5]), ("-$200", "-$300"))
+        for figure in ("17.8% -> 36.8%", "0.6% -> 4.4%", "-$396 -> -$679", "21% -> 48%", "-$327 -> -$231",
+                       "4.6% -> 5.5%", "11.6% -> 14.4%", "2.2% -> 2.7%", "6.9% -> 9.0%", "not alpha"):
+            self.assertIn(figure, total["cost"])
+        self.assertIn("$100 more of the shared total", line["cost"])
+        self.assertEqual(CONSTITUTION["options_money"]["probe"]["loss_total_usd"], total["now"][1:4])
+        self.assertEqual(dlane.cfg({"dlane": {"mode": "gate"}})["program_loss_usd"],
+                         float(line["now"][:5].replace("$", "")))
 
     def test_the_contamination_statement_names_windows_and_no_figure(self):
         """The operator's rule: no private study's figure in the repository. The statement names its windows and the

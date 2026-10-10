@@ -19,8 +19,9 @@ if HAVE:
 
 REPO = Path(__file__).resolve().parents[2]
 #: The money digest the grant is pinned to: `long_single` is no money rule and must not move it. R10's (Sept 29, 2026)
-#: was a3e2aa7c; the incubator's row (release B, Oct 1, 2026: `options_money.incubator`) moved it to this one.
-MONEY_DIGEST = "0310779c2f58eaf453835f1c989f130cf92a74198198b624cf021298a9e43945"  # release L-D (Oct 9, 2026; the incubator cap 1665c385 before it)
+#: was a3e2aa7c; the incubator's row (release B, Oct 1, 2026: `options_money.incubator`) moved it, then the incubator
+#: cap (Oct 8) to 1665c385, release L-D (Oct 9) to 0310779c, and the Probe total at $800 (Oct 10, 2026) to this one.
+MONEY_DIGEST = "fdf2ac7c1a446e39df9e27c8626fb86a954a3f5a939460406507a9b735f1d4c7"
 
 #: One program, two sides: a long call first, then (once the call is held) a long put. The side rule here is a clock so the
 #: numbers are by hand; a family's own rule is its mechanism's.

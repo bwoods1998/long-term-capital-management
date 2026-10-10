@@ -163,16 +163,18 @@ class TheProbeEnvelope(Fixture):
                          (probe["loss_basis"], float(probe["loss_budget_usd"]), probe["loss_window_sessions"],
                           float(probe["loss_total_usd"]), probe["max_open"]))
 
-    def test_the_constitution_in_force_is_release_lds(self):
+    def test_the_constitution_in_force_is_release_lds_with_the_800_total(self):
+        """Release L-D's rows, the total at the owner's $800 since THE PROBE TOTAL AT $800 (Oct 10, 2026; $400
+        before)."""
         env = self.envelope()
         self.check_constitution(env)
         self.assertEqual(env["constitution"], {"loss_basis": "net", "loss_budget_usd": 400.0, "loss_window_sessions": 20,
-                                               "loss_total_usd": 400.0, "max_open": 8, "demotion": "dm1"})
+                                               "loss_total_usd": 800.0, "max_open": 8, "demotion": "dm1"})
 
     def test_the_window_binds_when_an_old_gain_hides_a_recent_loss_from_the_total(self):
         """+$300 closed Aug 3 (outside the 20 sessions) and -$350 on Oct 14: NET in total is $50, the window's worst net
         stretch $350. D-1's single envelope (NET from inception against the $400) left $309.74 (6.19 units) and no
-        alarm; the window's envelope leaves $9.74 and A4 names it."""
+        alarm; the window's envelope leaves $9.74 and A4 names it (the $800 total leaves $709.74)."""
         self.fam("dir-a", lane="direction", band="probe")
         self.probe_close(300.0, "2026-08-03")
         self.probe_close(-350.0, "2026-10-14")
@@ -185,7 +187,7 @@ class TheProbeEnvelope(Fixture):
         self.assertEqual((gross["window_usd"], gross["total_usd"]), (350.0, 350.0))
         self.assertEqual((env["at_risk_usd"], env["open"], env["window_start"]), (40.26, 1, self.since))
         self.assertEqual((net["room_window_usd"], net["room_total_usd"], net["room_usd"], net["binding"]),
-                         (9.74, 309.74, 9.74, "window"))
+                         (9.74, 709.74, 9.74, "window"))
         self.assertEqual((env["room_net_usd"], env["room_net_units"], env["binding"]), (9.74, 0.19, "window"))
         self.assertEqual((env["window_net_usd"], env["realized_net_usd"]), (350.0, 50.0))
         self.assertEqual(env["probe_closes"], 2)
@@ -202,18 +204,19 @@ class TheProbeEnvelope(Fixture):
         self.assertIn("$400.00 in any 20 sessions binds", a4["text"])
 
     def test_the_total_binds_and_the_window_is_its_worst_net_stretch(self):
-        """-$300 closed Aug 3 (the total only), +$40 Oct 13 then -$60 Oct 14: the window's plain net is $20 but its worst
-        net stretch $60 (a gain offsets only the losses before it); NET in total $320. The total binds: $39.74 left."""
+        """-$700 closed Aug 3 (the total only), +$40 Oct 13 then -$60 Oct 14: the window's plain net is $20 but its
+        worst net stretch $60 (a gain offsets only the losses before it); NET in total $720. The $800 total binds:
+        $39.74 left (under L-D's $400 total, -$300 on Aug 3 left the same)."""
         self.fam("dir-a", lane="direction", band="probe")
-        self.probe_close(-300.0, "2026-08-03")
+        self.probe_close(-700.0, "2026-08-03")
         self.probe_close(40.0, "2026-10-13")
         self.probe_close(-60.0, "2026-10-14")
         self.held()
         self.noise()
         env = self.envelope()
         net, gross = env["by_basis"]["net"], env["by_basis"]["gross"]
-        self.assertEqual((net["window_usd"], net["total_usd"]), (60.0, 320.0))
-        self.assertEqual((gross["window_usd"], gross["total_usd"]), (60.0, 360.0))
+        self.assertEqual((net["window_usd"], net["total_usd"]), (60.0, 720.0))
+        self.assertEqual((gross["window_usd"], gross["total_usd"]), (60.0, 760.0))
         self.assertEqual((net["room_window_usd"], net["room_total_usd"], net["room_usd"], net["binding"]),
                          (299.74, 39.74, 39.74, "total"))
         self.assertEqual((gross["room_total_usd"], gross["room_usd"], gross["binding"]), (-0.26, 0.0, "total"))
@@ -221,7 +224,7 @@ class TheProbeEnvelope(Fixture):
         self.assertEqual((env["in_force"]["room_usd"], env["in_force"]["binding"]), ("39.74", "total"))
         a4 = self.alarm(env)
         self.assertEqual(a4["binding"], "total")
-        self.assertIn("$400.00 in total binds", a4["text"])
+        self.assertIn("$800.00 in total binds", a4["text"])
 
     def test_under_the_con_only_rollback_it_is_d1s_single_envelope_again(self):
         """Fast lane v2's rows (gross, a 2000-session window that holds every close, $400 in total): the window is the
@@ -276,7 +279,7 @@ class TheReportCarriesIt(Fixture):
 class TheLoosenedRowsNameTheRollingBudget(unittest.TestCase):
     def test_the_report_header_states_release_lds_two_envelopes(self):
         text = " ".join([*[" ".join(r.values()) for r in R.LOOSENED], *R.TIGHTENED])
-        self.assertIn("$400 of worst net stretch in any 20 sessions and $400 net in total", text)
+        self.assertIn("$400 of worst net stretch in any 20 sessions and $800 net in total", text)
         self.assertIn("rolling Probe budget (L9", text)
         self.assertTrue(text.isascii())
         for year in ("2020", "2021", "2025", "2026"):

@@ -321,6 +321,12 @@ def pre_ld():
     return patch.dict(CONSTITUTION["options_money"]["probe"], PRE_LD_PROBE, clear=True)
 
 
+def ld_as_set():
+    """The constitution's Probe row as release L-D set it (Oct 9, 2026): a $400 total, before the Probe total at
+    $800."""
+    return patch.dict(CONSTITUTION["options_money"]["probe"], loss_total_usd="400")
+
+
 class TheIncubatorCap(StandingCase):
     """The incubator cap (Oct 8, 2026): `incubator.max_loss_usd` $50 -> $75 moves the money digest from fast lane v2's
     da5c7542 to 1665c385. A grant pinned on the $50 row holds nothing on the $75 one until the standing grant re-ratifies
@@ -384,11 +390,18 @@ class TheReleaseLD(StandingCase):
     grant re-ratifies it at the House's start, on the owner's release change only. Its CON-only rollback (`loss_basis`
     "gross", `max_open` 3, `demotion` "dm0", `loss_total_usd` "400", `loss_window_sessions` 2000) is a digest of its own,
     320899d6, ratified the same way on the owner's deploy of it; `floor_box.py rollback` to the release before L-D brings
-    1665c385 back."""
+    1665c385 back. Run on L-D's own $400 total (`ld_as_set`): THE PROBE TOTAL AT $800 moved the digest again
+    (`TheProbeTotal800`)."""
 
     BEFORE = "1665c3858bce937617a339dfa56ae9a38a51e9fd763225ec10a645d3d5bafa08"
     LD = "0310779c2f58eaf453835f1c989f130cf92a74198198b624cf021298a9e43945"
     CON_ROLLBACK = "320899d675059182509a62b67d122afd2fdc54b08c59b2053a684d88fc8b55f2"
+
+    def setUp(self):
+        super().setUp()
+        patcher = ld_as_set()
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def pinned_before(self):
         with pre_ld():
@@ -425,6 +438,53 @@ class TheReleaseLD(StandingCase):
             out = self.standing(grant, release="r-ld-con", rows=owner_deploy(self.clock() - 60, release="r-ld-con"))
             self.assertEqual(out["action"], "ratified")
             self.assertEqual(grant.current()["policy"]["constitution_digest"], self.CON_ROLLBACK)
+            self.assertTrue(grant.allows_live(2))
+
+
+class TheProbeTotal800(StandingCase):
+    """THE PROBE TOTAL AT $800 (Oct 10, 2026; PREREG-T, under the owner's goal as re-set on Oct 9, item 4):
+    `loss_total_usd` "400" -> "800" moves the money digest from release L-D's 0310779c to fdf2ac7c (no fingerprint
+    move). A grant pinned on 0310779c holds nothing after the deploy until the standing grant re-ratifies it at the
+    House's start, on the owner's release change only. Its rollback (`loss_total_usd` "400") is L-D's digest again,
+    ratified the same way on the owner's deploy of it."""
+
+    LD = TheReleaseLD.LD
+    T800 = "fdf2ac7c1a446e39df9e27c8626fb86a954a3f5a939460406507a9b735f1d4c7"
+
+    def pinned_before(self):
+        with ld_as_set():
+            self.assertEqual(money_digest(), self.LD)
+            grant = self.enabled()
+        self.assertEqual(money_digest(), self.T800)
+        self.assertEqual(grant.current()["policy"]["constitution_digest"], self.LD)
+        return grant
+
+    def test_the_owners_deploy_re_ratifies_it_at_the_houses_start(self):
+        grant = self.pinned_before()
+        self.assertFalse(grant.allows_live(2), "real entries are held until it is ratified")
+        out = self.standing(grant, release="r-t800", rows=owner_deploy(self.clock() - 60, release="r-t800"))
+        self.assertEqual((out["action"], out["triggers"]), ("ratified", ["digest"]))
+        self.assertIn(f"money digest {self.LD[:12]} -> {self.T800[:12]}", grant.ratifications()[-1]["why"])
+        self.assertEqual(grant.current()["policy"]["constitution_digest"], self.T800)
+        self.assertTrue(grant.allows_live(2))
+
+    def test_the_updater_alone_never_ratifies_it(self):
+        grant = self.pinned_before()
+        out = self.standing(grant, release="main-abcdef123456", rows=updater_deploy(self.clock() - 60))
+        self.assertEqual(out["action"], "refused")
+        self.assertFalse(grant.allows_live(2))
+        self.assertEqual(grant.ratifications(), [])
+
+    def test_its_rollback_is_lds_digest_ratified_on_the_owners_deploy_of_it(self):
+        grant = self.pinned_before()
+        self.standing(grant, release="r-t800", rows=owner_deploy(self.clock() - 60, release="r-t800"))
+        self.clock.advance(HOUR)
+        with ld_as_set():
+            self.assertEqual(money_digest(), self.LD)
+            self.assertFalse(grant.allows_live(2))
+            out = self.standing(grant, release="r-t400", rows=owner_deploy(self.clock() - 60, release="r-t400"))
+            self.assertEqual(out["action"], "ratified")
+            self.assertEqual(grant.current()["policy"]["constitution_digest"], self.LD)
             self.assertTrue(grant.allows_live(2))
 
 

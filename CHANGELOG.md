@@ -29,6 +29,34 @@ any other deploy.
 The running House release is `20261010T033512Z-df7078e102a6` (main `9e2cf9fc`, the Probe roster, 03:36Z Oct 10), the
 gateway is `507b6118`, and the box's updater is on. What is built and not deployed is on branches.
 
+### The Probe total at $800 and the program line at -$300, on `feat/probe-total-800` (unreleased; an owner deploy; money digest `0310779c` -> `fdf2ac7c`; no evidence reset)
+
+- **Why** (PREREG-T, Claude's decision pre-registered privately on Oct 10, 2026 under the Probe roster R5 already live;
+  the owner's goal as re-set on Oct 9, item 4: "Probe loss budget: $400 net in any rolling 20 sessions and $800 net in
+  total"): the measured gain in Done at the owner's ceiling. The operator's simulation (cross-fit, the House pool,
+  roster 5, arrivals; index beta minus option costs, not alpha): P(Done) at 12 weeks 4.6% -> 5.5% (paired +0.92
+  points, SE 0.15), at 24 weeks 11.6% -> 14.4%; P(Done | zero edge) 2.2% -> 2.7% at 12 weeks, 6.9% -> 9.0% at 24.
+- **The rule:** `options_money.probe.loss_total_usd` "400" -> "800", the owner's ceiling (`league/constitution.py`);
+  `dlane.program_loss_usd` -200 -> -300 and `dlane.done_zero_edge_p` 0.024 -> 0.027 (`league/swarm/policy.json`; the
+  line's bound in `dlane.cfg` -300 to -25, tighten only; `dlane.ZERO_EDGE` names the figure's source). Unchanged: the
+  rolling $400 in any 20 sessions, the 10% cap, `open_per_family` 3, `max_open` 8, DM1, the kill switch, the daily stop
+  and the drawdown stop; open Probe risk stays at or under $400.
+- **Cost** (a loosening, both rows in the `dlane` report's `LOOSENED` header): P(the running Probe net below -$400
+  within 12 weeks) 17.8% -> 36.8%, below -$600 0.6% -> 4.4%; the 12-week net's 5th percentile -$396 -> -$679; P(the 60%
+  drawdown stop trips by 24 weeks) 21% -> 48%; mean 12-week net +$22 -> +$25, median -$327 -> -$231. One program may
+  spend $100 more of the shared total before it is retired.
+- **Identities:** money digest `0310779c` -> `fdf2ac7c`; constitution digest `ca89ff8a` -> `0adb4f0e`; the execution
+  fingerprint (`31a7e921`), the Gym bundle and the gate contract (`397b22b772b3`) unchanged (nothing in `league/live/`
+  or `league/gym/`). The standing grant re-ratifies on `fdf2ac7c` at the House's start on the owner's deploy (the
+  updater alone never does); no real entry until it has.
+- **Rollback:** `loss_total_usd` "400" and `dlane.program_loss_usd` -200 (with `done_zero_edge_p` 0.024), one owner
+  deploy: the money digest back to `0310779c`, re-ratified the same way; no fingerprint move.
+- **Proof.** `test_constitution`, `test_ld_release` (the two-envelope tests on the $800 in force and on L-D's $400,
+  `AS_SET`), `test_standing_grant` (`TheProbeTotal800`: the owner's deploy re-ratifies, the updater never does, the
+  rollback is L-D's digest), `test_dlane`, `test_dlane_report` (the line at -300, the header's two new rows),
+  `test_dlane_ld_joins`, `test_fast_lane_v2`, `test_live_long_single`. Operator's page: **The Probe total at $800 and
+  the program line at -$300** at the top of `docs/operations.md`.
+
 ### 03:36Z Oct 10, 2026: the Probe roster (#523), House `20261010T033512Z-df7078e102a6`, main `9e2cf9fc`; `dlane.roster` 5 at 03:48Z
 
 Owner deploy (no gateway change): no order in flight at 03:35:03Z; nightly stopped, deployed, promoted 03:36:06Z (rollback

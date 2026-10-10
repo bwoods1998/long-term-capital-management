@@ -19,8 +19,9 @@ operator clears it (swarm.json `dlane.k5_clear` true, or deleting the kv). The j
 and K5 is armed again at -$600 below that net (the review of Oct 9, 2026). While `dlane.k5_clear` is true K5 can
 neither hold nor trip: the report raises a K5 warning every run until the operator takes it out. A tightening, never a
 trade, never an order. The second write (DONE-RULE-A1 A1.3, Oct 10, 2026; `retire_due`): a program whose own realized
-Probe net is at or below the program loss line (`dlane.program_loss_usd`, -$200, half the $400 Probe total) is retired
-swarm-side, in the same writable open after the report; its real positions exit by the House's rules (alarm PL1).
+Probe net is at or below the program loss line (`dlane.program_loss_usd`: -$300 since THE PROBE TOTAL AT $800, PREREG-T,
+Oct 10, 2026; -$200 before it) is retired swarm-side, in the same writable open after the report; its real positions
+exit by the House's rules (alarm PL1).
 
 WITH THE LANE OFF (`dlane.mode` "off", THE ROLLBACK) the job writes no report and returns a `skipped` receipt, but for
 the program loss line: since the review of the weekend fixes (Oct 10, 2026) it still reads each program's realized Probe
@@ -69,8 +70,9 @@ constants), read exactly as pinned:
   (and the research window has ended); a final reading is frozen (carried from the previous report as it was). A Done claim is a holding FINAL checkpoint (the meter's `holds`);
   A8 (an `info` alert) names one the first time a report sees it final.
 - BESIDE IT, ALWAYS: P(Done | zero edge) (`dlane.done_zero_edge_p`, labelled as a simulation; since DONE-RULE-A1 A1.2
-  the pinned 2.4% with its horizon, holds, budget and source, `zero_edge`); Net after costs (`net_after_costs`, from the
-  close economics over the same days); the same-risk buy-and-hold two ways (below); the world-conditional
+  the pinned figure with its horizon, holds, budget and source, `zero_edge`: 2.7% since THE PROBE TOTAL AT $800, Oct
+  10, 2026, 2.4% under L-D's $400 total before it); Net after costs (`net_after_costs`, from the close economics over
+  the same days); the same-risk buy-and-hold two ways (below); the world-conditional
   false-positive rate beside the unconditional one for the screen that admitted each Candidate, Probe or Sized family
   (`probes`, with each program's own realized Probe net and when DM1 can first fire, A1.3); every loosened rule with its
   cost (`LOOSENED`); the contamination statement (`CONTAMINATION`); and `dlane.LABEL` on every direction figure.
@@ -93,10 +95,11 @@ THE REST OF THE REPORT:
   ({screen, fp_lane_mixed, fp_lane_2224, receipt}: the passed look of the version it trades, `trade_screens`), and the
   contamination statement beside them.
 - `probe_envelope`: THE PROBE LOSS BUDGET as release L-D's money table reads it from the constitution (`loss_basis`
-  "net", $400 of worst net stretch in any `loss_window_sessions` 20 sessions AND $400 net in total, `max_open`,
-  `demotion`): the code in force's own figure (`fast_lane.probe_budget`, which names its basis and the envelope that
-  binds), and under each basis, GROSS and NET, the window's and the total's realized figures (`real.probe_figures`, told
-  the basis by name), both rooms, the binding one and the room in units of today's cap.
+  "net", $400 of worst net stretch in any `loss_window_sessions` 20 sessions AND `loss_total_usd` net in total, $800
+  since Oct 10, 2026 and $400 before, `max_open`, `demotion`): the code in force's own figure
+  (`fast_lane.probe_budget`, which names its basis and the envelope that binds), and under each basis, GROSS and NET,
+  the window's and the total's realized figures (`real.probe_figures`, told the basis by name), both rooms, the binding
+  one and the room in units of today's cap.
 - `account`: the equity change since E0 (the first equity reading this report saw: it is written into the file and read
   back next day) beside the agents' and the House's realized closes since then and the account's other activity; what
   is left is labelled unexplained (open positions' marks included).
@@ -214,8 +217,8 @@ LOOSENED: tuple[dict[str, str], ...] = (
              "adoption rule (every upper bound at most 12%): a post-hoc loosening of that ceiling. The lane's rate "
              "stays under the owner's 15% per program; all cells (verticals included) reach 15.01% at the upper bound "
              "on 2022-24 worlds, which is why D2 runs only while the lane is calls only. Weak discrimination: it "
-             "passes mostly programs whose screen windows rose; the Probe loss budget (release L-D: $400 of worst net "
-             "stretch in any 20 sessions and $400 net in total) bounds the money"},
+             "passes mostly programs whose screen windows rose; the Probe loss budget ($400 of worst net stretch "
+             "in any 20 sessions and $800 net in total since Oct 10; $400 in total at release L-D) bounds the money"},
     {"rule": "the leakage alarm", "was": "one count over every look: 10 looks, over 30% passing",
      "now": "per lane: alpha unchanged; direction 10 looks, over 60% passing",
      "cost": "a real holdout leak in a direction program trips later; the paid review and audit and the post-cutoff "
@@ -259,11 +262,27 @@ LOOSENED: tuple[dict[str, str], ...] = (
      "now": "NET over closed Probe positions (Sized never offsets): in the window its worst net stretch (a gain offsets "
             "only the losses closed before it), in total from inception",
      "cost": "P(net <= -$360 in 8 weeks, no edge) 0.19 -> 0.27; gross Probe losses can pass $400"},
-    {"rule": "release L-D: Probe slots", "was": "3", "now": "8 (the $400 envelopes bind first)",
+    {"rule": "release L-D: Probe slots", "was": "3", "now": "8 (the $400 window's envelope binds first)",
      "cost": "P(net <= -$360) 0.30 -> 0.35; P(net < -$400) 2.1%, through Sized"},
     {"rule": "release L-D: DM1 demotion", "was": "D5's loss leg (-3 x mean maximum loss)",
      "now": "sticky demotion when 10+ real trades sum below -1.645 sigma sqrt(n)",
      "cost": "a losing program trades longer: P(net <= -$360) 0.27 -> 0.30"},
+    # THE PROBE TOTAL AT $800 (PREREG-T, Oct 10, 2026, under the Probe roster): the constitution's total and the program
+    # loss line beside it, measured together; the figures are the operator's pre-registered simulation's (no year named:
+    # the header carries none).
+    {"rule": "the Probe total (PREREG-T, Oct 10)", "was": "$400 net in total from inception (release L-D's setting)",
+     "now": "$800 net in total, the owner's ceiling; the $400 in any 20 sessions, the 10% cap, 3 a family, 8 slots, "
+            "DM1 and the stops unchanged (rollback: options_money.probe.loss_total_usd 400, an owner deploy)",
+     "cost": "simulation (cross-fit, the House pool, roster 5, arrivals; index beta minus option costs, not alpha): "
+             "P(the running Probe net below -$400 within 12 weeks) 17.8% -> 36.8%, below -$600 0.6% -> 4.4%; the "
+             "12-week net's 5th percentile -$396 -> -$679; P(the 60% drawdown stop trips by 24 weeks) 21% -> 48%; mean "
+             "12-week net +$22 -> +$25, median -$327 -> -$231; for P(Done) 4.6% -> 5.5% at 12 weeks and 11.6% -> 14.4% "
+             "at 24, and P(Done | zero edge) 2.2% -> 2.7% and 6.9% -> 9.0%"},
+    {"rule": "the program loss line (PREREG-T, Oct 10)", "was": "-$200 (DONE-RULE-A1 A1.3)",
+     "now": "-$300 (dlane.program_loss_usd; rollback -200 with the $400 total, an owner deploy)",
+     "cost": "one program may lose $300 of its own realized Probe net, not $200, before the dlane job retires it, "
+             "so a bad program spends up to $100 more of the shared total (3/8 of the $800, where -$200 was half the "
+             "$400); measured only together with the $800 total (the row above, whose costs are the pair's)"},
 )
 #: And what D-1 TIGHTENED (said beside the loosenings), with release L-D's rolling budget, a tightening of its NET.
 TIGHTENED: tuple[str, ...] = (
@@ -289,15 +308,16 @@ TIGHTENED: tuple[str, ...] = (
     # DONE-RULE-A1 (pinned Oct 9, 2026 ~20:50Z, before the first Probe close; read by the code since the weekend fixes).
     "DONE-RULE-A1 A1.1: a Done claim also needs 2 programs with 5+ matched replay closes each, every one within the gap: "
     "zero replay evidence never passes (it did: B1)",
-    "DONE-RULE-A1 A1.3: a program whose own realized Probe net is at or below dlane.program_loss_usd (-$200, half the $400 "
-    "total) is retired swarm-side by the dlane job (exits go on), since DM1 cannot fire before about 17 real trades",
+    "DONE-RULE-A1 A1.3: a program whose own realized Probe net is at or below dlane.program_loss_usd (-$300 since "
+    "Oct 10, with the $800 total; -$200 before) is retired swarm-side by the dlane job (exits go on), since DM1 cannot "
+    "fire before about 17 real trades",
     "DONE-RULE-A1 A1.4 and item 7: a checkpoint holds only with research 24/7 read per UTC day, and a Done claim is made "
     "only on a FINAL reading (replays landed, broker fees posted), frozen once final",
     "release L-D's rolling Probe budget (L9, beside NET above): the $400 is a wall over any 20 New York sessions, read "
-    "as the window's worst net stretch, AND $400 net in total from inception (the owner's ceiling is $800; raising it "
-    "is CON-only); a bad stretch that ages out of the window frees no room in the total. Measured cost (the budget "
-    "simulation, post-hoc, as traded, holds 2/3/5): P(Done) at 12 weeks 6.0/3.3/1.0% against 10.0/7.6/4.5% with the "
-    "$400 total alone, at 24 weeks 11.1/8.7/5.9% against 11.0/9.0/7.6%",
+    "as the window's worst net stretch, AND a net total from inception ($400 as L-D set it; the owner's $800 since "
+    "Oct 10, a loosening listed with its cost); a bad stretch that ages out of the window frees no room in the total. "
+    "Measured cost of the window (the budget simulation, post-hoc, as traded, holds 2/3/5): P(Done) at 12 weeks "
+    "6.0/3.3/1.0% against 10.0/7.6/4.5% with the $400 total alone, at 24 weeks 11.1/8.7/5.9% against 11.0/9.0/7.6%",
 )
 
 
@@ -1233,7 +1253,7 @@ def program_losses(positions: Sequence[Mapping[str, Any]], corrections: Mapping[
     tuition, `info.probe` true, as the money table's Probe tally marks them) since `since`, the book's cash plus the
     broker's posted fee correction, beside its open Probe positions' maximum loss. A program is DUE when it is alive, every
     Probe close of it is priced (an unpriced one may still be a gain: it waits for the House's reconciliation) and that
-    net is at or below the program loss line (`dlane.program_loss_usd`, -$200: half the $400 Probe total). The `dlane` job
+    net is at or below the program loss line (`dlane.program_loss_usd`, -$300 since Oct 10, 2026). The `dlane` job
     retires a due program swarm-side (`run`): a tightening, never a trade; its real positions exit by the House's rules.
     Every lane: the pinned rule names one program, whatever its lane, and the line holds with the direction lane off too
     (`lane_off`). {line_usd, total_usd, programs: [...], due}."""
@@ -1858,15 +1878,16 @@ def pl1_alarms(losses: Mapping[str, Any] | None) -> list[dict[str, Any]]:
     line = _num((losses or {}).get("line_usd"))
     return [{"id": "PL1", "level": "warning", "families": [p["family"] for p in due][:12], "line_usd": line,
              "text": f"PL1: {len(due)} programs' own realized Probe net is at or below the program loss line "
-                     f"(${line or 0:,.2f}, half the Probe total; DONE-RULE-A1 A1.3): "
+                     f"(${line or 0:,.2f}, dlane.program_loss_usd; DONE-RULE-A1 A1.3): "
                      + ", ".join(f"{p['family']} ${p['probe_net_usd']:,.2f}" for p in due[:6])
                      + ". The dlane job retires them swarm-side; their real positions exit by the House's rules"}]
 
 
 def zero_edge(settings: Mapping[str, Any] | None) -> dict[str, Any]:
     """P(Done | zero edge) beside the meter (decision 8; DONE-RULE-A1 A1.2, the readiness audit's M10): the setting's
-    figure, and when it is the pinned one (`dlane.ZERO_EDGE`, 2.4%) what it is: its horizon, holds, the budget variant
-    and its source. Another figure is a setting's and says so: the claim states the figure for the rules in force."""
+    figure, and when it is the pinned one (`dlane.ZERO_EDGE`, 2.7% since Oct 10, 2026) what it is: its horizon, holds,
+    the budget variant and its source. Another figure is a setting's and says so: the claim states the figure for the
+    rules in force."""
     from ..swarm import dlane
 
     value = dlane.cfg(settings)["done_zero_edge_p"]
@@ -2062,7 +2083,7 @@ def run(ctx: Any) -> dict[str, Any]:
 
 
 #: The public cause of a program-loss retirement (a `swarm.retired` event feeds the site's tape): words, no figure.
-PROGRAM_LOSS_PUBLIC = "retired: its own realized Probe losses reached the program loss line, half the shared Probe budget"
+PROGRAM_LOSS_PUBLIC = "retired: its own realized Probe losses reached the program loss line"
 
 
 def retire_due(root: Path, out: dict[str, Any], settings: Mapping[str, Any] | None) -> list[str]:
@@ -2087,8 +2108,9 @@ def retire_due(root: Path, out: dict[str, Any], settings: Mapping[str, Any] | No
     try:
         for fid, row in sorted(rows.items()):
             why = (f"DONE-RULE-A1 A1.3: its own realized Probe net ${row['probe_net_usd']:,.2f} over "
-                   f"{row['probe_closes']} Probe closes is at or below the program loss line ${line or 0:,.2f} (half the "
-                   "$400 Probe total): retired swarm-side by the dlane job; its real positions exit by the House's rules")
+                   f"{row['probe_closes']} Probe closes is at or below the program loss line ${line or 0:,.2f} "
+                   "(dlane.program_loss_usd): retired swarm-side by the dlane job; its real positions exit by the "
+                   "House's rules")
             if store.retire(fid, why, public_reason=PROGRAM_LOSS_PUBLIC):
                 store.note(fid, f"Retired by the dlane job: {why}")
                 store.event("swarm.dlane", fid, {"action": "program_loss_retire", "probe_net_usd": row["probe_net_usd"],
@@ -2102,7 +2124,7 @@ def retire_due(root: Path, out: dict[str, Any], settings: Mapping[str, Any] | No
         if alarm.get("id") == "PL1":
             alarm["retired"] = list(retired)
             alarm["text"] = (f"PL1: retired swarm-side {len(retired)} programs whose own realized Probe net is at or below "
-                             f"the program loss line (${line or 0:,.2f}, half the Probe total; DONE-RULE-A1 A1.3): "
+                             f"the program loss line (${line or 0:,.2f}, dlane.program_loss_usd; DONE-RULE-A1 A1.3): "
                              + (", ".join(f"{f} ${rows[f]['probe_net_usd']:,.2f}" for f in retired[:6]) or "none new")
                              + ". Their real positions exit by the House's rules; nothing else is touched")
     return retired
@@ -2129,7 +2151,7 @@ def lane_off(ctx: Any, root: Path, settings: Mapping[str, Any] | None) -> dict[s
     """THE PROGRAM LOSS LINE WITH THE LANE OFF (the review of the weekend fixes, Oct 10, 2026). DONE-RULE-A1 A1.3 names
     one program whatever its lane, and `dlane.mode` "off" rolls back the direction lane, not the pinned rule: before this
     the job returned at once, so with the lane rolled back an alpha Probe program (or a direction family gone back to
-    alpha) could lose past the line and drain the shared $400 Probe total with no PL1 and no retirement. So the job still
+    alpha) could lose past the line and drain the shared Probe total with no PL1 and no retirement. So the job still
     reads each program's own realized Probe net (`program_losses`, read-only as the report is) and retires a due one
     (`retire_due`), each PL1 a House warning. It writes no report: `dlane-report.json` is left as the lane last wrote it
     (the `stall` job does not read it while the lane is off), and the receipt carries the figures. Nothing due (or no

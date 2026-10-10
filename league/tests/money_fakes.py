@@ -3,11 +3,12 @@
 Release L-D moved five rows of the constitution's `options_money.probe`: `loss_basis` "gross" -> "net", `max_open` 3 -> 8,
 `demotion` "dm0" -> "dm1", and THE ROLLING PROBE BUDGET's new `loss_window_sessions` 20 and `loss_total_usd` "400" (the
 $400 became a rolling 20-session figure beside a $400 total, the operator's setting of Oct 9 inside the owner's $800
-ceiling). Their rollback values ("gross", 3, "dm0", a 2000-session window that holds every close since the fast lane,
-and a $400 total, the value in force) are fast lane v2's rules, and setting them is the CON-only rollback
-(docs/operations.md, **Release L-D**). The tests of fast lane v2's rules (the gross budget, three Probe slots, D5 and the
-forward-negative demotion) run on `rollback_table()`, so they pin the rollback path to what fast lane v2 did; the tests
-of L-D's rules run on the constitution in force.
+ceiling; the total is the $800 itself since THE PROBE TOTAL AT $800, Oct 10, 2026). Their rollback values ("gross", 3,
+"dm0", a 2000-session window that holds every close since the fast lane, and a $400 total, L-D's setting) are fast
+lane v2's rules, and setting them is the CON-only rollback (docs/operations.md, **Release L-D**). The tests of fast
+lane v2's rules (the gross budget, three Probe slots, D5 and the forward-negative demotion) run on
+`rollback_table()`, so they pin the rollback path to what fast lane v2 did; the tests of L-D's rules run on the
+constitution in force.
 """
 
 from __future__ import annotations

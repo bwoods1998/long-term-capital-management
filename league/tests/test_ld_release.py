@@ -1,12 +1,13 @@
 """RELEASE L-D (Oct 9, 2026; the plan of Oct 9, "L: Release L-D", and its critic): THE PROBE LOSS BUDGET read NET (L1), 8
 Probe slots inside the $400 envelope with the Probe room capped at the budget (L2), DM1's demotion behind its switch with
 its sigma read from the swarm's family state (L3), and THE ROLLING PROBE BUDGET, $400 in any 20 sessions beside a total
-from inception (L9): the owner's ceiling is $800, and the constitution sets $400 (the operator's decision of Oct 9), so
-the two-envelope mechanics are checked on `table(loss_total_usd="800")` (`CEILING`) and the setting in force beside
-them. The marketable natural limit `{"natural": k}` (L5) was dropped from L-D on Oct 9 (the operator's decision,
-about 07:40Z): it changed `league/gym/legs.py` and `PROGRAM.md`, which moves the Gym bundle, so the adoption would have
-re-run every stored Train and Validation result on the Gym boxes the direction lane needs; it waits for a planned Gym
-release, and its tests went with it.
+from inception (L9): the owner's ceiling is $800; the constitution set $400 (the operator's decision of Oct 9) and sets
+the $800 since THE PROBE TOTAL AT $800 (Oct 10, 2026; PREREG-T), so the two-envelope mechanics are checked on
+`table(loss_total_usd="800")` (`CEILING`, the setting in force) and on L-D's setting beside them (`AS_SET`, the
+$800's rollback). The marketable natural limit `{"natural": k}` (L5) was dropped from L-D on Oct 9 (the operator's
+decision, about 07:40Z): it changed `league/gym/legs.py` and `PROGRAM.md`, which moves the Gym bundle, so the adoption
+would have re-run every stored Train and Validation result on the Gym boxes the direction lane needs; it waits for a
+planned Gym release, and its tests went with it.
 
 Each L-D rule has a rollback value ("gross", 3, "dm0": the CON-only rollback, `money_fakes.rollback_table`), and each is
 checked here against a FROZEN COPY of fast lane v2's code at ccfa48d5 (`v2_probe_tally`, `v2_demotion`, `v2_band_for`):
@@ -39,8 +40,10 @@ if HAVE:
 
 E = D("1289.34")        # the sizing equity at the start of day Oct 8, 2026 (the plan's E)
 #: THE ROLLING PROBE BUDGET at the owner's ceilings ($400 in any 20 sessions, $800 in total), the two envelopes at
-#: different figures; the constitution sets the total to $400 (Oct 9).
+#: different figures; the constitution set the total to $400 on Oct 9 and to $800 since Oct 10 (PREREG-T).
 CEILING = table(loss_total_usd="800")
+#: Release L-D's setting of Oct 9: both envelopes at $400 (THE PROBE TOTAL AT $800's rollback, `loss_total_usd` "400").
+AS_SET = table(loss_total_usd="400")
 
 
 # ===================================================================================== fast lane v2, frozen (ccfa48d5)
@@ -143,11 +146,14 @@ class TheRows(unittest.TestCase):
         self.assertEqual((t.probe_loss_basis, t.probe_max_open, t.probe_demotion), ("net", 8, "dm1"))
         r = rollback_table()
         self.assertEqual((r.probe_loss_basis, r.probe_max_open, r.probe_demotion), ("gross", 3, "dm0"))
-        # THE ROLLING PROBE BUDGET: $400 over 20 sessions and $400 in total (the operator's setting of Oct 9 inside the
-        # owner's $800 ceiling, the row's bound); the rollback's a window of 2000 and the same $400.
-        self.assertEqual((probe["loss_budget_usd"], probe["loss_window_sessions"], probe["loss_total_usd"]), ("400", 20, "400"))
-        self.assertEqual((t.probe_loss_budget, t.probe_loss_window, t.probe_loss_total), (D("400"), 20, D("400")))
-        self.assertEqual(CEILING.probe_loss_total, D("800"))
+        # THE ROLLING PROBE BUDGET: $400 over 20 sessions and $800 in total since Oct 10 (THE PROBE TOTAL AT $800, the
+        # owner's ceiling, the row's bound; $400 as the operator set it on Oct 9, `AS_SET`); the rollback's a window of
+        # 2000 and a $400 total.
+        self.assertEqual((probe["loss_budget_usd"], probe["loss_window_sessions"], probe["loss_total_usd"]), ("400", 20, "800"))
+        self.assertEqual((t.probe_loss_budget, t.probe_loss_window, t.probe_loss_total), (D("400"), 20, D("800")))
+        self.assertEqual(CEILING, t, "the setting in force is the owner's ceiling")
+        self.assertEqual((AS_SET.probe_loss_budget, AS_SET.probe_loss_window, AS_SET.probe_loss_total),
+                         (D("400"), 20, D("400")))
         self.assertEqual((r.probe_loss_budget, r.probe_loss_window, r.probe_loss_total), (D("400"), 2000, D("400")))
         self.assertEqual(OPTIONS_MONEY_BOUNDS["probe.loss_window_sessions"], ("20", "2000"))
         self.assertEqual(OPTIONS_MONEY_BOUNDS["probe.loss_total_usd"], ("0", "800"))
@@ -172,15 +178,18 @@ class TheRows(unittest.TestCase):
     def test_the_digests_moved(self):
         from league.constitution import PINNED_DIGEST, digest, money_digest
 
-        self.assertEqual(money_digest(), "0310779c2f58eaf453835f1c989f130cf92a74198198b624cf021298a9e43945")
+        # L-D moved it 1665c385 -> 0310779c (Oct 9); THE PROBE TOTAL AT $800 0310779c -> fdf2ac7c (Oct 10, PREREG-T).
+        self.assertEqual(money_digest(), "fdf2ac7c1a446e39df9e27c8626fb86a954a3f5a939460406507a9b735f1d4c7")
         self.assertEqual(digest(), PINNED_DIGEST)
         self.assertEqual(money_digest(constitution(**FAST_LANE_V2)),
                          "320899d675059182509a62b67d122afd2fdc54b08c59b2053a684d88fc8b55f2", "the CON-only rollback's")
         for key, value in (("loss_basis", "gross"), ("max_open", 3), ("demotion", "dm0"), ("loss_window_sessions", 2000),
-                           ("loss_total_usd", "800")):
+                           ("loss_total_usd", "400")):
             self.assertNotEqual(money_digest(constitution(**{key: value})), money_digest(), key)
-        # The rollback's $400 total is the value in force (Oct 9): raising it to the owner's $800 is a money-digest move.
-        self.assertEqual(money_digest(constitution(loss_total_usd="400")), money_digest())
+        # The $800 total is the value in force (Oct 10): its rollback to L-D's $400 is L-D's money digest again.
+        self.assertEqual(money_digest(constitution(loss_total_usd="800")), money_digest())
+        self.assertEqual(money_digest(constitution(loss_total_usd="400")),
+                         "0310779c2f58eaf453835f1c989f130cf92a74198198b624cf021298a9e43945", "L-D's")
 
 
 # ================================================================================================ L1: the net budget
@@ -883,8 +892,9 @@ class TheRollingOutcome(unittest.TestCase):
     """THE ROLLING PROBE BUDGET as an OUTCOME (the review of release L-D, Oct 9, 2026): Probe opens admitted only by
     `money.plan_open` on `real.probe_figures`, closed later at a full loss, a partial one or a lottery-shaped gain (up to
     4x the maximum loss), never leave more than $400 of net realized Probe losses in ANY 20 NYSE sessions nor more than
-    the total net from inception, under "net" with the window's worst stretch: $800 at the owner's ceiling (`CEILING`),
-    $400 as set (Oct 9). With the window's plain net (the build before the review) the same runs do breach the $400."""
+    the total net from inception, under "net" with the window's worst stretch: $800 at the owner's ceiling (`CEILING`,
+    in force since Oct 10), $400 as set on Oct 9 (`AS_SET`). With the window's plain net (the build before the review)
+    the same runs do breach the $400."""
 
     setUp = TheNetTally.setUp
 
@@ -964,8 +974,9 @@ class TheRollingOutcome(unittest.TestCase):
         self.assertGreater(reused, 0, "gains were re-risked: some window's gross Probe losses passed $400")
 
     def test_as_set_no_20_session_window_nor_the_total_holds_more_than_400_net(self):
-        """The constitution in force (Oct 9): the same seasons with a $400 total beside the window."""
-        t = M.Table.from_constitution()
+        """Release L-D's setting (Oct 9; the $800 total's rollback): the same seasons with a $400 total beside the
+        window."""
+        t = AS_SET
         self.assertEqual((t.probe_loss_budget, t.probe_loss_total), (D("400"), D("400")))
         bound = 0
         for seed in range(8):
@@ -1005,8 +1016,9 @@ class TheRollingOutcome(unittest.TestCase):
 
 
 class TheTwoEnvelopes(unittest.TestCase):
-    """`money.plan_open`: a Probe open fits BOTH the window's $400 and the total's (the owner's ceiling, $800, here; $400
-    as set), each counting every real position's open maximum loss; the refusal names the one that binds."""
+    """`money.plan_open`: a Probe open fits BOTH the window's $400 and the total's (the owner's ceiling, $800, here and
+    in force since Oct 10; $400 as set on Oct 9), each counting every real position's open maximum loss; the refusal
+    names the one that binds."""
 
     def setUp(self):
         self.t = CEILING
@@ -1029,8 +1041,8 @@ class TheTwoEnvelopes(unittest.TestCase):
         self.assertEqual(self.plan("128.93", probe_realized="400", table_=rollback_table()).qty, 0)
 
     def test_as_set_the_total_binds_at_400_and_an_aged_out_loss_frees_no_room(self):
-        """The constitution in force (Oct 9): both envelopes at $400."""
-        t = M.Table.from_constitution()
+        """Release L-D's setting (Oct 9; the $800 total's rollback): both envelopes at $400."""
+        t = AS_SET
         self.assertEqual(self.plan(10, table_=t, probe_realized="0", probe_realized_total="390").qty, 1, "$400 exactly")
         refused = self.plan("10.01", table_=t, probe_realized="0", probe_realized_total="390")
         self.assertEqual(refused.reason, "probe: the loss budget in total: $390.00 could already be lost (realized net "
@@ -1162,8 +1174,17 @@ class TheRollingBudgetLive(LiveCase):
         self.assertEqual(len(self.opens()), 1, self.refusals())
         self.assertFalse(any(w.startswith("probe: the loss budget") for w in self.refusals()), self.refusals())
 
-    def test_as_set_the_same_old_loss_stops_it_by_the_400_total(self):
+    def test_in_force_since_oct_10_the_same_old_loss_lets_probe_trading_resume(self):
+        """THE PROBE TOTAL AT $800 (Oct 10, 2026): the constitution in force is the owner's ceiling."""
         live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 600})])
+        self.lost(live, -400.0, dt.date(2026, 8, 3))
+        self.run_to(9, 33)
+        self.assertEqual(len(self.opens()), 1, self.refusals())
+        self.assertFalse(any(w.startswith("probe: the loss budget") for w in self.refusals()), self.refusals())
+
+    def test_as_set_the_same_old_loss_stops_it_by_the_400_total(self):
+        """Release L-D's setting (Oct 9; the $800 total's rollback)."""
+        live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 600})], table=AS_SET)
         self.lost(live, -400.0, dt.date(2026, 8, 3))
         self.run_to(9, 33)
         self.assertEqual(self.opens(), [])
@@ -1187,7 +1208,7 @@ class TheRollingBudgetLive(LiveCase):
         self.assertTrue(any(w.startswith("probe: the loss budget in total: $790.00") for w in self.refusals()),
                         self.refusals())
         [told] = [t for lvl, t in self.alerts if "Probe loss budget" in t]
-        self.assertIn("$400 in any 20 sessions and $400 in total: net realized Probe losses", told)
+        self.assertIn("$400 in any 20 sessions and $800 in total: net realized Probe losses", told)
         self.assertIn("realized $0.00 in the window and $790.00 in total, held or working $0.00", told)
         self.assertIn("exits go on", told)
 

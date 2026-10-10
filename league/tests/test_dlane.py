@@ -131,15 +131,19 @@ class Settings(unittest.TestCase):
         self.assertEqual((c["val_tries"], c["looks_per_lineage"]), (1, 1))
         self.assertEqual((dlane.DEFAULTS["screen"], dlane.DEFAULTS["screens"]["D2"]), ("S-C", {"receipt_sha256": None}))
         self.assertEqual((c["alarm_min_looks"], c["alarm_pass_share"]), (10, 0.6))
-        # DONE-RULE-A1 (Oct 9, 2026): A1.2's zero-edge figure and A1.3's program loss line.
-        self.assertEqual((c["done_zero_edge_p"], c["k5_net_usd"], c["k5_clear"]), (0.024, -600.0, False))
-        self.assertEqual(c["program_loss_usd"], -200.0)
+        # DONE-RULE-A1 (Oct 9, 2026): A1.2's zero-edge figure and A1.3's program loss line, 0.024 and -200 under L-D's
+        # $400 Probe total; 0.027 and -300 since THE PROBE TOTAL AT $800 (PREREG-T, Oct 10, 2026).
+        self.assertEqual((c["done_zero_edge_p"], c["k5_net_usd"], c["k5_clear"]), (0.027, -600.0, False))
+        self.assertEqual(c["program_loss_usd"], -300.0)
+        self.assertEqual((dlane.DEFAULTS["done_zero_edge_p"], dlane.DEFAULTS["program_loss_usd"]), (0.027, -300))
 
     def test_the_program_loss_line_can_only_be_tightened(self):
-        """DONE-RULE-A1 A1.3 (Oct 9, 2026): -$200, half the $400 Probe total; a setting may raise it toward zero (to -$25),
-        never loosen it, and a malformed one is the default."""
+        """DONE-RULE-A1 A1.3 (Oct 9, 2026): -$300 since THE PROBE TOTAL AT $800 (PREREG-T, Oct 10, 2026; -$200 with the
+        $400 before it); a setting may raise it toward zero (to -$25), never loosen it, and a malformed one is the
+        default."""
         line = lambda v: dlane.cfg({"dlane": {"mode": "gate", "program_loss_usd": v}})["program_loss_usd"]  # noqa: E731
-        self.assertEqual((line(-100), line(-300), line(-10), line("x"), line(True)), (-100.0, -200.0, -25.0, -200.0, -200.0))
+        self.assertEqual((line(-100), line(-200), line(-400), line(-10), line("x"), line(True)),
+                         (-100.0, -200.0, -300.0, -25.0, -300.0, -300.0))
         self.assertEqual(dlane.ZERO_EDGE["value"], dlane.DEFAULTS["done_zero_edge_p"])
 
     def test_a_malformed_value_is_its_default_and_a_number_past_a_bound_is_the_bound(self):

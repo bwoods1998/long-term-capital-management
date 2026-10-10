@@ -89,10 +89,11 @@ below the net at the operator's last clear), a "gate" lane reads "shadow"; only 
 2026; `k5_rearm`): the job's next run records it (kv `dlane_k5_base`: the net then) and re-arms K5 at `k5_net_usd`
 below that net, so a cleared K5 neither trips again at once on the same losses nor stays off for good. While
 `k5_clear` is true K5 cannot trip at all: that is a loosening while it stays, and the report warns every run until the
-operator takes it out. THE PROGRAM LOSS LINE (DONE-RULE-A1 A1.3, Oct 9, 2026; `program_loss_usd`, -$200, half the $400
-Probe total): the `dlane` report job retires, swarm-side, any program whose own realized Probe net is at or below it, so
-one program cannot drain the shared Probe budget before DM1 can fire (about 17 real trades). Its real positions exit by
-the House's rules. A tightening, never a trade.
+operator takes it out. THE PROGRAM LOSS LINE (DONE-RULE-A1 A1.3, Oct 9, 2026; `program_loss_usd`, -$300 since PREREG-T,
+Oct 10, 2026, beside the $800 Probe total; -$200 before it, beside the $400): the `dlane` report job retires,
+swarm-side, any program whose own realized Probe net is at or below it, so one program cannot drain the shared Probe
+budget before DM1 can fire (about 17 real trades). Its real positions exit by the House's rules. A tightening, never a
+trade.
 
 SETTINGS. Every default is in league/swarm/policy.json's "dlane" block (the owner's deploy); swarm.json overrides it; each
 value is held inside its bound here (`cfg`): a malformed value is its default, a number past a bound is the bound. The
@@ -218,11 +219,15 @@ DONE: dict[str, Any] = {
     "min_measured_programs": 2,
 }
 #: A1.2 (DONE-RULE-A1.md): P(Done | zero edge) under the budget in force, the figure beside every claim. It replaced 0.13,
-#: MONEY's figure for the NET-total rules L-D retired. The study's 12-week, 3-session-hold cell of variant (i).
-ZERO_EDGE = {"value": 0.024, "horizon": "12 weeks", "holds": "3-session holds",
-             "variant": "(i) $400 worst net stretch in any 20 sessions + $400 net in total (release L-D's budget, D2)",
-             "source": "the operator's budget simulation (dlane-1009/budget/RESULT.md, worst-stretch section, variant i, "
-                       "zero edge; 6.0% at 24 weeks), pinned by DONE-RULE-A1 A1.2 (sha 333bad06)"}
+#: MONEY's figure for the NET-total rules L-D retired; 0.024 (the budget simulation's 12-week, 3-session-hold cell of
+#: its variant (i), L-D's $400 total) replaced that, and 0.027 (THE PROBE TOTAL AT $800, PREREG-T, Oct 10, 2026: the
+#: $800 total and the -$300 program loss line under the Probe roster) replaced 0.024. Rollback: 0.024 with the $400.
+ZERO_EDGE = {"value": 0.027, "horizon": "12 weeks", "holds": "the House pool's own holds",
+             "variant": "roster 5 + $400 worst net stretch in any 20 sessions + $800 net in total + the -$300 program "
+                        "loss line (the Probe total at $800, PREREG-T)",
+             "source": "the operator's pre-registered simulation PREREG-T (Oct 10, 2026: roster 5, $800 total, -$300 "
+                       "line, House pool, arrivals, cross-fit, 12 weeks, zero edge; 9.0% at 24 weeks), under "
+                       "DONE-RULE-A1 A1.2 (sha 333bad06)"}
 
 DEFAULTS: dict[str, Any] = {
     # The code's default is the rollback; policy.json switches the lane on ("gate").
@@ -252,17 +257,19 @@ DEFAULTS: dict[str, Any] = {
     "val_tries": 1, "looks_per_lineage": 1,
     # THE LEAKAGE ALARM of the direction lane (decision 7; the alpha lane's is `evidence.leakage_alarm`, unchanged).
     "alarm_min_looks": 10, "alarm_pass_share": 0.60,
-    # THE DONE METER's zero-edge figure (decision 8: "P(Done | zero edge), simulation"). 0.024 since DONE-RULE-A1 A1.2
-    # (Oct 9, 2026): 0.13 described the NET-total rules release L-D retired (`ZERO_EDGE` says what 0.024 is).
-    "done_zero_edge_p": 0.024,
+    # THE DONE METER's zero-edge figure (decision 8: "P(Done | zero edge), simulation"). 0.027 since THE PROBE TOTAL AT
+    # $800 (PREREG-T, Oct 10, 2026; `ZERO_EDGE` says what it is); 0.024 from DONE-RULE-A1 A1.2 (Oct 9, 2026) under L-D's
+    # $400 total; 0.13 before it described the NET-total rules release L-D retired.
+    "done_zero_edge_p": 0.027,
     # K5 (decision 9).
     "k5_net_usd": -600, "k5_clear": False,
     # ONE PROGRAM CANNOT DRAIN THE SHARED BUDGET (DONE-RULE-A1 A1.3, Oct 9, 2026; the readiness audit's M11): DM1 cannot
-    # fire before about 17 real trades at the live sigma, while the Probe total is $400 for every program together. The
-    # `dlane` report job retires, swarm-side, a program whose own realized Probe net is at or below this line (half the
-    # $400 total); its real positions exit by the House's rules (exits go on). A tightening: a setting can only raise it
-    # toward zero (-200 to -25), never loosen it.
-    "program_loss_usd": -200,
+    # fire before about 17 real trades at the live sigma, while one Probe total serves every program together. The
+    # `dlane` report job retires, swarm-side, a program whose own realized Probe net is at or below this line: -$300
+    # since THE PROBE TOTAL AT $800 (PREREG-T, Oct 10, 2026), with the $800 total; -$200 before it, with the $400 (the
+    # rollback). Its real positions exit by the House's rules (exits go on). A tightening: a setting can only raise it
+    # toward zero (-300 to -25), never loosen it.
+    "program_loss_usd": -300,
     # THE PROBE ROSTER (REDESIGN-1010, Oct 10, 2026) is `dlane.roster` in swarm.json, read by `league/swarm/bands.py`
     # `_roster_seats` alone (failing closed), never through this block.
     # THE TRAIN MAP (Oct 9, 2026; `train_map`): shown to the architect and direction researchers only when true. The
@@ -290,7 +297,7 @@ def cfg(settings: Mapping[str, Any] | None) -> dict[str, Any]:
     "off" (the rollback); a malformed one is "shadow". Lists keep only the lane's own words (`ROOTS`, `STRUCTURES`,
     `CLASSES`, `HOLDINGS`) and an empty one is the default. `max_share` is never under `birth_share`. The screen, the
     leakage alarm and K5 can only be TIGHTENED past the policy's (`look_level` <= 0.20, `sharpe_share` >= 0.25,
-    `alarm_pass_share` <= 0.60, `k5_net_usd` >= -600, `program_loss_usd` >= -200: DONE-RULE-A1 A1.3). A direction
+    `alarm_pass_share` <= 0.60, `k5_net_usd` >= -600, `program_loss_usd` >= -300: DONE-RULE-A1 A1.3). A direction
     lineage's Validation tries and holdout looks
     (`val_tries`, `looks_per_lineage`, release D-1b) are 1 whatever is written: D2's measured rate is per program."""
     raw = (settings or {}).get("dlane") if isinstance(settings, Mapping) else None
@@ -358,7 +365,7 @@ def cfg(settings: Mapping[str, Any] | None) -> dict[str, Any]:
         "done_zero_edge_p": number("done_zero_edge_p", 0.0, 1.0),
         "k5_net_usd": number("k5_net_usd", -600.0, -50.0),
         "k5_clear": raw.get("k5_clear") is True,
-        "program_loss_usd": number("program_loss_usd", -200.0, -25.0),
+        "program_loss_usd": number("program_loss_usd", -300.0, -25.0),
         "train_map": raw.get("train_map") is True,
     }
 

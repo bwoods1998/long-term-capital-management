@@ -1015,12 +1015,13 @@ class ReportedOnly(RoundCase):
         from league.ops.fast_lane import REALIZED_BASIS
 
         # THE ROLLING PROBE BUDGET (release L-D): the window's 20 sessions through Sep 30 start Sep 2 (Labor Day, Sep 7, is
-        # no session), so the Aug 3 loss is in the total only; the total in force is $400 (Oct 9), so it binds.
+        # no session), so the Aug 3 loss is in the total only; the total in force is $800 since Oct 10 (THE PROBE TOTAL
+        # AT $800), so the window binds ($357.50 and the total at L-D's $400).
         self.assertEqual(out["probe_budget"], {"realized_usd": "12.50", "realized_total_usd": "42.50",
                                                "realized_basis": REALIZED_BASIS["net"], "window_sessions": 20,
                                                "window_start": "2026-09-02", "at_risk_usd": "0.00", "open": 0,
-                                               "max_open": 8, "budget_usd": "400", "total_budget_usd": "400",
-                                               "room_usd": "357.50", "binding": "total"})
+                                               "max_open": 8, "budget_usd": "400", "total_budget_usd": "800",
+                                               "room_usd": "387.50", "binding": "window"})
         self.assertTrue(REALIZED_BASIS["net"].startswith("net: "), "release L-D: the label is the basis in force")
         self.assertEqual(band["d5"]["rule"], "dm1")
         self.assertTrue(out["reported_only"])

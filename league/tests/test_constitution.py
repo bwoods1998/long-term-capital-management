@@ -34,7 +34,7 @@ class ConstitutionTest(unittest.TestCase):
                          {"max_loss_usd": "75", "contracts": 1, "max_open": 4, "week_loss_usd": "150",
                           "min_sessions": 3, "min_trades": 10, "min_coverage": "0.80"})
 
-    def test_release_ld_moved_the_money_digest_to_the_one_the_grant_re_ratifies(self):
+    def test_the_probe_total_at_800_moved_the_money_digest_to_the_one_the_grant_re_ratifies(self):
         """Fast lane v2 (Oct 7, 2026; the owner's goal item 4): the Probe row (one structure within 10% of E, at most 3 Probe
         positions, the $400 Probe loss budget) moved the money digest (42c4a3af before it, Release B's incubator row) to
         da5c7542 and the full digest (595228a6 before it) to 5edc8956. The incubator cap (Oct 8, 2026, under the same
@@ -46,15 +46,23 @@ class ConstitutionTest(unittest.TestCase):
         4a1705b6 on the branch before the rolling budget, fdf2ac7c / 0adb4f0e with an $800 total; neither deployed).
         Its CON-only rollback (`loss_basis` "gross", `max_open` 3, `demotion` "dm0", `loss_total_usd` "400",
         `loss_window_sessions` 2000) is money digest 320899d6, full digest c9d8ef5b, digests of their own (the new keys
-        stay). The standing grant re-ratifies on each at the House's start on the owner's deploy (league/ops/grant.py)."""
+        stay). THE PROBE TOTAL AT $800 (Oct 10, 2026; PREREG-T, under the owner's goal as re-set on Oct 9, item 4)
+        moved only `loss_total_usd`, "400" -> "800", the owner's ceiling: money digest 0310779c -> fdf2ac7c, full digest
+        ca89ff8a -> 0adb4f0e (the $800 pair named above); its rollback, `loss_total_usd` "400", is L-D's pair again. The
+        standing grant re-ratifies on each at the House's start on the owner's deploy (league/ops/grant.py)."""
         import copy
 
         from league.constitution import money_digest
 
-        self.assertEqual(money_digest(), "0310779c2f58eaf453835f1c989f130cf92a74198198b624cf021298a9e43945")
-        self.assertEqual(PINNED_DIGEST, "ca89ff8af1dc45d58e3b6af3b8eba4f82afa4d0d73b9d2fb5d28e6d4d749aae3")
+        self.assertEqual(money_digest(), "fdf2ac7c1a446e39df9e27c8626fb86a954a3f5a939460406507a9b735f1d4c7")
+        self.assertEqual(PINNED_DIGEST, "0adb4f0ed7d9f20fc05cb3ce73590b5a2dfdfe38e5d6aa6759e071d1beb4d5b2")
+        # The $800 total is the only money rule it moved: at "400", the money digest and the full digest are L-D's.
+        ld = copy.deepcopy(CONSTITUTION)
+        ld["options_money"]["probe"]["loss_total_usd"] = "400"
+        self.assertEqual(money_digest(ld), "0310779c2f58eaf453835f1c989f130cf92a74198198b624cf021298a9e43945")
+        self.assertEqual(digest(ld), "ca89ff8af1dc45d58e3b6af3b8eba4f82afa4d0d73b9d2fb5d28e6d4d749aae3")
         # L-D's rows are the only money rules it moved: without them, the money digest is the incubator cap's.
-        before = copy.deepcopy(CONSTITUTION)
+        before = copy.deepcopy(ld)
         probe = before["options_money"]["probe"]
         del probe["loss_basis"], probe["demotion"], probe["loss_window_sessions"], probe["loss_total_usd"]
         probe["max_open"] = 3
@@ -73,7 +81,7 @@ class ConstitutionTest(unittest.TestCase):
         self.assertEqual(CONSTITUTION["options_money"]["probe"],
                          {"max_loss_share": "0.10", "contracts": 1, "open_per_family": 3, "family_share": "0.15",
                           "floor_usd": "0", "max_open": 8, "loss_budget_usd": "400", "loss_window_sessions": 20,
-                          "loss_total_usd": "400", "loss_basis": "net", "demotion": "dm1"})
+                          "loss_total_usd": "800", "loss_basis": "net", "demotion": "dm1"})
 
     def test_the_fast_lane_probe_rows_stay_inside_the_goals_bounds(self):
         import copy

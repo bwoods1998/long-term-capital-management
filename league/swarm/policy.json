@@ -116,10 +116,10 @@
     "looks_per_lineage": 1,
     "alarm_min_looks": 10,
     "alarm_pass_share": 0.6,
-    "done_zero_edge_p": 0.024,
+    "done_zero_edge_p": 0.027,
     "k5_net_usd": -600,
     "k5_clear": false,
-    "program_loss_usd": -200,
+    "program_loss_usd": -300,
     "train_map": true
   },
   "engineer": {
