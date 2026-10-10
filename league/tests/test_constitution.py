@@ -1,3 +1,4 @@
+import json
 import unittest
 
 from league.constitution import CONSTITUTION, PINNED_DIGEST, digest
@@ -49,15 +50,19 @@ class ConstitutionTest(unittest.TestCase):
         stay). THE PROBE TOTAL AT $800 (Oct 10, 2026; PREREG-T, under the owner's goal as re-set on Oct 9, item 4)
         moved only `loss_total_usd`, "400" -> "800", the owner's ceiling: money digest 0310779c -> fdf2ac7c, full digest
         ca89ff8a -> 0adb4f0e (the $800 pair named above); its rollback, `loss_total_usd` "400", is L-D's pair again. The
-        standing grant re-ratifies on each at the House's start on the owner's deploy (league/ops/grant.py)."""
+        standing grant re-ratifies on each at the House's start on the owner's deploy (league/ops/grant.py). Release E1
+        (the equity lane) moved both again by adding `equity_money` (`test_the_equity_lane_moved_the_money_digest`):
+        these are the digests of the constitution without that block, as each release before E1 had it."""
         import copy
 
         from league.constitution import money_digest
 
-        self.assertEqual(money_digest(), "fdf2ac7c1a446e39df9e27c8626fb86a954a3f5a939460406507a9b735f1d4c7")
-        self.assertEqual(PINNED_DIGEST, "0adb4f0ed7d9f20fc05cb3ce73590b5a2dfdfe38e5d6aa6759e071d1beb4d5b2")
+        t800 = copy.deepcopy(CONSTITUTION)
+        del t800["equity_money"]
+        self.assertEqual(money_digest(t800), "fdf2ac7c1a446e39df9e27c8626fb86a954a3f5a939460406507a9b735f1d4c7")
+        self.assertEqual(digest(t800), "0adb4f0ed7d9f20fc05cb3ce73590b5a2dfdfe38e5d6aa6759e071d1beb4d5b2")
         # The $800 total is the only money rule it moved: at "400", the money digest and the full digest are L-D's.
-        ld = copy.deepcopy(CONSTITUTION)
+        ld = copy.deepcopy(t800)
         ld["options_money"]["probe"]["loss_total_usd"] = "400"
         self.assertEqual(money_digest(ld), "0310779c2f58eaf453835f1c989f130cf92a74198198b624cf021298a9e43945")
         self.assertEqual(digest(ld), "ca89ff8af1dc45d58e3b6af3b8eba4f82afa4d0d73b9d2fb5d28e6d4d749aae3")
@@ -74,10 +79,10 @@ class ConstitutionTest(unittest.TestCase):
         # The CON-only rollback: its own digest, which the grant re-ratifies on the owner's deploy like any other.
         from league.tests.money_fakes import FAST_LANE_V2, constitution
 
-        self.assertEqual(money_digest(constitution(**FAST_LANE_V2)),
-                         "320899d675059182509a62b67d122afd2fdc54b08c59b2053a684d88fc8b55f2")
-        self.assertEqual(digest(constitution(**FAST_LANE_V2)),
-                         "c9d8ef5bd5e55544884924c8ef0c309e03d89fd230945f346103db3bea18c31f")
+        rollback = constitution(**FAST_LANE_V2)
+        del rollback["equity_money"]
+        self.assertEqual(money_digest(rollback), "320899d675059182509a62b67d122afd2fdc54b08c59b2053a684d88fc8b55f2")
+        self.assertEqual(digest(rollback), "c9d8ef5bd5e55544884924c8ef0c309e03d89fd230945f346103db3bea18c31f")
         self.assertEqual(CONSTITUTION["options_money"]["probe"],
                          {"max_loss_share": "0.10", "contracts": 1, "open_per_family": 3, "family_share": "0.15",
                           "floor_usd": "0", "max_open": 8, "loss_budget_usd": "400", "loss_window_sessions": 20,
@@ -132,6 +137,86 @@ class ConstitutionTest(unittest.TestCase):
         changed = copy.deepcopy(CONSTITUTION)
         del changed["options_money"]["incubator"]
         self.assertTrue(any("incubator" in p for p in options_money_problems(changed)))
+
+    def test_the_equity_lane_moved_the_money_digest_to_the_one_the_grant_re_ratifies(self):
+        """Release E1 (the equity lane, Oct 2026; league/equity/INTERFACES.md 7.1) added the constitution's `equity_money`
+        and moved nothing else: money digest fdf2ac7c (THE PROBE TOTAL AT $800) -> ea97607c, full digest 0adb4f0e ->
+        e38c807e. Every row of the block is a money rule (none is in `RISK_FREE`), so each moves the money digest and the
+        standing grant re-ratifies on the owner's deploy (league/tests/test_equity_money.py). Its switch-on, `enabled`
+        True, is a digest of its own (ad8c761b), ratified the same way; the rollback to a release before E1 brings
+        fdf2ac7c back."""
+        import copy
+
+        from league.constitution import RISK_FREE, money_digest
+
+        self.assertEqual(money_digest(), "ea97607c87a5e6d144a9577f0f3118397f7ca1d5eff073f75b022d8e79749ab9")
+        self.assertEqual(PINNED_DIGEST, "e38c807e47fd3176ab2c3dfc5c440b94ec5b920fa8f110ab642a28c0e3f17320")
+        before = copy.deepcopy(CONSTITUTION)
+        del before["equity_money"]
+        self.assertEqual(money_digest(before), "fdf2ac7c1a446e39df9e27c8626fb86a954a3f5a939460406507a9b735f1d4c7")
+        on = copy.deepcopy(CONSTITUTION)
+        on["equity_money"]["enabled"] = True
+        self.assertEqual(money_digest(on), "ad8c761bccc49033c3fdeca78c7b962f58272d192a2dd6e0626682ccdf6ac367")
+        self.assertFalse(any(path[0] == "equity_money" for path in RISK_FREE))
+        for path, value in ((("invested_share",), "0.90"), (("cash_reserve_usd",), "60"), (("probe", "max_programs"), 2),
+                            (("open_risk_weight", "etf"), "0.25"), (("demotion", "program_loss_usd"), "-200"),
+                            (("order_path", "close_until_before_close_s"), 60)):
+            moved = copy.deepcopy(CONSTITUTION)
+            node = moved["equity_money"]
+            for key in path[:-1]:
+                node = node[key]
+            node[path[-1]] = value
+            self.assertNotEqual(money_digest(moved), money_digest(), path)
+        # The block as E1 deploys it (INTERFACES 7.1, the captain's amendments A1, A5, A8): nothing switched on.
+        em = CONSTITUTION["equity_money"]
+        self.assertIs(em["enabled"], False)
+        self.assertEqual((em["invested_share"], em["cash_reserve_usd"]), ("1.00", "50"))
+        self.assertEqual(em["probe"], {"sleeve_share": "0.25", "max_programs": 3, "min_order_usd": "10"})
+        self.assertEqual(em["position_share"], {"etf": "0.50", "stock": "0.20"})
+        self.assertEqual(em["open_risk_weight"], {"etf": "0.20", "stock": "0.40"})
+
+    def test_the_equity_rows_stay_inside_the_owners_lines(self):
+        """`equity_money_problems` (EQUITY_MONEY_BOUNDS): each row is accepted inside its range and at its owner's line,
+        and refused one step past it; the loss budget is the options table's, shared (no row of its own here)."""
+        import copy
+
+        from league.constitution import EQUITY_MONEY_BOUNDS, equity_money_problems
+
+        self.assertEqual(equity_money_problems(), [])
+        self.assertNotIn("loss_budget_usd", json.dumps(CONSTITUTION["equity_money"]))
+        loose = {"position_share.etf": ("0.50", "0.5001"), "position_share.stock": ("0.20", "0.2001"),
+                 "invested_share": ("1.00", "1.01"), "cash_reserve_usd": ("50", "49.99"),
+                 "open_risk_weight.etf": ("0.20", "0.19"), "open_risk_weight.stock": ("0.40", "0.39"),
+                 "probe.sleeve_share": ("0.25", "0.26"), "probe.max_programs": (3, 4), "probe.min_order_usd": ("10", "9.99"),
+                 "sized.min_trades": (20, 19), "sized.confidence": ("0.80", "0.79"), "sized.kelly_fraction": ("0.25", "0.26"),
+                 "sized.sleeve_share": ("0.50", "0.51"), "sized.min_probe_sessions": (5, 4),
+                 "demotion.min_trades": (10, 11), "demotion.z": ("1.645", "1.65"),
+                 "demotion.program_loss_usd": ("-300", "-300.01"), "demotion.twin_gap_bp": ("15", "15.5"),
+                 "demotion.twin_min_closes": (5, 6), "holds.min_hold_sessions": (1, 0),
+                 "holds.max_hold_sessions": (60, 61), "holds.failed_decides_exit": (2, 3),
+                 "order_path.entry_collar_bp.etf": (10, 51), "order_path.max_collar_bp.etf": (50, 51),
+                 "order_path.max_collar_bp.stock": (100, 101), "order_path.max_orders_day": (60, 61)}
+        self.assertTrue(set(loose) <= set(EQUITY_MONEY_BOUNDS))
+        for path, (line, past) in loose.items():
+            for value, ok in ((line, True), (past, False)):
+                changed = copy.deepcopy(CONSTITUTION)
+                node = changed["equity_money"]
+                *parents, last = path.split(".")
+                for key in parents:
+                    node = node[key]
+                node[last] = value
+                problems = equity_money_problems(changed)
+                if ok:
+                    self.assertEqual(problems, [], (path, value))
+                else:
+                    self.assertTrue(any(f"equity_money.{path} " in p for p in problems), (path, value, problems))
+
+    def test_a_changed_threshold_changes_the_digest_equity_too(self):
+        import copy
+
+        changed = copy.deepcopy(CONSTITUTION)
+        changed["equity_money"]["probe"]["sleeve_share"] = "0.20"
+        self.assertNotEqual(digest(changed), PINNED_DIGEST)
 
     def test_sizing_stays_on_the_lower_bound_and_death_keeps_its_budget(self):
         """Whatever the owner's appetite, two properties hold: the scaled rung is never sized above

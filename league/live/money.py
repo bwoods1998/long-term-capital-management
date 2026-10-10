@@ -117,6 +117,13 @@ THE STOPS (`Stops`), with deposits and withdrawals netted out:
   `drawdown_stop_share` pauses real money (latched until the owner releases it; exits go on; the owner told).
 - A breach seen on an UNSETTLED observation blocks new entries at once (provisionally) and asks for a flows read; only
   a settled observation latches it, so an unread withdrawal cannot latch the pause by itself.
+
+THE EQUITY LANE (release E1; league/equity/INTERFACES.md section 7): `EquityTable` parses the constitution's
+`equity_money` (`Table.equity`), and `available_cash` is THE HOUSE-WIDE CASH RULE (A8.1) both books size against. The
+stops above, the kill switch and THE PROBE LOSS BUDGET bind the equity lane too: one budget for both lanes, read by
+`real.probe_tally` with the equity rows unioned in (each lot at `open_risk_weight` x its marked value, one Probe slot a
+program; `Exposure.equity_open_risk`, `Exposure.equity_invested`). The equity lane's sizing, sizing-up and demotion live
+in league/equity (`sizing.size_entry`, `bands.sized_up`, `bands.edm1`), outside the options fingerprint (A8.8).
 """
 
 from __future__ import annotations
@@ -225,13 +232,17 @@ class Table:
 
     @classmethod
     def from_constitution(cls, constitution: Mapping[str, Any] | None = None) -> "Table":
-        """The table in force; ValueError when it is missing or outside its bounds (nothing trades on a bad table)."""
+        """The table in force; ValueError when it is missing or outside its bounds (nothing trades on a bad table). Its
+        `equity` is the constitution's `equity_money` (`EquityTable.from_constitution`: a block outside its bounds is
+        refused here too, the whole table with it, as an options row is), None for a constitution without the block (a
+        tree before release E1)."""
         from ..constitution import CONSTITUTION, options_money_problems
 
         rules = dict(constitution or CONSTITUTION)
         problems = options_money_problems(rules)
         if problems:
             raise ValueError("the options money table is refused: " + "; ".join(problems))
+        equity = EquityTable.from_constitution(rules) if "equity_money" in rules else None
         t = rules["options_money"]
         probe, sized, path, gate, house = t["probe"], t["sized"], t["order_path"], t["gateway"], t["house_test"]
         inc = t["incubator"]
@@ -265,6 +276,7 @@ class Table:
             expiry_close_lead_minutes=int(path["expiry_close_lead_minutes"]),
             gateway_order_max_loss=D(gate["order_max_loss_usd"]), gateway_order_share=D(gate["order_equity_share"]),
             gateway_day_share=D(gate["day_equity_share"]), gateway_max_orders=int(gate["max_day_orders"]),
+            equity=equity,
         )
 
     def credit_allowed(self, equity: Decimal) -> bool:
@@ -311,14 +323,19 @@ class Table:
 class EquityTable:
     """THE EQUITY LANE's money table (release E1; owner: money; league/equity/INTERFACES.md "equity_money"): the
     constitution's `equity_money` parsed, Decimals for money and shares. Read by league/equity (the book, the bands, the
-    sizing inputs) by attribute; `Table.equity` carries it."""
+    sizing inputs) by attribute; `Table.equity` carries it. Its mappings are read-only views (and left out of the hash,
+    so a `Table` that carries one hashes as before).
+
+    The equity lane has NO loss budget of its own: its Probe opens are bound by the options rows of `Table`
+    (`probe_loss_budget` over `probe_loss_window` sessions, and `probe_loss_total`), one budget for both lanes, at
+    `open_risk_weight` x each lot's marked value and one Probe slot a program (`league/live/real.py` `probe_tally`)."""
 
     enabled: bool
-    universe: Mapping[str, str]                 # symbol -> "etf" | "stock"
-    position_share: Mapping[str, Decimal]       # class -> share of E (0.50 / 0.20)
+    universe: Mapping[str, str] = field(hash=False)              # symbol -> "etf" | "stock"
+    position_share: Mapping[str, Decimal] = field(hash=False)    # class -> share of E (0.50 / 0.20)
     invested_share: Decimal                     # "1.00" (A1: cash only by choice)
     cash_reserve: Decimal                       # "50" (A8.1), above the gateway's $25 floor
-    open_risk_weight: Mapping[str, Decimal]     # class -> weight (0.20 / 0.40)
+    open_risk_weight: Mapping[str, Decimal] = field(hash=False)  # class -> weight (0.20 / 0.40)
     probe_sleeve_share: Decimal                 # "0.25" (A5)
     probe_max_programs: int                     # 3 (A5) == elane.roster
     min_order_usd: Decimal                      # "10"
@@ -338,16 +355,50 @@ class EquityTable:
     default_max_hold_sessions: int              # 20 (A8.5)
     max_hold_sessions: int                      # 60, the lane cap (A8.5)
     failed_decides_exit: int                    # 2 (A8.5)
-    entry_collar_bp: Mapping[str, int]          # class -> 10 / 25
-    max_collar_bp: Mapping[str, int]            # class -> 50 / 100
+    entry_collar_bp: Mapping[str, int] = field(hash=False)       # class -> 10 / 25
+    max_collar_bp: Mapping[str, int] = field(hash=False)         # class -> 50 / 100
     max_orders_day: int                         # 60 (A8.3)
-    offsets: Mapping[str, int]                  # league/equity/schedule.py DEFAULTS' keys, seconds
+    offsets: Mapping[str, int] = field(hash=False)               # league/equity/schedule.py DEFAULTS' keys, seconds
 
     @classmethod
     def from_constitution(cls, constitution: Mapping[str, Any] | None = None) -> "EquityTable":
         """The equity table in force; ValueError when `equity_money` is missing or outside `EQUITY_MONEY_BOUNDS`
         (`league.constitution.equity_money_problems`): nothing equity trades on a bad table."""
-        raise NotImplementedError("money: league/live/money.py EquityTable.from_constitution")
+        from types import MappingProxyType
+
+        from ..constitution import CONSTITUTION, EQUITY_CLASSES, EQUITY_ORDER_OFFSETS, equity_money_problems
+
+        rules = dict(constitution or CONSTITUTION)
+        problems = equity_money_problems(rules)
+        if problems:
+            raise ValueError("the equity money table is refused: " + "; ".join(problems))
+        t = rules["equity_money"]
+        probe, sized, demote, holds, path = t["probe"], t["sized"], t["demotion"], t["holds"], t["order_path"]
+
+        def by_class(row: Mapping[str, Any], read: Any) -> Mapping[str, Any]:
+            return MappingProxyType({klass: read(row[klass]) for klass in EQUITY_CLASSES})
+
+        return cls(
+            enabled=t["enabled"] is True,
+            universe=MappingProxyType({symbol: klass for klass in EQUITY_CLASSES for symbol in t["universe"][klass]}),
+            position_share=by_class(t["position_share"], D), invested_share=D(t["invested_share"]),
+            cash_reserve=D(t["cash_reserve_usd"]), open_risk_weight=by_class(t["open_risk_weight"], D),
+            probe_sleeve_share=D(probe["sleeve_share"]), probe_max_programs=int(probe["max_programs"]),
+            min_order_usd=D(probe["min_order_usd"]),
+            sized_min_trades=int(sized["min_trades"]), sized_confidence=float(D(sized["confidence"])),
+            sized_kelly_fraction=float(D(sized["kelly_fraction"])), sized_sleeve_share=D(sized["sleeve_share"]),
+            sized_beat_bh=sized["beat_bh"] is True, sized_min_probe_sessions=int(sized["min_probe_sessions"]),
+            # Exactly "edm1" (`constitution.EQUITY_MONEY_CHOICES`; `equity_money_problems` refused anything else above).
+            demotion_rule=str(demote["rule"]), demotion_min_trades=int(demote["min_trades"]),
+            demotion_z=float(D(demote["z"])), program_loss_usd=D(demote["program_loss_usd"]),
+            twin_gap_bp=D(demote["twin_gap_bp"]), twin_min_closes=int(demote["twin_min_closes"]),
+            min_hold_sessions=int(holds["min_hold_sessions"]),
+            default_max_hold_sessions=int(holds["default_max_hold_sessions"]),
+            max_hold_sessions=int(holds["max_hold_sessions"]), failed_decides_exit=int(holds["failed_decides_exit"]),
+            entry_collar_bp=by_class(path["entry_collar_bp"], int), max_collar_bp=by_class(path["max_collar_bp"], int),
+            max_orders_day=int(path["max_orders_day"]),
+            offsets=MappingProxyType({name: int(path[name]) for name in EQUITY_ORDER_OFFSETS}),
+        )
 
 
 def available_cash(account: Mapping[str, Any], *, working_buys_worst: Decimal, reserved: Decimal,
@@ -356,8 +407,30 @@ def available_cash(account: Mapping[str, Any], *, working_buys_worst: Decimal, r
     cash - |short_market_value| - every working buy order's worst cost in both books (`working_buys_worst`: the equity
     book's, plus the options book's open orders as the caller adds them) - the working reservations (`reserved`) -
     `reserve_usd` (the constitution's `equity_money.cash_reserve_usd`). Not clamped at zero: a negative answer
-    refuses every open. ValueError when the account row has no readable cash (the caller refuses opens)."""
-    raise NotImplementedError("money: league/live/money.py available_cash")
+    refuses every open. ValueError when the account row has no readable cash (the caller refuses opens), when its
+    `short_market_value` is present but unreadable, or when a subtrahend is negative or not finite (each only ever
+    lowers the answer; a negative one would raise it). A row without `short_market_value` reads it as zero: shorts are
+    refused on their own by the positions (`league/equity/sizing.py`, "short_held"), so this term only ever counts a
+    short's proceeds out of the cash they inflate.
+
+    Margin buying power, `buying_power`, `regt_buying_power` and `multiplier` are never read here: the account may be a
+    margin account (every Alpaca account is one), and E1 trades cash only by choice (A1)."""
+    def amount(name: str, value: Any) -> Decimal:
+        try:
+            out = D(value)
+        except (TypeError, ValueError, ArithmeticError) as exc:
+            raise ValueError(f"the account's {name} is unreadable: {value!r}") from exc
+        return out
+
+    if not isinstance(account, Mapping) or account.get("cash") is None:
+        raise ValueError("the account row has no cash: no open can be judged against it")
+    cash = amount("cash", account["cash"])
+    raw_short = account.get("short_market_value")
+    short = abs(amount("short_market_value", raw_short)) if raw_short is not None else ZERO
+    for name, value in (("working_buys_worst", working_buys_worst), ("reserved", reserved), ("reserve_usd", reserve_usd)):
+        if not isinstance(value, Decimal) or not value.is_finite() or value < 0:
+            raise ValueError(f"{name} must be a finite Decimal at or above zero, not {value!r}")
+    return cash - short - working_buys_worst - reserved - reserve_usd
 
 
 # --------------------------------------------------------------------------------------------- the forward record

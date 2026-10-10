@@ -22,14 +22,30 @@ THE RULE (the design's section 4b with amendments A1, A5 and A8.1), in order; th
 8. SKIPPED (usd 0) under `min_order_usd` ("min_order").
 qty = floor(usd / `limit_price`, `config.QTY_PLACES` places); usd = qty x limit_price (never more than the target).
 
+Which rule binds: the caps of steps 3-7 are each computed on the same facts and the entry is their minimum; the binding
+named is the first, in the order above, whose cap is that minimum ("intent" when none cuts the target). A cap that
+leaves nothing (zero or below) refuses the entry under its own name; a remainder above zero but under `min_order_usd`
+(after the share count is floored) is skipped as "min_order", its reason naming the cap that cut it.
+
+Two code ceilings, as the gateway keeps its own: `position_share` is never read above `config.POSITION_SHARE` of its
+class (0.50 an ETF, 0.20 a stock, the owner's lines), and a class outside `config.CLASSES` is refused (ValueError), as
+are malformed facts (a share outside (0, 1], both or neither of `share` and `usd`, a limit or a weight not above zero, a
+value that is not a finite Decimal): the caller refuses the open and records why.
+
 E is the sizing equity: min(account equity, the grant's ratified capital) live (`OptionsLive.sizing_equity`), the
 sleeve E0 in the Gym.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from decimal import Decimal
+from dataclasses import dataclass, fields
+from decimal import ROUND_DOWN, Decimal
+
+from . import config
+
+ZERO = Decimal(0)
+#: The order the caps are named in when two tie (the module docstring's steps 3-7).
+CAPS = ("instrument", "sleeve_cap", "sleeve_cash", "invested", "cash", "budget")
 
 
 @dataclass(frozen=True)
@@ -69,9 +85,82 @@ class Sized:
     reason: str
 
 
+def _usd(value: Decimal) -> str:
+    return f"${value.quantize(Decimal('0.01'), rounding=ROUND_DOWN)}"
+
+
+def _checked(x: SizingInputs) -> None:
+    """ValueError when the facts are malformed (the module docstring): never a size from a fact that cannot be read."""
+    if x.klass not in config.CLASSES:
+        raise ValueError(f"{x.symbol}: the class {x.klass!r} is not one of {config.CLASSES}")
+    for f in fields(x):
+        value = getattr(x, f.name)
+        if f.name in ("symbol", "klass", "any_short") or (value is None and f.name in ("share", "usd", "budget_room")):
+            continue
+        if not isinstance(value, Decimal) or not value.is_finite():
+            raise ValueError(f"{x.symbol}: {f.name} is not a finite Decimal: {value!r}")
+    if not isinstance(x.any_short, bool):
+        raise ValueError(f"{x.symbol}: any_short is not a bool: {x.any_short!r}")
+    if (x.share is None) == (x.usd is None):
+        raise ValueError(f"{x.symbol}: an intent sets exactly one of share and usd")
+    if x.share is not None and not ZERO < x.share <= 1:
+        raise ValueError(f"{x.symbol}: an intent's share is in (0, 1], not {x.share}")
+    if x.usd is not None and x.usd <= 0:
+        raise ValueError(f"{x.symbol}: an intent's usd is above zero, not {x.usd}")
+    if x.limit_price <= 0 or x.weight <= 0:
+        raise ValueError(f"{x.symbol}: the limit price and the open-risk weight are above zero")
+
+
 def size_entry(x: SizingInputs) -> Sized:
-    """THE RULE (the module docstring)."""
-    raise NotImplementedError("money: league/equity/sizing.py size_entry")
+    """THE RULE (the module docstring): the entry's dollars and shares, the rule that set them, and why."""
+    _checked(x)
+    if x.cash < 0:
+        return Sized(ZERO, ZERO, "cash_negative", f"no equity open while the account's cash is below zero ({_usd(x.cash)}): "
+                                                  "the account would be borrowing")
+    if x.any_short:
+        return Sized(ZERO, ZERO, "short_held", "no equity open while any us_equity position is short")
+    target = x.sleeve_equity * x.share if x.share is not None else x.usd
+    share = min(x.position_share, config.POSITION_SHARE[x.klass])
+    caps = {
+        "instrument": share * x.E - x.account_symbol_value,
+        "sleeve_cap": share * x.sleeve_equity - x.sleeve_symbol_value,
+        "sleeve_cash": x.sleeve_free_cash,
+        "invested": x.invested_share * x.E - x.invested_now,
+        "cash": x.available_cash,
+    }
+    if x.budget_room is not None:
+        caps["budget"] = x.budget_room / x.weight
+    why = {
+        "instrument": f"{x.symbol} may hold {_usd(caps['instrument'])} more on the account ({share} x E {_usd(x.E)}, less "
+                      f"{_usd(x.account_symbol_value)} held and working across all programs)",
+        "sleeve_cap": f"{x.symbol} may hold {_usd(caps['sleeve_cap'])} more in this program's sleeve ({share} x "
+                      f"{_usd(x.sleeve_equity)}, less {_usd(x.sleeve_symbol_value)} of its own)",
+        "sleeve_cash": f"the sleeve has {_usd(x.sleeve_free_cash)} of free cash",
+        "invested": f"the invested cap leaves {_usd(caps['invested'])} ({x.invested_share} x E {_usd(x.E)}, less "
+                    f"{_usd(x.invested_now)} of equity held and working and options' open maximum loss)",
+        "cash": f"the House-wide available cash is {_usd(x.available_cash)} (after the reserve and every working buy)",
+        "budget": (f"the shared loss budget has {_usd(x.budget_room)} of room, {_usd(caps['budget'])} of {x.klass} at "
+                   f"weight {x.weight}") if x.budget_room is not None else "",
+    }
+    if target <= 0:
+        return Sized(ZERO, ZERO, "intent", f"refused: the intent asks for nothing (its share of a sleeve of "
+                                           f"{_usd(x.sleeve_equity)})")
+    usd, binding = target, "intent"
+    lowest = min(caps.values())
+    if lowest < target:
+        usd = lowest
+        binding = next(name for name in CAPS if name in caps and caps[name] == lowest)
+    if usd <= 0:
+        return Sized(ZERO, ZERO, binding, f"refused: {why[binding]}")
+    quantum = Decimal(1).scaleb(-config.QTY_PLACES)
+    qty = (usd / x.limit_price).quantize(quantum, rounding=ROUND_DOWN)
+    usd = qty * x.limit_price
+    cut = f" ({why[binding]})" if binding != "intent" else ""
+    if usd < x.min_order_usd:
+        return Sized(ZERO, ZERO, "min_order", f"skipped: {_usd(usd)} is under the {_usd(x.min_order_usd)} minimum{cut}")
+    if binding == "intent":
+        return Sized(usd, qty, binding, f"{qty} {x.symbol} at {x.limit_price}: the intent's {_usd(target)}")
+    return Sized(usd, qty, binding, f"{qty} {x.symbol} at {x.limit_price}: cut from {_usd(target)}: {why[binding]}")
 
 
-__all__ = ["SizingInputs", "Sized", "size_entry"]
+__all__ = ["SizingInputs", "Sized", "CAPS", "size_entry"]

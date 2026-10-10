@@ -327,7 +327,19 @@ def ld_as_set():
     return patch.dict(CONSTITUTION["options_money"]["probe"], loss_total_usd="400")
 
 
-class TheIncubatorCap(StandingCase):
+class PreE1(StandingCase):
+    """A historical case, run on the constitution before release E1 (the equity lane): no `equity_money` block. Every
+    release these cases replay ran on it, so their digests are its."""
+
+    def setUp(self):
+        super().setUp()
+        patcher = patch.dict(CONSTITUTION)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        CONSTITUTION.pop("equity_money", None)
+
+
+class TheIncubatorCap(PreE1):
     """The incubator cap (Oct 8, 2026): `incubator.max_loss_usd` $50 -> $75 moves the money digest from fast lane v2's
     da5c7542 to 1665c385. A grant pinned on the $50 row holds nothing on the $75 one until the standing grant re-ratifies
     it, which it does by itself only on an owner's release change (`floor_box.py deploy`, or its rollback back across it).
@@ -383,7 +395,7 @@ class TheIncubatorCap(StandingCase):
             self.assertTrue(grant.allows_live(2))
 
 
-class TheReleaseLD(StandingCase):
+class TheReleaseLD(PreE1):
     """Release L-D (Oct 9, 2026): the Probe row's `max_open` 3 -> 8, its new `loss_basis` "net" and `demotion` "dm1", and
     THE ROLLING PROBE BUDGET's `loss_window_sessions` 20 and `loss_total_usd` "400" (the operator's setting of Oct 9,
     inside the owner's $800 ceiling) move the money digest from the incubator cap's 1665c385 to 0310779c. A grant pinned on 1665c385 holds nothing after the deploy until the standing
@@ -441,7 +453,7 @@ class TheReleaseLD(StandingCase):
             self.assertTrue(grant.allows_live(2))
 
 
-class TheProbeTotal800(StandingCase):
+class TheProbeTotal800(PreE1):
     """THE PROBE TOTAL AT $800 (Oct 10, 2026; PREREG-T, under the owner's goal as re-set on Oct 9, item 4):
     `loss_total_usd` "400" -> "800" moves the money digest from release L-D's 0310779c to fdf2ac7c (no fingerprint
     move). A grant pinned on 0310779c holds nothing after the deploy until the standing grant re-ratifies it at the

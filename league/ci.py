@@ -15,7 +15,9 @@ asks a model anything.
    error. `game.json` must stay inside its bounds. `config.json` may change only its operating
    dials, never where money or secrets are concerned. Tools must pass the same safety check as
    strategies, because they run in the same boxes. The real-structure money rows (O1-O5) stay
-   inside their bounds, and the gateway admits exactly the structure types they open (`check_structures`).
+   inside their bounds, and the gateway admits exactly the structure types they open (`check_structures`). The equity
+   lane's money rows (`equity_money`) stay inside theirs, and the gateway's stock list, its stock-buy switch and its
+   per-symbol shares agree with them (`check_equity`).
 3. **The whole test suite**, and with it the replay regression: every founding seed replayed over
    the canned tapes must produce exactly the recorded result, so a change that shifts the
    simulator's arithmetic cannot slip through as a refactor.
@@ -153,6 +155,15 @@ FORBIDDEN: tuple[str, ...] = (
     # How the House is deployed and the House itself (its tick calls the updater).
     "scripts/floor_box.py", "league/house.py", "CHANGELOG.md",
 )
+#: THE EQUITY LANE (release E1, Oct 2026): its tree (the engine, the sizing, the bands, the screen and the book that
+#: trade real money, inside their own evidence identity) and its swarm lane (births, the look, the roster) are judges
+#: and money movers like the options lane's, so no role may change them and the updater never self-deploys them. They
+#: are named apart from the list above ONLY because the gateway's merge list (`gateway/lib/protected.mjs`
+#: MERGE_FORBIDDEN, which gateway/test/merge.test.mjs holds to that list as written) cannot change in E1: gateway/ ships
+#: separately. A gateway follow-up adds both to MERGE_FORBIDDEN and moves them into the list above, leaving this empty;
+#: until then league/tests/test_ci.py allows exactly these in `FORBIDDEN` beyond the gateway's list.
+PENDING_GATEWAY: tuple[str, ...] = ("league/equity/", "league/swarm/elane.py")
+FORBIDDEN += PENDING_GATEWAY
 #: The one path the gateway's merge route refuses (`gateway/lib/protected.mjs` MERGE_FORBIDDEN) that is not FORBIDDEN:
 #: the House's configuration. The operator role proposes its dials (`CONFIG_DIALS`), and the updater ships a change to
 #: it only when the RUNNING release's `check_config` finds nothing but those dials moved, inside their bounds (the
@@ -488,6 +499,21 @@ def gateway_caps_problems(root: Path, table: dict[str, Any], names: dict[str, st
     return problems
 
 
+def tree_constitution(root: Path = REPO) -> tuple[dict[str, Any] | None, list[str]]:
+    """(the namespace of the tree's `league/constitution.py`, why it could not be read). Compiled from its text, never
+    through the import system: a cached bytecode file keyed by the source's mtime and size could stand in for a file
+    rewritten within the same second (the constitution imports only the standard library)."""
+    path = root / "league" / "constitution.py"
+    try:
+        namespace: dict[str, Any] = {"__name__": "_ci_constitution", "__file__": str(path)}
+        exec(compile(path.read_text(encoding="utf-8"), str(path), "exec"), namespace)  # noqa: S102 - the tree's own constitution
+        if not isinstance(namespace.get("CONSTITUTION"), dict):
+            raise KeyError("CONSTITUTION")
+    except Exception as exc:  # noqa: BLE001 - a constitution that cannot be read is a refusal
+        return None, [f"league/constitution.py could not be read: {type(exc).__name__}: {exc}"]
+    return namespace, []
+
+
 def check_structures(root: Path = REPO) -> list[str]:
     """ONE source of truth for the structure types real money may open, and the money rows inside their bounds.
 
@@ -499,15 +525,10 @@ def check_structures(root: Path = REPO) -> list[str]:
     constitution is read from `root` without importing the tree's package."""
     from . import allocator
 
-    path = root / "league" / "constitution.py"
-    try:
-        # Compiled from its text, never through the import system: a cached bytecode file keyed by the source's mtime and
-        # size could stand in for a file rewritten within the same second (the constitution imports only the standard library).
-        namespace: dict[str, Any] = {"__name__": "_ci_constitution", "__file__": str(path)}
-        exec(compile(path.read_text(encoding="utf-8"), str(path), "exec"), namespace)  # noqa: S102 - the tree's own constitution
-        constitution = namespace["CONSTITUTION"]
-    except Exception as exc:  # noqa: BLE001 - a constitution that cannot be read is a refusal
-        return [f"league/constitution.py could not be read: {type(exc).__name__}: {exc}"]
+    namespace, unread = tree_constitution(root)
+    if namespace is None:
+        return unread
+    constitution = namespace["CONSTITUTION"]
     table = constitution.get("options_money")
     if table is not None:
         problems = [f"league/constitution.py: {p}" for p in namespace["options_money_problems"](constitution)]
@@ -526,6 +547,122 @@ def check_structures(root: Path = REPO) -> list[str]:
         problems.append(f"gateway/wrangler.jsonc: OPTION_STRUCTURES_REAL admits {gateway or 'none'} on the real account, "
                         f"but the constitution opens {wanted or 'none'} ({source}): the two change together, in one deploy")
     return problems
+
+
+#: The gateway's stock list (`gateway/lib/caps.mjs` STOCK_UNIVERSE, a frozen object of `SYM: 'class'` pairs) and its line.
+GATEWAY_STOCK_UNIVERSE = re.compile(r"export const STOCK_UNIVERSE = Object\.freeze\(\{([\s\S]*?)\}\);")
+GATEWAY_STOCK_PAIR = re.compile(r"""(?:'([^']+)'|"([^"]+)"|([A-Za-z][A-Za-z0-9_]*))\s*:\s*'([a-z]+)'""")
+#: The gateway's real stock-buy switch (`caps.stockBuysEnabled`: "on", trimmed and in any case, admits buys; anything
+#: else admits none) in `gateway/wrangler.jsonc`, read from its own line as OPTION_STRUCTURES_REAL is.
+GATEWAY_STOCK_SWITCH = re.compile(r'^\s*"STOCK_BUYS_REAL"\s*:\s*"([^"\\]*)"\s*,?\s*(//.*)?$')
+#: The gateway's per-symbol caps as a share of equity, by class (`account.stockCaps`): the House's
+#: `equity_money.position_share` never above them.
+GATEWAY_STOCK_SHARES = {"etf": "STOCK_ETF_EQUITY_SHARE", "stock": "STOCK_SINGLE_EQUITY_SHARE"}
+
+
+def gateway_stock_universe(root: Path = REPO) -> tuple[dict[str, str], list[str]]:
+    """({symbol: class} the gateway's real stock buys may name, why it could not be read), from `gateway/lib/caps.mjs`
+    STOCK_UNIVERSE as written (comments dropped): declared once, every entry a `SYM: 'etf' | 'stock'` pair, no symbol
+    twice."""
+    try:
+        text = (root / "gateway" / "lib" / "caps.mjs").read_text(encoding="utf-8")
+    except OSError as exc:
+        return {}, [f"gateway/lib/caps.mjs: {exc}"]
+    blocks = GATEWAY_STOCK_UNIVERSE.findall(text)
+    if len(blocks) != 1:
+        return {}, ["gateway/lib/caps.mjs: STOCK_UNIVERSE must be declared once, as a frozen object of SYM: 'class' pairs"]
+    body = re.sub(r"//[^\n]*", "", blocks[0])
+    pairs = [((a or b or c), klass) for a, b, c, klass in GATEWAY_STOCK_PAIR.findall(body)]
+    entries = [part for part in (p.strip() for p in body.split(",")) if part]
+    out: dict[str, str] = {}
+    for symbol, klass in pairs:
+        if klass not in ("etf", "stock") or symbol in out:
+            return {}, [f"gateway/lib/caps.mjs: STOCK_UNIVERSE names {symbol} as {klass!r} (twice, or not etf or stock)"]
+        out[symbol] = klass
+    if len(pairs) != len(entries):
+        return {}, ["gateway/lib/caps.mjs: STOCK_UNIVERSE has an entry that is not a SYM: 'etf' | 'stock' pair"]
+    return out, []
+
+
+def stock_agreement(table: Any, *, universe: Any, buys_on: Any, shares: Any, source: str) -> list[str]:
+    """Why the gateway's stock route (`universe` {symbol: class}, `buys_on` whether its STOCK_BUYS_REAL admits buys,
+    `shares` {class: its per-symbol share of equity}) disagrees with the constitution's `equity_money` (`table`), or [].
+    ONE comparison, read from the release's files by `gateway_stock_problems` and from the deployed gateway's
+    `/v1/health` by the pre-open job (league/ops/preopen.py): the universe is exactly the constitution's, symbol and
+    class; `enabled` True requires the gateway's buys on (the gateway may be on while `enabled` is False: that row is the
+    switch, A8); and each class's `position_share` is never above the gateway's share for it."""
+    from decimal import Decimal, InvalidOperation
+
+    if not isinstance(table, dict):
+        return ["league/constitution.py: equity_money is missing: the gateway's stock route has nothing to agree with"]
+    problems = []
+    rows = table.get("universe") if isinstance(table.get("universe"), dict) else {}
+    wanted = {s: k for k in ("etf", "stock") for s in (rows.get(k) if isinstance(rows.get(k), list) else [])}
+    got = dict(universe or {})
+    if got != wanted:
+        extra = sorted(f"{s} ({k})" for s, k in got.items() if wanted.get(s) != k)
+        missing = sorted(f"{s} ({k})" for s, k in wanted.items() if got.get(s) != k)
+        problems.append(f"{source}: the gateway's STOCK_UNIVERSE and equity_money.universe differ (gateway only: "
+                        f"{', '.join(extra) or 'none'}; constitution only: {', '.join(missing) or 'none'}): they change "
+                        "together")
+    if table.get("enabled") is True and buys_on is not True:
+        problems.append(f"{source}: equity_money.enabled is true but the gateway's STOCK_BUYS_REAL admits no buy: switch "
+                        "the gateway on first (the House's row is the switch)")
+    position = table.get("position_share") if isinstance(table.get("position_share"), dict) else {}
+    for klass, var in GATEWAY_STOCK_SHARES.items():
+        try:
+            mine, theirs = Decimal(str(position.get(klass))), Decimal(str((shares or {}).get(klass)))
+            above = not (mine.is_finite() and theirs.is_finite()) or mine > theirs
+        except (InvalidOperation, ValueError):
+            above = True
+        if above:
+            problems.append(f"{source}: equity_money.position_share.{klass} {position.get(klass)!r} is not within the "
+                            f"gateway's {var} {(shares or {}).get(klass)!r}")
+    return problems
+
+
+def gateway_stock_problems(root: Path, table: Any) -> list[str]:
+    """The gateway's stock route as the release's files set it, against the constitution's `equity_money` (`table`):
+    `gateway/lib/caps.mjs` STOCK_UNIVERSE, and in `gateway/wrangler.jsonc` STOCK_BUYS_REAL (set once, on its own line)
+    and the two per-symbol shares (each set once), read as OPTION_STRUCTURES_REAL and the caps are read
+    (`stock_agreement`)."""
+    universe, problems = gateway_stock_universe(root)
+    try:
+        text = (root / "gateway" / "wrangler.jsonc").read_text(encoding="utf-8")
+    except OSError as exc:
+        return problems + [f"gateway/wrangler.jsonc: {exc}"]
+    switch = [m.group(1) for m in (GATEWAY_STOCK_SWITCH.match(line) for line in text.splitlines()) if m]
+    if len([line for line in text.splitlines() if '"STOCK_BUYS_REAL"' in line]) != 1 or len(switch) != 1:
+        problems.append("gateway/wrangler.jsonc: STOCK_BUYS_REAL must be set once, on its own line, to a quoted value")
+    shares = {}
+    for klass, var in GATEWAY_STOCK_SHARES.items():
+        found = re.findall(rf'^\s*"{var}"\s*:\s*"([^"]*)"', text, flags=re.M)
+        if len(found) != 1:
+            problems.append(f"gateway/wrangler.jsonc: {var} must be set once (it bounds equity_money.position_share.{klass})")
+        else:
+            shares[klass] = found[0]
+    if problems:
+        return problems
+    return stock_agreement(table, universe=universe, buys_on=switch[0].strip().lower() == "on", shares=shares,
+                           source="gateway/wrangler.jsonc and gateway/lib/caps.mjs")
+
+
+def check_equity(root: Path = REPO) -> list[str]:
+    """THE EQUITY LANE's money rows inside their bounds (`constitution.equity_money_problems`), and the gateway's stock
+    route in agreement with them (`gateway_stock_problems`): one source of truth for what real equity opens may name.
+    The constitution is read from `root` as `check_structures` reads it (compiled from its text, never imported). A tree
+    whose constitution predates the equity lane (no `equity_money_problems`) has nothing to check."""
+    namespace, unread = tree_constitution(root)
+    if namespace is None:
+        return unread
+    constitution = namespace["CONSTITUTION"]
+    judge = namespace.get("equity_money_problems")
+    if judge is None:
+        return []
+    problems = [f"league/constitution.py: {p}" for p in judge(constitution)]
+    if problems:
+        return problems
+    return gateway_stock_problems(root, constitution.get("equity_money"))
 
 
 def run_tests(root: Path = REPO) -> list[str]:
@@ -583,6 +720,7 @@ def check(base: str | None, branch: str | None, *, root: Path = REPO, tests: boo
     problems.extend(check_tools(root))
     problems.extend(check_game(root))
     problems.extend(check_structures(root))
+    problems.extend(check_equity(root))
     problems.extend(check_config(base if role == "operator" or "league/config.json" in paths and (branch or "").startswith(tuple(f"{p}/" for p in PREFIXES)) else None, root))
     if tests and not problems:
         problems.extend(run_tests(root))

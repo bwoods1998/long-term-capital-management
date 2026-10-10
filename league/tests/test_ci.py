@@ -64,7 +64,10 @@ class GuardTest(unittest.TestCase):
         self.assertIsNotNone(block)
         gateway = set(re.findall(r"'([^']+)'", re.sub(r"//[^\n]*", "", block.group(1))))
         self.assertGreater(len(gateway), 40)
-        self.assertEqual(set(ci.FORBIDDEN) - gateway, set(), "the updater protects these; the gateway would merge them")
+        # Release E1: the equity lane's tree and swarm lane are protected here first; the gateway's list cannot change in
+        # E1 (gateway/ ships separately), so exactly `PENDING_GATEWAY` is allowed beyond it until a gateway follow-up.
+        self.assertEqual(set(ci.FORBIDDEN) - gateway, set(ci.PENDING_GATEWAY),
+                         "the updater protects these; the gateway would merge them")
         self.assertEqual(gateway - set(ci.FORBIDDEN), set(ci.MERGE_ONLY), "the gateway protects these; the updater would deploy them")
         for path in ("league/swarm/bands.py", "league/swarm/store.py", "ltcm/data/us_equity_session.py", "deploy/restart.sh",
                      "league/gym/engine.py", "league/swarm/guard.py",
@@ -234,6 +237,141 @@ class ContentTest(unittest.TestCase):
 class RepositoryTest(unittest.TestCase):
     def test_the_repository_as_it_stands_passes_its_own_content_checks(self):
         self.assertEqual(ci.check_strategies() + ci.check_tools() + ci.check_game() + ci.check_config(None), [])
+
+
+class TheEquityLane(unittest.TestCase):
+    """Release E1 (league/equity/INTERFACES.md 7.2): the equity lane's tree and swarm lane are protected; the
+    constitution's `equity_money` stays inside its bounds; and the gateway's stock route (`gateway/lib/caps.mjs`
+    STOCK_UNIVERSE, `gateway/wrangler.jsonc` STOCK_BUYS_REAL and the per-symbol shares) agrees with it, read from the
+    files as OPTION_STRUCTURES_REAL is (`check_equity`)."""
+
+    SWITCH_LINE = '"STOCK_BUYS_REAL": "on",'
+    ENABLED_LINE = '        "enabled": False,\n        "universe": {"etf"'
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.root = Path(self.dir.name)
+        (self.root / "league").mkdir()
+        (self.root / "gateway" / "lib").mkdir(parents=True)
+        self.constitution = (ci.REPO / "league" / "constitution.py").read_text(encoding="utf-8")
+        self.wrangler = (ci.REPO / "gateway" / "wrangler.jsonc").read_text(encoding="utf-8")
+        self.caps = (ci.REPO / "gateway" / "lib" / "caps.mjs").read_text(encoding="utf-8")
+        self.assertIn(self.SWITCH_LINE, self.wrangler)
+        self.assertEqual(self.constitution.count(self.ENABLED_LINE), 1)
+
+    def tree(self, *, constitution=None, wrangler=None, caps=None):
+        text = self.constitution
+        for old, new in (constitution or {}).items():
+            self.assertIn(old, text)
+            text = text.replace(old, new)
+        (self.root / "league" / "constitution.py").write_text(text, encoding="utf-8")
+        text = self.wrangler
+        for old, new in (wrangler or {}).items():
+            self.assertIn(old, text)
+            text = text.replace(old, new)
+        (self.root / "gateway" / "wrangler.jsonc").write_text(text, encoding="utf-8")
+        text = self.caps
+        for old, new in (caps or {}).items():
+            self.assertIn(old, text)
+            text = text.replace(old, new)
+        (self.root / "gateway" / "lib" / "caps.mjs").write_text(text, encoding="utf-8")
+        return ci.check_equity(self.root)
+
+    def test_the_tree_and_the_swarm_lane_are_protected(self):
+        self.assertEqual(ci.PENDING_GATEWAY, ("league/equity/", "league/swarm/elane.py"))
+        for entry in ci.PENDING_GATEWAY:
+            self.assertIn(entry, ci.FORBIDDEN)
+        for path in ("league/equity/sizing.py", "league/equity/live.py", "league/equity/INTERFACES.md",
+                     "League/Equity/bands.py", "league/swarm/elane.py"):
+            self.assertTrue(ci.guard([path], None), path)
+            for role in ci.ROLE_PATHS:
+                self.assertTrue(ci.guard([path], role), (path, role))
+        from league.updater import protected_changes
+
+        with tempfile.TemporaryDirectory() as tmp:
+            running, incoming = Path(tmp) / "running", Path(tmp) / "incoming"
+            for root, text in ((running, "X = 1\n"), (incoming, "X = 2\n")):
+                for rel in ("league/equity/sizing.py", "league/swarm/elane.py", "league/swarm/pool.py"):
+                    (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                    (root / rel).write_text(text)
+            self.assertEqual([p.split(":")[0] for p in protected_changes(incoming, running)],
+                             ["league/equity/sizing.py", "league/swarm/elane.py"])
+
+    def test_the_repository_as_it_stands_agrees(self):
+        self.assertEqual(ci.check_equity(), [])
+        universe, problems = ci.gateway_stock_universe()
+        self.assertEqual(problems, [])
+        from league.constitution import CONSTITUTION
+
+        em = CONSTITUTION["equity_money"]
+        self.assertEqual(universe, {s: k for k in ("etf", "stock") for s in em["universe"][k]})
+        self.assertEqual(self.tree(), [])
+
+    def test_the_switch_is_the_houses_and_the_gateway_may_be_on_while_it_is_off(self):
+        self.assertEqual(self.tree(), [], "gateway on, enabled False: the House's row is the switch (A8)")
+        self.assertEqual(self.tree(wrangler={self.SWITCH_LINE: '"STOCK_BUYS_REAL": "off",'}), [], "both off")
+        on = {self.ENABLED_LINE: self.ENABLED_LINE.replace("False", "True")}
+        self.assertEqual(self.tree(constitution=on), [], "both on")
+        self.assertEqual(self.tree(constitution=on, wrangler={self.SWITCH_LINE: '"STOCK_BUYS_REAL": " On ",'}), [],
+                         "the gateway's own reading: trimmed, any case")
+        for value in ("off", "", "yes", "onn"):
+            refused = self.tree(constitution=on, wrangler={self.SWITCH_LINE: f'"STOCK_BUYS_REAL": "{value}",'})
+            self.assertTrue(any("equity_money.enabled is true but the gateway's STOCK_BUYS_REAL admits no buy" in p
+                                for p in refused), (value, refused))
+        twice = self.tree(wrangler={self.SWITCH_LINE: self.SWITCH_LINE + '\n    "STOCK_BUYS_REAL": "on",'})
+        self.assertIn("STOCK_BUYS_REAL must be set once", " ".join(twice))
+        gone = self.tree(wrangler={self.SWITCH_LINE: ""})
+        self.assertIn("STOCK_BUYS_REAL must be set once", " ".join(gone))
+
+    def test_the_universe_changes_with_the_gateways_list(self):
+        refused = self.tree(caps={"COST: 'stock',": "COST: 'stock', NFLX: 'stock',"})
+        self.assertIn("gateway only: NFLX (stock)", " ".join(refused))
+        refused = self.tree(caps={"TLT: 'etf', GLD: 'etf',": "TLT: 'etf',"})
+        self.assertIn("constitution only: GLD (etf)", " ".join(refused))
+        refused = self.tree(caps={"'BRK.B': 'stock'": "'BRK.B': 'etf'"})
+        self.assertIn("gateway only: BRK.B (etf)", " ".join(refused), "a class is part of the list")
+        refused = self.tree(constitution={'"TLT", "GLD"],': '"TLT"],'})
+        self.assertIn("gateway only: GLD (etf)", " ".join(refused))
+        self.assertIn("STOCK_UNIVERSE has an entry", " ".join(self.tree(caps={"COST: 'stock',": "COST: 'stock', SQQQ,"})))
+        self.assertIn("twice, or not etf or stock", " ".join(self.tree(caps={"COST: 'stock',": "COST: 'stock', SPY: 'etf',"})))
+        self.assertIn("twice, or not etf or stock", " ".join(self.tree(caps={"COST: 'stock',": "COST: 'bond',"})))
+        moved = self.caps.replace("export const STOCK_UNIVERSE", "export const STOCK_LIST")
+        self.assertIn("STOCK_UNIVERSE must be declared once", " ".join(self.tree(caps={self.caps: moved})))
+
+    def test_the_position_shares_stay_within_the_gateways(self):
+        self.assertEqual(self.tree(constitution={'"position_share": {"etf": "0.50", "stock": "0.20"}':
+                                                 '"position_share": {"etf": "0.40", "stock": "0.10"}'}), [], "tighter")
+        refused = self.tree(wrangler={'"STOCK_ETF_EQUITY_SHARE": "0.5",': '"STOCK_ETF_EQUITY_SHARE": "0.4",'})
+        self.assertIn("equity_money.position_share.etf '0.50' is not within the gateway's STOCK_ETF_EQUITY_SHARE '0.4'",
+                      " ".join(refused))
+        refused = self.tree(wrangler={'"STOCK_SINGLE_EQUITY_SHARE": "0.2",': '"STOCK_SINGLE_EQUITY_SHARE": "x",'})
+        self.assertIn("position_share.stock", " ".join(refused))
+
+    def test_a_row_outside_its_bounds_is_refused_before_any_comparison(self):
+        refused = self.tree(constitution={'"invested_share": "1.00",': '"invested_share": "2.00",'})
+        self.assertEqual(refused, ["league/constitution.py: equity_money.invested_share = '2.00' is outside (0, 1.00]"])
+        refused = self.tree(constitution={'"cash_reserve_usd": "50",': '"cash_reserve_usd": "25",'})
+        self.assertIn("equity_money.cash_reserve_usd = '25' is outside [50, 200]", " ".join(refused))
+        refused = self.tree(constitution={'"rule": "edm1",': '"rule": "EDM1",'})
+        self.assertIn("equity_money.demotion.rule = 'EDM1' is not exactly one of ['edm1']", " ".join(refused))
+        refused = self.tree(constitution={self.ENABLED_LINE: self.ENABLED_LINE.replace("False", "1")})
+        self.assertIn("equity_money.enabled = 1 is not exactly one of [False, True]", " ".join(refused))
+
+    def test_a_constitution_before_the_equity_lane_has_nothing_to_check(self):
+        text = self.constitution.replace("def equity_money_problems(", "def _no_equity_money_problems(")
+        (self.root / "league" / "constitution.py").write_text(text, encoding="utf-8")
+        self.assertEqual(ci.check_equity(self.root), [])
+        (self.root / "league" / "constitution.py").write_text("CONSTITUTION = (", encoding="utf-8")
+        self.assertIn("could not be read", ci.check_equity(self.root)[0])
+
+    def test_the_check_runs_in_league_ci(self):
+        from unittest.mock import patch
+
+        with patch.object(ci, "check_equity", return_value=["the stock route disagrees"]) as check, \
+                patch.object(ci, "check_strategies", return_value=[]), patch.object(ci, "check_tools", return_value=[]):
+            self.assertIn("the stock route disagrees", ci.check(None, None, tests=False))
+        check.assert_called_once()
 
 
 if __name__ == "__main__":
