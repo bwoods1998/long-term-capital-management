@@ -29,6 +29,13 @@ any other deploy.
 The running House release is `20261010T062000Z-1767910d2115` (main `dd196cad`, the spent-lineage refusal, 06:20Z Oct 10),
 the gateway is `507b6118`, and the box's updater is on. What is built and not deployed is on branches.
 
+### An always-in card's ablation is dropped, on `fix/always-in-ablation` (unreleased; an owner deploy; no evidence reset)
+
+- `league/swarm/cards.py` `validate`: the architect's card template asks every card for an `ablation` switch, so its
+  always-in cards (declared inputs exactly `["clock"]`) arrived with one and were refused ("has no gate to switch off").
+  Such a card's ablation is now stored as the default (the same card and sha as one that declared none);
+  `dlane.card_errors` itself still refuses one. G1 on Train still holds the program to the clock alone.
+
 ### The always-in card, on `fix/always-in-v2` (unreleased; an owner deploy; no evidence reset)
 
 - A direction card whose declared inputs are exactly `["clock"]` is always-in: its card says "always-in" or "no gate"
