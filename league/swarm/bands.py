@@ -181,9 +181,9 @@ def waiting(fams: Sequence[Mapping[str, Any]], seats: int) -> set[str]:
 
     Why: the Probe budget is one envelope for every program, and Done needs >= 5 real closes from each of >= 2 programs.
     With no roster, every program that passes its look trades at once and the shared budget spreads one or two closes
-    over each of dozens of programs (the redesign grid: at a measured 35.6 D2 verdicts a session, P(Done in 12 weeks)
-    1.6% as traded, 5.1% even at +0.30 of maximum loss a trade). A roster seats a few programs, which then earn the
-    closes that can show an edge; the others wait their turn as Candidates (no real order, no shadow seat taken).
+    over each of dozens of programs, so the clause fails even for a real edge (the operator's private simulation,
+    REDESIGN-1010). A roster seats a few programs, which then earn the closes that can show an edge; the others wait
+    their turn as Candidates (no real order, no shadow seat taken).
 
     The rule, in this order:
     - every Probe family holds a seat and is never hidden (a Sized family neither holds one nor waits: its money is the
