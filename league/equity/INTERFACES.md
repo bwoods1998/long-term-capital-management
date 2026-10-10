@@ -1,0 +1,764 @@
+# E1 build interfaces: the equity lane's contract between its seven packages
+
+Branch `feat/equity-e1` (worktree `~/Work/ltcm-v3/eqe1`), from `origin/main` a48623e7 (the gateway's stock code, PR
+#532, is on it). This file is the skeleton's: every package builds against it and changes it only through the
+captain. The stubs it names exist on the branch now (bodies raise `NotImplementedError("<package>: <file> <name>")`;
+their docstrings say what each must do), so every package imports every other package's names from day one.
+
+**Sources, in order of authority.** The captain's amendments A1-A9 (A9, the share screen as adopted, overrides A7;
+A8, the design review's 13 decisions, overrides any brief), then the design (DESIGN.md), then the package briefs.
+Where a brief and an amendment differ, this file already follows the amendment and says so (section 13). The share
+screen is the pinned sscreen-1010 pre-registration with A9's fixes F1, D3, D5, D6, exactly as its receipt states.
+
+**Hard rules for every package.** No private figure is committed: no census or market result, no price or return from
+any real year, no Phase A number, no price scale from the census; rule-level simulation figures are allowed. No
+market data file is committed. No push, PR, deploy, or contact with the House, Sail, Alpaca, the gateway or a broker;
+no secret or env file read. `gateway/` is read only (`gateway/lib/caps.mjs`, `gateway/wrangler.jsonc`). Tests run one process at a time:
+
+    mkdir -p /dev/shm/eqe1-<key> && TMPDIR=/dev/shm/eqe1-<key> \
+      /home/bwoods1998/Work/long-term-capital-management/.venv/bin/python -m unittest <modules>
+
+Bulky scratch goes under `~/Work/.ltcm-main/scratch/eqe1/`. Match the surrounding code: its idioms, naming, docstring
+density, Decimal money and fail-closed style. Commit messages end with the two attribution lines the task gives.
+
+---
+
+## 1. Ownership map
+
+Each file has exactly ONE owner, except the two shared files of section 1.1, owned per function. A package edits only
+its own files (and its own functions of a shared file). A test file is owned by the package that creates it.
+
+| key | owns (new files in **bold**) |
+|---|---|
+| skeleton | `league/equity/INTERFACES.md` (this file; changed only through the captain) |
+| core | **`league/equity/__init__.py`**, **`config.py`**, **`store.py`**, **`program.py`**, **`ctx.py`**, **`engine.py`**, **`results.py`**, **`runner.py`**, **`synth.py`**, **`EQUITY.md`**; `league/swarm/evaluator.py` (equity identity, adoption mirrored, and `adopt` skipping equity families); tests **`league/tests/test_equity_store.py`**, **`test_equity_program.py`**, **`test_equity_ctx.py`**, **`test_equity_engine.py`**, **`test_equity_runner.py`**, **`test_equity_identity.py`** |
+| book | **`league/equity/live.py`**, **`schedule.py`**, **`actions.py`**, **`families.py`**; tests **`league/tests/test_equity_book.py`**, **`test_equity_schedule.py`**, **`test_equity_actions.py`**, **`test_equity_families.py`** |
+| hooks | **`league/live/equity_hook.py`**, **`league/equity/kinds.py`**, **`league/equity/child.py`**; `league/live/step.py`, `league/live/real.py`, `league/live/decider.py`, `league/live/paper.py`, `league/live/venue.py`; tests **`league/tests/test_equity_hooks.py`**, **`test_equity_decider.py`**, **`test_equity_i6.py`**, **`test_equity_isolation.py`**, **`test_equity_paper.py`** |
+| money | `league/constitution.py`, `league/ci.py`, `league/live/money.py` (all but `band_for`), **`league/equity/sizing.py`**, `league/equity/bands.py` (money's functions), `league/ops/preopen.py`; tests **`league/tests/test_equity_money.py`**, **`test_equity_sizing.py`**, **`test_equity_bands_money.py`**, and the pins in `league/tests/test_ci.py` and `league/tests/test_constitution.py` |
+| swarm | **`league/swarm/elane.py`**, `league/swarm/policy.json`, `league/swarm/settings.py`, `league/swarm/seeds.py`, `league/swarm/cards.py`, `league/swarm/gate.py`, `league/swarm/tournament.py`, `league/swarm/bands.py`, `league/swarm/store.py` (the `lanes` filter of `families`), `league/swarm/loop.py`,
+`league/swarm/dlane.py` (lane scoping only, A8.12), `league/equity/bands.py` (swarm's functions), `league/live/money.py` (`band_for` only); tests **`league/tests/test_elane.py`**, **`test_elane_seeds.py`**, **`test_elane_gate.py`** |
+| screen | **`league/equity/screen.py`**; tests **`league/tests/test_equity_screen.py`**, fixture **`league/tests/fixtures/equity_screen_fake.json`** (a fake receipt, tests only) |
+| ops | **`league/ops/equity_data.py`**, `league/ops/registry.py`, `league/ops/dlane_report.py`, `league/ops/twins.py`, `league/ops/funnel.py`, `scripts/floor_box.py`, `docs/operations.md`, `CHANGELOG.md`; tests **`league/tests/test_equity_data.py`**, **`test_equity_twins.py`**, **`test_dlane_report_equity.py`**, **`test_floor_box_equity.py`** |
+
+### 1.1 The two shared files (owned per function)
+
+| file | money owns | swarm owns |
+|---|---|---|
+| `league/live/money.py` | `Table` (its new `equity` field and `from_constitution` filling it), `EquityTable`, `Exposure` (its new `equity_open_risk`, `equity_invested`), `available_cash`, everything else in the file | `band_for` only: one first statement, `if equity_hook.is_equity_row(row): return equity_hook.band_for(row)` |
+| `league/equity/bands.py` | `EquityRecord`, `sized_up`, `sized_sleeve_share`, `edm1` | `next_band`, `band_for_row` |
+
+Each edits only its own functions; neither reorders the file.
+
+### 1.2 Files no package edits
+
+`gateway/**` (read only), `league/gym/**` (the equity lane imports it, never edits it: it is inside the options
+fingerprint), `league/live/families.py` (unchanged: the options reader keeps reading `bands.read(root)`, which leaves
+equity lanes out by default; the equity reader is `league/equity/families.py`), `league/live/state.py` (the book
+creates its own tables), `docs/benchmarks/equity_screen_1.json` (the captain writes it from the screen study's result;
+no package writes it).
+
+---
+
+## 2. Boundaries (A8.8, I5)
+
+1. **league/live reaches league.equity through exactly two modules**: `league/live/equity_hook.py` (any league.equity
+   import) and `league/live/decider.py` (it imports `league.equity.kinds` only). `test_equity_isolation.py` (hooks)
+   asserts this over every `league/live/*.py` by AST, and that `league/live/step.py` contains the text
+   `.equity.tick(` exactly once, inside `OptionsLive.minute`.
+2. **Evidence modules of league/equity** (`config`, `store`, `program`, `ctx`, `engine`, `results`, `runner`, `synth`,
+   `sizing`, `screen`, `child`, `kinds`) import nothing of `league.live` and nothing of `league.swarm`. They may import
+   `league.gym` modules listed in `league.swarm.evaluator.EQUITY_GYM_FILES` (core keeps the list equal to the imports;
+   `test_equity_identity.py` holds it) and `league/__init__.py`, `league/safety.py`, `league/structure_core.py`,
+   `league/stats.py` (the 4 `LEAGUE_FILES`).
+3. **Plumbing modules of league/equity** (`live`, `schedule`, `actions`, `families`, `bands`) may import
+   `league.live.state`, `league.live.venue`, `league.live.money`, `league.live.real` (its constants and
+   `probe_figures`, the shared budget's reader),
+   `league.swarm.bands`, `league.swarm.store`, `ltcm.data`. `bands` imports nothing of league.live (it reads the
+   money table by attribute).
+4. **The equity fingerprint** (`league.swarm.evaluator.equity_fingerprint`, core): sha256 over every
+   `league/equity/**/*.py` (code, not this file or EQUITY.md: as `execution_fingerprint`, documentation never
+   resets evidence), the 4 `LEAGUE_FILES` and `EQUITY_GYM_FILES`, path and bytes, in path order. It never includes
+   league/live. A change to league/live moves the OPTIONS fingerprint only; a change to league/equity moves the EQUITY
+   fingerprint only. E1 moves the options fingerprint once (its hooks and the stubs in money.py and decider.py).
+5. **Options consumers skip equity families** (swarm, core). ONE MECHANISM: `SwarmStore.families(*, alive=None,
+   lanes=None)` (swarm, league/swarm/store.py): `lanes` None returns the options lanes only (a family whose spec's
+   `lane` is "beta" or "equity" is left out), so the researcher's selection, the tournament's Gym validation, forks,
+   the learning game, the incubator, the diagnostician, idle retirement, the always-in G1 check and every other
+   existing caller skip equity families with no edit of their own; `lanes=LANES` returns the equity families only
+   (elane, the tournament's and the gate's equity dispatch); `lanes="all"` everything (reports). `bands.read(root)`,
+   `observe` and `incubator` likewise (equity rows only with `lanes=LANES`). `evaluator.adopt` (core) iterates the
+   default and so never touches an equity family; `adopt_equity` handles them. The swarm audits the raw-SQL readers of
+   `families` (league/swarm/game.py's alive ceiling, cards.py's graveyard reads, ...) and scopes the ones that would
+   act on an equity family. Look and Validation outcomes of equity families never reach generators or the
+   diagnostician (A9 D3). Helper: `elane.lane_of(store, fam)` is not None.
+
+---
+
+## 3. Conventions
+
+- Money and share quantities: `decimal.Decimal` in code, **Decimal strings** in SQLite and JSON (`"0.123456"`), never
+  floats; dollars unless named; shares up to 6 decimals sent (`config.QTY_PLACES`; the venue takes 9).
+- Prices and returns inside the engine, ctx and screen: float64 numpy (a program's world), rounded to 4 decimals at
+  the ctx; the cash book converts with `Decimal(str(x))`.
+- Days: ISO `YYYY-MM-DD` strings (New York session days) in rows and JSON; `int32` ordinals since 1970-01-01 in arrays
+  (`league.gym.day.ordinal`). Times: epoch seconds (UTC) in rows; schedule offsets in seconds from the session's open
+  or close (New York).
+- Lanes: `league.equity.LANES` = ("beta", "equity"). Classes: "etf", "stock". Fill points: `"at": "open" | "close"`.
+- Instances: `<family>@<version>:r` (the real evidence route, as the options book's), kept in `eq_instances`, never in
+  the options `instances` table.
+- Client ids: `lq-<eid>-<family slug>` (`league.equity.CLIENT_PREFIX`).
+- Every refusal names its cause; every unreadable input refuses opens and never blocks exits.
+
+---
+
+## 4. core
+
+### 4.1 `league/equity/__init__.py`
+`EQUITY_ENGINE_VERSION = "equity-engine-1"`, `EQUITY_STORE_VERSION = "equity-store-v1"`, `BETA`, `EQUITY`, `LANES`,
+`CLIENT_PREFIX = "lq-"` (written; no behaviour).
+
+### 4.2 `league/equity/config.py`
+Constants (written): `UNIVERSE` {symbol: class} = the gateway's `STOCK_UNIVERSE` exactly; `INDEX_ETFS`;
+`HALF_SPREAD_BP` (1 bp SPY QQQ IWM DIA, 3 bp other ETFs and stocks, 5 bp TLT GLD); `K_BASE` 1.0, `K_STRESS` 1.5;
+`SEC_FEE_PER_MILLION` "27.80", `TAF_PER_SHARE` "0.000166", `TAF_MAX` "8.30"; `POSITION_SHARE` {"etf": "0.50",
+"stock": "0.20"}; `SLEEVE_USD` "1000" (the Gym's E0); `MAX_SYMBOLS` 20, `MAX_HISTORY` 504, `MAX_INTENTS` 20,
+`MIN_HOLD_SESSIONS` 1, `DEFAULT_MAX_HOLD` 20, `MAX_HOLD_CAP` 60, `FAILED_DECIDES_EXIT` 2, `QTY_PLACES` 6; `WINDOWS`
+(Train 2016-01-04..2024-12-31, Validation 2025-01-02..2025-12-31, holdout 2026-01-02..2026-09-25, forward
+2026-09-26..), `SEALED`; `LOOK_FIRST` 2026-01-02 and `LOOK_CAP` 2026-12-31 (A9 D6: the one look reads LOOK_FIRST
+through min(the last close before the look, LOOK_CAP), the store's holdout and forward days);
+`TRAIN_ERA_SEGMENTS` ((2016-01-04, 2019-12-31), (2022-01-03, 2024-12-31)).
+Functions: `class_of(symbol) -> str | None`; `half_spread(symbol) -> float` (fraction); `sell_fees(proceeds: Decimal,
+shares: Decimal) -> Decimal` (SEC + TAF, each rounded UP to the cent, TAF capped).
+
+### 4.3 `league/equity/store.py`
+- Layout of `<state>/equity-daily/` (numpy only, atomic, manifest last): `VERSION`; `calendar.npz` {days int32, early
+  bool}; `bars/<SYMBOL>.npz` {days int32, raw_o, raw_h, raw_l, raw_c, raw_v, all_o, all_h, all_l, all_c float64};
+  `manifest.json` {version, fetched_through, symbols {SYM: {class, sha256, first, last, rows}}, calendar_sha256,
+  source "alpaca-sip-1Day" | "synthetic", audit}; `GATE` (the House's store only).
+- `EquityGateCapability` (cannot be constructed), `mint_equity_gate_capability(store_root, reason) ->
+  EquityGateCapability` (needs the `GATE` mark and a reason; StoreRefused otherwise), `StoreRefused`, `MissingData`.
+- `window_of(day) -> "train" | "validation" | "holdout" | "forward" | "pre" | "gap"`.
+- `Bars` (frozen): `days` int32 (n,), `early` bool (n,), `first` int (the run's first session index; before it
+  history only), `symbols` tuple, `raw[sym]` float64 (n, 5) o h l c v, `adj[sym]` float64 (n, 4) o h l c, `window`,
+  `data_version`; `n` property.
+- `EquityStore(root, *, gate=None)`: `gate` (bool), `manifest()`, `symbols() -> {sym: class}`,
+  `sessions(window=None) -> [date]`, `bars(symbols, window, *, history, start=None, end=None) -> Bars`,
+  `span(symbols, first, last, *, history) -> Bars` (Train only), `data_version(symbols, days) -> str` (24 hex).
+- `nyse_sessions(start, end) -> [(date, early: bool)]`: `ltcm.data.us_equity_session` from 2022 (that calendar starts
+  in 2022: `CALENDAR_MIN_YEAR`), the same rules computed here for 2016-2021 (no Juneteenth before 2022; the 2018-12-05
+  closure). The store's calendar, `synth`, and the data job's audit read this one.
+- `write_store(root, *, calendar: [(date, early)], series: {sym: {"days": [date], "raw_o".."raw_v", "all_o".."all_c":
+  [float]}}, classes: {sym: class}, fetched_through: date, source: str, gate: bool, audit=None) -> manifest dict`.
+  ops' `equity_data.run` and `synth` both write through it.
+
+### 4.4 `league/equity/program.py`
+- `NEEDS = {"symbols": [1-20 of config.UNIVERSE], "history": 0-504 (default 252), "max_hold_sessions": 1-60
+  (default 20)}`; `Needs(symbols, history, max_hold_sessions)` with `as_dict()`; `parse_needs(raw) -> Needs`
+  (`NeedsRefused`, a `CodeRefused`).
+- `load_program(code, *, name="program", params=None) -> EquityProgram` (`league.gym.safety.check_program`
+  unchanged; PARAMS bound at the declaration and merged as `league.gym.runtime` does);
+  `EquityProgram(name, code, needs, params, sha, run_sha)` with `start(*, timeout=1.0, max_errors=25,
+  budget_seconds=None) -> EquityRunner`.
+- `EquityRunner.decide(ctx) -> [intent]` ([] on error, timeout, disqualified), `stats() -> {calls, errors, timeouts,
+  seconds, messages, disqualified}`.
+- **Intents** (`normalize_intents(raw, on_error=None)`): at most 20; exactly one of:
+  - `{"buy": SYM, "share": (0, 1] | "usd": > 0, "at": "open" | "close" (default "open"), "tag": str}`;
+  - `{"sell": <lot id int>, "at": "open" | "close", "tag": str}` (a whole lot);
+  - `{"cancel": <order id int>}`.
+
+### 4.5 `league/equity/ctx.py` (I6: the Gym's and the live path's one constructor)
+- `Ctx` attributes: `symbols`, `bars` {sym: `SymbolBars`(open, high, low, close, volume, ret: read-only float64,
+  oldest first, last = session t; as-of prices `all_s x raw_t / all_t` rounded to 4 dp; volume raw; ret of the as-of
+  closes, NaN first)}, `prices` {sym: t's close}, `weekday` (0-4), `events`, `events_next` (`league.gym.events.flags_for`:
+  fomc, cpi, jobs, monthly_opex, quarter_end, half_day), `session_of_month` (1-based), `sessions_to_month_end`
+  (0 on the last), `positions` [`lot_row`], `orders` [{id, side, symbol, at, usd, tag}], `closed` [`closed_row`],
+  `rejects` [str], `cash`, `equity`, `budget` (floats, dollars, the sleeve's), `caps` {sym: dollars}, `params`.
+- `lot_row(*, lid, symbol, klass, qty, entry, mark, held_sessions, at, tag="") -> {id, symbol, class, qty, entry, mark,
+  value, pnl, held_sessions, at, tag}`; `closed_row(*, lid, symbol, qty, entry, exit, net, held_sessions, reason,
+  tag="") -> {id, symbol, qty, entry, exit, net, held_sessions, reason, tag}` (reason "program" | "max_hold" |
+  "house").
+- `Inputs` (frozen; pickled to the child): symbols, history, days (int32), raw {sym: (n,5)}, adj {sym: (n,4)},
+  trading_days (int32), early (bool), positions, orders, closed, rejects, cash, equity, budget, caps, params.
+- `build(inputs) -> Ctx`; `as_of(adj_col, raw_t, adj_t) -> ndarray`;
+  `inputs_from_bars(bars, t, *, needs, positions=(), orders=(), closed=(), rejects=(), cash, equity, budget, caps,
+  params) -> Inputs` (the Gym; never a row after t);
+  `inputs_from_fetch(raw_rows, all_rows, *, day, needs, ..., params) -> Inputs` (live: Alpaca 1Day rows
+  {t, o, h, l, c, v} per symbol through `day`; ValueError when t's bar is missing or the series disagree);
+  `ctx_bytes(ctx) -> bytes` (canonical; the I6 equality and the decision's provenance sha).
+- **The I6 helper** the hooks package's test uses: build a store with `synth.synthetic_store`, then for 20 random
+  sessions t compare `ctx_bytes(build(inputs_from_bars(bars, t, ...)))` with `ctx_bytes(build(inputs_from_fetch(rows
+  made from the same bars through t, ...)))`. core's own test proves the as-of identity (a store written later, after
+  a split and a dividend, gives the same ctx at t within rounding).
+
+### 4.6 `league/equity/engine.py`
+- `EngineConfig(capital=config.SLEEVE_USD, k=1.0, timeout=1.0, max_errors=25, budget_seconds=900.0)` (frozen).
+- `fill_price(official: float, side: "buy" | "sell", hs: float, k: float) -> float` = official x (1 +/- k x hs): the
+  engine's, the book's and the twins' one fill function.
+- `official(bars, symbol, index, at) -> float | None` (raw open or close at a session index).
+- `run(program, bars, *, cfg) -> result`; `run_isolated(...)` (an exception becomes `results.failed`).
+- **The session (A2)**: decide after the close of t on `build(inputs_from_bars(bars, t, ...))`; in t+1: (1) open
+  exits, (2) open entries, (3) close exits, (4) close entries. Entries sized by `league.equity.sizing.size_entry`
+  (`budget_room` None, `available_cash` = the sleeve's free cash, E = capital). Fees `config.sell_fees`. Min hold 1
+  session (a close-bought lot may sell at the next open). House exit rules identical live (A8.5): `max_hold_sessions`
+  -> next open ("max_hold"); 2 sessions of failed decides -> every lot at the next open ("house"). Sleeve cash >= 0
+  after every fill, asserted. Dividends from the all/raw ratio's step on the ex-date; splits scale shares.
+- Tests (DESIGN 11): golden P&L on synthetic series (fees, half-spreads, dividends through the ratio), no look-ahead
+  (fuzzing rows after t changes no decision at t), as-of identity, cash >= 0, min hold, determinism, open AND close
+  fills.
+
+### 4.7 `league/equity/results.py`
+- Result keys: run_id, program, program_sha, run_sha, params, window, symbols, engine, data_version, capital (Decimal
+  string), k, trials (1), status ("ok" | "disqualified" | "no_data"; "error" from `failed`), needs, summary, by_year,
+  trades, entry_days, exposure, bh, mte, daily ([day, pnl, equity, exposure]), lots, runtime, result_sha, start, end.
+- `summary`: trades, days, days_traded, pnl, fees, dividends, mean_net_return, sd_net_return, t_trade, win_rate,
+  sharpe_daily, t_daily, max_drawdown, exposure_mean, turnover, mte.
+- `lots` (the screen's input; House-only): {lid, symbol, class, weight (entry notional / capital), qty, entry_day,
+  entry_at, entry_px, exit_day, exit_at, exit_px, fees, div, hs, reason, held_sessions}.
+- `sha(value)`, `summarize`, `by_year`, `buy_and_hold`, `mte`, `view(result, window)` ("train" all; "validation" no
+  trades, dates, daily, lots; "holdout" / "forward" the gate's inputs; "gate" status only), `failed(program, why)`.
+- `validation_r_sd` for EDM1 = `summary.sd_net_return` of the version's 1.0x Validation run (swarm records it).
+
+### 4.8 `league/equity/runner.py` (A3: on the House, in the decider child)
+- `run_bars(code, params, bars, *, name="program", k=1.0, capital=None) -> result` (in-process; the child's).
+- `Run(result, bars)` (frozen); `RunFailed`; `RUN_BUDGET_SECONDS` 1200.
+- `Isolated(decider, store_root, *, budget_seconds=RUN_BUDGET_SECONDS)`: `needs(code, params, *, name) -> dict`,
+  `train(code, params, *, name, start=None, end=None, k=1.0) -> Run`, `validation(code, params, *, name, k=1.0) ->
+  Run`, `look(code, params, *, name, gate, k=1.0) -> Run` (`LOOK_FIRST` through min(the last close before the
+  look, `LOOK_CAP`), A9 D6; `gate` an `EquityGateCapability`), `segments(code, params, *, name) -> [Run]` (one per
+  `TRAIN_ERA_SEGMENTS`: the floor's IND22 and IND1622 pools).
+- The parent slices the store (with the capability for `look`) and sends `decider.kind("equity", "run", {"code",
+  "params", "name", "bars": Bars, "k", "capital"}, budget_seconds=...)`; the child (hooks' `child.handle`) calls
+  `run_bars`. NEEDS come first through `decider.kind("equity", "needs", {...})`, so the parent never executes a
+  program.
+
+### 4.9 `league/equity/synth.py`
+`synthetic_store(root, *, symbols=("SPY","QQQ","IWM","DIA"), start=2016-01-04, end=2026-10-09, seed=7, drift=0.0,
+vol=0.18, splits=None, dividends=None, gate=False, gaps=None) -> Path`; `constant_store(root, *, symbol="SPY",
+start=2025-01-02, sessions=20, price=100.0, step=0.0, gate=False) -> Path`. Every package's tests use these.
+
+### 4.10 `league/swarm/evaluator.py` (core's edits; stubs present)
+`EQUITY_KEY = "equity_evaluator"`, `EQUITY_GYM_FILES` (core keeps it equal to league/equity's league.gym imports),
+`equity_fingerprint(repo=None) -> str`, `equity_identity() -> {"equity": sha, "engine": EQUITY_ENGINE_VERSION}`,
+`adopt_equity(store, expected) -> {adopted, families, previous, current}` (mirrors `adopt` for equity-lane families
+only), and `adopt` skips equity-lane families (I5). Called at the swarm process start beside `adopt` (swarm wires the
+call in `loop.py`).
+
+---
+
+## 5. book
+
+### 5.1 Tables (`league/equity/live.py` `SCHEMA`, created by `EquityBook.__init__` through `LiveState.execute`)
+
+```sql
+CREATE TABLE IF NOT EXISTS eq_lots (
+    lid INTEGER PRIMARY KEY, instance TEXT NOT NULL, family TEXT NOT NULL, version INTEGER NOT NULL,
+    lane TEXT NOT NULL,                 -- beta | equity
+    symbol TEXT NOT NULL, class TEXT NOT NULL,          -- etf | stock
+    qty TEXT NOT NULL,                  -- Decimal string: shares held now (after splits)
+    opened_qty TEXT NOT NULL,           -- shares bought
+    entry_px TEXT NOT NULL,             -- average fill a share (split-adjusted)
+    entry_notional TEXT NOT NULL,       -- dollars paid, fees excluded
+    entry_at TEXT NOT NULL,             -- open | close
+    fees TEXT NOT NULL DEFAULT '0',     -- dollars booked on the lot (SEC + TAF on its sale)
+    div TEXT NOT NULL DEFAULT '0',      -- dollars of dividends credited (withholding negative)
+    mark TEXT, marked_at REAL,          -- last mark a share; open risk uses entry_px when null
+    opened_at REAL NOT NULL, opened_day TEXT NOT NULL,
+    status TEXT NOT NULL,               -- open | closing | closed
+    exit_px TEXT, exit_at TEXT, exit_day TEXT, closed_at REAL,
+    cash TEXT NOT NULL DEFAULT '0',     -- net cash: -entry_notional + proceeds - fees + div
+    reason TEXT,                        -- program | max_hold | house | demoted | retired | flatten | forced
+    probe INTEGER NOT NULL DEFAULT 0,   -- 1: opened at Probe (counts in the shared loss budget)
+    tag TEXT, iid INTEGER, info TEXT NOT NULL DEFAULT '{}');
+CREATE INDEX IF NOT EXISTS eq_lots_status ON eq_lots(status);
+CREATE TABLE IF NOT EXISTS eq_orders (
+    eid INTEGER PRIMARY KEY, client_id TEXT UNIQUE NOT NULL,     -- lq-<eid>-<family>
+    venue_id TEXT, instance TEXT NOT NULL, family TEXT NOT NULL, lid INTEGER, iid INTEGER,
+    side TEXT NOT NULL,                 -- buy | sell
+    symbol TEXT NOT NULL, class TEXT NOT NULL,
+    at TEXT NOT NULL,                   -- open | close (its window)
+    qty TEXT NOT NULL, limit_px TEXT NOT NULL, collar_bp INTEGER NOT NULL,
+    status TEXT NOT NULL,               -- pending | working | unknown | filled | canceled | expired | rejected | lost | missed | refused
+    placed_at REAL NOT NULL, day TEXT NOT NULL,
+    filled_qty TEXT NOT NULL DEFAULT '0', avg_px TEXT, fees_est TEXT NOT NULL DEFAULT '0',
+    replaces INTEGER,                   -- the eid this one replaces (cancel then resend, A8.4)
+    probe INTEGER NOT NULL DEFAULT 0, why TEXT, answer TEXT, updated_at REAL NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX IF NOT EXISTS eq_orders_status ON eq_orders(status);
+CREATE TABLE IF NOT EXISTS eq_fills (
+    fid INTEGER PRIMARY KEY AUTOINCREMENT, eid INTEGER NOT NULL, lid INTEGER, venue_fill_id TEXT,
+    qty TEXT NOT NULL, px TEXT NOT NULL, fees TEXT NOT NULL DEFAULT '0', at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS eq_intents (
+    iid INTEGER PRIMARY KEY, instance TEXT NOT NULL, family TEXT NOT NULL, version INTEGER NOT NULL,
+    decided_day TEXT NOT NULL, exec_day TEXT NOT NULL,
+    at TEXT NOT NULL,                   -- open | close
+    kind TEXT NOT NULL,                 -- buy | sell | cancel | house_exit
+    symbol TEXT, lid INTEGER, share TEXT, usd TEXT, tag TEXT,
+    status TEXT NOT NULL,               -- planned | sent | done | missed | refused | canceled
+    why TEXT, ctx_sha TEXT, bars_sha TEXT, created_at REAL NOT NULL, updated_at REAL NOT NULL);
+CREATE INDEX IF NOT EXISTS eq_intents_exec ON eq_intents(exec_day, status);
+CREATE TABLE IF NOT EXISTS eq_bars (
+    day TEXT NOT NULL, symbol TEXT NOT NULL, adjustment TEXT NOT NULL,   -- raw | all
+    o TEXT, h TEXT, l TEXT, c TEXT, v TEXT, fetched_at REAL NOT NULL,
+    sha TEXT NOT NULL,                  -- sha256 of the arrays the decision used (A8.11)
+    audit TEXT,                         -- null | ok | mismatch (the morning re-fetch)
+    PRIMARY KEY (day, symbol, adjustment));
+CREATE TABLE IF NOT EXISTS eq_activities (
+    id TEXT PRIMARY KEY, type TEXT NOT NULL, symbol TEXT, day TEXT, qty TEXT, net TEXT,
+    booked TEXT NOT NULL,               -- JSON of the booking (actions.Booking)
+    at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS eq_exports (lid INTEGER PRIMARY KEY, exported_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS eq_instances (
+    id TEXT PRIMARY KEY, family TEXT NOT NULL, version INTEGER NOT NULL, lane TEXT NOT NULL, run_sha TEXT NOT NULL,
+    code TEXT NOT NULL, params TEXT NOT NULL, band TEXT NOT NULL, seeded INTEGER NOT NULL DEFAULT 0,
+    max_hold INTEGER NOT NULL, failed_decides INTEGER NOT NULL DEFAULT 0, last_decided_day TEXT,
+    created_at REAL NOT NULL, retired_at REAL, why TEXT);
+```
+
+Key-values the book keeps in `kv` (live.sqlite): `eq_recon` {frozen, bad, good, problems, at}; `eq_freeze` {why, at}
+(an unexplained corporate action, A8.10); `eq_activities_cursor`; `eq_catchup` {day} (A8.5's catch-up decide).
+
+### 5.2 `league/equity/live.py`
+- Constants: `WORKING`, `TERMINAL`, `LOT_OPEN`/`LOT_CLOSING`/`LOT_CLOSED`, `REAL_SUFFIX` ":r", `SHARE_TOLERANCE`
+  1e-9, `CLIENT_PREFIX`; `client_id(eid, family) -> "lq-<eid>-<slug>"` (<= 48 chars).
+- Row functions (pure over `rows(sql, params) -> [dict]`, so the hooks and a restart read the same numbers; a state
+  without `eq_lots` reads as empty): `probe_figures(rows, *, weights) -> ProbeFigures(programs: int, closes:
+  ((ny_day | None, Decimal net cash), ...), open_risk: Decimal)` (ONE slot a program, A8.6; open risk = weight x mark
+  value of open ":r" lots, entry price when unmarked, plus weight x remaining x limit of working ":r" buys);
+  `expected_shares_rows(rows) -> {sym: Decimal}` (open lots + filled part of working buys, less the filled part of
+  working sells not yet booked); `working_buys_worst(rows) -> Decimal`; `orders_today(rows, day) -> int`;
+  `invested(rows) -> Decimal`.
+- `EquityBook(state, account, market, table, families, *, decider, stock_proof=None, sizing_equity=None,
+  options_book=None, root=None, clock=None, record=None, alert=None)`:
+  - `tick(now, *, account_row, positions, open_orders, real_block, killed) -> dict` (never raises);
+  - `frozen` (str), `expected_shares() -> {sym: Decimal}`, `busy() -> set[str]`, `health() -> dict`,
+    `flatten(why) -> int` (the rollback's first step: every open lot queued to exit through the normal path).
+- Calls it makes: `league.equity.sizing.size_entry` (money), `league.live.money.available_cash` (money) with
+  `working_buys_worst` = its own + the options book's open buy orders, `table.equity` (money's `EquityTable`),
+  `league.equity.bands.next_band` (swarm) with `sized_up` / `edm1` (money) through it, `decider.kind("equity",
+  "decide", {"jobs": [{"key": instance, "inputs": ctx.Inputs}]})` (hooks), `ctx.inputs_from_fetch` (core),
+  `stock_proof.passed()` / `stock_proof.step(now, market=...)` (hooks), `families.read/add_forward/set_band/
+  confirm_band` (own), `options_book.busy()`, `.exit_reserve()`, `.count_today(day)` (A8.3).
+- **Decide (16:30)**: per live instance (its band "probe" or "sized" in `families.read()`, roster seat held), the
+  16:20 bars (raw and all through t, `MarketData.bars(..., adjustment=...)`), `eq_bars` rows written with the arrays'
+  sha, `Inputs` built, one "decide" kind request for every instance, intents validated and recorded in `eq_intents`
+  with `exec_day` = `schedule.next_session(t)`, plus the House exits (max hold, demoted/retired/band-dropped, 2 failed
+  decides) as `kind` "house_exit". A missed decide (restart) runs as a catch-up for the last close.
+- **Pre-open (09:25)** and **the windows** as `schedule` and the module docstring say. Every open: `real_block(opening=
+  True)` is None, `table.equity.enabled`, `stock_proof.passed()`, not `frozen`, the program's band and seat, the loss
+  budget's room (`budget_room` = the lower of the window's and the total's room, from
+  `league.live.real.probe_figures` with the equity rows unioned in), `size_entry` > 0. Exits wait only on `killed()`
+  and the min hold.
+- **Exports**: a closed lot -> `families.add_forward(family, "real", [{"id": "eq-<lid>", "version", "day" (exit day),
+  "opened_day", "symbol", "class", "lane", "pnl" (net cash, float), "max_loss" (entry notional, float: so generic
+  readers' pnl / max_loss is the net return on notional), "notional", "fees", "div", "return", "hold_sessions",
+  "entry_at", "exit_at", "probe", "twin_key": "eq:<lid>"}])`, then `eq_exports`.
+- Tests (DESIGN 11 EquityBook list + these): write before send, unknown then lookup, restart recovery mid-window
+  (open and close), fractional partial fills, FIFO between two instances on one symbol, DIV and SPLIT booking,
+  Decimal reconcile with assignment shares, one working order per symbol across both books, exits first then entries
+  on post-fill cash, collar escalation and cut-offs, close-window repricing to 15:59:30 then missed, cancel then
+  resend after a terminal state (a fill after the cancel), kill / stop / freeze block opens not exits, the day order
+  cap, A8.5's exit rules.
+
+### 5.3 `league/equity/schedule.py`
+`DEFAULTS` (seconds): preopen_before_open_s 300, open_send_after_open_s 30, exit_wait_s 120, entry_until_after_open_s
+900, exit_until_before_close_s 300, close_send_before_close_s 300, close_until_before_close_s 30, open_reprice_s 60,
+close_reprice_s 30, bars_after_close_s 1200, decide_after_close_s 1800, audit_before_open_s 3600 (the constitution's
+`equity_money.order_path` carries the ones in force, same keys). `PHASES`. `Moments(day, open_at, close_at, early,
+preopen, open_send, entry_until, exit_until, close_send, close_until, bars_at, decide_at)`; `moments(day, offsets=None)
+-> Moments | None`; `next_session(day) -> date`; `phase(now, offsets=None) -> (phase, day)`. Half days by offset.
+
+### 5.4 `league/equity/actions.py`
+`DIVIDENDS` (DIV, DIVCGL, DIVCGS, DIVROC, DIVNRA, DIVTW), `ACTIONS` (SSP, SSO, REORG, NC, MA), `TYPES`;
+`Booking(kind, symbol, day, per_lot {lid: {div, qty, entry_px, cash}}, why)`; `book_activity(activity, lots) ->
+Booking` (pure; kind "freeze" for any other type touching a held symbol, A8.10).
+
+### 5.5 `league/equity/families.py`
+`EquityFamilies(root)` and `MemoryEquityFamilies(rows=())`: `read(family=None) -> [row]`, `forward_rows(family)`,
+`add_forward(family, source, trades) -> int`, `set_band(family, band, reason)`, `confirm_band(expected, band,
+reason) -> bool`; `validation_r_sd(state, version) -> float | None`. A row is `league.swarm.bands.read(root,
+lanes=LANES)`'s (section 8.3) plus `validation_r_sd`.
+
+---
+
+## 6. hooks
+
+### 6.1 `league/live/equity_hook.py` (stubs present; thin forwards, fail closed)
+`CLIENT_PREFIX`, `LANES`; `build_book(live) -> EquityBook | None`; `is_equity_client_id(cid) -> bool`;
+`is_equity_row(row) -> bool`; `expected_shares(book) -> {sym: Decimal}` (raises when unreadable: the caller treats
+every share as unexplained); `frozen(book) -> str`; `busy(book) -> set`; `probe_figures(rows, *, table) ->
+ProbeFigures`; `working_buys_worst(rows) -> Decimal`; `orders_today(rows, day) -> int`; `invested(rows) -> Decimal`;
+`open_risk(rows, *, table) -> Decimal`; `band_for(row) -> (band, why)`.
+
+### 6.2 Edits to league/live (keep them as small as possible; they move the options fingerprint once)
+- **step.py**
+  - `OptionsLive.__init__`: `self.equity = equity_hook.build_book(self)` after `self.book`.
+  - `minute()`: exactly one `self.equity.tick(now, account_row=self.account_row, positions=<the minute's positions or
+    None>, open_orders=<the minute's open orders or None>, real_block=self.real_block, killed=self._killed)` on every
+    branch (closed, before the open, session, after the close), after the options path's own reads, in its own
+    try/except (an equity failure never ends the options minute); its summary in `out["equity"]`.
+  - `real_block`: also returns `f"equity reconciliation: {why}"` while `equity_hook.frozen(self.equity)`.
+  - `_activities`: each OPASN / OPEXC books +/-100 x contracts on its underlying in the SHARE-EVENT LEDGER, kv
+    `shares` {symbol: signed Decimal string} (A8.2; today it is never written).
+  - `_close_shares` (A8.2, A8 wins over the brief's marketable limit and freeze): per us_equity symbol,
+    unattributed = account qty - `expected_shares(...)[sym]` (lots + filled part of working orders, read in the same
+    pass). A SHORT account qty is covered at once (market, as today). A LONG unattributed excess is sold after TWO
+    consecutive readings (kv `unattributed_seen` {symbol: qty string}), market as today, with an alarm. An account qty
+    below what the equity book owns is a mismatch for reconciliation, never an order. Lots the equity book owns are
+    never touched. A symbol with a working order in either book is skipped that minute. The ledger moves when an
+    `lv-shares-` order fills.
+  - `_stock_held` and `_resolve_latch` count only unattributed shares, so held equity lots never block entries.
+  - `health()`: `"equity": self.equity.health()`.
+- **real.py**
+  - `ingest`: skips client ids `equity_hook.is_equity_client_id` (as `lv-shares-`): never foreign.
+  - `reconcile`: us_equity rows compare `expected = equity_hook.expected_shares(...) + shares ledger` as Decimal with a
+    1e-9 tolerance (new keyword `equity_shares: Mapping[str, Decimal] | None`).
+  - `probe_tally`, `probe_realized`, `probe_figures`: union the equity rows (`equity_hook.probe_figures(rows,
+    table=...)`): open_n += programs; at_risk += open_risk; the closes join the window's worst net stretch and the
+    total by their NY day. Signatures gain `table` where they lack it (keyword, defaulting to the table in force).
+  - The options reservation (A8.1, DESIGN 4a's row reinstated): reserve against min(`options_buying_power`,
+    `money.available_cash(account, working_buys_worst=<both books>, reserved=<working reservations>,
+    reserve_usd=table.equity.cash_reserve)`); cash < 0 refuses every open in both lanes and alarms.
+  - `count_refusal` and the day count read both books (`equity_hook.orders_today`, A8.3).
+  - `RealBook.exposure` fills `equity_open_risk` and `equity_invested`.
+- **decider.py** (stubs present on `_Base`): `kind_load(kind, key, payload, *, budget_seconds=None) -> dict`,
+  `kind_drop(kind, key, *, budget_seconds=10.0)`, `kind(kind, op, payload, *, budget_seconds=None) -> dict`. Message
+  `("kind", kind, op, payload)`; the child's `_handle` answers `league.equity.kinds.module_for(kind).handle(op,
+  payload, state)` with `state` kept per kind in the child; `Decider._ask` reloads remembered kind loads after a
+  restart, as for options programs; `InlineDecider` the same in-process. The same isolation (uid 65534, netns, rlimits,
+  empty env). decider.py imports `league.equity.kinds` only.
+- **paper.py**: `StockPaperProof(state, account, *, record=None, clock=None)` with key `paper_proof_stock` (A8.7):
+  `step(now, *, market) -> dict`, `passed() -> bool`, `status() -> dict`. On `alpaca-paper`: buy a fractional SPY
+  marketable limit in the 15:55 close window, sell it at the next open, check fills, positions, activities and
+  reconciliation; it must pass once before the first real equity order; checked only by the equity book (options
+  entries never wait on it). Client ids `lq-pp-...` (never `lv-`).
+- **venue.py**: `MarketData.bars(symbols, *, timeframe, start, end=None, adjustment="raw")` (the book reads "all" too).
+
+### 6.3 `league/equity/kinds.py`, `league/equity/child.py` (stubs present)
+`KINDS = {"equity": "league.equity.child"}`, `module_for(kind) -> module`. `child.handle(op, payload, state) -> dict`
+with ops `load` {key, code, params, name, timeout, max_errors} -> {ok, needs, sha, run_sha}; `drop` {key}; `decide`
+{jobs: [{key, inputs}]} -> {ok, results: {key: {intents, stats, ctx_sha}}}; `needs` {code, params, name} -> {ok,
+needs, sha, run_sha}; `run` {code, params, name, bars, k, capital} -> {ok, result}. Refused program: {ok: False,
+refused: True, error}.
+
+### 6.4 Tests
+Each hook (`_close_shares` sells only the unattributed excess and never an owned lot; the two-reading rule; ingest
+ignores `lq-`; reconcile accepts held lots and assignment shares; probe_tally applies 20% / 40% in the window and the
+total with one slot a program; the reservation obeys the cash rule; count_refusal reads both books; real_block blocks
+on the equity freeze); the decider kind (isolation, restart reload, deadline); the I6 test (20 random days, byte for
+byte, core's helper); the isolation CI test (section 2.1); the stock paper proof.
+
+---
+
+## 7. money
+
+### 7.1 The constitution's `equity_money` block (league/constitution.py; `PINNED_DIGEST` re-pinned; the money digest
+moves and the standing grant re-ratifies at the House's start)
+
+```python
+"equity_money": {
+    "enabled": False,                       # E1 deploys False; the switch-on (ON) sets True (CON-only)
+    "universe": {"etf": ["SPY", "QQQ", "IWM", "DIA", "XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU",
+                         "XLV", "XLY", "TLT", "GLD"],
+                 "stock": ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "BRK.B", "JPM", "V", "UNH", "XOM", "JNJ",
+                           "PG", "MA", "HD", "AVGO", "LLY", "COST"]},     # == gateway STOCK_UNIVERSE (league.ci)
+    "position_share": {"etf": "0.50", "stock": "0.20"},
+    "invested_share": "1.00",               # A1: cash only by choice; equity long + open equity buys + options open max loss <= E
+    "cash_reserve_usd": "50",               # A8.1: above the gateway's $25 floor
+    "open_risk_weight": {"etf": "0.20", "stock": "0.40"},
+    "probe": {"sleeve_share": "0.25", "max_programs": 3, "min_order_usd": "10"},             # A5
+    "sized": {"min_trades": 20, "confidence": "0.80", "kelly_fraction": "0.25", "sleeve_share": "0.50",
+              "beat_bh": True, "min_probe_sessions": 5},
+    "demotion": {"rule": "edm1", "min_trades": 10, "z": "1.645", "program_loss_usd": "-300", "twin_gap_bp": "15",
+                 "twin_min_closes": 5},
+    "holds": {"min_hold_sessions": 1, "default_max_hold_sessions": 20, "max_hold_sessions": 60,
+              "failed_decides_exit": 2},                                                      # A8.5
+    "order_path": {"entry_collar_bp": {"etf": 10, "stock": 25}, "max_collar_bp": {"etf": 50, "stock": 100},
+                   "max_orders_day": 60,                                                      # A8.3
+                   "preopen_before_open_s": 300, "open_send_after_open_s": 30, "exit_wait_s": 120,
+                   "entry_until_after_open_s": 900, "exit_until_before_close_s": 300,
+                   "close_send_before_close_s": 300, "close_until_before_close_s": 30,       # A2: 15:55:00 .. 15:59:30
+                   "open_reprice_s": 60, "close_reprice_s": 30, "bars_after_close_s": 1200,
+                   "decide_after_close_s": 1800, "audit_before_open_s": 3600},
+},
+```
+
+Its comment says: THE LOSS BUDGET IS SHARED by both lanes: `options_money.probe.loss_budget_usd` ($400 net in any
+rolling 20 sessions) and `loss_total_usd` ($800 net in total) bound every agent program's Probe opens, options and
+equity, read by one `probe_tally`; while equity is invested at 3 x 0.25 E the options Probe lane has little window room
+left (A8.6, stated in docs and the dlane report). `EQUITY_MONEY_BOUNDS` (beside `OPTIONS_MONEY_BOUNDS`) with each
+row's owner's line at its loose end (tighten only): position_share.etf (0, 0.50], .stock (0, 0.20]; invested_share
+(0, 1.00]; cash_reserve_usd [50, 200]; open_risk_weight.etf [0.20, 1.00], .stock [0.40, 1.00]; probe.sleeve_share
+[0, 0.25], max_programs [0, 3], min_order_usd [10, 100]; sized.min_trades [20, 1000], confidence [0.80, 0.99],
+kelly_fraction [0.125, 0.25], sleeve_share [0, 0.50], min_probe_sessions [5, 60], beat_bh exactly True;
+demotion.rule exactly "edm1", min_trades [1, 10], z [0, 1.645], program_loss_usd [-300, -25], twin_gap_bp [1, 15],
+twin_min_closes [1, 5]; holds.min_hold_sessions [1, 1], default_max_hold_sessions [1, 60], max_hold_sessions [1, 60],
+failed_decides_exit [1, 2]; order_path collars [1, 50] / [1, 100], max_orders_day [0, 60], offsets within the
+session. `equity_money_problems(constitution=None) -> [str]` (in league/constitution.py beside
+`options_money_problems`, which `Table.from_constitution` already imports from there; the brief said ci.py: this
+follows the surrounding code, and ci.py calls it). Also: the universe's symbols and classes equal
+`league.equity.config.UNIVERSE`, and position_share <= `config.POSITION_SHARE` (a test, money's).
+
+### 7.2 `league/ci.py`
+- `check_structures` (or a new `check_equity`, run by `check`) calls `equity_money_problems` and
+  `gateway_stock_problems(root, table) -> [str]`: read from the files as `gateway_structures` reads
+  `OPTION_STRUCTURES_REAL`: `gateway/lib/caps.mjs` `STOCK_UNIVERSE` (the frozen object's `SYM: 'class'` pairs) equals
+  `equity_money.universe`; `gateway/wrangler.jsonc` `"STOCK_BUYS_REAL"` set once on its own line; `equity_money.enabled`
+  True requires it "on" (A8: the gateway is deployed with it "on" while the House's `enabled` False is the switch, so
+  "on" with `enabled` False passes); `position_share` <= `STOCK_ETF_EQUITY_SHARE` / `STOCK_SINGLE_EQUITY_SHARE`.
+- FORBIDDEN gains `league/equity/` and `league/swarm/elane.py` (league/ops/ and league/live/ already cover the rest).
+  The gateway's `MERGE_FORBIDDEN` cannot change in E1 (gateway/ is read only), so a new
+  `PENDING_GATEWAY: tuple[str, ...] = ("league/equity/", "league/swarm/elane.py")` names them, and `test_ci.py`'s
+  one-list test allows exactly `PENDING_GATEWAY` in `FORBIDDEN - gateway` (a gateway follow-up adds them there).
+
+### 7.3 `league/live/money.py` (stubs present)
+`Table.equity: EquityTable | None` (filled by `from_constitution` from `equity_money`); `EquityTable` (fields in the
+stub; `from_constitution(constitution=None)`); `Exposure.equity_open_risk`, `Exposure.equity_invested` (Decimal,
+default 0); `available_cash(account, *, working_buys_worst, reserved, reserve_usd) -> Decimal` = cash -
+|short_market_value| - working buys' worst cost (both books) - working reservations - reserve (not clamped).
+
+### 7.4 `league/equity/sizing.py` (stub present)
+`SizingInputs` (fields in the stub), `Sized(usd, qty, binding, reason)`, `size_entry(x) -> Sized`; bindings "intent",
+"instrument", "sleeve_cap", "sleeve_cash", "invested", "cash", "budget", "min_order", "cash_negative", "short_held".
+The book passes the live figures; the engine passes E = capital, `budget_room` None, `available_cash` = sleeve cash.
+
+### 7.5 `league/equity/bands.py` (money's functions; stubs present)
+`EquityRecord(n, returns, pnl, bh_pnl, probe_sessions, realized_net, twin_gaps_bp=(), validation_r_sd=None)`;
+`sized_up(record, table) -> (bool, why)`; `sized_sleeve_share(record, table) -> Decimal`; `edm1(record, table) -> str
+| None`. `table` is an `EquityTable` (attributes `sized_min_trades`, `sized_confidence`, `sized_kelly_fraction`,
+`sized_sleeve_share`, `sized_beat_bh`, `sized_min_probe_sessions`, `probe_sleeve_share`, `demotion_min_trades`,
+`demotion_z`, `program_loss_usd`, `twin_gap_bp`, `twin_min_closes`).
+
+### 7.6 `league/ops/preopen.py`
+Checks (each a `Check` row, `checks()` gains them): account cash >= 0; no short us_equity; equity reconciled (the
+book's `health()["frozen"]` empty); gateway universe == constitution (`gateway_stock_problems` from the release's
+files); multiplier and the PDT flag (`pattern_day_trader`, `daytrade_count`) reported (`info`), never a bar.
+
+### 7.7 Tests
+Bounds (each row in, at its line, past it refused), the digest moves and the grant re-ratifies (`test_ci`,
+`test_constitution` patterns), the gateway agreement (a universe or switch that disagrees is refused), sizing table
+cases (each binding), sizing-up and EDM1 cases.
+
+---
+
+## 8. swarm
+
+### 8.1 `league/swarm/policy.json` "elane" block (and `settings.DEFAULTS["elane"] = {"mode": "off"}`, so the policy
+layer's shape holds it to an object)
+
+```json
+"elane": {
+  "mode": "off",
+  "universe": ["SPY", "QQQ", "IWM", "DIA"],
+  "structures": ["etf"],
+  "birth_share": 0.0,
+  "roster": 3,
+  "screens": {
+    "beta": {"name": "S1", "receipt_sha256": null, "c_R": null, "c_X": null, "fp_cap": null, "owner_wall": null,
+             "retry": false, "r4": {}, "beside": null},
+    "equity": {"name": "S1", "receipt_sha256": null, "c_R": null, "c_X": null, "fp_cap": null, "owner_wall": null,
+               "retry": false, "r4": {}, "beside": null}
+  },
+  "val_tries": 1,
+  "looks_per_lineage": 1,
+  "program_loss_usd": -300
+}
+```
+
+E1 merges with "off" (the rollback); the switch-on (ON) sets "gate". THE INTEGRATOR (A9) copies the receipt
+`~/Work/.ltcm-main/scratch/eqlane-1010/equity_screen_1.json` VERBATIM to `docs/benchmarks/equity_screen_1.json` and
+pins it here: `receipt_sha256` (the file's bytes), `c_R`, `c_X`, `fp_cap`, `owner_wall`, `retry`
+(`R3_retry_permitted`), `r4` (`R4_flags`), `beside` (`stated_beside_every_live_trade`). A swarm test holds the sha to
+the file whenever both are present, and `roster` == `equity_money.probe.max_programs`. No package copies the receipt
+or pins it; until the integrator does, every equity look is refused (the screen working as built).
+
+### 8.2 `league/swarm/elane.py` (stubs present)
+`MODES`, `STRUCTURES`, `LABELS` {"beta": "MARKET BETA", "equity": "EQUITY"}, `BETA_NOTE`, `SEEDED_NOTE`, `SEEDS_KEY`
+"elane_seeds", `TRY_KEY` "elane_try", `DEFAULTS`; `cfg(settings)`, `on(settings)`, `lane_of(store, fam)`,
+`label(lane)`, `card_errors(card, structure, symbols, settings)`, `lineage_key(lane, key)` (A8.12),
+`screen_effective(settings, lane, *, policy=None)`, `try_open(store, fam, n, settings)`, `lineage_spent(store, fam,
+settings)`, `roster_seats(root)`, `isolated_runner(root) -> runner.Isolated`, `validate(tournament, fam, version)`,
+`look(gate, fam, version, sha) -> bool | None`, `birth_seeds(store, settings) -> [fid]`, `seeded(store, fid)`,
+`view(fam, *, lane)`.
+
+### 8.3 Edits
+- **bands.py**: `read(root, *, family=None, lanes=None)`: `lanes` None is the options lanes only (equity-lane families
+  never reach the options path: no OptionsLive instance, no observe row, no incubator row); `lanes=LANES` returns the
+  equity rows only, each with `lane`, `symbols`, `seeded`; an equity row's band currency is checked against the
+  equity identity (`banded_evaluator` {"engine": EQUITY_ENGINE_VERSION, "equity_sha256", "run_sha"}), not the
+  options one. `waiting()` / `seating`: equity Candidates take `elane.roster` seats apart from `dlane.roster`.
+  `observe` and `incubator` never return an equity family.
+- **store.py**: `SwarmStore.families(*, alive=None, lanes=None)` (section 2.5): None the options lanes only,
+  `LANES` the equity families only, "all" everything; a family's lane is its spec's `lane`.
+- **cards.py**: cards declare `lane`, `structure` ("etf" | "stock") and `symbols`; `validate` admits an equity card
+  through `elane.card_errors`; the graveyard is lane-scoped (a REFUTED row binds only its own lane's cards; keys
+  through `elane.lineage_key`).
+- **gate.py**: an equity family's look goes to `elane.look` (on the House, `EquityGateCapability`, the S1 screen; a
+  screen with no pinned receipt refuses: no look spent); the look event records lane, screen "S1", receipt, c_used and
+  the beside line.
+- **tournament.py**: Validation dispatches by lane (equity -> `elane.validate`, run through the isolated runner on the
+  House); `lane_forks` False for equity; one try a lineage (`elane.try_open`).
+- **settings.py**: the `elane` overlay (DEFAULTS block).
+- **seeds.py**: `EQUITY_SEEDS` (three specs) and `equity_program_for(spec) -> (code, params)`, the programs written
+  under the EQUITY.md contract (math and numpy only, no date):
+  - `seed-overnight-spy`: NEEDS {"symbols": ["SPY"], "history": 2, "max_hold_sessions": 2}; each decision: sell the
+    lot bought at the last close at the next open, and buy SPY at the next close (`"at": "close"`); PARAMS {"share":
+    0.5};
+  - `seed-overnight-qqq`: the same on QQQ, buying at the next close only when QQQ's close t < close t-1;
+  - `seed-reversal-index`: NEEDS {"symbols": ["SPY", "QQQ", "IWM", "DIA"], "history": 2, "max_hold_sessions": 10};
+    PARAMS {"theta": 0.02, "h": 8, "share": 0.25}: buy a symbol at the next open after a close at least theta below its
+    prior close, exit at the open h sessions later.
+  Each card names its published prior (Cliff, Cooper and Gulen 2008; Lou, Polk and Skouras 2019; Connors and Alvarez
+  2008) and no figure.
+- **loop.py**: `elane.birth_seeds` once a pass while the lane is on; `evaluator.adopt_equity` at start.
+- **dlane.py**: lane scoping only (A8.12): the always-in roots, `birth_spent` and the lineage links never join an
+  equity family to an options lineage.
+- **league/live/money.py** `band_for`: its first statement forwards an equity row to `equity_hook.band_for`.
+- **league/equity/bands.py** (swarm's functions): `next_band(row, record, table, *, seat_free, sticky=None) ->
+  (band, why)`; `band_for_row(row) -> (band, why)`.
+
+### 8.4 Family state keys
+`elane_try` {version, at, first, precheck, entered, retry_sha (A9 D3: the retry version's hash, recorded at the
+first try)}; `elane_look` {version, at, verdict (screen.verdict), beside}; `banded_evaluator` for equity (above);
+`validation_r_sd_by_version` {str(n): float} (the 1.0x Validation run's `summary.sd_net_return`); `elane_floor`
+{version: screen.floor result}; `elane_train_r` (the looked version's Train daily r by session, House-only, for
+`screen.same_lineage`; never in a view, never committed). Store kv: `elane_seeds` {seed id: fid}, `equity_evaluator`
+(core's `EQUITY_KEY`).
+
+### 8.5 Tests
+Card admission, the lane graveyard, one try and one look per lineage (and R3's retry only when the receipt permits
+and the first try failed its pre-check), A9 D3's same lineage (correlation >= 0.7 or the same template), receipt
+refusal, roster seats apart from dlane's, seeded births (once each), options consumers skipping equity families
+(generators and the diagnostician never read an equity look or Validation outcome), `bands.read` default excluding
+equity rows.
+
+---
+
+## 9. screen (A9: the share screen as adopted)
+
+`league/equity/screen.py` (stub present, already A9's): `SCREEN` "S1", `C_GRID_STEP` 0.01, `C_GRID_MAX` 5.00,
+`H_LENGTHS` (194, 251), `V_LENGTH` 250, `WORLDS` 20,000, `MIN_POOL` 300, `WORLD_SETS` {"IND22": 3, "IND1622": 5},
+`ACTIVITY_ROUND_TRIPS` 20, `ACTIVITY_INVESTED_DAYS` 120, `SAME_LINEAGE_CORR` 0.7, `RECEIPT_PATH`, `DEVIATIONS` (the A2
+close-fill legs); `ScreenRefused`; `Receipt(receipt_sha256, c_R, c_X, fp_cap, owner_wall, retry, r4, beside, fp)`;
+`Series(days, r, w, b, exits, invested)`; `receipt_sha256(path)`, `pinned_receipt(block) -> Receipt | None`,
+`load_receipt(path, *, pinned_sha256) -> Receipt`, `series(lots, bars, *, universe, capital, first=None, last=None)
+-> Series`, `excess(s)`, `precheck(v, *, variant="R")`, `pooled_t(v, h)`, `holdout_t(h)`, `look(v, h, *, c, c_H,
+variant="R")`, `floor(segments, *, fp_cap) -> {eligible, why, c_p, c_H, sets, own_fp, drift_kept, worlds, seeds}`,
+`label(v, h, *, c_X)`, `verdict(v, h, *, receipt, program_floor)`, `beside_line(result, receipt)`,
+`retry_permitted(receipt, *, first_precheck_failed)`, `same_lineage(train_r, other_train_r, *, same_template=False)`,
+`r4_flags(receipt, archetype=None)`.
+
+THE RULE (the receipt's `rule`, `precheck`, `look`, `floor`, `windows`, `lineage`): step 0 the floor on the program's
+own Train-era series: c_p and c_H (F1: the holdout-only t's 12% point, with sum_H > 0), each the smallest c on
+0.00..5.00 with the pass share <= fp_cap at BOTH L = 194 and 251, the maximum over IND22 and IND1622 where the program
+has that history (D5); ineligible with no 300-session pool or a threshold above 5.00; c_used = max(c_R, c_p). Step 1
+the pre-check on Validation. Step 2 after the one look: pooled t >= c_used, sum_H > 0 and t_H >= c_H. The holdout is
+2026-01-02 .. min(the last close before the look, 2026-12-31) (D6). S1-X labels alpha or beta (c_X, no floor, no
+guard). Beside every live trade: the receipt's template filled (c_used, c_H, own FP, drift-kept rate from the
+program's own floor run, S1-X label and FP, the contamination sentence). Lineage (D3): one look; R3's Validation-only
+retry only after a FAILED pre-check (its version hashed at the first try); same lineage by Train correlation >= 0.7 or
+the same template.
+
+The receipt file is the study's (`docs/benchmarks/equity_screen_1.json`, copied verbatim by the integrator; keys
+`name`, `study`, `rule`, `fp_cap`, `owner_wall`, `c_R`, `c_X`, `precheck`, `look`, `floor`, `windows`, `lineage`,
+`fp_zero_edge_at_cR`, `power_at_cR`, `binding_R`, `R3_retry_permitted`, `R4_flags`, `stated_beside_every_live_trade`,
+`note`, `sha256` (its inputs' shas)); `load_receipt` reads it, `pinned_receipt` reads policy.json's copy. Tests use only
+`league/tests/fixtures/equity_screen_fake.json` (marked fake, the same keys); the study itself is never run here.
+
+Call chain (swarm's `elane.look`): `pinned_receipt` (None: refuse) -> `Isolated.segments` -> `series` each -> `floor`
+(ineligible: refuse, no look spent) -> c_used = max(c_R, c_p) -> the recorded Validation `Run` -> `series` ->
+`precheck` -> `Isolated.look` -> `series` -> `verdict` -> `beside_line`.
+
+Tests: the accounting on golden synthetic series (open and close fills, fees), the pre-check, the look (with the F1
+guard), the floor on a synthetic store (both world sets, ineligibility), refusal without a receipt, one try and one
+look per lineage (R3), `same_lineage`, the beside-every-trade line.
+
+---
+
+## 10. ops
+
+- **`league/ops/equity_data.py`** (stub present): `FIRST_DAY` "2016-01-04", `STORE_DIR`, `BARS`, `MAX_PAGES`,
+  `SPLIT_JUMP`, `REGULAR_DAYS` 20, `REGULAR_TOLERANCE`; `fetch(gateway, symbols, start, end, *, adjustment,
+  timeframe="1Day") -> {sym: [rows]}`; `regular_session_check(gateway, symbol, days) -> {verdict, days, mismatches}`;
+  `audit(calendar, raw, adj, *, regular=None) -> {passed, checks}`; `run(ctx) -> dict`, writing through
+  `league.equity.store.write_store(..., gate=True)`. The audit's calendar is `store.nyse_sessions` (2016+).
+- **registry.py**: `Job("equity_data", "league.ops.equity_data", (S.at_start(), S.daily(<after the close, UTC>)),
+  grace=..., in_pause=True, owner="equity lane", what=...)`, as `direction`.
+- **dlane_report.py**: `read_book` also reads `eq_lots`; a close is one lot fully closed with net cash incl. fees and
+  dividends, counted from 2026-10-10 (earlier closes beside), on `done_screen` (":r") and `done_all`; beside every close
+  and checkpoint the BETA or EQUITY label, the same-risk buy-and-hold over the same sessions, MTE, the screen's FP
+  (`screen.beside_line`), "profit from market direction"; Done WITH and WITHOUT the three seeded programs (A8.12); the
+  A8.6 statement about the options Probe lane's window room. The Done rule is unchanged.
+- **twins.py**: `equity_twin(lot, bars, *, k=1.0) -> {"key": "eq:<lid>", "status": "priced" | "no_bar" |
+  "unpriceable", "final": bool, "live_return", "twin_return", "gap_bp" (a side), "entry_official", "exit_official",
+  "judged_at"}` in closed form from the House's own official opens and closes (`eq_bars`, raw) with
+  `league.equity.engine.fill_price` (open and close fills per A2), `config.sell_fees` and the lot's dividends; records
+  under the swarm store kv `equity_twins`, final once judged. EDM1's twin leg and the Done rule's consistency read it.
+- **funnel.py**: equity counts (births by lane, Validation tries, looks, passes, Probe programs, closes).
+- **scripts/floor_box.py** (A8.9): `deploy` and `rollback` refuse a release that lacks `EQUITY_BOOK_MARKERS =
+  (("league/equity/live.py", "class EquityBook"),)` while the box's live.sqlite has an `eq_lots` row with status
+  "open" (read-only guard snippet, as the real-book guard); `--force-equity-risk` is the documented emergency path.
+- **docs/operations.md**: the equity lane (switches: `equity_money.enabled`, `elane.mode`, `STOCK_BUYS_REAL`; the
+  schedule; the rollback that flattens first: `elane.mode` off, then `enabled` False (exits only), then
+  `EquityBook.flatten`, only then floor_box, with A8.9's guard; the stock paper proof; the cash-only choice (A1); the
+  shared budget's consequence for the options Probe lane, A8.6), and the gateway's stock route as the House sees it
+  (the "gateway README note on the House side": written here, since gateway/ is read only). **CHANGELOG.md** under
+  "Not yet deployed".
+- Tests: the data audit (synthetic: a gap, an insane bar, a split, a missing volume, the regular-session check), the
+  Done meter with equity rows, twins, the floor_box guard.
+
+---
+
+## 11. The flows (who calls whom)
+
+1. **Data**: ops `equity_data.run` -> gateway bars (raw, all) -> `equity_data.audit` -> core `store.write_store`.
+2. **Birth**: swarm `loop` -> `elane.birth_seeds` -> `seeds.equity_program_for` -> store family (lane "beta").
+3. **Validation**: swarm `tournament` -> `elane.validate` -> core `runner.Isolated.validation` -> hooks
+   `decider.kind("equity", "run")` -> hooks `child.handle` -> core `runner.run_bars` -> `engine.run`; then screen
+   `series` + `precheck`; swarm records `elane_try`, `validation_r_sd_by_version`.
+4. **Look**: swarm `gate` -> `elane.look` -> screen `pinned_receipt` -> core `Isolated.segments` -> screen `series`,
+   `floor` -> core `store.mint_equity_gate_capability` -> `Isolated.look` -> screen `series`, `verdict`,
+   `beside_line` -> family to Candidate.
+5. **Seat and band**: book `EquityBook` (16:30) -> book `families.read` (swarm `bands.read(lanes=LANES)`, seating) ->
+   swarm `bands.next_band` (money `edm1`, `sized_up`) -> book `families.set_band`.
+6. **Decide (16:20-16:30)**: book `schedule` -> `MarketData.bars` (hooks' adjustment) -> core
+   `ctx.inputs_from_fetch` -> hooks `decider.kind("equity", "decide")` -> `child.handle` -> core `ctx.build`,
+   `EquityRunner.decide` -> book `eq_intents`.
+7. **Send (09:30:30 and 15:55)**: book -> `real_block`, `killed` (hooks, step.py) -> money `available_cash`,
+   `sizing.size_entry` -> `Account.submit` (`lq-` client id) -> fills -> `eq_lots`.
+8. **Every minute**: hooks `step.minute` -> `self.equity.tick(...)`; `_close_shares` and `reconcile` read
+   `equity_hook.expected_shares`; `probe_tally` reads `equity_hook.probe_figures`.
+9. **Close and Done**: book export -> forward record; ops `twins.equity_twin`, `dlane_report` Done meter.
+
+## 12. Integration notes
+
+- Merge order (each on CI green): core, money, screen, book, hooks, swarm, ops (later ones may lean on earlier names;
+  every name already exists as a stub, so order affects only cross-package tests).
+- A cross-package test that needs another package's implementation states so in its docstring and is expected to
+  fail until that package lands; no package implements another's stub to make its tests pass (use a fake or a
+  `MemoryEquityFamilies`-style double).
+- The money digest (`PINNED_DIGEST`) is re-pinned once, by money; any later constitution change goes through money.
+- Nothing here switches anything on: `equity_money.enabled` False, `elane.mode` "off", no receipt pinned. ON is a
+  later, separate step (A6).
+
+## 13. Where the briefs disagreed, and what this file follows
+
+| point | brief or design said | this file follows |
+|---|---|---|
+| `_close_shares` | hooks brief: a marketable limit for assignment excess; freeze and never sell an unexplained excess | A8.2: short unattributed covered at once (market, as today); long unattributed sold after two consecutive readings (market) with an alarm; owned lots never touched |
+| options reservation | DESIGN 4a moved it to a cash wall; A1 dropped that | A8.1 reinstates it: min(`options_buying_power`, House-wide available cash) |
+| screens | DESIGN's EB and EQ, c_B, FP <= 10% | A7 as amended by A9: S1-R gates (c_used = max(c_R, c_p), and t_H >= c_H), S1-X labels |
+| who writes `docs/benchmarks/equity_screen_1.json` | swarm brief: "which the screen package writes" | A9: the integrator copies the study's receipt verbatim and pins it in policy.json; the screen package reads it (screen.py) and tests with a fake fixture |
+| the floor's worlds | screen brief: IND22, IND13 as the fallback, 2016-19 + 2022-24 stated as a deviation | A9 D5: the maximum over IND22 and IND1622 (the adopted rule, not a deviation); ineligible with no 300-session pool or a threshold above 5.00; plus c_H (F1) |
+| the holdout | the store's holdout window (to 2026-09-25) | A9 D6: 2026-01-02 .. min(the last close before the look, 2026-12-31) |
+| a lineage | one try and one look per lineage | A9 D3: plus same lineage by Train correlation >= 0.7 or the same template; R3's retry only after a failed pre-check, hashed at the first try |
+| where Validation runs | swarm brief: "in-process on the House" | A3: on the House, the program inside the decider-isolated child (`runner.Isolated`); never in the swarm process itself (it holds credentials) |
+| Gym boxes, `driver.py` | DESIGN 6a: a bundle to Gym boxes | A3: none in E1 |
+| `equity_money_problems` | money brief: in league/ci.py | league/constitution.py beside `options_money_problems` (the surrounding code), called by ci.py |
+| protected lists | swarm brief: add elane.py to the lists the repo keeps | ci.py FORBIDDEN gains it and league/equity/; the gateway's list is read only in E1, so `PENDING_GATEWAY` names the difference |
+| "a gateway README note on the House side" | ops brief | docs/operations.md (gateway/ is read only) |
+| equity band rules | money brief and swarm brief both name league/equity/bands.py | one file, owned per function (section 1.1) |
+| "families.py carries lane, structure and validation_r_sd" | swarm brief | `bands.read(root, lanes=LANES)` rows carry lane, structure, symbols, seeded (swarm); league/equity/families.py adds `validation_r_sd` (book); league/live/families.py is unchanged |
+| `elane.roster` | swarm brief: in the policy.json block | in policy.json (3), with swarm.json over it, read failing closed as `dlane.roster` |
+| probe sleeve, invested share, cash reserve | DESIGN 5: 0.30, 0.90, $25 | A5: 0.25 and max 3 programs; A1: "1.00"; A8.1: "50" |
+| sizing caps Gym vs live | DESIGN: the same caps | `size_entry` applies the account cap AND the same share of the sleeve (`sleeve_cap`), so a live position is never a larger share of its sleeve than the Gym allows |
+| ltcm.data's NYSE calendar | the data job's audit "NYSE calendar has no gap" from 2016 | that calendar starts in 2022; `store.nyse_sessions` computes 2016-2021 by the same rules (core) |

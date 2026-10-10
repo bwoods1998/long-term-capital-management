@@ -54,6 +54,32 @@ def execution_fingerprint(repo: Path | None = None) -> str:
     return digest.hexdigest()
 
 
+#: THE EQUITY IDENTITY (release E1, A8.8; owner: core): the store kv key of the adopted equity fingerprint, and every
+#: league/gym module league/equity imports (hashed with it, listed explicitly; a test holds the list to the imports).
+EQUITY_KEY = "equity_evaluator"
+EQUITY_GYM_FILES = ("league/gym/__init__.py", "league/gym/safety.py", "league/gym/runtime.py", "league/gym/events.py")
+
+
+def equity_fingerprint(repo: Path | None = None) -> str:
+    """THE EQUITY LANE's evidence identity (A8.8; owner: core): sha256 over every league/equity/**/*.py, the 4
+    `LEAGUE_FILES` and `EQUITY_GYM_FILES`, path and bytes, in path order (as `execution_fingerprint`). Equity bands bind
+    to it as options bands bind to `execution_fingerprint`; it never moves for a league/live or options-only change."""
+    raise NotImplementedError("core: league/swarm/evaluator.py equity_fingerprint")
+
+
+def equity_identity() -> dict[str, str]:
+    """{"equity": equity_fingerprint(), "engine": league.equity.EQUITY_ENGINE_VERSION} (owner: core)."""
+    raise NotImplementedError("core: league/swarm/evaluator.py equity_identity")
+
+
+def adopt_equity(store: Any, expected: Mapping[str, Any] | None) -> dict[str, Any]:
+    """`adopt` mirrored for the equity lanes (owner: core): at process start, when the stored `EQUITY_KEY` differs from
+    `expected`, every alive equity-lane family's selection views are archived and cleared and a live equity band goes
+    back to "gym" for fresh qualification (its frozen lots keep their exits), in one transaction; options families are
+    never touched. {adopted, families, previous, current}."""
+    raise NotImplementedError("core: league/swarm/evaluator.py adopt_equity")
+
+
 def identity(image: Any, bundle: Any) -> dict[str, str] | None:
     return {"image": str(image), "bundle": str(bundle), "execution": execution_fingerprint()} if image and bundle else None
 
@@ -171,4 +197,5 @@ def adopt(store: Any, expected: Mapping[str, Any] | None) -> dict[str, Any]:
 
 
 __all__ = ["KEY", "SELECTION_KEYS", "HOLD_KEYS", "identity", "matches", "row_matches", "gym_changed", "adopt",
-           "execution_fingerprint"]
+           "execution_fingerprint", "EQUITY_KEY", "EQUITY_GYM_FILES", "equity_fingerprint", "equity_identity",
+           "adopt_equity"]

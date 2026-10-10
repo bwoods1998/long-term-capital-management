@@ -343,6 +343,23 @@ class _Base:
                 raise DeciderError(answer.get("error") or "the decider failed")
             return answer["results"]
 
+    # ------------------------------------------------------------------ the generic kinds (release E1, A8.8; owner: hooks)
+    def kind_load(self, kind: str, key: str, payload: Mapping[str, Any], *, budget_seconds: float | None = None) -> dict:
+        """Load an instance of `kind` (league/equity/kinds.py `KINDS`): sends ("kind", kind, "load", {"key": key,
+        **payload}) and remembers it, so a restarted child reloads it before the kind's next request (fresh memory), as
+        `load` does for options programs. ProgramRefused when the child refuses it."""
+        raise NotImplementedError("hooks: league/live/decider.py _Base.kind_load")
+
+    def kind_drop(self, kind: str, key: str, *, budget_seconds: float = 10.0) -> None:
+        """Forget an instance of `kind` (in the child and for reloads)."""
+        raise NotImplementedError("hooks: league/live/decider.py _Base.kind_drop")
+
+    def kind(self, kind: str, op: str, payload: Mapping[str, Any], *, budget_seconds: float | None = None) -> dict:
+        """One request of `kind` (op "decide", "needs", "run", ...): sends ("kind", kind, op, payload) under the same
+        isolation and deadline rules as `decide`; the child answers `league.equity.kinds.module_for(kind).handle(op,
+        payload, state)`. DeciderError when the child failed (it was restarted)."""
+        raise NotImplementedError("hooks: league/live/decider.py _Base.kind")
+
     def _ask(self, message: Any, deadline: float) -> dict:  # pragma: no cover - abstract
         raise NotImplementedError
 

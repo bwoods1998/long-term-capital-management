@@ -218,6 +218,10 @@ class Table:
     gateway_order_share: Decimal
     gateway_day_share: Decimal
     gateway_max_orders: int
+    #: THE EQUITY LANE (release E1; league/equity/INTERFACES.md, money): the constitution's `equity_money`, parsed
+    #: (`EquityTable.from_constitution`); None until `from_constitution` reads it. The shared loss budget stays the
+    #: options rows above (`probe_loss_budget`, `probe_loss_window`, `probe_loss_total`): one budget, both lanes.
+    equity: "EquityTable | None" = None
 
     @classmethod
     def from_constitution(cls, constitution: Mapping[str, Any] | None = None) -> "Table":
@@ -301,6 +305,59 @@ class Table:
             if why:
                 return why if types == (structure,) else f"a {structure} family sends {' and '.join(types)} orders: {why}"
         return None
+
+
+@dataclass(frozen=True)
+class EquityTable:
+    """THE EQUITY LANE's money table (release E1; owner: money; league/equity/INTERFACES.md "equity_money"): the
+    constitution's `equity_money` parsed, Decimals for money and shares. Read by league/equity (the book, the bands, the
+    sizing inputs) by attribute; `Table.equity` carries it."""
+
+    enabled: bool
+    universe: Mapping[str, str]                 # symbol -> "etf" | "stock"
+    position_share: Mapping[str, Decimal]       # class -> share of E (0.50 / 0.20)
+    invested_share: Decimal                     # "1.00" (A1: cash only by choice)
+    cash_reserve: Decimal                       # "50" (A8.1), above the gateway's $25 floor
+    open_risk_weight: Mapping[str, Decimal]     # class -> weight (0.20 / 0.40)
+    probe_sleeve_share: Decimal                 # "0.25" (A5)
+    probe_max_programs: int                     # 3 (A5) == elane.roster
+    min_order_usd: Decimal                      # "10"
+    sized_min_trades: int                       # 20
+    sized_confidence: float                     # 0.80
+    sized_kelly_fraction: float                 # 0.25
+    sized_sleeve_share: Decimal                 # "0.50"
+    sized_beat_bh: bool                         # True
+    sized_min_probe_sessions: int               # 5
+    demotion_rule: str                          # "edm1"
+    demotion_min_trades: int                    # 10
+    demotion_z: float                           # 1.645
+    program_loss_usd: Decimal                   # "-300"
+    twin_gap_bp: Decimal                        # "15"
+    twin_min_closes: int                        # 5
+    min_hold_sessions: int                      # 1
+    default_max_hold_sessions: int              # 20 (A8.5)
+    max_hold_sessions: int                      # 60, the lane cap (A8.5)
+    failed_decides_exit: int                    # 2 (A8.5)
+    entry_collar_bp: Mapping[str, int]          # class -> 10 / 25
+    max_collar_bp: Mapping[str, int]            # class -> 50 / 100
+    max_orders_day: int                         # 60 (A8.3)
+    offsets: Mapping[str, int]                  # league/equity/schedule.py DEFAULTS' keys, seconds
+
+    @classmethod
+    def from_constitution(cls, constitution: Mapping[str, Any] | None = None) -> "EquityTable":
+        """The equity table in force; ValueError when `equity_money` is missing or outside `EQUITY_MONEY_BOUNDS`
+        (`league.constitution.equity_money_problems`): nothing equity trades on a bad table."""
+        raise NotImplementedError("money: league/live/money.py EquityTable.from_constitution")
+
+
+def available_cash(account: Mapping[str, Any], *, working_buys_worst: Decimal, reserved: Decimal,
+                   reserve_usd: Decimal) -> Decimal:
+    """THE HOUSE-WIDE CASH RULE (A8.1; owner: money): what a real open in EITHER lane may still spend = the account's
+    cash - |short_market_value| - every working buy order's worst cost in both books (`working_buys_worst`: the equity
+    book's, plus the options book's open orders as the caller adds them) - the working reservations (`reserved`) -
+    `reserve_usd` (the constitution's `equity_money.cash_reserve_usd`). Not clamped at zero: a negative answer
+    refuses every open. ValueError when the account row has no readable cash (the caller refuses opens)."""
+    raise NotImplementedError("money: league/live/money.py available_cash")
 
 
 # --------------------------------------------------------------------------------------------- the forward record
@@ -654,6 +711,11 @@ class Exposure:
     probe_realized: Decimal = ZERO
     probe_at_risk: Decimal = ZERO
     probe_realized_total: Decimal | None = None
+    # THE EQUITY LANE (release E1; owner: money; filled by league/live/real.py `RealBook.exposure` through
+    # league/live/equity_hook.py): the equity rows' open risk (open_risk_weight x mark value of open ":r" lots, plus
+    # working ":r" buys; already inside `probe_at_risk`), and the equity long value plus working buys (the invested cap).
+    equity_open_risk: Decimal = ZERO
+    equity_invested: Decimal = ZERO
 
 
 @dataclass(frozen=True)
