@@ -305,6 +305,13 @@ LOOSENED: tuple[dict[str, str], ...] = (
              "drawdown stop trips by 24 weeks) 46% -> 48%; P(Done | zero edge) 2.5% -> 2.7% at 12 weeks; for P(Done) "
              "5.3% -> 5.5% at 12 weeks (paired +0.24 points, SE 0.12: past the pre-registered 2-paired-SE preference "
              "for the total alone by a hair, 2.06 SE). Measured at roster 5 alone, as the row above"},
+    {"rule": "the graveyard for an always-in card (Oct 10)", "was": "any dead row in its cell with an overlapping input "
+     "(the clock) binds it", "now": "a card whose inputs are exactly the clock (no gate: labelled index beta) is bound "
+     "only by a dead always-in row; a gated idea's refutation no longer blocks it",
+     "cost": "more always-in direction programs reach their one Validation try: each is a D2 lottery at the lane's measured "
+             "false-positive rate (10.37% per program at zero edge, higher when the screen windows rose), and their profit "
+             "is index beta minus option costs, reported beside the same-risk buy-and-hold; the same always-in idea "
+             "still cannot repeat (an always-in row binds it) and one try per lineage stands"},
 )
 #: And what D-1 TIGHTENED (said beside the loosenings), with release L-D's rolling budget, a tightening of its NET.
 TIGHTENED: tuple[str, ...] = (

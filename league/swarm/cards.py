@@ -657,12 +657,21 @@ def match_keys(card: Mapping[str, Any], structure: Any, mechanism: Any = "", dte
     return [key], None
 
 
+#: AN ALWAYS-IN CARD (Oct 10, 2026): a proposal whose inputs are exactly these reads no state: it enters on the clock alone
+#: (a direction lane's labelled index beta). `matches` binds it only to a dead row that was always-in too.
+ALWAYS_IN_INPUTS = frozenset({"clock"})
+
+
 def matches(new: Mapping[str, Any], dead: Mapping[str, Any]) -> bool:
     """Does a proposal's cell `new` fall in a dead row's cell `dead`: the same class, structure family and holding, and (a
     carded row, when the proposal's inputs are known) inputs that overlap the dead card's. A legacy row (`inputs` None)
-    matches on the first three."""
+    matches on the first three. AN ALWAYS-IN PROPOSAL (inputs exactly `ALWAYS_IN_INPUTS`, Oct 10, 2026) matches only a
+    dead row whose inputs were exactly those too: a gated idea's refutation (its gate on implied vol, term structure,
+    trend, ...) says nothing of entering on the clock alone, while an always-in row binds the same always-in idea."""
     if (new.get("class"), new.get("family"), new.get("holding")) != (dead.get("class"), dead.get("family"), dead.get("holding")):
         return False
+    if new.get("inputs") is not None and set(new.get("inputs") or []) == ALWAYS_IN_INPUTS:
+        return dead.get("inputs") is not None and set(dead.get("inputs") or []) == ALWAYS_IN_INPUTS
     if dead.get("inputs") is None or new.get("inputs") is None:
         return True
     return bool(set(new.get("inputs") or []) & set(dead.get("inputs") or []))

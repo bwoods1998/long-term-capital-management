@@ -29,6 +29,13 @@ any other deploy.
 The running House release is `20261010T062000Z-1767910d2115` (main `dd196cad`, the spent-lineage refusal, 06:20Z Oct 10),
 the gateway is `507b6118`, and the box's updater is on. What is built and not deployed is on branches.
 
+### The graveyard and always-in cards, on `fix/always-in-graveyard` (unreleased; an owner deploy; no evidence reset)
+
+- `league/swarm/cards.py` `matches`: a card whose matched inputs are exactly the clock is bound only by an always-in dead
+  row (gated ideas' refutations no longer block the direction lane's labelled index beta). The card's own words still
+  count (`match_inputs`), one try per lineage stands, and an always-in row still binds. A LOOSENED row in the `dlane`
+  report states the cost. Docs: `docs/operations.md`. Proof: `test_swarm_cards` (two new tests).
+
 ### 06:20Z Oct 10, 2026: the spent-lineage refusal (#526), House `20261010T062000Z-1767910d2115`, main `dd196cad`
 
 Owner deploy (no gateway change) after the 06:00Z nightly: no order in flight at 06:19:51Z; promoted (rollback

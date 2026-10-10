@@ -164,6 +164,35 @@ class LegacyCells(unittest.TestCase):
         self.assertFalse(cards.matches(new, {**new, "inputs": ["iv_skew"]}), "disjoint inputs are another information set")
         self.assertFalse(cards.matches(new, {**new, "holding": "intraday"}))
 
+    def test_an_always_in_card_is_bound_only_by_an_always_in_row(self):
+        """Oct 10, 2026: a card that reads only the clock (labelled index beta) is not bound by gated ideas' refutations."""
+        key = {"class": "equity_premium", "family": "directional", "holding": "days_1_3"}
+        always = {**key, "inputs": ["clock"]}
+        self.assertFalse(cards.matches(always, {**key, "inputs": ["clock", "implied_vol"]}), "a gated row binds no always-in")
+        self.assertFalse(cards.matches(always, {**key, "inputs": ["iv_term_structure"]}))
+        self.assertFalse(cards.matches(always, {**key, "inputs": None}), "a legacy row read no card: it binds no always-in")
+        self.assertTrue(cards.matches(always, {**key, "inputs": ["clock"]}), "an always-in row binds the same always-in idea")
+        self.assertFalse(cards.matches(always, {**key, "inputs": ["clock"], "holding": "days_4_10"}), "another holding")
+        gated = {**key, "inputs": ["clock", "implied_vol"]}
+        self.assertTrue(cards.matches(gated, {**key, "inputs": ["clock"]}), "a gated card is matched as before")
+        self.assertTrue(cards.matches(gated, {**key, "inputs": None}))
+
+    def test_the_dlane_report_lists_the_always_in_graveyard_as_a_loosening_with_its_cost(self):
+        from league.ops import dlane_report as R
+
+        row = {r["rule"]: r for r in R.LOOSENED}["the graveyard for an always-in card (Oct 10)"]
+        self.assertIn("10.37%", row["cost"])
+        self.assertIn("index beta", row["cost"])
+
+    def test_an_always_in_cards_own_words_can_make_it_gated(self):
+        card = {**CARD, "mechanism_class": "equity_premium", "inputs": ["clock"]}
+        clean = cards.match_inputs(card | {"hypothesis": "The index drifts up; a call bought every session at 10:30 rents it."},
+                                   "Buy one call every session at the same minute and hold it two sessions.")
+        self.assertEqual(clean, ["clock"])
+        gated = cards.match_inputs(card | {"hypothesis": "Calls are cheap when implied vol is low."},
+                                   "Buy one call each morning when implied vol is low.")
+        self.assertIn("implied_vol", gated, "text that names a state is matched on it: no always-in exemption")
+
     def test_a_row_text_is_read_for_its_inputs(self):
         self.assertEqual(cards.infer_inputs("Oversold closes rebound over the next session after FOMC."),
                          ["event_calendar", "underlying_price"])

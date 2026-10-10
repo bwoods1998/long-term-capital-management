@@ -8,6 +8,18 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## The graveyard and always-in cards (Oct 10, 2026): `fix/always-in-graveyard`
+
+`league/swarm/cards.py` `matches`: a card whose matched inputs are exactly `["clock"]` (`ALWAYS_IN_INPUTS`: it reads no
+state and enters on the clock alone, the direction lane's labelled index beta) is bound only by a dead row whose inputs
+were exactly that too. Why: by Oct 10 the direction cells held 25-43 rows refuted on Train, every one a gated idea (an
+implied-vol, term-structure, trend or open-interest gate), and an always-in card could make no rebirth claim (the claim
+needs an input the dead row did not read), so the lane's own instrument could not be born. A gated row's refutation
+says nothing of entering on the clock alone. What still binds: an always-in row (the same always-in idea cannot repeat),
+the card's own words (`match_inputs` adds every input its text names, so a card that writes "when implied vol is low"
+is matched as gated), one Validation try per lineage, and the ration at birth. Cost: the `dlane` report's LOOSENED row.
+Agenda v21.4 (swarm.json, 15:33Z Oct 10) tells the architect an always-in card lists `inputs: ["clock"]`.
+
 ## The Probe total at $800 and the program line at -$300 (Oct 10, 2026): deployed 05:36Z (money `fdf2ac7c`, grant ratified 05:37Z)
 
 Built on `feat/probe-total-800`, not deployed: one owner deploy (`league/constitution.py`, `league/swarm/policy.json`
