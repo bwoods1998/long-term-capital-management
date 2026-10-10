@@ -8,6 +8,118 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## The equity lane (release E1, Oct 2026): `feat/equity-e1`, not deployed
+
+The owner's goal of Oct 10, 2026, on the House's side: agent programs trade long-only ETFs (stocks later, E3) with real
+money through the House's own **EquityBook** (`league/equity/live.py`; its tables `eq_lots`, `eq_orders`, `eq_fills`,
+`eq_intents`, `eq_bars`, `eq_activities`, `eq_exports`, `eq_instances` in `live.sqlite`). The lane's code is
+`league/equity/` (its own identity, `equity_fingerprint`: an equity change never resets the options evidence), its swarm
+side `league/swarm/elane.py`, its contract `league/equity/INTERFACES.md` and `league/equity/EQUITY.md`. E1 switches
+nothing on: it deploys with `equity_money.enabled` false, `elane.mode` "off" and no screen receipt pinned. In E1 the
+lane's programs are the three captain-seeded BETA programs (`seed-overnight-spy`, `seed-overnight-qqq`,
+`seed-reversal-index`: agent-written, judged by the swarm's screen like any family, and said plainly to be seeded);
+architect and researcher births in the beta and equity lanes are E2.
+
+**The switches** (all three must be on for a real equity open; any one off stops new opens):
+- `equity_money.enabled` (league/constitution.py, a CON change: the money digest moves and the standing grant re-ratifies
+  at the House's start). False: the book keeps its tables, runs its exits and reconciles; no equity open.
+- `elane.mode` (league/swarm/policy.json, swarm.json over it): "off" (the rollback: no seeded birth, no equity look) or
+  "gate".
+- `STOCK_BUYS_REAL` (gateway/wrangler.jsonc): deployed "on" with PR #532; while the House's `equity_money.enabled` is
+  false nothing sends a buy, so the House's switch is the one that matters. "off" closes the gateway's route (closes go
+  either way).
+- The screen (A9): the share screen S1's receipt, copied verbatim to `docs/benchmarks/equity_screen_1.json` and pinned in
+  policy.json's `elane.screens`; with no pinned receipt every equity look is refused (no look spent).
+- The stock paper proof (A8.7; `league/live/paper.py` `StockPaperProof`, kv `paper_proof_stock`): on `alpaca-paper` it
+  buys a fractional SPY marketable limit in the 15:55 ET close window and sells it at the next open, then checks fills,
+  positions, activities and reconciliation. It must pass once before the first real equity order. Only the equity book
+  waits on it (options entries never do); its client ids are `lq-pp-...`.
+
+**Cash only, by choice** (amendment A1). The gateway (PR #532) admits margin where the account offers it (its book cap is
+equity x min(2, the multiplier), bounded by buying power). The House's equity book in E1 does not use it: margin
+interest is not metered yet (the goal forbids hidden costs) and the loss budget binds first. The House rule: the equity
+lane's long value + open equity buys + the options' open maximum loss <= E (`equity_money.invested_share` "1.00"); an
+equity open is refused while account cash is below 0 or any us_equity position is short. THE HOUSE-WIDE CASH RULE
+(A8.1): no real open in either lane may push cash below the reserve. Available cash = cash - |short_market_value| -
+every working buy's worst cost (both books) - working reservations - `equity_money.cash_reserve_usd` ($50, above the
+gateway's $25 floor). The options book reserves against min(`options_buying_power`, available cash), and equity sizing
+reads the same figure. If cash is ever below 0, every open in both lanes refuses and an alarm fires. A later release may
+raise `invested_share` toward the venue's overnight multiplier once a margin-interest row is metered.
+
+**The loss budget is shared** (A8.6). The options lane's `options_money.probe` rows ($400 net in any rolling 20 sessions,
+$800 net in total) bound every agent program's Probe opens in both lanes, read by one `probe_tally`: an open ETF lot
+counts 20% of its value, a stock 40%, an option its maximum loss, and ONE slot a program (never one a lot). With the
+equity lane invested at `probe.max_programs` x `probe.sleeve_share` x E (3 x 0.25 E), its open risk is 0.15 x E, so the
+options Probe lane keeps only $400 - 0.15 x E of window room: **effectively off** while the equity sleeves are full.
+The `dlane` report says so with the figures (`equity.options_probe_room`).
+
+**The schedule** (New York time; `league/equity/schedule.py`, the offsets in force in `equity_money.order_path`; half days
+by the same offsets from the 13:00 close):
+- 16:20 the bars: each live program's symbols, 1Day raw and adjustment=all through the session just closed, written to
+  `eq_bars` with the arrays' sha (A8.11); 16:30 the decide: one isolated "equity" decider request a session, the intents
+  recorded in `eq_intents` for the NEXT session, at its open (`"at": "open"`, the default) or its close (`"at":
+  "close"`), with the House's exits (a lot's `max_hold_sessions`, default 20, cap 60; a demoted, retired or
+  band-dropped program; 2 sessions of failed decides) as `house_exit`. A decide missed by a restart runs as a catch-up
+  for the last close.
+- 08:30 the morning re-fetch audits yesterday's bars against a new fetch (a mismatch is an alarm and a twin note);
+  09:25 the pre-open: the account, positions and orders read, reconciliation, the plan.
+- THE OPEN: exits at 09:30:30; entries after the exits filled or 2 minutes, sized on cash after the exit fills, until
+  09:45 (a missed entry is recorded, never chased); exits go on until 15:55. THE CLOSE (A2): at 15:55:00 exits then
+  entries, marketable limits re-priced every 30 s to 15:59:30, then recorded missed. Collars 10 bp (ETF) / 25 bp
+  (stock) widening to 50 / 100. A replacement goes only once the old order is terminal (A8.4). The book caps itself at
+  60 orders a day and never sends while the House-wide day count would leave less than the options book's exit reserve
+  (A8.3).
+- MIN HOLD: a lot is never sold in the session it was bought (a close-bought lot may sell at the next open), kill switch
+  included: the gateway's kill switch blocks sells too, so exits wait on it.
+- The House jobs: `equity_data` at the House's start and 22:30Z (below); `equity_twins` at the start, 01:15Z and 40
+  minutes before each open; the `dlane` report (01:30Z, 30 minutes before each open) reads the twins.
+
+**The data job** (`league/ops/equity_data.py`, `equity_data`): Alpaca SIP daily bars of the universe through the gateway
+(`GET v2/stocks/bars`, already allowed), adjustment=raw and adjustment=all, from 2016-01-04 to the last closed session,
+the whole history each run (the all series restates every earlier row at a corporate action). The audit (calendar with
+no gap or extra day; sane bars; every raw/all ratio jump a split the raw close shows, and no raw jump the all series did
+not adjust; volumes; the 1Day bar against SPY's 1Min bars on 20 sessions, the design's fact 1: "regular", "extended" or
+"unverified") must pass, then `league.equity.store.write_store` writes `<state>/equity-daily/` atomically with the GATE
+mark. A failed fetch or audit writes nothing (a failed receipt, retried in its grace) and the last good store stays.
+"extended" is a stop for E1 (the store must then be built from 1Min bars); "unverified" is written and warned. The data
+never leaves the House's state directory (the vendor's terms; a public repository).
+
+**The twins and the Done meter.** `equity_twins` (league/ops/twins.py) prices each closed lot's twin in closed form from
+the House's own official opens and closes (`eq_bars`, raw) with the engine's fill function (open and close fills, the
+same fees, dividends and split): "priced", "no_bar" or "unpriceable", final once judged, the gap in bp a side (live
+minus twin; EDM1 demotes past 15 bp a side over 5 priced closes), each fill's slippage against its official price, and
+the same-risk buy-and-hold over the same sessions. The `dlane` report's Done meters count from Oct 10, 2026 (the goal:
+`done.counted_from`; every earlier agent close is listed in `done.earlier`, never counted); an equity close is one lot
+fully closed, its net cash with fees and dividends, on `:r` (both meters), matched to its own twin; beside every close
+and checkpoint ride the lane's label (MARKET BETA or EQUITY), the buy-and-hold, MTE, the S1 line recorded at the
+program's look and "profit from market direction". Done is also read without the three seeded programs
+(`done.without_seeded`, A8.12). The funnel (`league/ops/funnel.py`) counts the equity lanes apart (`equity`).
+
+**Roll back: flatten first.** In order, each step verified before the next:
+1. `elane.mode` "off" in swarm.json (no seeded birth, no equity look).
+2. `equity_money.enabled` false (a CON change; the grant re-ratifies at the start): the book keeps running its exits only.
+3. `EquityBook.flatten(why)`: every open lot queued to exit at the next window through the normal path (never a market
+   order). Wait until health's `equity` line shows no lot held and no order working.
+4. Only then `python3 scripts/floor_box.py rollback`. **The guard (A8.9):** `deploy` and `rollback` refuse a release
+   that lacks the EquityBook (`EQUITY_BOOK_MARKERS`: `league/equity/live.py` `class EquityBook`) while the box's
+   `live.sqlite` has an `eq_lots` row open or closing or an `eq_orders` row working (read-only). `--force-equity-risk` is
+   the emergency path only: the older release's `_close_shares` market-sells every share at its first minute (a forced
+   close, recorded as one) and its reconciliation freezes on them. Prefer fixing forward.
+`STOCK_BUYS_REAL` "off" (a gateway var deploy) closes the gateway's route at any point; closes go either way.
+
+**The gateway's stock route as the House sees it** (the gateway README's House-side note, kept here: `gateway/` ships on
+its own). The book sends `limit` `day` orders in shares (fractional, six decimals sent; the venue takes nine), never a
+notional, market or stop order, with client ids `lq-<eid>-<family>` (`league/live/real.py` `ingest` skips them: never a
+foreign order). A buy is a marketable limit at the ask x (1 + collar), a sale at the bid x (1 - collar). Each row is
+written `pending` before the POST; a lost answer is `unknown` and is looked up by its client id, never re-sent blind.
+The gateway's answers the book reads: `403 {cap}` (`stock_order`, `stock_position`, `stock_day`, `stock_total`,
+`buying_power`): a refusal recorded on the order; `503 equity` (Retry-After 30), `424 orders`, `424 positions`: the
+account or its book could not be read, nothing sent; `409 stock_close`: a second close of the same shares in flight;
+`423`: the kill switch, buys and sells alike. A buy is an open for the shared day counts (`MAX_DAY_OPEN_ORDERS` 250,
+`MAX_DAY_ORDERS` 300, both books together). The gateway's caps (50% of equity an ETF, 20% a stock, the margin line,
+buying power, 4x equity of buys a day) are the backstop under the House's tighter rules, never the rule the House sizes
+to. `/v1/health` `stock_buys` shows the switch, the shares, the day's buys and the buys in flight.
+
 ## Real stock and ETF buys at the gateway (Oct 10, 2026): `feat/gateway-stock-opens`, not deployed
 
 The owner's goal of Oct 10, 2026: agent programs may trade ETFs, stocks and options with real money. An ETF position at

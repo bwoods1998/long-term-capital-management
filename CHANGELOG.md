@@ -29,6 +29,37 @@ any other deploy.
 The running House release is `20261010T062000Z-1767910d2115` (main `dd196cad`, the spent-lineage refusal, 06:20Z Oct 10),
 the gateway is `507b6118`, and the box's updater is on. What is built and not deployed is on branches.
 
+### Release E1, the equity lane: ops, data, twins and the Done meter, on `feat/equity-e1` (unreleased; an owner deploy with the rest of E1; nothing switched on)
+
+- **The data job** `equity_data` (`league/ops/equity_data.py`, registered at the House's start and daily 22:30Z, in a
+  pause too): Alpaca SIP daily bars of the equity universe through the gateway's bars route, adjustment=raw and
+  adjustment=all, from 2016-01-04 to the last closed session, audited (the NYSE calendar with no gap, sane bars, every
+  raw/all ratio jump a split the raw close shows, volumes, and the design's fact 1: the 1Day bar against SPY's 1Min bars on
+  20 sessions, "regular", "extended" (a stop) or "unverified" (written, warned)), then written atomically through
+  `league.equity.store.write_store` to `<state>/equity-daily/` with the GATE mark. A failed fetch or audit writes
+  nothing. The data never leaves the House.
+- **The equity twins** (`league/ops/twins.py` `equity_twin`, the `equity_twins` job at the start, 01:15Z and 40 minutes
+  before each open): each closed equity lot's twin in closed form from the House's own official opens and closes
+  (`eq_bars`) with the engine's fill function (open and close fills, A2), the same fees, dividends and split; "priced",
+  "no_bar" or "unpriceable", final once judged; the gap in bp a side, each fill's slippage against its official price
+  and the same-risk buy-and-hold, in the swarm store's kv `equity_twins`.
+- **The Done meter** (`league/ops/dlane_report.py`): counted from Oct 10, 2026 as the goal says (`DONE_FROM`, 00:00 New
+  York; every earlier agent close reported beside in `done.earlier`, never counted; a frozen reading is carried only from
+  a report that counted from the same instant); the rule itself unchanged. An equity close is one EquityBook lot fully
+  closed with its net cash (fees and dividends), on `:r`, matched to its own twin (no nightly fallback: no twin is a
+  replay not landed); beside every close and checkpoint its lane's label (MARKET BETA or EQUITY), the buy-and-hold, MTE,
+  the S1 line recorded at the look and "profit from market direction"; Done also read without the three seeded
+  programs (`done.without_seeded`, A8.12); the equity trades' screen lines in `fp_beside_trades.equity_trades`; the
+  `equity` section with A8.6's statement that the options Probe lane is effectively off while the equity sleeves are
+  full. The funnel counts the equity lanes apart (`league/ops/funnel.py` `equity`; the daily page's table is unchanged).
+- **The rollback guard** (A8.9, `scripts/floor_box.py`): `deploy` and `rollback` refuse a release without the EquityBook
+  while the box's `live.sqlite` holds an equity lot or works an equity order (`EQUITY_BOOK_MARKERS`,
+  `EQUITY_GUARD_SNIPPET`, read-only); `--force-equity-risk` is the emergency path.
+- Docs: `docs/operations.md` "The equity lane" (the switches, the cash-only choice and the house-wide cash rule, the
+  shared budget's consequence, the schedule, the stock paper proof, the flatten-first rollback, and the gateway's stock
+  route as the House sees it). Proof: `test_equity_data`, `test_equity_twins`, `test_dlane_report_equity`,
+  `test_floor_box_equity`; `test_dlane_report`'s fixtures now count from the rule's inception explicitly.
+
 ### Real stock and ETF buys at the gateway, on `feat/gateway-stock-opens` (unreleased; a gateway deploy; no House change)
 
 - The owner's goal of Oct 10, 2026 (ETFs, stocks and options with real money). While `STOCK_BUYS_REAL` is `on` (set so

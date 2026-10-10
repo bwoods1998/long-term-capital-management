@@ -50,6 +50,9 @@ What this script will not do:
 - **It never rolls back to a release that cannot manage the real book while it holds something.** `rollback` reads
   the box's `live.sqlite` (read-only) for real positions held and real orders working, and the previous release for
   `real_money` and the long-single code; it refuses unless `--force-real-risk` is given.
+- **It never puts a release older than E1 on the box while the equity book holds a lot** (A8.9). `deploy` and `rollback`
+  read the target release for the EquityBook and, when it lacks it, the box's `live.sqlite` (read-only) for equity lots
+  held and equity orders working; they refuse unless `--force-equity-risk` is given. Flatten first, or fix forward.
 
 Box state lives in `.data/ltcm/box.json`: ids, names, the allowlist in effect, the releases sent
 and their verdicts, and the checkpoints taken. It is owner-only (mode 600) and holds no credential.
@@ -285,6 +288,63 @@ def book(state):
     positions = db.execute("select count(*) from positions where status in ('open', 'awaiting_expiry') and qty > 0").fetchone()[0]
     orders = db.execute("select count(*) from orders where status in ('pending', 'working', 'unknown')").fetchone()[0]
     return {"positions": int(positions), "orders": int(orders)}
+
+
+try:
+    ask = json.loads(sys.argv[1])
+    answer = {"release": release(ask["release"], ask["markers"]) if ask.get("release") else None}
+    answer.update(book(ask["state"]))
+except Exception as exc:
+    answer = {"error": type(exc).__name__ + ": " + str(exc)[:300]}
+print(json.dumps(answer))
+"""
+
+# --------------------------------------------------------------------------- the equity book guard
+# A8.9 (release E1, Oct 2026; the captain's amendments): a release older than E1 has no EquityBook. Its `_close_shares`
+# market-sells every us_equity share it does not attribute to an options assignment at its first minute, its
+# reconciliation freezes on the rest, and its `ingest` takes an `lq-` order for a foreign one. So `deploy` and `rollback`
+# refuse a release that lacks the EquityBook while the box's live state (`live.sqlite`, read-only) shows an equity lot
+# held (`eq_lots` open or closing) or an equity order working (`--force-equity-risk` overrides, loudly). The way back is
+# to flatten first (`elane.mode` off, `equity_money.enabled` false, `EquityBook.flatten`, every lot sold through the
+# book) or to fix forward (docs/operations.md, "The equity lane": its rollback).
+
+#: What a release must carry to hold equity lots: the EquityBook itself (release E1).
+EQUITY_BOOK_MARKERS = (("league/equity/live.py", "class EquityBook"),)
+
+#: Run on the box with the box's interpreter, read-only, one JSON argument `{state, release, markers}`: prints one JSON
+#: line `{release: {dir, missing} | null, lots, orders, book}` (equity lots held, equity orders working; `book` "absent"
+#: with no live state, "before E1" with no equity tables), or `{"error": ...}`. Standard library only.
+EQUITY_GUARD_SNIPPET = r"""
+# floor_box equity book guard (read-only)
+import json, pathlib, sqlite3, sys
+
+
+def release(path, markers):
+    base = pathlib.Path(path).resolve()
+    missing = []
+    for rel, marker in markers:
+        try:
+            text = (base / rel).read_text(encoding="utf-8")
+        except OSError:
+            text = ""
+        if marker not in text:
+            missing.append(rel + ": " + marker)
+    return {"dir": str(base), "missing": missing}
+
+
+def book(state):
+    path = pathlib.Path(state) / "live.sqlite"
+    if not path.exists():
+        return {"lots": 0, "orders": 0, "book": "absent"}
+    db = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
+    db.execute("pragma query_only=1")
+    tables = {row[0] for row in db.execute("select name from sqlite_master where type='table'")}
+    if "eq_lots" not in tables:
+        return {"lots": 0, "orders": 0, "book": "before E1"}
+    lots = db.execute("select count(*) from eq_lots where status in ('open', 'closing')").fetchone()[0]
+    orders = db.execute("select count(*) from eq_orders where status in ('pending', 'working', 'unknown')").fetchone()[0] \
+        if "eq_orders" in tables else 0
+    return {"lots": int(lots), "orders": int(orders), "book": "E1"}
 
 
 try:
@@ -900,6 +960,68 @@ def hold_real_book(answer: Mapping[str, Any], *, target: str, force: bool) -> No
         print(line, file=sys.stderr, flush=True)
 
 
+def equity_gaps(files: Sequence[Path]) -> list[str]:
+    """The equity book's markers (`EQUITY_BOOK_MARKERS`) the release packed from `files` lacks: each file must be one of
+    those sent, and say its marker."""
+    sent = {Path(path).as_posix() for path in files}
+    missing = []
+    for rel, marker in EQUITY_BOOK_MARKERS:
+        try:
+            present = rel in sent and marker in (REPO_ROOT / rel).read_text(encoding="utf-8")
+        except OSError:
+            present = False
+        if not present:
+            missing.append(f"{rel}: {marker}")
+    return missing
+
+
+def read_equity_guard(api: SailboxClient, box: str, python: str, *, release: str | None = None) -> dict[str, Any]:
+    """Run `EQUITY_GUARD_SNIPPET` on the box, read-only: `release` (a release directory there, or None) checked for the
+    EquityBook, and the live state's equity lots held and equity orders working. `{"error": ...}` when it could not be
+    run or read."""
+    ask = {"state": STATE_DIR, "release": release, "markers": [list(pair) for pair in EQUITY_BOOK_MARKERS]}
+    try:
+        result = api.exec(box, [python, "-c", EQUITY_GUARD_SNIPPET, json.dumps(ask)], timeout=120, on_output=None)
+    except SailboxError as error:
+        return {"error": f"the box could not run the check ({str(error)[:200]})"}
+    lines = [line for line in str(result.stdout or "").splitlines() if line.strip()]
+    try:
+        answer = json.loads(lines[-1])
+    except (IndexError, ValueError):
+        return {"error": f"the check gave no answer (exit {getattr(result, 'return_code', '?')}: "
+                         f"{str(getattr(result, 'stderr', '') or '')[-200:]})"}
+    return answer if isinstance(answer, dict) else {"error": "the check's answer was not an object"}
+
+
+def hold_equity_book(answer: Mapping[str, Any], missing: Sequence[str], *, target: str, force: bool) -> None:
+    """A8.9: refuse (SystemExit) to put `target` on the box when it lacks the EquityBook (`missing`) while the live state
+    shows an equity lot held or an equity order working, or cannot be read; say why it may go otherwise. `force`
+    (`--force-equity-risk`) sends it anyway, with a loud warning."""
+    if not missing:
+        return
+    lacks = "; ".join(missing)
+    if answer.get("error"):
+        risk = (f"the box's live state could not be read ({str(answer['error'])[:300]}), so nothing shows that the "
+                "equity book is flat")
+    else:
+        lots, orders = int(answer.get("lots") or 0), int(answer.get("orders") or 0)
+        if not lots and not orders:
+            say(f"  {target} predates the equity book ({lacks}); the live state shows no equity lot held and no equity "
+                "order working, so it may go")
+            return
+        risk = f"the equity book holds {lots} lot(s) and works {orders} order(s)"
+    why = (f"{target} lacks the equity book ({lacks}) and {risk}. A release before E1 market-sells every share it does "
+           "not attribute to an assignment at its first minute and freezes its reconciliation on the rest: flatten "
+           "first (elane.mode off, equity_money.enabled false, EquityBook.flatten, every lot sold through the book), or "
+           "fix forward (docs/operations.md, The equity lane)")
+    if not force:
+        raise SystemExit(f"REFUSED: {why}. --force-equity-risk sends it anyway.")
+    banner = "!" * 100
+    for line in (banner, f"WARNING: --force-equity-risk: {why}.", "Sending it anyway, as asked.", banner):
+        say(line)
+        print(line, file=sys.stderr, flush=True)
+
+
 # --------------------------------------------------------------------------- commands
 
 
@@ -1091,6 +1213,11 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     if missing:
         hold_structures(read_structure_guard(api, box, python), missing, target="this working tree",
                         force=args.force_structures_risk)
+    # The equity book guard (A8.9): a tree without the EquityBook is not sent while the live state holds an equity lot.
+    missing_equity = equity_gaps(files)
+    if missing_equity:
+        hold_equity_book(read_equity_guard(api, box, python), missing_equity, target="this working tree",
+                         force=args.force_equity_risk)
 
     # run.sh names the interpreter and restart.sh is what the watchdog calls, so both are in
     # place before it starts. A supervisor that is already up keeps the run.sh it started with.
@@ -1146,7 +1273,8 @@ def cmd_deploy(args: argparse.Namespace) -> int:
 
 
 def cmd_rollback(args: argparse.Namespace) -> int:
-    """Ask the in-box watchdog to roll back (`current` := `previous`, restart the House), after the structures guard.
+    """Ask the in-box watchdog to roll back (`current` := `previous`, restart the House), after the structures guard,
+    the real book guard and the equity book guard (A8.9).
 
     The rollback is the watchdog's (`python -m league.watchdog rollback`, run from the previous release, as
     docs/operations.md has said since Sept 19); this script moves no link itself. Before it is asked, the previous
@@ -1175,6 +1303,13 @@ def cmd_rollback(args: argparse.Namespace) -> int:
     hold_structures(answer, missing, target=f"the previous release {previous}", force=args.force_structures_risk)
     hold_real_book(read_real_guard(api, box, python, release=f"{REMOTE_ROOT}/previous"),
                    target=f"the previous release {previous}", force=args.force_real_risk)
+    # The equity book guard (A8.9): never back past E1 while the equity book holds a lot or works an order.
+    equity = read_equity_guard(api, box, python, release=f"{REMOTE_ROOT}/previous")
+    if equity.get("error"):
+        missing_equity = [f"{rel}: {marker} (not read: the check failed)" for rel, marker in EQUITY_BOOK_MARKERS]
+    else:
+        missing_equity = list((equity.get("release") or {}).get("missing") or [])
+    hold_equity_book(equity, missing_equity, target=f"the previous release {previous}", force=args.force_equity_risk)
 
     reason = args.reason  # sent below as a positional parameter, never as shell text
     say(f"rolling back {current} -> {previous}: {reason}")
@@ -1797,6 +1932,10 @@ def build_parser() -> argparse.ArgumentParser:
     risk_help = ("send it even when it lacks the structure-aware practice code and alpaca-paper holds a structure "
                  "(or the ledger cannot be read): a naked short and a frozen practice book follow")
     deploy.add_argument("--force-structures-risk", action="store_true", help=risk_help)
+    equity_help = ("send it even when it lacks the equity book (a release before E1) and the equity book holds a lot or "
+                   "works an order (or the live state cannot be read): its shares are market-sold and its reconciliation "
+                   "freezes; flatten first, or fix forward")
+    deploy.add_argument("--force-equity-risk", action="store_true", help=equity_help)
 
     rollback = sub.add_parser("rollback", help="the watchdog's rollback (current := previous, restart), after the structures guard")
     rollback.add_argument("--reason", default="operator rollback")
@@ -1804,6 +1943,7 @@ def build_parser() -> argparse.ArgumentParser:
     rollback.add_argument("--force-real-risk", action="store_true",
                           help="roll back even while the real book holds a position or works an order and the previous "
                                "release cannot manage it (real_money false, or no long-single code): unmanaged real risk")
+    rollback.add_argument("--force-equity-risk", action="store_true", help=equity_help)
 
     sub.add_parser("secrets", help="the three values the box holds -> /workspace/.env (the owner runs this)")
 
