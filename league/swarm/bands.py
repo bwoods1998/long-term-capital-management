@@ -89,6 +89,7 @@ Standard library only.
 
 from __future__ import annotations
 
+import calendar
 import functools
 import gzip
 import json
@@ -97,7 +98,7 @@ import sqlite3
 import threading
 import time
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from . import DB_NAME, settings
 from .store import loads
@@ -155,8 +156,102 @@ def _bundle() -> str | None:
 
 def _families(db: sqlite3.Connection, family: str | None, *, gym_only: bool = False) -> list[dict[str, Any]]:
     where = "retired_at IS NULL" + (" AND band='gym'" if gym_only else "") + (" AND id=?" if family is not None else "")
-    return [dict(r) for r in db.execute(f"SELECT id, band, structure, roots, state, lineage, best_version, best_train FROM "
-                                        f"families WHERE {where} ORDER BY id", (() if family is None else (str(family),)))]
+    return [dict(r) for r in db.execute(f"SELECT id, band, band_since, structure, roots, state, lineage, best_version, "
+                                        f"best_train FROM families WHERE {where} ORDER BY id",
+                                        (() if family is None else (str(family),)))]
+
+
+#: Seconds after a family became a Candidate (`banded_at`) within which its band's last move is that promotion: a later
+#: move into the Candidate band is a demotion from Probe (the money table's, DM1's) and takes no roster seat (`waiting`).
+ROSTER_SLACK_S = 300.0
+
+
+def _epoch(text: Any) -> float | None:
+    """`store.iso`'s text (UTC, whole seconds) as epoch seconds, else None."""
+    try:
+        return float(calendar.timegm(time.strptime(str(text), "%Y-%m-%dT%H:%M:%SZ")))
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def waiting(fams: Sequence[Mapping[str, Any]], seats: int) -> set[str]:
+    """THE PROBE ROSTER (REDESIGN-1010, Oct 10, 2026; `dlane.roster`): the Candidate families the live path does not
+    see while the roster is full. Pure. `fams`: the alive families (id, band, band_since, state as a dict); `seats`: the
+    roster (0 = no roster: nothing waits).
+
+    Why: the Probe budget is one envelope for every program, and Done needs >= 5 real closes from each of >= 2 programs.
+    With no roster, every program that passes its look trades at once and the shared budget spreads one or two closes
+    over each of dozens of programs (the redesign grid: at a measured 35.6 D2 verdicts a session, P(Done in 12 weeks)
+    1.6% as traded, 5.1% even at +0.30 of maximum loss a trade). A roster seats a few programs, which then earn the
+    closes that can show an edge; the others wait their turn as Candidates (no real order, no shadow seat taken).
+
+    The rule, in this order:
+    - every Probe family holds a seat and is never hidden (a Sized family neither holds one nor waits: its money is the
+      Sized table's), so a lower `seats` hides no family that trades: it only stops new seats until Probe falls below;
+    - a Candidate moved into the band more than `ROSTER_SLACK_S` after it became a Candidate (`state.banded_at`) came
+      back from Probe (a demotion): it takes no seat and is shown as before (the money table keeps its own reasons);
+    - the other Candidates take the free seats in the order they became Candidates (`banded_at`, then id); the rest wait.
+    A Candidate with no readable `banded_at` takes no seat and is shown (the live path's own checks hold it)."""
+    if seats <= 0:
+        return set()
+    probe = sum(1 for f in fams if f.get("band") == "probe")
+    queue: list[tuple[float, str]] = []
+    for fam in fams:
+        if fam.get("band") != "candidate":
+            continue
+        state = fam.get("state") if isinstance(fam.get("state"), Mapping) else {}
+        at = _finite(state.get("banded_at"))
+        if at is None:
+            continue
+        since = _epoch(fam.get("band_since"))
+        if since is not None and since > at + ROSTER_SLACK_S:
+            continue
+        queue.append((at, str(fam["id"])))
+    queue.sort()
+    free = max(0, int(seats) - probe)
+    return {fid for _, fid in queue[free:]}
+
+
+def roster(root: str | Path) -> dict[str, Any] | None:
+    """The roster as it stands, for reports: {seats, probe, seated, waiting} (seated: the Probe families and the
+    Candidates holding a seat; waiting: `waiting`'s). None when it is off or the store cannot be read."""
+    try:
+        seats = _roster_seats(root)
+        if not seats:
+            return None
+        db = sqlite3.connect(f"file:{Path(root) / DB_NAME}?mode=ro", uri=True, timeout=1.0)
+        db.row_factory = sqlite3.Row
+        try:
+            fams = _banded(db)
+        finally:
+            db.close()
+    except (sqlite3.Error, OSError):
+        return None
+    wait = waiting(fams, seats)
+    return {"seats": seats, "probe": sorted(str(f["id"]) for f in fams if f.get("band") == "probe"),
+            "seated": sorted(str(f["id"]) for f in fams if f.get("band") in ("probe", "candidate") and str(f["id"]) not in wait),
+            "waiting": sorted(wait)}
+
+
+def _roster_seats(root: str | Path) -> int:
+    """`dlane.roster` as the settings say (0 when off or unreadable)."""
+    from . import dlane
+
+    try:
+        return int(dlane.cfg(settings.load(root))["roster"])
+    except Exception:  # noqa: BLE001 - no readable roster is no roster: the live path sees what it saw before
+        return 0
+
+
+def _banded(db: sqlite3.Connection) -> list[dict[str, Any]]:
+    """The alive Candidate and Probe families, their state parsed (the roster's input)."""
+    out = []
+    for r in db.execute("SELECT id, band, band_since, state FROM families WHERE retired_at IS NULL AND band IN "
+                        "('candidate', 'probe') ORDER BY id"):
+        row = dict(r)
+        row["state"] = loads(row["state"], {}) or {}
+        out.append(row)
+    return out
 
 
 def read(root: str | Path, *, family: str | None = None) -> list[dict[str, Any]]:
@@ -172,10 +267,15 @@ def read(root: str | Path, *, family: str | None = None) -> list[dict[str, Any]]
         db.row_factory = sqlite3.Row
         try:
             fams = _families(db, family)
+            # THE PROBE ROSTER (`waiting`): read inside the same connection, over every Candidate and Probe family
+            seats = _roster_seats(root)
+            hidden = waiting(_banded(db), seats) if seats else set()
             wanted: dict[str, int] = {}
             for fam in fams:
                 state = loads(fam["state"], {}) or {}
                 fam["state"] = state
+                if fam["id"] in hidden:
+                    continue  # a Candidate waiting for a roster seat: no row, so no shadow or real instance
                 if fam["band"] in LIVE_BANDS and state.get("banded_version"):
                     wanted[fam["id"]] = int(state["banded_version"])
                 elif fam["band"] == "gym" and (state.get("validation_line") or {}).get("passed") and state.get("validation_version"):

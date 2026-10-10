@@ -8,7 +8,26 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
-## The weekend fixes, integrated (Oct 10, 2026): `release/weekend-fixes`, not deployed
+## The Probe roster (Oct 10, 2026): `feat/probe-roster`, off until set
+
+`dlane.roster` (swarm.json; a whole number 0-50; 0, the default, is no roster) caps how many families hold the Probe
+band's seats. Every Probe family holds a seat and is never hidden. The Candidates take the free seats in the order they
+became Candidates (`state.banded_at`), and the rest WAIT: `league/swarm/bands.py` `read` gives the live path no row for
+them, so they get no shadow or real instance and no band move until a seat frees (a seated family is retired, demoted or
+Sized). A Candidate that came back from Probe (a demotion: its band moved more than 300 s after `banded_at`) holds no
+seat and is shown as before. A Sized family neither holds a seat nor waits. Lowering the setting never hides a family
+that trades: it only stops new seats until the Probe count falls below it.
+
+- **Why:** Done needs >= 5 real closes from each of >= 2 programs, and every program at Probe shares one envelope and
+  8 slots. Without a roster those slots spread one or two closes over many programs, so the clause fails even for a
+  real edge. The operator's simulation (REDESIGN-1010, private) measured the effect before the setting was chosen.
+- **Read it:** `bands.roster(root)` -> {seats, probe, seated, waiting}, or None while it is off.
+- **Set / roll back:** `python3 set_swarm.py dlane.roster=<n> --apply` (owner's machine); `dlane.roster=0` is the
+  rollback. No deploy, no fingerprint move: the rule is swarm-side.
+- **Not handled:** a seated family that rarely signals keeps its seat (no idle eviction), and the oldest Candidate the
+  money table holds (unit fit, embargo) keeps its seat while younger ones wait.
+
+## The weekend fixes, integrated (Oct 10, 2026): `release/weekend-fixes`, deployed 22:57Z Oct 9
 
 One release of the three weekend builds, merged one at a time on main `cf96b72c` (the live release
 `20261009T170259Z-404fe99d6c9c`): `wfix/swarm` (M2, M3, M5, m3), `wfix/ops` (the stall alarm's four causes and the

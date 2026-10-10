@@ -26,8 +26,36 @@ any other deploy.
 
 ## Not yet deployed
 
-The running House release is `20261009T090334Z-cdbf1864a573` (main `40c39435`, release L-D, 09:04Z Oct 9, below), the
-gateway is `8072b5b1`, and the box's updater is on. What is built and not deployed is on branches.
+The running House release is `20261009T225656Z-01beacbc792b` (main `e24a5d6a`, the weekend fixes, 22:57Z Oct 9), the
+gateway is `507b6118`, and the box's updater is on. What is built and not deployed is on branches.
+
+### The Probe roster, on `feat/probe-roster` (unreleased; an owner deploy; no evidence reset; off until `dlane.roster` is set)
+
+- **Why** (REDESIGN-1010, Oct 10, 2026; the operator's private grid and its confirmatory run): Done needs >= 30 real
+  closes with >= 5 from each of >= 2 programs, while every program that passes its look trades at once from one shared
+  Probe envelope. At the measured rate of direction verdicts, the envelope's 8 slots spread one or two closes over each
+  of many programs, so the ">= 5 from each of >= 2" clause fails even for a strong edge. A roster seats a few programs,
+  which then earn the closes that can show an edge.
+- **The rule** (`league/swarm/bands.py` `waiting`, `roster`; `dlane.roster`, a whole number 0-50, 0 by default = no
+  roster): every Probe family holds a seat and is never hidden; a Candidate that came back from Probe (moved into the
+  band more than `ROSTER_SLACK_S`, 300 s, after `banded_at`) holds none and is shown as before; the other Candidates take
+  the free seats in the order they became Candidates; the rest WAIT: `bands.read` gives the live path no row for them,
+  so they have no shadow or real instance until a seat frees (a seated family retired, demoted or Sized). A Sized family
+  neither holds a seat nor waits. Lowering the setting hides no family that trades; it stops new seats only.
+- **Rollback:** `dlane.roster` 0 (a setting; no deploy). Nothing in `league/live/`, `league/gym/` or
+  `league/constitution.py`: the execution fingerprint, money digest and constitution digest are main's.
+- **Proof.** `league/tests/test_swarm_roster.py` (the pure rule, `bands.read` hiding and re-seating, a Probe family
+  never hidden, Sized outside, the setting's bounds).
+
+### Deployed Oct 9, 2026 (the entries below were written before their deploys; each is now live)
+
+- 10:36Z release D-1 + D-1b (the direction lane on D2): `20261009T103632Z-1edfe38272fb`.
+- 12:44Z the direction lane's graveyard (#519): `20261009T124422Z-c5baa58fd45e`, main `d70e00c3`.
+- 16:17Z the direction lane's Train map (#520): `20261009T161659Z-95b21ceb53ea`, main `a3c54fa5`.
+- 17:03Z the budget split (#521): `20261009T170259Z-404fe99d6c9c`, main `cf96b72c`, gateway `f8061e0f`.
+- 22:57Z the weekend fixes (#522): `20261009T225656Z-01beacbc792b`, main `e24a5d6a`, gateway `507b6118` (rollback
+  `f8061e0f`); fingerprint `31a7e921`, money `0310779c`, constitution `ca89ff8a`, gate contract `397b22b772b3`, all
+  unchanged; health clean, real money on.
 
 ### The weekend fixes, integrated, on `release/weekend-fixes` (unreleased; a gateway deploy FIRST, then one owner deploy on main `cf96b72c`; no evidence reset)
 

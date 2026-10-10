@@ -105,6 +105,8 @@ THE REST OF THE REPORT:
   economics' billed and metered basis, the gateway's Claude meter included).
 - `program_loss` (DONE-RULE-A1 A1.3): each program's own realized Probe net against the program loss line, the programs
   due and the ones this run retired.
+- `roster` (THE PROBE ROSTER, Oct 10, 2026; `league/swarm/bands.py` `roster`): the seats (`dlane.roster`), the Probe
+  families, the seated families and the Candidates waiting for a seat; None while the roster is off.
 - `contamination.meters`: (a) the holdout's head-minus-tail Sharpe gap per lane (`fast_lane.pooled_contamination` over
   the fast lane report's looks), (b) the mean excess over the same-risk buy-and-hold in the known window (Validation)
   against the unknown one (live), per lane, (c) live against the holdout per band (the fast lane report's rows).
@@ -1877,6 +1879,17 @@ def zero_edge(settings: Mapping[str, Any] | None) -> dict[str, Any]:
     return out
 
 
+def roster_now(root: str | Path) -> dict[str, Any] | None:
+    """THE PROBE ROSTER as it stands (`league/swarm/bands.py` `roster`): {seats, probe, seated, waiting}, None while
+    `dlane.roster` is 0 or the store cannot be read. Read only."""
+    from ..swarm import bands
+
+    try:
+        return bands.roster(root)
+    except Exception:  # noqa: BLE001 - the report goes on without it
+        return None
+
+
 # ------------------------------------------------------------------------------------------------- the report
 def report(root: str | Path, *, settings: Mapping[str, Any] | None = None, now: float | None = None,
            previous: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -1959,6 +1972,7 @@ def report(root: str | Path, *, settings: Mapping[str, Any] | None = None, now: 
                      "inception": dlane.DONE["inception"],
                      "fees": {"as_of": activity["as_of"], "why": activity["why"]}},
             "probes": probes(store, lanes, settings, book["positions"], losses),
+            "roster": roster_now(root),
             "program_loss": losses,
             "fp_beside_trades": trade_screens(store, lanes, settings, book["positions"], every, since=start),
             "direction_net": lane_net,
