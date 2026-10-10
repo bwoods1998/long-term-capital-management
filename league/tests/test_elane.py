@@ -85,9 +85,7 @@ class Settings(StoreCase):
         from league import constitution
 
         layer, _ = settings_mod.read_policy(REAL_POLICY_PATH)
-        money = getattr(constitution, "CONSTITUTION", {}).get("equity_money")
-        if not money:
-            self.skipTest("the constitution's equity_money block is the money package's (merged before swarm)")
+        money = constitution.CONSTITUTION["equity_money"]
         self.assertEqual(layer["elane"]["roster"], money["probe"]["max_programs"])
 
     def test_a_pinned_receipt_is_the_files_bytes(self):

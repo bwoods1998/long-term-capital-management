@@ -180,15 +180,19 @@ class Gate(StoreCase):
         self.assertEqual(holdout.first, 3)
         self.assertEqual(holdout.day(0).year, 2025, "history comes from the window before")
 
-    def test_the_look_runs_to_the_last_close_capped_at_the_end_of_2026(self):
+    def test_the_look_runs_to_the_last_close_capped_at_oct_9_2026(self):
+        """A12: every look reads exactly the 194 holdout sessions the screens are calibrated on, whatever the store
+        holds after them (forward days only)."""
+        self.assertEqual(config.LOOK_CAP, D(2026, 10, 9))
         gated = EquityStore(self.root, gate=mint_equity_gate_capability(self.root, "the look"))
         look = gated.bars(["SPY"], LOOK, history=0)
         self.assertEqual((look.day(0), look.day(look.n - 1)), (config.LOOK_FIRST, D(2026, 10, 9)))
         self.assertEqual(look.window, LOOK)
+        self.assertEqual(look.n, 194)
         later = Path(self.dir.name) / "later"
-        synth.synthetic_store(later, symbols=("SPY",), start=D(2026, 11, 2), end=D(2027, 1, 29), gate=True)
+        synth.synthetic_store(later, symbols=("SPY",), start=D(2025, 12, 1), end=D(2027, 1, 29), gate=True)
         capped = EquityStore(later, gate=mint_equity_gate_capability(later, "the look")).bars(["SPY"], LOOK, history=0)
-        self.assertEqual(capped.day(capped.n - 1), D(2026, 12, 31))
+        self.assertEqual((capped.day(0), capped.day(capped.n - 1), capped.n), (config.LOOK_FIRST, D(2026, 10, 9), 194))
 
     def test_validation_history_never_reads_a_sealed_day_and_train_spans_stay_in_train(self):
         store = EquityStore(self.root)

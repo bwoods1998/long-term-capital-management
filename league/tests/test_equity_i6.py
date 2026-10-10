@@ -4,8 +4,8 @@ ET fetch would return them (Alpaca 1Day rows for adjustment=raw and adjustment=a
 byte-identical to the Gym's, and the decider child's provenance sha (the "equity" kind's `ctx_sha`, after the inputs
 crossed the pickle boundary) is the Gym ctx's own.
 
-Cross-package (core): `league.equity.synth`, `store`, `program`, `ctx`. Until core lands on the branch every test here
-is skipped, naming the stub that is not implemented; nothing is faked, since the point is the two real builders."""
+Cross-package (core): `league.equity.synth`, `store`, `program`, `ctx`; nothing is faked, since the point is the two
+real builders."""
 
 import datetime as dt
 import hashlib
@@ -69,20 +69,16 @@ class SameCtx(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.dir = tempfile.TemporaryDirectory()
-        try:
-            from league.equity import program as P
-            from league.equity import store as S
-            from league.equity import synth
+        from league.equity import program as P
+        from league.equity import store as S
+        from league.equity import synth
 
-            root = synth.synthetic_store(cls.dir.name, symbols=SYMBOLS, start=dt.date(2023, 1, 3), end=dt.date(2025, 12, 31),
-                                         seed=SEED, splits={"QQQ": [(dt.date(2025, 6, 2), 2.0)]},
-                                         dividends={"SPY": [(dt.date(2025, 3, 21), 1.75)], "DIA": [(dt.date(2025, 9, 19), 0.9)]})
-            cls.program = P.load_program(PROGRAM, name="i6")
-            cls.bars = S.EquityStore(root).bars(list(cls.program.needs.symbols), "validation",
-                                                history=cls.program.needs.history)
-        except NotImplementedError as exc:
-            cls.dir.cleanup()
-            raise unittest.SkipTest(f"core is not on this branch yet ({exc})")
+        root = synth.synthetic_store(cls.dir.name, symbols=SYMBOLS, start=dt.date(2023, 1, 3), end=dt.date(2025, 12, 31),
+                                     seed=SEED, splits={"QQQ": [(dt.date(2025, 6, 2), 2.0)]},
+                                     dividends={"SPY": [(dt.date(2025, 3, 21), 1.75)], "DIA": [(dt.date(2025, 9, 19), 0.9)]})
+        cls.program = P.load_program(PROGRAM, name="i6")
+        cls.bars = S.EquityStore(root).bars(list(cls.program.needs.symbols), "validation",
+                                            history=cls.program.needs.history)
 
     @classmethod
     def tearDownClass(cls):

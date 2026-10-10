@@ -27,7 +27,8 @@ store's `GateCapability` (league/gym/store.py). A program never reaches the stor
 decider child sees arrays only.
 
 THE LOOK (A9 D6): the one sealed look reads `LOOK` ("look"), a span rather than a window: from `config.LOOK_FIRST`
-through min(the store's last close, `config.LOOK_CAP`), the holdout's days and, after 2026-09-25, the forward's. It
+through min(the store's last close, `config.LOOK_CAP`: 2026-10-09, A12), the holdout's days and, after 2026-09-25,
+the forward's. It
 opens only with the capability, as the two sealed windows do.
 
 AS-OF ADJUSTMENT (league/equity/ctx.py `as_of`): history at decision day t is all_s x raw_t / all_t, identical

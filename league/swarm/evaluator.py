@@ -147,6 +147,17 @@ def adopt_equity(store: Any, expected: Mapping[str, Any] | None) -> dict[str, An
                                 validated_version=None, stall=0, since_val_revisions=0, since_val_trials=0)
             cleared: dict[str, Any] = {key: None for key in keys}
             cleared.update(gate_ready=False, equity_evaluator=expected, previous_evaluator_selection=archived)
+            # A16: a version validated (and gate-ready) under the old engine but not yet looked at is owed its
+            # Validation again (the same try: no look was spent), so its recorded verdicts go stale; left current,
+            # `elane.next_try` would never ask for it and the family would wait forever.
+            from .elane import VALIDATION_KEY, VERDICTS_KEY
+
+            verdicts = state.get(VERDICTS_KEY)
+            if isinstance(verdicts, Mapping) and verdicts:
+                cleared[VERDICTS_KEY] = {str(k): ({**dict(v), "stale": True} if isinstance(v, Mapping) else v)
+                                         for k, v in verdicts.items()}
+            if isinstance(state.get(VALIDATION_KEY), Mapping):
+                cleared[VALIDATION_KEY] = {**dict(state[VALIDATION_KEY]), "stale": True}
             store.set_state(fam["id"], **cleared)
             store.note(fam["id"], "The equity engine changed. Historical runs, the lineage's Validation try and its "
                        "sealed look remain counted. Validation evidence is owed under the current engine; this does "

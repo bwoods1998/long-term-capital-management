@@ -41,16 +41,24 @@ def _alarm(signum, frame):
     raise TimedOut()
 
 
+#: The SIGALRM handler `_arm` replaced, put back by `_disarm`: another timer of the same process (the Gym's runtime,
+#: league/gym/runtime.py, installs its handler once) keeps working after a decide here.
+_PREVIOUS: list = []
+
+
 def _arm() -> None:
     """Start the deadline. The alarm repeats, so code that swallows one interruption gets another."""
     if hasattr(signal, "SIGALRM") and threading.current_thread() is threading.main_thread():
-        signal.signal(signal.SIGALRM, _alarm)
+        _PREVIOUS.append(signal.signal(signal.SIGALRM, _alarm))
         signal.setitimer(signal.ITIMER_REAL, MAX_SECONDS, 0.25)
 
 
 def _disarm() -> None:
     if hasattr(signal, "SIGALRM") and threading.current_thread() is threading.main_thread():
         signal.setitimer(signal.ITIMER_REAL, 0)
+        if _PREVIOUS:
+            previous = _PREVIOUS.pop()
+            signal.signal(signal.SIGALRM, previous if previous is not None else signal.SIG_DFL)
 
 
 def decide(code: str, ctx: dict) -> dict:

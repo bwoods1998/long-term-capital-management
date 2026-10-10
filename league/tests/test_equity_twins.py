@@ -4,12 +4,11 @@ function (open and close fills, A2), the same fees and dividends and split; its 
 buy-and-hold beside it; "priced", "no_bar" or "unpriceable", final once judged.
 
 Every figure is invented. Core's `league.equity.engine.fill_price`, `league.equity.config.half_spread` and
-`config.sell_fees` are called through their interface (league/equity/INTERFACES.md 4.2, 4.6); while core's stubs still
-raise, `core_fakes` stands in for them with the formulas the interface fixes (and steps aside once core lands)."""
+`config.sell_fees` are called through their interface (league/equity/INTERFACES.md 4.2, 4.6); `CoreAtItsInterface` holds
+them to the formulas the interface fixes."""
 
 from __future__ import annotations
 
-import contextlib
 import datetime as dt
 import json
 import tempfile
@@ -17,7 +16,6 @@ import unittest
 from decimal import ROUND_CEILING, Decimal
 from pathlib import Path
 from types import SimpleNamespace
-from unittest import mock
 from zoneinfo import ZoneInfo
 
 from league.ops import twins as TW
@@ -47,29 +45,19 @@ def fake_sell_fees(proceeds: Decimal, shares: Decimal) -> Decimal:
     return sec + taf
 
 
-def _stub(call) -> bool:
-    try:
-        call()
-    except NotImplementedError:
-        return True
-    except Exception:  # noqa: BLE001 - implemented (an argument it refuses is still an implementation)
-        return False
-    return False
+class CoreAtItsInterface(unittest.TestCase):
+    def test_cores_functions_are_the_interfaces_formulas(self):
+        """The twins call core's `engine.fill_price`, `config.half_spread` and `config.sell_fees`
+        (league/equity/INTERFACES.md 4.2, 4.6): each is the formula the interface fixes."""
+        from league.equity import config, engine
 
-
-@contextlib.contextmanager
-def core_fakes():
-    """Core's three functions, faked by the interface's formulas only while core's stubs still raise."""
-    from league.equity import config, engine
-
-    with contextlib.ExitStack() as stack:
-        if _stub(lambda: engine.fill_price(100.0, "buy", 0.0001, 1.0)):
-            stack.enter_context(mock.patch("league.equity.engine.fill_price", fake_fill_price))
-        if _stub(lambda: config.half_spread("SPY")):
-            stack.enter_context(mock.patch("league.equity.config.half_spread", fake_half_spread))
-        if _stub(lambda: config.sell_fees(Decimal("1"), Decimal("1"))):
-            stack.enter_context(mock.patch("league.equity.config.sell_fees", fake_sell_fees))
-        yield
+        for official, side, hs, k in ((600.0, "buy", 0.0001, 1.0), (600.0, "sell", 0.0001, 1.5), (42.5, "sell", 0.0005, 1.0)):
+            self.assertAlmostEqual(engine.fill_price(official, side, hs, k), fake_fill_price(official, side, hs, k), places=9)
+        for symbol in ("SPY", "XLK", "GLD"):
+            self.assertEqual(config.half_spread(symbol), fake_half_spread(symbol))
+        for proceeds, shares in (("1", "1"), ("312.77", "0.52"), ("250000", "1500"), ("1000000", "60000")):
+            self.assertEqual(config.sell_fees(Decimal(proceeds), Decimal(shares)),
+                             fake_sell_fees(Decimal(proceeds), Decimal(shares)))
 
 
 # ------------------------------------------------------------------------------------------------- fixtures
@@ -130,8 +118,7 @@ def put_bars(live, symbol: str, bars: dict, *, at: float = 0.0) -> None:
 # ================================================================================================== the twin
 class TheTwin(unittest.TestCase):
     def twin(self, row=None, bars=GOLDEN_BARS, **kw):
-        with core_fakes():
-            return TW.equity_twin(row or lot(), bars, at=ny("2026-10-16", 9, 50), **kw)
+        return TW.equity_twin(row or lot(), bars, at=ny("2026-10-16", 9, 50), **kw)
 
     def test_the_golden_twin_buys_the_open_and_sells_the_close_with_the_same_fees(self):
         rec = self.twin()
@@ -242,8 +229,7 @@ class TheRound(unittest.TestCase):
         put_lot(self.live, lot(2, exit_day="2026-10-16", cash="0.50", exit_px="101.10"))   # its exit day's bar not yet in
         put_lot(self.live, lot(3, status="open", exit_px=None, exit_at=None, exit_day=None, cash="0"))
         put_bars(self.live, "SPY", GOLDEN_BARS)
-        with core_fakes():
-            out = TW.run(self.ctx(ny("2026-10-16", 9, 50)))
+        out = TW.run(self.ctx(ny("2026-10-16", 9, 50)))
         self.assertTrue(out["ok"], out)
         self.assertEqual((out["closed"], out["judged"], out["pending"]), (2, {"priced": 1}, 1))
         records = TW.equity_records(self.store)
@@ -251,23 +237,19 @@ class TheRound(unittest.TestCase):
         self.assertEqual(records["eq:1"]["status"], "priced")
         # A final record is never judged again: a changed bar moves nothing.
         put_bars(self.live, "SPY", {"2026-10-15": bar(90.0, 90.0)})
-        with core_fakes():
-            TW.run(self.ctx(ny("2026-10-16", 10, 0)))
+        TW.run(self.ctx(ny("2026-10-16", 10, 0)))
         self.assertEqual(TW.equity_records(self.store)["eq:1"]["exit_official"], 102.0)
         # Two sessions past its exit day with no bar: lot 2 is final "no_bar".
-        with core_fakes():
-            out = TW.run(self.ctx(ny("2026-10-20", 9, 50)))
+        out = TW.run(self.ctx(ny("2026-10-20", 9, 50)))
         self.assertEqual(out["judged"], {"no_bar": 1})
         self.assertEqual(TW.equity_records(self.store)["eq:2"]["status"], "no_bar")
         self.assertEqual(self.alerts, [])
 
     def test_a_note_is_a_house_warning_and_nothing_to_do_is_skipped(self):
-        with core_fakes():
-            self.assertEqual(TW.run(self.ctx(ny("2026-10-16", 9, 50)))["status"], "skipped")
+        self.assertEqual(TW.run(self.ctx(ny("2026-10-16", 9, 50)))["status"], "skipped")
         put_lot(self.live, lot(1))
         put_bars(self.live, "SPY", {**GOLDEN_BARS, "2026-10-15": bar(101.5, 102.0, audit="mismatch")})
-        with core_fakes():
-            out = TW.run(self.ctx(ny("2026-10-16", 9, 50)))
+        out = TW.run(self.ctx(ny("2026-10-16", 9, 50)))
         self.assertEqual(out["notes"], ["eq:1"])
         self.assertEqual(self.alerts[0][0], "warning")
         self.assertIn("eq:1", self.alerts[0][1])

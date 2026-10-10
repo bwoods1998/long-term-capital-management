@@ -73,8 +73,9 @@ the gateway is `507b6118`, and the box's updater is on. What is built and not de
   `ctx.params` and would have failed every live decide); the book read `decider.kind_load`'s answer as refused (it
   carries no "ok": a refusal raises), so no live program would have loaded; none of the book's `equity.*` ledger kinds
   was registered (league/ledger.py `KINDS`: the ledger refused them and the book swallowed it); the stock proof starts
-  only once the options route's paper proofs have passed (one proof at a time on the practice account); the maximum
-  hold is one rule (`config.max_hold_due`: a lot is
+  only once the options route's paper proofs have passed (one proof at a time on the practice account);
+  `league/runner.py` gives back the SIGALRM handler it takes (it left its own in place, so the Gym runtime's timeout
+  raised the wrong exception after it in one process); the maximum hold is one rule (`config.max_hold_due`: a lot is
   held at most `max_hold_sessions`; the engine and the book disagreed by a session) and seed-reversal-index exits at
   the open h sessions after its entry; a day's bars fetched again keep their morning audit while unchanged (the twins
   need both days audited); the book posts the broker's REG and TAF fees to closed lots (`info.fee_basis`), which the Done
@@ -87,8 +88,13 @@ the gateway is `507b6118`, and the box's updater is on. What is built and not de
   `enabled` False, is `ea97607c`); A8.1, the calibration's reservation reads the House-wide cash rule
   (`RealBook.free_to_reserve`); A8.12, the options learning game never arms an equity family and its population
   ceiling counts the options lanes, and an equity look never counts in an options lane's leakage alarm.
-- Not yet in E1: the S2 screen (A11) waits for its receipt (`equity_screen_2.json`), so S1+F1 is pinned and the captain
-  swaps before ON; the gateway's `MERGE_FORBIDDEN` lacks `league/equity/` and `league/swarm/elane.py`, and its decider
+- Also applied: A12, `config.LOOK_CAP` 2026-10-09 (every look reads the 194 calibrated holdout sessions); A16,
+  `evaluator.adopt_equity` marks a family's recorded equity Validation verdicts stale, so a family validated but not yet
+  looked at is validated again under a new equity identity instead of waiting forever (no try or look spent).
+- Not yet in E1: the S2 screen (A11: its code, its receipt's copy and pin), so S1+F1 stays pinned (fails safe; the seeds'
+  looks wait for S2) and the captain swaps before ON; A13 (the equity identity over evidence modules only, the panel
+  kind's slot) and A14 (the Done consistency text), the E1 fixer's; the gateway's `MERGE_FORBIDDEN` lacks
+  `league/equity/` and `league/swarm/elane.py` (and `ltcm/broker.py`, now in the decider child's runtime), and its decider
   runtime test still reads the old in-function tuple, so the gateway CI job fails until a gateway follow-up.
 
 ### A stock buy's fill between reads is never lost, a lagging sale is never sold twice, and a definite answer lets a hold go, on `fix/gateway-stock-read-order` (unreleased; a gateway deploy; no House change)

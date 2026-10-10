@@ -179,6 +179,31 @@ class Adoption(StoreCase):
         self.assertEqual(adopt_equity(self.store, None), {"adopted": False, "families": 0,
                                                           "reason": "equity identity unavailable"})
 
+    def test_a_validated_family_not_yet_looked_at_is_validated_again(self):
+        """A16: a version validated and gate-ready under the old engine, its look not taken, is owed its Validation
+        again (the same try: no look was spent): adoption marks its verdicts stale, so `elane.next_try` asks for it."""
+        from league.swarm import elane
+
+        spec = {**EQUITY_SPEC, "id": "eq-waiting", "mechanism": "An invented overnight idea, awaiting its look."}
+        self.store.add_family(spec, origin="seed")
+        self.store.add_version("eq-waiting", "NEEDS = {'symbols': ['SPY']}\ndef decide(ctx):\n    return []\n", {},
+                               author="t")
+        self.store.update_family("eq-waiting", best_version=1, validated_version=1)
+        self.store.add_run("eq-waiting", 1, {"run_id": "v1", "status": "ok", "trials": 1, "summary": {}},
+                           window="validation", stress=1.0, purpose="validation")
+        self.store.set_state("eq-waiting", validation_version=1, gate_ready=True,
+                             **{elane.TRY_KEY: {"version": 1, "entered": True, "precheck": True},
+                                elane.VERDICTS_KEY: {"1": {"entered": True, "at": "x", "stale": False}},
+                                elane.VALIDATION_KEY: {"version": 1, "passed": True, "stale": False}})
+        on = {"elane": {"mode": "gate"}}
+        self.assertIsNone(elane.next_try(self.store, self.store.family("eq-waiting"), on), "current: awaits its look")
+        adopt_equity(self.store, equity_identity())
+        fam = self.store.family("eq-waiting")
+        self.assertEqual(fam["state"][elane.VERDICTS_KEY]["1"]["stale"], True)
+        self.assertEqual(fam["state"][elane.VALIDATION_KEY]["stale"], True)
+        self.assertEqual(elane.next_try(self.store, fam, on), 1, "validated again under the new engine")
+        self.assertIsNone(elane.lineage_spent(self.store, fam, on), "no try and no look spent by the adoption")
+
     def test_a_current_band_proof_keeps_its_band(self):
         current = equity_identity()
         proof = {"engine": current["engine"], "equity_sha256": current["equity"], "run_sha": "r"}

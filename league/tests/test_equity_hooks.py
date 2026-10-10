@@ -6,7 +6,7 @@ shorts covered at once, unattributed longs sold after two readings, owned lots n
 union of both lanes, the options reservation under the House-wide cash rule (A8.1) and the one day order count (A8.3).
 
 The equity book itself (league/equity/live.py, the book package) is a fake here (`FakeBook`), mocked at the interface
-INTERFACES.md fixes; the one test that reads its real row functions says so and skips until that package lands."""
+INTERFACES.md fixes; the one test that reads its real row functions says so."""
 
 import dataclasses
 import datetime as dt
@@ -612,7 +612,7 @@ class TheSharedBudget(unittest.TestCase):
             bare.close()
 
     def test_one_slot_a_program_and_the_class_weights_with_the_books_own_rows(self):
-        """Cross-package (book): `league.equity.live.probe_figures` over real eq_lots rows; skipped until book lands."""
+        """Cross-package (book): `league.equity.live.probe_figures` over real eq_lots rows."""
         from league.equity import live as B
 
         state = LiveState(Path(self.dir.name) / "book.sqlite", clock=Clock(at(MONDAY, 10, 0)))
@@ -629,10 +629,7 @@ class TheSharedBudget(unittest.TestCase):
             closed_at = dt.datetime(2026, 10, 7, 16, 0, tzinfo=dt.timezone.utc).timestamp()
             state.execute(lot, (4, "c@1:r", "c", "DIA", "etf", "0", "1", "400", "400", None, "closed", "-7.25", closed_at,
                                 "2026-10-07"))
-            try:
-                open_n, realized, at_risk = R.probe_tally(state.rows, day=self.DAY, basis="gross", table=equity_table())
-            except NotImplementedError:
-                self.skipTest("book: league/equity/live.py probe_figures is not implemented on this branch yet")
+            open_n, realized, at_risk = R.probe_tally(state.rows, day=self.DAY, basis="gross", table=equity_table())
             self.assertEqual(open_n, 2, "programs a and b: one slot each, not one a lot")
             self.assertEqual(at_risk, D("0.20") * D("55") + D("0.20") * D("200") + D("0.40") * D("180"))
             self.assertEqual(realized, D("7.25"))

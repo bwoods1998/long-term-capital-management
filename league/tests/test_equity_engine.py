@@ -2,8 +2,7 @@
 determinism, open AND close fills, and the result's views.
 
 `league.equity.sizing.size_entry` is money's; these tests mock it at the interface with `fake_size_entry`, the rule its
-docstring fixes, for the Gym's case (no loss budget). `RealSizing` runs the same programs through money's function once
-it lands (skipped while it is a stub).
+docstring fixes, for the Gym's case (no loss budget). `RealSizing` runs the same programs through money's function.
 """
 
 from __future__ import annotations
@@ -516,8 +515,8 @@ return out + [{'buy': 'SPY', 'share': 0.5, 'at': 'close'}]
 
 
 class RealSizing(unittest.TestCase):
-    """Cross-package: the engine through money's `size_entry` (skipped until money's package lands) agrees with the
-    rule the fake above implements on an ordinary program."""
+    """Cross-package: the engine through money's `size_entry` agrees with the rule the fake above implements on an
+    ordinary program."""
 
     def test_the_real_sizer_agrees_with_the_rule(self):
         probe = sizing.SizingInputs(symbol="SPY", klass="etf", share=Decimal("0.5"), usd=None,
@@ -527,10 +526,7 @@ class RealSizing(unittest.TestCase):
                                     invested_now=Decimal(0), invested_share=Decimal("1.00"),
                                     available_cash=Decimal(1000), cash=Decimal(1000), any_short=False,
                                     budget_room=None, weight=Decimal("0.20"), min_order_usd=Decimal(10))
-        try:
-            sizing.size_entry(probe)
-        except NotImplementedError:
-            self.skipTest("money's size_entry is not implemented on this branch yet")
+        self.assertEqual(sizing.size_entry(probe).binding, "intent")
         with tempfile.TemporaryDirectory() as tmp:
             root = synth.synthetic_store(Path(tmp) / "s", symbols=("SPY", "QQQ"), start=D(2024, 10, 1),
                                          end=D(2025, 12, 31))

@@ -32,7 +32,10 @@ architect and researcher births in the beta and equity lanes are E2.
   false nothing sends a buy, so the House's switch is the one that matters. "off" closes the gateway's route (closes go
   either way).
 - The screen (A9): the share screen S1's receipt, copied verbatim to `docs/benchmarks/equity_screen_1.json` and pinned in
-  policy.json's `elane.screens`; with no pinned receipt every equity look is refused (no look spent).
+  policy.json's `elane.screens`; with no pinned receipt every equity look is refused (no look spent). The House screen
+  is to be S2 (A11: receipt `equity_screen_2.json`); until S2's code lands S1+F1 stays pinned and the seeds' looks wait
+  for it; the captain swaps the pin before ON. Every look reads 2026-01-02 through 2026-10-09 (A12: exactly the 194
+  holdout sessions the screens are calibrated on; later days are forward days only).
 - The stock paper proof, STAGED (A8.7 as amended by A10.1; `league/live/paper.py` `StockPaperProof`, run by the equity
   book in its own OPEN window): stage BUY (kv `paper_proof_stock_buy`) buys a fractional SPY marketable limit on
   `alpaca-paper` from 09:30:30 ET to the 09:45 entry cut-off and passes on its fill, its lot row and the reconciled

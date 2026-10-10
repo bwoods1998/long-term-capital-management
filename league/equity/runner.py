@@ -142,8 +142,8 @@ class Isolated:
 
     def look(self, code: str, params: Mapping[str, Any] | None, *, name: str, gate: Any,
              k: float = 1.0) -> Run:
-        """The ONE sealed look: `config.LOOK_FIRST` through min(the last close before now, `config.LOOK_CAP`) (A9 D6;
-        the store's holdout and forward days). `gate` must be an `EquityGateCapability` (StoreRefused otherwise)."""
+        """The ONE sealed look: `config.LOOK_FIRST` through min(the last close before now, `config.LOOK_CAP`) (A9 D6 as
+        amended by A12: 2026-10-09; the store's holdout and forward days). `gate` must be an `EquityGateCapability` (StoreRefused otherwise)."""
         if not isinstance(gate, EquityGateCapability):
             raise StoreRefused("the sealed look needs the gate's EquityGateCapability")
         store = EquityStore(self.store_root, gate=gate)

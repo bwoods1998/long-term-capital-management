@@ -124,7 +124,7 @@ Constants (written): `UNIVERSE` {symbol: class} = the gateway's `STOCK_UNIVERSE`
 "stock": "0.20"}; `SLEEVE_USD` "1000" (the Gym's E0); `MAX_SYMBOLS` 20, `MAX_HISTORY` 504, `MAX_INTENTS` 20,
 `MIN_HOLD_SESSIONS` 1, `DEFAULT_MAX_HOLD` 20, `MAX_HOLD_CAP` 60, `FAILED_DECIDES_EXIT` 2, `QTY_PLACES` 6; `WINDOWS`
 (Train 2016-01-04..2024-12-31, Validation 2025-01-02..2025-12-31, holdout 2026-01-02..2026-09-25, forward
-2026-09-26..), `SEALED`; `LOOK_FIRST` 2026-01-02 and `LOOK_CAP` 2026-12-31 (A9 D6: the one look reads LOOK_FIRST
+2026-09-26..), `SEALED`; `LOOK_FIRST` 2026-01-02 and `LOOK_CAP` 2026-10-09 (A12, integration; A9 D6 had 2026-12-31: the one look reads LOOK_FIRST
 through min(the last close before the look, LOOK_CAP), the store's holdout and forward days);
 `TRAIN_ERA_SEGMENTS` ((2016-01-04, 2019-12-31), (2022-01-03, 2024-12-31)).
 Functions: `class_of(symbol) -> str | None`; `half_spread(symbol) -> float` (fraction); `sell_fees(proceeds: Decimal,
@@ -739,6 +739,10 @@ equity rows.
 ---
 
 ## 9. screen (A9: the share screen as adopted)
+
+**TODO (A11, integration):** the House screen is S2 (the captain's A11, final 23:30Z: receipt equity_screen_2.json,
+spec sscreen2-1010/HOUSE-RULE.md). Integration pinned S1+F1 with receipt 1 (fails safe); S2's code, its receipt's copy to
+`docs/benchmarks/equity_screen_2.json` and its pin (screen "S2") are still to land, and the seeds' looks wait for them.
 
 `league/equity/screen.py` (stub present, already A9's): `SCREEN` "S1", `C_GRID_STEP` 0.01, `C_GRID_MAX` 5.00,
 `H_LENGTHS` (194, 251), `V_LENGTH` 250, `WORLDS` 20,000, `MIN_POOL` 300, `WORLD_SETS` {"IND22": 3, "IND1622": 5},

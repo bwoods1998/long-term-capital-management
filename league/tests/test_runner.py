@@ -47,6 +47,24 @@ class Decide(unittest.TestCase):
         self.assertGreaterEqual(result["seconds"], 0)
         self.assertEqual(set(result), {"ok", "intents", "cancels", "thought", "memory", "needs", "seconds"})
 
+    def test_the_alarm_handler_it_replaced_is_put_back(self):
+        """Another timer of the process (the Gym's runtime installs its SIGALRM handler once) keeps its handler after a
+        decide here (release E1's tests run both in one process)."""
+        import signal
+
+        if not hasattr(signal, "SIGALRM"):
+            self.skipTest("no SIGALRM")
+
+        def mine(signum, frame):  # pragma: no cover - never fires
+            raise AssertionError("not this one")
+
+        before = signal.signal(signal.SIGALRM, mine)
+        try:
+            self.assertTrue(runner.decide(GOOD, {"params": {}})["ok"])
+            self.assertIs(signal.getsignal(signal.SIGALRM), mine)
+        finally:
+            signal.signal(signal.SIGALRM, before)
+
     def test_refused_code_is_reported_and_never_run(self):
         cases = {
             "import os\ndef decide(ctx):\n    return {}\n": "import os",

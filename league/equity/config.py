@@ -19,8 +19,8 @@ constitution's universe equal to the gateway's `STOCK_UNIVERSE` (gateway/lib/cap
   `FAILED_DECIDES_EXIT` (2 sessions of failed decides in a row exit the program's lots at the next open).
 - WINDOWS: Train 2016-01-04..2024-12-31 (SIP history starts in 2016), Validation 2025, holdout
   2026-01-02..2026-09-25, forward after; the holdout and forward are sealed (`store.EquityGateCapability`). The one
-  sealed look reads 2026-01-02 through min(the last close before the look, 2026-12-31) (A9 D6: `LOOK_FIRST`,
-  `LOOK_CAP`).
+  sealed look reads 2026-01-02 through min(the last close before the look, 2026-10-09) (A9 D6 as amended by A12:
+  `LOOK_FIRST`, `LOOK_CAP`).
 - TRAIN-ERA SEGMENTS for the screen's per-program floor (`TRAIN_ERA_SEGMENTS`): 2016-2019 and 2022-2024, never
   2020-2021, never 2025-2026 (A9 D5: the floor's world sets IND22 and IND1622).
 
@@ -83,9 +83,11 @@ WINDOWS: dict[str, tuple[dt.date, dt.date | None]] = {
 }
 SEALED = ("holdout", "forward")
 #: THE LOOK'S HOLDOUT (A9 D6): from LOOK_FIRST through min(the last close before the look, LOOK_CAP): the store's
-#: holdout window and, after 2026-09-25, its forward days (both sealed: the look holds the gate's capability).
+#: holdout window and, after 2026-09-25, its forward days (both sealed: the look holds the gate's capability). The cap is
+#: 2026-10-09 (the captain's A12, superseding D6's 2026-12-31): every look reads exactly the 194 holdout sessions the
+#: screens are calibrated on, and the days after it are forward days only (clean feedback later).
 LOOK_FIRST = dt.date(2026, 1, 2)
-LOOK_CAP = dt.date(2026, 12, 31)
+LOOK_CAP = dt.date(2026, 10, 9)
 #: The Train-era spans the screen's per-program floor builds its null worlds from (league/equity/screen.py).
 TRAIN_ERA_SEGMENTS: tuple[tuple[dt.date, dt.date], ...] = (
     (dt.date(2016, 1, 4), dt.date(2019, 12, 31)),

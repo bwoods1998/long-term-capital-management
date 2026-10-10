@@ -5,7 +5,7 @@ uid 65534 on a root House), every kind load reloaded into a restarted child, and
 
 The "equity" kind's own semantics are tested in-process with core's functions mocked at their interface (the program,
 the ctx, the runner: league/equity/INTERFACES.md 4.4-4.8); the child process is tested with a probe kind defined in this
-module (the child imports it), and once with the real "equity" kind, skipped until core lands.
+module (the child imports it), and once with the real "equity" kind.
 
 This module is also the probe kind's module: `handle` below runs inside the child, so its top level imports only the
 standard library and league.live.decider."""
@@ -156,7 +156,7 @@ class TheEquityKindInProcess(unittest.TestCase):
 
     def test_load_decide_and_drop(self):
         self.assertEqual(self.load(), {"needs": {"symbols": ["SPY"], "history": 2, "max_hold_sessions": 2},
-                                       "sha": "sha-seed", "run_sha": "run-seed"})
+                                       "sha": "sha-seed", "run_sha": "run-seed", "params": {"share": 0.5}})
         self.assertIn(("equity", "seed@1:r"), self.decider.kind_loaded)
         inputs = {"positions": [{"id": 1}], "day": "2026-10-09"}
         answer = self.decider.kind("equity", "decide", {"jobs": [{"key": "seed@1:r", "inputs": inputs},
@@ -191,7 +191,7 @@ class TheEquityKindInProcess(unittest.TestCase):
     def test_needs_and_run_keep_nothing(self):
         answer = self.decider.kind("equity", "needs", {"code": "NEEDS = {}", "params": {}, "name": "n"})
         self.assertEqual(answer, {"ok": True, "needs": {"symbols": ["SPY"], "history": 2, "max_hold_sessions": 2},
-                                  "sha": "sha-n", "run_sha": "run-n"})
+                                  "sha": "sha-n", "run_sha": "run-n", "params": {}})
         self.assertEqual(self.decider._kinds["equity"]["runners"], {})
         answer = self.decider.kind("equity", "run", {"code": "C", "params": {"h": 8}, "name": "r", "bars": {"n": 3},
                                                      "k": 1.5, "capital": "1000"}, budget_seconds=1200)
@@ -367,10 +367,7 @@ def decide(ctx):
     def test_needs_and_load_in_the_child(self):
         from league.equity import program as P
 
-        try:
-            local = P.load_program(self.CODE, name="probe")
-        except NotImplementedError as exc:
-            self.skipTest(f"core is not on this branch yet ({exc})")
+        local = P.load_program(self.CODE, name="probe")
         decider = D.Decider(timeout=0.5, python=sys.executable, allow_unisolated=True)
         try:
             answer = decider.kind("equity", "needs", {"code": self.CODE, "params": {}, "name": "probe"})

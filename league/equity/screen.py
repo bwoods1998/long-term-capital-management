@@ -11,6 +11,14 @@ House box). A screen with no pinned receipt refuses every program (`pinned_recei
 states another pre-check). A later receipt (equity_screen_2.json, a follow-up study) would land as a new file and a
 settings switch, never by editing receipt 1.
 
+TODO (A11, the captain's amendment of Oct 10, 23:10-23:30Z): THE HOUSE SCREEN IS S2 (sscreen2-1010: the gate is the
+pre-check AND sum_H > 1e-12 AND t_H >= c_H,used = max(c_H_floor, c_pF1 + c_H_margin), c_R = 0, c_pF1 by exact enumeration
+of holdout starts over IND22-NO and IND1622-NO at L 194 and 251; S1-X unchanged). Its receipt (equity_screen_2.json,
+sha256 45634dfc...) and its implementation spec (sscreen2-1010/HOUSE-RULE.md, with conformance vectors) are the
+captain's; S2 is new code not yet in this module, and this module's loader refuses receipt 2. Until S2 lands, S1+F1
+with receipt 1 stays pinned (it fails safe: A11 final says the seeds' looks wait for S2 code), and the captain swaps
+the pin before ON.
+
 THE DAILY SERIES (pre-registration section 2.2; `series`). Constant weights on the program's equity E0 (the engine's
 sleeve, `capital`): a lot's weight omega = its entry notional / E0 (the engine's `weight`). Prices o and c are the
 store's adjustment=all opens and closes at the lot's sessions (the engine's `Bars.adj`, so dividends are in the
@@ -62,8 +70,8 @@ S1-R, THE GATE (`verdict`):
 - step 2, after the one look (`look`): the pooled t over the 250 + |H| daily r of V and H (mean / sd(ddof 1) x
   sqrt(n)) >= c_used = max(c_R, c_p), sum_H r > 1e-12, AND t_H (the holdout-only t) >= c_H; sd < 1e-12 fails.
 - the windows (`verdict` checks them, failing closed on a mis-sliced run): V is calendar 2025's 250 sessions; the
-  holdout (A9 D6) is 2026-01-02 .. min(the last close before the look, 2026-12-31), 194..251 sessions, the lengths the
-  receipt was calibrated for.
+  holdout (A9 D6) is 2026-01-02 .. min(the last close before the look, `config.LOOK_CAP`), 194..251 sessions, the
+  lengths the receipt was calibrated for (A12 caps it at 2026-10-09: exactly 194).
 S1-X, THE LABEL (`label`): steps 1-2 on x with c_X, no floor, no holdout guard: "alpha" or "beta"; never a gate. Its FP
 is the program's own at c_X (N0 and N1 give the same x: r - w kappa - w (m_W - m_P) either way, so one curve serves
 both).
