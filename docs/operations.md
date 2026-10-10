@@ -8,7 +8,7 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
-## The Probe roster (Oct 10, 2026): `feat/probe-roster`, off until set
+## The Probe roster (Oct 10, 2026): deployed 03:36Z, `dlane.roster` 5 since 03:48Z
 
 `dlane.roster` in the state root's `swarm.json` (a whole number; above 50 reads as 50; absent is no roster) caps how many
 families hold the Probe band's seats (`league/swarm/bands.py` `seating`):

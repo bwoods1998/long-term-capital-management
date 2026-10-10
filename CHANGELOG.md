@@ -26,10 +26,16 @@ any other deploy.
 
 ## Not yet deployed
 
-The running House release is `20261009T225656Z-01beacbc792b` (main `e24a5d6a`, the weekend fixes, 22:57Z Oct 9), the
+The running House release is `20261010T033512Z-df7078e102a6` (main `9e2cf9fc`, the Probe roster, 03:36Z Oct 10), the
 gateway is `507b6118`, and the box's updater is on. What is built and not deployed is on branches.
 
-### The Probe roster, on `feat/probe-roster` (unreleased; an owner deploy; no evidence reset; off until `dlane.roster` is set)
+### 03:36Z Oct 10, 2026: the Probe roster (#523), House `20261010T033512Z-df7078e102a6`, main `9e2cf9fc`; `dlane.roster` 5 at 03:48Z
+
+Owner deploy (no gateway change): no order in flight at 03:35:03Z; nightly stopped, deployed, promoted 03:36:06Z (rollback
+`20261009T225656Z-01beacbc792b`), nightly back 03:46:16Z, updater repointed to `9e2cf9fc`. Verified on the box: health
+clean, real money on, execution fingerprint `31a7e921`, money `0310779c`, constitution `ca89ff8a` and gate contract
+`397b22b772b3` unchanged. `dlane.roster` 5 set in `swarm.json` at 03:48Z (no deploy): the box reads 5 seats, one Probe
+family seated, none waiting. Rollback of the rule: `dlane.roster` 0.
 
 - **Why** (REDESIGN-1010, Oct 10, 2026; the operator's private grid and its confirmatory run): Done needs >= 30 real
   closes with >= 5 from each of >= 2 programs, while every program that passes its look trades at once from one shared
