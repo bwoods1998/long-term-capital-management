@@ -471,7 +471,7 @@ same schema) held to the old shares, so neither rule's ceiling is passed.
 `meters.claude.research_usd_day` is at most 5, and `meters.sail.would_set_usd_day` is up to 20 (the day's figure from
 00:30Z the next day). `dlane-report.json` `loosened` names "graveyard alpha rows".
 
-## Release D-1b, the direction lane on D2 (Oct 9, 2026): built on `release/dlane-d1` on top of D-1, not deployed
+## Release D-1b, the direction lane on D2 (Oct 9, 2026): deployed 10:36Z Oct 9 with D-1
 
 D-1b switches the direction lane's screen to **D2** and meets the reporting terms of the owner's goal of Oct 9: item 4,
 "a pre-registered screen whose false-positive rate you have measured, at most 15% per program at zero edge, stated
@@ -603,7 +603,7 @@ carries it: main `40c39435` merged in). Like D-1 it is swarm-side and ops only. 
   `probe_budget` of the same night (both run outside market hours).
 - `<state>/budget.json` meters carry `out_in_days`.
 
-## Release D-1, the direction lane (Oct 9, 2026): built on `release/dlane-d1`, not deployed
+## Release D-1, the direction lane (Oct 9, 2026): deployed 10:36Z Oct 9
 
 A DIRECTION lane beside the unchanged ALPHA lane: research in which profit from the index's direction counts, reported
 beside the same-risk buy-and-hold and never called alpha. Claude's decisions under the owner's goal of Oct 7 (item 4:
