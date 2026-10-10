@@ -402,6 +402,9 @@ class FourthReview(unittest.TestCase):
                      r"\['run_result', 'runs'\]")
         held = self.status('read = self.store.run')
         self.refused(held, r"\['run'\]")
+        # A lineage set's holdout looks (`looks_over`, Oct 10, 2026: `lineage_looks` over any lineages) is one too.
+        self.refused(self.status('parts.append(str(self.store.looks_over([fam["lineage"]], include_inflight=True)))'),
+                     r"\['looks_over'\]")
         # A Validation figure reached through the family's own state, with no store call at all: a sealed key.
         self.refused(self.status('parts.append(json.dumps(state.get("validation_line", {}).get("numbers")))'),
                      r"key naming Validation")

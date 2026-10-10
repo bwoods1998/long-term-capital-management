@@ -85,16 +85,26 @@ gateway is `507b6118`, and the box's updater is on. What is built and not deploy
   `add_family`, a direction card's birth reads the lineage it would join (the parent's and every twin's it links: the
   set `lineage_tries` and `lineage_looks` read after the birth). When its tries reach `val_tries` or its looks reach
   `looks_per_lineage` (in flight too), the card is refused and recorded with the card refusals: the next request names
-  the lineage and the version that spent it ("propose a mechanism-level new idea on another slice or a new mechanism"),
-  and the pass's event counts it (`card_refused.spent_lineage`). No lineage is linked for a refused card.
-  `SwarmStore.looks_over` is `lineage_looks` over a lineage set.
+  the lineage that holds the try and the version that spent it ("propose a mechanism-level new idea on another slice or
+  a new mechanism"), and the pass's event counts it (`card_refused.spent_lineage`). No lineage is linked for a refused
+  card. `SwarmStore.looks_over` is `lineage_looks` over a lineage set.
+- **The review's answers:** a CLAIMED try refuses too: a living Gym-band member of that lineage born earlier in the same
+  pass (`Architect.pass_born`, a truncated answer's retry included), or one whose best awaits Validation
+  (`researcher.awaiting_validation`, passed in: `dlane.py` still imports no researcher), counts against `val_tries`
+  ("whose one Validation try is claimed (<family>, born in the same pass)" / "(<family> v<n> awaits Validation)"). The
+  refusal names the lineage that holds the try (a `long_single`'s twin, not its parent). `looks_over` joins
+  `harness_lanes.SEALED_READS` (a protected file). The LANES prompt is unchanged on purpose (its golden digests); the
+  card refusal is the channel.
 - **Unchanged:** alpha cards, the lane off, births with no parent, the tournament's retirement rule and the one-try,
   one-look accounting. Nothing in `league/live/`, `league/gym/` or `league/constitution.py`: the execution fingerprint,
-  money digest and constitution digest are main's.
+  money digest and constitution digest are main's. Not handled: a living member of an earlier pass with no best yet,
+  and a lineage joined after birth by identical code (`_link_code`); the tournament retires those losers as before.
 - **Rollback:** revert the commit.
 - **Proof.** `league/tests/test_dlane_spent_birth.py` (a spent lineage refused, named and fed back; a twin's spent try
-  refused; `birth_spent` agrees with `lineage_spent` after the birth on each lineage shape; a fresh idea, a lineage with
-  its try left, an alpha card and the lane off are born).
+  refused and the twin's lineage named; a second card of one idea in one pass, and across a retry, refused; a living
+  member awaiting Validation claims the try; `birth_spent` agrees with `lineage_spent` after the birth on each lineage
+  shape; a fresh idea, a lineage with its try left, an alpha card and the lane off are born);
+  `test_swarm_harness_lanes` (`looks_over` is a sealed read).
 
 ### 03:36Z Oct 10, 2026: the Probe roster (#523), House `20261010T033512Z-df7078e102a6`, main `9e2cf9fc`; `dlane.roster` 5 at 03:48Z
 

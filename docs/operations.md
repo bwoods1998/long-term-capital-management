@@ -83,21 +83,32 @@ look is not born (`league/swarm/dlane.py` `birth_spent`, asked by `league/swarm/
 `add_family`). The lineage read is the one the family would join: its parent's (a declared parent on the slice, else the
 newest dead family of the same idea on the slice, else a living twin) and, for a `long_single`, every twin lineage the
 birth links; their connected component, as `lineage_tries` and `lineage_looks` read it once the family is born. A prior
-lineage (a new idea on a dead slice) is not in it. The card becomes a card refusal: the next request lists it under
-"YOUR LAST PASS'S PROPOSALS REFUSED BY THE CARD CHECKS" with the lineage and the version that spent it, and the pass's
-`swarm.architect` event counts it in `card_refused.spent_lineage` (apart from `rebirth`).
+lineage (a new idea on a dead slice) is not in it. Nor is a card born when a living Gym-band member of that component
+already claims the try: one born earlier in the same pass (a truncated answer's retry included), or one whose best
+awaits Validation (`researcher.awaiting_validation`: its Validation job may be out, with no run landed yet). The card
+becomes a card refusal: the next request lists it under "YOUR LAST PASS'S PROPOSALS REFUSED BY THE CARD CHECKS",
+naming the lineage that holds the try and the version that spent or claims it, and the pass's `swarm.architect` event
+counts it in `card_refused.spent_lineage` (apart from `rebirth`).
 
 - **Why:** on Oct 10 about half of the lane's births joined such a lineage, and the tournament retired them on
   `SPENT_TRY` 15-60 minutes later without a try: research money, Gym runs and a population slot each, and the architect
   never learned why. The false-positive accounting is unchanged: one try a lineage, and a re-proposed idea still gets none.
-- **Read it:** `card_refused.spent_lineage` in the `swarm.architect` events; kv `architect_card_refusals`. Retirements
-  on `SPENT_TRY` within an hour of birth should fall to the families whose own try failed.
+- **Read it:** `card_refused.spent_lineage` in the `swarm.architect` events; kv `architect_card_refusals`. `SPENT_TRY`
+  retirements of newborns should fall, though not to zero (below).
 - **Unchanged:** alpha cards and the lane off (`dlane.mode` "off") are born as before; a birth with no parent (a new
   lineage) is never refused by this rule; a store error refuses nothing (the tournament's rule still retires). Nothing
   in `league/live/`, `league/gym/` or `league/constitution.py`.
+- **Not handled** (the tournament still retires the loser on `SPENT_TRY`): a living member of an earlier pass that has
+  no best yet claims nothing (it may die without a try), so a birth beside it can still lose the try to it; and a
+  lineage joined after birth by identical code (`SwarmStore._link_code`, when a version is added) can still spend a
+  newborn's try.
+- **The prompt is unchanged on purpose:** the LANES block still says a dead direction idea proposed again "continues its
+  lineage, with no try left" (true of the lineage; the card is now refused rather than born). Its text is pinned by
+  `test_dlane_trainmap`'s golden digests (the map off is main `d70e00c3`'s text byte for byte), so the card refusal is
+  the only channel that says so.
+- **The harness guard:** `SwarmStore.looks_over` (`lineage_looks` over a lineage set, which `birth_spent` reads) is a
+  sealed read (`harness_lanes.SEALED_READS`), like `lineage_looks`.
 - **Roll back:** revert the commit (there is no setting). Swarm-side only: no fingerprint, money or constitution move.
-- **Not handled:** a lineage joined after birth by identical code (`SwarmStore._link_code`, when a version is added) can
-  still spend a newborn's try; the tournament retires that family as before.
 
 ## The Probe roster (Oct 10, 2026): deployed 03:36Z, `dlane.roster` 5 since 03:48Z
 

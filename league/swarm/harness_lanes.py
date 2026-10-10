@@ -223,9 +223,10 @@ STORE_WRITES = frozenset({"put", "update_family", "bump", "set_state", "compare_
                           "_exec", "practice_event", "_reject"})
 #: Store reads of the holdout, Validation and forward evidence (D2a): a candidate may not start reading them, called or
 #: held as a reference. `runs` (its `window="validation"` rows), `run` and `run_result` return a Validation run's row or
-#: its full result as readily as a Train one's (the fourth review), so any new use of them counts.
-SEALED_READS = frozenset({"looks", "looked", "lineage_looks", "lineage_validated", "lineage_trial_sharpes", "forward",
-                          "version_runs", "runs", "run", "run_result"})
+#: its full result as readily as a Train one's (the fourth review), so any new use of them counts. `looks_over` is
+#: `lineage_looks` over a lineage set (Oct 10, 2026).
+SEALED_READS = frozenset({"looks", "looked", "lineage_looks", "looks_over", "lineage_validated",
+                          "lineage_trial_sharpes", "forward", "version_runs", "runs", "run", "run_result"})
 #: Store writers and sealed readers with everyday names: counted on ANY object (an over-approximation, defense in depth),
 #: so a new `runner.run(...)` or `result.note` is refused too. The brief tells the author.
 GENERIC_SEALED = frozenset({"run", "runs", "note", "put", "event", "refuse", "retire", "bump", "forward"}) & (

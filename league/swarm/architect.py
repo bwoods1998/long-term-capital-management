@@ -174,9 +174,11 @@ default, or "direction": cards.py, `dlane.card_errors`):
     `lane` (every birth's, while the lane is on). An alpha card and spec never carry a lane, so alpha card shas are the
     release before's.
   - THE RATION AT BIRTH (Oct 10, 2026; `dlane.birth_spent`): a direction card whose birth would continue a lineage (its
-    parent's, and every twin's a long_single links) that has spent its one Validation try or its one holdout look is not
-    born: it is a card refusal naming the lineage and the version that spent it (`dlane.spent_birth_text`), shown in the
-    next request, and the pass's event counts it (`card_refused.spent_lineage`). Born, it retired unjudged within the hour.
+    parent's, and every twin's a long_single links) that has spent its one Validation try or its one holdout look, or
+    whose try a living member claims (born earlier in the pass, or its best awaiting Validation), is not born: it is a
+    card refusal naming the lineage that holds the try and the version that spent or claims it
+    (`dlane.spent_birth_text`), shown in the next request, and the pass's event counts it
+    (`card_refused.spent_lineage`). Born, it retired unjudged.
   - NO PAID PASS WITHOUT A CELL (`closed`) reads a cell whose rows bind no direction card (DRIFT rows and, since Oct 9,
     alpha families' rows) as one a direction card can bear, and the BIRTH CELLS gain the lane's own cells (cards.py
     `lane_cells`); since Oct 9 their header says what binds a direction card (`LANE_CELLS_NOTE`) and each line of a cell
@@ -205,7 +207,7 @@ from . import cards, diagnostics, inputs, mechanism
 from . import dlane
 from . import game
 from . import settings as settings_mod
-from .researcher import MAX_ROOTS, SCREENED, SELF_REFUTED, VERDICT_TAG, VERDICT_WORDS
+from .researcher import MAX_ROOTS, SCREENED, SELF_REFUTED, VERDICT_TAG, VERDICT_WORDS, awaiting_validation
 from .store import LONG_SINGLE, SINGLE_SIDES, STRUCTURES, SwarmStore, iso, same_slice, slice_priors, slugify, structure_query
 
 #: Two mechanisms are the same idea when their content words overlap this much (Jaccard).
@@ -2029,6 +2031,8 @@ class Architect:
         allowed_roots = set(self.admitted_roots())
         allowed = self.structures()
         self.not_allowed: list[dict[str, Any]] = []  # this call's refusals by THE STRUCTURES: slug, structure, roots
+        # THE RATION AT BIRTH: the pass's births before this call (a truncated answer's retry reads the first answer's).
+        earlier = list(getattr(self, "pass_born", None) or [])
         born = []
         for row in rows if isinstance(rows, list) else []:
             if len(born) >= cap or not isinstance(row, dict):
@@ -2159,12 +2163,15 @@ class Architect:
                            and sorted(f["roots"]) == sorted(roots) and any(same_idea(f["mechanism"], idea) for idea in ideas)]
                 twins = list(dict.fromkeys(f["lineage"] for f in (*same, *kin, *of_idea)))
             # THE RATION AT BIRTH (Oct 10, 2026; `dlane.birth_spent`): a DIRECTION card whose birth would join a lineage
-            # (its parent's and the twins' it links) that has spent its one Validation try or its one holdout look is not
-            # born, and the next request names the lineage among the card refusals. Born, it retired on SPENT_TRY 15-60
-            # minutes later without a try (about half of the lane's births on the House, Oct 10), spending research money,
-            # Gym runs and a population slot. A new lineage (no parent) has nothing spent; alpha and the lane off: as before.
+            # (its parent's and the twins' it links) that has spent its one Validation try or its one holdout look, or
+            # whose try a living member claims (one born earlier in this pass, a truncated answer's retry included, or
+            # one whose best awaits Validation), is not born, and the next request names the lineage among the card
+            # refusals. Born, it retired on SPENT_TRY 15-60 minutes later without a try (about half of the lane's births
+            # on the House, Oct 10), spending research money, Gym runs and a population slot. A new lineage (no parent)
+            # has nothing spent; alpha and the lane off: as before.
             if lane == dlane.DIRECTION and parent:
-                spent = dlane.birth_spent(self.store, [str(home.get("lineage") or ""), *twins], self.settings)
+                spent = dlane.birth_spent(self.store, [str(home.get("lineage") or ""), *twins], self.settings,
+                                          born=[*earlier, *born], awaiting=awaiting_validation)
                 if spent is not None:
                     self.card_refused.append({"slug": slug, "spent": spent["spent"],
                                               "why": dlane.spent_birth_text(spent, home.get("lineage"), unseen)})
@@ -2221,6 +2228,8 @@ class Architect:
             born.append(fam["id"])
         if index is not None and index.yield_cfg is not None:
             self.cell_yield_seen = {"view": index.yield_view(), "open_born": open_born, "claims_dropped": dropped}
+        if isinstance(getattr(self, "pass_born", None), list):
+            self.pass_born.extend(born)
         return born
 
     def _digest_call(self, system: str, paired: bool, library: Any = None) -> tuple[dict[str, Any], dict[str, Any] | None]:
@@ -2293,6 +2302,7 @@ class Architect:
         self.pass_lane_quota = self.lane_quota()
         self.pass_lane_only = self.lane_only()
         self.pass_yields = None  # THE CELL'S YIELD: the request's reading of the cells (`card_block`), which `admit` uses
+        self.pass_born: list[str] | None = []  # THE RATION AT BIRTH: the pass's births, its retry's admit included
         info: dict[str, Any] | None = None
         try:
             # SYSTEM itself while Train is 2022-2024; else the running swarm's span (its store's migrated objective).
@@ -2312,7 +2322,7 @@ class Architect:
                                      **extra)  # Claude first; Astra every other pass if openai_model
         except Exception as exc:  # noqa: BLE001
             out = {"born": [], "error": str(exc)[:300]}
-            self.pass_quota = None
+            self.pass_quota, self.pass_born = None, None
             self.pass_lane_quota, self.pass_lane_only = None, None  # THE DIRECTION LANE: no request went: none is marked
             if info is not None:
                 out["digest"] = info
@@ -2392,7 +2402,7 @@ class Architect:
                     self.remember_refusals(refused, began)
                 out["truncated"]["retry"] = retry
                 out["seconds"] = round(self.clock() - began, 1)
-        quota, self.pass_quota = self.pass_quota, None  # the pass is made (its retry included)
+        quota, self.pass_quota, self.pass_born = self.pass_quota, None, None  # the pass is made (its retry included)
         if quota is not None and quota.refused:
             out["structure_capped"] = dict(quota.refused)  # proposals refused by the birth quota, by structure family
         lane_quota, lane_only = self.pass_lane_quota, self.pass_lane_only
@@ -2420,7 +2430,7 @@ class Architect:
                                    "items": [{k: r.get(k) for k in ("slug", "why", "row", "matched")} for r in refused_cards[:12]]}
             spent = sum(1 for r in refused_cards if r.get("spent"))
             if spent:
-                out["card_refused"]["spent_lineage"] = spent  # THE RATION AT BIRTH: direction cards into a spent lineage
+                out["card_refused"]["spent_lineage"] = spent  # THE RATION AT BIRTH: into a spent or claimed lineage
             if proposed:
                 # Only a pass that proposed something replaces them: an empty, cut-to-nothing or failed answer (Oct 1,
                 # 2026: nine empty Sail passes in a row wrote []) keeps the last real refusals and their lessons.

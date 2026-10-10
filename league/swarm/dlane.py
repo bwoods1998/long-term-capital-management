@@ -70,7 +70,8 @@ Validation try and one holdout look per direction lineage (`val_tries`, `looks_p
 `try_open`, `lineage_spent`), so a lineage's false-positive rate is the program's. THE ROLLBACK is instant and is a
 tightening: swarm.json `dlane.screen` "S-C" (a setting may always choose S-C; it can never pin a receipt). THE RATION
 AT BIRTH (Oct 10, 2026; `birth_spent`): a direction card whose birth would join a lineage that has spent its try or its
-look is refused by the architect's card checks, naming the lineage, instead of being born to retire unjudged.
+look, or whose try another living member claims (born in the same pass, or its best awaiting Validation), is refused by
+the architect's card checks, naming the lineage, instead of being born to retire unjudged.
 
 THE BIRTH QUOTA (`DirectionQuota`; decision 1). While the lane is behind `birth_share` (0.5) of the last
 `window_hours` (24) of births and fewer than `max_alive` (24) direction families live, at least
@@ -132,7 +133,7 @@ import math
 import re
 import time
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from . import evidence
 
@@ -1776,20 +1777,26 @@ def lineage_spent(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any
 
 
 #: The card refusal of a direction birth into a spent lineage (`spent_birth_text`): rules and names only, no figure.
-SPENT_BIRTH = ("this idea continues {lineage}, whose one {what} is spent ({who}): one Validation try and one holdout look "
-               "a direction lineage, and the same idea proposed again gets no new one; propose a mechanism-level new idea "
-               "on another slice or a new mechanism")
+SPENT_BIRTH = ("this idea continues {lineage}, whose one {what} is {state} ({who}): one Validation try and one holdout "
+               "look a direction lineage, and the same idea proposed again gets no new one; propose a mechanism-level "
+               "new idea on another slice or a new mechanism")
 
 
-def birth_spent(store: Any, lines: Iterable[str], settings: Mapping[str, Any] | None) -> dict[str, Any] | None:
+def birth_spent(store: Any, lines: Iterable[str], settings: Mapping[str, Any] | None, *, born: Iterable[str] = (),
+                awaiting: Callable[[Mapping[str, Any]], bool] | None = None) -> dict[str, Any] | None:
     """THE RATION AT BIRTH (Oct 10, 2026): what `lineage_spent` would answer for a DIRECTION family born into `lines` (the
     lineage it joins and every lineage its birth links to it: the architect's parent's and, for a `long_single`, its
-    twins'), read BEFORE the birth: {"spent": "look" or "try", "family", "version"} (the look or the try that spent the
-    ration; the lineage's first), else None. The set read is the one `lineage_tries` and `lineage_looks` read once the
-    family is born: the connected component of every lineage in `lines`. A prior lineage (`prior_lineage`, a new lineage
-    on a dead slice) is never in it: its trials count, its tries and looks do not. A newborn holds no try of its own, so
-    `lineage_spent`'s exceptions (its own try awaiting a verdict or a look) never apply: the ration is spent when the
-    looks reach `looks_per_lineage` (in flight too) or the tries reach `val_tries`.
+    twins'), read BEFORE the birth: {"spent": "look", "try" or "claim", "family", "version", "lineage"} (the look or the
+    try that spent the ration, the lineage's first, or the first claim on the try; "lineage" is that family's), else
+    None. The set read is the one `lineage_tries` and `lineage_looks` read once the family is born: the connected
+    component of every lineage in `lines`. A prior lineage (`prior_lineage`, a new lineage on a dead slice) is never in
+    it: its trials count, its tries and looks do not. A newborn holds no try of its own, so `lineage_spent`'s exceptions
+    (its own try awaiting a verdict or a look) never apply: the ration is spent when the looks reach `looks_per_lineage`
+    (in flight too) or the tries reach `val_tries`. It is CLAIMED when the tries and the claims (`_claims`: a living
+    member born in the architect's pass, `born`, or one whose best awaits Validation by `awaiting`, its job out too)
+    reach `val_tries`: the tournament gives the try to one of them and retires the other unjudged (the review of Oct
+    10). `awaiting` is `researcher.awaiting_validation`, passed by the architect (this module imports no researcher);
+    None reads no such claim.
     Why: until Oct 10, 2026 about half of the lane's births joined such a lineage and the tournament retired them on
     `SPENT_TRY` 15-60 minutes later without a try, spending research money, Gym runs and a population slot, and the
     architect never learned why (the House's measurement). None while the lane is off, and on any store error (the
@@ -1803,37 +1810,73 @@ def birth_spent(store: Any, lines: Iterable[str], settings: Mapping[str, Any] | 
             return None
         if store.looks_over(joined, include_inflight=True) >= c["looks_per_lineage"]:
             slots = ",".join("?" * len(joined))
-            row = store._one(f"SELECT family, version FROM looks WHERE lineage IN ({slots}) ORDER BY seq LIMIT 1",
-                             tuple(joined))
+            row = store._one(f"SELECT family, version, lineage FROM looks WHERE lineage IN ({slots}) "
+                             "ORDER BY seq LIMIT 1", tuple(joined))
             if row is not None:
-                return {"spent": "look", "family": str(row["family"]), "version": int(row["version"])}
+                return {"spent": "look", "family": str(row["family"]), "version": int(row["version"]),
+                        "lineage": str(row["lineage"])}
             from .store import loads
 
-            for fam in store._all(f"SELECT id, state FROM families WHERE lineage IN ({slots}) ORDER BY born_at, id",
-                                  tuple(joined)):
+            for fam in store._all(f"SELECT id, lineage, state FROM families WHERE lineage IN ({slots}) "
+                                  "ORDER BY born_at, id", tuple(joined)):
                 marker = (loads(fam["state"], {}) or {}).get("look_inflight") or {}
                 if marker.get("sha"):
-                    return {"spent": "look", "family": str(fam["id"]), "version": marker.get("n")}
-            return {"spent": "look", "family": None, "version": None}
-        tries = _tries_of(store, _families_in(store, joined))
+                    return {"spent": "look", "family": str(fam["id"]), "version": marker.get("n"),
+                            "lineage": str(fam["lineage"])}
+            return {"spent": "look", "family": None, "version": None, "lineage": None}
+        members = _families_in(store, joined)
+        tries = _tries_of(store, members)
         if len(tries) >= c["val_tries"]:
-            return {"spent": "try", "family": tries[0]["family"], "version": tries[0]["version"]}
+            first = store.family(tries[0]["family"]) or {}
+            return {"spent": "try", "family": tries[0]["family"], "version": tries[0]["version"],
+                    "lineage": first.get("lineage")}
+        claims = _claims(store, members, tries, born, awaiting)
+        if claims and len(tries) + len(claims) >= c["val_tries"]:
+            return {"spent": "claim", **claims[0]}
         return None
     except Exception:  # noqa: BLE001 - a rule that cannot be read refuses no birth
         return None
 
 
+def _claims(store: Any, fams: Sequence[str], tries: Sequence[Mapping[str, Any]], born: Iterable[str],
+            awaiting: Callable[[Mapping[str, Any]], bool] | None) -> list[dict[str, Any]]:
+    """THE RATION AT BIRTH's claims on a lineage's try: the living Gym-band families of `fams` that hold no try and were
+    born in the architect's pass (`born`: two cards of one idea in one answer) or whose best awaits Validation
+    (`awaiting`: the tournament's next job of theirs, or the one out, is the lineage's try), oldest first: [{family,
+    version (the best; None for a newborn), lineage, born}]. A member of an earlier pass still without a best is no
+    claim: it may die without a try."""
+    held = {(t["family"], t["version"]) for t in tries}
+    new = {str(x) for x in born}
+    living = [f for f in (store.family(fid) for fid in fams)
+              if f is not None and not f.get("retired_at") and (f.get("band") or "gym") == "gym"]
+    out = []
+    for fam in sorted(living, key=lambda f: (str(f.get("born_at") or ""), f["id"])):
+        n = fam.get("best_version") or (fam.get("state") or {}).get("best_train_version")
+        if fam["id"] in new:
+            out.append({"family": fam["id"], "version": None, "lineage": fam["lineage"], "born": True})
+        elif awaiting is not None and awaiting(fam) and (fam["id"], int(n)) not in held:
+            out.append({"family": fam["id"], "version": int(n), "lineage": fam["lineage"], "born": False})
+    return out
+
+
 def spent_birth_text(spent: Mapping[str, Any], lineage: Any = None, hidden: Iterable[str] = ()) -> str:
-    """The architect's card refusal for `birth_spent`'s answer `spent`: the lineage the idea continues, what is spent and by
-    which family's version. A family or lineage in `hidden` (THE LEARNING GAME's rows the architect may not read) is never
-    named."""
+    """The architect's card refusal for `birth_spent`'s answer `spent`: the lineage that holds what is spent or claimed
+    (`spent["lineage"]`, else `lineage`), what it is and which family's version spent or claims it. A family or lineage
+    in `hidden` (THE LEARNING GAME's rows the architect may not read) is never named."""
     hidden = {str(x) for x in hidden}
     what = "holdout look" if spent.get("spent") == "look" else "Validation try"
     fam = str(spent.get("family") or "")
-    who = ((fam + (f" v{spent['version']}" if spent.get("version") is not None else ""))
-           if fam and fam not in hidden else "by an earlier family")
+    version = f" v{spent['version']}" if spent.get("version") is not None else ""
+    if spent.get("spent") == "claim":
+        state = "claimed"
+        who = ((fam + (", born in the same pass" if spent.get("born") else f"{version} awaits Validation"))
+               if fam and fam not in hidden else "by a living family")
+    else:
+        state = "spent"
+        who = fam + version if fam and fam not in hidden else "by an earlier family"
+    lineage = spent.get("lineage") or lineage
     line = f"lineage {lineage}" if lineage and str(lineage) not in hidden else "a lineage"
-    return SPENT_BIRTH.format(lineage=line, what=what, who=who)
+    return SPENT_BIRTH.format(lineage=line, what=what, state=state, who=who)
 
 
 # ----------------------------------------------------------------------------------------------------------- the quota

@@ -2,8 +2,9 @@
 whose birth would continue a lineage that has spent its one Validation try (or its one holdout look) is refused by the
 card checks, named in the next request, and never born. Measured on the House on Oct 10: about half of the lane's births
 joined such a lineage (a parent on the slice with the same idea, or a long_single's twins) and the tournament retired them
-on `dlane.SPENT_TRY` 15-60 minutes later without a try. A fresh idea, a lineage with its try left, every alpha card and
-the lane off are born as before.
+on `dlane.SPENT_TRY` 15-60 minutes later without a try. So is one whose try a living member claims (the review): one
+born earlier in the same pass, or one whose best awaits Validation (its job out too). A fresh idea, a lineage with its
+try left, every alpha card and the lane off are born as before.
 
 Every family, mechanism and figure here is invented.
 """
@@ -14,6 +15,7 @@ import unittest
 
 from league.swarm import cards, dlane
 from league.swarm.architect import CARD_REFUSALS_KEY
+from league.swarm.researcher import awaiting_validation
 from league.tests.swarm_fakes import result
 from league.tests.test_dlane_births import DIR, DMECH, OFF, TREND, LaneCase, Router
 from league.tests.test_swarm_cards import CARD, MECH, proposal
@@ -23,6 +25,8 @@ IDLE = ("Retired by the idle rule, a limit on how long a family may research; it
         "mechanism has no edge")
 CODE = "# {fid}\nNEEDS = {{'roots': ['SPY']}}\nPARAMS = {{}}\ndef decide(ctx):\n    return []\n"
 OTHER = "Buy a call after three down closes in a row when the index sits above its own 200-day average, held a week."
+#: DMECH reworded: the same idea (`same_idea`), not the same text (the architect's `living` check reads its start).
+AGAIN = "Hold a cheap call a week to rent the index's drift while implied vol sits calm against its own trailing year."
 
 
 class SpentBirth(LaneCase):
@@ -63,7 +67,7 @@ class SpentBirth(LaneCase):
     def test_a_direction_card_continuing_a_spent_lineage_is_refused_named_and_fed_back(self):
         self.family("dir-old", tried=True)
         self.assertEqual(dlane.birth_spent(self.store, ["dir-old"], self.settings),
-                         {"spent": "try", "family": "dir-old", "version": 1})
+                         {"spent": "try", "family": "dir-old", "version": 1, "lineage": "dir-old"})
         out = self.arch(Router([self.again()])).run()
         self.assertEqual(out["born"], [])
         self.assertIsNone(self.store.family("dir-again"), "no birth")
@@ -103,9 +107,10 @@ class SpentBirth(LaneCase):
             after = dlane.lineage_spent(self.store, child, self.settings)
             self.assertEqual(after, {"try": dlane.SPENT_TRY, "look": dlane.SPENT_LOOK, None: None}[spent], parent)
         self.assertEqual(dlane.birth_spent(self.store, ["looked"], self.settings),
-                         {"spent": "look", "family": "looked", "version": 1})
+                         {"spent": "look", "family": "looked", "version": 1, "lineage": "looked"})
         self.assertEqual(dlane.birth_spent(self.store, ["in-flight"], self.settings),
-                         {"spent": "look", "family": "in-flight", "version": 1})
+                         {"spent": "look", "family": "in-flight", "version": 1,
+                          "lineage": "in-flight"})
         self.assertIsNone(dlane.birth_spent(self.store, [], self.settings))
         self.assertIsNone(dlane.birth_spent(self.store, ["tried"], {"dlane": OFF}), "the lane off reads nothing")
 
@@ -117,7 +122,8 @@ class SpentBirth(LaneCase):
         a = self.arch()
         self.assertEqual(a.admit([self.again()]), [])
         self.assertEqual(a.card_refused[0]["spent"], "try")
-        self.assertIn("continues lineage call-new, whose one Validation try is spent (put-old v1)",
+        # The lineage named is the one that holds the spent try (the twin's), not the parent's, which still has its own.
+        self.assertIn("continues lineage put-old, whose one Validation try is spent (put-old v1)",
                       a.card_refused[0]["why"])
         self.assertEqual(self.links(), [], "a refused card links no lineage")
 
@@ -127,7 +133,65 @@ class SpentBirth(LaneCase):
         self.assertTrue(text.startswith("this idea continues a lineage, whose one Validation try is spent (by an earlier "
                                         "family)"), text)
         self.assertNotIn("g-1a2b3c4d", text)
+        text = dlane.spent_birth_text({"spent": "claim", "family": "g-1a2b3c4d", "version": 2, "lineage": "g-1a2b3c4d",
+                                       "born": False}, None, frozenset({"g-1a2b3c4d"}))
+        self.assertTrue(text.startswith("this idea continues a lineage, whose one Validation try is claimed (by a "
+                                        "living family)"), text)
+        self.assertNotIn("g-1a2b3c4d", text)
         self.assertFalse(any(ch.isdigit() for ch in dlane.SPENT_BIRTH), "a public reason: no figure")
+
+    # ------------------------------------------------------------------------------------------- a claimed try
+    def test_a_second_card_of_one_idea_in_one_pass_is_refused_the_first_claims_the_try(self):
+        """The review's race: both continue the dead, untried `dir-old`; born, the second retired on SPENT_TRY once the
+        first's Validation run landed (one try a lineage, and the tournament sends one member a round)."""
+        self.family("dir-old")
+        out = self.arch(Router([self.again("dir-a"), self.again("dir-b", mechanism=AGAIN)])).run()
+        self.assertEqual(out["born"], ["dir-a"])
+        self.assertIsNone(self.store.family("dir-b"), "no birth")
+        self.assertEqual((out["card_refused"]["spent_lineage"], out["card_refused"]["rebirth"]), (1, 0))
+        self.assertEqual(out["card_refused"]["items"][0]["why"],
+                         "this idea continues lineage dir-old, whose one Validation try is claimed (dir-a, born in the "
+                         "same pass): one Validation try and one holdout look a direction lineage, and the same idea "
+                         "proposed again gets no new one; propose a mechanism-level new idea on another slice or a new "
+                         "mechanism")
+
+    def test_a_truncated_answers_retry_reads_the_first_answers_births(self):
+        a = self.arch()
+        a.pass_born = []  # as `run` sets it for the pass: its first admit and its retry's
+        self.family("dir-old")
+        self.assertEqual(a.admit([self.again("dir-a")]), ["dir-a"])
+        self.assertEqual(a.admit([self.again("dir-b", mechanism=AGAIN)]), [])
+        self.assertEqual((a.card_refused[0]["spent"], a.pass_born), ("claim", ["dir-a"]))
+        # A pass's births are its own: a later pass (or a call outside one) reads a living member by its best alone, so
+        # `dir-a` without one claims nothing there (it may die without a try; the tournament still retires the loser).
+        self.assertEqual(self.arch().admit([self.again("dir-c", mechanism=AGAIN)]), ["dir-c"])
+
+    def test_a_living_member_whose_best_awaits_validation_claims_the_try(self):
+        """The review's in-flight try: a living member's best awaits Validation (its job may be out, no run landed)."""
+        self.family("dir-old")
+        self.family("dir-live", mechanism=AGAIN, parent="dir-old", retire=False)
+        self.assertEqual(self.store.family("dir-live")["lineage"], "dir-old")
+
+        def spent():
+            return dlane.birth_spent(self.store, ["dir-old"], self.settings, awaiting=awaiting_validation)
+
+        # Still without a best: no claim (it may die without a try).
+        self.assertIsNone(spent())
+        self.store.update_family("dir-live", best_version=1)
+        self.assertEqual(spent(), {"spent": "claim", "family": "dir-live", "version": 1, "lineage": "dir-old",
+                                   "born": False})
+        self.assertIsNone(dlane.birth_spent(self.store, ["dir-old"], self.settings), "no reader, no such claim")
+        a = self.arch()
+        self.assertEqual(a.admit([self.again()]), [])
+        self.assertIn("continues lineage dir-old, whose one Validation try is claimed (dir-live v1 awaits Validation)",
+                      a.card_refused[0]["why"])
+        # A best that lost at 1.5x awaits nothing: no claim.
+        self.store.set_state("dir-live", robust_failed=[1])
+        self.assertIsNone(spent())
+        # Its run lands: the try is spent, whatever the claim read.
+        self.store.add_run("dir-live", 1, result("dir-live", window="validation"), window="validation", stress=1.0,
+                           purpose="validation")
+        self.assertEqual(spent(), {"spent": "try", "family": "dir-live", "version": 1, "lineage": "dir-old"})
 
     # ------------------------------------------------------------------------------------------- what is born
     def test_a_fresh_idea_on_the_slice_is_born_as_a_new_lineage(self):
