@@ -3,7 +3,8 @@
     from league.swarm import bands
     rows = bands.read(root)        # never raises, never waits more than a second ([] when it cannot read)
 
-One row per family the live path may run: every family in the Candidate, Probe or Sized band, and every
+One row per family the live path may run: every family in the Candidate, Probe or Sized band (but a Candidate
+waiting for a seat while THE PROBE ROSTER, `dlane.roster`, is on: `seating`), and every
 family in the Gym band whose validated version met the validation line AND passed the gate's review and audit,
 and whose holdout look (or forward record) has not failed, was not refused and was not held (THE LOOK HOLDS, Oct 2,
 2026: a held look ends the version's tuition as a failed one does) (execution tuition: 1-lot real orders that measure
@@ -162,8 +163,15 @@ def _families(db: sqlite3.Connection, family: str | None, *, gym_only: bool = Fa
 
 
 #: Seconds after a family became a Candidate (`banded_at`) within which its band's last move is that promotion: a later
-#: move into the Candidate band is a demotion from Probe (the money table's, DM1's) and takes no roster seat (`waiting`).
+#: move into the Candidate band is a demotion from Probe (the money table's, DM1's), and the family queues behind every
+#: fresh Candidate (`seating`).
 ROSTER_SLACK_S = 300.0
+#: `_roster_seats` when `dlane.roster` is present but unreadable and this process never read a good value: no NEW seat.
+ROSTER_CLOSED = -1
+#: The last good `dlane.roster` this process read, by state root (`_roster_seats`).
+_roster_good: dict[str, int] = {}
+_roster_lock = threading.Lock()
+_real_table: Any = None
 
 
 def _epoch(text: Any) -> float | None:
@@ -174,51 +182,78 @@ def _epoch(text: Any) -> float | None:
         return None
 
 
-def waiting(fams: Sequence[Mapping[str, Any]], seats: int) -> set[str]:
-    """THE PROBE ROSTER (REDESIGN-1010, Oct 10, 2026; `dlane.roster`): the Candidate families the live path does not
-    see while the roster is full. Pure. `fams`: the alive families (id, band, band_since, state as a dict); `seats`: the
-    roster (0 = no roster: nothing waits).
+def _seat_structure(structure: Any) -> bool:
+    """Whether a Candidate of this declared structure could reach Probe with real money: every order type it may send is
+    one of the money table's real types (`league.live.money.Table.family_real`, read, never edited). A structure that
+    cannot (credit types under the credit equity, types shadow-only until a paper round trip) takes no roster seat."""
+    global _real_table
+    try:
+        if _real_table is None:
+            from ..live.money import Table
+
+            _real_table = Table.from_constitution()
+        return bool(_real_table.family_real(str(structure or "")))
+    except Exception:  # noqa: BLE001 - an unreadable table: the family queues (it can only wait, never trade past the roster)
+        return True
+
+
+def seating(fams: Sequence[Mapping[str, Any]], seats: int) -> dict[str, list[str]]:
+    """THE PROBE ROSTER (REDESIGN-1010, Oct 10, 2026; `dlane.roster`): who holds the Probe band's seats. Pure but for the
+    money table's real types (`_seat_structure`). `fams`: the alive Candidate and Probe families (id, band, band_since,
+    structure, state as a dict); `seats`: the roster (0 = none, `ROSTER_CLOSED` = no new seat). Returns {probe, seated,
+    waiting, seatless}: `waiting` gets no `read` row.
 
     Why: the Probe budget is one envelope for every program, and Done needs >= 5 real closes from each of >= 2 programs.
     With no roster, every program that passes its look trades at once and the shared budget spreads one or two closes
-    over each of dozens of programs, so the clause fails even for a real edge (the operator's private simulation,
-    REDESIGN-1010). A roster seats a few programs, which then earn the closes that can show an edge; the others wait
-    their turn as Candidates (no real order, no shadow seat taken).
+    over each of many programs, so the clause fails even for a real edge (the operator's private simulation,
+    REDESIGN-1010). A roster seats a few programs, which then earn the closes that can show an edge; the others wait.
 
-    The rule, in this order:
-    - every Probe family holds a seat and is never hidden (a Sized family neither holds one nor waits: its money is the
-      Sized table's), so a lower `seats` hides no family that trades: it only stops new seats until Probe falls below;
-    - a Candidate moved into the band more than `ROSTER_SLACK_S` after it became a Candidate (`state.banded_at`) came
-      back from Probe (a demotion): it takes no seat and is shown as before (the money table keeps its own reasons);
-    - the other Candidates take the free seats in the order they became Candidates (`banded_at`, then id); the rest wait.
-    A Candidate with no readable `banded_at` takes no seat and is shown (the live path's own checks hold it)."""
-    if seats <= 0:
-        return set()
-    probe = sum(1 for f in fams if f.get("band") == "probe")
-    queue: list[tuple[float, str]] = []
+    The rule:
+    - every Probe family holds a seat and is never hidden (a Sized family is not an input: it neither holds nor waits);
+    - SEATLESS and shown as before: a Candidate whose structure cannot trade real money (`_seat_structure`), or with no
+      readable `state.banded_at`;
+    - the other Candidates QUEUE: first the fresh ones (never at Probe since `banded_at`), by `banded_at` then id; then
+      the ones that came back from Probe (their band moved more than `ROSTER_SLACK_S` after `banded_at`: a demotion), by
+      that move's time then id. The first `seats - Probe` of the queue hold a seat (shown); the rest WAIT (no row), so a
+      demoted family can come back to Probe only into a free seat.
+    With `seats` 0 nothing waits."""
+    probe = sorted(str(f["id"]) for f in fams if f.get("band") == "probe")
+    if seats == 0:
+        return {"probe": probe, "seated": [], "waiting": [], "seatless": []}
+    fresh: list[tuple[float, str]] = []
+    back: list[tuple[float, str]] = []
+    seatless: list[str] = []
     for fam in fams:
         if fam.get("band") != "candidate":
             continue
+        fid = str(fam["id"])
         state = fam.get("state") if isinstance(fam.get("state"), Mapping) else {}
         at = _finite(state.get("banded_at"))
-        if at is None:
+        if at is None or not _seat_structure(fam.get("structure")):
+            seatless.append(fid)
             continue
         since = _epoch(fam.get("band_since"))
         if since is not None and since > at + ROSTER_SLACK_S:
-            continue
-        queue.append((at, str(fam["id"])))
-    queue.sort()
-    free = max(0, int(seats) - probe)
-    return {fid for _, fid in queue[free:]}
+            back.append((since, fid))
+        else:
+            fresh.append((at, fid))
+    queue = [fid for _, fid in sorted(fresh)] + [fid for _, fid in sorted(back)]
+    free = 0 if seats < 0 else max(0, int(seats) - len(probe))
+    return {"probe": probe, "seated": queue[:free], "waiting": sorted(queue[free:]), "seatless": sorted(seatless)}
+
+
+def waiting(fams: Sequence[Mapping[str, Any]], seats: int) -> set[str]:
+    """The Candidates `seating` leaves waiting: `read` gives them no row."""
+    return set(seating(fams, seats)["waiting"])
 
 
 def roster(root: str | Path) -> dict[str, Any] | None:
-    """The roster as it stands, for reports: {seats, probe, seated, waiting} (seated: the Probe families and the
-    Candidates holding a seat; waiting: `waiting`'s). None when it is off or the store cannot be read."""
+    """The roster as it stands, for reports: {seats, closed, probe, seated, waiting, seatless} (`seated`: the Probe
+    families and the Candidates holding a seat). None when it is off or the store cannot be read."""
+    seats = _roster_seats(root)
+    if seats == 0:
+        return None
     try:
-        seats = _roster_seats(root)
-        if not seats:
-            return None
         db = sqlite3.connect(f"file:{Path(root) / DB_NAME}?mode=ro", uri=True, timeout=1.0)
         db.row_factory = sqlite3.Row
         try:
@@ -227,26 +262,49 @@ def roster(root: str | Path) -> dict[str, Any] | None:
             db.close()
     except (sqlite3.Error, OSError):
         return None
-    wait = waiting(fams, seats)
-    return {"seats": seats, "probe": sorted(str(f["id"]) for f in fams if f.get("band") == "probe"),
-            "seated": sorted(str(f["id"]) for f in fams if f.get("band") in ("probe", "candidate") and str(f["id"]) not in wait),
-            "waiting": sorted(wait)}
+    seat = seating(fams, seats)
+    return {"seats": max(seats, 0), "closed": seats == ROSTER_CLOSED, "probe": seat["probe"],
+            "seated": sorted(seat["probe"] + seat["seated"]), "waiting": seat["waiting"], "seatless": seat["seatless"]}
 
 
 def _roster_seats(root: str | Path) -> int:
-    """`dlane.roster` as the settings say (0 when off or unreadable)."""
-    from . import dlane
-
+    """`dlane.roster` from <root>/swarm.json, read here and FAILING CLOSED (the review of PR #523): no file, no `dlane`
+    block or no `roster` key is 0 (no roster); a whole number 0-50 is itself (above 50 is 50) and is remembered as this
+    process's last good value; a file that exists but cannot be read or parsed, or a `dlane`/`roster` of the wrong shape
+    (a string, a bool, a fraction, a negative) is the last good value, else `ROSTER_CLOSED` (no new seat: the queue all
+    waits). Never raises. The policy layer does not carry it: the roster is an operator's switch."""
+    path = Path(root) / "swarm.json"
+    key = str(path)
+    bad = False
     try:
-        return int(dlane.cfg(settings.load(root))["roster"])
-    except Exception:  # noqa: BLE001 - no readable roster is no roster: the live path sees what it saw before
+        doc = json.loads(path.read_text())
+    except FileNotFoundError:
         return 0
+    except (OSError, ValueError):
+        doc, bad = None, True
+    if not bad:
+        block = doc.get("dlane") if isinstance(doc, Mapping) else None
+        if not isinstance(doc, Mapping) or ("dlane" in doc and not isinstance(block, Mapping)):
+            bad = True
+        elif block is None or "roster" not in block:
+            return 0
+        else:
+            value = block["roster"]
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                bad = True
+            else:
+                good = min(int(value), 50)
+                with _roster_lock:
+                    _roster_good[key] = good
+                return good
+    with _roster_lock:
+        return _roster_good.get(key, ROSTER_CLOSED)
 
 
 def _banded(db: sqlite3.Connection) -> list[dict[str, Any]]:
     """The alive Candidate and Probe families, their state parsed (the roster's input)."""
     out = []
-    for r in db.execute("SELECT id, band, band_since, state FROM families WHERE retired_at IS NULL AND band IN "
+    for r in db.execute("SELECT id, band, band_since, structure, state FROM families WHERE retired_at IS NULL AND band IN "
                         "('candidate', 'probe') ORDER BY id"):
         row = dict(r)
         row["state"] = loads(row["state"], {}) or {}
@@ -267,9 +325,10 @@ def read(root: str | Path, *, family: str | None = None) -> list[dict[str, Any]]
         db.row_factory = sqlite3.Row
         try:
             fams = _families(db, family)
-            # THE PROBE ROSTER (`waiting`): read inside the same connection, over every Candidate and Probe family
+            # THE PROBE ROSTER (`seating`): read inside the same connection, over every Candidate and Probe family, and
+            # only when a Candidate is among the rows asked for (a Probe, Sized or Gym row is never hidden)
             seats = _roster_seats(root)
-            hidden = waiting(_banded(db), seats) if seats else set()
+            hidden = waiting(_banded(db), seats) if seats and any(f["band"] == "candidate" for f in fams) else set()
             wanted: dict[str, int] = {}
             for fam in fams:
                 state = loads(fam["state"], {}) or {}

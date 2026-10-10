@@ -36,16 +36,22 @@ gateway is `507b6118`, and the box's updater is on. What is built and not deploy
   Probe envelope. At the measured rate of direction verdicts, the envelope's 8 slots spread one or two closes over each
   of many programs, so the ">= 5 from each of >= 2" clause fails even for a strong edge. A roster seats a few programs,
   which then earn the closes that can show an edge.
-- **The rule** (`league/swarm/bands.py` `waiting`, `roster`; `dlane.roster`, a whole number 0-50, 0 by default = no
-  roster): every Probe family holds a seat and is never hidden; a Candidate that came back from Probe (moved into the
-  band more than `ROSTER_SLACK_S`, 300 s, after `banded_at`) holds none and is shown as before; the other Candidates take
-  the free seats in the order they became Candidates; the rest WAIT: `bands.read` gives the live path no row for them,
-  so they have no shadow or real instance until a seat frees (a seated family retired, demoted or Sized). A Sized family
-  neither holds a seat nor waits. Lowering the setting hides no family that trades; it stops new seats only.
-- **Rollback:** `dlane.roster` 0 (a setting; no deploy). Nothing in `league/live/`, `league/gym/` or
-  `league/constitution.py`: the execution fingerprint, money digest and constitution digest are main's.
-- **Proof.** `league/tests/test_swarm_roster.py` (the pure rule, `bands.read` hiding and re-seating, a Probe family
-  never hidden, Sized outside, the setting's bounds).
+- **The rule** (`league/swarm/bands.py` `seating`, `waiting`, `roster`; `dlane.roster` in `swarm.json`, read there
+  alone): every Probe family holds a seat and is never hidden; a Candidate that cannot trade real money (the money
+  table's real types) or has no `banded_at` holds none and is shown; the other Candidates queue, fresh ones by
+  `banded_at`, then ones back from Probe by when they came back; the first `seats - Probe` hold a seat and the rest
+  WAIT (no `bands.read` row, so no shadow or real instance and no money-table band move). Sized is outside. A setting
+  that cannot be read, or is not a whole number, keeps the last good value, else gives no new seat (fails closed).
+- **Pre-open check 6** lists waiting Candidates as by design, not as families missing a band row.
+- **Rollback:** `dlane.roster` 0 or removed (a setting; no deploy; it releases the queue at the next families pass).
+  Nothing in `league/live/`, `league/gym/` or `league/constitution.py`: the execution fingerprint, money digest and
+  constitution digest are main's.
+- **Review.** An adversarial review (3 lenses, each finding verified) confirmed 13 findings on the first cut; this
+  version answers them: fail-closed settings, real-type seats, demoted families queue for a seat, pre-open check 6, an
+  exact `seated` list, a cheaper one-family read, the docs' wording, and the tests below.
+- **Proof.** `league/tests/test_swarm_roster.py` (15 tests): the pure rule; `bands.read` hiding and re-seating,
+  one-family reads; a demotion through the store; a Probe family never hidden; Sized outside; non-real structures
+  seatless; malformed and unreadable settings; the cap at 50; the dlane report's `roster`; pre-open check 6.
 
 ### Deployed Oct 9, 2026 (the entries below were written before their deploys; each is now live)
 

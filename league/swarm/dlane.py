@@ -263,10 +263,8 @@ DEFAULTS: dict[str, Any] = {
     # $400 total); its real positions exit by the House's rules (exits go on). A tightening: a setting can only raise it
     # toward zero (-200 to -25), never loosen it.
     "program_loss_usd": -200,
-    # THE PROBE ROSTER (REDESIGN-1010, Oct 10, 2026; `league/swarm/bands.py` `waiting`): at most this many families hold
-    # the Probe band's seats; a Candidate past them waits (no live row) until a seat frees (retired, demoted, Sized). 0 is
-    # no roster (the code's default and the rollback). It never hides a Probe family: lowering it stops new seats only.
-    "roster": 0,
+    # THE PROBE ROSTER (REDESIGN-1010, Oct 10, 2026) is `dlane.roster` in swarm.json, read by `league/swarm/bands.py`
+    # `_roster_seats` alone (failing closed), never through this block.
     # THE TRAIN MAP (Oct 9, 2026; `train_map`): shown to the architect and direction researchers only when true. The
     # code's default is off (a dropped policy layer shows nothing); policy.json sets it true; swarm.json false hides it.
     "train_map": False,
@@ -362,7 +360,6 @@ def cfg(settings: Mapping[str, Any] | None) -> dict[str, Any]:
         "k5_clear": raw.get("k5_clear") is True,
         "program_loss_usd": number("program_loss_usd", -200.0, -25.0),
         "train_map": raw.get("train_map") is True,
-        "roster": whole("roster", 0, 50),
     }
 
 

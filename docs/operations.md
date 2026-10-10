@@ -10,22 +10,35 @@ is [archive/docs/operations.md](../archive/docs/operations.md).
 
 ## The Probe roster (Oct 10, 2026): `feat/probe-roster`, off until set
 
-`dlane.roster` (swarm.json; a whole number 0-50; 0, the default, is no roster) caps how many families hold the Probe
-band's seats. Every Probe family holds a seat and is never hidden. The Candidates take the free seats in the order they
-became Candidates (`state.banded_at`), and the rest WAIT: `league/swarm/bands.py` `read` gives the live path no row for
-them, so they get no shadow or real instance and no band move until a seat frees (a seated family is retired, demoted or
-Sized). A Candidate that came back from Probe (a demotion: its band moved more than 300 s after `banded_at`) holds no
-seat and is shown as before. A Sized family neither holds a seat nor waits. Lowering the setting never hides a family
-that trades: it only stops new seats until the Probe count falls below it.
+`dlane.roster` in the state root's `swarm.json` (a whole number; above 50 reads as 50; absent is no roster) caps how many
+families hold the Probe band's seats (`league/swarm/bands.py` `seating`):
+
+- every Probe family holds a seat and is never hidden; a Sized family neither holds one nor waits;
+- a Candidate whose structure cannot trade real money (the money table's real types) or with no `state.banded_at` holds
+  no seat and is shown as before;
+- the other Candidates queue: the fresh ones first, in the order they became Candidates (`banded_at`), then the ones that
+  came back from Probe (a demotion), by the time they came back. The first `seats - Probe` hold a seat; the rest WAIT:
+  `bands.read` gives the live path no row for them, so they have no shadow or real instance and no money-table band move
+  (the gate can still send one back to the Gym on a negative nightly forward record). A demoted family therefore comes
+  back to Probe only into a free seat.
+- **Fails closed.** The setting is read from `swarm.json` alone (not the policy layer). A file that cannot be read or
+  parsed, or a `dlane.roster` that is not a whole number (a string, a bool, a fraction, a negative), keeps this process's
+  last good value; with none, no new seat is given (`roster()` says `closed`). No file or no key is no roster.
+
+Lowering the setting never hides a Probe or Sized family, but Candidates past the new count lose their seat: their shadow
+books wind down and those closes enter the forward record. A Sized family held back to Probe takes a seat the same way.
+Setting it to 0 (or removing the key) releases every waiting Candidate to the money table at its next families pass.
 
 - **Why:** Done needs >= 5 real closes from each of >= 2 programs, and every program at Probe shares one envelope and
-  8 slots. Without a roster those slots spread one or two closes over many programs, so the clause fails even for a
-  real edge. The operator's simulation (REDESIGN-1010, private) measured the effect before the setting was chosen.
-- **Read it:** `bands.roster(root)` -> {seats, probe, seated, waiting}, or None while it is off.
+  8 slots. Without a roster those slots spread one or two closes over many programs, so the clause fails even for a real
+  edge. The operator's pre-registered simulation (REDESIGN-1010, private) chose the value.
+- **Read it:** `bands.roster(root)` -> {seats, closed, probe, seated, waiting, seatless}, or None while it is off; the
+  `dlane` report's `roster`; pre-open check 6 lists the waiting Candidates as by design (not as missing rows).
 - **Set / roll back:** `python3 set_swarm.py dlane.roster=<n> --apply` (owner's machine); `dlane.roster=0` is the
   rollback. No deploy, no fingerprint move: the rule is swarm-side.
-- **Not handled:** a seated family that rarely signals keeps its seat (no idle eviction), and the oldest Candidate the
-  money table holds (unit fit, embargo) keeps its seat while younger ones wait.
+- **Not handled:** a seated family that rarely signals keeps its seat (no idle eviction); the oldest Candidate the money
+  table holds for a passing reason (unit fit, embargo) keeps its seat while younger ones wait; a credit-type Candidate
+  holds no seat, so if equity ever opens credit types it is outside the roster.
 
 ## The weekend fixes, integrated (Oct 10, 2026): `release/weekend-fixes`, deployed 22:57Z Oct 9
 

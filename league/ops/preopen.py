@@ -217,8 +217,12 @@ def collect(root: Path, base: Path, release: Path, gateway: Any, *, now: float, 
                 e["fits_probe"] = M.fits_probe(table, E, M.D(unit))
             evals.append(e)
         ids = {r["family"] for r in rows}
-        return {"observe": len(obs), "read": evals, "live_missing_from_read": [f["id"] for f in live_fams if f["id"] not in ids],
-                "sizing_equity": None if E is None else str(E)}
+        # THE PROBE ROSTER (Oct 10, 2026): a Candidate waiting for a seat has no row on purpose (`bands.seating`)
+        roster = B.roster(root) or {}
+        waiting = set(roster.get("waiting") or [])
+        return {"observe": len(obs), "read": evals,
+                "live_missing_from_read": [f["id"] for f in live_fams if f["id"] not in ids and f["id"] not in waiting],
+                "roster": roster or None, "sizing_equity": None if E is None else str(E)}
 
     def backup() -> dict:
         rows = guard.read(root / "ledger.sqlite", lambda db: guard.rows(
@@ -428,6 +432,10 @@ def check_bands(h: Mapping[str, Any]) -> Check:
             c.req(r.get("fits_probe") is True, text + f"; fits the Probe cap: {r.get('fits_probe')}")
         else:
             c.info(text)
+    roster = b.get("roster") or {}
+    if roster:
+        c.info(f"the Probe roster: {roster.get('seats')} seats{' (CLOSED: dlane.roster unreadable, no new seat)' if roster.get('closed') else ''}; "
+               f"seated {roster.get('seated')}, waiting for a seat (no band row, by design) {roster.get('waiting')}")
     missing = b.get("live_missing_from_read") or []
     c.req(not missing, "every Candidate/Probe/Sized family has a band row" if not missing
           else f"live-band families with no band row: {missing}")
