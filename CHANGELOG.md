@@ -33,29 +33,45 @@ gateway is `507b6118`, and the box's updater is on. What is built and not deploy
 
 - **Why** (PREREG-T, Claude's decision pre-registered privately on Oct 10, 2026 under the Probe roster R5 already live;
   the owner's goal as re-set on Oct 9, item 4: "Probe loss budget: $400 net in any rolling 20 sessions and $800 net in
-  total"): the measured gain in Done at the owner's ceiling. The operator's simulation (cross-fit, the House pool,
-  roster 5, arrivals; index beta minus option costs, not alpha): P(Done) at 12 weeks 4.6% -> 5.5% (paired +0.92
-  points, SE 0.15), at 24 weeks 11.6% -> 14.4%; P(Done | zero edge) 2.2% -> 2.7% at 12 weeks, 6.9% -> 9.0% at 24.
+  total"): the measured gain in Done at the owner's ceiling. The operator's simulation (three paired arms; cross-fit,
+  fixed 2-, 3- and 5-session holds standing in for the House's pool, roster 5, arrivals; index beta minus option costs,
+  not alpha): P(Done) at 12 weeks 4.6% -> 5.5% (paired +0.92 points, SE 0.15), at 24 weeks 11.6% -> 14.4%; P(Done |
+  zero edge) 2.2% -> 2.7% at 12 weeks, 6.9% -> 9.0% at 24.
 - **The rule:** `options_money.probe.loss_total_usd` "400" -> "800", the owner's ceiling (`league/constitution.py`);
-  `dlane.program_loss_usd` -200 -> -300 and `dlane.done_zero_edge_p` 0.024 -> 0.027 (`league/swarm/policy.json`; the
-  line's bound in `dlane.cfg` -300 to -25, tighten only; `dlane.ZERO_EDGE` names the figure's source). Unchanged: the
-  rolling $400 in any 20 sessions, the 10% cap, `open_per_family` 3, `max_open` 8, DM1, the kill switch, the daily stop
-  and the drawdown stop; open Probe risk stays at or under $400.
-- **Cost** (a loosening, both rows in the `dlane` report's `LOOSENED` header): P(the running Probe net below -$400
-  within 12 weeks) 17.8% -> 36.8%, below -$600 0.6% -> 4.4%; the 12-week net's 5th percentile -$396 -> -$679; P(the 60%
-  drawdown stop trips by 24 weeks) 21% -> 48%; mean 12-week net +$22 -> +$25, median -$327 -> -$231. One program may
-  spend $100 more of the shared total before it is retired.
+  `dlane.program_loss_usd` -200 -> -300 and `dlane.done_zero_edge_p` 0.024 -> 0.027 (`league/swarm/policy.json` and
+  `league/swarm/dlane.py` `DEFAULTS`; the line's bound in `dlane.cfg` is its default, -300 to -25, tighten only;
+  `dlane.ZERO_EDGES` labels 0.024 and 0.027, `dlane.ZERO_EDGE` is 0.027). Unchanged: the rolling $400 in any 20
+  sessions, the 10% cap, `open_per_family` 3, `max_open` 8, DM1, the kill switch, the daily stop and the drawdown stop;
+  open Probe risk stays at or under $400.
+- **Cost** (two loosenings, each a row in the `dlane` report's `LOOSENED` header): P(the agents' running real net, the
+  Probe/Sized route and the incubator together, below -$400 within 12 weeks) 17.8% -> 36.8%, below -$600 0.6% -> 4.4%;
+  the 12-week net's 5th percentile -$396 -> -$679; P(the 60% drawdown stop trips by 24 weeks) 21% -> 48%; mean 12-week
+  net +$22 -> +$25, median -$327 -> -$231. Most of it is the total's; the line's own step over the $800 total alone:
+  35.8% -> 36.8%, 4.1% -> 4.4%, 46% -> 48%, zero-edge Done 2.5% -> 2.7%, for P(Done) 5.3% -> 5.5% (+0.24 points, SE
+  0.12: 2.06 paired SE, just past PREREG-T's 2). One program may spend $100 more of the shared total before it is
+  retired.
+- **Roster 5 only:** the pair was measured at `dlane.roster` 5 alone (at no roster the operator's grid found the $800
+  total almost all cost). The roster moves by `swarm.json` with no deploy, so a roster rollback or another count needs
+  the pair's rollback too, or a new measurement first; the `dlane` report's new PT1 warns while they run apart
+  (`dlane_report.pt1_alarms`).
+- **The report:** P(Done | zero edge) keeps both figures labelled: 0.027 with PREREG-T's horizon, holds and source,
+  0.024 with A1.2's, and any other figure is "not one this code names" (it no longer calls 0.027 A1.2's pin).
 - **Identities:** money digest `0310779c` -> `fdf2ac7c`; constitution digest `ca89ff8a` -> `0adb4f0e`; the execution
   fingerprint (`31a7e921`), the Gym bundle and the gate contract (`397b22b772b3`) unchanged (nothing in `league/live/`
   or `league/gym/`). The standing grant re-ratifies on `fdf2ac7c` at the House's start on the owner's deploy (the
-  updater alone never does); no real entry until it has.
-- **Rollback:** `loss_total_usd` "400" and `dlane.program_loss_usd` -200 (with `done_zero_edge_p` 0.024), one owner
-  deploy: the money digest back to `0310779c`, re-ratified the same way; no fingerprint move.
+  updater alone never does); no real entry until it has. Known stale: `league/live/money.py`'s docstring still says
+  "$400 as set on Oct 9" for `probe.loss_total_usd` (the code reads the constitution); its words wait for the next
+  `league/live` release, since editing them alone would move the fingerprint.
+- **Rollback** (one owner deploy): `loss_total_usd` "400" (`PINNED_DIGEST` back to `ca89ff8a`);
+  `dlane.program_loss_usd` -200 and `dlane.done_zero_edge_p` 0.024 in `policy.json` and in `dlane.py` `DEFAULTS` (the
+  bound follows); `ZERO_EDGE = ZERO_EDGES[0.024]`; the tests that pin the $800 rules with them. The money digest goes
+  back to `0310779c`, re-ratified the same way; no fingerprint move.
 - **Proof.** `test_constitution`, `test_ld_release` (the two-envelope tests on the $800 in force and on L-D's $400,
   `AS_SET`), `test_standing_grant` (`TheProbeTotal800`: the owner's deploy re-ratifies, the updater never does, the
-  rollback is L-D's digest), `test_dlane`, `test_dlane_report` (the line at -300, the header's two new rows),
-  `test_dlane_ld_joins`, `test_fast_lane_v2`, `test_live_long_single`. Operator's page: **The Probe total at $800 and
-  the program line at -$300** at the top of `docs/operations.md`.
+  rollback is L-D's digest), `test_dlane` (the bound follows the default), `test_dlane_report` (the line at -300, the
+  header's two rows with their own costs, both zero-edge labels, PT1), `test_dlane_ld_joins`, `test_fast_lane_v2`,
+  `test_live_long_single`. Operator's page: **The Probe total at $800 and the program line at -$300** at the top of
+  `docs/operations.md`.
 
 ### 03:36Z Oct 10, 2026: the Probe roster (#523), House `20261010T033512Z-df7078e102a6`, main `9e2cf9fc`; `dlane.roster` 5 at 03:48Z
 

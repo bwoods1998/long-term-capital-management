@@ -145,6 +145,12 @@ class Settings(unittest.TestCase):
         self.assertEqual((line(-100), line(-200), line(-400), line(-10), line("x"), line(True)),
                          (-100.0, -200.0, -300.0, -25.0, -300.0, -300.0))
         self.assertEqual(dlane.ZERO_EDGE["value"], dlane.DEFAULTS["done_zero_edge_p"])
+        # The bound is the default (the review of Oct 10, 2026): THE ROLLBACK's -200 in DEFAULTS (beside policy.json's)
+        # takes the bound with it, so no swarm.json setting keeps the -$300 the rolled-back rules no longer allow.
+        from unittest import mock
+
+        with mock.patch.dict(dlane.DEFAULTS, {"program_loss_usd": -200}):
+            self.assertEqual((line(-300), line(-250), line(-150), line("x")), (-200.0, -200.0, -150.0, -200.0))
 
     def test_a_malformed_value_is_its_default_and_a_number_past_a_bound_is_the_bound(self):
         c = dlane.cfg({"dlane": {"mode": "on", "birth_share": "half", "max_share": 0.2, "min_per_pass": 1.5,

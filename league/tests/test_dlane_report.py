@@ -159,13 +159,17 @@ class TheDoneMeter(Fixture):
         self.assertIn("tuition-before-d1", families)
         self.assertEqual(out["rule"]["sha256"], "0d007696c9a6a1cbbd7d2cc345811359ab1cec389cf88f75ceff295bbbc48dca")
         # DONE-RULE-A1 A1.2: the figure under the budget in force, said with its source: 2.7% at 12 weeks since THE
-        # PROBE TOTAL AT $800 (PREREG-T, Oct 10, 2026; 2.4% at 3-session holds under L-D's $400 total before it).
+        # PROBE TOTAL AT $800 (PREREG-T, Oct 10, 2026, on fixed 2-, 3- and 5-session holds; 2.4% at 3-session holds
+        # under L-D's $400 total before it).
         zero = out["done"]["p_done_zero_edge"]
         self.assertEqual((zero["value"], zero["label"], zero["horizon"], zero["holds"]),
-                         (0.027, "P(Done | zero edge), simulation", "12 weeks", "the House pool's own holds"))
+                         (0.027, "P(Done | zero edge), simulation", "12 weeks",
+                          "fixed 2-, 3- and 5-session holds (the simulation's stand-in for the House's pool)"))
         self.assertIn("A1.2", zero["source"])
         self.assertIn("PREREG-T", zero["source"])
         self.assertIn("$800 net in total", zero["variant"])
+        self.assertTrue(zero["by"].startswith("PREREG-T"))
+        self.assertNotIn("note", zero, "the figure for the rules this code ships")
         self.assertEqual(out["rule"]["amendment_sha256"], dlane.DONE["amendment_sha256"])
         self.assertIsNone(out["done"]["all"]["latest"], "no reading before the 30th close")
         self.assertEqual(out["done"]["all"]["next_checkpoint"], 30)
@@ -675,10 +679,35 @@ class TheAmendment(Fixture):
                          "DM1's fallback sigma 2.0: (1.645 x 2)^2 = 10.8")
 
     def test_a_zero_edge_figure_the_amendment_did_not_pin_says_so(self):
+        """A figure this code does not name is a setting's; it attributes neither 0.024 nor 0.027 to the wrong rule (the
+        review of THE PROBE TOTAL AT $800, Oct 10, 2026: A1.2 pinned 0.024; PREREG-T measured 0.027)."""
         out = R.zero_edge({"dlane": {"mode": "gate", "done_zero_edge_p": 0.13}})
         self.assertEqual(out["value"], 0.13)
-        self.assertIn("not the pinned 0.027", out["note"])
+        self.assertIn("not one this code names", out["note"])
+        self.assertIn("0.024: DONE-RULE-A1 A1.2, under L-D's $400 total", out["note"])
+        self.assertIn("0.027: PREREG-T", out["note"])
+        self.assertNotIn("pinned 0.027", out["note"])
         self.assertNotIn("horizon", out)
+
+    def test_both_named_zero_edge_figures_keep_their_own_labels_and_the_rollback_reads_l_ds(self):
+        """0.024 is A1.2's figure with its own horizon, holds and source whatever the code ships; a setting that picks it
+        beside the $800 rules says so; THE ROLLBACK (`ZERO_EDGE = ZERO_EDGES[0.024]`, 0.024 in DEFAULTS and policy.json)
+        reports it as the pinned figure with no note."""
+        from unittest import mock
+
+        self.assertEqual(sorted(dlane.ZERO_EDGES), [0.024, 0.027])
+        self.assertTrue(all(z["value"] == v for v, z in dlane.ZERO_EDGES.items()))
+        self.assertIs(dlane.ZERO_EDGE, dlane.ZERO_EDGES[dlane.DEFAULTS["done_zero_edge_p"]])
+        ld = R.zero_edge({"dlane": {"mode": "gate", "done_zero_edge_p": 0.024}})
+        self.assertEqual((ld["value"], ld["holds"], ld["by"]),
+                         (0.024, "3-session holds", "DONE-RULE-A1 A1.2, under L-D's $400 total"))
+        self.assertIn("pinned by DONE-RULE-A1 A1.2", ld["source"])
+        self.assertIn("the rules this code ships carry 0.027", ld["note"])
+        with mock.patch.object(dlane, "ZERO_EDGE", dlane.ZERO_EDGES[0.024]), \
+                mock.patch.dict(dlane.DEFAULTS, {"done_zero_edge_p": 0.024}):
+            rolled = R.zero_edge({"dlane": {"mode": "gate"}})
+        self.assertEqual((rolled["value"], rolled["holds"]), (0.024, "3-session holds"))
+        self.assertNotIn("note", rolled)
 
 
 class TheProgramLossLine(Fixture):
@@ -776,6 +805,52 @@ class TheProgramLossLine(Fixture):
                          ["dir-a"])
         loose = self.report(settings={"dlane": {"mode": "gate", "program_loss_usd": -1000}})["program_loss"]
         self.assertEqual((loose["line_usd"], loose["due"]), (-300.0, []))
+
+
+class TheProbeTotalsRoster(Fixture):
+    """PT1 (THE PROBE TOTAL AT $800's review, Oct 10, 2026): PREREG-T measured the $800 total and the -$300 line at roster
+    5 alone, and the roster moves by a swarm.json setting with no deploy: the report warns while the pair runs beside any
+    other roster, and says nothing once the pair is rolled back."""
+
+    def roster(self, value) -> None:
+        (self.root / "swarm.json").write_text(json.dumps({"dlane": {"mode": "gate", "roster": value}}))
+
+    def ids(self, settings=GATE) -> list[str]:
+        return [a["id"] for a in self.report(settings=settings)["alarms"]]
+
+    def test_the_pair_beside_roster_5_raises_nothing(self):
+        self.roster(5)
+        self.assertNotIn("PT1", self.ids())
+
+    def test_the_pair_with_the_roster_off_or_moved_is_a_warning(self):
+        [pt1] = [a for a in self.report()["alarms"] if a["id"] == "PT1"]
+        self.assertEqual((pt1["level"], pt1["roster"], pt1["total_usd"], pt1["line_usd"]), ("warning", None, 800.0, -300.0))
+        self.assertIn("the roster is off", pt1["text"])
+        self.assertIn("roll the pair back to $400 and $-200 (an owner deploy)", pt1["text"])
+        self.roster(3)
+        [pt1] = [a for a in self.report()["alarms"] if a["id"] == "PT1"]
+        self.assertEqual(pt1["roster"], 3)
+        self.assertIn("the roster is 3 seats", pt1["text"])
+        self.roster(0)
+        self.assertIn("PT1", self.ids(), "0 is the roster's rollback: the pair needs its own")
+
+    def test_a_closed_roster_and_the_bare_function(self):
+        self.assertEqual(R.pt1_alarms({"seats": 5, "closed": False}, GATE), [])
+        [pt1] = R.pt1_alarms({"seats": 0, "closed": True}, GATE)
+        self.assertEqual(pt1["roster"], "closed")
+        self.assertIn("closed (no new seat)", pt1["text"])
+
+    def test_the_rolled_back_pair_raises_nothing_and_half_a_rollback_still_warns(self):
+        from unittest import mock
+
+        from league.constitution import CONSTITUTION
+
+        ld = {"dlane": {"mode": "gate", "program_loss_usd": -200}}
+        with mock.patch.dict(CONSTITUTION["options_money"]["probe"], {"loss_total_usd": "400"}):
+            self.assertEqual(R.pt1_alarms(None, ld), [], "L-D's $400 and -$200: what every roster was measured beside")
+            self.assertEqual(R.pt1_alarms({"seats": 3, "closed": False}, ld), [])
+            self.assertEqual([a["id"] for a in R.pt1_alarms(None, GATE)], ["PT1"], "the -$300 line alone is the pair's")
+        self.assertEqual([a["id"] for a in R.pt1_alarms(None, ld)], ["PT1"], "the $800 total alone is the pair's")
 
 
 class TheReportFixes(Fixture):
@@ -891,9 +966,18 @@ class ReportedOnly(unittest.TestCase):
         self.assertEqual((total["was"][:4], total["now"][:4]), ("$400", "$800"))
         self.assertEqual((line["was"][:5], line["now"][:5]), ("-$200", "-$300"))
         for figure in ("17.8% -> 36.8%", "0.6% -> 4.4%", "-$396 -> -$679", "21% -> 48%", "-$327 -> -$231",
-                       "4.6% -> 5.5%", "11.6% -> 14.4%", "2.2% -> 2.7%", "6.9% -> 9.0%", "not alpha"):
+                       "4.6% -> 5.5%", "11.6% -> 14.4%", "2.2% -> 2.7%", "6.9% -> 9.0%", "not alpha",
+                       "with the -$300 line below (the pair as adopted)", "35.8%, 4.1%, -$674 and 46%",
+                       "the agents' running real net", "roster 5 alone", "alarm PT1"):
             self.assertIn(figure, total["cost"])
+        # The review of Oct 10: PREREG-T measured the line's own step (the $800 total with -$200 beside it), so its row
+        # carries that cost and how narrowly it cleared the pre-registered preference, not "measured only together".
         self.assertIn("$100 more of the shared total", line["cost"])
+        for figure in ("35.8% -> 36.8%", "4.1% -> 4.4%", "46% -> 48%", "2.5% -> 2.7%", "5.3% -> 5.5%",
+                       "+0.24 points, SE 0.12", "2.06 SE", "roster 5 alone"):
+            self.assertIn(figure, line["cost"])
+        self.assertNotIn("only together", line["cost"])
+        self.assertNotIn("running Probe net", total["cost"] + line["cost"])
         self.assertEqual(CONSTITUTION["options_money"]["probe"]["loss_total_usd"], total["now"][1:4])
         self.assertEqual(dlane.cfg({"dlane": {"mode": "gate"}})["program_loss_usd"],
                          float(line["now"][:5].replace("$", "")))

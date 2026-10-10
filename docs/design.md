@@ -560,10 +560,10 @@ everything that shows it says so. The rules live in one module, `league/swarm/dl
   the one alarm counts only the looks the alpha line judged. A direction family never plays the learning game, even
   when it is born into a lineage that has an arm.
 - **Its money.** The same routes and the same walls as alpha: the incubator (a direction mark in place of the drift
-  screen), tuition, Probe and Sized under the constitution's table, whose Probe loss budget is release L-D's ($400 of
-  worst net stretch in any 20 sessions and $400 net in total; the `dlane` report reads both envelopes from it); K5 puts
-  the lane in shadow once its realized net is at or below -$600, until the operator clears it (a clear re-arms K5 at
-  -$600 below the net at clearing). The live side has no calls-only check of its own: a `long_single` family may still
+  screen), tuition, Probe and Sized under the constitution's table, whose Probe loss budget is $400 of worst net
+  stretch in any 20 sessions (release L-D's) and $800 net in total (since Oct 10, 2026, measured at roster 5; $400 at
+  L-D; the `dlane` report reads both envelopes from it); K5 puts the lane in shadow once its realized net is at or
+  below -$600, until the operator clears it (a clear re-arms K5 at -$600 below the net at clearing). The live side has no calls-only check of its own: a `long_single` family may still
   send a put there, so the lane's calls-only rule rests on the swarm's refusals until a `league/live` release (an
   evidence reset) adds the guard.
 - **What Done means here.** The goal's Done is read by a rule pinned before D-1 shipped (DONE-RULE, sha256
@@ -774,7 +774,7 @@ everything that shows it says so. The rules live in one module, `league/swarm/dl
 | Probe family total max loss | 15% of equity | 8-15% |
 | Probe floor for a small account | $0 since fast lane v2 (one contract at most $100 before it) | $0-100 |
 | Probe positions held or working at once, across the account | 8 since release L-D (the $400 envelope binds first: three 10% units, eight $50 ones); 3 before it (3 x 10% = 30% of E, inside the 35% daily stop) | 0-8 (0 stops Probe opens) |
-| The Probe loss budget: realized Probe losses since fast lane v2 (positions a Probe family opened; NET since release L-D, a Probe gain offsetting Probe losses and a Sized gain never; GROSS before it), plus the maximum loss of every real position held or working (Sized too) and of a lost open until it is found | since release L-D (the owner's goal of Oct 9, which allows $800 in total): $400 over any rolling 20 NY sessions AND $400 in total, an open must fit both (under NET the window's figure is its worst net stretch: a Probe gain offsets only the losses before it there); $400 in total before it. An open that would breach either is refused, exits go on | $0-400 over a window of 20-2000 sessions; $0-800 in total (0 stops Probe opens) |
+| The Probe loss budget: realized Probe losses since fast lane v2 (positions a Probe family opened; NET since release L-D, a Probe gain offsetting Probe losses and a Sized gain never; GROSS before it), plus the maximum loss of every real position held or working (Sized too) and of a lost open until it is found | since release L-D (the owner's goal of Oct 9, which allows $800 in total): $400 over any rolling 20 NY sessions AND $800 in total since Oct 10, 2026 (the Probe total at $800, measured at roster 5; $400 in total at L-D), an open must fit both (under NET the window's figure is its worst net stretch: a Probe gain offsets only the losses before it there); $400 in total before L-D. An open that would breach either is refused, exits go on | $0-400 over a window of 20-2000 sessions; $0-800 in total (0 stops Probe opens) |
 | D5, demotion by live results (code, pre-registered, chosen not measured) | a Probe goes exit-only, for good for its version, when its realized real P&L is below -3 x its mean maximum loss, or its live fills run below its nightly replay of the same days by more than 0.20 a dollar of maximum loss over 5 or more real trades. Since release L-D (`probe.demotion` "dm1") a Probe or Sized family's loss leg is DM1 instead: 10+ real trades whose returns on maximum loss sum below -1.645 x sigma x sqrt(n); the replay-gap leg is kept | "dm0" or "dm1" |
 | Sized: current-version forward record of at least 20 trades, mean > 0 and 80% lower bound > 0, plus at least 5 real Probe trades and 1 whole Probe session | quarter-Kelly on the lower bound; paper/shadow alone cannot satisfy the real minimum | eighth- to half-Kelly |
 | Sized max loss per structure | 10% of equity | 5-15% |

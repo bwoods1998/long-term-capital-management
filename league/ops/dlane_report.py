@@ -70,12 +70,13 @@ constants), read exactly as pinned:
   (and the research window has ended); a final reading is frozen (carried from the previous report as it was). A Done claim is a holding FINAL checkpoint (the meter's `holds`);
   A8 (an `info` alert) names one the first time a report sees it final.
 - BESIDE IT, ALWAYS: P(Done | zero edge) (`dlane.done_zero_edge_p`, labelled as a simulation; since DONE-RULE-A1 A1.2
-  the pinned figure with its horizon, holds, budget and source, `zero_edge`: 2.7% since THE PROBE TOTAL AT $800, Oct
-  10, 2026, 2.4% under L-D's $400 total before it); Net after costs (`net_after_costs`, from the close economics over
-  the same days); the same-risk buy-and-hold two ways (below); the world-conditional
-  false-positive rate beside the unconditional one for the screen that admitted each Candidate, Probe or Sized family
-  (`probes`, with each program's own realized Probe net and when DM1 can first fire, A1.3); every loosened rule with its
-  cost (`LOOSENED`); the contamination statement (`CONTAMINATION`); and `dlane.LABEL` on every direction figure.
+  the figure for the rules in force with its horizon, holds, budget and source, `zero_edge`: 2.7% since THE PROBE
+  TOTAL AT $800, Oct 10, 2026, PREREG-T's at roster 5; 2.4%, A1.2's pin, under L-D's $400 total before it; both kept
+  labelled in `dlane.ZERO_EDGES`); Net after costs (`net_after_costs`, from the close economics over the same days);
+  the same-risk buy-and-hold two ways (below); the world-conditional false-positive rate beside the unconditional one
+  for the screen that admitted each Candidate, Probe or Sized family (`probes`, with each program's own realized Probe
+  net and when DM1 can first fire, A1.3); every loosened rule with its cost (`LOOSENED`); the contamination statement
+  (`CONTAMINATION`); and `dlane.LABEL` on every direction figure.
 
 THE SAME-RISK BUY-AND-HOLD (the plan's section 6, item 3), per counted close, summed beside each meter and checkpoint.
 Both are labelled approximations from the `direction` job's daily closes (`direction-closes.json`):
@@ -109,13 +110,16 @@ THE REST OF THE REPORT:
 - `program_loss` (DONE-RULE-A1 A1.3): each program's own realized Probe net against the program loss line, the programs
   due and the ones this run retired.
 - `roster` (THE PROBE ROSTER, Oct 10, 2026; `league/swarm/bands.py` `roster`): the seats (`dlane.roster`), the Probe
-  families, the seated families and the Candidates waiting for a seat; None while the roster is off.
+  families, the seated families and the Candidates waiting for a seat; None while the roster is off. THE PROBE TOTAL AT
+  $800 (PREREG-T, Oct 10, 2026) and its -$300 program loss line were measured at roster 5 alone, and the roster is a
+  swarm.json switch (no deploy) while the pair is the owner's deploy: PT1 warns while the pair runs beside any other
+  roster (`pt1_alarms`).
 - `contamination.meters`: (a) the holdout's head-minus-tail Sharpe gap per lane (`fast_lane.pooled_contamination` over
   the fast lane report's looks), (b) the mean excess over the same-risk buy-and-hold in the known window (Validation)
   against the unknown one (live), per lane, (c) live against the holdout per band (the fast lane report's rows).
-- `alarms`: A1-A9, PL1 (the program loss line) and K5 (HARNESS section 5, as amended by the plan and the operator's
-  decisions; K5 also while `dlane.k5_clear` disarms it), each a House alert through `ctx.alert` (warning, or info for A8
-  and A9), never an action on money. The `stall` job reads the warnings and A8 from this file and mails them (its
+- `alarms`: A1-A9, PL1 (the program loss line), PT1 (the $800 total off roster 5) and K5 (HARNESS section 5, as amended
+  by the plan and the operator's decisions; K5 also while `dlane.k5_clear` disarms it), each a House alert through
+  `ctx.alert` (warning, or info for A8 and A9), never an action on money. The `stall` job reads the warnings and A8 from this file and mails them (its
   `dlane` and `done` causes).
 
 Standard library only, except the Probe envelope's figures (`fast_lane.probe_budget` and `real.probe_figures` read
@@ -163,6 +167,12 @@ A6_HOURS = 48.0
 A9_SESSIONS = 10
 #: The label of the zero-edge figure (decision 8).
 ZERO_EDGE_LABEL = "P(Done | zero edge), simulation"
+#: PT1 (THE PROBE TOTAL AT $800, Oct 10, 2026): PREREG-T measured the $800 total and the -$300 program loss line at this
+#: roster alone (at no roster the operator's grid found the $800 total almost all cost), and L-D's $400 total and -$200
+#: line are the rules it measured them against.
+PT1_ROSTER = 5
+PT1_TOTAL_USD = 400.0
+PT1_LINE_USD = -200.0
 
 #: THE CONTAMINATION STATEMENT (the plan's section 6, extended by the critic's N10 and the operator's decision 8: the
 #: 2017-19 census is spent for the direction lane as a whole). In every report, verbatim but for two figures of the
@@ -268,21 +278,33 @@ LOOSENED: tuple[dict[str, str], ...] = (
      "now": "sticky demotion when 10+ real trades sum below -1.645 sigma sqrt(n)",
      "cost": "a losing program trades longer: P(net <= -$360) 0.27 -> 0.30"},
     # THE PROBE TOTAL AT $800 (PREREG-T, Oct 10, 2026, under the Probe roster): the constitution's total and the program
-    # loss line beside it, measured together; the figures are the operator's pre-registered simulation's (no year named:
-    # the header carries none).
+    # loss line beside it. PREREG-T ran three arms ($400 and -$200; $800 and -$200; $800 and -$300), so each row has its
+    # own cost: the total's row the pair as adopted, with the total alone beside it, and the line's row its own step over
+    # the $800 total alone. The figures are the operator's pre-registered simulation's (no year named: the header
+    # carries none); P(net below -$400 / -$600) reads the agents' running real net, the Probe/Sized route and the
+    # incubator together, not the Probe alone.
     {"rule": "the Probe total (PREREG-T, Oct 10)", "was": "$400 net in total from inception (release L-D's setting)",
      "now": "$800 net in total, the owner's ceiling; the $400 in any 20 sessions, the 10% cap, 3 a family, 8 slots, "
-            "DM1 and the stops unchanged (rollback: options_money.probe.loss_total_usd 400, an owner deploy)",
-     "cost": "simulation (cross-fit, the House pool, roster 5, arrivals; index beta minus option costs, not alpha): "
-             "P(the running Probe net below -$400 within 12 weeks) 17.8% -> 36.8%, below -$600 0.6% -> 4.4%; the "
-             "12-week net's 5th percentile -$396 -> -$679; P(the 60% drawdown stop trips by 24 weeks) 21% -> 48%; mean "
-             "12-week net +$22 -> +$25, median -$327 -> -$231; for P(Done) 4.6% -> 5.5% at 12 weeks and 11.6% -> 14.4% "
-             "at 24, and P(Done | zero edge) 2.2% -> 2.7% and 6.9% -> 9.0%"},
+            "DM1 and the stops unchanged (rollback: options_money.probe.loss_total_usd 400 with the line below, an "
+            "owner deploy)",
+     "cost": "simulation (cross-fit, fixed 2-, 3- and 5-session holds standing in for the House's pool, roster 5, "
+             "arrivals; index beta minus option costs, not alpha), with the -$300 line below (the pair as adopted): "
+             "P(the agents' running real net below -$400 within 12 weeks) 17.8% -> 36.8%, below -$600 0.6% -> 4.4%; "
+             "the 12-week net's 5th percentile -$396 -> -$679; P(the 60% drawdown stop trips by 24 weeks) 21% -> 48%; "
+             "mean 12-week net +$22 -> +$25, median -$327 -> -$231; for P(Done) 4.6% -> 5.5% at 12 weeks and 11.6% -> "
+             "14.4% at 24, and P(Done | zero edge) 2.2% -> 2.7% and 6.9% -> 9.0%. The total alone (the -$200 line "
+             "kept): 35.8%, 4.1%, -$674 and 46%, for P(Done) 5.3% and 14.2%. Measured at roster 5 alone (at no roster "
+             "almost all cost): a roster rollback or another roster needs this rollback too, or a new measurement "
+             "first (alarm PT1)"},
     {"rule": "the program loss line (PREREG-T, Oct 10)", "was": "-$200 (DONE-RULE-A1 A1.3)",
      "now": "-$300 (dlane.program_loss_usd; rollback -200 with the $400 total, an owner deploy)",
      "cost": "one program may lose $300 of its own realized Probe net, not $200, before the dlane job retires it, "
              "so a bad program spends up to $100 more of the shared total (3/8 of the $800, where -$200 was half the "
-             "$400); measured only together with the $800 total (the row above, whose costs are the pair's)"},
+             "$400). Its own step, against the $800 total with the -$200 line (the same simulation, paired): P(the "
+             "agents' running real net below -$400 within 12 weeks) 35.8% -> 36.8%, below -$600 4.1% -> 4.4%; P(the "
+             "drawdown stop trips by 24 weeks) 46% -> 48%; P(Done | zero edge) 2.5% -> 2.7% at 12 weeks; for P(Done) "
+             "5.3% -> 5.5% at 12 weeks (paired +0.24 points, SE 0.12: past the pre-registered 2-paired-SE preference "
+             "for the total alone by a hair, 2.06 SE). Measured at roster 5 alone, as the row above"},
 )
 #: And what D-1 TIGHTENED (said beside the loosenings), with release L-D's rolling budget, a tightening of its NET.
 TIGHTENED: tuple[str, ...] = (
@@ -1883,20 +1905,48 @@ def pl1_alarms(losses: Mapping[str, Any] | None) -> list[dict[str, Any]]:
                      + ". The dlane job retires them swarm-side; their real positions exit by the House's rules"}]
 
 
+def pt1_alarms(roster: Mapping[str, Any] | None, settings: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+    """PT1 (THE PROBE TOTAL AT $800, PREREG-T, Oct 10, 2026; its review): a warning while the constitution's Probe total
+    is above L-D's $400, or the program loss line below L-D's -$200, and the roster (`roster_now`) does not seat
+    `PT1_ROSTER`: off, closed or another count. PREREG-T measured the pair at roster 5 alone, and the roster moves by a
+    swarm.json setting with no deploy while the pair needs the owner's: the alarm makes them coming apart visible. The
+    way out is the pair's rollback (an owner deploy), the roster put back, or a new measurement. Never an action."""
+    from ..live import money as M
+    from ..swarm import dlane
+
+    total = float(M.Table.from_constitution().probe_loss_total)
+    line = dlane.cfg(settings)["program_loss_usd"]
+    seats = None if not roster else ("closed" if roster.get("closed") else roster.get("seats"))
+    if (total <= PT1_TOTAL_USD and line >= PT1_LINE_USD) or seats == PT1_ROSTER:
+        return []
+    where = "off" if seats is None else "closed (no new seat)" if seats == "closed" else f"{seats} seats"
+    return [{"id": "PT1", "level": "warning", "total_usd": total, "line_usd": line, "roster": seats,
+             "text": f"PT1: the Probe total ${total:,.0f} and the program loss line ${line:,.0f} were measured at roster "
+                     f"{PT1_ROSTER} alone (PREREG-T), and the roster is {where}: roll the pair back to "
+                     f"${PT1_TOTAL_USD:,.0f} and ${PT1_LINE_USD:,.0f} (an owner deploy), put dlane.roster back to "
+                     f"{PT1_ROSTER}, or measure the pair at this roster first"}]
+
+
 def zero_edge(settings: Mapping[str, Any] | None) -> dict[str, Any]:
     """P(Done | zero edge) beside the meter (decision 8; DONE-RULE-A1 A1.2, the readiness audit's M10): the setting's
-    figure, and when it is the pinned one (`dlane.ZERO_EDGE`, 2.7% since Oct 10, 2026) what it is: its horizon, holds,
-    the budget variant and its source. Another figure is a setting's and says so: the claim states the figure for the
-    rules in force."""
+    figure, and when it is one this code names (`dlane.ZERO_EDGES`: 0.024, A1.2's pin under L-D's $400 total; 0.027,
+    PREREG-T's under the $800 total, since Oct 10, 2026) what it is: its horizon, holds, the budget variant, its source
+    and who named it. A named figure that is not the one for the rules this code ships (`dlane.ZERO_EDGE`) says so;
+    another figure is a setting's and says so: the claim states the figure for the rules in force."""
     from ..swarm import dlane
 
     value = dlane.cfg(settings)["done_zero_edge_p"]
     out: dict[str, Any] = {"value": value, "label": ZERO_EDGE_LABEL}
-    if abs(value - float(dlane.ZERO_EDGE["value"])) < 1e-9:
-        out.update({k: v for k, v in dlane.ZERO_EDGE.items() if k != "value"})
+    named = next((z for v, z in dlane.ZERO_EDGES.items() if abs(value - float(v)) < 1e-9), None)
+    if named is not None:
+        out.update({k: v for k, v in named.items() if k != "value"})
+        if named is not dlane.ZERO_EDGE:
+            out["note"] = (f"a setting chose {named['value']} ({named['by']}); the rules this code ships carry "
+                           f"{dlane.ZERO_EDGE['value']} ({dlane.ZERO_EDGE['by']})")
     else:
-        out["note"] = (f"a setting's figure (dlane.done_zero_edge_p), not the pinned {dlane.ZERO_EDGE['value']} of "
-                       "DONE-RULE-A1 A1.2: its horizon and budget are not said here")
+        out["note"] = ("a setting's figure (dlane.done_zero_edge_p), not one this code names ("
+                       + "; ".join(f"{z['value']}: {z['by']}" for z in dlane.ZERO_EDGES.values())
+                       + "): its horizon and budget are not said here")
     return out
 
 
@@ -2004,7 +2054,7 @@ def report(root: str | Path, *, settings: Mapping[str, Any] | None = None, now: 
             "k5": dict(k5),
         }
         out["alarms"] = alarms(store, settings, lanes, book, every, envelope, done, k5, unit, previous, now=now,
-                               today=today, losses=losses)
+                               today=today, losses=losses) + pt1_alarms(out["roster"], settings)
     finally:
         store.close()
     return out
@@ -2188,4 +2238,4 @@ __all__ = ["run", "report", "FILE", "CONTAMINATION", "LOOSENED", "TIGHTENED", "c
            "buy_and_hold", "entry_delta", "funnel", "probes", "probe_envelope", "alarms", "fee_corrections", "read_book",
            "version_of", "inception", "Lanes", "ZERO_EDGE_LABEL", "trade_screens", "ALPHA_FP", "finality",
            "research_window", "Research247", "operator_edits", "program_losses", "dm1_reach", "net_after_costs",
-           "zero_edge", "retire_due", "GAP_MEASURE", "NEWS_CAUSES", "E0_BASIS", "pl1_alarms", "lane_off"]
+           "zero_edge", "retire_due", "GAP_MEASURE", "NEWS_CAUSES", "E0_BASIS", "pl1_alarms", "pt1_alarms", "lane_off"]

@@ -10,54 +10,71 @@ is [archive/docs/operations.md](../archive/docs/operations.md).
 
 ## The Probe total at $800 and the program line at -$300 (Oct 10, 2026)
 
-Built on `feat/probe-total-800`, not deployed: one owner deploy (`league/constitution.py` and
-`league/swarm/policy.json`). Claude's decision, pre-registered privately as PREREG-T on Oct 10 under the Probe roster R5
-already live, inside the owner's goal as he re-set it on Oct 9, item 4: "Probe loss budget: $400 net in any rolling 20
-sessions and $800 net in total".
+Built on `feat/probe-total-800`, not deployed: one owner deploy (`league/constitution.py`, `league/swarm/policy.json`
+and `league/swarm/dlane.py`, whose line bound is the -300 default). Claude's decision, pre-registered privately as
+PREREG-T on Oct 10 under the Probe roster R5 already live, inside the owner's goal as he re-set it on Oct 9, item 4:
+"Probe loss budget: $400 net in any rolling 20 sessions and $800 net in total".
 
 - **The rule.** `options_money.probe.loss_total_usd` "400" -> "800", the owner's ceiling (a loosening), and the program
-  loss line (DONE-RULE-A1 A1.3) `dlane.program_loss_usd` -200 -> -300, its bound in `dlane.cfg` -300 to -25 (a setting
-  can still only tighten it). The Done meter's zero-edge figure moves with them: `dlane.done_zero_edge_p` 0.024 -> 0.027
-  (`dlane.ZERO_EDGE` says what it is). Unchanged: the rolling $400 in any 20 sessions, the 10% cap, `open_per_family` 3,
-  `max_open` 8, DM1, the kill switch, the daily stop and the drawdown stop. Open Probe risk stays at or under $400 (the
-  window's envelope alone caps it), so `money.probe_room` is unchanged. A Probe open must fit the window's $400 and the
-  total's $800; a bad 20-session stretch that ages out of the window now leaves room in the total for a second before
-  any Probe gain refills it.
-- **Measured** (the operator's simulation: cross-fit, the House pool, roster 5, arrivals; what it trades is index beta
-  minus option costs, not alpha):
+  loss line (DONE-RULE-A1 A1.3) `dlane.program_loss_usd` -200 -> -300 (a second loosening), its bound in `dlane.cfg`
+  its default, -300 to -25 (a setting can still only tighten it). The Done meter's zero-edge figure moves with them:
+  `dlane.done_zero_edge_p` 0.024 -> 0.027 (`dlane.ZERO_EDGES` labels both, `dlane.ZERO_EDGE` is the one in force).
+  Unchanged: the rolling $400 in any 20 sessions, the 10% cap, `open_per_family` 3, `max_open` 8, DM1, the kill switch,
+  the daily stop and the drawdown stop. Open Probe risk stays at or under $400 (the window's envelope alone caps it), so
+  `money.probe_room` is unchanged. A Probe open must fit the window's $400 and the total's $800; a bad 20-session
+  stretch that ages out of the window now leaves room in the total for a second before any Probe gain refills it.
+- **It holds at roster 5 only.** PREREG-T measured the pair at `dlane.roster` 5 and nowhere else. At no roster the
+  operator's grid found the $800 total almost all cost (+0.11 points of Done for +37 points of the chance of a net below
+  -$400), and the House's population ceiling makes no roster behave like a roster near 24, where no one measured the
+  pair either. The roster moves by a `swarm.json` setting with no deploy; the pair needs the owner's deploy. So a roster
+  rollback (`dlane.roster` 0) or any other count needs the pair's rollback too (below), or a new measurement first.
+  Until then the `dlane` report raises **PT1** on every run with the lane on (a warning, so the `stall` job's `dlane`
+  cause mails it). The 0.027 zero-edge figure is roster 5's as well.
+- **Measured** (the operator's simulation, three paired arms: cross-fit, fixed 2-, 3- and 5-session holds standing in
+  for the House's pool, roster 5, arrivals; what it trades is index beta minus option costs, not alpha). "The running
+  real net" is the agents' Probe/Sized route and the incubator together, not the Probe alone:
 
-  | | $400 total, -$200 line | $800 total, -$300 line |
-  |---|---|---|
-  | P(Done) at 12 weeks | 4.6% | 5.5% (paired +0.92 points, SE 0.15) |
-  | P(Done) at 24 weeks | 11.6% | 14.4% |
-  | P(Done \| zero edge) at 12 / 24 weeks | 2.2% / 6.9% | 2.7% / 9.0% |
-  | P(the running Probe net below -$400 within 12 weeks) | 17.8% | 36.8% |
-  | P(the running Probe net below -$600 within 12 weeks) | 0.6% | 4.4% |
-  | 12-week net: 5th percentile | -$396 | -$679 |
-  | 12-week net: mean / median | +$22 / -$327 | +$25 / -$231 |
-  | P(the 60% drawdown stop trips by 24 weeks) | 21% | 48% |
+  | | $400 total, -$200 line | $800 total, -$200 line | $800 total, -$300 line (adopted) |
+  |---|---|---|---|
+  | P(Done) at 12 weeks | 4.6% | 5.3% (paired +0.68 points, SE 0.11) | 5.5% (+0.92, SE 0.15; +0.24 over the middle, SE 0.12) |
+  | P(Done) at 24 weeks | 11.6% | 14.2% | 14.4% |
+  | P(Done \| zero edge) at 12 / 24 weeks | 2.2% / 6.9% | 2.5% / 8.3% | 2.7% / 9.0% |
+  | P(the running real net below -$400 within 12 weeks) | 17.8% | 35.8% | 36.8% |
+  | P(the running real net below -$600 within 12 weeks) | 0.6% | 4.1% | 4.4% |
+  | 12-week net: 5th percentile | -$396 | -$674 | -$679 |
+  | 12-week net: mean / median | +$22 / -$327 | +$28 / -$230 | +$25 / -$231 |
+  | P(the 60% drawdown stop trips by 24 weeks) | 21% | 46% | 48% |
 
-- **The cost:** about one point of 12-week Done and three of 24-week Done, bought with twice the chance of a net Probe
-  loss past $400 within 12 weeks, seven times the chance past $600, and more than twice the chance that the account's
-  drawdown stop trips by 24 weeks. Zero-edge Done rises with it: about half of the 12-week Done (2.7% of 5.5%) and over
-  60% of the 24-week Done (9.0% of 14.4%) would come with no edge at all. A program may lose $300 of its own realized
-  Probe net before the `dlane` job retires it, $100 more of the shared total than before.
-  The `dlane` report lists both rows among its loosened rules with these costs (`LOOSENED`).
+  PREREG-T's rule preferred the $800 total alone unless the -$300 line beat it by more than 2 paired SE; it did by a
+  hair (2.06 SE).
+- **The cost:** about one point of 12-week Done and three of 24-week Done, bought with twice the chance of a running
+  real net past -$400 within 12 weeks, about seven times the chance past -$600, and more than twice the chance that the
+  account's drawdown stop trips by 24 weeks. Most of it is the total's: the line's own step adds a point to the -$400
+  figure, 0.3 to the -$600 one and 1.6 to the drawdown stop's for its 0.24 points of Done. A Done with no edge at all
+  becomes more likely too: 2.7% within 12 weeks and 9.0% within 24 (2.2% and 6.9% before), against 5.5% and 14.4% as
+  traded. A program may lose $300 of its own realized Probe net before the `dlane` job retires it, $100 more of the
+  shared total than before. The `dlane` report lists both rows among its loosened rules with these costs (`LOOSENED`).
 - **Identities.** Money digest `0310779c` -> `fdf2ac7c`; constitution digest `ca89ff8a` -> `0adb4f0e`. Nothing under
   `league/live/` or `league/gym/` changes: the execution fingerprint (`31a7e921`), the Gym bundle and the gate contract
-  (`397b22b772b3`) do not move, so no evidence reset and no band lost.
-- **The owner's deploy.** (1) CI green on the exact head; no order in flight; never 12:55-20:05Z on a trading day. (2)
-  `floor_box.py deploy` from `~/Work/ltcm-deploy`. (3) At the House's start the `grant` job re-ratifies on `fdf2ac7c` by
-  itself (receipt `ratified`, trigger `digest`; `python3 scripts/live_trading.py --ratify` on the box if it refuses);
-  until then no real entry. (4) Verify: `fast-lane-report.json` `probe_budget` reads `budget_usd` "400" and
-  `total_budget_usd` "800"; the next `dlane-report.json` reads `probe_envelope.total_budget_usd` 800,
-  `program_loss.line_usd` -300 (a `dlane.program_loss_usd` in the state root's `swarm.json` overrides it, held to -300
-  to -25) and `done.p_done_zero_edge.value` 0.027; the House's `research_evaluator` keeps `31a7e921`.
-- **Roll back.** `loss_total_usd` "400" (re-pin `PINNED_DIGEST` to `ca89ff8a...`) and `dlane.program_loss_usd` -200 in
-  `league/swarm/policy.json`, with `dlane.done_zero_edge_p` 0.024 so the zero-edge figure matches the rules again (the
-  report then calls it a setting's figure, not the pinned one): one owner deploy; the money digest goes back to
-  `0310779c` and the grant re-ratifies at the House's start; no fingerprint move. A tighter line alone needs no deploy:
-  `dlane.program_loss_usd` -200 in the state root's `swarm.json` (a setting may only tighten it).
+  (`397b22b772b3`) do not move, so no evidence reset and no band lost. So `league/live/money.py`'s docstring still
+  reads "$400 as set on Oct 9" for `probe.loss_total_usd`: the code reads the constitution's figure, and the words wait
+  for the next `league/live` release (editing them alone would move the fingerprint and reset the evidence).
+- **The owner's deploy.** (1) CI green on the exact head; no order in flight; never 12:55-20:05Z on a trading day;
+  `dlane.roster` 5 on the box. (2) `floor_box.py deploy` from `~/Work/ltcm-deploy`. (3) At the House's start the `grant`
+  job re-ratifies on `fdf2ac7c` by itself (receipt `ratified`, trigger `digest`; `python3 scripts/live_trading.py
+  --ratify` on the box if it refuses); until then no real entry. (4) Verify: `fast-lane-report.json` `probe_budget`
+  reads `budget_usd` "400" and `total_budget_usd` "800"; the next `dlane-report.json` reads
+  `probe_envelope.total_budget_usd` 800, `program_loss.line_usd` -300 (a `dlane.program_loss_usd` in the state root's
+  `swarm.json` overrides it, held to -300 to -25), `done.p_done_zero_edge.value` 0.027 with no `note`, `roster.seats` 5
+  and no PT1; the House's `research_evaluator` keeps `31a7e921`.
+- **Roll back** (all of it in one owner deploy): `league/constitution.py` `loss_total_usd` "400" (re-pin
+  `PINNED_DIGEST` to `ca89ff8a...`); `league/swarm/policy.json` `dlane.program_loss_usd` -200 and
+  `dlane.done_zero_edge_p` 0.024; `league/swarm/dlane.py` the same two in `DEFAULTS` (the line's bound is its default,
+  so -200 is the bound again and a setting may again only tighten from it) and `ZERO_EDGE = ZERO_EDGES[0.024]` (the
+  report then shows A1.2's figure with its own horizon, holds and source). The money digest goes back to `0310779c` and
+  the grant re-ratifies at the House's start; no fingerprint move; PT1 goes quiet. The tests that pin the $800 rules
+  (the CHANGELOG entry's Proof list) move in the same commit. A tighter line alone needs no deploy:
+  `dlane.program_loss_usd` -200 in the state root's `swarm.json`.
 
 ## The Probe roster (Oct 10, 2026): deployed 03:36Z, `dlane.roster` 5 since 03:48Z
 
@@ -86,7 +103,9 @@ Setting it to 0 (or removing the key) releases every waiting Candidate to the mo
 - **Read it:** `bands.roster(root)` -> {seats, closed, probe, seated, waiting, seatless}, or None while it is off; the
   `dlane` report's `roster`; pre-open check 6 lists the waiting Candidates as by design (not as missing rows).
 - **Set / roll back:** `python3 set_swarm.py dlane.roster=<n> --apply` (owner's machine); `dlane.roster=0` is the
-  rollback. No deploy, no fingerprint move: the rule is swarm-side.
+  rollback. No deploy, no fingerprint move: the rule is swarm-side. Once the $800 Probe total and the -$300 line are
+  deployed (the section above), they were measured at 5 seats alone: rolling the roster back or setting another count
+  needs their rollback too (an owner deploy), or a new measurement first; the `dlane` report raises PT1 until then.
 - **Not handled:** a seated family that rarely signals keeps its seat (no idle eviction); the oldest Candidate the money
   table holds for a passing reason (unit fit, embargo) keeps its seat while younger ones wait; a credit-type Candidate
   holds no seat, so if equity ever opens credit types it is outside the roster.
@@ -271,13 +290,15 @@ fingerprint move would retire every Probe program for good).
   market data, TypeSafe), and the economics Net beside it. The swarm's booked spend (`costs`) is "comparison only".
 - **A1.2:** P(Done | zero edge) is 0.024 with its horizon (12 weeks), holds (3 sessions), budget variant and source
   (`dlane.ZERO_EDGE`); `policy.json` `dlane.done_zero_edge_p` 0.13 -> 0.024. Any other setting says it is not pinned.
-- **A1.3, the program loss line** (`dlane.program_loss_usd`, -200 in `policy.json`; a setting can only tighten it, to
-  -25): each Probe row carries its program's own realized Probe net and closes, its share of the $400 total, and when DM1
-  can first fire (`dm1`: n > (1.645 sigma / r_floor)^2, 17 at the live sigma 2.46). The `dlane` job retires, swarm-side,
-  any program (every lane: the pinned rule names one program) whose realized Probe net is at or below the line, every
-  Probe close priced: `SwarmStore.retire`, a public `swarm.retired` cause in words, a notebook line and a private
-  `swarm.dlane` event with the figures. The live path then puts its real instance on exits only, so its positions close
-  by the House's rules. Alarm PL1 says it; the report's `program_loss.retired` names it.
+  (0.027 since the Probe total at $800, Oct 10, at the top; 0.024 keeps its own label in `dlane.ZERO_EDGES`.)
+- **A1.3, the program loss line** (`dlane.program_loss_usd`, -200 in `policy.json`, -300 since Oct 10; a setting can
+  only tighten it, to -25): each Probe row carries its program's own realized Probe net and closes, its share of the
+  Probe total ($400 then, $800 since Oct 10), and when DM1 can first fire (`dm1`: n > (1.645 sigma / r_floor)^2, 17 at
+  the live sigma 2.46). The `dlane` job retires, swarm-side, any program (every lane: the pinned rule names one program)
+  whose realized Probe net is at or below the line, every Probe close priced: `SwarmStore.retire`, a public
+  `swarm.retired` cause in words, a notebook line and a private `swarm.dlane` event with the figures. The live path then
+  puts its real instance on exits only, so its positions close by the House's rules. Alarm PL1 says it; the report's
+  `program_loss.retired` names it.
 - **m11:** a same-risk buy-and-hold uses the exact entry and exit days' closes or says why (never an older close);
   the `direction` job keeps today's daily bar only once the session has closed (15 minutes after); the funnel counts
   real opens by route; E0's basis says it is the first reading the report saw, not release L-D's deploy reading.
@@ -524,7 +545,7 @@ carries it: main `40c39435` merged in). Like D-1 it is swarm-side and ops only. 
   that result is a post-hoc loosening of that ceiling. The lane's rate stays under the owner's 15%.
 - Discrimination is weak: D2 passes mostly programs whose two screen windows rose.
 - The Probe loss budget, not the screen, bounds the money: release L-D's $400 of worst net stretch in any 20 sessions
-  and $400 net in total (`options_money.probe`).
+  and a net total, $400 at L-D and $800 since Oct 10 (`options_money.probe`).
 - Contamination: every author knows whether those windows rose. The rate is a property of the procedure across
   historical worlds, not a guarantee in this one.
 
@@ -741,9 +762,9 @@ screen, the alarm and K5 can only be TIGHTENED by a setting.
 | `dlane.screens.D2` | receipt_sha256 `c3605947...`, c 1.0, fp_lane_mixed 0.1037, fp_lane_2224 0.1239, fp_lane_ci_mixed [0.0957, 0.1116], fp_lane_cluster_mixed [0.079, 0.1276], power10 0.1995 (D-1b) | read from the repository's policy.json only, never swarm.json; CI holds the sha to `docs/benchmarks/direction_screen_2.json` and every figure to the receipt's |
 | `dlane.val_tries`, `looks_per_lineage` | 1, 1 (D-1b) | fixed at 1: one Validation try and one holdout look per direction lineage |
 | `dlane.alarm_min_looks`, `alarm_pass_share` | 10, 0.60 | >= 10; <= 0.60 (tighten only) |
-| `dlane.done_zero_edge_p` | 0.027 (the Probe total at $800, Oct 10; 0.024 from DONE-RULE-A1 A1.2; 0.13 before) | reported beside every Done figure: "P(Done \| zero edge), simulation"; at `dlane.ZERO_EDGE`'s value it carries its horizon, holds, budget and source |
+| `dlane.done_zero_edge_p` | 0.027 (the Probe total at $800, Oct 10, at roster 5; 0.024 from DONE-RULE-A1 A1.2; 0.13 before) | reported beside every Done figure: "P(Done \| zero edge), simulation"; at a figure `dlane.ZERO_EDGES` names (0.024, A1.2's; 0.027, PREREG-T's) it carries that figure's horizon, holds, budget, source and who named it, with a `note` when it is not `dlane.ZERO_EDGE` (the rules this code ships); any other figure says it is a setting's |
 | `dlane.k5_net_usd`, `k5_clear` | -600, false | -600 to -50 (tighten only); `k5_clear` true clears a set K5 and DISARMS K5 while it stays true (a loosening: the report warns every run; take it out once the clear is recorded) |
-| `dlane.program_loss_usd` | -300 (the Probe total at $800, Oct 10; -200 before) | -300 to -25 (tighten only): DONE-RULE-A1 A1.3, the `dlane` job retires a program whose own realized Probe net is at or below it |
+| `dlane.program_loss_usd` | -300 (the Probe total at $800, Oct 10, at roster 5; -200 before) | its code default (`DEFAULTS`, -300) to -25 (tighten only): DONE-RULE-A1 A1.3, the `dlane` job retires a program whose own realized Probe net is at or below it |
 | `dlane.train_map` | `true` (Oct 9, `feat/dlane-trainmap`) | true shows **The Train map** to the architect and direction researchers while the lane is on; false (swarm.json) hides it at once; the code's default and any value but `true` are false |
 
 **Every loosened rule, with its cost** (the operator's measurements: MONEY's simulation and the critic's; the header of
@@ -764,8 +785,8 @@ every `dlane` report, `dlane_report.LOOSENED`):
 | The birth quota | no lane | direction about half while behind, at most 60% | alpha births fall from about 73 to about 36 a day mid-way through the game's T0 experiment; the researcher's ROLE prompt (a shared prefix) changes for alpha researchers too, so "alpha golden" holds for code paths only (the game's report says so while the lane is on) |
 | The unit | MONEY's pre-registered $75 lane cap | 10% of equity (E5), as the live side | Probe-stage Done averaged over holds 6.3% against 7.8%; P(net <= -$360 in 8 weeks) 0.35 against 0.27 |
 | K5's clear | no K5 before D-1 | `dlane.k5_clear` true clears a set K5 at once and disarms K5 while it stays true; the job's next run records the clear and re-arms K5 at -$600 below the net then (deleting the kv clears the same way) | while `k5_clear` stays true the lane can lose past any line with no K5 (the report warns every run); after a clear K5 measures a further -$600 from the net at clearing, not from inception |
-| The Probe total (PREREG-T, Oct 10) | $400 net in total (release L-D's setting) | $800, the owner's ceiling (the window's $400 and every other money row unchanged) | P(the running Probe net below -$400 within 12 weeks) 17.8% -> 36.8%, below -$600 0.6% -> 4.4%; 12-week 5th percentile -$396 -> -$679; P(drawdown stop by 24 weeks) 21% -> 48%; for P(Done) 4.6% -> 5.5% (12 weeks) and 11.6% -> 14.4% (24); zero-edge Done 2.2% -> 2.7% and 6.9% -> 9.0% (the section at the top) |
-| The program loss line (PREREG-T, Oct 10) | -$200 | -$300 | one program may spend $100 more of the shared total before it is retired; measured only together with the $800 total (the row above) |
+| The Probe total (PREREG-T, Oct 10) | $400 net in total (release L-D's setting) | $800, the owner's ceiling (the window's $400 and every other money row unchanged) | with the -$300 line below (the pair as adopted): P(the agents' running real net, Probe/Sized and incubator, below -$400 within 12 weeks) 17.8% -> 36.8%, below -$600 0.6% -> 4.4%; 12-week 5th percentile -$396 -> -$679; P(drawdown stop by 24 weeks) 21% -> 48%; for P(Done) 4.6% -> 5.5% (12 weeks) and 11.6% -> 14.4% (24); zero-edge Done 2.2% -> 2.7% and 6.9% -> 9.0%. The total alone: 35.8%, 4.1%, -$674, 46%; P(Done) 5.3% and 14.2%. Measured at roster 5 alone: a roster rollback or another count needs this rollback too, or a new measurement (PT1; the section at the top) |
+| The program loss line (PREREG-T, Oct 10) | -$200 | -$300 | one program may spend $100 more of the shared total before it is retired; its own step over the $800 total alone (paired): the running real net below -$400 within 12 weeks 35.8% -> 36.8%, below -$600 4.1% -> 4.4%; the drawdown stop by 24 weeks 46% -> 48%; zero-edge Done 2.5% -> 2.7% (12 weeks); for P(Done) 5.3% -> 5.5% (12 weeks; +0.24 points, SE 0.12: past PREREG-T's 2-paired-SE preference for the total alone by a hair, 2.06 SE). Roster 5 alone, as the row above |
 
 Tightened: K5 (above); the screen, the alarm and K5's line can only tighten by a setting (the one setting that loosens
 K5 is `k5_clear`, in the table above); D2 refused without a pinned receipt; E5 prices one lot at today's prices before
@@ -834,6 +855,7 @@ PL1 a House warning, the receipt carrying the figures). The fast lane's report r
 | A7 | more than half of the direction versions that clear E1, E3 and E4 fail E5 | report today's cap and the median failing one lot |
 | A8 | a FINAL checkpoint holds (`info`, once a checkpoint; since the weekend fixes only on a final reading, naming items 3, 4 and 7) | read it with the buy-and-hold, P(Done \| zero edge), Net after costs and the contamination meters; it stops nothing. The `stall` job mails the final holding checkpoint at once (its `done` cause, which stands until a notice is sent) |
 | PL1 | a program's own realized Probe net is at or below the program loss line (`dlane.program_loss_usd`, -$300 since Oct 10; -$200 before; DONE-RULE-A1 A1.3) | none: the job retires it swarm-side the same run (its real positions exit by the House's rules); the report's `program_loss.retired` names it |
+| PT1 | the constitution's Probe total is above $400 or the program loss line below -$200 (the $800 total and the -$300 line, Oct 10), and `dlane.roster` is not 5 (off, closed or another count) | the pair was measured at roster 5 alone: roll it back (an owner deploy: the $800 section at the top), put `dlane.roster` back to 5, or measure the pair at this roster first |
 | A9 | every live direction program opened nothing for 10 sessions (`info`) | none: the lane is flat by design |
 | K5 | `dlane_k5` is set | the lane is in shadow until the operator clears it (**K5**, below) |
 | K5 (disarmed) | `dlane.k5_clear` is true | no loss trips K5 while it is: once the report shows the clear recorded (`k5.last_clear`, the new `k5.line`), take `k5_clear` out of `swarm.json` |
@@ -2093,7 +2115,7 @@ and `data/nightly.stop`), all read-only, and names a stall by its cause:
 | `paused` | a maintenance pause (`<state>/PAUSE`) or a stopped swarm (`<state>/swarm.stop`) has stood 6 h or more (by the file's time). While either stands, `births`, `gym_runs`, `validations` and `braked` are not raised: a pause stops research by design | "lift the maintenance pause once its work is done (`scripts/floor_box.py maintenance off`)", or "remove state/swarm.stop" |
 | `grant_refused` | the standing grant refused to re-ratify since the `grant` job's last `ok` run (its receipts: `standing grant refused`; a failure to read the account is no refusal) | "ratify the grant by hand on the box (`python3 scripts/live_trading.py --ratify`)", with the grant's own reason |
 | `kill_on` | the gateway's kill switch is on (`/v1/health` `kill_switch`; since its latest `kill` in `admin_log`): no real order, no Claude call, no merge. An unreadable health is no cause | "lift the gateway's kill switch once its cause is fixed (`python3 scripts/gateway_admin.py unkill`, your admin token)" |
-| `dlane` (weekend fixes) | `<state>/dlane-report.json` carries a warning-level alarm (A1-A7, PL1, K5), or it is older than 30 h while the lane is on (the `dlane` job stopped). With `dlane.mode` "off" the report is not read at all (the job writes none, so the last one would otherwise be mailed for good) | K5 holding: "the direction lane reads shadow while K5 holds ...: read its losses, then clear it"; K5 disarmed: "take dlane.k5_clear out of swarm.json"; none for the rest |
+| `dlane` (weekend fixes) | `<state>/dlane-report.json` carries a warning-level alarm (A1-A7, PL1, PT1, K5), or it is older than 30 h while the lane is on (the `dlane` job stopped). With `dlane.mode` "off" the report is not read at all (the job writes none, so the last one would otherwise be mailed for good) | K5 holding: "the direction lane reads shadow while K5 holds ...: read its losses, then clear it"; K5 disarmed: "take dlane.k5_clear out of swarm.json"; none for the rest |
 | `done` (weekend fixes) | a FINAL Done checkpoint holds (the report's `done.<meter>.checkpoints`, final and holding: frozen from report to report) that no SENT notice has told yet (`stall.json` `done_told`, added to only when the gateway says it sent the notice). Not read with the lane off. Until the review of the weekend fixes it read the report's A8, which one report says once, so a House start or a failed notice before the next stall run lost the claim | an owner LINE, told at once: "Done holds at a FINAL checkpoint ...: read the claim in dlane-report.json". News, never an owner step waiting: the Done meter's item 7 does not count it |
 | `preopen` (weekend fixes) | the latest pre-open receipt (`ops.sqlite`, at most 24 h old) failed a check, or the job failed or was missed | none: each FAIL is a House warning, and the checks run again before the next open |
 | `forward` (weekend fixes) | the nightly's ready file (`gym-forward.json`) does not carry the last session before today once the UTC day is 10 h in; `data/nightly.json` has carried an error 6 h or more (from the first run that saw it, kept in `stall.json`); or `data/nightly.stop` has stood 2 h or more | for a stop: "remove /workspace/state/data/nightly.stop ... the nightly forward replay, and with it the Done meter's replay twins, waits while it stands"; none for the rest |
@@ -3251,21 +3273,22 @@ client, grant or eligible family, and keeps an unfinished attempt's identity and
 proofs (the multi-leg vertical and the single-leg call) passed on Sept 28; a passed proof is not run again. Passing
 records paper execution evidence, never a family's evidence.
 
-**The money table (the sprint, owner decision D4, Sept 26, 2026; the Probe rows since fast lane v2, Oct 7, 2026, and
-release L-D, Oct 9, 2026)**: real types under $2,000 of equity are exactly `debit_vertical`, `long_butterfly`,
-`long_call`, `long_put` (the credit types come back only with a deposit to $2,000, in one deploy with the gateway, and
-a re-ratified grant); a Probe position is one structure within 10% of equity (5% with a $100 one-contract floor before
-fast lane v2), 3 open a family, 15% the family, at most 8 Probe positions across the account (3 before L-D) and a
-Probe loss budget of $400 in any rolling 20 sessions and $400 in total (L-D, inside the owner's goal of Oct 9, which
-allows $800 in total; $400 in total before it): realized Probe losses NET (`probe.loss_basis` "net"; GROSS before
-L-D) over the window's closes (its worst net stretch, so the $400 holds over every 20 sessions) and over every close, each plus every real position's maximum
-loss held or working plus the new open, so the dollars bind before the count; a Probe or Sized
-family is demoted by DM1 (`probe.demotion` "dm1"; D5 and the negative forward record before L-D, a Candidate's still);
-the book 90%; daily stop 35%, drawdown stop 60%; tuition $200 a day; the D3 calibration's day bounded at $50 of
-possible loss. The other routes keep the Probe room, min(`max_open` x 10% x E, $400), of the book's and the day's caps.
-Release L-D's section, at the top of this page, has each rule's cost and its CON-only rollback. The gateway's per-order cap is the lower of $1,000 and 25% of equity (at Sept 28's
-$1,473.11 of sizing equity: $368.27; 5% is $73.65, so a Probe's $100 floor applies; equity was $1,312.79 on Oct 2), 100%
-of equity opened a day, 250 of 300 orders open.
+**The money table (the sprint, owner decision D4, Sept 26, 2026; the Probe rows since fast lane v2, Oct 7, 2026, release
+L-D, Oct 9, 2026, and the Probe total at $800, Oct 10, 2026)**: real types under $2,000 of equity are exactly
+`debit_vertical`, `long_butterfly`, `long_call`, `long_put` (the credit types come back only with a deposit to $2,000,
+in one deploy with the gateway, and a re-ratified grant); a Probe position is one structure within 10% of equity (5%
+with a $100 one-contract floor before fast lane v2), 3 open a family, 15% the family, at most 8 Probe positions across
+the account (3 before L-D) and a Probe loss budget of $400 in any rolling 20 sessions and $800 in total (the owner's
+ceiling in his goal of Oct 9, since Oct 10 and measured at roster 5; $400 in total at L-D, and $400 in total with no
+window before it): realized Probe losses NET (`probe.loss_basis` "net"; GROSS before L-D) over the window's closes (its
+worst net stretch, so the $400 holds over every 20 sessions) and over every close, each plus every real position's
+maximum loss held or working plus the new open, so the dollars bind before the count; a Probe or Sized family is demoted
+by DM1 (`probe.demotion` "dm1"; D5 and the negative forward record before L-D, a Candidate's still); the book 90%; daily
+stop 35%, drawdown stop 60%; tuition $200 a day; the D3 calibration's day bounded at $50 of possible loss. The other
+routes keep the Probe room, min(`max_open` x 10% x E, $400), of the book's and the day's caps. Release L-D's section and
+the Probe total at $800's (both earlier on this page) have each rule's cost and its rollback. The gateway's per-order
+cap is the lower of $1,000 and 25% of equity (at Sept 28's $1,473.11 of sizing equity: $368.27; 5% is $73.65, so a
+Probe's $100 floor applies; equity was $1,312.79 on Oct 2), 100% of equity opened a day, 250 of 300 orders open.
 
 **The single-leg paper proof**: once the vertical's has passed, the practice account opens and closes a
 1-lot SPY call about 1-2% out of the money (nearest expiry at least a day out, at the natural, held two

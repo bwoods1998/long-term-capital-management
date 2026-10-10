@@ -858,8 +858,8 @@ CONSTITUTION: dict[str, Any] = {
     #   admitted against it, and once the gain aged out the next 20 sessions held $700 net, every open having passed).
     #   So a Probe gain offsets only the losses closed before it inside the window, and "$400 net in any rolling 20
     #   sessions" holds over every 20-session window as an outcome (the last open whose position closes in a window was
-    #   checked against that window's stretch up to it plus every position then open at its maximum loss), as the $400
-    #   total does from inception, residuals aside (the row above). A Probe open goes only if BOTH the window's realized
+    #   checked against that window's stretch up to it plus every position then open at its maximum loss), as the total
+    #   does from inception, residuals aside (the row above). A Probe open goes only if BOTH the window's realized
     #   + every real position's open maximum loss + the open <= $400 AND the total's realized + the same open maximum
     #   loss + the open <= `loss_total_usd` ($800 since Oct 10; $400 at L-D); the refusal names the one that binds, and
     #   exits always go on (`league/live/money.py` `plan_open`). Bounds: the window 20-2000 sessions (a longer window is
@@ -886,19 +886,27 @@ CONSTITUTION: dict[str, Any] = {
     # roster R5 already live, inside the owner's goal as he re-set it on Oct 9, item 4: "Probe loss budget: $400 net in
     # any rolling 20 sessions and $800 net in total"): `loss_total_usd` "400" -> "800", the owner's ceiling, a
     # loosening; and beside it, swarm-side, the program loss line (DONE-RULE-A1 A1.3, `dlane.program_loss_usd` in
-    # league/swarm/policy.json) -$200 -> -$300. Nothing else moves: the rolling $400 in any 20 sessions
-    # (`loss_budget_usd`, `loss_window_sessions`), the 10% cap, `open_per_family` 3, `max_open` 8, DM1, the kill switch,
-    # the daily stop and the drawdown stop. Open Probe risk stays at or under $400 (the window's envelope alone caps
-    # it), so `max_open`'s reasoning and `money.probe_room` stand. Measured (the operator's simulation: cross-fit, the
-    # House pool, roster 5, arrivals; what it trades is index beta minus option costs, not alpha): P(Done) at 12 weeks
-    # 4.6% -> 5.5% (paired +0.92 points, SE 0.15), at 24 weeks 11.6% -> 14.4%; P(Done | zero edge) 2.2% -> 2.7% at 12
-    # weeks and 6.9% -> 9.0% at 24 (`dlane.ZERO_EDGE`). Its cost: P(the running Probe net below -$400 within 12 weeks)
-    # 17.8% -> 36.8%, below -$600 0.6% -> 4.4%; the 12-week net's 5th percentile -$396 -> -$679; P(the 60% drawdown stop
-    # trips by 24 weeks) 21% -> 48%; the 12-week net's mean +$22 -> +$25 and its median -$327 -> -$231. A bad 20-session
-    # stretch (at most $400) that ages out of the window now leaves room in the total for a second before any Probe gain
-    # refills it; at $400 it left none. Rollback: `loss_total_usd` "400" and `dlane.program_loss_usd` -200, one owner
-    # deploy (the money digest moves back and the standing grant re-ratifies at the House's start; no fingerprint move,
-    # no evidence reset).
+    # league/swarm/policy.json and league/swarm/dlane.py's `DEFAULTS`, its bound) -$200 -> -$300, a second. Nothing else
+    # moves: the rolling $400 in any 20 sessions (`loss_budget_usd`, `loss_window_sessions`), the 10% cap,
+    # `open_per_family` 3, `max_open` 8, DM1, the kill switch, the daily stop and the drawdown stop. Open Probe risk
+    # stays at or under $400 (the window's envelope alone caps it), so `max_open`'s reasoning and `money.probe_room`
+    # stand. Measured (the operator's simulation, three paired arms: cross-fit, fixed 2-, 3- and 5-session holds
+    # standing in for the House's pool, roster 5, arrivals; what it trades is index beta minus option costs, not alpha):
+    # P(Done) at 12 weeks 4.6% -> 5.5% (paired +0.92 points, SE 0.15), at 24 weeks 11.6% -> 14.4%; P(Done | zero edge)
+    # 2.2% -> 2.7% at 12 weeks and 6.9% -> 9.0% at 24 (`dlane.ZERO_EDGE`). Its cost: P(the agents' running real net, the
+    # Probe/Sized route and the incubator together, below -$400 within 12 weeks) 17.8% -> 36.8%, below -$600 0.6% ->
+    # 4.4%; the 12-week net's 5th percentile -$396 -> -$679; P(the 60% drawdown stop trips by 24 weeks) 21% -> 48%; the
+    # 12-week net's mean +$22 -> +$25 and its median -$327 -> -$231. Most of it is the total's: with the -$200 line kept
+    # the figures are 35.8%, 4.1%, -$674 and 46% for P(Done) 5.3% and 14.2%, and the -$300 line beat that by 2.06
+    # paired SE, just past PREREG-T's 2. A bad 20-session stretch (at most $400) that ages out of the window now leaves
+    # room in the total for a second before any Probe gain refills it; at $400 it left none. MEASURED AT ROSTER 5 ALONE
+    # (at no roster the operator's grid found the $800 total almost all cost): the roster is a swarm.json setting with
+    # no deploy, so rolling it back or setting another count needs this rollback too, or a new measurement first; the
+    # `dlane` report warns (PT1) while they run apart. Rollback, one owner deploy: `loss_total_usd` "400" here (re-pin
+    # `PINNED_DIGEST`), `dlane.program_loss_usd` -200 and `dlane.done_zero_edge_p` 0.024 in league/swarm/policy.json and
+    # in league/swarm/dlane.py's `DEFAULTS` (the line's bound is its default), and `dlane.ZERO_EDGE` back to
+    # `ZERO_EDGES[0.024]`. The money digest moves back and the standing grant re-ratifies at the House's start; no
+    # fingerprint move, no evidence reset.
     "options_money": {
         "real_types": ["debit_vertical", "long_butterfly", "long_call", "long_put"],
         "credit_types": ["credit_vertical", "iron_condor", "iron_butterfly"],
