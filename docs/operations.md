@@ -8,6 +8,54 @@ enabled. This page describes the tree it is in, release V3-A part 1, which is li
 what production runs today. Current direction is in [the goal](goals/LTCM_OPTIONS_SWARM.md); the old operator's page
 is [archive/docs/operations.md](../archive/docs/operations.md).
 
+## The always-in card (Oct 10, 2026): `fix/always-in-v2`, not deployed
+
+Built on `fix/always-in-v2` (the second cut; the first, PR #528, was closed on its review), not deployed: one owner
+deploy (`league/swarm/cards.py`, `dlane.py`, `architect.py`, `researcher.py`, `tournament.py`, `league/ops/stall.py`
+and `league/ops/dlane_report.py`; nothing in `league/live/`, `league/gym/` or `league/constitution.py`). A reported
+loosening (the `dlane` report's LOOSENED row) with a behavioural check beside it.
+
+- **Why.** The direction lane trades labelled index beta: calls on SPY, QQQ or IWM held 2-8 sessions. By Oct 10 its
+  graveyard cells held 22-43 rows refuted on Train, every one a gated idea (an implied-vol, term-structure, trend or
+  open-interest gate). An always-in card (it enters on the clock alone: the lane's own instrument) read the clock, so it
+  matched those rows, and it could make no rebirth claim (a claim adds an input the dead row did not read). Direction
+  births were about zero and the Probe roster (5 seats, 1 filled) could not fill.
+- **The status is declared.** A direction card whose DECLARED inputs are exactly `["clock"]` is always-in
+  (`dlane.always_in`); its comparison or falsification must say it enters every session (`dlane.card_errors`). A dead
+  row is always-in when its family's declared card was (its own card, or a fork's by `card_sha`), never by its words.
+- **The graveyard** (`cards.RebirthIndex.check`, its direction path only, while the lane is on). An always-in card is
+  bound by the always-in direction rows on its roots, whatever their class or holding, and by no other row; no claim
+  frees it, and a claim it carries is dropped. A DRIFT row still binds no direction card. `cards.matches`, `matched`,
+  `text_cell`, the mechanism test's `mechanism_lineage` and the memory judge are unchanged: alpha cards (legacy rows
+  included) and gated direction cards are judged as on main.
+- **One idea a root** (`architect.admit`). An always-in birth links its lineage to every always-in direction lineage on
+  each of its roots (`cards.always_in_families`, `store.link_lineages`), alive or dead. The ration at birth
+  (`dlane.birth_spent`, with its claimed-try rule) reads those lineages with or without a parent, so each root's
+  always-in beta has ONE Validation try and one holdout look, ever, while `dlane.val_tries` is 1: at most three in all
+  (SPY, QQQ, IWM), fewer once a family on two roots joins two of them.
+- **The behavioural check, G1** (`dlane.always_in_entries`). On each 1.0x Train run of an always-in family, over the
+  Train years and each root it traded, a root-session is flat when no position of the program on that root was open at
+  the session's start; the program must have entered on at least 90% of its flat root-sessions (one flat on fewer than
+  20 passes: it was in the market nearly every session). It reads only the trades' entry and exit days and the run's
+  sessions, which every Train result carries (the mechanism test runs on a quarter of families, in shadow), works for
+  any hold, and catches any gate (implied vol, trend, weekday, month-end). A failing version is ineligible
+  (`train_score(..., always_in=True)`, fails `G1`, kept in the compact score); the tournament validates an always-in
+  version only with a G1 pass on record (`dlane.always_in_try`; `always_in_refused` in the round, which the stall check
+  reads), and a family any version of which failed G1 retires first in `_why` (`dlane.always_in_failed`, an IDLE death:
+  no row of it binds, no try was spent). What it cannot see: a program never flat on Train could add gated entries on
+  top of its always-in position.
+- **The view.** The architect's system prompt (`LANE_SYSTEM`), the BIRTH CELLS' header (`LANE_CELLS_NOTE`) and their
+  last line (`cards.ALWAYS_IN_LINE`: each lane root open, bound by an always-in row, or its always-in try spent or
+  claimed) say the rule; `Architect.closed` reads a lane root still open to an always-in birth as a pass that can bear
+  one. An always-in family's card brief says G1. The golden prompt pins are unchanged (the ALWAYS-IN line is added only
+  to a list that has a cell).
+- **The cost.** At most one always-in Validation try per root, each the lane's D2 lottery at 10.37% per program at zero
+  edge on mixed worlds (12.39% on 2022-24 worlds; higher when the screen windows rose); profit is index beta minus
+  option costs, beside the same-risk buy-and-hold. A self-refuted or refuted always-in family closes its root's
+  always-in for good (no claim can free it).
+- **Rollback.** Redeploy main before it; nothing it writes needs undoing (links between always-in lineages stay, and
+  only join tries that would have counted against the same idea).
+
 ## The Probe total at $800 and the program line at -$300 (Oct 10, 2026): deployed 05:36Z (money `fdf2ac7c`, grant ratified 05:37Z)
 
 Built on `feat/probe-total-800`, not deployed: one owner deploy (`league/constitution.py`, `league/swarm/policy.json`

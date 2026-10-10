@@ -184,6 +184,17 @@ default, or "direction": cards.py, `dlane.card_errors`):
     `lane_cells`); since Oct 9 their header says what binds a direction card (`LANE_CELLS_NOTE`) and each line of a cell
     a direction card may be in counts the rows that bind one (cards.py `direction_cells`). A direction birth that matched
     alpha rows records how many in its `swarm.born` card (`alpha_rows`).
+  - THE ALWAYS-IN CARD (Oct 10, 2026; cards.py and dlane.py, sections of that name; a reported loosening): a direction
+    card whose DECLARED inputs are exactly ["clock"] is checked against the always-in direction rows on its roots alone
+    (`index.check(..., roots=...)`), and ONE IDEA A ROOT: its birth joins every always-in direction lineage on each of
+    its roots (`cards.always_in_families`, `store.link_lineages`, inside the birth's transaction), so THE RATION AT BIRTH
+    above reads those lineages too, with or without a parent, and refuses a birth whose joined lineages have spent or
+    claimed their one try (`ALWAYS_IN_SPENT`). Its `swarm.born` card carries `always_in`, the lineages it joined
+    (`always_in_lines`) and the gated rows the rule before would have bound it by (`gated_rows`). The view: the system
+    prompt's rebirth paragraph says the rule (`LANE_SYSTEM`), the BIRTH CELLS' header too (`LANE_CELLS_NOTE`, while
+    the lane is on) and their last line gives each lane root's state (`cards.RebirthIndex.always_in_line`, with
+    `always_in_ration`), and NO PAID PASS WITHOUT A CELL reads a root still open to an always-in birth (no always-in row
+    binds it and its always-in ration is neither spent nor claimed) as a pass that can bear one (`closed`).
 With `dlane.mode` "off" (THE ROLLBACK, also the code's default) none of this acts: the system prompt, the request, the
 admission, the events and every kv are the release before's (ccfa48d5), byte for byte.
 
@@ -304,6 +315,13 @@ LANE_SYSTEM = (
     ('"card": {"hypothesis": "who pays and why the opportunity persists (60-600 characters)",',
      '"card": {"lane": "alpha (the default) or direction", "hypothesis": "who pays and why the opportunity persists (60-600 '
      'characters)",'),
+    # THE ALWAYS-IN CARD (Oct 10, 2026; cards.py): the rebirth rule's exception for the direction lane's own instrument.
+    ("otherwise it is refused and its row's lesson comes back to you.",
+     "otherwise it is refused and its row's lesson comes back to you. A DIRECTION card whose declared inputs are exactly "
+     "[\"clock\"] is ALWAYS-IN (its program enters every session on the clock alone, with no gate, and its comparison or "
+     "falsification says so): no cell's rows bind it, only the always-in direction rows on its roots (any class or "
+     "holding), and no rebirth can free it; its birth joins the always-in lineage on each of its roots, ONE Validation try "
+     "a root; a program that does not enter every session it is flat on Train is never validated and retires."),
 )
 
 
@@ -1346,7 +1364,14 @@ YIELD_CELLS_NOTE = ("; each cell is marked open or exhausted by how often its re
                     "an exhausted cell every row needs one")
 #: THE DIRECTION LANE'S GRAVEYARD (Oct 9, 2026; cards.py): the cells' header while the direction lane is on. Words only.
 LANE_CELLS_NOTE = ("; a DIRECTION card is bound only by the rows of direction families, never by an alpha family's row "
-                   "or a DRIFT row: each line of a cell a direction card may be in says how many of its rows bind one")
+                   "or a DRIFT row: each line of a cell a direction card may be in says how many of its rows bind one; an "
+                   "ALWAYS-IN direction card (declared inputs exactly [\"clock\"]) is bound by no cell's rows and names "
+                   "no claimable row, only the always-in direction rows on its roots bind it: the ALWAYS-IN line, last, "
+                   "gives each root's state")
+#: THE ALWAYS-IN CARD (Oct 10, 2026): what a refused always-in birth into a spent or claimed always-in lineage adds to
+#: `dlane.spent_birth_text`. Words only.
+ALWAYS_IN_SPENT = (" (an always-in card joins the always-in lineage on each of its roots, ONE Validation try a root: propose "
+                   "it on a root whose always-in try is open, or a gated card)")
 #: With `architect.claimable_rows`: what a cell's claimable rows are.
 CLAIMABLE_NOTE = ("; \"claimable\" lists rows a rebirth may name, newest first, each with the inputs it read: your card's "
                   "inputs must add one it did not read, and a carded row is matched only when your inputs overlap what it read")
@@ -1906,6 +1931,42 @@ class Architect:
             return None
         return tuple(dict.fromkeys(cards.structure_family(s) for s in self.structures()))
 
+    def always_in_ration(self) -> dict[str, str]:
+        """THE ALWAYS-IN CARD (Oct 10, 2026): each lane root whose always-in lineages (`cards.always_in_families`) have
+        spent or claimed their one Validation try (`dlane.birth_spent`, as `admit` reads it), in words for the BIRTH CELLS'
+        ALWAYS-IN line; a root missing from it is open as far as the ration goes. Ids only, never one the architect may
+        not read. {} while the lane is off or on an error (`admit` still checks every birth)."""
+        if not dlane.on(self.settings):
+            return {}
+        out: dict[str, str] = {}
+        try:
+            hidden = self.unseen()
+            for root in dlane.cfg(self.settings)["roots"]:
+                lines = list(dict.fromkeys(str(f["lineage"]) for f in cards.always_in_families(self.store, [root],
+                                                                                                exclude=hidden)))
+                spent = dlane.birth_spent(self.store, lines, self.settings, born=list(getattr(self, "pass_born", None) or []),
+                                          awaiting=awaiting_validation) if lines else None
+                if spent is None:
+                    continue
+                fam = str(spent.get("family") or "")
+                version = f" v{spent['version']}" if spent.get("version") is not None else ""
+                who = f" ({fam}{version})" if fam and fam not in hidden else ""
+                what = "holdout look" if spent.get("spent") == "look" else "Validation try"
+                state = "claimed" if spent.get("spent") == "claim" else "spent"
+                out[root] = f"its always-in lineage's one {what} is {state}{who}"
+        except Exception:  # noqa: BLE001 - the line then reads each root by its rows alone
+            return {}
+        return out
+
+    def always_in_open(self, index: Any) -> list[str]:
+        """THE ALWAYS-IN CARD: the lane roots an always-in birth could still land on: no always-in row on it binds one
+        (`cards.RebirthIndex.always_in_bound`) and its always-in ration is neither spent nor claimed (`always_in_ration`).
+        [] while the lane is off."""
+        if not dlane.on(self.settings):
+            return []
+        ration = self.always_in_ration()
+        return [r for r in dlane.cfg(self.settings)["roots"] if r not in ration and not index.always_in_bound([r])]
+
     def closed(self) -> dict[str, Any] | None:
         """NO PAID PASS WITHOUT A CELL (F1, Oct 3, 2026: six passes cost $0.51 that day and every one of their 15
         proposals was refused): why no proposal of this pass could be born whatever the model answered, or None. With
@@ -1929,6 +1990,10 @@ class Architect:
                 c = dlane.cfg(self.settings)
                 if any(index.bearable(cell, rows, dlane.DIRECTION) for cell, rows in grid
                        if cell[0] in c["classes"] and cell[1] == "directional" and cell[2] in c["holding"]):
+                    return None
+                # THE ALWAYS-IN CARD (Oct 10, 2026): no cell's rows bind an always-in card, so a lane root no always-in row
+                # binds, whose always-in ration is neither spent nor claimed, can bear one.
+                if "directional" in families and any(r for r in self.always_in_open(index)):
                     return None
             full = sum(1 for cell, _ in grid if index.room(cell) <= 0)
         except Exception:  # noqa: BLE001 - never a skipped pass on a reading that failed
@@ -1963,7 +2028,8 @@ class Architect:
             families = self.cell_families()
             try:
                 index = cards.RebirthIndex(self.store, self.settings, exclude=self.unseen())
-                cells = index.cells(claimable=claimable, families=families, chars=BIRTH_CELLS_CHARS)
+                cells = index.cells(claimable=claimable, families=families, chars=BIRTH_CELLS_CHARS,
+                                    always_in=self.always_in_ration() if dlane.on(self.settings) else None)
             except Exception:  # noqa: BLE001 - the request goes without the list; admit still checks every card
                 cells = []
             else:
@@ -2082,7 +2148,7 @@ class Architect:
             if card is not None and self.rebirth_mode() == "refuse":
                 if index is None:
                     index = cards.RebirthIndex(self.store, self.settings, yields=pass_yields, exclude=unseen)
-                verdict = index.check(card, structure, mechanism, dte)
+                verdict = index.check(card, structure, mechanism, dte, roots=roots)
                 if not verdict["ok"]:
                     self.card_refused.append({"slug": slug, "why": verdict["reason"], "row": verdict.get("row"),
                                               "lesson": verdict.get("lesson"), "matched": verdict.get("count")})
@@ -2169,12 +2235,20 @@ class Architect:
             # refusals. Born, it retired on SPENT_TRY 15-60 minutes later without a try (about half of the lane's births
             # on the House, Oct 10), spending research money, Gym runs and a population slot. A new lineage (no parent)
             # has nothing spent; alpha and the lane off: as before.
-            if lane == dlane.DIRECTION and parent:
-                spent = dlane.birth_spent(self.store, [str(home.get("lineage") or ""), *twins], self.settings,
+            # THE ALWAYS-IN CARD (Oct 10, 2026; cards.py, dlane.py): ONE IDEA A ROOT. An always-in direction card's birth
+            # joins every always-in direction lineage on each of its roots (alive or dead: `cards.always_in_families`), so
+            # the ration reads them here (with or without a parent) and, once born, its tries and looks count over them.
+            ai_lines: list[str] = []
+            if lane == dlane.DIRECTION and dlane.always_in(card):
+                ai_lines = list(dict.fromkeys(str(f["lineage"]) for f in cards.always_in_families(self.store, roots,
+                                                                                                    exclude=unseen)))
+            if lane == dlane.DIRECTION and (parent or ai_lines):
+                spent = dlane.birth_spent(self.store, [str(home.get("lineage") or ""), *twins, *ai_lines], self.settings,
                                           born=[*earlier, *born], awaiting=awaiting_validation)
                 if spent is not None:
                     self.card_refused.append({"slug": slug, "spent": spent["spent"],
-                                              "why": dlane.spent_birth_text(spent, home.get("lineage"), unseen)})
+                                              "why": dlane.spent_birth_text(spent, home.get("lineage"), unseen)
+                                              + (ALWAYS_IN_SPENT if ai_lines else "")})
                     continue
             with self.store.atomic():
                 if len(self.store.families(alive=True)) >= int(self.settings.get("population", {}).get("ceiling", 96)):
@@ -2182,6 +2256,8 @@ class Architect:
                 for line in twins:
                     self.store.link_lineages(str(home.get("lineage") or ""), line)
                 fam = self.store.add_family(spec, origin="architect", parent=parent, prior_lineage=prior)
+                for line in ai_lines:  # THE ALWAYS-IN CARD: one idea a root (its tries and looks count together)
+                    self.store.link_lineages(str(fam["lineage"]), line)
                 if card is not None:
                     cards.put(self.store, fam["id"], card, structure)
                     if index is not None:
@@ -2220,6 +2296,13 @@ class Architect:
                         born_payload["card"]["claim_dropped"] = str(verdict["dropped"])[:300]
                 if verdict and verdict.get("alpha_rows"):  # THE DIRECTION LANE'S GRAVEYARD: alpha rows it matched
                     born_payload["card"]["alpha_rows"] = int(verdict["alpha_rows"])
+                if lane == dlane.DIRECTION and dlane.always_in(card):  # THE ALWAYS-IN CARD: its status, its joined lineages
+                    born_payload["card"]["always_in"] = True
+                    born_payload["card"]["always_in_lines"] = ai_lines[:12]
+                    if verdict and verdict.get("gated_rows"):
+                        born_payload["card"]["gated_rows"] = int(verdict["gated_rows"])
+                    if verdict and verdict.get("dropped"):
+                        born_payload["card"]["claim_dropped"] = str(verdict["dropped"])[:300]
             if literature:
                 born_payload["literature"] = [x["id"] for x in literature]
             if lane_on:

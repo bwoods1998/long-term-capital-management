@@ -32,6 +32,12 @@ DIR = {**CARD, "lane": "direction", "mechanism_class": "equity_premium", "holdin
                      "index's drift whenever its decay is below that drift.",
        "inputs": ["implied_vol", "underlying_price"], "ablation": {"param": "gate_on", "off": 0},
        "comparison": "the same call bought at the same minute every session with the regime gate switched off"}
+#: THE ALWAYS-IN CARD (Oct 10, 2026): a direction card whose declared inputs are exactly the clock, and says so.
+ALWAYS = {**DIR, "inputs": ["clock"],
+          "hypothesis": "Index holders are paid to bear market risk, so a cheap out-of-the-money call bought every session "
+                        "rents the index's drift whenever its decay is below that drift.",
+          "comparison": "the same call bought at the same minute every session: an always-in program has no gate to "
+                        "switch off"}
 TREND = {**DIR, "mechanism_class": "trend_momentum",
          "hypothesis": "Slow capital extends the index's trend for several sessions, so a call held through it is paid by the "
                        "continuation."}
@@ -256,6 +262,12 @@ class ClosedPass(Case):
         self.settings["dlane"] = dict(GATE)
         self.assertIsNone(Architect(self.store, None, self.settings, clock=self.clock).closed())
         self.settings["dlane"] = {**GATE, "classes": ["equity_premium"]}
+        # THE ALWAYS-IN CARD (Oct 10, 2026): no cell's rows bind an always-in card, so while a lane root is open to one
+        # the pass is open too; an always-in row on every lane root closes them.
+        self.assertIsNone(Architect(self.store, None, self.settings, clock=self.clock).closed(), "an always-in card bears")
+        always = cards.validate(ALWAYS, "long_single", roots=list(dlane.ROOTS), settings=self.settings)[0]
+        self.bury("always-in-dead", always, reason="Refuted: it loses after costs.", structure="long_single",
+                  roots=dlane.ROOTS)
         self.assertEqual(Architect(self.store, None, self.settings, clock=self.clock).closed(),
                          {"cells": 46, "full": 46, "spent": 0}, "a cell outside the lane's classes bears no direction card")
 

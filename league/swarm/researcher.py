@@ -1852,11 +1852,13 @@ class Researcher:
         """A Train result's score over ITS OWN span (`span_of`: the years from its first day on, and a 2020-21 year only
         when every root of its had data): what its row records. Whether it may count now is `_counts_now`. THE DIRECTION
         LANE: a direction family's (`fam`, `_direction`) is direction-v2's (`dlane.train_score`: S_D, the Train years
-        2022-24 only, its unit priced at today's closes and equity, `dlane.unit_context`), with the same keys the view and
-        `_scored` read; every other family's, and every family's while the lane is off, is `evidence.train_score`."""
+        2022-24 only, its unit priced at today's closes and equity, `dlane.unit_context`; THE ALWAYS-IN CARD's G1 too for
+        an always-in family, `dlane.always_in_family`), with the same keys the view and `_scored` read; every other
+        family's, and every family's while the lane is off, is `evidence.train_score`."""
         if fam is not None and self._direction(fam):
             return dlane.train_score(result, first_year=int(span_of(result)[:4]),
-                                     unit=dlane.unit_context(self.store, self.settings), settings=self.settings)
+                                     unit=dlane.unit_context(self.store, self.settings), settings=self.settings,
+                                     always_in=dlane.always_in_family(self.store, fam, self.settings))
         return evidence.train_score(result, first_year=int(span_of(result)[:4]))
 
     # ------------------------------------------------------------------ THE DIRECTION LANE (release D-1)
@@ -1898,7 +1900,8 @@ class Researcher:
                 continue
             full = self.store.run_result(row["run_id"])
             if full is not None:
-                score = dlane.train_score(full, first_year=int(span_of(full)[:4]), settings=self.settings)
+                score = dlane.train_score(full, first_year=int(span_of(full)[:4]), settings=self.settings,
+                                          always_in=dlane.always_in_family(self.store, fam, self.settings))
                 if score.get("pnl") is not None:
                     return score
             stored = (row.get("summary") or {}).get(dlane.STATE_KEY)
@@ -1959,7 +1962,8 @@ class Researcher:
                     continue
                 full = self.store.run_result(row["run_id"])
                 if full is not None:
-                    score = dlane.train_score(full, first_year=int(span_of(full)[:4]), unit=unit, settings=self.settings)
+                    score = dlane.train_score(full, first_year=int(span_of(full)[:4]), unit=unit, settings=self.settings,
+                                              always_in=dlane.always_in_family(self.store, fam, self.settings))
                 else:
                     score = dlane._score_from_compact((row.get("summary") or {}).get(dlane.STATE_KEY), unit, self.settings)
                 if score is not None:
@@ -5162,9 +5166,10 @@ def migrate_objective(store: SwarmStore, *, beat: Callable[[], None] | None = No
         try:
             # THE DIRECTION LANE: a direction family's best is chosen anew under its own objective (S_D, `dlane.train_score`),
             # never the worst-year score; every family's while the lane is off.
-            unit = None
+            unit, always = None, False
             if dlane.lane_of(store, fam, settings) == dlane.DIRECTION:
                 unit = dlane.unit_context(store, settings)
+                always = dlane.always_in_family(store, fam, settings)  # THE ALWAYS-IN CARD: G1 is a bar of its best too
             rows: list[list[Any]] = []
             for run in store.runs(fid, window="train", limit=1000):
                 if run["status"] != "ok" or float(run["stress"] or 1.0) != 1.0 or run.get("purpose") == "robustness" or not run.get("path"):
@@ -5183,7 +5188,8 @@ def migrate_objective(store: SwarmStore, *, beat: Callable[[], None] | None = No
                     if result is None:
                         robust = None
                     elif unit is not None:
-                        robust = dlane.train_score(result, first_year=first.year, unit=unit, settings=settings)
+                        robust = dlane.train_score(result, first_year=first.year, unit=unit, settings=settings,
+                                                   always_in=always)
                     else:
                         robust = evidence.train_score(result, first_year=first.year)
                 except Exception:  # noqa: BLE001 - a malformed result is no candidate

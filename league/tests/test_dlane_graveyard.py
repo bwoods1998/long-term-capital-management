@@ -21,7 +21,7 @@ import unittest
 from league.swarm import cards, dlane, mechanism
 from league.swarm.architect import BIRTH_CELLS_CHARS, LANE_CELLS_NOTE, Architect
 from league.swarm.researcher import SELF_REFUTED, idle_cause
-from league.tests.test_dlane_births import DIR, GATE, OFF, TREND, lane
+from league.tests.test_dlane_births import ALWAYS, DIR, GATE, OFF, TREND, lane
 from league.tests.test_swarm_cards import CARD, GOOD, Case, proposal
 
 REFUTED = "Refuted: it loses after costs on every root tested."
@@ -371,6 +371,17 @@ class TheArchitectsView(Graves):
                           "the trend days_4_10 cell holds alpha rows only: a direction card bears it")
         self.grave("dir-trend-week-dead", self.dir_trend, reason=REFUTED, spec_lane="direction",
                    mechanism="Index trend continuation calls held a week, refuted in the lane.")
+        # THE ALWAYS-IN CARD (Oct 10, 2026): an always-in card is bound by no cell's rows, so a lane root open to one keeps
+        # the pass open; an always-in direction row on each lane root closes it.
+        self.assertIsNone(self.arch().closed(), "the lane's roots are open to an always-in card")
+        always = cards.validate(ALWAYS, "long_single", roots=list(dlane.ROOTS), settings={"dlane": GATE})[0]
+        self.clock.t += 60
+        fam = self.store.add_family({"id": "always-in-dead", "mechanism": "Rent the index's drift with a call bought every "
+                                     "session at the same minute.", "structure": "long_single", "roots": list(dlane.ROOTS),
+                                     "dte": [4, 10], "lane": "direction", "card_sha": cards.card_sha(always)},
+                                    origin="architect")
+        cards.put(self.store, fam["id"], always, "long_single")
+        self.store.retire_gym(fam["id"], REFUTED, floor=0, source="test")
         self.assertEqual(self.arch().closed(), {"cells": 44, "full": 44, "spent": 0},
                          "a direction family's REFUTED row closes the lane's last open cell")
 

@@ -73,6 +73,38 @@ AT BIRTH (Oct 10, 2026; `birth_spent`): a direction card whose birth would join 
 look, or whose try another living member claims (born in the same pass, or its best awaiting Validation), is refused by
 the architect's card checks, naming the lineage, instead of being born to retire unjudged.
 
+THE ALWAYS-IN CARD (Oct 10, 2026; `always_in`, `always_in_entries`, the bar G1; A REPORTED LOOSENING of the graveyard,
+league/swarm/cards.py). The lane's own instrument is an always-in call: it enters on the clock alone, with no gate. By Oct
+10 the lane's graveyard cells held 22-43 rows refuted on Train, every one a gated idea (an implied-vol, term-structure,
+trend or open-interest gate), and an always-in card could make no rebirth claim (a claim adds an input the dead row did
+not read), so it was never born. A DIRECTION card whose DECLARED inputs are exactly ["clock"] (`ALWAYS_IN_INPUTS`; never
+read from its words) is ALWAYS-IN, and its comparison or falsification says that it enters every session ("every
+session", "each session" or "always-in": `card_errors`). Three rules go with the status, while the lane is on:
+- THE GRAVEYARD (cards.py `RebirthIndex.check`): an always-in card is bound by the always-in direction rows on its roots
+  (a row is always-in by its family's DECLARED card, whatever its words, class or holding) and by no other row; no claim
+  frees it (it reads nothing a claim could add). Alpha cards and gated direction cards are judged as before;
+- ONE IDEA A ROOT (league/swarm/architect.py `admit`): its birth links its lineage to every always-in direction family's on
+  each of its roots (`store.link_lineages`), so the ration (one Validation try and one holdout look a connected lineage;
+  `birth_spent` before the birth, its claimed-try rule included) gives each root's always-in beta ONE Validation try, ever,
+  while `val_tries` is 1;
+- THE BEHAVIOURAL CHECK, G1 (`always_in_entries`): the declared status is checked against the program. On a 1.0x Train run
+  of an always-in family, over the Train years and each root it traded, a root-session is FLAT when no position of the
+  program on that root was open at the session's start (entered on an earlier session, exited on this one or later); the
+  program must have entered on at least `ALWAYS_IN_SHARE` (90%) of its flat root-sessions, and one flat on fewer than
+  `ALWAYS_IN_MIN_FLAT` (20) was in the market at nearly every session, which passes. Why this reading: it needs only the
+  trades' entry and exit days and the run's sessions, which every Train result carries (the mechanism test's arms are a
+  sample's, and only a quarter of families take it in shadow); it holds whatever the hold (one position held 2-8
+  sessions, or a new one every session); and a gate of any kind (implied vol, trend, the weekday, the month-end) leaves
+  flat sessions without an entry. A version that fails it is ineligible (`train_score(..., always_in=True)`: fails "G1");
+  the tournament validates an always-in family's version only with a G1 pass on record (`always_in_try`: a refusal spends
+  no try) and retires a family any of whose versions failed it (`always_in_failed`, `ALWAYS_IN_CAUSE`: an untested death,
+  tagged IDLE, so no graveyard row of it binds). What it cannot see: a program that is never flat (it rolls one position
+  without a flat session) could add gated entries on top of that always-in position.
+Its cost (the `dlane` report's LOOSENED row): at most one always-in Validation try per root (SPY, QQQ, IWM), ever, unless
+the owner changes `val_tries` (fewer when a family on two roots joins their lineages), each one D2's lottery at 10.37% per
+program at zero edge (higher when the screen windows rose), and its profit is index beta minus option costs, reported
+beside the same-risk buy-and-hold. With `dlane.mode` "off" nothing here acts.
+
 THE BIRTH QUOTA (`DirectionQuota`; decision 1). While the lane is behind `birth_share` (0.5) of the last
 `window_hours` (24) of births and fewer than `max_alive` (24) direction families live, at least
 max(`min_per_pass`, ceil(0.5 x want)) of a pass's births are reserved for direction and never filled with alpha (a pass
@@ -616,7 +648,194 @@ def card_errors(card: Any, structure: Any, roots: Any, settings: Mapping[str, An
     elif ablation is not None and not (isinstance(ablation, Mapping) and str(ablation.get("param") or "").strip()):
         errors.append("ablation: a direction card names the PARAMS switch that turns its regime gate off "
                       "({\"param\": ..., \"off\": ...})")
+    # THE ALWAYS-IN CARD (Oct 10, 2026): its declared inputs are its status, so it says what it is.
+    if always_in(card) and not any(EVERY_SESSION.search(str(card.get(k) or "")) for k in ("comparison", "falsification")):
+        errors.append("inputs: [\"clock\"] alone declares an ALWAYS-IN card (it enters every session on the clock alone, "
+                      "no gate): its comparison or falsification says so (\"every session\"), and its program must "
+                      "behave so on Train (G1)")
     return errors
+
+
+# ----------------------------------------------------------------------------------------------------------- always-in
+#: THE ALWAYS-IN CARD (Oct 10, 2026; the module docstring): a DIRECTION card whose DECLARED inputs are exactly these reads no
+#: state: it enters on the clock alone (the lane's own instrument, labelled index beta).
+ALWAYS_IN_INPUTS = ("clock",)
+#: What an always-in card's comparison or falsification says (`card_errors`): that it enters every session.
+EVERY_SESSION = re.compile(r"\b(?:every|each) (?:trading )?(?:session|day)\b|\balways[- ]in\b", re.I)
+#: G1, THE BEHAVIOURAL CHECK: the least share of its flat Train root-sessions an always-in program enters on, and the
+#: fewest flat root-sessions the share is read on (fewer: in the market at nearly every session, which passes).
+ALWAYS_IN_SHARE = 0.90
+ALWAYS_IN_MIN_FLAT = 20
+#: The family state's key of a G1 failure the tournament read from a Train run itself (`always_in_try`), beside the ones
+#: the researcher's scores record (`record`): what `always_in_failed` reads.
+ALWAYS_IN_KEY = "dlane_always_in"
+#: The public cause of `always_in_failed` (a `swarm.retired` cause and a graveyard lesson): no figure in its first
+#: sentence, and the idle rule's mark (architect.py `IDLE_MARK`), so its row is IDLE and binds no card.
+ALWAYS_IN_CAUSE = ("Retired because its program did not enter on the clock alone as its always-in card declared. A Train run "
+                   "of it entered on too few of the sessions it was flat (the lane needs nine in ten), so it loses the "
+                   "always-in exemption and its lineage's Validation try is not spent; it is a rule of the card, not a "
+                   "finding that the mechanism has no edge")
+
+
+def declared_inputs(card: Any) -> list[str]:
+    """A card's DECLARED inputs as `cards.validate` reads them (each a token; sorted, once each); [] without a list. Never
+    the words of its text (`cards.match_inputs`)."""
+    raw = card.get("inputs") if isinstance(card, Mapping) else None
+    if isinstance(raw, str):
+        raw = [x for x in re.split(r"[,;/+|]", raw) if x.strip()]
+    return sorted({_token(x) for x in raw}) if isinstance(raw, list) else []
+
+
+def always_in(card: Any) -> bool:
+    """THE ALWAYS-IN CARD: a DIRECTION card (raw or canonical) whose DECLARED inputs are exactly `ALWAYS_IN_INPUTS`."""
+    return isinstance(card, Mapping) and lane_value(card)[0] == DIRECTION and tuple(declared_inputs(card)) == ALWAYS_IN_INPUTS
+
+
+def always_in_family(store: Any, fam: Mapping[str, Any] | None, settings: Mapping[str, Any] | None) -> bool:
+    """A family judged in the direction lane now (`lane_of`) whose card (its own, else the one its spec's `card_sha` names:
+    `cards.card_of`) is `always_in`. False for every alpha family, while the lane is off, and on any error."""
+    if not isinstance(fam, Mapping) or lane_of(store, fam, settings) != DIRECTION:
+        return False
+    try:
+        from . import cards  # the cards module imports this one: read lazily
+
+        row = cards.card_of(store, str(fam["id"]))
+    except Exception:  # noqa: BLE001 - an unreadable card is no always-in card
+        return False
+    return always_in((row or {}).get("card") if isinstance(row, Mapping) else None)
+
+
+def always_in_entries(result: Mapping[str, Any] | None, first_year: Any = None) -> dict[str, Any]:
+    """G1's reading of a Train result (the module docstring): {known, flat, entered, share, passed}. Over the run's
+    sessions (`daily`) in the Train years from `first_year` (`_span`) and each root it traded there, a root-session is flat
+    when no trade of that root was entered on an earlier session and exited on this one or later (or never: still open);
+    `entered` counts the flat ones with an entry on that root. `share` is entered / flat (None under `ALWAYS_IN_MIN_FLAT`
+    flat root-sessions, which passes); `passed` share >= `ALWAYS_IN_SHARE`. `known` False (passed None) without a trade
+    list, a daily series, a Train-year trade, or a trade's exit day (a result from before the Gym wrote it)."""
+    out: dict[str, Any] = {"known": False, "flat": None, "entered": None, "share": None, "passed": None}
+    trades = result.get("trades") if isinstance(result, Mapping) else None
+    daily = result.get("daily") if isinstance(result, Mapping) else None
+    if not isinstance(trades, list) or not isinstance(daily, list):
+        return out
+    lo, hi = _span(first_year)
+
+    def train(day: Any) -> bool:
+        year = str(day or "")[:4]
+        return year.isdigit() and lo <= int(year) <= hi
+
+    sessions = sorted({str(d[0])[:10] for d in daily if isinstance(d, (list, tuple)) and d and train(d[0])})
+    if not sessions:
+        return out
+    opened: dict[str, list[int]] = {}
+    entries: dict[str, set[int]] = {}
+    for t in trades:
+        if not isinstance(t, Mapping) or not train(t.get("day")) or not str(t.get("root") or "").strip():
+            continue
+        if "exit_day" not in t:
+            return out
+        root, day = str(t["root"]).upper(), str(t["day"])[:10]
+        after = _after(sessions, day)
+        if after and sessions[after - 1] == day:
+            entries.setdefault(root, set()).add(after - 1)
+        held = opened.setdefault(root, [0] * len(sessions))
+        end = len(sessions) if not t.get("exit_day") else _after(sessions, str(t["exit_day"])[:10])
+        for k in range(after, end):  # open at the start of each session after its entry, through its exit's
+            held[k] += 1
+    if not entries:
+        return out
+    flat = entered = 0
+    for root, days in entries.items():
+        held = opened.get(root) or [0] * len(sessions)
+        for k, count in enumerate(held):
+            if count == 0:
+                flat += 1
+                entered += k in days
+    out.update(known=True, flat=flat, entered=entered)
+    if flat < ALWAYS_IN_MIN_FLAT:
+        out["passed"] = True
+    else:
+        out["share"] = round(entered / flat, 4)
+        out["passed"] = entered / flat >= ALWAYS_IN_SHARE
+    return out
+
+
+def _after(days: Sequence[str], day: str) -> int:
+    """The index of the first of the sorted `days` after `day` (len(days) when none is)."""
+    lo, hi = 0, len(days)
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if days[mid] <= day:
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo
+
+
+def always_in_why(reading: Mapping[str, Any]) -> str:
+    """G1's words to the researcher: rules and Train-year counts only (a count is written with a thousands comma, so it
+    never reads as a year)."""
+    return (f"its card is always-in (inputs: the clock alone), and its program entered on {int(reading.get('entered') or 0):,} "
+            f"of the {int(reading.get('flat') or 0):,} Train sessions it was flat on a root it trades; an always-in program "
+            f"enters every session its own open positions allow, with no gate (the lane needs {ALWAYS_IN_SHARE:.0%})")
+
+
+def _kept_g1(fam: Mapping[str, Any], n: Any = None) -> list[tuple[int, Mapping[str, Any] | None, list[str]]]:
+    """[(version, its recorded G1 reading or None, its recorded fails)] from the family's state (`record`), every version
+    or only `n`."""
+    block = (fam.get("state") or {}).get(STATE_KEY) if isinstance(fam.get("state"), Mapping) else None
+    versions = block.get("versions") if isinstance(block, Mapping) else None
+    out = []
+    for k, row in (versions or {}).items() if isinstance(versions, Mapping) else ():
+        if not str(k).isdigit() or (n is not None and int(k) != int(n)) or not isinstance(row, Mapping):
+            continue
+        train = row.get("train") if isinstance(row.get("train"), Mapping) else {}
+        reading = train.get("always_in") if isinstance(train.get("always_in"), Mapping) else None
+        out.append((int(k), reading, [str(f) for f in train.get("fails") or []]))
+    return out
+
+
+def always_in_try(store: Any, fam: Mapping[str, Any], n: Any, settings: Mapping[str, Any] | None) -> str | None:
+    """G1 AT THE TRY (the tournament, before an always-in family's version is validated): None (validate) for every family
+    that is not `always_in_family`, and for a version with a G1 pass on record: its recorded score's reading (`record`),
+    else its newest completed 1.0x Train run's own (`always_in_entries` on the full result the store keeps). "failed" (no
+    try: the family retires, `always_in_failed`, which reads the failure this records in the family's state,
+    `ALWAYS_IN_KEY`) or "unknown" (no try yet: no reading could be made) otherwise. Never raises: an error is "unknown"."""
+    try:
+        if not always_in_family(store, fam, settings):
+            return None
+        kept = _kept_g1(fam, n)
+        reading = kept[0][1] if kept else None
+        if not (isinstance(reading, Mapping) and reading.get("known")):
+            reading = None
+            for row in store.version_runs(str(fam["id"]), int(n), window="train", stress=1.0, limit=20):
+                full = store.run_result(row["run_id"]) if row.get("status") == "ok" and row.get("run_id") else None
+                if isinstance(full, Mapping):
+                    span = str((full.get("summary") or {}).get("train_from") or "")
+                    reading = always_in_entries(full, int(span[:4]) if span[:4].isdigit() else FIRST_YEAR)
+                    if reading.get("known"):
+                        break
+        if not (isinstance(reading, Mapping) and reading.get("known")):
+            return "unknown"
+        if reading.get("passed"):
+            return None
+        store.set_state(str(fam["id"]), **{ALWAYS_IN_KEY: {"version": int(n), "at": store.now(),
+                                                           "flat": reading.get("flat"), "entered": reading.get("entered")}})
+        return "failed"
+    except Exception:  # noqa: BLE001 - no try is bought by an error
+        return "unknown"
+
+
+def always_in_failed(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any] | None) -> str | None:
+    """THE ALWAYS-IN CARD's retirement (G1): `ALWAYS_IN_CAUSE` for an `always_in_family` any of whose recorded versions
+    failed G1 (its score's `fails`, `record`) or whose try G1 refused (`ALWAYS_IN_KEY`, `always_in_try`); else None (every
+    other family, while the lane is off, and on a store error)."""
+    try:
+        state = fam.get("state") or {}
+        if not (isinstance(state.get(ALWAYS_IN_KEY), Mapping) or any("G1" in fails for _, _, fails in _kept_g1(fam))):
+            return None
+        return ALWAYS_IN_CAUSE if always_in_family(store, fam, settings) else None
+    except Exception:  # noqa: BLE001 - a rule that cannot be read retires nothing
+        return None
 
 
 # ----------------------------------------------------------------------------------------------------------- the years
@@ -860,7 +1079,7 @@ def unit_of(result: Mapping[str, Any], unit: Mapping[str, Any] | None, *, median
 
 # ----------------------------------------------------------------------------------------------------------- the bar
 def train_score(result: Mapping[str, Any], *, first_year: Any = None, unit: Mapping[str, Any] | None = None,
-                settings: Mapping[str, Any] | None = None) -> dict[str, Any]:
+                settings: Mapping[str, Any] | None = None, always_in: bool = False) -> dict[str, Any]:
     """THE DIRECTION OBJECTIVE, direction-v2 (the module docstring), on a Train run at 1.0x:
     {objective, score, eligible, why, fails, t_pool, pnl, years, active, worst_year, quarters, unit, reported, beside}.
 
@@ -870,7 +1089,9 @@ def train_score(result: Mapping[str, Any], *, first_year: Any = None, unit: Mapp
     (every ACTIVE year t >= 0; never a bar) and R1 (None until `robust_verdict`); `beside` the drift figures (beta per 1%
     move, drift share, drift-adjusted alpha t, the same exposure held every session). `worst_year` (the lowest-t ACTIVE
     year) and `quarters` keep the shape the researcher's view reads from `evidence.train_score`. `unit` is
-    `unit_context`'s (None: E5 "unknown")."""
+    `unit_context`'s (None: E5 "unknown"). `always_in` (THE ALWAYS-IN CARD, Oct 10, 2026: the family's card is
+    `always_in`, `always_in_family`): G1 is read too (`always_in_entries`, kept as `always_in`) and is a bar after C1 (a
+    reading that is not known holds, as C1's does); every other family's score is the release before's."""
     c = cfg(settings)
     summary = result.get("summary") if isinstance(result, Mapping) and isinstance(result.get("summary"), Mapping) else {}
     k, n = evidence.quarters_positive(summary)
@@ -909,6 +1130,11 @@ def train_score(result: Mapping[str, Any], *, first_year: Any = None, unit: Mapp
     whys: list[tuple[str, str]] = []
     if calls_only(result, first_year) is False:
         whys.append(("C1", CALLS_ONLY_WHY))
+    if always_in:
+        reading = always_in_entries(result, first_year)
+        out["always_in"] = reading
+        if reading["passed"] is False:
+            whys.append(("G1", always_in_why(reading)))
     if len(out["active"]) < c["min_active_years"]:
         whys.append(("E1", f"it is in the market in {len(out['active'])} of {len(rows)} Train years; the lane needs "
                            f"{c['min_active_years']} (in the market: {ACTIVE_MIN_TRADES}+ trades on {ACTIVE_MIN_DAYS}+ days and "
@@ -1165,12 +1391,15 @@ def compact(score: Mapping[str, Any] | None, *, priced: bool = False) -> dict[st
     unit = score.get("unit") if isinstance(score.get("unit"), Mapping) else {}
     keys = ("median_2024_usd", "n_2024", "roots", "scaled_usd", "cap_usd", "verdict") if priced else \
         ("median_2024_usd", "n_2024", "roots", "verdict")
-    return {"objective": score.get("objective", OBJECTIVE), "score": score.get("score"),
-            "eligible": bool(score.get("eligible")), "fails": list(score.get("fails") or []), "why": score.get("why"),
-            "pnl": score.get("pnl"), "active": list(score.get("active") or []),
-            "years": {y: {k: r.get(k) for k in ("active", "t", "exposure", "pnl", "trades", "days_traded")}
-                      for y, r in (score.get("years") or {}).items() if isinstance(r, Mapping)},
-            "unit": {k: unit.get(k) for k in keys}, "reported": dict(score.get("reported") or {})}
+    out = {"objective": score.get("objective", OBJECTIVE), "score": score.get("score"),
+           "eligible": bool(score.get("eligible")), "fails": list(score.get("fails") or []), "why": score.get("why"),
+           "pnl": score.get("pnl"), "active": list(score.get("active") or []),
+           "years": {y: {k: r.get(k) for k in ("active", "t", "exposure", "pnl", "trades", "days_traded")}
+                     for y, r in (score.get("years") or {}).items() if isinstance(r, Mapping)},
+           "unit": {k: unit.get(k) for k in keys}, "reported": dict(score.get("reported") or {})}
+    if isinstance(score.get("always_in"), Mapping):  # THE ALWAYS-IN CARD's G1 reading (an always-in family's score only)
+        out["always_in"] = dict(score["always_in"])
+    return out
 
 
 def compact_robust(robust: Mapping[str, Any] | None) -> dict[str, Any] | None:
@@ -1273,8 +1502,9 @@ def lane_verdict(store: Any, fam: Mapping[str, Any], n: Any, settings: Mapping[s
     (`score` and `robust` compact). A full result is read when the store still keeps it (E5 priced at today's closes);
     else the row's stored compact score (its `dlane` summary key, E5 re-priced from its stored median) and, for the 1.5x
     run, the row's drift figures with the family state's robustness view. `known` False (figures owed, never a reason to
-    drop a mark) when a run or its figures are missing; `drop` True when a known bar failed for good (E1, E3, E4 or a
-    1.5x rule: the same program fails them again; an E5 failure is today's prices', so it never drops). Never raises."""
+    drop a mark) when a run or its figures are missing; `drop` True when a known bar failed for good (E1, E3, E4, an
+    always-in family's G1 or a 1.5x rule: the same program fails them again; an E5 failure is today's prices', so it never
+    drops). Never raises."""
     out: dict[str, Any] = {"known": False, "passed": False, "drop": False, "why": None, "score": None, "robust": None,
                            "lane": DIRECTION, "objective": OBJECTIVE}
     try:
@@ -1292,7 +1522,8 @@ def lane_verdict(store: Any, fam: Mapping[str, Any], n: Any, settings: Mapping[s
         first_year = int(span[:4]) if span[:4].isdigit() else FIRST_YEAR
         full = store.run_result(run["run_id"]) if run.get("run_id") else None
         if isinstance(full, Mapping):
-            score = train_score(full, first_year=first_year, unit=unit, settings=settings)
+            score = train_score(full, first_year=first_year, unit=unit, settings=settings,
+                                always_in=always_in_family(store, fam, settings))
         else:
             stored = summary.get(STATE_KEY)
             score = _score_from_compact(stored, unit, settings)
@@ -2598,4 +2829,8 @@ __all__ = ["OBJECTIVE", "ALPHA", "DIRECTION", "LANES", "MODES", "SCREENS", "ALPH
            "CALLS_ONLY_WHY", "ration_text",
            # the train map (Oct 9, 2026)
            "MAP_PATH", "MAP_LABEL", "MAP_UNITS", "MAP_ARCHITECT_ROWS", "MAP_BRIEF_ROWS", "map_text_problems", "train_map",
-           "map_on", "train_map_text", "train_map_brief"]
+           "map_on", "train_map_text", "train_map_brief",
+           # the always-in card (Oct 10, 2026)
+           "ALWAYS_IN_INPUTS", "EVERY_SESSION", "ALWAYS_IN_SHARE", "ALWAYS_IN_MIN_FLAT", "ALWAYS_IN_KEY", "ALWAYS_IN_CAUSE",
+           "declared_inputs", "always_in", "always_in_family", "always_in_entries", "always_in_why", "always_in_try",
+           "always_in_failed"]

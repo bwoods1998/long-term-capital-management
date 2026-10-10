@@ -962,7 +962,8 @@ class ReportedOnly(unittest.TestCase):
         rows = {r["rule"]: r for r in R.LOOSENED}
         total = rows["the Probe total (PREREG-T, Oct 10)"]
         line = rows["the program loss line (PREREG-T, Oct 10)"]
-        self.assertEqual(list(rows)[-2:], [total["rule"], line["rule"]])
+        order = list(rows)  # the pair as adopted, in order (the always-in graveyard's row of Oct 10 follows them)
+        self.assertEqual(order.index(line["rule"]), order.index(total["rule"]) + 1)
         self.assertEqual((total["was"][:4], total["now"][:4]), ("$400", "$800"))
         self.assertEqual((line["was"][:5], line["now"][:5]), ("-$200", "-$300"))
         for figure in ("17.8% -> 36.8%", "0.6% -> 4.4%", "-$396 -> -$679", "21% -> 48%", "-$327 -> -$231",

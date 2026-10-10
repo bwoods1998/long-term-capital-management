@@ -305,6 +305,23 @@ LOOSENED: tuple[dict[str, str], ...] = (
              "drawdown stop trips by 24 weeks) 46% -> 48%; P(Done | zero edge) 2.5% -> 2.7% at 12 weeks; for P(Done) "
              "5.3% -> 5.5% at 12 weeks (paired +0.24 points, SE 0.12: past the pre-registered 2-paired-SE preference "
              "for the total alone by a hair, 2.06 SE). Measured at roster 5 alone, as the row above"},
+    # THE ALWAYS-IN CARD (Oct 10, 2026; league/swarm/cards.py, dlane.py, architect.py): the lane's own instrument could
+    # not be born past the gated ideas refuted in its cells.
+    {"rule": "the graveyard for an always-in direction card (Oct 10)",
+     "was": "a direction card was bound by every direction family's row in its cell whose inputs overlap its own; an "
+            "always-in card reads the clock, so each gated idea refuted there (22-43 rows a cell) bound it, and no "
+            "claim could free it (it reads nothing a claim could add)",
+     "now": "a direction card whose declared inputs are exactly [\"clock\"] (always-in: it enters every session, no "
+            "gate) is bound only by the always-in direction rows on its roots, any class or holding; its birth joins "
+            "the always-in lineage on each of its roots, ONE Validation try a root; G1: its program must enter on 90% "
+            "of the Train sessions it is flat on, or it is never validated and retires; alpha cards and gated direction "
+            "cards are judged as before",
+     "cost": "at most one always-in Validation try per root (SPY, QQQ, IWM), ever, unless the owner changes "
+             "dlane.val_tries (fewer when a family on two roots joins their lineages): each is the lane's D2 lottery at "
+             "10.37% per program at zero edge on mixed worlds (12.39% on 2022-24 worlds; higher when the screen windows "
+             "rose), so up to three more such lotteries in all; their profit is index beta minus option costs, reported "
+             "beside the same-risk buy-and-hold, never alpha; a program never flat on Train could add gated entries on "
+             "top of its always-in position, which G1 cannot see"},
 )
 #: And what D-1 TIGHTENED (said beside the loosenings), with release L-D's rolling budget, a tightening of its NET.
 TIGHTENED: tuple[str, ...] = (

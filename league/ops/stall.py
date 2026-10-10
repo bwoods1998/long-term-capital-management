@@ -19,7 +19,8 @@ a STALL by its cause:
   as a game-arm family that waits for a CONFIRM (`waiting_game`: the learning game validates CONFIRMED versions only),
   nor as a direction family whose lineage's one Validation try is used or taken this round (`spent_lane`, `waiting_lane`:
   release D-1b's ration), or whose candidate's code names another open than a long call (`calls_refused`: release
-  D-1b's calls-only code check);
+  D-1b's calls-only code check), or an always-in family whose candidate has no G1 pass on record (`always_in_refused`:
+  THE ALWAYS-IN CARD, Oct 10, 2026);
 - `braked`: the Sail guard was braked `BRAKED_HOURS` or more of the last `BRAKE_WINDOW_HOURS` hours, whatever the cause
   (the budget's daily stop reached by noon keeps research from running round the clock as surely as a low balance);
 - `runway_sail`, `runway_claude`: a meter's days of research left at the ceiling (`budget.json` `card_runway_days`: what it
@@ -305,7 +306,8 @@ def swarm_facts(db: Any, now: float) -> dict[str, Any]:
                   # or another member took this round's (`waiting_lane`): owed no Validation now. Nor is a direction
                   # candidate whose code names another open than a long call (`calls_refused`, the review's finding 3).
                   "spent_lane": sorted(set(ids(validation.get("spent_lane"))) | set(ids(validation.get("waiting_lane")))
-                                       | set(ids(validation.get("calls_refused")))),
+                                       | set(ids(validation.get("calls_refused")))
+                                       | set(ids(validation.get("always_in_refused")))),
                   "errors": len(ids(validation.get("errors")))}
     out["last_round"] = round_
     out["brake"] = F.guard_hours(db, now - BRAKE_WINDOW_HOURS * 3600, now)

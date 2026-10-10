@@ -29,6 +29,15 @@ any other deploy.
 The running House release is `20261010T062000Z-1767910d2115` (main `dd196cad`, the spent-lineage refusal, 06:20Z Oct 10),
 the gateway is `507b6118`, and the box's updater is on. What is built and not deployed is on branches.
 
+### The always-in card, on `fix/always-in-v2` (unreleased; an owner deploy; no evidence reset)
+
+- A direction card whose declared inputs are exactly `["clock"]` is always-in: bound only by the always-in direction
+  rows on its roots (`cards.RebirthIndex.check`'s direction path; alpha cards, legacy rows and gated direction cards
+  as on main), linked at birth to every always-in lineage on its roots (one Validation try a root), and checked on
+  Train (G1: it enters on 90% of its flat sessions, or it is never validated and retires). The architect's prompt,
+  BIRTH CELLS and closed-pass check say it. A LOOSENED row in the `dlane` report states the cost. Docs:
+  `docs/operations.md`. Proof: `test_dlane_always_in`.
+
 ### 06:20Z Oct 10, 2026: the spent-lineage refusal (#526), House `20261010T062000Z-1767910d2115`, main `dd196cad`
 
 Owner deploy (no gateway change) after the 06:00Z nightly: no order in flight at 06:19:51Z; promoted (rollback

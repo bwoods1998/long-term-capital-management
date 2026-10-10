@@ -45,7 +45,10 @@
    retires, THE COHORT KEEP's or not (THE RATION BEFORE THE KEEP, Oct 10, 2026, the readiness audit's M3: until then the
    keep spared it as it spares the clocks, holding a population slot with nothing left to validate); a direction family
    never forks once its lineage's try is used (`lane_forks`). The alpha lane keeps its counts; with the lane off nothing
-   here is read.
+   here is read. THE ALWAYS-IN CARD (Oct 10, 2026; dlane.py): an always-in direction family's version is validated only
+   with a G1 pass on record (`dlane.always_in_try`: the program entered on the clock alone on Train), else it waits
+   (`always_in_refused`, no try spent), and a family a version of which failed G1 retires first in `_why`
+   (`dlane.always_in_failed`, an IDLE death that binds no card).
 3. THE ALLOCATION (Release B, league/swarm/allocation.py; `allocation.mode` "value"): each family's share of researcher
    turns and Gym priority by its expected information value (the variance of its next validation's pass or fail under
    an empirical-Bayes posterior, discounted by the idea's trials, its own and those inherited at birth, by exhaustion:
@@ -354,6 +357,7 @@ class Tournament:
         spent_lane: list[str] = []
         lane_waiting: list[str] = []
         calls_refused: list[str] = []  # a direction candidate whose code names another open (owed no Validation)
+        always_in_refused: list[str] = []  # THE ALWAYS-IN CARD: a candidate with no G1 pass on record (owed no Validation)
         lane_lines: set[str] = set()
         drift: dict[str, list[str]] = {"waiting": [], "failed": []}
         image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
@@ -436,6 +440,13 @@ class Tournament:
                 if dlane.calls_only_code(version["code"], version.get("params") or {}) is not None:
                     calls_refused.append(fam["id"])
                     continue
+                # THE ALWAYS-IN CARD's G1 (Oct 10, 2026; `dlane.always_in_try`): an always-in family's version is validated
+                # only with a G1 pass on record (its score's, else its Train run's own reading), so a program that did not
+                # enter on the clock alone spends no try (the family retires: `_why`, `dlane.always_in_failed`), and one
+                # with no reading waits. The lineage's own try validated again (`again`) was checked when it was sent.
+                if not again and dlane.always_in_try(self.store, fam, n, self.settings) is not None:
+                    always_in_refused.append(fam["id"])
+                    continue
                 lane_lines.update(lines)  # this direction lineage's try for the round (whichever way it is judged below)
             recorded = self.recorded_validation(fam["id"], n)
             if recorded is not None:  # validated before (a best submitted again): judged from its result, no new trial
@@ -497,6 +508,8 @@ class Tournament:
             out["waiting_lane"] = lane_waiting
         if calls_refused:  # its candidate names another open than a long call: owed no Validation until a calls-only one
             out["calls_refused"] = calls_refused
+        if always_in_refused:  # THE ALWAYS-IN CARD: its candidate has no G1 pass on record: owed no Validation
+            out["always_in_refused"] = always_in_refused
         return out
 
     def lane_lines(self, fam: Mapping[str, Any]) -> set[str] | None:
@@ -972,6 +985,12 @@ class Tournament:
         # practice cohort ends with it, so its program loses the incubator route (a tightening of a money route, listed in
         # the dlane report's TIGHTENED). `lineage_spent` is None for every alpha family and while the lane is off, so the
         # alpha lane and the rollback keep THE COHORT KEEP's order exactly.
+        # THE ALWAYS-IN CARD (Oct 10, 2026; `dlane.always_in_failed`): an always-in family a version of which did not enter
+        # on the clock alone on Train (G1) loses the always-in exemption and retires, before the ration and the keep
+        # alike; its cause is an untested death (IDLE), so no graveyard row of it binds, and no try of its was spent.
+        failed = dlane.always_in_failed(self.store, fam, self.settings)
+        if failed:
+            return failed
         spent = dlane.lineage_spent(self.store, fam, self.settings)
         if spent:
             return spent
