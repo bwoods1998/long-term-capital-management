@@ -315,29 +315,41 @@ CREATE TABLE IF NOT EXISTS eq_instances (
 ```
 
 Key-values the book keeps in `kv` (live.sqlite): `eq_recon` {frozen, bad, good, problems, at}; `eq_freeze` {why, at}
-(an unexplained corporate action, A8.10); `eq_activities_cursor`; `eq_catchup` {day} (A8.5's catch-up decide).
+(an unexplained corporate action, A8.10); `eq_activities_cursor`; `eq_decide` {day, status: done | failed | idle, at,
+why} (the last decision day handled: A8.5's catch-up decide runs while it is behind the last close); book, as built:
+`eq_synced` (the day the instances were last synced), `eq_decision` {day, start, end, symbols, shas, audit, mismatch}
+(A8.11's provenance and the morning audit's verdict), `eq_bars_audit` {day: {symbols, at}} (the twin note),
+`eq_sticky` {instance: why} (EDM1 demotions), `eq_band_since` {instance: {band, day}}, `eq_activity_refused` (watched
+activity types the venue refused), `eq_preopen_activities`. The book reads the hooks' share-event ledger `shares`.
 
 ### 5.2 `league/equity/live.py`
 - Constants: `WORKING`, `TERMINAL`, `LOT_OPEN`/`LOT_CLOSING`/`LOT_CLOSED`, `REAL_SUFFIX` ":r", `SHARE_TOLERANCE`
-  1e-9, `CLIENT_PREFIX`; `client_id(eid, family) -> "lq-<eid>-<slug>"` (<= 48 chars).
+  1e-9, `CLIENT_PREFIX`; `client_id(eid, family, *, nonce="") -> "lq-<eid>-<slug>"` (<= 48 chars; book, additive: the
+  book passes `LiveState.nonce`, so its ids are `lq-<nonce>-<eid>-<slug>`, as the options book's `lv-<nonce>-...`: a
+  rolled-back state never repeats an id the venue has seen).
 - Row functions (pure over `rows(sql, params) -> [dict]`, so the hooks and a restart read the same numbers; a state
   without `eq_lots` reads as empty): `probe_figures(rows, *, weights) -> ProbeFigures(programs: int, closes:
   ((ny_day | None, Decimal net cash), ...), open_risk: Decimal)` (ONE slot a program, A8.6; open risk = weight x mark
   value of open ":r" lots, entry price when unmarked, plus weight x remaining x limit of working ":r" buys);
   `expected_shares_rows(rows) -> {sym: Decimal}` (open lots + filled part of working buys, less the filled part of
   working sells not yet booked); `working_buys_worst(rows) -> Decimal`; `orders_today(rows, day) -> int`;
-  `invested(rows) -> Decimal`.
+  `invested(rows) -> Decimal`. A program is a family (its versions' lots share one slot).
 - `EquityBook(state, account, market, table, families, *, decider, stock_proof=None, sizing_equity=None,
   options_book=None, root=None, clock=None, record=None, alert=None)`:
   - `tick(now, *, account_row, positions, open_orders, real_block, killed) -> dict` (never raises);
   - `frozen` (str), `expected_shares() -> {sym: Decimal}`, `busy() -> set[str]`, `health() -> dict`,
-    `flatten(why) -> int` (the rollback's first step: every open lot queued to exit through the normal path).
+    `flatten(why) -> int` (the rollback's first step: every open lot queued to exit through the normal path);
+    `reconcile(positions, now=None) -> [problems]` (one reading; book, additive).
 - Calls it makes: `league.equity.sizing.size_entry` (money), `league.live.money.available_cash` (money) with
-  `working_buys_worst` = its own + the options book's open buy orders, `table.equity` (money's `EquityTable`),
+  `working_buys_worst` = its own and `reserved` = the options book's `reserved()` (its working opens' maximum loss with
+  fees and buffer: at least their worst cost, so no option buy is counted twice), `table.equity` (money's `EquityTable`),
   `league.equity.bands.next_band` (swarm) with `sized_up` / `edm1` (money) through it, `decider.kind("equity",
   "decide", {"jobs": [{"key": instance, "inputs": ctx.Inputs}]})` (hooks), `ctx.inputs_from_fetch` (core),
   `stock_proof.passed()` / `stock_proof.step(now, market=...)` (hooks), `families.read/add_forward/set_band/
-  confirm_band` (own), `options_book.busy()`, `.exit_reserve()`, `.count_today(day)` (A8.3).
+  confirm_band` (own), `options_book.busy()`, `.exit_reserve()`, `.count_today(day)` (A8.3), `.reserved()` and
+  `.exposure(...).book_loss` (the options open maximum loss in the invested cap, A1); `decider.kind_load("equity", key,
+  {code, params, name, timeout, max_errors})` before a decide (its answer's `needs`; a `params` in it, the merged
+  PARAMS, is used for the ctx when present) and `decider.kind_drop` at a retirement.
 - **Decide (16:30)**: per live instance (its band "probe" or "sized" in `families.read()`, roster seat held), the
   16:20 bars (raw and all through t, `MarketData.bars(..., adjustment=...)`), `eq_bars` rows written with the arrays'
   sha, `Inputs` built, one "decide" kind request for every instance, intents validated and recorded in `eq_intents`
@@ -364,19 +376,24 @@ Key-values the book keeps in `kv` (live.sqlite): `eq_recon` {frozen, bad, good, 
 900, exit_until_before_close_s 300, close_send_before_close_s 300, close_until_before_close_s 30, open_reprice_s 60,
 close_reprice_s 30, bars_after_close_s 1200, decide_after_close_s 1800, audit_before_open_s 3600 (the constitution's
 `equity_money.order_path` carries the ones in force, same keys). `PHASES`. `Moments(day, open_at, close_at, early,
-preopen, open_send, entry_until, exit_until, close_send, close_until, bars_at, decide_at)`; `moments(day, offsets=None)
--> Moments | None`; `next_session(day) -> date`; `phase(now, offsets=None) -> (phase, day)`. Half days by offset.
+preopen, open_send, entry_until, exit_until, close_send, close_until, bars_at, decide_at, audit_at)`; `moments(day,
+offsets=None) -> Moments | None`; `next_session(day) -> date`; `phase(now, offsets=None) -> (phase, day)`. Half days by
+offset. Book, additive: `audit_at` (open - `audit_before_open_s`), `offsets_of`, `is_session`, `previous_session`,
+`sessions_between(first, last)` (sessions in (first, last]: a lot's held sessions), `ny_day`.
 
 ### 5.4 `league/equity/actions.py`
 `DIVIDENDS` (DIV, DIVCGL, DIVCGS, DIVROC, DIVNRA, DIVTW), `ACTIONS` (SSP, SSO, REORG, NC, MA), `TYPES`;
 `Booking(kind, symbol, day, per_lot {lid: {div, qty, entry_px, cash}}, why)`; `book_activity(activity, lots) ->
-Booking` (pure; kind "freeze" for any other type touching a held symbol, A8.10).
+Booking` (pure; kind "freeze" for any other type touching a held symbol, A8.10). Book, additive: `Booking.unattributed`,
+`.new_symbol`, `.as_dict()`; kinds also "spinoff" and "none"; `CASH_IN_LIEU` ("CIL") and `WATCH` (types read one by
+one, best effort, beside `TYPES`).
 
 ### 5.5 `league/equity/families.py`
 `EquityFamilies(root)` and `MemoryEquityFamilies(rows=())`: `read(family=None) -> [row]`, `forward_rows(family)`,
 `add_forward(family, source, trades) -> int`, `set_band(family, band, reason)`, `confirm_band(expected, band,
 reason) -> bool`; `validation_r_sd(state, version) -> float | None`. A row is `league.swarm.bands.read(root,
-lanes=LANES)`'s (section 8.3) plus `validation_r_sd`.
+lanes=LANES)`'s (section 8.3) plus `validation_r_sd`. Book, additive: `last_error` ("" when the last `read` could read
+the store: the book never retires an instance on an unreadable read) and `twins()` (the swarm store's `equity_twins`).
 
 ---
 
