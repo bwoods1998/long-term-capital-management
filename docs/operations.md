@@ -57,6 +57,12 @@ or only for symbols tagged as assigned. Until it does, `STOCK_BUYS_REAL` "on" is
   (the venue's account and positions can lag an order's status); one whose answer never came, for two minutes from
   admission. So a burst of buys cannot pass a cap between two readings, and a buy that fills while the account and
   positions lag is still counted. One the open orders list by its `client_order_id` counts once, the larger of the two.
+  A held buy or close is let go early only on a definite answer (the House's cancel-then-resend re-prices every 30 s in
+  the close window): a submit the venue refuses with a 4xx other than 408 placed nothing and counts nothing from then;
+  and each check reads, by `client_order_id` (`GET v2/orders:by_client_order_id`, read-only, at most 10), the held
+  orders the open orders do not list: one `canceled`, `expired` or `rejected` counts only what it filled (shares the
+  positions may not show yet), learned once and never read again; one `filled` keeps its whole hold. A read that fails,
+  a 5xx, a 408 or no answer keeps the whole hold, and an order sent with no `client_order_id` can only wait it out.
 - **It is an open for the day's counts** (`MAX_DAY_OPEN_ORDERS`, `MAX_DAY_ORDERS`) and the kill switch stops it (`423`).
   It never spends the options' opening maximum loss (`MAX_DAY_USD_ALPACA`): the stock book has its own caps.
 - **Fails closed**: an account that cannot be read (or has no equity or `buying_power`, or a margin account, multiplier
@@ -79,10 +85,10 @@ fallen since that oldest one was admitted (it records what was free then): a clo
 counts once; one it does not show yet still counts; and a fill of an older order (already out of what was free) hides
 none. A close is admitted only when its qty is at most what is left. Two sales of the same shares, through one isolate or
 two, cannot both go: the second is `409 {cap: "stock_close"}`, nothing sent (the House reads a 4xx as a refusal and
-sends it again later). A held close the venue refused also holds its shares for the minute: from the readings alone it
-looks like a fill the positions do not show yet. Open orders that cannot be read, a full page of 500, or an open order on
-the close's side with no `qty` is `424 {cap: "orders"}`. No order is ever a short sale, so margin is never used for one, and no buy both
-covers and opens. With `STOCK_BUYS_REAL` anything but `on`, a real stock buy is what it was (a cover or a `400`). Crypto
+sends it again later). A close with a definite answer is let go early as a buy is (above, **Buys in flight**): refused
+with a 4xx, or read done by its `client_order_id` with only what it filled still held. Open orders that cannot be read,
+a full page of 500, or an open order on the close's side with no `qty` is `424 {cap: "orders"}`. No order is ever a
+short sale, so margin is never used for one, and no buy both covers and opens. With `STOCK_BUYS_REAL` anything but `on`, a real stock buy is what it was (a cover or a `400`). Crypto
 stays refused. The practice account (`alpaca-paper`) is unchanged.
 **Margin interest** on a margin account is the venue's charge on borrowed cash: the gateway does not meter it, so the
 House's economics must count it (no hidden costs).

@@ -105,6 +105,11 @@ account. **Reads and cancels always pass.** Deployed values (`wrangler.jsonc`, d
   as a buy is: from the oldest held close, the closes since count as the larger of what they ask and how
   far what is free has fallen since it was admitted (a close the venue already shows counts once, one
   filled while the positions lag still counts). A close past what is left is `409 {cap: "stock_close"}`.
+  A held buy or close is let go early only on a definite answer, so the House's cancel-then-resend
+  works: a submit the venue refuses with a 4xx (but 408) counts nothing from then, and each check reads
+  by `client_order_id` the held orders the open orders do not list (at most 10, read-only): one
+  `canceled`, `expired` or `rejected` counts only what it filled. A read that fails, a 5xx or a timeout
+  keeps the whole hold.
   No order is ever a short sale; crypto is refused. The running House sells every stock position at
   market (`_close_shares`): the House release that first buys must limit that to assignment shares
   (docs/operations.md).

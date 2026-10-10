@@ -29,7 +29,7 @@ any other deploy.
 The running House release is `20261010T062000Z-1767910d2115` (main `dd196cad`, the spent-lineage refusal, 06:20Z Oct 10),
 the gateway is `507b6118`, and the box's updater is on. What is built and not deployed is on branches.
 
-### A stock buy's fill between reads is never lost, and a lagging sale is never sold twice, on `fix/gateway-stock-read-order` (unreleased; a gateway deploy; no House change)
+### A stock buy's fill between reads is never lost, a lagging sale is never sold twice, and a definite answer lets a hold go, on `fix/gateway-stock-read-order` (unreleased; a gateway deploy; no House change)
 
 - The design review of Oct 10, 2026: `realStockBuy` read the account, then the open orders, then the positions, so a buy
   that filled between the first two reads was counted nowhere, and the Gate's ledger let an answered buy go after 5 s
@@ -44,8 +44,14 @@ the gateway is `507b6118`, and the box's updater is on. What is built and not de
   `caps.closeAvailable`; `424 orders` when they cannot be read), and is held `STOCK_LEDGER_HOLD_MS` after its answer (two
   minutes with none). From the oldest close held, the closes since count as the larger of what they ask and how far what
   is free has fallen since it was admitted, so a close the venue shows counts once and one it does not still counts; past
-  what is left is `409 stock_close`. Covers have the mirror rule. A venue-refused close also holds its shares for the
-  minute. Proof: `gateway/test/stock-buys.test.mjs`, `gateway/test/router.test.mjs` (453 of 453 in the gateway).
+  what is left is `409 stock_close`. Covers have the mirror rule. Proof: `gateway/test/stock-buys.test.mjs`,
+  `gateway/test/router.test.mjs` (453 of 453 in the gateway).
+- So the House's cancel-then-resend still works (it re-prices every 30 s in the close window), a held buy or close is let
+  go early on a definite answer: a submit refused with a 4xx other than 408 counts nothing from then, and each check reads
+  by `client_order_id` (`GET v2/orders:by_client_order_id`, read-only, at most 10) the held orders the open orders do not
+  list; one `canceled`, `expired` or `rejected` counts only what it filled, learned once. A failed read, a 5xx, a 408 or
+  no answer keeps the whole hold; `filled` keeps it as before. The Durable Object gains `stockAsk` (read-only). Proof:
+  `gateway/test/stock-buys.test.mjs` (455 of 455 in the gateway).
 
 ### Real stock and ETF buys at the gateway, on `feat/gateway-stock-opens` (unreleased; a gateway deploy; no House change)
 
