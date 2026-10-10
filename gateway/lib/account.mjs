@@ -126,6 +126,10 @@ export async function readAccountEquity(env, { fetcher = fetch, now = Date.now }
 export const STOCK_ETF_SHARE_MAX = 500000n;
 export const STOCK_SINGLE_SHARE_MAX = 200000n;
 export const STOCK_MULTIPLE_MAX = 2n * MILLION;
+//: The day's real stock buys, at qty x limit_price (cancelled ones included), at most this many times equity (the review
+//: of Oct 10, 2026): a gateway backstop under the House's daily and drawdown stops, which live only in House code. Four
+//: is two full turnovers of a book at its 2x line; a var may lower it ("0" closes the route), never raise it.
+export const STOCK_DAY_MULTIPLE_MAX = 4n * MILLION;
 
 /** A share or multiple in millionths from 0 to `max`; `max` when unset or malformed, `max` when above it. */
 function capped(raw, max) {
@@ -135,13 +139,22 @@ function capped(raw, max) {
   return millionths > max ? max : millionths;
 }
 
-/** The stock caps in force, from `vars`: STOCK_ETF_EQUITY_SHARE, STOCK_SINGLE_EQUITY_SHARE, STOCK_MAX_EQUITY_MULTIPLE. */
+/**
+ * The stock caps in force, from `vars`: STOCK_ETF_EQUITY_SHARE, STOCK_SINGLE_EQUITY_SHARE, STOCK_MAX_EQUITY_MULTIPLE,
+ * STOCK_DAY_EQUITY_MULTIPLE.
+ */
 export function stockCaps(env = {}) {
   return {
     etfShare: capped(env.STOCK_ETF_EQUITY_SHARE, STOCK_ETF_SHARE_MAX),
     stockShare: capped(env.STOCK_SINGLE_EQUITY_SHARE, STOCK_SINGLE_SHARE_MAX),
     maxMultiple: capped(env.STOCK_MAX_EQUITY_MULTIPLE, STOCK_MULTIPLE_MAX),
+    dayMultiple: capped(env.STOCK_DAY_EQUITY_MULTIPLE, STOCK_DAY_MULTIPLE_MAX),
   };
+}
+
+/** The day's stock buys cap: equity x STOCK_DAY_EQUITY_MULTIPLE, rounded down. */
+export function stockDayCapMicro(limits, equityMicro) {
+  return equityMicro > 0n ? equityMicro * limits.dayMultiple / MILLION : 0n;
 }
 
 /** One symbol's cap: its kind's share of equity (an "etf" the ETF share, anything else the single-stock share), rounded down. */
@@ -159,16 +172,35 @@ export function multiplierMillionths(raw) {
   return pico / MILLION;
 }
 
+/** The book's margin multiple: the lower of STOCK_MAX_EQUITY_MULTIPLE and the account's multiplier (millionths). */
+export function stockMultiple(limits, multiplier) {
+  return multiplier < limits.maxMultiple ? multiplier : limits.maxMultiple;
+}
+
 /** The whole book's cap: equity x the lower of STOCK_MAX_EQUITY_MULTIPLE and the account's multiplier, rounded down. */
 export function stockTotalCapMicro(limits, equityMicro, multiplier) {
-  const multiple = multiplier < limits.maxMultiple ? multiplier : limits.maxMultiple;
-  return equityMicro > 0n ? equityMicro * multiple / MILLION : 0n;
+  return equityMicro > 0n ? equityMicro * stockMultiple(limits, multiplier) / MILLION : 0n;
+}
+
+/**
+ * The book as the cap weighs it (the review of Oct 10, 2026): `totalMicro` (everything long, plus resting stock buys,
+ * plus buys in flight, plus this one) with the part the venue lends nothing on (`optionsMicro`, inside `totalMicro`)
+ * weighted at the margin multiple instead of once. Under Reg T's overnight line a book holds `stocks / m + options <=
+ * equity`, i.e. `stocks + options x m <= equity x m`; at a multiple of 1 or less nothing is lent and every dollar counts
+ * once. The extra weight rounds up: the book never reads smaller than it is.
+ */
+export function stockBookMicro(totalMicro, optionsMicro, multiple) {
+  if (multiple <= MILLION || optionsMicro <= 0n) return totalMicro;
+  return totalMicro + (optionsMicro * (multiple - MILLION) + MILLION - 1n) / MILLION;
 }
 
 /**
  * Read what a real stock buy is judged by, read-only, fresh every time (Oct 10, 2026): `{ ok: true, at, equity_micro,
  * buying_power_micro, multiplier }` (`multiplier` in millionths, as a string) or `{ ok: false, at, error }`. Buying power
- * is the venue's own, which nets its open orders; an account with no readable equity or buying power is no reading.
+ * is the venue's own, which nets its open orders: the LOWER of `buying_power` and the overnight `regt_buying_power` (the
+ * review of Oct 10, 2026: on pattern-day-trader margin, multiplier 4, `buying_power` is the intraday figure, 4 x
+ * (last_equity - maintenance_margin), which bounds nothing held overnight). An account with no readable equity or buying
+ * power is no reading, and so is a margin account (multiplier above 1) with no readable `regt_buying_power`.
  */
 export async function readStockAccount(env, { fetcher = fetch, now = Date.now } = {}) {
   const at = now();
@@ -176,10 +208,17 @@ export async function readStockAccount(env, { fetcher = fetch, now = Date.now } 
     const account = await fetchAccount(env, fetcher);
     const equity = accountPico(account.equity);
     if (equity === null) throw new Error('no equity field');
-    const power = accountPico(account.buying_power);
+    let power = accountPico(account.buying_power);
     if (power === null) throw new Error('no buying_power field');
+    const multiplier = multiplierMillionths(account.multiplier);
+    // A cash account (multiplier 1) borrows nothing, so its `buying_power` (its cash) needs no overnight figure beside it;
+    // one that is sent must still read.
+    const given = account.regt_buying_power !== undefined && account.regt_buying_power !== null;
+    const overnight = given ? accountPico(account.regt_buying_power) : null;
+    if (overnight === null && (given || multiplier > MILLION)) throw new Error('no regt_buying_power field');
+    if (overnight !== null && overnight < power) power = overnight;
     return { ok: true, at, equity_micro: String(floorMicro(equity)), buying_power_micro: String(floorMicro(power)),
-      multiplier: String(multiplierMillionths(account.multiplier)) };
+      multiplier: String(multiplier) };
   } catch (error) {
     return { ok: false, at, error: `alpaca account: ${String(error?.message || error?.name || 'read failed')}`.slice(0, 200) };
   }

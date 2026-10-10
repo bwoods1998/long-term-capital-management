@@ -6,7 +6,7 @@
 // this module rather than in the Durable Object class is what lets every rule below be tested
 // without a Workers runtime.
 
-import { caps, venueOrderCap, STOCK_UNIVERSE, stockBuysEnabled } from './caps.mjs';
+import { caps, venueOrderCap, STOCK_UNIVERSE, stockBuysEnabled, picoUnits } from './caps.mjs';
 import { monthCapMicro } from './frontier.mjs';
 import * as claude from './claude.mjs';
 import * as equity from './equity.mjs';
@@ -47,10 +47,12 @@ export const REVIEWS_KEY = 'github-reviews-v1';
 //: The engineer's pull requests (V3-A, WP8b): a New York day's count of their own, apart from the other roles' UTC day.
 export const ENGINEER_PULLS_KEY = 'github-engineer-pulls-v1';
 export const ADMIN_LOG_KEY = 'admin-log-v1';
-//: Real stock buys admitted and not yet seen by the venue (Oct 10, 2026): the in-flight part of the stock caps.
+//: Real stock buys admitted and not yet seen by the venue (Oct 10, 2026): the in-flight part of the stock caps. Real stock
+//: CLOSES (sales of shares held long, covers of a short) are kept in it too (`kind: "close"`; the review of Oct 10, 2026),
+//: so a second close of the same shares is refused before the venue shows the first.
 export const STOCK_PENDING_KEY = 'stock-pending-v1';
-//: An admitted stock buy counts as in flight until its forward is answered, then until no reading started before that
-//: answer can be judged by (`STOCK_READ_SKEW_MS`); one whose answer never came counts this long (twice the forward's
+//: An admitted stock buy or close counts as in flight until its forward is answered, then until no reading started before
+//: that answer can be judged by (`STOCK_READ_SKEW_MS`); one whose answer never came counts this long (twice the forward's
 //: 30-second timeout), after which the venue's own open orders and positions show it if it exists.
 export const STOCK_PENDING_MS = 60_000;
 export const STOCK_READ_SKEW_MS = 5_000;
@@ -270,15 +272,19 @@ export function createGate({ store, env = {}, now = Date.now }) {
   // --- real stock buys (Oct 10, 2026; caps.mjs "stock and ETF buys on the real account") --------------------------------
 
   /**
-   * The in-flight ledger, pruned at `at`: `{ next, entries: [{ id, at, symbol, micro, settled }] }`. An entry leaves once
-   * it can no longer count (`stockCounts`): settled more than STOCK_PENDING_MS ago, or unsettled for that long.
+   * The in-flight ledger, pruned at `at`: `{ next, entries: [{ id, at, symbol, micro, settled, kind, side?, qty? }] }`.
+   * `kind` is `buy` (an open, `micro` its qty x limit_price) or `close` (a sale or a cover: `side` and `qty`, picounits of
+   * shares; `micro` 0). An entry leaves once it can no longer count (`stockCounts`): settled more than STOCK_PENDING_MS
+   * ago, or unsettled for that long.
    */
   const stockLedger = at => {
     const row = read(store, STOCK_PENDING_KEY, {}) || {};
     const entries = (Array.isArray(row.entries) ? row.entries : [])
       .filter(entry => entry && typeof entry === 'object' && /^\d{1,18}$/.test(String(entry.micro)) && Number.isFinite(Number(entry.at)))
       .map(entry => ({ id: Number(entry.id), at: Number(entry.at), symbol: String(entry.symbol || ''), micro: String(entry.micro),
-        settled: entry.settled === null || entry.settled === undefined || !Number.isFinite(Number(entry.settled)) ? null : Number(entry.settled) }))
+        settled: entry.settled === null || entry.settled === undefined || !Number.isFinite(Number(entry.settled)) ? null : Number(entry.settled),
+        kind: entry.kind === 'close' ? 'close' : 'buy',
+        ...(entry.kind === 'close' ? { side: entry.side === 'buy' ? 'buy' : 'sell', qty: /^\d{1,30}$/.test(String(entry.qty)) ? String(entry.qty) : '0' } : {}) }))
       .filter(entry => (entry.settled === null ? entry.at : entry.settled) > at - STOCK_PENDING_MS);
     return { next: Number.isSafeInteger(Number(row.next)) && Number(row.next) > 0 ? Number(row.next) : 1, entries };
   };
@@ -294,12 +300,15 @@ export function createGate({ store, env = {}, now = Date.now }) {
 
   /**
    * One real stock or ETF BUY (Oct 10, 2026), judged in the step that reserves it. `stock` is what the router read from
-   * the venue for it just now: the account's `equity_micro`, `buying_power_micro` and `multiplier` (millionths), the
-   * symbol's long market value plus its open buy orders (`symbol_held_micro`), every long position plus every open stock
-   * buy (`total_held_micro`), and `read_at`, when the reading began. Added here: the buys this gate admitted that the
-   * venue may not have shown that reading (the ledger). Caps (`account.stockCaps`): the order alone at most the symbol's
-   * share of equity (`stock_order`); the symbol's position with it at most the same share (`stock_position`); the whole
-   * book with it at most equity x min(STOCK_MAX_EQUITY_MULTIPLE, the account's multiplier) (`stock_total`); never above the
+   * the venue for it just now: the account's `equity_micro`, `buying_power_micro` (the lower of `buying_power` and
+   * `regt_buying_power`) and `multiplier` (millionths), the symbol's long market value plus its open buy orders
+   * (`symbol_held_micro`), every long position plus every open stock buy (`total_held_micro`), the part of that the venue
+   * lends nothing on, long options above all (`options_held_micro`), and `read_at`, when the reading began. Added here:
+   * the buys this gate admitted that the venue may not have shown that reading (the ledger). Caps (`account.stockCaps`):
+   * the order alone at most the symbol's share of equity (`stock_order`); the day's buys with it at most
+   * STOCK_DAY_EQUITY_MULTIPLE x equity (`stock_day`); the symbol's position with it at most the same share
+   * (`stock_position`); the whole book with it, options weighed at the margin multiple, at most equity x
+   * min(STOCK_MAX_EQUITY_MULTIPLE, the account's multiplier) (`stock_total`, `account.stockBookMicro`); never above the
    * buying power (`buying_power`). It is an OPEN for the day's counts (MAX_DAY_OPEN_ORDERS, MAX_DAY_ORDERS) and never
    * spends the options' opening maximum loss: the stock book has its own caps.
    */
@@ -310,12 +319,13 @@ export function createGate({ store, env = {}, now = Date.now }) {
     const symbol = String(stock?.symbol || '');
     const kind = Object.prototype.hasOwnProperty.call(STOCK_UNIVERSE, symbol) ? STOCK_UNIVERSE[symbol] : null;
     const big = value => (/^-?\d{1,20}$/.test(String(value)) ? BigInt(value) : null);
-    const figures = ['equity_micro', 'buying_power_micro', 'multiplier', 'symbol_held_micro', 'total_held_micro'].map(key => big(stock?.[key]));
+    const figures = ['equity_micro', 'buying_power_micro', 'multiplier', 'symbol_held_micro', 'total_held_micro', 'options_held_micro']
+      .map(key => big(stock?.[key]));
     const readAt = Number(stock?.read_at);
-    if (!kind || figures.some(value => value === null) || !Number.isFinite(readAt)) {
+    if (!kind || figures.some(value => value === null) || !Number.isFinite(readAt) || figures[5] < 0n || figures[5] > figures[4]) {
       return { ok: false, status: 400, cap: 'stock', error: 'A real stock buy reaches the gate with its symbol and the account\'s reading, or not at all.' };
     }
-    const [equityMicro, powerMicro, multiplier, symbolHeld, totalHeld] = figures;
+    const [equityMicro, powerMicro, multiplier, symbolHeld, totalHeld, optionsHeld] = figures;
     if (row.orders >= openOrdersCap() && openOrdersCap() < limits.maxDayOrders) {
       return {
         ok: false, status: 403, cap: 'day_open_orders',
@@ -345,8 +355,17 @@ export function createGate({ store, env = {}, now = Date.now }) {
                `(${account.percent(share)} of ${equityText}).`,
       };
     }
+    const dayCap = account.stockDayCapMicro(limitsNow, equityMicro);
+    if (row.alpacaStock + amount > dayCap) {
+      return {
+        ok: false, status: 403, cap: 'stock_day',
+        error: `A buy of $${formatUsd(amount)} would take today's stock buys to $${formatUsd(row.alpacaStock + amount)}, past the ` +
+               `day's cap of $${account.formatUsdDown(dayCap)} (${account.shareText(limitsNow.dayMultiple)}x ${equityText}, ` +
+               'STOCK_DAY_EQUITY_MULTIPLE; every buy admitted today counts, a cancelled one too).',
+      };
+    }
     const ledger = stockLedger(at);
-    const counted = ledger.entries.filter(entry => stockCounts(entry, readAt));
+    const counted = ledger.entries.filter(entry => entry.kind === 'buy' && stockCounts(entry, readAt));
     const flight = counted.reduce((sum, entry) => sum + BigInt(entry.micro), 0n);
     const flightSymbol = counted.filter(entry => entry.symbol === symbol).reduce((sum, entry) => sum + BigInt(entry.micro), 0n);
     const held = symbolHeld + flightSymbol;
@@ -359,12 +378,14 @@ export function createGate({ store, env = {}, now = Date.now }) {
       };
     }
     const totalCap = account.stockTotalCapMicro(limitsNow, equityMicro, multiplier);
-    const book = totalHeld + flight;
-    if (book + amount > totalCap) {
-      const multiple = multiplier < limitsNow.maxMultiple ? multiplier : limitsNow.maxMultiple;
+    const multiple = account.stockMultiple(limitsNow, multiplier);
+    const book = account.stockBookMicro(totalHeld + flight + amount, optionsHeld, multiple);
+    if (book > totalCap) {
+      const weighed = book > totalHeld + flight + amount
+        ? `, long options and other unmarginable positions ($${formatUsd(optionsHeld)}) counted ${account.shareText(multiple)}x: the venue lends nothing on them` : '';
       return {
         ok: false, status: 403, cap: 'stock_total',
-        error: `A buy of $${formatUsd(amount)} would take what the account holds and has on order to $${formatUsd(book + amount)}, past ` +
+        error: `A buy of $${formatUsd(amount)} would take what the account holds and has on order to $${formatUsd(book)}${weighed}, past ` +
                `its cap of $${account.formatUsdDown(totalCap)} (${account.shareText(multiple)}x ${equityText}; the account's ` +
                `multiplier is ${account.shareText(multiplier)}, STOCK_MAX_EQUITY_MULTIPLE ${account.shareText(limitsNow.maxMultiple)}).`,
       };
@@ -377,10 +398,56 @@ export function createGate({ store, env = {}, now = Date.now }) {
       };
     }
     const id = ledger.next;
-    write(store, STOCK_PENDING_KEY, { next: id + 1, entries: [...ledger.entries, { id, at: Number(at), symbol, micro: String(amount), settled: null }] });
+    write(store, STOCK_PENDING_KEY, { next: id + 1,
+      entries: [...ledger.entries, { id, at: Number(at), symbol, micro: String(amount), settled: null, kind: 'buy' }] });
     save({ day: row.day, orders: row.orders + 1, notional: row.notional + amount, alpacaOpen: row.alpacaOpen,
       alpacaNotional: row.alpacaNotional + amount, alpacaStock: row.alpacaStock + amount });
     return { ok: true, day: row.day, micro: String(amount), venue: 'alpaca', stock_id: id };
+  };
+
+  /**
+   * One real stock CLOSE (the review of Oct 10, 2026): a sale of shares held long, or a buy covering a short, serialized
+   * here as buys are. `close` is what the router read for it just now, fresh from the venue: `symbol`, `side` (`sell` or
+   * `buy`), `qty` (picounits of shares), `available` (what that reading leaves to close on that side, picounits:
+   * `caps.availableHeld`) and `read_at`, when the reading began. The closes of the same symbol and side this gate
+   * admitted that the reading may not show yet (the ledger) are taken off `available` first, so two closes of the same
+   * shares, through one isolate or two, cannot both go: nothing sold is ever a short sale, nothing covered ever opens a
+   * long. Then it is an exit like any real close (`reserveReal`: the kill switch, the day's orders, no dollar cap).
+   */
+  const reserveStockClose = ({ amount, at, close, row }) => {
+    const symbol = String(close?.symbol || '');
+    const side = close?.side;
+    const units = value => (/^\d{1,30}$/.test(String(value)) ? BigInt(value) : null);
+    const qty = units(close?.qty);
+    const available = units(close?.available);
+    const readAt = Number(close?.read_at);
+    if (!symbol || (side !== 'sell' && side !== 'buy') || qty === null || qty <= 0n || available === null || !Number.isFinite(readAt)) {
+      return { ok: false, status: 400, cap: 'stock', error: 'A real stock close reaches the gate with its symbol, side, qty and the account\'s reading, or not at all.' };
+    }
+    if (at - readAt > maxLoss.maxAgeMs || readAt - at > STOCK_READ_SKEW_MS) {
+      return { ok: false, status: 424, cap: 'positions',
+        error: 'The real account\'s positions were not read just now, so a stock close cannot be checked against them: nothing was sent. Send it again.' };
+    }
+    const ledger = stockLedger(at);
+    const pending = ledger.entries
+      .filter(entry => entry.kind === 'close' && entry.symbol === symbol && entry.side === side && stockCounts(entry, readAt))
+      .reduce((sum, entry) => sum + BigInt(entry.qty), 0n);
+    if (pending + qty > available) {
+      const held = side === 'sell' ? 'long' : 'short';
+      const left = available > pending ? available - pending : 0n;
+      return {
+        ok: false, status: 409, cap: 'stock_close',
+        error: `A stock order on the real account must close shares it holds: ${symbol} ${held} (${picoUnits(qty)} needed, ` +
+               `${picoUnits(left)} ${held} left of ${picoUnits(available)} available once ${picoUnits(pending)} already being ` +
+               `closed by orders in flight are taken off). ${side === 'sell' ? 'A sale of shares not held long would be a short sale' : 'A buy that covers no short would open a position'}: refused.`,
+      };
+    }
+    const decision = reserveReal({ amount, at, exit: true, credit: false, row });
+    if (!decision.ok) return decision;
+    const id = ledger.next;
+    write(store, STOCK_PENDING_KEY, { next: id + 1,
+      entries: [...ledger.entries, { id, at: Number(at), symbol, micro: '0', settled: null, kind: 'close', side, qty: String(qty) }] });
+    return { ...decision, stock_id: id };
   };
 
   return {
@@ -444,15 +511,19 @@ export function createGate({ store, env = {}, now = Date.now }) {
      * Refusal is `{ ok: false, status, error }`; the caller forwards nothing. On the real Alpaca venue `micro` is an
      * open's maximum loss, judged by `reserveReal` (`credit` marks a credit structure's open, Sept 26, 2026, Wave 5).
      */
-    reserve({ micro, at = now(), exit = false, venue = null, credit = false, stock = null }) {
+    reserve({ micro, at = now(), exit = false, venue = null, credit = false, stock = null, stock_close: stockClose = null }) {
       if (killed()) {
         return { ok: false, status: 423, error: 'The kill switch is engaged; no orders are being forwarded.' };
       }
       const amount = BigInt(micro);
       if (amount <= 0n) return { ok: false, status: 400, cap: 'order', error: 'An order must have a positive notional.' };
+      if (stock && stockClose) return { ok: false, status: 400, cap: 'stock', error: 'A real stock order is a buy that opens or a close, never both.' };
       // A real stock or ETF buy is judged by the stock caps against the account's own reading (Oct 10, 2026): always an
       // open, whatever `exit` says.
       if (venue === 'alpaca' && stock) return reserveStock({ amount, at, stock, row: counters(at) });
+      // A real stock close is serialized against the closes of the same shares in flight (the review of Oct 10, 2026):
+      // always an exit, whatever `exit` says.
+      if (venue === 'alpaca' && stockClose) return reserveStockClose({ amount, at, close: stockClose, row: counters(at) });
       // The real Alpaca venue is capped by maximum loss against its own equity (Sept 26, 2026, Wave 5).
       if (venue === 'alpaca') return reserveReal({ amount, at, exit: exit === true, credit: credit === true, row: counters(at) });
       // A venue may carry a tighter per-order cap than the floor's (`MAX_ORDER_USD_<VENUE>`):
@@ -617,20 +688,23 @@ export function createGate({ store, env = {}, now = Date.now }) {
     },
 
     /**
-     * What `/v1/health` reports of real stock buys (Oct 10, 2026): the switch, the caps as shares of equity, the list, today's
-     * buys at qty x limit_price, the buys in flight, and whether a buy would be admitted now by the switch and the day's
-     * counts (the caps themselves are judged per buy, against a fresh reading of the account).
+     * What `/v1/health` reports of real stock buys (Oct 10, 2026): the switch, the caps as shares or multiples of equity,
+     * the list, today's buys at qty x limit_price, the buys in flight, the stock closes not yet answered, and whether a buy
+     * would be admitted now by the switch and the day's counts (the caps themselves are judged per buy, against a fresh
+     * reading of the account).
      */
     stockStatus(at = now()) {
       const row = counters(at);
       const limitsNow = account.stockCaps(env);
-      const flight = stockLedger(at).entries.filter(entry => entry.settled === null);
+      const unanswered = stockLedger(at).entries.filter(entry => entry.settled === null);
+      const flight = unanswered.filter(entry => entry.kind === 'buy');
       const enabled = stockBuysEnabled(env);
       return {
         enabled,
         etf_equity_share: account.shareText(limitsNow.etfShare),
         stock_equity_share: account.shareText(limitsNow.stockShare),
         max_equity_multiple: account.shareText(limitsNow.maxMultiple),
+        day_equity_multiple: account.shareText(limitsNow.dayMultiple),
         symbols: {
           etf: Object.keys(STOCK_UNIVERSE).filter(symbol => STOCK_UNIVERSE[symbol] === 'etf'),
           stock: Object.keys(STOCK_UNIVERSE).filter(symbol => STOCK_UNIVERSE[symbol] === 'stock'),
@@ -638,6 +712,7 @@ export function createGate({ store, env = {}, now = Date.now }) {
         day_buys_usd: formatUsd(row.alpacaStock),
         in_flight: flight.length,
         in_flight_usd: formatUsd(flight.reduce((sum, entry) => sum + BigInt(entry.micro), 0n)),
+        closes_in_flight: unanswered.length - flight.length,
         buys_admitted: enabled && !killed() && row.orders < openOrdersCap(),
       };
     },

@@ -191,17 +191,24 @@
     // allowed, never notional), metered at qty x limit_price, and judged against the account's own fresh reading (equity,
     // buying power, multiplier, open orders, positions; any read that fails refuses it): one order and the symbol's
     // position (held + resting buys + buys in flight + this one) at most STOCK_ETF_EQUITY_SHARE of equity for an ETF and
-    // STOCK_SINGLE_EQUITY_SHARE for a stock; every long position (options too) + every resting stock buy + this one at
-    // most equity x min(STOCK_MAX_EQUITY_MULTIPLE, the account's multiplier: 1 on a cash or limited-margin account), and
-    // never above buying power. The three numbers are CEILINGS in the code (0.5, 0.2, 2: the owner's lines): a value here
-    // can only lower them ("0" closes the route). A buy is an open for MAX_DAY_OPEN_ORDERS and MAX_DAY_ORDERS and is
-    // stopped by the kill switch; it never spends the options' opening maximum loss (MAX_DAY_USD_ALPACA). A sale is only
-    // ever a close of shares held long and a buy of a symbol held short only a cover: no short sale, so no margin for one.
-    // Margin interest on a margin account is the venue's charge, not metered here: the House accounts for it.
+    // STOCK_SINGLE_EQUITY_SHARE for a stock; every long position + every resting stock buy + this one at most equity x m,
+    // m = min(STOCK_MAX_EQUITY_MULTIPLE, the account's multiplier: 1 on a cash or limited-margin account), with long
+    // options (paid in full; the venue lends nothing on them) counted m times, so the book stays inside Reg T's overnight
+    // line on every multiplier, pattern-day-trader margin (4) included; never above the lower of buying_power and the
+    // overnight regt_buying_power; and the day's buys (cancelled ones too) at most STOCK_DAY_EQUITY_MULTIPLE x equity, a
+    // backstop under the House's daily and drawdown stops. The four numbers are CEILINGS in the code (0.5, 0.2, 2, 4): a
+    // value here can only lower them ("0" closes the route). A buy is an open for MAX_DAY_OPEN_ORDERS and MAX_DAY_ORDERS
+    // and is stopped by the kill switch; it never spends the options' opening maximum loss (MAX_DAY_USD_ALPACA). A sale is
+    // only ever a close of shares held long and a buy of a symbol held short only a cover, read fresh and serialized in the
+    // Gate: no short sale, so no margin for one. Margin interest on a margin account is the venue's charge, not metered
+    // here: the House accounts for it. The running House sells EVERY stock position at market each pass
+    // (league/live/step.py `_close_shares`): the House release that first sends a buy must limit that to assignment and
+    // exercise shares (docs/operations.md), or what is bought here is sold at once.
     "STOCK_BUYS_REAL": "on",
     "STOCK_ETF_EQUITY_SHARE": "0.5",
     "STOCK_SINGLE_EQUITY_SHARE": "0.2",
     "STOCK_MAX_EQUITY_MULTIPLE": "2",
+    "STOCK_DAY_EQUITY_MULTIPLE": "4",
 
     // The research library (Sept 29, 2026; lib/library.mjs, GET /v1/research/*): arXiv papers posted before 2025 for the
     // swarm's agents. No secret. arXiv's API terms: "make no more than one request every three seconds, and limit

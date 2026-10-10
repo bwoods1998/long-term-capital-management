@@ -45,6 +45,18 @@ the gateway is `507b6118`, and the box's updater is on. What is built and not de
   buy of a symbol held short stays a cover, at most the short: no short sale. The practice account is unchanged.
   `/v1/health` gains `stock_buys`. No House code sends a real stock buy yet. Docs: `docs/operations.md` (top section and
   **Switches**), `gateway/README.md`. Proof: `gateway/test/stock-buys.test.mjs` (24 tests; 437 of 437 in the gateway).
+- The branch's review, fixed on the branch: (1) MAJOR: every real stock order reads the positions fresh, never the
+  per-isolate cache (from it a "cover" of a short already gone went past every stock cap, and a sale of shares already
+  sold was a short sale), and the Gate serializes stock closes in the buys' in-flight ledger (`reserveStockClose`): a
+  second close of the same shares is `409 stock_close`. (2) MAJOR: the book cap is a margin line, long options counted at
+  the margin multiple (Reg T overnight: `stocks / m + options <= equity`), and buying power is the lower of
+  `buying_power` and `regt_buying_power` (a margin account without the latter is `503 equity`): on pattern-day-trader
+  margin the old gross cap and intraday buying power admitted a book past the overnight 2x. (3) A day cap on stock buys,
+  `STOCK_DAY_EQUITY_MULTIPLE` (a ceiling of 4x equity, `403 stock_day`), a gateway backstop under the House's stops.
+  (4) The House sells every stock position at market (`league/live/step.py` `_close_shares`): the House release that
+  first sends a buy must limit that to assignment and exercise shares (`docs/operations.md`). (5) Tests for buys in
+  flight against the book and buying power, the admit side of every boundary, one micro-dollar over, and `"0"` end to
+  end. 446 of 446 in the gateway.
 
 ### An always-in card's ablation is dropped, on `fix/always-in-ablation` (unreleased; an owner deploy; no evidence reset)
 

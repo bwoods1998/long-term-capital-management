@@ -1,9 +1,11 @@
 // Real stock and ETF buys (Oct 10, 2026; the owner's goal: agent programs may trade ETFs, stocks and options with real
 // money). While STOCK_BUYS_REAL is "on", the real account admits a LONG-ONLY buy of a listed symbol: a limit day order
 // sized in shares, metered at qty x limit_price, an ETF position at most 50% of equity and a single stock at most 20%,
-// the whole book at most equity x min(2, the account's multiplier) and never above its buying power, every figure read
-// from the account by the gateway itself and failing closed. A sale is still only a close of shares held long, a buy of a
-// symbol held short is still only a cover, the kill switch and the day's order counts stop a buy as they stop an option
+// the whole book at most equity x min(2, the account's multiplier) with long options weighed at that multiple (the venue
+// lends nothing on them), never above the lower of its buying power and its overnight Reg T buying power, and the day's
+// buys at most 4x equity, every figure read from the account by the gateway itself and failing closed. A sale is still
+// only a close of shares held long, a buy of a symbol held short is still only a cover, both read fresh and serialized in
+// the Gate (the review of Oct 10, 2026), the kill switch and the day's order counts stop a buy as they stop an option
 // open, and the practice account is unchanged.
 
 import assert from 'node:assert/strict';
@@ -11,10 +13,10 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 
 import {
-  stockCaps, stockSymbolCapMicro, stockTotalCapMicro, multiplierMillionths, readStockAccount,
-  STOCK_ETF_SHARE_MAX, STOCK_SINGLE_SHARE_MAX, STOCK_MULTIPLE_MAX,
+  stockCaps, stockSymbolCapMicro, stockTotalCapMicro, stockDayCapMicro, stockBookMicro, multiplierMillionths, readStockAccount,
+  STOCK_ETF_SHARE_MAX, STOCK_SINGLE_SHARE_MAX, STOCK_MULTIPLE_MAX, STOCK_DAY_MULTIPLE_MAX,
 } from '../lib/account.mjs';
-import { STOCK_UNIVERSE, stockKind, stockBuysEnabled, stockBuyOrder, heldShares, stockExposure } from '../lib/caps.mjs';
+import { STOCK_UNIVERSE, stockKind, stockBuysEnabled, stockBuyOrder, heldShares, stockExposure, availableHeld, marginableRow } from '../lib/caps.mjs';
 import { createGate, STOCK_PENDING_KEY, STOCK_PENDING_MS, DAY_KEY } from '../lib/gate.mjs';
 import { route } from '../lib/router.mjs';
 import { memoryStore, alpacaVenue, TOKEN } from './helpers.mjs';
@@ -29,7 +31,8 @@ const usd = dollars => {
 };
 
 //: The stock vars as wrangler.jsonc deploys them (pinned against the file below), beside the options caps.
-const STOCK_VARS = { STOCK_BUYS_REAL: 'on', STOCK_ETF_EQUITY_SHARE: '0.5', STOCK_SINGLE_EQUITY_SHARE: '0.2', STOCK_MAX_EQUITY_MULTIPLE: '2' };
+const STOCK_VARS = { STOCK_BUYS_REAL: 'on', STOCK_ETF_EQUITY_SHARE: '0.5', STOCK_SINGLE_EQUITY_SHARE: '0.2', STOCK_MAX_EQUITY_MULTIPLE: '2',
+  STOCK_DAY_EQUITY_MULTIPLE: '4' };
 const env = (extra = {}) => ({
   GATEWAY_TOKEN: TOKEN, ALPACA_KEY_ID: 'AK-REAL', ALPACA_SECRET_KEY: 'alpaca-real-secret',
   OPTION_STRUCTURES_REAL: 'debit_vertical,long_butterfly,long_call,long_put',
@@ -42,7 +45,7 @@ const gateAt = (settings = {}, clock = () => NOW) => createGate({ store: memoryS
 
 /** A cash account of $10,000 (multiplier 1), its buying power its cash. */
 const CASH = { equity: '10000.00', buying_power: '10000.00', multiplier: '1', status: 'ACTIVE' };
-const MARGIN = { equity: '10000.00', buying_power: '20000.00', multiplier: '2', status: 'ACTIVE' };
+const MARGIN = { equity: '10000.00', buying_power: '20000.00', regt_buying_power: '20000.00', multiplier: '2', status: 'ACTIVE' };
 
 const post = (body, venue = 'alpaca') => new Request(`${GATEWAY}/v1/${venue}/v2/orders`, {
   method: 'POST', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify(body),
@@ -73,29 +76,30 @@ const refused = (result, status, cap, pattern, message = '') => {
 
 // ------------------------------------------------------------------------------------------------ the numbers
 
-test('the deployed stock vars are the owner\'s: buys on, an ETF 50% of equity, a single stock 20%, the book at most 2x', () => {
+test('the deployed stock vars are the owner\'s: buys on, an ETF 50% of equity, a single stock 20%, the book at most 2x, a day 4x', () => {
   const config = readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
   const deployed = name => {
     const lines = config.split('\n').filter(line => line.includes(`"${name}"`));
     return lines.length === 1 ? JSON.parse(/:\s*("(?:[^"\\]|\\.)*")/.exec(lines[0])[1]) : lines.length;
   };
   for (const [name, value] of Object.entries(STOCK_VARS)) assert.equal(deployed(name), value, name);
-  assert.deepEqual(stockCaps(STOCK_VARS), { etfShare: 500000n, stockShare: 200000n, maxMultiple: 2000000n });
+  assert.deepEqual(stockCaps(STOCK_VARS), { etfShare: 500000n, stockShare: 200000n, maxMultiple: 2000000n, dayMultiple: 4000000n });
   assert.equal(stockBuysEnabled(STOCK_VARS), true);
 });
 
 test('the caps are ceilings: a var may lower a share or the multiple, never raise one past the owner\'s line', () => {
-  assert.deepEqual(stockCaps({}), { etfShare: STOCK_ETF_SHARE_MAX, stockShare: STOCK_SINGLE_SHARE_MAX, maxMultiple: STOCK_MULTIPLE_MAX });
-  assert.deepEqual(stockCaps({ STOCK_ETF_EQUITY_SHARE: '0.9', STOCK_SINGLE_EQUITY_SHARE: '1', STOCK_MAX_EQUITY_MULTIPLE: '4' }),
-    { etfShare: 500000n, stockShare: 200000n, maxMultiple: 2000000n }, 'above a ceiling reads as the ceiling');
+  assert.deepEqual(stockCaps({}), { etfShare: STOCK_ETF_SHARE_MAX, stockShare: STOCK_SINGLE_SHARE_MAX, maxMultiple: STOCK_MULTIPLE_MAX,
+    dayMultiple: STOCK_DAY_MULTIPLE_MAX });
+  assert.deepEqual(stockCaps({ STOCK_ETF_EQUITY_SHARE: '0.9', STOCK_SINGLE_EQUITY_SHARE: '1', STOCK_MAX_EQUITY_MULTIPLE: '4', STOCK_DAY_EQUITY_MULTIPLE: '9' }),
+    { etfShare: 500000n, stockShare: 200000n, maxMultiple: 2000000n, dayMultiple: 4000000n }, 'above a ceiling reads as the ceiling');
   for (const raw of ['x', '-0.1', '', null, undefined]) {
-    assert.deepEqual(stockCaps({ STOCK_ETF_EQUITY_SHARE: raw, STOCK_SINGLE_EQUITY_SHARE: raw, STOCK_MAX_EQUITY_MULTIPLE: raw }),
-      { etfShare: 500000n, stockShare: 200000n, maxMultiple: 2000000n }, `malformed ${String(raw)} reads as the ceiling`);
+    assert.deepEqual(stockCaps({ STOCK_ETF_EQUITY_SHARE: raw, STOCK_SINGLE_EQUITY_SHARE: raw, STOCK_MAX_EQUITY_MULTIPLE: raw, STOCK_DAY_EQUITY_MULTIPLE: raw }),
+      { etfShare: 500000n, stockShare: 200000n, maxMultiple: 2000000n, dayMultiple: 4000000n }, `malformed ${String(raw)} reads as the ceiling`);
   }
-  assert.deepEqual(stockCaps({ STOCK_ETF_EQUITY_SHARE: ' 0.25 ', STOCK_SINGLE_EQUITY_SHARE: '0.1', STOCK_MAX_EQUITY_MULTIPLE: '1' }),
-    { etfShare: 250000n, stockShare: 100000n, maxMultiple: 1000000n });
-  assert.deepEqual(stockCaps({ STOCK_ETF_EQUITY_SHARE: '0', STOCK_SINGLE_EQUITY_SHARE: '0', STOCK_MAX_EQUITY_MULTIPLE: '0' }),
-    { etfShare: 0n, stockShare: 0n, maxMultiple: 0n }, 'zero closes the route');
+  assert.deepEqual(stockCaps({ STOCK_ETF_EQUITY_SHARE: ' 0.25 ', STOCK_SINGLE_EQUITY_SHARE: '0.1', STOCK_MAX_EQUITY_MULTIPLE: '1', STOCK_DAY_EQUITY_MULTIPLE: '1.5' }),
+    { etfShare: 250000n, stockShare: 100000n, maxMultiple: 1000000n, dayMultiple: 1500000n });
+  assert.deepEqual(stockCaps({ STOCK_ETF_EQUITY_SHARE: '0', STOCK_SINGLE_EQUITY_SHARE: '0', STOCK_MAX_EQUITY_MULTIPLE: '0', STOCK_DAY_EQUITY_MULTIPLE: '0' }),
+    { etfShare: 0n, stockShare: 0n, maxMultiple: 0n, dayMultiple: 0n }, 'zero closes the route');
   const limits = stockCaps({});
   assert.equal(stockSymbolCapMicro(limits, 'etf', usd('10000')), usd('5000'));
   assert.equal(stockSymbolCapMicro(limits, 'stock', usd('10000')), usd('2000'));
@@ -109,6 +113,20 @@ test('the caps are ceilings: a var may lower a share or the multiple, never rais
   assert.equal(stockTotalCapMicro(limits, usd('10000'), 4n * M), usd('20000'), 'pattern-day-trader margin still caps the book at 2x');
   assert.equal(stockTotalCapMicro(stockCaps({ STOCK_MAX_EQUITY_MULTIPLE: '1' }), usd('10000'), 2n * M), usd('10000'));
   assert.equal(stockTotalCapMicro(limits, -usd('1'), 2n * M), 0n);
+  // The day: 4x equity, rounded down; none on negative equity.
+  assert.equal(stockDayCapMicro(limits, usd('10000')), usd('40000'));
+  assert.equal(stockDayCapMicro(stockCaps({ STOCK_DAY_EQUITY_MULTIPLE: '0.333333' }), usd('1')), 333333n);
+  assert.equal(stockDayCapMicro(limits, -usd('1')), 0n);
+  // The book as the cap weighs it: what the venue lends nothing on counts at the multiple, once at 1x or under.
+  assert.equal(stockBookMicro(usd('50000'), usd('10000'), 2n * M), usd('60000'), '$40,000 of stock + $10,000 of options x 2');
+  assert.equal(stockBookMicro(usd('50000'), usd('10000'), M), usd('50000'), 'a cash account: every dollar once');
+  assert.equal(stockBookMicro(usd('50000'), usd('10000'), 500000n), usd('50000'), 'under 1x nothing is lent either');
+  assert.equal(stockBookMicro(usd('50000'), 0n, 2n * M), usd('50000'));
+  assert.equal(stockBookMicro(0n, 3n, 1500000n), 2n, 'the extra weight rounds up');
+  // What the venue lends on: a US stock or ETF row; options, crypto and anything it cannot place are paid in full.
+  assert.deepEqual([{ symbol: 'SPY', asset_class: 'us_equity' }, { symbol: 'BRK.B' }, { symbol: 'SPY261016C00740000', asset_class: 'us_option' },
+    { symbol: 'SPY261016C00740000' }, { symbol: 'BTC/USD', asset_class: 'crypto' }, { symbol: 'SPY', asset_class: 'us_option' }].map(marginableRow),
+  [true, true, false, false, false, false]);
 });
 
 test('the switch: only "on" (any case, trimmed) admits buys; anything else, a typo included, admits none', () => {
@@ -244,11 +262,38 @@ test('over the cap for the book: every long position (options too) and open stoc
     positions: [long('SPY', '20', '10000.00')] }) }), 403, 'stock_total', /multiplier is 1/);
 });
 
+test('the book is a margin line: long options take no margin, so they count at the multiple and the overnight 2x holds on pattern-day-trader margin', async () => {
+  // The review of Oct 10, 2026 (P1): $30,000 equity on pattern-day-trader margin (multiplier 4), intraday buying power
+  // $80,000, overnight Reg T buying power $40,000, a long SPY call worth $10,000 and $30,000 of ETFs. Reg T overnight holds
+  // stocks / 2 + options <= equity: at most $40,000 of stock beside the call. A gross cap (stocks + options <= 2x) would
+  // have admitted $50,000 and left a margin call.
+  const account = { equity: '30000.00', buying_power: '80000.00', regt_buying_power: '40000.00', multiplier: '4', status: 'ACTIVE' };
+  const positions = [{ symbol: 'SPY261016C00740000', qty: '20', side: 'long', market_value: '10000.00', asset_class: 'us_option' },
+    long('SPY', '30', '15000.00'), long('QQQ', '30', '15000.00')];
+  admitted(await send(buy('IWM', '50', '200'), { tape: alpacaVenue({ account, positions }) }), 'exactly the overnight line: $40,000 of stock, $10,000 of options');
+  refused(await send(buy('IWM', '50.00005', '200'), { tape: alpacaVenue({ account, positions }) }), 403, 'stock_total',
+    /^A buy of \$10000\.01 would take what the account holds and has on order to \$60000\.01, long options and other unmarginable positions \(\$10000\.00\) counted 2x: the venue lends nothing on them, past its cap of \$60000\.00 \(2x \$30000\.00 equity; the account's multiplier is 4, STOCK_MAX_EQUITY_MULTIPLE 2\)\.$/,
+    'one cent over the overnight line, though the gross book ($50,000.01) is under 2x');
+  // On a cash account an option counts once, as before.
+  admitted(await send(buy('IWM', '25', '200'), { tape: alpacaVenue({ account: { equity: '30000.00', buying_power: '30000.00', multiplier: '1' },
+    positions: [positions[0], long('SPY', '30', '15000.00')] }) }), 'cash: $20,000 of ETFs beside a $10,000 option, exactly 100%');
+  refused(await send(buy('IWM', '25.00005', '200'), { tape: alpacaVenue({ account: { equity: '30000.00', buying_power: '30000.00', multiplier: '1' },
+    positions: [positions[0], long('SPY', '30', '15000.00')] }) }), 403, 'stock_total', /to \$30000\.01, past its cap of \$30000\.00 \(1x/);
+});
+
 test('over the buying power: never more than the venue offers, margin included', async () => {
   const account = { ...MARGIN, buying_power: '1000.00' };
   refused(await send(buy('AAPL', '4.00004', '250'), { tape: alpacaVenue({ account }) }), 403, 'buying_power',
     /^A buy of \$1000\.01 exceeds the account's buying power of \$1000\.00: no margin past what the venue offers\.$/);
   admitted(await send(buy('AAPL', '4', '250'), { tape: alpacaVenue({ account }) }), 'exactly the buying power');
+  // The overnight figure binds when it is the lower (pattern-day-trader margin: `buying_power` is intraday, 4x).
+  const intraday = { equity: '10000.00', buying_power: '40000.00', regt_buying_power: '1000.00', multiplier: '4' };
+  refused(await send(buy('AAPL', '4.00004', '250'), { tape: alpacaVenue({ account: intraday }) }), 403, 'buying_power',
+    /buying power of \$1000\.00:/);
+  admitted(await send(buy('AAPL', '4', '250'), { tape: alpacaVenue({ account: intraday }) }), 'exactly the overnight buying power');
+  // And `buying_power` binds when it is the lower.
+  refused(await send(buy('AAPL', '4.00004', '250'), { tape: alpacaVenue({ account: { ...MARGIN, buying_power: '1000.00', regt_buying_power: '9000.00' } }) }),
+    403, 'buying_power', /buying power of \$1000\.00:/);
 });
 
 // ------------------------------------------------------------------------------------------------ in flight
@@ -274,6 +319,79 @@ test('buys the venue has not shown yet still count: a burst cannot pass a cap be
   assert.equal(gate.stockStatus(clock).day_buys_usd, '5000.00');
 });
 
+test('buys in flight count against the book and the buying power too, not only their own symbol', async () => {
+  // The book: $5,000 of SPY and $4,000 of XLK the venue shows neither of, then XLE one cent past 100% of a cash account.
+  const gate = gateAt();
+  const slow = (account = { ...CASH, buying_power: '50000' }) => alpacaVenue({ account });
+  admitted(await send(buy('SPY', '10', '500'), { gate, tape: slow() }), 'SPY $5,000');
+  admitted(await send(buy('XLK', '20', '200'), { gate, tape: slow() }), 'XLK $4,000');
+  const over = await send(buy('XLE', '10.0001', '100'), { gate, tape: slow() });  // $1,000.01
+  assert.deepEqual([over.status, over.body.cap], [403, 'stock_total']);
+  assert.match(over.body.error, /to \$10000\.01, past its cap of \$10000\.00 \(1x/);
+  admitted(await send(buy('XLE', '10', '100'), { gate, tape: slow() }), 'exactly 100% with both in flight');
+  // The buying power: $2,500 of SPY the venue does not show yet leaves $500 of $3,000.
+  const second = gateAt();
+  admitted(await send(buy('SPY', '5', '500'), { gate: second, tape: slow({ ...CASH, buying_power: '3000.00' }) }), 'SPY $2,500');
+  const short = await send(buy('QQQ', '1.00002', '500'), { gate: second, tape: slow({ ...CASH, buying_power: '3000.00' }) });  // $500.01
+  assert.deepEqual([short.status, short.body.cap], [403, 'buying_power']);
+  assert.match(short.body.error, /^A buy of \$500\.01 exceeds the account's buying power of \$3000\.00 less \$2500\.00 of buys in flight: /);
+  admitted(await send(buy('QQQ', '1', '500'), { gate: second, tape: slow({ ...CASH, buying_power: '3000.00' }) }), 'exactly the buying power left');
+});
+
+test('the boundaries admit: a reading exactly two minutes old or five seconds ahead, an answer exactly five seconds before the reading still counted, 499 open orders', async () => {
+  const stock = (extra = {}) => ({ symbol: 'SPY', equity_micro: String(usd('10000')), buying_power_micro: String(usd('10000')),
+    multiplier: String(M), symbol_held_micro: '0', total_held_micro: '0', options_held_micro: '0', read_at: NOW, ...extra });
+  for (const readAt of [NOW - 120000, NOW + 5000]) {
+    const answer = gateAt().reserve({ micro: String(usd('100')), venue: 'alpaca', at: NOW, stock: stock({ read_at: readAt }) });
+    assert.equal(answer.ok, true, String(readAt - NOW));
+  }
+  // An answer at NOW counts for a reading that began at NOW + 5000, and no longer for one that began a millisecond later.
+  const gate = gateAt();
+  const first = gate.reserve({ micro: String(usd('4000')), venue: 'alpaca', at: NOW, stock: stock() });
+  assert.equal(gate.stockSettle({ id: first.stock_id, at: NOW }).ok, true);
+  const counted = gate.reserve({ micro: String(usd('1000.01')), venue: 'alpaca', at: NOW + 5000, stock: stock({ read_at: NOW + 5000 }) });
+  assert.deepEqual([counted.ok, counted.cap], [false, 'stock_position'], 'still counted at exactly five seconds');
+  const past = gate.reserve({ micro: String(usd('1000.01')), venue: 'alpaca', at: NOW + 5001, stock: stock({ read_at: NOW + 5001 }) });
+  assert.equal(past.ok, true, 'a reading begun after that judges by the venue alone');
+  // 499 open orders is a whole list; 500 may be cut off (refused above).
+  const many = Array.from({ length: 499 }, (_, i) => restingBuy(`X${i}`, '1', '1'));
+  admitted(await send(buy('SPY', '1', '500'), { tape: alpacaVenue({ account: CASH, openOrders: many }) }), '499 open orders');
+});
+
+test('one micro-dollar over a cap is over it, and "0" closes the route end to end', async () => {
+  // $5,000.0000005, rounded up to $5,000.000001: one micro-dollar past an ETF's 50% of $10,000.
+  assert.equal(stockBuyOrder(buy('SPY', '10.000000001', '500')).micro, usd('5000') + 1n);
+  refused(await send(buy('SPY', '10.000000001', '500')), 403, 'stock_order', /^A buy of \$5000\.01 of SPY exceeds the cap for an ETF of \$5000\.00/);
+  admitted(await send(buy('SPY', '10', '500')), 'exactly the cap');
+  for (const [name, symbol] of [['STOCK_ETF_EQUITY_SHARE', 'SPY'], ['STOCK_SINGLE_EQUITY_SHARE', 'AAPL']]) {
+    refused(await send(buy(symbol, '0.000000001', '1'), { settings: { [name]: '0' } }), 403, 'stock_order', /of \$0\.00 \(0% of \$10000\.00 equity\)\.$/, name);
+  }
+  refused(await send(buy('SPY', '0.000000001', '1'), { settings: { STOCK_MAX_EQUITY_MULTIPLE: '0' } }), 403, 'stock_total', /past its cap of \$0\.00 \(0x/);
+  refused(await send(buy('SPY', '0.000000001', '1'), { settings: { STOCK_DAY_EQUITY_MULTIPLE: '0' } }), 403, 'stock_day', /past the day's cap of \$0\.00 \(0x/);
+});
+
+test('the day\'s buys are capped at STOCK_DAY_EQUITY_MULTIPLE x equity (a ceiling of 4), cancelled buys included: a backstop under the House\'s stops', async () => {
+  let clock = NOW;
+  const settings = { STOCK_DAY_EQUITY_MULTIPLE: '0.6' };
+  const gate = gateAt(settings, () => clock);
+  // The venue shows none of them (cancelled, say): each is judged alone against the book, but all count for the day.
+  const tape = () => alpacaVenue({ account: { ...CASH, buying_power: '50000' } });
+  admitted(await send(buy('SPY', '10', '500'), { gate, tape: tape(), settings, clock: () => clock }), '$5,000');
+  clock += 6000;
+  admitted(await send(buy('QQQ', '2', '500'), { gate, tape: tape(), settings, clock: () => clock }), '$1,000: the day at exactly $6,000');
+  clock += 6000;
+  const over = await send(buy('IWM', '0.0001', '100'), { gate, tape: tape(), settings, clock: () => clock });  // $0.01
+  assert.deepEqual([over.status, over.body.cap, over.tape.orders().length], [403, 'stock_day', 0]);
+  assert.match(over.body.error, /^A buy of \$0\.01 would take today's stock buys to \$6000\.01, past the day's cap of \$6000\.00 \(0\.6x \$10000\.00 equity, STOCK_DAY_EQUITY_MULTIPLE; every buy admitted today counts, a cancelled one too\)\.$/);
+  // A new day starts at zero; a close is never a buy and never meets this cap.
+  const sale = { symbol: 'SPY', qty: '1', side: 'sell', type: 'limit', limit_price: '501', time_in_force: 'day' };
+  assert.equal((await send(sale, { gate, settings, clock: () => clock, tape: alpacaVenue({ positions: [long('SPY', '10', '5000.00')] }) })).status, 200);
+  clock = NOW + 24 * 3600000;
+  admitted(await send(buy('IWM', '0.0001', '100'), { gate, tape: tape(), settings, clock: () => clock }), 'the next day');
+  // As deployed (4x): $40,000 a day on $10,000.
+  assert.equal(gateAt().stockStatus(NOW).day_equity_multiple, '4');
+});
+
 test('a buy whose forward got no answer counts for a minute; one that never left the gateway is given back', async () => {
   let clock = NOW;
   const gate = gateAt({}, () => clock);
@@ -296,7 +414,7 @@ test('a buy whose forward got no answer counts for a minute; one that never left
   const store = memoryStore();
   const bare = createGate({ store, env: env(), now: () => NOW });
   const ok = bare.reserve({ micro: String(usd('500')), venue: 'alpaca', stock: { symbol: 'SPY', equity_micro: String(usd('10000')),
-    buying_power_micro: String(usd('10000')), multiplier: String(M), symbol_held_micro: '0', total_held_micro: '0', read_at: NOW } });
+    buying_power_micro: String(usd('10000')), multiplier: String(M), symbol_held_micro: '0', total_held_micro: '0', options_held_micro: '0', read_at: NOW } });
   assert.equal(ok.ok, true);
   assert.equal(bare.stockStatus(NOW).in_flight, 1);
   bare.refund({ ...ok, at: NOW });
@@ -342,6 +460,131 @@ test('a buy of a symbol held short is a cover, at most the short: no buy both co
   refused(await send(buy('AAPL', '1', '250'), { tape: racing }), 400, undefined, /A buy of AAPL is not admitted as an open: the account holds AAPL short/);
 });
 
+// ------------------------------------------------------------------------------------------------ closes: fresh and serialized
+
+test('a stock order never decides from a cached reading: a "cover" of a short that is gone is judged as an open, a sale of shares gone is refused', async () => {
+  // The review of Oct 10, 2026 (probes 1 and 2): this isolate's cache, filled by an option close a moment ago, still shows
+  // SPY short 2 and AAPL long 10; the venue is already flat in both (another isolate covered and sold).
+  const settings = { POSITIONS_CACHE_MS: '60000' };
+  const CALL = 'SPY261016C00740000';
+  const before = [{ symbol: 'SPY', qty: '-2', qty_available: '-2', side: 'short', market_value: '-1400', asset_class: 'us_equity' },
+    long('AAPL', '10', '2500.00'), { symbol: CALL, qty: '2', qty_available: '2', side: 'long', market_value: '200', asset_class: 'us_option' }];
+  const after = [before[2]];
+  let reads = 0;
+  const account = { equity: '1000.00', buying_power: '2000.00', regt_buying_power: '2000.00', multiplier: '2' };
+  const tape = alpacaVenue({ account, positions: () => (reads++ === 0 ? before : after) });
+  const gate = gateAt(settings);
+  const optionClose = { symbol: CALL, qty: '1', side: 'sell', type: 'limit', limit_price: '1.00', time_in_force: 'day', position_intent: 'sell_to_close' };
+  assert.equal((await send(optionClose, { gate, tape, settings })).status, 200, 'the option close fills the cache');
+  // 2 SPY at $700 is $1,400: 140% of $1,000, against an ETF's $500. From the cache it was a "cover" at one micro-dollar.
+  const cover = await send(buy('SPY', '2', '700'), { gate, tape, settings });
+  assert.deepEqual([cover.status, cover.body.cap], [403, 'stock_order'], JSON.stringify(cover.body));
+  // 10 AAPL from the cache was a sale of shares held; at the venue it would be a short sale.
+  const sale = await send({ symbol: 'AAPL', qty: '10', side: 'sell', type: 'market', time_in_force: 'day' }, { gate, tape, settings });
+  assert.equal(sale.status, 400);
+  assert.match(sale.body.error, /^A stock order on the real account must close shares it holds: AAPL long \(10 needed, none held\)/);
+  assert.equal(tape.orders().length, 1, 'only the option close went');
+  assert.equal(gate.status(NOW).today.orders, 1);
+  await send(buy('SPY', '1', '1'), { tape: alpacaVenue({ account: CASH }) });  // the cache off again for what follows
+});
+
+test('two sales of the same shares at once: one goes, the other is refused in the Gate; a cover likewise, at most the short', async () => {
+  // Probe 3: one isolate, two sales of the same 10 held shares in flight together. Each reads the venue fresh (10
+  // available); the Gate admits the first and takes it off the second's reading.
+  const gate = gateAt();
+  const tape = alpacaVenue({ positions: [long('AAPL', '10', '2500.00')] });
+  const sale = { symbol: 'AAPL', qty: '10', side: 'sell', type: 'market', time_in_force: 'day' };
+  const both = await Promise.all([send(sale, { gate, tape }), send({ ...sale, type: 'limit', limit_price: '250' }, { gate, tape })]);
+  assert.deepEqual(both.map(result => result.status).sort(), [200, 409]);
+  const loser = both.find(result => result.status === 409);
+  assert.equal(loser.body.cap, 'stock_close');
+  assert.match(loser.body.error, /^A stock order on the real account must close shares it holds: AAPL long \(10 needed, 0 long left of 10 available once 10 already being closed by orders in flight are taken off\)\. A sale of shares not held long would be a short sale: refused\.$/);
+  assert.equal(tape.orders().length, 1, 'ten shares sent, never twenty');
+  assert.equal(gate.status(NOW).today.orders, 1);
+  // Part of what is left goes: 10 held, 6 in flight, 4 more admitted, 0.000000001 more refused.
+  const part = gateAt();
+  const venue = alpacaVenue({ positions: [long('AAPL', '10', '2500.00')] });
+  assert.equal((await send({ ...sale, qty: '6' }, { gate: part, tape: venue })).status, 200);
+  assert.equal((await send({ ...sale, qty: '4' }, { gate: part, tape: venue })).status, 200);
+  const extra = await send({ ...sale, qty: '0.000000001' }, { gate: part, tape: venue });
+  assert.deepEqual([extra.status, extra.body.cap], [409, 'stock_close']);
+  // A cover: 100 short, 60 in flight, 60 more refused, 40 admitted.
+  const shorts = [{ symbol: 'XOM', qty: '-100', qty_available: '-100', side: 'short', market_value: '-11000', asset_class: 'us_equity' }];
+  const covers = gateAt();
+  const book = alpacaVenue({ positions: shorts });
+  const cover = qty => ({ symbol: 'XOM', qty, side: 'buy', type: 'market', time_in_force: 'day' });
+  assert.equal((await send(cover('60'), { gate: covers, tape: book })).status, 200);
+  const twice = await send(cover('60'), { gate: covers, tape: book });
+  assert.deepEqual([twice.status, twice.body.cap], [409, 'stock_close']);
+  assert.match(twice.body.error, /XOM short \(60 needed, 40 short left of 100 available once 60 already being closed by orders in flight are taken off\)\. A buy that covers no short would open a position: refused\.$/);
+  assert.equal((await send(cover('40'), { gate: covers, tape: book })).status, 200);
+  assert.equal(book.accountReads().length, 0, 'a cover never waits on the account');
+  // A sale and a cover are counted apart, and so are two symbols.
+  assert.equal(covers.stockStatus(NOW).closes_in_flight, 0, 'all answered');
+});
+
+test('a close in flight counts until the venue can show it: five seconds after its answer, a minute with none; one that never left is given back', async () => {
+  let clock = NOW;
+  const gate = gateAt({}, () => clock);
+  const sale = { symbol: 'AAPL', qty: '10', side: 'sell', type: 'limit', limit_price: '250', time_in_force: 'day' };
+  const held = () => alpacaVenue({ positions: [long('AAPL', '10', '2500.00')] });
+  // The venue refused the first sale (an answer all the same): five seconds on, a reading that shows the 10 shares still
+  // available judges alone.
+  const refusing = alpacaVenue({ positions: [long('AAPL', '10', '2500.00')], order: 403 });
+  assert.equal((await send(sale, { gate, tape: refusing, clock: () => clock })).status, 403, 'the venue\'s own refusal');
+  assert.equal((await send(sale, { gate, tape: held(), clock: () => clock })).status, 409, 'at once: it may not show yet');
+  clock = NOW + 5001;
+  assert.equal((await send(sale, { gate, tape: held(), clock: () => clock })).status, 200, 'five seconds on, the venue judges');
+  // A resting sale shows at the venue as shares no longer available: a second sale is refused by the reading itself.
+  clock = NOW + 11000;
+  const resting = await send(sale, { gate, tape: alpacaVenue({ positions: [long('AAPL', '10', '2500.00', { qty_available: '0' })] }), clock: () => clock });
+  assert.equal(resting.status, 400);
+  assert.match(resting.body.error, /AAPL long \(10 needed, none held\)/);
+  // No answer: it counts for a minute.
+  const silent = held();
+  const lost = { ...silent, fetcher: async (url, init = {}) => {
+    if (init.method === 'POST') throw Object.assign(new Error('timeout'), { name: 'TimeoutError' });
+    return silent.fetcher(url, init);
+  } };
+  const quiet = gateAt({}, () => clock);
+  assert.equal((await send(sale, { gate: quiet, tape: lost, clock: () => clock })).status, 502);
+  assert.equal(quiet.stockStatus(clock).closes_in_flight, 1);
+  clock += 30000;
+  assert.equal((await send(sale, { gate: quiet, tape: held(), clock: () => clock })).status, 409, 'at 30 s');
+  clock += 30001;
+  assert.equal((await send(sale, { gate: quiet, tape: held(), clock: () => clock })).status, 200, 'after a minute');
+  // A close that never reached the venue (refunded before any dispatch) leaves the ledger and the day's count.
+  const store = memoryStore();
+  const bare = createGate({ store, env: env(), now: () => NOW });
+  const close = { symbol: 'AAPL', side: 'sell', qty: String(10n * 10n ** 12n), available: String(10n * 10n ** 12n), read_at: NOW };
+  const ok = bare.reserve({ micro: '1', venue: 'alpaca', exit: true, stock_close: close });
+  assert.equal(ok.ok, true);
+  assert.equal(bare.stockStatus(NOW).closes_in_flight, 1);
+  bare.refund({ ...ok, at: NOW });
+  assert.deepEqual([bare.stockStatus(NOW).closes_in_flight, bare.status(NOW).today.orders], [0, 0]);
+  assert.equal(bare.reserve({ micro: '1', venue: 'alpaca', exit: true, stock_close: close }).ok, true, 'its shares are available again');
+});
+
+test('the Gate judges a close only from a reading it can use: malformed, stale, or a buy and a close at once admit nothing', () => {
+  const close = (extra = {}) => ({ symbol: 'AAPL', side: 'sell', qty: String(10n ** 12n), available: String(10n ** 12n), read_at: NOW, ...extra });
+  for (const extra of [{ symbol: '' }, { side: 'short' }, { qty: '0' }, { qty: '-1' }, { qty: '1.5' }, { available: undefined }, { available: '-1' }, { read_at: 'x' }]) {
+    const answer = gateAt().reserve({ micro: '1', venue: 'alpaca', exit: true, stock_close: close(extra) });
+    assert.deepEqual([answer.ok, answer.status, answer.cap], [false, 400, 'stock'], JSON.stringify(extra));
+  }
+  for (const readAt of [NOW - 120001, NOW + 5001]) {
+    const answer = gateAt().reserve({ micro: '1', venue: 'alpaca', exit: true, stock_close: close({ read_at: readAt }) });
+    assert.deepEqual([answer.ok, answer.status, answer.cap], [false, 424, 'positions'], String(readAt - NOW));
+  }
+  const both = gateAt().reserve({ micro: '1', venue: 'alpaca', exit: true, stock_close: close(), stock: { symbol: 'SPY' } });
+  assert.deepEqual([both.ok, both.status, both.cap], [false, 400, 'stock']);
+  const killed = gateAt();
+  killed.setKill(true, NOW);
+  assert.equal(killed.reserve({ micro: '1', venue: 'alpaca', exit: true, stock_close: close() }).status, 423, 'the kill switch stops a close');
+  // What a reading leaves to close: qty_available when given, signed by side.
+  const held = availableHeld([long('AAPL', '10', '1', { qty_available: '4' }), { symbol: 'XOM', qty: '-3', side: 'short' }, { symbol: 'X', qty: '-1', side: 'long' }]);
+  assert.deepEqual([...held.entries()], [['AAPL', 4n * 10n ** 12n], ['XOM', -3n * 10n ** 12n]]);
+});
+
 // ------------------------------------------------------------------------------------------------ the shape at the door
 
 test('market, notional, unlisted, good-till-cancelled and option-intent buys are refused before any money read; crypto stays refused', async () => {
@@ -370,6 +613,8 @@ test('an account, open orders or positions that cannot be read refuse the buy wi
     ['account unreadable', { account: 'not json' }, 503, 'equity', /an unreadable answer/],
     ['account with no buying power', { account: { equity: '10000.00', multiplier: '1' } }, 503, 'equity', /no buying_power field/],
     ['account with no equity', { account: { buying_power: '10000.00' } }, 503, 'equity', /no equity field/],
+    ['margin account with no overnight buying power', { account: { equity: '10000.00', buying_power: '20000.00', multiplier: '2' } }, 503, 'equity',
+      /no regt_buying_power field/],
     ['account read throws', { account: new TypeError('fetch failed') }, 503, 'equity', /fetch failed/],
     ['open orders HTTP 502', { openOrders: 502 }, 424, 'orders', /^Cannot read the real account's open orders: venue HTTP 502\.$/],
     ['open orders not a list', { openOrders: '{"orders":[]}' }, 424, 'orders', /not a list/],
@@ -402,7 +647,7 @@ test('the kill switch stops a buy, and the day\'s counts apply as for an option 
   // Two of three orders may open; the third place is kept for an exit.
   const settings = { MAX_DAY_OPEN_ORDERS: '2', MAX_DAY_ORDERS: '3' };
   const gate = gateAt(settings);
-  const tape = alpacaVenue({ account: { ...CASH, buying_power: '50000' }, positions: [long('IWM', '5', '1000.00')] });
+  const tape = alpacaVenue({ account: { ...CASH, buying_power: '50000' }, positions: [long('IWM', '10', '2000.00')] });
   for (let i = 0; i < 2; i += 1) assert.equal((await send(buy('SPY', '1', '500'), { gate, tape, settings })).status, 200);
   const third = await send(buy('SPY', '1', '500'), { gate, tape, settings });
   assert.deepEqual([third.status, third.body.cap], [403, 'day_open_orders']);
@@ -420,16 +665,17 @@ test('with STOCK_BUYS_REAL off a buy is what it was: a cover of a short or refus
   }
   const off = gateAt({ STOCK_BUYS_REAL: 'off' });
   const answer = off.reserve({ micro: String(usd('500')), venue: 'alpaca', stock: { symbol: 'SPY', equity_micro: String(usd('10000')),
-    buying_power_micro: String(usd('10000')), multiplier: String(M), symbol_held_micro: '0', total_held_micro: '0', read_at: NOW } });
+    buying_power_micro: String(usd('10000')), multiplier: String(M), symbol_held_micro: '0', total_held_micro: '0', options_held_micro: '0', read_at: NOW } });
   assert.deepEqual([answer.ok, answer.status, answer.cap], [false, 403, 'stock_buys']);
 });
 
 test('the gate judges only what it can read: a malformed reading, an unlisted symbol or a stale one admits nothing', () => {
   const stock = (extra = {}) => ({ symbol: 'SPY', equity_micro: String(usd('10000')), buying_power_micro: String(usd('10000')),
-    multiplier: String(M), symbol_held_micro: '0', total_held_micro: '0', read_at: NOW, ...extra });
+    multiplier: String(M), symbol_held_micro: '0', total_held_micro: '0', options_held_micro: '0', read_at: NOW, ...extra });
   const reserve = (gate, extra, micro = usd('100')) => gate.reserve({ micro: String(micro), venue: 'alpaca', stock: stock(extra) });
   for (const extra of [{ symbol: 'TSLA' }, { equity_micro: '1.5' }, { buying_power_micro: undefined }, { multiplier: 'x' },
-    { symbol_held_micro: null }, { total_held_micro: '' }, { read_at: 'soon' }]) {
+    { symbol_held_micro: null }, { total_held_micro: '' }, { options_held_micro: undefined }, { options_held_micro: '-1' },
+    { options_held_micro: '1' }, { read_at: 'soon' }]) {
     const answer = reserve(gateAt(), extra);
     assert.deepEqual([answer.ok, answer.status, answer.cap], [false, 400, 'stock'], JSON.stringify(extra));
   }
@@ -462,10 +708,19 @@ test('the practice account is unchanged: its stock buys pass unmetered with no r
 // ------------------------------------------------------------------------------------------------ the readings
 
 test('the account reading for a buy: equity and buying power rounded down, the multiplier as read, nothing assumed', async () => {
-  const tape = alpacaVenue({ account: { equity: '10000.0000009', buying_power: '19999.999999999', multiplier: '2' } });
+  const tape = alpacaVenue({ account: { equity: '10000.0000009', buying_power: '19999.999999999', regt_buying_power: '20000', multiplier: '2' } });
   assert.deepEqual(await readStockAccount(env(), { fetcher: tape.fetcher, now: () => NOW }),
     { ok: true, at: NOW, equity_micro: '10000000000', buying_power_micro: '19999999999', multiplier: '2000000' });
   assert.equal(tape.calls[0].url, 'https://api.alpaca.markets/v2/account');
+  // The lower of the intraday and the overnight figure; a margin account without the overnight one is no reading.
+  const read = async account => readStockAccount(env(), { fetcher: alpacaVenue({ account }).fetcher, now: () => NOW });
+  assert.equal((await read({ equity: '10000', buying_power: '40000', regt_buying_power: '12000.5', multiplier: '4' })).buying_power_micro, '12000500000');
+  assert.equal((await read({ equity: '10000', buying_power: '900', regt_buying_power: 12000, multiplier: '2' })).buying_power_micro, '900000000');
+  assert.equal((await read({ equity: '10000', buying_power: '10000', multiplier: '1' })).buying_power_micro, '10000000000', 'cash: its cash, no overnight figure needed');
+  for (const account of [{ equity: '10000', buying_power: '20000', multiplier: '2' }, { equity: '10000', buying_power: '40000', multiplier: '4' },
+    { equity: '10000', buying_power: '10000', regt_buying_power: 'x', multiplier: '1' }, { equity: '10000', buying_power: '20000', regt_buying_power: {}, multiplier: '2' }]) {
+    assert.deepEqual(await read(account), { ok: false, at: NOW, error: 'alpaca account: no regt_buying_power field' }, JSON.stringify(account));
+  }
   const none = await readStockAccount(env({ ALPACA_SECRET_KEY: '' }), { fetcher: tape.fetcher, now: () => NOW });
   assert.deepEqual(none, { ok: false, at: NOW, error: 'alpaca account: alpaca secret key is missing' });
 });
@@ -478,8 +733,8 @@ test('the exposure reading counts what is invested and on order, and refuses to 
   const orders = [restingBuy('SPY', '3', '500', { filled_qty: '1' }), restingBuy('XOM', '3', '110'), restingBuy('TLT', '1', '90'),
     { id: 'n', symbol: 'GLD', notional: '100.5', filled_qty: '0.1', side: 'buy', type: 'market' },
     { id: 's', symbol: 'SPY', qty: '1', side: 'sell', type: 'market' }, restingBuy('SPY', '2', '500', { filled_qty: '2' })];
-  assert.deepEqual(stockExposure('SPY', positions, orders), { symbolMicro: usd('2000'), totalMicro: usd('2840.500001') },
-    'SPY: $1,000 held, $1,000 resting; the book: $1,650.000001 long (the option too), $1,190.50 on order; shorts, sells, covers and filled orders not');
+  assert.deepEqual(stockExposure('SPY', positions, orders), { symbolMicro: usd('2000'), totalMicro: usd('2840.500001'), optionsMicro: usd('250') },
+    'SPY: $1,000 held, $1,000 resting; the book: $1,650.000001 long (the option too, $250 of it unmarginable), $1,190.50 on order; shorts, sells, covers and filled orders not');
   assert.deepEqual(stockExposure('XOM', positions, orders), { error: 'the account holds XOM short: a buy of it covers the short, at most its size, and opens nothing', short: true });
   assert.equal(stockExposure('SPY', null, []).source, 'positions');
   assert.equal(stockExposure('SPY', [], {}).source, 'orders');
@@ -497,12 +752,12 @@ test('health reports the stock route: the switch, the shares, the list, today\'s
   const response = await route(new Request(`${GATEWAY}/v1/health`, { headers: { Authorization: `Bearer ${TOKEN}` } }), env(), { gate, now: () => NOW });
   const body = await response.json();
   assert.deepEqual(body.stock_buys, {
-    enabled: true, etf_equity_share: '0.5', stock_equity_share: '0.2', max_equity_multiple: '2',
+    enabled: true, etf_equity_share: '0.5', stock_equity_share: '0.2', max_equity_multiple: '2', day_equity_multiple: '4',
     symbols: {
       etf: ['SPY', 'QQQ', 'IWM', 'DIA', 'XLB', 'XLC', 'XLE', 'XLF', 'XLI', 'XLK', 'XLP', 'XLRE', 'XLU', 'XLV', 'XLY', 'TLT', 'GLD'],
       stock: ['AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'META', 'BRK.B', 'JPM', 'V', 'UNH', 'XOM', 'JNJ', 'PG', 'MA', 'HD', 'AVGO', 'LLY', 'COST'],
     },
-    day_buys_usd: '271.50', in_flight: 0, in_flight_usd: '0.00', buys_admitted: true,
+    day_buys_usd: '271.50', in_flight: 0, in_flight_usd: '0.00', closes_in_flight: 0, buys_admitted: true,
   });
   assert.equal(gateAt({ STOCK_BUYS_REAL: 'off' }).status(NOW).stock_buys.enabled, false);
 });

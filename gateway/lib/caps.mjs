@@ -606,20 +606,13 @@ export function structureNotional(body, admitted = []) {
 // unchanged: nothing is metered there, and the venue's own margin rules judge it.
 
 /**
- * Why a multi-leg CLOSE may not go to the real account given its `positions` (Alpaca's `GET v2/positions` rows:
- * `{symbol, qty, qty_available, side}`, a short option reported with side "short" and a negative qty), or null when every
- * leg is held. `body` has already passed `structureOrder` as a close, or is a single-leg buy_to_close read as one leg
- * (`shortCloseBody`, the review of Deploy G).
- *
- * What a leg may close is what is AVAILABLE (the review of g/money, Sept 25, 2026): `qty_available`, the part not already
- * committed to an open order, when the row carries it (never more than `qty`); a row without it counts its `qty`. So a
- * second close of legs a resting close already sells is refused here, not only at the venue.
+ * What `positions` (Alpaca's `GET v2/positions` rows) leave AVAILABLE to close, by symbol, in signed picounits: positive
+ * long, negative short. `qty_available` (the part no open order commits) when the row carries it, never more than `qty`;
+ * a row without it counts its `qty`; one that cannot be read leaves nothing; a row that contradicts itself holds nothing.
  */
-export function closeLegsHeldError(body, positions) {
-  if (!Array.isArray(positions)) return 'The account\'s positions could not be read as a list: a real close is not admitted unread.';
-  const units = value => picoUnits(value < 0n ? -value : value);
-  const qty = parsePico(body.qty);
+export function availableHeld(positions) {
   const held = new Map();
+  if (!Array.isArray(positions)) return held;
   for (const row of positions) {
     if (!row || typeof row !== 'object' || typeof row.symbol !== 'string') continue;
     const amount = parsePico(row.qty);
@@ -636,6 +629,24 @@ export function closeLegsHeldError(body, positions) {
     if (magnitude === 0n) continue;
     held.set(row.symbol, (held.get(row.symbol) ?? 0n) + sign * magnitude);
   }
+  return held;
+}
+
+/**
+ * Why a multi-leg CLOSE may not go to the real account given its `positions` (Alpaca's `GET v2/positions` rows:
+ * `{symbol, qty, qty_available, side}`, a short option reported with side "short" and a negative qty), or null when every
+ * leg is held. `body` has already passed `structureOrder` as a close, or is a single-leg buy_to_close read as one leg
+ * (`shortCloseBody`, the review of Deploy G).
+ *
+ * What a leg may close is what is AVAILABLE (the review of g/money, Sept 25, 2026): `qty_available`, the part not already
+ * committed to an open order, when the row carries it (never more than `qty`); a row without it counts its `qty`. So a
+ * second close of legs a resting close already sells is refused here, not only at the venue.
+ */
+export function closeLegsHeldError(body, positions) {
+  if (!Array.isArray(positions)) return 'The account\'s positions could not be read as a list: a real close is not admitted unread.';
+  const units = value => picoUnits(value < 0n ? -value : value);
+  const qty = parsePico(body.qty);
+  const held = availableHeld(positions);
   const short = [];
   for (const raw of body.legs) {
     const intent = LEG_INTENTS[raw.position_intent];
@@ -687,6 +698,13 @@ export function closedLegRows(body) {
 // signed positions like any real close (`closeLegsHeldError`), failing closed when they cannot be read. Such an order
 // takes risk off: it is an exit (no dollar cap; counted in the day's orders; stopped by the kill switch). Every other
 // stock order, and every crypto order, is refused. `alpaca-paper` is unchanged.
+//
+// Since Oct 10, 2026 (the review of the stock buys, MAJOR) a stock order's positions are read FRESH, never from the
+// router's per-isolate cache (an isolate's cached reading could still show shares sold, or a short covered, through
+// another isolate), and the Gate serializes stock closes as it serializes buys (`gate.mjs` `reserveStockClose`): a close
+// is admitted only when its qty, plus the closes of the same symbol and side the Gate admitted that the reading may not
+// show yet, is at most what the fresh reading leaves available (`availableHeld`). So two sales of the same shares,
+// through one isolate or two, cannot both go, and neither can a sale of shares already sold: nothing is a short sale.
 
 /**
  * A stock order on the real account read as the close it must be: `{ body }` (a one-leg close in the shape
@@ -731,6 +749,15 @@ export function realStockClose(body) {
 // order plus this order at most equity x min(STOCK_MAX_EQUITY_MULTIPLE, the account's multiplier); and never above the
 // account's buying power. A buy of a symbol the account holds SHORT is never this path: it is a cover, judged as a close
 // above (at most the short), so no buy both covers and opens. A sale is always a close. Nothing here is ever a short sale.
+//
+// The review of Oct 10, 2026 tightened two of those caps. The book is a MARGIN line, not a gross one: options (and any
+// other long the venue lends nothing on) are paid in full, so under Reg T's overnight 2x a book holds `stocks / 2 +
+// options <= equity`; the cap is `stocks + options x m <= equity x m` with m = min(STOCK_MAX_EQUITY_MULTIPLE, the
+// multiplier) (options at 1x while m <= 1: exactly the old cap on a cash account). And buying power is the LOWER of the
+// venue's `buying_power` and its overnight `regt_buying_power` (on pattern-day-trader margin, multiplier 4,
+// `buying_power` is the intraday figure, 4x, which bounds nothing overnight). A day's buys are capped too: at most
+// STOCK_DAY_EQUITY_MULTIPLE (a ceiling of 4) x equity at qty x limit_price, cancelled buys included (`stock_day`): a
+// gateway backstop under the House's daily and drawdown stops, against a looping release or a leaked runtime token.
 
 //: The symbols a real stock buy may name: the broad index ETFs, the eleven SPDR sector ETFs, Treasuries and gold, and a
 //: short named list of large US stocks. A constant the House and this gateway share in spirit; changing it is a reviewed
@@ -810,10 +837,20 @@ export function heldShares(symbol, positions) {
 }
 
 /**
- * What the account already holds or has asked for, by the venue's own readings (Oct 10, 2026): `{ symbolMicro, totalMicro }`
- * or `{ error }`. `symbolMicro` is `symbol`'s long market value plus its open buy orders' remaining notional; `totalMicro`
- * is every long position's market value (stocks, ETFs and options alike: all of it is invested) plus every open stock or
- * ETF buy order's remaining notional (an option order is held to the option caps, and to buying power at the venue).
+ * Whether the venue lends on a long position row (Reg T: a US stock or ETF): a stock-shaped symbol whose `asset_class`,
+ * when the row names one, is `us_equity`. An option, crypto, or anything else is paid in full: the book cap counts it at
+ * the margin multiple (`gate.reserveStock`), which errs high for a row it cannot place.
+ */
+export const marginableRow = row => STOCK_SYMBOL.test(String(row?.symbol || ''))
+  && (row.asset_class === undefined || row.asset_class === null || row.asset_class === 'us_equity');
+
+/**
+ * What the account already holds or has asked for, by the venue's own readings (Oct 10, 2026): `{ symbolMicro, totalMicro,
+ * optionsMicro }` or `{ error }`. `symbolMicro` is `symbol`'s long market value plus its open buy orders' remaining
+ * notional; `totalMicro` is every long position's market value (stocks, ETFs and options alike: all of it is invested)
+ * plus every open stock or ETF buy order's remaining notional (an option order is held to the option caps, and to buying
+ * power at the venue); `optionsMicro` is the part of `totalMicro` the venue lends nothing on (long options and any other
+ * long that is not a US stock or ETF, `marginableRow`), which the book cap weighs at the margin multiple.
  * Fails closed: a long row with no readable market value, an open buy with no price (a market or stop buy), a symbol held
  * short, or a list that may be cut off (`ordersLimit` rows) is an error, never a guess.
  */
@@ -823,6 +860,7 @@ export function stockExposure(symbol, positions, orders, { ordersLimit = 500 } =
   if (orders.length >= ordersLimit) return { error: `the account has ${orders.length} or more open orders, more than one reading lists`, source: 'orders' };
   let symbolMicro = 0n;
   let totalMicro = 0n;
+  let optionsMicro = 0n;
   const short = new Set();
   for (const row of positions) {
     if (!row || typeof row !== 'object' || typeof row.symbol !== 'string') continue;
@@ -840,6 +878,7 @@ export function stockExposure(symbol, positions, orders, { ordersLimit = 500 } =
     if (value === null || value < 0n) return { error: `the long position in ${row.symbol} has no readable market value`, source: 'positions' };
     const micro = picoToMicro(value);
     totalMicro += micro;
+    if (!marginableRow(row)) optionsMicro += micro;
     if (row.symbol === symbol) symbolMicro += micro;
   }
   if (short.has(symbol)) return { error: `the account holds ${symbol} short: a buy of it covers the short, at most its size, and opens nothing`, short: true };
@@ -867,7 +906,7 @@ export function stockExposure(symbol, positions, orders, { ordersLimit = 500 } =
     totalMicro += remaining;
     if (name === symbol) symbolMicro += remaining;
   }
-  return { symbolMicro, totalMicro };
+  return { symbolMicro, totalMicro, optionsMicro };
 }
 
 // --- the practice account ------------------------------------------------------------------------

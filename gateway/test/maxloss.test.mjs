@@ -475,7 +475,7 @@ test('crypto, dollar-sized, intent-carrying and unpriced stock orders are refuse
   }
 });
 
-test('a stock close with its positions unread is a 424 that reserves nothing; the kill switch stops it; a second close is not sent from the cache', async () => {
+test('a stock close with its positions unread is a 424 that reserves nothing; the kill switch stops it; a second close of the same shares is refused by the Gate', async () => {
   for (const positions of [503, 'not json', '{"positions":[]}', new TypeError('fetch failed')]) {
     const tape = alpacaVenue({ positions });
     const { status, body, gate } = await send(SALE, { tape });
@@ -489,15 +489,16 @@ test('a stock close with its positions unread is a 424 that reserves nothing; th
   const halted = await send(SALE, { gate: killed, tape: alpacaVenue({ positions: SHARES }) });
   assert.equal(halted.status, 423);
   assert.equal(halted.tape.orders().length, 0);
-  // With a cache, the 100 shares sold leave the cached reading: a second sale of them within it is refused.
+  // A stock close reads the positions fresh even with a cache (the review of Oct 10, 2026), and the Gate holds the 100
+  // shares sold as in flight: a second sale of them, while the venue may not show the first, is refused.
   const cached = { POSITIONS_CACHE_MS: '60000' };
   const gate = gateAt(cached);
   assert.equal((await send(SALE, { gate, settings: cached, tape: alpacaVenue({ positions: SHARES }) })).status, 200);
   const again = await send({ ...SALE, qty: '1' }, { gate, settings: cached, tape: alpacaVenue({ positions: SHARES }) });
-  assert.equal(again.status, 400);
-  assert.match(again.body.error, /AAPL long \(1 needed, none held\)/);
-  assert.equal(again.tape.calls.length, 0, 'read from the cache, nothing sent');
-  await send(SALE, { tape: alpacaVenue({ positions: [] }) });  // a read with the cache off empties it for what follows
+  assert.deepEqual([again.status, again.body.cap], [409, 'stock_close']);
+  assert.match(again.body.error, /AAPL long \(1 needed, 0 long left of 100 available once 100 already being closed by orders in flight are taken off\)/);
+  assert.equal(again.tape.positionReads().length, 1, 'read fresh, never from the cache');
+  assert.equal(again.tape.orders().length, 0, 'nothing sent');
 });
 
 test('the stock-close reading and the exact counts it uses', () => {
