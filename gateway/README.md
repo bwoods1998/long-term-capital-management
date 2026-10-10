@@ -85,9 +85,13 @@ account. **Reads and cancels always pass.** Deployed values (`wrangler.jsonc`, d
   size held (exits). While `STOCK_BUYS_REAL` is `on` (Oct 10, 2026), a BUY of a symbol not held short
   also goes as an OPEN when it names a symbol of `STOCK_UNIVERSE` (`lib/caps.mjs`: SPY QQQ IWM DIA, the
   eleven SPDR sector ETFs, TLT, GLD, and 18 large US stocks) and is a `limit` `day` order sized in shares
-  (fractional allowed; no `notional`), metered at `qty x limit_price`. The gateway reads the account
-  (equity, buying power, multiplier), its open orders and its positions fresh, with the real keys, and
-  the Gate refuses `403 {cap}`: `stock_order` (the order alone over 50% of equity for an ETF, 20% for a
+  (fractional allowed; no `notional`), metered at `qty x limit_price`. The gateway reads the account's
+  open orders, then its positions, then the account (equity, buying power, multiplier) fresh, with the
+  real keys: in that order a buy that fills between two reads counts twice, never not at all. "Buys in
+  flight" are the buys the Gate admitted, each held for `STOCK_LEDGER_HOLD_MS` (60 s) after the venue's
+  answer (with no answer, two minutes from admission): the venue's account and positions can lag an
+  order's status. One the open orders list by its `client_order_id` counts once, the larger of the two.
+  The Gate refuses `403 {cap}`: `stock_order` (the order alone over 50% of equity for an ETF, 20% for a
   stock), `stock_day` (the day's buys with it over 4x equity), `stock_position` (the symbol's long
   market value + its resting buys + buys in flight + this order over that share), `stock_total` (every
   long stock position + every resting stock buy + buys in flight + this order + long options counted

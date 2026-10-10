@@ -846,11 +846,13 @@ export const marginableRow = row => STOCK_SYMBOL.test(String(row?.symbol || ''))
 
 /**
  * What the account already holds or has asked for, by the venue's own readings (Oct 10, 2026): `{ symbolMicro, totalMicro,
- * optionsMicro }` or `{ error }`. `symbolMicro` is `symbol`'s long market value plus its open buy orders' remaining
+ * optionsMicro, openBuys }` or `{ error }`. `symbolMicro` is `symbol`'s long market value plus its open buy orders' remaining
  * notional; `totalMicro` is every long position's market value (stocks, ETFs and options alike: all of it is invested)
  * plus every open stock or ETF buy order's remaining notional (an option order is held to the option caps, and to buying
  * power at the venue); `optionsMicro` is the part of `totalMicro` the venue lends nothing on (long options and any other
- * long that is not a US stock or ETF, `marginableRow`), which the book cap weighs at the margin multiple.
+ * long that is not a US stock or ETF, `marginableRow`), which the book cap weighs at the margin multiple. `openBuys` is
+ * every open buy counted in `totalMicro` that names a `client_order_id`, as `{ client_order_id, symbol, micro }` (what it
+ * counted): the Gate nets a buy it admitted and still holds against it, so the two count once (`gate.reserveStock`).
  * Fails closed: a long row with no readable market value, an open buy with no price (a market or stop buy), a symbol held
  * short, or a list that may be cut off (`ordersLimit` rows) is an error, never a guess.
  */
@@ -861,6 +863,7 @@ export function stockExposure(symbol, positions, orders, { ordersLimit = 500 } =
   let symbolMicro = 0n;
   let totalMicro = 0n;
   let optionsMicro = 0n;
+  const openBuys = [];
   const short = new Set();
   for (const row of positions) {
     if (!row || typeof row !== 'object' || typeof row.symbol !== 'string') continue;
@@ -905,8 +908,11 @@ export function stockExposure(symbol, positions, orders, { ordersLimit = 500 } =
     }
     totalMicro += remaining;
     if (name === symbol) symbolMicro += remaining;
+    if (typeof row.client_order_id === 'string' && row.client_order_id !== '') {
+      openBuys.push({ client_order_id: row.client_order_id, symbol: name, micro: remaining });
+    }
   }
-  return { symbolMicro, totalMicro, optionsMicro };
+  return { symbolMicro, totalMicro, optionsMicro, openBuys };
 }
 
 // --- the practice account ------------------------------------------------------------------------

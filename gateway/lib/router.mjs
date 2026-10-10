@@ -419,8 +419,9 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
       redirect: 'manual',
       signal: AbortSignal.timeout(30000),
     });
-    // A real stock buy or close the venue answered (taken or refused) is in its readings from now on: it leaves the gate's
-    // in-flight ledger (Oct 10, 2026). One with no answer stays in it until STOCK_PENDING_MS has passed.
+    // A real stock buy or close the venue answered (taken or refused) is settled in the gate's in-flight ledger (Oct 10,
+    // 2026): a close leaves it once the venue's readings show it (STOCK_READ_SKEW_MS), a buy is held STOCK_LEDGER_HOLD_MS
+    // more, since the venue's account and positions can lag the order's status. One with no answer stays in it longer.
     if (reservation && reservation.stock_id !== undefined) {
       try {
         await gate.stockSettle({ id: reservation.stock_id, at: now() });
@@ -575,15 +576,29 @@ async function realOrder(parsed, env, { gate, fetcher, now }) {
  * A real stock or ETF BUY that opens or adds to a long position (Oct 10, 2026; `caps.stockBuyOrder`, `gate.reserveStock`):
  * `{ micro, exit: false, credit: false, closeRows: null, stock }` for the gate, or `{ response }`. Its shape first (a
  * listed symbol, a limit day order sized in shares), then three reads of the real account, each with its keys, read-only,
- * fresh: the account (equity, the lower of `buying_power` and `regt_buying_power`, multiplier; recorded in the gate as the caps' equity reading), its open
- * orders, then its positions (in that order: a buy that fills between the two reads is counted twice, never not at
- * all). Each read that fails refuses the buy with nothing reserved or sent: the account a 503 (`equity`), the orders or
- * positions a 424 (`orders`, `positions`). The gate then judges the caps in the step that reserves.
+ * fresh: its open orders, then its positions, then the account (equity, the lower of `buying_power` and
+ * `regt_buying_power`, multiplier; recorded in the gate as the caps' equity reading). In that order (the design review of
+ * Oct 10, 2026): a buy that fills between two of the reads is still in the open orders read before it and already in the
+ * positions and the account read after it, so it is counted twice, never not at all. Read the other way round (the
+ * account first, as until today), a buy that filled between the account and the open orders had left the open list while
+ * the account was read before its debit. Each read that fails refuses the buy with nothing reserved or sent: the orders
+ * or positions a 424 (`orders`, `positions`), the account a 503 (`equity`). The gate then judges the caps in the step
+ * that reserves, adding the buys it admitted and still holds (`STOCK_LEDGER_HOLD_MS`), each netted against the open order
+ * that shows it (by `client_order_id`), so none is counted both as held and as open.
  */
 async function realStockBuy(parsed, env, { gate, fetcher, now }) {
   const order = stockBuyOrder(parsed);
   if (order.error) return { response: fail(order.error, 400) };
   const readAt = now();
+  const orders = await realOpenOrders(env, { fetcher, now });
+  if (orders.error) return { response: refuse(`Cannot read the real account's open orders: ${orders.error}.`, POSITIONS_UNREAD_STATUS, 'orders') };
+  const held = await realPositions(env, { fetcher, now, fresh: true });
+  if (held.error) return { response: refuse(`Cannot read the real account's positions: ${held.error}.`, POSITIONS_UNREAD_STATUS, 'positions') };
+  const exposure = stockExposure(order.symbol, held.positions, orders.orders, { ordersLimit: OPEN_ORDERS_LIMIT });
+  if (exposure.short) return { response: fail(`A buy of ${order.symbol} is not admitted as an open: ${exposure.error}.`, 400) };
+  if (exposure.error) {
+    return { response: refuse(`Cannot size this buy against the real account: ${exposure.error}.`, POSITIONS_UNREAD_STATUS, exposure.source || 'positions') };
+  }
   const reading = await account.readStockAccount(env, { fetcher, now });
   if (reading.ok !== true) {
     return {
@@ -596,21 +611,14 @@ async function realStockBuy(parsed, env, { gate, fetcher, now }) {
   } catch {
     // The options' reading is only refreshed here as a convenience; the buy is judged by `reading` itself.
   }
-  const orders = await realOpenOrders(env, { fetcher, now });
-  if (orders.error) return { response: refuse(`Cannot read the real account's open orders: ${orders.error}.`, POSITIONS_UNREAD_STATUS, 'orders') };
-  const held = await realPositions(env, { fetcher, now, fresh: true });
-  if (held.error) return { response: refuse(`Cannot read the real account's positions: ${held.error}.`, POSITIONS_UNREAD_STATUS, 'positions') };
-  const exposure = stockExposure(order.symbol, held.positions, orders.orders, { ordersLimit: OPEN_ORDERS_LIMIT });
-  if (exposure.short) return { response: fail(`A buy of ${order.symbol} is not admitted as an open: ${exposure.error}.`, 400) };
-  if (exposure.error) {
-    return { response: refuse(`Cannot size this buy against the real account: ${exposure.error}.`, POSITIONS_UNREAD_STATUS, exposure.source || 'positions') };
-  }
   return {
     micro: order.micro, exit: false, credit: false, closeRows: null,
     stock: {
       symbol: order.symbol, equity_micro: reading.equity_micro, buying_power_micro: reading.buying_power_micro, multiplier: reading.multiplier,
       symbol_held_micro: String(exposure.symbolMicro), total_held_micro: String(exposure.totalMicro),
       options_held_micro: String(exposure.optionsMicro), read_at: readAt,
+      open_buys: exposure.openBuys.map(row => ({ client_order_id: row.client_order_id, symbol: row.symbol, micro: String(row.micro) })),
+      ...(typeof parsed.client_order_id === 'string' ? { client_order_id: parsed.client_order_id } : {}),
     },
   };
 }

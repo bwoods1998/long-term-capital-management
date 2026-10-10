@@ -51,11 +51,19 @@ export const ADMIN_LOG_KEY = 'admin-log-v1';
 //: CLOSES (sales of shares held long, covers of a short) are kept in it too (`kind: "close"`; the review of Oct 10, 2026),
 //: so a second close of the same shares is refused before the venue shows the first.
 export const STOCK_PENDING_KEY = 'stock-pending-v1';
-//: An admitted stock buy or close counts as in flight until its forward is answered, then until no reading started before
-//: that answer can be judged by (`STOCK_READ_SKEW_MS`); one whose answer never came counts this long (twice the forward's
-//: 30-second timeout), after which the venue's own open orders and positions show it if it exists.
+//: An admitted stock close counts as in flight until its forward is answered, then until no reading started before that
+//: answer can be judged by (`STOCK_READ_SKEW_MS`); one whose answer never came counts this long (twice the forward's
+//: 30-second timeout), after which the venue's own positions show it if it exists.
 export const STOCK_PENDING_MS = 60_000;
 export const STOCK_READ_SKEW_MS = 5_000;
+//: An admitted stock BUY is held longer (the design review of Oct 10, 2026): it counts against every reading started up
+//: to this long after its answer, or, never answered, after STOCK_PENDING_MS ran out. The venue's account and positions
+//: can lag an order's status by more than STOCK_READ_SKEW_MS, and a buy that fills in that lag has left the open orders
+//: while its position and its debit do not show yet. A held buy the reading shows among the open orders (by its
+//: client_order_id and symbol) counts once, the larger of the two, never their sum (`reserveStock`).
+export const STOCK_LEDGER_HOLD_MS = 60_000;
+//: The longest client_order_id the venue takes; a longer one (or none) is never matched to an open order.
+const STOCK_CLIENT_MAX = 128;
 //: How many recent docs commits and merges the Gate keeps (and /v1/health shows); verdicts kept with their reasons;
 //: rejected commits kept apart, longer (a reject is final for its commit, so it outlives the verdict list; past this
 //: many the oldest are forgotten and the Gate refuses an approve that a forgotten reject could have been about:
@@ -273,11 +281,17 @@ export function createGate({ store, env = {}, now = Date.now }) {
 
   // --- real stock buys (Oct 10, 2026; caps.mjs "stock and ETF buys on the real account") --------------------------------
 
+  /** A client_order_id the ledger can match to an open order: a string of 1 to STOCK_CLIENT_MAX characters, else null. */
+  const stockClient = value => (typeof value === 'string' && value.length > 0 && value.length <= STOCK_CLIENT_MAX ? value : null);
+  /** When a buy's hold starts: its answer, or, never answered, when STOCK_PENDING_MS ran out. */
+  const stockAnswered = entry => (entry.settled === null ? entry.at + STOCK_PENDING_MS : entry.settled);
+
   /**
-   * The in-flight ledger, pruned at `at`: `{ next, entries: [{ id, at, symbol, micro, settled, kind, side?, qty? }] }`.
-   * `kind` is `buy` (an open, `micro` its qty x limit_price) or `close` (a sale or a cover: `side` and `qty`, picounits of
-   * shares; `micro` 0). An entry leaves once it can no longer count (`stockCounts`): settled more than STOCK_PENDING_MS
-   * ago, or unsettled for that long.
+   * The in-flight ledger, pruned at `at`: `{ next, entries: [{ id, at, symbol, micro, settled, kind, client?, side?, qty? }] }`.
+   * `kind` is `buy` (an open, `micro` its qty x limit_price, `client` its client_order_id when it named one) or `close` (a
+   * sale or a cover: `side` and `qty`, picounits of shares; `micro` 0). An entry leaves once no reading the gate would
+   * judge by can count it: a close settled more than STOCK_PENDING_MS ago, or unsettled for that long (`stockCounts`); a
+   * buy once its hold (`stockBuyHeld`) has ended for a reading as old as the caps take (`maxLoss.maxAgeMs`).
    */
   const stockLedger = at => {
     const row = read(store, STOCK_PENDING_KEY, {}) || {};
@@ -286,12 +300,20 @@ export function createGate({ store, env = {}, now = Date.now }) {
       .map(entry => ({ id: Number(entry.id), at: Number(entry.at), symbol: String(entry.symbol || ''), micro: String(entry.micro),
         settled: entry.settled === null || entry.settled === undefined || !Number.isFinite(Number(entry.settled)) ? null : Number(entry.settled),
         kind: entry.kind === 'close' ? 'close' : 'buy',
+        ...(entry.kind !== 'close' && stockClient(entry.client) ? { client: entry.client } : {}),
         ...(entry.kind === 'close' ? { side: entry.side === 'buy' ? 'buy' : 'sell', qty: /^\d{1,30}$/.test(String(entry.qty)) ? String(entry.qty) : '0' } : {}) }))
-      .filter(entry => (entry.settled === null ? entry.at : entry.settled) > at - STOCK_PENDING_MS);
+      .filter(entry => (entry.kind === 'buy'
+        ? stockAnswered(entry) + STOCK_LEDGER_HOLD_MS + maxLoss.maxAgeMs >= at
+        : (entry.settled === null ? entry.at : entry.settled) > at - STOCK_PENDING_MS));
     return { next: Number.isSafeInteger(Number(row.next)) && Number(row.next) > 0 ? Number(row.next) : 1, entries };
   };
-  /** Whether an entry counts against a reading started at `readAt`: still in flight, or answered after that reading began. */
+  /** Whether a close counts against a reading started at `readAt`: still in flight, or answered after that reading began. */
   const stockCounts = (entry, readAt) => entry.settled === null || !Number.isFinite(readAt) || entry.settled >= readAt - STOCK_READ_SKEW_MS;
+  /**
+   * Whether an admitted buy counts against a reading started at `readAt`: until STOCK_LEDGER_HOLD_MS after its answer
+   * (`stockAnswered`), however soon the venue's open orders stop showing it.
+   */
+  const stockBuyHeld = (entry, readAt) => !Number.isFinite(readAt) || stockAnswered(entry) >= readAt - STOCK_LEDGER_HOLD_MS;
   /** Take an entry out of the ledger (a buy that never reached the venue); the entry, or null. */
   const stockTake = (id, at) => {
     const ledger = stockLedger(at);
@@ -305,8 +327,12 @@ export function createGate({ store, env = {}, now = Date.now }) {
    * the venue for it just now: the account's `equity_micro`, `buying_power_micro` (the lower of `buying_power` and
    * `regt_buying_power`) and `multiplier` (millionths), the symbol's long market value plus its open buy orders
    * (`symbol_held_micro`), every long position plus every open stock buy (`total_held_micro`), the part of that the venue
-   * lends nothing on, long options above all (`options_held_micro`), and `read_at`, when the reading began. Added here:
-   * the buys this gate admitted that the venue may not have shown that reading (the ledger). Caps (`account.stockCaps`):
+   * lends nothing on, long options above all (`options_held_micro`), the open stock buys that name a client_order_id with
+   * what each counts there (`open_buys`: `[{ client_order_id, symbol, micro }]`), this buy's own `client_order_id`, and
+   * `read_at`, when the reading (open orders, then positions, then the account) began. Added here: the buys this gate
+   * admitted and still holds (`stockBuyHeld`), each net of the open order the reading shows for it by client_order_id
+   * and symbol, so a held buy counts once, the larger of the ledger's and the open order's (one open order nets at most
+   * one held buy; a buy that named no client_order_id counts whole). Caps (`account.stockCaps`):
    * the order alone at most the symbol's share of equity (`stock_order`); the day's buys with it at most
    * STOCK_DAY_EQUITY_MULTIPLE x equity (`stock_day`); the symbol's position with it at most the same share
    * (`stock_position`); the whole book with it, options weighed at the margin multiple, at most equity x
@@ -367,9 +393,28 @@ export function createGate({ store, env = {}, now = Date.now }) {
       };
     }
     const ledger = stockLedger(at);
-    const counted = ledger.entries.filter(entry => entry.kind === 'buy' && stockCounts(entry, readAt));
-    const flight = counted.reduce((sum, entry) => sum + BigInt(entry.micro), 0n);
-    const flightSymbol = counted.filter(entry => entry.symbol === symbol).reduce((sum, entry) => sum + BigInt(entry.micro), 0n);
+    // What the reading's open orders already count for each held buy, by symbol and client_order_id: the larger when one
+    // shows twice. A row that does not read nets nothing, so the buy it stands for counts whole: the caps err high.
+    const shown = new Map();
+    for (const open of Array.isArray(stock.open_buys) ? stock.open_buys : []) {
+      const client = stockClient(open?.client_order_id);
+      const micro = /^\d{1,20}$/.test(String(open?.micro)) ? BigInt(open.micro) : null;
+      if (client === null || typeof open.symbol !== 'string' || micro === null) continue;
+      const key = JSON.stringify([open.symbol, client]);
+      if (!shown.has(key) || shown.get(key) < micro) shown.set(key, micro);
+    }
+    let flight = 0n;
+    let flightSymbol = 0n;
+    for (const entry of ledger.entries) {
+      if (entry.kind !== 'buy' || !stockBuyHeld(entry, readAt)) continue;
+      const key = entry.client ? JSON.stringify([entry.symbol, entry.client]) : null;
+      const open = key !== null && shown.has(key) ? shown.get(key) : 0n;
+      if (key !== null) shown.delete(key);
+      const micro = BigInt(entry.micro);
+      const extra = micro > open ? micro - open : 0n;
+      flight += extra;
+      if (entry.symbol === symbol) flightSymbol += extra;
+    }
     const held = symbolHeld + flightSymbol;
     if (held + amount > symbolCap) {
       return {
@@ -400,8 +445,9 @@ export function createGate({ store, env = {}, now = Date.now }) {
       };
     }
     const id = ledger.next;
+    const client = stockClient(stock.client_order_id);
     write(store, STOCK_PENDING_KEY, { next: id + 1,
-      entries: [...ledger.entries, { id, at: Number(at), symbol, micro: String(amount), settled: null, kind: 'buy' }] });
+      entries: [...ledger.entries, { id, at: Number(at), symbol, micro: String(amount), settled: null, kind: 'buy', ...(client ? { client } : {}) }] });
     save({ day: row.day, orders: row.orders + 1, notional: row.notional + amount, alpacaOpen: row.alpacaOpen,
       alpacaNotional: row.alpacaNotional + amount, alpacaStock: row.alpacaStock + amount });
     return { ok: true, day: row.day, micro: String(amount), venue: 'alpaca', stock_id: id };
@@ -587,9 +633,10 @@ export function createGate({ store, env = {}, now = Date.now }) {
     },
 
     /**
-     * A real stock buy's forward was answered (Oct 10, 2026): the venue has the order or refused it, so a reading that
-     * starts from now on sees it, and it stops counting as in flight once no reading started before now is being judged
-     * (`STOCK_READ_SKEW_MS`). Unknown or already settled ids change nothing.
+     * A real stock buy's or close's forward was answered (Oct 10, 2026): the venue has the order or refused it. A close
+     * stops counting as in flight once no reading started before now is being judged (`STOCK_READ_SKEW_MS`); a buy is
+     * held STOCK_LEDGER_HOLD_MS from now (`stockBuyHeld`), since the venue's account and positions can lag its order's
+     * status. Unknown or already settled ids change nothing.
      */
     stockSettle({ id, at = now() }) {
       const ledger = stockLedger(at);
@@ -698,7 +745,8 @@ export function createGate({ store, env = {}, now = Date.now }) {
     stockStatus(at = now()) {
       const row = counters(at);
       const limitsNow = account.stockCaps(env);
-      const unanswered = stockLedger(at).entries.filter(entry => entry.settled === null);
+      // Unanswered and still within the forward's own horizon (a buy held past it is no longer "in flight" here).
+      const unanswered = stockLedger(at).entries.filter(entry => entry.settled === null && entry.at > at - STOCK_PENDING_MS);
       const flight = unanswered.filter(entry => entry.kind === 'buy');
       const enabled = stockBuysEnabled(env);
       return {

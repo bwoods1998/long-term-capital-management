@@ -37,8 +37,9 @@ or only for symbols tagged as assigned. Until it does, `STOCK_BUYS_REAL` "on" is
   stop or option-intent buy is a `400` before anything is read; a market, good-till-cancelled or unlisted buy is a `400`
   once the positions (read first, as for every real stock order) show it is not a cover, before the account is read.
 - **Its price**: `qty x limit_price`, rounded up. A buy fills at its limit or better, so nothing it spends is above it.
-- **Its caps**, read fresh from the account by the gateway itself (`GET v2/account`, then `GET v2/orders?status=open`,
-  then `GET v2/positions`, each with the real keys, read-only), judged in the Gate's single step that reserves:
+- **Its caps**, read fresh from the account by the gateway itself (`GET v2/orders?status=open`, then `GET v2/positions`,
+  then `GET v2/account`, each with the real keys, read-only: in that order a buy that fills between two reads is counted
+  twice, never not at all), judged in the Gate's single step that reserves:
 
   | Cap | Refusal (`403 {cap}`) | Rule |
   |---|---|---|
@@ -52,9 +53,10 @@ or only for symbols tagged as assigned. Until it does, `STOCK_BUYS_REAL` "on" is
   or malformed reads as the ceiling. Equity and buying power are rounded down, every cap rounds down, and the order's
   price and the options' extra weight round up. A House that reprices a buy (cancel and send again) spends the day's
   cap each time: price to fill.
-- **Buys in flight**: the Gate keeps each admitted buy until its forward is answered, and for five seconds after (a
-  reading that began before the answer may not show it); one whose answer never came counts for a minute. So a burst of
-  buys cannot pass a cap between two readings, and a buy is counted once the venue shows it.
+- **Buys in flight**: the Gate holds each admitted buy for `STOCK_LEDGER_HOLD_MS` (60 s) after its forward is answered
+  (the venue's account and positions can lag an order's status); one whose answer never came, for two minutes from
+  admission. So a burst of buys cannot pass a cap between two readings, and a buy that fills while the account and
+  positions lag is still counted. One the open orders list by its `client_order_id` counts once, the larger of the two.
 - **It is an open for the day's counts** (`MAX_DAY_OPEN_ORDERS`, `MAX_DAY_ORDERS`) and the kill switch stops it (`423`).
   It never spends the options' opening maximum loss (`MAX_DAY_USD_ALPACA`): the stock book has its own caps.
 - **Fails closed**: an account that cannot be read (or has no equity or `buying_power`, or a margin account, multiplier

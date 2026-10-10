@@ -29,6 +29,17 @@ any other deploy.
 The running House release is `20261010T062000Z-1767910d2115` (main `dd196cad`, the spent-lineage refusal, 06:20Z Oct 10),
 the gateway is `507b6118`, and the box's updater is on. What is built and not deployed is on branches.
 
+### A stock buy's fill between reads is never lost, on `fix/gateway-stock-read-order` (unreleased; a gateway deploy; no House change)
+
+- The design review of Oct 10, 2026: `realStockBuy` read the account, then the open orders, then the positions, so a buy
+  that filled between the first two reads was counted nowhere, and the Gate's ledger let an answered buy go after 5 s
+  though the venue's account and positions can lag an order's status longer. Now the open orders are read first, then
+  the positions, then the account (a fill in between counts twice, never not at all; every read still fails closed), and
+  the Gate holds each admitted buy `STOCK_LEDGER_HOLD_MS` (60 s) after its answer (unanswered, two minutes from
+  admission), netted against the open order that lists it by `client_order_id`, so it counts once, the larger of the two.
+  Stock closes are unchanged. Docs: `gateway/README.md`, `docs/operations.md`. Proof: `gateway/test/stock-buys.test.mjs`
+  (449 of 449 in the gateway).
+
 ### Real stock and ETF buys at the gateway, on `feat/gateway-stock-opens` (unreleased; a gateway deploy; no House change)
 
 - The owner's goal of Oct 10, 2026 (ETFs, stocks and options with real money). While `STOCK_BUYS_REAL` is `on` (set so

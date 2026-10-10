@@ -17,7 +17,7 @@ import {
   STOCK_ETF_SHARE_MAX, STOCK_SINGLE_SHARE_MAX, STOCK_MULTIPLE_MAX, STOCK_DAY_MULTIPLE_MAX,
 } from '../lib/account.mjs';
 import { STOCK_UNIVERSE, stockKind, stockBuysEnabled, stockBuyOrder, heldShares, stockExposure, availableHeld, marginableRow } from '../lib/caps.mjs';
-import { createGate, STOCK_PENDING_KEY, STOCK_PENDING_MS, DAY_KEY } from '../lib/gate.mjs';
+import { createGate, STOCK_PENDING_KEY, STOCK_PENDING_MS, STOCK_LEDGER_HOLD_MS, DAY_KEY } from '../lib/gate.mjs';
 import { route } from '../lib/router.mjs';
 import { memoryStore, alpacaVenue, TOKEN } from './helpers.mjs';
 
@@ -308,13 +308,15 @@ test('buys the venue has not shown yet still count: a burst cannot pass a cap be
   assert.deepEqual([second.status, second.body.cap], [403, 'stock_position']);
   assert.match(second.body.error, /held and on order \$3000\.00\)/);
   admitted(await send(buy('SPY', '4', '500'), { gate, tape: slow(), clock: () => clock }), 'exactly to the cap with the first counted');
-  // Six seconds on, the venue's own readings are what count: they show both buys, and the ledger no longer adds them.
+  // Six seconds on, the venue's open orders show both buys by their client_order_id: the ledger still holds them (the
+  // account and positions may lag a fill), but each counts once, never as held and as open both.
   clock = NOW + 6000;
-  const shown = alpacaVenue({ account: { ...CASH, buying_power: '50000' }, openOrders: [restingBuy('SPY', '10', '500')] });
+  const shown = alpacaVenue({ account: { ...CASH, buying_power: '50000' }, openOrders: [restingBuy('SPY', '6', '500', { client_order_id: 'buy-SPY-6' }),
+    restingBuy('SPY', '4', '500', { id: 'o-SPY-2', client_order_id: 'buy-SPY-4' })] });
   const full = await send(buy('SPY', '0.0002', '500'), { gate, tape: shown, clock: () => clock });
   assert.deepEqual([full.status, full.body.cap], [403, 'stock_position']);
   assert.match(full.body.error, /held and on order \$5000\.00\)/, 'counted once, from the venue');
-  // The ledger keeps an answered buy only as long as a reading could miss it.
+  // Both were answered: none is in flight, though the ledger holds them.
   assert.equal(gate.stockStatus(clock).in_flight, 0);
   assert.equal(gate.stockStatus(clock).day_buys_usd, '5000.00');
 });
@@ -338,20 +340,145 @@ test('buys in flight count against the book and the buying power too, not only t
   admitted(await send(buy('QQQ', '1', '500'), { gate: second, tape: slow({ ...CASH, buying_power: '3000.00' }) }), 'exactly the buying power left');
 });
 
-test('the boundaries admit: a reading exactly two minutes old or five seconds ahead, an answer exactly five seconds before the reading still counted, 499 open orders', async () => {
+test('a buy that fills between two reads is counted twice, never not at all: open orders, then positions, then the account', async () => {
+  // The design review of Oct 10, 2026: read the account first and the open orders after it, and a buy that fills between
+  // the two has left the open list while the account was read before its debit. A $2,000 SPY buy placed earlier (not
+  // this gate's: no ledger entry) fills after the Nth read; a buy of $3,000.01 more is one cent past the $5,000 cap if
+  // the resting $2,000 is counted at all, and admitted only if it is counted nowhere.
+  const resting = restingBuy('SPY', '4', '500', { client_order_id: 'earlier' });
+  const filling = (after, { lag = false } = {}) => {
+    let filled = after === 0;
+    const reads = [];
+    const tape = alpacaVenue({ account: { ...CASH, buying_power: '50000' }, openOrders: () => (filled ? [] : [resting]),
+      positions: () => (filled && !lag ? [long('SPY', '4', '2000.00')] : []) });
+    const fetcher = async (url, init = {}) => {
+      const answer = await tape.fetcher(url, init);
+      reads.push(/\/v2\/account$/.test(url) ? 'account' : /\/v2\/positions$/.test(url) ? 'positions' : /\/v2\/orders\?/.test(url) ? 'orders' : 'order');
+      if (reads.length === after) filled = true;
+      return answer;
+    };
+    return { ...tape, fetcher, reads };
+  };
+  for (const [after, counted] of [[0, '2000'], [1, '2000'], [2, '4000'], [3, '2000'], [4, '2000']]) {
+    const tape = filling(after);
+    refused(await send(buy('SPY', '6.00002', '500'), { tape }), 403, 'stock_position', new RegExp(`held and on order \\$${counted}\\.00\\)\\.$`),
+      `filled after read ${after}`);
+    assert.deepEqual(tape.reads, ['positions', 'orders', 'positions', 'account'], 'the cover check, then open orders, positions, the account');
+  }
+  // Positions that lag the fill (here they never show it): a fill any time after the reading began, with the open orders,
+  // is still counted there. Read the old way, one between the account and the open orders was counted nowhere. (A fill
+  // before the reading began is the ledger's: the next test.)
+  for (const after of [2, 3, 4]) {
+    refused(await send(buy('SPY', '6.00002', '500'), { tape: filling(after, { lag: true }) }), 403, 'stock_position',
+      /held and on order \$2000\.00\)\.$/, `filled after read ${after}, positions lagging`);
+  }
+  admitted(await send(buy('SPY', '2', '500'), { tape: filling(2) }), 'counted twice ($4,000), $1,000 more still fits: high by the order, never low');
+});
+
+test('an admitted buy is held a minute after its answer: a fill the account and positions show late still counts', async () => {
+  // Answered at NOW, then filled: it leaves the open orders, and the venue's positions and buying power do not show it yet.
+  let clock = NOW;
+  const gate = gateAt({}, () => clock);
+  const lagging = () => alpacaVenue({ account: { ...CASH, buying_power: '3000.00' } });
+  admitted(await send(buy('SPY', '6', '500'), { gate, tape: alpacaVenue({ account: { ...CASH, buying_power: '50000' } }), clock: () => clock }), 'SPY $3,000');
+  for (const at of [NOW + 6000, NOW + 30000, NOW + STOCK_LEDGER_HOLD_MS]) {
+    clock = at;
+    const position = await send(buy('SPY', '4.00002', '500'), { gate, tape: alpacaVenue({ account: { ...CASH, buying_power: '50000' } }), clock: () => clock });
+    assert.deepEqual([position.status, position.body.cap], [403, 'stock_position'], `${at - NOW} ms`);
+    assert.match(position.body.error, /held and on order \$3000\.00\)\.$/);
+    // The buying power the venue reports has not been debited for it either: the ledger still takes it off.
+    const power = await send(buy('QQQ', '0.0002', '500'), { gate, tape: lagging(), clock: () => clock });
+    assert.deepEqual([power.status, power.body.cap], [403, 'buying_power'], `${at - NOW} ms`);
+    assert.match(power.body.error, /buying power of \$3000\.00 less \$3000\.00 of buys in flight/);
+  }
+  assert.equal(gate.stockStatus(clock).in_flight, 0, 'answered: held, not in flight');
+  clock = NOW + STOCK_LEDGER_HOLD_MS + 1;
+  admitted(await send(buy('SPY', '4.00002', '500'), { gate, tape: alpacaVenue({ account: { ...CASH, buying_power: '50000' } }), clock: () => clock }),
+    'a minute after its answer the venue\'s own readings judge it');
+});
+
+test('a held buy the open orders show counts once, the larger of the two, never as held and as open both', async () => {
+  // Admitted at NOW as client_order_id "buy-SPY-6" ($3,000); ten seconds on the venue lists it.
+  const setup = async () => {
+    let clock = NOW;
+    const gate = gateAt({}, () => clock);
+    admitted(await send(buy('SPY', '6', '500'), { gate, tape: alpacaVenue({ account: { ...CASH, buying_power: '50000' } }), clock: () => clock }), 'SPY $3,000');
+    clock = NOW + 10000;
+    return { gate, clock: () => clock };
+  };
+  const listed = (extra = {}) => restingBuy('SPY', '6', '500', { client_order_id: 'buy-SPY-6', ...extra });
+  const judged = async (body, venue) => {
+    const { gate, clock } = await setup();
+    return send(body, { gate, clock, tape: alpacaVenue({ account: { ...CASH, buying_power: '50000' }, ...venue }) });
+  };
+  // Refused with only the first buy reserved and nothing more sent.
+  const over = (result, cap, pattern, message = '') => {
+    assert.deepEqual([result.status, result.body.cap], [403, cap], `${message} ${JSON.stringify(result.body)}`);
+    assert.match(result.body.error, pattern, message);
+    assert.deepEqual([result.tape.orders().length, result.gate.status(NOW).today.orders], [0, 1], message);
+  };
+  // Resting in full: counted once ($3,000), so $2,000 more is exactly the cap and a cent more is past it.
+  over(await judged(buy('SPY', '4.00002', '500'), { openOrders: [listed()] }), 'stock_position', /held and on order \$3000\.00\)\.$/);
+  admitted(await judged(buy('SPY', '4', '500'), { openOrders: [listed()] }), 'exactly to the cap, the order counted once');
+  // Partly filled: the open order shows $2,000 still resting and the position the $1,000 filled. The ledger keeps the
+  // larger of its $3,000 and the open $2,000, so the filled part counts twice for the hold: high, never low.
+  over(await judged(buy('SPY', '2.00002', '500'), { openOrders: [listed({ filled_qty: '2' })], positions: [long('SPY', '2', '1000.00')] }),
+    'stock_position', /held and on order \$4000\.00\)\.$/);
+  // Another client_order_id, or none, is another order: both count.
+  for (const other of [listed({ client_order_id: 'someone-else' }), restingBuy('SPY', '6', '500')]) {
+    over(await judged(buy('SPY', '0.0002', '500'), { openOrders: [other] }), 'stock_position', /held and on order \$6000\.00\)\.$/,
+      JSON.stringify(other.client_order_id));
+  }
+  // The buying power the venue reports nets its open orders: a held buy it lists is not taken off it a second time.
+  admitted(await judged(buy('QQQ', '6', '500'), { account: { ...CASH, buying_power: '3000.00' }, openOrders: [listed()] }),
+    'buying power net of the resting buy, the ledger adding nothing');
+  over(await judged(buy('QQQ', '0.0002', '500'), { account: { ...CASH, buying_power: '3000.00' } }), 'buying_power',
+    /less \$3000\.00 of buys in flight/, 'not listed: the ledger takes it off');
+  // The book: listed once.
+  over(await judged(buy('XLK', '15.0001', '200'), { openOrders: [listed()], positions: [long('IWM', '20', '4000.00')] }), 'stock_total',
+    /has on order to \$10000\.02,/);
+  // In the Gate: an open order nets one held buy of its symbol and client_order_id at most, and a client_order_id the venue
+  // would not take (over 128 characters) is never recorded to match.
+  const stock = (extra = {}) => ({ symbol: 'SPY', equity_micro: String(usd('10000')), buying_power_micro: String(usd('50000')),
+    multiplier: String(M), symbol_held_micro: '0', total_held_micro: '0', options_held_micro: '0', read_at: NOW, ...extra });
+  const store = memoryStore();
+  const gate = createGate({ store, env: env(), now: () => NOW });
+  for (const client of ['dup', 'dup', 'x'.repeat(129)]) {
+    assert.equal(gate.reserve({ micro: String(usd('1000')), venue: 'alpaca', at: NOW, stock: stock({ client_order_id: client }) }).ok, true);
+  }
+  assert.deepEqual(JSON.parse(store.get(STOCK_PENDING_KEY)).entries.map(entry => entry.client ?? null), ['dup', 'dup', null]);
+  const seen = { symbol_held_micro: String(usd('1000')), total_held_micro: String(usd('1000')),
+    open_buys: [{ client_order_id: 'dup', symbol: 'SPY', micro: String(usd('1000')) }, { client_order_id: 'x'.repeat(129), symbol: 'SPY', micro: String(usd('1000')) }] };
+  // $1,000 open + $1,000 (the second "dup") + $1,000 (the long id) = $3,000 held and on order: $2,000.01 more is past $5,000.
+  const past = gate.reserve({ micro: String(usd('2000.01')), venue: 'alpaca', at: NOW, stock: stock(seen) });
+  assert.deepEqual([past.ok, past.cap], [false, 'stock_position']);
+  assert.match(past.error, /held and on order \$3000\.00\)\.$/);
+  // The same client_order_id on another symbol is not this buy.
+  const elsewhere = gate.reserve({ micro: String(usd('1000.01')), venue: 'alpaca', at: NOW,
+    stock: stock({ ...seen, open_buys: [{ client_order_id: 'dup', symbol: 'QQQ', micro: String(usd('1000')) }] }) });
+  assert.match(elsewhere.error ?? '', /held and on order \$4000\.00\)/);
+  // What the exposure reading lists for the Gate: every counted open buy that names a client_order_id, at what it counted.
+  assert.deepEqual(stockExposure('SPY', [], [listed({ filled_qty: '2' }), restingBuy('QQQ', '1', '400'), { ...listed(), side: 'sell' },
+    restingBuy('TLT', '1', '90', { client_order_id: '' })]).openBuys, [{ client_order_id: 'buy-SPY-6', symbol: 'SPY', micro: usd('2000') }]);
+});
+
+test('the boundaries admit: a reading exactly two minutes old or five seconds ahead, an answer exactly a minute before the reading still counted, 499 open orders', async () => {
   const stock = (extra = {}) => ({ symbol: 'SPY', equity_micro: String(usd('10000')), buying_power_micro: String(usd('10000')),
     multiplier: String(M), symbol_held_micro: '0', total_held_micro: '0', options_held_micro: '0', read_at: NOW, ...extra });
   for (const readAt of [NOW - 120000, NOW + 5000]) {
     const answer = gateAt().reserve({ micro: String(usd('100')), venue: 'alpaca', at: NOW, stock: stock({ read_at: readAt }) });
     assert.equal(answer.ok, true, String(readAt - NOW));
   }
-  // An answer at NOW counts for a reading that began at NOW + 5000, and no longer for one that began a millisecond later.
+  // An answer at NOW counts for a reading that began at NOW + STOCK_LEDGER_HOLD_MS, and no longer for one that began a
+  // millisecond later; judged as late as the oldest reading the caps take, it is still in the ledger.
   const gate = gateAt();
   const first = gate.reserve({ micro: String(usd('4000')), venue: 'alpaca', at: NOW, stock: stock() });
   assert.equal(gate.stockSettle({ id: first.stock_id, at: NOW }).ok, true);
-  const counted = gate.reserve({ micro: String(usd('1000.01')), venue: 'alpaca', at: NOW + 5000, stock: stock({ read_at: NOW + 5000 }) });
-  assert.deepEqual([counted.ok, counted.cap], [false, 'stock_position'], 'still counted at exactly five seconds');
-  const past = gate.reserve({ micro: String(usd('1000.01')), venue: 'alpaca', at: NOW + 5001, stock: stock({ read_at: NOW + 5001 }) });
+  const counted = gate.reserve({ micro: String(usd('1000.01')), venue: 'alpaca', at: NOW + STOCK_LEDGER_HOLD_MS + 120000,
+    stock: stock({ read_at: NOW + STOCK_LEDGER_HOLD_MS }) });
+  assert.deepEqual([counted.ok, counted.cap], [false, 'stock_position'], 'still counted at exactly a minute');
+  const past = gate.reserve({ micro: String(usd('1000.01')), venue: 'alpaca', at: NOW + STOCK_LEDGER_HOLD_MS + 1,
+    stock: stock({ read_at: NOW + STOCK_LEDGER_HOLD_MS + 1 }) });
   assert.equal(past.ok, true, 'a reading begun after that judges by the venue alone');
   // 499 open orders is a whole list; 500 may be cut off (refused above).
   const many = Array.from({ length: 499 }, (_, i) => restingBuy(`X${i}`, '1', '1'));
@@ -392,7 +519,7 @@ test('the day\'s buys are capped at STOCK_DAY_EQUITY_MULTIPLE x equity (a ceilin
   assert.equal(gateAt().stockStatus(NOW).day_equity_multiple, '4');
 });
 
-test('a buy whose forward got no answer counts for a minute; one that never left the gateway is given back', async () => {
+test('a buy whose forward got no answer counts for two minutes; one that never left the gateway is given back', async () => {
   let clock = NOW;
   const gate = gateAt({}, () => clock);
   const lost = alpacaVenue({ account: { ...CASH, buying_power: '50000' } });
@@ -406,9 +533,15 @@ test('a buy whose forward got no answer counts for a minute; one that never left
   clock = NOW + 30000;
   const blocked = await send(buy('XLK', '5.00005', '200'), { gate, tape: alpacaVenue({ account: { ...CASH, buying_power: '50000' } }), clock: () => clock });
   assert.deepEqual([blocked.status, blocked.body.cap], [403, 'stock_position'], 'the unanswered $4,000 still counts at 30 s');
+  // Past STOCK_PENDING_MS it is held as if answered then: it may have filled at the forward's timeout, and the account
+  // and positions lag. It is no longer "in flight" on /v1/health.
   clock = NOW + STOCK_PENDING_MS + 1;
+  const held = await send(buy('XLK', '5.00005', '200'), { gate, tape: alpacaVenue({ account: { ...CASH, buying_power: '50000' } }), clock: () => clock });
+  assert.deepEqual([held.status, held.body.cap], [403, 'stock_position'], 'the unanswered $4,000 still counts a minute on');
+  assert.equal(gate.stockStatus(clock).in_flight, 0);
+  clock = NOW + STOCK_PENDING_MS + STOCK_LEDGER_HOLD_MS + 1;
   admitted(await send(buy('XLK', '5.00005', '200'), { gate, tape: alpacaVenue({ account: { ...CASH, buying_power: '50000' } }), clock: () => clock }),
-    'after a minute the venue\'s own readings judge it');
+    'after two minutes the venue\'s own readings judge it');
   // A buy that could not be signed never reached the venue (the router refunds it before any dispatch): its place, its
   // dollars and its ledger entry are given back.
   const store = memoryStore();
@@ -733,7 +866,7 @@ test('the exposure reading counts what is invested and on order, and refuses to 
   const orders = [restingBuy('SPY', '3', '500', { filled_qty: '1' }), restingBuy('XOM', '3', '110'), restingBuy('TLT', '1', '90'),
     { id: 'n', symbol: 'GLD', notional: '100.5', filled_qty: '0.1', side: 'buy', type: 'market' },
     { id: 's', symbol: 'SPY', qty: '1', side: 'sell', type: 'market' }, restingBuy('SPY', '2', '500', { filled_qty: '2' })];
-  assert.deepEqual(stockExposure('SPY', positions, orders), { symbolMicro: usd('2000'), totalMicro: usd('2840.500001'), optionsMicro: usd('250') },
+  assert.deepEqual(stockExposure('SPY', positions, orders), { symbolMicro: usd('2000'), totalMicro: usd('2840.500001'), optionsMicro: usd('250'), openBuys: [] },
     'SPY: $1,000 held, $1,000 resting; the book: $1,650.000001 long (the option too, $250 of it unmarginable), $1,190.50 on order; shorts, sells, covers and filled orders not');
   assert.deepEqual(stockExposure('XOM', positions, orders), { error: 'the account holds XOM short: a buy of it covers the short, at most its size, and opens nothing', short: true });
   assert.equal(stockExposure('SPY', null, []).source, 'positions');
