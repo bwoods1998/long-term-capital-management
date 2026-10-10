@@ -108,6 +108,17 @@ class TheRequest(BirthCase):
         self.assertNotIn("STRUCTURE FAMILIES", user, "the options structure groups are not the equity cards' words")
         self.assertNotRegex(user, r"\b202[56]\b")
 
+    def test_the_card_vocabulary_is_the_equity_cards_own(self):
+        """Finding 9 of the adversarial review: the equity architect was shown the options inputs, the minute of the day
+        and an intraday holding, which E1's `card_errors` refuses on an equity card, and no `equity_premium`."""
+        text = elane_births.vocabulary_text(self.settings)
+        for words in ("equity_premium", "trend_momentum", "reversal_liquidity", "calendar_flow", "- underlying_price:",
+                      "- share_volume:", "- clock: the session calendar", "- days_1_3:", "REBIRTH"):
+            self.assertIn(words, text)
+        for words in ("implied_vol", "iv_term_structure", "iv_skew", "option_liquidity", "open_interest", "- intraday:",
+                      "minute of the day", "volatility_risk_premium", "pinning_gamma", "dispersion"):
+            self.assertNotIn(words, text)
+
 
 class TheBirths(BirthCase):
     def test_births_as_equity_families_with_their_first_program(self):
@@ -219,6 +230,53 @@ class TheBirths(BirthCase):
         rows = elane_yield.ledger(self.store)["routes"]
         self.assertEqual((rows["sail:pro_asap"]["failed"], rows["sail:glm_asap"]["births"]), (1, 1))
         self.assertEqual(self.store.family("via-glm")["spec"]["e2_route"], "sail:glm_asap")
+
+
+class TheGraveyardBinds(BirthCase):
+    """Finding 11 of the adversarial review: a card in the cell of a family E2 refuted on Train needs a valid rebirth
+    claim (E1's `cards.RebirthIndex`), and no other equity family's row (an outcome lesson) can bind or be quoted."""
+
+    def refuted(self, fid: str, lane: str = "equity", symbols: tuple[str, ...] = ("XLK",)) -> dict:
+        fam = fx.e2_family(self.store, fid, lane=lane, agenda="trend", symbols=symbols,
+                           mechanism=f"Invented trend idea {fid} on one sector, refuted on Train.",
+                           record={"status": "refuted", "versions": {"1": {"fails": ["Y2"]}},
+                                   "refuted": {"at": "2026-10-10T00:00:00Z", "codes": ["Y2"], "versions": 1, "why": "x"}})
+        cards.put(self.store, fam["id"], fx.card(lane, symbols), "etf")
+        self.store.bury(fam["id"], "REFUTED on Train (equity-v1): an invented Train lesson.")
+        self.store.retire(fam["id"], "REFUTED on Train (equity-v1): an invented Train lesson.")
+        return fam
+
+    def test_a_card_in_a_refuted_cell_needs_a_rebirth(self):
+        self.born_options(60)
+        dead = self.refuted("dead-trend")
+        self.answers.append(fx.answer([fx.proposal("again", lane="equity", agenda="trend", symbols=("XLF",),
+                                                   code=fx.program("XLF"))]))
+        out = self.pass_()
+        self.assertEqual(out["born"], [])
+        why = self.store.get(LAST_KEY)["refused"][0]["why"]
+        self.assertTrue(why.startswith("graveyard:"), why)
+        self.assertIn(dead["id"], why)
+        self.assertNotIn("invented Train lesson", why, "the refusal names the row, never its lesson")
+
+    def test_the_binding_is_off_with_the_architects_rebirth_switch(self):
+        self.born_options(60)
+        self.refuted("dead-trend")
+        settings = fx.settings(max_per_pass=4)
+        settings["architect"] = {"card_rebirth": "off"}
+        arch = Architect(self.store, self.router, settings, clock=self.clock)
+        self.answers.append(fx.answer([fx.proposal("again", lane="equity", agenda="trend", symbols=("XLF",),
+                                                   code=fx.program("XLF"))]))
+        self.assertEqual(arch.equity_pass()["born"], ["again"])
+
+    def test_no_other_equity_row_binds_or_is_read(self):
+        self.born_options(60)
+        other = fx.e2_family(self.store, "looked-at", lane="equity", agenda="trend", symbols=("XLE",))
+        cards.put(self.store, other["id"], fx.card("equity", ("XLE",)), "etf")
+        self.store.bury(other["id"], "best validation: failed its look (an outcome lesson no generator may read)")
+        self.store.retire(other["id"], "its equity lineage has used its one sealed look")
+        self.answers.append(fx.answer([fx.proposal("free", lane="equity", agenda="trend", symbols=("XLF",),
+                                                   code=fx.program("XLF"))]))
+        self.assertEqual(self.pass_()["born"], ["free"], "only E2's own Train refutations bind")
 
 
 class TheOptionsArchitect(BirthCase):

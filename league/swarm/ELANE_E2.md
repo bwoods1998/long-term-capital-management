@@ -2,8 +2,9 @@
 
 E1 gave the equity lanes their live path, engine, store, screen and three captain-seeded programs (league/equity/
 INTERFACES.md). E2 makes the swarm itself breed them, around the clock: the architect proposes equity-lane families
-with their first program, a minimal researcher iterates each on Train, the first version to pass the Train bar takes
-its lineage's one Validation try, and the model routes are chosen by measured yield per dollar. No figure appears here
+with their first program, a minimal researcher iterates each on Train, the first version to pass the Train bar AND the
+equity review takes its lineage's one Validation try (E1's look waits for that review on every program the captain did
+not seed), and the model routes are chosen by measured yield per dollar. No figure appears here
 or in the code: the bar's constants are rules, and the Train map shown to agents is computed on the House from the
 swarm's own Train runs.
 
@@ -34,8 +35,11 @@ stops births at once; `elane.mode` "off" stops everything E2 does (E1's own roll
      only slow the options refill and free nothing the equity lanes use.
    - THE ADMISSION: lane, structure (a beta card is "etf"), symbols (in `elane.universe`, of the structure's class),
      agenda (an available mechanism), the cell not CLOSED, no family in Train research with the same idea on the same
-     slice, a valid card (`cards.validate`, E1's equity admission), a continued lineage that has no try (no seeded
-     program and no Train pass in it), and the quota. A born family's spec carries `lane`, `symbols`, `agenda`, the
+     slice, a valid card (`cards.validate`, E1's equity admission), THE GRAVEYARD BINDS (a card in the cell of a family E2
+     refuted on Train needs a valid `card.rebirth`, read by E1's lane-scoped `cards.RebirthIndex` over E2's own
+     refutations only, while `architect.card_rebirth` is "refuse"), a continued lineage that has no try (no seeded
+     program and no Train pass in it), and the quota. The card vocabulary shown is the equity cards' own (E1's
+     `elane.INPUTS` and `elane.CLASSES`, no implied vol, chain, skew or intraday holding). A born family's spec carries `lane`, `symbols`, `agenda`, the
      card's sha and `e2_route`; a program that passes the static checks is its version 1.
 
 2. **Train** (`league/swarm/elane_train.py`). THE BAR equity-v1 (the design's 6b): at 1.0x and 1.5x the half-spread
@@ -43,16 +47,42 @@ stops births at once; `elane.mode` "off" stops everything E2 does (E1's own roll
    through E1's isolated runner: at least 40 closed lots and 20 entry days in each of three or more Train years; no
    year's daily t below -1.0; net P&L above zero at 1.5x; the 1.5x P&L at least half the 1.0x P&L (which must be above
    zero). Beside it, never a bar: the same-exposure buy-and-hold, MTE and the drift share.
-   - THE RESEARCHER (`EquityResearcher`, minimal): each round gives a few families one step: score the newest version,
-     or ask the family's birth route for its first program or a revision (the brief holds the card, the agenda prior,
-     the bar and the family's own Train versions only), or refute it. The first passing version ends the research: it
-     is the lineage's one Validation try (`awaiting_validation`, which E1's tournament reads; `best_version` set). A
-     spent Train budget (`train_budget` scored versions) retires the family REFUTED on Train, with a graveyard row in
-     E2's own words.
+   - WHAT A VERDICT IS: only the program's own doing is judged: its runs finished (the bar), it was disqualified by its
+     own errors ("DQ"), the child refused to load it ("LOAD"), or the child failed its run `train_max_errors` times while
+     other programs' Train runs completed ("RUN"). A failure of the House's (no equity store yet, the store being
+     rewritten, a decider child that could not start, "no_data", a result outside Train) scores nothing, spends no
+     budget and asks no model: the family backs off (doubling, at most six hours) and is tried again; a result outside
+     Train is also an alert.
+   - THE RESEARCHER (`EquityResearcher`, minimal): each round gives a few families one step: re-score a stale pass,
+     review a bar pass, score the newest version, or ask the family's birth route for its first program or a revision
+     (the brief holds the card, the agenda prior, the bar and the family's own Train versions and review reasons only),
+     or retire it. The first version that passes the bar AND the review ends the research: it is the lineage's one
+     Validation try (`may_validate`, the guard E1's tournament applies; `best_version` set). A spent Train budget or
+     attempts cap, or a `stop` after a judged version, retires the family: REFUTED on Train (a graveyard row in E2's own
+     words) when the bar judged a version (Y1, Y2, P1 or R1), else STALLED (no graveyard row, no cell count). A `stop`
+     before any judged version is not accepted.
+   - THE IDENTITY: each verdict carries the equity identity (E1's `evaluator.equity_identity`) it was judged under. A
+     pass judged under another identity whose version has had no Validation try is Train-scored again before E1 may
+     validate it (kept or withdrawn). E1's adoption clears `best_version` and the review state; the round restores both
+     for a pass that stands (`upkeep`).
    - THE EQUITY TRAIN MAP: lane x agenda x universe group, with births, Train passes (the best passing pooled t),
-     refutations, and CLOSED cells (`refuted_cell_cap` refutations, no pass). In-sample, labelled so.
+     refutations (each with a judged version), stalls, and CLOSED cells (`refuted_cell_cap` refutations, no pass).
+     In-sample, labelled so.
 
-3. **No feedback** (`league/swarm/elane_seal.py`, A9 D3). No Validation or look outcome of a share program reaches a
+3. **The equity review** (`league/swarm/elane_review.py`). E1's look takes a sealed look only of a captain-seeded program
+   or of a version whose state carries a passed review and audit of its exact program (`state["review"]`, the gate's
+   shape: {"sha": gate.run_sha(version), "verdict": "pass", "audit": {"verdict": "pass"}}).
+   - THE LEVEL RULE (static, free): a raw price or volume level (a close, an average or range of prices, a lot's entry
+     or mark, a share volume, or the log of one) compared with, offset by, bucketed by or clipped at a constant or a
+     PARAMS value is refused before the program is stored or run (`check_code`); ratios of levels are untouched.
+   - THE PAID REVIEW AND AUDIT, at a version's first bar pass and before it is the Validation try: two different models
+     (`review_routes`; the audit never on the reviewer's model) read the exact program, its card and its own Train facts
+     under the gate's leakage rubric adapted to daily share programs (absolute levels, calendar reconstruction,
+     lookahead). A failure must be grounded (a verbatim excerpt, a contract reference, a counterexample), else it reads
+     unclear; `review_max_unclear` unclear reads fail. A failure is a Train failure of that version ("REVIEW") and spends
+     no try. The review's dollars are E2's (`usd_day`), on ledger rows of their own ("review:<route>").
+
+4. **No feedback** (`league/swarm/elane_seal.py`, A9 D3). No Validation or look outcome of a share program reaches a
    generator. The equity generators read equity families through `train_facts` only (birth facts and E2's own Train
    record; never a band, a retirement, a validated version, E1's try, look, floor or sigma, a look row, a forward
    record, or a graveyard lesson someone else wrote). The options generators read no equity-lane graveyard row at all
@@ -61,14 +91,16 @@ stops births at once; `elane.mode` "off" stops everything E2 does (E1's own roll
    happened after Train give the same equity request, researcher brief, route choice, Train map and options graveyard
    reads (league/tests/test_elane_e2_seal.py).
 
-4. **Yield per dollar** (`league/swarm/elane_yield.py`). One ledger row a model route ("sail:<profile>",
+5. **Yield per dollar** (`league/swarm/elane_yield.py`). One ledger row a model route ("sail:<profile>",
    "openai:<model>", "claude:<role>"): requests, answers, failures, dollars (births and research), births; the Train
    counts are read from E2's records, and the operator's report adds Validation entries, looks, looks passed and live
    programs, each per dollar. THE ROUTE CHOICE: with no births anywhere, the first route of `elane.e2.routes` (cheapest
-   list price first); before every route has `min_births` births, every `explore_every`-th request goes to the route
-   furthest from its sample and the rest DEFAULT TO THE CHEAPEST ROUTE THAT HAS PRODUCED BIRTHS (the lowest mean
-   dollars a request); once every route has its sample, the most Train passes per dollar (ties: births per dollar,
-   then the cheaper request). The yield the choice reads is Train passes, never a later stage: a choice made on look
+   list price first); a route is sampled at `min_births` births OR `sample_requests` requests (answered or failed: a
+   route that never bears is measured at zero); before every route is sampled, every `explore_every`-th request goes to
+   the unsampled route furthest from its sample and the rest DEFAULT TO THE CHEAPEST ROUTE THAT HAS PRODUCED BIRTHS
+   (the lowest mean dollars a request); once every route is sampled, every (`explore_every` x routes)-th request goes to
+   the least-requested route (no route starves on early bad luck) and the rest to the most Train passes per dollar,
+   smoothed ((passes + 1) / (usd + the pooled dollars a pass); ties: births per dollar, then the cheaper request). The yield the choice reads is Train passes, never a later stage: a choice made on look
    outcomes would feed the holdout back into which model writes the next programs (A9 D3). A family's revisions are
    asked on its birth route, so its cost and its yield sit on one row. `usd_day` caps E2's model dollars a UTC day.
 
@@ -77,27 +109,32 @@ stops births at once; `elane.mode` "off" stops everything E2 does (E1's own roll
 | file | what |
 |---|---|
 | `league/swarm/elane_births.py` | the switch, THE EQUITY QUOTA, the request's blocks, the equity pass and its admission |
-| `league/swarm/elane_train.py` | equity-v1, the record, the Train map and graveyard, the agenda, the equity researcher |
+| `league/swarm/elane_train.py` | equity-v1, what a verdict is, the record, the identity, `may_validate`, the Train map and graveyard, the agenda, the equity researcher |
+| `league/swarm/elane_review.py` | the equity review: the level rule, the paid review and audit's rubric and grounding, the record E1's look reads |
 | `league/swarm/elane_yield.py` | the route ledger, the operator's report, THE ROUTE CHOICE, one route a question |
 | `league/swarm/elane_seal.py` | what of an equity family a generator may read; the graveyard filter |
 | `league/swarm/architect.py` | `equity_due`, `equity_pass`; equity rows out of the digest, `graves`, `unseen`, `graveyard_ids` |
 | `league/swarm/researcher.py` | equity rows out of the `graveyard` tool |
-| `league/tests/test_elane_e2_*.py`, `elane_e2_fakes.py` | births, Train, seal (D3), yield; E1's names faked as INTERFACES fixes them |
+| `league/tests/test_elane_e2_*.py`, `elane_e2_fakes.py` | births, Train, review, seal (D3), yield; E1's names faked as INTERFACES fixes them |
+| `league/tests/test_elane_e2_e1.py` | E2 on E1's own code with the patches (skipped on the skeleton): patch 5 in E1's `equity_round`, E1's `reviewed`, adoption, the lane-scoped graveyard, patches 9 and 10 |
 
 ## Settings (`elane.e2`; every default in code, the policy.json block in patch 6)
 
 Births: `births_every_seconds`, `births_refill_seconds` (while fewer than `start` families research), `start`,
 `max_alive`, `min_per_pass`, `max_per_pass`, `window_hours`, `births_max_output_tokens`, `births_effort`,
 `families_shown`. Train: `train_budget`, `train_max_attempts`, `train_max_errors`, `train_every_seconds`,
-`train_per_round`, `train_max_output_tokens`, `train_effort`, `refuted_cell_cap`. Routes: `routes`, `min_births`,
+`train_per_round`, `train_max_output_tokens`, `train_effort`, `refuted_cell_cap`. Review: `review_routes`,
+`review_max_output_tokens`, `review_effort`, `review_max_unclear`. Routes: `routes`, `min_births`, `sample_requests`,
 `explore_every`, `usd_day`. Each is held to its bound in code; a malformed value is its default.
 
 ## The patches (league/swarm/ELANE_E2_PATCHES.md)
 
-E2 edits no file E1 owns. Eight patches for the integrator: the loop's two rounds; dlane's and the birth quota's
-windows skipping equity births; `game.visible_graveyard` dropping equity rows (the diagnostician's read); the
-tournament validating an E2 family only at its first Train pass; the `elane.e2` policy block; the four modules
-protected in league/ci.py; the operator's yield record in the dlane report. Plus what E2 needs E1 to build as
-INTERFACES says (the store's equity structures and `lanes` filter, `elane.cfg`/`on`/`isolated_runner`,
-`cards.validate` for equity cards) and one question for the integrator: the isolated runner is shared by E1's
-tournament and E2's Train round, so its calls must be serialized.
+E2 edits no file E1 owns. Nine patches for the integrator, each an exact unified diff against E1's head c02680d8
+(feat/equity-e1), applied together to a tree of c02680d8 plus this branch's files and tested there (the patch file says
+which modules): the loop's two rounds; the birth quota's window skipping equity births; `game.visible_graveyard`
+dropping equity rows and the learning game's ceiling counting options families; the tournament validating an E2 family
+only where `elane_train.may_validate` allows; the `elane.e2` policy block; the five modules protected (E1's
+`PENDING_GATEWAY`); the operator's yield record in the dlane report; the options population's floor in
+`store.retire_gym`; the operator's stall facts and the pre-open population check counting the options lanes only.
+E1 already scopes `dlane._born` by lane, so the release before's patch 2 is gone. The isolated runner is shared by E1's
+tournament and E2's Train round; E1 hooks' decider serializes its calls under one lock.

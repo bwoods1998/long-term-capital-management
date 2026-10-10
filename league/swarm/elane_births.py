@@ -30,7 +30,10 @@ THE ADMISSION (`EquityPass.admit`). A proposal is born as an equity family when:
 structure is in `elane.structures` (a beta card's is "etf"); its symbols (1-20) are in `elane.universe` and of its
 structure's class; its agenda is an available mechanism; its cell (lane x agenda x universe group) is not CLOSED; no
 family in Train research holds the same idea on the same slice; its card is valid (`cards.validate`, E1's equity
-admission through `elane.card_errors`); the lineage it continues (a named equity parent, or a dead family of its
+admission through `elane.card_errors`); THE GRAVEYARD BINDS (the design's lane-scoped REFUTED rows, PR #519): a card in
+the cell of a family E2 refuted on Train (its own lane's rows only: E1's `cards.RebirthIndex`, every other row excluded,
+so no row with an outcome lesson is read) needs a valid `card.rebirth` naming the row, as an options card does, while
+`architect.card_rebirth` is "refuse"; the lineage it continues (a named equity parent, or a dead family of its
 slice with the same idea) has taken no Validation try (no seeded program and no Train pass in it: an outcome-free
 rule, A9 D3); and THE EQUITY QUOTA admits it. Its spec carries `lane`, `symbols` (its `roots` too), `agenda`, the card's
 sha and `e2_route` (the route that bore it: its yield row, and the route its Train revisions are asked on). A program
@@ -361,7 +364,8 @@ def families_text(store: Any, settings: Mapping[str, Any] | None) -> str:
         rec = facts["record"]
         versions = elane_train.versions_of(rec)
         state = ("refuted on Train" if rec.get("status") == "refuted" else
-                 f"in Train research, {len(versions)} versions scored")
+                 "stalled on Train (no version could be judged: nothing said of the mechanism)"
+                 if rec.get("status") == "stalled" else f"in Train research, {len(versions)} versions scored")
         rows.append(f"- {facts['id']} ({facts['lane']} / {facts['agenda']} / {', '.join(facts['symbols'])}; {state}): "
                     f"{facts['mechanism'][:160]}")
     if not rows or not shown:
@@ -369,16 +373,52 @@ def families_text(store: Any, settings: Mapping[str, Any] | None) -> str:
     return "EQUITY FAMILIES BORN BY THIS PASS (the newest; Train facts only):\n" + "\n".join(rows[-shown:])
 
 
-def vocabulary_text(settings: Mapping[str, Any] | None) -> str:
-    """The card vocabulary (league/swarm/cards.py `vocabulary_text`: E1's words for the equity cards), without the
-    options structure families."""
-    from . import cards
+#: THE EQUITY CARD VOCABULARY (E1's `elane.INPUTS` and `elane.CLASSES`, as league/swarm/elane.py fixes them; the copies
+#: here are what E1's names are read over when they cannot be read). An equity card's inputs are a daily bar's, the
+#: calendar's and the event flags' (no implied vol, chain, skew, open interest or option liquidity: E1's `card_errors`
+#: refuses them), and no holding is intraday (a lot is never sold in the session it was bought).
+EQUITY_INPUTS: dict[str, str] = {
+    "underlying_price": "the symbols' daily bars (ctx.bars[s].open, high, low, close; ctx.prices), always as a ratio or a "
+                        "return, never a level",
+    "realized_vol": "realized volatility computed from the daily bars",
+    "share_volume": "daily share volume (ctx.bars[s].volume), relative to its own history",
+    "event_calendar": "the event flags (ctx.events, ctx.events_next: fomc, cpi, jobs, monthly_opex, quarter_end, half_day)",
+    "clock": "the session calendar (ctx.weekday, ctx.session_of_month, ctx.sessions_to_month_end)",
+    "cross_asset": "another symbol's bars among the family's own",
+}
+EQUITY_CLASSES_FALLBACK: dict[str, str] = {
+    "equity_premium": "the equity risk premium: holders of index ETFs are paid, on average, to bear market risk; a long ETF "
+                      "position earns the market's direction (MARKET BETA), reported beside the same-risk buy-and-hold",
+}
+#: The options classes that name an equity mechanism (the others are about implied volatility, skew, pins or dispersion).
+EQUITY_OPTION_CLASSES = ("trend_momentum", "reversal_liquidity", "relative_value", "calendar_flow", "event_premium")
+EQUITY_HOLDING: dict[str, str] = {
+    "days_1_3": "one to three sessions (a close-to-open overnight hold is one)",
+    "days_4_10": "four to ten sessions",
+    "days_11_plus": "more than ten sessions (the House exits a lot at its NEEDS max_hold_sessions, at most 60)",
+}
 
-    try:
-        text = cards.vocabulary_text(settings)
-    except Exception:  # noqa: BLE001 - the request goes without it; `cards.validate` still checks every card
-        return ""
-    return "FAMILY CARD VOCABULARY (each card uses exactly these words):\n" + text.split("\nSTRUCTURE FAMILIES", 1)[0]
+
+def vocabulary_text(settings: Mapping[str, Any] | None) -> str:
+    """THE EQUITY CARD VOCABULARY (the constants above): the mechanism classes an equity card may name (the options
+    classes that name an equity mechanism, and E1's `elane.CLASSES`), the inputs (E1's `elane.INPUTS`, in equity words)
+    and the holdings (no intraday). Never the options words an equity card is refused for."""
+    from . import cards, elane
+
+    classes = {k: v for k, v in getattr(cards, "MECHANISM_CLASSES", {}).items() if k in EQUITY_OPTION_CLASSES}
+    own = getattr(elane, "CLASSES", None)
+    classes.update(dict(own) if isinstance(own, Mapping) and own else EQUITY_CLASSES_FALLBACK)
+    names = getattr(elane, "INPUTS", None)
+    names = [str(n) for n in names] if isinstance(names, (tuple, list)) and names else list(EQUITY_INPUTS)
+    lines = ["FAMILY CARD VOCABULARY (each equity card uses exactly these words):", "MECHANISM CLASSES:"]
+    lines += [f"- {k}: {v}" for k, v in classes.items()]
+    lines += ["INPUTS (an equity program reads daily bars, the calendar and the event flags only):"]
+    lines += [f"- {n}: {EQUITY_INPUTS.get(n, n.replace('_', ' '))}" for n in names]
+    lines += ["HOLDING:"] + [f"- {k}: {v}" for k, v in EQUITY_HOLDING.items()]
+    lines += ["REBIRTH (only for a card in the cell of an EQUITY GRAVEYARD row of its lane): \"rebirth\": {\"row\": "
+              "\"<that row's id>\", \"different\": \"the mechanism-level change\", \"evidence\": \"what the new input "
+              "shows\"}, with an input the dead row did not read among the card's inputs."]
+    return "\n".join(lines)
 
 
 def last_text(store: Any) -> str:
@@ -472,6 +512,26 @@ class EquityPass:
     def refuse(self, slug: str, why: str) -> None:
         self.refused.append({"slug": slug, "why": why[:600]})
 
+    def lineage_tried(self, parent: Mapping[str, Any]) -> bool:
+        """Whether the lineage a proposal continues has its one Validation try (`tried`: outcome-free, A9 D3)."""
+        lines = elane_seal.lineages_of(self.store, str(parent["id"]))
+        return any(tried(f) for f in elane_seal.families_in(self.store, lines))
+
+    def rebirth_index(self) -> Any:
+        """THE GRAVEYARD BINDS (the module docstring): E1's `cards.RebirthIndex` over the rows of the families E2 refuted
+        on Train ONLY (every other equity family excluded: no row with an outcome lesson is read, A9 D3), or None while
+        `architect.card_rebirth` is "off", or False when it cannot be read (fail closed: nothing is born unchecked)."""
+        from . import cards
+
+        mode = getattr(self.architect, "rebirth_mode", None)
+        try:
+            if callable(mode) and mode() != "refuse":
+                return None
+            keep = {r["id"] for r in elane_train.refuted_rows(self.store, limit=10 ** 6)}
+            return cards.RebirthIndex(self.store, self.settings, exclude=frozenset(elane_seal.equity_ids(self.store) - keep))
+        except Exception:  # noqa: BLE001 - a binding that cannot be read admits nothing
+            return False
+
     def admit(self, rows: Sequence[Any], quota: EquityQuota, route: elane_yield.Route) -> list[str]:
         """Birth the proposals the admission admits (the module docstring); every refusal named."""
         from . import cards
@@ -481,6 +541,7 @@ class EquityPass:
         closed = set(elane_train.closed_cells(self.store, self.settings))
         fams = elane_seal.equity_families(self.store)
         known_rows = {r["id"] for r in elane_train.refuted_rows(self.store, limit=10 ** 6)}
+        index = self.rebirth_index() if rows else None
         born: list[str] = []
         for row in rows:
             if not isinstance(row, Mapping):
@@ -543,13 +604,10 @@ class EquityPass:
                     parent = mother
             if parent is None and same_slice:
                 parent = same_slice[-1]
-            if parent is not None:
-                lines = elane_seal.lineages_of(self.store, str(parent["id"]))
-                kin = elane_seal.families_in(self.store, lines)
-                if any(tried(f) for f in kin):
-                    self.refuse(slug, f"it continues {parent['id']}'s lineage, which has its one Validation try "
-                                      "(outcome sealed): propose a different idea")
-                    continue
+            if parent is not None and self.lineage_tried(parent):
+                self.refuse(slug, f"it continues {parent['id']}'s lineage, which has its one Validation try "
+                                  "(outcome sealed): propose a different idea")
+                continue
             card = dict(raw_card or {})
             card.update({"lane": lane, "structure": structure, "symbols": symbols})
             try:
@@ -559,6 +617,30 @@ class EquityPass:
             if checked is None:
                 self.refuse(slug, "card: " + "; ".join(problems)[:500])
                 continue
+            if index is False:
+                self.refuse(slug, "the equity graveyard's binding could not be read: not born unchecked")
+                continue
+            if index is not None:
+                try:
+                    verdict = index.check(checked, structure, mechanism, None, roots=symbols)
+                except Exception as exc:  # noqa: BLE001 - a binding that cannot be read admits nothing
+                    verdict = {"ok": False, "reason": f"the graveyard's binding could not be read ({type(exc).__name__})"}
+                if not verdict.get("ok"):
+                    self.refuse(slug, "graveyard: " + str(verdict.get("reason") or "a refuted row binds its cell")[:500])
+                    continue
+                if verdict.get("dropped"):
+                    checked = {k: v for k, v in checked.items() if k != "rebirth"}
+                if verdict.get("rebirth"):
+                    reborn = self.store.family(str(verdict.get("row") or ""))
+                    if parent is None and reborn is not None:
+                        if self.lineage_tried(reborn):
+                            self.refuse(slug, f"its rebirth continues {reborn['id']}'s lineage, which has its one "
+                                              "Validation try (outcome sealed): propose a different idea")
+                            continue
+                        parent = reborn
+                    note = getattr(index, "note_birth", None)
+                    if callable(note):
+                        note(checked, structure)
             if not quota.admits(lane):
                 self.refuse(slug, quota.why_not(lane) or "the quota")
                 continue

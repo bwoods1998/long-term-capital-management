@@ -2,7 +2,8 @@
 the Train counts read from E2's records, the operator's report (with the later stages), the day's line, one route a
 question with the fallback booked to the route that answered, and THE ROUTE CHOICE: the first route with no births,
 the cheapest route that has produced births by default, exploration every third request until every route has its
-sample, then the most Train passes per dollar; never a Validation or look outcome. Every number here is invented."""
+sample (births, or requests answered or failed), then the most Train passes per dollar, smoothed, with a route never
+starved; never a Validation or look outcome. Every number here is invented."""
 
 from __future__ import annotations
 
@@ -44,7 +45,7 @@ class TheChoice(YieldCase):
         self.assertEqual(self.pick(0), "sail:glm_asap", "0.50 a request beats 1.50")
         self.assertEqual(self.pick(2), "sail:k3", "the route furthest from its sample")
         self.spend("sail:k3", 1.0, 1)
-        self.assertEqual(self.pick(5), "sail:pro_asap", "fewest births, then list order")
+        self.assertEqual(self.pick(5), "sail:glm_asap", "fewest births, then fewest requests, then list order")
 
     def test_after_every_sample_the_most_train_passes_per_dollar(self):
         for key, usd in (("sail:pro_asap", 1.0), ("sail:glm_asap", 1.0), ("sail:k3", 4.0)):
@@ -54,7 +55,7 @@ class TheChoice(YieldCase):
                          record={"status": "passed" if passed else "researching", "versions": {"1": {}},
                                  **({"passed_version": 1} if passed else {})})
         self.assertEqual(self.pick(0), "sail:k3", "2 passes on 4 dollars beat none")
-        self.assertEqual(self.pick(2), "sail:k3", "no exploration once sampled")
+        self.assertEqual(self.pick(2), "sail:k3", "the sample's exploration is over once sampled")
 
     def test_no_train_pass_anywhere_then_births_per_dollar(self):
         for key, usd in (("sail:pro_asap", 2.0), ("sail:glm_asap", 1.0), ("sail:k3", 4.0)):
@@ -72,6 +73,31 @@ class TheChoice(YieldCase):
         other = fx.e2_family(self.store, "lost", route="sail:pro_asap", symbols=("QQQ",))
         self.store.set_state(other["id"], elane_look={"verdict": {"passed": True}})
         self.assertEqual([self.pick(t) for t in range(4)], before)
+
+    def test_a_route_that_never_bears_is_sampled_by_its_requests(self):
+        """Finding 3 of the adversarial review: a route whose answers are always cut, refused or failed (0 births) once
+        held the choice in exploration for ever; at `sample_requests` it is sampled, at a yield of zero births."""
+        settings = fx.settings(min_births=10, sample_requests=30)
+        self.spend("sail:pro_asap", 2.0, 30, requests=40)
+        self.spend("sail:glm_asap", 2.5, 25, requests=40)
+        self.spend("sail:k3", 9.0, 0, requests=30)
+        picks = [choose(self.store, settings, self.routes, turn=t, train_key=STATE_KEY) for t in range(300, 309)]
+        self.assertTrue(all("smoothed" in why or "every route keeps being measured" in why for _, why in picks))
+        self.assertEqual(sum(1 for r, _ in picks if r.key == "sail:k3"), 1, "one turn in nine, not one in three")
+
+    def test_a_route_with_no_pass_yet_is_never_starved(self):
+        """Finding 4 of the adversarial review: one pass on an expensive route beat a cheap route with none on every turn.
+        Now every (explore_every x routes)-th turn measures the least-requested route, and the smoothed yield lets a
+        cheap route's first pass overtake at once."""
+        for key, usd in (("sail:pro_asap", 2.0), ("sail:glm_asap", 200.0), ("sail:k3", 6.0)):
+            self.spend(key, usd, 10, requests=20)
+        fx.e2_family(self.store, "one-pass", route="sail:glm_asap",
+                     record={"status": "passed", "passed_version": 1, "versions": {"1": {}}})
+        picks = {self.pick(t) for t in range(0, 1000)}
+        self.assertIn("sail:pro_asap", picks, "the cheap route keeps being measured")
+        fx.e2_family(self.store, "cheap-pass", route="sail:pro_asap", symbols=("QQQ",),
+                     record={"status": "passed", "passed_version": 1, "versions": {"1": {}}})
+        self.assertEqual(self.pick(0), "sail:pro_asap", "one pass on 2 dollars beats one on 200")
 
     def test_a_claude_route_only_while_the_router_serves_its_role(self):
         settings = fx.settings(routes=["claude:architect", "sail:pro_asap"])
@@ -141,6 +167,21 @@ class TheLedger(YieldCase):
 
     def test_the_turn_counts_requests(self):
         self.assertEqual([elane_yield.next_turn(self.store) for _ in range(3)], [0, 1, 2])
+
+    def test_the_reviews_dollars_have_rows_of_their_own(self):
+        router = fx.FakeRouter(lambda call: {"text": "{}", "route": "sail", "model": call["sail_profile"], "cost_usd": 0.04})
+        _, route, _ = elane_yield.ask(router, self.store, self.settings, first=None, role="elane", system="s", user="u",
+                                      key="swarm:elane:review:f:1:0", max_output=4000, effort="medium", purpose="review",
+                                      now=self.clock(), candidates=[Route.of("sail:k3_balanced")],
+                                      book_as=lambda r: f"review:{r.key}")
+        self.assertEqual(route.key, "sail:k3_balanced")
+        rows = ledger(self.store)["routes"]
+        self.assertEqual(rows["review:sail:k3_balanced"]["usd_review"], 0.04)
+        self.assertNotIn("sail:k3_balanced", rows)
+        self.assertAlmostEqual(room(self.store, self.settings, self.clock()), elane_yield.DEFAULTS["usd_day"] - 0.04)
+        rep = report(self.store, self.settings, train_key=STATE_KEY)
+        self.assertIn("review:sail:k3_balanced", rep["review"])
+        self.assertNotIn("review:sail:k3_balanced", rep["routes"])
 
     def test_the_report_per_dollar(self):
         self.spend("sail:pro_asap", 2.0, 4)

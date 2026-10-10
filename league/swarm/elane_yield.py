@@ -17,22 +17,28 @@ THE ROUTE CHOICE (`choose`), for each equity request (a birth pass) and each new
 1. THE ROUTES are `elane.e2.routes` (default `DEFAULTS["routes"]`: Sail profiles, the cheapest list price first); a
    "claude:<role>" entry is used only while the router serves that role on Claude, an "openai:<model>" entry only
    while it names a model.
-2. A route's SAMPLE is `min_births` (10) births.
-3. Once EVERY route has its sample: the route with the most Train passes per dollar (passes / usd), ties broken by
-   births per dollar, then by the cheaper mean cost a request, then by the list order.
-4. Before that, EXPLORATION: every `explore_every`-th request (3; the ledger's `turn`) goes to the route with the
-   fewest births among those under their sample (ties: list order), so every route reaches its sample; every other
-   request DEFAULTS TO THE CHEAPEST ROUTE THAT HAS PRODUCED BIRTHS (the lowest mean dollars a request among routes with
-   a birth), and with none, the first route of the list.
+2. A route is SAMPLED once it has `min_births` (10) births OR `sample_requests` (30) requests, answered or failed: a
+   route that never answers, or whose answers are always cut or refused, is measured too, at a yield of zero births.
+3. Once EVERY route is sampled: every (`explore_every` x routes)-th request goes to the route with the fewest requests
+   (each route keeps being measured: a route never starves on an early run of bad luck); every other request goes to
+   the route with the most Train passes per dollar, SMOOTHED: (passes + 1) / (usd + the pooled dollars a pass), so one
+   lucky pass on an expensive route does not shut out a cheap route with none yet. Ties: births per dollar, then the
+   cheaper mean cost a request, then the list order.
+4. Before that, EXPLORATION: every `explore_every`-th request (3; the ledger's `turn`) goes to the unsampled route
+   furthest from its sample (fewest births, then fewest requests; ties: list order); every other request DEFAULTS TO
+   THE CHEAPEST ROUTE THAT HAS PRODUCED BIRTHS (the lowest mean dollars a request among routes with a birth), and with
+   none, the first route of the list.
 5. A route whose call fails is passed over for that request (the next route of the list answers; the answer is booked
-   to the route that gave it).
+   to the route that gave it, the failure to the route that failed).
 THE YIELD IS TRAIN PASSES PER DOLLAR, NEVER A LATER STAGE (A9 D3). Validation entries, looks passed and live programs
 are recorded for the operator and are never read by `choose`: a route chosen on the sealed look's outcomes would feed
 the holdout back into which model writes the next programs. A Train pass is the first stage every route's programs
 reach alike, and it is a Train fact. (`choose` is tested to give the same route whatever those outcomes are.)
 
-THE DAY'S LINE (`usd_day`, `room`): E2's model dollars a UTC day (births and Train research together); once spent, no
-equity question is asked until the next UTC day. A tightening beside the swarm's own pace and the guard.
+THE DAY'S LINE (`usd_day`, `room`): E2's model dollars a UTC day (births, Train research and the equity review
+together); once spent, no equity question is asked until the next UTC day. A tightening beside the swarm's own pace and
+the guard. The equity review's dollars (league/swarm/elane_review.py) are booked on rows of their own ("review:<route>"),
+never on a birth route's row, so they move no route's yield.
 
 Standard library only.
 """
@@ -58,11 +64,14 @@ ROLE = "elane"
 DEFAULTS: dict[str, Any] = {
     "routes": ["sail:pro_asap", "sail:glm_asap", "sail:k3"],
     "min_births": 10,
+    "sample_requests": 30,
     "explore_every": 3,
     "usd_day": 8.0,
 }
 #: Bounds of the numbers above (a value outside is its default).
-BOUNDS = {"min_births": (1, 1000), "explore_every": (2, 100), "usd_day": (0.0, 100.0)}
+BOUNDS = {"min_births": (1, 1000), "sample_requests": (1, 10000), "explore_every": (2, 100), "usd_day": (0.0, 100.0)}
+#: The ledger rows of the equity review (league/swarm/elane_review.py): "review:<route>", apart from the birth routes.
+REVIEW_PREFIX = "review:"
 ROUTE_KINDS = ("sail", "openai", "claude")
 #: The E1 family-state keys `report` reads for the operator (never `choose`).
 TRY_KEY, LOOK_KEY = "elane_try", "elane_look"
@@ -116,9 +125,13 @@ class Route:
 
 def routes(settings: Mapping[str, Any] | None, router: Any = None) -> list[Route]:
     """The routes a request may take now (THE ROUTE CHOICE, 1): the list, less a Claude role the router does not serve."""
+    return served([Route.of(key) for key in cfg(settings)["routes"]], router)
+
+
+def served(candidates: Sequence[Route], router: Any = None) -> list[Route]:
+    """`candidates` less a Claude role the router does not serve."""
     out = []
-    for key in cfg(settings)["routes"]:
-        route = Route.of(key)
+    for route in candidates:
         if route.kind == "claude":
             served = getattr(router, "claude_enabled", None)
             try:
@@ -137,7 +150,7 @@ def _today(now: float) -> str:
 
 def _row() -> dict[str, Any]:
     return {"requests": 0, "answered": 0, "failed": 0, "usd": 0.0, "usd_births": 0.0, "usd_research": 0.0,
-            "unknown_cost": 0, "births": 0}
+            "usd_review": 0.0, "unknown_cost": 0, "births": 0}
 
 
 def ledger(store: Any) -> dict[str, Any]:
@@ -172,13 +185,14 @@ def answer_usd(answer: Mapping[str, Any] | None) -> tuple[float, bool]:
 
 
 def book(store: Any, key: str, *, usd: float, known: bool, purpose: str, answered: bool, now: float) -> None:
-    """One request on route `key`: its dollars (`purpose` "births" or "research") and whether it was answered."""
+    """One request on route `key`: its dollars (`purpose` "births", "research" or "review") and whether it was
+    answered."""
     def change(b: dict[str, Any]) -> None:
         row = b["routes"].setdefault(key, _row())
         row["requests"] += 1
         row["answered" if answered else "failed"] += 1
         row["usd"] = round(row["usd"] + usd, 6)
-        name = "usd_births" if purpose == "births" else "usd_research"
+        name = {"births": "usd_births", "review": "usd_review"}.get(purpose, "usd_research")
         row[name] = round(row[name] + usd, 6)
         row["unknown_cost"] += 0 if known else 1
         day = _today(now)
@@ -237,7 +251,7 @@ def train_counts(store: Any, train_key: str) -> dict[str, dict[str, int]]:
 def choose(store: Any, settings: Mapping[str, Any] | None, candidates: Sequence[Route], *, turn: int,
            train_key: str) -> tuple[Route | None, str]:
     """THE ROUTE CHOICE (the module docstring) among `candidates` (`routes`): (the route, why). Reads the ledger's
-    dollars and births and E2's Train passes only."""
+    dollars, requests and births and E2's Train passes only."""
     if not candidates:
         return None, "no route is configured or served"
     c = cfg(settings)
@@ -250,25 +264,35 @@ def choose(store: Any, settings: Mapping[str, Any] | None, candidates: Sequence[
     def births(r: Route) -> int:
         return int(rows.get(r.key, {}).get("births") or 0)
 
+    def requests(r: Route) -> int:
+        return int(rows.get(r.key, {}).get("requests") or 0)
+
     def per_request(r: Route) -> float:
         row = rows.get(r.key, {})
         n = int(row.get("answered") or 0)
         return usd(r) / n if n else math.inf
 
+    def sampled(r: Route) -> bool:
+        return births(r) >= c["min_births"] or requests(r) >= c["sample_requests"]
+
     order = {r.key: i for i, r in enumerate(candidates)}
-    sampled = [r for r in candidates if births(r) >= c["min_births"]]
-    if len(sampled) == len(candidates):
+    if all(sampled(r) for r in candidates):
+        if turn % (c["explore_every"] * len(candidates)) == c["explore_every"] * len(candidates) - 1:
+            pick = min(candidates, key=lambda r: (requests(r), order[r.key]))
+            return pick, "exploration: every route keeps being measured (the route with the fewest requests)"
+        spent = sum(usd(r) for r in candidates)
+        won = sum(passes.get(r.key, {}).get("train_passes", 0) for r in candidates)
+        prior = spent / won if won else max(spent, 1.0)  # the pooled dollars a Train pass (no pass yet: all spent so far)
+
         def key(r: Route) -> tuple:
-            spend = usd(r)
             p = passes.get(r.key, {}).get("train_passes", 0)
-            yield_ = p / spend if spend > 0 else (math.inf if p else 0.0)
-            per_birth = births(r) / spend if spend > 0 else math.inf
-            return (-yield_, -per_birth, per_request(r), order[r.key])
+            per_birth = births(r) / usd(r) if usd(r) > 0 else math.inf
+            return (-(p + 1.0) / (usd(r) + prior), -per_birth, per_request(r), order[r.key])
         best = min(candidates, key=key)
-        return best, "the most Train passes per dollar (every route has its sample)"
+        return best, "the most Train passes per dollar, smoothed (every route has its sample)"
     if turn % c["explore_every"] == c["explore_every"] - 1:
-        under = [r for r in candidates if births(r) < c["min_births"]]
-        pick = min(under, key=lambda r: (births(r), order[r.key]))
+        under = [r for r in candidates if not sampled(r)]
+        pick = min(under, key=lambda r: (births(r), requests(r), order[r.key]))
         return pick, f"exploration: the route furthest from its sample of {c['min_births']} births"
     bore = [r for r in candidates if births(r) > 0]
     if bore:
@@ -302,7 +326,8 @@ def report(store: Any, settings: Mapping[str, Any] | None, *, train_key: str) ->
             row["looks_passed"] += int(passed is True)
         row["live"] += int(fam.get("band") in LIVE_BANDS and not fam.get("retired_at"))
     out: dict[str, Any] = {}
-    for key in sorted(set(book_["routes"]) | set(counts) | set(later)):
+    review = {k: dict(v) for k, v in book_["routes"].items() if k.startswith(REVIEW_PREFIX)}
+    for key in sorted((set(book_["routes"]) - set(review)) | set(counts) | set(later)):
         row = {**_row(), **book_["routes"].get(key, {}), **{"families": 0, "train_scored": 0, "train_passes": 0},
                **counts.get(key, {}), **{"validation_entries": 0, "looks": 0, "looks_passed": 0, "live": 0},
                **later.get(key, {})}
@@ -310,7 +335,7 @@ def report(store: Any, settings: Mapping[str, Any] | None, *, train_key: str) ->
         row["per_usd"] = {name: (round(row[name] / spend, 6) if spend > 0 else None)
                           for name in ("births", "train_passes", "validation_entries", "looks_passed", "live")}
         out[key] = row
-    return {"routes": out, "turn": book_["turn"], "days": book_["days"], "usd_day": cfg(settings)["usd_day"],
+    return {"routes": out, "review": review, "turn": book_["turn"], "days": book_["days"], "usd_day": cfg(settings)["usd_day"],
             "rule": "the route choice reads births, dollars and Train passes only (A9 D3)"}
 
 
@@ -332,11 +357,14 @@ def ask_on(router: Any, route: Route, *, role: str, system: str, user: str, key:
 
 def ask(router: Any, store: Any, settings: Mapping[str, Any] | None, *, first: Route | None, role: str, system: str,
         user: str, key: str, max_output: int, effort: str, purpose: str, now: float,
-        family: str | None = None) -> tuple[dict[str, Any] | None, Route | None, list[str]]:
+        family: str | None = None, candidates: Sequence[Route] | None = None,
+        book_as: Any = None) -> tuple[dict[str, Any] | None, Route | None, list[str]]:
     """Ask on `first` (when it is a route of the list now), then (on a failure) on each other route of the list in
     order; every attempt is booked. (the answer, the route that gave it, the errors); (None, None, errors) when no
-    route answered."""
-    candidates = routes(settings, router)
+    route answered. `candidates`: another list than `routes` (the equity review's); `book_as(route)`: the ledger row
+    its dollars go to (the review's "review:<route>"), else the route's own."""
+    candidates = list(candidates) if candidates is not None else routes(settings, router)
+    row_of = book_as if callable(book_as) else (lambda r: r.key)
     first = first if first is not None and any(r.key == first.key for r in candidates) else None
     ordered = ([first] if first is not None else []) + [r for r in candidates if first is None or r.key != first.key]
     errors: list[str] = []
@@ -346,7 +374,7 @@ def ask(router: Any, store: Any, settings: Mapping[str, Any] | None, *, first: R
                             max_output=max_output, effort=effort, family=family)
         except Exception as exc:  # noqa: BLE001 - the next route answers; the failure is booked
             billed = sum(_num(b.get("cost_usd")) or 0.0 for b in getattr(exc, "billed", []) or [] if isinstance(b, Mapping))
-            book(store, route.key, usd=billed + max(0.0, _num(getattr(exc, "held_usd", 0.0)) or 0.0), known=True,
+            book(store, row_of(route), usd=billed + max(0.0, _num(getattr(exc, "held_usd", 0.0)) or 0.0), known=True,
                  purpose=purpose, answered=False, now=now)
             errors.append(f"{route.key}: {type(exc).__name__}: {str(exc)[:200]}")
             continue
@@ -355,11 +383,12 @@ def ask(router: Any, store: Any, settings: Mapping[str, Any] | None, *, first: R
         if route.kind == "sail" and isinstance(moved, Mapping) and moved.get("to"):
             answered = Route.of(f"sail:{moved['to']}")  # the router's own window fallback answered: booked to it
         usd, known = answer_usd(answer)
-        book(store, answered.key, usd=usd, known=known, purpose=purpose, answered=True, now=now)
+        book(store, row_of(answered), usd=usd, known=known, purpose=purpose, answered=True, now=now)
         return answer, answered, errors
     return None, None, errors
 
 
-__all__ = ["LEDGER_KEY", "ROUTE_KEY", "ROLE", "DEFAULTS", "BOUNDS", "Route", "cfg", "e2_settings", "routes", "ledger", "book",
+__all__ = ["LEDGER_KEY", "ROUTE_KEY", "ROLE", "DEFAULTS", "BOUNDS", "REVIEW_PREFIX", "Route", "cfg", "e2_settings", "routes",
+           "served", "ledger", "book",
            "book_births", "next_turn", "spent_today", "room", "answer_usd", "train_counts", "choose", "report", "ask_on",
            "ask"]

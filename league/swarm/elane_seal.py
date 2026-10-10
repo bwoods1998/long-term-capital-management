@@ -14,9 +14,10 @@ and the diagnostician are generators too, of the options lanes. This module is t
   its record, in its own words. The graveyard TABLE's rows of equity families (a retirement after a failed look writes
   one, with the options code's "best validation" words) reach no generator: `without_equity_rows` drops them from
   every graveyard read an options generator makes (league/swarm/architect.py: the digest, the 20 newest rows, the ids
-  a proposal may cite; league/swarm/researcher.py: the `graveyard` tool). The readers this release may not edit
-  (league/swarm/game.py `visible_graveyard`, league/swarm/strategist.py, league/swarm/diagnostician.py,
-  league/swarm/cards.py `RebirthIndex`) are listed with their one-line patch in league/swarm/ELANE_E2_PATCHES.md.
+  a proposal may cite, and the options rebirth index through `Architect.unseen`; league/swarm/researcher.py: the
+  `graveyard` tool). The equity births' own rebirth index (league/swarm/elane_births.py `rebirth_index`) excludes
+  every equity family but those E2 refuted on Train. The reader this release may not edit (league/swarm/game.py
+  `visible_graveyard`, which the strategist and the diagnostician read) has its patch in ELANE_E2_PATCHES.md (4).
 - INVARIANCE IS THE TEST. Two stores that differ only in what happened to share programs after Train (a Validation
   try passed or failed, a look passed or failed, a band, a retirement after the look, a look row, a graveyard row with
   an outcome lesson) give the equity request, the researcher's brief and the route choice byte for byte the same

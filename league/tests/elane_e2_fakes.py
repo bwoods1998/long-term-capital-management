@@ -59,7 +59,10 @@ def lanes_families(self: SwarmStore, *, alive: bool | None = None, lanes: Any = 
     options lanes only, `LANES` the equity families only, "all" everything."""
     from league.equity import LANES
 
-    fams = _FAMILIES(self, alive=alive)
+    try:  # E1's own store (its `lanes` keyword: "all" is every family); the skeleton's has no such keyword
+        fams = _FAMILIES(self, alive=alive, lanes="all")
+    except TypeError:
+        fams = _FAMILIES(self, alive=alive)
     if lanes == "all":
         return fams
     equity = [f for f in fams if (f.get("spec") or {}).get("lane") in LANES]
@@ -74,7 +77,7 @@ def switch_on(case: Any) -> None:
     patches = [mock.patch.object(elane, "on", lambda s: ((s or {}).get("elane") or {}).get("mode") == "gate"),
                mock.patch.object(elane, "cfg", fake_cfg),
                mock.patch.object(cards, "validate", fake_validate),
-               mock.patch.object(store_mod, "STRUCTURES", tuple(store_mod.STRUCTURES) + ("etf", "stock")),
+               mock.patch.object(store_mod, "STRUCTURES", tuple(dict.fromkeys((*store_mod.STRUCTURES, "etf", "stock")))),
                mock.patch.object(SwarmStore, "families", lanes_families)]
     for p in patches:
         p.start()
@@ -173,6 +176,22 @@ def train_result(*, k: float = 1.0, pnl: float = 180.0, status: str = "ok", by_y
             "by_year": years, "bh": {"pnl": bh}, "mte": {"mean": 0.0004, "t": 0.9, "n": 400}}
 
 
+def review_answer(verdict: str = "pass", *, excerpt: str | None = None, reference: str = "levels",
+                  reasons: tuple[str, ...] = (), model: str = "pro_balanced", cost: float = 0.02) -> dict[str, Any]:
+    """An invented answer of the equity review or audit (league/swarm/elane_review.py `REVIEW`'s JSON)."""
+    findings = [] if excerpt is None else [{"code_excerpt": excerpt, "contract_reference": reference,
+                                            "counterexample": "when the invented condition holds the program buys on a "
+                                                              "remembered level, which identifies the years"}]
+    data = {"verdict": verdict, "reasons": list(reasons or ([f"an invented {verdict} reason"])), "findings": findings}
+    return {"text": json.dumps(data), "json": data, "route": "sail", "model": model, "cost_usd": cost}
+
+
+def is_review(call: Mapping[str, Any]) -> bool:
+    """Whether a router call is the equity review's or audit's (its key)."""
+    key = str(call.get("key") or "")
+    return key.startswith("swarm:elane:review:") or key.startswith("swarm:elane:audit:")
+
+
 class FakeRunner:
     """E1's `runner.Isolated.train` (INTERFACES 4.8): `answer(code, k) -> result` (an Exception raises); calls kept."""
 
@@ -204,5 +223,34 @@ def e2_family(store: SwarmStore, slug: str, *, lane: str = "beta", agenda: str =
     return store.family(fam["id"])
 
 
+class RunFailed(RuntimeError):
+    """The name E1's runner gives a child that failed a run (league/equity/runner.py `RunFailed`)."""
+
+
+class ProgramRefused(ValueError):
+    """The name E1's runner gives a program the child would not load (league/equity/runner.py `ProgramRefused`)."""
+
+
+class MissingData(FileNotFoundError):
+    """The name E1's store gives a store not yet written (league/equity/store.py `MissingData`)."""
+
+
+def reviewed(store: SwarmStore, fid: str, n: int = 1) -> None:
+    """Write the review record E1's look reads for version `n` (league/swarm/elane_review.py `record`)."""
+    from league.swarm import elane_review
+    from league.swarm.gate import run_sha
+
+    sha = run_sha(store.version(fid, n))
+    held = elane_review.record(sha, {"model": "pro_balanced", "route": "sail:pro_balanced"},
+                               {"model": "k3_balanced", "route": "sail:k3_balanced"}, at=store.now(), version=n)
+    store.set_state(fid, review=held)
+    from league.swarm import elane_train
+
+    rec = elane_train.record_of(store.family(fid))
+    rec["passed_review"] = held
+    store.set_state(fid, **{elane_train.STATE_KEY: rec})
+
+
 __all__ = ["UNIVERSE", "lane_block", "settings", "fake_cfg", "fake_validate", "switch_on", "new_store", "PROGRAM",
-           "program", "card", "proposal", "answer", "FakeRouter", "year_rows", "train_result", "FakeRunner", "e2_family"]
+           "program", "card", "proposal", "answer", "FakeRouter", "year_rows", "train_result", "FakeRunner", "e2_family",
+           "review_answer", "is_review", "RunFailed", "ProgramRefused", "MissingData", "reviewed"]
