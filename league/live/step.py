@@ -497,7 +497,9 @@ class OptionsLive:
     # ------------------------------------------------------------------ one minute
     def owner_actions(self) -> None:
         """What the owner asked for with `python -m league.live` (the live state's key-values, read every minute): the
-        drawdown pause released, an assignment's latch cleared. Only the owner's command writes them."""
+        drawdown pause released, an assignment's latch cleared (with the share-event ledger: the owner says the
+        assignment's shares are resolved, so any still held read as unattributed from then on). Only the owner's
+        command writes them."""
         ask = self.state.get("owner_release_drawdown")
         if ask and self.stops.drawdown_tripped:
             self.record("live.stop", {"stop": "drawdown", "released": True, "why": self.stops.drawdown_why,
@@ -511,7 +513,9 @@ class OptionsLive:
             latch = self.state.get("assignment_latch")
             if latch:
                 self.record("live.stop", {"stop": "assignment", "released": True, "why": latch.get("why")})
-            self.state.execute("DELETE FROM kv WHERE key IN ('assignment_latch', 'owner_clear_assignment')")
+            if self.state.get("shares"):
+                self.record("live.shares", {"ledger_cleared": dict(self.state.get("shares") or {}), "by": "the owner"})
+            self.state.execute("DELETE FROM kv WHERE key IN ('assignment_latch', 'owner_clear_assignment', 'shares')")
 
     def minute(self) -> dict:
         """One pass: the session's minute, the close's bookkeeping, or the quiet hours' reconciliation; then the

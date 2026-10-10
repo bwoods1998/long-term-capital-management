@@ -460,8 +460,9 @@ Nothing above changes; these are added beside it.
   brings the account back to the equity lots, so an assignment netted against a lot never consumes it); with the
   equity book unreadable it covers to flat and sells no long share. kv `shares_orders` {client id: {symbol, side, qty,
   filled, at}} (the House's `lv-shares-` orders, read back by client id each reading and before each reconciliation;
-  a fill moves the ledger toward zero, never past it, and only when the order's side reduces it). `real_block` also
-  refuses while the account row's `cash` is below zero (alerted once until it clears).
+  a fill moves the ledger toward zero, never past it, and only when the order's side reduces it). The owner's
+  `--clear-assignment` clears the ledger with the latch. `real_block` also refuses while the account row's `cash` is
+  below zero (alerted once until it clears).
 - real.py: `RealBook.free_to_reserve(account) -> (free: float, bound: str)` (the A8.1 reservation; a table without
   the equity block keeps `options_buying_power` alone); `RealBook.house_count(day)` (both books' count; `count_today`
   stays the options book's own, which the equity book reads); `probe_tally(..., table=None)` and

@@ -385,6 +385,15 @@ class TheShareLedger(LiveCase):
         self.run_to(9, 36)
         self.assertIsNone(live.state.get("assignment_latch"), "resolved although a program holds SPY")
 
+    def test_the_owners_clear_resets_the_ledger(self):
+        live = self.make([])
+        live._book_shares("OPASN", "SPY261016P00600000", 1)
+        live.state.put("assignment_latch", {"why": "an assignment on SPY261016P00600000 (1 contracts)", "at": 0})
+        live.state.put("owner_clear_assignment", {"by": "the owner"})
+        live.owner_actions()
+        self.assertIsNone(live.state.get("assignment_latch"))
+        self.assertIsNone(live.state.get("shares"), "the owner says the shares are resolved")
+
     def test_reconciliation_expects_the_ledger_beside_the_lots_until_the_shares_are_sold(self):
         live = self.make([])
         self.run_to(9, 31)
