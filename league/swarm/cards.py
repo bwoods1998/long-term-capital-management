@@ -156,6 +156,21 @@ continues no gated one: architect.py `admit`, `always_in_families`) and G1 (dlan
 varies its size or its hold, on Train is never validated and retires). ITS COST: the dlane report's LOOSENED row. With
 the lane off nothing here acts.
 
+THE EQUITY LANES (release E1, Oct 2026; league/swarm/elane.py). While `elane.mode` is "gate" a card may declare `lane`
+"beta" or "equity" (whatever the direction lane's mode), with its `structure` ("etf" | "stock") and `symbols`: `validate`
+reads it and checks it against the equity lanes' box (`elane.card_errors`: a structure in `elane.structures`, a beta card on ETFs
+only, symbols inside `elane.universe`, the inputs a daily bar carries, never a flat comparison), every reason named. Its
+class may be any of `MECHANISM_CLASSES` or the lanes' `equity_premium` (`elane.CLASSES`); it needs no ablation (its
+comparison is the same-exposure buy-and-hold, the screen's S1-X label). The card stores its `lane`, `structure` and
+`symbols` (inside its canonical JSON and so its sha). ITS CELL IS LANE-SCOPED (A8.12): an equity card's structure family
+is "<lane>:<structure>" (`key_of`, `elane.lineage_key`), so no options row shares its cell, and THE GRAVEYARD IS
+LANE-SCOPED: `RebirthIndex` keeps each equity lane's rows apart (`equity_rows`, by `row_lane`), a REFUTED row of an
+equity lane binds only that lane's cards, and no equity row ever binds, or is listed for, an options card (the options
+architect's cells and grid read `rows`, the options rows alone). Every options card, row and message is the release
+before's, and with the equity lanes off (THE ROLLBACK) `validate` reads a card's `lane` exactly as before (no equity
+card is admitted: `store.add_family` refuses an equity structure without an equity lane); the stored cards' cells and
+the graveyard's lanes stay lane-scoped whatever the mode.
+
 Standard library only.
 """
 
@@ -168,7 +183,7 @@ import math
 import re
 from typing import Any, Iterable, Mapping
 
-from . import dlane
+from . import dlane, elane
 from . import evidence as evidence_mod
 
 #: The mechanism classes, each with the sentence the architect reads. Drawn from the graveyard's 1,974 rows (Sept 30):
@@ -321,17 +336,18 @@ def row_lane(fam: Mapping[str, Any] | None, card: Any, lanes_by_sha: Mapping[str
     """THE DIRECTION LANE'S GRAVEYARD (Oct 9, 2026): a graveyard row's lane, read the way release D-1 stores it
     (`dlane.declared_lane`, from rows already in hand): its family's spec's `lane`, else its own card's (`card`), else
     (a fork) the card its spec's `card_sha` names (`lanes_by_sha`: each stored card's lane by sha), else "alpha": every
-    family born before the lane, or without a lane, is alpha."""
+    family born before the lane, or without a lane, is alpha. THE EQUITY LANES (release E1): "beta" or "equity" for an
+    equity family's row (its spec's `lane`, else its card's, else the card its spec's `card_sha` names)."""
     raw = fam.get("spec") if isinstance(fam, Mapping) else None
     try:
         spec = json.loads(raw) if isinstance(raw, str) else raw
     except (TypeError, ValueError):
         spec = None
     spec = spec if isinstance(spec, Mapping) else {}
-    if spec.get("lane") in dlane.LANES:
+    if spec.get("lane") in dlane.LANES or spec.get("lane") in elane.LANES:
         return str(spec["lane"])
     if isinstance(card, Mapping):
-        return dlane.lane_value(card)[0]
+        return elane.card_lane(card) or dlane.lane_value(card)[0]
     return lanes_by_sha.get(str(spec.get("card_sha") or ""), dlane.ALPHA)
 
 
@@ -367,14 +383,17 @@ def validate(raw: Any, structure: Any = None, *, roots: Any = None,
     errors: list[str] = []
     card: dict[str, Any] = {}
     lane = None
-    if dlane.on(settings):
+    # THE EQUITY LANES (release E1): while they are on, an equity card's lane is read whatever the direction lane's
+    # mode; while they are off (THE ROLLBACK) `lane` is read exactly as before (the direction lane's word, or ignored).
+    equity_lane = elane.card_lane(raw) if elane.on(settings) else None
+    if equity_lane is None and dlane.on(settings):
         lane, problem = dlane.lane_value(raw)
         if problem:
             errors.append(problem)
     _sized(card, errors, raw, "hypothesis")
-    classes = mechanism_classes(settings)
+    classes = mechanism_classes(settings) if equity_lane is None else {**MECHANISM_CLASSES, **elane.CLASSES}
     cls = _token(raw.get("mechanism_class"))
-    if cls in classes and (cls not in LANE_CLASSES or lane == dlane.DIRECTION):
+    if cls in classes and (cls not in LANE_CLASSES or lane == dlane.DIRECTION or equity_lane is not None):
         card["mechanism_class"] = cls
     elif cls in classes:
         errors.append(f"mechanism_class: {cls} is the direction lane's class: a card that names it declares \"lane\": "
@@ -415,9 +434,12 @@ def validate(raw: Any, structure: Any = None, *, roots: Any = None,
     _sized(card, errors, raw, "comparison")
     ablation = raw.get("ablation")
     if ablation is None:
-        card["ablation"] = dict(DEFAULT_ABLATION)
+        if equity_lane is None:  # an equity card needs none: its comparison is the same-exposure buy-and-hold (S1-X)
+            card["ablation"] = dict(DEFAULT_ABLATION)
     elif ablation == "flat" or (isinstance(ablation, Mapping) and ablation.get("flat") is True):
-        if structure is not None and not flat_allowed(structure):
+        if equity_lane is not None:
+            pass  # refused by the lanes' box below (`elane.card_errors`), in its own words
+        elif structure is not None and not flat_allowed(structure):
             errors.append(f"ablation: a flat comparison is only for a structure that is not directional ({structure} is "
                           "directional or carries the market's drift): its comparison is the same structure without the signal's condition "
                           "(default {\"param\": \"signal_on\", \"off\": 0})")
@@ -465,6 +487,23 @@ def validate(raw: Any, structure: Any = None, *, roots: Any = None,
         fields = {e.split(":", 1)[0] for e in boxed}
         errors = [e for e in errors if e.split(":", 1)[0] not in fields] + boxed
         card["lane"] = dlane.DIRECTION
+    if equity_lane is not None:
+        # THE EQUITY LANES: inside the lanes' box or refused, every reason named (the box's reason for a field replaces
+        # the general one); the card declares its lane, structure and symbols, which must be the proposal's.
+        given = structure if structure is not None else raw.get("structure")
+        symbols = roots if roots is not None else raw.get("symbols")
+        boxed = elane.card_errors(raw, given, symbols, settings)
+        if raw.get("structure") is not None and structure is not None and _token(raw["structure"]) != _token(structure):
+            boxed.append(f"structure: the card says {raw['structure']!r} and the proposal {structure!r}")
+        named = raw.get("symbols")
+        if isinstance(named, list) and isinstance(roots, (list, tuple)) and \
+                sorted({str(x).strip().upper() for x in named}) != sorted({str(x).strip().upper() for x in roots}):
+            boxed.append("symbols: the card's symbols are not the proposal's")
+        fields = {e.split(":", 1)[0] for e in boxed}
+        errors = [e for e in errors if e.split(":", 1)[0] not in fields] + boxed
+        card["lane"] = equity_lane
+        card["structure"] = _token(given)
+        card["symbols"] = sorted({str(x).strip().upper() for x in symbols}) if isinstance(symbols, (list, tuple)) else []
     return (card, []) if not errors else (None, errors)
 
 
@@ -486,9 +525,14 @@ def flat_allowed(structure: Any) -> bool:
 
 
 def key_of(card: Mapping[str, Any], structure: Any) -> dict[str, Any]:
-    """A card's cell: {class, inputs, family, holding}."""
+    """A card's cell: {class, inputs, family, holding}. An equity card's structure family is lane-scoped
+    ("<lane>:<structure>", `elane.lineage_key`, A8.12): no options row ever shares its cell."""
+    family = structure_family(structure)
+    lane = elane.card_lane(card)
+    if lane is not None:
+        family = elane.lineage_key(lane, family)
     return {"class": card.get("mechanism_class"), "inputs": sorted(card.get("inputs") or []),
-            "family": structure_family(structure), "holding": card.get("holding")}
+            "family": family, "holding": card.get("holding")}
 
 
 def key_text(key: Mapping[str, Any]) -> str:
@@ -1007,9 +1051,12 @@ class RebirthIndex:
         cards: dict[str, dict[str, Any]] = {}
         lanes_by_sha: dict[str, str] = {}
         always_by_sha: dict[str, bool] = {}  # THE ALWAYS-IN CARD: each stored card's declared status by sha
+        equity_by_sha: dict[str, str] = {}  # THE EQUITY LANES: each stored equity card's lane by sha (the oldest)
         if _tables(store):
             for r in store._all("SELECT family, sha, card, key, at FROM family_cards ORDER BY at, family"):
                 card = json.loads(r["card"])
+                if elane.card_lane(card) is not None:
+                    equity_by_sha.setdefault(r["sha"], str(elane.card_lane(card)))
                 if self.lane_on and r["sha"] not in lanes_by_sha:  # the oldest card of a sha, as `card_of` reads a fork's
                     lanes_by_sha[r["sha"]] = dlane.lane_value(card)[0]
                     always_by_sha[r["sha"]] = dlane.always_in(card)
@@ -1020,6 +1067,9 @@ class RebirthIndex:
         # THE ALWAYS-IN CARD (Oct 10, 2026): a family whose program failed G1 (dlane.py) lost the always-in status.
         lost = _g1_failed(store) if self.lane_on else frozenset()
         self.rows: list[dict[str, Any]] = []
+        #: THE EQUITY LANES' rows (release E1, A8.12), kept apart: each binds only cards of its own lane (`matched`), and
+        #: none is ever listed or counted for an options card.
+        self.equity_rows: list[dict[str, Any]] = []
         for g in store._all("SELECT family, at, mechanism, structure, roots, lesson FROM graveyard ORDER BY at, family"):
             if g["family"] in self.exclude:
                 continue
@@ -1051,8 +1101,13 @@ class RebirthIndex:
                     dlane.always_in(carded["card"]) if carded is not None
                     else always_by_sha.get(str(_spec_of(fam).get("card_sha") or ""), False))
                 row["roots"] = list(dict.fromkeys([*_roots_of(g["roots"]), *_roots_of(_spec_of(fam).get("roots"))]))
+            equity_lane = row_lane(fam, carded["card"] if carded is not None else None, equity_by_sha)
+            if equity_lane in elane.LANES or str(g["structure"]) in elane.STRUCTURES:
+                row["elane"] = equity_lane if equity_lane in elane.LANES else None  # a lane unknown binds no card
+                self.equity_rows.append(row)
+                continue
             self.rows.append(row)
-        self.by_id = {r["row"]: r for r in self.rows}
+        self.by_id = {r["row"]: r for r in self.rows + self.equity_rows}
         # The rebirths born so far: by the row each named (for ever) and by that row's cell (within the window).
         cutoff = None
         now = _parse_at(store.now()) if hasattr(store, "now") else None
@@ -1166,10 +1221,14 @@ class RebirthIndex:
         declared cell, and the rows of the cell its mechanism text reads as (`infer_key`'s class, with its structure family
         and holding) when that is another class; inputs are `match_inputs` (declared, and named by its own words)."""
         keys, other = match_keys(card, structure, mechanism, dte)
-        hit = [r for r in self.rows if matches(keys[0], r["key"])]
+        # THE EQUITY LANES (A8.12): an equity card is matched against its own lane's rows alone, an options card against
+        # the options rows alone.
+        lane = elane.card_lane(card)
+        pool = self.rows if lane is None else [r for r in self.equity_rows if r.get("elane") == lane]
+        hit = [r for r in pool if matches(keys[0], r["key"])]
         text_class = None
         if other is not None:
-            extra = [r for r in self.rows if matches(keys[1], r["key"]) and r not in hit]
+            extra = [r for r in pool if matches(keys[1], r["key"]) and r not in hit]
             if extra:
                 text_class = other
                 hit = sorted(hit + extra, key=lambda r: (r["at"], r["row"]))

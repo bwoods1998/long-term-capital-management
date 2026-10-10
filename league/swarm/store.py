@@ -9,6 +9,12 @@
 
 Nothing here is ever committed: the repository is public and programs are fitted to licensed data.
 
+THE EQUITY LANES (release E1, Oct 2026; league/swarm/elane.py). A family whose spec declares `lane` "beta" or "equity"
+is an equity family, with structure "etf" (or "stock"); every other is an options family. `families()` returns the
+options families alone unless asked for `lanes` (`EQUITY_LANES`, or "all"), so every options reader skips the equity
+lanes without an edit of its own. Lineages are lane-scoped (A8.12): identical code links lineages only inside one lane
+(`_link_code`), `link_lineages` never joins an equity lineage to an options one, and a fork stays in its parent's lane.
+
 TRIALS. Every Gym evaluation is a trial (`add_run` counts the result's own `trials`), per family and in
 total. An evaluation the family already made (its `eval_key` on a completed Train run: `evaluated`) is never asked of
 the Gym again: the researcher answers it from here, so it is no trial (R3, `researcher.py`'s NO DUPLICATE RUNS). A
@@ -236,11 +242,33 @@ LONG_SINGLE = "long_single"
 SINGLE_SIDES = ("long_call", "long_put")
 #: The five types that close in one order (the venue refuses one-order closes of the others).
 CLOSEABLE = ("debit_vertical", "credit_vertical", "iron_condor", "iron_butterfly", "long_butterfly")
+#: THE EQUITY LANES (release E1, Oct 2026; league/swarm/elane.py): the structures of an equity-lane family ("etf", and
+#: "stock" in a later release) and the lanes that may declare them (`league.equity.LANES`: "beta", "equity"). A family
+#: is an equity family exactly when its spec's `lane` is one of `EQUITY_LANES`, and then exactly when its structure is
+#: one of `EQUITY_STRUCTURES` (`add_family` holds the two together), so the options readers below tell the lanes apart
+#: by the structure column alone. `families(lanes=None)` (the default every options consumer calls) leaves equity
+#: families out; `lanes=EQUITY_LANES` returns them alone; `lanes="all"` everything (reports).
+EQUITY_STRUCTURES = ("etf", "stock")
+EQUITY_LANES = ("beta", "equity")
+#: The options readers' SQL guard: a families row that is no equity family.
+OPTIONS_ONLY_SQL = "structure NOT IN ('etf', 'stock')"
 _SLUG = re.compile(r"^[a-z0-9-]{1,40}$")
 
 
 def iso(t: float) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
+
+
+def lane_of_spec(spec: Any) -> str | None:
+    """The equity lane a family's spec declares ("beta" | "equity"), else None (an options family)."""
+    lane = spec.get("lane") if isinstance(spec, Mapping) else None
+    return str(lane) if lane in EQUITY_LANES else None
+
+
+def equity_family(fam: Mapping[str, Any] | None) -> bool:
+    """Whether a families row (parsed or raw) is an equity family: its structure is an equity structure (`add_family`
+    holds the structure and the spec's lane together)."""
+    return isinstance(fam, Mapping) and str(fam.get("structure") or "") in EQUITY_STRUCTURES
 
 
 def same_slice(a: Any, b: Any) -> bool:
@@ -466,8 +494,20 @@ class SwarmStore:
         lineage born on a dead one's slice names it as `prior_lineage`: its trials count, its looks do not. It may name
         several (`slice_priors`, a singles' slice): the first is kept as `prior_lineage`, all of them as `prior_lineages`.
         `inherited_trials` and `inherited_looks` record the counts at birth; the live counts are the methods'."""
-        if spec.get("structure") not in STRUCTURES:
+        lane = lane_of_spec(spec)
+        if spec.get("lane") is not None and lane is None and str(spec.get("structure")) in EQUITY_STRUCTURES:
+            raise ValueError(f"an equity structure needs an equity lane ({', '.join(EQUITY_LANES)}), not {spec.get('lane')!r}")
+        if lane is not None:
+            # THE EQUITY LANES (release E1): an equity family declares its lane and an equity structure, together.
+            if spec.get("structure") not in EQUITY_STRUCTURES:
+                raise ValueError(f"an equity-lane family's structure is one of {', '.join(EQUITY_STRUCTURES)}, "
+                                 f"not {spec.get('structure')!r}")
+            if parent and lane_of_spec((self.family(parent) or {}).get("spec")) != lane:
+                raise ValueError("an equity-lane family forks only from a family of its own lane (A8.12)")
+        elif spec.get("structure") not in STRUCTURES:
             raise ValueError(f"unknown structure {spec.get('structure')!r}")
+        elif parent and equity_family(self.family(parent)):
+            raise ValueError("an options family never forks from an equity-lane family (A8.12)")
         roots = [str(r).upper() for r in (spec.get("roots") or []) if str(r).strip()]
         if not roots:
             raise ValueError("a family names at least one root")
@@ -506,14 +546,32 @@ class SwarmStore:
     def family(self, fid: str) -> dict[str, Any] | None:
         return self._family(self._one("SELECT * FROM families WHERE id=?", (fid,)))
 
-    def families(self, *, alive: bool | None = None) -> list[dict[str, Any]]:
-        if alive is None:
-            rows = self._all("SELECT * FROM families ORDER BY born_at, id")
-        elif alive:
-            rows = self._all("SELECT * FROM families WHERE retired_at IS NULL ORDER BY born_at, id")
+    def families(self, *, alive: bool | None = None, lanes: Any = None) -> list[dict[str, Any]]:
+        """The families, oldest first (`alive` True: the living; False: the retired, by retirement). THE EQUITY LANES
+        (release E1; league/equity/INTERFACES.md section 2.5): `lanes` None (the default, so every existing caller) is the
+        options lanes only, an equity family left out; an iterable of equity lanes (`EQUITY_LANES`, or one of them) is
+        the equity families of those lanes only; "all" is every family (reports)."""
+        if lanes is None:
+            scope = f" AND {OPTIONS_ONLY_SQL}"
+            wanted = None
+        elif lanes == "all":
+            scope, wanted = "", None
         else:
-            rows = self._all("SELECT * FROM families WHERE retired_at IS NOT NULL ORDER BY retired_at, id")
-        return [self._family(r) for r in rows]  # type: ignore[misc]
+            wanted = {str(x) for x in ([lanes] if isinstance(lanes, str) else lanes)}
+            unknown = sorted(wanted - set(EQUITY_LANES))
+            if unknown:
+                raise ValueError(f"lanes: {', '.join(unknown)} is no equity lane (None is the options lanes, 'all' every family)")
+            scope = " AND structure IN ('etf', 'stock')"
+        if alive is None:
+            rows = self._all(f"SELECT * FROM families WHERE 1=1{scope} ORDER BY born_at, id")
+        elif alive:
+            rows = self._all(f"SELECT * FROM families WHERE retired_at IS NULL{scope} ORDER BY born_at, id")
+        else:
+            rows = self._all(f"SELECT * FROM families WHERE retired_at IS NOT NULL{scope} ORDER BY retired_at, id")
+        out = [self._family(r) for r in rows]
+        if wanted is not None:
+            out = [f for f in out if lane_of_spec(f["spec"]) in wanted]  # type: ignore[index]
+        return out  # type: ignore[return-value]
 
     def update_family(self, fid: str, **fields: Any) -> None:
         if not fields:
@@ -806,8 +864,11 @@ class SwarmStore:
         fam = self.family(fid)
         if fam is None:
             return
-        for other in self._all("SELECT DISTINCT f.lineage,f.structure,f.roots FROM versions v JOIN families f "
+        lane = lane_of_spec(fam["spec"])
+        for other in self._all("SELECT DISTINCT f.lineage,f.structure,f.roots,f.spec FROM versions v JOIN families f "
                                "ON f.id=v.family WHERE v.sha=? AND f.lineage!=?", (sha, fam["lineage"])):
+            if lane_of_spec(loads(other["spec"], {})) != lane:
+                continue  # LANE-SCOPED LINEAGES (A8.12): the same code in another equity lane is another lineage
             if same_slice(other["structure"], fam["structure"]) and sorted(loads(other["roots"], [])) == sorted(fam["roots"]):
                 a, b = sorted((fam["lineage"], other["lineage"]))
                 self._exec("INSERT OR IGNORE INTO lineage_links(a,b) VALUES(?,?)", (a, b))
@@ -821,6 +882,10 @@ class SwarmStore:
             return False
         with self._lock:
             if not (self._one("SELECT 1 FROM families WHERE lineage=?", (a,)) and self._one("SELECT 1 FROM families WHERE lineage=?", (b,))):
+                return False
+            # LANE-SCOPED LINEAGES (A8.12, release E1): an equity lineage is never joined to an options lineage.
+            kinds = {bool(self._one(f"SELECT 1 FROM families WHERE lineage=? AND NOT ({OPTIONS_ONLY_SQL})", (x,))) for x in (a, b)}
+            if len(kinds) > 1:
                 return False
             a, b = sorted((a, b))
             return self._exec("INSERT OR IGNORE INTO lineage_links(a,b) VALUES(?,?)", (a, b)).rowcount > 0
@@ -1227,4 +1292,5 @@ class SwarmStore:
 
 
 __all__ = ["SwarmStore", "ALIVE", "BANDS", "STRUCTURES", "LONG_SINGLE", "SINGLE_SIDES", "same_slice", "slice_priors",
-           "priors_of", "structure_text", "structure_query", "CLOSEABLE", "slugify", "code_sha", "dumps", "loads", "iso"]
+           "priors_of", "structure_text", "structure_query", "CLOSEABLE", "slugify", "code_sha", "dumps", "loads", "iso",
+           "EQUITY_STRUCTURES", "EQUITY_LANES", "OPTIONS_ONLY_SQL", "lane_of_spec", "equity_family"]

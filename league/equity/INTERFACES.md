@@ -578,17 +578,26 @@ or pins it; until the integrator does, every equity look is refused (the screen 
 `screen_effective(settings, lane, *, policy=None)`, `try_open(store, fam, n, settings)`, `lineage_spent(store, fam,
 settings)`, `roster_seats(root)`, `isolated_runner(root) -> runner.Isolated`, `validate(tournament, fam, version)`,
 `look(gate, fam, version, sha) -> bool | None`, `birth_seeds(store, settings) -> [fid]`, `seeded(store, fid)`,
-`view(fam, *, lane)`.
+`view(fam, *, lane)`. Added by swarm (additive): `next_try(store, fam, settings) -> int | None` (the version the
+tournament's equity round validates now), `lineage_tries(store, fid)`, `card_lane(card)`, `candidate(fam, store)`,
+`reviewed(state, sha)`, `same_lineage(store, fam, lane, template, train)`, and the state keys `LOOK_KEY`, `FLOOR_KEY`,
+`TRAIN_R_KEY`, `TEMPLATE_KEY`, `VALIDATION_KEY`, `VERDICTS_KEY` ("elane_verdicts" {str(n): {entered, at, stale}}),
+`SIGMA_KEY` ("validation_r_sd_by_version"). The tournament and the gate take an injected runner as `equity_runner`.
 
 ### 8.3 Edits
 - **bands.py**: `read(root, *, family=None, lanes=None)`: `lanes` None is the options lanes only (equity-lane families
   never reach the options path: no OptionsLive instance, no observe row, no incubator row); `lanes=LANES` returns the
-  equity rows only, each with `lane`, `symbols`, `seeded`; an equity row's band currency is checked against the
+  equity rows only, each with `lane`, `symbols`, `seeded` (and, added by swarm: `label`, `seat` "probe" | "seated" |
+  "sized", `validation_version`, `validation_r_sd_by_version`, `beside`; a waiting Candidate has no row, so every
+  Candidate row holds a seat: the book passes `seat_free=True` for it); an equity row's band currency is checked against the
   equity identity (`banded_evaluator` {"engine": EQUITY_ENGINE_VERSION, "equity_sha256", "run_sha"}), not the
   options one. `waiting()` / `seating`: equity Candidates take `elane.roster` seats apart from `dlane.roster`.
   `observe` and `incubator` never return an equity family.
 - **store.py**: `SwarmStore.families(*, alive=None, lanes=None)` (section 2.5): None the options lanes only,
-  `LANES` the equity families only, "all" everything; a family's lane is its spec's `lane`.
+  `LANES` the equity families only, "all" everything; a family's lane is its spec's `lane`. `add_family` admits an
+  equity structure ("etf" | "stock") exactly with an equity lane in the spec (the options readers tell the lanes apart by
+  the structure column: `store.OPTIONS_ONLY_SQL`); lineages are lane-scoped (identical code links only inside a lane,
+  `link_lineages` never joins an equity lineage to an options one, a fork stays in its parent's lane).
 - **cards.py**: cards declare `lane`, `structure` ("etf" | "stock") and `symbols`; `validate` admits an equity card
   through `elane.card_errors`; the graveyard is lane-scoped (a REFUTED row binds only its own lane's cards; keys
   through `elane.lineage_key`).
