@@ -25,19 +25,34 @@ accounting (league/equity/screen.py `series`) reads the same prices the engine f
 Each parent call reads `needs` from the program first (a "load" through the child, so the parent never executes it),
 slices the store for NEEDS symbols and history, and sends ("kind", "equity", "run", payload) with payload
 {"code", "params", "name", "bars": Bars, "k", "capital"}; the answer's `result` is the whole record (in-House only;
-`results.view` decides what a researcher sees). A child failure raises `RunFailed` (no trial is counted).
+`results.view` decides what a researcher sees). A child failure raises `RunFailed` (no trial is counted); a program the
+child refuses (it does not load) raises `ProgramRefused` (a `CodeRefused`). The parent re-checks the child's NEEDS
+(`program.parse_needs`) before it slices anything, so a child's answer never widens what is read.
 """
 
 from __future__ import annotations
 
 import datetime as dt
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Mapping
+
+from . import config
+from .program import CodeRefused, Needs, NeedsRefused, load_program, parse_needs
+from .store import LOOK, EquityGateCapability, EquityStore, StoreRefused
+
+KIND = "equity"
+#: The child's budget for learning a program's NEEDS (a load and a parse).
+NEEDS_BUDGET_SECONDS = 60.0
 
 
 class RunFailed(RuntimeError):
     """The isolated run did not return a result (the child failed, timed out or refused the program)."""
+
+
+class ProgramRefused(CodeRefused):
+    """The decider child refused the program (it does not load: the child's reason)."""
 
 
 @dataclass(frozen=True)
@@ -56,35 +71,92 @@ def run_bars(code: str, params: Mapping[str, Any] | None, bars: Any, *, name: st
              capital: Any = None) -> dict[str, Any]:
     """Load the program and replay it over `bars` (`engine.run`); CodeRefused / NeedsRefused when it does not load.
     `capital` None is `config.SLEEVE_USD`."""
-    raise NotImplementedError("core: league/equity/runner.py run_bars")
+    from .engine import EngineConfig, run_isolated
+
+    program = load_program(code, name=name, params=params)
+    capital = config.SLEEVE_USD if capital is None else Decimal(str(capital))
+    return run_isolated(program, bars, cfg=EngineConfig(capital=capital, k=float(k)))
 
 
 class Isolated:
     """The parent side: slices the store and runs the program in the decider child (the module docstring)."""
 
     def __init__(self, decider: Any, store_root: str | Path, *, budget_seconds: float = RUN_BUDGET_SECONDS):
-        raise NotImplementedError("core: league/equity/runner.py Isolated")
+        self.decider = decider
+        self.store_root = Path(store_root)
+        self.budget_seconds = float(budget_seconds)
+
+    def _ask(self, op: str, payload: Mapping[str, Any], budget: float) -> Mapping[str, Any]:
+        try:
+            answer = self.decider.kind(KIND, op, payload, budget_seconds=budget)
+        except Exception as exc:  # noqa: BLE001 - the child failed or timed out (it was restarted): no trial
+            raise RunFailed(f"the decider child failed the {op}: {type(exc).__name__}: {str(exc)[:300]}") from None
+        if not isinstance(answer, Mapping):
+            raise RunFailed(f"the decider child answered the {op} with a {type(answer).__name__}")
+        if not answer.get("ok"):
+            if answer.get("refused"):
+                raise ProgramRefused(str(answer.get("error") or "the program does not load"))
+            raise RunFailed(str(answer.get("error") or f"the decider child did not answer the {op}"))
+        return answer
 
     def needs(self, code: str, params: Mapping[str, Any] | None, *, name: str) -> dict[str, Any]:
         """The program's NEEDS as the child parsed it ({symbols, history, max_hold_sessions}); ProgramRefused."""
-        raise NotImplementedError("core: league/equity/runner.py Isolated.needs")
+        answer = self._ask("needs", {"code": code, "params": dict(params or {}), "name": name}, NEEDS_BUDGET_SECONDS)
+        return self._parsed(answer).as_dict()
+
+    @staticmethod
+    def _parsed(answer: Mapping[str, Any]) -> Needs:
+        try:
+            return parse_needs(answer.get("needs"))
+        except NeedsRefused as exc:
+            raise RunFailed(f"the child's NEEDS do not parse: {exc}") from None
+
+    def _needs(self, code: str, params: Mapping[str, Any] | None, name: str) -> Needs:
+        return self._parsed(self._ask("needs", {"code": code, "params": dict(params or {}), "name": name},
+                                      NEEDS_BUDGET_SECONDS))
+
+    def _run(self, code: str, params: Mapping[str, Any] | None, name: str, bars: Any, k: float) -> Run:
+        payload = {"code": code, "params": dict(params or {}), "name": name, "bars": bars, "k": float(k),
+                   "capital": None}
+        answer = self._ask("run", payload, self.budget_seconds)
+        result = answer.get("result")
+        if not isinstance(result, Mapping):
+            raise RunFailed("the decider child returned no result")
+        if result.get("status") == "error":
+            raise RunFailed(str(result.get("reason") or "the run ended in an error"))
+        return Run(dict(result), bars)
 
     def train(self, code: str, params: Mapping[str, Any] | None, *, name: str, start: dt.date | None = None,
               end: dt.date | None = None, k: float = 1.0) -> Run:
-        raise NotImplementedError("core: league/equity/runner.py Isolated.train")
+        """One Train run (2016-01-04..2024-12-31, cut to [start, end])."""
+        needs = self._needs(code, params, name)
+        bars = EquityStore(self.store_root).bars(needs.symbols, "train", history=needs.history, start=start, end=end)
+        return self._run(code, params, name, bars, k)
 
     def validation(self, code: str, params: Mapping[str, Any] | None, *, name: str, k: float = 1.0) -> Run:
-        raise NotImplementedError("core: league/equity/runner.py Isolated.validation")
+        """The Validation run (2025)."""
+        needs = self._needs(code, params, name)
+        bars = EquityStore(self.store_root).bars(needs.symbols, "validation", history=needs.history)
+        return self._run(code, params, name, bars, k)
 
     def look(self, code: str, params: Mapping[str, Any] | None, *, name: str, gate: Any,
              k: float = 1.0) -> Run:
         """The ONE sealed look: `config.LOOK_FIRST` through min(the last close before now, `config.LOOK_CAP`) (A9 D6;
         the store's holdout and forward days). `gate` must be an `EquityGateCapability` (StoreRefused otherwise)."""
-        raise NotImplementedError("core: league/equity/runner.py Isolated.look")
+        if not isinstance(gate, EquityGateCapability):
+            raise StoreRefused("the sealed look needs the gate's EquityGateCapability")
+        store = EquityStore(self.store_root, gate=gate)
+        needs = self._needs(code, params, name)
+        bars = store.bars(needs.symbols, LOOK, history=needs.history)
+        return self._run(code, params, name, bars, k)
 
     def segments(self, code: str, params: Mapping[str, Any] | None, *, name: str) -> list[Run]:
         """One run over each of `config.TRAIN_ERA_SEGMENTS` (the screen's per-program floor), in order."""
-        raise NotImplementedError("core: league/equity/runner.py Isolated.segments")
+        needs = self._needs(code, params, name)
+        store = EquityStore(self.store_root)
+        return [self._run(code, params, name, store.span(needs.symbols, first, last, history=needs.history), 1.0)
+                for first, last in config.TRAIN_ERA_SEGMENTS]
 
 
-__all__ = ["RunFailed", "Run", "RUN_BUDGET_SECONDS", "run_bars", "Isolated"]
+__all__ = ["RunFailed", "ProgramRefused", "Run", "RUN_BUDGET_SECONDS", "NEEDS_BUDGET_SECONDS", "KIND", "run_bars",
+           "Isolated"]

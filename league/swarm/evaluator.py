@@ -58,26 +58,102 @@ def execution_fingerprint(repo: Path | None = None) -> str:
 #: league/gym module league/equity imports (hashed with it, listed explicitly; a test holds the list to the imports).
 EQUITY_KEY = "equity_evaluator"
 EQUITY_GYM_FILES = ("league/gym/__init__.py", "league/gym/safety.py", "league/gym/runtime.py", "league/gym/events.py")
+#: An equity family's state keys an adoption archives and clears beside `SELECTION_KEYS` (its evidence under the old
+#: engine: the Validation runs' spread, the screen's floor, the Train series a lineage check reads). Its tries and its
+#: look (`elane_try`, `elane_look`) are never cleared: a lineage's spent try and look stay spent.
+EQUITY_SELECTION_KEYS = ("validation_r_sd_by_version", "elane_floor", "elane_train_r")
 
 
+def _equity_lanes() -> tuple[str, ...]:
+    from ..equity import LANES
+
+    return LANES
+
+
+def is_equity_family(fam: Mapping[str, Any] | None) -> bool:
+    """Whether a family row belongs to an equity lane (its spec's `lane` is "beta" or "equity")."""
+    spec = (fam or {}).get("spec") or {}
+    return isinstance(spec, Mapping) and str(spec.get("lane") or "") in _equity_lanes()
+
+
+@lru_cache(maxsize=4)
 def equity_fingerprint(repo: Path | None = None) -> str:
     """THE EQUITY LANE's evidence identity (A8.8; owner: core): sha256 over every league/equity/**/*.py, the 4
     `LEAGUE_FILES` and `EQUITY_GYM_FILES`, path and bytes, in path order (as `execution_fingerprint`). Equity bands bind
     to it as options bands bind to `execution_fingerprint`; it never moves for a league/live or options-only change."""
-    raise NotImplementedError("core: league/swarm/evaluator.py equity_fingerprint")
+    from ..gym.driver import LEAGUE_FILES
+
+    repo = repo or Path(__file__).resolve().parents[2]
+    files = {repo / name for name in (*LEAGUE_FILES, *EQUITY_GYM_FILES)}
+    files.update(p for p in (repo / "league" / "equity").rglob("*.py") if "__pycache__" not in p.parts)
+    digest = hashlib.sha256()
+    for path in sorted(files):
+        digest.update(path.relative_to(repo).as_posix().encode() + b"\0" + path.read_bytes() + b"\0")
+    return digest.hexdigest()
 
 
 def equity_identity() -> dict[str, str]:
     """{"equity": equity_fingerprint(), "engine": league.equity.EQUITY_ENGINE_VERSION} (owner: core)."""
-    raise NotImplementedError("core: league/swarm/evaluator.py equity_identity")
+    from ..equity import EQUITY_ENGINE_VERSION
+
+    return {"equity": equity_fingerprint(), "engine": EQUITY_ENGINE_VERSION}
+
+
+def equity_band_current(state: Mapping[str, Any], expected: Mapping[str, Any]) -> bool:
+    """Whether an equity family's band proof (`banded_evaluator` {"engine", "equity_sha256", "run_sha"}) names the
+    equity identity `expected` ({"equity", "engine"})."""
+    proof = state.get("banded_evaluator") or {}
+    return isinstance(proof, Mapping) and proof.get("engine") == expected.get("engine") and \
+        proof.get("equity_sha256") == expected.get("equity")
 
 
 def adopt_equity(store: Any, expected: Mapping[str, Any] | None) -> dict[str, Any]:
     """`adopt` mirrored for the equity lanes (owner: core): at process start, when the stored `EQUITY_KEY` differs from
     `expected`, every alive equity-lane family's selection views are archived and cleared and a live equity band goes
     back to "gym" for fresh qualification (its frozen lots keep their exits), in one transaction; options families are
-    never touched. {adopted, families, previous, current}."""
-    raise NotImplementedError("core: league/swarm/evaluator.py adopt_equity")
+    never touched. {adopted, families, previous, current}.
+
+    A missing identity cannot authorize adoption. Runs, trials, the lineage's tries and its look, refusals, forward
+    records and the band's history stay; the family's `equity_evaluator` names the identity it is now judged under."""
+    if expected is None:
+        return {"adopted": False, "families": 0, "reason": "equity identity unavailable"}
+    from .bands import LIVE_BANDS
+
+    expected = dict(expected)
+    with store.atomic():
+        previous = store.get(EQUITY_KEY)
+        if previous == expected:
+            return {"adopted": False, "families": 0}
+        try:
+            rows = store.families(alive=True, lanes=_equity_lanes())
+        except TypeError:  # a store before the swarm's lane filter: every family, the equity ones picked here
+            rows = store.families(alive=True)
+        count = 0
+        for fam in rows:
+            if not is_equity_family(fam):
+                continue
+            state = fam.get("state") or {}
+            if fam["band"] in LIVE_BANDS and not equity_band_current(state, expected):
+                # The House keeps the lots for their exits; the band must be earned again under the new engine.
+                store.set_band(fam["id"], "gym", reason="equity execution semantics changed; fresh qualification is "
+                                                       "required")
+            keys = (*SELECTION_KEYS, *EQUITY_SELECTION_KEYS)
+            archived = {key: state[key] for key in keys if key in state}
+            archived.update({key: fam.get(key) for key in ("best_train", "best_version", "best_validation",
+                                                           "validated_version")})
+            store.event("swarm.status", fam["id"], {"action": "equity_evaluator_adopted", "from": previous,
+                                                    "to": expected, "_previous_selection": archived})
+            store.update_family(fam["id"], best_train=None, best_version=None, best_validation=None,
+                                validated_version=None, stall=0, since_val_revisions=0, since_val_trials=0)
+            cleared: dict[str, Any] = {key: None for key in keys}
+            cleared.update(gate_ready=False, equity_evaluator=expected, previous_evaluator_selection=archived)
+            store.set_state(fam["id"], **cleared)
+            store.note(fam["id"], "The equity engine changed. Historical runs, the lineage's Validation try and its "
+                       "sealed look remain counted. Validation evidence is owed under the current engine; this does "
+                       "not grant another try or another look.")
+            count += 1
+        store.put(EQUITY_KEY, expected)
+    return {"adopted": True, "families": count, "previous": previous, "current": expected}
 
 
 def identity(image: Any, bundle: Any) -> dict[str, str] | None:
@@ -143,6 +219,8 @@ def adopt(store: Any, expected: Mapping[str, Any] | None) -> dict[str, Any]:
         holds = HOLD_KEYS if gym_changed(previous, expected) else ()
         now = float(store.clock())
         for fam in store.families(alive=True):
+            if is_equity_family(fam):
+                continue  # the equity lanes bind to their own identity (`adopt_equity`, I5)
             state = fam.get("state") or {}
             from .bands import LIVE_BANDS, current_banded_evaluator
             from .gate import run_sha
@@ -197,5 +275,5 @@ def adopt(store: Any, expected: Mapping[str, Any] | None) -> dict[str, Any]:
 
 
 __all__ = ["KEY", "SELECTION_KEYS", "HOLD_KEYS", "identity", "matches", "row_matches", "gym_changed", "adopt",
-           "execution_fingerprint", "EQUITY_KEY", "EQUITY_GYM_FILES", "equity_fingerprint", "equity_identity",
-           "adopt_equity"]
+           "execution_fingerprint", "EQUITY_KEY", "EQUITY_GYM_FILES", "EQUITY_SELECTION_KEYS", "equity_fingerprint",
+           "equity_identity", "equity_band_current", "is_equity_family", "adopt_equity"]

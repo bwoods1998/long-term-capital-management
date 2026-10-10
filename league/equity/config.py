@@ -14,8 +14,9 @@ constitution's universe equal to the gateway's `STOCK_UNIVERSE` (gateway/lib/cap
   real confirmations (the design's fact 4).
 - CAPS: `POSITION_SHARE` of the sizing equity per instrument class; `SLEEVE_USD` is the Gym's sleeve E0 (a round
   constant, part of every run's identity, never the account's equity).
-- HOLDS: `MIN_HOLD_SESSIONS` (a lot never sells in the session it was bought), `DEFAULT_MAX_HOLD` and `MAX_HOLD_CAP`
-  (NEEDS `max_hold_sessions`, A8.5), `FAILED_DECIDES_EXIT` (2 sessions of failed decides exit the program's lots).
+- HOLDS: `MIN_HOLD_SESSIONS` (a lot never sells in the session it was bought: `may_sell`), `DEFAULT_MAX_HOLD` and
+  `MAX_HOLD_CAP` (NEEDS `max_hold_sessions`, A8.5: `max_hold_due`, the engine's and the book's one predicate),
+  `FAILED_DECIDES_EXIT` (2 sessions of failed decides in a row exit the program's lots at the next open).
 - WINDOWS: Train 2016-01-04..2024-12-31 (SIP history starts in 2016), Validation 2025, holdout
   2026-01-02..2026-09-25, forward after; the holdout and forward are sealed (`store.EquityGateCapability`). The one
   sealed look reads 2026-01-02 through min(the last close before the look, 2026-12-31) (A9 D6: `LOOK_FIRST`,
@@ -29,7 +30,7 @@ Standard library only.
 from __future__ import annotations
 
 import datetime as dt
-from decimal import Decimal
+from decimal import ROUND_CEILING, Decimal
 
 ETF, STOCK = "etf", "stock"
 CLASSES = (ETF, STOCK)
@@ -62,11 +63,15 @@ SLEEVE_USD = Decimal("1000")
 
 MAX_SYMBOLS = 20
 MAX_HISTORY = 504
+DEFAULT_HISTORY = 252
 MAX_INTENTS = 20
 MIN_HOLD_SESSIONS = 1
 DEFAULT_MAX_HOLD = 20
 MAX_HOLD_CAP = 60
 FAILED_DECIDES_EXIT = 2
+#: The Gym's smallest entry (the constitution's `equity_money.probe.min_order_usd` live): an entry sized under it is
+#: skipped and said so in `ctx.rejects`.
+MIN_ORDER_USD = Decimal("10")
 #: Share quantities are floored to this many decimals (the venue takes nine; the House sends six).
 QTY_PLACES = 6
 
@@ -88,24 +93,58 @@ TRAIN_ERA_SEGMENTS: tuple[tuple[dt.date, dt.date], ...] = (
 )
 
 
+CENT = Decimal("0.01")
+
+
 def class_of(symbol: str) -> str | None:
     """"etf", "stock", or None when `symbol` is not in `UNIVERSE`."""
-    raise NotImplementedError("core: league/equity/config.py class_of")
+    return UNIVERSE.get(str(symbol or "").strip().upper())
 
 
 def half_spread(symbol: str) -> float:
     """The symbol's half-spread as a fraction (1 bp = 0.0001); KeyError for a symbol outside `UNIVERSE`."""
-    raise NotImplementedError("core: league/equity/config.py half_spread")
+    return HALF_SPREAD_BP[str(symbol).strip().upper()] / 10_000.0
+
+
+def _decimal(value: object, name: str) -> Decimal:
+    """`value` as a finite Decimal (a float through its shortest repr, never its binary expansion)."""
+    try:
+        out = value if isinstance(value, Decimal) else Decimal(str(value))
+    except Exception:  # noqa: BLE001 - every unreadable amount is the same refusal
+        raise ValueError(f"{name} is not a number: {value!r}") from None
+    if not out.is_finite():
+        raise ValueError(f"{name} is not a finite number: {value!r}")
+    return out
 
 
 def sell_fees(proceeds: Decimal, shares: Decimal) -> Decimal:
     """SEC + TAF on one sale of `shares` for `proceeds` dollars: each fee rounded UP to the cent, TAF capped at
-    `TAF_MAX`. Decimal in, Decimal out (dollars). The engine, the book's fee estimate and the twins all call this."""
-    raise NotImplementedError("core: league/equity/config.py sell_fees")
+    `TAF_MAX`. Decimal in, Decimal out (dollars). The engine, the book's fee estimate and the twins all call this.
+
+    A sale of nothing (proceeds and shares at or under zero) pays nothing; a negative amount is a ValueError."""
+    proceeds, shares = _decimal(proceeds, "proceeds"), _decimal(shares, "shares")
+    if proceeds < 0 or shares < 0:
+        raise ValueError("a sale's proceeds and shares are not negative")
+    sec = (proceeds * SEC_FEE_PER_MILLION / Decimal(1_000_000)).quantize(CENT, rounding=ROUND_CEILING)
+    taf = min(shares * TAF_PER_SHARE, TAF_MAX).quantize(CENT, rounding=ROUND_CEILING)
+    return sec + taf
+
+
+def max_hold_due(held_sessions: int, max_hold_sessions: int) -> bool:
+    """THE MAXIMUM-HOLD RULE (A8.5), one predicate for the engine and the book: a lot whose `held_sessions` at a
+    decision close (`ctx.positions[i]["held_sessions"]`: sessions since its entry session, 0 at the entry session's own
+    close) has reached its program's `max_hold_sessions` exits at the next open (reason "max_hold")."""
+    return int(held_sessions) >= int(max_hold_sessions)
+
+
+def may_sell(entry_session: int, session: int) -> bool:
+    """THE MINIMUM HOLD (`MIN_HOLD_SESSIONS`): a lot never sells in the session it was bought (a lot bought at the close
+    may sell at the next open). Sessions are indices of one calendar (or ordinals of session days)."""
+    return int(session) - int(entry_session) >= MIN_HOLD_SESSIONS
 
 
 __all__ = ["ETF", "STOCK", "CLASSES", "UNIVERSE", "INDEX_ETFS", "HALF_SPREAD_BP", "K_BASE", "K_STRESS",
            "SEC_FEE_PER_MILLION", "TAF_PER_SHARE", "TAF_MAX", "POSITION_SHARE", "SLEEVE_USD", "MAX_SYMBOLS",
            "MAX_HISTORY", "MAX_INTENTS", "MIN_HOLD_SESSIONS", "DEFAULT_MAX_HOLD", "MAX_HOLD_CAP", "FAILED_DECIDES_EXIT",
            "QTY_PLACES", "WINDOWS", "SEALED", "LOOK_FIRST", "LOOK_CAP", "TRAIN_ERA_SEGMENTS", "class_of", "half_spread",
-           "sell_fees"]
+           "sell_fees", "DEFAULT_HISTORY", "MIN_ORDER_USD", "CENT", "max_hold_due", "may_sell"]

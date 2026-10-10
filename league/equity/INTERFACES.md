@@ -243,6 +243,46 @@ start=2025-01-02, sessions=20, price=100.0, step=0.0, gate=False) -> Path`. Ever
 only), and `adopt` skips equity-lane families (I5). Called at the swarm process start beside `adopt` (swarm wires the
 call in `loop.py`).
 
+### 4.11 Additions made while building core (additive; nothing above changes meaning)
+- **store**: `LOOK = "look"`, a window name `bars()` and `sessions()` accept: the one sealed look's span,
+  `LOOK_FIRST` .. min(the store's `fetched_through`, `LOOK_CAP`), opened only with the capability (A9 D6; the holdout
+  and forward windows alone cannot express it). A look's `Bars.window` and result `window` are "look";
+  `results.view(result, "look")` is the holdout view. Also `FIRST_YEAR` (2016: `nyse_sessions` refuses earlier days),
+  `ordinal`, `from_ordinal`, `as_date`, `Bars.day(i)`, `EquityStore.fetched_through`. A capability minted for one
+  store root opens no other. Every file read is checked against the manifest's sha256 (MissingData on a mismatch), and
+  npz files are byte-reproducible, so the same data has the same `data_version`.
+- **config**: `DEFAULT_HISTORY` 252, `MIN_ORDER_USD` "10" (the Gym's `min_order_usd`), `CENT`, and the two hold
+  predicates the book must use too: `may_sell(entry_session, session)` (min hold) and `max_hold_due(held_sessions,
+  max_hold_sessions)`: `held_sessions` at a decision close = sessions since the lot's entry session (0 at the entry
+  session's own close); due when it has reached `max_hold_sessions` -> exit at the next open.
+- **program**: `NeedsRefused` subclasses `league.gym.runtime.NeedsRefused` (still a `CodeRefused`);
+  `EquityRunner.last_failed` (the last decide raised, timed out or the runner is disqualified; a malformed intent is
+  an error but never a failed decide: A8.5's count reads this).
+- **ctx**: `calendar_around(day) -> (trading_days, early)` (t's month and the next session's month from
+  `store.nyse_sessions`: both builders read it). The as-of factor is session t's closes (a symbol with no bar at t
+  takes its last bar's; `prices[sym]` NaN). Byte equality holds for the same arrays (I6); a store fetched after a later
+  split or dividend agrees within the vendor's 4-decimal rounding (scaled by the split), not to the byte.
+- **engine**: decisions run at the close of the session before the run's first through the one before its last;
+  `split_factor`, `RATIO_TOLERANCE`, `SPLIT_MIN_STEP`, `SPLIT_RESIDUAL`, `SPLIT_TERMS` (dividends and splits read from
+  the all/raw close ratio's step); a result also carries `actions` (the dividends and splits booked on held lots),
+  `reason` when disqualified, and `summary.account_pnl`, `summary.open_lots`. Lots open at the run's end are in `lots`
+  with reason "open". ctx.caps in the Gym = max(0, min(position share x E0 - own marked value, cash)).
+- **results**: `canonical`, `basket_returns`, `excess_returns(trades, closes, days, opens=None)`, and `mte(trades,
+  closes, *, days=(), opens=None)` (a lot's time-matched window runs between its own fill points, open or close).
+- **runner**: `ProgramRefused(CodeRefused)` (the child refused the program; `league.live.decider.ProgramRefused` is
+  out of an evidence module's reach), `KIND = "equity"`, `NEEDS_BUDGET_SECONDS`; the parent re-parses the child's
+  NEEDS before it slices.
+- **synth**: `synthetic_store(..., as_of=None)` (the fetch day: bars through it, adjustment=all with its events only);
+  THE I6 HELPER: `bar_rows(bars, symbol, t, *, adjustment) -> [{t, o, h, l, c, v}]` and `same_ctx_cases(store_root, *,
+  symbols, history, count=20, seed=0, window="validation", gate=None, ...) -> [{day, index, needs, gym, raw_rows,
+  all_rows, common}]`: build the live ctx with `ctx.inputs_from_fetch(case["raw_rows"], case["all_rows"],
+  day=case["day"], needs=case["needs"], **case["common"])` (or the book's path) and compare `ctx_bytes` with
+  `build(case["gym"])`.
+- **evaluator**: `is_equity_family(fam)` (spec `lane` in `LANES`), `equity_band_current(state, expected)`,
+  `EQUITY_SELECTION_KEYS`; `adopt_equity` reads `store.families(alive=True, lanes=LANES)` (a store without the swarm's
+  `lanes` keyword: every alive family, filtered by `is_equity_family`), keeps `elane_try` and `elane_look` (spent
+  stays spent), clears `EQUITY_SELECTION_KEYS` with `SELECTION_KEYS`, and records the family's `equity_evaluator`.
+
 ---
 
 ## 5. book

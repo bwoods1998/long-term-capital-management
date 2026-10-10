@@ -1,7 +1,8 @@
 # Writing an equity program
 
-> Owner: core (league/equity/INTERFACES.md). This is the skeleton's draft of the contract; core finalizes it with the
-> engine, and every statement here is held by a test before E1 merges.
+> Owner: core (league/equity/INTERFACES.md). The contract between an equity program and the House. The Gym engine
+> (`league/equity/engine.py`) and the House's equity book (`league/equity/live.py`) both follow it; every statement
+> here is held by a test in `league/tests/test_equity_*.py`.
 
 An equity program is one Python file: `NEEDS`, `PARAMS` and `decide(ctx)`. It trades long-only ETFs (and, in a later
 release, stocks) with whole and fractional shares. The House runs it once a session, after the close; whatever it
@@ -33,9 +34,11 @@ the run. Be deterministic.
 
 | key | meaning | default |
 |---|---|---|
-| `symbols` | the symbols you trade and read, 1 to 20, from the lane's universe (SPY QQQ IWM DIA, the eleven SPDR sector ETFs, TLT, GLD; stocks in a later release) | required |
+| `symbols` | the symbols you trade and read, 1 to 20 (duplicates count once), from the lane's universe (SPY QQQ IWM DIA, the eleven SPDR sector ETFs, TLT, GLD; stocks in a later release) | required |
 | `history` | prior sessions of daily bars in `ctx.bars` (0-504) | `252` |
-| `max_hold_sessions` | the House exits any lot of yours held this many sessions, at the next open (1-60) | `20` |
+| `max_hold_sessions` | the House exits any lot of yours whose `held_sessions` reaches this, at the next open (1-60) | `20` |
+
+No other key is allowed. A malformed NEEDS refuses the program.
 
 ## PARAMS
 
@@ -46,39 +49,61 @@ As the options contract: a dict of numbers, booleans, strings or short lists, bo
 
 | field | what |
 |---|---|
-| `ctx.symbols` | your NEEDS symbols |
-| `ctx.bars[sym]` | `open`, `high`, `low`, `close`, `volume`, `ret` arrays, oldest first, the last element session t; prices adjusted for splits and dividends AS OF t (never by a later event); volume in shares; NaN where there was no bar |
-| `ctx.prices[sym]` | session t's close |
+| `ctx.symbols` | your NEEDS symbols, in your order |
+| `ctx.bars[sym]` | `open`, `high`, `low`, `close`, `volume`, `ret` arrays, oldest first, the last element session t, at most `history` + 1 long; prices adjusted for splits and dividends AS OF t (never by a later event) and rounded to 4 decimals; volume in shares as traded; `ret` the close-to-close return (NaN first); NaN where there was no bar |
+| `ctx.prices[sym]` | session t's close (NaN if `sym` had no bar at t) |
 | `ctx.weekday` | 0 Monday .. 4 Friday |
 | `ctx.events`, `ctx.events_next` | booleans for t and the next session: fomc, cpi, jobs, monthly_opex, quarter_end, half_day |
 | `ctx.session_of_month`, `ctx.sessions_to_month_end` | 1 on the month's first session; 0 on its last |
-| `ctx.positions` | your open lots: `{id, symbol, class, qty, entry, mark, value, pnl, held_sessions, at, tag}`; `at` says how the lot was filled ("open" or "close") |
-| `ctx.orders` | your pending orders (usually none: everything you ask executes the next session) |
-| `ctx.closed` | lots closed since your last call: `{id, symbol, qty, entry, exit, net, held_sessions, reason, tag}` |
-| `ctx.rejects` | why your last intents were refused |
-| `ctx.cash`, `ctx.equity`, `ctx.budget` | your sleeve's free cash, its equity, and the equity you size against (dollars) |
-| `ctx.caps[sym]` | dollars you may still add to `sym` now |
-| `ctx.params` | your PARAMS |
+| `ctx.positions` | your open lots: `{id, symbol, class, qty, entry, mark, value, pnl, held_sessions, at, tag}`; `entry` the fill a share (split-adjusted), `mark` t's close, `pnl` (mark - entry) x qty (dividends not included: they are cash), `held_sessions` the sessions since the lot's entry session (0 at the entry session's own close), `at` how the lot was filled ("open" or "close") |
+| `ctx.orders` | your pending orders: always empty today (everything you ask executes, or is refused, in the next session) |
+| `ctx.closed` | lots closed since your last call: `{id, symbol, qty, entry, exit, net, held_sessions, reason, tag}`; `net` dollars after fees with dividends; `reason` "program", "max_hold" or "house" |
+| `ctx.rejects` | why your intents of the last call were refused, and any exit of yours that waits |
+| `ctx.cash`, `ctx.equity` | your sleeve's free cash, and its equity (cash + lots at t's close) |
+| `ctx.budget` | the sleeve equity your entries are sized on (the Gym: the run's capital E0, $1,000) |
+| `ctx.caps[sym]` | dollars you may still add to `sym` now: the instrument cap (50% of the sizing equity an ETF, 20% a stock) less your holding of `sym`, at most your cash |
+| `ctx.params` | your PARAMS (a copy: changing it changes nothing) |
 
 ## Intents
 
-At most 20 a call; each has exactly one of `buy`, `sell`, `cancel`:
+At most 20 a call (the rest are dropped and counted as an error); each has exactly one of `buy`, `sell`, `cancel`:
 
 ```python
 {"buy": "SPY", "share": 0.5, "at": "close", "tag": "overnight"}   # half of the sleeve's equity, at the next close
 {"buy": "QQQ", "usd": 250.0}                                       # dollars; "at" defaults to "open"
 {"sell": 17, "at": "open"}                                         # a whole lot, by its id
-{"cancel": 3}                                                      # a pending order
+{"cancel": 3}                                                      # a pending order (none exist today)
 ```
 
+A buy has exactly one of `share` (0 < share <= 1) and `usd` (> 0). `tag` is any short text (64 characters kept). A
+malformed intent is dropped and counted as an error (it never counts as a failed decide).
+
 `"at": "open"` fills at the next session's official open x (1 + half-spread) for a buy, x (1 - half-spread) for a sell;
-`"at": "close"` at the next session's official close the same way. A session executes open exits, open entries, close
-exits, close entries, in that order. A lot is never sold in the session it was bought (a lot bought at the close may
-sell at the next open). Sells pay the SEC and TAF fees; there is no commission. An entry is sized by the House
-(`league/equity/sizing.py`): your share of the sleeve, capped by the instrument's cap, the sleeve's cash, the House's
-cash and the shared loss budget; under $10 it is skipped and said so in `ctx.rejects`.
+`"at": "close"` at the next session's official close the same way. Half-spreads: 1 bp SPY QQQ IWM DIA, 3 bp the other
+ETFs and stocks, 5 bp TLT and GLD. A session executes open exits, open entries, close exits, close entries, in that
+order. Sells pay the SEC and FINRA TAF fees (each rounded up to the cent); there is no commission.
+
+An entry is sized by the House (`league/equity/sizing.py`, the same function in the Gym and live): your share of the
+sleeve, capped by the instrument's cap, the same share of your sleeve, your sleeve's cash, the House's cash and (live)
+the shared loss budget; shares are floored to 6 decimals; under $10 it is skipped. Whatever is refused is said in the
+next `ctx.rejects`: a buy of a symbol outside your NEEDS, a sell of a lot that is not open, a sell of a lot bought in
+the same session, a cancel, an entry sized to nothing, a session without an official price.
 
 ## The House's exit rules (the same in the Gym)
 
-A lot held `max_hold_sessions` sessions exits at the next open. Two sessions of failed decides in a row exit all your
-lots at the next open. A program demoted or retired has its lots exit at the next open.
+- A lot is never sold in the session it was bought (a lot bought at the close may sell at the next open).
+- A lot whose `held_sessions` at a decision close has reached `max_hold_sessions` exits at the next open (reason
+  "max_hold").
+- Two sessions of failed decides in a row (an exception, a timeout, a disqualified program) exit all your lots at the
+  next open (reason "house").
+- A program demoted or retired has its lots exit at the next open (live).
+
+An exit you asked for in the same phase goes first (its reason is "program"). An exit without an official price
+waits for the next session.
+
+## Dividends and splits
+
+You see prices as of t only. Your lots hold shares as traded: on an ex-dividend day the dividend is credited to your
+cash for every lot you held at the previous close (`ctx.closed[...]["net"]` includes it); on a split day the lot's
+shares and entry price are scaled by the split. In the Gym both are read from the vendor's two series (the step of
+the adjusted-to-raw price ratio); live, from the venue's activities.
