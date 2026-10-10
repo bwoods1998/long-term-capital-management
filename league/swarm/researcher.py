@@ -4093,8 +4093,13 @@ class Researcher:
             from .architect import lesson_view  # D2a: no sentence about Validation, the holdout or 2025 (Sept 29, 2026)
 
             try:  # THE LEARNING GAME's quarantine (exactly the store's read with the game off); a failure shows nothing
-                rows = game.visible_graveyard(self.store, str(args.get("query") or ""), limit=5,
+                # THE SEAL OF THE EQUITY LANES (release E2, A9 D3; league/swarm/elane_seal.py): no equity-lane row.
+                from . import elane_seal
+
+                sealed = elane_seal.equity_ids(self.store)
+                rows = game.visible_graveyard(self.store, str(args.get("query") or ""), limit=5 + len(sealed),
                                               settings=getattr(self, "settings", None))
+                rows = [r for r in rows if str(r.get("family")) not in sealed][:5]
             except Exception:  # noqa: BLE001 - fail closed: never the unfiltered read
                 rows = []
             lessons = [{"family": r["family"], "mechanism": r["mechanism"][:200], "structure": r["structure"],
