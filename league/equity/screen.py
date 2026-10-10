@@ -8,8 +8,8 @@ the integrator copies VERBATIM from the captain's scratch and pins), whose sha25
 policy.json carries in `elane.screens.<lane>` (a test holds the sha to the file; docs/benchmarks/ never reaches the
 House box). A screen with no pinned receipt refuses every program (`pinned_receipt` -> None; `verdict` raises
 `ScreenRefused`; `load_receipt` raises it on a sha that is not the pinned one, or on a receipt that is malformed or
-states another pre-check). A later receipt (equity_screen_2.json, a follow-up study) would land as a new file and a
-settings switch, never by editing receipt 1.
+states another pre-check). Receipt 2 (equity_screen_2.json, the follow-up study sscreen2-1010) landed as a new file and
+a new screen beside this one, S2 (amendment A11, below), never by editing receipt 1.
 
 TODO (A11, the captain's amendment of Oct 10, 23:10-23:30Z): THE HOUSE SCREEN IS S2 (sscreen2-1010: the gate is the
 pre-check AND sum_H > 1e-12 AND t_H >= c_H,used = max(c_H_floor, c_pF1 + c_H_margin), c_R = 0, c_pF1 by exact enumeration
@@ -84,6 +84,28 @@ receipt permits it, the first try FAILED its pre-check (no look spent), and the 
 recorded at the first try; SAME LINEAGE (`same_lineage`): Train daily returns correlating >= 0.7 (on common sessions)
 with a program already looked at, or the same template. Look and Validation outcomes of share programs are never fed
 back to generators or the diagnostician (the swarm's rule).
+
+S2, THE SHARE SCREEN OF AMENDMENT A11 (sscreen2-1010 as adopted with its review's fixes; `floor_s2`, `look_s2`,
+`verdict_s2`, `beside_line_s2`), BESIDE S1, never a settings switch inside it. The pinned block's `screen` (or `name`)
+picks the screen (`screen_of`), and the public entry points route on the receipt they are handed: `pinned_receipt`
+(an "S2" block gives a `ReceiptS2`), `load_receipt(..., screen=)`, `floor(..., receipt=)`, `verdict`, `beside_line`.
+Receipt 1 (`Receipt`) runs S1 exactly as above; receipt 2 (`ReceiptS2`, `RECEIPT_PATH_S2`) runs S2:
+- unchanged from S1: the series and their accounting (with the A2 deviation), the pre-check, the S1-X label (c_X; its
+  FP read from an S1 floor's "X" curve when one is given, else "unmeasured"), the lineage and the no-feedback rule;
+- the look: pre-check AND sum_H r > 1e-12 AND t_H >= c_H,used. c_R = 0: the pooled t is reported, never a bar;
+- c_H,used = max(c_H_floor, c_pF1 + c_H_margin) in integer grid steps (k = 100 c), the floor and the margin read from
+  the receipt at run time; k_used > 500 makes the program INELIGIBLE;
+- c_pF1 (`floor_s2`): the largest, over the program's eligible cells (IND22-NO: its 2022-24 pool of >= 550 sessions;
+  IND1622-NO: its 2016-19 and 2022-24 pools of >= 251 each; L 194 and 251), of each cell's smallest k on 0..500 with
+  HO[k] x den <= num x T (fp_cap as an exact fraction). A world is V (250) and H (L) consecutive sessions, each
+  circular inside one pool piece, never sharing a session, every valid (V piece, V start, H piece, H start) equally
+  likely; the rates are counted EXACTLY over all of them (no seeds, no world count). Nulls per role,
+  inclusion-weighted: N0 x = r - w kappa_role (the FP null), N1 x = r - w (kappa_role - m_role) (drift kept). The
+  program's own FP (the gate under N0), holdout-only rate and drift-kept rate at c_H,used, each the largest over its
+  cells, are stated beside every live trade (computed on the House, never committed);
+- the windows: V calendar 2025's 250 sessions; H 194..251 sessions inside 2026-01-02 .. min(`config.LOOK_CAP`,
+  `S2_LOOK_CAP`), A12's cap 2026-10-09: exactly the 194 sessions the receipt is calibrated on; later days are forward
+  days only.
 
 DEVIATION (stated beside every verdict): the A2 close-fill legs above (the pre-registration knew open fills only).
 
@@ -220,12 +242,19 @@ def _flags(value: Any) -> dict[str, tuple[str, ...]] | None:
     return out
 
 
-def pinned_receipt(block: Mapping[str, Any] | None) -> Receipt | None:
-    """The receipt a lane's screen block pins (the REPOSITORY's policy.json `elane.screens.<lane>`, never swarm.json):
-    None unless it carries a 64-hex `receipt_sha256`, finite `c_R` and `c_X` in [0, 5], `fp_cap` in (0, 1) and the
-    beside template with every placeholder (`BESIDE_FIELDS`). A `name` other than "S1", an `owner_wall` or `r4` that is
-    present but malformed also refuse (None): a pin is read whole or not at all."""
+def pinned_receipt(block: Mapping[str, Any] | None) -> Receipt | ReceiptS2 | None:
+    """The receipt a lane's screen block pins (the REPOSITORY's policy.json `elane.screens.<lane>`, never swarm.json),
+    ROUTED by the block's screen (`screen_of`: its `screen` or `name`, A11): an "S2" block is `pinned_receipt_s2`'s (a
+    `ReceiptS2`); an "S1" block (or one naming neither) is receipt 1's: None unless it carries a 64-hex
+    `receipt_sha256`, finite `c_R` and `c_X` in [0, 5], `fp_cap` in (0, 1) and the beside template with every
+    placeholder (`BESIDE_FIELDS`). A block naming another screen, an `owner_wall` or `r4` that is present but malformed
+    also refuse (None): a pin is read whole or not at all."""
     if not isinstance(block, Mapping):
+        return None
+    which = screen_of(block)
+    if which == SCREEN_S2:
+        return pinned_receipt_s2(block)
+    if which != SCREEN:
         return None
     if block.get("name", SCREEN) != SCREEN:
         return None
@@ -256,11 +285,17 @@ def pinned_receipt(block: Mapping[str, Any] | None) -> Receipt | None:
                    fp=dict(fp) if isinstance(fp, Mapping) else {})
 
 
-def load_receipt(path: str | Path, *, pinned_sha256: str) -> Receipt:
+def load_receipt(path: str | Path, *, pinned_sha256: str, screen: str = SCREEN) -> Receipt | ReceiptS2:
     """Read a receipt file and check its sha256 against the pinned one (ScreenRefused on a mismatch or a malformed
-    file): CI's and the tests' reader (a fake receipt under league/tests/fixtures only). Malformed: not JSON, a key of
+    file): CI's and the tests' reader (a fake receipt under league/tests/fixtures only). ROUTED by `screen`, the pinned
+    block's (`screen_of`): "S2" reads receipt 2 (`load_receipt_s2`); "S1" (the default) reads receipt 1 and refuses
+    receipt 2 (it lacks receipt 1's keys); another screen refuses. Receipt 1 malformed: not JSON, a key of
     `RECEIPT_KEYS` missing, `R3_retry_permitted` not a bool, a pre-check other than this module's (`rt_min` 20,
     `id_min` 120) or a lineage with more than one holdout look, or figures `pinned_receipt` refuses."""
+    if screen == SCREEN_S2:
+        return load_receipt_s2(path, pinned_sha256=pinned_sha256)
+    if screen != SCREEN:
+        raise ScreenRefused(f"the share screen refuses: no screen {screen!r}")
     if not isinstance(pinned_sha256, str) or not _HEX64.fullmatch(pinned_sha256):
         raise ScreenRefused("the share screen refuses: no receipt sha256 is pinned")
     try:
@@ -633,8 +668,13 @@ def _trimmed(counts: np.ndarray) -> list[int]:
     return [int(x) for x in counts[:int(nz[-1]) + 1]] if len(nz) else []
 
 
-def floor(segments: Sequence[Series | None], *, fp_cap: float) -> dict[str, Any]:
-    """Step 0 from the program's Train-era series (one `Series` per `config.TRAIN_ERA_SEGMENTS` entry, on true
+def floor(segments: Sequence[Series | None], *, fp_cap: float | None = None,
+          receipt: Receipt | ReceiptS2 | None = None) -> dict[str, Any]:
+    """The program floor, ROUTED by `receipt` (A11): a `ReceiptS2` runs `floor_s2`; a `Receipt` runs S1's floor at its
+    fp_cap (an `fp_cap` given beside it must be the same); `fp_cap` alone runs S1's (E1's call). ScreenRefused with
+    neither, or with a receipt that is neither.
+
+    S1's step 0 from the program's Train-era series (one `Series` per `config.TRAIN_ERA_SEGMENTS` entry, on true
     history; a None or empty entry is a span the program has no history in): {screen, eligible, why, c_p, c_H, fp_cap,
     sets {"IND22": {pool, c_p, c_H, by_L {"194": {c_p, c_H}, "251": ...}}, "IND1622": {...}}, own_fp (at c_p),
     drift_kept (N1 at c_p), worlds, seeds {set: {L: seed}}, curves {set: {L: {"R_N0", "R_N1", "X": pass counts on the
@@ -642,6 +682,14 @@ def floor(segments: Sequence[Series | None], *, fp_cap: float) -> dict[str, Any]
     leaves the Train-era spans makes the program ineligible (a 2020, 2021, 2025 or 2026 session never enters a world).
     `own_fp` and `drift_kept` are the largest over the floor's cells (its sets and both L); `verdict` reads the curves
     at c_used."""
+    if isinstance(receipt, ReceiptS2):
+        return floor_s2(segments, receipt=receipt)
+    if isinstance(receipt, Receipt):
+        if fp_cap is not None and _cap(fp_cap) != _cap(receipt.fp_cap):
+            raise ValueError(f"fp_cap {fp_cap!r} is not the receipt's {receipt.fp_cap}")
+        fp_cap = receipt.fp_cap
+    elif receipt is not None or fp_cap is None:
+        raise ScreenRefused("the share screen refuses: no receipt is pinned (a floor needs one)")
     cap = _cap(fp_cap)
     out: dict[str, Any] = {"screen": SCREEN, "eligible": False, "why": None, "c_p": None, "c_H": None,
                            "fp_cap": float(fp_cap), "sets": {}, "own_fp": None, "drift_kept": None, "worlds": WORLDS,
@@ -737,9 +785,11 @@ def fp_at(program_floor: Mapping[str, Any] | None, key: str, c: float) -> float 
 
 
 # ---------------------------------------------------------------------------------------------------- the verdict
-def _windows(v: Series, h: Series) -> dict[str, Any]:
+def _windows(v: Series, h: Series, *, cap: dt.date | None = None) -> dict[str, Any]:
     """The windows the receipt was calibrated for: V calendar 2025's `V_LENGTH` sessions, H inside [LOOK_FIRST,
-    LOOK_CAP] with 194..251 sessions (A9 D6). {ok, validation, holdout, why}."""
+    LOOK_CAP] with 194..251 sessions (A9 D6; `cap` an earlier last session, S2's A12 cap). {ok, validation, holdout,
+    why}."""
+    look_cap = config.LOOK_CAP if cap is None else cap
     v_first, v_last = config.WINDOWS["validation"]
     nv, nh = len(v.days), len(h.days)
     why = None
@@ -747,19 +797,24 @@ def _windows(v: Series, h: Series) -> dict[str, Any]:
                                       and int(np.max(v.days)) <= _ordinal(v_last))):
         why = f"the Validation series is not calendar 2025's {V_LENGTH} sessions ({nv})"
     elif not (H_LENGTHS[0] <= nh <= H_LENGTHS[-1]) or not (
-            _ordinal(config.LOOK_FIRST) <= int(np.min(h.days)) and int(np.max(h.days)) <= _ordinal(config.LOOK_CAP)):
+            _ordinal(config.LOOK_FIRST) <= int(np.min(h.days)) and int(np.max(h.days)) <= _ordinal(look_cap)):
         why = (f"the holdout is not {H_LENGTHS[0]}..{H_LENGTHS[-1]} sessions inside "
-               f"{config.LOOK_FIRST}..{config.LOOK_CAP} ({nh})")
+               f"{config.LOOK_FIRST}..{look_cap} ({nh})")
     return {"ok": why is None, "validation": nv, "holdout": nh, "why": why}
 
 
-def verdict(v: Series, h: Series, *, receipt: Receipt | None, program_floor: Mapping[str, Any]) -> dict[str, Any]:
-    """The whole S1 after the look: {screen "S1", passed (S1-R), why (the first failed condition), c_R, c_X, c_p, c_H,
+def verdict(v: Series, h: Series, *, receipt: Receipt | ReceiptS2 | None, program_floor: Mapping[str, Any],
+            s1_floor: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """ROUTED by `receipt` (A11): a `ReceiptS2` is `verdict_s2` (`s1_floor`, an S1 floor for S1-X's FP, is S2's only).
+
+    The whole S1 after the look: {screen "S1", passed (S1-R), why (the first failed condition), c_R, c_X, c_p, c_H,
     c_used, t, t_H, sum_h, n, precheck, look, windows, label (S1-X), own_fp (the program's FP at c_used), drift_kept
     (its N1 pass rate at c_used), fp_x (its S1-X FP at c_X), fp_cap, r4, deviations, receipt}. ScreenRefused when
     `receipt` is None; a floor that is not eligible, or was run at another fp_cap than the receipt's, fails the program
     (no look should have been spent: the swarm runs the floor before the look); so do windows outside the calibrated
     ones."""
+    if isinstance(receipt, ReceiptS2):
+        return verdict_s2(v, h, receipt=receipt, program_floor=program_floor, s1_floor=s1_floor)
     if receipt is None:
         raise ScreenRefused("the share screen refuses: no receipt is pinned")
     fl = program_floor if isinstance(program_floor, Mapping) else {}
@@ -805,10 +860,17 @@ def _c(x: Any) -> str:
     return "unmeasured" if v is None else f"{v:.2f}"
 
 
-def beside_line(result: Mapping[str, Any], receipt: Receipt) -> str:
+def beside_line(result: Mapping[str, Any], receipt: Receipt | ReceiptS2) -> str:
     """The receipt's `beside` template filled from a `verdict` (stated beside every live trade of the program), R4
     flags appended. Percentages at two decimals, thresholds at the grid's; a figure the verdict lacks reads
-    "unmeasured"."""
+    "unmeasured". ROUTED by `receipt` (A11): a `ReceiptS2` fills receipt 2's template (`beside_line_s2`); a verdict of
+    the other screen than the receipt's is a ValueError; no receipt refuses."""
+    if isinstance(receipt, ReceiptS2):
+        return beside_line_s2(result, receipt)
+    if not isinstance(receipt, Receipt):
+        raise ScreenRefused("the share screen refuses: no receipt is pinned")
+    if result.get("screen", SCREEN) != SCREEN:
+        raise ValueError(f"a {result.get('screen')} verdict beside receipt 1's line")
     lab = result.get("label")
     fill = {"c_used": _c(result.get("c_used")), "c_H": _c(result.get("c_H")), "own_fp": _pct(result.get("own_fp")),
             "n1": _pct(result.get("drift_kept")), "alpha|beta": lab if lab in ("alpha", "beta") else "unlabelled",
@@ -889,9 +951,518 @@ def r4_flags(receipt: Receipt | None, archetype: str | None = None) -> list[str]
     return [f"{a}: {f}" for a in sorted(receipt.r4) for f in receipt.r4[a]]
 
 
+# ===================================================================================== S2, the share screen of A11
+SCREEN_S2 = "S2"
+#: The screens a pinned block may name (`screen_of`).
+SCREENS = (SCREEN, SCREEN_S2)
+#: Receipt 2 (the integrator copies it verbatim; docs/benchmarks/ never reaches the House box).
+RECEIPT_PATH_S2 = "docs/benchmarks/equity_screen_2.json"
+#: S2's world sets: their `config.TRAIN_ERA_SEGMENTS` indices, in piece order (the study's IND-NO sets).
+S2_SETS = {"IND22-NO": (1,), "IND1622-NO": (0, 1)}
+#: The pool lengths (sessions, after `POOL_SKIP`) that make a set eligible.
+S2_MIN = {"IND22-NO": {1: 550}, "IND1622-NO": {0: 251, 1: 251}}
+#: A12: an S2 look's holdout ends at this session at the latest (with `config.LOOK_CAP`, whichever is earlier): the
+#: 194 sessions 2026-01-02..2026-10-09 the receipt is calibrated on; later sessions are forward days only.
+S2_LOOK_CAP = dt.date(2026, 10, 9)
+#: Receipt 2's keys (the fake fixture carries the same).
+RECEIPT_KEYS_S2 = ("name", "screen", "study", "rule", "fp_cap", "owner_wall", "c_R", "c_H_floor", "c_H_margin", "c_X",
+                   "precheck", "look", "floor", "windows", "lineage", "R3_retry_permitted", "R4_flags", "fp_zero_edge",
+                   "power", "stated_beside_every_live_trade", "note", "sha256")
+#: The placeholders of receipt 2's beside-every-trade template, each filled by `beside_line_s2`.
+BESIDE_FIELDS_S2 = ("c_H", "own_fp", "honly", "n1", "alpha|beta", "fpx")
+#: The floor's method (receipt 2's `floor.method`): an exact enumeration, no seeds and no world count.
+S2_METHOD = "exact"
+NO_SET_WHY = ("no eligible floor set (IND22-NO needs a 2022-24 pool >= 550; IND1622-NO needs 2016-19 and 2022-24 pools "
+              ">= 251 each)")
+_K_MAX = len(GRID) - 1                          # 500: c = 5.00
+_ISO_DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+@dataclass(frozen=True)
+class ReceiptS2:
+    """Receipt 2 as policy.json pins it (`elane.screens.<lane>` with `screen` / `name` "S2"): `receipt_sha256` (the
+    file's bytes, 64 hex), `c_R` (always 0.0: no pooled-t bar), `c_H_floor` and `c_H_margin` (on the 0.01 grid), `c_X`
+    (S1-X's label threshold), `fp_cap`, `owner_wall` (None when the block names none), `retry` (`R3_retry_permitted`),
+    `r4` (`R4_flags`), `beside` (`stated_beside_every_live_trade`, a template with {c_H}, {own_fp}, {honly}, {n1},
+    {alpha|beta}, {fpx}) and `fp` (the receipt's `fp_zero_edge` and `power`, as `load_receipt_s2` reads them)."""
+
+    receipt_sha256: str
+    c_R: float
+    c_H_floor: float
+    c_H_margin: float
+    c_X: float
+    fp_cap: float
+    owner_wall: float | None
+    retry: bool
+    r4: Mapping[str, tuple[str, ...]]
+    beside: str
+    fp: Mapping[str, Any]
+
+
+class _Ineligible(ValueError):
+    """S2: the program has no floor (it cannot be looked at under S2)."""
+
+
+def screen_of(pin: Any) -> str | None:
+    """Which screen a pin runs: "S1" for a `Receipt`, "S2" for a `ReceiptS2`; for a policy block, its `screen` or its
+    `name` ("S1" when it names neither, as receipt 1's blocks may be written). None for anything else: a block naming
+    another screen, or whose `screen` and `name` disagree."""
+    if isinstance(pin, ReceiptS2):
+        return SCREEN_S2
+    if isinstance(pin, Receipt):
+        return SCREEN
+    if not isinstance(pin, Mapping):
+        return None
+    named = [pin[key] for key in ("screen", "name") if key in pin]
+    if not named:
+        return SCREEN
+    if not all(isinstance(x, str) for x in named) or len(set(named)) != 1:
+        return None
+    return named[0] if named[0] in SCREENS else None
+
+
+def receipt_path(pin: Any) -> str | None:
+    """The repository path of the receipt file a pin (a receipt or a policy block) names, None for no screen."""
+    return {SCREEN: RECEIPT_PATH, SCREEN_S2: RECEIPT_PATH_S2}.get(screen_of(pin) or "")
+
+
+def _on_grid(value: Any) -> float | None:
+    """A number on the 0.01 grid in [0, 5], else None."""
+    v = _number(value, 0.0, C_GRID_MAX)
+    if v is None or abs(v * 100.0 - round(v * 100.0)) > 1e-9:
+        return None
+    return v
+
+
+def _k(c: float) -> int:
+    """A grid threshold as its integer step k = 100 c."""
+    return int(round(float(c) * 100.0))
+
+
+def pinned_receipt_s2(block: Mapping[str, Any] | None) -> ReceiptS2 | None:
+    """The receipt 2 a lane's screen block pins (the REPOSITORY's policy.json `elane.screens.<lane>`, never swarm.json):
+    None unless the block names S2 (`screen` or `name`), carries a 64-hex `receipt_sha256`, `c_R` exactly 0,
+    `c_H_floor` and `c_H_margin` on the 0.01 grid in [0, 5], `c_X` in [0, 5], `fp_cap` in (0, 1), `owner_wall` absent or
+    in (0, 1], the beside template with every `BESIDE_FIELDS_S2` placeholder, and a well-formed `r4`."""
+    if not isinstance(block, Mapping) or screen_of(block) != SCREEN_S2:
+        return None
+    sha = block.get("receipt_sha256")
+    if not isinstance(sha, str) or not _HEX64.fullmatch(sha):
+        return None
+    c_R = _number(block.get("c_R"), 0.0, C_GRID_MAX)
+    c_floor, c_margin = _on_grid(block.get("c_H_floor")), _on_grid(block.get("c_H_margin"))
+    c_X = _number(block.get("c_X"), 0.0, C_GRID_MAX)
+    fp_cap = _number(block.get("fp_cap"), 0.0, 1.0)
+    if c_R != 0.0 or c_floor is None or c_margin is None or c_X is None or fp_cap is None or not 0.0 < fp_cap < 1.0:
+        return None
+    wall = block.get("owner_wall")
+    owner_wall = None
+    if wall is not None:
+        owner_wall = _number(wall, 0.0, 1.0)
+        if owner_wall is None or owner_wall <= 0.0:
+            return None
+    beside = block.get("beside")
+    if not isinstance(beside, str) or not all("{" + f + "}" in beside for f in BESIDE_FIELDS_S2):
+        return None
+    raw_r4 = block.get("r4")
+    r4 = _flags({} if raw_r4 is None else raw_r4)
+    if r4 is None:
+        return None
+    fp = block.get("fp")
+    return ReceiptS2(receipt_sha256=sha, c_R=0.0, c_H_floor=c_floor, c_H_margin=c_margin, c_X=c_X, fp_cap=fp_cap,
+                     owner_wall=owner_wall, retry=block.get("retry") is True, r4=r4, beside=beside,
+                     fp=dict(fp) if isinstance(fp, Mapping) else {})
+
+
+def _read_receipt(path: str | Path, pinned_sha256: str, who: str) -> tuple[Mapping[str, Any], str]:
+    """A receipt file's JSON object and sha256, refused (ScreenRefused) unless its bytes are the pinned ones."""
+    if not isinstance(pinned_sha256, str) or not _HEX64.fullmatch(pinned_sha256):
+        raise ScreenRefused(f"{who} refuses: no receipt sha256 is pinned")
+    try:
+        raw = Path(path).read_bytes()
+    except OSError as exc:
+        raise ScreenRefused(f"{who} refuses: the receipt {path} cannot be read ({exc})") from exc
+    sha = hashlib.sha256(raw).hexdigest()
+    if sha != pinned_sha256:
+        raise ScreenRefused(f"{who} refuses: the receipt's sha256 {sha[:12]} is not the pinned {pinned_sha256[:12]}")
+    try:
+        doc = json.loads(raw)
+    except ValueError as exc:
+        raise ScreenRefused(f"{who} refuses: the receipt is not JSON ({exc})") from exc
+    if not isinstance(doc, Mapping):
+        raise ScreenRefused(f"{who} refuses: the receipt is not an object")
+    return doc, sha
+
+
+def load_receipt_s2(path: str | Path, *, pinned_sha256: str) -> ReceiptS2:
+    """Read receipt 2 and check its sha256 against the pinned one: CI's and the tests' reader. ScreenRefused on a sha
+    mismatch (or none pinned), a file that cannot be read or is not a JSON object, a key of `RECEIPT_KEYS_S2` missing,
+    `screen` not "S2", `R3_retry_permitted` not a bool, a pre-check other than this code's (`rt_min` 20, `id_min` 120),
+    a lineage other than one look and two Validation tries (one try plus R3's retry), a `floor.method` other than
+    "exact", a holdout window other than `config.LOOK_FIRST` .. `S2_LOOK_CAP` (A12), or figures `pinned_receipt_s2`
+    refuses."""
+    who = "the share screen S2"
+    doc, sha = _read_receipt(path, pinned_sha256, who)
+    missing = [k for k in RECEIPT_KEYS_S2 if k not in doc]
+    if missing:
+        raise ScreenRefused(f"{who} refuses: the receipt lacks {', '.join(missing)}")
+    if doc["screen"] != SCREEN_S2:
+        raise ScreenRefused(f"{who} refuses: the receipt is for screen {doc['screen']!r}, not S2")
+    if not isinstance(doc["R3_retry_permitted"], bool):
+        raise ScreenRefused(f"{who} refuses: the receipt's R3_retry_permitted is not a bool")
+    pre = doc["precheck"] if isinstance(doc["precheck"], Mapping) else {}
+    lineage = doc["lineage"] if isinstance(doc["lineage"], Mapping) else {}
+    fl = doc["floor"] if isinstance(doc["floor"], Mapping) else {}
+    windows = doc["windows"] if isinstance(doc["windows"], Mapping) else {}
+    if pre.get("rt_min") != ACTIVITY_ROUND_TRIPS or pre.get("id_min") != ACTIVITY_INVESTED_DAYS:
+        raise ScreenRefused(f"{who} refuses: the receipt states another pre-check than this code")
+    if lineage.get("holdout_looks") != LOOKS_PER_LINEAGE or lineage.get("validation_tries") != VALIDATION_TRIES + 1:
+        raise ScreenRefused(f"{who} refuses: the receipt states another lineage than this code")
+    if fl.get("method") != S2_METHOD:
+        raise ScreenRefused(f"{who} refuses: the receipt's floor is not the exact enumeration")
+    days = _ISO_DAY.findall(str(windows.get("holdout") or ""))
+    if days[:2] != [config.LOOK_FIRST.isoformat(), S2_LOOK_CAP.isoformat()]:
+        raise ScreenRefused(f"{who} refuses: the receipt's holdout is not {config.LOOK_FIRST}..{S2_LOOK_CAP} (A12)")
+    receipt = pinned_receipt_s2({
+        "screen": SCREEN_S2, "receipt_sha256": sha, "c_R": doc["c_R"], "c_H_floor": doc["c_H_floor"],
+        "c_H_margin": doc["c_H_margin"], "c_X": doc["c_X"], "fp_cap": doc["fp_cap"], "owner_wall": doc["owner_wall"],
+        "retry": doc["R3_retry_permitted"], "r4": doc["R4_flags"], "beside": doc["stated_beside_every_live_trade"],
+        "fp": {k: doc[k] for k in ("fp_zero_edge", "power")}})
+    if receipt is None:
+        raise ScreenRefused(f"{who} refuses: the receipt's figures are malformed")
+    return receipt
+
+
+# ------------------------------------------------------------------------------------------ S2's floor, exactly
+def _pools_s2(segments: Sequence[Series | None]) -> dict[int, dict[str, np.ndarray]]:
+    """The program's pools by `config.TRAIN_ERA_SEGMENTS` index: each series placed by its days (as `floor`), from
+    `POOL_SKIP` to its end. _Ineligible for a series that leaves the spans or two series for one span; ValueError for
+    arrays of unequal length."""
+    placed: dict[int, Series] = {}
+    for s in segments:
+        if s is None or len(s.days) == 0:
+            continue
+        if len({len(s.days), len(s.r), len(s.w), len(s.b), len(s.exits), len(s.invested)}) != 1:
+            raise ValueError("a series whose arrays differ in length")
+        k = _train_segment(np.asarray(s.days))
+        if k is None:
+            raise _Ineligible("a series leaves the Train-era spans (2016-01-04..2019-12-31, 2022-01-03..2024-12-31)")
+        if k in placed:
+            raise _Ineligible("two series for one Train-era span")
+        placed[k] = s
+    return {k: {"r": np.asarray(s.r, dtype=np.float64)[POOL_SKIP:], "w": np.asarray(s.w, dtype=np.float64)[POOL_SKIP:],
+                "b": np.asarray(s.b, dtype=np.float64)[POOL_SKIP:],
+                "exits": np.asarray(s.exits, dtype=np.int64)[POOL_SKIP:],
+                "invested": np.asarray(s.invested, dtype=bool)[POOL_SKIP:]} for k, s in placed.items()}
+
+
+def _sets_s2(pools: Mapping[int, Mapping[str, np.ndarray]]) -> dict[str, list[Mapping[str, np.ndarray]]]:
+    """The eligible world sets, {name: [pools in piece order]} (`S2_SETS`, `S2_MIN`)."""
+    n = {k: len(p["r"]) for k, p in pools.items()}
+    return {name: [pools[k] for k in members] for name, members in S2_SETS.items()
+            if all(n.get(k, 0) >= S2_MIN[name][k] for k in members)}
+
+
+def _tuple_counts(lens: Sequence[int], L: int, lv: int = V_LENGTH) -> tuple[np.ndarray, np.ndarray, int]:
+    """Per piece: U = the valid H starts per V start, W = the valid V starts per H start; T = the valid tuples. In one
+    piece of length n, H start d is valid for V start b iff (d - b) mod n lies in [lv, n - L]."""
+    lens = np.asarray(lens, dtype=np.int64)
+    NV = np.where(lens >= lv, lens, 0)
+    NH = np.where(lens >= L, lens, 0)
+    same = np.where((lens >= lv) & (lens >= L), np.maximum(0, lens - lv - L + 1), 0)
+    U = np.where(lens >= lv, NH.sum() - NH + same, 0)
+    W = np.where(lens >= L, NV.sum() - NV + same, 0)
+    return U, W, int((NV * U).sum())
+
+
+def _starts(n: int, length: int) -> np.ndarray:
+    """Every circular block start of a piece of n sessions: an (n, length) index array."""
+    d = np.arange(n)
+    return (d[:, None] + np.arange(length)[None, :]) % n
+
+
+def _role_constants(pools: Sequence[Mapping[str, np.ndarray]], L: int, *, lv: int = V_LENGTH) -> dict[str, float]:
+    """kappa_V, kappa_H (inclusion-weighted sum r / sum w) and m_V, m_H (inclusion-weighted mean b): a session of piece
+    k lies in U_k lv V blocks and W_k L H blocks of the valid tuples. _Ineligible on a series that is not finite or on
+    no exposure."""
+    if not all(np.isfinite(p[key]).all() for p in pools for key in ("r", "w", "b")):
+        raise _Ineligible("the pool series are not finite")
+    lens = [len(p["r"]) for p in pools]
+    U, W, _ = _tuple_counts(lens, L, lv)
+    sr = np.array([float(np.sum(p["r"])) for p in pools])
+    sw = np.array([float(np.sum(p["w"])) for p in pools])
+    sb = np.array([float(np.sum(p["b"])) for p in pools])
+    n = np.array(lens, dtype=float)
+    if not (U * sw).sum() > 0 or not (W * sw).sum() > 0:
+        raise _Ineligible("no exposure in the pool (kappa is undefined)")
+    out = {"kappa_V": float((U * sr).sum() / (U * sw).sum()), "kappa_H": float((W * sr).sum() / (W * sw).sum()),
+           "m_V": float((U * sb).sum() / (U * n).sum()), "m_H": float((W * sb).sum() / (W * n).sum())}
+    if not all(math.isfinite(v) for v in out.values()):
+        raise _Ineligible("the pool series are not finite")
+    return out
+
+
+def _grid_index(t: np.ndarray, ok: np.ndarray) -> np.ndarray:
+    """The largest k with k / 100 <= t where ok, else -1: (ok and t >= k / 100) <=> index >= k."""
+    return np.searchsorted(GRID, np.where(ok, t, -np.inf), side="right") - 1
+
+
+def _curve(ix: np.ndarray, weights: Any) -> np.ndarray:
+    """The sum of the integer weights of the entries with index >= k, for k = 0..500 (exact, int64)."""
+    m = ix >= 0
+    acc = np.zeros(len(GRID), dtype=np.int64)
+    np.add.at(acc, ix[m], np.asarray(weights, dtype=np.int64)[m])
+    return acc[::-1].cumsum()[::-1]
+
+
+def _exact_cell(pools: Sequence[Mapping[str, np.ndarray]], L: int, *, null: str = "N0", edge: float = 0.0,
+                lv: int = V_LENGTH, act: tuple[int, int] = (ACTIVITY_ROUND_TRIPS, ACTIVITY_INVESTED_DAYS)
+                ) -> dict[str, Any]:
+    """One (world set, L) cell's exact counts over its valid tuples, for k = 0..500 (c = k / 100):
+      holdout_only[k] = #(sum_H > 1e-12 AND sd_H >= 1e-12 AND t_H >= c)                    (F1's rate x T; no pre-check)
+      gate[k]         = #(pre-check(V) AND sum_H > 1e-12 AND sd_H >= 1e-12 AND t_H >= c)   (the S2 gate x T)
+    on the null `null` ("N0": x = r - w kappa_role; "N1": x = r - w (kappa_role - m_role)), plus w edge / 252 (`edge`,
+    a per-invested-dollar edge a year; tests only). `lv` and `act` (round trips, invested days) shrink V for the
+    brute-force tests. -> {holdout_only, gate, T, consts}. _Ineligible as `_role_constants`, or with no valid tuple."""
+    rc = _role_constants(pools, L, lv=lv)
+    if null == "N0":
+        g_v, g_h = rc["kappa_V"], rc["kappa_H"]
+    elif null == "N1":
+        g_v, g_h = rc["kappa_V"] - rc["m_V"], rc["kappa_H"] - rc["m_H"]
+    else:
+        raise ValueError(f"null {null!r} is neither 'N0' nor 'N1'")
+    g_v, g_h = g_v - edge / 252.0, g_h - edge / 252.0
+    lens = np.array([len(p["r"]) for p in pools], dtype=np.int64)
+    U, W, T = _tuple_counts(lens, L, lv)
+    if T <= 0:
+        raise _Ineligible(f"no valid (V, H) tuple at L {L}")
+    pre = []                                    # the pre-check of every V start, per piece
+    for p, n in zip(pools, lens):
+        if n < lv:
+            pre.append(np.zeros(0, dtype=np.int64))
+            continue
+        ix = _starts(int(n), lv)
+        x = np.asarray(p["r"], float)[ix] - np.asarray(p["w"], float)[ix] * g_v
+        active = (np.asarray(p["exits"])[ix].sum(1) >= act[0]) | (np.asarray(p["invested"])[ix].sum(1) >= act[1])
+        pre.append((active & (x.sum(1) > ZERO)).astype(np.int64))
+    PV = np.array([int(v.sum()) for v in pre], dtype=np.int64)
+    ho = np.zeros(len(GRID), dtype=np.int64)
+    gate = np.zeros(len(GRID), dtype=np.int64)
+    for j, (p, n) in enumerate(zip(pools, lens)):
+        n = int(n)
+        if n < L:
+            continue
+        ix = _starts(n, L)
+        x = np.asarray(p["r"], float)[ix] - np.asarray(p["w"], float)[ix] * g_h
+        s = x.sum(1)
+        sd = x.std(1, ddof=1)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            t = x.mean(1) / sd * math.sqrt(L)
+        k = _grid_index(t, (s > ZERO) & (sd >= ZERO) & np.isfinite(t))
+        # The pre-check-passing V starts compatible with each H start d: every V start of the other pieces, plus the
+        # V starts b of this piece with (d - b) mod n in [lv, n - L] (one circular window sum over the doubled array).
+        a = np.full(n, int(PV.sum() - PV[j]), dtype=np.int64)
+        if n >= lv and n - lv - L + 1 > 0:
+            c = np.concatenate([[0], np.cumsum(np.concatenate([pre[j], pre[j]]))])
+            d = np.arange(n)
+            a += c[d + n - lv + 1] - c[d + L]
+        ho += _curve(k, np.full(n, int(W[j]), dtype=np.int64))
+        gate += _curve(k, a)
+    return {"holdout_only": ho, "gate": gate, "T": T, "consts": rc}
+
+
+def _first_k(counts: np.ndarray, T: int, cap: Fraction) -> int | None:
+    """The smallest grid step k with counts[k] / T <= cap, in exact integers; None when none on 0..500."""
+    ok = counts * cap.denominator <= cap.numerator * T
+    return int(np.argmax(ok)) if ok.any() else None
+
+
+def floor_s2(segments: Sequence[Series | None], *, receipt: ReceiptS2) -> dict[str, Any]:
+    """S2's program floor (HOUSE-RULE sections 3-7) from the program's Train-era series (one `Series` per
+    `config.TRAIN_ERA_SEGMENTS` entry, on true history; None or empty where it has none). Deterministic: an exact
+    enumeration, no seeds. -> {screen "S2", eligible, why, method "exact", c_pF1, c_H_used, k_F1, k_used, fp_cap,
+    c_H_floor, c_H_margin (as run: `verdict_s2` checks them against the receipt), sets {name: {pools [lengths], by_L
+    {"194" | "251": {k_F1, T}}}}, own_fp, holdout_only, drift_kept (each the largest over the cells at k_used), cells
+    {"<set>|<L>": {T, HO_used, G_N0_used, G_N1_used}}}. Computed on the House, never committed. INELIGIBLE (eligible
+    False, `why`): no eligible set, a cell with no valid tuple or no c <= 5.00, c_H,used above 5.00, zero exposure, a
+    series that is not finite, a series outside the Train-era spans or two series for one span. ScreenRefused without
+    an S2 receipt; ValueError on arrays of unequal length."""
+    if not isinstance(receipt, ReceiptS2):
+        raise ScreenRefused("the share screen S2 refuses: no S2 receipt is pinned")
+    cap = _cap(receipt.fp_cap)
+    k_floor, k_margin = _k(receipt.c_H_floor), _k(receipt.c_H_margin)
+    out: dict[str, Any] = {"screen": SCREEN_S2, "eligible": False, "why": None, "method": S2_METHOD, "c_pF1": None,
+                           "c_H_used": None, "k_F1": None, "k_used": None, "fp_cap": receipt.fp_cap,
+                           "c_H_floor": receipt.c_H_floor, "c_H_margin": receipt.c_H_margin, "sets": {},
+                           "own_fp": None, "holdout_only": None, "drift_kept": None, "cells": {}}
+    try:
+        sets = _sets_s2(_pools_s2(segments))
+        if not sets:
+            raise _Ineligible(NO_SET_WHY)
+        found: dict[str, tuple[Sequence[Mapping[str, np.ndarray]], int, dict[str, Any]]] = {}
+        for name, pools in sets.items():
+            row: dict[str, Any] = {"pools": [len(p["r"]) for p in pools], "by_L": {}}
+            out["sets"][name] = row
+            for L in H_LENGTHS:
+                try:
+                    e0 = _exact_cell(pools, L, null="N0")
+                except _Ineligible as exc:
+                    raise _Ineligible(f"{name} L {L}: {exc}") from None
+                k = _first_k(e0["holdout_only"], e0["T"], cap)
+                row["by_L"][str(L)] = {"k_F1": k, "T": e0["T"]}
+                if k is None:
+                    raise _Ineligible(f"{name} L {L}: no c <= {C_GRID_MAX:.2f} holds the holdout-only rate at "
+                                      f"{float(cap) * 100:g}%")
+                found[f"{name}|{L}"] = (pools, L, e0)
+        k_f1 = max(row["k_F1"] for set_row in out["sets"].values() for row in set_row["by_L"].values())
+        k_used = max(k_floor, k_f1 + k_margin)
+        out.update(k_F1=k_f1, c_pF1=k_f1 / 100)
+        if k_used > _K_MAX:
+            raise _Ineligible(f"c_H,used {k_used / 100:.2f} is above {C_GRID_MAX:.2f}")
+        for cell, (pools, L, e0) in found.items():
+            e1 = _exact_cell(pools, L, null="N1")
+            out["cells"][cell] = {"T": int(e0["T"]), "HO_used": int(e0["holdout_only"][k_used]),
+                                  "G_N0_used": int(e0["gate"][k_used]), "G_N1_used": int(e1["gate"][k_used])}
+        rows = out["cells"].values()
+        out.update(eligible=True, k_used=k_used, c_H_used=k_used / 100,
+                   own_fp=max(r["G_N0_used"] / r["T"] for r in rows),
+                   holdout_only=max(r["HO_used"] / r["T"] for r in rows),
+                   drift_kept=max(r["G_N1_used"] / r["T"] for r in rows))
+    except _Ineligible as exc:
+        out["why"] = str(exc)
+        out["cells"] = {}
+    return out
+
+
+def _floor_misfit_s2(program_floor: Mapping[str, Any], receipt: ReceiptS2) -> str | None:
+    """Why an S2 floor was not run by this receipt (None when it was): another screen or method, or another fp_cap,
+    c_H_floor or c_H_margin than the receipt's. Eligibility is not judged here."""
+    fl = program_floor
+    if fl.get("screen") != SCREEN_S2:
+        return f"not an S2 floor ({fl.get('screen') or 'none'})"
+    if fl.get("method") != S2_METHOD:
+        return f"not an exact floor ({fl.get('method')!r})"
+    for key in ("fp_cap", "c_H_floor", "c_H_margin"):
+        ran = _number(fl.get(key), 0.0, C_GRID_MAX)
+        if ran is None or abs(ran - float(getattr(receipt, key))) > ZERO:
+            return f"run at {key} {fl.get(key)!r}, the receipt's is {getattr(receipt, key)}"
+    return None
+
+
+def floor_fits(program_floor: Any, receipt: Any) -> bool:
+    """Whether a (cached) floor was run by this receipt's screen and settings, eligible or not: an S1 floor at the
+    receipt's fp_cap for a `Receipt`; an exact S2 floor at the receipt's fp_cap, c_H_floor and c_H_margin for a
+    `ReceiptS2`. False for anything else (run the floor again)."""
+    if not isinstance(program_floor, Mapping) or "eligible" not in program_floor:
+        return False
+    if isinstance(receipt, ReceiptS2):
+        return _floor_misfit_s2(program_floor, receipt) is None
+    if isinstance(receipt, Receipt):
+        ran = _number(program_floor.get("fp_cap"), 0.0, 1.0)
+        return (program_floor.get("screen", SCREEN) == SCREEN and ran is not None
+                and abs(ran - receipt.fp_cap) <= ZERO)
+    return False
+
+
+# ------------------------------------------------------------------------------------------- S2's look and verdict
+def look_s2(v: Series, h: Series, *, c_H: float) -> dict[str, Any]:
+    """S2's look after the one holdout look: {passed, t_H, sum_h, t (the pooled t, reported, never a bar), n, c_H,
+    checks {precheck, sum_h, t_H}}: the pre-check on V (`precheck`), sum_H r > 1e-12, and t_H (mean / sd(ddof 1) x
+    sqrt(L), None when sd < 1e-12 or not finite) >= c_H. There is no c_R: the pooled t never gates."""
+    if isinstance(c_H, bool) or not isinstance(c_H, (int, float)) or not math.isfinite(float(c_H)):
+        raise ValueError(f"c_H must be a finite number: {c_H!r}")
+    pre = precheck(v)
+    rh = np.asarray(h.r, dtype=np.float64)
+    sum_h = float(rh.sum())
+    t_h = holdout_t(rh)
+    checks = {"precheck": bool(pre["passed"]), "sum_h": sum_h > ZERO, "t_H": t_h is not None and t_h >= float(c_H)}
+    return {"passed": all(checks.values()), "t_H": t_h, "sum_h": sum_h, "t": pooled_t(v.r, rh),
+            "n": len(v.r) + len(rh), "c_H": float(c_H), "checks": checks}
+
+
+def verdict_s2(v: Series, h: Series, *, receipt: ReceiptS2 | None, program_floor: Mapping[str, Any],
+               s1_floor: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """The whole S2 after the look: {screen "S2", passed, why (the first failed condition), c_R 0.0, c_pF1, c_H
+    (= c_H,used), t_H, sum_h, t (pooled, report only), n, precheck, look, windows, label (S1-X, unchanged), own_fp,
+    holdout_only, drift_kept (the program's own, from its S2 floor at c_H,used), fp_x (S1-X's FP at c_X, read from an
+    eligible S1 floor's "X" curve; None, "unmeasured", without one), fp_cap, r4, deviations, receipt}.
+    Failure order: no receipt raises ScreenRefused; then step 0 the floor (not an eligible exact S2 floor run at the
+    receipt's fp_cap, c_H_floor and c_H_margin, or a c_H,used that is not max(c_H_floor, c_pF1 + c_H_margin) on the
+    grid); the windows (V calendar 2025's 250 sessions, H 194..251 sessions inside 2026-01-02 .. min(config.LOOK_CAP,
+    S2_LOOK_CAP)); step 1 the pre-check; step 2 the look (sum_h, t_H)."""
+    if not isinstance(receipt, ReceiptS2):
+        raise ScreenRefused("the share screen S2 refuses: no S2 receipt is pinned")
+    fl = program_floor if isinstance(program_floor, Mapping) else {}
+    windows = _windows(v, h, cap=min(config.LOOK_CAP, S2_LOOK_CAP))
+    pre = precheck(v)
+    s1 = s1_floor if isinstance(s1_floor, Mapping) and s1_floor.get("eligible") is True else None
+    out: dict[str, Any] = {
+        "screen": SCREEN_S2, "passed": False, "why": None, "c_R": 0.0, "c_pF1": None, "c_H": None, "t_H": None,
+        "sum_h": None, "t": None, "n": None, "precheck": pre, "look": None, "windows": windows,
+        "label": label(v, h, c_X=receipt.c_X), "own_fp": None, "holdout_only": None, "drift_kept": None,
+        "fp_x": fp_at(s1, "X", receipt.c_X) if s1 is not None else None, "fp_cap": receipt.fp_cap,
+        "r4": r4_flags(receipt), "deviations": list(DEVIATIONS), "receipt": receipt.receipt_sha256}
+    if fl.get("screen") == SCREEN_S2 and fl.get("eligible") is not True:
+        why = fl.get("why") or "not eligible"
+    else:
+        why = _floor_misfit_s2(fl, receipt)
+    c_pf1 = _on_grid(fl.get("c_pF1"))
+    k_used = None
+    if why is None:
+        # c_H,used again from the floor's c_pF1 and the RECEIPT's floor and margin, in grid steps: a floor (or a cached
+        # copy) whose c_H,used is not that number judges nothing.
+        used = _on_grid(fl.get("c_H_used"))
+        k_used = None if c_pf1 is None else max(_k(receipt.c_H_floor), _k(c_pf1) + _k(receipt.c_H_margin))
+        if k_used is None or k_used > _K_MAX or used is None or _k(used) != k_used:
+            why = (f"c_H,used {fl.get('c_H_used')!r} is not max(c_H_floor, c_pF1 + c_H_margin) on 0.00..5.00 "
+                   f"(c_pF1 {fl.get('c_pF1')!r})")
+    if why is not None or k_used is None:
+        out["why"] = f"step 0, the floor: {why}"
+        return out
+    c_H = k_used / 100
+    lk = look_s2(v, h, c_H=c_H)
+    out.update(c_pF1=c_pf1, c_H=c_H, t_H=lk["t_H"], sum_h=lk["sum_h"], t=lk["t"], n=lk["n"], look=lk,
+               own_fp=_number(fl.get("own_fp"), 0.0, 1.0), holdout_only=_number(fl.get("holdout_only"), 0.0, 1.0),
+               drift_kept=_number(fl.get("drift_kept"), 0.0, 1.0))
+    if not windows["ok"]:
+        out["why"] = f"the windows: {windows['why']}"
+    elif not pre["passed"]:
+        out["why"] = "step 1, the pre-check: " + ", ".join(k for k, ok in pre["checks"].items() if not ok)
+    elif not lk["passed"]:
+        out["why"] = "step 2, the look: " + ", ".join(k for k in ("sum_h", "t_H") if not lk["checks"][k])
+    else:
+        out["passed"] = True
+    return out
+
+
+def beside_line_s2(result: Mapping[str, Any], receipt: ReceiptS2) -> str:
+    """Receipt 2's `beside` template filled from a `verdict_s2` (stated beside every live trade of the program): {c_H}
+    c_H,used, {own_fp} its FP at zero edge, {honly} its holdout-only rate, {n1} its drift-kept rate, {alpha|beta} the
+    S1-X label, {fpx} S1-X's FP; R4 flags appended as S1's. Percentages at two decimals, thresholds at the grid's; a
+    figure the verdict lacks reads "unmeasured"."""
+    if not isinstance(receipt, ReceiptS2):
+        raise ScreenRefused("the share screen S2 refuses: no S2 receipt is pinned")
+    if result.get("screen", SCREEN_S2) != SCREEN_S2:
+        raise ValueError(f"a {result.get('screen')} verdict beside receipt 2's line")
+    lab = result.get("label")
+    fill = {"c_H": _c(result.get("c_H")), "own_fp": _pct(result.get("own_fp")),
+            "honly": _pct(result.get("holdout_only")), "n1": _pct(result.get("drift_kept")),
+            "alpha|beta": lab if lab in ("alpha", "beta") else "unlabelled", "fpx": _pct(result.get("fp_x"))}
+    line = receipt.beside
+    for key, value in fill.items():
+        line = line.replace("{" + key + "}", value)
+    flags = list(result.get("r4") or ())
+    if flags:
+        line += "; R4 flags: " + "; ".join(str(f) for f in flags)
+    return line
+
+
 __all__ = ["SCREEN", "C_GRID_STEP", "C_GRID_MAX", "H_LENGTHS", "V_LENGTH", "WORLDS", "MIN_POOL", "WORLD_SETS",
            "ACTIVITY_ROUND_TRIPS", "ACTIVITY_INVESTED_DAYS", "SAME_LINEAGE_CORR", "RECEIPT_PATH", "DEVIATIONS",
            "LOOKS_PER_LINEAGE", "VALIDATION_TRIES", "GRID", "SET_SEGMENTS", "RECEIPT_KEYS", "BESIDE_FIELDS",
            "ScreenRefused", "Receipt", "Series", "receipt_sha256", "pinned_receipt", "load_receipt", "series", "excess",
            "precheck", "pooled_t", "holdout_t", "look", "floor", "fp_at", "label", "verdict", "beside_line",
-           "retry_permitted", "look_permitted", "same_lineage", "r4_flags"]
+           "retry_permitted", "look_permitted", "same_lineage", "r4_flags",
+           "SCREEN_S2", "SCREENS", "RECEIPT_PATH_S2", "S2_SETS", "S2_MIN", "S2_LOOK_CAP", "RECEIPT_KEYS_S2",
+           "BESIDE_FIELDS_S2", "S2_METHOD", "NO_SET_WHY", "ReceiptS2", "screen_of", "receipt_path", "pinned_receipt_s2",
+           "load_receipt_s2", "floor_s2", "floor_fits", "look_s2", "verdict_s2", "beside_line_s2"]

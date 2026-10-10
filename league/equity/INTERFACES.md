@@ -795,6 +795,29 @@ Tests: the accounting on golden synthetic series (open and close fills, fees), t
 guard), the floor on a synthetic store (both world sets, ineligibility), refusal without a receipt, one try and one
 look per lineage (R3), `same_lineage`, the beside-every-trade line.
 
+**S2 (amendment A11) exists beside S1** (branch feat/equity-e1-s2; spec sscreen2-1010/HOUSE-RULE.md). S1 and receipt 1
+are unchanged and keep working. S2 is new code, not a settings switch: the look is the pre-check AND sum_H > 1e-12 AND
+t_H >= c_H,used = max(c_H_floor, c_pF1 + c_H_margin) in integer grid steps, c_R = 0 (the pooled t is reported, never a
+bar), c_pF1 by EXACT enumeration of holdout starts over IND22-NO and IND1622-NO at L 194 and 251; S1-X unchanged; the
+holdout capped at 2026-10-09 (A12, `S2_LOOK_CAP`, with `config.LOOK_CAP` if earlier). Names: `SCREEN_S2` "S2",
+`RECEIPT_PATH_S2`, `S2_SETS`, `S2_MIN`, `S2_LOOK_CAP`, `RECEIPT_KEYS_S2`, `BESIDE_FIELDS_S2`;
+`ReceiptS2(receipt_sha256, c_R, c_H_floor, c_H_margin, c_X, fp_cap, owner_wall, retry, r4, beside, fp)`;
+`pinned_receipt_s2(block)`, `load_receipt_s2(path, *, pinned_sha256)`, `floor_s2(segments, *, receipt) -> {screen
+"S2", eligible, why, method "exact", c_pF1, c_H_used, fp_cap, c_H_floor, c_H_margin, sets, own_fp, holdout_only,
+drift_kept, cells}`, `look_s2(v, h, *, c_H)`, `verdict_s2(v, h, *, receipt, program_floor, s1_floor=None)`,
+`beside_line_s2(result, receipt)`; and for routing `screen_of(pin)`, `receipt_path(pin)`,
+`floor_fits(program_floor, receipt)`.
+
+ROUTING: the pinned block's `screen` (or `name`) picks the screen, and every public entry point routes on the receipt it
+is handed: `pinned_receipt` (an "S2" block gives a `ReceiptS2`), `load_receipt(..., screen="S2")` (S1's default still
+refuses receipt 2), `floor(segments, receipt=)`, `verdict(..., s1_floor=None)` and `beside_line` (receipt 2's
+template). `floor(segments, fp_cap=)` with no receipt is S1's, as E1 calls it today, so the swarm's look must pass
+`receipt=` and key its cached floor with `floor_fits`. The integrator copies
+~/Work/.ltcm-main/scratch/eqlane-1010/equity_screen_2.json VERBATIM to `docs/benchmarks/equity_screen_2.json` and pins
+it in policy.json `elane.screens.<lane>` with `"screen": "S2"` (or `"name": "S2"`; HOUSE-RULE section 9's block:
+receipt_sha256, c_R 0.0, c_H_floor, c_H_margin, c_X, fp_cap, owner_wall, retry, r4, beside, each copied from the
+receipt). Tests use only league/tests/fixtures/equity_screen_2_fake.json (marked fake) and synthetic pools.
+
 ---
 
 ## 10. ops

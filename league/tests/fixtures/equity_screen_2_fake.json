@@ -1,0 +1,80 @@
+{
+  "name": "equity_screen_2_fake",
+  "screen": "S2",
+  "study": "FAKE: an invented receipt 2 for league/tests/test_equity_screen.py only; not a measurement, never pinned",
+  "rule": "FAKE (the S2 rule's shape only). Pre-check: (RT >= 20 or ID >= 120) and sum_V r > 1e-12. Look: sum_H r > 1e-12 and t_H >= c_H,used; c_R = 0 (the pooled t is not a bar). c_H,used = max(c_H_floor, c_pF1 + c_H_margin) on the 0.01 grid; c_pF1 by exact enumeration. Label S1-X unchanged.",
+  "fp_cap": 0.12,
+  "owner_wall": 0.15,
+  "c_R": 0.0,
+  "c_H_floor": 0.9,
+  "c_H_margin": 0.05,
+  "c_X": 1.1,
+  "precheck": {
+    "rt_min": 20,
+    "id_min": 120,
+    "rule": "(RT_V >= 20 or ID_V >= 120) and sum_V(r) > 1e-12"
+  },
+  "look": {
+    "rule": "pre-check passed AND sum_H(r) > 1e-12 AND t_H >= c_H,used; sd_H < 1e-12 fails",
+    "c_H_used": "max(c_H_floor, c_pF1 + c_H_margin) in grid steps",
+    "pooled_t": "report only, never a condition (c_R = 0)"
+  },
+  "floor": {
+    "method": "exact",
+    "c_pF1": "FAKE: the largest over the eligible cells of each cell's smallest c with the holdout-only rate <= fp_cap",
+    "world_sets": {
+      "IND22-NO": "the 2022-24 pool, >= 550 sessions",
+      "IND1622-NO": "the 2016-19 and 2022-24 pools, >= 251 sessions each"
+    },
+    "seeds": "none"
+  },
+  "windows": {
+    "validation": "the Validation window (250 sessions)",
+    "holdout": "2026-01-02 .. 2026-10-09: FAKE fixture sentence (the look cap)"
+  },
+  "lineage": {
+    "holdout_looks": 1,
+    "validation_tries": 2,
+    "retry": "only after the first try FAILED its pre-check (no look spent), the retry version hashed at the first try (R3)",
+    "same_lineage": "Train daily returns correlating >= 0.7 with a program already looked at, or the same template",
+    "no_feedback": "look and Validation outcomes never reach generators or the diagnostician"
+  },
+  "R3_retry_permitted": true,
+  "R4_flags": {
+    "A1": [],
+    "A2": [],
+    "A3": [
+      "FAKE: an invented wall flag"
+    ],
+    "A4": [],
+    "A5": [],
+    "A6": []
+  },
+  "fp_zero_edge": {
+    "A1": {
+      "FAKE-NO|194": [
+        0.1,
+        0.09,
+        0.11
+      ]
+    }
+  },
+  "power": {
+    "A1": {
+      "FAKE-NO|194|N0e10": [
+        0.3,
+        0.29,
+        0.31
+      ]
+    }
+  },
+  "stated_beside_every_live_trade": "S2, c_R = 0 (no pooled-t bar), c_H,used = {c_H}; this program's FP at zero edge = {own_fp}% (cap 12%; owner's wall 15%); its holdout-only rate at c_H,used = {honly}%; drift-kept pass rate = {n1}% (not a false positive: the goal counts direction); S1-X: {alpha|beta} (FP {fpx}%); contamination: FAKE fixture sentence",
+  "note": "FAKE: an invented receipt 2 for league/tests/test_equity_screen.py only; not a measurement, never pinned",
+  "sha256": {
+    "PREREG.md": "0000000000000000000000000000000000000000000000000000000000000000",
+    "HOUSE-RULE.md": "0000000000000000000000000000000000000000000000000000000000000000",
+    "code": {
+      "house_ref.py": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  }
+}
