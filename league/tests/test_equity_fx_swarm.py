@@ -214,6 +214,15 @@ class EquityRoundsOnTheirOwn(LoopCase):
         sw.tournament.validate.assert_called_once()
         self.assertEqual(len(self.store.looks()), 3, "the failed options round cost the seeds nothing")
 
+    def test_neither_options_round_calls_an_equity_step(self):
+        sw = self.on()
+        with mock.patch.object(sw.tournament, "equity_round") as step, mock.patch.object(sw.gate, "equity_round") as looks:
+            row = sw.tournament.run()
+            sw.gate.run()
+        step.assert_not_called()
+        looks.assert_not_called()
+        self.assertNotIn("equity", row, "the hourly row is the options lanes'")
+
     def test_the_pace_and_the_switch(self):
         sw = self.on()
         self.assertTrue(sw.equity_due())
