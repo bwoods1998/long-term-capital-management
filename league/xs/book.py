@@ -62,6 +62,13 @@ HOLD_DAY_FAILS_EXIT = False
 TAG = "xs"
 #: The House exit of a lot whose name is no longer eligible.
 INELIGIBLE = "ineligible"
+#: THE TWIN MARKER (package J writes it after its nightly twins; package G's `elane_xs.live_ready` reads it and nothing
+#: else of the forward record): `<root>/xs-twins.json` = {"version": `TWINS_VERSION`, "through": day, "at",
+#: "instances": {id: {"due": day | null, "last": day | null}}}: which live panel instance has its twin row. Ids and
+#: days only: never an agreement bit, a return or a symbol; outside every manifest. No marker, or one two sessions
+#: behind: mode "live" reads as "gate".
+TWINS_FILE = "xs-twins.json"
+TWINS_VERSION = "xs-twins-1"
 REBALANCE_STATUS = ("planned", "hold", "failed", "late")
 AUDIT_STATUS = ("ok", "mismatch", "unread")
 
@@ -230,7 +237,7 @@ def date_record(lots: Sequence[Any], twins: Mapping[Any, Any], spy: Mapping[str,
 
 
 __all__ = ["KIND", "MAX_INTENTS", "FETCH_CHUNK", "FETCH_TICK_S", "KEEP_SESSIONS", "LIVE_BARS_DIR", "MISSING_MAX",
-           "HOLD_DAY_FAILS_EXIT", "TAG", "INELIGIBLE", "REBALANCE_STATUS", "AUDIT_STATUS", "SCHEMA",
+           "HOLD_DAY_FAILS_EXIT", "TAG", "INELIGIBLE", "TWINS_FILE", "TWINS_VERSION", "REBALANCE_STATUS", "AUDIT_STATUS", "SCHEMA",
            "INSTANCE_KIND_COLUMN", "INSTANCE_KIND_DDL", "Columns", "Fetched", "columns", "called", "fetch", "complete",
            "bars_sha", "keep", "kept", "same", "inputs", "standing", "intents", "marks", "rebalance_row", "spy_closes",
            "date_record"]
