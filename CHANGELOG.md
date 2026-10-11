@@ -64,6 +64,21 @@ Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. 
   with the constitution's names at most 10 tickers a side and counts the rest; the pre-open's check 5 counts the
   options population by the store's own guard (a panel family is its own lane's), and its check 10 holds the panel
   lane ready while a panel program is live.
+- **Integrated Oct 11 (R-E4a; nothing deployed):** eight packages (A data, B costs and counts, C the xs core, D the
+  engine, E the screen and the identity, G the swarm's lane, H the book's panel path, I the universe generator, CI
+  and docs) merged over E1 and E2 with their review fixes (`feat/equity-e2-int` 5ad1f01e), every patch to E1's and
+  E2's files applied, XS1's receipt landed verbatim with its pin. E4's own commits move NO id: the options execution
+  fingerprint, the equity identity and the money digest are the E1/E2 head's on every one of them (E1's own fixes
+  moved all three before E4 was merged onto them: the vendor's cents, the Probe sleeve A20). **One fault found and
+  fixed at integration:** a panel program ALREADY SEATED went on buying after the lane's mode was put down, the
+  nightly I6 failed or its shadow twin stopped (the seat rule read Candidates only). Now a seated panel family has a
+  row only while the lane is live, its planned entries are held at the send, and the book retires it on the lane's
+  own word; a switch file caught mid-write retires nobody. The xs rounding bound is E1's own, re-exported.
+- **Owed, each holding real money back by design:** package J (the forward twin; after release E3: until then mode
+  "live" reads as "gate"); package B's probe strata P4-P6 (patch 18, E3's file: until then every panel look waits);
+  the universe commit R-E4b (needs the House's `tradable.json`; its gateway half is a patch for the owner). And one
+  decision for the captain before mode "live": at the Probe sleeve of 0.50 x E a five-name basket alone fills the
+  $400 loss window (four whole names, the fifth cut), so a panel program wants its own sleeve share.
 - Operations: [docs/operations.md](docs/operations.md), "The panel lane" (the switch, the screen, A22, the live rules,
   the universe deploy and its rollback, the alarms).
 

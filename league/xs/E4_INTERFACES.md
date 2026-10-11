@@ -363,3 +363,75 @@ files to each other):
   the verdict; whether a look was spent; and its own ninth vector. The names 0..23 are the columns, in that order.
 - THE VECTORS RUN UNDER THEIR OWN BAR: a receipt whose c_XS is the vector file's `k_XS` / 100, never the pinned
   receipt's, so a rebuilt receipt at another c_XS moves no vector.
+
+## 10. As integrated (Oct 11, 2026; `feat/equity-e4`; nothing pushed, nothing deployed)
+
+**What is in the tree.** C0 and packages A, B, C, D, E, G, H and I, each merged with `--no-ff` in section 2's order;
+then `feat/equity-e2-int` at 5ad1f01e (it carries `feat/equity-e1` at 05f83d9e and `feat/equity-e2` at 04ca26c9: E1's
+and E2's review and verification fixes, the vendor's cents, the Probe sleeve A20, the sizing-up step parked); then
+every patch file of `league/swarm/e4_patches/`, in its README's order; then the receipt and its pin; then what
+integration itself found. The base's sentence "the code wins" held: three hunks met E1's and E2's newer text
+(`elane.look`'s seed order, `elane_train.review_step`'s audit reader, the book's cents-aware audit) and were taken
+with a three-way apply, both sides kept.
+
+**The ids.** E1's own fixes moved all three ids after this contract's base (0e8bbaa7): the options execution
+fingerprint, the equity identity and the money digest of `feat/equity-e2-int` 5ad1f01e are not 0e8bbaa7's. NO COMMIT
+OF E4 MOVES ONE: every commit before the merge of 5ad1f01e carries 0e8bbaa7's three, and the merge and every commit
+after it carry 5ad1f01e's three. The xs identity is new (no band exists under an older one). The universe commit
+(R-E4b), the only commit of this release that moves a digest, is NOT in this tree (below).
+
+**What integration changed beyond the patch files** (each with its test):
+- THE SEAT OF A SEATED PANEL PROGRAM (a fault, found by the end-to-end test). Package G's seat rule gave a panel
+  CANDIDATE no row while the lane's effective mode is under "live"; nothing held a family already at Probe, so a
+  seated program went on buying after the mode was put down, the nightly I6 failed or the twin marker went stale.
+  Now: `bands._read_equity` gives a panel family in a running band a row only while the lane is live;
+  `elane_xs.seat_standing` and `bands.equity_seat_withdrawn` give E1's `families.standing` the store's word
+  ("demoted" on positive evidence, "unknown" when the lane cannot be READ, so a file caught mid-write retires
+  nobody); and the book asks for the row at every SEND of a non-equity kind's entry (`live._seat_block`), so an entry
+  planned on a live evening is held the next morning. `elane_xs.mode` and `live_ready` answer as before: each is now
+  the never-raising reading of a core that raises (`_mode_why`, `_live_legs`). The family's band in the store is not
+  moved (it keeps its roster seat; when the lane is live again the same instance runs again).
+  `league/equity/families.py` is a fifth E1 file E4 touches, beside H's four. Tests:
+  `test_e4_integration.TheSeatOfASeatedPanelProgram`, `test_e4_e2e` step 9.
+- THE VENDOR'S CENTS ARE ONE BOUND: `league.xs.config.rounding_bound`, `ADJUSTED_HALF_STEP` and `ROUNDING_GUARD` are
+  re-exports of E1's (section 5's promise); `xs.engine.split_of` calls E1's tolerance-aware `split_factor`.
+- `league/ops/stall.py`: patch 1b (G's proposal: the two SQL scopes) and a third literal E2's patch 14 brought after
+  the base (the awaiting list): `stall.EQUITY_STRUCTURES`, held equal to the store's.
+- `league/ops/preopen.py`: the gateway's class list reads the constitution's `EQUITY_CLASSES` (G's structure seal met
+  it once package I's patch stopped its skip). `test_dlane_report_panel`: H's test of an unreadable style rule makes
+  the rule unreadable itself, and a passer with no style verdict reads "style-open: unmeasured" (its own test).
+- policy.json ships `elane.panel.mode` "off" (the spec's shipped value); `elane.screens.equity_xs` is
+  `screen.pin(RECEIPT_PATH)` of the receipt at sha256 98acbb83, written whole.
+
+**Owed, and what each holds back.**
+- PACKAGE J (the forward registry row, the nightly shadow twin, the marker): after release E3. Until its marker is
+  written, mode "live" reads as "gate": no panel program is seated (`test_e4_integration.TheLaneStopsWhereItsRuleSays`).
+- PATCH 18 (package B, E3's `league/ops/contam_probe.py`: strata P4-P6). Until the probe publishes a route's panel
+  strata, every panel look waits, nothing spent (A22 (3); the same test).
+- THE UNIVERSE COMMIT (R-E4b; package I's generator is built and tested): it needs the House's
+  `universe/tradable.json`, which exists only after R-E4a's `equity_universe` job has run and passed its audit, and
+  the owner's `git apply` of the gateway half (`gateway-universe.patch` in the captain's scratch: `gateway/` is not
+  edited by this release). It is ONE commit, of `league/constitution.py` and `gateway/lib/caps.mjs` alone.
+- The gateway's merge list (`gateway/lib/protected.mjs` MERGE_FORBIDDEN) owes seven entries (E2's five,
+  `league/swarm/elane_xs.py`, `scripts/gen_universe.py`); they wait in `league/ci.py` `PENDING_GATEWAY`.
+
+**For release E3's integrator** (whichever of E3 and E4 merges second regenerates its diffs on the other's head):
+`registry.py` (E4's six rows are last: E3's go before them), `funnel.py` (E4's `asset_years` block and E3's
+`forward_record` stand side by side), `dlane_report.py`, `elane_train.py`, `elane_births.py`, `elane_seal.py`,
+policy.json, `ci.py` and the docs are edited by both. `elane_folds.born` must skip `elane_xs.is_panel` families (a
+panel family's hidden year is `elane_xs.assign`'s, over six years); `equity_neff.funnel_rows` reads E3's
+`forward-report.json` `cey.hist_iy` and says "default" when the key is not there.
+
+**Decisions the builders made that the captain should confirm** (each is in its package's report; the code and this
+file say the same):
+1. The Probe sleeve: at 0.50 x E (A20) a five-name basket alone fills the loss window (four whole names and the
+   fifth cut, held by `test_e4_e2e`); a panel program wants its own sleeve share before mode "live" (open point 17).
+2. The vanish leg (D): at a name's third session with no valid close its leg is -0.30, no cost, for the lot, its
+   counterparts and its cell's members, when the House could not have sold it since it left the eligible set.
+3. The dither (C; open point 18): on the ADJUSTED price's own cent grid, not the raw price's as the spec worded it.
+4. A17 one step on (H): a hold day that was asked successfully does not reset the failed-decide count either.
+5. `i6.equal` is the bars' verdict within the vendor's cents (A); `bytes_equal` is reported beside it.
+6. The French label stays "unmeasured" until a route to the library exists, so every XS1 verdict carries the screen
+   flag "style-open"; the SEAT rule reads the House's own holdings-based loadings (`league/xs/style.py`), not the flag.
+7. First-night budgets of the data jobs are estimates (A: about 570 asset calls and 900-1,000 bar calls; a peak of
+   about 0.5 GB for the first whole fetch), to be read off the House's first receipts.

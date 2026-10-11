@@ -28,3 +28,16 @@ One author a file, so no two worktrees ever touch the same one. The whole contra
 | 18 | E3's `league/ops/contam_probe.py` | B | OWED: after release E3 |
 
 Merge order on green CI: C0, A, B, C, D, E, G, H, then I (J after E3).
+
+## Applied (Oct 11, 2026)
+
+Patches 1 to 14 and 16 are in the tree, with patch 15's test and pre-open hunks (none moves a digest); the files of
+this directory are now a record. Each was applied to `feat/equity-e2-int` 5ad1f01e (E1 at 05f83d9e, E2 at 04ca26c9),
+not to the base the diffs were cut on: G's and H's with a three-way apply (three hunks met newer text of E1's and
+E2's; both sides kept), I's from its own diffs for that head. Beside the table: patch 1b (`league/ops/stall.py`, G's
+proposal) with a third literal E2 added after the base; `league/ledger.py` (H: the kind `equity.rebalance`); and the
+integrator's own edits, which no patch file carries (`league/equity/families.py`, the seat of a seated panel program
+in `league/swarm/bands.py`, `elane_xs.py` and `league/equity/live.py`, the rounding re-export, the pre-open's class
+list): `league/xs/E4_INTERFACES.md` section 10 lists them with their tests. NOT applied, owed: patch 15's universe
+commit (R-E4b: it needs the House's `tradable.json` and the owner's gateway half), patch 17 (package J) and patch 18
+(package B), the last two after release E3.
