@@ -100,7 +100,12 @@ fingerprint of the RUNNING release's files (`_xs_sha`, `current_xs_evaluator`), 
 `xs_evaluator`. No panel row is returned when that fingerprint cannot be computed (`strict`: `EquityUnreadable` while
 a panel family is in a running band), and `equity_proof_current` judges a proof by the engine it names. A panel
 Candidate is seatable only while the panel lane's effective mode is "live" (`elane_xs.seatable(root)`, handed to
-`equity_seating`); its row's `beside` is XS1's sentence, stated beside every live panel trade.
+`equity_seating`); its row's `beside` is XS1's sentence, stated beside every live panel trade. A SEATED PANEL FAMILY
+HAS A ROW ONLY WHILE THE LANE IS LIVE TOO (`_read_equity`): at Probe or Sized with the lane's mode put down, or a leg
+of `elane_xs.live_ready` failed (the nightly I6, the twin marker, the universe), it has no row, so the book opens
+nothing for it, and `equity_seat_withdrawn` is the store's word the book retires its instance on (its lots exit at the
+next open by E1's rule; a lane that cannot be READ retires nothing). Its band in the store is not moved: when the lane
+is live again its row is back and the same instance runs again.
 
 `read(root, family=f)` and `observe(root, family=f)` read one family only (the live path's per-minute admissions). The
 Gym bundle's version is built once per `BUNDLE_TTL` seconds a process, not once per call (it reads and hashes every file
@@ -574,6 +579,26 @@ def equity_proof_current(state: Mapping[str, Any], version: Mapping[str, Any]) -
     return current_equity_evaluator(state, sha, equity_sha)
 
 
+def equity_seat_withdrawn(root: str | Path, fam: Mapping[str, Any]) -> tuple[str, str] | None:
+    """RELEASE E4: THE STORE'S WORD on the seat of a family in a running band that `read` gave no row for a reason of
+    the LANE's, as league/equity/families.py `standing` answers the book: None for a family that is no panel family and
+    while the panel lane is live (the question is then E1's own: the version, the proof); ("demoted", why) on the
+    lane's POSITIVE word that no panel program holds a seat now (`elane_xs.seat_standing`: a switch put down, or a
+    named leg of `live_ready` failed): the book retires the instance and its lots exit at the next open; ("unknown",
+    why) when the lane cannot be read, on which the book retires nothing (A8.5) and, having no row, opens nothing."""
+    if str((fam or {}).get("structure") or "") != "panel":
+        return None
+    try:
+        from . import elane_xs
+
+        live, why = elane_xs.seat_standing(root)
+    except Exception as exc:  # noqa: BLE001 - no evidence either way
+        return "unknown", f"the panel lane could not be read ({type(exc).__name__})"
+    if live is True:
+        return None
+    return ("demoted" if live is False else "unknown"), str(why)
+
+
 def _panel_proof(proof: Mapping[str, Any]) -> bool:
     """Whether a band proof names the panel engine (`league.xs.XS_ENGINE_VERSION`): the proof's engine says which
     identity judges it."""
@@ -629,6 +654,14 @@ def _read_equity(root: str | Path, *, family: str | None, lanes: Any, strict: bo
             seat = equity_seating(_banded(db, equity=True), elane.roster_seats(root), seatable=_equity_seatable(root)) \
                 if any(f["band"] == "candidate" for f in fams) else {"probe": [], "seated": [], "waiting": [], "seatless": []}
             hidden = set(seat["waiting"]) | set(seat["seatless"])
+            if any(f["structure"] == "panel" and f["band"] != "candidate" for f in fams) \
+                    and not _equity_seatable(root)("panel"):
+                # RELEASE E4, THE SEAT OF A SEATED PANEL FAMILY: the seat rule that gives a panel Candidate a row only
+                # while the lane's effective mode is "live" holds for one at Probe or Sized too. Left to the Candidates
+                # alone, a seated panel program went on buying after the lane's mode was put down, the nightly I6
+                # failed or its shadow twin stopped. No row: the book opens nothing for it (league/equity/live.py
+                # `_seat_block`) and asks `equity_seat_withdrawn` before it retires the instance.
+                hidden |= {f["id"] for f in fams if f["structure"] == "panel"}
             versions = {}
             for fam in fams:
                 fam["state"] = loads(fam["state"], {}) or {}
@@ -1040,4 +1073,4 @@ def incubator(root: str | Path, *, family: str, version: int) -> list[dict[str, 
 __all__ = ["read", "observe", "incubator", "incubator_refusal", "program_refusal", "owed_bars", "priority", "practice_tier",
            "demoted", "LIVE_BANDS", "TIERS", "BUNDLE_TTL", "BELT_RECORDS", "BARS_OWED_FILE", "BAD_OUTCOMES",
            "seating", "waiting", "roster", "equity_seatable", "equity_seats", "equity_seating",
-           "current_equity_evaluator", "equity_proof_current", "EquityUnreadable"]
+           "current_equity_evaluator", "equity_proof_current", "equity_seat_withdrawn", "EquityUnreadable"]

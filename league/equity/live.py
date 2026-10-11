@@ -733,6 +733,8 @@ class EquityBook:
         self._positions_now: list[dict] | None = None
         self._open_now: list[dict] | None = None
         self._quotes: dict[str, dict] = {}
+        #: RELEASE E4: {instance: why it may open nothing | None} of this pass (`_seat_block`).
+        self._seats: dict[str, str | None] = {}
         self._minute_positions: Sequence[Mapping[str, Any]] | None = None
         self._minute_open: Sequence[Mapping[str, Any]] | None = None
         recon = self.state.get("eq_recon", {}) or {}
@@ -1067,6 +1069,7 @@ class EquityBook:
         self._positions_now = None
         self._open_now = None
         self._quotes = {}
+        self._seats = {}
         self._minute_positions = positions
         self._minute_open = open_orders
 
@@ -1474,7 +1477,34 @@ class EquityBook:
             return f"equity reconciliation: {frozen}"
         if inst is None or not inst.live:
             return "the program is not at Probe or Sized"
+        if inst.kind != EQUITY_KIND:
+            return self._seat_block(inst)
         return None
+
+    def _seat_block(self, inst: Instance) -> str | None:
+        """RELEASE E4, THE SEAT AT THE SEND: why a program of another kind than the book's own (a panel program) may
+        open no position this pass, or None. The swarm's reader gives its family a row in a running band on this
+        version only while its LANE may trade (league/swarm/bands.py `read`: a panel family has none unless the panel
+        lane's effective mode is "live": its switch, the universe deploy, the nightly I6, its shadow twin's marker).
+        The band sync asks once a day, at the decide, and an entry planned then is sent the next morning: what stopped
+        the lane overnight must stop that entry too. Read once a pass (`_seats`); a store that cannot be read opens
+        nothing. Exits never ask it. An entry it holds is tried again each minute of its window and is missed at the
+        cut-off, with this reason."""
+        if inst.id not in self._seats:
+            why: str | None = None
+            try:
+                rows = [dict(r) for r in self.families.read(inst.family)]
+                unread = str(getattr(self.families, "last_error", "") or "")
+                row = next((r for r in rows if str(r.get("family")) == inst.family), None)
+                if unread:
+                    why = f"its family's seat could not be read ({unread[:120]})"
+                elif row is None or row.get("band") not in LIVE_BANDS or int(row.get("version") or 0) != inst.version:
+                    why = ("its family holds no seat now (the swarm gives this version no row in a running band: its "
+                           "lane is not live): exits only")
+            except Exception as exc:  # noqa: BLE001 - fail closed
+                why = f"its family's seat could not be read ({type(exc).__name__})"
+            self._seats[inst.id] = why
+        return self._seats[inst.id]
 
     def _quote(self, symbol: str) -> dict[str, Any]:
         if symbol not in self._quotes:

@@ -108,9 +108,11 @@ class EquityFamilies:
         `read`: (code, why), read on the swarm store itself and never inferred from the absence. "retired": its family
         is retired, is no equity-lane family, runs another banded version, or its band's proof is not the current
         equity identity (`bands.current_equity_evaluator`: an evidence release moved it); "demoted": its band is no
-        running band (a Candidate waiting for a seat, back in the Gym); "live": the store shows it alive in a running
-        band on this version with a current proof (the read left it out for a reason of its own: its code file or its
-        version row); "unknown": the family, its version or the equity identity could not be read. Never raises."""
+        running band (a Candidate waiting for a seat, back in the Gym), or its lane gives it no seat now (release E4: a
+        panel family while the panel lane is not live, `bands.equity_seat_withdrawn`); "live": the store shows it alive
+        in a running band on this version with a current proof (the read left it out for a reason of its own: its code
+        file or its version row); "unknown": the family, its version, the equity identity or its lane's own word could
+        not be read. Never raises."""
         try:
             with self.lock:
                 store = self._db()
@@ -141,6 +143,12 @@ class EquityFamilies:
                 return "unknown", "the equity identity could not be computed"
             if not current:
                 return "retired", "its band's proof is not the current equity identity"
+            # RELEASE E4: a family whose LANE gives it no seat now (a panel family while the panel lane is not live:
+            # `bands.read` leaves it out) is "demoted" on the lane's positive word, "unknown" when the lane cannot be
+            # read; None for every other family, and the answer below is E1's own.
+            seat = bands.equity_seat_withdrawn(self.root, fam)
+            if seat is not None:
+                return seat
             return "live", "the store shows it running: its row could not be read (its code file)"
         except Exception as exc:  # noqa: BLE001 - no evidence either way
             return "unknown", f"{type(exc).__name__}: {str(exc)[:160]}"

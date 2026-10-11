@@ -467,36 +467,46 @@ def _settings_of(root: str | Path | None, settings: Mapping[str, Any] | None) ->
         return {}
 
 
+def _mode_why(settings: Mapping[str, Any] | None, root: str | Path | None = None, *,
+              policy: Mapping[str, Any] | None = None) -> tuple[str, str | None]:
+    """(THE EFFECTIVE MODE, why it is not the setting's own or None). `mode`'s rule, and it RAISES on what it cannot
+    read: `mode` reads that as "off", `seat_standing` as "cannot say"."""
+    if not _lane_on(settings):
+        return "off", "the equity lanes are off (elane.mode)"
+    c = cfg(settings)
+    wanted = MODES.index(c["mode"])
+    if wanted == 0:
+        return "off", None
+    cap, why = MODES.index("live"), None
+    if root is None:
+        cap, why = MODES.index("gate"), "no state root: the store's side cannot be read"
+    else:
+        manifest = _manifest(root)
+        if manifest is None or manifest.get("verdict") not in ("ok", "low_coverage"):
+            # no panel store, or a coverage the lane cannot stand on ("insufficient")
+            return "off", ("the panel store has no manifest" if manifest is None else
+                           f"the panel store's coverage verdict is {str(manifest.get('verdict'))[:40]!r}")
+        share = _num(manifest.get("hs_share"))
+        if share is None or share < c["spreads_min_share"]:
+            # provisional costs: research only
+            cap, why = min(cap, MODES.index("train")), "the spreads' share is under elane.panel.spreads_min_share"
+    if min(wanted, cap) > MODES.index("train"):
+        pinned, refusal = receipt(policy=policy)
+        if pinned is None:
+            cap, why = min(cap, MODES.index("train")), refusal  # NO RECEIPT, NO LOOK
+    if min(wanted, cap) > MODES.index("gate"):
+        ready, leg = _live_legs(root, settings) if root is not None else (False, None)
+        if not ready:
+            cap, why = min(cap, MODES.index("gate")), leg
+    return MODES[min(wanted, cap)], (why if cap < wanted else None)
+
+
 def mode(settings: Mapping[str, Any] | None, root: str | Path | None = None, *,
          policy: Mapping[str, Any] | None = None) -> str:
     """THE EFFECTIVE MODE (the module docstring), one of `MODES`. Without a `root` the store-side conditions cannot be
     read: at most the settings' own mode, and never "live". Never raises: whatever cannot be read lowers the mode."""
     try:
-        if not _lane_on(settings):
-            return "off"
-        c = cfg(settings)
-        wanted = MODES.index(c["mode"])
-        if wanted == 0:
-            return "off"
-        cap = MODES.index("live")
-        if root is None:
-            cap = MODES.index("gate")
-        else:
-            manifest = _manifest(root)
-            if manifest is None or manifest.get("verdict") not in ("ok", "low_coverage"):
-                return "off"  # no panel store, or a coverage the lane cannot stand on ("insufficient")
-            share = _num(manifest.get("hs_share"))
-            if share is None or share < c["spreads_min_share"]:
-                cap = min(cap, MODES.index("train"))  # provisional costs: research only
-        if min(wanted, cap) > MODES.index("train"):
-            pinned, _ = receipt(policy=policy)
-            if pinned is None:
-                cap = min(cap, MODES.index("train"))  # NO RECEIPT, NO LOOK
-        if min(wanted, cap) > MODES.index("gate"):
-            ready, _ = live_ready(root, settings) if root is not None else (False, None)
-            if not ready:
-                cap = min(cap, MODES.index("gate"))
-        return MODES[min(wanted, cap)]
+        return _mode_why(settings, root, policy=policy)[0]
     except Exception:  # noqa: BLE001 - a mode that cannot be read is off
         return "off"
 
@@ -555,38 +565,77 @@ def _tradable_share(root: str | Path, day: dt.date) -> float | None:
     return sum(1 for _, symbol in members if symbol in allowed) / len(members)
 
 
+def _live_legs(root: str | Path, settings: Mapping[str, Any] | None) -> tuple[bool, str | None]:
+    """`live_ready`'s legs, in its order: (ready, the first leg that fails). It RAISES on a leg it cannot read."""
+    c = cfg(settings)
+    manifest = _manifest(root)
+    if manifest is None:
+        return False, "the panel store has no manifest"
+    through = _day(manifest.get("fetched_through"))
+    if through is None:
+        return False, "the panel manifest names no last session"
+    since = _day(manifest.get("live_from")) if manifest.get("live_from") else None
+    if since is None:
+        return False, "the universe deploy is not in force (the panel manifest's live_from is not set)"
+    share = _tradable_share(root, through)
+    if share is None or share < c["live_min_tradable_share"]:
+        return False, ("the tradable share of the index's members is under elane.panel.live_min_tradable_share "
+                       "(regenerate the universe: an owner deploy)")
+    born = (_day(manifest.get("universe_at")) if manifest.get("universe_at") else None) or since
+    if (through - born).days > c["universe_max_age_days"]:
+        return False, "the committed universe is older than elane.panel.universe_max_age_days"
+    i6 = manifest.get("i6")
+    if not isinstance(i6, Mapping) or i6.get("equal") is not True:
+        return False, "the last nightly I6 did not hold (the live ctx is not proved equal to the Gym's)"
+    why = _twins_ready(root, through)
+    if why is not None:
+        return False, why
+    return True, None
+
+
 def live_ready(root: str | Path, settings: Mapping[str, Any] | None) -> tuple[bool, str | None]:
     """(ready, the first leg that fails): the universe deploy, the tradable share, the universe's age, the last I6,
     the twin marker (the module docstring). THE UNIVERSE'S AGE is read from the manifest's `universe_at` (the first
     session the stock list now in force was read by the panel job) and, where the job writes none, from `live_from`
     (the first deploy): it fails closed `universe_max_age_days` after whichever it reads. Never raises."""
     try:
-        c = cfg(settings)
-        manifest = _manifest(root)
-        if manifest is None:
-            return False, "the panel store has no manifest"
-        through = _day(manifest.get("fetched_through"))
-        if through is None:
-            return False, "the panel manifest names no last session"
-        since = _day(manifest.get("live_from")) if manifest.get("live_from") else None
-        if since is None:
-            return False, "the universe deploy is not in force (the panel manifest's live_from is not set)"
-        share = _tradable_share(root, through)
-        if share is None or share < c["live_min_tradable_share"]:
-            return False, ("the tradable share of the index's members is under elane.panel.live_min_tradable_share "
-                           "(regenerate the universe: an owner deploy)")
-        born = (_day(manifest.get("universe_at")) if manifest.get("universe_at") else None) or since
-        if (through - born).days > c["universe_max_age_days"]:
-            return False, "the committed universe is older than elane.panel.universe_max_age_days"
-        i6 = manifest.get("i6")
-        if not isinstance(i6, Mapping) or i6.get("equal") is not True:
-            return False, "the last nightly I6 did not hold (the live ctx is not proved equal to the Gym's)"
-        why = _twins_ready(root, through)
-        if why is not None:
-            return False, why
-        return True, None
+        return _live_legs(root, settings)
     except Exception as exc:  # noqa: BLE001 - a leg that cannot be read is not ready
         return False, f"the live legs cannot be read ({type(exc).__name__})"
+
+
+def seat_standing(root: str | Path) -> tuple[bool | None, str]:
+    """THE LANE'S OWN WORD ON A SEAT, for a panel program that is ALREADY SEATED (`bands.equity_seat_withdrawn`, which
+    E1's `league.equity.families.EquityFamilies.standing` asks before the book retires an instance whose family has no
+    row): (True, "") while the effective mode is "live"; (False, why) on POSITIVE EVIDENCE that it is not: the box's
+    swarm.json and the panel's files were read, and a switch or a named leg of `live_ready` says so; (None, why) when
+    it cannot be told (a swarm.json, a manifest or a marker that is there and cannot be read: a file being rewritten;
+    a leg that raised). `mode` reads every one of those as "off", which is right for a seat not yet given and wrong
+    for one to take away: the book retires only on positive evidence (A8.5), so a file caught mid-write sells nothing.
+    Either way `bands.read` gives the family no row while the lane is not live, so it OPENS nothing. Never raises."""
+    try:
+        root = Path(root)
+        from . import settings as settings_mod
+
+        from ..xs import book as xbook
+
+        for path, what in ((root / "swarm.json", "the box's swarm.json"),
+                           (root / STORE_DIR / PANEL_MANIFEST, "the panel manifest"),
+                           (root / STORE_DIR / xbook.TWINS_FILE, "the twin marker")):
+            try:
+                if not isinstance(json.loads(path.read_text(encoding="utf-8")), Mapping):
+                    return None, f"{what} is no object"
+            except FileNotFoundError:
+                continue  # no file: the policy alone decides; a missing manifest or marker is a leg of the rule
+            except (OSError, ValueError) as exc:
+                return None, f"{what} could not be read ({type(exc).__name__})"
+        found, why = _mode_why(settings_mod.load(root), root)
+        if found == "live":
+            return True, ""
+        return False, (f"the panel lane is not live (its mode reads \"{found}\"): "
+                       f"{why or 'elane.panel.mode is set so'}")[:300]
+    except Exception as exc:  # noqa: BLE001 - no evidence either way
+        return None, f"the panel lane could not be read ({type(exc).__name__}: {str(exc)[:120]})"
 
 
 def is_panel(fam: Mapping[str, Any] | None) -> bool:
@@ -3375,7 +3424,7 @@ __all__ = ["STRUCTURE", "PANELS", "OBJECTIVE", "LANE", "MODES", "STATE_KEY", "FL
            "UNIVERSE_MANIFEST", "DEFAULTS", "BOUNDS", "CENSUS_NOTE_MAX", "CENSUS_LABEL", "SCREEN_NULLS", "PANEL_AGENDA",
            "INPUTS", "BAR_XS", "FAILS_XS", "PROGRAM_FAILS", "JUDGED_XS", "MAP_LABEL", "K_BASE", "K_STRESS",
            "SAME_LINEAGE_XS", "TRAIN_ENDED", "EARLY_CAUSES", "LineageUnread", "cfg", "pin", "receipt", "mode",
-           "live_ready", "is_panel", "seatable", "panel_families", "record_of", "versions_of", "passed_version",
+           "live_ready", "seat_standing", "is_panel", "seatable", "panel_families", "record_of", "versions_of", "passed_version",
            "judged", "identity", "hidden_year_of", "card_errors", "cell_of", "family_cell", "cell_text",
            "closed_cells", "cell_looks", "forward_verdicts", "look_room", "probe_reading", "probed", "style_of",
            "assign", "run_spans", "seen_spans", "hidden_span", "agenda_text", "contract_text", "bar_text",
