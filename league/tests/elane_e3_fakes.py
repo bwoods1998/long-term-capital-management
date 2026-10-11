@@ -113,13 +113,15 @@ class InventedMarket:
     sessions of each year, invented prices) and one closed lot a year, so the out-of-fold arithmetic has a series to
     read. `figures[year]` overrides a year's row and its lot's weight (what two markets differ in). A program whose
     text holds "fails" loses at the stress. It has NO LOOK-BACK: a span's rows never depend on another year's. Its
-    `decider` is E2's fake (the restart check's kinds)."""
+    `decider` is E2's fake (the restart check's kinds). What a test can make of THE HIDDEN RUN (a run over exactly the
+    year `hidden`, 1 January to 31 December): `hidden_status` (how it ended) and `fails` (an exception it raises)."""
 
-    def __init__(self, figures: Mapping[int, Mapping[str, Any]] | None = None, *, hidden_status: str = "ok",
-                 fails: BaseException | None = None):
+    def __init__(self, figures: Mapping[int, Mapping[str, Any]] | None = None, *, hidden: int | None = None,
+                 hidden_status: str = "ok", fails: BaseException | None = None):
         self.rows = {y: year_figures() for y in range(2016, 2025)}
         for y, row in (figures or {}).items():
             self.rows[int(y)] = year_figures(**row)
+        self.hidden = hidden
         self.hidden_status = hidden_status
         self.fails = fails
         self.calls: list[tuple[float, dt.date, dt.date]] = []
@@ -140,8 +142,8 @@ class InventedMarket:
 
     def train(self, code: str, params: Any, *, name: str, start: Any = None, end: Any = None, k: float = 1.0) -> Any:
         self.calls.append((float(k), start, end))
-        one_year = start.year == end.year and (start.month, start.day, end.month, end.day) == (1, 1, 12, 31)
-        if one_year and self.fails is not None:
+        hidden_run = self.hidden is not None and (start, end) == (dt.date(self.hidden, 1, 1), dt.date(self.hidden, 12, 31))
+        if hidden_run and self.fails is not None:
             raise self.fails
         years = [y for y in self.rows if start.year <= y <= end.year]
         factor = 1.0 if k == 1.0 else (-0.5 if "fails" in code else 0.7)
@@ -153,7 +155,7 @@ class InventedMarket:
             lots.append({"lid": i + 1, "symbol": "SPY", "class": "etf", "weight": float(self.rows[y]["weight"]),
                          "qty": 1.0, "entry_day": days[0].isoformat(), "entry_at": "close", "entry_px": 100.0,
                          "exit_day": days[2].isoformat(), "exit_at": "open", "exit_px": 101.0, "fees": 0.02, "div": 0.0,
-                         "hs": None, "reason": "program", "held_sessions": 2})
+                         "hs": 0.0001 * float(k), "reason": "program", "held_sessions": 2})
         result = {"run_id": f"{name}-{k}-{start}", "run_sha": "invented-run", "status": "ok", "window": "train",
                   "start": start.isoformat(), "end": end.isoformat(), "symbols": ["SPY"], "capital": "1000",
                   "needs": {"symbols": ["SPY"], "history": 0, "max_hold_sessions": 2}, "by_year": rows,
@@ -164,7 +166,7 @@ class InventedMarket:
                               "exposure_mean": 0.3, "max_drawdown": 30.0, "mean_net_return": 0.001},
                   "bh": {"pnl": round(sum(r["bh_pnl"] for r in rows.values()), 2)},
                   "mte": {"mean": 0.0004, "t": 0.9, "n": 40}}
-        if one_year:
+        if hidden_run:
             result["status"] = self.hidden_status
         run = SimpleNamespace(result=result, bars=self.bars(years))
         self.runs.append(run)

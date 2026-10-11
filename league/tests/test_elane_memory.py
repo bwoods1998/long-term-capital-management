@@ -34,6 +34,7 @@ class Base(unittest.TestCase):
         """A family and its version as `EquityResearcher.score` leaves them before the ingest: the seen runs made (one
         a seen span and k), the bar's verdict on them, the record written."""
         market = market if market is not None else e3.InventedMarket()
+        market.hidden = hidden
         fam = e3.hidden_family(self.store, slug, hidden, code=self.code, **kw)
         seen = {k: [market.train(self.code, {}, name=slug, start=first, end=last, k=k)
                     for first, last in elane_folds.seen_spans(hidden)] for k in K}
