@@ -973,6 +973,52 @@ class TheInputs(Panel):
         self.assertEqual(grid.dropped, 3, "the nightly job drops and counts the same three rows")
         self.assertTrue(np.array_equal(grid.raw[:, 0], got[:, 0], equal_nan=True), "and its store holds the same bars")
 
+    def test_a_number_is_an_int_a_float_or_a_decimal_as_the_houses_venue_client_hands_it(self):
+        # THE REVIEW'S regress-1. The live book's market data comes through the House's venue client, whose decoder
+        # hands every price as a Decimal (`ltcm.adapters.decode`: json.loads(parse_float=Decimal), "never returns a
+        # float"); the nightly job's gateway reader hands floats. Both are the venue's same JSON number, so both are
+        # the same arrays to the bit and nothing is dropped. (With Decimal refused here, no live bar was ever placed:
+        # every row of every symbol counted as dropped, and each fake venue of the tests handed floats.)
+        from decimal import Decimal
+
+        from ltcm.adapters import decode
+
+        case = synth.same_ctx_cases(self.root, history=20, count=1, seed=1)[0]
+        day, columns = case["day"], case["columns"]
+        body = {which: json.dumps(case[f"{which}_rows"]).encode("utf-8") for which in ("raw", "all")}
+        floats = {which: json.loads(text) for which, text in body.items()}
+        client = {which: decode(text, what="bars") for which, text in body.items()}
+        kinds = {type(row[f]) for rows in client["raw"].values() for row in rows for f in "ohlc"}
+        self.assertIn(Decimal, kinds, "the client's decoder hands a price as a Decimal")
+        self.assertNotIn(float, kinds, "and never as a float")
+        c_floats, c_client = {}, {}
+        days, raw, adj = ctx.rows_to_arrays(floats["raw"], floats["all"], day=day, columns=columns, count=c_floats)
+        days2, raw2, adj2 = ctx.rows_to_arrays(client["raw"], client["all"], day=day, columns=columns, count=c_client)
+        self.assertEqual((c_floats, c_client), ({"dropped": 0}, {"dropped": 0}))
+        self.assertGreater(int(np.isfinite(raw2[:, :, 3]).sum()), 0)
+        self.assertEqual((days.tobytes(), raw.tobytes(), adj.tobytes()), (days2.tobytes(), raw2.tobytes(), adj2.tobytes()),
+                         "the same doubles: float() of the Decimal is the float the same digits parse to")
+        self.assertEqual((raw2.dtype, adj2.dtype), (np.float64, np.float64))
+        # The nightly job's store, read from floats, holds what the live decision read from Decimals.
+        from league.ops import equity_panel
+
+        symbol = columns[0]
+        grid = equity_panel.Grid(ctx.fetch_sessions(day), [7])
+        grid.place({symbol: floats["raw"][symbol]}, {symbol: 7}, "raw")
+        self.assertEqual(grid.raw[:, 0].tobytes(), raw2[:, 0].tobytes())
+        # What is no number stays dropped, whole, whatever its kind: a bool (True is no price of 1), a string (the
+        # venue's numbers are JSON numbers), a Decimal that is not finite.
+        rows = client["raw"][symbol]
+        _, whole, _ = ctx.rows_to_arrays({symbol: rows}, client["all"], day=day, columns=[symbol])
+        bad = [{**rows[-5], "o": True}, {**rows[-4], "h": str(rows[-4]["h"])}, {**rows[-3], "c": Decimal("NaN")},
+               {**rows[-2], "l": Decimal("Infinity")}]
+        count: dict = {}
+        _, got, _ = ctx.rows_to_arrays({symbol: [*rows[:-5], *bad, {**rows[-1], "v": Decimal(int(rows[-1]["v"]))}]},
+                                       client["all"], day=day, columns=[symbol], count=count)
+        self.assertEqual(count, {"dropped": 4})
+        self.assertTrue(np.isnan(got[-5:-1]).all(), "never half a bar")
+        self.assertTrue(np.array_equal(got[:-5], whole[:-5], equal_nan=True) and np.array_equal(got[-1], whole[-1]))
+
     def test_the_live_inputs_are_refused_when_they_cannot_be_a_decisions(self):
         case = synth.same_ctx_cases(self.root, history=20, count=1, seed=2)[0]
         day, columns, common = case["day"], case["columns"], case["common"]

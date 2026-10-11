@@ -117,6 +117,7 @@ import hashlib
 import math
 from collections import OrderedDict
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any, Mapping, Sequence
 
 import numpy as np
@@ -794,6 +795,11 @@ def rows_to_arrays(raw_rows: Mapping[str, Sequence[Mapping[str, Any]]],
     ["dropped"]; never half a bar), exactly as the nightly job's `league.ops.equity_panel.Grid.place` reads the same
     answer: the store then holds what the live decision read, and one malformed bar among 515 columns never stops
     every decide of the lane (it raised here once: the live path sat blind where the night's job only counted).
+    A NUMBER IS AN int, A float OR A Decimal, never a bool and never a string. The live book's market data comes
+    through the House's venue client, whose decoder hands every price as a Decimal (`ltcm.adapters.decode`: "never
+    returns a float"), where the nightly job's gateway reader hands floats: both are the venue's same JSON number, and
+    `float()` of either is the same double (correctly rounded from the same digits), so the store and the live read
+    agree to the bit. (The review's regress-1: with Decimal refused here, no live bar was ever placed.)
     ValueError for a symbol whose rows name a day twice (two prices for one bar: nothing to decide on)."""
     t = as_date(day)
     sessions = fetch_sessions(t)
@@ -817,7 +823,8 @@ def rows_to_arrays(raw_rows: Mapping[str, Sequence[Mapping[str, Any]]],
                     dropped += 1 if at >= sessions[0] else 0   # (before the window: not asked for, not counted)
                     continue
                 values = [row.get(k) for k in keys]
-                if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in values):
+                if any(isinstance(v, bool) or not isinstance(v, (int, float, Decimal)) or not math.isfinite(v)
+                       for v in values):
                     dropped += 1
                     continue
                 target[i, col, :] = [float(v) for v in values]

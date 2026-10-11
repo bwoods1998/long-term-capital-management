@@ -9,12 +9,14 @@ written from their contract's words (league/xs/E4_INTERFACES.md; the stubs' docs
 
 import datetime as dt
 import hashlib
+import json
 import math
 import os
 import pickle
 import stat
 import tempfile
 import unittest
+import urllib.parse
 from contextlib import contextmanager
 from decimal import Decimal as D
 from pathlib import Path
@@ -22,15 +24,19 @@ from unittest import mock
 
 import numpy as np
 
+from ltcm.adapters import VenueClient, decode
+
 from league.equity import bands as B
 from league.equity import live as L
 from league.equity import schedule as S
 from league.equity import store as ES
+from league.live.venue import MarketData
 from league.tests import test_equity_book as T
 from league.xs import book, config
 from league.xs import ctx as X
 from league.xs import program as P
 from league.xs import store as XS
+from league.xs import synth
 
 DAY = dt.date(2026, 10, 13)            # a Tuesday
 PREV = dt.date(2026, 10, 12)
@@ -195,6 +201,40 @@ class Market:
                 rows.append(row)
             out[symbol] = rows
         return out
+
+
+def as_the_client(answer):
+    """`answer` as the House's venue client hands it to the live book: the venue's JSON bytes decoded by
+    `ltcm.adapters.decode` (json.loads with parse_float=Decimal: a price is a Decimal and never a float, a whole
+    number an int). The fake venues of the panel lane's live path hand their answers through it (this module's
+    `TheHousesClientHandsDecimals`, league/tests/test_equity_book_panel.py `Market`, league/tests/test_e4_e2e.py
+    `PanelMarket`), so a reader that takes only floats fails its test. THE REVIEW'S regress-1: every fake handed
+    floats, the real rows were refused as "no number", and in mode "live" no bar was ever placed."""
+    return decode(json.dumps(answer).encode("utf-8"), what="the fake venue's answer")
+
+
+def venue_stamped(rows):
+    """`Market`'s rows with the venue's own stamp of a 1Day bar, the session's New York midnight in UTC (04:00Z in
+    summer, 05:00Z in winter): package C's real `rows_to_arrays` reads a bar's day off it (the doubles above read the
+    first ten characters, and `Market` stamps 04:00Z the year round)."""
+    return {symbol: [{**row, "t": synth._stamp(dt.date.fromisoformat(row["t"][:10]))} for row in series]
+            for symbol, series in rows.items()}
+
+
+class Transport:
+    """The venue behind the House's own client, with no network: `ltcm.adapters.VenueClient` asks it for a URL and it
+    answers the venue's JSON BYTES for the bars route, from the tape of `Market` (invented prices)."""
+
+    def __init__(self, tape: "Market"):
+        self.tape, self.asked = tape, []
+
+    def request(self, method, url, headers=None, body=None, timeout=None):
+        parts = urllib.parse.urlparse(url)
+        query = {k: v[0] for k, v in urllib.parse.parse_qs(parts.query).items()}
+        self.asked.append((method, parts.path, query))
+        rows = venue_stamped(self.tape.bars(query["symbols"].split(","), timeframe=query["timeframe"],
+                                            start=query["start"], end=query["end"], adjustment=query["adjustment"]))
+        return 200, {}, json.dumps({"bars": rows, "next_page_token": None}).encode("utf-8")
 
 
 def names(n, prefix="N"):
@@ -402,6 +442,71 @@ class TheChunkedFetch(Case):
         again = book.fetch(self.market, self.cols, PREV, progress=progress)
         self.assertEqual(int(again.days[-1]), ES.ordinal(PREV))
         self.assertEqual(len(self.market.calls), 12)
+
+
+class TheHousesClientHandsDecimals(unittest.TestCase):
+    """THE REVIEW'S regress-1, held through the House's OWN classes and package C's REAL `rows_to_arrays` (no double of
+    it here: `fixtures()` is not entered): `ltcm.adapters.VenueClient` (as league/service.py builds the venue's client)
+    over a transport that answers the venue's JSON bytes, `league.live.venue.MarketData.bars` over it (what
+    `league/service.py` hands the live book), then `book.fetch`."""
+
+    SYMBOLS = ("SPY", *names(45))          # two chunks of the fetch
+
+    def setUp(self):
+        self.tape = Market()
+        self.transport = Transport(self.tape)
+        self.market = MarketData(VenueClient(self.transport))
+
+    def test_the_clients_rows_are_decimals(self):
+        rows = self.market.bars(["SPY", "N001"], timeframe="1Day", start=PREV.isoformat(), end="2026-10-14")
+        self.assertEqual(sorted(rows), ["N001", "SPY"])
+        self.assertEqual([r["t"][:10] for r in rows["SPY"]], [PREV.isoformat(), DAY.isoformat()])
+        self.assertEqual({type(r[f]) for r in rows["SPY"] for f in "ohlc"}, {D}, "never a float (the decoder's word)")
+        self.assertEqual({type(r["v"]) for r in rows["SPY"]}, {int})
+        self.assertEqual(self.transport.asked[0][1], "/v2/stocks/bars")
+
+    def test_every_bar_the_client_hands_is_placed(self):
+        fetched = book.fetch(self.market, self.SYMBOLS, DAY)
+        self.assertEqual((fetched.raw.shape, fetched.all.shape), ((253, 46, 5), (253, 46, 4)))
+        self.assertEqual(fetched.meta["dropped"], 0, "a Decimal is a number: no row is dropped")
+        self.assertTrue(np.isfinite(fetched.raw).all() and np.isfinite(fetched.all).all(), "every bar is placed")
+        self.assertEqual(len(self.transport.asked), 4, "two chunks, raw then all")
+        # The same answer read as floats (the nightly job's gateway reader: plain json.loads) is the same arrays to
+        # the bit: the store holds what the live decision read.
+        floats = book.fetch(mock.Mock(bars=lambda symbols, **kw: venue_stamped(self.tape.bars(symbols, **kw))),
+                            self.SYMBOLS, DAY)
+        self.assertEqual(floats.meta["dropped"], 0)
+        self.assertEqual((fetched.days.tobytes(), fetched.raw.tobytes(), fetched.all.tobytes()),
+                         (floats.days.tobytes(), floats.raw.tobytes(), floats.all.tobytes()))
+        k = self.SYMBOLS.index("N030")
+        row = self.tape.bars(["N030"], timeframe="1Day", start=DAY.isoformat(), end="2026-10-14")["N030"][0]
+        self.assertEqual(fetched.raw[-1, k].tolist(), [row[f] for f in "ohlcv"])
+
+    def test_the_fake_venues_decoder_is_the_clients(self):
+        rows = venue_stamped(self.tape.bars(["N001"], timeframe="1Day", start=PREV.isoformat(), end="2026-10-14"))
+        handed = as_the_client(rows)
+        self.assertEqual(handed, self.market.bars(["N001"], timeframe="1Day", start=PREV.isoformat(), end="2026-10-14"))
+        self.assertEqual({type(r["c"]) for r in handed["N001"]}, {D})
+        fetched = book.fetch(mock.Mock(bars=lambda symbols, **kw: as_the_client(venue_stamped(self.tape.bars(symbols, **kw)))),
+                             self.SYMBOLS, DAY)
+        self.assertEqual(fetched.meta["dropped"], 0)
+        self.assertTrue(np.isfinite(fetched.raw).all())
+
+    def test_a_row_that_is_no_number_is_still_dropped_whole_and_counted(self):
+        real = self.tape.bars
+
+        def bars(symbols, **kw):
+            rows = as_the_client(venue_stamped(real(symbols, **kw)))
+            if "N007" in rows and kw.get("adjustment") == "raw":
+                rows["N007"][-1] = {**rows["N007"][-1], "c": str(rows["N007"][-1]["c"])}      # a string is no number
+                rows["N007"][-2] = {**rows["N007"][-2], "o": True}                             # nor is a bool
+            return rows
+
+        fetched = book.fetch(mock.Mock(bars=bars), self.SYMBOLS, DAY)
+        k = self.SYMBOLS.index("N007")
+        self.assertEqual(fetched.meta["dropped"], 2)
+        self.assertTrue(np.isnan(fetched.raw[-2:, k]).all(), "never half a bar")
+        self.assertTrue(np.isfinite(np.delete(fetched.raw, k, axis=1)).all())
 
 
 class WhenAFetchMayBeDecidedOn(Case):

@@ -59,7 +59,8 @@ def tape_day(day: dt.date) -> int:
 
 class Market(T.Market):
     """The book tests' market, with a tape for any symbol (test_xs_book's): quotes four cents wide around the tape's
-    price of the clock's day, 1Day bars from the same tape."""
+    price of the clock's day, 1Day bars from the same tape. EVERY ANSWER IS HANDED AS THE HOUSE'S VENUE CLIENT HANDS
+    IT (`XB.as_the_client`: the venue's JSON decoded with Decimal prices, never a float; the review's regress-1)."""
 
     def __init__(self, clock):
         super().__init__(clock)
@@ -85,11 +86,12 @@ class Market(T.Market):
             t = T.iso(self.clock() - 1)
             out[s] = {"latestQuote": {"bp": float(bid), "ap": float(ask), "t": t},
                       "latestTrade": {"p": float((bid + ask) / 2), "t": t}}
-        return out
+        return XB.as_the_client(out)
 
     def bars(self, symbols, *, timeframe, start, end=None, adjustment="raw"):
         self.bar_calls.append((tuple(symbols), timeframe, start, end, adjustment))
-        return self.tape.bars(symbols, timeframe=timeframe, start=start, end=end, adjustment=adjustment)
+        return XB.as_the_client(self.tape.bars(symbols, timeframe=timeframe, start=start, end=end,
+                                               adjustment=adjustment))
 
 
 class Child(T.Decider):

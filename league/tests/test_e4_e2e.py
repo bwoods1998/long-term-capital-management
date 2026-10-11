@@ -85,6 +85,7 @@ if HAVE:
     from league.tests import REAL_POLICY_PATH
     from league.tests.elane_e2_fakes import FakeRouter, answer, review_answer
     from league.tests.test_equity_book import Clock, Market, Venue, at, iso
+    from league.tests.test_xs_book import as_the_client
     from league.xs import book as xbook
     from league.xs import config as xconfig
     from league.xs import identity as xidentity
@@ -205,7 +206,10 @@ if HAVE:
     class PanelMarket(Market):
         """The fake venue's market data over the panel store's own bars and the sessions invented after them: SIP
         snapshots a half-spread either side of the session's official open (before noon) or close, and 1Day bars the
-        venue serves once a session has closed."""
+        venue serves once a session has closed. EVERY ANSWER IS HANDED AS THE HOUSE'S VENUE CLIENT HANDS IT
+        (`as_the_client`: the venue's JSON bytes decoded by `ltcm.adapters.decode`, every price a Decimal and never a
+        float), so every reader on the live path, the panel's and the book's, is held to the rows it really gets
+        (the review's regress-1: with floats here the whole week passed while the real rows placed no bar)."""
 
         HALF_SPREAD = D("0.0003")
 
@@ -234,7 +238,7 @@ if HAVE:
                 stamp = iso(self.clock() - 1)
                 out[symbol] = {"latestQuote": {"bp": float(bid), "ap": float(ask), "t": stamp},
                                "latestTrade": {"p": float((bid + ask) / 2), "t": stamp}}
-            return out
+            return as_the_client(out)
 
         def served(self) -> str:
             """The last session whose 1Day bar the venue serves now: today's from the close on."""
@@ -244,9 +248,9 @@ if HAVE:
         def bars(self, symbols, *, timeframe, start, end=None, adjustment="raw"):
             self.bar_calls.append((tuple(symbols), timeframe, start, end, adjustment))
             last = self.served()
-            return {s: [dict(r) for r in self.bar_rows[adjustment].get(s, [])
-                        if start[:10] <= r["t"][:10] <= last and (end is None or r["t"][:10] < end[:10])]
-                    for s in symbols}
+            return as_the_client({s: [dict(r) for r in self.bar_rows[adjustment].get(s, [])
+                                      if start[:10] <= r["t"][:10] <= last and (end is None or r["t"][:10] < end[:10])]
+                                  for s in symbols})
 
         def extend(self, day: dt.date, move) -> None:
             """One invented session for every symbol, on the cent grid (so the adjusted row is the raw one: no event
@@ -263,7 +267,9 @@ if HAVE:
 
     class Gateway:
         """The gateway's bars route over the same market, as the data job's nightly I6 asks it (the venue's `end` day
-        is inclusive there, as E1's data job reads it)."""
+        is inclusive there, as E1's data job reads it). Its numbers are floats, as the ops jobs' own gateway reader
+        hands them (league/ops/context.py `Gateway`: plain json.loads), where the live book's client hands Decimals:
+        the nightly I6 here compares the one with the other, as on the House."""
 
         def __init__(self, market: "PanelMarket"):
             self.market, self.requests = market, []
