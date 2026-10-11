@@ -247,7 +247,15 @@ to `meter`, `report`, `funnel.window` or `stall.run` may raise (the spec's 11.4-
 - **A minutes file is written once**, so `fill_minutes.run` writes none for a day whose answer lacks the send-minute
   bar of `equity_data.CALENDAR_SYMBOL` in either window (a failed receipt: retried inside its grace, then by the
   backfill); and a closed lot's `fwd_lotgap` row waits while the minutes job may still fetch a missing file of its
-  entry or exit day (the last `BACKFILL_SESSIONS` forward days), then is written with what there is.
+  entry or exit day (the last `BACKFILL_SESSIONS` forward days), then is written with what there is. A day that is
+  not ready never holds up the days after it: the run writes every ready day of its backfill and fails at its end
+  (`day`: the first it left; `unready`: how many).
+- **The engine id of a re-price.** `on_run` files a run's `fwd_ll` rows under the id of the newest `fwd_days` row of
+  the run's last day (what B's `write` just wrote), and under `forward_db.engine_now` only when there is none. FOR
+  THE INTEGRATOR, not D's to fix: B writes a night under `engine_id(fwd_engine())`, while `engine_now` (A's
+  `counted_days` default, C's meters) is the LARGEST id. They are the same id until an engine label COMES BACK (a
+  rollback restores an equity fingerprint that already has its id while a newer id exists); from that night the
+  shadow writes under the old id and every reader of "the newest engine" reads the abandoned series.
 - **Names added**: in `fill_minutes` `FILL_POINTS`, `STAMP`, `LOOKBACK_DAYS`, `livelike_of`, `inside`, `path_of`,
   `days_on_disk`, `due_days`; in `forward_twins` `LIVE_DB`, `SWARM_DB`, `KIND`, `DECIDE_TIMEOUT`, `DECIDE_MAX_ERRORS`,
   `REAL_SUFFIX`, `RUN_FAILURES`, `FINISH_KEYS`, `d_retired`, `registry_key`, `read_book`, `twin_records`.
