@@ -404,6 +404,13 @@ after it carry 5ad1f01e's three. The xs identity is new (no band exists under an
 - policy.json ships `elane.panel.mode` "off" (the spec's shipped value); `elane.screens.equity_xs` is
   `screen.pin(RECEIPT_PATH)` of the receipt at sha256 98acbb83, written whole.
 
+**The seams no package could test alone, now held** (`league/tests/test_e4_integration.py`, beside the end-to-end
+test): package B's spreads and N_eff jobs on package C's real store, and package A's and the twins' readers of their
+files; package H's live columns on package C's real universe (the live eligibility IS the store's, the class of the
+month included, which the nightly I6 leaves out; a held name that left the index keeps its column); the nightly I6
+(A) on a fake venue's bars and on the bars a live decision kept (H); with `elane.panel.mode` "off" and every other
+condition held, nothing is born, run, spent or seated.
+
 **Owed, and what each holds back.**
 - PACKAGE J (the forward registry row, the nightly shadow twin, the marker): after release E3. Until its marker is
   written, mode "live" reads as "gate": no panel program is seated (`test_e4_integration.TheLaneStopsWhereItsRuleSays`).

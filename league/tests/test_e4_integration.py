@@ -13,6 +13,8 @@ is the lane's one path from a birth to the Done meter; this module is what stand
   effective mode is "gate" whatever the setting.
 - `TheDataJobsOnTheRealStore`: package B's spreads and N_eff jobs on package C's real store (they were built against
   fakes of it), and package A's and the twins' readers of what they leave.
+- `TheLiveColumnsOnTheRealUniverse`: package H's columns on package C's real universe: the live eligibility is the
+  store's own (the class of the month included), and a held name that left the index keeps its column.
 - `TheSeams`: the committed receipt, its pin and the House's sentence; one rounding bound for both lanes; the stall
   job's structures are the store's; every job row names a built module with its own wall."""
 
@@ -452,6 +454,70 @@ class TheDataJobsOnTheRealStore(unittest.TestCase):
         self.assertEqual((kept["neff_pr"], kept["names"], kept["coverage"]), (out["neff_pr"], out["names"], "ok"))
         self.assertEqual(self.gateway.calls, [], "it reads the store and asks the venue nothing")
         self.assertEqual(french.run(self.ctx("french"))["status"], "skipped")
+
+
+@unittest.skipUnless(HAVE, "numpy not installed")
+class TheLiveColumnsOnTheRealUniverse(unittest.TestCase):
+    """Package H's adapter was built against doubles of package C's universe and store. Here its columns are built on
+    C's REAL ones: the eligibility a live decision reads is the store's own, the class of the month included (the
+    nightly I6 compares bars and leaves the class rule out), and a held name that left the index keeps its column."""
+
+    @classmethod
+    def setUpClass(cls):
+        from league.equity.store import mint_equity_gate_capability
+        from league.ops import equity_panel
+        from league.xs import store as xstore
+
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.tmp.cleanup)
+        cls.root = synth.synthetic_panel(Path(cls.tmp.name) / "equity-daily", n_assets=40, gate=True,
+                                         live_from=dt.date(2026, 9, 1))
+        cls.panel = equity_panel.load_panel(cls.root)
+        cls.store = xstore.PanelStore(cls.root, gate=mint_equity_gate_capability(cls.root, reason="a test reads 2025-26"))
+        cls.assets = json.loads((cls.root / "universe" / "assets.json").read_text(encoding="utf-8"))
+
+    def test_the_live_eligibility_is_the_stores_own_with_the_class_of_the_month(self):
+        import numpy as np
+
+        from league.equity import store as estore
+
+        ref = len(xconfig.REF)
+        column = {aid: k for k, aid in enumerate(self.panel.aids)}
+        chosen = set()
+        for t in range(len(self.panel.days) - 420, len(self.panel.days), 7):     # twenty months: the choice flips
+            day = self.panel.days[t]
+            cols = xbook.columns(self.root, "fam@1:r", day)
+            take = [column[int(aid)] for aid in cols.aids]
+            first = t - (xconfig.DERIVE_SESSIONS - 1)
+            fetched = xbook.Fetched(days=np.array([estore.ordinal(d) for d in self.panel.days[first:t + 1]], dtype=np.int32),
+                                    raw=np.asarray(self.panel.raw[first:t + 1][:, take]),
+                                    all=np.asarray(self.panel.adj[first:t + 1][:, take]), meta={})
+            aids = [int(aid) for aid in cols.aids[ref:]]
+            live = np.asarray(xbook.eligible(cols, fetched, day), dtype=bool)[ref:]
+            gym = np.asarray(self.store.elig0_row(day, aids), dtype=bool)
+            self.assertEqual(live.tolist(), gym.tolist(), day)
+            # Before the class rule the adapter's row differs from the store's by the month's other class alone.
+            before = np.asarray(cols.elig0, dtype=bool)[ref:]
+            out = set(self.store.class_out(day))
+            self.assertEqual({aid for aid, a, b in zip(aids, before, gym) if a != b}, out, day)
+            chosen |= out
+        self.assertEqual(len(chosen), 2, "both classes of the pair were the month's other class at some time")
+
+    def test_a_held_name_that_left_the_index_keeps_a_column_and_is_no_candidate(self):
+        from league.equity.store import nyse_sessions
+
+        aid, spell = max(((int(aid), row["spells"][-1]) for aid, row in self.assets.items()
+                          if not row.get("ref") and row["spells"][-1][2]), key=lambda item: item[1][2])
+        symbol, left = spell[0], dt.date.fromisoformat(spell[2])
+        day = [d for d, _ in nyse_sessions(left, left + dt.timedelta(days=10))][1]     # the session after it left
+        for held in ({symbol: (left - dt.timedelta(days=20)).isoformat()}, [symbol]):
+            cols = xbook.columns(self.root, "fam@1:r", day, held=held)
+            self.assertEqual(cols.extra, (symbol,))
+            at_ = cols.symbols.index(symbol)
+            self.assertEqual((int(cols.aids[at_]), bool(cols.elig0[at_])), (aid, False))
+        self.assertNotIn(symbol, xbook.columns(self.root, "fam@1:r", day).symbols, "not held: no column")
+        with self.assertRaises(xbook.ColumnsRefused):
+            xbook.columns(self.root, "fam@1:r", day, held=["NOSUCH"])
 
 
 @unittest.skipUnless(HAVE, "numpy not installed")
