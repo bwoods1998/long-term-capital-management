@@ -218,3 +218,77 @@ class EquityRoundsOnTheirOwn(LoopCase):
         with mock.patch.object(sw.tournament, "equity_round", side_effect=RuntimeError("boom")), screen():
             out = sw.equity_rounds()
         self.assertEqual(out["errors"], {"round": "RuntimeError"}, "never raises; the gate's step still ran")
+
+
+class TheOrderOfTheLooks(FixCase):
+    """s2-6 and evidence-9 (one defect): the seeds' looks ran in (born_at, id) order with born_at to the second, so in
+    the ids' alphabet (QQQ before SPY), or by a clock tick; under D3 the later of two seeds of one lineage is refused
+    with no look, and it then retired as "used its one Validation try", which is not what happened."""
+
+    def seeded(self):
+        born = elane.birth_seeds(self.store, ON)
+        self.assertEqual(len({self.store.family(fid)["born_at"] for fid in born}), 1, "one clock reading: one second")
+        with screen():
+            self.tournament.equity_round()
+        return born
+
+    def test_the_looks_are_taken_in_the_seed_lists_order(self):
+        from league.swarm import seeds
+
+        listed = [str(spec["id"]) for spec in seeds.EQUITY_SEEDS]
+        self.assertEqual(listed[:2], ["seed-overnight-spy", "seed-overnight-qqq"], "SPY's overnight seed goes first")
+        self.assertNotEqual(listed, sorted(listed), "the list's order is not the alphabet's")
+        self.assertEqual(self.seeded(), listed)
+        fams = self.store.families(alive=True, lanes=elane.LANES)
+        self.assertEqual([f["id"] for f in fams], sorted(listed), "the store's order: born in one second, by id")
+        self.assertEqual([f["id"] for f in elane.round_order(self.store, fams)], listed)
+        self.runner.calls.clear()
+        out, mint = self.gate_round()  # every seed's Train series is the harness's one series: one lineage
+        self.assertEqual(out["looked"], [{"family": "seed-overnight-spy", "passed": True, "lane": BETA}])
+        self.assertEqual([c[1] for c in self.runner.calls if c[0] == "look"], ["seed-overnight-spy"])
+        for fid in listed[1:]:
+            (refusal,) = self.store.refusals(fid)
+            self.assertEqual(refusal["stage"], "same lineage")
+            self.assertIn("seed-overnight-spy", refusal["reason"])
+
+    def test_a_later_birth_keeps_its_place_and_an_unseeded_family_follows_the_seeds(self):
+        self.born("aaa-first")  # born before the seeds: its turn is first, whatever its id
+        self.clock.advance(5)
+        born = elane.birth_seeds(self.store, ON)
+        self.born("aaa-same-second", seeded=False)
+        self.clock.advance(5)
+        self.born("aaa-later")
+        fams = self.store.families(alive=True, lanes=elane.LANES)
+        self.assertEqual([f["id"] for f in elane.round_order(self.store, fams)],
+                         ["aaa-first", *born, "aaa-same-second", "aaa-later"])
+        with mock.patch.object(self.store, "get", side_effect=RuntimeError("unreadable")):
+            self.assertEqual(elane.round_order(self.store, fams), fams, "a store that cannot say: the order as given")
+
+    def test_a_version_refused_before_its_look_retires_for_what_happened(self):
+        self.seeded()
+        self.gate_round()
+        with screen():
+            out = self.tournament.equity_round()
+        self.assertEqual(out["retired"], ["seed-overnight-qqq", "seed-reversal-index"])
+        for fid in out["retired"]:
+            fam = self.store.family(fid)
+            self.assertEqual(fam["retire_reason"], elane.SAME_LINEAGE)
+            self.assertNotEqual(fam["retire_reason"], elane.SPENT_TRY, "its try was not what ended it")
+        self.assertNotRegex(elane.SAME_LINEAGE + elane.FLOOR_INELIGIBLE + elane.REFUSED_BEFORE_LOOK, r"seed-|\$",
+                            "public causes: the rule's words, no family and no figure")
+        self.assertEqual(self.store.family("seed-overnight-spy")["band"], "candidate", "the one that was judged")
+
+    def test_an_ineligible_floor_and_a_failed_recheck_have_their_own_causes(self):
+        version, sha = self.ready("b1")
+        with screen(eligible=False):
+            self.assertIsNone(self.gate.look(self.store.family("b1"), version, sha))
+        self.assertEqual(elane.lineage_spent(self.store, self.store.family("b1"), ON), elane.FLOOR_INELIGIBLE)
+        version, sha = self.ready("b2", code=CODE + "# another program\n")
+        with screen(precheck=False):
+            self.assertIsNone(self.gate.look(self.store.family("b2"), version, sha))
+        self.assertEqual(self.store.refusals("b2")[0]["stage"], "precheck")
+        self.assertEqual(elane.lineage_spent(self.store, self.store.family("b2"), ON), elane.REFUSED_BEFORE_LOOK)
+        # A failed Validation try, and a spent look, keep their own words.
+        self.born("b3", code=CODE + "# a third program\n")
+        self.validated("b3", precheck=False)
+        self.assertEqual(elane.lineage_spent(self.store, self.store.family("b3"), ON), elane.SPENT_TRY)

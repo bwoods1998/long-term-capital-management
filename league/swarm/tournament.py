@@ -1319,7 +1319,7 @@ class Tournament:
         the equity rounds' own thread (`Swarm.equity_rounds`), never by `run`."""
         out: dict[str, Any] = {"validated": {}, "retired": [], "errors": {}}
         try:
-            fams = self.store.families(alive=True, lanes=elane.LANES)
+            fams = elane.round_order(self.store, self.store.families(alive=True, lanes=elane.LANES))
         except Exception as exc:  # noqa: BLE001
             self.store.event("swarm.status", None, {"action": "elane_round_error", "error": type(exc).__name__})
             return out

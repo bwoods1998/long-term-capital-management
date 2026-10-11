@@ -78,7 +78,11 @@ spent SPY/QQQ/IWM always-in roots never refuse an equity birth, and a REFUTED eq
 
 THE SEEDS (A4; league/swarm/seeds.py `EQUITY_SEEDS`): seed-overnight-spy, seed-overnight-qqq, seed-reversal-index,
 each born once as an agent-authored family (`birth_seeds`), then Validation, the screen's pre-check and one sealed look
-like any family. Every report says plainly that these three were seeded by the captain's build agents (`SEEDED_NOTE`), and
+like any family. THEIR LOOKS ARE TAKEN IN THAT ORDER (`round_order`: both equity rounds walk the families by birth,
+the seeds of one second in `EQUITY_SEEDS` order): under D3 the later of two seeds of one lineage is refused with no
+look, so which one is judged is the list's order, never the ids' alphabet or a clock tick. A version refused at the
+gate before its look retires for what happened (`REFUSED_CAUSES`: the same lineage, no eligible floor), not as a spent
+Validation try. Every report says plainly that these three were seeded by the captain's build agents (`SEEDED_NOTE`), and
 the Done meter reads Done with and without them (`seeded`).
 
 Standard library only at import (league/equity/__init__.py and config.py); the screen, the runner and the store (numpy)
@@ -152,6 +156,16 @@ NOT_A_TRY = ("error", "no_data")
 #: The public causes of `lineage_spent` (a `swarm.retired` cause): rules only, no figure.
 SPENT_LOOK = "its equity lineage has used its one sealed look (one Validation try and one look an equity lineage)"
 SPENT_TRY = "its equity lineage has used its one Validation try (one Validation try and one look an equity lineage)"
+#: A version that passed its Validation pre-check and was REFUSED AT THE GATE BEFORE ITS LOOK (`_refuse`: no look was
+#: taken) retires for what happened, by the refusal's stage; a stage not named here reads `REFUSED_BEFORE_LOOK`.
+SAME_LINEAGE = ("its program is the same lineage as a program already looked at (A9 D3: Train daily returns "
+                "correlating at 0.7 or more, or the same template): one sealed look a lineage, so it was refused "
+                "before any look")
+FLOOR_INELIGIBLE = ("the share screen has no eligible program floor for it (too little Train-era history, or no "
+                    "threshold on the screen's grid): it was refused before any look")
+REFUSED_BEFORE_LOOK = ("the gate refused its program before the sealed look (its recorded Validation no longer passes "
+                       "the screen's pre-check, or the lineage's look was already spent): no look was taken")
+REFUSED_CAUSES = {"same lineage": SAME_LINEAGE, "screen floor": FLOOR_INELIGIBLE}
 
 DEFAULTS: dict[str, Any] = {
     "mode": "off",
@@ -354,6 +368,23 @@ def seeded(store: Any, fid: str) -> bool:
         return False
     spec = (fam or {}).get("spec") if isinstance(fam, Mapping) else None
     return isinstance(spec, Mapping) and spec.get("seeded") is True
+
+
+def round_order(store: Any, fams: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    """THE ORDER OF AN EQUITY ROUND, which is the order the looks are taken in. D3 makes it a decision: of two programs
+    of one lineage the second is refused with no look. Oldest first by the second of birth, then the captain-seeded
+    programs in `seeds.EQUITY_SEEDS` order (the three are born in one call, so in one second: by id alone the order was
+    the alphabet's, or a clock tick's when a second ended between two births), then by id. A store that cannot say
+    which families are seeds leaves the order as given."""
+    try:
+        from . import seeds
+
+        rank = {str(spec["id"]): i for i, spec in enumerate(seeds.EQUITY_SEEDS)}
+        place = {str(fid): rank[str(sid)] for sid, fid in (store.get(SEEDS_KEY) or {}).items() if str(sid) in rank}
+    except Exception:  # noqa: BLE001
+        return list(fams)
+    return sorted(fams, key=lambda f: (str(f.get("born_at") or ""), place.get(str(f.get("id")), len(rank)),
+                                       str(f.get("id"))))
 
 
 def candidate(fam: Mapping[str, Any], store: Any = None) -> int | None:
@@ -589,8 +620,20 @@ def next_try(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any] | N
         return None
 
 
+def _refused_cause(store: Any, fid: str, n: int) -> str:
+    """The public cause of a version the gate refused before its look (`_refuse`): its last refusal's stage read through
+    `REFUSED_CAUSES`, `REFUSED_BEFORE_LOOK` for another stage or when no row can be read. Rules only, no figure."""
+    try:
+        rows = [r for r in store.refusals(str(fid)) if r.get("version") == int(n)]
+    except Exception:  # noqa: BLE001 - the stage cannot be read: the general words
+        rows = []
+    return REFUSED_CAUSES.get(str(rows[-1].get("stage") or ""), REFUSED_BEFORE_LOOK) if rows else REFUSED_BEFORE_LOOK
+
+
 def lineage_spent(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any] | None) -> str | None:
-    """Why the family's equity lineage can take no look (its one look used, or its one try failed), or None."""
+    """Why the family's equity lineage can take no look, or None: its one look used (`SPENT_LOOK`), its one try failed
+    (`SPENT_TRY`), or its version refused at the gate before any look (`REFUSED_CAUSES`: the same lineage as a program
+    already looked at, no eligible program floor; `REFUSED_BEFORE_LOOK` otherwise)."""
     try:
         if lane_of(store, fam) is None:
             return None
@@ -613,6 +656,8 @@ def lineage_spent(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any
             sha = _run_sha(store.version(fid, last["version"]))
             if sha is not None and not store.looked(sha) and state.get("gated_sha") != sha:
                 return None  # it entered the gate and waits for its one look
+            if sha is not None and not store.looked(sha):
+                return _refused_cause(store, fid, last["version"])  # the gate refused it before any look
             return SPENT_TRY
         n_next = held.get("retry_sha")
         if n_next and len(tries) <= c["val_tries"]:
@@ -1230,7 +1275,8 @@ __all__ = ["MODES", "STRUCTURES", "LABELS", "BETA_NOTE", "SEEDED_NOTE", "SEEDS_K
            "try_open", "lineage_spent",
            "roster_seats", "isolated_runner", "validate", "look", "birth_seeds", "seeded", "view", "BETA", "EQUITY",
            "LANES", "LOOK_KEY", "FLOOR_KEY", "TRAIN_R_KEY", "TEMPLATE_KEY", "VALIDATION_KEY", "VERDICTS_KEY", "SIGMA_KEY", "SCREEN",
-           "ROUND_KEY", "ROUND_SECONDS",
+           "ROUND_KEY", "ROUND_SECONDS", "round_order", "SAME_LINEAGE", "FLOOR_INELIGIBLE", "REFUSED_BEFORE_LOOK",
+           "REFUSED_CAUSES",
            "STORE_DIR", "SEED_AUTHOR", "CLASSES", "INPUTS", "NOT_A_TRY", "SPENT_LOOK", "SPENT_TRY", "ROSTER_CLOSED",
            "card_lane", "candidate", "lineage_tries", "next_try", "reviewed", "same_lineage", "LineageUnread", "LOSS_LINE",
            "loss_line"]

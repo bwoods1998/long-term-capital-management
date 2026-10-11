@@ -1323,7 +1323,8 @@ class Gate:
         gate-ready goes to `look` (so to `elane.look`), one look at a time; a look in flight from a dead process is owed
         again. Its looks are listed in `out["looked"]` with their lane. Called by the swarm's loop on the equity rounds'
         own thread (`Swarm.equity_rounds`), never by `run`."""
-        for fam in self.store.families(alive=True, lanes=elane.LANES):
+        # THE ORDER THE LOOKS ARE TAKEN IN is a decision under D3 (`elane.round_order`): by birth, the seeds as listed.
+        for fam in elane.round_order(self.store, self.store.families(alive=True, lanes=elane.LANES)):
             fid = str(fam["id"])
             state = fam.get("state") or {}
             marker = state.get("look_inflight") or {}
