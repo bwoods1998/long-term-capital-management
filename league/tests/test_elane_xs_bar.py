@@ -804,7 +804,9 @@ class E2sResearcherForwardsAPanelFamily(ScoreCase):
         e2_family(self.store, "etf-a", code=None)
         r = self.researcher()
         self.assertEqual(sorted(f["id"] for f in r.queue()), ["etf-a", fam["id"]])
+        F.panel_family(self.store, "mom-a", agenda="xs_momentum", code=F.good(tag="m"))
         self.world.quiet = "a wall is near"
+        self.world.quiet_asked.clear()
         self.assertEqual([f["id"] for f in r.queue()], ["etf-a"], "the ETF family's research is not slowed")
         self.assertEqual(len(self.world.quiet_asked), 1, "asked once a round, not once a family")
         self.world.quiet = None
