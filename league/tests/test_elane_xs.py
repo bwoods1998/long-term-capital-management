@@ -1175,6 +1175,136 @@ class ThePanelLineageHasOneTry(GateCase):
         self.assertEqual(elane.card_errors(F.card(), "panel", [], self.settings), [])
 
 
+@unittest.skipUnless(F.PATCHED, F.HOLDS.format(n="5 and 6"))
+class ThePanelBirths(unittest.TestCase):
+    """Patches 5 and 6: E2's equity pass shows the PANEL block, forwards a panel proposal to `elane_xs.admit`, and
+    splits its births by structure; `cards.validate` knows a panel card."""
+
+    def setUp(self):
+        from league.swarm.architect import Architect
+        from league.tests.elane_e2_fakes import FakeRouter, answer
+
+        self.world = F.switch_on(self)
+        self.store = F.new_store(self)
+        F.ready(self.store.root)
+        self.answers: list = []
+        self.answer = answer
+        self.router = FakeRouter(lambda call: self.answers.pop(0) if self.answers else answer([]))
+        self.make = lambda settings: Architect(self.store, self.router, settings, clock=self.store.clock)
+        self.settings = F.settings("train", e2={"max_per_pass": 4, "min_per_pass": 4})
+        self.arch = self.make(self.settings)
+
+    def proposal(self, slug, **over):
+        row = {"slug": slug, "lane": "equity", "structure": "panel", "panel": "sp500", "agenda": "xs_reversal",
+               "max_names": 5, "rebalance": "weekly", "weekday": 0,
+               "mechanism": f"Invented mechanism {slug}: liquidity providers are paid to absorb a week of selling.",
+               "rejection": "the residual at or below zero at 1.5x", "sketch": "rank the week's losers within a sector",
+               "card": F.card(), "program": F.good(tag=slug)}
+        row.update(over)
+        return row
+
+    def pass_(self, rows, arch=None):
+        self.answers.append(self.answer(rows))
+        self.store.clock.advance(7200)
+        return (arch or self.arch).equity_pass()
+
+    def test_a_panel_proposal_is_born_a_panel_family_with_its_card_its_program_and_its_own_record(self):
+        out = self.pass_([self.proposal("rev-a")])
+        self.assertEqual(out["born"], ["rev-a"])
+        fam = self.store.family("rev-a")
+        self.assertEqual((fam["structure"], fam["roots"], fam["band"]), ("panel", [], "gym"))
+        spec = fam["spec"]
+        self.assertEqual({k: spec[k] for k in ("lane", "agenda", "panel", "max_names", "rebalance", "weekday", "e2_route",
+                                               "hidden_year", "gid")},
+                         {"lane": "equity", "agenda": "xs_reversal", "panel": "sp500", "max_names": 5,
+                          "rebalance": "weekly", "weekday": 0, "e2_route": F.ROUTE, "hidden_year": None, "gid": "g0"})
+        from league.swarm import cards, elane_train
+
+        card = cards.card_of(self.store, "rev-a")["card"]
+        self.assertEqual({k: card.get(k) for k in ("lane", "structure", "panel", "max_names", "rebalance", "weekday")},
+                         {"lane": "equity", "structure": "panel", "panel": "sp500", "max_names": 5,
+                          "rebalance": "weekly", "weekday": 0})
+        self.assertNotIn("symbols", card)
+        self.assertEqual(cards.card_of(self.store, "rev-a")["key"]["family"], "equity:panel")
+        self.assertEqual(spec["card_sha"], cards.card_sha(card))
+        self.assertEqual(self.store.latest_version("rev-a")["n"], 1)
+        state = fam["state"]
+        self.assertEqual(state[elane_xs.STATE_KEY]["status"], "researching")
+        self.assertNotIn(elane_train.STATE_KEY, state)
+        born = [e["payload"] for e in self.store.events_after(0, limit=500) if e["kind"] == "swarm.born"][0]
+        self.assertEqual((born["lane"], born["structure"], born["roots"], born["panel"], born["program"]),
+                         ("equity", "panel", [], "sp500", "v1"))
+        self.assertNotIn("hidden_year", born)
+        self.assertEqual(out["panel"], {"want": 2, "born": 1})
+
+    def test_the_request_carries_the_panel_block_only_while_the_lane_bears(self):
+        self.pass_([])
+        request = self.router.calls[-1]["user"]
+        for part in ("THE PANEL (structure \"panel\", lane equity)", "PANEL QUOTA: of this pass's births, 2 may be panel",
+                     "THE PANEL AGENDA", "THE PANEL TRAIN BAR (equity-xs-v1)", "THE PANEL CONTRACT"):
+            self.assertIn(part, request)
+        self.pass_([self.proposal("rev-a")])
+        self.pass_([])
+        self.assertIn("PANEL TRAIN MAP", self.router.calls[-1]["user"])
+        off = self.make(F.settings("off", e2={"max_per_pass": 4, "min_per_pass": 4}))
+        out = self.pass_([self.proposal("rev-b")], off)
+        self.assertNotIn("THE PANEL (structure", self.router.calls[-1]["user"])
+        self.assertEqual(out["born"], [])
+        self.assertIn("the panel lane is closed", out["refused"]["items"][0]["why"])
+        self.assertNotIn("panel", out, "with the lane off the pass is E2's own")
+
+    def test_the_passes_births_split_by_structure(self):
+        from league.tests.elane_e2_fakes import proposal as etf
+
+        rows = [self.proposal(f"rev-{i}", agenda=agenda) for i, agenda in enumerate(
+            ("xs_reversal", "xs_momentum", "xs_low_vol"))]
+        rows += [etf(f"etf-{i}", symbols=(sym,), mechanism=f"Invented ETF mechanism number {i}: holders of {sym} are "
+                                                           "paid for overnight risk.")
+                 for i, sym in enumerate(("SPY", "QQQ", "IWM"))]
+        out = self.pass_(rows)
+        self.assertEqual(sorted(out["born"]), ["etf-0", "etf-1", "rev-0", "rev-1"])
+        whys = {item["slug"]: item["why"] for item in out["refused"]["items"]}
+        self.assertIn("2 panel births are born", whys["rev-2"])
+        self.assertIn("2 share-program births are born", whys["etf-2"])
+        self.assertEqual(out["panel"], {"want": 2, "born": 2})
+
+    def test_a_proposal_outside_the_panels_box_is_refused_with_its_reason(self):
+        closed = {"status": "refuted", "versions": {"1": {"fails": ["XT1"]}}}
+        for i in range(3):
+            F.panel_family(self.store, f"dead-{i}", agenda="xs_52w_high", record=closed)
+        F.panel_family(self.store, "busy", agenda="xs_momentum",
+                       mechanism="Invented mechanism busy: winners of the last year keep winning for months.")
+        tried = F.panel_family(self.store, "tried", agenda="xs_low_vol", record={
+            "status": "passed", "passed_version": 1, "versions": {"1": {"fails": []}}})
+        rows = [self.proposal("a", max_names=13, card=F.card(max_names=13)),
+                self.proposal("b", agenda="overnight"),
+                self.proposal("c", agenda="xs_52w_high"),
+                self.proposal("d", agenda="xs_momentum",
+                              mechanism="Invented mechanism busy: winners of the last year keep winning for months."),
+                self.proposal("e", agenda="xs_low_vol", parent=tried["id"]),
+                self.proposal("f", card=F.card(symbols=["AAPL"])),
+                self.proposal("g", max_names=8),
+                self.proposal("h", mechanism="too short")]
+        out = self.pass_(rows)
+        self.assertEqual(out["born"], [])
+        whys = {item["slug"]: item["why"] for item in out["refused"]["items"]}
+        self.assertIn("max_names", whys["a"])
+        self.assertIn("THE PANEL AGENDA", whys["b"])
+        self.assertIn("CLOSED", whys["c"])
+        self.assertIn("in Train research: busy", whys["d"])
+        self.assertIn("its one Validation try", whys["e"])
+        self.assertIn("symbols", whys["f"])
+        self.assertIn("different values", whys["g"])
+        self.assertIn("mechanism", whys["h"])
+
+    def test_a_program_that_does_not_fit_is_left_for_the_researcher(self):
+        out = self.pass_([self.proposal("rev-a", program=F.good(names=8))])
+        self.assertEqual(out["born"], ["rev-a"])
+        self.assertIsNone(self.store.latest_version("rev-a"))
+        refused = self.store.family("rev-a")["state"][elane_xs.STATE_KEY]["refused"]
+        self.assertIn("max_names", refused[0]["why"])
+
+
 @unittest.skipUnless(F.PATCHED, F.HOLDS.format(n="1, 2, 4 and 5"))
 class NoStructureLiteralOutsideTheStore(unittest.TestCase):
     """Seal X16: every scope that told the equity lanes apart by spelling "etf" and "stock" out reads the store's
