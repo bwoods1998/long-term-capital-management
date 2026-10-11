@@ -195,7 +195,8 @@ def walk(r: Rows, E: D, cash: D, asks: Sequence[tuple[str, str]], *, share: D = 
 def figures(r: Rows, *, E: D = D("2000"), day_multiple: D = D(4)) -> dict[str, Any]:
     """THE CLOSED FORMS the documents state, as shares of E unless a name says dollars or a count:
     - `lot`: a one-ETF program's lot, the sleeve's own share of one ETF: sleeve x etf;
-    - `seated`, `risk`: every seat holding one such lot, and its open risk at the ETF weight;
+    - `seated`: a lot in every seat, as asked; `one_held`, `one_risk`: what the invested cap lets the lane hold of
+      them (the lower of `seated` and the invested share), and its open risk at the ETF weight;
     - `same`, `rest`: how many programs hold a WHOLE lot of one ETF under the instrument cap (etf x E), and what the
       next program's lot of that ETF is;
     - `cash_fit`: how many of the seats' lots fit whole, each in its own ETF, when the account is all the capital
@@ -214,7 +215,8 @@ def figures(r: Rows, *, E: D = D("2000"), day_multiple: D = D(4)) -> dict[str, A
     ladder = r.max_bp // r.entry_bp
     sends = int(day_multiple // lot)
     return {
-        "seats": r.seats, "sleeve": r.sleeve, "lot": lot, "seated": seated, "risk": r.weight * seated,
+        "seats": r.seats, "sleeve": r.sleeve, "lot": lot, "seated": seated, "one_held": min(seated, r.invested),
+        "one_risk": r.weight * min(seated, r.invested),
         "same": same, "rest": r.etf - same * lot,
         "cash_fit": min(r.seats, int(min(r.invested * E, E - r.reserve) // (lot * E))),
         "budget_fit": min(r.seats, int((r.window / r.weight) // (lot * E))),
@@ -316,16 +318,17 @@ def gateway_day_multiple(repo: Path = REPO) -> D:
 BODY = (
     "THE DESIGN IN FORCE: {seats} seats (`probe.max_programs`, `elane.roster`), a Probe sleeve of {sleeve} x E",
     "(`probe.sleeve_share`). A one-ETF program's lot is `position_share.etf` ({etf}) of its sleeve: {lot} x E.",
-    "Every seat holding one such lot: {seated} x E of ETFs, {risk} x E of open risk at weight {weight}.",
-    "One ETF across programs (the instrument cap, {etf} x E): {same} whole lots fit; the next program's lot of it is",
-    "{rest} x E. At E = {E}, the account all cash and nothing realized: {cash_fit} of {seats} whole lots fit under the",
-    "invested cap ({invested} x E) and the ${reserve} cash reserve alone, and {budget_fit} of {seats} in the ${window}",
-    "window alone; the window alone holds all {seats} up to E = {budget_e}. Whole sleeves (programs that hold several",
-    "ETFs) ask for {sleeves} x E; the lane holds at most {held} x E, {held_risk} x E of open risk. The options Probe",
-    "lane keeps ${window} less the window's realized loss less {weight} x the equity lots: ${window} - {risk} x E with",
-    "every seat holding one lot. The gateway's day line ({day_multiple}x equity of buys a day, a cancelled one too)",
-    "admits {sends} sends of such a lot: {ladders} entries can each climb the collar's ladder of {ladder} sends. A",
-    "Sized sleeve (the step is parked) would be between {sleeve} x E and {sized} x E.",
+    "A lot in every seat asks for {seated} x E of ETFs; the lane holds at most {one_held} x E of them, {one_risk} x E of",
+    "open risk at weight {weight}. One ETF across programs (the instrument cap, {etf} x E): {same} whole lots fit; the",
+    "next program's lot of it is {rest} x E. At E = {E}, the account all cash and nothing realized: {cash_fit} of",
+    "{seats} whole lots fit under the invested cap ({invested} x E) and the ${reserve} cash reserve alone, and",
+    "{budget_fit} of {seats} in the ${window} window alone; the window alone holds all {seats} up to E = {budget_e}.",
+    "Whole sleeves (programs that hold several ETFs) ask for {sleeves} x E; the lane holds at most {held} x E,",
+    "{held_risk} x E of open risk. The options Probe lane keeps ${window} less the window's realized loss less {weight} x",
+    "the equity lots: ${window} - {one_risk} x E against the one-ETF lots above. The gateway's day line ({day_multiple}x",
+    "equity of buys a day, a cancelled one too) admits {sends} sends of such a lot: {ladders} entries can each climb the",
+    "collar's ladder of {ladder} sends. A Sized sleeve (the step is parked) would be between {sleeve} x E and",
+    "{sized} x E.",
 )
 #: The documents' line beside the block's: the digests of the pair in force (never in the constitution's own comment).
 DIGEST_LINE = ("Money digest `{money}`, full digest `{full}` (`PINNED_DIGEST`); the rollback, `set_design 3 0.50`, is "
@@ -348,7 +351,8 @@ def slots(constitution: Mapping[str, Any] | None = None, *, repo: Path = REPO) -
     back["equity_money"]["probe"].update(max_programs=REFERENCE[0], sleeve_share=REFERENCE[1])
     return {
         "seats": str(f["seats"]), "sleeve": sh(f["sleeve"]), "etf": sh(r.etf), "lot": sh(f["lot"]),
-        "seated": sh(f["seated"]), "risk": sh(f["risk"]), "weight": sh(r.weight), "same": str(f["same"]),
+        "seated": sh(f["seated"]), "one_held": sh(f["one_held"]), "one_risk": sh(f["one_risk"]),
+        "weight": sh(r.weight), "same": str(f["same"]),
         "rest": sh(f["rest"]), "invested": sh(r.invested), "reserve": f"{r.reserve:f}", "cash_fit": str(f["cash_fit"]),
         "window": f"{r.window:f}", "budget_fit": str(f["budget_fit"]), "E": usd(f["E"]), "budget_e": usd(f["budget_e"]),
         "sleeves": sh(f["sleeves"]), "held": sh(f["held"]), "held_risk": sh(f["held_risk"]),

@@ -44,7 +44,11 @@ class TheTable(unittest.TestCase):
         self.assertEqual(e, M.EquityTable.from_constitution())
         self.assertIs(e.enabled, True, "A10.2: the switch ships on (elane.mode off and the stock proof hold the lane)")
         self.assertEqual((e.invested_share, e.cash_reserve, e.min_order_usd), (D("1.00"), D("50"), D("10")))
-        self.assertEqual((e.probe_sleeve_share, e.probe_max_programs), (D("0.50"), 3), "A20: 0.50 x E, three seats")
+        from league.tests.equity_design import CANDIDATES, in_force
+
+        seats, sleeve = in_force()
+        self.assertIn((seats, sleeve), CANDIDATES, "the two numbers of release E5-S are one of the grid's pairs")
+        self.assertEqual((e.probe_sleeve_share, e.probe_max_programs), (D(sleeve), seats))
         self.assertEqual(dict(e.position_share), {"etf": D("0.50"), "stock": D("0.20")})
         self.assertEqual(dict(e.open_risk_weight), {"etf": D("0.20"), "stock": D("0.40")})
         self.assertEqual((e.sized_min_trades, e.sized_confidence, e.sized_kelly_fraction, e.sized_sleeve_share,
@@ -217,12 +221,25 @@ class TheGrantReRatifies(StandingCase):
     grant pinned on fdf2ac7c holds nothing after the deploy until the standing grant re-ratifies it at the House's
     start, on the owner's release change only. The stop (`enabled` False, a constitution-only change) is a digest of
     its own, ratified the same way, and so is A20's rollback (the sleeve back at 0.25: 3a7c52d5); the rollback to a
-    release before E1 brings fdf2ac7c back on the owner's deploy of it."""
+    release before E1 brings fdf2ac7c back on the owner's deploy of it.
+
+    THESE ARE E1's DIGESTS, at A20's design (three seats at 0.50): every test here runs with the two rows at that
+    design (`setUp`: `reference`), whatever pair release E5-S's `set_design` has put in force. A MOVE OF THE PAIR is a
+    digest of its own, ratified the same way and by the owner's deploy alone (`test_a_design_move_...`), and the move
+    back to A20's design lands on E1's digest exactly."""
 
     BEFORE = "fdf2ac7c1a446e39df9e27c8626fb86a954a3f5a939460406507a9b735f1d4c7"
     E1 = "7e41909a9da3e3f44cb4edd8f37921d7f6edba5a9de84e328624570d94ca146a"
     OFF = "23f17a1467610f8d252b55c6d6748f8fb1311a0142e3f92c43d4bff710886579"
     QUARTER = "3a7c52d58911d0c1a39f58cbe79547e343683a18004355b52a9390c8aec04fd2"
+
+    def setUp(self):
+        from league.tests.equity_design import reference
+
+        super().setUp()
+        at_a20 = reference()
+        at_a20.__enter__()
+        self.addCleanup(at_a20.__exit__, None, None, None)
 
     def pre_e1(self):
         patcher = patch.dict(CONSTITUTION)
@@ -284,6 +301,39 @@ class TheGrantReRatifies(StandingCase):
             out = self.standing(grant, release="r-quarter", rows=owner_deploy(self.clock() - 60, release="r-quarter"))
             self.assertEqual(out["action"], "ratified")
             self.assertEqual(grant.current()["policy"]["constitution_digest"], self.QUARTER)
+            self.assertTrue(grant.allows_live(2))
+
+    def test_a_design_move_is_a_digest_of_its_own_ratified_the_same_way_and_so_is_the_move_back(self):
+        """Release E5-S: the seats and the sleeve move together (`set_design SEATS SLEEVE`), each pair of the grid a
+        money digest of its own (league/tests/equity_design.py `DIGESTS`). A grant ratified on E1's digest holds
+        nothing under any other pair until the owner's deploy of that release re-ratifies it; the updater alone
+        never does; and `set_design 3 0.50` is E1's digest again, on which the grant is ratified as before."""
+        from league.tests.equity_design import CANDIDATES, DIGESTS, REFERENCE, design
+
+        grant = self.pinned_before()
+        self.standing(grant, release="r-e1", rows=owner_deploy(self.clock() - 60, release="r-e1"))
+        self.assertEqual(DIGESTS[REFERENCE][0], self.E1)
+        for n, pair in enumerate(c for c in CANDIDATES if c != REFERENCE):
+            self.clock.advance(HOUR)
+            with design(*pair):
+                self.assertEqual(money_digest(), DIGESTS[pair][0], pair)
+                self.assertFalse(grant.allows_live(2), f"{pair}: a moved pair is a moved money rule")
+                out = self.standing(grant, release="main-abcdef123456", rows=updater_deploy(self.clock() - 60))
+                self.assertEqual(out["action"], "refused", pair)
+                self.assertFalse(grant.allows_live(2))
+                release = f"r-design-{n}"
+                out = self.standing(grant, release=release, rows=owner_deploy(self.clock() - 60, release=release))
+                self.assertEqual(out["action"], "ratified", pair)
+                self.assertEqual(grant.current()["policy"]["constitution_digest"], DIGESTS[pair][0])
+                self.assertTrue(grant.allows_live(2))
+            # The move back (the rollback): E1's digest again, held until the owner's deploy of it ratifies it.
+            self.clock.advance(HOUR)
+            self.assertEqual(money_digest(), self.E1)
+            self.assertFalse(grant.allows_live(2))
+            back = f"r-back-{n}"
+            out = self.standing(grant, release=back, rows=owner_deploy(self.clock() - 60, release=back))
+            self.assertEqual(out["action"], "ratified", pair)
+            self.assertEqual(grant.current()["policy"]["constitution_digest"], self.E1)
             self.assertTrue(grant.allows_live(2))
 
     def test_the_rollback_before_e1_is_ratified_on_the_owners_deploy_of_it(self):

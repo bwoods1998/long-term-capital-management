@@ -148,34 +148,55 @@ class ConstitutionTest(unittest.TestCase):
         block is a money rule (none is in `RISK_FREE`), so each moves the money digest and the standing grant
         re-ratifies on the owner's deploy (league/tests/test_equity_money.py). THE SWITCH SHIPS ON (the captain's
         A10.2): `enabled` True is the block as deployed; its stop, `enabled` False, is a digest of its own (23f17a14),
-        ratified the same way; the rollback to a release before E1 brings fdf2ac7c back."""
+        ratified the same way; the rollback to a release before E1 brings fdf2ac7c back.
+
+        SINCE RELEASE E5-S THE SEATS AND THE SLEEVE ARE TWO NUMBERS (`set_design SEATS SLEEVE`): every figure above
+        is A20's design's (three seats at 0.50), read here with the two rows at that design (`reference`) whatever
+        pair is in force, so `set_design 3 0.50` is shown to bring E1's digests back to the last hex; the pair in
+        force is one of the pre-registered grid's, and its own digests are the grid's pins
+        (league/tests/equity_design.py `DIGESTS`), `PINNED_DIGEST` among them. No other row may move with it."""
         import copy
 
         from league.constitution import RISK_FREE, money_digest
+        from league.tests.equity_design import CANDIDATES, DIGESTS, REFERENCE, constitution_at, in_force, reference
 
-        self.assertEqual(money_digest(), "7e41909a9da3e3f44cb4edd8f37921d7f6edba5a9de84e328624570d94ca146a")
-        self.assertEqual(PINNED_DIGEST, "e909eb1040231bc078e878df2d87fad7a1001d86ab3eac32be5f45f2b82c1895")
-        before = copy.deepcopy(CONSTITUTION)
-        del before["equity_money"]
-        self.assertEqual(money_digest(before), "fdf2ac7c1a446e39df9e27c8626fb86a954a3f5a939460406507a9b735f1d4c7")
-        off = copy.deepcopy(CONSTITUTION)
-        off["equity_money"]["enabled"] = False
-        self.assertEqual(money_digest(off), "23f17a1467610f8d252b55c6d6748f8fb1311a0142e3f92c43d4bff710886579")
-        # A20's rollback: the sleeve back at a quarter of E, the sizing-up step still parked, is a pair of its own...
-        quarter = copy.deepcopy(CONSTITUTION)
-        quarter["equity_money"]["probe"]["sleeve_share"] = "0.25"
-        self.assertEqual(money_digest(quarter), "3a7c52d58911d0c1a39f58cbe79547e343683a18004355b52a9390c8aec04fd2")
-        self.assertEqual(digest(quarter), "6d19fddd271cc46682e48e09ae14364976b76077ca084198874f47dbf4340b43")
-        # ...and with the rule's own 20 closes back too it is the pair the branch carried before A20, and nothing else.
-        quarter["equity_money"]["sized"]["min_trades"] = 20
-        self.assertEqual(money_digest(quarter), "ad8c761bccc49033c3fdeca78c7b962f58272d192a2dd6e0626682ccdf6ac367")
-        self.assertEqual(digest(quarter), "65b0e025a08d4c3a8f78e487eb1a0f83ad9bfed307563c02acbd50ac4a6308bb")
-        # The row alone (the sleeve at 0.50, sizing up as pre-registered) is the digest of the commit before the park.
-        unparked = copy.deepcopy(CONSTITUTION)
-        unparked["equity_money"]["sized"]["min_trades"] = 20
-        self.assertEqual(money_digest(unparked), "d8c96f66d556c2123b9e797c901075f43af34ad182de3b965fceeca0a7c97f14")
+        pair = in_force()
+        self.assertIn(pair, CANDIDATES, "the seats and the sleeve in force are one of the grid's pairs")
+        self.assertEqual((money_digest(), PINNED_DIGEST), DIGESTS[pair], "the pair in force is on its pinned digests")
+        self.assertEqual(digest(), PINNED_DIGEST)
+        for candidate in CANDIDATES:
+            at = constitution_at(*candidate)
+            self.assertEqual((money_digest(at), digest(at)), DIGESTS[candidate], candidate)
+        self.assertEqual(len({money for money, _ in DIGESTS.values()}), len(CANDIDATES), "every pair is a digest of its own")
+        self.assertEqual(DIGESTS[REFERENCE], ("7e41909a9da3e3f44cb4edd8f37921d7f6edba5a9de84e328624570d94ca146a",
+                                              "e909eb1040231bc078e878df2d87fad7a1001d86ab3eac32be5f45f2b82c1895"),
+                         "the rollback is E1's pair, exactly")
+        with reference():
+            self.assertEqual(money_digest(), "7e41909a9da3e3f44cb4edd8f37921d7f6edba5a9de84e328624570d94ca146a")
+            self.assertEqual(digest(), "e909eb1040231bc078e878df2d87fad7a1001d86ab3eac32be5f45f2b82c1895")
+            before = copy.deepcopy(CONSTITUTION)
+            del before["equity_money"]
+            self.assertEqual(money_digest(before), "fdf2ac7c1a446e39df9e27c8626fb86a954a3f5a939460406507a9b735f1d4c7")
+            off = copy.deepcopy(CONSTITUTION)
+            off["equity_money"]["enabled"] = False
+            self.assertEqual(money_digest(off), "23f17a1467610f8d252b55c6d6748f8fb1311a0142e3f92c43d4bff710886579")
+            # A20's rollback: the sleeve back at a quarter of E, the sizing-up step still parked, is a pair of its own...
+            quarter = copy.deepcopy(CONSTITUTION)
+            quarter["equity_money"]["probe"]["sleeve_share"] = "0.25"
+            self.assertEqual(money_digest(quarter), "3a7c52d58911d0c1a39f58cbe79547e343683a18004355b52a9390c8aec04fd2")
+            self.assertEqual(digest(quarter), "6d19fddd271cc46682e48e09ae14364976b76077ca084198874f47dbf4340b43")
+            self.assertEqual((money_digest(quarter), digest(quarter)), DIGESTS[(3, "0.25")], "the grid's own pair")
+            # ...and with the rule's own 20 closes back too it is the pair the branch carried before A20, and nothing else.
+            quarter["equity_money"]["sized"]["min_trades"] = 20
+            self.assertEqual(money_digest(quarter), "ad8c761bccc49033c3fdeca78c7b962f58272d192a2dd6e0626682ccdf6ac367")
+            self.assertEqual(digest(quarter), "65b0e025a08d4c3a8f78e487eb1a0f83ad9bfed307563c02acbd50ac4a6308bb")
+            # The row alone (the sleeve at 0.50, sizing up as pre-registered) is the digest of the commit before the park.
+            unparked = copy.deepcopy(CONSTITUTION)
+            unparked["equity_money"]["sized"]["min_trades"] = 20
+            self.assertEqual(money_digest(unparked), "d8c96f66d556c2123b9e797c901075f43af34ad182de3b965fceeca0a7c97f14")
         self.assertFalse(any(path[0] == "equity_money" for path in RISK_FREE))
-        for path, value in ((("invested_share",), "0.90"), (("cash_reserve_usd",), "60"), (("probe", "max_programs"), 2),
+        seats, sleeve = pair
+        for path, value in ((("invested_share",), "0.90"), (("cash_reserve_usd",), "60"), (("probe", "max_programs"), seats - 1),
                             (("probe", "sleeve_share"), "0.49"), (("sized", "min_trades"), 999),
                             (("open_risk_weight", "etf"), "0.25"), (("demotion", "program_loss_usd"), "-200"),
                             (("order_path", "close_until_before_close_s"), 60)):
@@ -186,15 +207,15 @@ class ConstitutionTest(unittest.TestCase):
             node[path[-1]] = value
             self.assertNotEqual(money_digest(moved), money_digest(), path)
         # The block as E1 deploys it (INTERFACES 7.1, the captain's amendments A1, A5, A8, A10.2: the switch ships on;
-        # nothing trades until a look passes with `elane.mode` "gate" and the stock proof's BUY stage passes; A20: the
-        # Probe sleeve at 0.50 x E, three seats, and no other row moved: the owner's lines are the same strings).
+        # nothing trades until a look passes with `elane.mode` "gate" and the stock proof's BUY stage passes), with the
+        # two numbers of release E5-S in its `probe` row and no other row moved: the owner's lines are the same strings.
         em = CONSTITUTION["equity_money"]
         self.assertIs(em["enabled"], True)
         self.assertEqual((em["invested_share"], em["cash_reserve_usd"]), ("1.00", "50"))
-        self.assertEqual(em["probe"], {"sleeve_share": "0.50", "max_programs": 3, "min_order_usd": "10"})
+        self.assertEqual(em["probe"], {"sleeve_share": sleeve, "max_programs": seats, "min_order_usd": "10"})
         self.assertEqual(em["position_share"], {"etf": "0.50", "stock": "0.20"})
         self.assertEqual(em["open_risk_weight"], {"etf": "0.20", "stock": "0.40"})
-        self.assertEqual(em["sized"]["sleeve_share"], "0.50", "left as pre-registered: the Probe's own since A20")
+        self.assertEqual(em["sized"]["sleeve_share"], "0.50", "left as pre-registered at every design: never under the Probe's")
         self.assertEqual(em["sized"], {"min_trades": 1000, "confidence": "0.80", "kelly_fraction": "0.25",
                                        "sleeve_share": "0.50", "beat_bh": True, "min_probe_sessions": 5},
                          "THE SIZING-UP STEP IS PARKED: 1000 closes, a tightening inside its bound; nothing else moved")
@@ -214,7 +235,7 @@ class ConstitutionTest(unittest.TestCase):
         loose = {"position_share.etf": ("0.50", "0.5001"), "position_share.stock": ("0.20", "0.2001"),
                  "invested_share": ("1.00", "1.01"), "cash_reserve_usd": ("50", "49.99"),
                  "open_risk_weight.etf": ("0.20", "0.19"), "open_risk_weight.stock": ("0.40", "0.39"),
-                 "probe.sleeve_share": ("0.50", "0.51"), "probe.max_programs": (3, 4), "probe.min_order_usd": ("10", "9.99"),
+                 "probe.sleeve_share": ("0.50", "0.51"), "probe.max_programs": (6, 7), "probe.min_order_usd": ("10", "9.99"),
                  "sized.min_trades": (20, 19), "sized.confidence": ("0.80", "0.79"), "sized.kelly_fraction": ("0.25", "0.26"),
                  "sized.sleeve_share": ("0.50", "0.51"), "sized.min_probe_sessions": (5, 4),
                  "demotion.min_trades": (10, 11), "demotion.z": ("1.645", "1.65"),
@@ -224,13 +245,21 @@ class ConstitutionTest(unittest.TestCase):
                  "order_path.entry_collar_bp.etf": (10, 51), "order_path.max_collar_bp.etf": (50, 51),
                  "order_path.max_collar_bp.stock": (100, 101), "order_path.max_orders_day": (60, 61)}
         self.assertTrue(set(loose) <= set(EQUITY_MONEY_BOUNDS))
-        # A20 (Oct 11, 2026) loosened ONE bound, the Probe sleeve's, to the value in force; the owner's lines beside it
-        # (an ETF's share, the invested share, the Sized sleeve's cap, the seats) are where they were.
+        # A20 (Oct 11, 2026) loosened ONE bound, the Probe sleeve's, to 0.50; release E5-S (the same day) loosened ONE
+        # more, the seats', to six, so that the two rows are set together inside them. The owner's lines beside them
+        # (an ETF's share, the invested share) and the Sized sleeve's cap are where they were, and the rows in force
+        # are inside the two bounds, wherever the study's verdict puts them.
+        from decimal import Decimal
+
         self.assertEqual(EQUITY_MONEY_BOUNDS["probe.sleeve_share"], ("0", "0.50"))
-        self.assertEqual(CONSTITUTION["equity_money"]["probe"]["sleeve_share"], EQUITY_MONEY_BOUNDS["probe.sleeve_share"][1])
+        self.assertEqual(EQUITY_MONEY_BOUNDS["probe.max_programs"], ("0", "6"))
+        row = CONSTITUTION["equity_money"]["probe"]
+        self.assertLessEqual(Decimal(row["sleeve_share"]), Decimal(EQUITY_MONEY_BOUNDS["probe.sleeve_share"][1]))
+        self.assertLessEqual(row["max_programs"], int(EQUITY_MONEY_BOUNDS["probe.max_programs"][1]))
+        self.assertLessEqual(Decimal(row["sleeve_share"]), Decimal(CONSTITUTION["equity_money"]["sized"]["sleeve_share"]),
+                             "the Sized cap is never under the Probe sleeve")
         self.assertEqual((EQUITY_MONEY_BOUNDS["position_share.etf"], EQUITY_MONEY_BOUNDS["invested_share"],
-                          EQUITY_MONEY_BOUNDS["sized.sleeve_share"], EQUITY_MONEY_BOUNDS["probe.max_programs"]),
-                         (("0", "0.50"), ("0", "1.00"), ("0", "0.50"), ("0", "3")))
+                          EQUITY_MONEY_BOUNDS["sized.sleeve_share"]), (("0", "0.50"), ("0", "1.00"), ("0", "0.50")))
         # THE SIZING-UP STEP IS PARKED at the other end of its bound: 1000 closes is the row in force, the rule's own
         # 20 stays allowed (the switch back), and one past either end is refused.
         self.assertEqual((CONSTITUTION["equity_money"]["sized"]["min_trades"], EQUITY_MONEY_BOUNDS["sized.min_trades"]),
