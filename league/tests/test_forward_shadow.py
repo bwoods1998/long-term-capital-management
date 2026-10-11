@@ -1813,6 +1813,11 @@ class TheJob(Case):
         self.assertEqual(forward_shadow.house_failures(
             {**clean, "twins": {"begin": {"error": "ValueError"}, "finish": {"instances": 2}, "rows": 0, "errors": 4}}),
             ["the twins' timing table raised ValueError", "the twins' re-price of 3 runs raised"])
+        self.assertEqual(forward_shadow.house_failures(
+            {**clean, "twins": {"begin": {"error": "ValueError"}, "finish": {"error": "KeyError"}, "errors": 2}}),
+            ["the twins' timing table raised ValueError", "the twins' own runs raised KeyError"])
+        self.assertEqual(forward_shadow.house_failures({**clean, "register": {"error": "OperationalError"}}),
+                         ["the registry's sync raised OperationalError"])
 
     def test_the_jobs_child_is_its_own_decider_with_its_own_log(self):
         child = self.real_decider(self.root)
