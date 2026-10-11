@@ -248,6 +248,12 @@ PAUSE_FILES = {"PAUSE": ("maintenance", "lift the maintenance pause once its wor
                "swarm.stop": ("swarm_stop", "remove state/swarm.stop once the swarm should run again (the House starts it then)")}
 CAUSES = ("births", "birth_yield", "gym_runs", "validations", "braked", "runway_sail", "runway_claude", "owner_deploy",
           "paused", "grant_refused", "kill_on", "dlane", "done", "preopen", "forward", "swarm_alerts", "underspend")
+#: THE EQUITY LANES (release E2): their births (a `swarm.born` whose payload's lane is "beta" or "equity"), their families
+#: (structure "etf" or "stock": league/swarm/store.py `OPTIONS_ONLY_SQL`) and their Train runs on the House are their own:
+#: none masks a stalled options architect, population or Gym here.
+OPTIONS_BIRTHS = "COALESCE(json_extract(payload, '$.lane'), '') NOT IN ('beta', 'equity')"
+OPTIONS_FAMILIES = "structure NOT IN ('etf', 'stock')"
+OPTIONS_RUNS = "family NOT IN (SELECT id FROM families WHERE structure IN ('etf', 'stock'))"
 #: The causes a pause stops by design: not raised while the floor is paused.
 RESEARCH_CAUSES = ("births", "birth_yield", "gym_runs", "validations", "braked", "underspend")
 #: The causes that are news to the owner, not a stall nor a step WAITING (Oct 10, 2026): a Done checkpoint that holds is
@@ -466,11 +472,14 @@ def swarm_facts(db: Any, now: float) -> dict[str, Any]:
     iso = lambda hours: S.iso(now - hours * 3600)  # noqa: E731
     one = lambda sql, params=(): (guard.ids(db, sql, params) or [None])[0]  # noqa: E731
     marks = ",".join("?" * len(F.NOT_RUN))
-    #: A Gym evaluation: a row with a trial the Gym neither refused nor failed (an F1 verdict's rows carry no trial).
-    evaluated = f"status NOT IN ({marks}) AND trials > 0"
+    #: A Gym evaluation: a row with a trial the Gym neither refused nor failed (an F1 verdict's rows carry no trial). RELEASE
+    #: E2: the equity lanes' runs (their Train runs on the House) are no Gym evaluation; their Validations still count.
+    evaluated_all = f"status NOT IN ({marks}) AND trials > 0"
+    evaluated = f"{evaluated_all} AND {OPTIONS_RUNS}"
     out: dict[str, Any] = {}
-    out["births"] = int(one("SELECT count(*) FROM events WHERE kind='swarm.born' AND at>=?", (iso(BIRTH_HOURS),)) or 0)
-    out["last_birth_at"] = one("SELECT max(at) FROM events WHERE kind='swarm.born'")
+    out["births"] = int(one(f"SELECT count(*) FROM events WHERE kind='swarm.born' AND at>=? AND {OPTIONS_BIRTHS}",
+                            (iso(BIRTH_HOURS),)) or 0)
+    out["last_birth_at"] = one(f"SELECT max(at) FROM events WHERE kind='swarm.born' AND {OPTIONS_BIRTHS}")
     # THE LEARNING GAME's children (league/swarm/game.py `ORIGIN`) are births too, though they emit no `swarm.born`.
     children = int(one("SELECT count(*) FROM families WHERE origin=? AND born_at>=?", (GAME_ORIGIN, iso(BIRTH_HOURS))) or 0)
     if children:
@@ -478,7 +487,7 @@ def swarm_facts(db: Any, now: float) -> dict[str, Any]:
     last_child = one("SELECT max(born_at) FROM families WHERE origin=?", (GAME_ORIGIN,))
     if last_child and (out["last_birth_at"] is None or str(last_child) > str(out["last_birth_at"])):
         out["last_birth_at"] = last_child
-    out["alive"] = int(one("SELECT count(*) FROM families WHERE retired_at IS NULL") or 0)
+    out["alive"] = int(one(f"SELECT count(*) FROM families WHERE retired_at IS NULL AND {OPTIONS_FAMILIES}") or 0)
     passes = {"passes": 0, "no_cell": 0, "ceiling": 0, "failed": 0, "asked": 0, "proposed": 0, "born": 0}
     for text in guard.ids(db, "SELECT payload FROM events WHERE kind='swarm.architect' AND at>=? ORDER BY seq",
                           (iso(BIRTH_HOURS),)):
@@ -499,15 +508,15 @@ def swarm_facts(db: Any, now: float) -> dict[str, Any]:
             passes["proposed"] += int(_finite(row.get("proposed")) or 0)
         passes["born"] += len(row.get("born") or []) if isinstance(row.get("born"), list) else 0
     out["architect"] = passes
-    runs = guard.rows(db, "SELECT status, trials > 0 AS trial, count(*) AS n FROM runs WHERE at>=? GROUP BY status, trials > 0",
-                      (iso(GYM_HOURS),))
+    runs = guard.rows(db, f"SELECT status, trials > 0 AS trial, count(*) AS n FROM runs WHERE at>=? AND {OPTIONS_RUNS} "
+                          "GROUP BY status, trials > 0", (iso(GYM_HOURS),))
     out["gym_runs"] = sum(int(r["n"] or 0) for r in runs if r["status"] not in F.NOT_RUN and r["trial"])
     out["gym_not_run"] = sum(int(r["n"] or 0) for r in runs if r["status"] in F.NOT_RUN)
     out["gym_no_trial"] = sum(int(r["n"] or 0) for r in runs if r["status"] not in F.NOT_RUN and not r["trial"])
     out["last_gym_run_at"] = one(f"SELECT max(at) FROM runs WHERE {evaluated}", F.NOT_RUN)
     out["cycles"] = int(one("SELECT count(*) FROM events WHERE kind='swarm.cycle' AND at>=?", (iso(GYM_HOURS),)) or 0)
     since_v = iso(VALIDATION_HOURS)
-    out["validation_runs"] = int(one(f"SELECT count(*) FROM runs WHERE \"window\"='validation' AND at>=? AND {evaluated}",
+    out["validation_runs"] = int(one(f"SELECT count(*) FROM runs WHERE \"window\"='validation' AND at>=? AND {evaluated_all}",
                                      (since_v, *F.NOT_RUN)) or 0)
     out["validation_inherited"] = int(one(f"SELECT count(*) FROM runs WHERE \"window\"='validation' AND at>=? AND status NOT IN "
                                           f"({marks}) AND trials = 0", (since_v, *F.NOT_RUN)) or 0)
@@ -594,7 +603,7 @@ def _yield_facts(db: Any, now: float) -> dict[str, Any]:
         if isinstance(payload, Mapping):
             passes.append((S.epoch(row["at"]), payload))
     since = S.iso(now - DRY_HOURS * 3600)
-    born = guard.ids(db, "SELECT count(*) FROM events WHERE kind='swarm.born' AND at>=?", (since,))
+    born = guard.ids(db, f"SELECT count(*) FROM events WHERE kind='swarm.born' AND at>=? AND {OPTIONS_BIRTHS}", (since,))
     children = guard.ids(db, "SELECT count(*) FROM families WHERE origin=? AND born_at>=?", (GAME_ORIGIN, since))
     return {"yield": {"jam": architect_tally(passes, now - JAM_HOURS * 3600),
                       "low": architect_tally(passes, now - YIELD_HOURS * 3600),

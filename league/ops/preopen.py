@@ -208,7 +208,9 @@ def collect(root: Path, base: Path, release: Path, gateway: Any, *, now: float, 
         # heartbeat, or the guard's check inside it, written in between is stamped after `now`.
         read_at = float(clock()) if clock is not None else now
         st = hb.get("status") or {}
-        alive = guard.read(root / "swarm.sqlite", lambda db: guard.ids(db, "SELECT count(*) FROM families WHERE retired_at IS NULL"))[0]
+        # The options population against its floor: the equity lanes' families are their own (release E2).
+        alive = guard.read(root / "swarm.sqlite", lambda db: guard.ids(db, "SELECT count(*) FROM families WHERE retired_at IS "
+                                                                           "NULL AND structure NOT IN ('etf', 'stock')"))[0]
         return {"raw_is_object": isinstance(raw, dict), "raw_live": raw.get("live") if isinstance(raw, dict) else None,
                 "defaults_live": dict(SS.DEFAULTS["live"]),
                 "eff_gym": {k: (eff.get("gym") or {}).get(k) for k in ("enabled", "image_checkpoint", "gate_checkpoint")},
