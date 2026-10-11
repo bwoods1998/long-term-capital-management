@@ -57,6 +57,12 @@ What they did find is fixed here, each with a test that failed before.
   resumes at it, or its fill is counted in the attempt that had begun), so it cannot corrupt the next attempt's
   reconciliation. The options `PaperProof` is byte for byte as it was. `league/live` is hashed: **the options
   execution fingerprint moves**, as it already does once with E1 (no further cost: one adoption at the E1 deploy).
+- **A Validation the House could not make is not a failed pre-check** (`league/swarm/loop.py`
+  `Swarm.equity_rounds`). The round's line mapped every verdict to "entered or not", so a Validation that could not
+  be made at all (the evidence child could not start: no run, no try spent) read `validated: false`, `errors: {}`,
+  exactly like a failed pre-check. Such a verdict, and a refused one, is now under `validation_errors`
+  {family: error} in the round's log line and in the heartbeat's `status.equity`; `validated` holds real verdicts
+  only. A report only: no rule and no fingerprint moves.
 
 ### Release E1, the rehearsal on real data: the data job, the vendor's cents, the seeds' order, on `feat/equity-e1` (unreleased; an owner deploy with the rest of E1; the equity identity moves before its first look; no money-digest move)
 

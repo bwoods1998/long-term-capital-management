@@ -999,8 +999,11 @@ differ, this section is the code.
   `Swarm.equity_due()` (the lane on and `elane.ROUND_SECONDS`, 300, since the store's kv `elane.ROUND_KEY`
   "elane_round_at"; never the guard, never `gym_ready`) and `Swarm.equity_rounds()` (on the round thread "equity":
   `Tournament.equity_round()`, then `Gate.equity_round(out)`; never raises) -> {validated {family: entered}, retired,
-  errors, looked, held}. `Tournament.run` and `Gate.run` no longer call the equity steps, and the hourly
-  `swarm.tournament` row carries no `equity` key. The heartbeat's status carries `equity` {mode, round_at}.
+  errors, looked, held}. `validated` holds real verdicts only; a verdict carrying `error` or `refused` (no Validation
+  was made, no try spent) is under `validation_errors` {family: the error | "refused: why"}, present when any (the
+  verification's fix). `Tournament.run` and `Gate.run` no longer call the equity steps, and the hourly
+  `swarm.tournament` row carries no `equity` key. The heartbeat's status carries `equity` {mode, round_at, and the
+  last round's `validation_errors` when it left any (`Swarm.equity_unmade`)}.
 - **The order of a round** (swarm): `elane.round_order(store, fams) -> [fam]`: by the second of birth, then by id,
   the seeds as one block in `seeds.EQUITY_SEEDS`' declared order (section 15.4 says which). Both equity rounds walk it.
 - **Retirement causes** (swarm): `elane.SAME_LINEAGE`, `elane.FLOOR_INELIGIBLE`, `elane.REFUSED_BEFORE_LOOK`,

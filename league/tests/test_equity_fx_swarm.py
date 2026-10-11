@@ -238,6 +238,66 @@ class EquityRoundsOnTheirOwn(LoopCase):
         self.assertEqual(out["errors"], {"round": "RuntimeError"}, "never raises; the gate's step still ran")
 
 
+class AValidationTheHouseCouldNotMake(LoopCase):
+    """verify-evidence-2 (the verification of E1): `Swarm.equity_rounds` mapped every verdict to bool(entered), so a
+    Validation the House could not make at all (the evidence child cannot start: no run, no try spent) read
+    `validated: false` with `errors: {}` in the round's line, exactly like a FAILED pre-check. It is said under its
+    own key, in the log line and in the heartbeat, and `validated` holds real verdicts only."""
+
+    def on(self, runner):
+        self.settings["elane"] = {"mode": "gate"}
+        (self.root / "swarm.json").write_text(json.dumps({"enabled": True, "gym": self.settings["gym"],
+                                                          "researcher": {"idle_seconds": 0}, "elane": {"mode": "gate"}}))
+        sw = self.swarm()
+        sw.tournament.equity_runner = sw.gate.equity_runner = runner
+        sw.equity_births()
+        return sw
+
+    def test_a_run_that_could_not_be_made_is_an_error_not_a_failed_pre_check(self):
+        from league.equity.runner import RunFailed
+
+        class Broken(FakeRunner):
+            def validation(self, code, params, *, name, k=1.0):
+                if name != "seed-reversal-index":
+                    raise RunFailed("the decider child could not be started")
+                return super().validation(code, params, name=name, k=k)
+
+        sw = self.on(Broken())
+        with screen():
+            out = sw.equity_rounds()
+        self.assertEqual(out["validated"], {"seed-reversal-index": True}, "real verdicts only")
+        self.assertEqual(out["validation_errors"], {"seed-overnight-qqq": "RunFailed", "seed-overnight-spy": "RunFailed"})
+        self.assertEqual(out["errors"], {}, "the round itself did not fail")
+        for fid in out["validation_errors"]:
+            self.assertIsNone(self.store.family(fid)["state"].get(elane.TRY_KEY), "no try was spent")
+        self.assertEqual(sw.equity_status()["validation_errors"], out["validation_errors"], "the heartbeat says so too")
+        sw.heartbeat()
+        beat = json.loads((self.root / "swarm.heartbeat").read_text())["status"]["equity"]
+        self.assertEqual(beat["validation_errors"], out["validation_errors"])
+        # The House can make the runs again: real verdicts, and the heartbeat's errors are gone with the next round.
+        sw.tournament.equity_runner = sw.gate.equity_runner = FakeRunner()
+        with screen():
+            out = sw.equity_rounds()
+        self.assertEqual(out["validated"], {"seed-overnight-qqq": True, "seed-overnight-spy": True})
+        self.assertNotIn("validation_errors", out)
+        self.assertNotIn("validation_errors", sw.equity_status())
+
+    def test_a_failed_pre_check_stays_a_verdict_and_a_refusal_is_said_as_one(self):
+        sw = self.on(FakeRunner())
+        with screen(precheck=False):
+            out = sw.equity_rounds()
+        self.assertEqual(sorted(out["validated"].items()), [("seed-overnight-qqq", False), ("seed-overnight-spy", False),
+                                                            ("seed-reversal-index", False)], "FAILED: a real verdict")
+        self.assertNotIn("validation_errors", out)
+        refused = {"validated": {"a": {"entered": False, "refused": elane.SPENT_TRY}, "b": {"entered": True},
+                                 "c": {"entered": False, "error": "no_data"}, "d": "not a verdict"},
+                   "retired": [], "errors": {}}
+        with mock.patch.object(sw.tournament, "equity_round", return_value=refused), screen():
+            out = sw.equity_rounds()
+        self.assertEqual(out["validated"], {"b": True})
+        self.assertEqual(out["validation_errors"], {"a": f"refused: {elane.SPENT_TRY}", "c": "no_data"})
+
+
 class TheOrderOfTheLooks(FixCase):
     """s2-6 and evidence-9 (one defect): the seeds' looks ran in (born_at, id) order with born_at to the second, so in
     the ids' alphabet, or by a clock tick; under D3 the later of two seeds of one lineage is refused with no look, and

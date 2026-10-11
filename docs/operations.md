@@ -32,7 +32,12 @@ validated in a round takes its look in the same round. **Neither the research bu
 switched off holds them**, and no options round carries them: an options Validation that fails or runs long costs an
 equity family nothing. They need only the swarm process running (`enabled` in swarm.json) and `elane.mode` "gate". The
 heartbeat's `status.equity` shows the mode and when the last equity round started; the swarm's log has one `equity:`
-line a round (who was validated, who was looked at).
+line a round (who was validated, who was looked at). **A Validation the House could not make is not a failed
+pre-check**: `validated` {family: entered} holds real verdicts only (`false` there is a FAILED pre-check, and the
+lineage's one try is spent), while a Validation that could not be made (the evidence child could not start, or a run
+that ended with no data: nothing is recorded, no try is spent, and it is asked again next round) or that was refused
+is named under `validation_errors` {family: the error}, in that line and, until the next round, in the heartbeat's
+`status.equity`. Read `equity-decider.log` on the box when one stays there.
 
 **The order of the looks** is the seed list's DECLARED order (`league/swarm/seeds.py` `EQUITY_SEEDS`,
 `elane.round_order`): `seed-overnight-qqq, seed-reversal-index, seed-overnight-spy`. It is a decision (the captain's,
