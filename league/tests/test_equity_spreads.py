@@ -671,19 +671,26 @@ class ThePanelHalfSpread(unittest.TestCase):
         self.assertIsNone(reader("QAZ", "not a day"))
         self.assertEqual(Universe.asked[0], ("open", self.root))
 
-    def test_with_no_half_spreads_to_read_there_is_no_reader(self):
-        self.assertIsNone(SP.panel_half_spread(self.root))                              # no panel store
-        self.panel([100, 101], [[0.001, 0.0005], [0.001, 0.0005]], break_sha="hs.npy")
-        self.assertIsNone(SP.panel_half_spread(self.root), "a file that does not match its manifest")
-        self.panel([100, 101], [[0.001, 0.0005], [0.001, 0.0005]], break_sha="aids.npy")
-        self.assertIsNone(SP.panel_half_spread(self.root))
-        self.panel([100, 101], [[0.001, 0.0005]])
-        self.assertIsNone(SP.panel_half_spread(self.root), "arrays that do not agree")
-        self.panel([100, 101], [[0.001, 0.0005], [0.001, 0.0005]])
+    def test_with_no_panel_store_there_is_no_reader_and_one_that_cannot_be_read_says_so(self):
+        self.assertIsNone(SP.panel_half_spread(self.root), "no panel store: as before release E4")
+        self.assertEqual(Universe.asked, [])
+        good = ([100, 101], [[0.001, 0.0005], [0.001, 0.0005]])
+        for why, build in (("hs.npy does not match", lambda: self.panel(*good, break_sha="hs.npy")),
+                           ("aids.npy does not match", lambda: self.panel(*good, break_sha="aids.npy")),
+                           ("not two figures an asset", lambda: self.panel([100, 101], [[0.001, 0.0005]]))):
+            build()
+            with self.assertRaisesRegex(LookupError, why):
+                SP.panel_half_spread(self.root)
+        self.panel(*good)
         self.assertIsNotNone(SP.panel_half_spread(self.root))
+        (self.root / xs_store.PANEL_DIR / "hs.npy").unlink()
+        with self.assertRaisesRegex(LookupError, "FileNotFoundError"):
+            SP.panel_half_spread(self.root)
+        self.panel(*good)
         for fail in (NotImplementedError("a stub"), eq_store.MissingData("no universe")):
             Universe.fail = fail
-            self.assertIsNone(SP.panel_half_spread(self.root))
+            with self.assertRaises(LookupError):
+                SP.panel_half_spread(self.root)
 
     def test_the_fill_points_are_the_panels_columns(self):
         self.assertEqual(SP.POINTS, ("open", "close"))

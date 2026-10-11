@@ -520,10 +520,12 @@ def run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, A
 def panel_half_spread(root: str | Path) -> Callable[[str, str], tuple[float, float] | None] | None:
     """A PANEL LOT'S HALF-SPREAD for its replay twin (package B's patch 11 has `league.ops.twins.equity_twin` ask it
     when a lot's symbol is outside E1's universe): a reader `(symbol, ISO day) -> (half-spread fraction at the open,
-    at the close) | None`, from panel/hs.npy through `league.xs.store.Universe.aid`; None when the panel store under
-    `root` (`<state>/equity-daily`) has no half-spreads to read (no store, a file that does not match its manifest's
-    sha256, arrays that do not agree, no universe). The reader answers None for a symbol that named no panel asset on
-    that day, and for a row that is not two positive finite fractions: the twin then stays unpriceable."""
+    at the close) | None`, from panel/hs.npy through `league.xs.store.Universe.aid`. None when `root`
+    (`<state>/equity-daily`) holds NO panel store (no manifest: nothing of the panel exists, the twin is unpriceable
+    as before release E4). LookupError when a panel store is there and its half-spreads cannot be read now (a file
+    that does not match its manifest's sha256, arrays that do not agree, no universe): the twin waits, it is not
+    judged. The reader answers None for a symbol that named no panel asset on that day, and for a row that is not two
+    positive finite fractions: that twin stays unpriceable."""
     import numpy as np
 
     from ..xs import store as xs_store
@@ -531,20 +533,21 @@ def panel_half_spread(root: str | Path) -> Callable[[str, str], tuple[float, flo
 
     root = Path(root)
     folder = root / xs_store.PANEL_DIR
+    if not (folder / "PANEL_MANIFEST.json").exists():
+        return None
     try:
         shas = (read_json(folder / "PANEL_MANIFEST.json") or {}).get("sha256") or {}
         arrays = {}
         for name in ("aids.npy", "hs.npy"):
-            raw = (folder / name).read_bytes()
-            if hashlib.sha256(raw).hexdigest() != shas.get(name):
-                return None
+            if hashlib.sha256((folder / name).read_bytes()).hexdigest() != shas.get(name):
+                raise ValueError(f"panel/{name} does not match its manifest")
             arrays[name] = np.load(folder / name, allow_pickle=False)
         aids, hs = arrays["aids.npy"], np.asarray(arrays["hs.npy"], dtype=np.float64)
         if aids.ndim != 1 or hs.shape != (aids.shape[0], len(POINTS)):
-            return None
+            raise ValueError("panel/hs.npy is not two figures an asset of panel/aids.npy")
         universe = xs_store.Universe(root)
-    except Exception:  # noqa: BLE001 - no half-spreads to read: every panel twin stays unpriceable
-        return None
+    except Exception as exc:  # noqa: BLE001 - a store that is there and cannot be read: said so, nothing judged on it
+        raise LookupError(f"{type(exc).__name__}: {str(exc)[:160]}") from None
     index = {int(aid): i for i, aid in enumerate(aids.tolist())}
 
     def reader(symbol: str, day: str) -> tuple[float, float] | None:
