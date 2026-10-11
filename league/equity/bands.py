@@ -424,6 +424,42 @@ def _neg(text: str) -> tuple:
     return tuple(-ord(c) for c in str(text)) + (1,)
 
 
+def seat_plan(holders: Sequence[SeatFacts], waiting: Sequence[SeatFacts], *, seats: int, settings: SeatSettings,
+              late: bool = False, yielded_today: bool = False) -> dict[str, Any]:
+    """(swarm) THE PLAN OF ONE BAND SYNC, pure (the conformance vectors, league/tests/fixtures/equity_seat_vectors.json,
+    are its inputs and answers; a second implementation of the rule must give them all). `holders`: the seated
+    programs AFTER the sync's demotions; `waiting`: the passed programs with no seat that are not sticky; `seats`: the
+    seats there are; `late`: the seating pass (free seats only); `yielded_today`: a seat already yielded at this
+    decision day. -> {"idle": the idle holders, "yields": the one that yields (or None), "for": the best-ranked
+    unflagged waiting program it yields to (named as the reason, not as the seat's owner), "queue": the waiting
+    programs best first (the yielded one among them, flagged), "seat": the first of the queue that the free seats
+    take, in order}. THE BOOK APPLIES IT AND MAY FALL THROUGH: a seating that does not take passes to the next of
+    the queue. Under "first-come" the queue is by pass time and nothing is idle (the book does not call this then: its
+    band sync is release E5-S's own; the answer is here for the vectors).
+
+    WHAT IT NEVER SAYS: that a program holding a lot, a working order or a planned intent leaves its seat (an idle
+    program is flat by definition), or that a better-ranked arrival takes a held seat (outranking is not adopted)."""
+    holders, waiting = list(holders), list(waiting)
+    if settings.first_come:
+        queue = sorted(waiting, key=_pass_key)
+        free = max(0, int(seats) - len(holders))
+        return {"idle": [], "yields": None, "for": None, "queue": [p.family for p in queue],
+                "seat": [p.family for p in queue[:free]]}
+    idle = [] if late else [p for p in holders if seat_idle(p, settings)]
+    fresh = [p for p in waiting if not p.flagged]
+    goes = taker = None
+    if idle and fresh and len(holders) <= int(seats) and not yielded_today:
+        goes, taker = seat_yielder(idle), seat_order(fresh)[0]
+        holders = [p for p in holders if p.family != goes.family]
+        waiting = waiting + [SeatFacts(family=goes.family, k=goes.k, passed_at=goes.passed_at, flagged=True,
+                                       seeded=goes.seeded)]
+    queue = seat_order(waiting)
+    free = max(0, int(seats) - len(holders))
+    return {"idle": [p.family for p in idle], "yields": goes.family if goes else None,
+            "for": taker.family if taker else None, "queue": [p.family for p in queue],
+            "seat": [p.family for p in queue[:free]]}
+
+
 def band_for_row(row: Mapping[str, Any]) -> tuple[str, str]:
     """(swarm) What `league.live.money.band_for` answers for an equity-lane row (through
     `league.live.equity_hook.band_for`): the row's band unchanged, with the reason "an equity-lane family: its band is
@@ -434,4 +470,4 @@ def band_for_row(row: Mapping[str, Any]) -> tuple[str, str]:
 __all__ = ["EquityRecord", "sized_up", "sized_sleeve_share", "edm1", "next_band", "band_for_row", "FIRST_COME",
            "ACTIVITY_FREE", "SEAT_RULES", "K_TOLERANCE", "K_PER_SESSIONS", "SeatSettings", "SEAT_FALLBACK",
            "seat_settings", "close_days", "run_sessions", "seat_counts", "seat_k", "SeatFacts", "seat_key", "seat_order",
-           "seat_idle", "seat_yielder"]
+           "seat_idle", "seat_yielder", "seat_plan"]

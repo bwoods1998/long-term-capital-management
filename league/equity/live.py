@@ -2327,28 +2327,32 @@ class EquityBook:
         waiting = [r for r in rows if r.get("band") == "candidate" and r.get("holdout_passed") and key_of(r) not in sticky]
         seats = self._seat_count(et)
         facts = {str(r["family"]): self._seat_facts(r, since, flags, day) for r in holders + waiting}
-        idle: list[str] = []
-        if not late:
-            idle = [f for f in (str(r["family"]) for r in holders) if B.seat_idle(facts[f], rule)]   # (3) the idle test
-            fresh = [facts[str(r["family"])] for r in waiting if not facts[str(r["family"])].flagged]
-            if idle and fresh and len(holders) <= seats and memory.get("yield_day") != day:         # (4) one yield
-                goes = B.seat_yielder(facts[f] for f in idle)
-                row = next(r for r in holders if str(r["family"]) == goes.family)
-                taker = B.seat_order(fresh)[0]
-                why = (f"it yields its idle seat: flat, and no buy of its own reached the venue or was cut or refused "
-                       f"by the loss budget in its last {rule.idle_sessions} seated sessions (seated {goes.seated_sessions}); "
-                       f"{taker.family} waits unflagged (seat rule {rule.rule})")
-                if self._yield(row, why, taker.family, rule, since, memory, flags, day, now, out):
-                    holders.remove(row)
-                    waiting.append(row)
-                    idle.remove(goes.family)
-                    facts[goes.family] = self._seat_facts(row, since, flags, day)
-                    last = memory.get("last")
+
+        def plan_now(yielded: bool) -> dict[str, Any]:
+            return B.seat_plan([facts[str(r["family"])] for r in holders], [facts[str(r["family"])] for r in waiting],
+                               seats=seats, settings=rule, late=late, yielded_today=yielded)
+
+        plan = plan_now(memory.get("yield_day") == day)                                              # (3) the idle test
+        idle = list(plan["idle"])
+        if plan["yields"]:                                                                           # (4) one yield
+            goes = facts[plan["yields"]]
+            row = next(r for r in holders if str(r["family"]) == goes.family)
+            why = (f"it yields its idle seat: flat, and no buy of its own reached the venue or was cut or refused by "
+                   f"the loss budget in its last {rule.idle_sessions} seated sessions (seated {goes.seated_sessions}); "
+                   f"{plan['for']} waits unflagged (seat rule {rule.rule})")
+            if self._yield(row, why, str(plan["for"]), rule, since, memory, flags, day, now, out):
+                holders.remove(row)
+                waiting.append(row)
+                idle.remove(goes.family)
+                facts[goes.family] = self._seat_facts(row, since, flags, day)
+                last = memory.get("last")
+            plan = plan_now(True)           # the queue as it stands: with the yielded program flagged, or without a yield
         free = max(0, seats - len(holders))
         by_family = {str(r["family"]): r for r in waiting}
-        for position, f in enumerate(B.seat_order(facts[x] for x in by_family), 1):                  # (5) the free seats
+        for position, family in enumerate(plan["queue"], 1):                                         # (5) the free seats
             if free <= 0:
                 break
+            f = facts[family]
             row = by_family[f.family]
             key = key_of(row)
             try:

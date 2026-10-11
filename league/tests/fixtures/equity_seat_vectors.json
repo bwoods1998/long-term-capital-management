@@ -1,0 +1,1816 @@
+{
+ "about": "THE SEAT RULE's conformance vectors (release E5-A; the captain's A24; league/equity/bands.py seat_plan). Each vector is one band sync: the seated programs after the sync's demotions, the waiting programs that are not sticky, the seats there are, and what the plan must answer. Any second implementation of the rule (a study's simulator) must reproduce all of them. K is a whole number or [numerator, denominator] (null: its counts cannot be read); every K, time and name here is invented.",
+ "vectors": [
+  {
+   "name": "a free seat goes to the higher K",
+   "source": "spec 1",
+   "seats": 3,
+   "settings": {
+    "rule": "activity-1-free",
+    "k_floor": "0.25",
+    "idle_sessions": 10
+   },
+   "late": false,
+   "yielded_today": false,
+   "holders": [
+    {
+     "family": "h1",
+     "k": 30,
+     "passed_at": 1.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "h2",
+     "k": 60,
+     "passed_at": 2.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    }
+   ],
+   "waiting": [
+    {
+     "family": "a",
+     "k": 40,
+     "passed_at": 10.0,
+     "flagged": false,
+     "seeded": false
+    },
+    {
+     "family": "b",
+     "k": 90,
+     "passed_at": 11.0,
+     "flagged": false,
+     "seeded": false
+    }
+   ],
+   "expect": {
+    "idle": [],
+    "yields": null,
+    "for": null,
+    "queue": [
+     "b",
+     "a"
+    ],
+    "seat": [
+     "b"
+    ]
+   }
+  },
+  {
+   "name": "a free seat, equal K: the earlier look pass",
+   "source": "spec 2",
+   "seats": 3,
+   "settings": {
+    "rule": "activity-1-free",
+    "k_floor": "0.25",
+    "idle_sessions": 10
+   },
+   "late": false,
+   "yielded_today": false,
+   "holders": [
+    {
+     "family": "h1",
+     "k": 30,
+     "passed_at": 1.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "h2",
+     "k": 60,
+     "passed_at": 2.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    }
+   ],
+   "waiting": [
+    {
+     "family": "a",
+     "k": 50,
+     "passed_at": 15.0,
+     "flagged": false,
+     "seeded": false
+    },
+    {
+     "family": "b",
+     "k": 50,
+     "passed_at": 13.0,
+     "flagged": false,
+     "seeded": false
+    }
+   ],
+   "expect": {
+    "idle": [],
+    "yields": null,
+    "for": null,
+    "queue": [
+     "b",
+     "a"
+    ],
+    "seat": [
+     "b"
+    ]
+   }
+  },
+  {
+   "name": "a free seat, equal K and pass time: the lower family id",
+   "source": "spec 3",
+   "seats": 3,
+   "settings": {
+    "rule": "activity-1-free",
+    "k_floor": "0.25",
+    "idle_sessions": 10
+   },
+   "late": false,
+   "yielded_today": false,
+   "holders": [
+    {
+     "family": "h1",
+     "k": 30,
+     "passed_at": 1.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "h2",
+     "k": 60,
+     "passed_at": 2.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    }
+   ],
+   "waiting": [
+    {
+     "family": "b",
+     "k": 50,
+     "passed_at": 13.0,
+     "flagged": false,
+     "seeded": false
+    },
+    {
+     "family": "a",
+     "k": 50,
+     "passed_at": 13.0,
+     "flagged": false,
+     "seeded": false
+    }
+   ],
+   "expect": {
+    "idle": [],
+    "yields": null,
+    "for": null,
+    "queue": [
+     "a",
+     "b"
+    ],
+    "seat": [
+     "a"
+    ]
+   }
+  },
+  {
+   "name": "K is compared exactly: 41 Train-era close days in 205 sessions are 50 a 250, a tie with 50",
+   "source": "A24 (K per 250 sessions)",
+   "seats": 3,
+   "settings": {
+    "rule": "activity-1-free",
+    "k_floor": "0.25",
+    "idle_sessions": 10
+   },
+   "late": false,
+   "yielded_today": false,
+   "holders": [
+    {
+     "family": "h1",
+     "k": 30,
+     "passed_at": 1.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "h2",
+     "k": 60,
+     "passed_at": 2.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    }
+   ],
+   "waiting": [
+    {
+     "family": "z",
+     "k": [
+      10250,
+      205
+     ],
+     "passed_at": 9.0,
+     "flagged": false,
+     "seeded": false
+    },
+    {
+     "family": "y",
+     "k": 50,
+     "passed_at": 8.0,
+     "flagged": false,
+     "seeded": false
+    },
+    {
+     "family": "x",
+     "k": [
+      10251,
+      205
+     ],
+     "passed_at": 20.0,
+     "flagged": false,
+     "seeded": false
+    }
+   ],
+   "expect": {
+    "idle": [],
+    "yields": null,
+    "for": null,
+    "queue": [
+     "x",
+     "y",
+     "z"
+    ],
+    "seat": [
+     "x"
+    ]
+   }
+  },
+  {
+   "name": "NO OUTRANKING: three seated programs that hold lots, a far better-ranked arrival: nobody moves",
+   "source": "A24 item 4 (spec 4-12 are not adopted)",
+   "seats": 3,
+   "settings": {
+    "rule": "activity-1-free",
+    "k_floor": "0.25",
+    "idle_sessions": 10
+   },
+   "late": false,
+   "yielded_today": false,
+   "holders": [
+    {
+     "family": "h1",
+     "k": 30,
+     "passed_at": 1.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "h2",
+     "k": 60,
+     "passed_at": 2.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "h3",
+     "k": 90,
+     "passed_at": 3.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    }
+   ],
+   "waiting": [
+    {
+     "family": "c",
+     "k": 200,
+     "passed_at": 9.0,
+     "flagged": false,
+     "seeded": false
+    }
+   ],
+   "expect": {
+    "idle": [],
+    "yields": null,
+    "for": null,
+    "queue": [
+     "c"
+    ],
+    "seat": []
+   }
+  },
+  {
+   "name": "NO OUTRANKING: a flat seated program that asked for a buy 3 sessions ago is not idle and keeps its seat",
+   "source": "A24 item 4",
+   "seats": 3,
+   "settings": {
+    "rule": "activity-1-free",
+    "k_floor": "0.25",
+    "idle_sessions": 10
+   },
+   "late": false,
+   "yielded_today": false,
+   "holders": [
+    {
+     "family": "h1",
+     "k": 1,
+     "passed_at": 1.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": 3,
+     "flat": true
+    },
+    {
+     "family": "h2",
+     "k": 60,
+     "passed_at": 2.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "h3",
+     "k": 90,
+     "passed_at": 3.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    }
+   ],
+   "waiting": [
+    {
+     "family": "c",
+     "k": 250,
+     "passed_at": 9.0,
+     "flagged": false,
+     "seeded": false
+    }
+   ],
+   "expect": {
+    "idle": [],
+    "yields": null,
+    "for": null,
+    "queue": [
+     "c"
+    ],
+    "seat": []
+   }
+  },
+  {
+   "name": "an idle seat with nobody waiting: nothing moves (it is idle, and keeps its seat)",
+   "source": "spec 13",
+   "seats": 3,
+   "settings": {
+    "rule": "activity-1-free",
+    "k_floor": "0.25",
+    "idle_sessions": 10
+   },
+   "late": false,
+   "yielded_today": false,
+   "holders": [
+    {
+     "family": "h1",
+     "k": 30,
+     "passed_at": 1.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "h2",
+     "k": 60,
+     "passed_at": 2.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "rare",
+     "k": 100,
+     "passed_at": 3.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 10,
+     "quiet_sessions": null,
+     "flat": true
+    }
+   ],
+   "waiting": [],
+   "expect": {
+    "idle": [
+     "rare"
+    ],
+    "yields": null,
+    "for": null,
+    "queue": [],
+    "seat": []
+   }
+  },
+  {
+   "name": "an idle seat with an unflagged program waiting: it yields and the waiting program is seated in one call, even at a lower K",
+   "source": "spec 14",
+   "seats": 3,
+   "settings": {
+    "rule": "activity-1-free",
+    "k_floor": "0.25",
+    "idle_sessions": 10
+   },
+   "late": false,
+   "yielded_today": false,
+   "holders": [
+    {
+     "family": "h1",
+     "k": 30,
+     "passed_at": 1.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "h2",
+     "k": 60,
+     "passed_at": 2.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "rare",
+     "k": 100,
+     "passed_at": 3.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 10,
+     "quiet_sessions": null,
+     "flat": true
+    }
+   ],
+   "waiting": [
+    {
+     "family": "w",
+     "k": 5,
+     "passed_at": 9.0,
+     "flagged": false,
+     "seeded": false
+    }
+   ],
+   "expect": {
+    "idle": [
+     "rare"
+    ],
+    "yields": "rare",
+    "for": "w",
+    "queue": [
+     "w",
+     "rare"
+    ],
+    "seat": [
+     "w"
+    ]
+   }
+  },
+  {
+   "name": "an idle seat with only idle-flagged programs waiting: nothing moves (two rare traders do not rotate)",
+   "source": "spec 15",
+   "seats": 3,
+   "settings": {
+    "rule": "activity-1-free",
+    "k_floor": "0.25",
+    "idle_sessions": 10
+   },
+   "late": false,
+   "yielded_today": false,
+   "holders": [
+    {
+     "family": "h1",
+     "k": 30,
+     "passed_at": 1.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "h2",
+     "k": 60,
+     "passed_at": 2.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "rare",
+     "k": 100,
+     "passed_at": 3.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 10,
+     "quiet_sessions": null,
+     "flat": true
+    }
+   ],
+   "waiting": [
+    {
+     "family": "other-rare",
+     "k": 200,
+     "passed_at": 4.0,
+     "flagged": true,
+     "seeded": false
+    }
+   ],
+   "expect": {
+    "idle": [
+     "rare"
+    ],
+    "yields": null,
+    "for": null,
+    "queue": [
+     "other-rare"
+    ],
+    "seat": []
+   }
+  },
+  {
+   "name": "idle needs all three: nine seated sessions is not ten",
+   "source": "spec 16",
+   "seats": 3,
+   "settings": {
+    "rule": "activity-1-free",
+    "k_floor": "0.25",
+    "idle_sessions": 10
+   },
+   "late": false,
+   "yielded_today": false,
+   "holders": [
+    {
+     "family": "h1",
+     "k": 30,
+     "passed_at": 1.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "h2",
+     "k": 60,
+     "passed_at": 2.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "rare",
+     "k": 100,
+     "passed_at": 3.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 9,
+     "quiet_sessions": null,
+     "flat": true
+    }
+   ],
+   "waiting": [
+    {
+     "family": "w",
+     "k": 5,
+     "passed_at": 9.0,
+     "flagged": false,
+     "seeded": false
+    }
+   ],
+   "expect": {
+    "idle": [],
+    "yields": null,
+    "for": null,
+    "queue": [
+     "w"
+    ],
+    "seat": []
+   }
+  },
+  {
+   "name": "idle needs all three: a buy asked five sessions ago",
+   "source": "spec 16",
+   "seats": 3,
+   "settings": {
+    "rule": "activity-1-free",
+    "k_floor": "0.25",
+    "idle_sessions": 10
+   },
+   "late": false,
+   "yielded_today": false,
+   "holders": [
+    {
+     "family": "h1",
+     "k": 30,
+     "passed_at": 1.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "h2",
+     "k": 60,
+     "passed_at": 2.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "rare",
+     "k": 100,
+     "passed_at": 3.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 40,
+     "quiet_sessions": 5,
+     "flat": true
+    }
+   ],
+   "waiting": [
+    {
+     "family": "w",
+     "k": 5,
+     "passed_at": 9.0,
+     "flagged": false,
+     "seeded": false
+    }
+   ],
+   "expect": {
+    "idle": [],
+    "yields": null,
+    "for": null,
+    "queue": [
+     "w"
+    ],
+    "seat": []
+   }
+  },
+  {
+   "name": "idle needs all three: it holds a lot",
+   "source": "spec 16",
+   "seats": 3,
+   "settings": {
+    "rule": "activity-1-free",
+    "k_floor": "0.25",
+    "idle_sessions": 10
+   },
+   "late": false,
+   "yielded_today": false,
+   "holders": [
+    {
+     "family": "h1",
+     "k": 30,
+     "passed_at": 1.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "h2",
+     "k": 60,
+     "passed_at": 2.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "rare",
+     "k": 100,
+     "passed_at": 3.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 40,
+     "quiet_sessions": null,
+     "flat": false
+    }
+   ],
+   "waiting": [
+    {
+     "family": "w",
+     "k": 5,
+     "passed_at": 9.0,
+     "flagged": false,
+     "seeded": false
+    }
+   ],
+   "expect": {
+    "idle": [],
+    "yields": null,
+    "for": null,
+    "queue": [
+     "w"
+    ],
+    "seat": []
+   }
+  },
+  {
+   "name": "idle at exactly ten seated sessions with its last asked buy exactly ten sessions back",
+   "source": "A24 item 3",
+   "seats": 3,
+   "settings": {
+    "rule": "activity-1-free",
+    "k_floor": "0.25",
+    "idle_sessions": 10
+   },
+   "late": false,
+   "yielded_today": false,
+   "holders": [
+    {
+     "family": "h1",
+     "k": 30,
+     "passed_at": 1.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "h2",
+     "k": 60,
+     "passed_at": 2.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "rare",
+     "k": 100,
+     "passed_at": 3.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 10,
+     "quiet_sessions": 10,
+     "flat": true
+    }
+   ],
+   "waiting": [
+    {
+     "family": "w",
+     "k": 5,
+     "passed_at": 9.0,
+     "flagged": false,
+     "seeded": false
+    }
+   ],
+   "expect": {
+    "idle": [
+     "rare"
+    ],
+    "yields": "rare",
+    "for": "w",
+    "queue": [
+     "w",
+     "rare"
+    ],
+    "seat": [
+     "w"
+    ]
+   }
+  },
+  {
+   "name": "a sticky (EDM1) program is in neither list: its seat is free and it is never in the queue",
+   "source": "spec 18",
+   "seats": 3,
+   "settings": {
+    "rule": "activity-1-free",
+    "k_floor": "0.25",
+    "idle_sessions": 10
+   },
+   "late": false,
+   "yielded_today": false,
+   "holders": [
+    {
+     "family": "h1",
+     "k": 30,
+     "passed_at": 1.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "h2",
+     "k": 60,
+     "passed_at": 2.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    }
+   ],
+   "waiting": [
+    {
+     "family": "w",
+     "k": 5,
+     "passed_at": 9.0,
+     "flagged": false,
+     "seeded": false
+    }
+   ],
+   "expect": {
+    "idle": [],
+    "yields": null,
+    "for": null,
+    "queue": [
+     "w"
+    ],
+    "seat": [
+     "w"
+    ]
+   }
+  },
+  {
+   "name": "the seating pass fills a free seat and never yields",
+   "source": "spec 19",
+   "seats": 4,
+   "settings": {
+    "rule": "activity-1-free",
+    "k_floor": "0.25",
+    "idle_sessions": 10
+   },
+   "late": true,
+   "yielded_today": false,
+   "holders": [
+    {
+     "family": "h1",
+     "k": 30,
+     "passed_at": 1.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "h2",
+     "k": 60,
+     "passed_at": 2.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "rare",
+     "k": 100,
+     "passed_at": 3.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 10,
+     "quiet_sessions": null,
+     "flat": true
+    }
+   ],
+   "waiting": [
+    {
+     "family": "a",
+     "k": 40,
+     "passed_at": 10.0,
+     "flagged": false,
+     "seeded": false
+    },
+    {
+     "family": "b",
+     "k": 90,
+     "passed_at": 11.0,
+     "flagged": false,
+     "seeded": false
+    }
+   ],
+   "expect": {
+    "idle": [],
+    "yields": null,
+    "for": null,
+    "queue": [
+     "b",
+     "a"
+    ],
+    "seat": [
+     "b"
+    ]
+   }
+  },
+  {
+   "name": "K unreadable ranks after every readable K and before every idle-flagged program",
+   "source": "spec 20",
+   "seats": 3,
+   "settings": {
+    "rule": "activity-1-free",
+    "k_floor": "0.25",
+    "idle_sessions": 10
+   },
+   "late": false,
+   "yielded_today": false,
+   "holders": [
+    {
+     "family": "h1",
+     "k": 30,
+     "passed_at": 1.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "h2",
+     "k": 60,
+     "passed_at": 2.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    }
+   ],
+   "waiting": [
+    {
+     "family": "u",
+     "k": null,
+     "passed_at": 1.0,
+     "flagged": false,
+     "seeded": false
+    },
+    {
+     "family": "r",
+     "k": 1,
+     "passed_at": 9.0,
+     "flagged": false,
+     "seeded": false
+    },
+    {
+     "family": "f",
+     "k": 200,
+     "passed_at": 0.5,
+     "flagged": true,
+     "seeded": false
+    }
+   ],
+   "expect": {
+    "idle": [],
+    "yields": null,
+    "for": null,
+    "queue": [
+     "r",
+     "u",
+     "f"
+    ],
+    "seat": [
+     "r"
+    ]
+   }
+  },
+  {
+   "name": "first-come: the queue is by pass time whatever K says, and an idle seat never yields",
+   "source": "spec 21",
+   "seats": 4,
+   "settings": {
+    "rule": "first-come",
+    "k_floor": "0.25",
+    "idle_sessions": 10
+   },
+   "late": false,
+   "yielded_today": false,
+   "holders": [
+    {
+     "family": "h1",
+     "k": 30,
+     "passed_at": 1.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "h2",
+     "k": 60,
+     "passed_at": 2.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "rare",
+     "k": 100,
+     "passed_at": 3.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 10,
+     "quiet_sessions": null,
+     "flat": true
+    }
+   ],
+   "waiting": [
+    {
+     "family": "a",
+     "k": 200,
+     "passed_at": 9.0,
+     "flagged": false,
+     "seeded": false
+    },
+    {
+     "family": "b",
+     "k": 1,
+     "passed_at": 2.0,
+     "flagged": false,
+     "seeded": false
+    }
+   ],
+   "expect": {
+    "idle": [],
+    "yields": null,
+    "for": null,
+    "queue": [
+     "b",
+     "a"
+    ],
+    "seat": [
+     "b"
+    ]
+   }
+  },
+  {
+   "name": "a seeded program and a bred one with equal K: no priority by origin, the earlier pass",
+   "source": "spec 22",
+   "seats": 3,
+   "settings": {
+    "rule": "activity-1-free",
+    "k_floor": "0.25",
+    "idle_sessions": 10
+   },
+   "late": false,
+   "yielded_today": false,
+   "holders": [
+    {
+     "family": "h1",
+     "k": 30,
+     "passed_at": 1.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "h2",
+     "k": 60,
+     "passed_at": 2.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    }
+   ],
+   "waiting": [
+    {
+     "family": "seeded",
+     "k": 50,
+     "passed_at": 7.0,
+     "flagged": false,
+     "seeded": true
+    },
+    {
+     "family": "bred",
+     "k": 50,
+     "passed_at": 6.0,
+     "flagged": false,
+     "seeded": false
+    }
+   ],
+   "expect": {
+    "idle": [],
+    "yields": null,
+    "for": null,
+    "queue": [
+     "bred",
+     "seeded"
+    ],
+    "seat": [
+     "bred"
+    ]
+   }
+  },
+  {
+   "name": "the same with the seeded one passed first: it is first",
+   "source": "spec 22",
+   "seats": 3,
+   "settings": {
+    "rule": "activity-1-free",
+    "k_floor": "0.25",
+    "idle_sessions": 10
+   },
+   "late": false,
+   "yielded_today": false,
+   "holders": [
+    {
+     "family": "h1",
+     "k": 30,
+     "passed_at": 1.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "h2",
+     "k": 60,
+     "passed_at": 2.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    }
+   ],
+   "waiting": [
+    {
+     "family": "seeded",
+     "k": 50,
+     "passed_at": 5.0,
+     "flagged": false,
+     "seeded": true
+    },
+    {
+     "family": "bred",
+     "k": 50,
+     "passed_at": 6.0,
+     "flagged": false,
+     "seeded": false
+    }
+   ],
+   "expect": {
+    "idle": [],
+    "yields": null,
+    "for": null,
+    "queue": [
+     "seeded",
+     "bred"
+    ],
+    "seat": [
+     "seeded"
+    ]
+   }
+  },
+  {
+   "name": "ONE YIELD A DECISION DAY: a second sync of the same day, after a yield, yields nothing more",
+   "source": "review A1",
+   "seats": 3,
+   "settings": {
+    "rule": "activity-1-free",
+    "k_floor": "0.25",
+    "idle_sessions": 10
+   },
+   "late": false,
+   "yielded_today": true,
+   "holders": [
+    {
+     "family": "h1",
+     "k": 30,
+     "passed_at": 1.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "rare",
+     "k": 100,
+     "passed_at": 3.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 10,
+     "quiet_sessions": null,
+     "flat": true
+    },
+    {
+     "family": "rare2",
+     "k": 90,
+     "passed_at": 4.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 12,
+     "quiet_sessions": null,
+     "flat": true
+    }
+   ],
+   "waiting": [
+    {
+     "family": "w",
+     "k": 5,
+     "passed_at": 9.0,
+     "flagged": false,
+     "seeded": false
+    }
+   ],
+   "expect": {
+    "idle": [
+     "rare",
+     "rare2"
+    ],
+    "yields": null,
+    "for": null,
+    "queue": [
+     "w"
+    ],
+    "seat": []
+   }
+  },
+  {
+   "name": "two idle seats and one program waiting: ONE yields, the lowest K",
+   "source": "PREREG 8.3 (one yield a sync)",
+   "seats": 3,
+   "settings": {
+    "rule": "activity-1-free",
+    "k_floor": "0.25",
+    "idle_sessions": 10
+   },
+   "late": false,
+   "yielded_today": false,
+   "holders": [
+    {
+     "family": "h1",
+     "k": 30,
+     "passed_at": 1.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "rare",
+     "k": 100,
+     "passed_at": 3.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 10,
+     "quiet_sessions": null,
+     "flat": true
+    },
+    {
+     "family": "rare2",
+     "k": 20,
+     "passed_at": 4.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 12,
+     "quiet_sessions": null,
+     "flat": true
+    }
+   ],
+   "waiting": [
+    {
+     "family": "w",
+     "k": 5,
+     "passed_at": 9.0,
+     "flagged": false,
+     "seeded": false
+    }
+   ],
+   "expect": {
+    "idle": [
+     "rare",
+     "rare2"
+    ],
+    "yields": "rare2",
+    "for": "w",
+    "queue": [
+     "w",
+     "rare2"
+    ],
+    "seat": [
+     "w"
+    ]
+   }
+  },
+  {
+   "name": "two idle seats of equal K: the latest seated yields",
+   "source": "PREREG 8.3",
+   "seats": 3,
+   "settings": {
+    "rule": "activity-1-free",
+    "k_floor": "0.25",
+    "idle_sessions": 10
+   },
+   "late": false,
+   "yielded_today": false,
+   "holders": [
+    {
+     "family": "h1",
+     "k": 30,
+     "passed_at": 1.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "early",
+     "k": 20,
+     "passed_at": 3.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 14,
+     "quiet_sessions": null,
+     "flat": true
+    },
+    {
+     "family": "late",
+     "k": 20,
+     "passed_at": 2.0,
+     "seeded": false,
+     "seat_day": "2026-10-06",
+     "seated_sessions": 11,
+     "quiet_sessions": null,
+     "flat": true
+    }
+   ],
+   "waiting": [
+    {
+     "family": "w",
+     "k": 5,
+     "passed_at": 9.0,
+     "flagged": false,
+     "seeded": false
+    }
+   ],
+   "expect": {
+    "idle": [
+     "early",
+     "late"
+    ],
+    "yields": "late",
+    "for": "w",
+    "queue": [
+     "w",
+     "late"
+    ],
+    "seat": [
+     "w"
+    ]
+   }
+  },
+  {
+   "name": "an idle seat whose K cannot be read yields before one whose K can",
+   "source": "A24 item 2 (unreadable ranks last)",
+   "seats": 3,
+   "settings": {
+    "rule": "activity-1-free",
+    "k_floor": "0.25",
+    "idle_sessions": 10
+   },
+   "late": false,
+   "yielded_today": false,
+   "holders": [
+    {
+     "family": "h1",
+     "k": 30,
+     "passed_at": 1.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "known",
+     "k": 1,
+     "passed_at": 3.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 14,
+     "quiet_sessions": null,
+     "flat": true
+    },
+    {
+     "family": "unknown",
+     "k": null,
+     "passed_at": 2.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 14,
+     "quiet_sessions": null,
+     "flat": true
+    }
+   ],
+   "waiting": [
+    {
+     "family": "w",
+     "k": 5,
+     "passed_at": 9.0,
+     "flagged": false,
+     "seeded": false
+    }
+   ],
+   "expect": {
+    "idle": [
+     "known",
+     "unknown"
+    ],
+    "yields": "unknown",
+    "for": "w",
+    "queue": [
+     "w",
+     "unknown"
+    ],
+    "seat": [
+     "w"
+    ]
+   }
+  },
+  {
+   "name": "the yielded program returns only into a FREE seat, behind every unflagged program",
+   "source": "A24 item 3",
+   "seats": 3,
+   "settings": {
+    "rule": "activity-1-free",
+    "k_floor": "0.25",
+    "idle_sessions": 10
+   },
+   "late": false,
+   "yielded_today": false,
+   "holders": [
+    {
+     "family": "h1",
+     "k": 30,
+     "passed_at": 1.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "h2",
+     "k": 60,
+     "passed_at": 2.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    }
+   ],
+   "waiting": [
+    {
+     "family": "yielded",
+     "k": 200,
+     "passed_at": 1.0,
+     "flagged": true,
+     "seeded": false
+    },
+    {
+     "family": "w",
+     "k": 1,
+     "passed_at": 9.0,
+     "flagged": false,
+     "seeded": false
+    }
+   ],
+   "expect": {
+    "idle": [],
+    "yields": null,
+    "for": null,
+    "queue": [
+     "w",
+     "yielded"
+    ],
+    "seat": [
+     "w"
+    ]
+   }
+  },
+  {
+   "name": "with two seats free the yielded program returns too, second",
+   "source": "A24 item 3",
+   "seats": 3,
+   "settings": {
+    "rule": "activity-1-free",
+    "k_floor": "0.25",
+    "idle_sessions": 10
+   },
+   "late": false,
+   "yielded_today": false,
+   "holders": [
+    {
+     "family": "h1",
+     "k": 30,
+     "passed_at": 1.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    }
+   ],
+   "waiting": [
+    {
+     "family": "yielded",
+     "k": 200,
+     "passed_at": 1.0,
+     "flagged": true,
+     "seeded": false
+    },
+    {
+     "family": "w",
+     "k": 1,
+     "passed_at": 9.0,
+     "flagged": false,
+     "seeded": false
+    }
+   ],
+   "expect": {
+    "idle": [],
+    "yields": null,
+    "for": null,
+    "queue": [
+     "w",
+     "yielded"
+    ],
+    "seat": [
+     "w",
+     "yielded"
+    ]
+   }
+  },
+  {
+   "name": "seats moved down (three hold two): an idle seat does not yield, because no seat would be free for the waiting program; nobody is unseated",
+   "source": "E5-S (seats moved down unseat nobody)",
+   "seats": 2,
+   "settings": {
+    "rule": "activity-1-free",
+    "k_floor": "0.25",
+    "idle_sessions": 10
+   },
+   "late": false,
+   "yielded_today": false,
+   "holders": [
+    {
+     "family": "h1",
+     "k": 30,
+     "passed_at": 1.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "h2",
+     "k": 60,
+     "passed_at": 2.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "rare",
+     "k": 100,
+     "passed_at": 3.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 10,
+     "quiet_sessions": null,
+     "flat": true
+    }
+   ],
+   "waiting": [
+    {
+     "family": "w",
+     "k": 5,
+     "passed_at": 9.0,
+     "flagged": false,
+     "seeded": false
+    }
+   ],
+   "expect": {
+    "idle": [
+     "rare"
+    ],
+    "yields": null,
+    "for": null,
+    "queue": [
+     "w"
+    ],
+    "seat": []
+   }
+  },
+  {
+   "name": "the roster closed (no seats): nobody is seated and nobody yields",
+   "source": "elane.roster fails closed",
+   "seats": 0,
+   "settings": {
+    "rule": "activity-1-free",
+    "k_floor": "0.25",
+    "idle_sessions": 10
+   },
+   "late": false,
+   "yielded_today": false,
+   "holders": [
+    {
+     "family": "h1",
+     "k": 30,
+     "passed_at": 1.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "h2",
+     "k": 60,
+     "passed_at": 2.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "rare",
+     "k": 100,
+     "passed_at": 3.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 10,
+     "quiet_sessions": null,
+     "flat": true
+    }
+   ],
+   "waiting": [
+    {
+     "family": "w",
+     "k": 5,
+     "passed_at": 9.0,
+     "flagged": false,
+     "seeded": false
+    }
+   ],
+   "expect": {
+    "idle": [
+     "rare"
+    ],
+    "yields": null,
+    "for": null,
+    "queue": [
+     "w"
+    ],
+    "seat": []
+   }
+  },
+  {
+   "name": "the unflagged program an idle seat yields to is the best-ranked one, and it takes the seat",
+   "source": "A24 item 3",
+   "seats": 3,
+   "settings": {
+    "rule": "activity-1-free",
+    "k_floor": "0.25",
+    "idle_sessions": 10
+   },
+   "late": false,
+   "yielded_today": false,
+   "holders": [
+    {
+     "family": "h1",
+     "k": 30,
+     "passed_at": 1.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "h2",
+     "k": 60,
+     "passed_at": 2.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 30,
+     "quiet_sessions": null,
+     "flat": false
+    },
+    {
+     "family": "rare",
+     "k": 100,
+     "passed_at": 3.0,
+     "seeded": false,
+     "seat_day": "2026-10-01",
+     "seated_sessions": 10,
+     "quiet_sessions": null,
+     "flat": true
+    }
+   ],
+   "waiting": [
+    {
+     "family": "lo",
+     "k": 5,
+     "passed_at": 1.0,
+     "flagged": false,
+     "seeded": false
+    },
+    {
+     "family": "hi",
+     "k": 60,
+     "passed_at": 9.0,
+     "flagged": false,
+     "seeded": false
+    },
+    {
+     "family": "old-rare",
+     "k": 250,
+     "passed_at": 0.1,
+     "flagged": true,
+     "seeded": false
+    }
+   ],
+   "expect": {
+    "idle": [
+     "rare"
+    ],
+    "yields": "rare",
+    "for": "hi",
+    "queue": [
+     "hi",
+     "lo",
+     "old-rare",
+     "rare"
+    ],
+    "seat": [
+     "hi"
+    ]
+   }
+  }
+ ]
+}

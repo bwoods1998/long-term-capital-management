@@ -171,6 +171,14 @@ THE GOAL OF OCT 10, 2026 AND THE EQUITY LANES (release E1; the captain's design 
   the reading is not final; a frozen final reading is carried as it was. The close-date figures are not computed yet
   and no forward rule moves a seat (`PREREGISTERED["status"]` says so in the report). A reading with no equity close
   is read by the pinned rule's own measure, as before.
+- THE SEATS (release E5-A; the captain's A24, `SEAT_RULE`, registered Oct 11, 2026, before the first live share close
+  and before any program waited for a seat; it replaced A14's forward seat sentence, which was written and never
+  active): `equity.seats` is the EquityBook's own seat plan (its kv `eq_seat` in live.sqlite, read with the book: the
+  book is the one source of who holds a seat and who waits), as {rule, seats, holders (each with its seat's day, its
+  seated sessions, whether it is flat and idle, and whether it was SEEDED), seeded_seats and its sentence (which seats
+  the captain-seeded programs hold: said in every report), waiting (each program's rank POSITION, never K, and
+  whether it is flagged idle; under "first-come" the swarm's roster by pass time), idle_flagged, last_change (the
+  last change of hands and why), preregistered (the rule's text and its stated costs)}. K is never in a report.
 - THE FORWARD RECORD (release E3; league/ops/forward_report.py): `forward_record` is that job's report as it last wrote
   it (None when absent or stale), and its alarms (FW1-FW8, RR1, RR2, CP1, CP2, MM1: ids, counts and dates only) ride
   this report's `alarms`, so the `dlane` stall cause mails a warning. Read only, and never this report's failure.
@@ -254,9 +262,42 @@ A14_SEAT_RULE = (
 #: sessions on which the live and the shadow intents agree.
 A14_GAP_BP = 15.0
 A14_AGREEMENT = 0.95
+#: A24, THE SEAT RULE (the captain's pre-registration of 13:42Z Oct 11, 2026, BEFORE the first live share close and
+#: before any program waited for a seat; release E5-A builds it; the constitution's `equity_money.probe.seat` holds its
+#: name and constants, league/equity/bands.py and league/equity/live.py apply it). The sentences are in every report
+#: verbatim (`equity.seats.preregistered`) and in docs/operations.md (league/tests/test_equity_seats.py holds the page
+#: to these words and the figures in them to the constitution's rows). It REPLACED A14's forward seat sentence
+#: (`A14_SEAT_RULE`), which stays above as it was registered: it was written and never active.
+A24_SEAT_RULE = (
+    "The seat rule is \"activity-1-free\" (the rollback value is \"first-come\"). A free seat goes to the best-ranked "
+    "waiting passed program. Its rank K is the smaller of its Validation close days and its Train-era close days per "
+    "250 sessions, a day counted only when the lots it closed that day sum to at least 0.25 of its sleeve (read as "
+    "0.25 minus 0.0005, the engine's rounding); ties go to the earlier look pass, then the family id. K reads no P&L "
+    "and no sealed window, and is never printed in public text. A seated program that is flat and has had no buy "
+    "reach the venue, and none cut or refused by the loss budget, for 10 seated sessions is flagged idle: it keeps its "
+    "seat while nobody waits and yields it at once when an unflagged program waits. A buy refused by the instrument "
+    "cap, the invested cap or cash does not count as asked. A yielded program returns only into a free seat, by the "
+    "same rank, with no new look. No trading program is ever stopped by the seat rule: outranking is not adopted. "
+    "Seeded and bred programs follow the same rule, and EDM1 covers waiting programs too. The rule only decides who "
+    "may open: never a forced or hand-placed trade, and no lot is ever sold by it.")
+A24_SEAT_COSTS = (
+    "The seat rule's costs, stated: closes concentrate in frequent traders, so Done reached this way is weaker "
+    "evidence of skill; a daily slice of a quarter sleeve can buy rank; a slow, non-idle incumbent keeps its seat.")
+SEAT_RULE = {
+    "id": "A24", "registered": "2026-10-11T13:42Z",
+    "before": "the first live share close, and before any program waited for a seat",
+    "rule": A24_SEAT_RULE, "costs": A24_SEAT_COSTS, "outranking": "not adopted",
+    "rollback": "equity_money.probe.seat.rule \"first-come\" (one owner deploy, one money-digest move; nobody is unseated)",
+    "replaces": "A14's forward seat sentence (`done.preregistered.forward_seat_rule`): written, never active",
+}
 PREREGISTERED = {
     "id": "A14", "registered": "2026-10-10", "before": "the first equity close",
     "consistency": A14_CONSISTENCY, "beside_done": A14_BESIDE_DONE, "forward_seat_rule": A14_SEAT_RULE,
+    # A24 (Oct 11, 2026; release E5-A) replaced the sentence above before any seat could change hands by it.
+    "seat_rule": "A24 replaced the forward seat sentence above on Oct 11, 2026, before the first live share close: it "
+                 "was written and never active. Since release E5-A the seat rule in force is A24's "
+                 "(`equity.seats.preregistered`), under which an idle seated program may yield its seat whatever its "
+                 "closes; it reads no P&L of the forward record.",
     "status": "consistency is computed since release E3 (each checkpoint's `a14`: the size of the mean fill gap "
               "either way, and the intents); the close-date figures are not computed yet and no forward rule moves a "
               "seat",
@@ -640,13 +681,13 @@ def lane_label(lane: Any) -> str | None:
 # ------------------------------------------------------------------------------------------------- the book
 def read_book(live_path: str | Path) -> dict[str, list[dict[str, Any]]]:
     """The live book's positions and instances, and (release E1) the EquityBook's lots and instances (`lots`,
-    `eq_instances`; empty for a book from before E1), read-only in one transaction; an absent book is an empty one:
-    nothing traded."""
+    `eq_instances`; empty for a book from before E1), and (release E5-A) its seat plan (`seat_plan`: the kv `eq_seat`,
+    None before its first band sync), read-only in one transaction; an absent book is an empty one: nothing traded."""
     from . import guard
 
     path = Path(live_path)
     if not path.exists():
-        return {"positions": [], "instances": [], "lots": [], "eq_instances": []}
+        return {"positions": [], "instances": [], "lots": [], "eq_instances": [], "seat_plan": None}
 
     def read(db: Any) -> dict[str, list[dict[str, Any]]]:
         tables = set(guard.ids(db, "SELECT name FROM sqlite_master WHERE type='table'"))
@@ -661,7 +702,11 @@ def read_book(live_path: str | Path) -> dict[str, list[dict[str, Any]]]:
                           ) if "eq_lots" in tables else []
         eq_instances = guard.rows(db, "SELECT id, family, version, lane, band, seeded, created_at, retired_at FROM "
                                       "eq_instances") if "eq_instances" in tables else []
-        return {"positions": positions, "instances": instances, "lots": lots, "eq_instances": eq_instances}
+        # THE SEAT PLAN (release E5-A): the book's own kv, read in the same transaction as its instances.
+        plan = guard.ids(db, "SELECT value FROM kv WHERE key='eq_seat'") if "kv" in tables else []
+        plan = _loads(plan[0], None) if plan else None
+        return {"positions": positions, "instances": instances, "lots": lots, "eq_instances": eq_instances,
+                "seat_plan": dict(plan) if isinstance(plan, Mapping) else None}
 
     return guard.read(path, read)
 
@@ -890,11 +935,13 @@ def options_probe_room(equity_usd: Any, constitution: Mapping[str, Any] | None =
 
 
 def equity_section(book: Mapping[str, Any], every: Sequence[Mapping[str, Any]], twins: Mapping[str, Mapping[str, Any]], *,
-                   count_from: float, unit: Mapping[str, Any], seeded: Iterable[str], screens: "EquityScreens"
-                   ) -> dict[str, Any]:
+                   count_from: float, unit: Mapping[str, Any], seeded: Iterable[str], screens: "EquityScreens",
+                   root: str | Path | None = None) -> dict[str, Any]:
     """THE EQUITY LANES in the report (release E1): every equity close with its label, seeded mark, buy-and-hold, MTE,
     twin and screen line, and whether it counts (`count_from`); the lots open now by lane; the twins' verdicts and each
-    program's mean gap a side; the seeded programs; profit from market direction; and A8.6's options Probe room."""
+    program's mean gap a side; the seeded programs; profit from market direction; A8.6's options Probe room; and
+    (release E5-A) THE SEATS (`equity_seats`: who holds each, which the seeds hold, who waits and in what order)."""
+    seeded = set(seeded or ())
     from ..swarm import elane
 
     rows = [c for c in every if c.get("equity")]
@@ -929,7 +976,62 @@ def equity_section(book: Mapping[str, Any], every: Sequence[Mapping[str, Any]], 
                            "EDM1 demotes past 15 bp a side over 5 priced closes"},
         "seeded": sorted(seeded), "seeded_note": elane.SEEDED_NOTE,
         "options_probe_room": options_probe_room((unit or {}).get("equity_usd")),
+        "seats": equity_seats(root, book, seeded),
     }
+
+
+def equity_seats(root: str | Path | None, book: Mapping[str, Any], seeded: Iterable[str]) -> dict[str, Any]:
+    """THE SEATS (release E5-A; A24, `SEAT_RULE`): the EquityBook's own seat plan as it last wrote it (`book`'s
+    `seat_plan`: the book is the one source), for the owner: {rule, seats, as_of (the decision day of the plan), holders
+    [{family, version, band, seeded, since, seated_sessions, quiet_sessions, flat, idle}], seeded_seats (the holders
+    the captain's build agents seeded) and `seeded_statement` (said in every report), waiting [{family, rank, seeded,
+    flagged}] in the plan's order (a rank POSITION, never K), idle_flagged, last_change, order, preregistered}. Under
+    "first-come" the book ranks nobody: `waiting` is the swarm's roster by pass time (`bands.roster(root, lanes=LANES)`),
+    and `order` says so. Before the book's first plan the holders are its live instances and `why` says so. Never
+    raises: what cannot be read is None with a `why`."""
+    seeded = set(seeded or ())
+    plan = book.get("seat_plan") if isinstance(book.get("seat_plan"), Mapping) else None
+    out: dict[str, Any] = {"rule": None, "seats": None, "as_of": None, "holders": [], "seeded_seats": [],
+                           "seeded_statement": None, "waiting": None, "idle_flagged": [], "last_change": None,
+                           "order": None, "why": None, "preregistered": dict(SEAT_RULE)}
+    if plan is None:
+        holders = [{"family": str(r.get("family")), "version": _int(r.get("version")), "band": r.get("band"),
+                    "seeded": bool(int(r.get("seeded") or 0)) or str(r.get("family")) in seeded}
+                   for r in book.get("eq_instances") or [] if r.get("retired_at") is None and r.get("band") in ("probe", "sized")]
+        out["why"] = "the book has written no seat plan yet: the holders are its live instances"
+    else:
+        holders = [{**dict(h), "seeded": bool(h.get("seeded")) or str(h.get("family")) in seeded}
+                   for h in plan.get("holders") or [] if isinstance(h, Mapping)]
+        out.update(rule=plan.get("rule"), seats=_int(plan.get("seats")), as_of=plan.get("day"), order=plan.get("order"),
+                   idle_flagged=sorted(str(f) for f in (plan.get("idle") or {})) if isinstance(plan.get("idle"), Mapping) else [],
+                   last_change=dict(plan["last"]) if isinstance(plan.get("last"), Mapping) else None)
+        if isinstance(plan.get("waiting"), list):
+            out["waiting"] = [{"family": str(w.get("family")), "rank": _int(w.get("rank")),
+                               "seeded": bool(w.get("seeded")) or str(w.get("family")) in seeded,
+                               "flagged": bool(w.get("flagged"))} for w in plan["waiting"] if isinstance(w, Mapping)]
+    if out["waiting"] is None and root is not None:
+        # "first-come" (or no plan yet): the swarm's roster orders the waiting, by pass time.
+        try:
+            from ..equity import LANES
+            from ..swarm import bands
+
+            roster = bands.roster(root, lanes=LANES)
+        except Exception:  # noqa: BLE001 - a roster that cannot be read is no list, said so
+            roster = None
+        if roster is not None:
+            out["waiting"] = [{"family": str(f), "rank": None, "seeded": str(f) in seeded, "flagged": False}
+                              for f in roster.get("waiting") or []]
+            out["order"] = out["order"] or "by pass time: the swarm's roster"
+            out["seats"] = out["seats"] if out["seats"] is not None else _int(roster.get("seats"))
+    out["holders"] = sorted(holders, key=lambda h: (str(h.get("since") or ""), str(h.get("family"))))
+    out["seeded_seats"] = sorted(str(h["family"]) for h in holders if h.get("seeded"))
+    held, of = len(holders), out["seats"]
+    names = ", ".join(out["seeded_seats"])
+    out["seeded_statement"] = (
+        f"{held} of {of if of is not None else 'the'} seats are held; programs seeded by the captain's build agents hold "
+        f"{len(out['seeded_seats'])} of them" + (f": {names}" if names else "") + ". Seeded and bred programs follow the "
+        "same seat rule.")
+    return out
 
 
 def equity_yield(store: Any, settings: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -2785,7 +2887,7 @@ def report(root: str | Path, *, settings: Mapping[str, Any] | None = None, now: 
             "fp_beside_trades": trade_screens(store, lanes, settings, book["positions"], every, since=start,
                                               lots=book.get("lots") or (), screens=screens),
             "equity": equity_section(book, every, eq_twins, count_from=count_from, unit=unit, seeded=seeded,
-                                     screens=screens),
+                                     screens=screens, root=root),
             "equity_yield": equity_yield(store, settings),
             "direction_net": lane_net,
             "account": account(root, every, activity, previous, now=now),
@@ -2983,7 +3085,7 @@ def lane_off(ctx: Any, root: Path, settings: Mapping[str, Any] | None) -> dict[s
 
 
 __all__ = ["run", "report", "FILE", "CONTAMINATION", "PREREGISTERED", "A14_CONSISTENCY", "A14_BESIDE_DONE",
-           "A14_SEAT_RULE", "A14_GAP_BP", "A14_AGREEMENT", "a14_consistency", "ZERO_EDGE_EQUITY_NOTE", "LOOSENED",
+           "A14_SEAT_RULE", "A24_SEAT_RULE", "A24_SEAT_COSTS", "SEAT_RULE", "equity_seats", "A14_GAP_BP", "A14_AGREEMENT", "a14_consistency", "ZERO_EDGE_EQUITY_NOTE", "LOOSENED",
            "TIGHTENED", "closes", "meter", "reading", "replay_gap",
            "replay_twins", "twin_records",
            "buy_and_hold", "entry_delta", "funnel", "probes", "probe_envelope", "alarms", "fee_corrections", "read_book",
