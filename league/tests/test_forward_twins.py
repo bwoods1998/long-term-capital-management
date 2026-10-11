@@ -1088,7 +1088,12 @@ class TheTwins(WithAStore):
         self.assertEqual(json.loads(rows[D4]["shadow_keys"]), ["B|SPY|close"])
         self.assertEqual((rows[D4]["live_keys"], rows[D4]["agree"], rows[D4]["cause"]), ("[]", 0, "unknown"),
                          "a decide that failed left no intent: counted, its cause not known")
-        self.assertEqual(sum(1 for r in rows.values() if r["agree"] == 0), 1)
+        # Against the twin run itself that is the one session that differs, as before A29 (`base_agree`). The
+        # fixture's book then sells a lot no decision of its own bought (`mirror` writes the run's lots whatever
+        # decide it skips), so the twin re-based on that book differs once more, and agrees from there
+        # (league/tests/test_forward_rebase.py holds the rule on books that are their own decisions' doing).
+        self.assertEqual([r["day"] for r in rows.values() if r["base_agree"] == 0], [D4])
+        self.assertEqual([r["day"] for r in rows.values() if r["agree"] == 0], [D4, "2026-10-16"])
 
     def test_a_state_losing_program_disagrees_after_a_reload(self):
         # A deploy reloads the live child at the fifth decision: its clock starts again, the twin's goes on.
@@ -1284,8 +1289,8 @@ class TheLiveSide(WithAStore):
         db.commit()
         db.close()
         self.assertEqual(forward_twins.live_intents(old, self.iid, needs=("SPY",)), {})
-        self.assertEqual(forward_twins.read_book(old), {"instances": [], "lots": {}, "intents": {}, "decision_day": None,
-                                                        "since": {}})
+        self.assertEqual(forward_twins.read_book(old), {"instances": [], "lots": {}, "intents": {}, "exits": {},
+                                                        "decision_day": None, "since": {}})
         self.assertIsNone(forward_twins.live_bars(old, self.iid, D1, needs={"symbols": ["SPY"], "history": 1}))
 
     def test_the_book_as_the_night_reads_it(self):
@@ -1750,7 +1755,7 @@ class TheSeals(WithAStore):
         self.assertNotIn("DELETE ", source)
         kinds = {k for k, package in forward_db.EVENT_KINDS.items() if package == "D"}
         self.assertEqual(kinds, {"no_minute", "twin_unregistered", "twin_sha_mismatch", "twin_interrupted", "live_bars",
-                                 "twin_retired", "twin_revived"})
+                                 "twin_retired", "twin_revived", "twin_rebased"})
         for kind in kinds:
             self.assertIn(f'"{kind}"', source, kind)
             self.assertIn(kind, forward_db.ONCE_KINDS)

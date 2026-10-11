@@ -66,6 +66,16 @@ decision used (`fwd_days.bars`), the twins record the shadow's and the live deci
 `live_bars`), and an intent disagreement is DATA: counted, with its `cause` (`CAUSES`) when the bars differ, never an
 error. A14's pre-registered rule (95% of the counted sessions) is not changed by it.
 
+THE TWIN IS RE-BASED AFTER A DIFFERENCE (the captain's A29, registered before the first real share order and before
+any twin row existed; league/ops/forward_twins.py applies it). What the store holds of it: the `twin_rebased` event
+(once an (instance, session)) and two columns of `fwd_twins`, `rebased` (how many times the instance's twin had been
+re-based when that session was compared) and `base_agree` (whether the live intents were the UN-RE-BASED twin's that
+session). The registered columns (`agree`, `why`, `cause`, the keys, the bars hashes) and the bounds (`A14_AGREE`,
+`A14_GAP_BP`) are as they were. A STORE MADE BEFORE THEM (`ADDED_COLUMNS`, `_migrate`): a writable `open_db` adds
+each missing column with `ALTER TABLE ... ADD COLUMN`, which changes the table's declaration and rewrites no row (an
+older row reads NULL there: `rebased` NULL is 0, and its `base_agree` is its `agree`, since its twin was never
+re-based); a reader on a store not yet opened for writing asks `has_column` first.
+
 SETTINGS (`cfg`, `mode`): policy.json `elane.forward.*`, swarm.json over it (`DEFAULTS`, `BOUNDS`); a malformed value
 is its code default and an unreadable block is "off". Changing a constant of this module is a captain's release with
 its cost stated, never a setting.
@@ -170,6 +180,9 @@ TAGS = ("review_pass", "review_fail", "try", "try_entered", "look_pass", "look_f
 #: the book shows it (a revival clears `retired_at` in the book), and the session it ran again from.
 #: `meter_partial` (C; the review's fix): a day whose meters were written after their wait with programs still without
 #: their row for it (league/ops/forward_report.py: FW5 reads no such day).
+#: `twin_rebased` (D; the captain's A29): the session after which a live instance's twin was set to the live book
+#: (that session's own row is counted as differing, exactly as registered; the sessions after it are compared from
+#: the same state), written the night the re-based twin is first compared.
 EVENT_KINDS: dict[str, str] = {
     "prereg": "A", "registered": "A", "register_skipped": "A", "stopped": "A", "suspect": "A", "resumed": "A",
     "identity_moved": "A",
@@ -177,12 +190,12 @@ EVENT_KINDS: dict[str, str] = {
     "run_disqualified": "B", "restated": "B", "budget_hit": "B", "audit_mismatch": "B", "chain_ok": "B",
     "chain_broken": "B",
     "no_minute": "D", "twin_unregistered": "D", "twin_sha_mismatch": "D", "twin_interrupted": "D", "live_bars": "D",
-    "twin_retired": "D", "twin_revived": "D", "meter_partial": "C"}
+    "twin_retired": "D", "twin_revived": "D", "meter_partial": "C", "twin_rebased": "D"}
 #: The kinds written through `event(..., once=<key>)`: a second call for the same kind, pid, day and key writes nothing.
 ONCE_KINDS = ("prereg", "register_skipped", "identity_moved", "engine_moved", "night_failed", "run_failed", "run_behind",
               "data_failed", "run_disqualified", "restated", "budget_hit", "audit_mismatch", "no_minute",
               "twin_unregistered", "twin_sha_mismatch", "twin_interrupted", "live_bars", "twin_retired",
-              "twin_revived", "meter_partial")
+              "twin_revived", "meter_partial", "twin_rebased")
 #: `fwd_kv` keys: the equity fingerprint last seen; `FGS_SHA` (written once through `kv_first`); the swarm event cursor.
 KV_KEYS = ("equity_sha", "fgs_prereg", "scored_seq")
 #: `fwd_twins.cause` of a session the live and the shadow intents disagree on (THE BARS HASH): "bars" when both bars
@@ -276,6 +289,10 @@ CREATE TABLE IF NOT EXISTS fwd_twins (                  -- one live instance and
   live_bars TEXT, shadow_bars TEXT,                     -- THE BARS HASH of the live decision's bars (NULL: not known) and
                                                         -- of the twin's decision
   cause TEXT CHECK (cause IS NULL OR cause IN ('bars','program','unknown')),   -- agree 0 only (CAUSES); else NULL
+  rebased INTEGER,                                      -- A29: the re-bases behind the twin this session was compared
+                                                        -- with (0: the twin as registered; NULL in an older row: 0)
+  base_agree INTEGER,                                   -- A29: 1 | 0 | NULL, the same comparison against the
+                                                        -- UN-RE-BASED twin (an older row: NULL, read as its `agree`)
   PRIMARY KEY (instance, day));
 CREATE TABLE IF NOT EXISTS fwd_part (instance TEXT NOT NULL, through TEXT NOT NULL, pid INTEGER NOT NULL,
   matched INTEGER NOT NULL, missed INTEGER NOT NULL, extra INTEGER NOT NULL, at REAL NOT NULL,
@@ -293,6 +310,10 @@ _PRAGMAS_SQL = "PRAGMA recursive_triggers=ON;\n"
 #: The whole store: `sqlite3.Connection.executescript(SCHEMA)` (idempotent). Complete from step 0: every package tests
 #: on an in-memory database made from it.
 SCHEMA = _PRAGMAS_SQL + _TABLES_SQL + _TRIGGERS_SQL
+#: COLUMNS ADDED AFTER A TABLE'S FIRST RELEASE, each (table, column, declaration), in the order `SCHEMA` declares
+#: them: a store made before them gains them at its next writable `open_db` (`_migrate`). Only a nullable column with
+#: no default may be listed: SQLite adds one by changing the table's declaration alone, and no row is rewritten.
+ADDED_COLUMNS = (("fwd_twins", "rebased", "INTEGER"), ("fwd_twins", "base_agree", "INTEGER"))
 
 
 # ------------------------------------------------------------------------------------------------------- shared types
@@ -464,9 +485,31 @@ def _json(value: Any, default: Any = None) -> Any:
         return default
 
 
+def has_column(db: sqlite3.Connection, table: str, column: str) -> bool:
+    """Whether the store's `table` holds `column` (a reader's question about one of `ADDED_COLUMNS`: a store nobody
+    has opened for writing since the release that added it does not, and its rows read as NULL there)."""
+    if table not in TABLES:
+        raise ValueError(f"no forward table {table!r}")
+    return any(str(row[1]) == column for row in db.execute(f"PRAGMA table_info({table})"))
+
+
+def _migrate(db: sqlite3.Connection) -> int:
+    """`ADDED_COLUMNS` on a store made before them: each missing column is added (`ALTER TABLE ... ADD COLUMN`: the
+    table's declaration changes, no row is rewritten, the append-only triggers stand and never fire). Idempotent; how
+    many columns it added."""
+    added = 0
+    for table, column, declaration in ADDED_COLUMNS:
+        if not has_column(db, table, column):
+            db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+            added += 1
+    if added:
+        db.commit()
+    return added
+
+
 def open_db(root: str | Path, *, readonly: bool = False) -> sqlite3.Connection:
-    """`<root>/forward.sqlite`, rows as `sqlite3.Row`. Writable: creates the file 0600 (WAL), runs `SCHEMA` and, when
-    `fgs_prereg` is absent, writes that kv (`kv_first`: `FGS_SHA`) and one `prereg` event holding the sha and `FGS`.
+    """`<root>/forward.sqlite`, rows as `sqlite3.Row`. Writable: creates the file 0600 (WAL), runs `SCHEMA`, adds the
+    columns a store from an earlier release lacks (`_migrate`: no row is rewritten) and, when `fgs_prereg` is absent, writes that kv (`kv_first`: `FGS_SHA`) and one `prereg` event holding the sha and `FGS`.
     `readonly`: `guard.connect_ro` (it raises `sqlite3.OperationalError` when the file is absent).
 
     THE FIRST VALUE STANDS: a store whose `fgs_prereg` is another sha than this release's `FGS_SHA` keeps it, and this
@@ -488,6 +531,7 @@ def open_db(root: str | Path, *, readonly: bool = False) -> sqlite3.Connection:
         db.execute("PRAGMA journal_mode=WAL")
         db.execute("PRAGMA synchronous=NORMAL")
         db.executescript(SCHEMA)
+        _migrate(db)
         pinned = kv_get(db, "fgs_prereg")
         if pinned != FGS_SHA:
             with _tx(db):
@@ -876,7 +920,8 @@ __all__ = ["DB", "SCHEMA", "GENESIS", "MODES", "REASONS", "LANES", "CHECKPOINTS"
            "FILL_VERSION", "TOL", "NEFF_WINDOW", "NEFF_MIN_DAYS", "NEFF_PROVISIONAL", "Q", "RC_READS", "RC_MIN_GROUP",
            "SUSPECT_NIGHTS", "DQ_NIGHTS", "A14_GAP_BP", "A14_AGREE", "E3_ROUTE", "E3_ALPHA_F", "CONTROL_ROUTE",
            "CONTROL_ALPHA_F", "FGS", "FGS_SHA", "HASHED", "DEFAULTS", "BOUNDS", "TAGS", "EVENT_KINDS", "ONCE_KINDS",
-           "KV_KEYS", "CAUSES", "BARS_HEX", "TABLES", "APPEND_ONLY", "WRITERS", "APPEND_ONLY_ERROR", "Program",
+           "KV_KEYS", "CAUSES", "BARS_HEX", "TABLES", "APPEND_ONLY", "WRITERS", "APPEND_ONLY_ERROR", "ADDED_COLUMNS",
+           "has_column", "Program",
            "ShadowRun", "bars_hash", "cfg", "mode", "t0", "first_close", "first_day", "fwd_engine", "open_db",
            "row_hash", "append_registry", "verify_chain", "head", "event", "events", "kv_get", "kv_put", "kv_first",
            "engine_id", "engine_now", "engine_label", "programs", "active", "suspect", "program", "tags", "tag",
