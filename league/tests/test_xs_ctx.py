@@ -594,8 +594,10 @@ class Build(Panel):
                 row = len(days) - 1 - back
                 median = statistics.median(volume(r) for r in range(row - 62, row + 1))
                 self.assertAlmostEqual(float(got[-1 - back]), round(volume(row) / median, 6), delta=1.5e-6)
-            self.assertTrue(np.isnan(got[:62]).all(), "no value until the inputs hold 63 sessions")
-            self.assertTrue(np.isfinite(got[62:]).all())
+            self.assertTrue(np.isnan(got[:31]).all(), "fewer than 32 valid bars among the sessions through it")
+            self.assertTrue(np.isfinite(got[31:]).all())
+            early = statistics.median(volume(r) for r in range(0, 41))
+            self.assertAlmostEqual(float(got[40]), round(volume(40) / early, 6), delta=1.5e-6)
 
     def test_rel_volume_needs_its_valid_bars_and_ignores_the_missing(self):
         inputs = self.inputs()

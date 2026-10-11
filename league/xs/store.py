@@ -467,9 +467,17 @@ class Universe:
             raise KeyError(f"{'no' if not pick else 'more than one'} asset traded as {name} on {day}")
         return pick[0].aid
 
+    def left(self, day: dt.date) -> list[int]:
+        """The aids that were index members before `day` and are not on it (a held lot of one keeps its column)."""
+        day = as_date(day)
+        return sorted(a.aid for a in self._assets.values()
+                      if not a.ref and a.spell(day) is None and any(row[2] is not None and row[2] <= day
+                                                                    for row in a.spells))
+
     def exit(self, aid: int, day: dt.date) -> str | None:
         """How the spell of `aid` that covers `day`, or its last one before it, ended ("deal" | "other" | "unknown"),
-        None while it is open (D12: counted beside a result, never a price)."""
+        None while it is open (D12: counted beside a result, never a price). The spell's end may lie after `day`: it
+        is a membership fact about the spell a vanished name's bars ended in, and no price."""
         asset = self._assets[int(aid)]
         day = as_date(day)
         rows = [row for row in asset.spells if row[1] <= day]

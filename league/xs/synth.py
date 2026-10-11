@@ -133,6 +133,9 @@ def _paths(assets: Sequence[Mapping[str, Any]], sessions: Sequence[dt.date], ref
     gamma = shape.uniform(0.6, 1.2, count)
     start = 20.0 + shape.uniform(0.0, 280.0, count)
     base_volume = shape.uniform(2e5, 2e7, count)
+    paired = [i for i, asset in enumerate(assets) if asset["ticker"] in PAIR]
+    if len(paired) == 2:
+        base_volume[paired[1]] = base_volume[paired[0]]      # one company: the classes differ by the swing below
     sd = float(vol) * IDIO_SHARE / math.sqrt(252.0)
     mu = float(drift) / 252.0 - 0.5 * sd * sd
 
@@ -414,9 +417,7 @@ def same_ctx_cases(root: str | Path, *, history: int, count: int = 20, seed: int
     for index in sorted(picks):
         day = sessions[index]
         inside = sorted(members(day))
-        left = [aid for aid in universe.table().tolist()
-                if aid >= store.FIRST_MEMBER_AID and aid not in inside and universe.exit(aid, day) is not None]
-        held = left[-2:]
+        held = universe.left(day)[-2:]
         run_key = f"i6|{day.isoformat()}"
         ahead = [d for d in sessions[index + 1:index + 1 + config.MEMBER_AHEAD] if (d - day).days <= 7]
         last = ahead[-1] if ahead else day

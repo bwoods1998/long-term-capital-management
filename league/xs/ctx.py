@@ -72,8 +72,8 @@ THREE MORE GRIDS ARE CLOSED THE SAME WAY (each narrower than the registered cont
   the stock. So `rel_volume` reads the volume moved by a RELATIVE dither (x (1 + u_v), at most half a percent: the same
   hash under the field b"v") and put on the total-return basis first (x raw close / adjusted close: a split then
   leaves no step in it that would date the session). Its median is over the valid bars of the
-  `config.REL_VOLUME_SESSIONS` sessions through that session; NaN until the inputs hold that many sessions, or when
-  fewer than `REL_VOLUME_MIN_VALID` of them have a valid bar.
+  `config.REL_VOLUME_SESSIONS` sessions through that session; NaN when fewer than `REL_VOLUME_MIN_VALID` of them
+  have a valid bar.
 - THE SLEEVE'S DOLLARS. `equity` is the cash plus the open lots marked at their DITHERED closes, and `cash` and
   `equity` are rounded to the cent: with one lot held, an exact equity series is that lot's exact marks.
 - A NAME WITH NO VALID BAR AT t is not a slot (it is outside U(t)); a held lot of it is marked at its last bar's
@@ -483,32 +483,37 @@ _REL: "OrderedDict[bytes, np.ndarray]" = OrderedDict()
 
 def _rel_volume(basis: np.ndarray, first: int) -> np.ndarray:
     """float64 (L, k): each session's volume over the median of the column's valid volumes on the
-    `config.REL_VOLUME_SESSIONS` sessions through it, for the rows from `first` on (NaN before; NaN until the inputs
-    hold that many sessions, and with fewer than `REL_VOLUME_MIN_VALID` valid bars among them). `basis` (L, k): the
-    dithered volumes, NaN where no valid bar. A row is a pure function of its window, and is kept by the window's
-    digest (`_REL`): a run's next decision computes its new sessions only."""
+    `config.REL_VOLUME_SESSIONS` sessions through it (those the inputs hold), for the rows from `first` on (NaN
+    before; NaN with fewer than `REL_VOLUME_MIN_VALID` valid bars among them, so a session the inputs do not hold and
+    a session without a bar read alike). `basis` (L, k): the dithered volumes, NaN where no valid bar. A row is a
+    pure function of its window, and is kept by the window's digest (`_REL`): a run's next decision computes its new
+    sessions only."""
     length, k = basis.shape
     span = config.REL_VOLUME_SESSIONS
     out = np.full((length, k), np.nan)
-    start = max(first, span - 1)
-    if start >= length or not k:
+    first = max(0, first)
+    if first >= length or not k:
         return out
     block = np.ascontiguousarray(basis)
-    marks = [hashlib.blake2b(block[row].tobytes(), digest_size=16).digest() for row in range(start - span + 1, length)]
-    for row in range(start, length):
-        at = row - (start - span + 1)
-        name = hashlib.blake2b(b"".join(marks[at - span + 1:at + 1]), digest_size=16).digest()
+    low = max(0, first - span + 1)
+    marks = [hashlib.blake2b(block[row].tobytes(), digest_size=16).digest() for row in range(low, length)]
+    blank = hashlib.blake2b(np.full(k, np.nan).tobytes(), digest_size=16).digest()
+    for row in range(first, length):
+        start = max(0, row - span + 1)
+        # a session the inputs do not hold is a session without a bar: the same digest, the same row
+        held = [blank] * (span - (row - start + 1)) + marks[start - low:row - low + 1]
+        name = hashlib.blake2b(b"".join(held), digest_size=16).digest()
         found = _REL.get(name)
         if found is None or found.shape != (k,):
-            window = block[row - span + 1:row + 1]
+            window = block[start:row + 1]
             known = np.isfinite(window)
             count = known.sum(axis=0)
             ordered = np.sort(np.where(known, window, np.inf), axis=0)
             safe = np.maximum(count, 1)
-            low = np.take_along_axis(ordered, ((safe - 1) // 2)[None, :], axis=0)[0]
-            high = np.take_along_axis(ordered, (safe // 2)[None, :], axis=0)[0]
+            lower = np.take_along_axis(ordered, ((safe - 1) // 2)[None, :], axis=0)[0]
+            upper = np.take_along_axis(ordered, (safe // 2)[None, :], axis=0)[0]
             with np.errstate(invalid="ignore", divide="ignore"):
-                median = 0.5 * (low + high)
+                median = 0.5 * (lower + upper)
                 found = np.where((count >= REL_VOLUME_MIN_VALID) & np.isfinite(median) & (median > 0),
                                  block[row] / median, np.nan)
             found.setflags(write=False)
