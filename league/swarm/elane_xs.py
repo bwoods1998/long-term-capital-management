@@ -173,12 +173,12 @@ BOUNDS: dict[str, tuple[float, float]] = {
 CENSUS_NOTE_MAX = 200
 #: The label every census note is shown under (E4-SPEC 8.2): the captain's reading of a cell, never evidence.
 CENSUS_LABEL = "in-sample 2010-24, best of 7; not evidence"
-#: `elane.screens.equity_xs` as policy.json ships it: every value a null, and with nulls every panel look waits.
-SCREEN_NULLS: dict[str, Any] = {
-    "name": "XS1", "screen": "XS1", "receipt_sha256": None, "c_XS": None, "c_margin": None, "alpha_plac": None,
-    "placebo_draws": None, "rung": None, "fp_cap": None, "owner_wall": None, "validation_tries": None,
-    "holdout_looks": None, "retry": False, "flags": {}, "screen_flags": [], "beside": None,
-}
+#: `elane.screens.equity_xs` as policy.json ships it: `league.xs.screen.PIN_KEYS` in order, EVERY value a null (a
+#: pin is whole or it is nulls: the screen's own test holds a half-filled block to be neither), and with nulls every
+#: panel look waits. The integrator fills it from the receipt in the commit that lands the receipt.
+SCREEN_NULLS: dict[str, Any] = dict.fromkeys((
+    "name", "screen", "receipt_sha256", "c_XS", "c_margin", "alpha_plac", "placebo_draws", "rung", "fp_cap",
+    "owner_wall", "validation_tries", "holdout_looks", "retry", "flags", "screen_flags", "beside"))
 
 #: THE PANEL AGENDA: the spec's `agenda` keys, each with its published prior (no figure). `earnings_drift` stays
 #: unavailable (no earnings dates on the House).

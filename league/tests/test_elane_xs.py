@@ -76,6 +76,7 @@ class Settings(unittest.TestCase):
         self.assertEqual(elane_xs.PANEL_MANIFEST, f"{xstore.PANEL_DIR}/PANEL_MANIFEST.json")
         self.assertEqual(elane_xs.UNIVERSE_MANIFEST, f"{xstore.UNIVERSE_DIR}/UNIVERSE_MANIFEST.json")
         self.assertEqual(tuple(elane_xs.SCREEN_NULLS), xscreen.PIN_KEYS)
+        self.assertEqual(set(elane_xs.SCREEN_NULLS.values()), {None})
         self.assertEqual(elane_xs.SCREEN_NAME, xscreen.SCREEN)
         self.assertEqual(elane_xs.STRUCTURE, "panel")
         self.assertEqual(len(set(elane_xs.SEALED)), 8)
@@ -921,6 +922,7 @@ class NoReceiptNoLook(GateCase):
         self.assertEqual(tuple(block), xscreen.PIN_KEYS)
         if block["receipt_sha256"] is None:
             self.assertEqual(block, elane_xs.SCREEN_NULLS, "nulls until the integrator lands the receipt with its pin")
+            self.assertEqual(set(block.values()), {None}, "a pin is whole or it is nulls: never half-filled")
         else:
             path = REPO / xscreen.RECEIPT_PATH
             self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), block["receipt_sha256"])
