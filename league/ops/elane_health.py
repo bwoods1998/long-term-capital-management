@@ -228,7 +228,8 @@ RULE_WORDS = {"reading": "the reading rule", "level": "the level rule", "memory"
 #: found names it. Order matters where one sentence holds two markers.
 SENTENCES: dict[str, tuple[tuple[str, str], ...]] = {
     "reading": (
-        ("reads a symbol's bars by key", "a symbol's bars read by key (ctx.bars[sym] is ONE object: its arrays are read by attribute)"),
+        ("reads a symbol's bars by key",
+         "a symbol's bars read by key (ctx.bars[sym] is ONE object: its arrays are read by attribute)"),
         ("reads a symbol's bars by position", "a symbol's bars read by position or as rows"),
         ("is iterated as rows", "a symbol's bars iterated as rows"),
         ("is unpacked", "a symbol's bars unpacked"),
@@ -236,7 +237,8 @@ SENTENCES: dict[str, tuple[tuple[str, str], ...]] = {
         ("is handed a symbol's bars whole", "a symbol's bars handed whole to numpy or math"),
         ("is put into arithmetic", "a symbol's bars put into arithmetic whole"),
         ("is compared or searched", "a symbol's bars compared or searched whole"),
-        ("reads ctx.positions (or ctx.closed) as a dict", "ctx.positions or ctx.closed read as a dict (each is a list of lots)"),
+        ("reads ctx.positions (or ctx.closed) as a dict",
+         "ctx.positions or ctx.closed read as a dict (each is a list of lots)"),
         ("subscripts a float", "ctx.prices[sym] or ctx.caps[sym] subscripted (each is one float)"),
         ("reads a lot by attribute", "a lot read by attribute (a lot is a dict)"),
         ("ctx has no field", "a field ctx does not have"),
@@ -259,10 +261,12 @@ SENTENCES: dict[str, tuple[tuple[str, str], ...]] = {
     ),
     "level": (
         ("keeps the run's dollars in a lot's tag", "the run's dollars kept in a lot's tag"),
-        ("the sleeve's dollars now against the run's anchor", "the sleeve's dollars held against the run's anchor (its own profit since it began)"),
+        ("the sleeve's dollars now against the run's anchor",
+         "the sleeve's dollars held against the run's anchor (its own profit since it began)"),
         ("a price level with the sleeve's dollars", "a price level compared with the sleeve's dollars"),
         ("a price or volume level (or its log)", "a price or volume level held against a constant or a PARAMS value"),
-        ("the ratio of two different symbols' prices", "the ratio of two symbols' prices held against a constant or a PARAMS value"),
+        ("the ratio of two different symbols' prices",
+         "the ratio of two symbols' prices held against a constant or a PARAMS value"),
         ("the sleeve's dollars of this run", "the sleeve's dollars of the run held against a constant or a PARAMS value"),
         ("nested too deeply", "a program nested too deeply to be read"),
     ),
@@ -330,7 +334,7 @@ IDLE_BRIEFS = {"pace": "starved at its own pace (elane.e2.pace_share)", "usd_day
                "(elane.e2.usd_day)", "sail_day": "starved: the House's Sail day holds it", OTHER: "starved",
                "raised": "broken: its rounds raise", "house": "broken: Train runs fail on the House's side",
                "unanswered": "broken: no model route answers", "refused": "broken: every program is refused before a run",
-               "no_round": "broken: no round starts"}
+               "barren": "no family yet: the equity passes bear none", "no_round": "broken: no round starts"}
 IDLE_STEPS = {"raised": "the equity rounds raise (the swarm log): a fix, in a release",
               "house": "check the equity_data job's receipt and the swarm's equity-decider.log",
               "no_round": "the equity lanes start no round (the swarm log): a fix, in a release"}
@@ -652,7 +656,8 @@ def _held(db: Any, loaded: Mapping[str, Any] | None, now: float) -> dict[str, An
         pace = elane_yield.pace(store, loaded, now)
         return {"text": text, "kind": skip_kind(text), "limit_usd_hour": float(pace["limit_usd_per_hour"]),
                 "spent_last_hour_usd": float(pace["spent_last_hour_usd"]),
-                "day_line_usd": float(elane_yield.day_line(loaded)), "spent_today_usd": float(elane_yield.spent_today(store, now))}
+                "day_line_usd": float(elane_yield.day_line(loaded)),
+                "spent_today_usd": float(elane_yield.spent_today(store, now))}
     except Exception:  # noqa: BLE001 - not read: the idle cause says so
         return None
 
@@ -676,19 +681,17 @@ def facts(db: Any, now: float, loaded: Mapping[str, Any] | None = None) -> dict[
 def lanes(loaded: Mapping[str, Any] | None, f: Mapping[str, Any] | None = None, *,
           paused: bool = False) -> tuple[bool, str | None, dict[str, Any]]:
     """WHEN A CAUSE IS JUDGED (the module docstring): (judged, why not, the lanes' settings the checks read:
-    {births_every_seconds, train_every_seconds, pace_share, usd_day}). `f`: the store's facts, for the empty lanes."""
+    {births_every_seconds, pace_share, usd_day}). `f`: the store's facts, for the empty lanes."""
     c: dict[str, Any] = {}
     if not isinstance(loaded, Mapping):
         return False, "the swarm's settings could not be read", c
     try:
-        from ..swarm import elane, elane_births, elane_train, elane_yield
-        from ..swarm import architect, loop
+        from ..swarm import architect, elane, elane_births, elane_yield, loop
 
         wired = callable(getattr(architect.Architect, "equity_pass", None)) and hasattr(loop, "EquityResearcher")
         mode, share = elane.cfg(loaded)["mode"], elane_births.birth_share(loaded)
         money = elane_yield.cfg(loaded)
         c = {"births_every_seconds": float(elane_births.cfg(loaded)["births_every_seconds"]),
-             "train_every_seconds": float(elane_train.cfg(loaded)["train_every_seconds"]),
              "pace_share": float(money["pace_share"]), "usd_day": float(money["usd_day"])}
     except Exception as exc:  # noqa: BLE001 - the lanes' own readers are not in this tree, or do not read
         return False, f"release E2's readers could not be read ({type(exc).__name__})", c
@@ -789,7 +792,8 @@ def _dq_check(f: Mapping[str, Any], now: float, started: float | None) -> dict[s
                 name = dq_class(verdict.get("why"))
                 _bump(classes, name)
                 if len(examples) < 6:
-                    examples.append({"family": fam["id"], "version": int(n), "error": name, "line": dq_line(verdict.get("why"))})
+                    examples.append({"family": fam["id"], "version": int(n), "error": name,
+                                     "line": dq_line(verdict.get("why"))})
     numbers: dict[str, Any] = {
         "scored": scored, "faulted": faulted, "disqualified": by_code["DQ"], "load_refused": by_code["LOAD"],
         "run_failed": by_code["RUN"], "share": None if not scored else round(faulted / scored, 2), "families": len(families),
@@ -890,7 +894,8 @@ def _births_check(f: Mapping[str, Any], now: float, started: float | None) -> di
                  f"{hows.get('failed', 0)} got no answer, {hows.get('raised', 0)} raised."
                  + (f" The commonest refusals: {reasons}." if reasons else "")
                  + (f" Symbols the code knows and elane.universe does not hold, named most: {symbols}." if symbols else "")
-                 if streak else f"The equity lanes' latest pass that asked a model bore a family ({len(asked)} asked in {span})."),
+                 if streak else
+                 f"The equity lanes' latest pass that asked a model bore a family ({len(asked)} asked in {span})."),
         "numbers": numbers,
         "doing": DOING["elane_births"] + ("" if lever or not stalled else
                                           (f" After {BIRTHS_OWNER_HOURS:g} h with no equity birth this is your step when a "
@@ -914,23 +919,22 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
     births_at = (f.get("kv") or {}).get(BIRTHS_AT_KEY)
     every = float(c.get("births_every_seconds") or 7200.0)
     overdue = births_at is not None and now - births_at > max(IDLE_HOURS * 3600.0, 2.0 * every)
-    # Births are wanted when the latest pass was held back, left births unfilled or bore none, or when the pass itself
-    # is overdue (a pass that may ask no model is not started, so it leaves no event).
-    wanted = overdue or bool(last and (last["skipped"] in ("pace", "usd_day", "sail_day") or last["short"] > 0
-                                       or last["barren"]))
+    # Births are wanted when the latest pass was held back, left births unfilled or bore none. A pass that may ask no
+    # model is not started and leaves no event: it shows as overdue.
+    wanted = bool(last and (last["skipped"] in ("pace", "usd_day", "sail_day") or last["short"] > 0 or last["barren"]))
     scored_at = [S.epoch(v.get("at")) for fam in fams for v in fam["versions"].values()]
     last_scored = max([t for t in scored_at if t is not None and t <= now], default=None)
     owed_at = [S.epoch(fam["born_at"]) for fam in researching] + [f.get("first_event_at")]
     first_owed = min([t for t in owed_at if t is not None], default=None)
     since = last_scored if last_scored is not None else first_owed
     held = f.get("held") if isinstance(f.get("held"), Mapping) else None
-    numbers: dict[str, Any] = {"researching": len(researching), "births_wanted": wanted,
+    numbers: dict[str, Any] = {"researching": len(researching), "births_wanted": wanted, "pass_overdue": overdue,
                                "last_scored_at": None if last_scored is None else S.iso(last_scored), "min_hours": IDLE_HOURS}
     if held is not None:
         numbers.update(held_now=held["kind"] or "none", pace_usd_hour=round(held["limit_usd_hour"], 4),
                        spent_last_hour_usd=round(held["spent_last_hour_usd"], 4), day_line_usd=round(held["day_line_usd"], 2),
                        spent_today_usd=round(held["spent_today_usd"], 2))
-    if not researching and not wanted:
+    if not researching and not wanted and not overdue:
         return _not_judged("no equity family is in Train research and no equity birth is wanted", numbers)
     if since is None:
         return _not_judged("nothing says since when the equity lanes owe work", numbers)
@@ -948,7 +952,7 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
                         + f" The lanes are idle after {IDLE_HOURS:g} h with nothing scored.",
                 "numbers": numbers, "doing": DOING["broken"], "owner_step": None, "onset": None}
     # WHY, since the lanes went idle: the Train rounds' own steps, the rounds that raised, the families waiting.
-    tally = {"rounds": 0, "house": 0, "unanswered": 0, "refused": 0, "raised": 0, "skipped": 0}
+    tally = {"rounds": 0, "house": 0, "unanswered": 0, "refused": 0, "raised": 0, "passes": 0}
     houses: dict[str, int] = {}
     for at, payload in f.get("rounds") or []:
         if at < edge:
@@ -961,8 +965,8 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
                 _bump(houses, read["house"])
             tally["unanswered"] += int(read["unanswered"])
             tally["refused"] += int(read["refused"] is not None)
-            tally["skipped"] += int(read["skipped"] is not None)
     tally["raised"] = sum(1 for at, _ in f.get("raised") or [] if at >= edge)
+    tally["passes"] = sum(1 for at, row in passes if at >= edge and row["barren"])
     waiting = [fam for fam in researching if any(t > now for t in fam["waits"].values())]
     for fam in waiting:
         for name, until in fam["waits"].items():
@@ -970,7 +974,8 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
                 _bump(houses, name.split(":", 1)[1])
     train_at = (f.get("kv") or {}).get(TRAIN_AT_KEY)
     numbers.update(train_rounds=tally["rounds"], house_failures=tally["house"], unanswered=tally["unanswered"],
-                   refused_answers=tally["refused"], rounds_raised=tally["raised"], families_waiting=len(waiting),
+                   refused_answers=tally["refused"], rounds_raised=tally["raised"], barren_passes=tally["passes"],
+                   families_waiting=len(waiting),
                    train_round_age_min=None if train_at is None else round(max(0.0, now - train_at) / 60.0, 1))
     starved = held is not None and held["kind"] is not None
     if starved:
@@ -985,9 +990,10 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
         }.get(kind, "E2 may ask no model now")
         why = f"STARVED, not broken: {words}, so no model is asked." + (f" {PACE_LEVER}" if kind in ("pace", "usd_day") else "")
     else:
+        # With no family in research the work owed is the equity pass's: barren passes are `elane_births`' to explain.
         kind = ("raised" if tally["raised"] else "house" if tally["house"] or houses else
                 "unanswered" if tally["unanswered"] or any("unanswered" in fam["waits"] for fam in waiting) else
-                "refused" if tally["refused"] else "no_round")
+                "refused" if tally["refused"] else "barren" if not researching and tally["passes"] else "no_round")
         parts = [f"{tally['rounds']} Train rounds ran"]
         if tally["raised"]:
             parts.append(f"{tally['raised']} rounds raised")
@@ -1002,22 +1008,26 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
             parts.append(f"{len(waiting)} of {len(researching)} families wait out a backoff")
         if train_at is not None:
             parts.append(f"the Train round last started {max(0.0, now - train_at) / 60.0:.0f} min ago")
-        why = ("BROKEN, not starved: " + ("E2 may ask a model now" if held is not None else
-                                         "whether E2 may ask a model now could not be read") + " and " + "; ".join(parts) + ".")
+        may = "E2 may ask a model now" if held is not None else "whether E2 may ask a model now could not be read"
+        why = (f"Not starved ({may}): {tally['passes']} equity passes asked a model and bore no family, so there is none "
+               "to score (see elane_births)." if kind == "barren" else
+               f"BROKEN, not starved: {may} and " + "; ".join(parts) + ".")
     numbers["kind"] = kind
-    owed = (f"{len(researching)} families are in Train research" if researching else "no family is in Train research")
+    owed = ((f"{len(researching)} families are in Train research" if researching else "no family is in Train research")
+            + (" and births are wanted" if wanted else " and the equity pass is overdue" if overdue else ""))
     owner = None
     if not starved and kind in IDLE_OWNER_KINDS:
         owner = {"raised": "the equity lanes' rounds raise (the swarm log's \"elane failed\" and \"elane_train failed\" lines)",
                  "house": ("the equity lanes' Train runs fail on the House's side: check the equity_data job's receipt and the "
                            "swarm's equity-decider.log"),
-                 "no_round": "the equity lanes owe work, may ask a model and start no round (the swarm log's elane_train lines)",
+                 "no_round": ("the equity lanes owe work, may ask a model and start no round (the swarm log's elane_train "
+                              "lines)"),
                  }[kind] + f"; it needs a fix, in a release or on the box ({REPORT} prints each family's state)"
     return {
         "stalled": True, "judged": True,
-        "what": (f"No equity version was scored on Train for {_hours(idle)} h while {owed}"
-                 + (" and births are wanted" if wanted else "") + f". {why}"),
-        "numbers": numbers, "doing": DOING["starved" if starved else "broken"], "owner_step": owner, "onset": edge,
+        "what": f"No equity version was scored on Train for {_hours(idle)} h while {owed}. {why}",
+        "numbers": numbers, "owner_step": owner, "onset": edge,
+        "doing": DOING["starved" if starved else "elane_births" if kind == "barren" else "broken"],
         "brief": f"no version scored for {_hours(idle)} h, " + IDLE_BRIEFS.get(str(kind), IDLE_BRIEFS[OTHER]),
         "step": IDLE_STEPS.get(str(kind)) if owner else None}
 
@@ -1027,8 +1037,10 @@ def _sail_words(text: Any) -> str:
     text = str(text or "")
     for mark, words in (("is closed: the Sail guard is braked", "the Sail guard is braked"),
                         ("holds new research", "the Sail guard holds new research at the day's line"),
-                        ("has no room for an equity question", "the day's Sail dollars are within a dollar of the guard's line"),
-                        ("is unknown", "the Sail guard has no fresh reading"), ("could not be read", "the guard's record could not be read")):
+                        ("has no room for an equity question",
+                         "the day's Sail dollars are within a dollar of the guard's line"),
+                        ("is unknown", "the Sail guard has no fresh reading"),
+                        ("could not be read", "the guard's record could not be read")):
         if mark in text:
             return words
     return "its reason is not one this reader knows"
@@ -1058,7 +1070,8 @@ def _refused_check(f: Mapping[str, Any], now: float, started: float | None) -> d
         "what": (f"{n} of the {answers} programs the equity generators wrote in {span} were refused before a run by ONE "
                  f"static rule, {words} ({refused} refused in all: {by_rule})."
                  + (" Its commonest sentence: " + "; then ".join(f"{s} ({k}x)" for s, k in said) + "." if said else "")
-                 if top else f"None of the {answers} programs the equity generators wrote in {span} was refused by a static rule."),
+                 if top else
+                 f"None of the {answers} programs the equity generators wrote in {span} was refused by a static rule."),
         "numbers": numbers, "doing": DOING["elane_refused"],
         "owner_step": (f"the equity generators are not being taught {words}: teach it where they read it "
                        "(league/equity/EQUITY.md, the researcher's system prompt, elane_review.READING_CTX), in a "
@@ -1296,7 +1309,8 @@ def text(doc: Mapping[str, Any]) -> str:
     lines = [f"The equity lanes' health at {doc.get('at')}"
              + ("" if doc.get("judged") else f" (not judged: {doc.get('why')})"), ""]
     for cause, check in (doc.get("checks") or {}).items():
-        lines.append(f"{cause}: {'STANDS' if check.get('stalled') else 'judged, clear' if check.get('judged') else 'not judged'}")
+        state = "STANDS" if check.get("stalled") else "judged, clear" if check.get("judged") else "not judged"
+        lines.append(f"{cause}: {state}")
         lines.append(f"  {check.get('what')}")
         if check.get("hint"):
             lines.append(f"  {check['hint']}.")
@@ -1312,7 +1326,8 @@ def text(doc: Mapping[str, Any]) -> str:
             lines.append(f"  {name}: {json.dumps(value, sort_keys=True)}")
     lines += ["", f"Families the equity pass bore: {len(doc.get('families') or [])}"]
     for fam in doc.get("families") or []:
-        lines.append(f"  {fam['id']} ({fam['lane']}, {fam['status']}{'' if fam['alive'] else ', retired'}; born {fam['born_at']})")
+        gone = "" if fam["alive"] else ", retired"
+        lines.append(f"  {fam['id']} ({fam['lane']}, {fam['status']}{gone}; born {fam['born_at']})")
         for n, row in fam["versions"].items():
             said = "passed the bar" if row["passed"] else "failed " + ", ".join(row["fails"] or ["?"])
             where = f": {row['error']}" + (f" at line {row['line']}" if row.get("line") else "") if row.get("error") else ""

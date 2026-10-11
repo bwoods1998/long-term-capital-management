@@ -690,6 +690,31 @@ class OwedWorkAndNothingScored(Case):
         self.assertEqual((check["stalled"], check["judged"]), (False, False))
         self.assertIn("no equity family is in Train research and no equity birth is wanted", check["what"])
 
+    def test_no_family_yet_and_barren_passes_are_the_equity_passs_to_explain(self):
+        symbols = "symbols: 1 to 20 of SPY, QQQ, IWM, DIA (XLK not)"
+        for hours in (5.0, 4.0, 3.5):
+            self.births(hours, refused=[("far", symbols)])
+        self.ago(3.5)
+        self.store.put(EH.BIRTHS_AT_KEY, self.t)
+        checks = self.equity()
+        idle = checks["elane_idle"]
+        self.assertEqual((idle["stalled"], idle["numbers"]["kind"], idle["owner_step"], idle["numbers"]["barren_passes"]),
+                         (True, "barren", None, 3))
+        self.assertIn("for 5.0 h while no family is in Train research and births are wanted. Not starved (E2 may ask a model "
+                      "now): 3 equity passes asked a model and bore no family, so there is none to score (see elane_births).",
+                      idle["what"])
+        self.assertEqual(idle["doing"], EH.DOING["elane_births"])
+        self.assertTrue(checks["elane_births"]["stalled"])
+        # A pass that is overdue and may ask a model is a lane that starts no round: the owner's step.
+        self.setUp()
+        self.births(11.0, born=["an-invented-family"], want=1)
+        self.ago(11.0)
+        self.store.put(EH.BIRTHS_AT_KEY, self.t)
+        idle = self.equity()["elane_idle"]
+        self.assertEqual((idle["stalled"], idle["numbers"]["kind"], idle["numbers"]["pass_overdue"]), (True, "no_round", True))
+        self.assertIn("while no family is in Train research and the equity pass is overdue. BROKEN, not starved", idle["what"])
+        self.assertIn("start no round", idle["owner_step"])
+
     def test_births_wanted_and_held_back_before_any_family_is_starved(self):
         self.births(5.0, skipped="pace")
         self.ago(5.0)
