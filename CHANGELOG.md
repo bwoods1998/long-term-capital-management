@@ -69,6 +69,15 @@ What they did find is fixed here, each with a test that failed before.
   hair earlier in its minute than the last, and the open window re-priced every second minute again. An order that
   carries its minute's stamp is now aged in whole House minutes; one without it is aged from its POST in seconds,
   exactly, as before. `league/equity/live.py` is plumbing: neither identity moves.
+- **The public wording** (this file's rehearsal entry below, `docs/operations.md`, `league/ops/equity_data.py`,
+  `league/swarm/seeds.py`, `league/equity/INTERFACES.md`, three tests' docstrings). The rehearsal's commits had
+  written counts read from the vendor's data, and two findings about the seeds on real Train data, into this public
+  repository. They are reworded to what each rule IS and why (the daily bar's close is the closing cross; a flat bar
+  of volume 0 is a session without a trade; the vendor rounds its adjusted prices to the cent; the seeds' declared
+  order is the captain's decision, made before any Validation or look from Train-era figures only, amendment A18;
+  the two overnight seeds share a template and are one lineage). A test holds the wording
+  (`league/tests/test_equity_rehearsal.py` `ThePublicWording`). Comments, docstrings and docs only: no code and no
+  fingerprint moves.
 
 ### Release E1, the rehearsal on real data: the data job, the vendor's cents, the seeds' order, on `feat/equity-e1` (unreleased; an owner deploy with the rest of E1; the equity identity moves before its first look; no money-digest move)
 
@@ -79,35 +88,32 @@ real data, so no store was ever written.** Ten defects; every blocker and major 
 (`league/tests/test_equity_rehearsal.py`, `league/tests/test_equity_data.py`).
 
 - **The data job's audit reads real bars as they are** (`league/ops/equity_data.py`; blockers). Two checks were wrong
-  about real data; these correct them and loosen no evidence. Counts only, no price:
-  - *volume*: the history holds two flat bars of volume 0 (one symbol, two sessions of 2016: a session without a
-    trade, the venue carrying the last price). The check refused them, and history never changes, so every run
-    failed. A flat bar of volume 0 now passes and is listed; any other missing volume still fails.
+  about real data; these correct them and loosen no evidence. The rules and their reasons only: no count and no
+  price read from the vendor's data is written here.
+  - *volume*: a flat bar of volume 0 is a session without a trade (the venue carries the last price), and the history
+    holds such bars. The check refused them, and history never changes, so every run failed. A flat bar of volume 0
+    now passes and is listed; any other missing volume still fails.
   - *the regular session*: the rule ended the session before the closing minute, where the closing cross prints, and
-    compared the volume. On the 252 sessions of one Train year the daily open lay inside the 09:30 minute's range on
-    all 252 and the daily close inside the closing minute's range on all 252; the daily volume equalled the minutes'
-    sum on none. "regular" was unreachable, and a close-set high or low read as "extended", which fails the audit: on
-    that year's 233 rolling 20-session windows the rule read 190 extended, 43 unverified and 0 regular. The corrected
-    rule (the open against the 09:30 minute, the close against the closing minute, the high and low between the
-    extreme before the closing minute and the extreme with it, no volume; "extended" only above 2 such days of 20)
-    reads 0 extended, 12 unverified and 221 regular. A bar truly built from extended hours still fails.
+    compared the volume. The daily bar's open is the opening cross (inside the 09:30 minute's range), its close is
+    the closing cross (inside the closing minute's range), and its volume counts prints the minute bars leave out,
+    so "regular" was unreachable, and a close-set high or low read as "extended", which fails the audit. The
+    corrected rule reads the open against the 09:30 minute, the close against the closing minute, the high and low
+    between the extreme before the closing minute and the extreme with it, and no volume; "extended" only above 2
+    such days of 20. A bar truly built from extended hours still fails.
   - a failed audit's receipt now lists the first five problems of each failed check, every decimal figure masked.
 - **The vendor rounds its adjusted prices to the cent**, so the all/raw ratio jitters with no event at all. One bound
   (`league/equity/config.py` `rounding_bound`) serves the two places that read it:
   - *the Gym engine* (major; `league/equity/engine.py` `ratio_tolerance`): with a fixed 2e-5 bound the engine read the
-    jitter as dividends (cash credited, one-sided) and as anomalies. Over the Train history, 35 symbols and 78,586
-    ratio steps hold 1,312 real events; another 21,440 steps were read as a dividend and 21,420 as an anomaly. With
-    the price-aware tolerance 1,185 steps are read as events and no anomaly is booked for the three seeds; their
-    trades and floors are unchanged.
+    jitter as dividends (cash credited, one-sided) and as anomalies. With the price-aware tolerance only a step the
+    rounding of its two adjusted closes cannot explain is an event.
   - *the split reader* (major; `split_factor`): the rounding pushed a true factor's residual above the fixed bound,
-    and the search then took the nearest smaller fraction with the rest as a dividend (a 20-for-1 read as 39-for-2).
-    The factor may now lie its step's tolerance above 1. No E1 symbol has a split; the store's later symbols do.
+    and the search then took a neighbouring fraction with the rest as a dividend. The factor may now lie its step's
+    tolerance above 1.
   - *the book's morning audit* (major; `league/equity/live.py` `_as_of_equal`): on an ex-dividend morning the vendor
     has restated the whole adjusted series, each price rounded to the cent again; compared to a millionth, every such
-    morning read as a price mismatch, which cancels the decision's buys and counts a failed decide (one of the four
-    index ETFs goes ex-dividend monthly). Emulated on every Train ex-dividend day of the four index ETFs: 205 of 205
-    read "differ" before, 0 of 205 with the bound, and a close moved by 0.05% or 0.2% is still caught on 205 of 205.
-    Raw prices stay exact.
+    morning read as a price mismatch, which cancels the decision's buys and counts a failed decide. With the bound an
+    ex-dividend morning reads the same as-of prices, and a close that truly moved is still caught. Raw prices stay
+    exact.
   - `engine.py` and `config.py` are evidence modules: **the equity identity moves**, which is free before the first
     look and would retire every looked lineage after it. `EQUITY_EVIDENCE` is unchanged.
 - **The volume is no part of a day's audit mark** (`league/equity/live.py`; blocker, with the review's evidence-1):
@@ -115,21 +121,21 @@ real data, so no store was ever written.** Ten defects; every blocker and major 
   and cleared the day's morning audit, which the twins then report as never audited. Predicted from the code and the
   vendor's documentation, not observed: the first Monday settles it.
 - **The seeds' looks go in the declared order, and the order is decided** (major; `league/swarm/seeds.py`,
-  `league/swarm/elane.py` `round_order`, `seed_wait`). On real Train series the two overnight seeds are one lineage
-  under the lane's own rule, so only one is ever looked at, and which one was left to the store's order. Decided
-  before any Validation or look, from Train-era figures only: `seed-overnight-qqq`, `seed-reversal-index`,
-  `seed-overnight-spy`. QQQ's overnight seed spends the lineage's one look (its own floor sets it the lower bar, so
-  the look has the higher power there); SPY's is then refused as the same lineage and retired with that reason. A
-  seed's look also waits while a seed declared before it in its lineage has no verdict (strict, with no timeout: the
-  verification's fixes above). **Stated cost: SPY's every-close seed is not expected to trade;
-  the seeds that can pass buy only after a down close.**
+  `league/swarm/elane.py` `round_order`, `seed_wait`). The two overnight seeds share a template and are one lineage,
+  so only one is ever looked at (D3), and which one was left to the store's order. The captain decided it before any
+  Validation or look, from Train-era figures only (amendment A18): `seed-overnight-qqq`, `seed-reversal-index`,
+  `seed-overnight-spy`. QQQ's overnight seed spends the lineage's one look; SPY's is then refused as the same lineage
+  and retired with that reason. A seed's look also waits while a seed declared before it in its lineage has no
+  verdict (strict, with no timeout: the verification's fixes above). **Stated cost: SPY's every-close seed is not
+  expected to trade; the seeds that can pass buy only after a down close.**
 - **Stated, not built** (minors; the captain's decisions): a live decision's ctx does not reproduce byte for byte
-  from a later store, because of the same rounding (a seed's own condition flipped on 0 to 2 of about 2,190 decision
-  days a symbol; A14's intent-agreement reading polices it; as-of prices from raw bars and per-event factors are owed
-  before E2). The FOMC, CPI and jobs tables start in 2017 and the CPI and jobs tables end in September 2026:
-  `ctx.events` says nothing outside them, the same live and in the Gym, said in `league/equity/EQUITY.md`; the tables
-  are extended with verified dates before any event-conditioned program is born.
-- The review's fixes that met here: the daily fixer's as-of comparison assumed a four-decimal grid (the measured grid
+  from a later store, because of the same rounding (a program whose condition sits within that rounding of its
+  threshold can decide differently in a later replay; A14's intent-agreement reading polices it; as-of prices from
+  raw bars and per-event factors are owed before E2). The FOMC, CPI and jobs tables start in 2017 and the CPI and
+  jobs tables end in September 2026: `ctx.events` says nothing outside them, the same live and in the Gym, said in
+  `league/equity/EQUITY.md`; the tables are extended with verified dates before any event-conditioned program is
+  born.
+- The review's fixes that met here: the daily fixer's as-of comparison assumed a four-decimal grid (the vendor's grid
   is the cent); the swarm fixer's seed order (SPY first) is replaced by the declared one; the look round's "one
   family's error never stops the others" holds, with the seeds' wait beside it.
 

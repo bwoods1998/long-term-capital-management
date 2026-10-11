@@ -1128,8 +1128,9 @@ above and this section differ, this section is the code.
   failed audit's receipt carries `problems` {check: the first `RECEIPT_PROBLEMS` (5) texts, every decimal figure
   masked}.
 - **The seeds' order** (swarm; CHANGES section 14's): `seeds.EQUITY_SEEDS` is seed-overnight-qqq,
-  seed-reversal-index, seed-overnight-spy, the declared order of the looks (the two overnight seeds are one lineage on
-  real Train series; the reason is beside the list). `elane.round_order` walks the seeds as one block in that order,
+  seed-reversal-index, seed-overnight-spy, the declared order of the looks (the captain's decision before any
+  Validation or look, from Train-era figures only, amendment A18; the two overnight seeds share a template and are
+  one lineage). `elane.round_order` walks the seeds as one block in that order,
   standing where the first of them was born. WITHIN A LINEAGE THE ORDER IS STRICT (amendment A18; the verification's
   fix): each spec's `lineage` declares the lineage its seed is in ("overnight" for the two overnight seeds,
   "reversal"; read by the wait alone, no part of `equity_family_spec`). `elane.seed_owed(store, fam, settings) ->

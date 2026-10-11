@@ -41,11 +41,10 @@ is named under `validation_errors` {family: the error}, in that line and, until 
 
 **The order of the looks** is the seed list's DECLARED order (`league/swarm/seeds.py` `EQUITY_SEEDS`,
 `elane.round_order`): `seed-overnight-qqq, seed-reversal-index, seed-overnight-spy`. It is a decision (the captain's,
-Oct 11, 2026, before any Validation or look, from Train-era figures only), because it matters under D3: of two programs
-of one lineage (Train daily returns correlating at 0.7 or more, or the same template) the later one is refused with no
-look. The rehearsal on real bars found **the two overnight seeds to be one lineage**, so only one of them is ever looked
-at. `seed-overnight-qqq` goes first because its own floor sets it the lower bar of the two at the look, so the
-lineage's one look has the higher power there; `seed-reversal-index`, a lineage of its own, follows;
+Oct 11, 2026, before any Validation or look, from Train-era figures only: amendment A18), because it matters under D3:
+of two programs of one lineage (Train daily returns correlating at 0.7 or more, or the same template) the later one
+is refused with no look. **The two overnight seeds share a template and are one lineage**, so only one of them is
+ever looked at. `seed-overnight-qqq` goes first by that decision; `seed-reversal-index`, a lineage of its own, follows;
 `seed-overnight-spy` is last and, once `seed-overnight-qqq` has been looked at (passed OR failed: the lineage's look
 is spent either way), it is refused its look as the same lineage and retired with that cause said
 (`elane.SAME_LINEAGE`), plainly reported. **The consequence to know: SPY's overnight seed, the one that buys at every
@@ -301,13 +300,14 @@ data never leaves the House's state directory (the vendor's terms; a public repo
   the 20 days hold an extended field) FAILS the audit and is a stop for E1 (the store must then be built from 1Min
   bars); **"regular"** needs every day compared, at most 2 stray days and none extended; anything else is
   **"unverified"**, written and warned.
-- **Why they read so** (the rehearsal on the House box against real SIP data, Oct 11, 2026; counts only): as first
-  written both checks were wrong about real data and the job could never write a store. The history holds two flat
-  bars of volume 0 (one symbol, two sessions of 2016), and history never changes. On the 252 sessions of one Train
-  year the daily open lay inside the 09:30 minute's range on all 252 and the daily close inside the closing minute's
-  range on all 252, while the daily volume equalled the minutes' sum on none; on that year's 233 rolling 20-session
-  windows the first rule read 190 extended, 43 unverified and 0 regular, this rule 0 extended, 12 unverified and 221
-  regular. These correct the checks; they loosen no evidence, and a bar truly built from extended hours still fails.
+- **Why they read so** (the rehearsal on the House box against real SIP data, Oct 11, 2026; the rules and their
+  reasons only: no count read from the vendor's data is written here): as first written both checks were wrong about
+  real data and the job could never write a store. A flat bar of volume 0 is a session without a trade; the history
+  holds such bars, and history never changes. The daily bar's open is the opening cross (inside the 09:30 minute's
+  range) and its close is the closing cross (inside the closing minute's range), while its volume counts prints the
+  minute bars leave out; a rule that ended the session before the closing minute and compared the volume could never
+  read "regular", and read a close-set high or low as "extended". These correct the checks; they loosen no evidence,
+  and a bar truly built from extended hours still fails.
 
 **The vendor's cents** (the rehearsal's other finding; `league/equity/config.py` `rounding_bound`). The vendor rounds
 its adjustment=all prices to the cent and restates the whole series at every dividend and split. One bound says how
@@ -323,8 +323,9 @@ places share it so they cannot drift apart:
   move larger than the bound: about 0.03 / price (half a basis point at $600, three at $100).
 - **I6 is the two builders on the same bars, not a live ctx against a later store.** After a later event the store's
   as-of prices differ from the ones a live decision saw by up to that rounding, so a live decision's `ctx_sha` does
-  not reproduce byte for byte from a later store. On the rehearsal's Train history a seed's own condition flipped on
-  0 to 2 of about 2,190 decision days a symbol. A14's intent-agreement reading (95% of counted sessions) polices it.
+  not reproduce byte for byte from a later store. A program whose condition sits within that rounding of its
+  threshold can decide differently live and in a later replay. A14's intent-agreement reading (95% of counted
+  sessions) polices it.
   Owed before E2's births depend on it: as-of prices built from raw bars and per-event factors.
 - **The event tables have a first and a last row** (`league/gym/events.py`; `ctx.events`): fomc 2017-02-01 through
   2026-12-09, cpi 2017-01-18 through 2026-09-11, jobs 2017-01-06 through 2026-09-04. Outside a table's rows its flag

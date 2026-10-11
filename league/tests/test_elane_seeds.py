@@ -67,8 +67,10 @@ class Programs(StoreCase):
             self.assertIsNone(re.search(r"(?:19|20)\d\d", code), "no year, even in a comment")
             self.assertIn("MARKET BETA", code)
             self.assertEqual((spec["lane"], spec["structure"]), (BETA, "etf"))
-        self.assertEqual(len({s["template"] for s in seeds.EQUITY_SEEDS}), 3,
-                         "three templates (whether two of them are one lineage is their Train returns' to say, D3)")
+        self.assertEqual(len({s["template"] for s in seeds.EQUITY_SEEDS}), 3, "three rules, each with its own name")
+        self.assertEqual(len({s["lineage"] for s in seeds.EQUITY_SEEDS}), 2,
+                         "two declared lineages: the two overnight seeds are written from one program template and "
+                         "are one (A18); D3 still judges every look")
 
     def test_the_cards_name_their_prior_and_no_figure(self):
         for spec in seeds.EQUITY_SEEDS:

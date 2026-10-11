@@ -705,14 +705,13 @@ _FALSIFICATION = ("refuted when its one sealed look fails the share screen S2: t
                   "own floor plus the receipt's margin)")
 
 #: THE ORDER OF THIS LIST IS THE ORDER THE SEEDS' LOOKS ARE TAKEN IN (league/swarm/elane.py `round_order`, `seed_wait`),
-#: and it is a decision (the captain's, Oct 11, 2026, before any Validation or look, from Train-era figures only). The
-#: rehearsal on real bars found the two overnight seeds to be ONE LINEAGE under the lane's own rule (their Train daily
-#: returns correlate at or above the rule's 0.7), so only one of them is ever looked at (D3: one look a lineage) and the
-#: other is refused its look and retired as the same lineage. Which one must not be the ids' alphabet or a clock tick:
-#: seed-overnight-qqq goes first because its own floor sets it the lower bar of the two at the look, so the lineage's
-#: one look has the higher power there; seed-reversal-index, a lineage of its own, follows; seed-overnight-spy is last
-#: and, with seed-overnight-qqq looked at, is refused its look as the same lineage and retired with that reason,
-#: plainly reported.
+#: and it is a decision: the captain's, made on Oct 11, 2026, before any Validation or look, from Train-era figures only
+#: (amendment A18; what it was decided on stays off this public file). The two overnight seeds are written from one
+#: program template (`EQUITY_OVERNIGHT`) and are ONE LINEAGE, so only one of them is ever looked at (D3: one look a
+#: lineage) and the other is refused its look and retired as the same lineage. Which one must not be the ids' alphabet
+#: or a clock tick: seed-overnight-qqq goes first by that decision; seed-reversal-index, a lineage of its own, follows;
+#: seed-overnight-spy is last and, with seed-overnight-qqq looked at, is refused its look as the same lineage and
+#: retired with that reason, plainly reported.
 #: WITHIN A LINEAGE THE ORDER IS STRICT (amendment A18; `elane.seed_wait`): each seed's `lineage` below DECLARES the
 #: lineage it is in (the two overnight seeds are one; the reversal seed is its own), and a seed's look is never taken
 #: while a seed declared before it in the same lineage is alive without a verdict. There is no timeout: the later seed

@@ -246,8 +246,8 @@ class TheAudit(unittest.TestCase):
         self.assertEqual(self.check(raw, adj)["checks"]["volume"]["count"], 1, "a flat bar must say volume 0 exactly")
 
     def test_a_flat_bar_of_volume_zero_is_a_session_without_a_trade_and_passes_listed(self):
-        """rehearsal-1: the real history holds two such bars (one symbol, two sessions), and history never changes, so
-        refusing them failed the audit on every run: no store, no Validation, no look, no trade."""
+        """rehearsal-1: the real history holds such bars, and history never changes, so refusing them failed the
+        audit on every run: no store, no Validation, no look, no trade."""
         raw, adj = bars()
         for i in (4, 9):
             flat = raw["QQQ"][i]["c"]
@@ -493,7 +493,7 @@ class TheJob(unittest.TestCase):
         self.assertEqual((out["status"], out["ok"]), ("failed", False))
         self.assertIn("calendar", out["error"])
         self.assertEqual(self.written, [])
-        # rehearsal-7: the receipt names what failed (the real failure's said "count 2" and nothing else).
+        # rehearsal-7: the receipt names what failed (the real failure's said a count and nothing else).
         self.assertEqual(set(out["problems"]), {"calendar"})
         self.assertIn("QQQ", out["problems"]["calendar"][0])
         self.assertIn(str(DAYS[12]), " ".join(out["problems"]["calendar"]))

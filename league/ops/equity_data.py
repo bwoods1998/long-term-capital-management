@@ -39,18 +39,16 @@ THE AUDIT (`audit`; each a named check, all must pass; each lists at most `PROBL
   "extended" FAILS the audit: the store must then be built from 1Min bars, a stop for E1, reported, never patched.
   "unverified" passes, recorded, and the job raises a House warning.
 
-WHY THE TWO CHECKS READ AS THEY DO (the rehearsal on the House box against real SIP data, Oct 11, 2026; counts only).
-As first written both were wrong about real data and the job could never write a store; what follows corrects the
-checks and loosens no evidence. Volume: the history holds two bars of volume 0, both flat (one symbol, two sessions of
-2016); history never changes, so a check that refused them failed every run. The regular session: the first rule
-ended the session before the closing minute and compared the volume. On the 252 sessions of one Train year the daily
-open lay inside the 09:30 minute's range on 252 and the daily close inside the closing minute's range on 252, the
-close equalled the last minute before it on 13, the daily volume equalled the minutes' sum on none, and the bar
-called extended on 18 of them was a close-set high or low or a close that happened to equal an after-hours print;
-"regular" was unreachable. On the 233 rolling 20-session windows of that year the first rule read 190 extended (the
-audit fails), 43 unverified and 0 regular; this rule reads 0 extended, 12 unverified and 221 regular. A bar truly
-built from extended hours still fails: on that year a pre-market print alone lay below the 1Day bar's low on 103 of
-the 252 sessions and above its high on 67, far more than 2 of 20.
+WHY THE TWO CHECKS READ AS THEY DO (the rehearsal on the House box against real SIP data, Oct 11, 2026; the rules
+and their reasons only: no count and no price read from the vendor's data is written in this public file). As first
+written both were wrong about real data and the job could never write a store; what follows corrects the checks and
+loosens no evidence. Volume: a flat bar of volume 0 is a session without a trade, the history holds such bars, and
+history never changes, so a check that refused them failed every run. The regular session: the first rule ended the
+session before the closing minute and compared the volume. But the daily bar's open is the opening cross, inside the
+09:30 minute's range; its close is the closing cross, inside the closing minute's range; and its volume counts prints
+the minute bars leave out. So "regular" was unreachable, and a close-set high or low, or a close that happened to
+equal an after-hours print, read as "extended", which fails the audit. A bar truly built from extended hours still
+fails (the verdict "extended").
 
 A FAILED AUDIT'S RECEIPT names what failed: the first `RECEIPT_PROBLEMS` problems of each failed check (`problems`:
 symbols, days and verdict words; every decimal figure is masked, so no ratio and no price leaves in a receipt).

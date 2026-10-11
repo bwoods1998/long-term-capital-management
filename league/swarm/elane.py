@@ -91,8 +91,8 @@ spent SPY/QQQ/IWM always-in roots never refuse an equity birth, and a REFUTED eq
 THE SEEDS (A4; league/swarm/seeds.py `EQUITY_SEEDS`): seed-overnight-qqq, seed-reversal-index, seed-overnight-spy,
 each born once as an agent-authored family (`birth_seeds`), then Validation, the screen's pre-check and one sealed look
 like any family. THEIR LOOKS ARE TAKEN IN THAT DECLARED ORDER, and the order is a decision (the captain's, Oct 11,
-2026, from Train-era figures only, before any Validation or look; the reason is beside the list): the two overnight
-seeds are one lineage under D3, so only the first of them declared is ever judged and the other is refused with no
+2026, from Train-era figures only, before any Validation or look: amendment A18): the two overnight seeds share a
+template and are one lineage, so only the first of them declared is ever judged and the other is refused with no
 look and retired as the same lineage. Two rules hold it: `round_order` (both equity rounds walk the seeds as one block,
 in the list's order, whatever second each was born in) and `seed_wait`, which is STRICT WITHIN A LINEAGE (amendment
 A18): each seed's `lineage` in the list declares the lineage it is in, and a seed's look is never taken while a seed
