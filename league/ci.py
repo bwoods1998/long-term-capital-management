@@ -170,8 +170,18 @@ FORBIDDEN: tuple[str, ...] = (
 #: They are named apart from the list above ONLY because the gateway's merge list (`gateway/lib/protected.mjs`
 #: MERGE_FORBIDDEN, which gateway/test/merge.test.mjs holds to that list as written) cannot change in E1: gateway/ ships
 #: separately. A gateway follow-up adds them to MERGE_FORBIDDEN and moves them into the list above, leaving this
-#: empty; until then league/tests/test_ci.py allows exactly these in `FORBIDDEN` beyond the gateway's list.
-PENDING_GATEWAY: tuple[str, ...] = ()
+#: empty; until then league/tests/test_ci.py allows exactly these in `FORBIDDEN` beyond the gateway's list. E1's own
+#: four entries made that move with its gateway follow-up; what waits here now is release E2's.
+#: THE EQUITY LANES' BIRTHS, TRAIN AND REVIEW (release E2, Oct 2026): the Train bar equity-v1, its restart check and the
+#: Train map (elane_train.py), the equity quota and admission (elane_births.py), the route choice by yield per dollar
+#: (elane_yield.py), the seal of Validation and look outcomes and of the 2020-21 reserve (elane_seal.py, A9 D3 and A15)
+#: and the equity review and level rule (elane_review.py): selection constants and secrecy rules, like dlane.py. The
+#: updater never self-deploys a change to them from this release on; the gateway's merge route refuses them once its
+#: own follow-up adds the five to MERGE_FORBIDDEN (gateway/ ships separately, as it did for E1).
+PENDING_GATEWAY: tuple[str, ...] = (
+    "league/swarm/elane_births.py", "league/swarm/elane_train.py", "league/swarm/elane_yield.py",
+    "league/swarm/elane_seal.py", "league/swarm/elane_review.py",
+)
 FORBIDDEN += PENDING_GATEWAY
 #: The one path the gateway's merge route refuses (`gateway/lib/protected.mjs` MERGE_FORBIDDEN) that is not FORBIDDEN:
 #: the House's configuration. The operator role proposes its dials (`CONFIG_DIALS`), and the updater ships a change to
