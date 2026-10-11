@@ -311,7 +311,8 @@ class TheReceipt(unittest.TestCase):
                 f"{s.ticker},{s.start.isoformat()},{s.end.isoformat() if s.end else ''}\n" for s in spells))
             out = io.StringIO()
             gateway = FakeGateway(series, **kwargs)
-            code = P.main(["--spells", str(source), "--root", str(Path(tmp) / "state"), *extra], gateway=gateway,
+            code = P.main(["--spells", str(source), "--root", str(Path(tmp) / "state"), "--pause", "0", *extra],
+                          gateway=gateway,
                           sleep=lambda s: None, clock=lambda: 1_760_000_000.0, out=out)
             path = Path(tmp) / "state" / P.STORE_DIR / P.RECEIPT
             written = path.read_text() if path.exists() else None
@@ -393,6 +394,14 @@ class TheScript(unittest.TestCase):
             self.assertIsInstance(gateway, Gateway)
             self.assertEqual(gateway.calls, [])
             self.assertNotIn("GATEWAY_TOKEN", os.environ)
+
+    def test_the_command_waits_before_every_request(self):
+        spells, series = world()
+        gateway = FakeGateway(series)
+        waits: list[float] = []
+        receipt, _ = P.run(gateway, spells, sleep=waits.append, clock=lambda: 0.0, pause=0.25, limit_probe=False)
+        self.assertEqual(waits, [0.25] * receipt["requests"])
+        self.assertEqual(P.default_release(), str(REPO), "in a checkout the release is the checkout")
 
     def test_the_probe_years_are_the_panels_train_era_and_no_sealed_year(self):
         self.assertEqual(P.YEARS, (2016, 2017, 2018, 2019, 2022, 2023, 2024))

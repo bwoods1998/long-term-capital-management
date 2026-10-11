@@ -3,6 +3,9 @@
     python3 scripts/panel_probe.py --spells sp500_ticker_start_end.csv [--root /workspace/state]
                                    [--release /workspace/current] [--list] [--no-write] [--names FOX,Q]
 
+On the House: the box's own Python, the spell file placed beside it, and `--release` the running release (the default
+when this file is copied there alone). It writes one file, its receipt, under `--root`.
+
 Owner: package A of release E4 (written at Step 0, because the captain runs it on the House while the packages are
 built; `league/tests/test_panel_probe.py` runs it against a recording fake gateway).
 
@@ -91,6 +94,9 @@ LIMIT_LADDER = (39, 100, 200, 400)
 MAX_REQUESTS = 3000
 STORE_DIR = "equity-daily"
 RECEIPT = "probe.json"
+#: The House's running release, and the command's wait before every request (seconds).
+HOUSE_RELEASE = "/workspace/current"
+PAUSE_S = 0.15
 DATE_PARAMS = ("start", "end", "asof")
 NOT_PROBED = "not probed: this script only GETs bars (package A's jobs verify it)"
 
@@ -182,10 +188,13 @@ class Probe:
     """The probe's one way out: bars GETs through `gateway` (an object with `get(path, params)`), each guarded, tried
     up to `TRIES` times, counted. `sleep` waits between tries (the tests pass a no-op)."""
 
-    def __init__(self, gateway: Any, *, sleep: Callable[[float], None] = time.sleep, max_requests: int = MAX_REQUESTS):
+    def __init__(self, gateway: Any, *, sleep: Callable[[float], None] = time.sleep, max_requests: int = MAX_REQUESTS,
+                 pause: float = 0.0):
         self.gateway = gateway
         self.sleep = sleep
         self.max_requests = int(max_requests)
+        #: Seconds waited before every request (the venue's and the gateway's rate limits are not this probe's to test).
+        self.pause = max(0.0, float(pause))
         self.requests = 0
         self.failed = 0
 
@@ -196,6 +205,8 @@ class Probe:
             if self.requests >= self.max_requests:
                 raise ProbeStopped(f"the probe's cap of {self.max_requests} requests is reached")
             self.requests += 1
+            if self.pause:
+                self.sleep(self.pause)
             try:
                 return self.gateway.get(BARS, dict(params))
             except Exception as exc:  # noqa: BLE001 - the gateway's own error: tried again, then the caller's
@@ -300,10 +311,11 @@ def symbols_limit(probe: Probe, symbols: Sequence[str], day: dt.date) -> dict[st
 
 def run(gateway: Any, spells: Sequence[Spell], *, names: Sequence[str] = TEST_NAMES, batch: int = BATCH,
         limit_probe: bool = True, sleep: Callable[[float], None] = time.sleep,
-        clock: Callable[[], float] = time.time, max_requests: int = MAX_REQUESTS) -> tuple[dict[str, Any], dict[str, list[str]]]:
+        clock: Callable[[], float] = time.time, max_requests: int = MAX_REQUESTS,
+        pause: float = 0.0) -> tuple[dict[str, Any], dict[str, list[str]]]:
     """The probe (the module docstring): (the receipt: counts only, the listing: {"no_bars" | "reused" | "error":
     [tickers]} for the terminal's `--list`, never written). `ProbeStopped` when SPY gives no calendar."""
-    probe = Probe(gateway, sleep=sleep, max_requests=max_requests)
+    probe = Probe(gateway, sleep=sleep, max_requests=max_requests, pause=pause)
     batch = max(1, int(batch))
     # 1. the calendar
     sessions: list[dt.date] = []
@@ -440,6 +452,15 @@ def write_receipt(root: str | Path, receipt: Mapping[str, Any]) -> Path:
     return path
 
 
+def default_release() -> str:
+    """The release whose gateway client is used when `--release` names none: the checkout this script sits in when it
+    has one, else the House's running release (the script copied alone onto the box)."""
+    here = Path(__file__).resolve().parents[1]
+    if (here / "league" / "ops" / "context.py").is_file():
+        return str(here)
+    return HOUSE_RELEASE
+
+
 def house_gateway(release: str | Path, root: str | Path) -> Any:
     """The running release's own gateway client (`league.ops.context`), built as a House job's is. Where the token is
     not in this process's environment, the release's own loader reads the House's environment file into it
@@ -466,8 +487,9 @@ def main(argv: Sequence[str] | None = None, *, gateway: Any = None, sleep: Calla
     parser = argparse.ArgumentParser(description="E4 step -1: the panel's coverage probe (read-only; counts only)")
     parser.add_argument("--spells", required=True, help="the membership spell file (ticker,start_date,end_date)")
     parser.add_argument("--root", default="/workspace/state", help="the House's state directory")
-    parser.add_argument("--release", default=str(Path(__file__).resolve().parents[1]),
+    parser.add_argument("--release", default=default_release(),
                         help="the running release (its league.ops.context is the gateway client)")
+    parser.add_argument("--pause", type=float, default=PAUSE_S, help="seconds waited before every request")
     parser.add_argument("--names", default=",".join(TEST_NAMES), help="fact 1's test tickers, comma-separated")
     parser.add_argument("--batch", type=int, default=BATCH, help="symbols a request of open spells")
     parser.add_argument("--max-requests", type=int, default=MAX_REQUESTS)
@@ -491,7 +513,7 @@ def main(argv: Sequence[str] | None = None, *, gateway: Any = None, sleep: Calla
     try:
         receipt, listing = run(gateway, spells, names=args.names.split(","), batch=args.batch,
                                limit_probe=not args.no_limit_probe, sleep=sleep, clock=clock,
-                               max_requests=args.max_requests)
+                               max_requests=args.max_requests, pause=args.pause)
     except (ProbeStopped, SealedRequest) as exc:
         print(f"panel_probe: stopped: {exc}", file=sys.stderr)
         return 2
