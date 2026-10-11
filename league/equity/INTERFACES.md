@@ -208,6 +208,10 @@ shares: Decimal) -> Decimal` (SEC + TAF, each rounded UP to the cent, TAF capped
   sessions t compare `ctx_bytes(build(inputs_from_bars(bars, t, ...)))` with `ctx_bytes(build(inputs_from_fetch(rows
   made from the same bars through t, ...)))`. core's own test proves the as-of identity (a store written later, after
   a split and a dividend, gives the same ctx at t within rounding).
+- **What I6 does not say** (the rehearsal on real bars, section 15.4): the vendor rounds its adjustment=all prices to
+  the cent and restates the series at every later event, so a live decision's ctx does not reproduce byte for byte
+  from a later store; the as-of prices differ by up to `config.rounding_bound` of the adjusted prices they are built
+  from. `ctx.events`' fomc, cpi and jobs are False outside their tables' rows (league/gym/events.py), in both builders.
 
 ### 4.6 `league/equity/engine.py`
 - `EngineConfig(capital=config.SLEEVE_USD, k=1.0, timeout=1.0, max_errors=25, budget_seconds=900.0)` (frozen).
@@ -465,7 +469,9 @@ the store: the book never retires an instance on an unreadable read) and `twins(
 `is_equity_row(row) -> bool`; `expected_shares(book) -> {sym: Decimal}` (raises when unreadable: the caller treats
 every share as unexplained); `frozen(book) -> str`; `busy(book) -> set`; `probe_figures(rows, *, table) ->
 ProbeFigures`; `working_buys_worst(rows) -> Decimal`; `orders_today(rows, day) -> int`; `invested(rows) -> Decimal`;
-`open_risk(rows, *, table) -> Decimal`; `band_for(row) -> (band, why)`.
+`open_risk(rows, *, table) -> Decimal`; `band_for(row) -> (band, why)`; `flux(book, rows, now) -> set[str]` (busy, or
+an equity order changed in the last `FLUX_S`; raises when unreadable); `shares_taken(book, symbol, qty, px, *, why) ->
+Decimal` (`Unreadable.shares_taken` raises).
 
 ### 6.2 Edits to league/live (keep them as small as possible; they move the options fingerprint once)
 - **step.py**
@@ -479,17 +485,26 @@ ProbeFigures`; `working_buys_worst(rows) -> Decimal`; `orders_today(rows, day) -
     `shares` {symbol: signed Decimal string} (A8.2; today it is never written).
   - `_close_shares` (A8.2, A8 wins over the brief's marketable limit and freeze): per us_equity symbol,
     unattributed = account qty - `expected_shares(...)[sym]` (lots + filled part of working orders, read in the same
-    pass). A SHORT account qty is covered at once (market, as today). A LONG unattributed excess is sold after TWO
-    consecutive readings (kv `unattributed_seen` {symbol: qty string}), market as today, with an alarm. An account qty
+    pass). A SHORT account qty is covered at once by exactly the account's short (market; whole shares first, the
+    fraction at the next reading); lots it swallowed are marked (kv `lots_swallowed`) and closed in the equity book
+    once proved gone. A LONG unattributed excess is sold after TWO consecutive readings (kv `unattributed_seen`
+    {symbol: qty string}), market as today, with an alarm; on a symbol the equity book holds, only the part the
+    share-event ledger explains (kv `unexplained_shares` for the rest, never sold). An account qty
     below what the equity book owns is a mismatch for reconciliation, never an order. Lots the equity book owns are
     never touched. A symbol with a working order in either book is skipped that minute. The ledger moves when an
     `lv-shares-` order fills.
   - `_stock_held` and `_resolve_latch` count only unattributed shares, so held equity lots never block entries.
-  - `health()`: `"equity": self.equity.health()`.
+  - `health()`: `"equity": self.equity.health()`; `"shares"` (the ledger, the House's share orders, a refused
+    order's run, unexplained shares and swallowed lots).
+  - `minute()` gives the equity book its minute when the options pass raises (the exception is raised again after
+    it); `_equity_minute_spent` skips it only on hung account reads late in the minute (10 s or more in failed reads
+    and the pass ended past second 45: summary `equity.skipped`, one warning a run); `_close_shares_safe`: a failure
+    in the share handling never ends the options pass.
 - **real.py**
   - `ingest`: skips client ids `equity_hook.is_equity_client_id` (as `lv-shares-`): never foreign.
   - `reconcile`: us_equity rows compare `expected = equity_hook.expected_shares(...) + shares ledger` as Decimal with a
-    1e-9 tolerance (new keyword `equity_shares: Mapping[str, Decimal] | None`).
+    1e-9 tolerance (new keyword `equity_shares: Mapping[str, Decimal] | None`); `reconcile(..., equity_flux=())`:
+    us_equity symbols in flux (`equity_hook.flux`) are not judged that reading.
   - `probe_tally`, `probe_realized`, `probe_figures`: union the equity rows (`equity_hook.probe_figures(rows,
     table=...)`): open_n += programs; at_risk += open_risk; the closes join the window's worst net stretch and the
     total by their NY day. Signatures gain `table` where they lack it (keyword, defaulting to the table in force).
@@ -513,7 +528,8 @@ ProbeFigures`; `working_buys_worst(rows) -> Decimal`; `orders_today(rows, day) -
   sells it in the next session's open window, first, and passes on the whole sale, the FILL activities and the
   position back at its baseline (gates every real equity SALE); a SELL stage that ends its window unpassed is
   "failed" (an alarm with the owner's step; new real buys stop until it passes). Checked only by the equity book
-  (options entries never wait on it). Client ids `lq-pp-...` (never `lv-`).
+  (options entries never wait on it). Client ids `lq-pp-...` (never `lv-`). `StockPaperProof` never waits for the
+  options route's proofs (no `after`); `_idle` minutes read nothing of the practice account.
 - **venue.py**: `MarketData.bars(symbols, *, timeframe, start, end=None, adjustment="raw")` (the book reads "all" too).
 
 ### 6.3 `league/equity/kinds.py`, `league/equity/child.py` (stubs present)
@@ -523,7 +539,8 @@ with ops `load` {key, code, params, name, timeout, max_errors} -> {ok, needs, sh
 `params` the merged PARAMS the book builds the live ctx with, as the engine does: I6); `drop` {key}; `decide`
 {jobs: [{key, inputs}]} -> {ok, results: {key: {intents, stats, ctx_sha}}}; `needs` {code, params, name} -> {ok,
 needs, sha, run_sha}; `run` {code, params, name, bars, k, capital} -> {ok, result}. Refused program: {ok: False,
-refused: True, error}.
+refused: True, error}. `decide` results carry `failed` (the runner's `last_failed`; True also beside `missing` and
+`error`) and `why` when failed.
 
 ### 6.4 Tests
 Each hook (`_close_shares` sells only the unattributed excess and never an owned lot; the two-reading rule; ingest
@@ -541,9 +558,8 @@ Nothing above changes; these are added beside it.
   block and nothing is held. The row readers answer the empty figure, without importing league.equity's row functions,
   for a state with no `eq_lots` / `eq_orders` table. With a table that has no equity block, `probe_figures` weighs
   every class at 1 (fail closed).
-- step.py: `_close_shares` covers a SHORT account quantity by its unattributed part (owned less the account: the buy
-  brings the account back to the equity lots, so an assignment netted against a lot never consumes it); with the
-  equity book unreadable it covers to flat and sells no long share. kv `shares_orders` {client id: {symbol, side, qty,
+- step.py: `_close_shares` covers exactly the account's short; a refused share order is alarmed (kv
+  `shares_refused`); with the equity book unreadable it covers to flat and sells no long share. kv `shares_orders` {client id: {symbol, side, qty,
   filled, at}} (the House's `lv-shares-` orders, read back by client id each reading and before each reconciliation;
   a fill moves the ledger toward zero, never past it, and only when the order's side reduces it). The owner's
   `--clear-assignment` clears the ledger with the latch. `real_block` also refuses while the account row's `cash` is
@@ -563,6 +579,9 @@ Nothing above changes; these are added beside it.
 - paper.py: `STOCK_KEY`; `StockPaperProof.step` reads `market.stocks(["SPY"])`; its witnesses are `buy_witness`,
   `hold_witness`, `sell_witness`, `activity_witness`, `recon_witness`; one attempt a session.
 - venue.py: `BAR_ADJUSTMENTS` ("raw", "all").
+- league/live/__main__.py (book, a pure addition): `--flatten-equity WHY`, `--clear-equity-freeze WHY`,
+  `EQUITY_FLATTEN`, `EQUITY_CLEAR_FREEZE`, `equity_ask(why)`, and the status's `equity` block {freeze, reconciliation,
+  pending_owner_actions}.
 
 ---
 
@@ -632,6 +651,9 @@ follows the surrounding code, and ci.py calls it). Also: the universe's symbols 
 stub; `from_constitution(constitution=None)`); `Exposure.equity_open_risk`, `Exposure.equity_invested` (Decimal,
 default 0); `available_cash(account, *, working_buys_worst, reserved, reserve_usd) -> Decimal` = cash -
 |short_market_value| - working buys' worst cost (both books) - working reservations - reserve (not clamped).
+`invested_room(table, equity, exposure) -> Decimal | None`, `invested_refusal(table, equity, exposure, loss) -> str |
+None` (A1 on the options side: equity lots and working equity buys + the options book's open maximum loss + the new
+open at most `invested_share` x E).
 
 ### 7.4 `league/equity/sizing.py` (stub present)
 `SizingInputs` (fields in the stub), `Sized(usd, qty, binding, reason)`, `size_entry(x) -> Sized`; bindings "intent",
@@ -942,7 +964,7 @@ receipts are judged only through the repository's pin (`test_the_committed_pin`,
 
 | point | brief or design said | this file follows |
 |---|---|---|
-| `_close_shares` | hooks brief: a marketable limit for assignment excess; freeze and never sell an unexplained excess | A8.2: short unattributed covered at once (market, as today); long unattributed sold after two consecutive readings (market) with an alarm; owned lots never touched |
+| `_close_shares` | hooks brief: a marketable limit for assignment excess; freeze and never sell an unexplained excess | A8.2: a short covered at once (market) by exactly the account's short (the review: the gateway admits no larger buy; a lot it swallowed is closed as `forced`, never bought back); long unattributed sold after two consecutive readings (market) with an alarm, on a held symbol only the part the ledger explains; owned lots never touched |
 | options reservation | DESIGN 4a moved it to a cash wall; A1 dropped that | A8.1 reinstates it: min(`options_buying_power`, House-wide available cash) |
 | screens | DESIGN's EB and EQ, c_B, FP <= 10% | A7 as amended by A9: S1-R gates (c_used = max(c_R, c_p), and t_H >= c_H), S1-X labels |
 | who writes `docs/benchmarks/equity_screen_1.json` | swarm brief: "which the screen package writes" | A9: the integrator copies the study's receipt verbatim and pins it in policy.json; the screen package reads it (screen.py) and tests with a fake fixture |
@@ -972,8 +994,8 @@ differ, this section is the code.
   `Tournament.equity_round()`, then `Gate.equity_round(out)`; never raises) -> {validated {family: entered}, retired,
   errors, looked, held}. `Tournament.run` and `Gate.run` no longer call the equity steps, and the hourly
   `swarm.tournament` row carries no `equity` key. The heartbeat's status carries `equity` {mode, round_at}.
-- **The order of a round** (swarm): `elane.round_order(store, fams) -> [fam]`: by the second of birth, then the seeds in
-  `seeds.EQUITY_SEEDS` order, then by id. Both equity rounds walk it.
+- **The order of a round** (swarm): `elane.round_order(store, fams) -> [fam]`: by the second of birth, then by id,
+  the seeds as one block in `seeds.EQUITY_SEEDS`' declared order (section 15.4 says which). Both equity rounds walk it.
 - **Retirement causes** (swarm): `elane.SAME_LINEAGE`, `elane.FLOOR_INELIGIBLE`, `elane.REFUSED_BEFORE_LOOK`,
   `elane.REFUSED_CAUSES` {refusal stage: cause}: what `lineage_spent` answers for a version the gate refused before
   its look. `SPENT_TRY` and `SPENT_LOOK` are unchanged.
@@ -1010,3 +1032,96 @@ differ, this section is the code.
   `applies_to`, `equity_closes`, `equity_note` (`ZERO_EDGE_EQUITY_NOTE`) when any is counted; `equity_beside` carries
   `zero_edge_note`. `funnel.equity_counts` reads Validation verdicts from the `swarm.status` events with action
   "elane_validation".
+
+## 15. The review's fixes on the order path, the daily step and the hooks, and the rehearsal's (Oct 11, 2026; as built, additive unless it says so)
+
+What the rest of the adversarial review and the rehearsal on real data changed in the contract above. Where a line
+above and this section differ, this section is the code.
+
+### 15.1 The order path (book; league/equity/live.py, league/equity/schedule.py, league/live/__main__.py)
+- **Key-values** (ADDS to 5.1): `owner_equity_flatten` and `owner_equity_clear_freeze` {why, at, by}: written only by
+  the owner's command (league/live/__main__.py), read first every minute and deleted by the book (`EquityBook._owner`).
+  `eq_orders.answer` also carries `tick` (the minute's `now` the order was sent in; a re-price is aged from it) and
+  `retry` (true on a gateway refusal whose cap is in `RETRY_CAPS`); `eq_lots.info.exit_unread_told` (the day the
+  owner was told).
+- **Constants** (ADDS to 5.2): `OWNER_FLATTEN`, `OWNER_CLEAR_FREEZE`, `RETRY_CAPS` (positions, orders, equity,
+  stock_close), `CLOSE_EXIT_WAIT_S` 60; `Order.again` (a refusal that is sent again: the House's rate or a
+  `RETRY_CAPS` answer).
+- **Calls**: `_send(..., tick=, until=) -> Order | None`: nothing is written or POSTed at or after `until` by the
+  wall clock. `_end_stale`: an order the venue still shows working on a later New York day than its own is
+  cancelled at the first minute that sees it. `_intent_lot`: a buy fill whose order and intent name no lot joins the
+  open lot that intent already opened (one buy intent is one lot).
+- **The windows** (CHANGES 5.2's and the module docstring's): the send times are effective, not nominal: the open
+  window's first send is the 09:31 minute's and the close window's the 15:55 minute's, one re-price a minute at most;
+  nothing is POSTed at or after a cut-off by the wall clock (09:45:00 an open entry; 15:59:30 every exit and every
+  close entry). In the close window the entries wait for the window's exits to fill, or `CLOSE_EXIT_WAIT_S`, as the
+  open window waits `exit_wait_s`; in either window an entry sized to nothing is not final while an exit may still
+  fill (`_exits_due`): it is sized again each minute and recorded missed at its cut-off. When an exit is still
+  unfilled after the wait, an entry that is cut but not to nothing goes at the smaller size.
+- **The gateway's unread readings**: a refusal whose cap is in `RETRY_CAPS` is sent again next minute until the
+  window's cut-off; it never ends an entry, never counts toward the three refusals that carry an exit, and widens no
+  collar. A `403 {cap}` verdict is unchanged.
+
+### 15.2 The daily step (book; league/equity/live.py, league/equity/families.py, league/equity/child.py, league/swarm/bands.py)
+- **Key-values** (CHANGES 5.1): `eq_decide` {day, status: done | failed | idle, at, why, instances, seated_at}:
+  `instances` names every instance asked for the day (decided, or its own decide failed); a record without it is
+  closed to the seating pass. `eq_failed` {instance: the last decision day a failed decide was counted for it}.
+  `eq_decision` also carries `volume` (symbols whose volume alone read differently). `eq_bars_audit` {day: {symbols,
+  volume, at}}. `eq_instances.last_decided_day`: the last session the program was asked, including a session its own
+  decide failed.
+- **Decide** (ADDS to 5.2): THE SEATING PASS (`_seat_step`): once the day's decision is recorded, every minute until
+  one minute before the next session's close window, a Candidate holding a seat goes to Probe, gets its instance and
+  is decided for the same close on the same bars; nothing else moves in that pass. An instance is asked once a
+  session. A failed decide is counted once a session, whatever failed (the House could not ask; the program's own
+  decide failed; the morning audit found a price mismatch); a program the House could not ask is asked again every 10
+  minutes until the next session's pre-open; one whose own decide failed has spent the session. A House exit rule
+  that is due goes at the next OPEN even when the program planned its own `at: close` sale of that lot (that sale is
+  recorded refused). `_record_of(family, version, row, *, refetch=False)`: only the daily band sync passes True.
+- **The bars and the audit**: the day's fetch includes the symbol of every lot open, opened or closed that session,
+  with no live program too. `_bars_verdict(...) -> "ok" | "volume" | "mismatch"`: raw open, high, low and close
+  exactly, the as-of prices within `config.rounding_bound` (`_as_of_equal`), a volume-only difference a note. Each
+  audited symbol's rows are marked on its own verdict; a day fetched again keeps its mark while its prices are
+  unchanged (the volume is no part of it).
+- **5.5** (CHANGES): `EquityFamilies.read` reads strictly (`bands.read(..., strict=True)`): a missing store, a failed
+  read and a missing equity identity land in `last_error`. `standing(family, version) -> (code, why)`: the store's
+  own word on one family; code is "retired" | "demoted" (`GONE`: the book retires on these alone) | "live" |
+  "unknown". `MemoryEquityFamilies.hidden`: families `read` leaves out although they run.
+- **8.3** (ADDS): `bands.read(root, *, family=None, lanes=None, strict=False)`: `strict` raises `EquityUnreadable`
+  where the equity read answers [] for a store it could not read. `equity_proof_current(state, version) -> bool |
+  None`.
+
+### 15.3 The hooks (league/live)
+- **EquityBook** (ADDS to 5.2; hooks' pure addition to the book's file): `shares_taken(symbol, qty, px, *, why) ->
+  Decimal`: lots an assignment swallowed closed as `forced`, oldest first, at `px` or the lot's mark; never an order.
+- The names of 6.1, 6.2, 6.5 and 7.3 are corrected in place above (`flux`, `shares_taken`, `equity_flux`,
+  `_equity_minute_spent`, `invested_room`, the cover's size, the stock proof's wait).
+- **The shared test venue** (league/tests/live_fakes.py `Venue.stock_refusal`): on the real account it refuses what
+  the gateway refuses (a sale of more than held, a buy larger than the short on a symbol held short, a market buy
+  that opens), so the gateway's rule is held in every live test.
+
+### 15.4 The rehearsal on real data
+- **4.2** (ADDS; core): `config.ADJUSTED_HALF_STEP` 0.005, `config.ROUNDING_GUARD` 1.5, `config.rounding_bound(*adjusted)
+  -> float` (the largest relative move the vendor's cent rounding of these adjustment=all prices explains in a ratio
+  or product built from them; ValueError for no price or one that is not a positive finite number). ONE bound for
+  the engine and the book.
+- **4.6** (CHANGES; core): `engine.ratio_tolerance(adj_prev, adj_now) -> float` (`RATIO_TOLERANCE`, or the rounding
+  bound of the two adjusted closes when that is more); `split_factor(step, tolerance=RATIO_TOLERANCE)`. A ratio step
+  inside its tolerance is no event, a split's factor may lie its tolerance above 1, and a dividend is what remains
+  below 1 by more than it.
+- **10** (CHANGES; ops): `equity_data.regular_session_check` -> {verdict, days, compared, mismatches, extended_days,
+  mismatch_days}: the session's minutes run through the closing minute, the open is judged against the 09:30
+  minute's range and the close against the closing minute's, the volume is not compared; `STRAY_DAYS_MAX` 2 ("extended"
+  only above it, "regular" with at most that many stray days and none extended; no allowance on a reading shorter than
+  `REGULAR_DAYS`). `audit`'s volume check passes a flat bar of volume 0 and lists it (`zero` {symbol: [days]}). A
+  failed audit's receipt carries `problems` {check: the first `RECEIPT_PROBLEMS` (5) texts, every decimal figure
+  masked}.
+- **The seeds' order** (swarm; CHANGES section 14's): `seeds.EQUITY_SEEDS` is seed-overnight-qqq,
+  seed-reversal-index, seed-overnight-spy, the declared order of the looks (the two overnight seeds are one lineage on
+  real Train series; the reason is beside the list). `elane.round_order` walks the seeds as one block in that order,
+  standing where the first of them was born. `elane.seed_ahead(store, fam, settings) -> str | None` (the seed
+  declared before `fam` whose look is still to come) and `elane.seed_wait(store, fam, settings) -> str | None` (the
+  seed `fam`'s look waits for now; bounded by `elane.SEED_WAIT_SECONDS` 1800 from the first round it waited, family
+  state `elane.SEED_WAIT_KEY` "elane_seed_wait" {for, since, passed}; a `swarm.status` alert
+  "equity_seed_order_passed" when the bound passes; the operator's `gate_hold` on the earlier seed releases the later
+  ones). `Gate._equity_look` asks it before a look; `Swarm.equity_rounds`' answer carries `waits` {family: the seed
+  it waits for} when any waits.

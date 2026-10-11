@@ -474,5 +474,128 @@ class TheSeedsDeclaredOrder(FS.FixCase):
             self.assertIsNone(elane.seed_wait(self.store, self.store.family(SPY), ON), "a store that cannot say")
 
 
+# ------------------------------------------------------------------------------------------- the event tables
+EVENTS_PROGRAM = ("NEEDS = {'symbols': ['SPY'], 'history': 5, 'max_hold_sessions': 5}\nPARAMS = {}\n\n\n"
+                  "def decide(ctx):\n    return []\n")
+MONEY = dict(cash=1000.0, equity=1000.0, budget=1000.0, caps={"SPY": 500.0})
+
+
+class TheEventTablesCoverage(unittest.TestCase):
+    """rehearsal-8: the FOMC, CPI and jobs tables (league/gym/events.py) start in 2017, and the CPI and jobs tables
+    end before the first live session, while the equity Train window starts in 2016. Outside a table's coverage its
+    flag is False on every session, which says nothing about the day. Stated in the program contract; the same in the
+    Gym and live (one constructor); the tables are extended, with verified dates, before any program that reads them
+    is born (events.py is in the equity identity, so not after a look)."""
+
+    @classmethod
+    def setUpClass(cls):
+        import tempfile
+
+        from league.equity import program as P
+        from league.equity import store as ST
+        from league.equity import synth
+
+        cls.dir = tempfile.TemporaryDirectory()
+        cls.program = P.load_program(EVENTS_PROGRAM, name="events")
+        early = synth.synthetic_store(Path(cls.dir.name) / "early", symbols=("SPY",), start=dt.date(2016, 1, 4),
+                                      end=dt.date(2016, 12, 30), seed=3)
+        cls.early = ST.EquityStore(early).bars(["SPY"], "train", history=5)
+        late = synth.synthetic_store(Path(cls.dir.name) / "late", symbols=("SPY",), start=dt.date(2026, 8, 3),
+                                     end=dt.date(2026, 10, 9), seed=3, gate=True)
+        cap = ST.mint_equity_gate_capability(late, reason="a synthetic store: the tables' coverage after their last rows")
+        cls.late = ST.EquityStore(late, gate=cap).bars(["SPY"], ST.LOOK, history=5)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.dir.cleanup()
+
+    def both(self, bars, t):
+        """The session's events from the Gym's inputs and from the live fetch's: (day, gym ctx, live ctx)."""
+        from league.equity import ctx as C
+        from league.gym.day import from_ordinal
+        from league.tests.test_equity_i6 import fetched
+
+        common = dict(needs=self.program.needs, params=self.program.params, **MONEY)
+        day = from_ordinal(int(bars.days[t]))
+        raw_rows, all_rows = fetched(bars, t)
+        gym = C.build(C.inputs_from_bars(bars, t, **common))
+        live = C.build(C.inputs_from_fetch(raw_rows, all_rows, day=day.isoformat(), **common))
+        return day, gym, live
+
+    def test_the_coverage_is_what_the_contract_says(self):
+        from league.gym import events
+
+        spans = {name: (min(table), max(table)) for name, table in
+                 (("fomc", events.FOMC), ("cpi", events.CPI), ("jobs", events.JOBS))}
+        self.assertEqual({first.year for first, _ in spans.values()}, {2017}, "no table has a 2016 row")
+        self.assertLess(spans["cpi"][1], dt.date(2026, 10, 12), "the CPI table ends before the first live session")
+        self.assertLess(spans["jobs"][1], dt.date(2026, 10, 12))
+        contract = " ".join((REPO / "league" / "equity" / "EQUITY.md").read_text().split())
+        page = " ".join((REPO / "docs" / "operations.md").read_text().split())
+        for name, (first, last) in spans.items():
+            for text in (contract, page):
+                self.assertIn(f"{name} {first.isoformat()} through {last.isoformat()}", text,
+                              "the tables' own first and last rows, said where a program's author reads")
+
+    def test_before_the_tables_and_after_their_last_rows_the_flags_are_false_live_as_in_the_gym(self):
+        from league.equity import ctx as C
+        from league.gym import events
+
+        seen = {"quarter_end": 0, "monthly_opex": 0, "half_day": 0}
+        for bars in (self.early, self.late):
+            # From the first session with a whole history in the slice (a synthetic store starts where it starts).
+            for t in range(max(bars.first, self.program.needs.history), bars.n):
+                day, gym, live = self.both(bars, t)
+                self.assertEqual(C.ctx_bytes(gym), C.ctx_bytes(live), day)
+                self.assertEqual((gym.events, gym.events_next), (live.events, live.events_next), day)
+                covered = {"fomc": day in events.FOMC, "cpi": day in events.CPI, "jobs": day in events.JOBS}
+                self.assertEqual({k: gym.events[k] for k in covered}, covered)
+                if day.year == 2016:
+                    self.assertEqual(set(covered.values()), {False}, f"{day}: before every table")
+                if day > max(events.CPI):
+                    self.assertFalse(gym.events["cpi"] or gym.events["jobs"], f"{day}: after both tables' last rows")
+                for name in seen:
+                    seen[name] += bool(gym.events[name])
+        self.assertTrue(all(seen.values()), f"the calendar's own flags hold everywhere: {seen}")
+
+
+# ------------------------------------------------------------------------------------- a later store's as-of prices
+class TheCtxOfALaterStore(unittest.TestCase):
+    """rehearsal-6: I6 (league/tests/test_equity_i6.py) holds byte for byte between the two BUILDERS fed the same
+    bars. It does not hold between a live decision's ctx and the same session read later from the store once an event
+    has restated the adjusted series: the vendor rounds each adjusted price to the cent again, so the as-of prices move
+    by up to the rounding of the prices they are built from (`config.rounding_bound`). A live `ctx_sha` therefore does
+    not reproduce from a later store; A14's intent-agreement reading (95% of counted sessions) polices what that does
+    to decisions. Building as-of prices from raw bars and per-event factors is owed before E2's births depend on it."""
+
+    RAW = (100.37, 101.12, 99.81, 100.05, 102.33, 101.47)
+
+    def ctx(self, level: float):
+        from league.equity import ctx as C
+        from league.equity import program as P
+        from league.tests.test_equity_i6 import stamp
+
+        program = P.load_program(EVENTS_PROGRAM, name="later")
+        days = [dt.date(2025, 3, d) for d in (3, 4, 5, 6, 7, 10)]
+        raw_rows = {"SPY": [{"t": stamp(d), "o": c, "h": c, "l": c, "c": c, "v": 1000.0} for d, c in zip(days, self.RAW)]}
+        all_rows = {"SPY": [{**r, **{k: cents(r[k] * level) for k in "ohlc"}} for r in raw_rows["SPY"]]}
+        inputs = C.inputs_from_fetch(raw_rows, all_rows, day=days[-1].isoformat(), needs=program.needs,
+                                     params=program.params, **MONEY)
+        return C, C.build(inputs), [row["c"] for row in all_rows["SPY"]]
+
+    def test_a_restated_series_gives_other_bytes_within_the_rounding_bound(self):
+        C, live, live_all = self.ctx(0.9731)                 # the 16:20 fetch of session t
+        _, later, later_all = self.ctx(0.9731 * 0.9971)      # the store, after a later ex-date restated the series
+        self.assertNotEqual(C.ctx_bytes(live), C.ctx_bytes(later), "not byte for byte")
+        a, b = live.bars["SPY"].close, later.bars["SPY"].close
+        self.assertEqual(float(a[-1]), float(b[-1]), "session t's own close is the raw close in both")
+        moved = 0
+        for i in range(len(self.RAW) - 1):
+            bound = config.rounding_bound(live_all[i], live_all[-1], later_all[i], later_all[-1])
+            self.assertLessEqual(abs(float(a[i]) - float(b[i])), bound * float(a[i]) + 1e-4, i)
+            moved += float(a[i]) != float(b[i])
+        self.assertGreater(moved, 0, "some as-of price moved")
+
+
 if __name__ == "__main__":
     unittest.main()

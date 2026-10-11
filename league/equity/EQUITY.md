@@ -7,8 +7,9 @@
 An equity program is one Python file: `NEEDS`, `PARAMS` and `decide(ctx)`. It trades long-only ETFs (and, in a later
 release, stocks) with whole and fractional shares. The House runs it once a session, after the close; whatever it
 asks for executes in the NEXT session, at the open or at the close. The Gym replays the same file over daily bars, and
-a program sees byte-identical inputs in the Gym and on the House for the same decision day. It never sees a date or a
-year.
+a program sees byte-identical inputs in the Gym and on the House when both read the same bars for the same decision
+day (three things can make the bars themselves differ: see "Where the Gym and the House may read differently"). It
+never sees a date or a year.
 
 ## The file
 
@@ -53,7 +54,7 @@ As the options contract: a dict of numbers, booleans, strings or short lists, bo
 | `ctx.bars[sym]` | `open`, `high`, `low`, `close`, `volume`, `ret` arrays, oldest first, the last element session t, at most `history` + 1 long; prices adjusted for splits and dividends AS OF t (never by a later event) and rounded to 4 decimals; volume in shares as traded; `ret` the close-to-close return (NaN first); NaN where there was no bar |
 | `ctx.prices[sym]` | session t's close (NaN if `sym` had no bar at t) |
 | `ctx.weekday` | 0 Monday .. 4 Friday |
-| `ctx.events`, `ctx.events_next` | booleans for t and the next session: fomc, cpi, jobs, monthly_opex, quarter_end, half_day |
+| `ctx.events`, `ctx.events_next` | booleans for t and the next session: fomc, cpi, jobs, monthly_opex, quarter_end, half_day. **fomc, cpi and jobs come from tables with a first and a last row (below): outside them the flag is False and says nothing** |
 | `ctx.session_of_month`, `ctx.sessions_to_month_end` | 1 on the month's first session; 0 on its last |
 | `ctx.positions` | your open lots: `{id, symbol, class, qty, entry, mark, value, pnl, held_sessions, at, tag}`; `entry` the fill a share (split-adjusted), `mark` t's close, `pnl` (mark - entry) x qty (dividends not included: they are cash), `held_sessions` the sessions since the lot's entry session (0 at the entry session's own close), `at` how the lot was filled ("open" or "close") |
 | `ctx.orders` | your pending orders: always empty today (everything you ask executes, or is refused, in the next session) |
@@ -106,4 +107,26 @@ waits for the next session.
 You see prices as of t only. Your lots hold shares as traded: on an ex-dividend day the dividend is credited to your
 cash for every lot you held at the previous close (`ctx.closed[...]["net"]` includes it); on a split day the lot's
 shares and entry price are scaled by the split. In the Gym both are read from the vendor's two series (the step of
-the adjusted-to-raw price ratio); live, from the venue's activities.
+the adjusted-to-raw price ratio); live, from the venue's activities. The vendor rounds its adjusted prices to the cent,
+so in the Gym a step of that ratio within the rounding of its two adjusted closes is no event, a dividend is credited
+to within about a cent a share, and a dividend smaller than that rounding is not credited.
+
+## Where the Gym and the House may read differently
+
+The two builders are one function, so the same bars give the same bytes. The bars are the vendor's, and three things
+about them differ between a live decision at t and the same session replayed later:
+
+- **The adjusted prices are rounded to the cent.** `ctx.bars` holds prices as of t, built from the vendor's adjusted
+  series. After a later dividend or split the vendor restates that whole series and rounds each price to the cent
+  again, so the history of session t read from a later store differs from what you saw live by up to about a cent and
+  a half over each of the prices involved (a few hundredths of a percent of a $100 price, more of a cheaper one).
+  Session t's own close is the same in both. A condition that sits within that distance of its threshold can decide
+  differently live and in replay; leave a margin, or expect the rare session where the two disagree.
+- **The last volume.** Live, `volume[-1]` is the vendor's figure as read at 16:20 ET; the session's volume goes on
+  counting late and after-hours prints, and the replay reads the final figure. A program that reads the last volume
+  may decide differently live and in replay.
+- **The event tables have a first and a last row** (`league/gym/events.py`): fomc 2017-02-01 through 2026-12-09, cpi
+  2017-01-18 through 2026-09-11, jobs 2017-01-06 through 2026-09-04. Outside a table's rows its flag is False on every
+  session, in the Gym and live alike: every session of 2016, and live every session after the table's last row. False
+  there says nothing about the day. Do not condition on these three flags until the tables are extended;
+  `monthly_opex`, `quarter_end` and `half_day` come from the calendar and hold everywhere.
