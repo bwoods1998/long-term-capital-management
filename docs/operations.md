@@ -500,19 +500,23 @@ the look on the House; real money only at Probe, inside the shared loss budget).
     sentence and numbers at every run (the receipt and the report): the Train steps due in the last 3 h, taken and
     skipped by reason (`steps_due`, `steps_taken`, `steps_skipped`, `skipped_pace`, `skipped_usd_day`,
     `skipped_sail_day`), whether E2 is held now and by which line (`held_now`), whether a hold was seen in the 3 h
-    (`held_lately`), the idle hours (`idle_hours`; `starved` true once they pass 3), and the lever: the hourly pace
-    (`elane.e2.pace_share`), or the day's line, which is `elane.e2.usd_day` only when that is under 24 hours at the
-    hourly pace (at the release's settings it is not, and the lever is the pace again); where the budget is at its
-    floor (no usable `budget.json`) it says the budget's line binds before the share, before the command
-    (`python3 set_swarm.py elane.e2.pace_share=<lines> --apply`). The research funnel carries the same counts for
+    (`held_lately`), the idle hours (`idle_hours`; `starved` true once they pass 3 on a held lane), and the lever:
+    the hourly pace (`elane.e2.pace_share`), or the day's line, which is `elane.e2.usd_day` only when that is under
+    24 hours at the hourly pace (at the release's settings it is not, and the lever is the pace again); where the
+    budget is at its floor (no usable `budget.json`) it says the budget's line binds before the share, before the
+    command (`python3 set_swarm.py elane.e2.pace_share=<lines> --apply`). The research funnel carries the same counts for
     the day and the release (`train_steps`; the passes' `skipped`). **The cost of this ruling: a lane starved by a
     setting is seen in the funnel and the receipt, not in the mail.** Read `train_steps` in the `scoreboard` job's
-    receipt when you set a pace: nothing will mail what it costs.
+    receipt when you set a pace: nothing will mail what it costs. And while a hold was seen in the 3 h only what
+    the record proves broken stands: questions no route answered, programs refused before a run, one failure of a
+    kind and rounds that judge nothing are said in the held lane's sentence ("Since the lanes went idle ...") and
+    its numbers, and stand on nothing there.
     The idle clock is kept per release (`stall.json` `elane.idle`): from the later of the last version scored and
     when the work became owed, less the time the swarm was down (at a restart, from the heartbeat the last run read
     to the new start), so a broken lane that is restarted every two hours is still judged idle; its hours say "at
     least" unless they start at a version scored. Not judged while the swarm itself is not running (its heartbeat
-    ten minutes old), or under 3 h of running time.
+    ten minutes old), nor while the time taken off for restarts leaves under 3 h of running time (the check then
+    says how much was taken off).
   - `elane_refused`: more than half of the programs the generators wrote in the last 6 h (8 at least) were refused
     before a run by ONE static rule (the reading, level or memory rule, the code rules, NEEDS). It names the rule
     and its commonest sentence. As `elane_dq`: when fewer than 8 fall in the 6 h (a slow lane writes one program an

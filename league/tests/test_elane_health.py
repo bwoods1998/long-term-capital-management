@@ -1458,7 +1458,7 @@ class OwedWorkAndNothingScored(Case):
         stall.json under the running release, and only the time the swarm was down is taken off it."""
         fams = [self.bred(f"br-{i}", hours=0.9) for i in range(3)]
         self.restarted(NOW, 3600.0)
-        seen = []
+        seen, said = [], []
         for k in range(12):  # twelve hours, a stall run an hour, every Train step a failure of the House's
             now = NOW + k * HOUR
             for minutes in (25, 5):
@@ -1473,7 +1473,7 @@ class OwedWorkAndNothingScored(Case):
             check = self.own(out)["elane_idle"]
             seen.append((k, check["stalled"], check["judged"], check["numbers"].get("idle_hours"),
                          check["numbers"].get("down_hours")))
-            self.said = [*getattr(self, "said", []), check["what"]]
+            said.append(check["what"])
         # Restarts at +2 h (a minute before the run), +5 h (half an hour before), +7 h, +10 h: the hour between the last
         # heartbeat the job read and each new start is taken off, and nothing else.
         self.assertEqual(seen[:5], [(0, False, True, 0.9, 0.0), (1, False, True, 1.9, 0.0), (2, False, False, 1.9, 1.0),
@@ -1485,8 +1485,8 @@ class OwedWorkAndNothingScored(Case):
         self.assertIn("No equity version was scored on Train for at least 8.9 h of the swarm's running time (it was down "
                       "3.0 h more) while 3 families are in Train research.", check["what"])
         # Under three hours of running time it was not judged, and said the time taken off.
-        self.assertEqual(self.said[2], "Not judged: nothing was scored for 2.9 h, 1.0 h of them with the swarm down (the "
-                                       "lanes are judged idle after 3 h with nothing scored).")
+        self.assertEqual(said[2], "Not judged: nothing was scored for 2.9 h, 1.0 h of them with the swarm down (the lanes "
+                                  "are judged idle after 3 h with nothing scored).")
         kept = json.loads((self.root / ST.STATE_FILE).read_text())[EH.STATE_KEEP]
         self.assertEqual(kept["idle"], {"from": NOW - 0.9 * HOUR, "down": 3.0 * HOUR - 120.0, "started": NOW + 10 * HOUR - 1800.0,
                                         "beat_at": NOW + 11 * HOUR}, "since when (the families' birth), and the time down")
