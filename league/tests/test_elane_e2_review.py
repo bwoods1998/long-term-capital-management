@@ -1,6 +1,7 @@
 """Release E2, THE EQUITY REVIEW (league/swarm/elane_review.py): the level rule refuses a program that holds a raw price
 or volume level against a constant or a PARAMS value and leaves scale-free programs alone (the captain's three seeds
-among them); a paid failure binds only when grounded; the audit's reader is another model; the record is the one E1's
+among them); it refuses RUN-START DEPENDENCE (the sleeve's dollars of the run held against a constant, a PARAMS value
+or the run's anchor) and leaves sizing by the sleeve alone; a paid failure binds only when grounded; the audit's reader is another model; the record is the one E1's
 look reads (league/swarm/elane.py `reviewed`). Every program here is invented."""
 
 from __future__ import annotations
@@ -84,6 +85,277 @@ def decide(ctx):
         return []
 ''',
 }
+
+#: The integration review's seal-4: the direct, natural shapes the rule let through (each returned no refusal).
+HEAD = '''import math
+import numpy as np
+NEEDS = {"symbols": ["SPY", "QQQ"], "history": 252, "max_hold_sessions": 5}
+PARAMS = {"x": 400.0}
+'''
+MISSED = {
+    "the bars iterated by items()": '''
+def decide(ctx):
+    out = []
+    for s, b in ctx.bars.items():
+        if b.close[-1] > 400:
+            out.append({"buy": s, "share": 0.2})
+    return out
+''',
+    "the bars iterated by values()": '''
+def decide(ctx):
+    return [{"buy": "SPY", "share": 0.2} for b in ctx.bars.values() if b.close[-1] > PARAMS["x"]]
+''',
+    "the prices iterated by items()": '''
+def decide(ctx):
+    return [{"buy": s, "share": 0.2} for s, px in ctx.prices.items() if px > 400]
+''',
+    "a helper handed the level": '''
+def sma(xs, n):
+    return float(np.mean(xs[-n:]))
+def decide(ctx):
+    if sma(ctx.bars["SPY"].close, 200) > 400:
+        return [{"buy": "SPY", "share": 0.5}]
+    return []
+''',
+    "a helper handed the bars": '''
+def last(b):
+    return b.close[-1]
+def decide(ctx):
+    if last(ctx.bars["SPY"]) > PARAMS["x"]:
+        return [{"buy": "SPY", "share": 0.5}]
+    return []
+''',
+    "a helper that holds its argument against its other argument": '''
+def above(x, k):
+    return x > k
+def decide(ctx):
+    if above(ctx.prices["SPY"], 400):
+        return [{"buy": "SPY", "share": 0.5}]
+    return []
+''',
+    "a lot's entry by get": '''
+def decide(ctx):
+    return [{"sell": p["id"]} for p in ctx.positions if p.get("entry") > 400]
+''',
+    "a lot's mark through enumerate": '''
+def decide(ctx):
+    return [{"sell": p["id"]} for i, p in enumerate(ctx.positions) if p["mark"] > 400]
+''',
+    "numpy's greater": '''
+def decide(ctx):
+    if np.greater(ctx.prices["SPY"], 400.0):
+        return [{"buy": "SPY", "share": 0.5}]
+    return []
+''',
+    "numpy's subtract": '''
+def decide(ctx):
+    if np.subtract(ctx.prices["SPY"], 400.0) > 0:
+        return [{"buy": "SPY", "share": 0.5}]
+    return []
+''',
+    "numpy's mod": '''
+def decide(ctx):
+    if np.mod(ctx.prices["SPY"], 10) < 1:
+        return []
+    return [{"buy": "SPY", "share": 0.5}]
+''',
+    "numpy's floor_divide": '''
+def decide(ctx):
+    k = np.floor_divide(ctx.prices["SPY"], 100)
+    return [{"buy": "SPY", "share": 0.5}] if k else []
+''',
+    "numpy's digitize": '''
+def decide(ctx):
+    k = int(np.digitize(ctx.prices["SPY"], [250.0, 330.0, 420.0]))
+    return [{"buy": "SPY", "share": 0.5}] if k == 2 else []
+''',
+    "numpy's searchsorted": '''
+def decide(ctx):
+    k = int(np.searchsorted(np.array([250.0, 330.0, 420.0]), ctx.prices["SPY"]))
+    return [{"buy": "SPY", "share": 0.5}] if k == 2 else []
+''',
+    "a constant written as text": '''
+def decide(ctx):
+    if ctx.prices["SPY"] > float("400"):
+        return [{"buy": "SPY", "share": 0.5}]
+    return []
+''',
+    "a constant plus zero": '''
+def decide(ctx):
+    if ctx.prices["SPY"] > 400 + 0:
+        return [{"buy": "SPY", "share": 0.5}]
+    return []
+''',
+    "a PARAMS value plus zero": '''
+def decide(ctx):
+    if ctx.prices["SPY"] > PARAMS["x"] + 0.0:
+        return [{"buy": "SPY", "share": 0.5}]
+    return []
+''',
+    "a constant written as arithmetic": '''
+def decide(ctx):
+    if ctx.prices["SPY"] > 2 * 200:
+        return [{"buy": "SPY", "share": 0.5}]
+    return []
+''',
+    "the ratio of two different symbols' prices": '''
+def decide(ctx):
+    r = ctx.prices["QQQ"] / ctx.prices["SPY"]
+    if r > 0.85:
+        return [{"buy": "QQQ", "share": 0.5}]
+    return []
+''',
+    "the log ratio of two different symbols' closes": '''
+def decide(ctx):
+    r = np.log(ctx.bars["QQQ"].close[-1]) - np.log(ctx.bars["SPY"].close[-1])
+    if r > -0.16:
+        return [{"buy": "QQQ", "share": 0.5}]
+    return []
+''',
+    "the bars reached by getattr": '''
+def decide(ctx):
+    b = getattr(ctx, "bars")["SPY"]
+    if getattr(b, "close")[-1] > 400:
+        return [{"buy": "SPY", "share": 0.5}]
+    return []
+''',
+}
+
+#: The integration review's seal-1: a program that reads its own profit since the run began. The first is the
+#: reviewer's program (a profit lock), word for word; the rest are the same dependence written other ways.
+RUN_ANCHORED = {
+    "the profit lock (equity over budget against a PARAMS value)": '''NEEDS = {"symbols": ["SPY"], "history": 2, "max_hold_sessions": 4}
+PARAMS = {"share": 0.5, "lock": 0.03, "small": 0.02}
+
+
+def decide(ctx):
+    if ctx.positions:
+        return []
+    ahead = ctx.equity / ctx.budget - 1.0
+    share = ctx.params["small"] if ahead >= ctx.params["lock"] else ctx.params["share"]
+    return [{"buy": "SPY", "share": share, "at": "open"}]
+''',
+    "equity against a constant": '''
+def decide(ctx):
+    if ctx.equity > 1030.0:
+        return []
+    return [{"buy": "SPY", "share": 0.5}]
+''',
+    "equity against the budget": '''
+def decide(ctx):
+    share = 0.02 if ctx.equity > ctx.budget else 0.5
+    return [{"buy": "SPY", "share": share}]
+''',
+    "equity against a multiple of the budget": '''
+def decide(ctx):
+    if ctx.equity >= 1.03 * ctx.budget:
+        return []
+    return [{"buy": "SPY", "share": 0.5}]
+''',
+    "the profit in dollars": '''
+def decide(ctx):
+    won = ctx.equity - ctx.budget
+    return [] if won > 0 else [{"buy": "SPY", "share": 0.5}]
+''',
+    "a size that shrinks as the run gets ahead": '''
+def decide(ctx):
+    return [{"buy": "SPY", "share": 0.5 * (ctx.budget / ctx.equity) ** 20}]
+''',
+    "cash against a constant": '''
+def decide(ctx):
+    if ctx.cash > 515:
+        return []
+    return [{"buy": "SPY", "share": 0.5}]
+''',
+    "the cap room against equity": '''
+def decide(ctx):
+    if 2 * ctx.caps["SPY"] < ctx.equity:
+        return []
+    return [{"buy": "SPY", "share": 0.5}]
+''',
+    "the cap room against a constant": '''
+def decide(ctx):
+    room = ctx.caps.get("SPY", 0.0)
+    return [{"buy": "SPY", "usd": room}] if room > 100 else []
+''',
+    "a lot's dollars against a PARAMS value": '''
+PARAMS = {"take": 15.0}
+def decide(ctx):
+    return [{"sell": lot["id"]} for lot in ctx.positions if lot["pnl"] > PARAMS["take"]]
+''',
+    "a lot's value against a constant, through a helper": '''
+def big(lot):
+    return lot["value"] > 600
+def decide(ctx):
+    return [{"sell": lot["id"]} for lot in ctx.positions if big(lot)]
+''',
+    "the day's realized dollars against a constant": '''
+def decide(ctx):
+    if sum(row["net"] for row in ctx.closed) > 10:
+        return []
+    return [{"buy": "SPY", "share": 0.5}]
+''',
+    "a buy clipped at a constant of dollars": '''
+def decide(ctx):
+    return [{"buy": "SPY", "usd": min(ctx.cash, 500.0)}]
+''',
+    "equity in buckets": '''
+def decide(ctx):
+    step = ctx.equity // 50
+    return [{"buy": "SPY", "share": 0.5}] if step % 2 else []
+''',
+    "a price against the sleeve": '''
+def decide(ctx):
+    if ctx.prices["SPY"] < ctx.cash:
+        return [{"buy": "SPY", "share": 0.5}]
+    return []
+''',
+    "the sleeve over a price against a constant": '''
+def decide(ctx):
+    if ctx.equity / ctx.prices["SPY"] > 2.5:
+        return [{"buy": "SPY", "share": 0.5}]
+    return []
+''',
+}
+
+#: What stays allowed of the run's dollars: sizing proportional to them, a sign or zero check, and the position's own
+#: state among the sleeve's dollars now.
+SLEEVE_SIZED = '''import math
+import numpy as np
+
+NEEDS = {"symbols": ["SPY", "QQQ"], "history": 63, "max_hold_sessions": 10}
+PARAMS = {"share": 0.5, "take": 0.04, "weight": 0.4}
+
+
+def strength(c, n):
+    return c[-1] / c[-1 - n] - 1.0
+
+
+def decide(ctx):
+    out = []
+    held = 0.0
+    for lot in ctx.positions:
+        held += lot["value"]
+        if lot["pnl"] < 0 and lot["held_sessions"] >= 3:
+            out.append({"sell": lot["id"], "at": "open"})
+        elif lot["mark"] / lot["entry"] - 1.0 > ctx.params["take"] or lot["pnl"] / lot["value"] > ctx.params["take"]:
+            out.append({"sell": lot["id"], "at": "open"})
+        elif lot["value"] / ctx.equity > ctx.params["weight"]:
+            out.append({"sell": lot["id"], "at": "close"})
+    lost = [row for row in ctx.closed if row["net"] < 0]
+    if lost or ctx.cash <= 0 or ctx.cash / ctx.equity < 0.5 or held > 0.6 * ctx.equity:
+        return out
+    ranked = sorted(ctx.symbols, key=lambda s: strength(ctx.bars[s].close, 20), reverse=True)
+    for s in ranked[:1]:
+        if ctx.caps[s] <= 0 or ctx.caps.get(s, 0.0) == 0:
+            continue
+        c = ctx.bars[s].close
+        if strength(c, 20) > 0 and c[-1] > float(np.mean(c[-50:])):
+            usd = min(ctx.cash, ctx.caps[s], ctx.params["share"] * ctx.equity)
+            out.append({"buy": s, "usd": round(usd, 2), "at": "close"})
+            out.append({"buy": s, "usd": 0.25 * ctx.budget})
+    return out
+'''
 
 SCALE_FREE = '''import math
 import numpy as np
@@ -196,6 +468,97 @@ class TheLevelRule(unittest.TestCase):
 
     def test_a_file_that_does_not_parse_is_left_to_the_code_rules(self):
         self.assertEqual(level_refusals("def decide(ctx:"), [])
+
+    def test_the_natural_shapes_the_rule_missed_are_refused(self):
+        # The integration review's seal-4: each of these returned no refusal, so only the two paid readers stood
+        # between such a program and its lineage's one Validation try.
+        for name, body in MISSED.items():
+            with self.subTest(name):
+                found = level_refusals(HEAD + body)
+                self.assertTrue(found, name)
+                self.assertTrue(all(f.startswith("line ") for f in found))
+        cross = level_refusals(HEAD + MISSED["the ratio of two different symbols' prices"])
+        self.assertIn("two different symbols", cross[0])
+
+    def test_one_symbols_own_ratio_and_a_rank_in_its_own_history_still_pass(self):
+        own = HEAD + '''
+def last(b):
+    return b.close[-1]
+def sma(xs, n):
+    return float(np.mean(xs[-n:]))
+def decide(ctx):
+    out = []
+    for s, b in ctx.bars.items():
+        c = b.close
+        rank = int(np.searchsorted(np.sort(c[-252:]), c[-1]))
+        if last(b) > sma(c, 200) and c[-1] / c[-21] - 1 > 0.02 + 0 and rank > 200 and np.greater(c[-1], c[-2]):
+            out.append({"buy": s, "share": 0.2})
+    a, b = ctx.bars["QQQ"].close, ctx.bars["SPY"].close
+    spread = a[-1] / a[-21] - b[-1] / b[-21]
+    ratio = a[-63:] / b[-63:]
+    if spread > 0.01 and ratio[-1] > np.mean(ratio) and np.subtract(a[-1], a[-2]) > 0:
+        out.append({"buy": "QQQ", "share": 0.2})
+    for p in ctx.positions:
+        if p.get("mark") < p.get("entry") * 0.95 or p.get("held_sessions") >= 5:
+            out.append({"sell": p["id"]})
+    return out
+'''
+        self.assertEqual(level_refusals(own), [])
+
+
+class RunStartDependence(unittest.TestCase):
+    """The integration review's seal-1: a bred program could read its own profit since the run began and size on it,
+    which lifted a zero-edge program's pass rate at the share screen above its pinned cap (every judged window starts
+    flat; the screen's floor never sees a fresh start)."""
+
+    def test_the_run_s_dollars_held_against_a_constant_or_the_anchor_are_refused(self):
+        for name, code in RUN_ANCHORED.items():
+            with self.subTest(name):
+                found = level_refusals(code)
+                self.assertTrue(found, name)
+                self.assertTrue(all(f.startswith("line ") for f in found))
+        lock = RUN_ANCHORED["the profit lock (equity over budget against a PARAMS value)"]
+        why = elane_review.level_text(lock)
+        self.assertIn("line 8", why)
+        self.assertIn("the run's own profit since it began", why)
+        self.assertIn("every judged run starts flat", why)
+
+    def test_the_profit_lock_is_refused_before_it_is_stored_or_run(self):
+        from league.swarm import elane_train
+
+        lock = RUN_ANCHORED["the profit lock (equity over budget against a PARAMS value)"]
+        why = elane_train.check_code(lock, ["SPY"])
+        self.assertIsNotNone(why, "it passed every static check before: the Gym's code rules have nothing against it")
+        self.assertIn("equity level rule", why)
+        base = lock.replace("    ahead = ctx.equity / ctx.budget - 1.0\n", "").replace(
+            'ctx.params["small"] if ahead >= ctx.params["lock"] else ctx.params["share"]', 'ctx.params["share"]')
+        self.assertNotIn("ctx.equity", base)
+        self.assertIsNone(elane_train.check_code(base, ["SPY"]), "the same program without the rule is admitted")
+
+    def test_sizing_by_the_sleeve_and_the_positions_own_state_pass(self):
+        self.assertEqual(level_refusals(SLEEVE_SIZED), [])
+
+    def test_a_dict_of_the_programs_own_is_not_a_lot(self):
+        own = '''
+def decide(ctx):
+    best = {"value": 0.0, "pnl": 2}
+    table = {"net": 3}
+    if best["value"] > 0.5 or best["pnl"] > 1 or table["net"] > 2:
+        return []
+    return [{"buy": "SPY", "share": 0.5}]
+'''
+        self.assertEqual(level_refusals(own), [])
+
+    def test_the_rubric_and_the_facts_name_it(self):
+        self.assertIn("RUN-START DEPENDENCE", elane_review.REVIEW)
+        self.assertIn("run", elane_review.FACTS)
+        self.assertIn("(one of: levels, calendar, context, fills, run)", " ".join(elane_review.REVIEW.split()))
+        code = RUN_ANCHORED["the profit lock (equity over budget against a PARAMS value)"]
+        finding = {"code_excerpt": "ahead = ctx.equity / ctx.budget - 1.0", "contract_reference": "run",
+                   "counterexample": "three percent ahead of a fresh start the program trades a token size; mid-run it "
+                                     "would not"}
+        answer = {"json": {"verdict": "fail", "reasons": ["a profit lock"], "findings": [finding]}, "text": ""}
+        self.assertEqual(grounded(answer, code)["verdict"], "fail", "a reader's failure on it binds")
 
 
 class ThePaidReview(unittest.TestCase):

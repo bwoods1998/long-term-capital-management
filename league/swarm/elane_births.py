@@ -233,7 +233,9 @@ lane, a universe slice, a card and its first program. Every program is judged th
 passes, real money at Probe size. The Validation and holdout outcomes are SEALED: nobody who writes programs ever sees
 them, you included, so they cannot be fitted; write mechanisms, not history. You know the market's history: a rule that
 works only because you know which years fell is not a mechanism. Use scale-free state (returns, realized volatility, a
-price against its own moving average or recent high, the calendar fields), never a price level or a date.
+price against its own moving average or recent high, the calendar fields), never a price level or a date, and never the
+sleeve's own dollars since the run began (ctx.equity, ctx.cash, ctx.budget, ctx.caps or a lot's value or pnl against a
+constant, a PARAMS value or ctx.budget: every judged run starts flat, and live trading never restarts where a window does).
 
 Reply with ONE JSON object: {"families": [{"slug": "short-kebab-name", "lane": "beta or equity", "agenda": "<one key of
 THE AGENDA>", "mechanism": "one or two sentences: why it should make money and who pays", "structure": "etf", "symbols":

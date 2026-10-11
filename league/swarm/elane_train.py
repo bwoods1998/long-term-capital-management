@@ -185,7 +185,8 @@ FAILS: dict[str, str] = {
     "RUN": "the decider child failed this program's Train run again and again while other programs' runs completed",
     "DQ": "the program was disqualified on Train by its own errors or timeouts",
     "LOAD": "the decider child refused to load the program",
-    "REVIEW": "the equity review refused the program (an absolute level, a reconstructed calendar or lookahead)",
+    "REVIEW": "the equity review refused the program (an absolute level, a reconstructed calendar, a rule keyed to the "
+              "run's own profit since it began, or lookahead)",
     "STATE": f"run again with its STATE emptied every {BAR['state_every']} sessions (as a restart of the House's decider "
              f"empties it), the program's intents matched the uninterrupted run's on fewer than "
              f"{BAR['state_match']:.0%} of the Train sessions (a decide that fails in one run and not the other is no "
@@ -1130,9 +1131,14 @@ Validation try: send the version you would stake the lineage on. A rule that wor
 is not a mechanism; use scale-free state (returns, volatility, a price against its own moving average or recent high, the
 calendar fields), never a price level or a date. THE LEVEL RULE refuses, before it runs, a program that holds a price, an
 average or range of prices, a lot's entry or mark, a share volume, or the log of any of them, against a constant or a
-PARAMS value (compared with, offset by, bucketed by or clipped at one); a ratio of two levels is fine. THE REVIEW (two
+PARAMS value (compared with, offset by, bucketed by or clipped at one); a ratio of two levels of the SAME symbol is fine
+(a ratio of two different symbols' prices against a constant is not). It also refuses RUN-START DEPENDENCE: every judged
+run starts flat with the same capital (ctx.budget), so never hold ctx.equity, ctx.cash, ctx.budget, ctx.caps or a lot's
+value or pnl against a constant or a PARAMS value, and never the sleeve's dollars against ctx.budget or ctx.caps (no
+profit lock, no sleeve-wide stop, no size that changes once the run is ahead or behind): size by a share of the sleeve,
+check a sign (a lot's pnl below zero) and exit on a lot's own return (mark over entry). THE REVIEW (two
 other models) refuses absolute levels, a calendar reconstructed by counting sessions in STATE, tables of dates or levels,
-and lookahead. THE STATE RULE (part of the bar): the House's decider restarts on every deploy and a restart empties STATE,
+run-start dependence and lookahead. THE STATE RULE (part of the bar): the House's decider restarts on every deploy and a restart empties STATE,
 so the bar runs your program again with STATE emptied every 20 sessions and fails it (STATE) unless its intents match the
 uninterrupted run's on 99% of sessions. Keep in STATE only a cache of what ctx gives again; read holdings from
 ctx.positions and the clock from ctx's calendar fields, never from a count you keep. Your decide must work on an empty
