@@ -783,3 +783,119 @@ report-only arms run again at the House's bar (an alternative receipt that reads
 landed), and the CI hold of the vectors' bar to the pin's. Not measured by anyone on the box: the ops child's
 address-space cap against a panel run that opens the panel store once a run (`league.xs.runner.Isolated`; section
 13 fixed it for the panel night alone, and the zero-edge job runs the plain runner in an ops child).
+
+## 17. The ship check's fixes (Oct 11, 2026; `feat/equity-e4`; nothing pushed, nothing deployed)
+
+The check of the merged tree (section 16) and its rehearsal on a copy of the House's state said FIX FIRST: one
+blocker, three majors, the minors. This section is the record of what was changed for each, and it says what is
+true of the tree where an earlier section says otherwise.
+
+**1. Main moved: releases E5-S and E2.4 (`81963c87`) are merged under the lane, every line of both kept.**
+
+| where the two met | main | E4 | as merged |
+|---|---|---|---|
+| `league/swarm/elane_births.py` (the request) | `agenda_text(self.settings)` | the panel block | both |
+| `test_constitution`, `test_live_long_single`, `test_equity_money` | E5-S's design grid (`league/tests/equity_design.py`: every pin read at a pair of the grid) | every E1 pin read with E1's universe put back | the grid's pins read with E1's universe put back: they hold at any pair, before the universe deploy and after it |
+| `test_e4_e2e` | six seats at 0.25 x E | a basket's size pinned at 0.50 x E | the pair in force is read and the budget computed from the table's rows |
+| `league/ops/elane_health.py` (E2.4's lane alarms) | reads ETF and stock families | `test_e4_integration` held that no ops job but the forward record spells the structures | THE RULING: the lane alarms read share programs only. Their causes judge E2's own Train record (family state `elane_e2`); a panel family keeps the panel's (`elane_xs`) and is watched by the panel's own alarms |
+| CHANGELOG.md, docs/operations.md | E2.4's and E5-S's entries and sections | E4's | E4's first, then main's as main wrote them |
+
+The Probe sleeve is 0.25 x E and the seats six (section 8's point 17 and section 10's first decision speak of
+A20's 0.50 x E, three seats): a panel program's sleeve is the $557 the spec's feasibility table assumed, a basket
+alone is $222.90 of open risk at about $2,229, inside the $400 window, and `_panel_budget` scales it only once the
+lane's other lots and the window's losses leave less room. The money question is restated at that design in
+docs/operations.md, **The panel's live rules**.
+
+**2. The live book: THE SPEC'S DECISION 27 IS AMENDED. B8 is the panel kind's alone.** B8 (a buy cut by a cap waits
+while an exit of its own program is working) was written for every instance and built so: with the panel switch at
+any position it changed what the book does for a seated ETF program whose buy is cut while its own sale works (it
+waited, and was missed at the cut-off where main bought the cut size). Six share programs hold real-money seats
+under release E1's entry rule, and their replay twins and forward record are read on it. The captain's ruling: a
+share program's live behaviour is main's, order for order, with the lane off and with it at "train".
+- `league/equity/live.py`: `EquityBook._cut_waits(inst)` is True for an instance of another kind than the book's
+  own and False for the book's; `_work_entry` asks it at B8. `_seat_step` reads the failed-decide count again only
+  when it asked a panel instance. Nothing else of package H's patch acts on an instance of the book's own kind:
+  the dispatches by `inst.kind` (`_seat_block`, the adapter in `_size`, `_panel_job`, `_panel_record`,
+  `_decide_counts`, `_panel_record_of`) are the book's own branch for kind "equity", `_panel_bars` and
+  `_panel_audit` return before any read with no panel instance, and `families.standing` asks the panel lane's word
+  only of a panel family.
+- THE PROOF IS RECORDED: `league/tests/equity_week.py` (the rehearsal's harness of the lane's first Monday: the
+  real book, schedule, sizing, stock proof and decider kind; a fake venue of two accounts; invented prices; every id
+  counted, so two runs are equal to the byte) and `league/tests/test_equity_etf_orders.py`. 65 scenarios: the
+  normal Monday three ways; the practice order filled late, refused, lost; quotes stale or wide; the ladder; the
+  loss budget and the caps; the order counts and the House's block; restarts, a restated bar, the kill switch,
+  skipped minutes; the week, and the weeks in which stage SELL cannot pass or the owner flattens; and programs that
+  sell and buy in one window with sales that rest. Five of them again through the REAL reader
+  (`league.equity.families.EquityFamilies` over a real swarm store) with the panel switch absent, "off" and at
+  "train" (a panel family in Train research in the store). The fixture
+  (`league/tests/fixtures/equity_etf_orders.json`) was recorded on main `81963c87` and is the same file on both
+  Pythons. Held equal: every POST to either account, cancel, fill and alert, whole; every intent, order, lot and
+  instance row, the book's keys, every record and every minute's answer, by digest.
+- TWO DIFFERENCES ARE ALLOWED, each held to what it must be (`equity_week.main_shape`): the column
+  `eq_instances.kind` ("equity" on every row) and the adapter's table `eq_rebalances` (empty). Main's book on a
+  state that holds both trades the 65 scenarios as on its own (checked at the fix: the rollback).
+- IT HAS TEETH: with `_cut_waits` True for every kind (B8 as the spec wrote it) five scenarios are no longer
+  main's; before the fix they were the five that differed, in orders.
+- A LATER CHANGE OF THE SHARE PROGRAMS' PATH FAILS THAT TEST. A release of main that means to change the book
+  records the fixture again on its own clean tree.
+
+**3. The zero-edge job fits the ops child's memory, and so does any judgment.** Section 16 left "the ops child's
+address-space cap against a panel run that opens the panel store once a run" unmeasured; the rehearsal measured it:
+the job failed on the second run of its first program. In `league/swarm/elane_xs.py` (plumbing):
+- `one_store(run_through)`: inside it the panel runner's ungated runs read ONE `PanelStore`; a gated run (the look,
+  a forward run) opens its own. The zero-edge job holds it around a chunk, `score` around a judgment.
+- `bar_runs(run_one, spans, placebos=..., again=...)`: the bar's runs, each run's RESULT kept and its slice let
+  go; with `again` (`slicer`) a k 1.5 run is kept as its result alone and its slice is cut again when the restart
+  check reads it, one span's at a time. `runner.state_stream` holds every rebuilt ctx to the sha the run
+  recorded, so a slice that is not the run's is refused, never read. Keeping the k 1.5 runs whole until the check
+  was tried first: the real job still met the cap on its eighth run.
+- `league/tests/test_xs_zero_edge.py` `TheJobFitsItsMemory` (its world: `league/tests/xs_zero_edge_budget.py`):
+  three judgments at 2,455 sessions by 767 columns under `league.ops.__main__.limit(None, 500)`, with the real
+  store, runner and decider (the House's side and its child's loop; the engine canned), peak about 80 MB under the
+  cap on the desk and are held to 50; the judgment as it was meets the cap inside its first program, and the test
+  holds that too. The real job, run whole on the desk under the same limits, peaked at 452 MB of 522.
+
+**4. No run that lost a decide to the clock is judged or recorded** (`elane_xs.steady`, `CLOCK_RUNS` 3,
+`SLOW_SHARE` 0.05; asked by `score` through `bar_runs`, by the hidden run, by `xs_zero_edge.judge` and by
+`forward_xs`'s `_forward`). The limit of a decide is wall time in `league/gym/runtime.py` and
+`league/xs/program.py`; neither is changed (the first is inside the equity identity and the options fingerprint's
+closure, the second inside the xs identity, and the real fix is a release of its own).
+- A run whose `runtime.timeouts` is above zero is made again; the first with none is the one read.
+- Every run of the bound with one: `TooSlow` when the counts are equal in every run or each is above 5% of its
+  run's calls (a program's own slowness repeats), else `ClockUnsteady`.
+- `score`: `TooSlow` is the version's verdict `SLOW` (`PROGRAM_FAILS`; no facts, `judged` False, one of the
+  family's versions spent), its words the counts and the measured seconds; `ClockUnsteady` is a House failure of
+  kind "clock" (nothing scored, the backoff, the alert `elane_xs_clock` at the third).
+- `state_check` stops (`StateCheckInterrupted`, the House's) when a decide of either instance timed out.
+- `xs_zero_edge.judge` and `forward_xs` judge no program: both exceptions are the House's there (the chunk ends
+  with what it has; on the night a `RunFailed`, E3's retry, no row).
+- NOT ASKED YET, and owed before any look: `elane_xs.validate` and `elane_xs.look`.
+- What a run with a program's OWN errors and no timeout reads is unchanged: a failed decide is a hold, and 25
+  disqualify (DQ). A program's exception repeats on every run; a timeout is the one failure the House's clock can
+  make.
+
+**5. The rest.**
+- `league/ops/registry.py`: `equity_spreads` cpu 900 (the patch's record says 300; `test_equity_panel.
+  TheRegistryRows` names the difference and holds twice a night's measured cost).
+- `league/ops/equity_universe.py` `Paced`, `PAUSE_S` 0.4, `RATE_WAIT_S` (30, 65), `backoff`: the two data jobs
+  hand their venue calls the paced client; a function called with the plain client pauses nowhere.
+- `league/ops/forward_xs.py` `run`: skipped while the House's daily store holds no forward day, and while the
+  panel store's last session less the row lag is before the first forward day.
+- `league/tests/test_elane_xs.py`: the look refuses under "gate" by its own reading of the mode.
+- `league/tests/test_e3_seal_imports.py`: `OPS_MAY` is release E3's list again; `J_DISPATCH` (five modules) may
+  import `forward_xs`, each inside a function, held both ways. Section 16's "under J's change every E3 ops module
+  may import it" is no longer so.
+
+**6. The identities.** The options execution fingerprint, the equity identity and the money digest are main's
+(`81963c87`: E5-S moved the money digest; E4 moves none) on both Pythons. The xs identity is 2f0083bc..., as in
+section 16: no evidence module of `league/xs` changed (`XS.md` gained the paragraph on the clock; it is no part of
+the identity).
+
+**7. Open, for the captain.** The fix at the root of point 4 (the child's own CPU time), and the rule in
+Validation and the look before any look. The spreads job's quotes route has never been sent; its CPU figure is an
+inference from bars calls, and a kept connection (a change to the ops client of every job) would cut it sevenfold.
+The zero-edge job's headroom is about 60 MB on the box by the desk's figure and the rehearsal's offset: a memory
+room of the row's own is the next lever (`league/ops/runner.py` `EXTRA_MB` is one figure for every job). Whether
+release E1's entry rule should change for share programs too (B8's reason holds for them: a cut buy's size is
+final) is a decision of its own, with a rehearsal of its own. The lane alarms of release E2.4 do not watch a panel
+family's Train stalls; the panel's own alarms and the funnel do.

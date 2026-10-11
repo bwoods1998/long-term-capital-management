@@ -20,10 +20,28 @@ shown is `league/xs/XS.md`; the lane in the swarm is `league/swarm/E4.md`; what 
 `league/swarm/e4_patches/` (one file an author; a record once applied).
 
 **What ships (as merged, Oct 11, 2026; nothing deployed): ONE release, in two steps.** The tree holds the whole
-lane: the eight packages of the integration over E1 and E2, main's E2.2 and E3 (`7d2d3c84`) merged under them, the
-review's and the ship pass's fixes, and the three pieces built since on that head and merged in this order: the
-forward twin (package J), the probe's panel strata (patch 18: built, not handed to the House's job) and the receipt
-at the captain's bar (A23). The records are `league/xs/E4_INTERFACES.md` sections 10 to 16.
+lane: the eight packages of the integration over E1 and E2, the review's and the ship pass's fixes, the three pieces
+built since and merged in this order (the forward twin, package J; the probe's panel strata, patch 18: built, not
+handed to the House's job; the receipt at the captain's bar, A23), main's releases through E5-S and E2.4
+(`81963c87`: six seats at a Probe sleeve of 0.25 x E, and the equity lanes' alarms) merged under all of it, and the
+ship check's fixes (below). The records are `league/xs/E4_INTERFACES.md` sections 10 to 17.
+- **A SHARE PROGRAM'S LIVE PATH IS MAIN'S, ORDER FOR ORDER, at every position of the lane's switch** (the captain's
+  ruling at the ship check: six ETF programs hold real-money seats). The live equity book carries the panel kind
+  (`league/equity/live.py`, package H), and one of its rules was written for every instance: the spec's decision
+  27, B8, a buy cut by a cap waits while an exit of its own program is working. B8 is now the panel kind's alone
+  (`EquityBook._cut_waits`). The proof is a recorded comparison (`league/tests/test_equity_etf_orders.py`): the
+  rehearsal's harness of the lane's first Monday (the real book, schedule, sizing, stock proof and decider kind
+  over a fake venue and invented prices) runs 65 scenarios, the normal Monday, every way a buy can miss, the week
+  and its failing weeks, and programs that sell and buy in one window; five of them again through the real swarm
+  reader with the panel switch absent, "off" and at "train" (a panel family in Train research in the store). The
+  fixture was recorded on main `81963c87`; every POST, cancel, fill, alert, intent, order, lot, instance row,
+  record and minute's answer of this tree equals it. With B8 as the spec wrote it five scenarios differ, and the
+  test holds that it would see them.
+- **What the deploy changes for a book that holds no panel program, and nothing else:** the live state gains the
+  column `eq_instances.kind` ("equity" on every share program's row) and the empty table `eq_rebalances`, both made
+  when the book starts; main's book reads neither and trades the same weeks on a state that holds them (checked:
+  the rollback). The swarm's start writes the xs identity's mark to its store, and the forward register asks the
+  panel reader, which finds nothing. No order, size, time or alert of a share program moves.
 - **STEP ONE is this tree, deployed with the lane's switch able to reach "train".** An owner deploy (`league/xs/`,
   `league/ops/` and policy.json are behind CI's wall). policy.json ships `elane.panel.mode` "off"; the captain's one
   settings change to "train" starts the data jobs that night, then panel births in the equity pass, the Train bar
@@ -77,6 +95,46 @@ section 12); the two steps are as stated above. What the merge made true: a pane
 year (E3's folds record in the committed policy); a scored panel version IS in E3's forward record from the hour its
 Train verdict is written (package J: its own reader beside E3's, its own night after the panel store's); and the
 swarm no longer reads the contamination probe's own file (E3's seal forbids it: below, A22 (3)).
+
+**The ship check's fixes (Oct 11, 2026; nothing deployed).** The check of the merged tree and its rehearsal on a
+copy of the House's state found one blocker, three majors and the minors; each is closed in this tree
+(`league/xs/E4_INTERFACES.md` section 17 is the record).
+- **Main had moved** (releases E5-S and E2.4): merged, every line of both kept. The seats and the sleeve are read,
+  never assumed, wherever E4 states a size (**The panel's live rules**, below, is restated at the design in force).
+  Release E2.4's lane alarms (`league/ops/elane_health.py`) read share programs only: their causes judge E2's own
+  Train record, and a panel family keeps the panel's and is watched by the panel's own alarms (**The alarms**,
+  below).
+- **The live book**: above.
+- **The zero-edge job fits the ops child's memory.** It opened the panel store again for every run and kept every
+  run whole: at the real panel's size its second run met the 500 MB cap, so every Sunday chunk would have failed.
+  A judgment now reads one store, keeps each run's result and lets its slice go, and the restart check cuts a
+  slice again when it reads it. Three judgments at 2,455 sessions by 767 columns under the child's own limit peak
+  about 80 MB under the cap on the desk (the test holds 50; the box reads about 20 MB higher at the same shape).
+  The swarm's own judgments use the same code (they were 762 MB a judgment on the box, uncapped).
+- **No run that lost a decide to the clock is judged.** A decide's limit is one second of WALL time and the box
+  stood still for longer: a program of 100 ms a decide met a timeout in three of six runs and gave different lots
+  on the same span. In the Train judgment, the zero-edge job and the forward night a run whose runtime shows a
+  decide timeout is made again, three times at most, and never read. Timeouts in every one of those runs that
+  repeat as a program's do (the same count, or more than 5% of its calls) are the program's: the verdict `SLOW`,
+  whose words carry the seconds measured, and which its author reads. Timeouts that do not repeat are the House's:
+  nothing scored, a backoff, one alert (`elane_xs_clock`) at the third. On the forward night such a program gets no
+  row and goes on E3's retry list. THE COST: up to three times the CPU of an affected run, inside the lane's day
+  budget. NOT DONE HERE: the fix at the root (the child's own CPU time, `league/gym/runtime.py`) is inside the
+  equity identity and needs a release of its own; and Validation and the look do not ask the rule yet, which must
+  be closed before any look (step two).
+- **`equity_spreads`' CPU row is 900 s** (was 300): the ops client opens a TLS connection a request, about 70 ms of
+  CPU a call on the box, and a night of the backfill asks up to 6,000. At 300 s the child would have been killed on
+  each of its nine nights. A kept connection would cut that cost; it is a change to the ops client of every job and
+  is not made here. The quotes route itself has not been rehearsed.
+- **The data jobs pace their venue calls**: 0.4 s before every bars call, rename test and asset row (at most 150 a
+  minute by the pause; they went at about 285), and a call the venue answers 429 waits 30 s, then 65 s. A first
+  night's whole fetch is about seven minutes longer for it, inside its wall.
+- **`forward_xs` skips where E3's own job skips**: while the House's daily store holds no forward day (it failed
+  there, three receipts and three warnings on the first evening at "train"), and while the panel store holds no
+  session whose rows are final.
+- **Two guards have their tests**: the look's own reading of the lane's mode (a family validated under "gate" took
+  its look at "train" with that line removed, and no test said so), and release E3's seal, whose allowance for
+  package J is now its five dispatching modules', held both ways.
 
 **The probe's panel strata (package B's patch 18; built Oct 11, 2026; NOT WIRED; nothing deployed).** Release E3's
 probe (`league/ops/contam_probe.py`) can now be handed a PLAN of three more strata
@@ -422,8 +480,9 @@ moved the receipt's bar and changed none of them):
    (`league/tests/fixtures/xs1_conformance_c.json`; `league/tests/test_xs_screen.py`).
 
 **Read it** (read-only, on the box): the swarm log; `swarm.sqlite` events `swarm.status` with
-action `elane_xs_train`, `elane_xs_window` or `xs_evaluator_adopted`, and `swarm.gate` look events with screen "XS1";
-a panel family's state key `elane_xs` (its Train record: each version's verdict, fails and facts); kv
+action `elane_xs_train`, `elane_xs_window`, `elane_xs_clock` or `xs_evaluator_adopted`, and `swarm.gate` look events
+with screen "XS1"; a panel family's state key `elane_xs` (its Train record: each version's verdict, fails and facts;
+a version whose decides ran past their second in every run it was given reads `SLOW` with the seconds measured); kv
 `elane_xs_cpu`, `elane_xs_zero_edge` (the weekly zero-edge pass rate of the bar: an alarm above 5%) and
 `elane_xs_alerts`; the ops receipts of `equity_universe` and `equity_panel` (the two jobs' own record: counts and
 verdicts only, never a price, never a ticker list; they record no House event) and the House's `equity.rebalance`
@@ -498,53 +557,62 @@ amendments were in force; they change its dollar examples and none of its rules,
 >   returns and gaps on a golden six-lot, two-date fixture; `bh_pnl` against a hand value across a dividend; an ETF instance's record is byte for
 >   byte what E1 builds today.
 
-Read with the amendments in force when this was integrated, which the text above predates:
-- **The Probe sleeve** is the constitution's `equity_money.probe.sleeve_share` x E, and the captain's A20 set it to
-  0.50 (the text's "$557 sleeve" is 0.25 x E). The rules do not change; the dollar examples scale with the sleeve, and
-  -$300 is then a smaller share of it. One consequence is new and is stated here: a FULL sleeve of stocks at 0.50 x E
-  counts 0.40 x 0.50 x E = 0.20 x E of open risk, which is above the $400 window once E is above $2,000. So the loss
-  budget, not the sleeve, bounds a panel program's invested dollars at that size.
-  **THE PLAIN ANSWER at about $2,229, and the rule that makes it tradable.** The build spec's "a five-name basket IS
-  tradable and needs no larger sleeve" was computed on a 0.25 x E sleeve. At the rows in force (sleeve $1,114.50; a
-  name at most 20% of it, $222.90; a stock weighing 0.40 of the $400 window) E1's sizing, which holds the window a
-  name at a time at the send, would buy FOUR names of $222.90 and cut the fifth to $108.40 (three whole after $100
-  of window loss; one whole and one cut beside the two seeded programs invested), every rebalance, while the Gym
-  twin buys five: a cut name is never resized (the KEEP rule), so the basket would stay lopsided until that name is
-  sold. **So the whole basket is SCALED TO THE ROOM** (`league/equity/live.py` `_panel_budget`; plumbing, no money
-  row and no digest move, and no wall loosened): the budget a panel decision is handed is the smaller of the sleeve
-  and what a FULL basket fits now (the program's own lots at their marks plus the loss budget's room over the stock
-  weight; the invested cap likewise), and every name is its weight of THAT:
+Read with the amendments in force, which the text above predates:
+- **The Probe sleeve** is the constitution's `equity_money.probe.sleeve_share` x E. The text's "$557 sleeve" is
+  0.25 x E at about $2,229, which IS the design in force since release E5-S (six seats at 0.25 x E; **The seats and
+  the sleeve**, below); between E1's deploy and E5-S it was the captain's A20, three seats at 0.50 x E, and
+  `set_design` may move the pair again. The rules do not change with the pair; the dollar examples scale with the
+  sleeve. What does not scale is the shared loss window: a stock weighs 0.40 of it, so a FULL sleeve of stocks is
+  0.40 x the sleeve of open risk against $400.
+  **THE RULE THAT KEEPS A BASKET WHOLE: IT IS SCALED TO THE ROOM** (`league/equity/live.py` `_panel_budget`;
+  plumbing, no money row and no digest move, and no wall loosened). E1's sizing holds the window a name at a time
+  at the send, so where a full basket does not fit, it would buy the first names whole and cut the last, every
+  rebalance, while the Gym twin buys them all; a cut name is never resized (the KEEP rule), so the basket would
+  stay lopsided until that name is sold. So the budget a panel decision is handed is the smaller of the sleeve and
+  what a FULL basket fits now (the program's own lots at their marks plus the loss budget's room over the stock
+  weight; the invested cap likewise), and every name is its weight of THAT. Rule arithmetic at E = $2,229:
 
-  | at E = $2,229, sleeve $1,114.50 | the decision's budget | a five-name basket | its open risk |
+  | AT THE DESIGN IN FORCE: six seats, sleeve $557.25 | the decision's budget | a five-name basket | its open risk |
+  |---|---|---|---|
+  | alone, the window untouched | $557.25 (the sleeve) | 5 x $111.45 | $222.90 |
+  | after $100 of window loss | $557.25 | 5 x $111.45 | $222.90 |
+  | after $200 of window loss | $500.00 | 5 x $100.00 | $200 |
+  | beside five ETF programs each holding a one-ETF lot ($278.63 at risk) | $303.43 | 5 x $60.68 | $121.37 |
+  | a 12-name basket alone | $557.25 | 12 x $46.43 | $222.90 |
+
+  | AT A20's DESIGN: three seats, sleeve $1,114.50 | the decision's budget | a five-name basket | its open risk |
   |---|---|---|---|
   | alone, the window untouched | $1,000.00 | 5 x $200.00 | $400 (the whole window) |
   | after $100 of window loss | $750.00 | 5 x $150.00 | $300 |
-  | beside the two seeded ETF programs invested ($222.90 at risk) | $442.75 | 5 x $88.55 | $177.10 |
-  | beside one seed invested and $88.55 of window loss | $500.00 | 5 x $100.00 | $200 |
-  | a 12-name basket alone | $1,000.00 | 12 x $83.33 | $400 |
+  | beside one ETF program invested and $88.55 of window loss | $500.00 | 5 x $100.00 | $200 |
 
-  (`league/tests/test_e4_e2e.py` trades the first row against a fake venue on money's real rules, and
-  `test_equity_book_panel.TheWholeBasketIsScaledToTheRoom` the first and fourth.) The lot's WEIGHT is the same as
-  its twin's (dollars over the decision's own budget), so the two agree. Held lots are never resized, and a budget
-  that fell sells nothing. The send's own sizing still holds every wall a name at a time, so a budget that moved
-  between the decision and the open cuts the last name, as before (and a name the send CUT stays cut until it is
-  sold; only a name it SKIPPED is bought later by the standing target).
-  **WHAT THE SCALING DOES NOT DO (the verification's residual; as built, held by the same class's send tests).**
-  It sizes a basket bought from flat, or rotated whole. A held five-name basket IS the whole window (5 x $200 x
-  0.40), so after ANY net loss in the window the room is below zero, and on a PARTIAL rotation the sale of one name
-  frees $80 of it, less than the loss took: the name rotated in is refused for budget at the send, and the program
-  holds four names where its Gym twin holds five. Measured on the fake venue at the rows in force: $100 of window
-  loss and one name rotated, the sale goes and the buy is refused; two rotated, one is bought ($150) and the second
-  refused; $200 of loss and one rotated, refused. With no loss, or on a full rotation ($40 of loss: five names of
-  $180), every name is bought whole. The basket stays a name short until a rotation frees more room than the window
-  lost, or the loss leaves the 20-session window; the standing target asks for the name again each close.
-  **THE COST, stated:** a full basket at this size USES THE WHOLE WINDOW. While it is held, another program's new
-  buys and the options Probe lane's opens are refused for budget (first come, as three invested ETF programs
-  already leave the options lane about $66 of room); after a loss in the window the panel's own basket is rebuilt
-  smaller on a full rotation and loses a name on a partial one. **This is a money question and it is open:** a
-  panel sleeve of its own (a constitution row; 0.25 x E is the captain's leaning) is the owner's deploy with a
-  money-digest move, decided with the universe before any panel program is seated. Nothing is changed here: in the
-  release that takes the lane to "train" no panel program can hold a seat, so no order meets this rule.
+  (`league/tests/test_e4_e2e.py` trades the first row of the design in force against a fake venue on money's real
+  rules: five lots of $111.45, the sleeve whole. `test_equity_book_panel.TheWholeBasketIsScaledToTheRoom` holds
+  the scaling itself on a table of its own at A20's design, where a basket alone met the window: its first and
+  third rows.) The lot's WEIGHT is the same as its twin's (dollars over the decision's own budget), so the two
+  agree. Held lots are never resized, and a budget that fell sells nothing. The send's own sizing still holds every
+  wall a name at a time, so a budget that moved between the decision and the open cuts the last name, as before
+  (and a name the send CUT stays cut until it is sold; only a name it SKIPPED is bought later by the standing
+  target).
+  **WHAT THE SCALING DOES NOT DO (the verification's residual; as built, held by the same class's send tests at
+  A20's design).** It sizes a basket bought from flat, or rotated whole. Once the lane's lots and the window's loss
+  leave less room than the basket holds, a PARTIAL rotation's new name is refused for budget at the send: the sale
+  of one name frees 0.40 x that name of room, less than the shortfall, and the program holds one name fewer than
+  its Gym twin until a rotation frees more room than is short, or the loss leaves the 20-session window (the
+  standing target asks for the name again each close). At A20's design that was after ANY net loss, because a
+  basket alone was the whole window (measured there on the fake venue: $100 of loss and one name rotated, the sale
+  goes and the buy is refused). At the design in force a basket alone leaves $177.10 of the window, so alone it
+  takes a loss above that; beside five invested ETF programs the window is full ($278.63 + $121.37) and it is any
+  loss again.
+  **THE COST, stated:** the window is one, shared, first come. A panel basket weighs four times what a one-ETF lot
+  does ($222.90 against $55.73 of open risk at the design in force), so one panel program and five ETF programs
+  ask for $501.53 of a $400 window: whichever buys later is scaled or refused, and the options Probe lane's opens
+  wait for what is left (six invested one-ETF programs alone leave it about $66). **This is a money question and
+  it is open:** a panel sleeve of its own (a constitution row; the Probe sleeve is now the 0.25 x E the captain
+  leaned to for it, so the row would say how a panel program's share and its 0.40 weight sit beside the ETF
+  programs', not make its sleeve smaller) is the owner's deploy with a money-digest move, decided with the
+  universe before any panel program is seated. Nothing is changed here: in the release that takes the lane to
+  "train" no panel program can hold a seat, so no order meets this rule.
 - **Sizing up is parked** (the captain's A21: `equity_money.sized.min_trades` 1000, for every equity program): the
   text's "sizing up from 20 dates" reads "from `sized.min_trades` close dates", which no program reaches while the
   step is parked. EDM1's legs, the -$300 program line, the window and the total are as the text says.
@@ -666,7 +734,9 @@ read cut short (W) and membership staler than `membership_max_stale_days` (W; lo
 nights running (W); `equity_panel` failed two days running (C while a panel program is live); the nightly I6 not
 equal (C: the mode reads at most "gate"); a panel decision's morning re-read "mismatch" (C: its buys are cancelled) or
 "unread" (W); the 16:20 fetch decided late and incomplete (W); the spreads table under its bound in mode "gate" or
-above (W); the zero-edge pass rate of the Train bar above 5% (W: the bar is too loose); an E4 job or a Train run
+above (W); the zero-edge pass rate of the Train bar above 5% (W: the bar is too loose); a panel version's judgment
+stopped three times by decide timeouts that did not repeat (W, `elane_xs_clock`: the box's clock; no run that lost
+a decide is judged); an E4 job or a Train run
 found RUNNING at a wall (C); the xs identity moved while a panel lineage is in Probe (C, said before the deploy);
 `live_ready` false while a panel program is live (C: its opens stop, its exits go on, and nothing is retired or sold
 on it: its entries are held at the send, the book's alert at the day's band sync names the leg, and the pre-open's
@@ -1775,7 +1845,11 @@ by the same offsets from the 13:00 close):
   window waits `exit_wait_s`. In either window an entry sized to nothing is not final while an exit may still fill:
   it is sized again each minute and recorded missed at its cut-off. Cost stated: when an exit is still unfilled
   after the wait, an entry that is cut but not to nothing goes at the smaller size, and its target is then fixed by
-  that first order. Collars 10 bp (ETF) / 25 bp (stock) widening to 50 / 100; an order refused before the venue
+  that first order. (THIS IS A SHARE PROGRAM'S RULE, and release E4 leaves it as it is: a recorded week holds a
+  share program's orders to main's, `league/tests/test_equity_etf_orders.py`. A PANEL program's cut buy WAITS while
+  an exit of its own program is still working and goes whole once it has filled, or is recorded missed at its
+  cut-off: rule B8 of the panel kind, `EquityBook._cut_waits`.) Collars 10 bp (ETF) / 25 bp (stock) widening to
+  50 / 100; an order refused before the venue
   widens no collar. A replacement goes only once the old order is terminal (A8.4), and one buy intent is one lot
   whatever a re-price finds. The book caps itself at 60 orders a day and never sends while the House-wide day count
   would leave less than the options book's exit reserve (A8.3).
@@ -4357,11 +4431,11 @@ occurrences past its grace has a receipt was not in the old registry.
 | `forward_shadow` | after each `equity_data` run (22:30; release E3); never inside 09:00-17:30 ET on a session | 3 h | every registered program recomputed whole on its forward days in the job's own decider child, the controls, the checkpoints, the live-like re-price and the live twins; at most `elane.forward.cpu_seconds_night` of child time | runs |
 | `forward_report` | after each `forward_shadow` run, and trading days, open − 35 min (release E3) | 3 h | the forward record's meters and `<state>/forward-report.json` with alarms FW1-FW8 and, while the panel lane's switch is up, FX1-FX3 (operator-only) | runs |
 | `forward_audit` | trading days, open − 25 min (release E3) | 40 min | a forward day whose bars the morning audit found different leaves the counted days; the registry's hash chain is verified | runs |
-| `forward_xs` | after each `equity_panel` run (01:55; release E4, package J); never inside 09:00-17:30 ET on a session | 3 h | the panel lane's forward night: every registered panel program recomputed whole on its forward days, each live panel instance's shadow twin, and the twin marker the lane reads before mode "live" (**The forward twin**, at the top); a `skipped` receipt while `elane.forward.mode` or `elane.panel.mode` is "off" | runs |
+| `forward_xs` | after each `equity_panel` run (01:55; release E4, package J); never inside 09:00-17:30 ET on a session | 3 h | the panel lane's forward night: every registered panel program recomputed whole on its forward days, each live panel instance's shadow twin, and the twin marker the lane reads before mode "live" (**The forward twin**, at the top); a `skipped` receipt while `elane.forward.mode` or `elane.panel.mode` is "off", while the House's daily store holds no forward day (where `forward_shadow` skips too), and while the panel store holds no session whose rows are final | runs |
 | `contam_probe` | Saturdays 00:10 (release E3) | 6 h | the contamination probe: one model route a week, at most `elane.contam.usd_run` dollars; aggregates into `<state>/contamination.json`; never retried | skipped |
 | `equity_universe` | daily 01:40 (release E4; never at a House start) | 3 h | the point-in-time S&P 500 membership, the assets and their aids, the audit, into `<state>/equity-daily/universe/` (**The panel lane**, at the top); a `skipped` receipt while `elane.panel.mode` is "off", as each of the five below | runs |
-| `equity_panel` | daily 01:55 (release E4) | 3 h | the panel's daily bars through the venue's asof (never 2020), the coverage audit and its verdict, the half-spread table and the spreads' share, the nightly I6, into `<state>/equity-daily/panel/` | runs |
-| `equity_spreads` | daily 06:30 (release E4) | 3 h | the panel's half-spreads: quote samples at the instants the book trades, on Train-era sessions, at most 6,000 calls and 40 minutes a night until the table is whole (about nine nights), then monthly; into `<state>/equity-daily/spreads.json`. Three hours of grace, not six: with one ops child no daily job may still be working at a pre-open | runs |
+| `equity_panel` | daily 01:55 (release E4) | 3 h | the panel's daily bars through the venue's asof (never 2020), the coverage audit and its verdict, the half-spread table and the spreads' share, the nightly I6, into `<state>/equity-daily/panel/`; 0.4 s before every venue call (as the membership job's asset rows and rename tests), and 30 s then 65 s after a 429 | runs |
+| `equity_spreads` | daily 06:30 (release E4) | 3 h | the panel's half-spreads: quote samples at the instants the book trades, on Train-era sessions, at most 6,000 calls and 40 minutes a night until the table is whole (about nine nights), then monthly; into `<state>/equity-daily/spreads.json`. Three hours of grace, not six: with one ops child no daily job may still be working at a pre-open. Its CPU limit is 900 s: the ops client opens a connection a call, about 70 ms of CPU each on the box | runs |
 | `equity_neff` | the first Saturday of a month, 10:00 (release E4) | 6 h | the panel's independent names (N_eff on Train segment 2) into `<state>/equity-daily/neff.json` | runs |
 | `french` | the first Saturday of a month, 11:00 (release E4) | 6 h | the French library's daily factors where a route to them exists (none today: a `skipped` receipt) | runs |
 | `xs_zero_edge` | Sundays 06:00, 08:00, 10:00 and 12:00 (release E4) | 100 min | the panel Train bar's zero-edge column: seeded random-score programs through the whole bar in the job's own decider child, as many as fit its 2,400 s a chunk (it stops itself), into the swarm store's kv `elane_xs_zero_edge` | runs |

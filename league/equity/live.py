@@ -2960,26 +2960,28 @@ class EquityBook:
     def _panel_budget(self, inst: Instance, day: str, lots: Sequence[Lot]) -> tuple[Decimal, Decimal]:
         """A PANEL PROGRAM'S BUDGET FOR ONE DECISION, and its whole sleeve beside it: (budget, sleeve). THE WHOLE BASKET
         IS SCALED TO THE ROOM (the review's spec-2). A basket's lots are `weight x budget` a name, and E1's sizing
-        holds the account's walls a name at a time, at the send: on a sleeve of 0.50 x E a full basket of stocks is
-        0.40 x 0.50 x E = 0.20 x E of open risk, above the $400 window from E = $2,000, so at $2,229 a five-name
-        target bought four names of $222.90 and the fifth cut to $108.40 (three whole after $100 of window loss, two
-        beside the two seeded programs), while its Gym twin bought five every time. So the budget the decision is
-        handed is the smaller of
+        holds the account's walls a name at a time, at the send: where a full basket does not fit the shared loss
+        window it buys the first names whole and cuts the last, every rebalance, while its Gym twin buys them all. (It
+        was found at A20's design, a sleeve of 0.50 x E: a full basket of stocks was 0.40 x 0.50 x E of open risk,
+        above the $400 window from E = $2,000, so at $2,229 a five-name target bought four names of $222.90 and the
+        fifth cut to $108.40.) So the budget the decision is handed is the smaller of
         - the sleeve (`sleeve_share` x E), and
         - what the account's walls leave a FULL basket now: the program's own lots at their marks plus the shared
           loss budget's room over the class's open-risk weight, and plus the invested cap's room.
-        Every name of the target then scales alike: five lots of $200.00 at $2,229 with the window untouched ($150.00
-        after $100 of window loss, $88.55 beside the two seeds invested), each a fifth of the budget its twin's
-        weights are read against. NOTHING IS LOOSENED: the send's own sizing still holds every wall a name at a time
-        (a budget that has moved since cuts the last name, as before), held lots are never resized and a budget that
-        fell sells nothing (KEEP), and a figure that cannot be read leaves the sleeve as the budget. WHAT IT DOES NOT
-        DO: it sizes a basket bought from flat or rotated whole. A held five-name basket is the whole window, so
-        after any net loss in the window a PARTIAL rotation's new name is planned at a fifth of the smaller budget
-        and then refused for budget at the send (one sale frees less room than the loss took): the program holds
-        four names where its twin holds five (`TheWholeBasketIsScaledToTheRoom`'s send tests pin it as built). THE
-        COST, stated in docs/operations.md: a full basket at this size uses the whole window, so another program's
-        new buys and the options Probe lane's opens wait for room (first come). A panel sleeve of its own is a
-        money row and the owner's decision, open."""
+        Every name of the target then scales alike, each its weight of the budget its twin's weights are read
+        against. AT THE DESIGN IN FORCE since release E5-S (six seats, 0.25 x E; `set_design` may move it) a basket
+        alone is its whole sleeve, five lots of $111.45 at $2,229 and $222.90 of open risk, and it is scaled once
+        the lane's other lots and the window's losses leave less than that (five of $60.68 beside five invested
+        one-ETF programs); at A20's it was five of $200.00 with the window untouched. NOTHING IS LOOSENED: the
+        send's own sizing still holds every wall a name at a time (a budget that has moved since cuts the last name,
+        as before), held lots are never resized and a budget that fell sells nothing (KEEP), and a figure that cannot
+        be read leaves the sleeve as the budget. WHAT IT DOES NOT DO: it sizes a basket bought from flat or rotated
+        whole. Once the room is under what the basket holds, a PARTIAL rotation's new name is planned at its weight
+        of the smaller budget and then refused for budget at the send (one sale frees less room than is short): the
+        program holds a name fewer than its twin (`TheWholeBasketIsScaledToTheRoom`'s send tests pin it as built, on
+        a table of their own at A20's design). THE COST, stated in docs/operations.md: the window is one and
+        shared, first come, and a basket weighs four one-ETF lots of it. A panel sleeve of its own is a money row
+        and the owner's decision, open."""
         et = self._et()
         E = self.sizing_equity() or ZERO
         sleeve = self._sleeve_share(inst) * E if et is not None else ZERO

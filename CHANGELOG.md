@@ -29,7 +29,7 @@ any other deploy.
 The running House release is `20261011T190534Z-dc7e047c9530` (main `e36c7e39`, release E5-S, 19:06Z Oct 11), the
 gateway is `f9528af2` (14:36:49Z Oct 11), and the box's updater is on. What is built and not deployed is on branches.
 
-### Release E4, "breadth": the point-in-time S&P 500 panel under the screen XS1, on `feat/equity-e4` (unreleased; main's E2.2 and E3 merged under it; ONE release in TWO STEPS, each an owner deploy: step one is the whole tree, no digest move, ships switched off and may be set to "train"; step two the universe with the money row of a panel sleeve, one money-digest move, deployed separately)
+### Release E4, "breadth": the point-in-time S&P 500 panel under the screen XS1, on `feat/equity-e4` (unreleased; main's releases through E5-S and E2.4 merged under it; ONE release in TWO STEPS, each an owner deploy: step one is the whole tree, no digest move, ships switched off and may be set to "train"; step two the universe with the money row of a panel sleeve, one money-digest move, deployed separately)
 
 - **What it adds** (`league/xs/E4_INTERFACES.md`, `league/swarm/E4.md`): programs that pick 5 to 12 names out of the
   day's S&P 500 members by a symmetric cross-sectional rule, see salted slots with no ticker, no date and no price
@@ -87,11 +87,13 @@ gateway is `f9528af2` (14:36:49Z Oct 11), and the box's updater is on. What is b
   1. **The universe commit** (R-E4b, above). It needs the House's own `tradable.json`, which the `equity_universe`
      job writes only once the lane has been at "train": step two cannot be cut before step one has run.
   2. **The money row for a panel sleeve**: a constitution row and the lines of the book that read it, not built.
-     At the Probe sleeve of 0.50 x E a five-name basket alone fills the $400 loss window (since the review's fixes
-     it trades whole from flat, five names of $200, the basket scaled to the room; while it is held the other
-     programs' new buys wait for room, and after any net loss in the window a partial rotation's new name is cut or
-     refused at the send, so the program holds a name fewer than its Gym twin: pinned as built). Decided and
-     deployed with the universe, so the grant re-ratifies once.
+     Without it a panel program takes the Probe sleeve and one of its seats: at the design in force since release
+     E5-S (six seats, 0.25 x E) a five-name basket is five names of $111.45 at about $2,229, $222.90 of open risk
+     where a one-ETF lot is $55.73, so a basket beside five invested ETF programs asks for more than the $400
+     window: whichever buys later is scaled or refused (the basket is scaled to the room and trades whole from
+     flat; once the room is short a partial rotation's new name is refused at the send and the program holds a
+     name fewer than its Gym twin: pinned as built, at A20's design where a basket alone met the window). Decided
+     and deployed with the universe, so the grant re-ratifies once.
   3. **The gateway patch**, three parts, each a patch file for the owner (no builder edits `gateway/`): the static
      half of the universe (`gateway/lib/caps.mjs` and its tests made ready for a generated list; it changes no
      list), the generated list itself (`gen_universe.py --gateway-patch`), and the merge list's follow-up for the
@@ -210,6 +212,34 @@ gateway is `f9528af2` (14:36:49Z Oct 11), and the box's updater is on. What is b
   with `elane.panel.mode` "off" no data job runs either, and none starts with the House; `coverage_min` is the
   lane's own key; the lane's effective mode and the leg that holds it are in the heartbeat and the report, with
   the alarms that had no detector.
+- **The ship check's fixes (Oct 11; nothing deployed; the three ids are main's `81963c87` on both Pythons; the xs
+  identity is unchanged, 2f0083bc...).** MERGED: main's releases E5-S (six seats at a Probe sleeve of 0.25 x E)
+  and E2.4 (the equity lanes' alarms), every line of both kept; E5-S's design grid is read with E1's universe put
+  back, so its pins hold before the universe deploy and after it; the lane alarms read share programs only (a
+  panel family keeps its own record and its own alarms). **A SHARE PROGRAM'S LIVE PATH IS MAIN'S, ORDER FOR
+  ORDER, at every position of the panel switch:** the spec's decision 27 (B8: a buy cut by a cap waits while an
+  exit of its own program works) was written for every instance, and six ETF programs hold real-money seats under
+  E1's rule; B8 is now the panel kind's alone. Proved by a recorded comparison
+  (`league/tests/test_equity_etf_orders.py`, its harness `league/tests/equity_week.py`, its fixture recorded on
+  main `81963c87`): the lane's first Monday the normal way, every way a buy can miss, the week and its failing
+  weeks, programs that sell and buy in one window, 65 scenarios, and five again through the real swarm reader with
+  the switch absent, "off" and at "train"; every POST, cancel, fill, alert, intent, order, lot, instance row,
+  record and minute's answer equals main's. Two differences are allowed and held: the column `eq_instances.kind`
+  and the empty table `eq_rebalances` (main's book trades the same weeks on a state that holds them). With B8 as
+  the spec wrote it five scenarios differ. FIXED: **the zero-edge job could not finish one program inside the ops
+  child's 500 MB** (a store opened a run, every run kept whole): a judgment reads one store, keeps results and
+  lets slices go, and the restart check cuts a slice again when it reads it; three judgments at the real panel's
+  size peak about 80 MB under the cap, held by a test under the child's own limit, and the swarm's judgments use
+  the same code. **A decide is limited by WALL time and the box stood still for longer:** in the Train judgment,
+  the zero-edge job and the forward night a run whose runtime shows a decide timeout is made again, three times at
+  most, and never read; timeouts in every run that repeat as a program's do are the program's (`SLOW`, with the
+  measured seconds, which its author reads), and those that do not are the House's (nothing scored, a backoff, one
+  alert). The fix at the root is in `league/gym/runtime.py`, inside the equity identity: a release of its own;
+  Validation and the look do not ask the rule yet (before any look). **`equity_spreads`' CPU row** is 900 s (300
+  was under a night of its backfill at the cost a call measured on the box). The data jobs pace their venue calls
+  (0.4 s before each; 30 s then 65 s after a 429). `forward_xs` skips where E3's own job skips (it failed on an
+  evening the House's daily store held no forward day). The look's own reading of the lane's mode has its test,
+  and E3's seal lets five modules import package J's, the five that dispatch to it.
 - Operations: [docs/operations.md](docs/operations.md), "The panel lane" (the switch, the screen, A22, the live rules,
   the universe deploy and its rollback, the alarms).
 

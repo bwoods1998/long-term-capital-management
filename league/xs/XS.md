@@ -52,6 +52,12 @@ imports `math` and `numpy` only; no `print`, `repr`, `open`, `eval`, `exec`, cla
 functions; no bare `except:`; **no year or date literal**. A decide call has 1 second; 25 errors or timeouts disqualify
 the run. Be deterministic.
 
+**The second is a second of the House's wall clock, on a busy box of one core: answer in a small fraction of it.** A
+Train run in which a decide ran past the limit is not judged: the House makes it again, three times at most, and
+reads the first run in which none did. A program whose decides run past the limit in every one of those runs, the
+same way each time (the same count, or more than one call in twenty), is refused as too slow (`SLOW`), and the
+refusal states the seconds its decides took.
+
 ## NEEDS
 
 | key | meaning | default |
