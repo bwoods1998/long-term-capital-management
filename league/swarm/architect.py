@@ -200,6 +200,14 @@ default, or "direction": cards.py, `dlane.card_errors`):
 With `dlane.mode` "off" (THE ROLLBACK, also the code's default) none of this acts: the system prompt, the request, the
 admission, the events and every kv are the release before's (ccfa48d5), byte for byte.
 
+THE EQUITY LANES (release E2, Oct 2026; league/swarm/elane_births.py, ELANE_E2.md). While `elane.mode` is "gate" and
+`elane.birth_share` is above zero, `equity_pass` (its own loop round, `equity_due`) asks for equity-lane families in a
+request of its own (the LANES/EQUITY block, the agenda, the equity quota, the equity Train map), on the route chosen by
+measured yield per dollar; the options pass above, its request and its births do not change. THE SEAL (A9 D3;
+league/swarm/elane_seal.py): no equity-lane graveyard row reaches this architect (the digest's rows, `graves`, `unseen`
+and so the rebirth index and the cited ids), since a look's failure writes one whose lesson tells the outcome; while no
+equity family exists every read is the release before's.
+
 Each pass is a `swarm.architect` event; each birth a `swarm.born` event (the site's news; a carded birth's `card` key is
 its cell, sha and rebirth row).
 Standard library only.
@@ -218,6 +226,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 from . import cards, diagnostics, inputs, mechanism
 from . import dlane
+from . import elane_seal
 from . import game
 from . import settings as settings_mod
 from .researcher import MAX_ROOTS, SCREENED, SELF_REFUTED, VERDICT_TAG, VERDICT_WORDS, awaiting_validation
@@ -940,6 +949,9 @@ class GraveyardDigest:
         # THE LEARNING GAME: no game-arm row, no row of a family that learned on the hidden years (the store's own read
         # with the game off).
         raw = game.visible_graveyard(self.store, "", limit=10 ** 9, settings=self.settings)
+        # THE SEAL OF THE EQUITY LANES (release E2, A9 D3; league/swarm/elane_seal.py): no equity-lane row (a look's
+        # failure writes one with the options code's validation words) reaches the digest. None exist before E2.
+        raw = elane_seal.without_equity_rows(self.store, raw)
         return sorted((parse_lesson(r, families.get(r["family"])) for r in raw), key=lambda p: (p["at"], p["id"]))
 
     @staticmethod
@@ -1446,15 +1458,22 @@ class Architect:
         return game.visible_families(self.store, alive=alive, settings=self.settings, learners=learners)
 
     def graves(self, query: str = "", limit: int = 8) -> list[dict[str, Any]]:
-        """The graveyard rows the architect reads (`game.visible_graveyard`; the store's own read with the game off)."""
-        return game.visible_graveyard(self.store, query, limit=limit, settings=self.settings)
+        """The graveyard rows the architect reads (`game.visible_graveyard`; the store's own read with the game off), never
+        an equity-lane row (THE SEAL OF THE EQUITY LANES, release E2: `elane_seal.without_equity_rows`)."""
+        sealed = elane_seal.equity_ids(self.store)
+        if not sealed:
+            return game.visible_graveyard(self.store, query, limit=limit, settings=self.settings)
+        rows = game.visible_graveyard(self.store, query, limit=limit + len(sealed), settings=self.settings)
+        return [r for r in rows if str(r.get("family")) not in sealed][:limit]
 
     def unseen(self) -> frozenset[str]:
         """The families whose rows the architect may not read: the game arm's, alive or retired, and those whose graveyard
-        rows `game.quarantined` drops. Empty with the game off or before T0."""
+        rows `game.quarantined` drops. Empty with the game off or before T0. THE SEAL OF THE EQUITY LANES (release E2,
+        A9 D3): every equity-lane family too, so the rebirth index (league/swarm/cards.py `RebirthIndex`, `exclude`), the
+        cited ids and the lane counts never read an equity row (none exist before E2)."""
         seen = {f["id"] for f in self.visible()}
         return (frozenset(f["id"] for f in self.store.families() if f["id"] not in seen)
-                | game.quarantined(self.store, self.settings))
+                | game.quarantined(self.store, self.settings) | elane_seal.equity_ids(self.store))
 
     def admitted_roots(self) -> list[str]:
         """The roots a birth may use: the core five once THE LEARNING GAME has started (`game.birth_roots`), else
@@ -1594,7 +1613,7 @@ class Architect:
         return "5m" if paired else None
 
     def graveyard_ids(self) -> set[str]:
-        unseen = self.unseen()  # THE LEARNING GAME: an id the architect may not read is no row to cite
+        unseen = self.unseen()  # THE LEARNING GAME: an id the architect may not read is no row to cite (nor an equity one)
         return {r["family"] for r in self.store._all("SELECT family FROM graveyard") if r["family"] not in unseen}
 
     def class_cap(self) -> int:
@@ -1638,6 +1657,26 @@ class Architect:
                               alive=len(self.store.families(alive=True)))
         except Exception:  # noqa: BLE001
             return None
+
+    # ------------------------------------------------------------------ THE EQUITY LANES (release E2; elane_births.py)
+    def equity_due(self) -> bool:
+        """THE EQUITY PASS is due (`elane_births.due`: `elane.mode` "gate", `elane.birth_share` above zero, its own
+        cadence and day's dollars). False on any error: the options passes never depend on it."""
+        from . import elane_births
+
+        try:
+            return elane_births.due(self.store, self.settings, now=self.clock())
+        except Exception:  # noqa: BLE001 - an unreadable switch is off
+            return False
+
+    def equity_pass(self) -> dict[str, Any]:
+        """THE EQUITY PASS (release E2; league/swarm/elane_births.py `EquityPass`): its own request for equity-lane
+        families (the LANES/EQUITY block, the agenda, the equity quota, the equity Train map, the equity graveyard), on
+        the route chosen by measured yield per dollar (league/swarm/elane_yield.py). The options pass, its request and
+        its births are untouched by it."""
+        from . import elane_births
+
+        return elane_births.EquityPass(self).run()
 
     # ------------------------------------------------------------------ THE DIRECTION LANE (dlane.py)
     def lane_quota(self) -> Any:
