@@ -106,8 +106,10 @@ are compared from the same state. A re-based twin that differs again counts agai
   reads that run too, as before); one `twin_rebased` event (once an (instance, session)) the night a re-based twin is
   first compared, holding the lots it was seeded with (symbols, days and fill points), the count it could not hold
   and the counts of what was planned.
-- ROWS FROM BEFORE THIS RELEASE stand as written (the store is append-only) and are read by the same rule: a stored
-  differing session re-bases the twin for the sessions not yet written; their `rebased` reads 0 and their `base_agree`
+- ROWS FROM BEFORE THIS RELEASE stand as written (the store is append-only) and are read by the same rule: the
+  LATEST stored differing session re-bases the twin for the sessions not yet written (the twin goes through the
+  stored sessions after it in order); an earlier one, whose next session was already written against the
+  un-re-based twin, re-based nothing then and re-bases nothing now. Their `rebased` reads 0 and their `base_agree`
   their `agree` (they were compared with the un-re-based twin).
 - A RETIRED SESSION is unreadable as before, and re-bases nothing. THE SPLIT RULE stands for every session compared
   with the twin run (its inputs are rebuilt from the run's result, which keeps a lot's post-split quantity); a
@@ -1249,9 +1251,9 @@ def _one_instance(root: Path, db: sqlite3.Connection, shadow: Any, inst: Mapping
                     # sessions after it are compared from there: when the session to compare is not written yet,
                     # or when the re-base is on record (its event: an earlier night compared the next session with
                     # it, and tonight's twin is made the same way; a twin already re-based tonight goes on in order).
-                    # A stored differing session that none of these holds of (a row from before this release, with
-                    # stored rows after it) re-based nothing then and re-bases nothing now; the latest one re-bases
-                    # the sessions not yet written.
+                    # A stored differing session none of these holds of is a row from before this release whose next
+                    # session was written against the un-re-based twin: it stays the latest until another differs,
+                    # and the latest one re-bases the sessions not yet written.
                     if differed is not None and not gone and (day not in stored or wanted[differed] in based
                                                               or chain is not None):
                         # What is gathered is written first: a re-base that cannot be made tonight never costs

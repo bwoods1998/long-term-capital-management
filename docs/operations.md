@@ -165,9 +165,10 @@ is COMPUTED, never its bounds: the 95%, the 15 bp, the keys and the pooling are 
   writable open (`ALTER TABLE ... ADD COLUMN`: no row is rewritten; an older row reads no re-base and its own
   `agree` as the un-re-based answer). The twin's book is stored nowhere: it is recomputed each night from the rows,
   the live book and the store.
-- **Rows written before this release** stand as written and are read by the same rule: a stored differing session
-  re-bases the twin for the sessions not yet written (the latest one does; one with stored rows after it re-based
-  nothing then and re-bases nothing now).
+- **Rows written before this release** stand as written and are read by the same rule: the latest stored differing
+  session re-bases the twin for the sessions not yet written (the twin goes through the stored sessions after it in
+  order); an earlier one, whose next session was already written against the un-re-based twin, re-based nothing
+  then and re-bases nothing now.
 - **Unchanged.** Every program's un-re-based shadow (its forward record from registration, `fwd_days`) is written
   every night as before, and so is participation (`fwd_part`), which is read against the un-re-based twin run. A
   retired session is unreadable and re-bases nothing; a revived instance's new run starts flat. A session compared

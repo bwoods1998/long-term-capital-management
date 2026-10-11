@@ -634,19 +634,17 @@ class AStoreFromBeforeTheRelease(unittest.TestCase):
 
 
 class RowsWrittenBeforeTheRelease(Rebase):
-    def test_they_stand_and_a_stored_differing_session_re_bases_the_sessions_not_yet_written(self):
-        """THE FIRST NIGHT AFTER THIS RELEASE. The release before it wrote decisions 0 to 5 of the missed-first-buy
-        book against the un-re-based twin: decision 1 differs, and so do 4 and 5 (the book a session behind). Tonight
-        those six rows stand as written; the twin is set to the live book after the LATEST of them that differs
-        (decision 5), and decisions 6 on are compared from there: they agree. No event is written for a session
-        whose re-base never was (1 and 4)."""
+    """THE FIRST NIGHT AFTER THIS RELEASE, on the missed-first-buy book. The release before it compared every session
+    with the un-re-based twin: decision 1 differs, and so do 4 and 5 (the book a session behind)."""
+
+    def written_before(self, n: int):
+        """The first `n` rows as the release before this one wrote them (its eleven columns, the twin run's keys)."""
         iid, pid, lots = self.live("hold3@1", HOLD3, missed_buys={D2})
-        days = forward_twins._sessions(forward_twins._date(D1), forward_twins._date(END))
         program = forward_db.program(self.db, "hold3@1")
         run = self.shadow(END).run_from(program, schedule.next_session(forward_twins._date(D1)))
         book = forward_twins.read_book(self.root / forward_twins.LIVE_DB)
         live = forward_twins._live_keys(book["intents"][iid], ["QQQ"])
-        for day, keys, bars in forward_twins._twin(self.decider, run)[:6]:        # as that release wrote them
+        for day, keys, bars in forward_twins._twin(self.decider, run)[:n]:
             mine = live.get(day, [])
             agreed = forward_twins.agree(mine, keys)
             self.db.execute("INSERT INTO fwd_twins(instance, day, pid, live_keys, shadow_keys, agree, why, at, live_bars, "
@@ -654,8 +652,16 @@ class RowsWrittenBeforeTheRelease(Rebase):
                             (iid, day, pid, json.dumps(mine), json.dumps(keys), int(agreed), None, 1.0, None, bars,
                              forward_twins.cause(agreed, None, bars)))
         self.db.commit()
+        return iid, pid, lots, [tuple(r) for r in self.rows(iid)]
+
+    def test_they_stand_and_the_latest_stored_differing_session_re_bases_the_sessions_not_yet_written(self):
+        """Decisions 0 to 5 are stored. Tonight those six rows stand as written; the twin is set to the live book
+        after the LATEST of them that differs (decision 5), and decisions 6 on are compared from there: they agree.
+        No event is written for a session whose re-base never was (1 and 4: the session after each was written
+        against the un-re-based twin)."""
+        iid, pid, lots, before = self.written_before(6)
+        days = forward_twins._sessions(forward_twins._date(D1), forward_twins._date(END))
         self.assertEqual(self.line(iid), ".x..xx")
-        before = [tuple(r) for r in self.rows(iid)]
         out = self.night(END)
         self.assertEqual([tuple(r) for r in self.rows(iid)][:6], before, "append-only: not a byte of them moved")
         self.assertEqual(self.line(iid), ".x..xx" + "." * 23)
@@ -669,6 +675,22 @@ class RowsWrittenBeforeTheRelease(Rebase):
         self.assertEqual((reading["intents"]["sessions"], reading["intents"]["agreed"]), (29, 26))
         self.assertEqual((reading["rebase"]["rebases"], reading["rebase"]["sessions"], reading["rebase"]["agreed"]),
                          (1, 29, 15))
+
+    def test_stored_sessions_that_agreed_after_it_are_gone_through_in_order(self):
+        """Decisions 0 to 3 are stored (the differing one is decision 1; 2 and 3 agreed with the un-re-based twin).
+        Tonight the twin is set to the live book after decision 1 and goes through the stored sessions 2 and 3 in
+        order (their rows stand; nothing of them is compared again), and decisions 4 on, which as registered would
+        differ at 4 and 5, agree. One night at a time gives the same rows."""
+        iid, pid, lots, before = self.written_before(4)
+        self.assertEqual(self.line(iid), ".x..")
+        out = self.night("2026-10-20")
+        self.assertEqual((out["twins"], out["rebased"], out["disagreed"], out["interrupted"]), (2, 1, 0, 0))
+        self.nights("2026-10-21")
+        self.assertEqual([tuple(r) for r in self.rows(iid)][:4], before)
+        self.assertEqual(self.line(iid), ".x.." + "." * 25)
+        self.assertEqual(self.line(iid, "base_agree")[4:], "xx" + "..xx" * 5 + "..x")
+        self.assertEqual([e["day"] for e in self.rebased()], [D2])
+        self.assertEqual([r["rebased"] for r in self.rows(iid)[4:]], [1] * 25)
 
 
 # ============================================================================================ the report

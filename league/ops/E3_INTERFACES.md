@@ -617,9 +617,10 @@ release's tree), and a differing session's own row is that release's row too.
   price, sized to nothing, outside NEEDS or the bars) is `unheld` and not held.
 - **The night** (`finish`, per run of an instance): the un-re-based twin run and its decides are made whole, as
   before. Sessions are then read in day order. A differing session re-bases the twin for the next one when that
-  one is not written yet, or when the re-base is on record (its event), so a later night makes the same twin; a
-  stored differing session that neither holds of (a row from before this release with stored rows after it)
-  re-based nothing then and re-bases nothing now. What is gathered is written before each re-base (one transaction
+  one is not written yet, or when the re-base is on record (its event), so a later night makes the same twin. ROWS
+  FROM BEFORE THIS RELEASE: the latest stored differing session re-bases the twin for the sessions not yet written
+  (the twin goes through the stored sessions after it in order); an earlier one, whose next session was written
+  against the un-re-based twin, re-based nothing then and re-bases nothing now. What is gathered is written before each re-base (one transaction
   a stretch, the night's `fwd_part` row with the first), so a re-base that cannot be made tonight (`twin_interrupted`,
   as before) never costs the rows before it. A retired session re-bases nothing. THE SPLIT RULE stands for sessions
   compared with the twin run; a session compared with a re-based twin is read (its inputs hold a lot's quantity as
