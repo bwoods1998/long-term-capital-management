@@ -986,20 +986,21 @@ CONSTITUTION: dict[str, Any] = {
     #   CHANGELOG.md), and nothing else. The two numbers are the captain's to set from the verdict of the
     #   pre-registered study EQDONE-3, whose candidates are seats 3, 4, 5, 6 x sleeve 0.50, 0.33, 0.25;
     #   league/tests/test_equity_design.py holds the tree to every one of them through `size_entry` and pins each
-    #   one's money digest, so the row the study names lands on a digest the tree already states. WHY MORE SEATS AT A
-    #   SMALLER SLEEVE: Done reads 30 real closes whose P&L sums above zero; more programs trading at once make
-    #   closes sooner, and a smaller lot a program keeps the same shared loss budget over them. ITS COST, PLAINLY: a
+    #   one's money digest, so the row the study names lands on a digest the tree already states. WHY THE TWO MOVE
+    #   TOGETHER: Done reads 30 real closes whose P&L sums above zero; more programs trading at once make closes
+    #   sooner, and a smaller lot a program keeps the same shared loss budget over them. ITS COST, PLAINLY: a
     #   seat is one passed sealed look, so more seats put more programs, the screen's false positives among them, on
     #   real money at once; a smaller lot pays the same spread and fees per dollar and earns back a loss more slowly;
     #   and closes made sooner by long-only index ETFs are weak evidence of skill. It buys closes, not edge.
     #   Every owner line stands and binds through `size_entry` at any seats and any sleeve: an ETF at most 0.50 x E
     #   across all programs (`position_share`), at most 1.00 x E invested (`invested_share`), the cash reserve, and
     #   the shared loss budget ($400 net in any rolling 20 sessions, $800 net in total). A SEAT ONLY DECIDES WHO MAY
-    #   OPEN: no lot is ever sold because a number changed (a lot larger than a smaller sleeve keeps its own exits,
-    #   and its program opens nothing until it is back inside the sleeve), and a buy planned under the old sleeve is
-    #   sized at its send under the one in force. Rollback, one owner deploy: `set_design 3 0.50` (A20's design: the
-    #   money digest is 7e41909a again, exactly; the bounds may stay); the standing grant re-ratifies at the House's
-    #   start; no fingerprint move, no evidence reset.
+    #   OPEN: no lot is ever sold because a number changed. A lot larger than a smaller sleeve keeps its own exits,
+    #   and its program's next entries are held to the sleeve in force (no more of that ETF while the lot is over
+    #   half the sleeve, nothing at all while it is over the whole of it); a buy planned under the old sleeve is
+    #   sized at its send under the one in force; seats moved down unseat nobody. Rollback, one owner deploy:
+    #   `set_design 3 0.50` (A20's design: the money digest is 7e41909a again, exactly; the bounds may stay); the
+    #   standing grant re-ratifies at the House's start; no fingerprint move, no evidence reset.
     # <equity-design>
     #   THE DESIGN IN FORCE: 6 seats (`probe.max_programs`, `elane.roster`), a Probe sleeve of 0.25 x E
     #   (`probe.sleeve_share`). A one-ETF program's lot is `position_share.etf` (0.50) of its sleeve: 0.125 x E.

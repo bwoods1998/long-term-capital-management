@@ -60,7 +60,7 @@ Money digest `6c0bc42b`, full digest `c3c061b0` (`PINNED_DIGEST`); the rollback,
 
 - **Whose choice.** The captain's, before Monday's open, from the verdict of the pre-registered study EQDONE-3 over
   seats 3, 4, 5, 6 x sleeve 0.50, 0.33, 0.25. The build left a working pair in the tree; the branch is not a
-  release until the verdict's pair is set by the same step. Why more seats at a smaller sleeve: Done reads 30 real
+  release until the verdict's pair is set by the same step. Why the two move together: Done reads 30 real
   closes whose P&L sums above zero, more programs trading at once make closes sooner, and a smaller lot a program
   keeps the same shared loss budget over them. Its cost: more programs, the screen's false positives among them, on
   real money at once; the same spread and fees per dollar on a lot that earns a loss back more slowly; closes made
@@ -72,8 +72,8 @@ Money digest `6c0bc42b`, full digest `c3c061b0` (`PINNED_DIGEST`); the rollback,
   sizing function). A seat only decides who may open: no lot is ever sold because a number changed.
 - **At the deploy.** A Candidate waiting for a seat is seated at the first band sync, first come, and asked for the
   same close; a buy already planned is sized at its send under the sleeve in force; a lot larger than a smaller
-  sleeve keeps its own exits and its program opens nothing until it is back inside the sleeve. All three are the
-  code as it was, now tested through the real book and the real swarm store.
+  sleeve keeps its own exits, and its program's next entries are held to the sleeve in force; seats moved down
+  unseat nobody. All of it is the code as it was, now tested through the real book and the real swarm store.
 - **What a pair can make bind** (docs/operations.md, **The seats and the sleeve**): cut or refused entries where the
   seats' lots do not all fit (the Gym fills them; A14 reads the difference); the day's 60 equity orders, sized for
   three programs, on a day most orders are re-priced; the gateway's day line on a day every entry climbs its whole

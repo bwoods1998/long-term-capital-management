@@ -674,7 +674,7 @@ Money digest `6c0bc42b`, full digest `c3c061b0` (`PINNED_DIGEST`); the rollback,
   verdict's pair is set. Every pair of the grid is held by `league/tests/test_equity_design.py` and
   `test_equity_sleeve.py` through the House's own `size_entry`, and each pair's money digest is pinned
   (`league/tests/equity_design.py` `DIGESTS`), so the pair the study names lands on a digest the tree already states.
-- **Why more seats at a smaller sleeve.** Done reads 30 real closes whose P&L sums above zero. More programs trading
+- **Why the two move together.** Done reads 30 real closes whose P&L sums above zero. More programs trading
   at once make closes sooner, and a smaller lot a program keeps the same shared loss budget over them.
 - **Its cost, plainly.** A seat is one passed sealed look, so more seats put more programs, the screen's false
   positives among them, on real money at once. A smaller lot pays the same spread and fees per dollar and earns a
@@ -710,8 +710,10 @@ Money digest `6c0bc42b`, full digest `c3c061b0` (`PINNED_DIGEST`); the rollback,
     size.
   - **A lot larger than a smaller sleeve is never sold for it.** The House's own exits are the maximum hold, the
     failed decides and a retired or demoted program (`_house_exits`), never a size. The program's next entries are
-    refused by its own sleeve until it is back inside it. Seats moved DOWN unseat nobody either: a Probe program
-    keeps its seat, and no new one is given until the count in force has room.
+    held to the sleeve in force: no more of that ETF while the lot is over half the sleeve (`sleeve_cap`), and of
+    another ETF only what the sleeve has left (`sleeve_cash`: nothing while the lot alone is over the whole
+    sleeve). Seats moved DOWN unseat nobody either: a Probe program keeps its seat, and no new one is given until
+    the count in force has room.
 - **Rollback**, one owner deploy: `set_design 3 0.50` is A20's design, and its money digest is `7e41909a` again, to
   the last hex (the seats' bound may stay at six). The standing grant re-ratifies at the House's start; no
   fingerprint moves and no evidence is reset. Programs seated beyond three keep their seats (above) and are sized
