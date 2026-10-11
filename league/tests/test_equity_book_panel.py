@@ -297,6 +297,7 @@ class ThePatchIsWhole(unittest.TestCase):
         self.assertIsNone(K.book_for(None))
         self.assertEqual([K.kind_of(s) for s in ("panel", "etf", "stock", None)], ["panel", "equity", "equity", "equity"])
         self.assertIn("sizing cut", inspect.getsource(L.EquityBook._work_entry), "B8: a cut buy waits for its own sale")
+        self.assertIn("self._cut_waits(inst)", inspect.getsource(L.EquityBook._work_entry), "and only a panel instance's")
         self.assertIn("entry_until", inspect.getsource(L.EquityBook._panel_record), "B9: a late rebalance plans nothing")
         for name in ("_panel_bars", "_panel_job", "_panel_ineligible", "_panel_audit", "_panel_record_of", "_decide_counts"):
             self.assertTrue(hasattr(L.EquityBook, name), name)
@@ -664,25 +665,29 @@ class TheCutBuyWaits(PanelCase):
         self.assertEqual([b["symbol"] for b in cut], ["N010"], "no exit of its OWN program is due: the cut is final, as E1's")
         self.assertLess(self.usd(cut[0]), D("41"))
 
-    def test_an_etf_rotation_waits_the_same_way(self):
-        """B8 changes the book for EVERY instance (E4-SPEC decision 27): an ETF program's buy cut by its own sale waits
-        too. The seeds have no sale in a buy's window: nothing changes for them."""
+    def test_an_etf_rotation_never_waits_it_trades_as_on_main(self):
+        """B8 IS THE PANEL KIND'S ALONE (`EquityBook._cut_waits`; the captain's ruling at the ship check: the spec's
+        decision 27 wrote it for every instance, and the seated share programs trade under release E1's entry rule).
+        An ETF program's buy cut while its own sale works goes at the cut size once the window's exit wait has passed,
+        as on main (league/tests/test_equity_etf_orders.py holds whole weeks of it to main's own record)."""
         h = self.h
         h.state.execute("DELETE FROM eq_intents")
         h.state.execute("DELETE FROM eq_lots")
         h.venue.held.clear()
         seed = h.instance("seed-overnight-spy")
+        self.assertEqual((seed.kind, L.EquityBook._cut_waits(seed)), ("equity", False))
+        self.assertIs(L.EquityBook._cut_waits(h.book._instance(KEY)), True, "the panel instance's cut buy waits")
         lot = h.lot(seed, "SPY", "0.8", "600")                      # $480 of its $557.25 sleeve
         h.intent(seed, "sell", symbol="SPY", lid=lot.lid)
         buy = h.intent(seed, "buy", symbol="QQQ", share="0.5")    # $278.62: an ETF's half of the sleeve
         h.venue.fill = "none"
         h.run(MONDAY, (9, 26), (9, 31), (9, 33))
-        self.assertEqual(h.sent("buy"), [])
-        self.assertIn("sizing cut (sleeve_cash)", h.get_intent(buy.iid).why)
-        h.venue.fill = "cross"
-        h.tick(9, 34)
-        self.assertEqual([b["symbol"] for b in h.sent("buy")], ["QQQ"])
-        self.assertGreater(self.usd(h.sent("buy")[0]), D("278"), "whole, never the $77 the sleeve had free")
+        cut = h.sent("buy")
+        self.assertEqual([b["symbol"] for b in cut], ["QQQ"], "sent in the first minute after the exit wait, cut")
+        self.assertLess(self.usd(cut[0]), D("278"), "under its $278.62 target: the cut size, release E1's rule")
+        [order] = h.state.rows("SELECT why FROM eq_orders WHERE side='buy'")
+        self.assertIn("entry (sleeve_cash:", order["why"], "cut by the cash its own unsold lot still holds")
+        self.assertNotIn("sizing cut", h.get_intent(buy.iid).why or "")
 
 
 # -------------------------------------------------------------------------------------------------------------- B9

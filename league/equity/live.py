@@ -1846,8 +1846,8 @@ class EquityBook:
                 return
             self._finish(intent, "done" if filled_qty > 0 else "refused", f"sizing ({sized.binding}): {sized.reason}")
             return
-        if sized.binding != "intent":
-            # B8 (release E4; EVERY instance, an ETF program's too): A CUT SIZE IS NOT FINAL WHILE AN EXIT OF ITS OWN
+        if sized.binding != "intent" and self._cut_waits(inst):
+            # B8 (release E4; A PANEL INSTANCE ONLY, `_cut_waits`): A CUT SIZE IS NOT FINAL WHILE AN EXIT OF ITS OWN
             # PROGRAM MAY STILL FILL. Sent now, the cut size would be the intent's whole target (a re-price sends target
             # minus filled of the FIRST order): with $40 idle in the sleeve and a $111 sale still working, a $111 buy
             # would go for $40 and stay there. Any binding but "intent": the sleeve's cash, the House-wide cash, the
@@ -1864,6 +1864,17 @@ class EquityBook:
         self._send(intent, side="buy", symbol=symbol, klass=klass, qty=sized.qty, limit=limit, collar=collar, day=today,
                    lid=intent.lid, replaces=current.eid if current is not None else None, probe=inst.band == "probe",
                    why=f"entry ({sized.binding}: {sized.reason})"[:300], tick=now, until=deadline)
+
+    @staticmethod
+    def _cut_waits(inst: Instance) -> bool:
+        """Whether a buy of `inst` that a cap CUT waits while an exit of its own program is working (B8): a panel
+        instance's, and NEVER one of the book's own kind. The spec's decision 27 wrote B8 for every instance; the
+        captain's ruling at the ship check (Oct 11, 2026) keeps it to the panel kind, because the seated share
+        programs trade real money under release E1's entry rule, on which their replay twins and their forward record
+        are read: a share program's cut buy goes at the cut size, as on main, order for order
+        (league/tests/test_equity_etf_orders.py holds it to weeks recorded on main). Whether E1's rule should change
+        for share programs too is a decision of its own, with a rehearsal of its own."""
+        return inst.kind != EQUITY_KIND
 
     # ------------------------------------------------------------------ sizing
     def _size(self, intent: Intent, inst: Instance, symbol: str, klass: str, limit: Decimal, usd: Decimal | None,
@@ -2109,16 +2120,18 @@ class EquityBook:
         # not whole is always recorded by this pass (the day's decision went ahead without it while it waited), and the
         # House's exit rules ran with that decision, before the count. Its lots exit AT THE NEXT OPEN, as the alert
         # says and as the Gym does, not a session late: the rules are run again for the instances just counted.
-        counted_now = self.state.get("eq_failed", {}) or {}
-        failed_exit = self._holds()[3]
-        due = set()
-        for i in fresh:
-            if i.kind != EQUITY_KIND and counted_now.get(i.id) == day and counted.get(i.id) != day:
-                again_inst = self._instance(i.id)
-                if again_inst is not None and again_inst.failed_decides >= failed_exit:
-                    due.add(i.id)
-        if due and (mn is None or now < mn.open_send):
-            self._house_exits(t, now, only=due)
+        others = [i for i in fresh if i.kind != EQUITY_KIND]        # (none: nothing more is read or planned)
+        if others:
+            counted_now = self.state.get("eq_failed", {}) or {}
+            failed_exit = self._holds()[3]
+            due = set()
+            for i in others:
+                if counted_now.get(i.id) == day and counted.get(i.id) != day:
+                    again_inst = self._instance(i.id)
+                    if again_inst is not None and again_inst.failed_decides >= failed_exit:
+                        due.add(i.id)
+            if due and (mn is None or now < mn.open_send):
+                self._house_exits(t, now, only=due)
         asked = sorted(set(handled) | {i.id for i in fresh if i.last_decided_day == day})
         if asked != sorted(handled):
             record = {k: v for k, v in done.items() if k != "why"}
