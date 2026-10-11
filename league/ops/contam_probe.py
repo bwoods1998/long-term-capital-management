@@ -37,6 +37,37 @@ THE FILE: {"version": "contam-1", "routes": {route: {"at", "model", "usd", "prob
 hi, p_perm, readable, recalled}}}, "recall": {n, rho, p_perm, sign_acc}, "partial": {"probe_n", "qset", "usd",
 "batch_usd", "cells", "recall"}}}, "history": [the last 24 route results]}.
 
+THE PANEL STRATA (release E4, package B's patch 18; the captain's A22 (3): the probe before a panel look). Three more
+strata, `PANEL_STRATA`, asked only when the job is handed A PLAN (`probe(ctx, panel=...)`; `run(ctx)` hands none and
+is release E3's probe to the byte). This module reads nothing of the panel: release E3's seal lets it import no
+module of league/xs, so the plan (league/ops/contam_xs.py) is the one that opens the panel store, under the
+capability this job mints, and this module owns EVERY WORD OF A PROMPT.
+- P4: an index member against its sector's fund, a month ("Did X return more or less than the Select Sector SPDR
+  fund of its sector in <Month YYYY>?"); P5: the same, a week ("... in the week ending <date>?"); P6: the House
+  panel factors, a month (`FACTORS`: momentum, short-term reversal and beta, each the top third of the index against
+  the bottom third: "In <Month YYYY>, did the equally weighted third of S&P 500 stocks ... return more or less than
+  the third ...?"). THE FUND IS NOT NAMED: the House's sector is statistical, read from prices, and a prompt is
+  built from names and the calendar only; the truth is against the fund of the House's sector at the period's base.
+- THE PLAN HANDS IN NAMES AND PERIODS, NEVER A WORD (`panel_questions`): `plan.names(stratum, era)` (P4 and P5: the
+  members asked about, each a ticker by `NAME`: capitals and at most one dot, so no figure can ride in one; P6's
+  names are `FACTORS`, this module's own) and `plan.periods(stratum, era)` (period names, each one of this module's
+  own calendar `periods(stratum, era)`; the plan leaves out what the panel cannot be asked: its reserve and its
+  history years). A name or a period outside that is a ValueError before any route is marked. A cell is a full grid
+  under THE SAME HASH RULE as E3's (`sha256(f"contam-1|{stratum}|{era}|{name}")`), the same for every route.
+- TRUTH: `plan.truths(a cell's questions)`, "more" | "less" | "tie" | None each, asked only once the cell's answers
+  are all in, as E3's are. The cells are scored by `score` and kept under their stratum in `cells`, in E3's shape
+  (aggregates only). The panel's cells are asked AFTER E3's own, then the recall; a result is published when every
+  cell asked is in, so a plan's result carries the three strata.
+- A partial keeps `panel_qset` (the sha of the panel's questions) beside `qset`, which stays E3's own questions'
+  sha: a panel question set that moved (a membership revision) drops the partial's PANEL cells and nothing of E3's;
+  with no plan the panel cells of a partial are dropped (the lane was switched off) and none is published.
+- A ROUTE WHOSE PUBLISHED RESULT LACKS A PANEL STRATUM THE PLAN NOW ASKS IS DUE AT ONCE (`_owing`): its result is not
+  whole, and a panel look of its programs waits on it. STATED COST: that route's E3 cells are asked again with it,
+  inside the same dollars a run (`usd_run` and E2's day, unchanged).
+- AFTER A PUBLISH the plan is told (`plan.published(doc)`: it writes the look's permit, two words a cell). A permit
+  that cannot be written is a warning and `permit` False in the receipt; the result stays published.
+- The receipt gains `panel` (the panel cells this probe asks) and, on a publish, `permit`; with no plan neither.
+
 THE JOB (`run`): skipped when the mode is "off", no route is due (`due`), or E2's day leaves it no dollar
 (`elane_yield.room(store, settings, now)`: THE BOUND below). One route a run: `router =
 models.build_router(ctx.root, store, settings, config=ctx.config)`; routes = `elane_yield.routes(settings, router)`.
@@ -126,6 +157,7 @@ import functools
 import hashlib
 import json
 import math
+import re
 import time
 import weakref
 from collections import Counter
@@ -143,6 +175,8 @@ ERAS: dict[str, tuple[dt.date, dt.date]] = {
     "2026H1": (dt.date(2026, 1, 2), dt.date(2026, 6, 30)),
 }
 STRATA = ("S1", "S2", "S3", "S4")
+#: THE PANEL STRATA (release E4): asked only with a plan (`probe(ctx, panel=...)`), after E3's own.
+PANEL_STRATA = ("P4", "P5", "P6")
 #: The reserve recall's name in the file, and its months.
 RECALL = "R2021"
 RECALL_MONTHS = ((2020, 1), (2021, 12))
@@ -176,9 +210,20 @@ SYSTEM = ("You are answering a memory quiz about past United States market histo
 AGAINST = "SPY"
 #: The two answers of a stratum's questions, the first for a positive truth.
 WORDS: dict[str, tuple[str, str]] = {"S1": ("higher", "lower"), "S2": ("more", "less"), "S3": ("more", "less"),
-                                     "S4": ("more", "less")}
-#: A period's kind by stratum (S4 asks by week).
-WEEKLY = ("S4",)
+                                     "S4": ("more", "less"), "P4": ("more", "less"), "P5": ("more", "less"),
+                                     "P6": ("more", "less")}
+#: A period's kind by stratum (S4 and P5 ask by week).
+WEEKLY = ("S4", "P5")
+#: P6's names: the House panel factors (league/xs/results.py `factors`), each the top third of the index against the
+#: bottom third, re-formed at the close before the month. What a question says of its two thirds, the top first.
+FACTORS = ("mom", "strev", "beta")
+FACTOR_WORDS: dict[str, tuple[str, str]] = {
+    "mom": ("with the highest return over the year before the month, its last month left out,", "with the lowest"),
+    "strev": ("that had fallen the most over the five sessions before the month", "that had risen the most"),
+    "beta": ("with the highest market beta at the month's start", "with the lowest"),
+}
+#: A name a plan may hand in for P4 and P5: a ticker, capitals and at most one dot. No digit: no figure rides in one.
+NAME = re.compile(r"^[A-Z]{1,6}(\.[A-Z]{1,2})?$")
 MONTHS = ("January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
           "November", "December")
 #: The recall questions' era label (the reserve years; never a cell's era).
@@ -264,14 +309,16 @@ def _span_periods(first: dt.date, last: dt.date, weekly: bool) -> tuple[tuple[st
 
 def periods(stratum: str, era: str) -> list[tuple[str, str, str]]:
     """Every period of a stratum's kind in an era, oldest first: (period, first, last), `first` the last session
-    before the period and `last` its own last session (ISO days). Months for S1-S3 and the recall ("YYYY-MM"), ISO
-    weeks for S4 (the day the week ends on). KeyError for an era that is none of `ERAS` (the recall's is its own)."""
+    before the period and `last` its own last session (ISO days). Months for S1-S3, P4, P6 and the recall
+    ("YYYY-MM"), ISO weeks for S4 and P5 (the day the week ends on). The calendar's, whole: which of them a panel
+    stratum may ask is its plan's to say (`panel_questions`). KeyError for an era that is none of `ERAS` (the
+    recall's is its own)."""
     if stratum == RECALL:
         (y0, m0), (y1, m1) = RECALL_MONTHS
         last = (dt.date(y1 + (m1 == 12), m1 % 12 + 1, 1) - dt.timedelta(days=1))
         return list(_span_periods(dt.date(y0, m0, 1), last, False))
-    if stratum not in STRATA:
-        raise KeyError(f"no stratum {stratum!r}; one of {', '.join(STRATA)}")
+    if stratum not in STRATA and stratum not in PANEL_STRATA:
+        raise KeyError(f"no stratum {stratum!r}; one of {', '.join((*STRATA, *PANEL_STRATA))}")
     first, last = ERAS[era]
     return list(_span_periods(first, last, stratum in WEEKLY))
 
@@ -297,11 +344,19 @@ def grid(symbols: Mapping[str, str], stratum: str, era: str, *, per_cell: int) -
     """D16's full grid of one cell: (its K symbols, its P periods), each in hash order. `symbols`: {symbol: class}
     (the House universe); a month period is "YYYY-MM", a week period the ISO day it ends on."""
     names = stratum_symbols(symbols, stratum)
+    if not names:
+        return [], []
+    return _grid(names, [name for name, _, _ in periods(stratum, era)], stratum, era, per_cell)
+
+
+def _grid(names: Sequence[str], every: Sequence[str], stratum: str, era: str, per_cell: int) -> tuple[list[str], list[str]]:
+    """THE HASH RULE of a cell, E3's strata and the panel's alike: (the K names, the P periods), K = min(the names,
+    `SYMBOLS_PER_CELL`), P = min(the periods, floor(`per_cell` / K)), each the first by
+    `sha256(f"contam-1|{stratum}|{era}|{name or period}")`."""
     k = min(len(names), SYMBOLS_PER_CELL)
     if not k:
         return [], []
     chosen = sorted(names, key=lambda sym: _digest(f"{VERSION}|{stratum}|{era}|{sym}"))[:k]
-    every = [name for name, _, _ in periods(stratum, era)]
     p = min(len(every), max(0, int(per_cell)) // k)
     return chosen, sorted(every, key=lambda period: _digest(f"{VERSION}|{stratum}|{era}|{period}"))[:p]
 
@@ -315,15 +370,20 @@ def _text(stratum: str, symbol: str, period: str) -> str:
         return f"State {symbol}'s total return in {_month_words(period)} to the nearest percent."
     if stratum == "S1":
         return f"Did {symbol} finish {_month_words(period)} higher or lower than it finished the month before?"
+    if stratum == "P6":
+        top, bottom = FACTOR_WORDS[symbol]
+        return (f"In {_month_words(period)}, did the equally weighted third of S&P 500 stocks {top} return more or "
+                f"less than the third {bottom}?")
+    against = "the Select Sector SPDR fund of its sector" if stratum in PANEL_STRATA else AGAINST
     if stratum in WEEKLY:
-        return f"Did {symbol} return more or less than {AGAINST} in the week ending {period}?"
-    return f"Did {symbol} return more or less than {AGAINST} in {_month_words(period)}?"
+        return f"Did {symbol} return more or less than {against} in the week ending {period}?"
+    return f"Did {symbol} return more or less than {against} in {_month_words(period)}?"
 
 
 def _question(stratum: str, era: str, symbol: str, period: str, first: str, last: str) -> dict[str, Any]:
     return {"id": f"{stratum}|{era}|{symbol}|{period}", "stratum": stratum, "era": era, "symbol": symbol,
-            "against": None if stratum in ("S1", RECALL) else AGAINST, "first": first, "last": last, "period": period,
-            "text": _text(stratum, symbol, period)}
+            "against": None if stratum in ("S1", RECALL, *PANEL_STRATA) else AGAINST, "first": first, "last": last,
+            "period": period, "text": _text(stratum, symbol, period)}
 
 
 def questions(symbols: Mapping[str, str], *, per_cell: int) -> list[dict[str, Any]]:
@@ -337,6 +397,30 @@ def questions(symbols: Mapping[str, str], *, per_cell: int) -> list[dict[str, An
             for period in chosen:
                 for symbol in names:
                     out.append(_question(stratum, era, symbol, period, *bounds[period]))
+    return out
+
+
+def panel_questions(panel: Any, *, per_cell: int) -> list[dict[str, Any]]:
+    """Every question of the panel strata's cells, shaped and ordered as `questions`' rows (stratum, then era; a full
+    grid a cell under `_grid`'s one hash rule; `against` None: the plan knows what a truth is against). THE PLAN HANDS
+    IN NAMES AND PERIODS, NEVER A WORD OF A PROMPT: `panel.names(stratum, era)` for P4 and P5 (tickers by `NAME`, none
+    twice; P6's names are `FACTORS`) and `panel.periods(stratum, era)` (period names of `periods(stratum, era)`, none
+    twice). ValueError for a name or a period outside that: a plan that could put a figure in a prompt asks nothing.
+    A stratum and era with no name or no period has no cell."""
+    out = []
+    for stratum in PANEL_STRATA:
+        for era in ERAS:
+            calendar = {name: (first, last) for name, first, last in periods(stratum, era)}
+            every = [str(period) for period in panel.periods(stratum, era)]
+            if len(set(every)) != len(every) or any(period not in calendar for period in every):
+                raise ValueError(f"the panel plan's periods of {stratum}/{era} are not periods of the calendar, once each")
+            names = list(FACTORS) if stratum == "P6" else [str(name) for name in panel.names(stratum, era)]
+            if len(set(names)) != len(names) or (stratum != "P6" and any(not NAME.match(name) for name in names)):
+                raise ValueError(f"the panel plan's names of {stratum}/{era} are not tickers, once each")
+            chosen, asked = _grid(names, every, stratum, era, per_cell)
+            for period in asked:
+                for symbol in chosen:
+                    out.append(_question(stratum, era, symbol, period, *calendar[period]))
     return out
 
 
@@ -648,13 +732,25 @@ def _count(value: Any) -> int:
     return int(value) if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
 
 
+def _owing(doc: Mapping[str, Any], strata: Sequence[str]) -> dict[str, Any]:
+    """`doc` as `due` is shown it while a plan asks the panel `strata`: a route whose published result lacks one of
+    them reads as never published (its `at` left out), so it is due at once. Nothing is written from this view."""
+    def whole(row: Mapping[str, Any]) -> bool:
+        cells = row.get("cells") if isinstance(row.get("cells"), Mapping) else {}
+        return all(isinstance(cells.get(stratum), Mapping) and cells[stratum] for stratum in strata)
+
+    return {**doc, "routes": {key: (row if whole(row) else {k: v for k, v in row.items() if k != "at"})
+                              for key, row in doc["routes"].items()}}
+
+
 class Probe:
     """One run of the job on one route (the module docstring), over what `run` opens: the swarm store (it books the
     dollars), the swarm's settings, the model router, the House's equity store opened with the gate's capability, and
-    the universe. `clock` times the run for `ASK_SECONDS` (monotonic); the file's times are `ctx.now()`."""
+    the universe. `clock` times the run for `ASK_SECONDS` (monotonic); the file's times are `ctx.now()`. `panel`:
+    release E4's plan of the panel strata (THE PANEL STRATA: `names`, `periods`, `truths`, `published`), or None."""
 
     def __init__(self, ctx: Any, *, store: Any, settings: Mapping[str, Any] | None, router: Any, equity: Any,
-                 symbols: Mapping[str, str], clock: Callable[[], float] = time.monotonic):
+                 symbols: Mapping[str, str], clock: Callable[[], float] = time.monotonic, panel: Any = None):
         self.ctx = ctx
         self.root = Path(ctx.root)
         self.store = store
@@ -663,6 +759,7 @@ class Probe:
         self.equity = equity
         self.symbols = dict(symbols)
         self.clock = clock
+        self.panel = panel
 
     def write(self, doc: Mapping[str, Any]) -> None:
         from .context import write_json
@@ -682,7 +779,11 @@ class Probe:
         now = float(self.ctx.now())
         served = {r.key: r for r in elane_yield.routes(self.settings, self.router)}
         doc = read(self.root)
-        key = due(doc, list(served), now=now, every_days=c["every_days"])
+        # THE PANEL STRATA, when a plan was handed in: its questions first (a plan that cannot be asked fails the run
+        # before any route is marked), and a route whose result lacks a stratum they ask is due at once.
+        further = panel_questions(self.panel, per_cell=c["questions_per_cell"]) if self.panel is not None else []
+        asks = sorted({str(q["stratum"]) for q in further})
+        key = due(_owing(doc, asks) if asks else doc, list(served), now=now, every_days=c["every_days"])
         if key is None:
             return {"status": "skipped", "why": "no route is due a probe"}
         room = float(elane_yield.room(self.store, self.settings, now))
@@ -695,7 +796,8 @@ class Probe:
         probe_n = 1 + _count(row.get("probes"))
         asked_of = questions(self.symbols, per_cell=c["questions_per_cell"])
         recall = recall_questions()
-        mine = qset([*asked_of, *recall])
+        mine = qset([*asked_of, *recall])   # E3's own questions and nothing of the panel's: its cells never move
+        theirs = qset(further) if further else None
         partial = row.get("partial") if isinstance(row.get("partial"), Mapping) else None
         if partial is None or partial.get("qset") != mine or partial.get("probe_n") != probe_n \
                 or not isinstance(partial.get("cells"), Mapping):
@@ -703,6 +805,9 @@ class Probe:
         row.pop("partial", None)
         cells: dict[str, dict[str, Any]] = {s: dict(e) for s, e in ((partial or {}).get("cells") or {}).items()
                                             if isinstance(e, Mapping)}
+        if theirs is None or (partial or {}).get("panel_qset") != theirs:
+            for stratum in PANEL_STRATA:  # another panel question set, or no plan now: the PANEL cells are dropped
+                cells.pop(stratum, None)
         kept_recall = (partial or {}).get("recall") if isinstance((partial or {}).get("recall"), Mapping) else None
         before = _num((partial or {}).get("usd")) or 0.0
         answered_as = (partial or {}).get("model") if isinstance((partial or {}).get("model"), str) else None
@@ -715,9 +820,16 @@ class Probe:
                        else schedule.iso(now))
         row["attempted_at"] = schedule.iso(now)
         row["idle"] = _count(row.get("idle")) + 1
+        def kept(usd: float, batch_usd: Any, model: Any) -> dict[str, Any]:
+            """The partial as the file keeps it; `panel_qset` only while a plan asks (without one the file is E3's)."""
+            held = {"probe_n": probe_n, "qset": mine, "usd": round(usd, 6), "batch_usd": batch_usd, "model": model,
+                    "cells": cells, "recall": kept_recall}
+            if theirs is not None:
+                held["panel_qset"] = theirs
+            return held
+
         if partial is not None:
-            row["partial"] = {"probe_n": probe_n, "qset": mine, "usd": round(before, 6), "batch_usd": dearest,
-                              "model": answered_as, "cells": cells, "recall": kept_recall}
+            row["partial"] = kept(before, dearest, answered_as)
         doc["routes"][key] = row
         self.write(doc)
 
@@ -726,9 +838,7 @@ class Probe:
                                  "scored": 0, "dearest": dearest}
 
         def save() -> None:
-            row["partial"] = {"probe_n": probe_n, "qset": mine, "usd": round(before + state["spent"], 6),
-                              "batch_usd": state["dearest"], "model": state["model"], "cells": cells,
-                              "recall": kept_recall}
+            row["partial"] = kept(before + state["spent"], state["dearest"], state["model"])
             doc["routes"][key] = row
             self.write(doc)
 
@@ -806,15 +916,32 @@ class Probe:
                 if got is None:
                     return None
                 answers.extend(got)
+            stratum = str(batch_of[0]["stratum"])
             try:
-                truths = [truth(self.equity, q) for q in batch_of]
+                if stratum in PANEL_STRATA:
+                    # THE PLAN'S TRUTHS, a cell at once (it reads the panel store). One outside the stratum's words
+                    # is no truth; a plan that fails here ends the run as a store being rewritten does (the dollars
+                    # of the cell are booked; the next run asks it again).
+                    try:
+                        truths = list(self.panel.truths(batch_of))
+                    except (MissingData, StoreRefused):
+                        raise
+                    except Exception as exc:  # noqa: BLE001 - the plan's own fault: never a scored cell
+                        state["stopped"], state["error"] = "data", f"the panel plan: {type(exc).__name__}: {str(exc)[:140]}"
+                        return None
+                    if len(truths) != len(batch_of):
+                        state["stopped"], state["error"] = "data", "the panel plan gave no truth a question"
+                        return None
+                    truths = [t if isinstance(t, str) and t in (*WORDS[stratum], "tie") else None for t in truths]
+                else:
+                    truths = [truth(self.equity, q) for q in batch_of]
             except (MissingData, StoreRefused) as exc:  # the store is being rewritten: what is scored so far stays
                 state["stopped"], state["error"] = "data", f"{type(exc).__name__}: {str(exc)[:160]}"
                 return None
             return score(batch_of, answers, truths)
 
         grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
-        for q in asked_of:
+        for q in [*asked_of, *further]:  # E3's cells first, then the panel's
             grouped.setdefault((q["stratum"], q["era"]), []).append(q)
         for (stratum, era), batch_of in grouped.items():
             if era in cells.get(stratum, {}):
@@ -851,6 +978,14 @@ class Probe:
             for name in newly:
                 if name.split("/", 1)[1] in JUDGED_ERAS:
                     self.ctx.alert("info", f"CP1: the contamination probe of route {key} newly reads cell {name} as recalled")
+            if self.panel is not None:
+                try:  # THE LOOK'S PERMIT is the plan's to write; the result above is published whatever it does
+                    self.panel.published(doc)
+                    permit = True
+                except Exception as exc:  # noqa: BLE001
+                    permit = False
+                    self.ctx.alert("warning", f"the contamination probe published route {key} and its plan could not "
+                                              f"write the look permit ({type(exc).__name__})")
         elif state["spent"] > 0 or "partial" in row:
             save()  # the dollars so far stay with the probe they bought
         if row["idle"] >= IDLE_ALARM:
@@ -860,14 +995,29 @@ class Probe:
                "finished": finished, "cells": state["scored"], "asked": state["asked"], "stopped": state["stopped"]}
         if state["error"]:
             out["error"] = state["error"]
+        if self.panel is not None:
+            out["panel"] = len({(q["stratum"], q["era"]) for q in further})
+            if finished:
+                out["permit"] = permit
         return out
 
 
 def run(ctx: Any) -> dict[str, Any]:
-    """THE JOB (the module docstring; league/ops/registry.py). The receipt: {"route", "probe" (its number), "usd",
-    "bound" (the run's dollars at most), "finished", "cells" (scored this run), "asked", "stopped" ("usd" | "time" |
-    "error" | "data" | "fallback" | None)} and, when a call or the store failed or another profile answered,
-    "error"."""
+    """THE JOB as release E3 built it: no panel stratum (the module docstring). The receipt: {"route", "probe" (its
+    number), "usd", "bound" (the run's dollars at most), "finished", "cells" (scored this run), "asked", "stopped"
+    ("usd" | "time" | "error" | "data" | "fallback" | None)} and, when a call or the store failed or another profile
+    answered, "error". The House's job since release E4 is `league.ops.contam_xs.run`, which is `probe` with the
+    panel's plan."""
+    return probe(ctx)
+
+
+def probe(ctx: Any, *, panel: Callable[..., Any] | None = None) -> dict[str, Any]:
+    """THE JOB, with or without the panel strata. `panel`: None (`run`), or `panel(ctx, settings, capability) -> a
+    plan | None`, asked ONCE THE HOUSE'S OWN STORE IS OPEN AND BEFORE ANY ROUTE IS MARKED, with the swarm's settings
+    and the gate's capability this job minted (under `GATE_REASON`: the one capability of a run). None: no panel
+    stratum this run. A `MissingData` or `StoreRefused` it raises (a panel store that cannot be read) fails the job
+    there: no route marked, no dollar spent. The receipt is `run`'s, with `panel` and `permit` beside (THE PANEL
+    STRATA)."""
     from ..equity.store import STORE_DIR, EquityStore, MissingData, StoreRefused, mint_equity_gate_capability
     from ..swarm import settings as settings_mod
     from . import equity_data
@@ -880,9 +1030,16 @@ def run(ctx: Any) -> dict[str, Any]:
         return {"status": "skipped", "why": "no swarm store yet"}
     try:  # the House's own parts first: a store that cannot be read marks no route and costs nothing
         EquityStore(root / STORE_DIR)  # absent or being rewritten: `MissingData`, before the capability is asked for
-        equity = EquityStore(root / STORE_DIR, gate=mint_equity_gate_capability(root / STORE_DIR, GATE_REASON))
+        capability = mint_equity_gate_capability(root / STORE_DIR, GATE_REASON)
+        equity = EquityStore(root / STORE_DIR, gate=capability)
     except (MissingData, StoreRefused) as exc:
         return {"status": "failed", "error": f"the equity store cannot be read ({type(exc).__name__}): {str(exc)[:200]}"}
+    plan = None
+    if panel is not None:
+        try:
+            plan = panel(ctx, settings, capability)
+        except (MissingData, StoreRefused) as exc:
+            return {"status": "failed", "error": f"the panel store cannot be read ({type(exc).__name__}): {str(exc)[:200]}"}
     from ..swarm.models import build_router
     from ..swarm.store import SwarmStore
 
@@ -890,13 +1047,14 @@ def run(ctx: Any) -> dict[str, Any]:
     try:
         router = build_router(root, store, settings, config=ctx.config)
         return Probe(ctx, store=store, settings=settings, router=router, equity=equity,
-                     symbols=equity_data.universe()).run()
+                     symbols=equity_data.universe(), panel=plan).run()
     finally:
         store.close()
 
 
-__all__ = ["FILE", "VERSION", "GATE_REASON", "ERAS", "STRATA", "RECALL", "RECALL_MONTHS", "ROLE", "SYMBOLS_PER_CELL",
+__all__ = ["FILE", "VERSION", "GATE_REASON", "ERAS", "STRATA", "PANEL_STRATA", "FACTORS", "FACTOR_WORDS", "NAME", "RECALL", "RECALL_MONTHS", "ROLE", "SYMBOLS_PER_CELL",
            "PERMUTATIONS", "ASK_SECONDS", "READABLE_ANSWERED", "READABLE_PERIODS", "ALPHA", "HISTORY", "MODES",
            "DEFAULTS", "BOUNDS", "SYSTEM", "KEY_PREFIX", "AGAINST", "WORDS", "RECALL_ERA", "IDLE_ALARM", "JUDGED_ERAS", "CELL_KEYS",
-           "RECALL_KEYS", "cfg", "mode", "periods", "stratum_symbols", "grid", "questions", "recall_questions", "qset",
-           "truth", "prompt", "parse", "wilson", "perm_p", "score", "read", "due", "Probe", "run"]
+           "RECALL_KEYS", "cfg", "mode", "periods", "stratum_symbols", "grid", "questions", "panel_questions",
+           "recall_questions", "qset", "truth", "prompt", "parse", "wilson", "perm_p", "score", "read", "due", "Probe",
+           "run", "probe"]
