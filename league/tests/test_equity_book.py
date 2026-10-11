@@ -1215,7 +1215,7 @@ class Decide(BookTest):
     def test_a_retired_program_exits_and_never_decides(self):
         h = self.harness()
         inst = self.setup_decide(h, rows=[family_row("someone-else")])
-        h.families.rows.pop(inst.family)
+        h.families.rows[inst.family]["band"] = "retired"                    # the swarm retired its family
         h.instance("someone-else")
         lot = h.lot(inst, "SPY", "0.4", "590")
         h.tick(16, 31)

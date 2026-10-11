@@ -15,9 +15,14 @@ equity family), `confirm_band` (the row is still the one the band was judged on,
 transaction, so a gate or a retirement on the swarm's own connection cannot interleave with the band write).
 
 `last_error` says why the last `read` could not read the store ("" when it could): an unreadable store reads as no
-rows, and the book never takes "no rows" from an unreadable store for "every program retired". `twins()` is the swarm
-store's `equity_twins` record (league/ops/twins.py writes it: {"eq:<lid>": {status, gap_bp, final, ...}}), EDM1's twin
-leg.
+rows, and the book never takes "no rows" from an unreadable store for "every program retired". The read is STRICT
+(`bands.read(..., strict=True)`): a missing store, a read that failed within its second and an equity identity that
+cannot be computed each raise there and land in `last_error` (the plain read answers [] for all three, which the book
+once took for "every family gone"). `standing(family, version)` is the store's own word on ONE family, for an instance
+whose family has no row in a good read: the book retires only on what it says ("retired" | "demoted"), never on the
+absence alone (one family's code file or version row that cannot be read leaves it out of `read` too). `twins()` is the
+swarm store's `equity_twins` record (league/ops/twins.py writes it: {"eq:<lid>": {status, gap_bp, final, ...}}), EDM1's
+twin leg.
 
 `MemoryEquityFamilies` is the same API in memory, for tests.
 """
@@ -36,6 +41,11 @@ from . import LANES
 TWINS_KEY = "equity_twins"
 #: The bands the book itself moves an equity family between (the swarm moves gym <-> candidate and retires).
 BOOK_BANDS = ("candidate", "probe", "sized")
+#: The bands an instance runs in (league/equity/live.py `LIVE_BANDS`).
+RUNNING_BANDS = ("probe", "sized")
+#: `standing`'s answers that are POSITIVE EVIDENCE a version no longer runs (the book retires its instance on these
+#: alone); "live" (the store shows it running) and "unknown" (it could not be read) change nothing.
+GONE = ("retired", "demoted")
 
 
 def validation_r_sd(state: Any, version: Any) -> float | None:
@@ -72,11 +82,12 @@ class EquityFamilies:
     def _rows(self, family: str | None = None) -> list[dict]:
         from ..swarm import bands
 
-        return [dict(row) for row in bands.read(self.root, family=family, lanes=LANES)
+        return [dict(row) for row in bands.read(self.root, family=family, lanes=LANES, strict=True)
                 if str(row.get("lane") or "") in LANES]
 
     def read(self, family: str | None = None) -> list[dict]:
-        """The equity-lane rows (the module docstring); [] when the store cannot be read within a second."""
+        """The equity-lane rows (the module docstring); [] with `last_error` set when the store cannot be read (no
+        store, not within a second, no equity identity)."""
         try:
             rows = self._rows(family)
         except Exception as exc:  # noqa: BLE001 - fail closed: no row, and `last_error` says why
@@ -91,6 +102,48 @@ class EquityFamilies:
                     row["validation_r_sd"] = None
         self.last_error = ""
         return rows
+
+    def standing(self, family: str, version: int) -> tuple[str, str]:
+        """THE STORE'S OWN WORD on `family`'s version `version`, for an instance whose family has no row in a good
+        `read`: (code, why), read on the swarm store itself and never inferred from the absence. "retired": its family
+        is retired, is no equity-lane family, runs another banded version, or its band's proof is not the current
+        equity identity (`bands.current_equity_evaluator`: an evidence release moved it); "demoted": its band is no
+        running band (a Candidate waiting for a seat, back in the Gym); "live": the store shows it alive in a running
+        band on this version with a current proof (the read left it out for a reason of its own: its code file or its
+        version row); "unknown": the family, its version or the equity identity could not be read. Never raises."""
+        try:
+            with self.lock:
+                store = self._db()
+                fam = store.family(str(family))
+                if fam is None:
+                    return "unknown", "the swarm store has no such family"
+                if fam.get("retired_at"):
+                    return "retired", "its family is retired"
+                state = fam.get("state") if isinstance(fam.get("state"), Mapping) else {}
+                spec = fam.get("spec") if isinstance(fam.get("spec"), Mapping) else {}
+                if str(spec.get("lane") or "") not in LANES:
+                    return "retired", "its family is no equity-lane family"
+                band = str(fam.get("band") or "")
+                if band not in RUNNING_BANDS:
+                    return "demoted", f"its band is {band or 'none'}"
+                banded = state.get("banded_version")
+                if isinstance(banded, bool) or not isinstance(banded, int):
+                    return "unknown", f"its band names no version ({banded!r})"
+                if banded != int(version):
+                    return "retired", f"superseded by version {banded}"
+                row = store.version(str(family), banded)
+            if row is None or not row.get("sha"):
+                return "unknown", f"its version {banded} cannot be read"
+            from ..swarm import bands
+
+            current = bands.equity_proof_current(state, row)
+            if current is None:
+                return "unknown", "the equity identity could not be computed"
+            if not current:
+                return "retired", "its band's proof is not the current equity identity"
+            return "live", "the store shows it running: its row could not be read (its code file)"
+        except Exception as exc:  # noqa: BLE001 - no evidence either way
+            return "unknown", f"{type(exc).__name__}: {str(exc)[:160]}"
 
     def forward_rows(self, family: str) -> list[dict]:
         with self.lock:
@@ -121,7 +174,10 @@ class EquityFamilies:
                     return False
                 if validation_r_sd(state, expected.get("version")) != expected.get("validation_r_sd"):
                     return False
-                row = next((r for r in self._rows(family) if r.get("family") == family), None)
+                try:
+                    row = next((r for r in self._rows(family) if r.get("family") == family), None)
+                except Exception:  # noqa: BLE001 - the row could not be read again (the read is strict): no write
+                    return False
                 if row is None or any(row.get(k) != expected.get(k) for k in CONFIRM_FIELDS):
                     return False
                 if band != fam["band"]:
@@ -143,7 +199,10 @@ class EquityFamilies:
 
 class MemoryEquityFamilies:
     """The same API over rows in memory (tests). `forward` {family: {trade id: row}}, `moves` [(family, band, reason)],
-    `twin_rows` the twins record; set `last_error` to make `read` answer [] as an unreadable store does."""
+    `twin_rows` the twins record; set `last_error` to make `read` answer [] as an unreadable store does. `hidden`:
+    families `read` leaves out although they run (a row the store could not read: `standing` then says "live");
+    `standing` of a family with no row at all is "unknown" (the store never deletes a family: it retires it, band
+    "retired")."""
 
     def __init__(self, rows: Iterable[Mapping[str, Any]] = ()):
         self.rows = {str(r["family"]): dict(r) for r in rows}
@@ -151,6 +210,7 @@ class MemoryEquityFamilies:
         self.moves: list[tuple[str, str, str]] = []
         self.twin_rows: dict[str, dict] = {}
         self.last_error = ""
+        self.hidden: set[str] = set()
         self.lock = threading.Lock()
 
     def read(self, family: str | None = None) -> list[dict]:
@@ -158,7 +218,22 @@ class MemoryEquityFamilies:
             if self.last_error:
                 return []
             return [copy.deepcopy(r) for r in self.rows.values() if r.get("band") != "retired"
-                    and (family is None or r["family"] == family)]
+                    and r["family"] not in self.hidden and (family is None or r["family"] == family)]
+
+    def standing(self, family: str, version: int) -> tuple[str, str]:
+        with self.lock:
+            row = self.rows.get(str(family))
+            if self.last_error:
+                return "unknown", self.last_error
+            if row is None:
+                return "unknown", "the swarm store has no such family"
+            if row.get("band") == "retired":
+                return "retired", "its family is retired"
+            if row.get("band") not in RUNNING_BANDS:
+                return "demoted", f"its band is {row.get('band') or 'none'}"
+            if int(row.get("version") or 0) != int(version):
+                return "retired", f"superseded by version {row.get('version')}"
+            return "live", "the store shows it running: its row could not be read (its code file)"
 
     def forward_rows(self, family: str) -> list[dict]:
         with self.lock:
@@ -199,4 +274,5 @@ class MemoryEquityFamilies:
             return copy.deepcopy(self.twin_rows)
 
 
-__all__ = ["TWINS_KEY", "BOOK_BANDS", "CONFIRM_FIELDS", "validation_r_sd", "EquityFamilies", "MemoryEquityFamilies"]
+__all__ = ["TWINS_KEY", "BOOK_BANDS", "RUNNING_BANDS", "GONE", "CONFIRM_FIELDS", "validation_r_sd", "EquityFamilies",
+           "MemoryEquityFamilies"]
