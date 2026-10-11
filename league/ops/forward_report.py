@@ -49,10 +49,23 @@ and a night the budget cut, or one a vendor bar came late to, leaves programs wi
 the next night's whole recompute fills it. Written the night itself, the day's N_eff and CEY (the goal's measure of
 compounding) and its RC group counts would be short of those programs for good. So a day is written once no active
 registered program that was owed it (its `first_day` on or before the day, held by the registry at the day's close)
-is still without its row under the newest engine, or once `METER_WAIT_NIGHTS` later nights have run, whichever
+is still AWAITED for its row under the newest engine, or once `METER_WAIT_NIGHTS` later nights have run, whichever
 comes first; in the second case it is written as it stands and one `meter_partial` event (once a day; the count of
-programs still without a row) marks it. The days after a waiting day wait behind it (CEY is a running sum). FW5
+the rows still awaited) marks it. The days after a waiting day wait behind it (CEY is a running sum). FW5
 reads no partial day: neither in its run of days nor in its medians.
+ONLY AN ABSENCE THE NEXT NIGHTS CAN FILL IS AWAITED (the verification's fix). Awaited without end, ONE program that
+never gets a row again (a holder of a halted symbol, the shadow's STATED LIMIT; a program that hangs every night)
+made every later day's meters `METER_WAIT_NIGHTS` sessions late and partial for good, and FW5, which reads no
+partial day, read nothing from then on. So a program without its row for a day is awaited when its absence began
+that day (it has its row, under any engine, for the session before, which it was owed too), whatever the cause; or
+when it has been without one for fewer than `METER_WAIT_NIGHTS` owed sessions running and is neither suspect
+(`forward_db.suspect`) nor behind in the shadow's queue (`_behind`: its last attempt failed twice in the child). A
+STANDING absentee is so awaited at the start of its absence (its first day, or its first `METER_WAIT_NIGHTS` - 1)
+and never again: the days after are written the night itself, are no partial days, and FW5 reads them. FW2 goes on
+telling a program that fails night after night. A CONTROL is made in the job's own process and no budget leaves one
+stale: one without its row is awaited, by the same rule, only when its data failed (a `data_failed` event of its
+own for that night or a later one). A night whose deadline deferred the controls left every due program stale too,
+and the day waits for those.
 
 THE METER'S FLOOR (`METER_MIN`; the review's fix). BH and BY over one or two lineages are a verdict on a program
 (with one lineage, BH is 1 exactly when that lineage's p is at or under q), and no program without a "live" tag has
@@ -640,30 +653,68 @@ def _write_day(root: str | Path, db: sqlite3.Connection, day: str, *, now: float
             (day, n["n_w"], n["members"], n["neff"], n["neff_raw"], cey_day, total, sim_py, hist_iy,
              forward_stats.replay_multiple(sim_py, hist_iy, total), float(now))).rowcount
         if awaited and wrote["cey"]:
-            # Written after its wait, short of these programs' rows: marked once, and FW5 reads no such day.
+            # Written after its wait, short of these awaited rows: marked once, and FW5 reads no such day.
             forward_db.event(db, "meter_partial", day=day, at=float(now), once="day",
                              payload={"why": f"written after {METER_WAIT_NIGHTS} later nights with programs still "
                                              "without their row for the day", "programs": int(awaited)})
     return wrote
 
 
+def _behind(db: sqlite3.Connection, pid: int) -> bool:
+    """A program whose LAST attempt failed twice in the child: a `run_failed` or a `run_behind` event newer than every
+    row of its own, under any engine. The shadow's queue puts it behind its class until a run of it completes
+    (league/ops/forward_shadow.py `Shadow._behind`, THE QUEUE'S HEAD); read here as the queue reads it."""
+    failed = _one(db, "SELECT MAX(at) FROM fwd_events WHERE kind IN ('run_failed', 'run_behind') AND pid=?", (int(pid),))
+    if failed is None:
+        return False
+    wrote = _one(db, "SELECT MAX(at) FROM fwd_days WHERE pid=?", (int(pid),))
+    return wrote is None or float(wrote) < float(failed)
+
+
 def _awaited(db: sqlite3.Connection, day: str) -> int:
-    """How many active registered programs that were owed `day` (first day on or before it; held by the registry at
-    its close) have no row for it under the newest engine: the programs a night left stale or without data."""
+    """How many registered rows A LATER NIGHT CAN STILL GIVE their row for `day` (the module docstring: A DAY'S METERS
+    WAIT FOR ITS ROWS, and ONLY AN ABSENCE THE NEXT NIGHTS CAN FILL IS AWAITED).
+
+    WHO LACKS IT: an active registered program that was owed `day` (first day on or before it; held by the registry at
+    its close) and has no row for it under the newest engine; and a control in the same place whose data failed on
+    that night or a later one (a `data_failed` event of its own: no budget leaves a control stale).
+    WHOSE ABSENCE IS AWAITED: one that began on `day` (it has its row, under any engine, for the session before, which
+    it was owed too), whatever its cause; or one of fewer than `METER_WAIT_NIGHTS` owed sessions running, `day` among
+    them, of a program that is neither suspect nor behind in the queue. One without its row for `METER_WAIT_NIGHTS`
+    owed sessions running is a standing absentee and is awaited no more."""
     engine, closed = forward_db.engine_now(db), _close_at(day)
     if engine is None or closed is None:
         return 0
-    missing = guard.ids(db, "SELECT r.pid FROM fwd_registry r WHERE r.lane!='control' AND r.first_day<=? AND "
-                            "r.registered_at<=? AND NOT EXISTS (SELECT 1 FROM fwd_days d WHERE d.pid=r.pid AND d.day=? "
-                            "AND d.engine=?)", (day, closed, day, int(engine)))
+    missing = _rows(db, "SELECT r.pid, r.first_day, r.registered_at FROM fwd_registry r WHERE r.first_day<=? AND "
+                        "r.registered_at<=? AND NOT EXISTS (SELECT 1 FROM fwd_days d WHERE d.pid=r.pid AND d.day=? AND "
+                        "d.engine=?) AND (r.lane!='control' OR EXISTS (SELECT 1 FROM fwd_events e WHERE "
+                        "e.kind='data_failed' AND e.pid=r.pid AND e.day>=?))", (day, closed, day, int(engine), day))
     if not missing:
         return 0
     stopped = set(guard.ids(db, "SELECT DISTINCT pid FROM fwd_tags WHERE tag='stopped'"))
-    return sum(1 for pid in missing if pid not in stopped or forward_db.active(db, int(pid)))
+    # The forward days before `day` that an absence of `METER_WAIT_NIGHTS` sessions spans, the nearest first.
+    before = [(session, _close_at(session)) for session in _window(day, METER_WAIT_NIGHTS)[-2::-1]]
+    awaited = 0
+    for row in missing:
+        pid = int(row["pid"])
+        if pid in stopped and not forward_db.active(db, pid):
+            continue
+        absent, began = 1, False                    # the owed sessions running without its row; it began on `day`
+        for nearest, (session, close_at) in enumerate(before):
+            if session < str(row["first_day"]) or close_at is None or float(row["registered_at"]) > close_at:
+                break                               # not owed that session, nor any before it
+            if _one(db, "SELECT 1 FROM fwd_days WHERE pid=? AND day=? LIMIT 1", (pid, session)) is not None:
+                began = nearest == 0
+                break
+            absent += 1
+        if began or (absent < METER_WAIT_NIGHTS and not forward_db.suspect(db, pid) and not _behind(db, pid)):
+            awaited += 1
+    return awaited
 
 
 def _partial_days(db: sqlite3.Connection) -> set[str]:
-    """The days whose meters were written short of a program's row (`meter_partial`)."""
+    """The days whose meters were written short of a row still awaited (`meter_partial`; a day written without a
+    standing absentee's row is not one)."""
     return {str(day) for day in guard.ids(db, "SELECT DISTINCT day FROM fwd_events WHERE kind='meter_partial'")}
 
 
@@ -819,7 +870,8 @@ def _cey(db: sqlite3.Connection) -> dict[str, Any] | None:
 def _under_median(db: sqlite3.Connection) -> tuple[int, str | None]:
     """(for how many forward days running, ending at the latest, cey_day was under the median of the last
     `MEDIAN_DAYS` forward days up to it; the first of those days). A PARTIAL day (`meter_partial`: written short of a
-    program's row) is read as no day at all: a night the budget cut says nothing of what the generators do."""
+    row a later night could still have given it) is read as no day at all: a night the budget cut says nothing of
+    what the generators do. A day written without a standing absentee's row is no partial day and is read."""
     partial = _partial_days(db)
     rows = [row for row in _rows(db, "SELECT day, cey_day FROM fwd_cey ORDER BY day DESC LIMIT "
                                      f"{MEDIAN_DAYS + 10 * FW5_DAYS + len(partial)}")[::-1] if row["day"] not in partial]

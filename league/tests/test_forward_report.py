@@ -653,7 +653,12 @@ class TheMeter(Fixture):
 class ADaysMetersWaitForItsRows(Fixture):
     """A day's rows are first-write and never recomputed: written the night a budget cut (or a vendor bar came late),
     the day's N_eff, CEY and group counts were short of the programs left without a row, for good. The wait is real
-    here (`WAITS`): every registered program has its rows, or lacks them on purpose."""
+    here (`WAITS`): every registered program has its rows, or lacks them on purpose.
+
+    ONLY AN ABSENCE THE NEXT NIGHTS CAN FILL IS AWAITED: one that began on the day itself, or a short one of a program
+    that is neither suspect nor behind in the queue. A STANDING absentee (a holder of a halted symbol, a program that
+    hangs every night) is awaited at the start of its absence and never again: the days after are written the night
+    itself, whole of everything a night can give them, are no partial days, and FW5 reads them."""
 
     WAITS = True
 
@@ -719,18 +724,185 @@ class ADaysMetersWaitForItsRows(Fixture):
         self.population(2, 3)
         day = DAYS[2]
         self.assertEqual(R._awaited(self.db, day), 0)
-        self.control("index", 0)                                         # a control is run in the parent: never awaited
+        self.control("index", 0)                                         # a control with no failed data: never awaited
         self.register("later@1", first_day=DAYS[3])                      # its first day is after the day
         self.register("retro@1", registered_at=close(day) + 3600.0)      # the registry held it after the day's close
         stopped = self.register("stopped@1")
+        self.series(stopped, DAYS[:2], [0.0, 0.0])
         self.tag(stopped, "stopped", f"cap:{DAYS[1]}")
         self.assertEqual(R._awaited(self.db, day), 0)
         owed = self.register("owed@1")
+        self.series(owed, DAYS[:2], [0.0, 0.0])                          # it had its rows until the day itself
         self.assertEqual(R._awaited(self.db, day), 1)
+        new = self.register("new@1", first_day=day)                      # the day is the first it is owed
+        self.assertEqual(R._awaited(self.db, day), 2)
+        self.event("run_behind", pid=new, day=day)                       # its first run failed twice: behind its class
+        self.assertEqual(R._awaited(self.db, day), 1, "a first run that failed twice is not what the next night fills")
         self.day(owed, day, 0.0, engine=self.label("eq-1+cccccccccccc+fwd-1") - 1)
         self.assertEqual(R._awaited(self.db, day), 2 + 1,
-                         "a row under an older engine is not the day's row: every program is owed it under the newest")
+                         "a row under an older engine is not the day's row: every program is owed it under the newest, "
+                         "and the rows it had the session before, under the engine of that night, say its absence is new")
         self.assertEqual(R._awaited(self.db, "2026-10-17"), 0, "no session, nothing owed")
+
+    def test_a_short_absence_is_awaited_and_a_standing_one_is_not(self):
+        self.population(2, 6)
+        rows = {gap: self.register(f"gap-{gap}@1") for gap in (1, 2, 3, 6)}
+        for gap, pid in rows.items():                                    # without a row for the last `gap` sessions
+            self.series(pid, DAYS[:6 - gap], [0.0] * (6 - gap))
+        day = DAYS[5]
+        self.assertEqual(R._awaited(self.db, day), R.METER_WAIT_NIGHTS - 1,
+                         "absent since the day, or the session before it: what a night's whole recompute fills")
+        self.assertEqual(R.METER_WAIT_NIGHTS, 3)
+        # Of the two, the one absent two sessions is awaited only while it is neither suspect nor behind.
+        self.tag(rows[2], "suspect", DAYS[5])
+        self.assertEqual(R._awaited(self.db, day), 1)
+        self.event("run_failed", pid=rows[1], day=day)
+        self.assertEqual(R._awaited(self.db, day), 1, "the first session of an absence is awaited whatever its cause")
+
+    def standing(self, nights: int, absent_from: int, tell, *, thin_from: int | None = None) -> tuple[list, int]:
+        """`nights` nights of eight programs with a row every day and one that has none from night `absent_from` on
+        (`tell(pid, i)` writes what the shadow would of it that night); after each night the real `meters`. With
+        `thin_from`, four of the eight are stopped from that night (the day's increment halves). ([(sessions the
+        newest meter row lags the night, the answer's "waiting")], the absentee's pid)."""
+        rng = np.random.default_rng(7)
+        whole = [self.register(f"fam-{i}@1") for i in range(8)]
+        absentee = self.register("absentee@1")
+        read = []
+        for i in range(nights):
+            self.now = ny(DAYS[i], 19)
+            if thin_from is not None and i == thin_from:
+                for pid in whole[4:]:
+                    self.tag(pid, "stopped", f"cap:{DAYS[i - 1]}")
+                whole = whole[:4]
+            for pid in whole:
+                self.day(pid, DAYS[i], float(rng.normal(0, 0.01)))
+            if i < absent_from:
+                self.day(absentee, DAYS[i], float(rng.normal(0, 0.01)))
+            else:
+                tell(absentee, i)
+            self.night(DAYS[i])
+            out = self.meters()
+            written = [r["day"] for r in self.table("fwd_cey")]
+            read.append((i - (DAYS.index(written[-1]) if written else -1), out.get("waiting")))
+        return read, absentee
+
+    def test_one_standing_absentee_holds_no_later_day_and_blinds_no_alarm(self):
+        """A program that holds a halted symbol has no row from that session on (the shadow's STATED LIMIT) and is
+        never stopped. It was awaited every day for good: every later day's meters came three sessions late and were
+        marked partial, and FW5, which reads no partial day, read no day at all."""
+        store = self.swarm()
+        self.equity_family(store, "eq-a")
+        halted_from, thin_from, nights, wait = 14, 35, 45, R.METER_WAIT_NIGHTS
+        self.now = ny(DAYS[thin_from + 2], 12)
+        store.event("swarm.born", "eq-a", {"lane": "beta"})
+        read, absentee = self.standing(
+            nights, halted_from, lambda pid, i: self.event("data_failed", pid=pid, day=DAYS[i]), thin_from=thin_from)
+        # The absence is awaited while a night could still fill it: its first `wait` - 1 sessions, each `wait` nights.
+        settled = halted_from + 2 * wait - 2
+        self.assertEqual([lag for lag, _ in read[halted_from:settled]], [1, 2, 3, 3])
+        self.assertEqual([waiting for _, waiting in read[halted_from:settled]],
+                         [{"day": DAYS[halted_from], "programs": 1}] * wait + [{"day": DAYS[halted_from + 1], "programs": 1}])
+        self.assertEqual(R._partial_days(self.db), set(DAYS[halted_from:halted_from + wait - 1]))
+        # From then on every day is written the night itself, and none is a partial day.
+        self.assertEqual({lag for lag, _ in read[settled:]}, {0}, "no later day's meters wait for the absentee")
+        self.assertEqual({str(waiting) for _, waiting in read[settled:]}, {"None"})
+        cey = self.table("fwd_cey")
+        self.assertEqual([r["day"] for r in cey], DAYS[:nights], "every day has its meters")
+        self.assertEqual({r["members"] for r in cey[settled:thin_from]}, {8}, "whole of the eight a night gives a row")
+        self.assertEqual(self.db.execute("SELECT count(*) FROM fwd_days WHERE pid=? AND day>=?",
+                                         (absentee, DAYS[halted_from])).fetchone()[0], 0)
+        # FW5 reads the days after: the increment under its median ten days running, while births go on, is told.
+        self.now = ny(DAYS[nights - 1], 20)
+        run, first = R._under_median(self.db)
+        self.assertGreaterEqual(run, R.FW5_DAYS, "the ten days after four of the eight stopped are read")
+        self.assertLessEqual(first, DAYS[thin_from])
+        (alarm,) = [a for a in self.section()["alarms"] if a["id"] == "FW5"]
+        self.assertIn("while 1 equity births went on", alarm["text"])
+
+    def test_a_program_that_hangs_every_night_is_awaited_its_first_night_only(self):
+        """Its run fails in the night's child and again alone (`run_failed`): it stands behind its class from that
+        night and is tagged suspect after the third. Only the first session of its absence could have been a
+        passing failure."""
+        def hung(pid, i):
+            self.event("run_failed", pid=pid, day=DAYS[i])
+            if i >= 12 + forward_db.SUSPECT_NIGHTS - 1:
+                self.tag(pid, "suspect", DAYS[i])
+
+        read, absentee = self.standing(24, 12, hung)
+        self.assertTrue(R._behind(self.db, absentee))
+        self.assertEqual([lag for lag, _ in read[12:16]], [1, 2, 3, 0])
+        self.assertEqual({lag for lag, _ in read[16:]}, {0})
+        self.assertEqual(R._partial_days(self.db), {DAYS[12]})
+        self.assertEqual([r["day"] for r in self.table("fwd_cey")], DAYS[:24])
+        # A run of it that completes fills its days, and it is behind no more: its next absence is a new one.
+        self.now = ny(DAYS[24], 19)
+        self.assertEqual(R._awaited(self.db, DAYS[24]), 8, "the eight that had their rows the session before")
+        self.series(absentee, DAYS[12:24], [0.001] * 12)
+        self.assertFalse(R._behind(self.db, absentee))
+        self.assertEqual(R._awaited(self.db, DAYS[24]), 8 + 1)
+
+    def test_behind_is_read_as_the_shadows_queue_reads_it(self):
+        from types import SimpleNamespace
+
+        from league.ops import forward_shadow
+
+        a, b, c, d = (self.register(f"q-{i}@1") for i in range(4))
+        self.now = ny(DAYS[3], 19)
+        for pid in (a, b, c):
+            self.series(pid, DAYS[:3], [0.0] * 3)
+        self.now = ny(DAYS[4], 19)
+        self.event("run_failed", pid=a, day=DAYS[4])                     # newer than every row of its own
+        self.event("run_behind", pid=d, day=DAYS[4])                     # no row at all
+        self.event("run_failed", pid=b, day=DAYS[4])
+        self.event("data_failed", pid=c, day=DAYS[4])                    # the data's: an order of nobody
+        self.now = ny(DAYS[5], 19)
+        self.series(b, DAYS[3:6], [0.0] * 3)                             # a run of it completed since
+        queue = forward_shadow.Shadow._behind(SimpleNamespace(db=self.db))
+        self.assertEqual(queue, {a, d})
+        self.assertEqual({pid for pid in (a, b, c, d) if R._behind(self.db, pid)}, queue)
+
+    def test_a_control_whose_data_failed_is_awaited_the_same_way(self):
+        """A control is made in the job's own process and no budget leaves it stale, so one without its row is
+        awaited only when the night said its data failed (`data_failed`: a vendor bar that came late). Unawaited, the
+        day's control group was written short of it for good."""
+        rng = np.random.default_rng(5)
+        whole = self.population(2, 12)
+        controls = [self.control("index", n) for n in range(6)]
+        late, unmade, halted, rest = controls[0], controls[1], controls[2], controls[3:]
+        for pid in controls:
+            self.series(pid, DAYS[:11], rng.normal(0, 0.01, 11), r0=0.0)
+        for pid in (halted, *rest):
+            self.day(pid, DAYS[11], 0.0, r0=0.0)
+        for day in DAYS[:12]:
+            self.night(day)
+        self.now = ny(DAYS[11], 19)
+        self.assertEqual(R._awaited(self.db, DAYS[11]), 0, "a control without its row and with no failed data")
+        self.event("data_failed", pid=late, day=DAYS[11])
+        out = self.meters()
+        self.assertEqual((out["days"], out["waiting"]), (11, {"day": DAYS[11], "programs": 1}))
+
+        def night(i: int, made) -> dict:
+            self.now = ny(DAYS[i], 19)
+            for pid in whole:
+                self.day(pid, DAYS[i], float(rng.normal(0, 0.01)))
+            for pid in made:
+                self.day(pid, DAYS[i], 0.0, r0=0.0)
+            self.night(DAYS[i])
+            return self.meters()
+
+        # The next night's whole recompute fills it: the day's control group is whole of every control a night made.
+        self.day(late, DAYS[11], 0.0, r0=0.0, at=ny(DAYS[12], 19))
+        self.assertEqual(night(12, (late, halted, *rest)).get("waiting"), None)
+        groups = {(r["day"], r["grp"]): r["n"] for r in self.table("fwd_groups")}
+        self.assertEqual((groups[(DAYS[11], "control:index")], groups[(DAYS[12], "control:index")]), (5, 5))
+        self.assertEqual(R._partial_days(self.db), set(), "the one never made had no failed data: nobody waited for it")
+        # A control whose data fails every night from now on is a standing absentee like any other.
+        for i in range(13, 22):
+            self.event("data_failed", pid=halted, day=DAYS[i], at=ny(DAYS[i], 19))
+            out = night(i, (late, *rest))
+        self.assertEqual((out.get("waiting"), self.table("fwd_cey")[-1]["day"]), (None, DAYS[21]))
+        self.assertEqual(R._partial_days(self.db), set(DAYS[13:13 + R.METER_WAIT_NIGHTS - 1]))
+        self.assertEqual(unmade, controls[1])
 
 
 # ============================================================================================== D9: RC
