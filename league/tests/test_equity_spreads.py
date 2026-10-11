@@ -751,5 +751,143 @@ class ThePanelHalfSpread(unittest.TestCase):
         self.assertEqual(len(SP.POINTS), len(SP.TIMES_ET))
 
 
+# ------------------------------------------------------------------------------------------------- a panel lot's twin
+def panel_lot(lid: int = 7, *, symbol: str = "QAZ", entry_at: str = "open", exit_at: str = "close",
+              opened_day: str = "2027-02-01", exit_day: str = "2027-02-03") -> dict:
+    """An invented closed `eq_lots` row of a name outside E1's universe (league/equity/live.py SCHEMA)."""
+    return {"lid": lid, "instance": "panel-fam@1:r", "family": "panel-fam", "version": 1, "lane": "equity",
+            "symbol": symbol, "class": "stock" if symbol != "SPY" else "etf", "qty": "2.500000",
+            "opened_qty": "2.500000", "entry_px": "40.06", "entry_notional": "100.15", "entry_at": entry_at,
+            "fees": "0.02", "div": "0", "mark": None, "marked_at": None, "opened_at": 1.0, "opened_day": opened_day,
+            "status": "closed", "exit_px": "42.90", "exit_at": exit_at, "exit_day": exit_day, "closed_at": 2.0,
+            "cash": "7.08", "reason": "program", "probe": 1, "tag": "xs", "iid": None, "info": "{}"}
+
+
+def official(o: float, c: float) -> dict:
+    return {"o": str(o), "h": str(max(o, c) + 1), "l": str(min(o, c) - 1), "c": str(c), "v": "1000000", "audit": "ok",
+            "sha": "x" * 64}
+
+
+BARS = {"2027-02-01": official(40.0, 41.0), "2027-02-03": official(42.0, 43.0)}
+
+
+class APanelLotsTwin(unittest.TestCase):
+    """Package B's patch 11 to league/ops/twins.py: a lot of a name outside E1's universe is priced at the panel's
+    half-spreads, the open's figure for a fill at the open and the close's for a fill at the close; with none it stays
+    unpriceable; a lot of E1's universe never asks."""
+
+    PAIR = (0.0010, 0.0005)
+
+    def twin(self, row=None, **kw):
+        from league.ops import twins
+
+        return twins.equity_twin(row or panel_lot(), BARS, at=NOW, **kw)
+
+    def test_an_open_entry_pays_the_opens_figure_and_a_close_exit_the_closes(self):
+        asked = []
+
+        def reader(symbol, day):
+            asked.append((symbol, day))
+            return self.PAIR
+
+        rec = self.twin(panel_hs=reader)
+        self.assertEqual((rec["status"], rec["final"], rec["why"]), ("priced", True, None))
+        self.assertEqual(asked, [("QAZ", "2027-02-01")])
+        self.assertEqual((rec["hs_bp"], rec["hs_exit_bp"], rec["hs_source"]), (10.0, 5.0, "panel"))
+        self.assertEqual((rec["entry_official"], rec["exit_official"]), (40.0, 43.0))
+        self.assertEqual(rec["twin"]["entry_px"], round(40.0 * (1 + 0.0010), 6))
+        self.assertEqual(rec["twin"]["exit_px"], round(43.0 * (1 - 0.0005), 6))
+        stress = self.twin(panel_hs=reader, k=1.5)
+        self.assertEqual(stress["twin"]["entry_px"], round(40.0 * (1 + 0.0015), 6))
+        self.assertEqual(stress["twin"]["exit_px"], round(43.0 * (1 - 0.00075), 6))
+
+    def test_a_close_entry_pays_the_closes_figure_and_an_open_exit_the_opens(self):
+        rec = self.twin(panel_lot(entry_at="close", exit_at="open"), panel_hs=lambda symbol, day: self.PAIR)
+        self.assertEqual((rec["entry_official"], rec["exit_official"]), (41.0, 42.0))
+        self.assertEqual((rec["hs_bp"], rec["hs_exit_bp"]), (5.0, 10.0))
+        self.assertEqual(rec["twin"]["entry_px"], round(41.0 * (1 + 0.0005), 6))
+        self.assertEqual(rec["twin"]["exit_px"], round(42.0 * (1 - 0.0010), 6))
+
+    def test_with_no_figure_the_lot_is_unpriceable_as_before(self):
+        want = ("unpriceable", True, "QAZ is not in the universe (no half-spread)")
+        rec = self.twin()
+        self.assertEqual((rec["status"], rec["final"], rec["why"]), want)
+        for answer in (None, (), (0.001,), (0.001, 0.0), (0.001, float("nan")), ("x", 0.001), (0.001, 0.001, 0.001),
+                       {"open": 0.001, "close": 0.001}):
+            rec = self.twin(panel_hs=lambda symbol, day, a=answer: a)
+            self.assertEqual((rec["status"], rec["final"], rec["why"]), want, answer)
+            self.assertNotIn("hs_source", rec)
+
+    def test_a_panel_store_that_cannot_be_read_leaves_the_lot_waiting(self):
+        def unread(symbol, day):
+            raise LookupError("panel/hs.npy does not match its manifest")
+
+        rec = self.twin(panel_hs=unread)
+        self.assertEqual((rec["status"], rec["final"]), ("unpriceable", False))
+        self.assertIn("cannot be read", rec["why"])
+        self.assertIn("does not match its manifest", rec["why"])
+
+    def test_a_lot_of_e1s_universe_never_asks_the_panel(self):
+        def boom(symbol, day):
+            raise AssertionError("an E1 lot asked the panel for a half-spread")
+
+        row = panel_lot(symbol="SPY")
+        rec = self.twin(row, panel_hs=boom)
+        self.assertEqual(rec, self.twin(row))
+        self.assertEqual(rec["status"], "priced")
+        self.assertNotIn("hs_source", rec)
+        self.assertNotIn("hs_exit_bp", rec)
+
+    def round(self, lots, reader):
+        """`equity_round` over a book of `lots`, `panel_half_spread` answering `reader` (an exception: raised)."""
+        from league.equity.live import SCHEMA
+        from league.live.state import LiveState
+        from league.ops import twins
+        from league.swarm.store import SwarmStore
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        store = SwarmStore(root)
+        self.addCleanup(store.close)
+        live = LiveState(root / "live.sqlite")
+        self.addCleanup(live.close)
+        live.db.executescript(SCHEMA)
+        for row in lots:
+            live.upsert("eq_lots", row, "lid")
+            for day, b in BARS.items():
+                live.upsert("eq_bars", {"day": day, "symbol": row["symbol"], "adjustment": "raw", "o": b["o"],
+                                        "h": b["h"], "l": b["l"], "c": b["c"], "v": b["v"], "fetched_at": 0.0,
+                                        "sha": b["sha"], "audit": b["audit"]}, "day, symbol, adjustment")
+        opened = mock.Mock(side_effect=reader if isinstance(reader, Exception) else None, return_value=reader)
+        with mock.patch.object(SP, "panel_half_spread", opened):
+            out = twins.equity_round(root, now=NOW, store=store)
+        return out, twins.equity_records(store), opened, root
+
+    def test_the_round_never_opens_the_panel_store_for_a_book_of_e1_lots(self):
+        out, records, opened, _ = self.round([panel_lot(1, symbol="SPY")], lambda symbol, day: self.PAIR)
+        self.assertEqual((out["judged"], records["eq:1"]["status"]), ({"priced": 1}, "priced"))
+        opened.assert_not_called()
+
+    def test_the_round_prices_a_panel_lot_from_the_panel_store_opened_once(self):
+        out, records, opened, root = self.round([panel_lot(1, symbol="SPY"), panel_lot(2), panel_lot(3, symbol="QBZ")],
+                                                lambda symbol, day: self.PAIR if symbol == "QAZ" else None)
+        opened.assert_called_once_with(root / SP.STORE_DIR)
+        self.assertEqual(out["judged"], {"priced": 2, "unpriceable": 1})
+        self.assertEqual((records["eq:2"]["status"], records["eq:2"]["hs_source"], records["eq:2"]["hs_bp"]),
+                         ("priced", "panel", 10.0))
+        self.assertEqual((records["eq:3"]["status"], records["eq:3"]["final"]), ("unpriceable", True))
+
+    def test_with_no_panel_store_a_panel_lot_is_unpriceable_and_with_an_unreadable_one_it_waits(self):
+        out, records, opened, _ = self.round([panel_lot(2)], None)
+        self.assertEqual((out["judged"], records["eq:2"]["status"], records["eq:2"]["final"]),
+                         ({"unpriceable": 1}, "unpriceable", True))
+        for fail in (LookupError("panel/hs.npy does not match its manifest"), RuntimeError("anything else")):
+            out, records, opened, _ = self.round([panel_lot(1, symbol="SPY"), panel_lot(2), panel_lot(4)], fail)
+            self.assertEqual((out["judged"], out["pending"], sorted(records)), ({"priced": 1}, 2, ["eq:1"]))
+            self.assertTrue(all("cannot be read" in why for why in out["pending_why"]))
+            opened.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

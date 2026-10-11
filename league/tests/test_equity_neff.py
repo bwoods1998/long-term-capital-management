@@ -710,5 +710,66 @@ class TheFunnelsRows(unittest.TestCase):
         self.assertEqual(top, {"__future__", "datetime", "json", "math", "sqlite3", "pathlib", "typing"})
 
 
+class TheFunnelCarriesTheRows(unittest.TestCase):
+    """Package B's patch 11: `league.ops.funnel.window` carries the rows under `asset_years`, beside every count it
+    carried before; rows it cannot read are an `errors` entry, never a zero, and take no other section with them."""
+
+    def setUp(self):
+        from league.swarm.store import SwarmStore
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        store = SwarmStore(self.root, clock=lambda: NOW - 3600.0)
+        self.addCleanup(store.close)
+        store.add_family({**SPEC, "id": "etf-eq", "structure": "etf", "lane": "equity"}, origin="seed")
+        store.add_family({**SPEC, "id": "panel-a", "structure": "etf", "lane": "equity"}, origin="seed")
+        db = sqlite3.connect(self.root / "swarm.sqlite")
+        db.execute("UPDATE families SET structure='panel' WHERE id='panel-a'")
+        db.commit()
+        db.close()
+        for i, (fid, days) in enumerate((("etf-eq", 1764), ("panel-a", 754), ("panel-a", 753))):
+            store.add_run(fid, 1, {"run_id": f"r{i}", "status": "ok", "trials": 1, "summary": {"days": days}},
+                          window="train", stress=1.0, purpose="elane_train", prune=False)
+        (self.root / EN.STORE_DIR).mkdir()
+        (self.root / EN.STORE_DIR / EN.FILE).write_text(json.dumps({"sp500": {"neff_pr": 80.0}}))
+
+    def test_the_window_carries_the_rows_beside_what_it_carried(self):
+        from league.ops import funnel
+
+        out = funnel.window(self.root, NOW - 86400.0, NOW)
+        self.assertEqual(out["errors"], {})
+        self.assertEqual(out["asset_years"], guard.read(
+            self.root / "swarm.sqlite", lambda db: EN.funnel_rows(self.root, db, NOW - 86400.0, NOW)))
+        panel = out["asset_years"]["equity"]["panel"]
+        self.assertEqual((panel["train_runs"], panel["program_years"], panel["train_years"], panel["neff"]),
+                         (2, 5.98, 5.98, 80.0))
+        self.assertEqual(panel["independent_asset_years"], round(1507 / 252 * 80.0, 2))
+        self.assertEqual(out["asset_years"]["equity"]["etf"]["replay_multiple"], round(7.0 / 16.1, 2))
+        for key in ("births", "versions", "gym_runs", "gym_runs_total", "validations", "looks", "band_moves",
+                    "spend_usd", "equity", "braked", "book"):
+            self.assertIn(key, out, f"the funnel lost {key}")
+        self.assertEqual(out["gym_runs"]["train"], 3)
+        self.assertEqual(funnel.read(self.root, self.root, "r1", NOW)["day"]["asset_years"], out["asset_years"])
+
+    def test_rows_that_cannot_be_read_are_an_error_never_a_zero(self):
+        from league.ops import funnel
+
+        with mock.patch.object(EN, "funnel_rows", side_effect=RuntimeError("no rows today")):
+            out = funnel.window(self.root, NOW - 86400.0, NOW)
+        self.assertNotIn("asset_years", out)
+        self.assertEqual(out["errors"], {"asset_years": "RuntimeError: no rows today"})
+        self.assertEqual((out["gym_runs"]["train"], out["looks"]), (3, {"taken": 0, "passed": 0}))
+        self.assertIn("book", out)
+
+    def test_the_funnel_still_imports_the_standard_library_alone(self):
+        from league.ops import funnel
+
+        tree = ast.parse(Path(funnel.__file__).read_text())
+        top = {alias.name for node in tree.body if isinstance(node, (ast.Import, ast.ImportFrom)) for alias in node.names}
+        self.assertNotIn("equity_neff", top)
+        self.assertNotIn("numpy", top)
+
+
 if __name__ == "__main__":
     unittest.main()

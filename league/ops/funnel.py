@@ -36,6 +36,12 @@ THE EQUITY LANES (release E1, Oct 2026), apart, under `equity` (the daily page's
 - from the live book (`book_counts`'s `equity`): the EquityBook's orders placed and filled, lots opened and closed (a
   close is one lot fully closed), and the programs holding a lot now.
 
+INDEPENDENT ASSET-YEARS (release E4), apart, under `asset_years` (the daily page's table reads none of them): per
+equity lane and structure ("etf", "stock", "panel"), the Gym's Train runs in the window as simulated program-years
+beside the independent asset-years they read (their Train years x the N_eff of their data: the panel's `neff_pr` of
+neff.json, an ETF program's from release E3's report when it carries one, else 2.3) and the ratio, the replay multiple
+(league/ops/equity_neff.py `funnel_rows`). Simulated years are compute, never evidence; N_eff is a count, never a return.
+
 READ-ONLY: every SQLite open is `mode=ro` (`guard.read`); each section that cannot be read is an `errors` entry and its
 counts None, never a zero. Standard library only.
 """
@@ -380,6 +386,12 @@ def window(root: str | Path, start: float, end: float) -> dict[str, Any]:
         out["book"] = book_counts(root, start, end)
     except Exception as exc:  # noqa: BLE001
         out["errors"]["book"] = f"{type(exc).__name__}: {str(exc)[:200]}"
+    try:  # RELEASE E4: independent asset-years beside simulated program-years (league/ops/equity_neff.py)
+        from . import equity_neff
+
+        out["asset_years"] = guard.read(root / SWARM_DB, lambda db: equity_neff.funnel_rows(root, db, start, end))
+    except Exception as exc:  # noqa: BLE001 - unread is never zero
+        out["errors"]["asset_years"] = f"{type(exc).__name__}: {str(exc)[:200]}"
     return out
 
 
