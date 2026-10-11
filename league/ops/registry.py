@@ -141,6 +141,35 @@ JOBS: tuple[Job, ...] = (
         what="the direction lane's report (operator-only): the funnel per lane, the Probe envelope, the DONE meter of the "
              "pinned rule (done_screen, done_all) beside the same-risk buy-and-hold, alarms A1-A9, PL1 and K5, into "
              "<state>/dlane-report.json; the program loss line (A1.3), the lane off too"),
+    # THE PANEL LANE's data and measurement jobs (release E4, "breadth"; league/xs/E4_INTERFACES.md). Each one's first
+    # statement is `league.xs.config.quiet(now, its own wall)`: a start that could still be working at a wall of the
+    # session (09:25-09:45 and 15:50-16:35 ET) is a `skipped` receipt, and the occurrence is not lost (the at-start one
+    # of `equity_universe` runs at its next daily time, and `equity_panel` after it). They read the gateway and write
+    # their own files under <state>/equity-daily/, so they run in a pause too; with `elane.panel.mode` "off" nothing
+    # else of the lane runs. They go last: at a House start every older job that is due at the same instant goes first.
+    Job("equity_universe", "league.ops.equity_universe", (S.at_start(), S.daily(1, 40)), grace=3 * HOUR, cpu=120,
+        wall=900, in_pause=True, owner="breadth",
+        what="the point-in-time S&P 500 membership from a pinned public file and the changes table (the gateway's "
+             "reader), the assets and their aids, the audit, into <state>/equity-daily/universe/ (counts only out)"),
+    Job("equity_panel", "league.ops.equity_panel", (S.after("equity_universe"),), grace=3 * HOUR, cpu=600, wall=3300,
+        in_pause=True, owner="breadth",
+        what="the panel's daily bars through the venue's asof (never 2020), the store's vintage rule, the coverage "
+             "audit and its verdict, the nightly I6, into <state>/equity-daily/panel/"),
+    Job("equity_spreads", "league.ops.equity_spreads", (S.daily(6, 30),), grace=6 * HOUR, cpu=300, wall=3000,
+        in_pause=True, owner="breadth",
+        what="the panel's half-spreads: quote samples at the instants the book trades, on Train-segment sessions, "
+             "resumable, into <state>/equity-daily/spreads.json"),
+    Job("equity_neff", "league.ops.equity_neff", (S.monthly_first(5, 10, 0),), grace=6 * HOUR, cpu=600, wall=900,
+        in_pause=True, owner="breadth",
+        what="the panel's independent names (N_eff on Train segment 2) into <state>/equity-daily/neff.json"),
+    Job("french", "league.ops.french", (S.monthly_first(5, 11, 0),), grace=6 * HOUR, cpu=60, wall=300,
+        in_pause=True, owner="breadth",
+        what="the French library's daily factors where a route to them exists (none today: a skipped receipt)"),
+    Job("xs_zero_edge", "league.ops.xs_zero_edge",
+        (S.weekly(6, 6, 0), S.weekly(6, 8, 0), S.weekly(6, 10, 0), S.weekly(6, 12, 0)), grace=100 * MINUTE, cpu=2400,
+        wall=3000, in_pause=True, owner="breadth",
+        what="the panel Train bar's zero-edge expected column: seeded random-score programs through the whole bar, "
+             "25 a run, into the swarm store's kv elane_xs_zero_edge"),
 )
 
 
