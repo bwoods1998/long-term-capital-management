@@ -29,7 +29,8 @@ and the diagnostician are generators too, of the options lanes. This module is t
   (league/tests/test_elane_e2_seal.py).
 
 Why E2 cares beyond the rule: a generator that sees which programs passed the sealed look learns the holdout, and
-the screen's false-positive rate per program (S1-R's 12%) holds only for programs written blind to it.
+the screen's false-positive cap per program (the pinned share screen S2's `fp_cap`, amendment A11; S1-R's before it)
+holds only for programs written blind to it.
 
 Standard library only.
 """
