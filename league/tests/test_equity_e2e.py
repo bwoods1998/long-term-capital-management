@@ -243,8 +243,16 @@ class TheEquityLaneEndToEnd(unittest.TestCase):
         sleeve = table.equity.probe_sleeve_share * E
         self.assertEqual((lot.status, lot.entry_at, lot.opened_day, lot.probe), ("open", "close", MONDAY.isoformat(), True))
         self.assertLessEqual(lot.entry_notional, sleeve * D("0.5"), "the intent's half of a Probe sleeve, at most")
-        [order] = state.rows("SELECT why FROM eq_orders")
+        [order] = state.rows("SELECT why, qty, limit_px FROM eq_orders")
         self.assertTrue(order["why"].startswith("entry (intent:"), order["why"])   # the intent bound, no cap cut it
+        # THE PROBE SLEEVE AT 0.66 (the captain's A20): a one-ETF program's lot is a third of E AT ITS LIMIT (the ask
+        # and the entry collar above it, to the cent), its shares floored to six places; it fills at the ask, under it.
+        self.assertEqual(table.equity.probe_sleeve_share, D("0.66"))
+        limit = D(order["limit_px"])
+        self.assertEqual(D(order["qty"]), (D("0.33") * E / limit).quantize(D("0.000001"), rounding="ROUND_DOWN"))
+        self.assertEqual(lot.qty, D(order["qty"]))
+        self.assertLessEqual(lot.qty * limit, D("0.33") * E)
+        self.assertGreater(lot.qty * limit, D("0.33") * E - limit * D("0.000001"))
         self.assertEqual(lot.entry_px, market.quotes["SPY"][1], "a marketable limit filled at the ask")
         # The shared loss budget counts the lot's open risk at the ETF weight (both lanes, one budget).
         _, _, _, at_risk, _ = R.probe_figures(state.rows, day=MONDAY.isoformat(), table=table)

@@ -74,8 +74,9 @@ confirm that SPY's seed was refused as QQQ's lineage (the figure stays on the Ho
 
 **The switches** (all three must be on for a real equity open; any one off stops new opens):
 - `equity_money.enabled` (league/constitution.py, a CON change: the money digest moves and the standing grant re-ratifies
-  at the House's start). E1 ships True (money digest `ad8c761b`); False (`ea97607c`) is the stop: the book keeps its
-  tables, runs its exits and reconciles; no equity open.
+  at the House's start). E1 ships True (money digest `d6510685`, with the Probe sleeve at 0.66 x E: **The Probe
+  sleeve** below); False (`a782f11f`) is the stop: the book keeps its tables, runs its exits and reconciles; no equity
+  open.
 - `elane.mode` (league/swarm/policy.json, swarm.json over it): "off" (the rollback: no seeded birth, no equity look) or
   "gate".
 - `STOCK_BUYS_REAL` (gateway/wrangler.jsonc): deployed "on" with PR #532; while the House's `equity_money.enabled` is
@@ -150,10 +151,57 @@ the venue's overnight multiplier once a margin-interest row is metered.
 
 **The loss budget is shared** (A8.6). The options lane's `options_money.probe` rows ($400 net in any rolling 20 sessions,
 $800 net in total) bound every agent program's Probe opens in both lanes, read by one `probe_tally`: an open ETF lot
-counts 20% of its value, a stock 40%, an option its maximum loss, and ONE slot a program (never one a lot). With the
-equity lane invested at `probe.max_programs` x `probe.sleeve_share` x E (3 x 0.25 E), its open risk is 0.15 x E, so the
-options Probe lane keeps only $400 - 0.15 x E of window room: **effectively off** while the equity sleeves are full.
-The `dlane` report says so with the figures (`equity.options_probe_room`).
+counts 20% of its value, a stock 40%, an option its maximum loss, and ONE slot a program (never one a lot). The
+equity lane holds at most the LOWER of its Probe sleeves (`probe.max_programs` x `probe.sleeve_share` x E: 3 x 0.66 E)
+and the invested cap (`invested_share` x E: 1.00 E). The sleeves ask for more than the account holds, so the invested
+cap is the bound: at most 1.00 x E of ETFs, 0.20 x E of open risk. With the lane invested to that cap the options
+Probe lane keeps only $400 - 0.20 x E of window room ($200 at E = $1,000, nothing from E = $2,000) and the invested
+cap leaves an option open no room either: **effectively off** while the equity lane is full. From E = $2,000 the
+budget, not the invested cap, is what cuts the equity lane's entries (each is cut to the budget's room over 0.20, so
+the lane stops at $2,000 of ETFs, less five times what the window has lost and the options lane has at risk). The
+`dlane` report says so with the figures (`equity.options_probe_room`, whose `bound` names which rule set them: the
+sleeves, the invested cap or the budget).
+
+**The Probe sleeve is 0.66 x E** (the captain's amendment A20, Oct 11, 2026; `equity_money.probe.sleeve_share`,
+league/constitution.py). The rule: a program that passed its look takes one of three seats, first come, with a sleeve
+of 0.66 x E; a program's position in one ETF is at most half its sleeve, so a one-ETF program's lot is 0.33 x E (it
+was 0.125 x E under the sleeve of 0.25 the branch carried before). Seats, seating and every other row are unchanged.
+- **Its source.** A pre-registered study (EQDONE-2: its design and decision rule pinned before any code or figure,
+  its code before the run), run and decided before the first live equity trade and before the result of the options
+  lane's next close was known. Its question: Done reads the sum of the realized P&L of every agent program's closes
+  since Oct 10, both lanes together, so a losing close early in that sum must be earned back by the lots that follow;
+  what lot can do that? In the study a lot of an eighth of E could not; the chance of Done rose with the lot up to a
+  third of E and no further, and the worst outcomes kept growing with it. The study's rule picked this sleeve together
+  with a different seat rule; A20 takes the sleeve alone (seating stays first come), which the same rule picks among
+  the first-come designs. The gain it measured is small, near two standard errors of its own measurement, and what it
+  measures is long-only index-ETF exposure: mostly the market's direction, not alpha.
+- **Its cost, plainly.** Each lot is about 2.6 times as large, so the lane's dollar swings grow about 2 to 2.5 times,
+  losses as much as gains. A larger lot is a larger bet on the programs' edge and on the market's direction; it adds
+  no edge, and at zero edge it adds nothing but spread. If the sum of closes is already at or above zero, the smaller
+  lot was the safer one.
+- **What it is.** A loosening of ONE row and its bound (`EQUITY_MONEY_BOUNDS["probe.sleeve_share"]`: 0.25 -> 0.66),
+  decided by the captain (Claude) under goal item 4 and reported here with its cost. **It is bounded by the owner's
+  caps and loss budget, none of which moved**, and `size_entry` applies each to every entry at any sleeve, naming the
+  one that binds:
+  - an ETF at most 0.50 x E across all programs (`instrument`): two programs in one ETF hold 0.50 x E together, not
+    0.66;
+  - at most 1.00 x E invested, the options' open maximum loss included (`invested`): three one-ETF lots are 0.99 x E,
+    and a fourth entry is cut to what is left or refused;
+  - the House-wide cash reserve (`cash`): when E is the account's own equity, the $50 kept in cash cuts the last lot
+    before the invested cap does;
+  - the shared loss budget, $400 net in any rolling 20 sessions and $800 net in total (`budget`): an entry is cut to
+    the budget's room over the ETF weight;
+  - the kill switch, the daily stop and the drawdown stop, as before.
+- **A Sized program sizes nothing up now.** `sized.sleeve_share` (0.50) was left as pre-registered and sits under
+  the Probe sleeve; the rule never sizes under the Probe's, so a Sized program's sleeve is 0.66 x E whatever its
+  record (**Sizing up and demotion** below).
+- **The money digest** is `d6510685` (full digest `d397bc7c`): one move with the E1 block, ratified at the House's
+  start on the owner's deploy. **Rollback**, one owner deploy: `sleeve_share` "0.25" (the bound may stay) and
+  `PINNED_DIGEST` re-pinned; the digest is then `ad8c761b`, the grant re-ratifies, no fingerprint moves and no
+  evidence is reset. Lots already held are not resized: a sleeve applies to the entries sized after it.
+- Proof: `league/tests/test_equity_sleeve.py` (three lots of 0.33 x E and the invested cap, two programs in one ETF,
+  the cash reserve, the budget's cut, a Sized program's sleeve), `test_constitution` and `test_ci` (the row, its bound
+  and one step past it), `test_equity_bands_money`, `test_equity_money`, `test_equity_e2e` (the real book's lot).
 
 **The schedule** (New York time; `league/equity/schedule.py`, the offsets in force in `equity_money.order_path`; half days
 by the same offsets from the 13:00 close):
@@ -359,7 +407,8 @@ rules read ONE PROGRAM VERSION's real record (`EquityRecord`, built by the book'
 in close order, each close's net return = its net cash (fees and dividends included) over its entry notional. The
 bands move once a day, at the decision's band sync (never in the seating pass, never at send time).
 - **Candidate to Probe**: a Candidate that passed its lane's sealed look takes a free roster seat (at most
-  `probe.max_programs` 3 live programs): a sleeve of `probe.sleeve_share` x E (0.25).
+  `probe.max_programs` 3 live programs, first come): a sleeve of `probe.sleeve_share` x E (0.66 since the captain's
+  A20: **The Probe sleeve** above).
 - **Probe to Sized** (`sized_up`), when ALL hold, checked in this order (the reason recorded names the first that
   fails):
   1. at least 20 real closes (`sized.min_trades`);
@@ -376,8 +425,13 @@ bands move once a day, at the decision's band sync (never in the seating pass, n
   holds `sized.min_trades` closes; otherwise the figure is unpriced and `beat_bh` fails that day.
 - **The Sized sleeve** (`sized_sleeve_share`, read from the record each time an entry is sized): quarter Kelly on
   that lower bound (`sized.kelly_fraction` 0.25 x the lower bound / the variance of the per-close net return),
-  floored to four decimals of E, capped at 0.50 x E (`sized.sleeve_share`) and **never below the Probe's 0.25 x E**:
-  a Sized program never trades smaller than a Probe.
+  floored to four decimals of E, capped at 0.50 x E (`sized.sleeve_share`) and **never below the Probe's 0.66 x E**:
+  a Sized program never trades smaller than a Probe. As coded: max(the Probe's share, min(quarter Kelly, the cap)).
+  **Since A20 the cap (0.50) is under the Probe's share (0.66), so the answer is 0.66 x E for every record: a Sized
+  program keeps the Probe sleeve and sizes nothing up.** The rule and its row are left as pre-registered; raising
+  `sized.sleeve_share` is a later decision, with its bound. What Sized still changes: a lot bought while Sized carries
+  no Probe mark, so its close joins neither the loss budget's realized figures nor the program's own -$300 line; its
+  open value still counts as open risk at the same weight.
 - **Sized stays Sized**: no rule steps a Sized version back to Probe; it leaves its band only by EDM1 (or its
   family's retirement).
 - **EDM1, the demotion** (`edm1`): the version goes back to Candidate, exits only, sticky for the version
@@ -459,6 +513,13 @@ a session carry it to the next open. A buy is an open for the shared day counts 
 `MAX_DAY_ORDERS` 300, both books together). The gateway's caps (50% of equity an ETF, 20% a stock, the margin line,
 buying power, 4x equity of buys a day) are the backstop under the House's tighter rules, never the rule the House sizes
 to. `/v1/health` `stock_buys` shows the switch, the shares, the day's buys and the buys in flight.
+**Against the lot of 0.33 x E** (A20; the gateway reads the account's equity, and E is never above it): one order and
+one ETF's position are under the gateway's 50%; the lane at its invested cap (1.00 x E) is at the gateway's book line
+on a multiplier of 1 (1.00 x equity), which the House's $50 cash reserve keeps it under; and the gateway's day line
+counts every buy it admits, a cancelled one too, so it admits twelve sends of such a lot a day (it admitted 32 of the
+lot of 0.125 x E). Three entries a day sent once each use a quarter of it; three entries each re-priced past their
+fourth send would meet `stock_day`, and an entry that does ends refused (`league/tests/test_ci.py` holds the figures
+to the release's own gateway files).
 
 ## Real stock and ETF buys at the gateway (Oct 10, 2026): deployed 21:18Z Oct 10 (gateway `3cc811b0`, #532)
 

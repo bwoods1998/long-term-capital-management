@@ -29,6 +29,65 @@ any other deploy.
 The running House release is `20261010T214125Z-d4667186f969` (main `ac6d008b`, the no-captain automations, 21:42Z
 Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. What is built and not deployed is on branches.
 
+### Release E1, the Probe sleeve at 0.66 x E (the captain's A20), on `feat/equity-e1-sleeve` (unreleased; an owner deploy with the rest of E1; the money digest E1 deploys is `d6510685`, one move with the block; no fingerprint move, no evidence reset)
+
+- **The rule.** `equity_money.probe.sleeve_share` "0.25" -> "0.66" and its bound
+  (`EQUITY_MONEY_BOUNDS["probe.sleeve_share"]`) ("0", "0.25") -> ("0", "0.66"), in `league/constitution.py`. Three
+  seats and first-come seating are unchanged. A program's position in one ETF is at most half its sleeve, so a
+  one-ETF program's lot goes from 0.125 x E to 0.33 x E. No other row moves.
+- **Its source.** A pre-registered study (EQDONE-2: its design and decision rule pinned before any code or figure),
+  run and decided before the first live equity trade and before the result of the options lane's next close was
+  known. Done reads the sum of the realized P&L of every agent program's closes since Oct 10, both lanes together, so
+  a losing close early in that sum has to be earned back by the lots that follow: in the study a lot of an eighth of
+  E could not, the chance of Done rose with the lot up to a third of E and no further, and the worst outcomes kept
+  growing with it. The study's rule picked this sleeve together with a different seat rule; A20 takes the sleeve
+  alone, which the same rule picks among the first-come designs. The gain it measured is small, near two standard
+  errors of its own measurement, and it is long-only index-ETF exposure: mostly the market's direction, not alpha.
+- **Its cost, plainly.** Each lot is about 2.6 times as large, so the lane's dollar swings grow about 2 to 2.5 times,
+  losses as much as gains. It adds no edge: at zero edge it adds nothing but spread, and when the sum of closes is
+  already at or above zero the smaller lot was the safer one.
+- **What it is: a loosening of ONE row**, decided by the captain (Claude) under goal item 4 and reported with its
+  cost, **bounded by the owner's caps and loss budget, none of which moved.** `size_entry` applies each to every entry
+  at any sleeve and names the one that binds: an ETF at most 0.50 x E across all programs, at most 1.00 x E invested
+  (the options' open maximum loss included), the $50 cash reserve, and the shared loss budget ($400 net in any rolling
+  20 sessions, $800 net in total); the kill switch, the daily stop and the drawdown stop stand.
+- **What follows from it, stated where the old arithmetic stood:**
+  - three sleeves of 0.66 x E ask for more than the account holds, so the invested cap, not the sleeves, bounds the
+    lane: at most 1.00 x E of ETFs, 0.20 x E of open risk (it was 3 x 0.25 x E and 0.15 x E). With the lane invested to
+    that cap the options Probe lane keeps $400 - 0.20 x E of the window (nothing from E = $2,000; it was nothing from
+    E = $2,667), and from E = $2,000 the budget is what cuts the equity lane's entries;
+  - **a Sized program sizes nothing up now.** `sized.sleeve_share` (0.50) was left as pre-registered and sits under
+    the Probe sleeve, and `sized_sleeve_share` is max(the Probe's share, min(quarter Kelly, the cap)): 0.66 x E
+    whatever the record. A lot bought while Sized still carries no Probe mark (its close joins neither the budget's
+    realized figures nor the program's -$300 line);
+  - against the gateway (read, not changed): one order and one ETF's position of 0.33 x E are under its 50% of
+    equity; the lane at 1.00 x E is at its book line on a multiplier of 1, under it by the House's cash reserve; its
+    day line (4x equity of buys, a cancelled one too) admits twelve sends of such a lot a day, where it admitted 32
+    of the old lot, so three entries each re-priced past their fourth send would meet `stock_day` and end refused.
+- Fixed with it: the `dlane` report's `equity.options_probe_room` multiplied the seats by the sleeve (`league/ops/dlane_report.py`):
+  at 0.66 that reads 0.396 x E of open risk, which the invested cap never allows. It now takes the lower of the
+  sleeves and the invested cap, never reads the lane's open risk above the window, and names what set the figure
+  (`bound`: "sleeves", "invested_cap" or "budget"; `invested_share`, `invested_share_of_e` beside it). Its statement
+  and the docs carry the new arithmetic.
+- **Identities.** Money digest `d6510685` (it was `ad8c761b` on the branch with the sleeve at 0.25, never deployed),
+  full digest `d397bc7c` (`PINNED_DIGEST`); the stop, `enabled` False, is `a782f11f`. The standing grant re-ratifies
+  at the House's start on the owner's deploy, once, with the rest of E1. Neither fingerprint moves (no file of
+  `league/live/`, `league/gym/` or the equity evidence is touched). **Rollback**, one owner deploy: `sleeve_share`
+  "0.25" (the bound may stay), `PINNED_DIGEST` re-pinned; the digest is then `ad8c761b` and the grant re-ratifies;
+  lots already held are not resized.
+- Proof: `league/tests/test_equity_sleeve.py` (new: three one-ETF lots of 0.33 x E and the invested cap holding at
+  1.00 x E, a fourth entry cut and a fifth refused by name; two programs in one ETF held to 0.50 x E by the
+  instrument cap; the cash reserve cutting the last lot; the budget cutting an entry when its room over 0.20 is the
+  smaller; a Sized program's sleeve never below the Probe's 0.66). Tests that pinned the old value now pin the new:
+  `test_constitution` (the row, the digests, the bound at 0.66 and refused at 0.67), `test_equity_money` (the table,
+  the grant's re-ratification on the new digest, and on the rollback's), `test_equity_bands_money` (the Sized
+  sleeve's arithmetic kept on a table whose Probe sleeve is under the cap, and the table in force),
+  `test_ci` (0.67 refused by CI; the lot against the gateway's files), `test_dlane_report_equity`,
+  `test_equity_e2e` (the real book's lot is a third of E), `test_live_long_single` (the digest).
+- Not changed, and said: `league/live/money.py` `EquityTable` still annotates `probe_sleeve_share` with the old
+  "0.25" in a comment. That file is in the options execution fingerprint, so the comment waits for the next release
+  that moves it; the value is read from the constitution.
+
 ### Release E1, the rehearsal on real data: the data job, the vendor's cents, the seeds' order, on `feat/equity-e1` (unreleased; an owner deploy with the rest of E1; the equity identity moves before its first look; no money-digest move)
 
 Before the first deploy, E1's data job, its audit, the store, the three seeds' Train runs and the screen's floor were
@@ -314,8 +373,9 @@ evidence, ops and docs side (the order path's, the daily step's and the live hoo
   the S1+F1 screen: no lane pins it any more, A11 above; the file and its code stay); A10.1, the
   stock paper proof staged in the equity book's OPEN window (`paper_proof_stock_buy` gates real buys,
   `paper_proof_stock_sell` real sales, the practice sale first, a failed SELL stage alarms and stops new buys);
-  A10.2, `equity_money.enabled` ships True (money digest `fdf2ac7c` -> `ad8c761b`, full digest -> `65b0e025`; the stop,
-  `enabled` False, is `ea97607c`); A8.1, the calibration's reservation reads the House-wide cash rule
+  A10.2, `equity_money.enabled` ships True (money digest `fdf2ac7c` -> `d6510685`, full digest -> `d397bc7c`; the stop,
+  `enabled` False, is `a782f11f`: the figures since the Probe sleeve moved to 0.66, A20, at the top of this section;
+  with the sleeve at 0.25 they were `ad8c761b`, `65b0e025` and `ea97607c`); A8.1, the calibration's reservation reads the House-wide cash rule
   (`RealBook.free_to_reserve`); A8.12, the options learning game never arms an equity family and its population
   ceiling counts the options lanes, and an equity look never counts in an options lane's leakage alarm.
 - Also applied: A12, `config.LOOK_CAP` 2026-10-09 (every look reads the 194 calibrated holdout sessions); A16,

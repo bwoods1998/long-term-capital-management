@@ -943,10 +943,14 @@ CONSTITUTION: dict[str, Any] = {
     # and `loss_total_usd` ($800 net in total) bound every agent program's Probe opens, options AND equity, read by one
     # `probe_tally` (`league/live/real.py`): an equity lot counts at `open_risk_weight` x its marked value (open risk, with
     # every working buy), its close's net cash (fees and dividends in) joins the realized figures, and an equity program
-    # takes ONE Probe slot however many lots it holds (A8.6). There is no second budget here. While three equity programs
-    # hold their whole Probe sleeves (3 x 0.25 x E of ETFs at weight 0.20: 0.15 x E of open risk), the options Probe lane
-    # keeps $400 - 0.15 x E of the window ($100 at E = $2,000, nothing from E = $2,667): with the equity lane invested,
-    # options Probe opens are effectively off. The kill switch, the daily stop and the drawdown stop bound both lanes.
+    # takes ONE Probe slot however many lots it holds (A8.6). There is no second budget here. Three Probe sleeves of
+    # 0.66 x E (A20, under `probe` below) ask for more than the account holds, so THE INVESTED CAP bounds the lane, not
+    # the sleeves: at most 1.00 x E of ETFs at weight 0.20, which is at most 0.20 x E of open risk (three one-ETF
+    # programs hold a lot of 0.33 x E each: 0.99 x E, 0.198 x E of open risk). With the equity lane invested to that cap
+    # the options Probe lane keeps $400 - 0.20 x E of the window at most ($200 at E = $1,000, nothing from E = $2,000),
+    # and the invested cap itself leaves an option open no room (`money.invested_room`): options Probe opens are then
+    # off. From E = $2,000 it is the budget, not the invested cap, that cuts the equity lane's entries (each is cut to the
+    # budget's room over 0.20). The kill switch, the daily stop and the drawdown stop bound both lanes.
     #
     # - `enabled`: the House's switch for real equity OPENS. THE SWITCH SHIPS ON (the captain's A10.2): E1 deploys True,
     #   one money-digest move with the block itself (the standing grant re-ratifies at the House's start); nothing trades
@@ -973,14 +977,34 @@ CONSTITUTION: dict[str, Any] = {
     # - `open_risk_weight`: what an equity position counts in the shared budget, as a share of its marked value (the
     #   goal's convention: 0.20 an ETF, 0.40 a stock; only stricter).
     # - `probe` (A5): a program that passed its lane's look takes an equity roster seat (`max_programs`, equal to the
-    #   swarm's `elane.roster`) with a sleeve of `sleeve_share` x E; an entry is cut to fit the budget's room over its
-    #   weight, and nothing under `min_order_usd` is sent.
+    #   swarm's `elane.roster`; first come) with a sleeve of `sleeve_share` x E; an entry is cut to fit the budget's room
+    #   over its weight, and nothing under `min_order_usd` is sent.
+    #   THE PROBE SLEEVE AT 0.66 (A20, Oct 11, 2026; Claude's decision under goal item 4, from the pre-registered study
+    #   EQDONE-2, fixed before the first live equity trade and before the options lane's next close was known):
+    #   `sleeve_share` "0.25" -> "0.66", a loosening of this one row and of its bound; the three seats and first-come
+    #   seating are unchanged. A program's position in one ETF is at most `position_share.etf` (0.50) of its sleeve
+    #   (`size_entry`'s "sleeve_cap"), so a one-ETF program's lot goes from 0.125 x E to 0.33 x E. Why: Done reads the
+    #   sum of the realized P&L of every agent program's closes since Oct 10, 2026, both lanes together, so a losing
+    #   close early in that sum has to be earned back by the lots that follow; in the study a lot of an eighth of E
+    #   earned too little to do it, a lot of a third of E could. Its cost: each lot is about 2.6 times as large, so the
+    #   lane's dollar swings, losses as much as gains, grow about 2 to 2.5 times, and at zero edge it adds nothing (a
+    #   larger lot scales the bet on a program's edge and on the market's direction; it is no edge). Every owner line stands
+    #   and still binds through `size_entry` at any sleeve: an ETF at most 0.50 x E across all programs
+    #   (`position_share`), at most 1.00 x E invested (`invested_share`), the cash reserve, and the shared loss budget
+    #   ($400 net in any rolling 20 sessions, $800 net in total). Rollback, one owner deploy: `sleeve_share` "0.25" here
+    #   (its bound may stay) and `PINNED_DIGEST` re-pinned; the money digest moves back and the standing grant
+    #   re-ratifies at the House's start; no fingerprint move, no evidence reset.
     # - `sized`, PRE-REGISTERED here before the first live trade (goal item 4; `league/equity/bands.py` `sized_up`,
     #   `sized_sleeve_share`): a Probe program is Sized when its version's real closes number at least `min_trades`, their
     #   mean net return on notional is above zero with its one-sided `confidence` lower bound above zero, its P&L beats the
     #   same-risk buy-and-hold over the same sessions (`beat_bh`, the goal's scaling rule), and it has spent at least
-    #   `min_probe_sessions` sessions at Probe. Its sleeve is then `kelly_fraction` Kelly on that lower bound, at most
-    #   `sleeve_share` x E and never below the Probe's.
+    #   `min_probe_sessions` sessions at Probe. Its sleeve is then, as coded, max(the Probe's `sleeve_share`,
+    #   min(`kelly_fraction` Kelly on that lower bound, `sleeve_share`)) x E: never below the Probe's. SINCE A20
+    #   `sized.sleeve_share` (0.50) SITS BELOW THE PROBE SLEEVE (0.66), so that is 0.66 x E whatever the record: a Sized
+    #   program keeps the Probe sleeve and sizes nothing up (the row and its rule are left as pre-registered; raising
+    #   the row is a later decision, with its bound). What Sized still changes: a lot bought while Sized carries no
+    #   Probe mark, so its close joins neither the budget's realized figures nor the program's own loss line
+    #   (`demotion.program_loss_usd`); its open value still counts as open risk, at the same weight.
     # - `demotion`, EDM1, PRE-REGISTERED the same way (`league/equity/bands.py` `edm1`): exits only, sticky for the
     #   version, when its real closes are `min_trades` or more and their net returns sum below -`z` x sigma x sqrt(n)
     #   (sigma: the per-trade sd of its Validation run); when its realized net reaches `program_loss_usd`; or when its
@@ -1005,7 +1029,7 @@ CONSTITUTION: dict[str, Any] = {
         "invested_share": "1.00",
         "cash_reserve_usd": "50",
         "open_risk_weight": {"etf": "0.20", "stock": "0.40"},
-        "probe": {"sleeve_share": "0.25", "max_programs": 3, "min_order_usd": "10"},
+        "probe": {"sleeve_share": "0.66", "max_programs": 3, "min_order_usd": "10"},
         "sized": {"min_trades": 20, "confidence": "0.80", "kelly_fraction": "0.25", "sleeve_share": "0.50",
                   "beat_bh": True, "min_probe_sessions": 5},
         "demotion": {"rule": "edm1", "min_trades": 10, "z": "1.645", "program_loss_usd": "-300", "twin_gap_bp": "15",
@@ -1214,12 +1238,20 @@ EQUITY_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
     # The goal's open-risk convention: an ETF counts at least 20% of its value, a stock at least 40%.
     "open_risk_weight.etf": ("0.20", "1.00"),
     "open_risk_weight.stock": ("0.40", "1.00"),
-    # A5: at most three Probe programs on a quarter of E each (0 stops new seats); no order under $10.
-    "probe.sleeve_share": ("0", "0.25"),
+    # A5: at most three Probe programs (0 stops new seats); no order under $10.
+    # THE PROBE SLEEVE'S BOUND (A20, Oct 11, 2026; Claude's decision under goal item 4, from the pre-registered study
+    # EQDONE-2, fixed before the first live equity trade): the sleeve's loose end is 0.66 of E (a quarter of E before
+    # it), a loosening of this one row; a one-ETF program's lot is half its sleeve, 0.33 x E at most. Its cost: each lot
+    # is about 2.6 times as large, so the lane's dollar swings, losses as much as gains, grow about 2 to 2.5 times, and
+    # at zero edge it adds nothing. No owner line moves, and each binds at any sleeve through `size_entry`:
+    # `position_share` (an ETF at most 0.50 x E across all programs), `invested_share` (1.00 x E) and the shared loss
+    # budget (`options_money.probe`: $400 net in any rolling 20 sessions, $800 net in total).
+    "probe.sleeve_share": ("0", "0.66"),
     "probe.max_programs": ("0", "3"),
     "probe.min_order_usd": ("10", "100"),
     # The pre-registered sizing-up rule (the design's section 5): at least 20 closes, an 80% bound, quarter Kelly, half
-    # of E at most, five Probe sessions.
+    # of E at most (since A20 that is under the Probe sleeve's 0.66, and a Sized sleeve is never below the Probe's: the
+    # constitution's `sized` comment), five Probe sessions.
     "sized.min_trades": ("20", "1000"),
     "sized.confidence": ("0.80", "0.99"),
     "sized.kelly_fraction": ("0.125", "0.25"),
@@ -1386,4 +1418,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '65b0e025a08d4c3a8f78e487eb1a0f83ad9bfed307563c02acbd50ac4a6308bb'
+PINNED_DIGEST = 'd397bc7cff373158ab4889cfdf80c0851fe2624ae42d87d4ab8e6a9b9400109f'
