@@ -29,6 +29,44 @@ any other deploy.
 The running House release is `20261010T214125Z-d4667186f969` (main `ac6d008b`, the no-captain automations, 21:42Z
 Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. What is built and not deployed is on branches.
 
+### Release E4, "breadth": the point-in-time S&P 500 panel under the screen XS1, on `feat/equity-e4` (unreleased; two owner deploys: R-E4a research, no digest move, ships switched off; R-E4b the universe, one money-digest move, deployed separately)
+
+- **What it adds** (`league/xs/E4_INTERFACES.md`, `league/swarm/E4.md`): programs that pick 5 to 12 names out of the
+  day's S&P 500 members by a symmetric cross-sectional rule, see salted slots with no ticker, no date and no price
+  level, and are judged on their daily RESIDUAL against matched placebo portfolios by the screen XS1 (the study
+  XSCREEN-1's receipt, `docs/benchmarks/equity_screen_xs_1.json`, pinned in policy.json; every threshold read from it
+  at runtime). The data jobs (membership, the panel's bars with their coverage audit, spreads, N_eff), the panel
+  package `league/xs/` with its own evidence identity, the Train bar equity-xs-v1 with its weekly zero-edge column,
+  the one Validation try and the one look, and the live adapter through E1's EquityBook (a rebalance the book can
+  execute, a standing target that retries a missed buy, the bars a decision read kept and audited).
+- **Ships off.** policy.json `elane.panel.mode` "off": no birth, no run, no fetch of the live path, no model question.
+  The ladder is "train", "gate", "live", each the captain's settings change and each falling back to the one before.
+  **Mode "live" reads as "gate" until the forward twin exists** (package J, owed: it is built on release E3's forward
+  modules), and **no panel look runs until E3's contamination probe has run with the panel strata** (the captain's A22).
+- **Before any real money on an XS1 pass** (A22): a style-open program takes no live seat on a pass alone (recorded
+  and shadowed, never seated); at most 2 XS1 looks an agenda cell; the equity code review and the contamination probe
+  before a look; a ninth conformance vector beside the study's eight.
+- **The live rules read a panel program by close DATE** (pre-registered before mode "live"; word for word in
+  docs/operations.md): one observation a close date for EDM1, for sizing up and for the twin-gap leg. E1's rules are
+  unchanged as functions and as numbers; the cost, stated: EDM1's statistical leg cannot act before the 10th close
+  date, and until then the -$300 program line, the $400 window and the stops bound a panel program's loss.
+- **R-E4a moves no identity and no digest:** nothing under `league/live/` or `league/gym/` and no evidence module of
+  `league/equity/` changes; the constitution is untouched. The xs identity is adopted for the first time.
+- **R-E4b, THE UNIVERSE (one commit, deployed separately):** `equity_money.universe.stock` grows from E1's 18 names to
+  the panel's tradable union (every symbol that was an index member in the 36 months before the generation day and is
+  tradable and fractionable; sorted; no date), written by `scripts/gen_universe.py` with the same list at the gateway
+  (`gateway/lib/caps.mjs`). `digest()` and `money_digest()` move ONCE (the figures are in that commit's entry: they
+  are the list's) and the standing grant re-ratifies at the House's start. No bound, share, weight, seat or cap
+  changes; `league/equity/config.py` `UNIVERSE` stays E1's 35 and inside it. The gateway deploys first; both deploys
+  go between two pre-opens. Regenerated about once a year.
+- **CI:** `league/swarm/elane_xs.py` and `scripts/gen_universe.py` are FORBIDDEN (`PENDING_GATEWAY` until the
+  gateway's merge list names them: a gateway follow-up, with E2's five); the comparison of the gateway's stock list
+  with the constitution's names at most 10 tickers a side and counts the rest; the pre-open's check 5 counts the
+  options population by the store's own guard (a panel family is its own lane's), and its check 10 holds the panel
+  lane ready while a panel program is live.
+- Operations: [docs/operations.md](docs/operations.md), "The panel lane" (the switch, the screen, A22, the live rules,
+  the universe deploy and its rollback, the alarms).
+
 ### Release E2, integrated on E1: the swarm breeds share programs for the BETA and EQUITY lanes, on `feat/equity-e2-int` (unreleased; an owner deploy with or after E1; no identity moves; ships switched off)
 
 - **What it adds** (`league/swarm/ELANE_E2.md`): the architect's equity pass (families with their first program, on
