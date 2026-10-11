@@ -616,6 +616,18 @@ class TheLateCatchUp(PanelCase):
         h.run(MONDAY, (15, 55))
         self.assertEqual(h.held(), ["N000", "N001", "N020", "N021", "N022"])
 
+    def test_with_the_lane_at_exits_only_the_days_decision_waits_for_the_panels_bars(self):
+        h = self.h
+        h.table = __import__("dataclasses").replace(h.table, equity=__import__("dataclasses").replace(
+            h.table.equity, enabled=False))
+        h.book = h.new_book()
+        h.market.tape.absent = {("N000", FRIDAY.isoformat())}       # a held name's bar is late
+        h.decide(FRIDAY)
+        self.assertEqual(h.state.get("eq_decide")["day"], THURSDAY.isoformat(), "no seating pass runs at exits only")
+        h.market.tape.absent = set()
+        h.tick(16, 31, day=FRIDAY)
+        self.assertEqual(h.state.get("eq_decide")["instances"], [KEY])
+
     def test_a_decide_before_the_cut_off_is_not_late(self):
         h = self.h
         h.tick(9, 40, day=MONDAY)
