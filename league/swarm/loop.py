@@ -68,6 +68,7 @@ from . import elane, game
 from . import HEARTBEAT, LOCK_FILE, LOG_FILE, PID_FILE, settings as settings_mod
 from .architect import AGENDA_KEY, Architect, GraveyardDigest, allowed_structures
 from .diagnostician import Diagnostician
+from .elane_train import EquityResearcher
 from .funding import FundingWatch
 from .gate import Gate
 from .guard import SailGuard, provider_reader
@@ -509,6 +510,9 @@ class Swarm:
         # two Claude calls send the same bytes, so the second reads the first's cache entry.
         self.digest = GraveyardDigest(self.store, self.settings, clock=clock)
         self.architect = Architect(self.store, self.router, self.settings, clock=clock, digest=self.digest)
+        # THE EQUITY TRAIN (release E2; league/swarm/elane_train.py): the equity researcher and the equity review, on E1's
+        # isolated runner (`elane.isolated_runner`, built on its first Train run).
+        self.elane_train = EquityResearcher(self.store, self.router, self.settings, root=self.root, clock=clock)
         self.strategist = Strategist(self.store, self.router, self.settings, digest=self.digest, clock=clock,
                                      architect=self.architect)
         self.diagnostician = Diagnostician(self.store, self.router, self.settings, pool=self.pool, researcher=self.researcher,
@@ -1008,6 +1012,13 @@ class Swarm:
                 born = self.reseed()
                 if born:
                     log(f"reseeded {len(born)}: {', '.join(born)}")
+            # THE EQUITY LANES' BIRTHS AND TRAIN (release E2; league/swarm/elane_births.py, elane_train.py): their own
+            # rounds, never inside the options architect's pass (its ceiling and its closed cells stop neither). Each is
+            # off unless `elane.mode` is "gate" (births also need `elane.birth_share` above zero).
+            if research and self.architect.equity_due():
+                self._round("elane", self.architect.equity_pass)
+            if research and self.elane_train.due():
+                self._round("elane_train", self.elane_train.run)
             if research and self.diagnostician.due():  # Claude's own funded line and daily budget, not the researchers' pace
                 self._round("diagnostician", self.diagnostician.run)
             if not self.over_pace():
