@@ -1,29 +1,33 @@
 """The contamination probe's panel strata P4-P6, and the look's permit (release E4, package B's patch 18).
 
-Owner: package B of release E4. Protected (league/ops/). THE HOUSE'S `contam_probe` JOB IS THIS MODULE'S `run` since
-release E4: release E3's probe (league/ops/contam_probe.py) with THE PLAN of the panel strata handed in. Why a module
-of its own: E3's seal lets its probe import no module of league/xs, so the probe owns every word of a prompt and the
-state of a run, and this module owns what only the panel can say: which members and periods a panel stratum may ask
-about, the truth on the House, and the permit a panel look waits on (the captain's A22 (3)).
+Owner: package B of release E4. Protected (league/ops/). THE PLAN release E3's probe is handed
+(`league.ops.contam_probe.probe(ctx, panel=plan)`), and the permit a panel look waits on (the captain's A22 (3)).
+Why a module of its own: E3's seal lets its probe import no module of league/xs, so the probe owns every word of a
+prompt and the state of a run, and this module owns what only the panel can say: which members and periods a panel
+stratum may ask about, and the truth on the House. And this module imports nothing of the probe's (no ops module
+outside the forward record's own may: its report's seal), so the probe hands the plan its calendar (`periods`,
+`eras`) and its file's content (`published(doc)`). NOT WIRED: the House's job (`contam_probe.run`) hands no plan
+until the captain gives the allowance its one import needs in E3's seal test (league/xs/E4_INTERFACES.md 13).
 
-WHEN THE PLAN IS HANDED IN (`run`, `plan`). `elane.panel.mode` "off" (the lane's switch, read as set), no panel store
-or universe under `<state>/equity-daily/` yet, or a panel whose coverage verdict is "insufficient": NO PLAN, and the
-job is release E3's probe to the byte (no panel stratum, no permit written). Otherwise the job first asks the quiet
-windows with its own wall (`league.xs.config.quiet(now, WALL_S)`: a skipped receipt, as every E4 job; its Saturday
-00:10Z occurrence never meets a wall), then the probe opens its own store and mints the gate's capability, and `plan`
-opens the panel store under THAT capability and reads it once (the membership, and the arrays' shas on one Train
-session). A panel store that cannot be read there fails the job before any route is marked or dollar spent.
+WHEN THERE IS A PLAN (`plan`, the maker the probe calls once its own store is open and before any route is marked).
+`elane.panel.mode` "off" (the lane's switch, read as set), no panel store or universe under `<state>/equity-daily/`
+yet, or a panel whose coverage verdict is "insufficient": NO PLAN (None), and the probe is release E3's to the byte
+(no panel stratum, no permit written). Otherwise the quiet windows first, with the job's own wall
+(`league.xs.config.quiet(now, WALL_S)`: a skipped receipt, as every E4 job; the probe's Saturday 00:10Z never meets
+a wall); then the panel store is opened under THE PROBE'S OWN capability and read once (the membership, and the
+arrays' shas on one Train session). A panel store that cannot be read there fails the job before any route is marked
+or dollar spent.
 
 WHAT A PANEL STRATUM ASKS (names and the calendar only; the words are the probe's).
 - THE PERIODS (`Plan.periods`): of the era "2016-24", the months (P4, P6) and ISO weeks (P5) that lie, base and end,
   inside ONE span of `league.xs.config.TRAIN_SEGMENTS` (2017-19 and 2022-24): never a period of 2016 or 2021 (history
   only), never one of 2020 (the reserve: no such row exists), and none whose base is in such a year (each segment's
-  first month and first week are left out). Of "2025" and "2026H1", every period of the calendar.
+  first month and first week are left out). Of "2025" and "2026H1", every period of the probe's calendar.
 - THE MEMBERS (`Plan.names` for P4 and P5): the tickers that were unmasked index members, under one asset and one
   ticker, on EVERY base day of the era's admitted months and on the last of them's end, and that the panel store
   holds a column for. The probe draws its K a cell from them by its own hash rule, the same for every route. STATED
   COST: names that stayed in the index through an era; a route recalls those at least as well as the ones that left.
-  P6's names are the probe's own (`contam_probe.FACTORS`).
+  P6's names are the probe's own (the House panel factors: `FACTORS` here is held equal to the probe's).
 
 TRUTH (`Plan.truths`; on the House, never written; asked by the probe a cell at once, after the cell's answers).
 - From THE PANEL STORE through its own windows, one slice a period under the run key `RUN_KEY`: a "2016-24" period
@@ -44,9 +48,10 @@ TRUTH (`Plan.truths`; on the House, never written; asked by the probe a cell at 
 THE PERMIT (`permit`, `write_permit`; the swarm reads it: `league.swarm.elane_xs.probe_reading`, `probed`).
 `<state>/xs-look-permit.json` (atomic, 0600): {"version": "xs-look-permit-1", "routes": {route: {"at", "model",
 "cells": {"P4" | "P5" | "P6": {era: {"readable": bool, "recalled": bool}}}}}}: one row for every route whose
-PUBLISHED result carries all three panel strata, and NOTHING ELSE of a cell (no count, no rate, no p). It is rewritten
-from the probe's own file each time a result is published and after every run of this job that had a plan (so a
-permit lost or left behind is made again). The probe's own file is never read by the swarm (release E3's seal).
+PUBLISHED result carries all three panel strata, and NOTHING ELSE of a cell (no count, no rate, no p). The probe
+tells its plan the content of its file (`Plan.published`) each time it publishes a route and after every other run
+that had a plan, and the permit is rewritten from it (so a permit lost or left behind is made again). The probe's
+own file is never read by the swarm (release E3's seal), and never by this module either: it is handed its content.
 
 Standard library at import; numpy and league.xs inside the functions that read the panel.
 """
@@ -56,9 +61,9 @@ from __future__ import annotations
 import datetime as dt
 import math
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
-#: The job's own wall (seconds): what `league.xs.config.quiet` is asked with (the registry row's).
+#: The probe job's wall (seconds): what `league.xs.config.quiet` is asked with (the registry row's; a test holds it).
 WALL_S = 3300
 #: The equity lanes' state directory (`league.ops.equity_data.STORE_DIR`; spelled here, a test holds them equal).
 STORE_DIR = "equity-daily"
@@ -69,6 +74,8 @@ TRAIN_ERA = "2016-24"
 #: The strata whose names are index members, and the stratum whose periods say when a member must have been one.
 MEMBER_STRATA = ("P4", "P5")
 MONTH_STRATUM = "P4"
+#: P6's names as the probe spells them (`league.ops.contam_probe.FACTORS`; a test holds them equal).
+FACTORS = ("mom", "strev", "beta")
 
 
 # ------------------------------------------------------------------------------------------------- the arithmetic
@@ -137,19 +144,22 @@ def _word(gap: float | None) -> str | None:
 class Plan:
     """THE PLAN of the panel strata for one run of the probe (the module docstring), over the House's panel store.
     `store`: a `league.xs.store.PanelStore`, opened with the gate's capability on the House (a 2025 or 2026 truth
-    is refused without it). What the probe asks of it: `names`, `periods`, `truths`, `published`."""
+    is refused without it). `periods`, `eras`: the probe's own calendar (`contam_probe.periods(stratum, era)` and its
+    eras' names, the Train era first). `state_root`: where the permit is written (None: nowhere). What the probe asks
+    of it: `names`, `periods`, `truths`, `published`."""
 
-    def __init__(self, store: Any, state_root: str | Path | None = None):
-        from . import contam_probe
-
+    def __init__(self, store: Any, state_root: str | Path | None = None, *,
+                 periods: Callable[[str, str], Sequence[Sequence[str]]], eras: Sequence[str]):
         self.store = store
         self.universe = store.universe()
         self.state_root = None if state_root is None else Path(state_root)
+        self.eras = tuple(str(era) for era in eras)
+        self._calendar = periods
         self._columns = {int(aid) for aid in store.aids().tolist()}
         self._aid: dict[tuple[str, str], int] = {}
         self._names: dict[str, list[str]] = {}
         self._periods: dict[tuple[str, str], list[tuple[str, str, str]]] = {}
-        for era in contam_probe.ERAS:           # read once: a universe that cannot be read fails the job here
+        for era in self.eras:                   # read once: a universe that cannot be read fails the job here
             self.names(MONTH_STRATUM, era)
 
     # ------------------------------------------------------------------ what a stratum may ask
@@ -158,9 +168,8 @@ class Plan:
         found = self._periods.get((stratum, era))
         if found is None:
             from ..xs import config as xs_config
-            from . import contam_probe
 
-            every = contam_probe.periods(stratum, era)
+            every = [(str(name), str(base), str(end)) for name, base, end in self._calendar(stratum, era)]
             if era == TRAIN_ERA:
                 spans = [(lo.isoformat(), hi.isoformat()) for lo, hi in xs_config.TRAIN_SEGMENTS]
                 every = [row for row in every if any(lo <= row[1] and row[2] <= hi for lo, hi in spans)]
@@ -265,7 +274,8 @@ class Plan:
 
     # ------------------------------------------------------------------ the permit
     def published(self, doc: Mapping[str, Any]) -> None:
-        """The probe published a route's result: the permit is rewritten from the probe's file as it now stands."""
+        """The probe hands in its file's content (after a publish, and after any other run that had this plan): the
+        permit is rewritten from it."""
         if self.state_root is not None:
             write_permit(self.state_root, doc)
 
@@ -296,14 +306,13 @@ def permit(doc: Mapping[str, Any] | None) -> dict[str, Any]:
     return {"version": elane_xs.PROBE_VERSION, "routes": out}
 
 
-def write_permit(root: str | Path, doc: Mapping[str, Any] | None = None) -> dict[str, Any]:
+def write_permit(root: str | Path, doc: Mapping[str, Any] | None) -> dict[str, Any]:
     """Write `<root>/xs-look-permit.json` (`league.swarm.elane_xs.PROBE_FILE`; atomic, 0600) from a probe file's
-    content (`doc`; default: the probe's own file as it stands) and return what was written."""
+    content (`doc`: what the probe handed in) and return what was written."""
     from ..swarm import elane_xs
-    from . import contam_probe
     from .context import write_json
 
-    found = permit(contam_probe.read(root) if doc is None else doc)
+    found = permit(doc)
     write_json(Path(root) / elane_xs.PROBE_FILE, found)
     return found
 
@@ -328,63 +337,35 @@ def asked(root: str | Path, settings: Mapping[str, Any] | None) -> str | None:
     return None
 
 
-def plan(ctx: Any, settings: Mapping[str, Any] | None, capability: Any) -> Plan | None:
-    """THE PLAN for this run (what `contam_probe.probe` calls once its own store is open), or None (`asked`, or a
-    panel whose coverage verdict is "insufficient": the lane is off by its own rule). The panel store is opened under
-    the probe's own capability and READ ONCE here: the membership of every era, and one Train session's slice (every
-    array's sha against the manifest). `MissingData` / `StoreRefused` when it cannot be read: the job fails before
-    any route is marked."""
+def plan(ctx: Any, settings: Mapping[str, Any] | None, capability: Any, *,
+         periods: Callable[[str, str], Sequence[Sequence[str]]], eras: Sequence[str]) -> Plan | dict[str, Any] | None:
+    """THE PLAN'S MAKER (what `contam_probe.probe` calls once its own store is open, with its calendar). None: no
+    panel stratum this run (`asked`, or a panel whose coverage verdict is "insufficient": the lane is off by its own
+    rule). A skipped receipt: the panel's work could meet a wall of the session (`league.xs.config.quiet(now,
+    WALL_S)`: no E4 work runs through one). Else a `Plan`: the panel store opened under the probe's own capability
+    and READ ONCE here: the membership of every era, and one Train session's slice (every array's sha against the
+    manifest). `MissingData` / `StoreRefused` when it cannot be read: the job fails before any route is marked."""
     from ..xs import config as xs_config
     from ..xs import store as xs_store
 
     root = Path(ctx.root)
     if asked(root, settings) is not None:
         return None
+    try:
+        why = xs_config.quiet(ctx.now(), WALL_S)
+    except Exception as exc:  # noqa: BLE001 - work that cannot learn whether it stands at a wall does not start
+        why = f"the quiet windows could not be read ({type(exc).__name__}: {str(exc)[:160]})"
+    if why is not None:
+        return {"status": "skipped", "why": why}
     store = xs_store.PanelStore(root / STORE_DIR, gate=capability)
     if store.verdict() == "insufficient":
         return None
-    found = Plan(store, root)
+    found = Plan(store, root, periods=periods, eras=eras)
     sessions = store.sessions("train")
     if sessions:
         store.train(sessions[-1], sessions[-1], history=xs_config.MIN_HISTORY, run_key=RUN_KEY, aids=[])
     return found
 
 
-def run(ctx: Any) -> dict[str, Any]:
-    """THE HOUSE'S `contam_probe` JOB since release E4 (league/ops/registry.py): `contam_probe.probe(ctx, panel=plan)`.
-    With no panel stratum to ask (`asked`) it is release E3's probe and nothing else. With one, the quiet windows
-    first (a skipped receipt: no E4 work runs through a wall); the probe's receipt, with `panel` and `permit` beside;
-    and after a run that had a plan the permit is written again from the probe's file as it stands."""
-    from ..swarm import settings as settings_mod
-    from . import contam_probe
-
-    root = Path(ctx.root)
-    settings = settings_mod.load(root, config=ctx.config)
-    if contam_probe.mode(settings) == "off" or asked(root, settings) is not None:
-        return contam_probe.probe(ctx, panel=plan)   # E3's probe: `plan` answers None again, from the same settings
-    from ..xs import config as xs_config
-
-    try:
-        why = xs_config.quiet(ctx.now(), WALL_S)
-    except Exception as exc:  # noqa: BLE001 - a job that cannot learn whether it stands at a wall does not start
-        why = f"the quiet windows could not be read ({type(exc).__name__}: {str(exc)[:160]})"
-    if why is not None:
-        return {"status": "skipped", "why": why}
-    made: list[bool] = []
-
-    def planned(*args: Any) -> Plan | None:
-        found = plan(*args)
-        made.append(found is not None)
-        return found
-
-    out = contam_probe.probe(ctx, panel=planned)
-    if any(made):
-        try:
-            write_permit(root)
-        except Exception as exc:  # noqa: BLE001 - the probe's result stands; the next run writes the permit again
-            ctx.alert("warning", f"contam_probe: the look permit could not be written ({type(exc).__name__})")
-    return out
-
-
-__all__ = ["WALL_S", "STORE_DIR", "RUN_KEY", "TRAIN_ERA", "MEMBER_STRATA", "MONTH_STRATUM", "thirds", "factor_days",
-           "Plan", "permit", "write_permit", "asked", "plan", "run"]
+__all__ = ["WALL_S", "STORE_DIR", "RUN_KEY", "TRAIN_ERA", "MEMBER_STRATA", "MONTH_STRATUM", "FACTORS", "thirds",
+           "factor_days", "Plan", "permit", "write_permit", "asked", "plan"]

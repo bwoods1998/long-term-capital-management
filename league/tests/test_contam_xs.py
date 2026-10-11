@@ -9,10 +9,11 @@ the plan seam of league/ops/contam_probe.py; the captain's A22 (3): the contamin
 - `TheJob`: a route's published result carries the three strata beside E3's cells, which are byte for byte what they
   were; the permit holds two words a cell and no figure, and `elane_xs.probed` opens on it; every request key is
   new; the run's dollars are capped as shipped; truths are read after answers; nothing written holds a truth.
-- `TheHousesJob`: `contam_xs.run` on a House state: release E3's probe with the lane off or no panel store; the
-  strata and the permit with them; a panel store that cannot be read fails before any route is marked; a wall skips.
-- `TheWiring`: the registry's row, the constants held equal, and the seals (the probe imports nothing of league/xs;
-  no sealed tree imports this module).
+- `TheHousesJob`: `contam_probe.probe(ctx, panel=contam_xs.plan)` on a House state: release E3's probe with the
+  lane off or no panel store; the strata and the permit with them; a panel store that cannot be read fails before
+  any route is marked; a wall skips. And `contam_probe.run`, the House's job as the tree leaves it, hands no plan.
+- `TheWiring`: the constants held equal, and the seals as they stand (the probe imports nothing of league/xs or of
+  this module; this module imports nothing of the probe's; no sealed tree imports it).
 
 The panel is package C's synthetic one (seeded noise on the true calendar, made-up tickers) and the router is
 scripted: every price, member, answer and dollar here is invented. No model is called and no network is used."""
@@ -127,7 +128,7 @@ class Panels(unittest.TestCase):
         return xs_store.PanelStore(self.panels[which], gate=self.capability(which) if gate else None)
 
     def plan(self, which: str = "a", *, gate: bool = True, root=None) -> X.Plan:
-        return X.Plan(self.panel(which, gate=gate), root)
+        return X.Plan(self.panel(which, gate=gate), root, periods=P.periods, eras=tuple(P.ERAS))
 
     @staticmethod
     def cells(questions) -> dict:
@@ -372,7 +373,7 @@ class ThePlan(Panels):
         for era in ("2025", "2026H1"):
             self.assertTrue(all(t in ("more", "less") for t in gated.truths(cells["P6", era])))
         with self.assertRaises(StoreRefused):
-            X.Plan(xs_store.PanelStore(self.panels["a"], gate=self.capability("b")))
+            xs_store.PanelStore(self.panels["a"], gate=self.capability("b"))   # another store's capability opens nothing
 
     def test_no_row_of_the_reserve_or_of_a_history_year_is_asked_for(self):
         """Every slice a truth reads names its run sessions; none lies in 2016, 2020 or 2021, a Train one lies inside
@@ -805,13 +806,19 @@ class TheJob(Jobs):
         self.assertEqual((out["finished"], out["permit"]), (True, False))
         self.assertEqual([(a["level"], "look permit" in a["text"]) for a in ctx.alerts], [("warning", True)])
         self.assertIn("at", self.doc()["routes"]["sail:pro_asap"])
-        self.assertEqual(sorted(X.write_permit(self.root)["routes"]), ["sail:pro_asap"], "the job writes it again from the file")
+        self.assertEqual(sorted(X.write_permit(self.root, self.doc())["routes"]), ["sail:pro_asap"],
+                         "handed the file's content again, it writes it")
         self.assertIsNone(elane_xs.probed(self.root, {"spec": {"e2_route": "sail:pro_asap"}}))
 
 
 # ================================================================================================ the House's job
+def wired(ctx):
+    """The probe with the panel's plan handed in: the two lines the House's job is one allowance away from."""
+    return P.probe(ctx, panel=X.plan)
+
+
 class TheHousesJob(Panels):
-    """`contam_xs.run(ctx)` on a House state (the registry's job), with the swarm's router scripted."""
+    """`contam_probe.probe(ctx, panel=contam_xs.plan)` on a House state, with the swarm's router scripted."""
 
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -834,7 +841,7 @@ class TheHousesJob(Panels):
         """The synthetic panel as this state's `equity-daily` (a copy: a test may break it)."""
         return Path(shutil.copytree(self.panels[which], self.root / STORE_DIR))
 
-    def run_job(self, job=X.run):
+    def run_job(self, job=wired):
         with mock.patch("league.swarm.models.build_router", lambda root, store, settings_, *, config=None: self.router):
             return job(self.ctx())
 
@@ -946,6 +953,19 @@ class TheHousesJob(Panels):
         self.assertIsNone(xs_config.quiet(saturday.timestamp(), X.WALL_S))
         self.assertIsNone(xs_config.quiet(saturday.timestamp() + 6 * 3600, X.WALL_S), "nor at the end of its grace")
 
+    def test_the_houses_job_hands_no_plan_as_the_tree_stands(self):
+        """`contam_probe.run` is the registry's job and is release E3's probe: with the lane on and a panel store in
+        place it asks no panel stratum and writes no permit. Handing it the plan is one import, which E3's seal
+        test does not list (league/xs/E4_INTERFACES.md 13: the captain's to allow)."""
+        self.house()
+        self.on("train")
+        out = self.run_job(P.run)
+        self.assertEqual((out["finished"], out["stopped"]), (True, None))
+        self.assertNotIn("panel", out)
+        self.assertFalse((self.root / elane_xs.PROBE_FILE).exists())
+        self.assertIn("no published result", elane_xs.probed(self.root, {"spec": {"e2_route": out["route"]}}))
+        self.assertEqual(registry.by_name()["contam_probe"].module, "league.ops.contam_probe")
+
     def test_the_probes_switch_is_still_the_probes(self):
         self.house()
         (self.root / "swarm.json").write_text(json.dumps({"elane": {"contam": {"mode": "off"}, "panel": {"mode": "train"}}}))
@@ -955,29 +975,37 @@ class TheHousesJob(Panels):
 
 # ===================================================================================================== the wiring
 class TheWiring(unittest.TestCase):
-    def test_the_houses_job_is_this_module_and_its_row_is_e3s(self):
+    def test_the_constants_are_the_ones_they_stand_for(self):
         job = registry.by_name()["contam_probe"]
-        self.assertEqual(job.module, "league.ops.contam_xs")
-        self.assertEqual((job.triggers, job.cpu, job.wall, job.paid, job.retry, job.in_pause),
-                         ((schedule.weekly(5, 0, 10),), 300, 3300, True, False, False), "release E3's row, unmoved")
-        self.assertEqual(X.WALL_S, job.wall)
+        self.assertEqual((job.module, job.triggers, job.cpu, job.wall, job.paid, job.retry, job.in_pause),
+                         ("league.ops.contam_probe", (schedule.weekly(5, 0, 10),), 300, 3300, True, False, False),
+                         "release E3's row, unmoved")
+        self.assertEqual(X.WALL_S, job.wall, "the wall the quiet windows are asked with is the probe job's")
         self.assertLess(P.ASK_SECONDS, job.wall)
         self.assertEqual((X.STORE_DIR, X.STORE_DIR, X.STORE_DIR), (STORE_DIR, equity_data.STORE_DIR, elane_xs.STORE_DIR))
         self.assertEqual(X.TRAIN_ERA, next(iter(P.ERAS)))
-        self.assertTrue(callable(X.run) and callable(P.run) and callable(P.probe))
+        self.assertEqual((X.FACTORS, X.MEMBER_STRATA, X.MONTH_STRATUM), (P.FACTORS, P.PANEL_STRATA[:2], P.PANEL_STRATA[0]))
+        self.assertEqual(set(P.PANEL_STRATA) - set(X.MEMBER_STRATA), {"P6"})
+        self.assertEqual(elane_xs.PROBE_STRATA, P.PANEL_STRATA)
 
-    def test_the_probe_imports_nothing_of_the_panel_and_e3s_seal_is_as_it_was(self):
-        """Release E3's seal T1 lets its ops modules import only what its contract lists, and the probe is one of
-        them: every panel read is this module's, handed to the probe as a plan."""
-        reached = {module for module, _, _ in seal.imports(REPO, REPO / "league" / "ops" / "contam_probe.py")}
+    def test_neither_module_imports_the_other_and_no_seal_was_moved(self):
+        """Release E3's seal T1 lets its ops modules import only what its contract lists (nothing of league/xs, and
+        not this module); the forward report's seal lets no ops module outside the forward record's own import the
+        probe. Both stand as written: the probe hands the plan its calendar and its file's content, and takes the
+        plan's maker as a parameter."""
+        probe, mine = REPO / "league" / "ops" / "contam_probe.py", REPO / "league" / "ops" / "contam_xs.py"
+        reached = {module for module, _, _ in seal.imports(REPO, probe)}
         self.assertFalse({m for m in reached if m.startswith("league.xs") or m in ("league.ops.contam_xs", "league.swarm.elane_xs")})
-        self.assertEqual(seal.outside(REPO, REPO / "league" / "ops" / "contam_probe.py", seal.OPS_MAY), [])
+        self.assertEqual(seal.outside(REPO, probe, seal.OPS_MAY), [])
         self.assertNotIn("contam_xs", seal.E3_OPS)
-        self.assertFalse({m for m in seal.OPS_MAY if "xs" in m.split(".")[-1]}, "nothing of the panel was let in")
-        mine = {module for module, _, _ in seal.imports(REPO, REPO / "league" / "ops" / "contam_xs.py")}
-        self.assertTrue({"league.ops.contam_probe", "league.xs.store", "league.xs.ctx", "league.swarm.elane_xs"} <= mine)
-        top = {module for module, inside, _ in seal.imports(REPO, REPO / "league" / "ops" / "contam_xs.py") if not inside}
-        self.assertEqual(top, set(), "numpy and the panel are imported where they are used")
+        self.assertFalse({m for m in seal.OPS_MAY if m.rsplit(".", 1)[-1].endswith("xs") or ".xs" in m},
+                         "nothing of the panel was let into E3's list")
+        imported = {module for module, _, _ in seal.imports(REPO, mine)}
+        self.assertFalse(imported & {f"league.ops.{name}" for name in seal.E3_OPS}, "nothing of the forward record's")
+        self.assertTrue({"league.xs.store", "league.xs.ctx", "league.xs.placebo", "league.swarm.elane_xs"} <= imported)
+        self.assertEqual({module for module, inside, _ in seal.imports(REPO, mine) if not inside}, set(),
+                         "numpy and the panel are imported where they are used")
+        self.assertNotIn(P.FILE, mine.read_text(encoding="utf-8"), "it is handed the probe's file's content, never its name")
 
     def test_the_permit_the_lanes_own_tests_fake_is_the_shape_the_job_writes(self):
         """league/tests/elane_xs_fakes.py `write_probe` (the panel lane's tests and the end-to-end test write a permit

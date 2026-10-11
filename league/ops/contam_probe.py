@@ -40,8 +40,11 @@ hi, p_perm, readable, recalled}}}, "recall": {n, rho, p_perm, sign_acc}, "partia
 THE PANEL STRATA (release E4, package B's patch 18; the captain's A22 (3): the probe before a panel look). Three more
 strata, `PANEL_STRATA`, asked only when the job is handed A PLAN (`probe(ctx, panel=...)`; `run(ctx)` hands none and
 is release E3's probe to the byte). This module reads nothing of the panel: release E3's seal lets it import no
-module of league/xs, so the plan (league/ops/contam_xs.py) is the one that opens the panel store, under the
-capability this job mints, and this module owns EVERY WORD OF A PROMPT.
+module of league/xs, so the plan (release E4's league/ops/contam_xs.py, which in its turn imports nothing of this
+module: the forward record's own seal) is the one that opens the panel store, under the capability this job mints,
+and this module owns EVERY WORD OF A PROMPT. NOT WIRED: `run(ctx)`, the House's job, hands no plan; the two lines
+that would hand it one need an allowance in E3's seal test, which is the captain's to give (the patch is in the
+captain's scratch; league/xs/E4_INTERFACES.md section 13).
 - P4: an index member against its sector's fund, a month ("Did X return more or less than the Select Sector SPDR
   fund of its sector in <Month YYYY>?"); P5: the same, a week ("... in the week ending <date>?"); P6: the House
   panel factors, a month (`FACTORS`: momentum, short-term reversal and beta, each the top third of the index against
@@ -65,7 +68,8 @@ capability this job mints, and this module owns EVERY WORD OF A PROMPT.
   whole, and a panel look of its programs waits on it. STATED COST: that route's E3 cells are asked again with it,
   inside the same dollars a run (`usd_run` and E2's day, unchanged).
 - AFTER A PUBLISH the plan is told (`plan.published(doc)`: it writes the look's permit, two words a cell). A permit
-  that cannot be written is a warning and `permit` False in the receipt; the result stays published.
+  that cannot be written is a warning and `permit` False in the receipt; the result stays published. After any other
+  run that had a plan `probe` tells it again with the file as it stands, so a permit lost is made again.
 - The receipt gains `panel` (the panel cells this probe asks) and, on a publish, `permit`; with no plan neither.
 
 THE JOB (`run`): skipped when the mode is "off", no route is due (`due`), or E2's day leaves it no dollar
@@ -1003,21 +1007,22 @@ class Probe:
 
 
 def run(ctx: Any) -> dict[str, Any]:
-    """THE JOB as release E3 built it: no panel stratum (the module docstring). The receipt: {"route", "probe" (its
-    number), "usd", "bound" (the run's dollars at most), "finished", "cells" (scored this run), "asked", "stopped"
-    ("usd" | "time" | "error" | "data" | "fallback" | None)} and, when a call or the store failed or another profile
-    answered, "error". The House's job since release E4 is `league.ops.contam_xs.run`, which is `probe` with the
-    panel's plan."""
+    """THE JOB (the module docstring; league/ops/registry.py), as release E3 built it: no panel stratum. The receipt:
+    {"route", "probe" (its number), "usd", "bound" (the run's dollars at most), "finished", "cells" (scored this
+    run), "asked", "stopped" ("usd" | "time" | "error" | "data" | "fallback" | None)} and, when a call or the store
+    failed or another profile answered, "error"."""
     return probe(ctx)
 
 
 def probe(ctx: Any, *, panel: Callable[..., Any] | None = None) -> dict[str, Any]:
-    """THE JOB, with or without the panel strata. `panel`: None (`run`), or `panel(ctx, settings, capability) -> a
-    plan | None`, asked ONCE THE HOUSE'S OWN STORE IS OPEN AND BEFORE ANY ROUTE IS MARKED, with the swarm's settings
-    and the gate's capability this job minted (under `GATE_REASON`: the one capability of a run). None: no panel
-    stratum this run. A `MissingData` or `StoreRefused` it raises (a panel store that cannot be read) fails the job
-    there: no route marked, no dollar spent. The receipt is `run`'s, with `panel` and `permit` beside (THE PANEL
-    STRATA)."""
+    """THE JOB, with or without the panel strata. `panel`: None (`run`), or a plan's maker, asked ONCE THE HOUSE'S
+    OWN STORE IS OPEN AND BEFORE ANY ROUTE IS MARKED: `panel(ctx, settings, capability, periods=periods,
+    eras=tuple(ERAS))`, with the swarm's settings, the gate's capability this job minted (under `GATE_REASON`: the
+    one capability of a run) and this module's own calendar (the maker imports nothing of this module). It answers a
+    plan; None (no panel stratum this run: the probe is E3's); or a receipt (a dict with "status": the job ends
+    with it, as where the panel's work could meet a wall). A `MissingData` or `StoreRefused` it raises (a panel
+    store that cannot be read) fails the job there. In each of those no route is marked and no dollar spent. The
+    receipt is `run`'s, with `panel` and `permit` beside (THE PANEL STRATA)."""
     from ..equity.store import STORE_DIR, EquityStore, MissingData, StoreRefused, mint_equity_gate_capability
     from ..swarm import settings as settings_mod
     from . import equity_data
@@ -1037,19 +1042,27 @@ def probe(ctx: Any, *, panel: Callable[..., Any] | None = None) -> dict[str, Any
     plan = None
     if panel is not None:
         try:
-            plan = panel(ctx, settings, capability)
+            plan = panel(ctx, settings, capability, periods=periods, eras=tuple(ERAS))
         except (MissingData, StoreRefused) as exc:
             return {"status": "failed", "error": f"the panel store cannot be read ({type(exc).__name__}): {str(exc)[:200]}"}
+        if isinstance(plan, Mapping):
+            return dict(plan)  # the maker's own receipt: nothing was opened for a route
     from ..swarm.models import build_router
     from ..swarm.store import SwarmStore
 
     store = SwarmStore(root)
     try:
         router = build_router(root, store, settings, config=ctx.config)
-        return Probe(ctx, store=store, settings=settings, router=router, equity=equity,
-                     symbols=equity_data.universe(), panel=plan).run()
+        out = Probe(ctx, store=store, settings=settings, router=router, equity=equity,
+                    symbols=equity_data.universe(), panel=plan).run()
     finally:
         store.close()
+    if plan is not None and "permit" not in out:
+        try:  # nothing was published this run: the permit is made again from the file as it stands, all the same
+            plan.published(read(root))
+        except Exception as exc:  # noqa: BLE001 - the next run writes it again
+            ctx.alert("warning", f"the contamination probe's plan could not write the look permit ({type(exc).__name__})")
+    return out
 
 
 __all__ = ["FILE", "VERSION", "GATE_REASON", "ERAS", "STRATA", "PANEL_STRATA", "FACTORS", "FACTOR_WORDS", "NAME", "RECALL", "RECALL_MONTHS", "ROLE", "SYMBOLS_PER_CELL",
