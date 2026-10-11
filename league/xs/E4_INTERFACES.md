@@ -216,6 +216,15 @@ Each is a place the two texts had to be reconciled at Step 0; the stub says whic
 8. **The cell id's formula** is what the study's reference draft uses; the pre-registration fixes the order of the
    draws by "cells in ascending id" and the study's HOUSE-RULE-XS1.md will fix the ids. D and E re-check on its landing.
 9. **`screen.RECEIPT_KEYS`** is the pre-registration's table; the real receipt's exact key list is the study's.
+10. **"Asset id" in the pre-registration's orderings is the COLUMN ORDER on the House.** Its ties (beta, then asset
+    id), a cell's member list (ascending asset id) and a cell's lots (weight descending, asset id ascending) name the
+    study's asset id, a ticker's rank. The decider child holds no aid, by the seal: its member columns are in
+    ascending SALTED id, and that order stands for it everywhere. The law of a draw is the same (uniform over the
+    cell); the stream differs from an aid-ordered one, and is as fixed before the look (the run key and the seed
+    are). A conformance fixture hands its columns in the study's order, so the two implementations still agree.
+11. **Seal X1's clause "every price array's last column is 1.0" no longer applies** (the ctx has no price array). Its
+    adversary still does: the lattice search, continued fractions and the dither-range bound are run on the five
+    scale-free fields, and must recover every close with the dither switched off and none with it on.
 
 ## 9. Tests
 
