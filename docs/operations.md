@@ -43,10 +43,11 @@ reads the default 8); every other `elane.e2` key has its own bound and a malform
 - **Train is 2016-19 and 2022-24** (A15): seven years, two runs a stress, summed. **2020-21 is the reserve**: no E2
   run has a session in it and a result carrying a row of it is refused whole (alert `elane_train_window`). The
   loosening, stated: the bar reads seven years, not nine.
-- The bar ends with **STATE, the restart check** (A15): the program is run again with its memory emptied every 20
-  sessions and must give the same intents on 99% of sessions, because the decider child restarts on every deploy. A
-  check that cannot finish three times in a row is the House's failure and an alert (`elane_train_state`); it is never
-  a pass.
+- The bar ends with **STATE, the restart check** (A15): the program is run again with its memory emptied 7 sessions
+  into each span and every 20 after, and must end 99% of the sessions as the uninterrupted run does (the same orders,
+  each buy the same size, the same count of failed decides), because the decider child restarts on every deploy. A
+  check that cannot run or finish is the House's failure, never a pass: the version is not scored, and its third such
+  failure is an alert, sent once (`elane_train_state`).
 - **Nothing after Train reaches a generator** (A9 D3): no Validation or look outcome, no band, no retirement after the
   look. The equity generators read Train facts only, and no options generator reads an equity graveyard row.
 
@@ -95,8 +96,11 @@ with a row for the route that answered.
 
 **Not handled, stated.** E2's rounds start only while the options Gym is configured and the Sail guard allows
 research, like every round that makes new research, though an equity Train run needs no Gym box. The restart check
-does not catch memory that changes fewer than 1% of sessions. Post-earnings drift is named in the agenda and refused
-until earnings data exist.
+does not catch memory that changes fewer than 1% of sessions. **The reserve's bars reach Train as look-back**: no
+2020-21 session is run or scored, but a 2022-24 run reads up to 504 sessions before 2022-01-03 as its NEEDS `history`,
+so a program with look-back has 2022-24 Train figures that are functions of 2020-21 bars; sealing those bars too would
+be a change in E1's runner or store, the captain's call when the reserve's accessor is built. Post-earnings drift is
+named in the agenda and refused until earnings data exist.
 
 ## The equity lane (release E1, Oct 2026): `feat/equity-e1`, not deployed
 

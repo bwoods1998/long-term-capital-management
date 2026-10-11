@@ -210,15 +210,25 @@ class TheScreensName(unittest.TestCase):
 
     def test_the_text_tells_no_threshold_of_the_screen(self):
         # The receipt's figures are the operator's: no generator text carries one (the seal is about outcomes; a
-        # threshold in a prompt would be a target to fit).
+        # threshold in a prompt would be a target to fit). No sentence that speaks of the screen, Validation or the
+        # look holds one of the pinned block's figures, and no text anywhere names one of the receipt's quantities.
         block = policy()["elane"]["screens"]
         figures = {str(block[lane][key]) for lane in block for key in ("c_H_floor", "c_H_margin", "c_X", "fp_cap", "owner_wall")}
         figures.discard("0.0")
+        self.assertEqual(len(figures), 5, figures)
+        spoken = 0
         for where, text in self.texts().items():
-            for figure in figures:
-                self.assertIsNone(re.search(rf"(?<![\d.]){re.escape(figure)}(?![\d])", text), (where, figure))
-            for word in ("c_H", "c_R", "c_X", "fp_cap", "t_H"):
+            for word in ("c_H", "c_R", "c_X", "c_p", "fp_cap", "t_H"):
                 self.assertNotIn(word, text, where)
+            for sentence in re.split(r"(?<=[.;:])\s+", " ".join(text.split())):
+                if not re.search(r"screen|Validation|\blook\b|holdout", sentence):
+                    continue
+                spoken += 1
+                for figure in figures:
+                    self.assertIsNone(re.search(rf"(?<![\d.]){re.escape(figure)}(?!\d)", sentence), (where, figure, sentence))
+                    percent = f"{float(figure) * 100:g}%"
+                    self.assertNotIn(percent, sentence, (where, percent))
+        self.assertGreaterEqual(spoken, 5, "the texts do speak of the screen, Validation and the look")
 
 
 class TheLoop(LoopCase):

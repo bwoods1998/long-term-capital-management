@@ -1,11 +1,13 @@
 # Release E2: the patches in E1's files, as applied
 
 This file was E2's list of changes for the integrator. It is now the record of what was applied: nothing here is left
-to do. E2 (`feat/equity-e2`) was merged into E1's final head 8e11986b on branch `feat/equity-e2-int`; E2's own files
+to do. E2 (`feat/equity-e2`, carried at 04ca26c9: its A15 review fixes included) was merged into E1's final head
+8e11986b on branch `feat/equity-e2-int`, and E1's later commit bb0f2671 was merged in after it; E2's own files
 (`league/swarm/elane_births.py`, `elane_train.py`, `elane_yield.py`, `elane_seal.py`, `elane_review.py`, their tests,
 and its branches in `league/swarm/architect.py` and `league/swarm/researcher.py`) merged with no conflict, and each
-patch below went in as one commit, in this order (11 was found by the full suite and added at the integration). The numbers are the ones the code's comments and docstrings name
-("patch 5", "patch 9"). The design is in [ELANE_E2.md](ELANE_E2.md).
+patch below went in as one commit, in this order (11 was found by the full suite and added at the integration). The
+numbers are the ones the code's comments and docstrings name ("patch 5", "patch 9"). The design is in
+[ELANE_E2.md](ELANE_E2.md).
 
 | # | file | what | without it | applied |
 |---|---|---|---|---|
