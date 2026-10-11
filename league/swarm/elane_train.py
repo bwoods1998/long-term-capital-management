@@ -1201,22 +1201,34 @@ def start_orders(intents: Any, inputs: Any) -> list[Any]:
     return out
 
 
-def _order_text(order: Any) -> str:
-    """One compared order in words ("buy SPY 0.5 of the sleeve at the open")."""
+def _order_text(order: Any, symbols: Sequence[str]) -> str:
+    """One compared order in words ("buy SPY 0.5 of the sleeve at the open"), FROM A CLOSED VOCABULARY: its kind, a
+    symbol only when it is one of the run's own (`symbols`: its NEEDS), the two fill points, and a size to two
+    significant digits. Nothing a program writes freely reaches a record or a brief through it (as `dq_said` keeps an
+    exception's text out: a program can put a bar of the reserve it reads as look-back into any string or number it
+    chooses)."""
     if not isinstance(order, Mapping):
         return "an order that is no intent"
-    at = f" at the {order.get('at')}" if order.get("at") else ""
+    at = f" at the {order.get('at')}" if order.get("at") in ("open", "close") else ""
+
+    def named(symbol: Any) -> str:
+        return str(symbol) if str(symbol) in symbols else "a symbol outside its NEEDS"
     if "buy" in order:
         share, usd = _num(order.get("share")), _num(order.get("usd"))
-        size = f" {share:.4g} of the sleeve" if share is not None else (f" ${usd:,.2f}" if usd is not None else "")
-        return f"buy {order['buy']}{size}{at}"
+        size = (f" {share:.2g} of the sleeve" if share is not None else
+                f" about ${float(f'{usd:.2g}'):,.6g}" if usd is not None else "")
+        return f"buy {named(order['buy'])}{size}{at}"
     if "sell" in order:
-        return f"sell {order['sell']}{at}"
+        held = str(order["sell"])
+        return f"sell {held if held in symbols else 'a lot it does not hold'}{at}"
     return "cancel an order" if "cancel" in order else "an order of no kind"
 
 
-def _orders_text(orders: Sequence[Any], limit: int = 4) -> str:
-    said = [_order_text(o) for o in orders[:limit]]
+def _orders_text(orders: Sequence[Any], inputs: Any, limit: int = 3) -> str:
+    """A decide's compared orders in words (`_order_text`; the first `limit`, then how many more), "nothing" for none."""
+    symbols = _field(inputs, "symbols")
+    symbols = [str(x) for x in symbols] if isinstance(symbols, (list, tuple)) else []
+    said = [_order_text(o, symbols) for o in orders[:limit]]
     if len(orders) > limit:
         said.append(f"and {len(orders) - limit} more")
     return "; ".join(said) if said else "nothing"
@@ -1269,8 +1281,9 @@ def later_runs(runner: Any, code: str, params: Mapping[str, Any] | None, *, name
     return out
 
 
-#: How many of a later run's differing sessions its record names (`start_check`'s `misses`).
-START_MISSES = 12
+#: How many of a later run's differing sessions its record names (`start_check`'s `misses`): enough to see where a
+#: later run fell out of step, and few, since a program chooses the sessions it differs on.
+START_MISSES = 6
 
 
 def start_check(decider: Any, code: str, params: Mapping[str, Any] | None, *, name: str,
@@ -1393,8 +1406,8 @@ def start_check(decider: Any, code: str, params: Mapping[str, Any] | None, *, na
                     if len(out["misses"]) < START_MISSES:
                         out["misses"].append(k)
                     if out["first_miss"] is None:
-                        out["first_miss"] = {"session": k, "what": what, "base": _orders_text(mine)[:240],
-                                             "later": _orders_text(yours)[:240]}
+                        out["first_miss"] = {"session": k, "what": what, "base": _orders_text(mine, inputs),
+                                             "later": _orders_text(yours, theirs)}
             if seen != len(days):
                 raise StartCheckInterrupted(f"Train span {span} gave the start check {seen} sessions for {len(days)} "
                                             "decisions")
@@ -1435,8 +1448,9 @@ def start_check(decider: Any, code: str, params: Mapping[str, Any] | None, *, na
             "held": all(out["held"] for out in runs), "first_miss": first_miss}
 
 
-#: What of a start check the record keeps (`with_start`): counts, sessions counted from a later run's own start and the
-#: program's own orders in words; no day and no market figure.
+#: What of a start check the record keeps (`with_start`): counts, a few sessions counted from a later run's own start,
+#: and what the two runs asked where they first differed, in words of a closed vocabulary (`_order_text`): no day, no
+#: market figure, nothing a program writes freely.
 START_KEYS = ("sessions", "matched", "share", "need", "active", "active_matched", "active_share", "active_need", "warm",
               "shifts", "runs", "skipped", "disqualified", "failed", "sized", "size_gap", "first_miss")
 

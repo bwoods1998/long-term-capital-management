@@ -111,6 +111,25 @@ class WhatMatches(unittest.TestCase):
         self.assertEqual((same, round(gaps["usd"], 2)), (False, 1.64))
         self.assertEqual(elane_train.same_intents(buy(share=0.5), buy(usd=500.0)), (False, None), "a share against dollars")
 
+    def test_what_two_runs_asked_is_told_in_a_closed_vocabulary(self):
+        """A record and a brief say what the two runs asked where they first differed. A program chooses its symbols'
+        text, its sizes and its tags, and it reads the reserve's bars as look-back: only an order's kind, a symbol of
+        the run's own NEEDS, the two fill points and a size to two significant digits are ever said."""
+        inputs = {"symbols": ["SPY", "QQQ"], "positions": [{"id": 7, "symbol": "SPY"}]}
+        orders = start_orders([{"sell": 7, "at": "open", "tag": "close 2021-12-31 was 475.31"},
+                               {"buy": "QQQ", "share": 0.123456, "at": "close"},
+                               {"buy": "THE CLOSE WAS 475.31", "usd": 475.31, "at": "next week"},
+                               {"sell": 99}, {"cancel": 4}], inputs)
+        text = elane_train._orders_text(orders, inputs)
+        self.assertEqual(text, "sell SPY at the open; buy QQQ 0.12 of the sleeve at the close; buy a symbol outside its "
+                               "NEEDS about $480; and 2 more")
+        self.assertNotIn("475", text)
+        self.assertEqual(elane_train._orders_text(orders[3:], inputs), "sell a lot it does not hold at the open; "
+                                                                       "cancel an order")
+        self.assertEqual(elane_train._orders_text([], inputs), "nothing")
+        self.assertEqual(elane_train._orders_text(start_orders([{"buy": "SPY", "usd": 1234.56}], inputs), inputs),
+                         "buy SPY about $1,200 at the open")
+
     def test_the_same_book_is_the_lots_the_house_shows_less_what_the_runs_standing_sets(self):
         def book(**change: Any) -> dict:
             lot = {"id": 3, "symbol": "SPY", "class": "etf", "qty": 1.25, "entry": 400.04, "mark": 402.5, "value": 503.13,
@@ -167,6 +186,8 @@ def decide(ctx):
     return out
 '''
 SESSIONS = 300
+#: Every differing session on record (a record names a later run's first `START_MISSES` only).
+ALL_MISSES = mock.patch.object(elane_train, "START_MISSES", 10_000)
 
 
 def invented(offset: int, *, flags: Callable[[int, int, int], str] | None = None,
@@ -259,7 +280,9 @@ class TheRule(unittest.TestCase):
             return "" if age % 2 else "quiet"
         out = self.check(span(lots=lots, flags=flags))
         self.assertEqual(self.rows(out), [(0, 61, 217, 0, 0, False), (0, 127, 151, 0, 0, False)])
-        self.assertEqual(out["runs"][0]["misses"][:3], [22, 23, 24], "its first warmed-up sessions")
+        self.assertEqual(out["runs"][0]["misses"], [22, 23, 24, 25, 26, 27],
+                         "its first warmed-up sessions (a record names six, and counts the rest)")
+        self.assertEqual(elane_train.START_MISSES, 6)
         self.assertEqual(out["first_miss"], {"span": 0, "shift": 61, "session": 22, "what": "orders",
                                              "base": "sell SPY at the open; buy SPY 0.5 of the sleeve at the close",
                                              "later": "nothing"})
@@ -304,13 +327,14 @@ class TheRule(unittest.TestCase):
     def test_what_differs_and_what_does_not(self):
         told = {30: "near", 32: "usd", 34: "open", 36: "other", 38: "first", 40: "sells", 42: "raise", 44: "quiet",
                 46: "small"}
-        out = self.check(span(flags=lambda i, age, offset: told.get(age, "") if offset == 61 else ""))
+        with ALL_MISSES:
+            out = self.check(span(flags=lambda i, age, offset: told.get(age, "") if offset == 61 else ""))
         row = out["runs"][0]
         self.assertEqual(row["misses"], [32, 34, 36, 38, 40, 42, 44, 46],
                          "a size within the tolerance is the same size; the rest are other orders")
         self.assertEqual((row["failed"], row["sized"], row["disqualified"]), (1, 1, 0))
         self.assertEqual(out["first_miss"]["what"], "orders")
-        self.assertEqual(out["first_miss"]["later"], "sell SPY at the open; buy SPY $500.00 at the close")
+        self.assertEqual(out["first_miss"]["later"], "sell SPY at the open; buy SPY about $500 at the close")
         # 38 is an even age of the run started on an odd session: a lot is held, so the order of the orders shows.
 
     def test_a_decide_that_fails_in_both_runs_alike_is_a_match(self):
@@ -504,7 +528,8 @@ class TheBarOnTheFakes(ResearchCase):
         self.assertIn("(START) run again from later starts (61 and 127 sessions into a Train span", brief)
         self.assertIn("the lowest of the 4 later runs matched 65.3% of its sessions (99.0% needed of each)", brief)
         self.assertIn("the run started 61 sessions into span 1 matched 179 of 239 (179 of 239 with an order) and "
-                      "differed on its sessions 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 and 48 more", brief)
+                      "differed on its sessions 1, 2, 3, 4, 5, 6 and 54 more", brief)
+        self.assertIn("2 more later runs fell short too", brief)
         self.assertIn("(sessions are counted from a later run's own first decision)", brief)
         self.assertIn("first differed (its session 1), the two runs asked the same orders in different sizes: the run "
                       "from the span's start asked [sell SPY at the open; buy SPY 0.02 of the sleeve at the close], the "
@@ -1102,11 +1127,13 @@ class StartOnE1(unittest.TestCase):
         locks for good soon after any start, so every difference from the run that started earlier lies before that.
         Compared only once warmed up, it matched everywhere; held to that run wherever the two show the same book,
         its first sessions are compared and it fails."""
-        out = self.check(LATCH)
+        with ALL_MISSES:
+            out = self.check(LATCH)
         self.assertEqual(out["warm"], 524)
         self.assertEqual([(r["span"], r["shift"]) for r in out["runs"]], [(0, 61), (0, 127), (1, 61)])
         self.assertEqual([(s["span"], s["shift"]) for s in out["skipped"]], [(1, 127)], "it fits 2022-24 once only")
         self.assert_fails(out)
+        self.assertTrue(all(len(r["misses"]) == r["sessions"] - r["matched"] for r in out["runs"]), "all on record")
         late = [k for r in out["runs"] for k in r["misses"] if k >= out["warm"]]
         self.assertEqual(late, [], "nothing differs once a later run is warmed up")
         self.assertTrue(all(r["early"] > 500 for r in out["runs"]), "the same book from a later run's third session")
@@ -1136,7 +1163,8 @@ class StartOnE1(unittest.TestCase):
         token = [lot for run in self.runs for lot in run.result["lots"] if float(lot["qty"]) * float(lot["entry_px"]) < 100.0]
         self.assertEqual(token, [], "no run was ever five times its capital ahead: the lock never closed")
         at_once = LATCH.replace('"history": 504', '"history": 2')
-        out = self.check(at_once, self.paying)
+        with ALL_MISSES:
+            out = self.check(at_once, self.paying)
         self.assertTrue(out["held"], "the market pays every session: each run is 1% ahead within days of its start")
         lots = [lot for run in self.runs for lot in run.result["lots"]]
         token = [lot for lot in lots if float(lot["qty"]) * float(lot["entry_px"]) < 100.0]
@@ -1183,6 +1211,7 @@ class StartOnE1(unittest.TestCase):
         with self.assertRaises(StartCheckInterrupted) as caught:
             start_check(decider, code, {}, name="p",
                         spans=killed(later_runs(runner, code, {}, name="p", runs=runs), 200))
+        self.assertIsInstance(caught.exception, elane_train.StateCheckInterrupted)
         self.assertRegex(str(caught.exception), "reloaded an instance|restarted during the start check")
         self.assertEqual(decider.kind_loaded, {}, "every instance dropped")
         again = start_check(decider, code, {}, name="p", spans=later_runs(runner, code, {}, name="p", runs=runs))
@@ -1275,7 +1304,7 @@ class NoDayInTheWords(unittest.TestCase):
         out = start_check(decider, FLAGGED, {}, name="p",
                           spans=[span(flags=lambda i, age, offset: "small" if offset and age < 40 else "")])
         text = start_text({"start": {k: out[k] for k in elane_train.START_KEYS}})
-        self.assertIn("differed on its sessions 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 and 28 more", text)
+        self.assertIn("differed on its sessions 1, 2, 3, 4, 5, 6 and 34 more", text)
         self.assertFalse(re.search(r"\b(19|20)\d\d\b", text), text)
         self.assertFalse(re.search(r"\b(19|20)\d\d\b", json.dumps({k: out[k] for k in elane_train.START_KEYS})))
 

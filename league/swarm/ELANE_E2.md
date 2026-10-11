@@ -195,12 +195,15 @@ Stopping, from the lightest:
      span too short goes without it and the record says so (`skipped`). On the Train spans (1,006 and 753 sessions)
      the 61-session start fits every program the contract allows; the 127-session start does not fit 2022-24 for a
      program with `history` above 486.
-     WHAT THE RECORD KEEPS (`start`), and what its author reads: the counts by later run, the sessions that differed
-     counted from the later run's own first decision (never a day), what the two runs asked where they first
-     differed (the program's own orders in words), and how many sessions differed in a buy's size alone. The next
-     brief says so and says what a program may decide from: ctx's bars, its calendar fields and each lot's own facts,
-     never how its run stands (`start_text`, `START_ADVICE`); the bar's text and the researcher's system prompt say
-     the same before a program is written.
+     WHAT THE RECORD KEEPS (`start`), and what its author reads: the counts by later run, the first six sessions
+     that differed in each, counted from the later run's own first decision (never a day), what the two runs asked
+     where they first differed, and how many sessions differed in a buy's size alone. The next brief says so and
+     says what a program may decide from: ctx's bars, its calendar fields and each lot's own facts, never how its
+     run stands (`start_text`, `START_ADVICE`); the bar's text and the researcher's system prompt say the same
+     before a program is written. THE WORDS ARE A CLOSED VOCABULARY (`_order_text`), as a disqualification's are: an
+     order's kind, a symbol only when it is one of the program's own NEEDS, the two fill points, a size to two
+     significant digits. A program chooses its tags, its symbols' text and its sizes, and it reads the reserve's
+     bars as look-back, so nothing it writes freely reaches a record or a brief.
      NEVER A SILENT PASS, exactly as the restart check (one reader, `_decided`): an instance the child reloaded or
      lost, a decider that restarted, an answer without its counts, a later run that ended in no result, left its
      span or does not share the span's sessions, and spans that fit no later start are the House's
