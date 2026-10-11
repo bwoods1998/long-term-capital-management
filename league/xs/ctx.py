@@ -40,30 +40,44 @@ rounded to `config.CTX_PLACES` decimals.
 
 THE LEVEL IS REMOVED, NOT HIDDEN (E4-SPEC D7, kept under the pre-registration's fields: it only adds noise). A ratio
 of two cent prices keeps the cent grid, and the grid gives the price back (a lattice search over 60 days of ratios
-leaves one survivor). So, in this order: (1) the as-of prices of each bar (`league.equity.ctx.as_of`, the factor read
-from session t's close; a name with no bar at t takes its last bar's, E1's `_factor_row`). (2) THE DITHER, at the
-source of the grid: each as-of price p of (name, session s, field) becomes p x (1 + u / raw), raw = that bar's RAW
-price of the field, u uniform on [-`config.DITHER_HALF`, +`config.DITHER_HALF`) dollars: u = (int.from_bytes(sha256(
-dither_key | b"|" | str(id) | b"|" | str(session ordinal) | b"|" | field)[:8], "big") / 2**64 - 0.5) x 0.01, field one
-of b"o", b"h", b"l", b"c"; SPY's arrays use the id -1. One (id, session, field) has one dither for the whole run and it
-scales with every later restatement, so two days' views of one bar stay proportional. (3) the five fields are formed
-from the DITHERED prices only (`ret` from two dithered closes, never from two grid prices) and rounded. A held lot's
-`weight` (qty x the name's dithered close at t / equity) and `ret` (that close over the lot's entry price moved by a
-dither keyed b"lot" and the lot id, minus 1) are dithered the same way, to 4 decimals. Fills, marks, the residual and
-every statistic read the undithered store: only what a program SEES carries the noise (at most half a cent a price).
+leaves one survivor; the ratio of two small price moves is a ratio of two small whole numbers of cents). So:
+(1) THE DITHER, at the source of the grid: each ADJUSTED price p of (name, session s, field) becomes p + u, u uniform on
+[-`config.DITHER_HALF`, +`config.DITHER_HALF`) dollars: u = (int.from_bytes(sha256(dither_key | b"|" | str(id) | b"|" |
+str(session ordinal) | b"|" | field)[:8], "big") / 2**64 - 0.5) x 0.01, field one of b"o", b"h", b"l", b"c"; SPY's
+arrays use the id -1. One (id, session, field) has one dither for the whole run. (2) the five fields are formed from
+the DITHERED prices only (`ret` from two dithered closes, never from two grid prices) and rounded. A held lot's
+`weight` (qty x the name's dithered RAW close at t / equity) and `ret` (that close over the lot's entry price moved by
+a dither keyed b"lot" and the lot id, minus 1) are dithered the same way, to 4 decimals. Fills, marks, the residual
+and every statistic read the undithered store: only what a program SEES carries the noise (at most half a cent a
+price).
+
+WHERE THIS DEPARTS FROM D7'S WORDS, AND WHY (the vendor's cents, found after the designs). D7 moves each bar's RAW
+price by half a raw cent and carries it through the as-of factor, on the reading that adjustment=all is the raw price
+times an exact factor. THE VENDOR ROUNDS adjustment=all TO THE CENT, so the grid a ratio of two history prices keeps
+is the ADJUSTED price's own cent grid, and half a raw cent covers only part of an adjusted cent wherever a later
+dividend or split has shrunk the adjusted price (after a 20-for-1 split the adjusted grid is twenty times coarser
+than that dither): the search then finds the gaps. So each adjusted price is moved by half a cent OF ITS OWN grid:
+uniform over exactly one cell, never less noise than D7's. And NO AS-OF PRODUCT IS FORMED: every field is a ratio, so
+the factor of `league.equity.ctx.as_of` cancels, and with it its 4-decimal rounding, which differs from one decision
+day to the next. A bar's fields are therefore THE SAME NUMBERS IN EVERY CTX OF A RUN: two views of one bar give a
+program nothing to compare (the bound a known dither range puts on a level needs two views that differ). What is
+left, stated: on the LIVE path a fetch made after the vendor restates a name's history shows its bars under another
+vintage, each moved by the vendor's own cent rounding; a program that kept the earlier view across an ex-date could
+read the scale of those moves. It exists only where nothing is hindsight (a live decision), never in a run on the
+store (one vintage), and it is what the code review's "no search for a price level" is for.
 
 THREE MORE GRIDS ARE CLOSED THE SAME WAY (each narrower than the registered contract, none wider):
 - THE SHARE COUNT. A session's volume is a whole number of shares, and a ratio of two of them over one median is the
   same lattice: for a thinly traded name it gives the exact counts back, and an exact count dates a session and names
-  the stock. So `rel_volume` reads the volume moved by a RELATIVE dither u_v x 100 (at most half a percent, the same
+  the stock. So `rel_volume` reads the volume moved by a RELATIVE dither (x (1 + u_v), at most half a percent: the same
   hash under the field b"v") and put on the total-return basis first (x raw close / adjusted close: a split then
   leaves no step in it that would date the session). Its median is over the valid bars of the
   `config.REL_VOLUME_SESSIONS` sessions through that session; NaN until the inputs hold that many sessions, or when
   fewer than `REL_VOLUME_MIN_VALID` of them have a valid bar.
 - THE SLEEVE'S DOLLARS. `equity` is the cash plus the open lots marked at their DITHERED closes, and `cash` and
   `equity` are rounded to the cent: with one lot held, an exact equity series is that lot's exact marks.
-- A NAME WITH NO VALID BAR AT t still shows its history (NaN that session); a held lot of it is marked at its last
-  valid bar's dithered close.
+- A NAME WITH NO VALID BAR AT t is not a slot (it is outside U(t)); a held lot of it is marked at its last bar's
+  dithered close (E1's `_factor_row`: the row its as-of factor would be read from).
 
 `derive` IS THE ONE READER of eligibility and the characteristics (the pre-registration's 3.1-3.3): the ctx's rows,
 the engine's cells, the placebos' cells and the House exit "ineligible" all read it, in the Gym and live alike. Its
@@ -89,7 +103,7 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
-from ..equity.ctx import _encode, _factor_row, _ro, as_of, calendar_around
+from ..equity.ctx import _encode, _factor_row, _ro, calendar_around
 from ..equity.store import as_date, from_ordinal, nyse_sessions, ordinal
 from . import config
 
@@ -99,11 +113,10 @@ FIELDS = ("ret", "oret", "iret", "range", "rel_volume")
 CTX_PREFIX = b"xs-ctx-1;"
 #: The id the market's (SPY's) dither is drawn under.
 MARKET_ID = -1
-#: The dither's fields: a bar's four prices (dollars, +-`config.DITHER_HALF`) and its volume (relative, +-half a
-#: percent), and the key a held lot's entry price is dithered under.
+#: The dither's fields: a bar's four prices (dollars, +-`config.DITHER_HALF`) and its volume (the same number read as
+#: a share of the volume: +-half a percent), and the key a held lot's entry price is dithered under.
 DITHER_FIELDS = (b"o", b"h", b"l", b"c", b"v")
 DITHER_LOT = b"lot"
-VOLUME_DITHER = 100.0
 #: `rel_volume` needs this many valid bars among its `config.REL_VOLUME_SESSIONS` sessions.
 REL_VOLUME_MIN_VALID = 32
 #: A held lot's `weight` and `ret`, and a closed lot's `net_ret`, are rounded to this many decimals; dollars to cents.
@@ -341,7 +354,7 @@ def cells(elig: np.ndarray, sector: np.ndarray, beta: np.ndarray, mom: np.ndarra
     return bg, mg, cell
 
 
-# ------------------------------------------------------------------------------------------ as-of prices and validity
+# -------------------------------------------------------------------------------------------------------- validity
 def _valid(raw: np.ndarray, adj: np.ndarray) -> np.ndarray:
     """bool (L, m): a VALID CLOSE: a raw close above 0 with a raw volume above 0 (`store.valid_bars`' rule: the
     vendor's flat volume-0 bar is no bar) and a positive adjusted close."""
@@ -349,29 +362,6 @@ def _valid(raw: np.ndarray, adj: np.ndarray) -> np.ndarray:
     with np.errstate(invalid="ignore"):
         return (np.isfinite(close) & np.isfinite(volume) & np.isfinite(total) & (close > 0) & (volume > 0)
                 & (total > 0))
-
-
-def _factors(raw: np.ndarray, adj: np.ndarray) -> np.ndarray:
-    """float64 (m,): each column's AS-OF FACTOR raw_c / adj_c at its factor row: session t's (the last), else the
-    column's last bar before it (E1's `_factor_row`, column by column; NaN for a column with no bar)."""
-    close, total = raw[:, :, 3], adj[:, :, 3]
-    with np.errstate(invalid="ignore"):
-        ok = np.isfinite(close) & np.isfinite(total) & (close > 0) & (total > 0)
-    length, m = ok.shape
-    out = np.full(m, np.nan)
-    if not length:
-        return out
-    row = length - 1 - np.argmax(ok[::-1], axis=0)
-    has = ok.any(axis=0)
-    cols = np.flatnonzero(has)
-    out[cols] = close[row[cols], cols] / total[row[cols], cols]
-    return out
-
-
-def _as_of(adj: np.ndarray, factors: np.ndarray) -> np.ndarray:
-    """E1's `as_of` for every column at once: adj x factor, rounded to 4 decimals (NaN where there is no factor)."""
-    with np.errstate(invalid="ignore"):
-        return np.round(adj * factors[None, :, None], 4)
 
 
 def _arrays(inputs: Inputs) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -404,8 +394,7 @@ def derive(inputs: Inputs, *, rung: str | None = None) -> Derived:
     sector = np.full(m, -1, dtype=np.int8)
     if length >= 2:
         valid = _valid(raw, adj)
-        with np.errstate(invalid="ignore"):
-            closes = np.where(valid, np.round(adj[:, :, 3] * _factors(raw, adj)[None, :], 4), np.nan)
+        closes = np.where(valid, adj[:, :, 3], np.nan)          # total-return closes: one fetch's series a column
         funds = closes[:, list(config.FUND_COLUMNS)]
         beta, mom, found = characteristics(closes, closes[:, config.MARKET_COLUMN], funds)
         sector[ref:] = found[ref:]
@@ -432,7 +421,8 @@ def ineligible(inputs: Inputs, derived: Derived) -> list[int]:
 # -------------------------------------------------------------------------------------------------------- the dither
 def dither(key: bytes, ident: int, session: int, field: bytes) -> float:
     """D7's u for one (id, session ordinal, field): (int.from_bytes(sha256(key | b"|" | str(id) | b"|" | str(session) |
-    b"|" | field)[:8], "big") / 2**64 - 0.5) x 0.01: uniform on [-`config.DITHER_HALF`, +`config.DITHER_HALF`)."""
+    b"|" | field)[:8], "big") / 2**64 - 0.5) x 0.01: uniform on [-`config.DITHER_HALF`, +`config.DITHER_HALF`). Dollars
+    for a price field (added to the bar's adjusted price); for the volume's (b"v") a share of the volume."""
     digest = hashlib.sha256(bytes(key) + b"|" + str(int(ident)).encode() + b"|" + str(int(session)).encode() + b"|"
                             + bytes(field)).digest()
     return (int.from_bytes(digest[:8], "big") / 2.0 ** 64 - 0.5) * (2.0 * config.DITHER_HALF)
@@ -532,15 +522,16 @@ def _rel_volume(basis: np.ndarray, first: int) -> np.ndarray:
 
 
 # ------------------------------------------------------------------------------------------------------ the ctx
-def _fields(asof: np.ndarray, raw: np.ndarray, valid: np.ndarray, u: np.ndarray, rel: np.ndarray,
-            history: int) -> dict[str, np.ndarray]:
-    """The five scale-free fields of columns (L, k): `asof` (L, k, 4) as-of o h l c, `raw` (L, k, 5), `valid` (L, k),
-    `u` (L, k, 5) their dithers, `rel` (L, k) their `rel_volume`; each (k, history + 1), oldest first, the last
-    session t, NaN-padded on the left when the inputs hold fewer sessions. Formed from the DITHERED prices only,
-    rounded to `config.CTX_PLACES` decimals."""
+def _fields(adj: np.ndarray, valid: np.ndarray, u: np.ndarray, rel: np.ndarray, history: int) -> dict[str, np.ndarray]:
+    """The five scale-free fields of columns (L, k): `adj` (L, k, 4) adjusted o h l c, `valid` (L, k), `u` (L, k, 5)
+    their dithers, `rel` (L, k) their `rel_volume`; each (k, history + 1), oldest first, the last session t,
+    NaN-padded on the left when the inputs hold fewer sessions. Formed from the DITHERED prices only (each adjusted
+    price moved by its own u; a price that is not above zero after it reads as no price), rounded to
+    `config.CTX_PLACES` decimals."""
     length, k = valid.shape
     with np.errstate(invalid="ignore", divide="ignore"):
-        prices = np.where(valid[:, :, None] & (raw[:, :, :4] > 0), asof * (1.0 + u[:, :, :4] / raw[:, :, :4]), np.nan)
+        moved = adj + u[:, :, :4]
+        prices = np.where(valid[:, :, None] & (adj > 0) & (moved > 0), moved, np.nan)
         o, h, low, c = prices[:, :, 0], prices[:, :, 1], prices[:, :, 2], prices[:, :, 3]
         ret, oret = np.full((length, k), np.nan), np.full((length, k), np.nan)
         if length > 1:
@@ -597,28 +588,23 @@ def build(inputs: Inputs, derived: Derived | None = None) -> XsCtx:
     # SPY and the member columns only: no other REF column reaches a program.
     shown = np.array([market, *range(ref, m)], dtype=np.int64)
     idents = np.array([MARKET_ID, *ids.tolist()], dtype=np.int64)
-    asof = _as_of(adj[:, shown], _factors(raw[:, shown], adj[:, shown]))
-    for field in range(4):       # the market's by E1's own `as_of` (the matrix form is the same expression: tested)
-        asof[:, 0, field] = as_of(adj[:, market, field], raw[market_row, market, 3], adj[market_row, market, 3])
-    shown_raw, shown_valid = raw[:, shown], valid[:, shown]
+    shown_raw, shown_adj, shown_valid = raw[:, shown], adj[:, shown], valid[:, shown]
     u = _dithers(key, idents, days)
     with np.errstate(invalid="ignore", divide="ignore"):
         # the volume on the total-return basis (a split leaves no step in it), then its own relative dither
-        basis = np.where(shown_valid, shown_raw[:, :, 4] * shown_raw[:, :, 3] / adj[:, shown, 3]
-                         * (1.0 + VOLUME_DITHER * u[:, :, 4]), np.nan)
+        basis = np.where(shown_valid, shown_raw[:, :, 4] * shown_raw[:, :, 3] / shown_adj[:, :, 3]
+                         * (1.0 + u[:, :, 4]), np.nan)
     rel = _rel_volume(basis, max(0, length - (history + 1)))
     slots = np.flatnonzero(elig)
     keep = np.array([0, *(slots - ref + 1).tolist()], dtype=np.int64)        # into `shown`: the market, then U(t)
-    fields = _fields(asof[:, keep], shown_raw[:, keep], shown_valid[:, keep], u[:, keep], rel[:, keep], history)
+    fields = _fields(shown_adj[:, keep], shown_valid[:, keep], u[:, keep], rel[:, keep], history)
 
     def dithered_close(col: int) -> float | None:
-        """The column's dithered as-of close at its last valid bar (session t's when it has one)."""
-        at = col - ref + 1
-        rows = np.flatnonzero(shown_valid[:, at])
-        if not rows.size:
+        """The column's dithered RAW close at its last bar (session t's when it has one): E1's `_factor_row`."""
+        row = _factor_row(raw[:, col], adj[:, col])
+        if row is None:
             return None
-        row = int(rows[-1])
-        return float(asof[row, at, 3]) * (1.0 + float(u[row, at, 3]) / float(shown_raw[row, at, 3]))
+        return float(raw[row, col, 3]) + float(u[row, col - ref + 1, 3])
 
     cash = float(inputs.cash)
     lots, marked, readable = [], cash, True
@@ -627,7 +613,7 @@ def build(inputs: Inputs, derived: Derived | None = None) -> XsCtx:
         if not ref <= col < m:
             raise ValueError("a held lot's column is a member column of the decision")
         close = dithered_close(col)
-        if close is None or not qty > 0:
+        if close is None or not close > 0 or not qty > 0:
             readable = False
             value, ret = float(row["value"]), None
         else:
@@ -807,7 +793,7 @@ def ctx_bytes(ctx: XsCtx) -> bytes:
     return b"".join(out)
 
 
-__all__ = ["FIELDS", "CTX_PREFIX", "MARKET_ID", "DITHER_FIELDS", "DITHER_LOT", "VOLUME_DITHER", "REL_VOLUME_MIN_VALID",
+__all__ = ["FIELDS", "CTX_PREFIX", "MARKET_ID", "DITHER_FIELDS", "DITHER_LOT", "REL_VOLUME_MIN_VALID",
            "LOT_PLACES", "USD_PLACES", "Fields", "XsCtx", "Inputs", "Derived", "characteristics", "group_counts",
            "cells", "derive", "ineligible", "dither", "lot_dither", "build", "inputs_from_panel",
            "inputs_from_arrays", "fetch_sessions", "rows_to_arrays", "inputs_from_fetch", "ctx_bytes"]
