@@ -552,11 +552,14 @@ def invented_week(market: Market, *, through: dt.date = FRIDAY2, history: int = 
 
 
 # ------------------------------------------------------------------------------------------------------------ the House
-def store_families(root: Path, programs: list[dict], clock: Clock, panel: str) -> Any:
+def store_families(root: Path, programs: list[dict], clock: Clock, panel: str, *, forced: tuple[str, ...] = ()) -> Any:
     """THE REAL READER: a `SwarmStore` at `root` holding `programs` as ETF families seated at Probe (each with its
     version's file and a band proof under the equity identity of the tree that runs this), and the `EquityFamilies`
     the House's book reads them through. `panel`: the panel lane's switch as the root's swarm.json says it ("": no
-    key); at "train" the store also holds one panel family in Train research, as the lane bears them."""
+    key); at "train" the store also holds one panel family in Train research, as the lane bears them. `forced`
+    (bands): WHAT STEP ONE CANNOT MAKE, put there by hand: one panel family in each of these bands, passed and with
+    a band proof that is current under the xs identity, so that the lane's mode alone decides whether the book ever
+    sees it (league/tests/test_equity_panel_on_main.py)."""
     from league.equity.families import EquityFamilies
     from league.swarm.evaluator import equity_identity
     from league.swarm.gate import run_sha
@@ -594,6 +597,23 @@ def store_families(root: Path, programs: list[dict], clock: Clock, panel: str) -
                                     "e2_route": "invented-route", "hidden_year": None, "gid": "g0"}, origin="architect")
             store.add_version(fam["id"], PANEL, {}, author="architect:invented")
             store.set_state(fam["id"], elane_xs={"status": "researching", "versions": {}})
+        for band in forced:
+            from league.xs import XS_ENGINE_VERSION
+            from league.xs.identity import xs_fingerprint
+
+            fam = store.add_family({"id": f"xs-forced-{band}", "mechanism": "An invented cross-sectional mechanism.",
+                                    "structure": "panel", "roots": [], "lane": "equity", "agenda": "xs_reversal",
+                                    "panel": "sp500", "max_names": 5, "rebalance": "weekly", "weekday": 0,
+                                    "e2_route": "invented-route", "hidden_year": None, "gid": "g0"}, origin="architect")
+            version = store.add_version(fam["id"], PANEL, {}, author="architect:invented")
+            sha = run_sha(store.version(fam["id"], version["n"]))
+            store.update_family(fam["id"], best_version=version["n"], validated_version=version["n"])
+            store.set_state(fam["id"], banded_version=version["n"], banded_at=clock(), gate="pass", holdout_passed=True,
+                            banded_evaluator={"engine": XS_ENGINE_VERSION, "xs_sha256": str(xs_fingerprint()),
+                                              "run_sha": sha})
+            store.set_band(fam["id"], "candidate", reason="an invented look")
+            if band != "candidate":
+                store.set_band(fam["id"], band, reason="an invented seat")
     finally:
         store.close()
     return EquityFamilies(root)
@@ -607,7 +627,7 @@ class House:
     options minute)."""
 
     def __init__(self, root: Path, programs: list[dict], *, cash: str = "2229", grant: str = "2229", lag: float = 8.0,
-                 reader: str = "memory", panel: str = ""):
+                 reader: str = "memory", panel: str = "", forced: tuple[str, ...] = ()):
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self.clock = Clock(at(FRIDAY, 16, 0))
@@ -617,7 +637,7 @@ class House:
         self.starts = 0
         self.state = self.new_state()
         self.table = M.Table.from_constitution()
-        self.families = (store_families(self.root, programs, self.clock, panel) if reader == "store"
+        self.families = (store_families(self.root, programs, self.clock, panel, forced=forced) if reader == "store"
                          else MemoryEquityFamilies(programs))
         self.decider = InlineDecider()
         self.events: list[tuple[float, str, dict]] = []
@@ -1164,8 +1184,9 @@ def close_and_decide(house: House, day: dt.date) -> None:
         house.tick(day, hh, mm)
 
 
-def run(name: str, *, reader: str = "memory", panel: str = "") -> dict[str, Any]:
-    """Scenario `name` on the tree this module was imported from: `snapshot` of what it left."""
+def run(name: str, *, reader: str = "memory", panel: str = "", forced: tuple[str, ...] = ()) -> dict[str, Any]:
+    """Scenario `name` on the tree this module was imported from: `snapshot` of what it left. `forced`: the real
+    reader's store also holds a panel family in each of these bands (`store_families`)."""
     spec = SCENARIOS[name]
     root = Path(tempfile.mkdtemp(prefix="equity-week-"))
     programs = six_programs(a_first=spec.get("a_first", True), roll=spec.get("roll", ""), rotate=spec.get("rotate", ""))
@@ -1174,7 +1195,8 @@ def run(name: str, *, reader: str = "memory", panel: str = "") -> dict[str, Any]
     for row in programs:
         if row["family"] in spec.get("candidates", ()):
             row["band"] = "candidate"
-    house = House(root, programs, cash=spec.get("cash", "2229"), lag=spec.get("lag", 8.0), reader=reader, panel=panel)
+    house = House(root, programs, cash=spec.get("cash", "2229"), lag=spec.get("lag", 8.0), reader=reader, panel=panel,
+                  forced=forced)
     try:
         if spec["kind"] == "twin":
             house.forward = Forward(house, programs)
