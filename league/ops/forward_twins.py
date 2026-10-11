@@ -96,7 +96,8 @@ from typing import Any, Callable, Iterator, Mapping, Sequence
 from . import fill_minutes, forward_db
 from .forward_db import ShadowRun
 
-#: `fwd_twins.why` of an unreadable session (D12): a split during a hold; a session the instance was retired at or after.
+#: `fwd_twins.why` of an unreadable session (D12): a split during a hold; a session at or after the one the House
+#: retired the instance at.
 UNREADABLE = ("split", "retired")
 #: Every key `a14_reading` returns, on every branch (a missing store included).
 A14_KEYS = ("applies", "holds", "final", "why", "gap", "intents", "by_instance")
@@ -464,7 +465,7 @@ def _book_bars(db: sqlite3.Connection, instance: str, day: str, needs: Mapping[s
     start = str(decision.get("start") or "")
     if not symbols or not start:
         return None
-    series: dict[str, dict[str, list[dict[str, Any]]]] = {"raw": {s: [] for s in symbols}, "all": {s: [] for s in symbols}}
+    series: dict[str, dict[str, list[dict[str, Any]]]] = {name: {s: [] for s in symbols} for name in ("raw", "all")}
     for bar in guard.batched(db, "SELECT day, symbol, adjustment, o, h, l, c, v, sha FROM eq_bars WHERE day>=? AND "
                                  "day<=? AND symbol IN ({marks}) ORDER BY day", symbols, params=(start, day)):
         kept = (shas.get(bar["symbol"]) or {}).get(bar["adjustment"]) if isinstance(shas.get(bar["symbol"]), Mapping) \
@@ -749,12 +750,13 @@ def _lot_gaps(root: Path, db: sqlite3.Connection, book: Mapping[str, Any], throu
     with db:
         before = db.total_changes
         db.executemany("INSERT OR IGNORE INTO fwd_lotgap(lid, instance, pid, symbol, opened_day, exit_day, entry_at, "
-                       "exit_at, model_bp, entry_slip_bp, exit_slip_bp, timing_entry_bp, timing_exit_bp, exec_entry_bp, "
-                       "exec_exit_bp, side_gap_bp, twin_gap_bp, at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+                       "exit_at, model_bp, entry_slip_bp, exit_slip_bp, timing_entry_bp, timing_exit_bp, "
+                       "exec_entry_bp, exec_exit_bp, side_gap_bp, twin_gap_bp, at) "
+                       "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
         return db.total_changes - before, failed
 
 
-# ------------------------------------------------------------------------------------------------------- the night's end
+# ---------------------------------------------------------------------------------------------------- the night's end
 def registry_key(instance: str) -> str:
     """A live instance's registry key: its id less ":r"."""
     instance = str(instance)
@@ -855,7 +857,8 @@ def _one_instance(root: Path, db: sqlite3.Connection, shadow: Any, inst: Mapping
         db.executemany("INSERT OR IGNORE INTO fwd_twins(instance, day, pid, live_keys, shadow_keys, agree, why, at, "
                        "live_bars, shadow_bars, cause) VALUES(?,?,?,?,?,?,?,?,?,?,?)", rows)
         db.execute("INSERT OR IGNORE INTO fwd_part(instance, through, pid, matched, missed, extra, at) "
-                   "VALUES(?,?,?,?,?,?,?)", (iid, night, pid, part["matched"], part["missed"], part["extra"], float(now)))
+                   "VALUES(?,?,?,?,?,?,?)",
+                   (iid, night, pid, part["matched"], part["missed"], part["extra"], float(now)))
     out["twins"] += len(rows)
     out["disagreed"] += sum(1 for row in rows if row[5] == 0)
     out["unreadable"] += sum(1 for row in rows if row[5] is None)
@@ -867,7 +870,10 @@ def finish(root: str | Path, db: sqlite3.Connection, shadow: Any, *, now: float)
     day)); the twin run (`shadow.run_from`), its `fwd_twins` rows (D12, each with its two bars hashes and, when the
     sides disagree, its cause), one `fwd_part` row for `through`. For every closed live lot with a final priced E1
     twin and no `fwd_lotgap` row: its row (D11; timing and execution None when `fill_minutes` is false).
-    {"instances", "twins", "disagreed", "lots", "interrupted", "live_bars"} (counts)."""
+    {"instances", "twins", "disagreed", "lots", "interrupted", "live_bars"} (counts), with `FINISH_KEYS`' others
+    beside ("unreadable", "unregistered", "mismatched", "failed") and, when an instance's twin could not be made,
+    "errors" (ids and class names). It reads `shadow.through`, `shadow.run_from`, and the night's `decider` and
+    `settings` as the shadow holds them; one instance's failure never costs another its rows."""
     root = Path(root)
     out: dict[str, Any] = {key: 0 for key in FINISH_KEYS}
     cfg = _cfg(_settings(root, shadow))

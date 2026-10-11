@@ -99,7 +99,8 @@ def _num(value: Any) -> float | None:
 
 
 def _stamp(value: Any) -> str:
-    """A bar's time as the file keeps it (UTC, to the second). ValueError for a stamp that is not a moment with a zone."""
+    """A bar's time as the file keeps it (UTC, to the second). ValueError for a stamp that is not a moment with a
+    zone."""
     moment = dt.datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
     if moment.tzinfo is None:
         raise ValueError(f"the bar time {str(value)[:40]!r} has no zone")
