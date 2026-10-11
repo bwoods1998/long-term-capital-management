@@ -10,6 +10,9 @@ link, league/ops/forward_db.py `append_registry`):
   verdict's `pnl_10` is not None): reason "train_pass" or "train_fail". Forward statistics are then survivor-free,
   and "do Train passers beat Train failers on days no author saw" is the only clean test of the bar itself. A version
   that could not be judged (RUN, DQ, LOAD, WINDOW) has no figure and is not registered;
+- (release E4, package J) every PANEL version judged on its own Train bar, by the panel lane's own reader
+  (league/ops/forward_xs.py `scored_rows`: `ugroup` "panel:<panel>", route "XS1" at the same alpha, its NEEDS the
+  panel's); the panel night of that module runs them, never this release's shadow;
 - the captain-seeded programs (`seed_versions`: reason "seed") and every live instance not yet registered
   (`live_instances`: reason "live", from the book row's own code and params);
 - with a base group's first non-control program, that group's skill-free controls (league/ops/forward_controls.py:
@@ -32,7 +35,9 @@ review_fail (its fails are ["REVIEW"]), try and try_entered (`elane_try`), look_
 verdict), live (value: the instance id).
 
 THE STOP RULES, each run, from the forward store's own rows and events, counting only nights after the pid's latest
-"resumed" tag. A FAILURE NEVER STOPS A PROGRAM.
+"resumed" tag. A FAILURE NEVER STOPS A PROGRAM. A program's nights are those of THE JOB THAT RUNS IT (`fwd_runs.job`: the forward
+shadow's own for an ETF or a stock program, the panel night's for a panel program: each names its night by its own
+store's day).
 - stopped, value "cap:<night>": its STORED days (any status, the newest engine) reach its reason's session cap
   (`stop_after_sessions`: train_pass, seed, live; `stop_fail_after_sessions`: train_fail);
 - stopped, value "disqualified:<night>": a `run_disqualified` event on each of the program's last `DQ_NIGHTS`
@@ -85,9 +90,10 @@ SCORED_KIND = "swarm.elane"
 SCORED_PASS = "scored"
 #: The real route's instance suffix (league/equity/live.py `REAL_SUFFIX`): an instance's registry key is its id less it.
 REAL_SUFFIX = ":r"
-#: The structures the forward record registers: an ETF or a stock program's (E1's and E2's). Release E4's third equity
-#: structure, "panel" (league/swarm/elane.py `STRUCTURES`), is not among them on purpose: a panel version's row, its
-#: nightly shadow and its twin are package J's (league/ops/forward_xs.py, owed).
+#: The structures THIS READER registers: an ETF or a stock program's (E1's and E2's). Release E4's third equity
+#: structure, "panel" (league/swarm/elane.py `STRUCTURES`), is not among them on purpose: a panel version is read by
+#: the panel's own reader (league/ops/forward_xs.py `scored_rows`, which `sync` asks beside this one), and its
+#: nightly shadow and its twin are that module's panel night.
 STRUCTURES = ("etf", "stock")
 #: A control's author and the NEEDS beside its symbols.
 CONTROL_AUTHOR = "house"

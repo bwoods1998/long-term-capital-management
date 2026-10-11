@@ -101,7 +101,9 @@ class NoPanelNoLines(PanelFixture):
 
     def test_the_words_are_the_adapters(self):
         self.assertEqual((R.PANEL_TAG, R.PANEL_KIND, R.PANEL_LABEL), (book.TAG, book.KIND, book.LABEL))
-        self.assertIn("NOT shadowed", R.PANEL_OWED)
+        self.assertIn("not recorded yet", R.PANEL_OWED)
+        self.assertIn("forward_xs", R.PANEL_OWED)
+        self.assertTrue(R.PANEL_SHADOWED.startswith("shadowed: every scored panel version is registered"))
         self.assertIn("no live seat on an XS1 pass alone", R.STYLE_OPEN_RULE)
 
 
@@ -244,7 +246,7 @@ class TheStyleOpenPassers(PanelFixture):
             panel = self.report()["equity"]["panel"]
         self.assertEqual(panel["style_open"], [{"family": "xs-momentum", "version": 2, "passed": True, "seat": None,
                                                 "why": "style-open: mom +", "look_at": "2026-11-02T21:40:00Z",
-                                                "shadow": R.PANEL_OWED}])
+                                                "shadow": R.PANEL_SHADOWED}])
         self.assertEqual(asked, [("xs-momentum", 2)])
         self.assertEqual(panel["style_open_rule"], R.STYLE_OPEN_RULE)
         self.assertEqual(panel["programs"], {}, "it holds no seat: it has no instance and no lot")

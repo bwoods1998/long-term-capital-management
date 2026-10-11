@@ -551,7 +551,7 @@ class TheSwarmReadsOnlyTheMarker(unittest.TestCase):
         (Path(self.root) / elane_xs.STORE_DIR / book.TWINS_FILE).unlink()
         with elane_xs._cache_lock:
             elane_xs._mode_cache.clear()
-        self.assertEqual(elane_xs.mode(self.settings, self.root), "gate", "package J is owed: no twin, no live seat")
+        self.assertEqual(elane_xs.mode(self.settings, self.root), "gate", "no marker: no twin, no live seat")
         self.assertFalse(elane_xs.seatable(self.root)("panel"))
 
 

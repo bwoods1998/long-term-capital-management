@@ -566,6 +566,28 @@ class ThePanelNight(unittest.TestCase):
         self.assertEqual(h.events("run_failed") + h.events("data_failed") + h.events("suspect"), [])
         self.assertEqual(len(h.rows(pid)), 4, "nobody was run")
 
+    def test_every_run_of_a_night_reads_the_nights_one_store(self):
+        # The ops child's address space is capped 500 MB above its start, and every open of the panel store maps its
+        # two bar arrays again (about 120 MB at the real panel's size, held until a full collection). Opened once a
+        # run, as `league.xs.runner.Isolated` opens it, the third run of a night found no room: measured at the real
+        # panel's size, every program after the first two was a `data_failed`. One store a night.
+        h = House(self)
+        h.store(h.days[0])
+        for slug in ("pa", "pb", "pc"):
+            h.scored(h.family(slug, code=CODE + f"\n# {slug}\n"), when=at(h.days[0], 12))
+        h.sync()
+        opened = []
+        real = xstore.PanelStore.__init__
+
+        def counted(self, *args, **kwargs):
+            opened.append(1)
+            return real(self, *args, **kwargs)
+
+        with mock.patch.object(xstore.PanelStore, "__init__", counted):
+            receipt = h.night(6)
+        self.assertEqual((receipt["programs"], receipt["data_failed"], receipt["errors"]), (3, 0, 0))
+        self.assertEqual(len(opened), 1, "the canary, three programs and the bars hash: one open of the panel store")
+
     def test_a_program_the_child_cannot_run_is_the_retrys_and_marked_only_beside_one_that_ran(self):
         h = House(self)
         h.store(h.days[0])

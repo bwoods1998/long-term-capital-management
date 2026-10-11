@@ -507,8 +507,20 @@ def _shadow_class() -> Any:
             as E3 reads a refusal."""
             from ..xs import runner as XR
 
-            iso = XR.Isolated(self.decider, self.root / E1_STORE_DIR,
-                              budget_seconds=float(self.cfg["run_budget_seconds"]), nice=None)
+            panel = self.panel
+
+            class OneStore(XR.Isolated):
+                """The panel's own runner over THE NIGHT'S ONE STORE. `Isolated` opens the store again for every
+                run, and each open maps the two bar arrays again (about 120 MB of address space at the real panel's
+                size, held until a full collection: the store and its universe name each other). The ops child's
+                address space is capped 500 MB above its start: the third run of a night found no room to map
+                them (measured: every program after the first two a `data_failed`)."""
+
+                def _store(self, gate: Any = None) -> Any:
+                    return panel
+
+            iso = OneStore(self.decider, self.root / E1_STORE_DIR,
+                           budget_seconds=float(self.cfg["run_budget_seconds"]), nice=None)
             began = self.clock()
             try:
                 return iso.forward(code, dict(params or {}), name=name, gate=self._gate, start=start, run_key=run_key)
