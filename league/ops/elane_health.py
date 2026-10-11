@@ -22,7 +22,8 @@ THE CAUSES (`CAUSES`; `checks`). Each has `what`, `numbers`, `doing` (what the f
   symbols of the code's universe that `elane.universe` does not hold. The owner's step only once no equity family was
   born for `BIRTHS_OWNER_HOURS` and a setting clears the main way they bore nothing (`BIRTH_LEVERS`).
 - `elane_idle`: work is owed (families in Train research, or births wanted) and no version was scored on Train for
-  `IDLE_HOURS`. It says why in the lane's own words: STARVED when E2 may ask no model now (`elane_yield.hold`: its
+  `IDLE_HOURS`, counted from the later of the last version scored and when the work became owed (a family born after
+  a quiet spell is not idle on a score of days ago). It says why in the lane's own words: STARVED when E2 may ask no model now (`elane_yield.hold`: its
   hourly pace, its day's line, or the House's Sail day and the guard), BROKEN when it may and still scores nothing (the
   Train round's own steps: failures of the House's, questions no route answered, steps and rounds that raised,
   families waiting out a backoff, no round at all). A starved lane names its lever and needs nobody; a broken one is
@@ -945,12 +946,25 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
     overdue = births_at is not None and now - births_at > max(IDLE_HOURS * 3600.0, 2.0 * every)
     # Births are wanted when the latest pass was held back, left births unfilled or bore none. A pass that may ask no
     # model is not started and leaves no event: it shows as overdue.
-    wanted = bool(last and (last["skipped"] in ("pace", "usd_day", "sail_day") or last["short"] > 0 or last["barren"]))
+    unfilled = lambda row: row["skipped"] in ("pace", "usd_day", "sail_day") or row["short"] > 0 or row["barren"]  # noqa: E731
+    wanted = bool(last and unfilled(last))
     scored_at = [S.epoch(v.get("at")) for fam in fams for v in fam["versions"].values()]
     last_scored = max([t for t in scored_at if t is not None and t <= now], default=None)
-    owed_at = [S.epoch(fam["born_at"]) for fam in researching] + [f.get("first_event_at")]
+    # SINCE WHEN WORK IS OWED: the oldest family still in research was born; the first of the latest passes that left
+    # births unfilled; the last time the pass ran, when it is overdue. The lanes are idle from the later of that and
+    # the last version scored: a family born after a quiet spell is not idle on a score of days ago.
+    owed_at = [S.epoch(fam["born_at"]) for fam in researching]
+    if wanted:
+        first = passes[-1][0]
+        for at, row in reversed(passes):
+            if not unfilled(row):
+                break
+            first = at
+        owed_at.append(first)
+    if overdue:
+        owed_at.append(births_at)
     first_owed = min([t for t in owed_at if t is not None], default=None)
-    since = last_scored if last_scored is not None else first_owed
+    since = first_owed if last_scored is None or first_owed is None else max(last_scored, first_owed)
     held = f.get("held") if isinstance(f.get("held"), Mapping) else None
     numbers: dict[str, Any] = {"researching": len(researching), "births_wanted": wanted, "pass_overdue": overdue,
                                "last_scored_at": None if last_scored is None else S.iso(last_scored), "min_hours": IDLE_HOURS}
@@ -974,8 +988,8 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
             return _not_judged(f"the swarm started {_hours(now - started)} h ago (the lanes are judged idle after "
                                f"{IDLE_HOURS:g} h with nothing scored)", numbers)
         return {"stalled": False, "judged": True,
-                "what": (f"The last equity version was scored {_hours(idle)} h ago." if last_scored is not None else
-                         f"The equity lanes have owed work for {_hours(idle)} h and scored no version yet.")
+                "what": (f"The last equity version was scored {_hours(idle)} h ago." if since == last_scored else
+                         f"The equity lanes have owed work for {_hours(idle)} h and scored no version since.")
                         + f" The lanes are idle after {IDLE_HOURS:g} h with nothing scored.",
                 "numbers": numbers, "doing": DOING["broken"], "owner_step": None, "onset": None}
     # WHY, since the lanes went idle: the Train rounds' own steps, the rounds that raised, the families waiting.

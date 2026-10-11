@@ -616,7 +616,8 @@ owner when the lanes next go wrong.
   showed the last pass's refusals with their reasons (a test holds it).
 - **Settings:** none added to `swarm.json`, none changed. One owner's switch in `ops.json`:
   `{"stall": {"elane": false}}` stops the four from being judged. What changes at the deploy without a setting: the
-  four causes are judged and told, Done's item 7 counts their owner steps, and the equity request's wording above.
+  four causes are judged and told, Done's item 7 counts their owner steps, the `scoreboard` job's receipt gains
+  `equity`, and the equity request's wording above.
 - **An alarm never loosens a judge:** no screen, bar, budget, seat, money rule, graveyard or refusal rule changes, no
   program is read, parsed or run by the alarm, and nothing under `league/live/`, `league/gym/`, `league/equity/*.py`,
   `league/constitution.py` or `gateway/` is touched: the execution fingerprint, the equity identity and the money

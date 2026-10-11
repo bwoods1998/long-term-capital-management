@@ -2,7 +2,7 @@
 `elane_births`, `elane_idle`, `elane_refused`) raised through the stall job's machinery (league/ops/stall.py), each judged
 only while the lanes are on and on enough evidence; the notice that carries them under a cause the gateway words; the
 Done meter's item 7 counting their owner steps; the lanes' research funnel (league/ops/funnel.py `equity.research`, the
-stall receipt's `elane.funnel`); and the operator's report. The closed words are held to the code that writes the
+`scoreboard` job's receipt); and the operator's report. The closed words are held to the code that writes the
 records (the equity pass, the Train round, the static rules, a disqualification's record) by running that code.
 
 Every family, program, refusal, dollar and number here is invented."""
@@ -748,6 +748,15 @@ class OwedWorkAndNothingScored(Case):
         self.assertEqual((check["stalled"], check["judged"]), (False, True))
         self.assertEqual(check["what"], "The last equity version was scored 1.0 h ago. The lanes are idle after 3 h with "
                                         "nothing scored.")
+        # A family born after a quiet spell: work is owed since its birth, never since a score of days ago.
+        self.setUp()
+        old = self.bred("alpha-one", hours=60, record={"status": "passed", "versions": {"1": verdict(50.0)}, "passed_version": 1})
+        self.bred("beta-two", hours=0.4)
+        check = self.equity()["elane_idle"]
+        self.assertEqual((check["stalled"], check["judged"], check["numbers"]["idle_hours"]), (False, True, 0.4))
+        self.assertEqual(check["what"], "The equity lanes have owed work for 0.4 h and scored no version since. The lanes are "
+                                        "idle after 3 h with nothing scored.")
+        self.assertEqual(self.store.family(old)["state"][EH.STATE_KEY]["status"], "passed")
         # Nothing owed: every family past its research, the last pass bore what it wanted.
         self.setUp()
         a = self.bred("alpha-one", record={"status": "passed", "versions": {"1": verdict(9.0)}, "passed_version": 1})
@@ -1131,7 +1140,7 @@ class TheResearchFunnel(Case):
         self.assertEqual((early["birth_passes"]["passes"], early["train_rounds"], early["versions"]["scored"],
                           early["model_usd"]["total"]), (3, 2, 4, 0.18))
 
-    def test_the_funnel_and_the_stall_receipt_carry_it(self):
+    def test_the_funnel_and_the_scoreboard_jobs_receipt_carry_it(self):
         self.invented_day()
         window = FN.window(self.root, NOW - 24 * HOUR, NOW)
         self.assertEqual(window["errors"], {})
