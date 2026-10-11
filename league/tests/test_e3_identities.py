@@ -9,7 +9,11 @@ pre-registered (`FGS_SHA`); and every E3 switch is off in code.
 `TheWiringIsWhole` holds the three edits of existing files this release makes for its jobs and settings (the spec's
 11.1-11.3: six jobs in league/ops/registry.py, three blocks in league/swarm/policy.json, three paths behind the wall
 in league/ci.py) to the spec's tables, and to each other: all three applied, or none of them (the base the packages
-were built on). A release with its jobs registered and its settings missing, or its modules unprotected, fails here."""
+were built on). A release with its jobs registered and its settings missing, or its modules unprotected, fails here.
+
+`TheDeclaredReceipts` holds the release's declared receipts (the spec's 7.6: the file league/ops/release_receipts.py
+`DECLARATIONS` names) to the spec's text: two receipts, each a count the funnel's `forward_record` carries, read back
+after a week."""
 
 from __future__ import annotations
 
@@ -22,7 +26,7 @@ from pathlib import Path
 from league import ci, constitution
 from league.equity import kinds, results
 from league.gym.driver import LEAGUE_FILES
-from league.ops import contam_probe, forward_db, registry
+from league.ops import contam_probe, forward_db, forward_report, registry, release_receipts
 from league.ops import schedule as S
 from league.swarm import elane_folds
 from league.swarm.evaluator import (EQUITY_EVIDENCE, EQUITY_GYM_FILES, equity_fingerprint, execution_fingerprint)
@@ -37,7 +41,9 @@ E3_OPS = tuple(f"league/ops/{name}.py" for name in (
     "forward_db", "forward_register", "forward_controls", "forward_shadow", "forward_audit", "forward_stats",
     "forward_report", "release_receipts", "fill_minutes", "forward_twins", "contam_probe"))
 E3_SWARM = ("league/swarm/elane_folds.py", "league/swarm/elane_effects.py", "league/swarm/elane_memory.py")
-E3_NEW = (*E3_OPS, "league/ops/E3_INTERFACES.md", *E3_SWARM, "docs/benchmarks/release_receipts.json")
+#: The release's declared receipts, where the module that reads them looks (league/ops/release_receipts.py).
+DECLARATIONS = release_receipts.DECLARATIONS
+E3_NEW = (*E3_OPS, "league/ops/E3_INTERFACES.md", *E3_SWARM, DECLARATIONS)
 #: The existing files the release edits (the spec's section 11).
 E3_PATCHED = ("league/ops/registry.py", "league/swarm/policy.json", "league/ci.py", "league/ops/funnel.py",
               "league/ops/dlane_report.py", "league/ops/stall.py", "league/swarm/elane_train.py",
@@ -77,6 +83,16 @@ FGS_LITERAL = {
            "over the pools",
     "alpha_e3_rows": "0.03", "alpha_fresh_route_F": "0.12"}
 FGS_LITERAL_SHA = "c1eaf140a42c4a5968c60990c514c43fd92c182f6c315ddfb8841d366959e4f1"
+#: The release's declared receipts as the spec's 7.6 writes them.
+RECEIPTS_LITERAL = {"schema": 1, "receipts": [
+    {"id": "E3-forward", "release": "E3", "metric": "forward_record.program_sessions", "direction": "up", "min_delta": 1,
+     "window_hours": 168,
+     "why": "the forward record accrues program-sessions (a week: the first row of a Thursday or Friday deploy lands "
+            "after the weekend)"},
+    {"id": "E3-oof", "release": "E3", "metric": "forward_record.oof_rows", "direction": "up", "min_delta": 1,
+     "window_hours": 168,
+     "why": "every scored version of a hidden-year family leaves an OOF row; it needs equity births on "
+            "(elane.birth_share above 0 with elane.mode gate), else it reads flat"}]}
 
 
 def policy_elane() -> dict:
@@ -320,10 +336,43 @@ class TheWiringIsWhole(unittest.TestCase):
             self.assertEqual([line.split(":")[0] for line in protected_changes(incoming, running)], sorted(E3_SWARM))
 
 
-def _built(fn) -> bool:
+class TheDeclaredReceipts(unittest.TestCase):
+    """The spec's 7.6 and D17: what release E3 declares it will move, read back by the stall job after its window."""
+
+    def declared(self) -> dict:
+        return json.loads((REPO / DECLARATIONS).read_text(encoding="utf-8"))
+
+    def test_the_file_is_the_specs_text(self):
+        self.assertEqual(self.declared(), RECEIPTS_LITERAL)
+        self.assertEqual([r["id"] for r in self.declared()["receipts"]], ["E3-forward", "E3-oof"])
+
+    def test_each_declares_a_count_the_funnel_carries_read_after_a_week(self):
+        for receipt in self.declared()["receipts"]:
+            self.assertEqual(sorted(receipt), sorted(("id", "release", "metric", "direction", "min_delta",
+                                                      "window_hours", "why")), receipt["id"])
+            section, _, key = receipt["metric"].partition(".")
+            self.assertEqual(section, "forward_record", "league/ops/funnel.py `window` carries it under that name")
+            self.assertIn(key, forward_report.FUNNEL_KEYS, "an integer count, never a figure")
+            self.assertIn(receipt["direction"], release_receipts.DIRECTIONS)
+            self.assertEqual((receipt["release"], receipt["min_delta"]), ("E3", 1))
+            # A week, not the default 72 h: the first row of a Thursday or Friday deploy lands after the weekend.
+            self.assertEqual(receipt["window_hours"], 168)
+            self.assertGreater(receipt["window_hours"], release_receipts.READ_AFTER_HOURS)
+            self.assertGreater(len(receipt["why"]), 40, "it says why the metric should move")
+
+    def test_the_module_that_reads_them_keeps_both(self):
+        if not _built(release_receipts.declarations, REPO):
+            self.skipTest("league/ops/release_receipts.py is another package's and not built on this tree")
+        kept = release_receipts.declarations(REPO)
+        self.assertEqual([(r["id"], r["metric"], r["direction"], r["min_delta"], r["window_hours"]) for r in kept],
+                         [("E3-forward", "forward_record.program_sessions", "up", 1.0, 168.0),
+                          ("E3-oof", "forward_record.oof_rows", "up", 1.0, 168.0)], "none dropped as malformed")
+
+
+def _built(fn, *args) -> bool:
     """Whether another package's function is built yet (its stub raises NotImplementedError)."""
     try:
-        fn(None)
+        fn(*(args or (None,)))
     except NotImplementedError:
         return False
     return True
