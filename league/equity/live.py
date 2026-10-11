@@ -297,8 +297,9 @@ BUDGET_WORDS = "the shared loss budget has"
 #: any program planned a buy. Nothing a program writes reaches it: not an intent, not a tag, not a reason. Kept only
 #: while the seat rule is in force (under "first-come" nothing is idle and the book asks nothing extra).
 OPEN_NOTE_KEY = "eq_open_note"
-#: Calendar days a refused session's note is kept (the idle test reads at most `idle_sessions` counted sessions back;
-#: a session every window of which was clear is dropped the day after: only a refusal is ever read).
+#: Calendar days a refused session's note is kept; an older one counts for the idle clock again (it could matter only
+#: to a seat with fewer than `idle_sessions` counted sessions in all that time). A session every window of which was
+#: clear is dropped the day after: only a refusal is ever read.
 OPEN_NOTE_KEEP_DAYS = 400
 _SLUG = re.compile(r"[^a-z0-9-]+")
 _DAY = re.compile(r"\d{4}-\d{2}-\d{2}")

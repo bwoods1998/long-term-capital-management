@@ -21,7 +21,10 @@ from unittest import mock
 
 from league.equity import live as L
 from league.equity import schedule as S
+from league.equity.families import EquityFamilies
+from league.swarm import elane
 from league.tests import equity_design as X
+from league.tests import equity_seat_sequence as Q
 from league.tests import test_equity_book as T
 from league.tests import test_equity_seats as TS
 
@@ -968,6 +971,111 @@ class TheMinors(TS.SeatCase):
         self.assertIn("The seat rule must never end in a sale", told)
         self.assertIn(f.key("rare"), told)
         self.assertTrue([p for kind, p in f.h.events if kind == "equity.alert" and "yielded" in str(p.get("what"))])
+
+
+class TheYieldOnTheSwarmsOwnStore(TS.SeatCase):
+    """The yield's two databases as they are on the House: the REAL swarm store and its real reader
+    (`EquityFamilies.confirm_band`, which reads the family's row again inside the store's own write transaction),
+    and the live state. Five invented programs that passed their looks (league/tests/equity_seat_sequence.py's);
+    three seats; nobody ever plans a buy, so at the tenth session the three seated are idle and two wait."""
+
+    def house(self):
+        root = self.fresh()
+        patcher = mock.patch.dict(elane.DEFAULTS, {"roster": 3})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        store = Q.swarm(root)
+        self.addCleanup(store.close)
+        h = T.Harness(root, cash=str(TS.E), E=str(TS.E), table=X.table_at(3, "0.50").equity)
+        self.addCleanup(h.state.close)
+        h.families = EquityFamilies(root)
+        self.addCleanup(lambda: h.families._store is not None and h.families._store.close())
+        h.book = h.new_book()
+        h.state.execute("DELETE FROM kv WHERE key='eq_decide'")
+        days = TS.sessions(TS.MONDAY, 14)
+        fake = TS.Floor.__new__(TS.Floor)
+        fake.h, fake.days = h, days
+        for symbol in ("SPY", "QQQ", "IWM", "DIA"):
+            TS.Floor.bars(fake, symbol, n=40)
+        for fid, _, symbol in Q.PROGRAMS:
+            h.decider.needs[L.instance_key(fid, 1)] = {"symbols": [symbol], "history": 5, "max_hold_sessions": 60}
+        for mm in (0, 1, 2):
+            h.tick(14, mm, day=TS.SUNDAY)                         # seated before Monday's open: Monday is their first
+        return h, store, days
+
+    def session(self, h, day) -> dict:
+        out = {}
+        for hh, mm in ((9, 31), (9, 33), (16, 21), (16, 31), (16, 32)):
+            out.update(h.tick(hh, mm, day=day))
+        return out
+
+    def bands(self, store) -> dict:
+        return {fid: store.family(fid)["band"] for fid, _, _ in Q.PROGRAMS}
+
+    def test_a_commit_that_fails_moves_the_band_back_in_the_store_itself(self):
+        h, store, days = self.house()
+        seated = {"m-first": "probe", "z-second": "probe", "a-third": "probe", "k-fourth": "candidate", "b-fifth": "candidate"}
+        self.assertEqual(self.bands(store), seated)
+        for n in range(0, 9):
+            self.session(h, days[n])
+        self.assertEqual(self.bands(store), seated, "nine sessions: nobody is idle yet")
+        proxy = CommitFails(h.state.db)
+        h.state.db = proxy
+        self.addCleanup(lambda: setattr(h.state, "db", proxy.db))
+        real = h.families.confirm_band
+
+        def confirm(expected, band, reason):
+            done = real(expected, band, reason)
+            if done and band == "candidate":
+                proxy.armed = True                                 # the swarm's store has the band: the commit fails
+            return done
+
+        key = L.instance_key("a-third", 1)
+        with mock.patch.object(h.families, "confirm_band", confirm):
+            out = self.session(h, days[9])
+        self.assertEqual(proxy.failed, 1)
+        self.assertTrue(any(e.startswith("seats: OperationalError") for e in out.get("errors", []) + h.book._last.get("errors", [])))
+        self.assertEqual(self.bands(store), seated, "the store says Probe again: the yield did not happen anywhere")
+        moves = [(e["payload"]["band_from"], e["payload"]["band_to"], e["payload"]["reason"])
+                 for e in store.events_after(0, limit=5000) if e["kind"] == "swarm.band" and e["family"] == "a-third"]
+        self.assertEqual([(a, b) for a, b, _ in moves[-2:]], [("probe", "candidate"), ("candidate", "probe")])
+        self.assertIn("its yield could not be written", moves[-1][2])
+        inst = h.book._instance(key)
+        self.assertEqual((inst.retired_at, inst.band, inst.why), (None, "probe", ""))
+        self.assertEqual(h.book.seats().get("idle"), {})
+        self.assertFalse([t for level, t in h.alerts if level == "error"])
+        self.assertEqual(inst.last_decided_day, days[9].isoformat(), "the day's decision ran all the same")
+        # The next decision, with nothing injected: the yield, whole, in both databases.
+        self.session(h, days[10])
+        self.assertEqual(self.bands(store), {**seated, "a-third": "candidate", "k-fourth": "probe"})
+        inst = h.book._instance(key)
+        self.assertTrue(inst.retired_at is not None and inst.why.startswith(L.YIELDED))
+        self.assertEqual(sorted(h.book.seats()["idle"]), ["a-third"])
+        self.assertEqual(h.intents(kind="house_exit"), [])
+        self.assertEqual(h.venue.sent, [])
+
+    def test_a_live_write_that_fails_never_reaches_the_store(self):
+        h, store, days = self.house()
+        for n in range(0, 9):
+            self.session(h, days[n])
+        real = h.book._save_instance
+        fired = []
+
+        def save(inst):
+            if str(inst.why).startswith(L.YIELDED) and not fired:
+                fired.append(inst.id)
+                raise RuntimeError("the live state's write failed (injected)")
+            return real(inst)
+
+        h.book._save_instance = save
+        events = len(store.events_after(0, limit=5000))
+        self.session(h, days[9])
+        self.assertEqual(fired, [L.instance_key("a-third", 1)])
+        self.assertEqual(store.family("a-third")["band"], "probe")
+        self.assertFalse([e for e in store.events_after(0, limit=5000)[events:] if e["kind"] == "swarm.band"],
+                         "the swarm's store was never written")
+        self.session(h, days[10])
+        self.assertEqual((store.family("a-third")["band"], store.family("k-fourth")["band"]), ("candidate", "probe"))
 
 
 class CommitFails:
