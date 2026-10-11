@@ -902,7 +902,9 @@ class ADaysMetersWaitForItsRows(Fixture):
             out = night(i, (late, *rest))
         self.assertEqual((out.get("waiting"), self.table("fwd_cey")[-1]["day"]), (None, DAYS[21]))
         self.assertEqual(R._partial_days(self.db), set(DAYS[13:13 + R.METER_WAIT_NIGHTS - 1]))
-        self.assertEqual(unmade, controls[1])
+        last = {pid: self.db.execute("SELECT max(day) FROM fwd_days WHERE pid=?", (pid,)).fetchone()[0]
+                for pid in (unmade, halted)}
+        self.assertEqual(last, {unmade: DAYS[10], halted: DAYS[12]}, "neither was given a row; no day waits for them")
 
 
 # ============================================================================================== D9: RC
