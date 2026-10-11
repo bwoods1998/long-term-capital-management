@@ -487,6 +487,37 @@ class TheJob(unittest.TestCase):
         out, gw, _ = self.run_job(now)
         self.assertEqual(out["days"], ["2026-10-13"])
 
+    def test_a_day_that_is_not_ready_never_holds_up_the_days_after_it(self):
+        # The oldest day goes first: were the run to stop at a day the venue never settles, every newer day of the
+        # backfill would wait behind it for ten sessions.
+        now = at(dt.date(2026, 10, 15), 16, 45)
+        out, gw, ctx = self.run_job(now, Gateway(unready="2026-10-13"))
+        self.assertEqual((out["status"], out["ok"], out["day"], out["unready"]), ("failed", False, "2026-10-13", 1))
+        self.assertEqual(out["days"], ["2026-10-12", "2026-10-14", "2026-10-15"])
+        self.assertEqual(fill_minutes.days_on_disk(self.root), ["2026-10-12", "2026-10-14", "2026-10-15"])
+        self.assertIn("2026-10-13", out["error"])
+        self.assertIn("not ready", out["error"])
+        self.assertEqual(len(gw.calls), 8, "two requests a session, the unready one included")
+        self.assertEqual(ctx.alerts, [])
+        out, gw, _ = self.run_job(now, Gateway(unready="2026-10-13"))      # the retry inside its grace: that day alone
+        self.assertEqual((out["status"], out["days"], len(gw.calls)), ("failed", [], 2))
+        out, gw, _ = self.run_job(now)                                     # the venue has settled it
+        self.assertEqual(out["days"], ["2026-10-13"])
+        self.assertNotIn("status", out)
+
+    def test_several_days_that_are_not_ready_are_counted_and_the_text_holds_dates_only(self):
+        now = at(dt.date(2026, 10, 19), 16, 45)                            # six forward days have closed
+        out, gw, _ = self.run_job(now, Gateway(absent={equity_data.CALENDAR_SYMBOL}))
+        self.assertEqual((out["status"], out["days"], out["day"], out["unready"]), ("failed", [], "2026-10-12", 6))
+        self.assertIn("2026-10-12, 2026-10-13, 2026-10-14 ...", out["error"])
+        self.assertNotIn("2026-10-15", out["error"], "the text names the first three")
+        self.assertNotRegex(out["error"].replace("2026-10-", ""), r"\d+\.\d|%|bp", "ids, counts and dates only")
+        # A gateway error is the venue's own: the run stops at it, as before.
+        out, gw, _ = self.run_job(now, Gateway(unready="2026-10-12", fail="2026-10-14"))
+        self.assertEqual((out["status"], out["days"], out["day"]), ("failed", ["2026-10-13"], "2026-10-14"))
+        self.assertIn("GatewayError", out["error"])
+        self.assertNotIn("unready", out)
+
     def test_a_symbol_with_no_bar_is_its_own_gap_not_the_days(self):
         out, gw, _ = self.run_job(at(EDT_DAY, 16, 45), Gateway(absent={"XLC"}))
         self.assertEqual(out["days"], ["2026-10-12"])

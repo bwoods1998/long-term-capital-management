@@ -29,7 +29,9 @@ the daily store, which is written later that evening: a forward day here is a se
 a missing day). A DAY THAT IS NOT READY IS NOT WRITTEN: a file is written once and never fetched again, so an answer
 that lacks the send-minute bar of `equity_data.CALENDAR_SYMBOL` in either window (the venue has not settled the day
 yet) writes no file and fails the receipt; the runner starts the job again inside its grace and the next run's
-backfill fetches the day. A symbol that has no bar in a minute is that symbol's alone: its live-like price is None.
+backfill fetches the day. Such a day never holds up the days after it: the run goes on through its backfill (the
+oldest day goes first) and fails at its end, naming the days it left. A symbol that has no bar in a minute is that
+symbol's alone: its live-like price is None.
 
 Standard library only.
 """
@@ -294,7 +296,8 @@ def _cfg(settings: Mapping[str, Any] | None) -> dict[str, Any]:
 
 def run(ctx: Any) -> dict[str, Any]:
     """THE JOB (the module docstring; league/ops/registry.py). The receipt: {"days": [the days written], "symbols",
-    "bars" (counts)}, never a price."""
+    "bars" (counts)}, never a price; a failed one names the first `day` it left and, when days were not ready, how
+    many (`unready`)."""
     from ..swarm import settings as settings_mod
     from . import forward_db
     from .equity_data import CALENDAR_SYMBOL, universe
@@ -312,6 +315,7 @@ def run(ctx: Any) -> dict[str, Any]:
     marker = CALENDAR_SYMBOL if CALENDAR_SYMBOL in symbols else symbols[0]
     todo = [day for day in due_days(now, first=forward_db.t0()) if not path_of(root, day).exists()]
     written: list[str] = []
+    unready: list[str] = []
     count = 0
 
     def receipt(**more: Any) -> dict[str, Any]:
@@ -329,12 +333,16 @@ def run(ctx: Any) -> dict[str, Any]:
                            error=f"{type(exc).__name__}: {str(exc)[:200]}")
         doc = {"bars": bars}
         if any(livelike_of(doc, day, marker, at) is None for at in FILL_POINTS):
-            return receipt(status="failed", ok=False, day=day.isoformat(),
-                           error=f"the minute bars of {day.isoformat()} are not ready: no send-minute bar of {marker} "
-                                 "in a window; nothing written for that day")
+            unready.append(day.isoformat())     # not written; the days after it are their own (the oldest goes first)
+            continue
         write_day(root, day, bars, fetched_at=now)
         written.append(day.isoformat())
         count += sum(len(rows) for rows in bars.values())
+    if unready:
+        return receipt(status="failed", ok=False, day=unready[0], unready=len(unready),
+                       error=f"the minute bars of {', '.join(unready[:3])}{' ...' if len(unready) > 3 else ''} are not "
+                             f"ready: no send-minute bar of {marker} in a window; nothing written for "
+                             f"{'that day' if len(unready) == 1 else 'those days'}")
     return receipt(ok=True)
 
 
