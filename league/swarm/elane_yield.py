@@ -346,8 +346,8 @@ def usd_hour(settings: Mapping[str, Any] | None, line: float | None = None) -> f
     league/swarm/loop.py `Swarm.pace_status` calls this with its reading of the line and takes what E2 spent in the
     hour, at most this, off the researchers' limit, so whatever E2's pace the researchers keep at least half their
     line. Up to a share of a half it is E2's hourly pace itself (`pace_hour`), as it was before release E2.2; the name
-    is from then. The heartbeat's `pace.equity` block shows this number as E2's limit: above a share of a half E2's
-    own pace is `pace_hour` (`pace`, and the operator's `report`)."""
+    is from then. The heartbeat's `researcher_pace.equity` block shows this number as E2's limit: above a share of a
+    half E2's own pace is `pace_hour` (`pace`, and the operator's `report`)."""
     if line is None:
         line, _ = model_line(settings)
     share = min(float(cfg(settings)["pace_share"]), LINE_SHARE_MAX)

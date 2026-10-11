@@ -103,7 +103,7 @@ block on the engine):
 ```python
 import numpy as np
 
-NEEDS = {"symbols": ["SPY", "QQQ"], "history": 60, "max_hold_sessions": 20}
+NEEDS = {"symbols": ["SPY", "QQQ"], "history": 60, "max_hold_sessions": 30}
 PARAMS = {"window": 20, "share": 0.25}
 
 
@@ -116,10 +116,10 @@ def decide(ctx):
         if len(close) <= n or not np.all(np.isfinite(close[-n - 1:])):
             continue                                     # a short or broken window: wait, never index past it
         above = close[-1] > float(np.mean(close[-n:]))   # a price against its own average: scale-free
-        if above and not lots:
-            intents.append({"buy": sym, "share": ctx.params["share"], "at": "open"})
-        elif not above:
+        if lots and (not above or ctx.sessions_to_month_end == 0):         # its own exits; ctx's own calendar
             intents += [{"sell": lot["id"], "at": "open"} for lot in lots]  # a lot is sold by its id
+        elif above and not lots:
+            intents.append({"buy": sym, "share": ctx.params["share"], "at": "open"})
     return intents
 ```
 

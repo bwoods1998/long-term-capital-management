@@ -61,8 +61,10 @@ def worked_example() -> str:
     return found.group(1)
 
 
-#: THE SHAPES OF THE DISQUALIFIED PROGRAMS (the first five: `ctx.bars[sym]` by key, through a name, as rows in a loop and
-#: in a comprehension, measured and indexed), then every other misreading the rule refuses. Each: (the body, the line of
+#: THE MISREADINGS. The first five are the two the disqualified programs had (a symbol's bars read BY KEY and walked AS
+#: ROWS), in the shapes a program writes them: by key, by key through a name, as rows sliced and looped, as rows in a
+#: comprehension, measured and indexed. They are written here from that description; the programs themselves are the
+#: House's and are not in this repository. Then every other misreading the rule refuses. Each: (the body, the line of
 #: the fault, words its refusal must say).
 MISREAD: dict[str, tuple[str, int, tuple[str, ...]]] = {
     "bars by key": ('''
@@ -242,7 +244,7 @@ MISREAD: dict[str, tuple[str, int, tuple[str, ...]]] = {
             return {"buy": "SPY", "share": 0.25, "at": "close"} if ctx.weekday == 0 else {}
      ''', 10, ("decide returns an empty dict", "for no order return []")),
 }
-#: The five shapes the first disqualified programs had (the release's reason).
+#: The two misreadings the disqualified programs had, in five shapes (the release's reason).
 FIVE = ("bars by key", "bars by key through a name", "bars as rows, sliced and looped", "bars as rows in a comprehension",
         "bars measured and indexed")
 
@@ -489,6 +491,26 @@ class TheTexts(unittest.TestCase):
         self.assertLessEqual(len(text), elane_train.CONTRACT_CHARS, "the generators are handed the whole contract")
         self.assertEqual(elane_train.contract_text(), text)
         self.assertIn(worked_example(), elane_train.contract_text())
+
+    def test_what_the_contract_says_a_program_has_is_what_the_sandbox_gives(self):
+        import numpy as np
+
+        from league.gym import runtime, safety
+
+        said = re.search(r"What you have: (.*?)There is no pandas\.", " ".join(contract().split())).group(1)
+        names = re.findall(r"`([A-Za-z_.]+)`", said)
+        builtins = [n for n in names if "." not in n and n != "math"]
+        self.assertGreaterEqual(len(builtins), 15)
+        for name in builtins:
+            self.assertIn(name, runtime._SAFE_BUILTIN_NAMES, name)
+        numpy_names = [n.split(".", 1)[1] for n in names if n.startswith("np.")]
+        self.assertGreaterEqual(len(numpy_names), 6)
+        for name in numpy_names:
+            self.assertTrue(callable(getattr(np, name)), name)
+            self.assertNotIn(name, safety.NUMPY_BANNED, name)
+        self.assertEqual(safety.ALLOWED_IMPORTS, {"math", "numpy"})
+        with self.assertRaises(safety.CodeRefused):
+            safety.check_program("import pandas as pd\n" + fx.program())
 
     def test_the_sentence_and_the_two_lines_reach_the_architect_the_researcher_and_no_figure_rides_them(self):
         said = elane_review.READING_CTX
@@ -746,9 +768,26 @@ class TheReadingRule(unittest.TestCase):
 
     def test_a_birth_carrying_a_misread_program_is_born_without_it(self):
         # The equity pass admits the family and leaves its first program to the researcher (`EquityPass.admit` reads
-        # `check_code`): the misread program is never version 1.
-        self.assertIsNotNone(check_code(prog(MISREAD["bars as rows in a comprehension"][0]), SYMBOLS))
-        self.assertIsNone(check_code(prog(SOUND["arrays by attribute, lots by key"]), SYMBOLS))
+        # `check_code`): the misread program is never version 1, and the researcher's first brief says why.
+        from league.swarm.architect import Architect
+
+        fx.switch_on(self)
+        clock = fx.Clock()
+        store = fx.new_store(self, clock)
+        settings = fx.settings(max_per_pass=4)
+        rows = [fx.proposal("misread-at-birth", symbols=("SPY", "QQQ"), code=prog(MISREAD["bars as rows in a comprehension"][0]))]
+        router = fx.FakeRouter(lambda call: fx.answer(rows))
+        out = Architect(store, router, settings, clock=clock).equity_pass()
+        self.assertEqual(out.get("born"), ["misread-at-birth"], out)
+        self.assertIsNone(store.latest_version("misread-at-birth"), "the misread program was not stored")
+        rec = record_of(store.family("misread-at-birth"))
+        self.assertTrue(rec["refused"][0]["why"].startswith("the architect's program: refused before it ran by the equity "
+                                                           "reading rule"), rec["refused"])
+        researcher = EquityResearcher(store, router, settings, runner=fx.FakeRunner(), clock=clock)
+        brief = researcher.brief(store.family("misread-at-birth"))
+        self.assertIn("is iterated as rows and raises a TypeError", brief)
+        self.assertIn(elane_review.READING_CTX, brief)
+        self.assertIn("Write version 1: the whole file.", brief)
 
 
 class TheDisqualificationsBrief(unittest.TestCase):
@@ -926,7 +965,7 @@ class OnE1sRunner(unittest.TestCase):
         self.assertLessEqual(len([line for line in code.splitlines() if line.strip()]), 20, "a short program")
         program = load_program(code, name="worked-example")
         self.assertEqual((program.needs.symbols, program.needs.history, program.needs.max_hold_sessions),
-                         (SYMBOLS, 60, 20))
+                         (SYMBOLS, 60, 30))
         self.assertIsNone(check_code(code, SYMBOLS), "it passes every static rule the swarm applies to a bred program")
         runner = self.runner()
         runs = [runner.train(code, {}, name="worked", start=first, end=last, k=1.0) for first, last in self.SPANS]
@@ -936,8 +975,8 @@ class OnE1sRunner(unittest.TestCase):
             self.assertEqual((result["runtime"]["errors"], result["runtime"]["timeouts"]), (0, 0), result["runtime"])
             self.assertGreater(result["summary"]["trades"], 5, "it trades")
             self.assertEqual({t["entry_at"] for t in result["trades"]}, {"open"})
-            self.assertEqual({t["reason"] for t in result["trades"]} - {"program", "max_hold"}, set())
-            self.assertIn("program", {t["reason"] for t in result["trades"]}, "its own sells, by the lot's id")
+            self.assertEqual({t["reason"] for t in result["trades"]}, {"program"},
+                             "every exit is its own sell, by the lot's id: none is left to the House's maximum hold")
         # The first span begins at the store's first session: its first decisions have one, two, three closes behind
         # them, and the example waits (no error) where an unguarded window would raise.
         self.assertEqual(runs[0].bars.first, 0)
