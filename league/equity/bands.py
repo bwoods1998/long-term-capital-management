@@ -31,6 +31,8 @@ EDM1_SIGMA_MIN_TRADES = 10
 #: ...else this fallback, a net return of 2% of notional a trade: a rule's round figure, chosen and not measured. A
 #: smaller sigma demotes sooner, so it errs toward exits only.
 EDM1_FALLBACK_SIGMA = 0.02
+#: An sd of its own at or under this is no sd (rounding noise of equal returns; the screen's own floor for an sd, 1e-12).
+EDM1_SIGMA_FLOOR = 1e-12
 #: A Sized sleeve share is floored to this many places (a share of E).
 SLEEVE_PLACES = Decimal("0.0001")
 
@@ -84,9 +86,11 @@ def edm1_sigma(record: EquityRecord, returns: list[float] | None = None) -> tupl
     returns = _returns(record) if returns is None else returns
     n = len(returns)
     if n >= max(EDM1_SIGMA_MIN_TRADES, 2):
-        mean = sum(returns) / n
-        own = _positive_sd(math.sqrt(sum((r - mean) ** 2 for r in returns) / (n - 1)))
-        if own is not None:
+        # `math.fsum`, and a floor: ten equal returns must read as NO sd of its own on every Python. The built-in `sum`
+        # is exact for such a list only since 3.12; on 3.11 it left an sd of 2e-18, which EDM1 would have used as sigma.
+        mean = math.fsum(returns) / n
+        own = _positive_sd(math.sqrt(math.fsum((r - mean) ** 2 for r in returns) / (n - 1)))
+        if own is not None and own > EDM1_SIGMA_FLOOR:
             return own, f"the sd of its own {n} real closes"
     return EDM1_FALLBACK_SIGMA, "the rule's fallback (no Validation sd, no usable sd of its own)"
 
