@@ -72,6 +72,13 @@ AS BUILT, beside the words above.
 - THE ALERTS the job raises itself (`ctx.alert`; ids, counts and names only): CP2 (warning) when the route's `idle`
   reaches `IDLE_ALARM`, CP1 (info) for each 2025 or 2026H1 cell newly recalled. A call that fails ends the run for
   that route ("stopped": "error"; its billed dollars booked); the next run goes on from the partial.
+- ONE ROUTE, ONE MODEL. The router sends a Sail profile outside the asap window to its fallback profile while that
+  window is stalled (league/swarm/models.py `sail_fallback`), and the fallback may be another model. An answer another
+  profile gave is not the probed route's memory: it is read by no score, its dollars are booked on the row of the
+  route that gave it ("probe:sail:<profile>", as E2 books a fallback's answer), and the run ends ("stopped":
+  "fallback"). The route adds no cell that run, so it goes to the back of the line and CP2 says so at the third.
+- THE ANSWERS' PARSE (`parse`) reads the array with the most usable answers of those a reply holds (a fence or a
+  sentence around it changes nothing), and of a reply cut before its array ends the whole entries before the cut.
 - ANSWERS FIRST, THEN TRUTH: a cell's truths are read only once all its batches are in, so no truth exists while a
   prompt is built. A store that cannot be opened with the gate's capability fails the job BEFORE the route is marked
   (the House's, never the route's).
@@ -153,6 +160,8 @@ RECALL_KEYS = ("n", "rho", "p_perm", "sign_acc")
 #: A probe call's output bound and effort.
 MAX_OUTPUT = 2000
 EFFORT = "low"
+#: `parse` tries this many opening brackets of a reply for its array of answers.
+ARRAY_STARTS = 32
 _Z95 = 1.959963984540054
 
 
@@ -395,21 +404,38 @@ def _answer(stratum: str, entry: Any) -> Any:
 
 def parse(text: Any, batch: Sequence[Mapping[str, Any]]) -> list[Any]:
     """The batch's answers from a model's reply, one an item in order (None for an item not answered, or for all when
-    the reply is not a JSON array)."""
+    the reply holds no JSON array). A model may write a fence or a sentence around its array: of the arrays the reply
+    holds (the first `ARRAY_STARTS` brackets are tried), the one with the most usable answers is read, the earliest on
+    a tie. A reply CUT before its array ends (a route's answer cut at its output bound) gives the whole entries before
+    the cut; the items after it are not answered."""
     none: list[Any] = [None] * len(batch)
     if not isinstance(text, str):
         return none
-    start, end = text.find("["), text.rfind("]")
-    if start < 0 or end <= start:
-        return none
-    try:
-        data = json.loads(text[start:end + 1])
-    except ValueError:
-        return none
-    if not isinstance(data, list):
-        return none
-    out = [_answer(str(q["stratum"]), entry) for q, entry in zip(batch, data)]
-    return out + none[len(out):]
+
+    def read(data: Any) -> list[Any] | None:
+        if not isinstance(data, list):
+            return None
+        out = [_answer(str(q["stratum"]), entry) for q, entry in zip(batch, data)]
+        return out + none[len(out):]
+
+    decoder = json.JSONDecoder()
+    starts = [i for i, ch in enumerate(text) if ch == "["][:ARRAY_STARTS]
+    best: list[Any] | None = None
+    for start in starts:
+        try:
+            got = read(decoder.raw_decode(text, start)[0])
+        except ValueError:
+            continue
+        if got is not None and (best is None or sum(a is not None for a in got) > sum(a is not None for a in best)):
+            best = got
+    if best is None and starts:  # no array ends: the entries before the cut
+        cut = text.rfind(",")
+        if cut > starts[0]:
+            try:
+                best = read(json.loads(text[starts[0]:cut] + "]"))
+            except ValueError:
+                best = None
+    return best if best is not None else none
 
 
 # ------------------------------------------------------------------------------------------------------------ the score
@@ -681,6 +707,17 @@ class Probe:
                 state["stopped"], state["error"] = "error", f"{type(exc).__name__}: {str(exc)[:160]}"
                 return None
             usd, known = elane_yield.answer_usd(answer)
+            moved = answer.get("sail_fallback") if isinstance(answer, Mapping) else None
+            other = str(moved.get("to") or "") if isinstance(moved, Mapping) else ""
+            if route.kind == "sail" and other and other != route.name:
+                # ANOTHER PROFILE ANSWERED (the router's own window fallback): not this route's memory. Its dollars go
+                # to the row of the route that gave it, as E2 books them; no score reads the answer; the run ends.
+                elane_yield.book(self.store, f"probe:sail:{other}", usd=usd, known=known, purpose="probe",
+                                 answered=True, now=now)
+                state["spent"] += usd
+                state["stopped"] = "fallback"
+                state["error"] = f"the router's window fallback answered on sail:{other}, not on {route.key}"
+                return None
             elane_yield.book(self.store, f"probe:{route.key}", usd=usd, known=known, purpose="probe", answered=True,
                              now=now)
             state["spent"] += usd
@@ -756,8 +793,8 @@ class Probe:
 
 def run(ctx: Any) -> dict[str, Any]:
     """THE JOB (the module docstring; league/ops/registry.py). The receipt: {"route", "probe" (its number), "usd",
-    "finished", "cells" (scored this run), "asked", "stopped" ("usd" | "time" | "error" | "data" | None)} and, when a
-    call or the store failed, "error"."""
+    "finished", "cells" (scored this run), "asked", "stopped" ("usd" | "time" | "error" | "data" | "fallback" | None)}
+    and, when a call or the store failed or another profile answered, "error"."""
     from ..equity.store import STORE_DIR, EquityStore, MissingData, StoreRefused, mint_equity_gate_capability
     from ..swarm import settings as settings_mod
     from . import equity_data

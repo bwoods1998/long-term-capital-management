@@ -47,8 +47,9 @@ def question_of(line: str) -> str:
 class ProbeRouter:
     """The swarm's router as the probe drives it, scripted: `answerer(question text) -> answer` for each numbered item of
     a call's user text. Like the Provider, it answers a request key it has seen from its own store at no cost; a new
-    key costs `cost` dollars. `fails[profile]` is an exception that route's every call raises; `calls` keeps each call
-    and `billed` the keys that cost."""
+    key costs `cost` dollars. `fails[profile]` is an exception that route's every call raises; `moves[profile]` is the
+    profile the router's own window fallback answers on in its place (league/swarm/models.py: the answer then says
+    so, and the fallback's call has a key of its own); `calls` keeps each call and `billed` the keys that cost."""
 
     def __init__(self, answerer=None, *, cost: float = 0.05):
         self.answerer = answerer or (lambda text: "higher" if "higher or lower" in text else
@@ -58,6 +59,7 @@ class ProbeRouter:
         self.calls: list[dict] = []
         self.billed: list[str] = []
         self.fails: dict[str, BaseException] = {}
+        self.moves: dict[str, str] = {}
 
     def claude_enabled(self, role: str) -> bool:
         return False
@@ -67,13 +69,17 @@ class ProbeRouter:
         profile = kw["sail_profile"]
         if profile in self.fails:
             raise self.fails[profile]
-        if kw["key"] in self.seen:
-            return {**self.seen[kw["key"]], "cost_usd": 0.0}
+        moved = self.moves.get(profile)
+        key = kw["key"] if moved is None else f"{kw['key']}:fallback:{moved}"
+        if key in self.seen:
+            return {**self.seen[key], "cost_usd": 0.0}
         items = [line for line in kw["user"].split("\n\n", 1)[1].splitlines() if re.match(r"^\d+\. ", line)]
         answer = {"text": json.dumps([self.answerer(question_of(line)) for line in items]), "route": "sail",
-                  "model": profile, "cost_usd": self.cost}
-        self.seen[kw["key"]] = answer
-        self.billed.append(kw["key"])
+                  "model": moved or profile, "cost_usd": self.cost}
+        if moved is not None:
+            answer["sail_fallback"] = {"from": profile, "to": moved, "why": "flagged"}
+        self.seen[key] = answer
+        self.billed.append(key)
         return answer
 
 
@@ -284,8 +290,34 @@ class TheAnswers(unittest.TestCase):
         self.assertEqual(P.parse('["higher", "up", 1, null, "lower", "lower"]', self.batch), ["higher", None, None, None])
         self.assertEqual(P.parse('[{"answer": "lower"}, {"1": "higher"}, {"a": 1, "b": 2}, "more"]', self.batch),
                          ["lower", "higher", None, None], "a word of another stratum is no answer")
-        for text in ("higher, lower, higher, lower", "", None, 7, '{"answers": "higher"}', "[higher", "] [", '["higher",'):
+        for text in ("higher, lower, higher, lower", "", None, 7, '{"answers": "higher"}', "[higher", "] [", "[", "[,",
+                     "[higher, lower], sorry", '{"a": ["x", "y"]}'):
             self.assertEqual(P.parse(text, self.batch), [None] * 4, repr(text))
+
+    def test_the_array_is_found_among_a_models_other_words(self):
+        want = ["higher", "lower", "higher", "lower"]
+        for text in ('Items [1-4], from memory [as asked]: ["higher", "lower", "higher", "lower"] (my best guesses).',
+                     '[1] ["higher", "lower", "higher", "lower"]',
+                     '["higher", "lower", "higher", "lower"] and again [1, 2, 3, 4]',
+                     '[["higher", "lower", "higher", "lower"]]',
+                     '{"answers": ["higher", "lower", "higher", "lower"]}'):
+            self.assertEqual(P.parse(text, self.batch), want, text)
+        self.assertEqual(P.parse('["lower", "lower"] or ["higher", "higher"]', self.batch), ["lower", "lower", None, None],
+                         "the earliest of two arrays that answer as much")
+        self.assertEqual(P.parse("[" * 40 + '"higher"' + "]" * 40, self.batch), [None] * 4,
+                         f"only the first {P.ARRAY_STARTS} brackets are tried")
+        self.assertEqual(P.ARRAY_STARTS, 32)
+
+    def test_a_reply_cut_before_its_array_ends_gives_the_entries_before_the_cut(self):
+        """A route's answer cut at its output bound (league/swarm/models.py: a Sail answer `truncated`): the items it
+        did answer are its answers; the rest are not answered and count in `skipped`."""
+        self.assertEqual(P.parse('["higher",', self.batch), ["higher", None, None, None])
+        self.assertEqual(P.parse('```json\n["higher", "lower", "hig', self.batch), ["higher", "lower", None, None])
+        self.assertEqual(P.parse('["higher", "lower", "higher", "low', self.batch), ["higher", "lower", "higher", None])
+        self.assertEqual(P.parse('[{"answer": "lower"}, {"answer": "hi', self.batch), ["lower", None, None, None])
+        self.assertEqual(P.parse('["higher"', self.batch), [None] * 4, "no whole entry is known to be whole")
+        self.assertEqual(P.parse('[3, -2, 1', P.recall_questions()[:4]), [3.0, -2.0, None, None],
+                         "a number cut short is not read as a smaller one")
 
     def test_the_recalls_numbers(self):
         batch = P.recall_questions()[:5]
@@ -677,6 +709,65 @@ class TheJob(Jobs):
         del self.router.fails["pro_asap"]
         out, ctx = self.probe(router=self.router)
         self.assertEqual(out["route"], "sail:glm_asap")
+
+    def test_an_answer_another_profile_gave_is_no_answer_of_the_route(self):
+        """The router's own window fallback (a Sail profile outside the asap window, its window stalled) answers on
+        another profile, which may be another model: the probe of route A never scores what route B remembered."""
+        self.router.moves["pro_asap"] = "glm_asap"
+        out, ctx = self.probe()
+        self.assertEqual((out["route"], out["stopped"], out["finished"], out["cells"], out["asked"], out["usd"]),
+                         ("sail:pro_asap", "fallback", False, 0, 0, 0.05))
+        self.assertIn("sail:glm_asap", out["error"])
+        self.assertEqual(len(self.router.calls), 1, "the run ends at the first answer that is not the route's")
+        book = elane_yield.ledger(self.store)["routes"]
+        self.assertEqual(set(book), {"probe:sail:glm_asap"}, "the dollars, on the row of the route that answered")
+        self.assertEqual((book["probe:sail:glm_asap"]["answered"], book["probe:sail:glm_asap"]["usd"]), (1, 0.05))
+        self.assertAlmostEqual(elane_yield.spent_today(self.store, self.clock()), 0.05, places=6)
+        row = self.doc()["routes"]["sail:pro_asap"]
+        self.assertEqual((row["idle"], row["partial"]["cells"], row["partial"]["recall"], row["partial"]["model"]),
+                         (1, {}, None, None), "no cell, no model named: nothing of the other profile's answer is kept")
+        self.assertNotIn("at", row)
+        self.assertEqual(ctx.alerts, [])
+        # It goes to the back of the line; once its own profile answers, the same batch is asked under its own key.
+        order = []
+        for _ in range(2):
+            self.clock.advance(WEEK)
+            order.append(self.probe()[0]["route"])
+        self.assertEqual(order, ["sail:glm_asap", "sail:k3"])
+        del self.router.moves["pro_asap"]
+        self.clock.advance(WEEK)
+        out, _ = self.probe()
+        self.assertEqual((out["route"], out["finished"], out["stopped"]), ("sail:pro_asap", True, None))
+        row = self.doc()["routes"]["sail:pro_asap"]
+        self.assertEqual((row["model"], row["idle"], row["probes"]), ("pro_asap", 0, 1))
+        mine = [c["key"] for c in self.router.calls if c["sail_profile"] == "pro_asap"]
+        self.assertEqual(mine[1], mine[0], "the batch the fallback answered, asked again of the route itself")
+        self.assertAlmostEqual(row["usd"], 0.05 * (1 + out["asked"]), places=6, msg="the probe's dollars, the fallback's too")
+
+    def test_a_fallback_that_names_the_routes_own_profile_is_the_routes_answer(self):
+        only = settings()
+        only["elane"]["e2"]["routes"] = ["sail:k3"]
+        self.router.moves["k3"] = "k3"
+        out, _ = self.probe(settings_=only)
+        self.assertEqual((out["finished"], out["stopped"]), (True, None))
+        self.assertEqual(set(elane_yield.ledger(self.store)["routes"]), {"probe:sail:k3"})
+        self.assertEqual(self.doc()["routes"]["sail:k3"]["model"], "k3")
+
+    def test_three_runs_a_fallback_answered_raise_cp2(self):
+        only = settings()
+        only["elane"]["e2"]["routes"] = ["sail:k3"]
+        self.router.moves["k3"] = "pro_asap"
+        alerts = []
+        for _ in range(3):
+            out, ctx = self.probe(settings_=only)
+            self.assertEqual(out["stopped"], "fallback")
+            alerts.append(ctx.alerts)
+            self.clock.advance(WEEK)
+        self.assertEqual(alerts[:2], [[], []])
+        self.assertEqual(alerts[2], [{"level": "warning", "text": "CP2: the contamination probe's route sail:k3 added no "
+                                                                   "cell in its last 3 attempts"}])
+        self.assertEqual(len(self.router.billed), 1, "the fallback's stored answer is read again at no cost")
+        self.assertAlmostEqual(elane_yield.ledger(self.store)["routes"]["probe:sail:pro_asap"]["usd"], 0.05, places=6)
 
     def test_the_stores_trouble_keeps_what_is_scored_and_books_what_was_billed(self):
         real, seen = P.truth, []
