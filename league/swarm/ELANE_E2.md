@@ -247,12 +247,11 @@ Stopping, from the lightest:
      sleeve, "what is left", the House's room), or from the cash share or a lot's weight: the static rule allows it
      and this check refuses it at the first session two runs hold the same lots, since such a size differs between
      two runs; size by a constant `share` (the House sizes a share on the sleeve itself and cuts it to the cash and
-     the room). (3) A weight cap or a rule on the
-     cash share that binds often: allowed by the static rule, and run-dependent where it binds (a lot's weight is
-     its asked share times its own return times capital over equity); it passes while it flips fewer than 1% of a
-     later run's sessions. (4) A count kept in STATE across lots (a wait after an exit): it differs for a session or
-     two after a later start and passes (in the tests: `WAIT`), unless the program trades so seldom that two
-     differing sessions are over 5% of its trades.
+     the room). (3) A weight cap or a rule on the cash share that binds often: allowed by the static rule, and
+     run-dependent where it binds (a lot's weight is its asked share times its own return times capital over
+     equity); it passes while it flips fewer than 1% of a later run's sessions. (4) A count kept in STATE across
+     lots (a wait after an exit): it differs for a session or two after a later start and passes (in the tests:
+     `WAIT`), unless the program trades so seldom that two differing sessions are over 5% of its trades.
    - WHAT A VERDICT IS: only the program's own doing is judged: its runs finished (the bar), it was disqualified by its
      own errors ("DQ"), the child refused to load it ("LOAD"), the child failed its run (or a check's runs or
      decides) `train_max_errors` times in a row while other programs' Train judgments completed ("RUN"), its
@@ -315,9 +314,10 @@ Stopping, from the lightest:
      to their run's start. Refused: `ctx.equity`, `ctx.cash`, `ctx.budget`, `ctx.caps` or a lot's `value`, `pnl` or
      `net` compared with, offset by, bucketed by or clipped at a constant or a PARAMS value, and the sleeve's dollars
      now held against `ctx.budget` or `ctx.caps` in any way (a constant over them and their log are the run's dollars
-     still: `1000.0 / ctx.equity`, `math.log(ctx.equity)`). Allowed: sizing proportional to them, a sign or zero
-     check, and the position's own state among the sleeve's dollars now (cash over equity, a lot's value over
-     equity). FOR THE CAPTAIN: the root is E1's (the floor's worlds never start flat while every judged window does);
+     still: `1000.0 / ctx.equity`, `math.log(ctx.equity)`). Allowed by this rule: sizing proportional to them, a sign
+     or zero check, and the position's own state among the sleeve's dollars now (cash over equity, a lot's value over
+     equity). (Since E2.1 the bar's START check refuses a SIZE taken from them all the same, where two runs differ
+     in nothing else: see START, above.) FOR THE CAPTAIN: the root is E1's (the floor's worlds never start flat while every judged window does);
      the static rule and the rubric below are the guard until the screen's floor sees fresh starts.
    - THE RUN'S CAPITAL FROM A LOT, in the same pass (the verification's seal-1 residual). The anchor need not come
      from ctx. The House sizes an entry as the asked share of the run's capital, so what a lot cost is that capital

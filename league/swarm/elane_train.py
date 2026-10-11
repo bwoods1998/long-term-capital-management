@@ -2594,6 +2594,8 @@ __all__ = ["OBJECTIVE", "STATE_KEY", "TRAIN_AT_KEY", "TRAIN_OK_KEY", "HOUSE_ALER
            "MAP_LABEL", "cfg", "lane_on", "symbols_group", "cell_of", "cell_text", "outside_years", "combine", "year_rows",
            "train_score", "bar_text", "record_of", "e2_family", "passed_version", "identity", "judged", "tried",
            "pass_current", "may_validate", "compact", "dq_said", "program_fault", "KIND", "StateCheckInterrupted", "state_inputs",
-           "SIZE_TOL", "same_intents", "restart_check", "with_state", "restart_text", "train_map",
+           "SIZE_TOL", "same_intents", "restart_check", "with_state", "restart_text", "StartCheckInterrupted", "StartRun",
+           "start_run", "start_plan", "start_orders", "same_book", "later_runs", "start_check", "with_start", "start_text",
+           "START_ADVICE", "START_KEYS", "START_MISSES", "train_map",
            "closed_cells", "train_map_text", "refuted_rows", "needs_literal", "check_code", "program_of", "contract_text",
            "RESEARCHER_SYSTEM", "version_text", "EquityResearcher", "versions_of", "BETA", "EQUITY", "LANES"]
