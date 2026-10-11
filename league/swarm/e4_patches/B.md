@@ -303,10 +303,10 @@ held by `ThePanelHalfSpread` in that file, already on the package's branch):
 
 ```diff
 diff --git a/league/tests/test_equity_spreads.py b/league/tests/test_equity_spreads.py
-index 705de769..240969b4 100644
+index c9d62216..ca35a1f0 100644
 --- a/league/tests/test_equity_spreads.py
 +++ b/league/tests/test_equity_spreads.py
-@@ -739,5 +739,143 @@ class ThePanelHalfSpread(unittest.TestCase):
+@@ -751,5 +751,143 @@ class ThePanelHalfSpread(unittest.TestCase):
          self.assertEqual(len(SP.POINTS), len(SP.TIMES_ET))
  
  
