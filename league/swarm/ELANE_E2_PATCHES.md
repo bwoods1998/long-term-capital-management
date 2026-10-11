@@ -46,6 +46,11 @@ provides: the isolated runner's `train(start, end)` and `decider`, the decider k
 hook that is missing fails safe: the restart check is then the House's failure (the version is not scored and cannot
 pass; the third such failure of a version raises the `elane_train_state` alert, once), never a pass.
 
+**Release E2.1 (the start check, START) needed no patch either.** It reads the same things and no more: the runner's
+`train(start, end)` for its later runs, the decider kinds and the decide answer's counts for its instances (keys
+`e2-start:`, dropped when it ends), and the ctx builder through the restart check's own stream. It edits no file of
+E1's, so the three identities do not move. A missing hook fails safe the same way (`elane_train_start`).
+
 ## Carried from E2's A15 review, for the captain (nothing here is a patch today)
 
 - **The reserve's bars reach Train as look-back.** E2 runs no session of 2020-2021 and keeps no row, figure or day of
@@ -146,7 +151,8 @@ done on E1's frozen head 05f83d9e:
 - **The pace split** (a note; the captain's decision). `elane.e2.pace_share` ships 0.25 with its bound 0 to 0.5,
   unchanged. The documents say plainly that the equity lanes' research spend is that share of the researchers'
   hourly pace, that `elane.e2.usd_day` is only a cap above it, and that the captain sets the share with the settings
-  tool at switch-on. No code changed for it.
+  tool at switch-on. No code changed for it. (Release E2.2 widened the bound to 0 to 4 and bounds E2 by the House's
+  Sail day instead of half the line: the last section.)
 
 The three identities did not move: these changes touch `league/swarm/elane_review.py`, `elane_train.py`,
 `elane_births.py`, their tests and the documents.
@@ -182,3 +188,33 @@ The three identities did not move: these changes touch `league/swarm/elane_revie
   `decider`, the decider kinds, the decide answer's `stats.calls`, `stats.errors` and `stats.disqualified`,
   `ctx.inputs_from_bars`, `ctx.lot_row` and `ctx.closed_row`. E2's instances are keyed
   "e2-state:<family>:<span>:<a|bN>" and dropped when the check ends.
+
+## Release E2.2 (Oct 11, 2026): no patch applied, one open for the loop
+
+Release E2.2 (how ctx is read; E2's own pace inside the House's Sail day: ELANE_E2.md) edits E2's five modules, their
+tests, the documents, `league/equity/EQUITY.md` (a document: no identity hashes it) and a comment in
+`league/swarm/settings.py`. It edits no file of E1's code, so the three identities do not move.
+
+- **What it reads of E1, beside the list above.** The Sail guard's own record (the swarm store's kv `guard`:
+  `braked`, `research_held`, `last_ok`, and in `last` the caps the guard computed, `budget_research_usd_day`,
+  `budget_account_usd_day`, `gate_reserve_usd`, `metered_today`, `at`), the guard's settings (`guard.stale_seconds`,
+  `guard.pace_day`, `guard.pace_slack`) and `SwarmStore.spent` for the guard's own kinds (`guard.SWARM_SAIL_KINDS`).
+  A test holds the keys and the kinds to `league/swarm/guard.py`; a record without the research cap holds E2 (fail
+  closed). And `league/equity/ctx.py`'s `Ctx.__slots__`, `SymbolBars.__slots__`, `lot_row`, `closed_row`,
+  `league/gym/events.py`'s `EVENT_NAMES` and `league/equity/program.py`'s `KINDS`, `AT` and `_intent` sentences: the
+  reading rule's tables are copies, each held to its source by a test.
+- **The loop's reading is unchanged, and it is what made a fix necessary.** `Swarm.pace_status` (patch 12) takes
+  `min(E2's hour, elane_yield.usd_hour(settings, limit))` off the researchers' limit. With the share's bound at four
+  lines an unchanged `usd_hour` would have taken the whole line and paused every researcher, so `usd_hour` is now THE
+  LINE'S SHARE, `min(pace_share, 0.5)` of the line, and E2's own pace is `pace_hour`. Up to a share of a half nothing
+  moved.
+- **OPEN, a patch for `league/swarm/loop.py` (the captain's; not applied, not needed for safety).** The heartbeat's
+  `researcher_pace.equity` block shows `usd_hour` as `limit_usd_per_hour` and reads `paused` from it. Above a share
+  of a half that number is the line's share, not E2's pace, so the block says "paused" while E2 is under its own pace.
+  The patch: fill the block from `elane_yield.pace(store, settings, now)` (E2's own limit, spend and pause) and keep
+  `taken_usd` as it is. Until then E2's pace is read in the `dlane` report's `equity_yield` (`usd_hour`,
+  `line_share_usd_hour`, `day_line`) and E2's own skips in the swarm log (`elane:` and `elane_train:` lines: a skip
+  names the pace, the day or the Sail day).
+- **OPEN, a note for the captain.** `allocation.plan_usd_per_hour` (null by default) counts E2's dollars as research
+  spend: with a plan set, E2 at a high pace contracts the researchers' workers toward the plan's floor. Set no plan
+  while E2 runs at more than a line, or set it with E2's pace in it.

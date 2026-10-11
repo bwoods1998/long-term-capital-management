@@ -175,7 +175,7 @@ class MarketRunner:
                               "pnl": round(sum(r["pnl"] for r in rows.values()), 2), "fees": 1.0, "win_rate": 0.55,
                               "exposure_mean": 0.3, "max_drawdown": 30.0, "mean_net_return": 0.001},
                   "bh": {"pnl": round(sum(r["bh_pnl"] for r in rows.values()), 2)}, "mte": {"mean": 0.0004, "t": 0.9, "n": 40}}
-        return SimpleNamespace(result=result, bars=None)
+        return SimpleNamespace(result=result, bars=None, code=code, start=start, end=end)
 
 
 class TheReserve(unittest.TestCase):
@@ -223,8 +223,16 @@ class TheReserve(unittest.TestCase):
         self.assertEqual((records["earns"]["status"], records["earns"]["passed_version"]), ("passed", 1), "really judged")
         self.assertEqual((records["loses"]["status"], records["loses"]["versions"]["1"]["fails"]), ("refuted", ["P1", "R1"]))
         self.assertEqual(sorted(records["earns"]["versions"]["1"]["years"]), [str(y) for y in elane_train.TRAIN_YEARS])
-        self.assertEqual(a["calls"], [(k, *span) for _ in range(2) for k in (1.0, 1.5) for span in elane_train.TRAIN_SPANS],
-                         "only the Train spans were ever run")
+        spans = elane_train.TRAIN_SPANS
+        self.assertEqual([c for c in a["calls"] if any(c[1] == first for first, _ in spans)],
+                         [(k, *span) for _ in range(2) for k in (1.0, 1.5) for span in spans],
+                         "the bar's own runs are the Train spans")
+        # The start check's runs (the family that met the rest of the bar): each inside a Train span, to its end.
+        later = [c for c in a["calls"] if all(c[1] != first for first, _ in spans)]
+        self.assertEqual(len(later), 2 * len(spans))
+        for k, start, end in later:
+            self.assertTrue(k == 1.0 and any(first < start < last == end for first, last in spans), (k, start, end))
+        self.assertEqual(len(a["calls"]), 8 + len(later), "only sessions of the Train spans were ever run")
         self.assertEqual(a["report"]["routes"]["sail:pro_asap"]["train_passes"], 1, "the ledger counts the pass")
 
     def test_no_figure_of_2020_21_reaches_a_record_the_map_the_ledger_or_a_generator(self):

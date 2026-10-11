@@ -200,9 +200,14 @@ class TheResearcher(ResearchCase):
         fam = fx.e2_family(self.store, "overnight-spy", code=fx.program())
         out = self.researcher.run()
         self.assertEqual((out["steps"][0]["passed"], out["steps"][0]["review"]["review"]), (True, "pass"))
-        self.assertEqual([(c["k"], c["start"], c["end"]) for c in self.runner.calls],
+        self.assertEqual([(c["k"], c["start"], c["end"]) for c in self.runner.base_calls()],
                          [(k, *span) for k in (1.0, 1.5) for span in TRAIN_SPANS],
                          "the Train spans only (never 2020-21), one run a span, both stresses")
+        # The start check's runs (test_elane_e2_start.py): each span again at 1.0x from two later starts, inside it.
+        self.assertEqual(self.runner.calls[:4], self.runner.base_calls(), "the bar's own runs come first")
+        later = self.runner.later_calls()
+        self.assertEqual([(c["k"], c["end"]) for c in later], [(1.0, span[1]) for span in TRAIN_SPANS for _ in (0, 1)])
+        self.assertTrue(all(span[0] < c["start"] < span[1] for c, span in zip(later, (s for s in TRAIN_SPANS for _ in (0, 1)))))
         fam = self.store.family(fam["id"])
         self.assertEqual((fam["best_version"], record_of(fam)["status"], record_of(fam)["passed_version"]), (1, "passed", 1))
         self.assertEqual(self.researcher.queue(), [], "a passing family researches no more")
@@ -917,8 +922,11 @@ class TheRestartCheck(ResearchCase):
                          (20, 7, 0, 0, {}))
         decider = self.runner.decider
         # Each span: A loaded once; B loaded with it, then fresh at sessions 7 and 27; every instance dropped at the end.
-        self.assertEqual(decider.loads, [f"e2-state:{fam['id']}:{span}:{x}" for span in (0, 1)
-                                         for x in ("a", "b0", "b1", "b2")])
+        self.assertEqual([key for key in decider.loads if key.startswith("e2-state:")],
+                         [f"e2-state:{fam['id']}:{span}:{x}" for span in (0, 1) for x in ("a", "b0", "b1", "b2")])
+        # Then the start check's instances (test_elane_e2_start.py): one a run, never reset.
+        self.assertEqual(decider.loads[8:], [f"e2-start:{fam['id']}:{span}:{x}" for span in (0, 1)
+                                             for x in ("a", "s61", "s127")])
         self.assertEqual(decider.instances, {})
 
     def test_the_resets_are_off_the_spans_start(self):

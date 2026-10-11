@@ -29,6 +29,51 @@ any other deploy.
 The running House release is `20261010T214125Z-d4667186f969` (main `ac6d008b`, the no-captain automations, 21:42Z
 Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. What is built and not deployed is on branches.
 
+### Release E2.1, the Train bar's START check: a bred share program's decisions must not depend on when its run started, on `feat/equity-e21-start` (unreleased; built on main `5ad1f01e`, where E1 and E2 are; no identity moves, no setting, no money-digest move)
+
+- **The hole.** A program can stop or shrink its trading once its own run is ahead (a profit lock). The share screen's
+  floor is built from slices of long Train runs, which start flat once, while Validation and the sealed look each
+  start flat, so a lock passes the screen far more often than its stated false-positive rate. E2's static rule refuses
+  the spellings it can follow and the two paid readers' rubric names the pattern; the verification showed spellings
+  the static rule cannot see, and one left open by design (the weight lock).
+- **The fix** (`league/swarm/elane_train.py` `start_check`, in the bar after Y1, Y2, P1, R1 and STATE; rules in
+  `BAR`, never in settings). Each Train span is run again from 61 and 127 decision sessions in (E1's isolated runner,
+  every run starting flat), each run is decided again through E1's decider kinds on its own ctx, and every later run
+  must give the orders of the run from the span's first session (kind, symbol, fill point, a buy's size within the
+  restart check's tolerance; tags apart; a sell by its lot's symbol) on 99% of its compared sessions: every session
+  once it has warmed up (the longer of NEEDS `history` and `max_hold_sessions`, and 20 more). A version that fails
+  it fails the bar with the code **START**: the program's fault, like STATE (no Validation try spent, nothing said of
+  the mechanism). Why it is the right property: the House starts every program live on a fresh date, so a program
+  whose decisions depend on its run's start cannot agree with its own replay.
+- **Three rules the build added to the rule as first written, each with the program that showed why** (one constant
+  each): a later run is ALSO compared before its warm-up ends wherever the two runs hold the same lots (a lock that
+  latches hid in the warm-up, and a program chose its own warm-up by declaring 504 sessions of look-back it never
+  read); every later run must also match on 95% of the sessions on which either run asked an order (a program that
+  trades once a month could differ on a fifth of its trades inside 1% of its sessions); and no session may show the
+  same lots and the same orders in another size (a lock that closes within days of every start differed on a
+  handful of sessions, inside both shares, each of them the same orders at another size).
+- **What its author reads** after a START failure: which later run fell short, the sessions that differed (counted
+  from that run's own first decision, never a day), what the two runs asked where they first differed, and that a
+  program must decide from ctx's bars, calendar and each lot's own facts alone, never from how its run stands. The
+  bar's text, the researcher's system prompt and the equity architect's say the rule before a program is written.
+- **The House's side, as for STATE:** a child that fails or restarts mid-check, a later run that gives no result and
+  spans that fit no later start are the House's (not scored, never a pass; the third is the alert
+  `elane_train_start`, once). **A pass judged before the check** that has not had its Validation try is scored again
+  on the next round and kept or withdrawn, so none reaches Validation without it.
+- **Cost, measured on the build machine:** four more Train runs a version that reaches the check (eight instead of
+  four) and one more decide a session of six of them: 1.4 to 2.8 seconds a version (one to four symbols, any
+  look-back), about twice the restart check. Versions that fail Y1-R1 or STATE cost nothing more.
+- **Not caught, stated** (`league/swarm/ELANE_E2.md`): a lock no Train run reaches, a lock that changes whether the
+  program trades (never how much) and closes within days of every start, and what the two shares allow in other
+  orders. **Refused though honest, stated:** a hold that simply ends at the House's maximum-hold exit and is bought
+  again at once, a buy sized in dollars worked out from the sleeve's equity, cash or room, a weight cap that binds
+  on more than 1% of sessions; each with its cure in the brief.
+- **Files:** `league/swarm/elane_train.py` (the check, the record, the texts), `elane_births.py` and
+  `elane_review.py` (words only), the tests (`league/tests/test_elane_e2_start.py`, new; the fakes; three counts in
+  the Train and seal tests that now hold the later runs), `league/swarm/ELANE_E2.md`, `docs/operations.md`. Nothing
+  under `league/equity`, `league/live`, `league/gym`, the gateway or the constitution: the three identities are the
+  same before and after.
+
 ### Release E2, integrated on E1: the swarm breeds share programs for the BETA and EQUITY lanes, on `feat/equity-e2-int` (unreleased; an owner deploy with or after E1; no identity moves; ships switched off)
 
 - **What it adds** (`league/swarm/ELANE_E2.md`): the architect's equity pass (families with their first program, on
@@ -76,13 +121,65 @@ Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. 
   whatever its spelling). Also: the review reads its dollar hold again before the audit; and the documents say
   plainly that the equity lanes' research spend is `elane.e2.pace_share` of the researchers' hourly pace (about a
   quarter at the shipped 0.25), that `elane.e2.usd_day` is only a cap above it, and that the captain sets the share
-  with the settings tool at switch-on.
+  with the settings tool at switch-on. (Release E2.2, below, makes that pace E2's own: the share's bound is 0 to 4
+  lines, no longer at most half the line, and the House's Sail day bounds E2 in its place.)
 - **No identity moves by E2:** it changes nothing under `league/live/`, `league/gym/`, `league/equity/` or
   `league/constitution.py`. The options execution fingerprint and the money digest are the ones E1 ships, and no
   evidence is reset by E2. (E1's own review fixes, merged here, move the equity evidence identity before its first
   look: the section below.)
 - Operations: [docs/operations.md](docs/operations.md), "The equity lanes' births" (switch on, read, stop, the budget,
   the yield record).
+
+### Release E2.2: the equity lanes read ctx as it is given, and their pace is their own, on `feat/equity-e22-yield` (unreleased; an owner deploy; no identity moves; the shipped settings are unchanged)
+
+Two things seen in the equity births' first hour on the House, each fixed in E2's own modules and documents.
+
+- **The generators misread the program contract.** `league/equity/EQUITY.md` said `ctx.bars[sym]` carries "arrays";
+  it is ONE object whose six arrays are read by attribute (`ctx.bars[sym].close`). The first programs the equity
+  researcher wrote mostly read it by key or as rows, every decide raised a TypeError, the version was disqualified
+  (each costs model dollars and one of its family's scored versions), and its author was told the error's class and
+  line only. Three layers (`league/swarm/ELANE_E2.md`, "Release E2.2"):
+  - **The texts.** EQUITY.md says what each field of ctx is (read off `league/equity/ctx.py`), what a program has
+    (plain builtins, `math`, numpy, no pandas), and gains "Reading ctx": a worked rolling-window program and the
+    common faults (bars by key, bars as rows, a short or NaN window, a lot by attribute, a sell by a symbol, a
+    malformed intent, an empty dict returned for no order). One sentence and two lines of it are in the equity
+    architect's lanes block and the equity researcher's system prompt. No outcome and no figure is in them.
+  - **A static pre-check, THE READING RULE** (`league/swarm/elane_review.py` `reading_refusals`, first of the static
+    rules in `elane_train.check_code`): the misreadings that can be seen in the source are refused before a version
+    is stored or run, each with its line and what to write instead. It follows a name only while every binding gives
+    it one kind of value and never refuses on a guess. A refusal costs one of the family's write attempts, never one
+    of its scored versions.
+  - **The disqualification's brief.** E1's run result does carry the exception's text, and E2 keeps it out of every
+    record and brief on purpose (a program chooses that text and reads reserve bars as look-back). The author is now
+    shown the line of its own file the first error was raised at and what is wrong there (what the reading rule sees
+    on that line, else one fixed sentence a class of error), worked out when the brief is written, so the versions
+    already disqualified get it too. The House's own sentence about a malformed return is named in the record.
+- **The equity lanes were starved.** E2's model spend was held to `elane.e2.pace_share` of the Sail model line, at
+  most half of it: at the ceiling at most $0.17 an hour, $4 a day, so the lanes stood still for most of each hour
+  while most of the day's Sail research dollars went unspent (the line is the model share of a day planned around Gym
+  boxes; an equity Train run needs none). **The pace is now E2's own:** `pace_share` is held to 0 to 4 lines (shipped
+  0.25, unchanged), `elane.e2.usd_day` stays the day's cap (shipped 8.0, held to 0 to 100), and what bounds E2 beyond
+  the two is the House's Sail day: E2 reads the Sail guard's own record and, fresh before each model call, the
+  swarm's Sail spend of the day, and stops a dollar before the line where the guard holds new research (its cap less
+  the gate's reserve, and the day's even pace), so it never brings the guard's hold on the options researchers and
+  the day's total never passes the guard's cap on its account. The options researchers keep at least half their line
+  whatever E2's pace (`elane_yield.usd_hour`, the loop's reading, is `min(pace_share, 0.5)` of the line: unchanged, a
+  share above one would have paused every researcher).
+- **What the captain sets** (no deploy of its own, read on the next loop pass): BOTH `elane.e2.pace_share` and
+  `elane.e2.usd_day`, since E2's day is the smaller of `usd_day` and a day at its pace:
+  `python3 set_swarm.py elane.e2.pace_share=<lines> elane.e2.usd_day=<dollars> --apply`. Left alone, nothing changes
+  for a share of a half or less.
+- **Open, for the captain** (`league/swarm/ELANE_E2_PATCHES.md`, the last section): the heartbeat's
+  `researcher_pace.equity` block shows the line's share as E2's limit, so above a share of a half it reads "paused"
+  while E2 is under its own pace (a patch for `league/swarm/loop.py`, not applied; E2's pace is in the `dlane`
+  report's `equity_yield`); and `allocation.plan_usd_per_hour`, if ever set, counts E2's dollars.
+- **No identity moves:** only E2's five modules, their tests, the documents, `league/equity/EQUITY.md` (a document no
+  identity hashes) and a comment in `league/swarm/settings.py` change. The options execution fingerprint, the equity
+  evidence identity and the money digest are the ones main carries.
+- Tests: `league/tests/test_elane_e2_reading.py` (every shape the rule refuses is run on E1's real isolated runner and
+  is disqualified there; the contract's worked example is taken out of the document, loads, trades and holds the
+  restart check; the rule's tables are held to E1's own definitions) and `league/tests/test_elane_e2_yield2.py` (a
+  day at four lines against the real Sail guard a minute at a time, and the real loop at the guard's line).
 
 ### Release E1, the verification's last fixes, on `feat/equity-e1` (unreleased; an owner deploy with the rest of E1)
 
