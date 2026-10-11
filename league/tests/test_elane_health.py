@@ -1891,6 +1891,15 @@ class TheLanesAnswers(Case):
         check = self.equity()["elane_idle"]
         self.assertEqual((check["stalled"], check["numbers"]["kind"], check["numbers"]["unanswered"]), (False, "pace", 8))
         self.assertNotIn("questions_lost", check["numbers"])
+        # And healed they stay, whatever comes after: six none answered in the morning, two answers, then three that
+        # none answered over the last four hours. The three count (three of five: too few); the six never do again.
+        self.setUp()
+        fams = self.lane([self.silent] * 6 + [ruled] * 2, first=11.5, every=0.3, born=11.9)
+        for hours in (4.0, 2.5, 1.0):
+            self.round(hours, self.silent(fams[0]))
+        check = self.equity()["elane_idle"]
+        self.assertEqual((check["stalled"], check["numbers"]["questions_lost"], check["numbers"]["questions_asked"],
+                          check["numbers"]["unanswered"]), (False, 3, 5, 9))
         # THE TIME THE SWARM WAS DOWN is no time a route failed to answer in: three and a half hours since the first
         # question none answered, one of them with the swarm down (the idle clock's own figure), is two and a half.
         for down, stands in ((3600.0, False), (0.0, True)):

@@ -96,7 +96,8 @@ was found by the captain reading the log, never by an alarm):
 
 THE EQUITY LANES' OWN CAUSES (release E2.4, Oct 11, 2026; league/ops/elane_health.py, which judges them): `elane_dq`
 (most equity versions scored could not be judged for a fault of their own program), `elane_births` (the last equity
-passes that asked a model bore no family), `elane_idle` (A BROKEN LANE: work owed and no version scored for hours
+passes that asked a model bore no family), `elane_idle` (A BROKEN LANE: most of its program questions lost to a
+fault (answers that hold no program, questions no route answers), or work owed and no version scored for hours
 while its own record shows failures, or while it may ask a model; a lane held by its own pace, its day's dollars or
 the Sail guard never stands: what the setting costs is in the check's numbers and the funnel) and `elane_refused` (most
 programs written were refused before a run by one static rule). Each is judged only while the lanes are on and on

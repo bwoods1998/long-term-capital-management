@@ -1528,12 +1528,12 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
     kept_only = found is None and broken is not None
     # The routes of a lane broken by its answers, and which way most were lost: this run's, or what was kept of them.
     named = asked["routes"] if found == "answers" else was.get("routes") if broken == "answers" else None
+    named = [row for row in named if isinstance(row, (list, tuple)) and row] if isinstance(named, (list, tuple)) else []
     way = (max(LOST_KINDS, key=lambda k: (asked["by_kind"][k], -LOST_KINDS.index(k))) if found == "answers" else
            was.get("lost") if was.get("lost") in LOST_KINDS else LOST_KINDS[0])
     keep["broken"] = None if broken is None else {
         "kind": broken, "at": now if stood is None else stood,
-        **({"routes": [list(row) for row in named or [] if isinstance(row, (list, tuple))], "lost": way}
-           if broken == "answers" else {})}
+        **({"routes": [list(row) for row in named], "lost": way} if broken == "answers" else {})}
     if not late and broken is None:
         if down > 0:
             # A swarm that was down is not idle on the hours it was down: under `IDLE_HOURS` of running time, not judged.
@@ -1635,7 +1635,7 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
     numbers["kind"] = kind
     owner = None
     if kind == "answers":
-        owner = _answers_step([row[0] for row in named or [] if isinstance(row, (list, tuple)) and row], way, routes)
+        owner = _answers_step([row[0] for row in named], way, routes)
     elif kind in IDLE_OWNER_KINDS:
         owner = {"raised": "the equity lanes' rounds raise (the swarm log's \"elane failed\" and \"elane_train failed\" lines)",
                  "house": ("the equity lanes' Train runs fail on the House's side: check the equity_data job's receipt and the "
