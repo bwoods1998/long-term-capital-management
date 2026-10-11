@@ -271,6 +271,8 @@ SENTENCES: dict[str, tuple[tuple[str, str], ...]] = {
     ),
     "code": (
         ("does not compile", "a program that does not compile"),
+        ("imports only math and numpy", "an import other than math or numpy"),
+        ("is not allowed", "a name or a construct the code rules do not allow"),
         ("exactly one top-level function decide", "no single top-level decide(ctx)"),
         ("decide takes exactly one argument", "a decide that does not take ctx alone"),
         ("PARAMS", "a PARAMS that is not one simple top-level assignment"),
@@ -290,24 +292,48 @@ _ITEM = re.compile(r"(?:^|[:;] )line (\d{1,6}): ")
 _RAISES = ("TypeError", "AttributeError", "KeyError")
 
 #: What the floor does about each cause by itself.
+#: Kept short: a cause's sentence, this and its owner step are one House warning of 900 characters.
 DOING = {
-    "elane_dq": ("Each disqualified version's author is shown, in its next brief, the line of its own file the first "
-                 "error was raised at and what is wrong there; a family whose versions all end so is retired STALLED (no "
-                 "graveyard row, no cell count: nothing is said of its mechanism). Nothing loosens the bar or the sandbox."),
+    "elane_dq": ("Each disqualified version's author is shown the line of its own file the first error was raised at and "
+                 "what is wrong there; a family whose versions all end so is retired STALLED. Nothing loosens the bar or "
+                 "the sandbox."),
     "elane_births": ("The equity pass asks again at its own cadence and shows its next request the last pass's refusals "
-                     "with their reasons. Nothing loosens the admission: the universe, the agenda, the closed cells and "
-                     "the lineages with their try bind by design."),
-    "elane_refused": ("Each refusal is in its author's next brief with what to write instead; it costs the question's "
-                      "dollars and one of the family's write attempts, never a scored version. Nothing loosens a rule."),
-    "starved": ("E2 asks again by itself once it may: when its hour's spend falls under its pace, at 00:00 UTC for its "
-                "day, when the Sail guard has room. Versions already written are still scored (a Train run needs no "
-                "model). Nothing raises a pace or a line by itself."),
+                     "with their reasons. Nothing loosens the admission."),
+    "elane_refused": ("Each refusal is in its author's next brief with what to write instead; it costs one write attempt, "
+                      "never a scored version. Nothing loosens a rule."),
+    "starved": ("E2 asks again by itself once it may (its hour's spend under its pace, 00:00 UTC for its day, room under "
+                "the Sail guard's line). Versions already written are still scored. Nothing raises a pace or a line."),
     "broken": ("The Train round comes every ten minutes while it has work; a failure of the House's backs its family off "
-               "(doubling to six hours) and is alerted once (elane_train_house, among the swarm's alerts); a question no "
-               "route answered is asked again after its backoff. Nothing here restarts or repairs anything."),
+               "and is alerted once (elane_train_house); a question no route answered is asked again after its backoff. "
+               "Nothing here repairs anything."),
     "not_judged": "Nothing: the cause is not judged.",
 }
 REPORT = "python3 -m league.ops.elane_health --state /workspace/state"
+#: THE SHORT WORDS a cause is told in when several share the carried entry (`carried`; each check's `brief` and `step`):
+#: how an equity pass bore nothing or was refused, the short owner step of each way a setting clears, why a lane is
+#: idle, and the short owner step of each way it is broken.
+BIRTH_BRIEFS = {"symbols": "symbols outside elane.universe", "structure": "structures outside elane.structures",
+                "closed_cell": "closed cells", "tried_lineage": "lineages that have their try",
+                "same_idea": "ideas already in research", "card": "cards the card checks refuse",
+                "agenda": "agenda keys that are not on the agenda", "lane": "lanes that are none",
+                "mechanism": "no mechanism sentence", "graveyard": "the equity graveyard", "quota": "the pass's quota",
+                "store": "births the store refused", OTHER: "other refusals", "refused": "refusals",
+                "truncated": "answers cut short", "empty": "answers with no family", "failed": "no route answered",
+                "raised": "the pass raised"}
+BIRTH_STEPS = {"symbols": "decide whether to widen elane.universe (swarm.json)",
+               "structure": "decide whether to widen elane.structures (swarm.json)",
+               "closed_cell": "decide whether to widen elane.universe (closed cells bind by design)",
+               "tried_lineage": "decide whether to widen elane.universe (the ration binds by design)",
+               "truncated": "raise elane.e2.births_max_output_tokens or lower elane.e2.max_per_pass",
+               "raised": "the equity pass raises: a fix, in a release"}
+IDLE_BRIEFS = {"pace": "starved at its own pace (elane.e2.pace_share)", "usd_day": "starved: its day's dollars are spent "
+               "(elane.e2.usd_day)", "sail_day": "starved: the House's Sail day holds it", OTHER: "starved",
+               "raised": "broken: its rounds raise", "house": "broken: Train runs fail on the House's side",
+               "unanswered": "broken: no model route answers", "refused": "broken: every program is refused before a run",
+               "no_round": "broken: no round starts"}
+IDLE_STEPS = {"raised": "the equity rounds raise (the swarm log): a fix, in a release",
+              "house": "check the equity_data job's receipt and the swarm's equity-decider.log",
+              "no_round": "the equity lanes start no round (the swarm log): a fix, in a release"}
 #: The lever of a starved lane, said beside it (never an owner step: the lanes run as their settings say).
 PACE_LEVER = ("The lever is yours: BOTH elane.e2.pace_share and elane.e2.usd_day bind (python3 set_swarm.py "
               "elane.e2.pace_share=<lines> elane.e2.usd_day=<dollars> --apply).")
@@ -316,7 +342,7 @@ IDLE_OWNER_KINDS = ("raised", "house", "no_round")
 #: The gateway's cuts of a stall entry (gateway/lib/email.mjs: `sentence(entry.what, 400)`, `sentence(entry.doing, 700)`,
 #: STALL_STEP_CHARS, STALL_NUMBERS) and the figures of each cause the carried entry shows first.
 WHAT_CHARS, DOING_CHARS, STEP_CHARS, FIGURES = 400, 700, 400, 16
-MAIL_FIGURES = {"elane_dq": ("scored", "faulted", "top_error"), "elane_births": ("barren_passes", "top_refusal", "born"),
+MAIL_FIGURES = {"elane_dq": ("scored", "faulted", "top_error"), "elane_births": ("barren_passes", "kind", "born"),
                 "elane_idle": ("idle_hours", "kind", "researching"), "elane_refused": ("answers", "top_rule", "top_rule_n")}
 
 
@@ -358,12 +384,20 @@ def _hours(seconds: float) -> str:
 
 
 def _fit(parts: Sequence[str], limit: int, sep: str = " ") -> str:
-    """`parts` joined inside `limit` characters, each cut to an even share of it (a cut ends "...")."""
+    """`parts` joined inside `limit` characters: the short ones whole, the longest cut to what they leave, evenly (a
+    cut ends "...")."""
     parts = [" ".join(str(p).split()) for p in parts if p]
     if not parts:
         return ""
-    share = max(20, (limit - len(sep) * (len(parts) - 1)) // len(parts))
-    return sep.join(p if len(p) <= share else p[:share - 3].rstrip() + "..." for p in parts)[:limit]
+    room = limit - len(sep) * (len(parts) - 1)
+    caps = [len(p) for p in parts]
+    while sum(caps) > room and max(caps) > 0:
+        longest = max(caps)
+        over = [i for i, cap in enumerate(caps) if cap == longest]
+        cut = min(longest - max([cap for cap in caps if cap < longest], default=0), -(-(sum(caps) - room) // len(over)))
+        for i in over:
+            caps[i] -= cut
+    return sep.join(p if len(p) <= cap else p[:max(0, cap - 3)].rstrip() + "..." for p, cap in zip(parts, caps))[:limit]
 
 
 # ---------------------------------------------------------------------------------------------- closed words
@@ -764,38 +798,39 @@ def _dq_check(f: Mapping[str, Any], now: float, started: float | None) -> dict[s
     if scored < DQ_MIN_SCORED:
         return _not_judged(f"{scored} equity versions were scored in {span} (at least {DQ_MIN_SCORED} are needed)", numbers)
     top = _top(classes, 3)
-    said = ""
+    said, hint = "", None
     if top:
         name, n = top[0]
         numbers.update(top_error=_token(name), top_error_n=n)
         said = (f" The commonest first error: {'none its record names' if name == UNNAMED else name} ({n} of "
-                f"{by_code['DQ']} disqualifications" + ("; then " + ", ".join(f"{k} {v}" for k, v in top[1:]) if top[1:]
-                                                        else "") + ").")
-        tally = refusals_tally(f, start, now)
-        told = _top(tally["raises"].get(name, {}), 1)
+                f"{by_code['DQ']}" + ("; then " + ", ".join(f"{k} {v}" for k, v in top[1:]) if top[1:] else "") + ").")
+        told = _top(refusals_tally(f, start, now)["raises"].get(name, {}), 1)
         if told:
-            said += f" The reading rule's commonest sentence for it in the same hours: {told[0][0]} ({told[0][1]}x)."
-        try:
+            said += f" The reading rule's commonest sentence for it: {told[0][0]} ({told[0][1]}x)."
+        try:  # the contract's own sentence for the class (one fixed sentence a class: rules, nothing a run read)
             from ..swarm.elane_train import DQ_HINTS
 
-            said += f" {DQ_HINTS[name]}." if name in DQ_HINTS else ""
-        except Exception:  # noqa: BLE001 - the class is named without the contract's sentence for it
-            pass
+            hint = DQ_HINTS.get(name)
+        except Exception:  # noqa: BLE001 - the class is named without it
+            hint = None
     stalled = faulted > DQ_SHARE * scored
     named = f" (the commonest first error: {top[0][0]})" if top and top[0][0] != UNNAMED else ""
+    retired = numbers["retired_stalled"]
     return {
         "stalled": stalled, "judged": True,
         "what": (f"{faulted} of the {scored} equity versions scored in {span} could not be judged for a fault of their own "
-                 f"program: {by_code['DQ']} disqualified by their errors or timeouts, {by_code['LOAD']} refused at load, "
-                 f"{by_code['RUN']} failed by the decider child. No mechanism was judged in them"
-                 + (f", and {numbers['retired_stalled']} families were retired STALLED" if numbers["retired_stalled"] else "")
-                 + f".{said}"),
+                 f"program ({by_code['DQ']} disqualified, {by_code['LOAD']} refused at load, {by_code['RUN']} failed by the "
+                 "decider child): no mechanism was judged in them" + (f", and {retired} families were retired STALLED"
+                                                                      if retired else "") + f".{said}"),
         "numbers": numbers, "doing": DOING["elane_dq"],
-        "owner_step": (f"the equity generators misread the program contract or the sandbox{named}: fix the text they read "
-                       "(league/equity/EQUITY.md \"Reading ctx\", elane_review.READING_CTX, the researcher's system "
-                       f"prompt) or the static rule that should refuse it, in a release; {REPORT} lists the families and "
-                       "lines") if stalled else None,
-        "onset": min(firsts) if firsts and stalled else None, "examples": examples}
+        "owner_step": (f"the equity generators misread the program contract{named}: fix the text they read "
+                       "(league/equity/EQUITY.md \"Reading ctx\", elane_review.READING_CTX) or the static rule that should "
+                       f"refuse it, in a release; {REPORT} lists the families and lines") if stalled else None,
+        "onset": min(firsts) if firsts and stalled else None, "examples": examples, "hint": hint,
+        "brief": (f"{faulted} of {scored} versions scored in {numbers['hours']:g} h could not be judged (their own faults"
+                  + (f", mostly {top[0][0]}" if named else "") + ")"),
+        "step": ("fix the contract text the generators read" + (f" for {top[0][0]}" if named else "")
+                 + " (league/equity/EQUITY.md \"Reading ctx\"), in a release") if stalled else None}
 
 
 def _births_check(f: Mapping[str, Any], now: float, started: float | None) -> dict[str, Any]:
@@ -863,7 +898,11 @@ def _births_check(f: Mapping[str, Any], now: float, started: float | None) -> di
         "owner_step": (f"no equity family was born for {_hours(now - (last_born if last_born is not None else streak[-1][0]))} "
                        f"h while {len(streak)} passes asked for one: "
                        + lever.format(named=f" ({symbols})" if symbols else "")) if lever else None,
-        "onset": (last_born if last_born is not None else streak[-1][0]) if stalled else None}
+        "onset": (last_born if last_born is not None else streak[-1][0]) if stalled else None,
+        "brief": (f"the last {len(streak)} passes that asked a model bore no family"
+                  + (f" (mostly {BIRTH_BRIEFS.get(str(kind), 'refusals')}" + (f": {symbols}" if symbols else "") + ")"
+                     if kind else "")),
+        "step": BIRTH_STEPS.get(str(kind)) if lever else None}
 
 
 def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapping[str, Any]) -> dict[str, Any]:
@@ -978,7 +1017,9 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
         "stalled": True, "judged": True,
         "what": (f"No equity version was scored on Train for {_hours(idle)} h while {owed}"
                  + (" and births are wanted" if wanted else "") + f". {why}"),
-        "numbers": numbers, "doing": DOING["starved" if starved else "broken"], "owner_step": owner, "onset": edge}
+        "numbers": numbers, "doing": DOING["starved" if starved else "broken"], "owner_step": owner, "onset": edge,
+        "brief": f"no version scored for {_hours(idle)} h, " + IDLE_BRIEFS.get(str(kind), IDLE_BRIEFS[OTHER]),
+        "step": IDLE_STEPS.get(str(kind)) if owner else None}
 
 
 def _sail_words(text: Any) -> str:
@@ -1019,10 +1060,13 @@ def _refused_check(f: Mapping[str, Any], now: float, started: float | None) -> d
                  + (" Its commonest sentence: " + "; then ".join(f"{s} ({k}x)" for s, k in said) + "." if said else "")
                  if top else f"None of the {answers} programs the equity generators wrote in {span} was refused by a static rule."),
         "numbers": numbers, "doing": DOING["elane_refused"],
-        "owner_step": (f"the equity generators are not being taught {words}" + (f" ({said[0][0]})" if said else "")
-                       + ": teach it where they read it (league/equity/EQUITY.md, the researcher's system prompt, "
-                       f"elane_review.READING_CTX) in a release; {REPORT} lists the refusals") if stalled else None,
-        "onset": None, "examples": tally["examples"]}
+        "owner_step": (f"the equity generators are not being taught {words}: teach it where they read it "
+                       "(league/equity/EQUITY.md, the researcher's system prompt, elane_review.READING_CTX), in a "
+                       f"release; {REPORT} lists the refusals") if stalled else None,
+        "onset": None, "examples": tally["examples"],
+        "brief": (f"{n} of {answers} programs written in {numbers['hours']:g} h were refused before a run by {words}"
+                  + (f": {said[0][0]}" if said else "")),
+        "step": f"teach {words} where the generators read it (league/equity/EQUITY.md), in a release" if stalled else None}
 
 
 def judge(f: Mapping[str, Any], *, now: float, started: float | None = None,
@@ -1149,26 +1193,33 @@ def research(db: Any, start: float, end: float) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------------------------- the notice
-def carried(entries: Sequence[Mapping[str, Any]], known: Sequence[str] = ()) -> list[dict[str, Any]]:
+def carried(entries: Sequence[Mapping[str, Any]], known: Sequence[str] = (),
+            found: Mapping[str, Mapping[str, Any]] | None = None) -> list[dict[str, Any]]:
     """THE NOTICE (the module docstring): the stall notice's entries (`stall.cause_facts`, one a standing cause) with
     the equity causes the gateway has no words for (those not in `known`, `stall.CAUSES`) folded into ONE `CARRIER`
     entry: its `what` names each one ("elane_dq: ..."), its `numbers` open with each one's figures (`MAIL_FIGURES`,
     named "<cause>_<figure>"), its `doing` and `owner_step` hold theirs, its `since` is the earliest, each inside the
-    gateway's own cut. A carrier that stands by itself keeps its own words after theirs. Pure."""
+    gateway's own cut. One equity cause alone is told in its own sentence and step; several, or one beside a carrier
+    that stands by itself (its own words come after theirs), each in its short words (`found`: the checks, for their
+    `brief` and `step`), so the entry's 400 characters name them all. Pure."""
     own = [dict(e) for e in entries if e.get("cause") in CAUSES and e.get("cause") not in known]
     if not own:
         return [dict(e) for e in entries]
     rest = [dict(e) for e in entries if not (e.get("cause") in CAUSES and e.get("cause") not in known)]
     host = next((e for e in rest if e.get("cause") == CARRIER), None)
-    lead = "The equity lanes: " if len(own) > 1 or host else "The equity lanes, "
-    told = [f"{e['cause']}: {e.get('what') or ''}" for e in own]
-    numbers: dict[str, Any] = {}
+    alone = len(own) == 1 and host is None
+    lead = "The equity lanes, " if alone else "The equity lanes: "
+    short = {} if alone or not isinstance(found, Mapping) else found
+    told, steps, numbers = [], [], {}
     for e in own:
+        check = short.get(e["cause"]) if isinstance(short.get(e["cause"]), Mapping) else {}
+        told.append(f"{e['cause']}: {check.get('brief') or e.get('what') or ''}")
+        if e.get("owner_step"):
+            steps.append(str(check.get("step") or e["owner_step"]))
         figures = e.get("numbers") if isinstance(e.get("numbers"), Mapping) else {}
         for name in MAIL_FIGURES.get(e["cause"], ()):
             if name in figures:
                 numbers[f"{e['cause']}_{name}"[:40]] = figures[name]
-    steps = [str(e["owner_step"]) for e in own if e.get("owner_step")]
     doing = list(dict.fromkeys(str(e.get("doing") or "") for e in own))
     if host is not None:
         told.append(f"Also: {host.get('what') or ''}")
@@ -1188,7 +1239,7 @@ def receipt(root: str | Path, now: float, found: Mapping[str, Mapping[str, Any]]
     """The stall receipt's `elane` (league/ops/stall.py `run`): each equity cause's check as the receipt keeps a check
     (with whether it was judged, and its examples: the families, versions and lines an operator reads), the cause they
     travel in, and the research funnel of the last `FUNNEL_HOURS`. Never raises."""
-    keys = ("stalled", "judged", "what", "numbers", "doing", "owner_step", "examples")
+    keys = ("stalled", "judged", "what", "numbers", "doing", "owner_step", "examples", "hint")
     out: dict[str, Any] = {"carrier": CARRIER,
                            "checks": {c: {k: found[c].get(k) for k in keys if k in found[c]} for c in CAUSES if c in found}}
     try:
@@ -1247,6 +1298,8 @@ def text(doc: Mapping[str, Any]) -> str:
     for cause, check in (doc.get("checks") or {}).items():
         lines.append(f"{cause}: {'STANDS' if check.get('stalled') else 'judged, clear' if check.get('judged') else 'not judged'}")
         lines.append(f"  {check.get('what')}")
+        if check.get("hint"):
+            lines.append(f"  {check['hint']}.")
         if check.get("owner_step"):
             lines.append(f"  Owner step: {check['owner_step']}")
         figures = ", ".join(f"{k} {v}" for k, v in (check.get("numbers") or {}).items() if v is not None and k != "judged")

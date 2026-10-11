@@ -265,6 +265,27 @@ def _symbols_line(settings: Mapping[str, Any] | None) -> str:
     return " | ".join(parts) or "none (elane.universe is empty)"
 
 
+#: How the contract-in-brief names each universe group (`elane_train.symbols_group`) beside its half-spread.
+GROUP_WORDS = {"index": "the index ETFs", "sectors": "the sector ETFs", "defensive": "the defensive ETFs",
+               "stocks": "the stocks"}
+
+
+def _costs_line(settings: Mapping[str, Any] | None) -> str:
+    """The half-spread of each group of symbols `elane.universe` holds (league/equity/config.py `HALF_SPREAD_BP`), in
+    the universe's own symbols and no other (release E2.4): "1 bp the index ETFs SPY, QQQ, IWM and DIA". The line
+    named the costs of the code's whole universe ("3 bp the other ETFs, 5 bp TLT and GLD") whatever the universe held,
+    and a pass then proposed symbols the admission refuses."""
+    groups: dict[tuple[str, int], list[str]] = {}
+    for symbols in universe(settings).values():
+        for sym in symbols:
+            groups.setdefault((elane_train.symbols_group([sym]), int(eqconfig.HALF_SPREAD_BP[sym])), []).append(sym)
+    order = {group: i for i, group in enumerate(elane_train.GROUPS)}
+    rows = sorted(groups.items(), key=lambda row: (order.get(row[0][0], len(order)), row[0][1]))
+    named = lambda syms: syms[0] if len(syms) == 1 else f"{', '.join(syms[:-1])} and {syms[-1]}"  # noqa: E731
+    return "; ".join(f"{bp} bp {GROUP_WORDS.get(group, group)} {named(syms)}" for (group, bp), syms in rows) \
+        or "no symbol is open"
+
+
 def lanes_text(settings: Mapping[str, Any] | None) -> str:
     """THE LANES/EQUITY block: each lane's meaning and label, the universe, the contract in brief, the ration and the
     screen ("" while the births are off). Rules only."""
@@ -282,13 +303,13 @@ def lanes_text(settings: Mapping[str, Any] | None) -> str:
         "(trend, momentum and rotation, short-term reversal, low volatility, a conditioned calendar effect); long only, "
         "never short, never margin.",
         f"- THE UNIVERSE (elane.universe; a family trades 1 to {eqconfig.MAX_SYMBOLS} of them and reads only its own): "
-        + _symbols_line(settings) + ".",
+        + _symbols_line(settings) + ". A proposal naming any other symbol is refused whole: the contract in your "
+        "system prompt speaks of every symbol the code knows, and only the symbols of this line are open.",
         "- THE CONTRACT IN BRIEF: decide(ctx) runs once a session after the close on daily bars (prices adjusted as of "
         "that day, never by a later event); an intent executes in the NEXT session, \"at\": \"open\" (default) or "
         "\"close\"; a lot is never sold in the session it was bought; the House exits a lot after its NEEDS "
-        "max_hold_sessions (at most 60); an ETF position is at most half the sleeve; fills pay the half-spread (1 bp "
-        "the index ETFs, 3 bp the other ETFs, 5 bp TLT and GLD) and sells the SEC and FINRA fees. The whole contract is "
-        "in your system prompt.",
+        "max_hold_sessions (at most 60); an ETF position is at most half the sleeve; fills pay the half-spread ("
+        + _costs_line(settings) + ") and sells the SEC and FINRA fees. The whole contract is in your system prompt.",
         "- " + elane_review.READING_CTX,
         "- THE RATION: ONE Validation try and ONE sealed look a LINEAGE. A family continuing an idea (its parent, or a "
         "dead family of the same slice and idea), the same template, or a program whose Train daily returns correlate "

@@ -1991,7 +1991,7 @@ def run(ctx: Any) -> dict[str, Any]:
                          f"told at {mail.get('owner_at') or mail.get('info_at')}: the owner causes at most every 12 h, the "
                          "rest at most every 24 h")
     else:
-        facts = notice_facts(EH.carried(entries, CAUSES), now)  # the equity causes travel in one the gateway words
+        facts = notice_facts(EH.carried(entries, CAUSES, found), now)  # the equity causes travel in one the gateway words
         notice["notice_id"] = facts["notice_id"]
         notify = _notifier(ctx)
         if notify is None:
