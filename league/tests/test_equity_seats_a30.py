@@ -499,6 +499,16 @@ class TheIdleClock(TS.SeatCase):
         f.session(10, windows=False)
         rare = {x["family"]: x for x in f.seats()["holders"]}["rare"]
         self.assertEqual((rare["seated_sessions"], rare["left_out"]), (8, 2))
+        # THE PLAN (which travels to health.json and the reports) carries the head of the House's words only; the
+        # words after the first colon or bracket (they may hold a figure of the account's) stay in the book's note.
+        self.assertEqual(f.seats()["left_out"], [{"day": f.days[3].isoformat(), "why": "close window: the daily stop"},
+                                                 {"day": f.days[4].isoformat(), "why": f"open window: {PAUSED}"}])
+        for words, head in (("open window: the account's cash is below zero (-12.34): no real open in either lane",
+                             "open window: the account's cash is below zero"),
+                            ("close window: equity reconciliation: SPY: the account holds 1, the equity book expects 0",
+                             "close window: equity reconciliation"),
+                            ("open window: ", "open window: "), ("", "")):
+            self.assertEqual(L._reason_head(words), head)
         # THE KV: today's note while it is today's, and the refused sessions; a clear day is gone the day after.
         self.assertEqual(sorted(h.state.get(L.OPEN_NOTE_KEY)), [f.days[3].isoformat(), f.days[4].isoformat(),
                                                                 f.days[9].isoformat()])
@@ -821,6 +831,27 @@ class TheMinors(TS.SeatCase):
                 f.session(last)
                 self.assertEqual((f.band("new"), f.band("late")), ("candidate", "probe"),
                                  "ten whole sessions seated, and then it yields")
+
+    def test_a_decision_caught_up_after_the_next_open_dates_its_seats_the_same_way(self):
+        """The House was down at the close: the day's own decision runs the next morning, after the open. A seat it
+        gives counts from the session after, as one of the seating pass would."""
+        f = self.floor()
+        f.add("busy", "SPY", k=200, passed=1.0)
+        f.plan("busy", {"buy": "SPY", **BUY})
+        f.session(0)
+        f.plan("busy")
+        f.run(1, 3)
+        for mm in (31, 33):
+            f.h.tick(9, mm, day=f.days[4])                         # session 4's windows; no minute after its close
+        f.add("new", "IWM", k=50, passed=30.0)                     # it passes its look while the House is down
+        f.h.tick(10, 0, day=f.days[5])                             # the House is back: session 4's decision, caught up
+        f.h.tick(10, 1, day=f.days[5])
+        self.assertEqual(f.h.state.get("eq_decide")["day"], f.days[4].isoformat())
+        self.assertEqual(f.h.state.get("eq_band_since")[f.key("new")],
+                         {"band": "probe", "day": f.days[4].isoformat(), "seat": f.days[5].isoformat()})
+        held = {x["family"]: x for x in f.seats()["holders"]}
+        self.assertEqual((held["new"]["since"], held["busy"]["since"]), (f.days[5].isoformat(), f.days[0].isoformat()))
+        self.assertEqual(f.inst("new").last_decided_day, f.days[4].isoformat())
 
     def test_a_returned_programs_late_seat_keeps_its_own_session_through_the_revival(self):
         f = self.rare(seats=4, roster=3)

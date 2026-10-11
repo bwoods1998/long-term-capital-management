@@ -1368,9 +1368,11 @@ idle rule.
     day all of whose windows are clear is dropped the day after, a refused one is kept `OPEN_NOTE_KEEP_DAYS`.
     `_refused_days() -> {day: why}`: the sessions with a window looked at and never clear. `_counted(first, last,
     refused) -> (counted, left out)` is `schedule.sessions_between` less those in (first, last].
-  - `eq_band_since[key]` = {band, day} and, for a seat taken in the seating pass at or after the next session's
-    `open_send`, `seat`: that session, from which the idle test counts (`day` stays the decision day; a mark
-    without `seat` counts from `day`).
+  - `eq_band_since[key]` = {band, day} and, for a seat taken at or after the next session's `open_send` (the
+    seating pass during a session, a decision caught up after a restart), `seat`: that session, from which the
+    idle test counts (`day` stays the decision day; a mark without `seat` counts from `day`).
+  - The plan's `left_out[].why` is `_reason_head`: the window and the House's words up to their first colon or
+    bracket; the whole words stay in `eq_open_note`.
   - `_yield(...)`: refuses inside another transaction; one state transaction that finds the instance flat again,
     retires it with why "yielded: ...", writes the flag, the plan's memory and the mark, and LAST calls
     `confirm_band(row, "candidate", why)`; False rolls the transaction back (`_NoYield`). A commit that fails after

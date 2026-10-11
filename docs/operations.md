@@ -1275,13 +1275,16 @@ In plain words, and where each part lives:
   a session the House did not look at (it was not running in either entry window, or the rule in force was
   "first-come", under which no note is kept) counts as any other; a long outage with programs waiting is the
   watchdog's to end, and the captain may set the rule to "first-come" for its length. The plan shows each holder's
-  `left_out` beside its `seated_sessions`, and lists the sessions left out with the House's reason (`left_out`).
-- **A seat's first session.** A seat taken at the day's decision, or in the seating pass before the next session's
-  open, counts its sessions from that next session. A seat taken in the seating pass once that session's open has
-  begun (09:30:30 ET) counts from the session AFTER it: the program could not use that open, so the session is
-  not one of its ten. (`eq_band_since` keeps the decision day as `day`, as every other reader of the mark knows
-  it, and the session the count starts from as `seat`; the plan's `since` shows the latter.) Chosen over dating
-  every seat on the decision day, which would have let the idle test name a program after nine whole sessions.
+  `left_out` beside its `seated_sessions`, and lists the sessions left out (`left_out`), each with the window and
+  the head of the House's reason ("open window: the House is paused"); the reason's whole words, which may hold a
+  figure of the account's, stay in the book's note.
+- **A seat's first session.** A seat taken before the next session's open (at the day's decision, or in the seating
+  pass that evening or morning) counts its sessions from that next session. A seat taken once that session's open
+  has begun (09:30:30 ET: in the seating pass during the session, or by a decision caught up after a restart)
+  counts from the session AFTER it: the program could not use that open, so the session is not one of its ten.
+  (`eq_band_since` keeps the decision day as `day`, as every other reader of the mark knows it, and the session
+  the count starts from as `seat`; the plan's `since` shows the latter.) Chosen over dating every seat on the
+  decision day, which would have let the idle test name a program after nine whole sessions.
 - **What the rule never does.** It stops no program that trades: OUTRANKING IS NOT ADOPTED (a better-ranked arrival
   never makes a seated program exit-only; that would be a new value of `rule`, which the table does not allow, and
   may come only by A24's own pre-registered line). It plans no exit, cancels no order and sells no lot. A program

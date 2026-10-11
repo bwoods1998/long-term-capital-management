@@ -2184,7 +2184,8 @@ class EquityBook:
         before = (dumps(sticky), dumps(since))
         day = t.isoformat()
         rule = B.seat_settings()
-        #: {instance key: the session a seat taken in this (late) sync counts from}, filled by `_seat_bands`.
+        #: {instance key: the session a seat taken in this sync counts from, when it is not the next one}, filled by
+        #: `_seat_bands`.
         counts_from: dict[str, str] = {}
         if et is not None and et.enabled and not rule.first_come:
             # THE SEAT RULE in force (the module docstring): the book ranks the waiting programs itself. Its own trouble
@@ -2407,12 +2408,13 @@ class EquityBook:
 
         THE IDLE CLOCK (A30 (2)): a holder's seated sessions and its sessions since its last asked buy leave out
         every session in which the House refused every open (`_refused_days`). A SEAT'S FIRST SESSION: a seat taken
-        at the day's decision, or in the seating pass before the next session's open, counts from that next session;
-        one taken in the seating pass once that session's open has begun (09:30:30: its open entries can no longer
-        all go) counts from the session after it (`eq_band_since`'s `seat`, kept beside the mark's own `day`, which
-        stays the decision day every other reader of the mark knows), so the idle test never names a program before
-        it sat through `idle_sessions` whole sessions. A STALE FLAG: a program whose band is live holds a seat,
-        however it came by it (a rollback seats by pass time), and its idle flag is dropped."""
+        before the next session's open (at the day's decision, or in the seating pass that evening or morning) counts
+        from that next session; one taken once that session's open has begun (09:30:30: its open entries can no
+        longer all go; the seating pass during the session, or a decision caught up after a restart) counts from the
+        session after it (`eq_band_since`'s `seat`, kept beside the mark's own `day`, which stays the decision day
+        every other reader of the mark knows), so the idle test never names a program before it sat through
+        `idle_sessions` whole sessions. A STALE FLAG: a program whose band is live holds a seat, however it came by
+        it (a rollback seats by pass time), and its idle flag is dropped."""
         memory = dict(self.state.get(SEAT_KEY, {}) or {})
         flags = {str(k): v for k, v in (memory.get("idle") or {}).items()} if isinstance(memory.get("idle"), Mapping) else {}
         for row in rows:
@@ -2421,12 +2423,10 @@ class EquityBook:
         passed = dict(memory.get("passed") or {}) if isinstance(memory.get("passed"), Mapping) else {}
         last = memory.get("last")
         refused = self._refused_days()
-        first_session = day
-        if late:
-            nxt = S.next_session(day)
-            mn = S.moments(nxt, self._offsets())
-            if mn is not None and now >= mn.open_send:
-                first_session = nxt.isoformat()
+        # (The day's own decision runs before the next open, but for a catch-up after a restart: the same rule then.)
+        nxt = S.next_session(day)
+        mn = S.moments(nxt, self._offsets())
+        first_session = nxt.isoformat() if mn is not None and now >= mn.open_send else day
 
         def key_of(row: Mapping[str, Any]) -> str:
             return instance_key(row["family"], int(row["version"]))
@@ -2639,8 +2639,9 @@ class EquityBook:
         """THE PLAN as the sync leaves it, written to `SEAT_KEY` when it changed: who holds each seat (since when, how
         many sessions that count, how many left out because the House refused every open, flat, quiet, idle, seeded),
         who waits and in what order (a rank POSITION, never K), who is flagged idle, the sessions left out of the
-        idle clock since the oldest seat (`left_out`: [{day, why}], the newest thirty), and the last change of hands
-        with its reason. The day's decision also says it in one line of the minute's summary (`out["seats"]`)."""
+        idle clock since the oldest seat (`left_out`: [{day, why}], the newest thirty; `why` is the head of the
+        House's words, `_reason_head`), and the last change of hands with its reason. The day's decision also says
+        it in one line of the minute's summary (`out["seats"]`)."""
         refused = refused or {}
 
         def held(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -2657,7 +2658,7 @@ class EquityBook:
                 "holders": sorted((held(r) for r in holders), key=lambda h: (h["since"], h["family"])), "waiting": queue,
                 "sticky": sorted(str(k).split("@", 1)[0] for k in sticky), "order": "the book's plan (equity_money.probe.seat)"}
         oldest = min((h["since"] for h in plan["holders"]), default=day)
-        plan["left_out"] = [{"day": d, "why": str(refused[d])[:240]} for d in sorted(refused) if oldest < d <= day][-30:]
+        plan["left_out"] = [{"day": d, "why": _reason_head(refused[d])} for d in sorted(refused) if oldest < d <= day][-30:]
         was = self.state.get(SEAT_KEY)
         if not isinstance(was, Mapping) or {k: v for k, v in was.items() if k != "day"} != \
                 {k: v for k, v in plan.items() if k != "day"} or not late:
@@ -3652,6 +3653,16 @@ def _refused(windows: Any) -> str:
         if isinstance(entry, Mapping) and not entry.get("clear"):
             return f"{name} window: {str(entry.get('why') or 'refused')[:200]}"
     return ""
+
+
+def _reason_head(why: Any) -> str:
+    """A refused session's reason as the seat plan carries it (the plan travels to health.json and the reports): the
+    window and the head of the House's words, up to their first colon or bracket ("open window: the House is
+    paused"; "close window: equity reconciliation"). What follows there may be a figure of the account's (shares,
+    cash, a day's loss): it stays in the book's own note (`OPEN_NOTE_KEY`, live.sqlite)."""
+    window, _, words = str(why or "").partition(" window: ")
+    head = re.split(r"[:(]", words, maxsplit=1)[0].strip()
+    return f"{window} window: {head or 'refused'}"[:160] if words else str(why or "")[:160]
 
 
 def _counted(first: str, last: str, refused: Mapping[str, Any]) -> tuple[int, int]:
