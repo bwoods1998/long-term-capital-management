@@ -869,11 +869,13 @@ class TheVintageRule(Fixture):
         cent[0, 3] += 0.01   # two cents: 0.22%, a restatement
         self.assertFalse(P.ratios_equal(raw, adj, raw, cent))
         self.assertLess(abs(xs_config.rounding_bound(9.0, 9.01) - 1.5 * 0.005 * (1 / 9.0 + 1 / 9.01)), 1e-15)
-        gone = raw.copy()
-        gone[1] = np.nan
-        self.assertFalse(P.ratios_equal(raw, adj, gone, adj), "a bar that came or went on the overlap")
+        gone_raw, gone_adj = raw.copy(), adj.copy()
+        gone_raw[1], gone_adj[1] = np.nan, np.nan
+        self.assertFalse(P.ratios_equal(raw, adj, gone_raw, gone_adj), "a bar the store has is gone from the fetch")
+        self.assertTrue(P.ratios_equal(gone_raw, gone_adj, raw, adj), "a bar served late says nothing against the store")
         empty = np.full((3, 5), np.nan)
         self.assertTrue(P.ratios_equal(empty, empty[:, :4], empty, empty[:, :4]), "no bar on either side")
+        self.assertFalse(P.ratios_equal(empty, empty[:, :4], raw, adj), "bars, and none of the store's to hold them to")
 
     def test_the_daily_run_appends_and_keeps_each_vintage(self):
         first, _ = self.run_job()
@@ -967,6 +969,23 @@ class TheVintageRule(Fixture):
         k = after.aids.index(aid_of(grown, "QJOIN"))
         self.assertEqual(int(np.isfinite(after.raw[:, k, 3]).sum()), len(after.days), "a year of look-back and more")
         self.assertEqual(after.member[:, k].tolist(), [False] * (len(after.days) - 1) + [True])
+
+    def test_a_bar_served_late_is_taken_without_a_whole_refetch(self):
+        """A run just after a close can find a name's bar of the day not yet served: the next run fills it."""
+        self.run_job()
+        company = next(c for c in self.market.companies if c.name == "co-QAAE")
+        self.market.today = D(2022, 4, 1)
+        company.last = LAST           # the venue has not its bar of April 1 yet
+        receipt, _ = self.run_job(NOW + DAY)
+        panel = self.panel()
+        k = self.column(panel, "QAAE")
+        self.assertTrue(np.isnan(panel.raw[-1, k]).all())
+        company.last = None
+        whole = len(self.market.requests)
+        receipt, _ = self.run_job(NOW + DAY + 3600)
+        self.assertEqual((receipt["mode"], receipt["refetched"]), ("incremental", 0))
+        self.assertTrue(np.isfinite(self.panel().raw[-1, k]).all())
+        self.assertFalse([p for p in self.market.requests[whole:] if p["symbols"] == "QAAE"])
 
     def test_incremental_needs_a_store_whose_sessions_are_the_calendars_first(self):
         with self.assertRaises(ValueError):
@@ -1311,19 +1330,17 @@ class TheNightlyI6(Fixture):
         self.assertEqual((out["equal"], out["bytes_equal"]), (True, False),
                          "the vendor's cents: equal bars, and a ctx that is not byte for byte the same")
 
-    def test_without_the_ctx_the_bars_verdict_stands_alone(self):
-        if "inputs" in inspect.signature(xs_ctx.build).parameters and not _is_stub(xs_ctx.build):
-            self.skipTest("package C's ctx is in the tree: the stand-in test above holds the shas")
+    def test_the_bars_verdict_stands_alone_until_the_ctx_is_built_and_the_shas_come_with_it(self):
+        """In a tree without package C's ctx the I6 is the bars' verdict and says so; with it, the same call hashes
+        both sides, and one vintage on both gives the same bytes."""
         out = self.check()
-        self.assertEqual((out["equal"], out["store_sha"], out["bytes_equal"]), (True, None, None))
-        self.assertIn("not built", out["why"])
-
-
-def _is_stub(function) -> bool:
-    try:
-        return "raise NotImplementedError" in inspect.getsource(function)
-    except (OSError, TypeError):
-        return False
+        self.assertIs(out["equal"], True)
+        if out["store_sha"] is None:
+            self.assertEqual((out["fetch_sha"], out["bytes_equal"]), (None, None))
+            self.assertIn("not built", out["why"])
+        else:
+            self.assertRegex(out["store_sha"], r"^[0-9a-f]{64}$")
+            self.assertEqual((out["fetch_sha"], out["bytes_equal"], out["why"]), (out["store_sha"], True, None))
 
 
 # ================================================================================================ the job
@@ -1503,6 +1520,92 @@ class TheJob(Fixture):
         for name in ("raw", "adj", "member", "tradable", "hs", "early"):
             self.assertTrue(np.array_equal(getattr(panel, name), getattr(again, name), equal_nan=True), name)
         self.assertEqual(panel.manifest["version"], "xs-panel-v1")
+
+
+class TheRegistryRows(unittest.TestCase):
+    """Patch 10 (league/swarm/e4_patches/A.md): the six job rows of E4-SPEC 13. The rows are read from the patch file
+    itself, so what is held is what the integrator applies; once it is applied, the registry's own rows are held to it."""
+
+    PATCH = REPO / "league" / "swarm" / "e4_patches" / "A.md"
+    #: E4-SPEC 13: name -> (triggers, grace seconds, cpu, wall).
+    SPEC = {
+        "equity_universe": ((("start",), ("daily", 1, 40)), 3 * 3600, 120, 900),
+        "equity_panel": ((("after", "equity_universe"),), 3 * 3600, 600, 3300),
+        "equity_spreads": ((("daily", 6, 30),), 6 * 3600, 300, 3000),
+        "equity_neff": ((("monthly", 5, 10, 0),), 6 * 3600, 600, 900),
+        "french": ((("monthly", 5, 11, 0),), 6 * 3600, 60, 300),
+        "xs_zero_edge": ((("weekly", 6, 6, 0), ("weekly", 6, 8, 0), ("weekly", 6, 10, 0), ("weekly", 6, 12, 0)),
+                         100 * 60, 2400, 3000),
+    }
+
+    @classmethod
+    def setUpClass(cls):
+        from league.ops import registry
+
+        cls.registry = registry
+        blocks = re.findall(r"```diff\n(.*?)```", cls.PATCH.read_text(encoding="utf-8"), flags=re.S)
+        cls.diff = next(b for b in blocks if b.startswith("--- a/league/ops/registry.py"))
+        lines = cls.diff.splitlines()
+        cls.added = [line[1:] for line in lines if line.startswith("+") and not line.startswith("+++")]
+        cls.context = [line[1:] for line in lines if line.startswith(" ")]
+        scope = {name: getattr(registry, name) for name in ("Job", "S", "HOUR", "MINUTE")}
+        cls.rows = eval("(\n" + "\n".join(cls.added) + "\n)", scope)  # noqa: S307 - the repository's own patch file
+
+    @staticmethod
+    def trigger(t) -> tuple:
+        return {"start": ("start",), "after": ("after", t.job), "daily": ("daily", t.at.hour, t.at.minute)}.get(
+            t.kind, (t.kind, t.weekday, t.at.hour, t.at.minute))
+
+    def test_the_six_rows_are_the_specs_table(self):
+        self.assertEqual([job.name for job in self.rows], list(self.SPEC))
+        for job in self.rows:
+            triggers, grace, cpu, wall = self.SPEC[job.name]
+            self.assertEqual(job.module, f"league.ops.{job.name}")
+            self.assertEqual(tuple(self.trigger(t) for t in job.triggers), triggers, job.name)
+            self.assertEqual((job.grace, job.cpu, job.wall), (grace, cpu, wall), job.name)
+            self.assertEqual((job.in_pause, job.paid, job.retry), (True, False, True), job.name)
+            self.assertTrue(job.what and job.owner, job.name)
+
+    def test_each_wall_is_the_figure_its_job_asks_the_quiet_windows_with(self):
+        import importlib
+
+        for job in self.rows:
+            self.assertEqual(importlib.import_module(job.module).WALL_S, job.wall, job.name)
+        self.assertEqual((P.WALL_S, U.WALL_S), (self.SPEC["equity_panel"][3], self.SPEC["equity_universe"][3]))
+
+    def test_no_row_is_due_inside_a_session_of_either_season_and_every_wall_is_under_the_grants_grace(self):
+        grant = self.registry.by_name()["grant"]
+        for job in self.rows:
+            self.assertLessEqual(job.wall + 5 * 60, grant.grace, f"{job.name}: an hourly grant waits behind it")
+            for t in job.triggers:
+                minutes = t.at.hour * 60 + t.at.minute
+                inside = 12 * 60 + 55 <= minutes <= 21 * 60 + 5
+                if t.kind == "daily":
+                    self.assertFalse(inside, job.name)
+                elif t.kind in ("weekly", "monthly"):
+                    self.assertGreaterEqual(t.weekday, 5, f"{job.name}: a weekend job")
+                elif t.kind == "after":
+                    self.assertIn(t.job, self.SPEC)
+
+    def test_the_patch_fits_the_registry_and_the_registry_holds_it_once_applied(self):
+        source = Path(self.registry.__file__).read_text(encoding="utf-8").splitlines()
+        at = 0
+        for line in self.context:   # the diff's context is the registry's own text, in order: the anchor
+            at = source.index(line, at) + 1
+        self.assertIn(")", [line.strip() for line in self.context], "the rows end the JOBS tuple")
+        have = self.registry.by_name()
+        present = [name for name in self.SPEC if name in have]
+        if present:   # applied: all six, exactly these, and last
+            self.assertEqual(present, list(self.SPEC))
+            self.assertEqual([have[name] for name in self.SPEC], list(self.rows))
+            self.assertEqual([job.name for job in self.registry.JOBS][-6:], list(self.SPEC))
+            for line in self.added:
+                self.assertIn(line, source)
+        else:         # not yet: no name is taken, and the rows go after every job the registry has
+            self.assertEqual(set(self.SPEC) & set(have), set())
+            self.assertIn("dlane", have)
+        names = [job.name for job in self.registry.JOBS]
+        self.assertEqual(len(names), len(set(names)))
 
 
 class TheWalls(unittest.TestCase):

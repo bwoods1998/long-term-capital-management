@@ -867,7 +867,8 @@ def assign(spells: Sequence[tuple], previous: Mapping[str, Any] | None,
                         None if e is None else ("other" if k + 1 < len(mine) else exits.get((t, e), "unknown"))]
                        for k, (t, s, e) in enumerate(mine)],
             "symbol": symbol,
-            "alpaca": venue[symbol] if symbol in venue else (was.get("alpaca") if was.get("symbol") == symbol else None),
+            "alpaca": venue[symbol] if symbol in venue else (
+                was.get("alpaca") if was.get("symbol") == symbol else None),
             "ref": False, "renames": renames, "masked": was.get("masked") if was.get("masked") in BAR_MASKS else None}
     for row in out.values():
         if not row["ref"] and row["spells"] and row["spells"][-1][2] is None and usable(row["alpaca"]) \
@@ -1095,7 +1096,8 @@ def read_universe(root: str | Path) -> dict[str, Any] | None:
 def _spells_csv(spells: Sequence[tuple], filed: set[tuple]) -> bytes:
     lines = ["ticker,start,end,source"]
     for ticker, start, end in sorted((_spell(s) for s in spells), key=lambda s: (s[0], s[1])):
-        lines.append(f"{ticker},{start.isoformat()},{_iso(end) or ''},{'fja' if (ticker, start, end) in filed else 'wiki'}")
+        source = "fja" if (ticker, start, end) in filed else "wiki"
+        lines.append(f"{ticker},{start.isoformat()},{_iso(end) or ''},{source}")
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 
@@ -1178,7 +1180,8 @@ def _read_wiki(gateway: Any, through: dt.date, before: Mapping[str, Any], now: f
     nothing was read), "block" (SOURCE.json's `wiki`), "applied" (the rows in force after `through`)}. A verified
     read re-derives the rows in force (confirmed, in tonight's table); an unverified one keeps the earlier ones."""
     block = {"page": before.get("page"), "revid": before.get("revid"), "verdict": "unverified",
-             "known_through": before.get("known_through") or through.isoformat(), "seen": dict(before.get("seen") or {}),
+             "known_through": before.get("known_through") or through.isoformat(),
+             "seen": dict(before.get("seen") or {}),
              "applied": list(before.get("applied") or []), "rows": 0, "malformed": 0, "complete": False,
              "reach": before.get("reach"), "reach_ok": False, "why": None, "read_at": before.get("read_at"),
              "changes_applied": 0}
@@ -1478,7 +1481,8 @@ __all__ = ["PIN", "REPO", "FILE", "RAW", "ATOM", "WEB", "ASSETS", "AGENT", "WALL
            "membership", "tradable", "audit", "run", "COMMITS", "WIKI_API", "WIKI_PAGES", "RENAME_WINDOW_DAYS",
            "RENAME_TOLERANCE", "REFRESH_DAYS", "PIN_ALARM_DAYS", "STALE_ALARM_DAYS", "UNKNOWN_EXITS_ALARM",
            "FIRST_AID", "TICKER", "STORE_DIR", "SOURCE_FILE", "SPELLS_FILE", "ASSETS_FILE", "TRADABLE_FILE",
-           "MANIFEST_FILE", "JOINS_FILE", "VENUE_FILE", "WALL_SHARE", "VENUE_KEEP_EVERY", "OutOfWall", "HASHED", "BAR_MASKS", "VENUE_MASK", "spans", "in_store", "store_sessions",
+           "MANIFEST_FILE", "JOINS_FILE", "VENUE_FILE", "WALL_SHARE", "VENUE_KEEP_EVERY", "OutOfWall", "HASHED",
+           "BAR_MASKS", "VENUE_MASK", "spans", "in_store", "store_sessions",
            "quiet_now", "known_through", "parse_changes", "row_key", "confirmed", "apply_changes", "usable",
            "columns", "rename_candidates", "pair_key", "rename_test", "folder", "ensure_salt", "read_universe",
            "remask"]

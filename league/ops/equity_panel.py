@@ -5,21 +5,22 @@ with its manifest keywords, `league.xs.config.quiet`); the registry row is A's p
 `equity_universe`). While C0 is not in the release the job is skipped, never a crash.
 
 PER RUN: `league.xs.config.quiet(now, WALL_S)` first; the universe (league/ops/equity_universe.py's files); REF and
-member bars for `league.xs.config.SPANS`, through `GET /v1/alpaca/v2/stocks/bars` with the venue's `asof` (`fetch_asof`):
-ONE REQUEST SERIES AN ASSET, its last spell's ticker, the assets whose spell is open together at today's `asof` (the
-parameter left out), each ended asset alone at its last member session, a day INSIDE its spell, so a reused ticker
-resolves to the spell's own company (`plan`). 2020 IS NEVER FETCHED (ValueError for a span or an `asof` touching it).
+member bars for `league.xs.config.SPANS`, through `GET /v1/alpaca/v2/stocks/bars` with the venue's `asof`
+(`fetch_asof`): ONE REQUEST SERIES AN ASSET, its last spell's ticker, the assets whose spell is open together at
+today's `asof` (the parameter left out), each ended asset alone at its last member session, a day INSIDE its spell,
+so a reused ticker resolves to the spell's own company (`plan`). 2020 IS NEVER FETCHED (ValueError for a span or an
+`asof` touching it).
 
 THE ADJ VINTAGE (4.2): `adj` of one asset is always ONE fetch's series. The daily run (`incremental`) fetches the last
 `INCREMENTAL_SESSIONS` sessions of every active asset; an asset whose adj/raw close ratios on the overlap equal the
 store's WITHIN THE VENDOR'S CENTS (`league.xs.config.rounding_bound`: the adjustment=all series is served rounded to
 the cent, so two readings of one unrestated series differ by nothing and two a dividend restated by more than the
 rounding) takes the window's rows; any other (a dividend or split restated its history, a bar came or went, a raw
-price of the overlap was revised) is refetched whole in the same run and its `vintage` set to today. A whole refetch of every asset (`full`) runs when
-`full_at` is older than `FULL_EVERY_DAYS`; if a call still fails after its `TRIES` it writes nothing new, the run
-falls back to the incremental, and it is tried again the next night (`full_at` does not move; two nights running is
-an alarm). A raw price that a refetch changed is counted in `revisions` (an alarm above `REVISIONS_ALARM`; a volume
-alone is not: the next day's fetch always reads a later volume).
+price of the overlap was revised) is refetched whole in the same run and its `vintage` set to today. A whole refetch
+of every asset (`full`) runs when `full_at` is older than `FULL_EVERY_DAYS`; if a call still fails after its `TRIES`
+it writes nothing new, the run falls back to the incremental, and it is tried again the next night (`full_at` does
+not move; two nights running is an alarm). A raw price that a refetch changed is counted in `revisions` (an alarm
+above `REVISIONS_ALARM`; a volume alone is not: the next day's fetch always reads a later volume).
 
 D19, COVERAGE AND WHAT MAY MASK A MEMBER. A VALID BAR is a raw close above 0 with a raw volume above 0 (the vendor
 serves a session without a trade as a flat bar of volume 0: no valid bar that day, in the Gym and live alike; the
@@ -91,6 +92,8 @@ LOOKBACK_DAYS = 400
 KEEP_ENDED_DAYS = 120
 #: D20: a name's own half-spread needs this many samples at a fill point.
 MIN_SAMPLES = 8
+#: The jumps are read this many columns at a time (a whole panel's arrays are never doubled in memory).
+JUMP_COLUMNS = 64
 #: Second reads a run (two calls each); the rest wait for the next run, their bars standing meanwhile.
 SECOND_READS_RUN = 60
 #: `live_from` is set by the first run that finds at least this share of the day's members in the constitution's
@@ -135,7 +138,9 @@ def _call(gateway: Any, params: Mapping[str, Any], tries: int, sleep: Callable[[
                 sleep(BACKOFF_S[min(attempt, len(BACKOFF_S) - 1)])
     if count is not None:
         count["failed"] = count.get("failed", 0) + 1
-    raise RuntimeError(f"a bars call failed {max(1, int(tries))} times: {type(last).__name__}: {str(last)[:160]}")
+    status = getattr(last, "status", None)
+    raise RuntimeError(f"a bars call failed {max(1, int(tries))} times: {type(last).__name__}"
+                       f"{'' if status is None else f' (HTTP {status})'}")  # its kind, never the venue's own text
 
 
 def fetch_asof(gateway: Any, symbols: Sequence[str], start: str, end: str, *, adjustment: str,
@@ -264,7 +269,8 @@ def requests(assets: Mapping[str, Any], days: Sequence[dt.date], *, since: dt.da
     return out
 
 
-def plan(assets: Mapping[str, Any], days: Sequence[dt.date]) -> list[tuple[str | None, list[str], str, str]]:  # noqa: A002
+def plan(assets: Mapping[str, Any],  # noqa: A002
+         days: Sequence[dt.date]) -> list[tuple[str | None, list[str], str, str]]:
     """[(asof, symbols, start, end)]: open spells together at today's `asof`, each ended spell at its own; no span
     touches 2020."""
     return [(r.asof, list(r.symbols), r.start, r.end) for r in requests(assets, days)]
@@ -295,7 +301,8 @@ class Grid:
                 self._stamps[stamp] = None
         return self._stamps[stamp]
 
-    def place(self, rows: Mapping[str, Sequence[Mapping[str, Any]]], aid_of: Mapping[str, int], adjustment: str) -> None:
+    def place(self, rows: Mapping[str, Sequence[Mapping[str, Any]]], aid_of: Mapping[str, int],
+              adjustment: str) -> None:
         """Put one answer's rows on their days and columns. A row off the grid's days, or with a field that is no
         finite number, is dropped and counted (never half a bar)."""
         target, fields = (self.raw, RAW_FIELDS) if adjustment == "raw" else (self.adj, ADJ_FIELDS)
@@ -441,17 +448,19 @@ def full(root: str | Path, gateway: Any, last: dt.date, *, assets: Mapping[str, 
 
 
 def ratios_equal(store_raw: np.ndarray, store_adj: np.ndarray, fetch_raw: np.ndarray, fetch_adj: np.ndarray) -> bool:
-    """THE VINTAGE TEST of one asset on the overlap ((k, 5) and (k, 4) arrays): the same sessions have a bar in both
-    readings, and on each the adj/raw close ratio of the fetch equals the store's within the vendor's cents
-    (`league.xs.config.rounding_bound` of the two adjusted closes). An overlap with no bar on either side says
-    nothing against the store (True)."""
+    """THE VINTAGE TEST of one asset on the overlap ((k, 5) and (k, 4) arrays): on every session both readings have a
+    bar, the adj/raw close ratio of the fetch equals the store's within the vendor's cents
+    (`league.xs.config.rounding_bound` of the two adjusted closes). False too when a bar the store has is gone from
+    the fetch, and when the fetch has a bar and no session holds both (nothing ties the new rows to the store's
+    basis). A bar the store lacked and the fetch now has (served late) says nothing against the store; an overlap
+    with no bar on either side neither (True)."""
     from ..xs import config as xs_config
 
     had = np.isfinite(store_raw[:, 3]) & np.isfinite(store_adj[:, 3])
     has = np.isfinite(fetch_raw[:, 3]) & np.isfinite(fetch_adj[:, 3])
-    if not np.array_equal(had, has):
+    if bool(np.any(had & ~has)) or (bool(has.any()) and not bool(np.any(had & has))):
         return False
-    for i in np.flatnonzero(had).tolist():
+    for i in np.flatnonzero(had & has).tolist():
         rs, as_, rf, af = (float(store_raw[i, 3]), float(store_adj[i, 3]), float(fetch_raw[i, 3]),
                            float(fetch_adj[i, 3]))
         if min(rs, as_, rf, af) <= 0:
@@ -505,8 +514,11 @@ def incremental(root: str | Path, gateway: Any, last: dt.date, *, assets: Mappin
         if aid in again:
             continue
         k, w = grid.col[aid], window.col[aid]
-        if not ratios_equal(grid.raw[start:n_old, k], grid.adj[start:n_old, k], window.raw[:overlap, w],
-                            window.adj[:overlap, w]) or _revised(grid.raw[start:n_old, k], window.raw[:overlap, w]):
+        fresh = bool(np.isfinite(window.raw[overlap:, w, 3]).any()) and not bool(
+            np.isfinite(grid.raw[start:n_old, k, 3]).any())  # bars to append, and none of the store's to hold them to
+        if fresh or not ratios_equal(grid.raw[start:n_old, k], grid.adj[start:n_old, k], window.raw[:overlap, w],
+                                     window.adj[:overlap, w]) \
+                or _revised(grid.raw[start:n_old, k], window.raw[:overlap, w]):
             again.add(aid)  # restated, or the tape itself revised: one fetch's series again, counted below
             continue
         grid.raw[start:, k] = window.raw[:, w]
@@ -666,7 +678,7 @@ def second_read(gateway: Any, symbol: str, day: dt.date, *, asof: str | None, da
         price = float(session[-1]["c"]) if session else None
     except (RuntimeError, ValueError, TypeError, KeyError):
         return None
-    if daily is None or price is None or not (math.isfinite(daily) and math.isfinite(price) and daily > 0 and price > 0):
+    if daily is None or price is None or not (math.isfinite(daily) and math.isfinite(price)) or min(daily, price) <= 0:
         return None
     return abs(price / daily - 1.0) <= SECOND_READ_GAP
 
@@ -680,32 +692,34 @@ def jumps(raw: np.ndarray, adj: np.ndarray, days: Sequence[dt.date]) -> dict[str
     from .equity_data import RAW_JUMP, SPLIT_JUMP, SPLIT_RAW_TOLERANCE
 
     out: dict[str, list[tuple[int, int, int]]] = {"moves": [], "unexplained": []}
-    n, m = raw.shape[0], raw.shape[1]
-    spans_found = _span_windows(days)
+    if raw.shape[0] != len(days):
+        raise ValueError("jumps: the arrays and the days do not agree")
     index = {d: i for i, d in enumerate(days)}
-    for first, last in spans_found:
+    for first, last in _span_windows(days):
         lo, hi = index[first], index[last] + 1
-        rc, ac = raw[lo:hi, :, 3], adj[lo:hi, :, 3]
-        with np.errstate(invalid="ignore"):
-            ok = np.isfinite(rc) & np.isfinite(ac) & (rc > 0) & (ac > 0)
-        rows = np.where(ok, np.arange(hi - lo)[:, None], -1)
-        before = np.full_like(rows, -1)
-        before[1:] = np.maximum.accumulate(rows, axis=0)[:-1]
-        has = ok & (before >= 0)
-        take = np.clip(before, 0, None)
-        cols = np.broadcast_to(np.arange(m)[None, :], rows.shape)
-        with np.errstate(invalid="ignore", divide="ignore"):
-            p_rc, p_ac = rc[take, cols], ac[take, cols]
-            jump = (p_rc / p_ac) / (rc / ac)
-            move = p_rc / rc
-            bound = np.maximum(SPLIT_JUMP, xs_config.ROUNDING_GUARD * xs_config.ADJUSTED_HALF_STEP * (1 / p_ac + 1 / ac))
-            stepped = has & (np.abs(jump - 1.0) > bound)
-            unexplained = stepped & (np.abs(move / jump - 1.0) > SPLIT_RAW_TOLERANCE)
-            moved = has & ~stepped & (np.abs(move - 1.0) > RAW_JUMP) & (np.abs(1.0 / move - 1.0) > RAW_JUMP)
-        for name, mask in (("moves", moved), ("unexplained", unexplained)):
-            for i, k in zip(*np.nonzero(mask)):
-                out[name].append((lo + int(i), int(k), lo + int(before[i, k])))
-    assert n == len(days)
+        for c0 in range(0, raw.shape[1], JUMP_COLUMNS):
+            rc, ac = raw[lo:hi, c0:c0 + JUMP_COLUMNS, 3], adj[lo:hi, c0:c0 + JUMP_COLUMNS, 3]
+            with np.errstate(invalid="ignore"):
+                ok = np.isfinite(rc) & np.isfinite(ac) & (rc > 0) & (ac > 0)
+            rows = np.where(ok, np.arange(hi - lo)[:, None], -1)
+            before = np.full_like(rows, -1)
+            before[1:] = np.maximum.accumulate(rows, axis=0)[:-1]
+            has = ok & (before >= 0)
+            take = np.clip(before, 0, None)
+            cols = np.broadcast_to(np.arange(rc.shape[1])[None, :], rows.shape)
+            with np.errstate(invalid="ignore", divide="ignore"):
+                p_rc, p_ac = rc[take, cols], ac[take, cols]
+                jump = (p_rc / p_ac) / (rc / ac)
+                move = p_rc / rc
+                cents = xs_config.ROUNDING_GUARD * xs_config.ADJUSTED_HALF_STEP * (1 / p_ac + 1 / ac)
+                stepped = has & (np.abs(jump - 1.0) > np.maximum(SPLIT_JUMP, cents))
+                unexplained = stepped & (np.abs(move / jump - 1.0) > SPLIT_RAW_TOLERANCE)
+                moved = has & ~stepped & (np.abs(move - 1.0) > RAW_JUMP) & (np.abs(1.0 / move - 1.0) > RAW_JUMP)
+            for name, mask in (("moves", moved), ("unexplained", unexplained)):
+                for i, k in zip(*np.nonzero(mask)):
+                    out[name].append((lo + int(i), c0 + int(k), lo + int(before[i, k])))
+    for found in out.values():
+        found.sort()
     return out
 
 
@@ -941,6 +955,8 @@ def i6_check(root: str | Path, gateway: Any, day: dt.date, *, live: str | Path |
 
         def blanked(raw: np.ndarray, adj: np.ndarray, names: Sequence[int]) -> int:
             hit = 0
+            if not gone:
+                return hit
             for k, aid in enumerate(names):
                 for i, iso in enumerate(isos):
                     if (aid, iso) in gone and np.isfinite(raw[i, k, 3]):
@@ -1311,6 +1327,6 @@ __all__ = ["BARS", "WALL_S", "TRIES", "BACKOFF_S", "INCREMENTAL_SESSIONS", "FULL
            "ACCEPT_FIRST", "REUSED_USD", "INSANE_SHARE", "SECOND_READ_GAP", "MASKED_MEMBERS_MAX", "REVISIONS_ALARM",
            "I6_NEEDS", "fetch_asof", "plan", "incremental", "full", "acceptance", "second_read", "coverage",
            "hs_table", "i6_check", "run", "BATCH", "PAGE_LIMIT", "MAX_PAGES", "LOOKBACK_DAYS", "KEEP_ENDED_DAYS",
-           "MIN_SAMPLES", "SECOND_READS_RUN", "LIVE_FROM_SHARE", "I6_FLOOR", "LIVE_DB", "SPREADS_FILE", "Request",
+           "MIN_SAMPLES", "JUMP_COLUMNS", "SECOND_READS_RUN", "LIVE_FROM_SHARE", "I6_FLOOR", "LIVE_DB", "SPREADS_FILE", "Request",
            "requests", "Grid", "Panel", "load_panel", "ratios_equal", "valid_bars", "sane_bars", "jumps", "hs_share",
            "compare_bars", "ref_audit", "tradable_rows"]
