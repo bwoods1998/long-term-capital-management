@@ -234,6 +234,33 @@ class NoOrderThatMayStillFill(T.BookTest):
         self.assertEqual(after.status, "filled", "the order path took it back")
         self.assertEqual(len(h.book._lots(instance=key)), 1)
 
+    def test_a_lot_is_made_in_one_place_and_a_fill_booked_through_one_door(self):
+        """THE ARGUMENT `_flat` RESTS ON, held to the source: a `Lot` is constructed in `_book_fill` and nowhere else
+        in the book; `_book_fill` is called from `_absorb` alone; and `_absorb` from the four places that each read
+        an order still working or a lost one inside its take-back (`_sync_orders`, `_look_up`, `_send` on the order
+        it has just written, `_cancel` on a working order). A new way to book a lot fails here first, and its author
+        reads `_flat` before the seat rule can meet it."""
+        import ast
+        import inspect
+
+        tree = ast.parse(inspect.getsource(L))
+        where: dict[str, set[str]] = {"Lot": set(), "_book_fill": set(), "_absorb": set()}
+        for fn in [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]:
+            for call in [n for n in ast.walk(fn) if isinstance(n, ast.Call)]:
+                name = call.func.id if isinstance(call.func, ast.Name) else \
+                    call.func.attr if isinstance(call.func, ast.Attribute) else ""
+                if name in where and not (name == "Lot" and fn.name in ("of",)):
+                    where[name].add(fn.name)
+        self.assertEqual(where, {"Lot": {"_book_fill"}, "_book_fill": {"_absorb"},
+                                 "_absorb": {"_sync_orders", "_look_up", "_send", "_cancel"}})
+        # No other module of the lane or of the House writes a lot row.
+        root = Path(L.__file__).resolve().parents[1]
+        for path in sorted(root.glob("equity/*.py")) + sorted(root.glob("live/*.py")):
+            text = path.read_text(encoding="utf-8")
+            if path.name != "live.py" or path.parent.name != "equity":
+                self.assertNotIn("INTO eq_lots", text, path.name)
+                self.assertNotIn('upsert("eq_lots"', text, path.name)
+
     def test_the_two_windows_are_one_constant(self):
         self.assertEqual(L.LOST_TAKE_BACK_DAYS, 3)
         self.assertEqual(L.LOST_HOLDS_SEAT_DAYS, L.LOST_TAKE_BACK_DAYS + 1)
@@ -513,6 +540,58 @@ class TheIdleClock(TS.SeatCase):
         self.assertEqual(sorted(h.state.get(L.OPEN_NOTE_KEY)), [f.days[3].isoformat(), f.days[4].isoformat(),
                                                                 f.days[9].isoformat()])
         self.assertEqual(h.state.get(L.OPEN_NOTE_KEY)[f.days[9].isoformat()], {"open": {"clear": True}})
+
+    def test_a_minute_in_which_the_entries_wait_for_the_exits_is_no_look(self):
+        """The note is written where the windows work their entries, so it says what an entry was (or would have
+        been) told. At 09:31 an open exit is still working and the entries wait for it (two minutes): the House
+        would open, but no entry can go, so that minute is no look. From 09:33, when the entries are worked, the
+        House refuses to the cut-off: every entry of the window was refused, and the session is left out."""
+        for after, left_out in ((PAUSED, True), (None, False)):
+            with self.subTest(after=after):
+                f = self.floor()
+                f.add("busy", "SPY", k=200, passed=1.0)
+                f.add("rare", "IWM", k=100, passed=3.0)
+                f.plan("busy", {"buy": "SPY", **BUY})
+                f.session(0)
+                f.plan("busy")
+                f.session(1)
+                [lot] = f.h.book._lots(instance=f.key("busy"))
+                f.plan("busy", {"sell": lot.lid, "at": "open"})
+                f.session(2)
+                f.plan("busy")
+                h = f.h
+                h.venue.fill = "none"                              # the sale rests: an open exit is still working
+                h.tick(9, 31, day=f.days[3])
+                self.assertEqual(len(h.book._orders()), 1, "the exit is working")
+                self.assertNotIn(f.days[3].isoformat(), h.state.get(L.OPEN_NOTE_KEY, {}),
+                                 "the entries wait for the exits: no look, though the House would open")
+                h.blocked = after
+                for mm in (33, 40, 44):
+                    h.tick(9, mm, day=f.days[3])
+                note = h.state.get(L.OPEN_NOTE_KEY)[f.days[3].isoformat()]
+                self.assertEqual(note, {"open": {"clear": False, "why": PAUSED}} if left_out else {"open": {"clear": True}})
+                self.assertEqual(f.days[3].isoformat() in h.book._refused_days(), left_out)
+
+    def test_the_notes_own_trouble_never_stops_an_entry(self):
+        f = self.floor()
+        f.add("busy", "SPY", k=200, passed=1.0)
+        f.plan("busy", {"buy": "SPY", **BUY})
+        f.session(0)
+        f.plan("busy")
+        calls = []
+        real = f.h.book._open_block
+
+        def block(real_block, inst, killed=None):
+            calls.append(inst)
+            if inst is L.OPEN_PROBE:
+                raise RuntimeError("the note could not be made (injected)")
+            return real(real_block, inst, killed)
+
+        f.h.book._open_block = block
+        out = f.h.tick(9, 31, day=f.days[1])
+        self.assertTrue(any(e.startswith("open_note: RuntimeError") for e in out.get("errors", [])), out)
+        self.assertEqual(len(f.h.book._lots(instance=f.key("busy"))), 1, "the entry went all the same")
+        self.assertIs(calls[0], L.OPEN_PROBE, "asked before the minute's entries, for nobody in particular")
 
     def test_the_note_is_the_books_own_and_a_restart_keeps_it(self):
         f = self.floor()

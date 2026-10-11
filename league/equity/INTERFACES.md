@@ -1360,9 +1360,11 @@ idle rule.
     New York day. `_sync_orders` takes a lost order back for `LOST_TAKE_BACK_DAYS` (3: the constant both read), so
     the seat rule's window is the wider by a day. A lot is booked only by `_absorb` of a buy, and `_absorb` runs
     only on those orders: a program that reads flat has no order through which a lot could still be booked to it.
-  - `_open_note(now, m, real_block, killed)` (A30 (2)), a step of `tick` between the stock proof and the windows,
-    only while the rule is not "first-come": in an entry window ("open": `open_send` <= now < `entry_until`;
-    "close": `close_send` <= now < `close_until`) it asks `_open_block(real_block, OPEN_PROBE, killed)` (an
+  - `_open_note(window, m, real_block, killed, out)` (A30 (2)), called by `_windows` at each minute in which it
+    works a window's entries ("open": once the open's exits filled or `exit_wait_s` passed, while now <
+    `entry_until`; "close": once the close's exits filled or `CLOSE_EXIT_WAIT_S` passed, while now <
+    `close_until`), entries or none, only while the rule is not "first-come": it asks
+    `_open_block(real_block, OPEN_PROBE, killed)` (an
     instance that is live by construction: the answer is the House's alone) and keeps kv `eq_open_note`
     (`OPEN_NOTE_KEY`): {day: {window: {"clear": true} | {"clear": false, "why"}}}; clear is kept once seen; a
     day all of whose windows are clear is dropped the day after, a refused one is kept `OPEN_NOTE_KEEP_DAYS`.

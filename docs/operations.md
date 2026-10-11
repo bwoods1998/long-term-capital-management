@@ -1258,9 +1258,10 @@ In plain words, and where each part lives:
   and an ERROR alert says the seat rule's promise was broken: tell the captain.
 - **The idle clock and the House** (A30 (2)). A session in which the House refused every open is left out of every
   program's seated sessions and of its sessions since its last asked buy. HOW A SESSION IS KNOWN TO BE ONE: the
-  book keeps a note of its own (`live.sqlite` kv `eq_open_note`), written every minute of a session's two entry
-  windows (the open window's entry minutes, 09:30:30 to 09:45 ET, and the close window's, 15:55 to 15:59:30)
-  from the House's answer to "may a real equity open of ANY program go now?": exactly what `_open_block` answers
+  book keeps a note of its own (`live.sqlite` kv `eq_open_note`), written at every minute in which the windows
+  work their entries (the open window's, from 09:30:30 ET or the two minutes its exits are given, to 09:45; the
+  close window's, from 15:55 or the minute its exits are given, to 15:59:30), whether or not anybody planned a
+  buy, from the House's answer to "may a real equity open of ANY program go now?": exactly what `_open_block` answers
   before it looks at the instance (the House's own `real_block`: real money off, the grant, the kill switch, a
   stop, either book's reconciliation, the assignment latch, the options paper proof, the pause, the account read,
   cash below zero; then the lane's own: `equity_money.enabled` off, the stock proof's BUY stage not passed or its
@@ -1268,7 +1269,9 @@ In plain words, and where each part lives:
   from the first minute the House would have opened in it and stays clear. A session is left out when the House
   looked in one of its two windows and never once would have opened there (either window: a program may buy at
   the open or at the close, and a stop that trips at noon refuses the close's entries). One refused minute in a
-  window that then cleared leaves nothing out: every entry of that window had its chance. WHY A PROGRAM CANNOT
+  window that then cleared leaves nothing out: every entry of that window had its chance. What is NOT one of
+  `_open_block`'s answers leaves nothing out either: the day's order count, a quote that cannot be used, a figure
+  the sizing could not read that minute. WHY A PROGRAM CANNOT
   FORGE IT: the note is written from the House's own answer for a program that is live by construction
   (`OPEN_PROBE`), whether or not anybody planned a buy; no intent, tag, reason or order of a program is read to
   make it, and nothing a program returns from `decide` is a word of `_open_block`. WHAT IT DOES NOT COVER, stated:

@@ -285,15 +285,16 @@ SEAT_KEY = "eq_seat"
 YIELDED = "yielded"
 BUDGET_WORDS = "the shared loss budget has"
 #: THE OPEN NOTE (the captain's A30 (2); `EquityBook._open_note`, `_refused_days`): the kv in which the book keeps, a
-#: session and an entry window ("open": the minutes an open entry may go, 09:30:30 to 09:45; "close": 15:55 to
-#: 15:59:30), whether the House would have let a real equity open go at ANY minute it looked there: {day: {window:
-#: {"clear": bool, "why": the House-wide refusal it last met while never clear}}}. A session with a window the House
-#: looked in and never once would have opened in is A SESSION IN WHICH THE HOUSE REFUSED EVERY OPEN: it is left out of
-#: every program's seated and quiet sessions for the idle test. The answer is `_open_block`'s for ANY program (asked
-#: with `OPEN_PROBE`, an instance that is live by construction), so it is exactly what `_open_block` says before it
-#: looks at the instance; the book writes the note from that answer alone, every minute of the two windows, whether or
-#: not any program planned a buy. Nothing a program writes reaches it: not an intent, not a tag, not a reason. Kept
-#: only while the seat rule is in force (under "first-come" nothing is idle and the book asks nothing extra).
+#: session and an entry window ("open": the minutes the open's entries are worked, from 09:30:30 or the two minutes
+#: its exits are given, to 09:45; "close": 15:55 or the minute its exits are given, to 15:59:30), whether the House
+#: would have let a real equity open go at ANY minute it looked there: {day: {window: {"clear": bool, "why": the
+#: House-wide refusal it last met while never clear}}}. A session with a window the House looked in and never once
+#: would have opened in is A SESSION IN WHICH THE HOUSE REFUSED EVERY OPEN: it is left out of every program's seated
+#: and quiet sessions for the idle test. The answer is `_open_block`'s for ANY program (asked with `OPEN_PROBE`, an
+#: instance that is live by construction), so it is exactly what `_open_block` says before it looks at the instance;
+#: the book writes the note from that answer alone, at every minute the window's entries are worked, whether or not
+#: any program planned a buy. Nothing a program writes reaches it: not an intent, not a tag, not a reason. Kept only
+#: while the seat rule is in force (under "first-come" nothing is idle and the book asks nothing extra).
 OPEN_NOTE_KEY = "eq_open_note"
 #: Calendar days a refused session's note is kept (the idle test reads at most `idle_sessions` counted sessions back;
 #: a session every window of which was clear is dropped the day after: only a refusal is ever read).
@@ -1086,9 +1087,6 @@ class EquityBook:
                 ("decide", lambda: self._decide_step(now, out)),
                 # The stock proof before the windows (A10.1): in its SELL stage's window the practice sale goes first.
                 ("proof", lambda: self._proof_step(now, m, out)),
-                # The open note after the proof (a BUY stage that passes this minute opens this minute) and before the
-                # windows: what it reads is what this minute's entries are about to be told.
-                ("open_note", lambda: self._open_note(now, m, real_block, killed)),
                 ("windows", lambda: self._windows(now, m, out, real_block, killed)),
                 ("exports", lambda: self._export(out)),
                 ("fees", lambda: self._fees(now, out)),
@@ -1521,37 +1519,38 @@ class EquityBook:
             return "the program is not at Probe or Sized"
         return None
 
-    def _open_note(self, now: float, m: S.Moments | None, real_block: Callable[..., str | None],
-                   killed: Callable[[], bool] | None) -> None:
-        """THE OPEN NOTE (`OPEN_NOTE_KEY`; the captain's A30 (2)), written every minute of a session's two entry
-        windows while the seat rule is in force: whether the House would let a real equity open of ANY program go
-        this minute (`_open_block` asked with `OPEN_PROBE`: grant, kill switch, stops, both reconciliations, the
-        pause, the account read, `equity_money.enabled`, the stock proof's BUY stage, a failed SELL stage, the
-        freezes). A window is CLEAR from the first minute it would; until then it carries the refusal's words. The
-        kv is written only when a window's answer changes (a handful of writes a session)."""
-        if m is None or B.seat_settings().first_come:
-            return
-        if m.open_send <= now < m.entry_until:
-            window = "open"
-        elif m.close_send <= now < m.close_until:
-            window = "close"
-        else:
-            return
-        why = self._open_block(real_block, OPEN_PROBE, killed)
-        held = self.state.get(OPEN_NOTE_KEY, {})
-        note = {str(k): dict(v) for k, v in held.items() if isinstance(v, Mapping)} if isinstance(held, Mapping) else {}
-        day = m.day.isoformat()
-        was = note.get(day, {}).get(window)
-        was = dict(was) if isinstance(was, Mapping) else None
-        if was is not None and was.get("clear"):
-            return
-        now_is = {"clear": True} if why is None else {"clear": False, "why": str(why)[:200]}
-        if was == now_is:
-            return
-        note.setdefault(day, {})[window] = now_is
-        floor = (m.day - dt.timedelta(days=OPEN_NOTE_KEEP_DAYS)).isoformat()
-        self.state.put(OPEN_NOTE_KEY, {d: w for d, w in sorted(note.items())
-                                       if d == day or (d > floor and _refused(w))})
+    def _open_note(self, window: str, m: S.Moments, real_block: Callable[..., str | None],
+                   killed: Callable[[], bool] | None, out: dict) -> None:
+        """THE OPEN NOTE (`OPEN_NOTE_KEY`; the captain's A30 (2)), written by `_windows` at every minute in which the
+        entries of an entry window are worked (`window`: "open" from the first minute the open's entries may go,
+        which is after the open's exits or their two minutes, to 09:45; "close" likewise to 15:59:30), entries or
+        none, while the seat rule is in force: whether the House would let a real equity open of ANY program go this
+        minute (`_open_block` asked with `OPEN_PROBE`: the House's `real_block`, the kill switch,
+        `equity_money.enabled`, the stock proof's BUY stage, a failed SELL stage, the freezes). It is the answer
+        this minute's entries are given, asked once more for nobody in particular. A window is CLEAR from the first
+        minute it would, and stays clear; until then it carries the refusal's words. The kv is written only when a
+        window's answer changes (a handful of writes a session). Never the windows' end: its own trouble is an
+        `equity.error` and the entries go on."""
+        try:
+            if B.seat_settings().first_come:
+                return
+            why = self._open_block(real_block, OPEN_PROBE, killed)
+            held = self.state.get(OPEN_NOTE_KEY, {})
+            note = {str(k): dict(v) for k, v in held.items() if isinstance(v, Mapping)} if isinstance(held, Mapping) else {}
+            day = m.day.isoformat()
+            was = note.get(day, {}).get(window)
+            was = dict(was) if isinstance(was, Mapping) else None
+            if was is not None and was.get("clear"):
+                return
+            now_is = {"clear": True} if why is None else {"clear": False, "why": str(why)[:200]}
+            if was == now_is:
+                return
+            note.setdefault(day, {})[window] = now_is
+            floor = (m.day - dt.timedelta(days=OPEN_NOTE_KEEP_DAYS)).isoformat()
+            self.state.put(OPEN_NOTE_KEY, {d: w for d, w in sorted(note.items())
+                                           if d == day or (d > floor and _refused(w))})
+        except Exception as exc:  # noqa: BLE001 - a note, never the windows' end
+            self._error("open_note", exc, out)
 
     def _refused_days(self) -> dict[str, str]:
         """THE SESSIONS IN WHICH THE HOUSE REFUSED EVERY OPEN (`OPEN_NOTE_KEY`): {day: why}, a session with an entry
@@ -1614,6 +1613,8 @@ class EquityBook:
         if entries:
             out["entries"] = len(entries)
         if not open_exits or now >= m.open_send + off["exit_wait_s"]:
+            if now < m.entry_until:
+                self._open_note("open", m, real_block, killed, out)
             for intent in entries:
                 if intent.at != "open":
                     continue
@@ -1625,6 +1626,8 @@ class EquityBook:
         # THE CLOSE WINDOW keeps the session's order too (A2: close exits, then close entries): its entries wait for the
         # window's exits (today's close exits, and an open exit still going late) to fill, or `CLOSE_EXIT_WAIT_S`.
         if now >= m.close_send and (now >= m.close_send + CLOSE_EXIT_WAIT_S or not self._exits_due(today, now, m)):
+            if now < m.close_until:
+                self._open_note("close", m, real_block, killed, out)
             for intent in entries:
                 if intent.at != "close":
                     continue
