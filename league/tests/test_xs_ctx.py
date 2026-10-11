@@ -902,6 +902,11 @@ class TheInputs(Panel):
             self.assertTrue(all(lot["col"] >= REF for lot in case["common"]["positions"]))
             held = {int(case["aids"][lot["col"]]) for lot in case["common"]["positions"]}
             self.assertTrue(set(extra) <= held, "the names that left the index are held")
+            # the helper's book: lots 1 and 2 left the index (the House's exits), lot 3 is a slot of the day
+            gym = ctx.build(case["gym"])
+            self.assertEqual([lot["id"] for lot in gym.positions], [1, 2, 3])
+            self.assertEqual(ctx.ineligible(case["gym"], ctx.derive(case["gym"])), [1, 2])
+            self.assertEqual([lot["slot"] in gym.ids.tolist() for lot in gym.positions], [False, False, True])
         self.assertTrue(any(len([a for a in case["aids"][REF:] if not self.panel.universe().member(int(a), case["day"])])
                             == 2 for case in cases))
 

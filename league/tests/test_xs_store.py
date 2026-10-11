@@ -376,7 +376,10 @@ class QuietWindows(unittest.TestCase):
         return dt.datetime(day.year, day.month, day.day, hour, minute, second, tzinfo=NEW_YORK).timestamp()
 
     def test_the_walls(self):
+        from ltcm.data import NEW_YORK
+
         self.assertEqual(config.WALLS_ET, (("09:25", "09:45"), ("15:50", "16:35")))
+        self.assertEqual(config.NEW_YORK, NEW_YORK, "one zone: the House's own")
         monday = D(2026, 10, 12)
         for hour, minute, need, free in ((9, 0, 60, True), (9, 24, 59, True), (9, 24, 60, False), (9, 25, 0, False),
                                          (9, 30, 1, False), (9, 45, 0, False), (9, 45, 1, True, ), (12, 0, 600, True),

@@ -46,7 +46,7 @@ import numpy as np
 from ..equity import synth as _e1_synth
 from ..equity.store import ALL_COLUMNS, RAW_COLUMNS, as_date, from_ordinal, nyse_sessions, ordinal
 from . import PANELS, config, store
-from .ctx import inputs_from_panel
+from .ctx import derive, inputs_from_panel
 from .program import Needs
 
 #: The fixed salt of every synthetic panel (32 bytes; never the House's).
@@ -363,9 +363,9 @@ def cent_panel(root: str | Path, *, n_assets: int = 50, **kwargs: Any) -> Path:
 
 
 def _stamp(day: dt.date) -> str:
-    from ltcm.data import NEW_YORK
-
-    return dt.datetime.combine(day, dt.time(0), NEW_YORK).astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    """The venue's stamp of a 1Day bar: the session's New York midnight, in UTC."""
+    return dt.datetime.combine(day, dt.time(0), config.NEW_YORK).astimezone(dt.timezone.utc) \
+        .strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def bar_rows(days: np.ndarray, raw: np.ndarray, adj: np.ndarray, *, adjustment: str) -> list[dict[str, Any]]:
@@ -396,7 +396,9 @@ def same_ctx_cases(root: str | Path, *, history: int, count: int = 20, seed: int
 
     Each case also carries `aids` (the columns' aids, the parent's), `run_key`, `slice` (the Gym's `store.Slice`) and
     `straddles` (whether the index changed within two sessions of the day). The Gym's slice runs from the day through
-    the two sessions after it, so its `elig0` row reads the membership ahead as a live decision's does."""
+    the two sessions after it, so its `elig0` row reads the membership ahead as a live decision's does. THE BOOK of
+    every case: lots 1 and 2 are the two held names that left the index (they keep a column, an id and a mark, and
+    `ctx.ineligible` names them), lot 3 a name of U(t); one closed lot; one reject."""
     panel = store.PanelStore(root, gate=gate)
     universe = panel.universe()
     sessions = panel.sessions(window)
@@ -428,8 +430,14 @@ def same_ctx_cases(root: str | Path, *, history: int, count: int = 20, seed: int
                                aids=[*inside, *held])
         bars, t = piece.bars, piece.bars.first
         column = {int(aid): i for i, aid in enumerate(piece.aids.tolist())}
+        # the book: lots 1 and 2 are the held names that left the index (outside U: the House's exits), lot 3 a name
+        # of U(t) (the lowest aid that is eligible that day; with none, the day's first member)
+        blank = inputs_from_panel(bars, t, needs=needs, cash=0.0, equity=0.0, budget=0.0, params={})
+        eligible = np.asarray(derive(blank).elig, dtype=bool)
+        chosen = next((aid for aid in inside if eligible[column[aid]]), inside[0] if inside else None)
+        lots = [*zip((1, 2), held), *([(3, chosen)] if chosen is not None else [])]
         positions = []
-        for lid, aid in enumerate([*held, *inside[:1]], start=1):
+        for lid, aid in lots:
             col = column[aid]
             mark = float(bars.raw[t, col, 3])
             qty = 1.5 * lid
