@@ -920,11 +920,20 @@ class Restated(Case):
         self.assertEqual({k: events[1]["payload"][k] for k in ("days", "first", "last", "moved", "same", "bars")},
                          {"days": 2, "first": moved, "last": after, "moved": 1, "same": 1, "bars": "same"})
         self.assertEqual(len({e["payload"]["once"] for e in events}), 2)
+        # A later day corrected as well, the first restated day as it was: another cause, another event.
+        write_night(self.root, FWD[9])
+        perturb(self.root, "SPY", FWD[4], 1.02)
+        perturb(self.root, "SPY", FWD[6], 1.01)
+        self.assertEqual(self.shadow(FWD[9], write=False).night()["restated"], 1)
+        events = self.events("restated", pid)
+        self.assertEqual([(e["day"], e["payload"]["days"], e["payload"]["last"]) for e in events],
+                         [(moved, 1, moved), (moved, 2, after), (moved, 4, FWD[7].isoformat())])
+        self.assertEqual(len({e["payload"]["once"] for e in events}), 3)
         self.assertEqual(
             {row["day"]: (row["r"], row["w"], row["at"]) for row in self.rows(pid) if row["day"] in stored}, stored)
         for event in events:                                   # a payload holds no figure
             self.assertFalse([v for v in event["payload"].values() if isinstance(v, float)])
-        self.assertEqual(self.count("fwd_runs"), 5)
+        self.assertEqual(self.count("fwd_runs"), 6)
 
     def test_an_ex_day_under_the_vendors_cents_is_one_event_a_holder_not_one_a_day(self):
         # THE BARS HASH's fact, on the stored returns: the vendor rounds adjustment=all to cents and rescales the
