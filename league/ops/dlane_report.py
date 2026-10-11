@@ -1500,7 +1500,8 @@ class Research247:
     - `at_budget`: every `budget` receipt of the day (ops.sqlite) has every meter's day figure `limited_by` "ceiling" (no
       taper; None with no receipt that day);
     - `owner`: the causes with an owner step that any `stall` receipt of the day found standing (but the news causes,
-      `NEWS_CAUSES`);
+      `NEWS_CAUSES`), the equity lanes' own causes among them since release E2.4 (the receipt's `elane.checks`,
+      league/ops/elane_health.py: an owner step waiting is one whatever lane it is in);
     - `stall_receipts`: how many `stall` receipts (status ok) the day has. Since the review of the weekend fixes (Oct 10,
       2026) a day with none is not held ("no stall receipt"), as a day with no budget receipt is not: the stall job
       failing all day (an unreadable swarm store) or missed is a day nobody looked for an owner step, never a day with
@@ -1579,8 +1580,11 @@ class Research247:
             if str(r.get("due_at") or "")[:10] != day:
                 continue
             stalls += 1
-            checks = (_loads(r.get("summary_json"), {}) or {}).get("checks") or {}
-            for cause, check in checks.items() if isinstance(checks, Mapping) else ():
+            summary = _loads(r.get("summary_json"), {}) or {}
+            checks = dict(summary.get("checks")) if isinstance(summary.get("checks"), Mapping) else {}
+            equity = summary.get("elane").get("checks") if isinstance(summary.get("elane"), Mapping) else None
+            checks.update(equity if isinstance(equity, Mapping) else {})  # release E2.4: the equity lanes' own causes
+            for cause, check in checks.items():
                 if (isinstance(check, Mapping) and check.get("stalled") and check.get("owner_step")
                         and cause not in NEWS_CAUSES):
                     owner.add(str(cause))
