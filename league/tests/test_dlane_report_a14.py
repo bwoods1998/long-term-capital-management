@@ -9,10 +9,15 @@ carries the forward record's section and its alarms, and never fails for them.
 `a14_reading` is package D's: A FAKE HERE (`A14Fixture.fake`, a scripted answer in the shape its contract states), as
 are the forward report's `read_section` and `alarms` where a test scripts them. The dlane report read here is
 `integrated("dlane_report")` (league/tests/test_forward_patches.py): the module with package C's edits, applied by the
-integrator or, until then, on a copy of its source. Every close, twin and count is invented."""
+integrator or, until then, on a copy of its source. Every close, twin and count is invented.
+
+ON BOTH BASES (test_forward_patches.py, TWO BASES). On a tree whose `dlane_report` carries E1's own reader
+(`a14_consistency`), a checkpoint's `a14` is the forward record's reading with the fill-gap half of the counted rows
+beside it, so these tests read the forward record's own keys of it (`own`) and hold either way."""
 
 from __future__ import annotations
 
+import importlib
 import json
 import unittest
 from pathlib import Path
@@ -38,6 +43,11 @@ def a14(holds: bool = True, final: bool = True, why: str | None = None) -> dict:
             "intents": {"instances": 2, "sessions": 20, "agreed": 20, "missing": 0, "unreadable": 0, "share": 1.0,
                         "bound": 0.95, "ok": True, "disagreed": 0, "causes": {}},
             "by_instance": [{"instance": "p-a@1:r", "sessions": 10, "agreed": 10, "missing": 0, "unreadable": 0}]}
+
+
+def own(reading: dict, like: dict) -> dict:
+    """The keys of `like` as a checkpoint's `a14` carries them (ON BOTH BASES, the module docstring)."""
+    return {key: reading.get(key, "absent") for key in like}
 
 
 class A14Fixture(EquityFixture):
@@ -80,7 +90,7 @@ class TheCheckpointNeedsA14(A14Fixture):
         cp = out["done"]["all"]["latest"]
         self.assertEqual((cp["at_close"], cp["holds"], cp["final"], cp["why"], cp["final_why"]), (30, True, True, None, None))
         self.assertEqual((cp["items"], cp["consistent_ok"]), ({"3": True, "4": True, "7": True}, True))
-        self.assertEqual(cp["a14"], a14())
+        self.assertEqual(own(cp["a14"], a14()), a14())
         self.assertTrue(out["done"]["all"]["holds"])
         # It is read over exactly the checkpoint's counted closes, from the state root.
         root, pids = self.asked[0]
@@ -118,7 +128,13 @@ class TheCheckpointNeedsA14(A14Fixture):
                 "measured_programs", "replay_coverage", "final", "final_why")
         self.assertEqual({k: cp[k] for k in same}, {k: held["latest"][k] for k in same})
         self.assertEqual(meter["running"], held["running"])
-        self.assertTrue(meter["running"]["consistent_ok"])
+        # They are what this tree's module reads without the edits (A14's reading is a checkpoint's): every figure but
+        # the words of E1's own fill-gap half, where the tree has one.
+        base = importlib.import_module("league.ops.dlane_report").report(self.root, settings=GATE, now=self.now)
+        words = ("why", "a14", "holds")
+        self.assertEqual({k: v for k, v in meter["running"].items() if k not in words},
+                         {k: v for k, v in base["done"]["all"]["running"].items() if k not in words})
+        self.assertEqual(self.asked and max(len(pids) for _, pids in self.asked), 30, "no A14 is read for the running figures")
 
     def test_a14_can_only_take_a_holding_away_never_give_one(self):
         # Twenty-nine closes of one program and one of another: the pinned rule's own item 3 fails.
@@ -208,7 +224,7 @@ class AFrozenFinalReading(A14Fixture):
         self.answer = RuntimeError("the forward store is gone")
         later = self.report(previous=first)
         cp = later["done"]["all"]["latest"]
-        self.assertEqual((cp["holds"], cp["final"], cp["frozen"], cp["a14"]), (True, True, True, a14()))
+        self.assertEqual((cp["holds"], cp["final"], cp["frozen"], own(cp["a14"], a14())), (True, True, True, a14()))
         self.assertTrue(later["done"]["all"]["holds"])
         self.assertEqual(self.asked, [], "a frozen checkpoint is not read again")
 
@@ -250,7 +266,8 @@ class WhateverA14ReadingAnswers(A14Fixture):
         self.answer = {"holds": True, "why": None}
         cp = self.whole(self.report())
         self.assertEqual((cp["holds"], cp["final"]), (True, False))
-        self.assertEqual(cp["a14"], {"holds": True, "why": None, "applies": True, "final": False})
+        said = {"holds": True, "why": None, "applies": True, "final": False}
+        self.assertEqual(own(cp["a14"], said), said)
         self.assertFalse(self.report()["done"]["all"]["holds"], "never a Done claim on an A14 that does not say it is final")
 
     def test_a_dict_whose_flags_are_not_true(self):
@@ -275,8 +292,8 @@ class WhateverA14ReadingAnswers(A14Fixture):
                       FileNotFoundError("forward.sqlite"), KeyError("pid")):
             self.answer = error
             cp = self.whole(self.report())
-            self.assertEqual(cp["a14"], {"applies": True, "holds": False, "final": False,
-                                         "why": f"A14 could not be read ({type(error).__name__})"})
+            said = {"applies": True, "holds": False, "final": False, "why": f"A14 could not be read ({type(error).__name__})"}
+            self.assertEqual(own(cp["a14"], said), said)
             self.assertEqual((cp["holds"], cp["final"], cp["items"]["4"]), (False, False, False))
 
     def test_the_program_loss_line_and_k5_are_untouched(self):
@@ -378,7 +395,7 @@ class TheJobCarriesThem(A14Fixture):
         self.assertIn("FW2", out["alarms"])
         doc = read_json(self.root / R.FILE)
         self.assertEqual(doc["forward_record"], section)
-        self.assertEqual(doc["done"]["all"]["latest"]["a14"], a14())
+        self.assertEqual(own(doc["done"]["all"]["latest"]["a14"], a14()), a14())
         self.assertIn({"level": "warning", "text": f"dlane: {row['text']}"}, ctx.alerts)
         facts = stall.dlane_facts(self.root)
         self.assertIn("FW2", [a["id"] for a in facts["alarms"]])

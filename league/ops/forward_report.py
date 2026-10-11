@@ -369,8 +369,9 @@ def sim_program_years(root: str | Path, db: sqlite3.Connection, day: str) -> flo
 
 
 def _year_bars(store: Any, symbols: Sequence[str], year: int) -> Any:
-    """One calendar year's slice up to the look cap, with the session before it (the first return's base): Train days
-    through `EquityStore.span`, the Validation year through its window, the look's span after it."""
+    """One calendar year's slice up to the look cap, with history before it (the first return's base is its last
+    session: `Bars.first` says where the year begins, however many history sessions the store hands a slice): Train
+    days through `EquityStore.span`, the Validation year through its window, the look's span after it."""
     from ..equity import config
     from ..equity import store as ST
 
@@ -400,10 +401,13 @@ def hist_independent_years(root: str | Path, symbols: Sequence[str]) -> float | 
         by_year: dict[int, Any] = {}
         for year in range(ST.FIRST_YEAR, config.LOOK_CAP.year + 1):
             bars = _year_bars(store, names, year)
-            if bars.n < 2:
+            # The year's sessions and the ONE session before them (none before the store's first): a slice carries
+            # as many history sessions as the store gives a run, and only the last is a return's base here.
+            base = max(int(bars.first) - 1, 0)
+            if bars.n - base < 2:
                 continue
             # The as-of return of a session is the adjustment=all close ratio (the as-of factor cancels in a ratio).
-            closes = np.vstack([bars.adj[sym][:, 3] for sym in bars.symbols])
+            closes = np.vstack([bars.adj[sym][base:, 3] for sym in bars.symbols])
             whole = np.isfinite(closes).all(axis=1) & (closes > 0).all(axis=1)   # a bar on each of those sessions
             closes = closes[whole]
             by_year[year] = closes[:, 1:] / closes[:, :-1] - 1.0
