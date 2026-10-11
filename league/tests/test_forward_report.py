@@ -1084,6 +1084,22 @@ class TheReadersAlarms(Fixture):
             (alarm,) = R.alarms(self.root, now=ny(DAYS[3], 12), settings=RECORD)
         self.assertIn("the forward store could not be read", alarm["text"])
 
+    def test_the_readers_open_nothing_writable(self):
+        # The dlane job makes its report inside `guard.readonly()` (every writable SQLite open in the process is
+        # refused there), and the funnel is read by read-only jobs: what they call here opens the forward store and
+        # the swarm store read-only, or a refusal would read as "the store could not be read" for good.
+        self.register(first_day=DAYS[0])
+        self.swarm().close()
+        with guard.readonly():
+            (alarm,) = R.alarms(self.root, now=ny(DAYS[3], 12), settings=RECORD)       # no report: the store is opened
+            self.assertIn(f"1 registered rows were owed the forward day {DAYS[2]}", alarm["text"])
+            self.assertIsNone(R.read_section(self.root))
+            rows = R.funnel_rows(self.root, 0.0, ny(DAYS[3], 12))
+            self.assertEqual((rows["registered_total"], rows["oof_rows"]), (1, 0))
+            section = R.section(self.root, now=ny(DAYS[3], 12), settings=RECORD)
+        self.assertEqual([k for k, v in section.items() if isinstance(v, dict) and "error" in v], [])
+        self.assertEqual(section["registry"]["programs"], 1)
+
     def test_no_settings_handed_in_reads_the_swarms_own(self):
         (self.root / "swarm.json").write_text(json.dumps(RECORD))
         write_json(self.root / R.FILE, {"at": S.iso(self.now), "mode": "record", "alarms": [self.ROW]})
