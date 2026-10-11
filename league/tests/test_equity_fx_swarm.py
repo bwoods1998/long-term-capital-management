@@ -1001,3 +1001,26 @@ class OneFamilysErrorNeverStopsTheOthers(FixCase):
         with screen():
             self.gate.equity_round(out)
         self.assertEqual([row["family"] for row in out["looked"]], ["seed-overnight-spy"], "and taken the next round")
+
+
+class EquityRoundsBeforeTheGymsWork(LoopCase):
+    """s2-7: a main-loop pass that fails at the guard's reading or at the Gym pool's management (Sail down, the Gym
+    down) must not cost the equity rounds their start: they start before either."""
+
+    def test_a_pass_that_fails_on_the_guard_or_the_pool_has_already_started_them(self):
+        self.settings["elane"] = {"mode": "gate"}
+        (self.root / "swarm.json").write_text(json.dumps({"enabled": True, "gym": self.settings["gym"],
+                                                          "researcher": {"idle_seconds": 0}, "elane": {"mode": "gate"}}))
+        sw = self.swarm()
+        sw.tournament.equity_runner = sw.gate.equity_runner = FakeRunner()
+        for broken in ("guard", "pool"):
+            self.store.put(elane.ROUND_KEY, 0.0)
+            failing = (mock.patch.object(self.guard, "check", side_effect=RuntimeError("the provider cannot be read"))
+                       if broken == "guard" else
+                       mock.patch.object(self.pool, "manage", side_effect=RuntimeError("Sail is down")))
+            with screen(), failing:
+                with self.assertRaises(RuntimeError):
+                    sw.step()
+                sw.rounds["equity"].join(30)
+            self.assertGreater(self.store.get(elane.ROUND_KEY), 0.0, f"the equity round ran although the {broken} failed")
+        self.assertEqual(len(self.store.looks()), 3)

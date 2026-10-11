@@ -969,6 +969,11 @@ class Swarm:
         except Exception:  # noqa: BLE001 - a notice never stops the loop
             pass
         self.equity_births()
+        # THE EQUITY ROUNDS (release E1, A3): on the House, no Gym box, no model dollar. Started here, before the guard
+        # is read and the Gym's pool is managed and outside the branch that holds the options rounds, so neither the
+        # brake, nor a Gym that is down, nor a pass that fails on either holds a seed's Validation or its look.
+        if self.equity_due():
+            self._round("equity", self.equity_rounds)
         if getattr(self.guard, "due", lambda: True)():
             was = not self.guard.allows()
             held = bool(getattr(self.guard, "research_held", False))
@@ -993,10 +998,6 @@ class Swarm:
         except Exception:  # noqa: BLE001 - a notice never stops the loop
             log(f"funding watch failed: {traceback.format_exc()[-600:]}")
         self.pool.manage()
-        # THE EQUITY ROUNDS (release E1, A3): on the House, no Gym box, no model dollar. Before and outside the branch
-        # below, so neither the brake nor a Gym that is down holds a seed's Validation or its look.
-        if self.equity_due():
-            self._round("equity", self.equity_rounds)
         if self.guard.allows() and self.gym_ready():
             if self.tournament.due():
                 self._round("tournament", self.tournament_round)
