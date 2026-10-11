@@ -1,34 +1,62 @@
 """Generate the tradable stock universe of release E4 into the constitution (and the gateway's list, as a patch).
 
-    python3 scripts/gen_universe.py --from tradable.json [--check] [--gateway-patch PATH]
+    python3 scripts/gen_universe.py --from tradable.json [--check] [--gateway-patch PATH] [--repo DIR]
 
-Owner: package I of release E4. STEP 0 STUB: the constants are the contract; every function raises NotImplementedError
-until I lands.
+Owner: package I of release E4 (league/xs/E4_INTERFACES.md; E4-SPEC section 11).
 
 THE INPUT is ONE file the captain copies from the House: `<state>/equity-daily/universe/tradable.json` {"as_of": day,
 "stock": [SYM...]} (league/ops/equity_universe.py `tradable`): every symbol that was an S&P 500 member on ANY session
 of the 36 months through `as_of` and is tradable, fractionable and unmasked that day. A 36-MONTH UNION, NOT A DAY'S
 MEMBERS: a dated or quarterly list in a public repository would be a point-in-time membership history; a union
-carries no date and needs regenerating about once a year.
+carries no date and needs regenerating about once a year. The file's `as_of` is read to check the shape and is
+written nowhere.
 
 WHAT IT WRITES: the generated block of `league/constitution.py` `equity_money.universe.stock` (between two marker
 comments; E1's 18 stocks kept; `.etf` unchanged; no bound, share, weight, seat or cap changes) and `PINNED_DIGEST`
 re-pinned. THE GATEWAY'S LIST (`gateway/lib/caps.mjs` `STOCK_UNIVERSE`, generated in place between two marker
 comments) is written as a PATCH FILE (`--gateway-patch`), never into gateway/: the owner deploys the gateway.
-`league/equity/config.py` `UNIVERSE` is NOT touched (it is hashed into the equity identity).
+`league/equity/config.py` `UNIVERSE` is NOT touched (it is hashed into the equity identity). On a tree that has no
+markers yet (release E1's literal lists) the first run puts them in: the constitution's `"stock": [...]` literal and
+the gateway's stock pairs become the marked blocks, and nothing else of either file moves.
 
-IT REFUSES: a ticker that fails the gateway's `STOCK_SYMBOL` pattern, an ETF, a list under `MIN_NAMES` or over
-`MAX_NAMES`, a list that lacks one of E1's stocks, an input that carries a date beside a symbol. `--check` writes
-nothing and exits 1 when the tree is not what the input generates.
+IT REFUSES: a ticker that fails the gateway's `STOCK_SYMBOL` pattern (or the constitution's own, which is the
+narrower), an ETF, a symbol named twice, a list under `MIN_NAMES` or over `MAX_NAMES`, a list that lacks one of E1's
+stocks, an input that carries a date beside a symbol (any key but `as_of` and `stock`, any entry that is not a plain
+ticker). AND IT REFUSES ITS OWN WORK, before a byte is written, unless the rewritten constitution compiles, differs
+from the tree's in `equity_money.universe.stock` AND NOTHING ELSE, sits inside `equity_money_problems`' bounds and
+pins its own digest; and unless the rewritten gateway list reads, by `league.ci`'s own parser, as the same ETFs and
+exactly these stocks, with every byte outside the block unchanged. `--check` writes nothing and exits 1 when the
+tree is not what the input generates.
+
+THE ORDER OF A RUN (the captain's, on his machine; E4-SPEC section 11 and docs/operations.md "The universe deploy"):
+
+    python3 scripts/gen_universe.py --from tradable.json --gateway-patch /path/outside/the/repo/universe.patch
+    git apply /path/outside/the/repo/universe.patch      # the owner's step: gateway/ is the owner's
+    python3 scripts/gen_universe.py --from tradable.json --check
+    python3 -m league.ci --no-tests                      # the two lists are one list (`gateway_stock_problems`)
+
+With no `--gateway-patch` it writes nothing while the gateway's list would differ: the two lists change together, in
+one commit (`league.ci.gateway_stock_problems` refuses a tree where they differ).
 
 THIS COMMIT MOVES THE MONEY DIGEST (`digest()` and `money_digest()`, once; the standing grant re-ratifies at the
 House's start) and is deployed separately (release R-E4b), between two pre-opens, the gateway first. What is
 committed is a ticker allow-list, sorted: no date, no weight, no history.
+
+Standard library only; it imports `league.equity.config` (E1's universe: the stocks kept, the ETFs refused) and
+nothing else of the league. Exit 0 when it wrote or the check held, 1 when the check failed, 2 when it refused.
 """
 
 from __future__ import annotations
 
+import argparse
+import copy
+import datetime as dt
+import difflib
+import json
+import os
+import re
 import sys
+import textwrap
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -45,32 +73,376 @@ GATEWAY_END = "// --- end of the generated universe ---"
 MIN_NAMES = 450
 MAX_NAMES = 650
 
-_STUB = "scripts/gen_universe.py is a Step 0 stub: package I builds it (league/xs/E4_INTERFACES.md)"
+#: The keys of a tradable.json, and no other: a key beside them could carry a date beside a symbol.
+INPUT_KEYS = ("as_of", "stock")
+#: The gateway's `STOCK_SYMBOL` (gateway/lib/caps.mjs: a US stock ticker with an optional share class) and the
+#: constitution's `_TICKER` (league/constitution.py: one class letter), each matched whole. A test holds both to
+#: their files.
+STOCK_SYMBOL = re.compile(r"[A-Z]{1,5}(\.[A-Z]{1,2})?")
+TICKER = re.compile(r"[A-Z]{1,5}(\.[A-Z])?")
+#: The repository's line length: no generated line is longer.
+WIDTH = 120
+#: How many tickers a refusal names (the rest are counted): a refusal is read on a terminal, never a list of 500.
+NAMED = 10
+#: What the generated blocks say of themselves (the count follows). No date: the block is a union, never a day's list.
+ABOUT = ("THE PANEL'S TRADABLE UNION (release E4; scripts/gen_universe.py): every symbol that was an S&P 500 member on any "
+         "session of the 36 months before the generation day and was tradable, fractionable and unmasked that day, "
+         "release E1's stocks among them. Sorted; no date, no weight, no history. The constitution's "
+         "`equity_money.universe.stock` and the gateway's STOCK_UNIVERSE hold the same symbols (`league.ci` holds the "
+         "two equal); `league.equity.config.UNIVERSE` stays release E1's and inside them. Regenerated about once a "
+         "year: an owner deploy, the gateway first, both between two pre-opens; the money digest moves.")
+
+_PINNED = re.compile(r"^PINNED_DIGEST = '([0-9a-f]{64})'$", re.M)
+#: Release E1's literal, as it stands before the first run: the `"stock": [...]` list that closes `universe`.
+_LEGACY = re.compile(r'^(?P<indent>[ ]+)"stock": \[(?P<body>[^\]]*)\]\},[ ]*$', re.M)
+#: The gateway's list, as `league.ci.GATEWAY_STOCK_UNIVERSE` reads it (a test holds this to `league.ci`'s own reader).
+_GATEWAY_LIST = re.compile(r"export const STOCK_UNIVERSE = Object\.freeze\(\{([\s\S]*?)\}\);")
+_GATEWAY_PAIR = re.compile(r"""(?:'([^']+)'|"([^"]+)"|([A-Za-z][A-Za-z0-9_]*))\s*:\s*'([a-z]+)'""")
+_IDENTIFIER = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
+_DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+class Refused(ValueError):
+    """The generator will not write: the input, the tree or its own rewrite fails a rule (the message says which)."""
+
+
+def e1_universe() -> dict[str, list[str]]:
+    """Release E1's universe by class, in its order (`league.equity.config.UNIVERSE`, which release E4 never
+    changes): its stocks are the ones every generated list keeps, its ETFs the ones no stock list may name."""
+    from league.equity import config
+
+    return {klass: [s for s, k in config.UNIVERSE.items() if k == klass] for klass in config.CLASSES}
+
+
+def _named(symbols: Sequence[str]) -> str:
+    """At most `NAMED` of `symbols` and how many more there are."""
+    listed = ", ".join(symbols[:NAMED])
+    return listed if len(symbols) <= NAMED else f"{listed} and {len(symbols) - NAMED} more"
+
+
+def problems(symbols: Sequence[str], *, keep: Sequence[str], etfs: Sequence[str]) -> list[str]:
+    """Why a list is refused ([]: it is not): the module docstring's rules. `keep`: the stocks it must hold (E1's);
+    `etfs`: the symbols it may not (the constitution's ETFs)."""
+    names = list(symbols)
+    if any(not isinstance(s, str) for s in names):
+        return ["every symbol is a plain ticker (a string): an entry that is a list, an object or a number could carry "
+                "a date beside a symbol"]
+    out: list[str] = []
+    bad = sorted({s for s in names if not STOCK_SYMBOL.fullmatch(s)})
+    if bad:
+        out.append(f"{len(bad)} symbol(s) fail the gateway's STOCK_SYMBOL pattern: {_named([repr(s[:12]) for s in bad])}")
+    narrow = sorted({s for s in names if STOCK_SYMBOL.fullmatch(s) and not TICKER.fullmatch(s)})
+    if narrow:
+        out.append(f"{len(narrow)} symbol(s) pass the gateway's pattern and fail the constitution's ticker pattern "
+                   f"(one class letter): {_named(narrow)}")
+    twice = sorted({s for s in names if names.count(s) > 1}) if len(set(names)) != len(names) else []
+    if twice:
+        out.append(f"{len(twice)} symbol(s) are named more than once: {_named(twice)}")
+    funds = sorted(set(names) & set(etfs))
+    if funds:
+        out.append(f"{len(funds)} symbol(s) are ETFs (the stock list names stocks; `universe.etf` is not generated): "
+                   f"{_named(funds)}")
+    count = len(set(names))
+    if not MIN_NAMES <= count <= MAX_NAMES:
+        out.append(f"the list has {count} names: a 36-month union of the index has {MIN_NAMES} to {MAX_NAMES}")
+    missing = [s for s in keep if s not in set(names)]
+    if missing:
+        out.append(f"the list lacks {len(missing)} of release E1's stocks (`league.equity.config.UNIVERSE` must stay "
+                   f"inside the universe): {_named(missing)}")
+    return out
 
 
 def read_input(path: str | Path) -> list[str]:
     """The sorted, distinct symbols of a tradable.json; ValueError for another shape or a refused list."""
-    raise NotImplementedError(_STUB)
+    try:
+        raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise Refused(f"{path}: not a readable JSON file ({type(exc).__name__})") from None
+    if not isinstance(raw, dict) or sorted(raw) != sorted(INPUT_KEYS):
+        raise Refused(f"{path}: a tradable.json is an object with exactly the keys {list(INPUT_KEYS)} (a key beside "
+                      "them could carry a date beside a symbol)")
+    as_of = raw["as_of"]
+    try:
+        dated = isinstance(as_of, str) and _DAY.fullmatch(as_of) is not None and dt.date.fromisoformat(as_of) is not None
+    except ValueError:
+        dated = False
+    if not dated:
+        raise Refused(f"{path}: `as_of` is the day the list was made (YYYY-MM-DD)")
+    stock = raw["stock"]
+    if not isinstance(stock, list):
+        raise Refused(f"{path}: `stock` is a list of tickers")
+    universe = e1_universe()
+    refused = problems(stock, keep=universe["stock"], etfs=universe["etf"])
+    if refused:
+        raise Refused(f"{path}: " + "; ".join(refused))
+    return sorted(stock)
 
 
-def problems(symbols: Sequence[str], *, keep: Sequence[str], etfs: Sequence[str]) -> list[str]:
-    """Why a list is refused ([]: it is not): the module docstring's rules."""
-    raise NotImplementedError(_STUB)
+# ------------------------------------------------------------------------------------------------ the two blocks
+def _wrap(items: Sequence[str], indent: str) -> list[str]:
+    """`items`, each followed by a comma, packed into lines of at most `WIDTH` columns that begin with `indent`."""
+    lines: list[str] = []
+    line = indent
+    for item in items:
+        piece = item + ","
+        if line != indent and len(line) + 1 + len(piece) > WIDTH:
+            lines.append(line)
+            line = indent
+        line += piece if line == indent else " " + piece
+    if line != indent:
+        lines.append(line)
+    return lines
+
+
+def _about(indent: str, mark: str, count: int) -> list[str]:
+    """`ABOUT` and the count as comment lines (`mark`: the language's line comment) no wider than `WIDTH`."""
+    lines = textwrap.wrap(ABOUT, width=WIDTH - len(indent) - len(mark) - 1, break_long_words=False)
+    return [f"{indent}{mark} {line}" for line in (*lines, f"{count} stocks.")]
+
+
+def _block(symbols: Sequence[str], indent: str) -> list[str]:
+    """The constitution's generated block, its two markers included, as lines without their newlines."""
+    return [indent + BEGIN, *_about(indent, "#", len(symbols)), f'{indent}"stock": [',
+            *_wrap([json.dumps(s) for s in symbols], indent + "    "), f"{indent}],", indent + END]
+
+
+def _gateway_block(symbols: Sequence[str], indent: str) -> list[str]:
+    """The gateway's generated block (its `SYM: 'stock'` pairs, a dotted symbol quoted), its two markers included."""
+    pairs = [(s if _IDENTIFIER.fullmatch(s) else "'" + s + "'") + ": 'stock'" for s in symbols]
+    return [indent + GATEWAY_BEGIN, *_about(indent, "//", len(symbols)), *_wrap(pairs, indent), indent + GATEWAY_END]
+
+
+def _marked(text: str, begin: str, end: str, what: str) -> tuple[int, int, str] | None:
+    """(start, end, indent) of the lines from the `begin` marker through the `end` marker, or None when neither is
+    there. `Refused` for one without the other, either twice, out of order, or sharing its line with anything."""
+    if begin not in text and end not in text:
+        return None
+    lines = text.split("\n")
+    first = [i for i, line in enumerate(lines) if line.strip() == begin]
+    last = [i for i, line in enumerate(lines) if line.strip() == end]
+    if text.count(begin) != 1 or text.count(end) != 1 or len(first) != 1 or len(last) != 1 or first[0] >= last[0]:
+        raise Refused(f"{what}: the generated block's two markers must each stand once, alone on a line, in order")
+    indent = lines[first[0]][:len(lines[first[0]]) - len(lines[first[0]].lstrip())]
+    start = sum(len(line) + 1 for line in lines[:first[0]])
+    stop = sum(len(line) + 1 for line in lines[:last[0] + 1]) - 1
+    return start, stop, indent
+
+
+def _namespace(text: str, label: str) -> dict[str, Any]:
+    """The constitution's namespace, compiled from its text as `league.ci.tree_constitution` compiles it (never
+    imported: the file under the generator's hands is not the one a module cache holds)."""
+    namespace: dict[str, Any] = {"__name__": "_gen_universe_constitution", "__file__": label}
+    try:
+        exec(compile(text, label, "exec"), namespace)  # noqa: S102 - the tree's own constitution
+    except Exception as exc:  # noqa: BLE001 - a constitution that cannot be read is a refusal
+        raise Refused(f"{label} could not be read: {type(exc).__name__}: {exc}") from None
+    table = namespace.get("CONSTITUTION")
+    if not isinstance(table, dict) or not isinstance(table.get("equity_money"), dict) or \
+            not isinstance(table["equity_money"].get("universe"), dict) or \
+            any(not callable(namespace.get(name)) for name in ("digest", "money_digest", "equity_money_problems")):
+        raise Refused(f"{label}: no `equity_money.universe`, `digest`, `money_digest` or `equity_money_problems`: this "
+                      "tree is not release E1's or later")
+    return namespace
+
+
+def _stocks(namespace: dict[str, Any]) -> list[str]:
+    return list(namespace["CONSTITUTION"]["equity_money"]["universe"].get("stock") or [])
+
+
+def _etfs(namespace: dict[str, Any]) -> list[str]:
+    return list(namespace["CONSTITUTION"]["equity_money"]["universe"].get("etf") or [])
+
+
+def _but_the_stocks(namespace: dict[str, Any]) -> dict[str, Any]:
+    """The constitution without `equity_money.universe.stock`: what a run may not move."""
+    rules = copy.deepcopy(namespace["CONSTITUTION"])
+    rules["equity_money"]["universe"].pop("stock", None)
+    return rules
 
 
 def constitution_text(text: str, symbols: Sequence[str]) -> str:
-    """`league/constitution.py`'s text with the generated block rewritten for `symbols` and `PINNED_DIGEST` re-pinned."""
-    raise NotImplementedError(_STUB)
+    """`league/constitution.py`'s text with the generated block rewritten for `symbols` and `PINNED_DIGEST` re-pinned.
+    `Refused` (a ValueError) when the list is refused, the text has no block to rewrite, or the rewrite would change
+    anything but `equity_money.universe.stock` and the pin."""
+    before = _namespace(text, CONSTITUTION)
+    kept = e1_universe()
+    refused = problems(symbols, keep=kept["stock"], etfs=sorted({*_etfs(before), *kept["etf"]}))
+    if refused:
+        raise Refused("; ".join(refused))
+    names = sorted(symbols)
+    span = _marked(text, BEGIN, END, CONSTITUTION)
+    if span is not None:
+        start, stop, indent = span
+        out = text[:start] + "\n".join(_block(names, indent)) + text[stop:]
+    else:
+        found = list(_LEGACY.finditer(text))
+        try:
+            literal = sorted(json.loads(f"[{found[0].group('body')}]")) if len(found) == 1 else None
+        except (ValueError, TypeError):
+            literal = None
+        if literal is None or literal != sorted(_stocks(before)):
+            raise Refused(f"{CONSTITUTION}: no generated block and no single `\"stock\": [...]` literal closing "
+                          "`equity_money.universe`: place the two markers around the `\"stock\"` entry by hand")
+        indent = found[0].group("indent")
+        out = text[:found[0].start()] + "\n".join([*_block(names, indent), indent + "},"]) + text[found[0].end():]
+    if len(_PINNED.findall(out)) != 1:
+        raise Refused(f"{CONSTITUTION}: PINNED_DIGEST must be pinned once, on its own line")
+    moved = _namespace(out, CONSTITUTION)
+    out = _PINNED.sub(f"PINNED_DIGEST = '{moved['digest'](moved['CONSTITUTION'])}'", out)
+    after = _namespace(out, CONSTITUTION)
+    if _stocks(after) != names:
+        raise Refused(f"{CONSTITUTION}: the rewritten block does not read back as the list")
+    if _but_the_stocks(after) != _but_the_stocks(before):
+        raise Refused(f"{CONSTITUTION}: the rewrite would change more than `equity_money.universe.stock`")
+    bounds = after["equity_money_problems"](after["CONSTITUTION"])
+    if bounds:
+        raise Refused(f"{CONSTITUTION}: " + "; ".join(bounds))
+    if after["digest"](after["CONSTITUTION"]) != after.get("PINNED_DIGEST"):
+        raise Refused(f"{CONSTITUTION}: the rewritten file does not pin its own digest")
+    return out
+
+
+def gateway_pairs(text: str) -> dict[str, str]:
+    """{symbol: class} of `gateway/lib/caps.mjs` STOCK_UNIVERSE, read as `league.ci.gateway_stock_universe` reads it
+    (comments dropped; declared once; every entry a `SYM: 'etf' | 'stock'` pair; no symbol twice). `Refused` else."""
+    blocks = _GATEWAY_LIST.findall(text)
+    if len(blocks) != 1:
+        raise Refused(f"{GATEWAY}: STOCK_UNIVERSE must be declared once, as a frozen object of SYM: 'class' pairs")
+    body = re.sub(r"//[^\n]*", "", blocks[0])
+    pairs = [((a or b or c), klass) for a, b, c, klass in _GATEWAY_PAIR.findall(body)]
+    out: dict[str, str] = {}
+    for symbol, klass in pairs:
+        if klass not in ("etf", "stock") or symbol in out:
+            raise Refused(f"{GATEWAY}: STOCK_UNIVERSE names {symbol} as {klass!r} (twice, or not etf or stock)")
+        out[symbol] = klass
+    if len(pairs) != len([part for part in (p.strip() for p in body.split(",")) if part]):
+        raise Refused(f"{GATEWAY}: STOCK_UNIVERSE has an entry that is not a SYM: 'etf' | 'stock' pair")
+    return out
 
 
 def gateway_text(text: str, symbols: Sequence[str]) -> str:
-    """`gateway/lib/caps.mjs`'s text with `STOCK_UNIVERSE`'s generated block rewritten (for the patch file only)."""
-    raise NotImplementedError(_STUB)
+    """`gateway/lib/caps.mjs`'s text with `STOCK_UNIVERSE`'s generated block rewritten (for the patch file only).
+    `Refused` when the list is refused, the list cannot be found, or the rewrite would move an ETF pair or a byte
+    outside the block."""
+    before = gateway_pairs(text)
+    funds = [s for s, k in before.items() if k == "etf"]
+    kept = e1_universe()
+    refused = problems(symbols, keep=kept["stock"], etfs=sorted({*funds, *kept["etf"]}))
+    if refused:
+        raise Refused("; ".join(refused))
+    names = sorted(symbols)
+    found = _GATEWAY_LIST.search(text)
+    span = _marked(text, GATEWAY_BEGIN, GATEWAY_END, GATEWAY)
+    if span is not None:
+        start, stop, indent = span
+        if not found.start(1) <= start < stop <= found.end(1):
+            raise Refused(f"{GATEWAY}: the generated block's markers are outside STOCK_UNIVERSE")
+    else:
+        # Release E1's literal: the lines of `SYM: 'stock'` pairs, which close the object.
+        offset, rows = found.start(1), found.group(1).split("\n")
+        code = [re.sub(r"//[^\n]*", "", row) for row in rows]
+        mine = [i for i, row in enumerate(code) if "'stock'" in row]
+        if not mine or mine != list(range(mine[0], mine[-1] + 1)) or any("'etf'" in code[i] for i in mine) or \
+                any("'etf'" in row for row in code[mine[-1] + 1:]):
+            raise Refused(f"{GATEWAY}: no generated block, and STOCK_UNIVERSE's stock pairs are not whole lines after "
+                          "its ETF pairs: place the two markers around them by hand")
+        start = offset + sum(len(row) + 1 for row in rows[:mine[0]])
+        stop = offset + sum(len(row) + 1 for row in rows[:mine[-1] + 1]) - 1
+        indent = rows[mine[0]][:len(rows[mine[0]]) - len(rows[mine[0]].lstrip())]
+    out = text[:start] + "\n".join(_gateway_block(names, indent)) + text[stop:]
+    after = gateway_pairs(out)
+    if [s for s, k in after.items() if k == "etf"] != funds or [s for s, k in after.items() if k == "stock"] != names:
+        raise Refused(f"{GATEWAY}: the rewritten list does not read back as the same ETFs and exactly these stocks")
+    if not out.startswith(text[:start]) or not out.endswith(text[stop:]):
+        raise Refused(f"{GATEWAY}: the rewrite would move a byte outside the block")
+    return out
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """The command (the module docstring); 0 when it wrote or the check held."""
-    raise NotImplementedError(_STUB)
+def patch_text(before: str, after: str, path: str) -> str:
+    """A unified diff of one file, as `git apply` takes it from the repository's root ("" when nothing differs)."""
+    if before == after:
+        return ""
+    lines = difflib.unified_diff(before.splitlines(keepends=True), after.splitlines(keepends=True),
+                                 fromfile=f"a/{path}", tofile=f"b/{path}")
+    return f"diff --git a/{path} b/{path}\n" + "".join(line if line.endswith("\n") else line + "\n\\ No newline at end "
+                                                         "of file\n" for line in lines)
+
+
+# ------------------------------------------------------------------------------------------------ the command
+def _write(path: Path, text: str) -> None:
+    """Atomic, the file's mode kept."""
+    tmp = path.with_name(path.name + ".gen_universe.tmp")
+    tmp.write_text(text, encoding="utf-8")
+    try:
+        os.chmod(tmp, path.stat().st_mode & 0o777)
+    except OSError:
+        pass
+    os.replace(tmp, path)
+
+
+def main(argv: Sequence[str] | None = None, *, out: Any = None) -> int:
+    """The command (the module docstring); 0 when it wrote or the check held. `out`: the tests'."""
+    parser = argparse.ArgumentParser(description="release E4: the tradable stock universe, generated (moves the money "
+                                                 "digest: one commit, deployed separately)")
+    parser.add_argument("--from", dest="source", required=True, help="the House's universe/tradable.json")
+    parser.add_argument("--check", action="store_true", help="write nothing; exit 1 unless the tree is what the input "
+                                                              "generates")
+    parser.add_argument("--gateway-patch", default=None, help="where the gateway's half is written, as a patch (never "
+                                                              "inside gateway/)")
+    parser.add_argument("--repo", default=str(REPO), help="the checkout to generate into (default: this one)")
+    args = parser.parse_args(argv)
+    out = out if out is not None else sys.stdout
+
+    def say(text: str) -> None:
+        print(text, file=out)
+
+    repo = Path(args.repo).resolve()
+    try:
+        symbols = read_input(args.source)
+        rules, caps = (repo / CONSTITUTION).read_text(encoding="utf-8"), (repo / GATEWAY).read_text(encoding="utf-8")
+        was = _namespace(rules, CONSTITUTION)
+        new_rules, new_caps = constitution_text(rules, symbols), gateway_text(caps, symbols)
+        now = _namespace(new_rules, CONSTITUTION)
+        target = None
+        if args.gateway_patch is not None:
+            target = Path(args.gateway_patch).resolve()
+            if (repo / "gateway") in (target, *target.parents):
+                raise Refused("the gateway's half is a patch file outside gateway/: the owner applies and deploys it")
+    except (Refused, OSError) as exc:
+        say(f"refused: {exc}")
+        return 2
+    old, new = set(_stocks(was)), set(symbols)
+    say(f"universe.stock: {len(old)} -> {len(new)} names ({len(new - old)} added, {len(old - new)} removed); "
+        f"universe.etf: {len(_etfs(now))}, unchanged")
+    if args.check:
+        stale = [path for path, a, b in ((CONSTITUTION, rules, new_rules), (GATEWAY, caps, new_caps)) if a != b]
+        for path in stale:
+            say(f"check: {path} is not what this input generates")
+        if not stale:
+            say(f"check: the tree is what this input generates (digest {now['PINNED_DIGEST'][:12]}, money digest "
+                f"{now['money_digest'](now['CONSTITUTION'])[:12]})")
+        return 1 if stale else 0
+    if new_caps != caps and target is None:
+        say(f"refused: {GATEWAY} would change and no --gateway-patch was given: the two lists change together, in one "
+            "commit; nothing was written")
+        return 2
+    if new_caps != caps:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(patch_text(caps, new_caps, GATEWAY), encoding="utf-8")
+        say(f"{GATEWAY}: its half is the patch {target} (the owner's step, in the SAME commit: git apply {target})")
+    else:
+        say(f"{GATEWAY}: already what this input generates (no patch written)")
+    if new_rules != rules:
+        _write(repo / CONSTITUTION, new_rules)
+        say(f"{CONSTITUTION}: written; digest {was['digest'](was['CONSTITUTION'])[:12]} -> {now['PINNED_DIGEST'][:12]}; "
+            f"money digest {was['money_digest'](was['CONSTITUTION'])[:12]} -> "
+            f"{now['money_digest'](now['CONSTITUTION'])[:12]}")
+        say("THIS MOVES THE MONEY DIGEST: commit it alone, marked \"UNIVERSE (moves the money digest; deployed "
+            "separately)\"; deploy the gateway first, then the House, both between two pre-opens; the standing grant "
+            "re-ratifies at the House's start")
+    else:
+        say(f"{CONSTITUTION}: already what this input generates (nothing written)")
+    return 0
 
 
 if __name__ == "__main__":
