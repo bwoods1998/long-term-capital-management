@@ -175,8 +175,9 @@ request text, and nothing of E1's.
 2. **When a cause is judged.** Only while `elane.mode` is "gate", `elane.birth_share` is above zero, E2's rounds are
    in the tree, the floor is not paused, `elane.e2.usd_day` and `elane.e2.pace_share` are above zero and the store
    holds an equity family or pass. Evidence counts from the running swarm's start (its heartbeat's `started_at`): a
-   release that fixes a fault restarts the swarm, and what the generators did before it is not held against it.
-   STATED LIMIT: a swarm that restarts more often than a cause's window gathers little evidence and is rarely judged;
+   release that fixes a fault restarts the swarm, and what the generators did before it is not held against it. A
+   lane is not judged idle while the swarm itself is not running (a heartbeat ten minutes old: the options lanes'
+   causes say that). STATED LIMIT: a swarm that restarts more often than a cause's window gathers little evidence and is rarely judged;
    its restarts are the watchdog's and the deploys' to explain.
 3. **Closed words only.** A record's sentences quote what a program wrote (a rule's sentence quotes its source, a
    refusal names the model's lane, symbols and slug), and a disqualification's exception text is the program's own

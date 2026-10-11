@@ -39,7 +39,8 @@ pause or a stopped swarm stops the lanes by design), E2's own dollars are not se
 Else every cause reads "Not judged" and says why. And only on enough evidence, counted SINCE THE RUNNING SWARM STARTED
 (the heartbeat's `started_at`): a release that fixes a fault restarts the swarm, so what the generators did under the
 earlier release is not held against this one, and a House that just started is not judged on its first minutes. A
-cause with too little evidence says how much it has and how much it needs.
+cause with too little evidence says how much it has and how much it needs. A lane is not judged idle while the swarm
+itself is not running (its heartbeat `BEAT_STALE_SECONDS` old): that is the options lanes' causes to tell.
 
 WHAT IT READS. The swarm's store, read-only, in one read transaction (`facts`): the equity families the equity pass
 bore and E2's own Train record of each (state `elane_e2`: versions with their fails and what a disqualification said,

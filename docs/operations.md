@@ -192,8 +192,8 @@ the look on the House; real money only at Probe, inside the shared loss budget).
     bind by design); answers cut short want a higher `elane.e2.births_max_output_tokens` or a lower
     `elane.e2.max_per_pass`; a pass that raises needs a release. Cards refused, an empty answer or a route that did
     not answer stay information.
-  - `elane_idle`: work is owed (families in Train research, or births wanted) and no version was scored for 3 h. It
-    reads STARVED when E2 may ask no model now, in the lane's own words: at its own hourly pace, its day's dollars
+  - `elane_idle`: work is owed (families in Train research, or births wanted) and no version was scored for 3 h
+    (not judged while the swarm itself is not running: its heartbeat ten minutes old). It reads STARVED when E2 may ask no model now, in the lane's own words: at its own hourly pace, its day's dollars
     spent, or held by the House's Sail day and the guard. That is no step of yours: the lanes run as their settings
     say, and it names the lever (`python3 set_swarm.py elane.e2.pace_share=<lines> elane.e2.usd_day=<dollars>
     --apply`; both bind). It reads BROKEN when E2 may ask and still scores nothing. **Your step** when its rounds
