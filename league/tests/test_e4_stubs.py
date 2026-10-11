@@ -38,7 +38,7 @@ INPUTS = FIXTURES / "xs1_conformance_inputs.npz"
 #: Every module release E4 adds, by the package that owns it (league/xs/E4_INTERFACES.md's table).
 MODULES = {
     "A": ("league.ops.equity_universe", "league.ops.equity_panel"),
-    "B": ("league.ops.equity_spreads", "league.ops.equity_neff", "league.ops.french"),
+    "B": ("league.ops.equity_spreads", "league.ops.equity_neff", "league.ops.french", "league.ops.contam_xs"),
     "C": ("league.xs", "league.xs.config", "league.xs.store", "league.xs.ctx", "league.xs.program",
           "league.xs.synth"),
     "D": ("league.xs.engine", "league.xs.results", "league.xs.placebo", "league.xs.runner", "league.xs.child"),

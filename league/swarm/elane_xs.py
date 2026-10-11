@@ -78,8 +78,8 @@ THE CAPTAIN'S A22 (from the study's review; binding): BEFORE ANY REAL MONEY ON A
    league/swarm names it; it holds counts and rates of the eras programs are judged on). It reads THE PERMIT,
    `<root>/PROBE_FILE`, which the probe's job alone writes when it publishes a route's panel strata: for each
    route `at`, `model` and, a stratum and era, the two words `readable` and `recalled`, and nothing else. While
-   the probe's panel strata are not built (package B's patch to the probe: owed) no permit exists, and every panel
-   look waits. The permit's reading is recorded with the look.
+   a route has no row there (its probe is not yet published with the panel strata: package B's patch to the
+   probe's job) every look of its programs waits. The permit's reading is recorded with the look.
 4. The screen reproduces the study's conformance vectors and one more for the second segment's floor cell alone
    (package E's; `league.xs.screen`).
 

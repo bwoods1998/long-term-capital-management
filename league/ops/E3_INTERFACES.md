@@ -598,3 +598,35 @@ modules. What changed HERE, each a few lines (the record: league/swarm/e4_patche
   after the day, never partial for that cause). FW1 would read a registry that
   held ONLY panel programs as stalled each morning (no row of the last closed day by 09:00): the House's registry
   holds the seeds and the controls.
+
+## 14. What release E4's patch 18 added to the probe (Oct 11, 2026; additive: no signature, key or column above changed)
+
+Release E4's panel lane holds a look back until the probe has asked three strata of the panel (its A22 (3)). The
+probe gained a seam for them and nothing else of its behaviour moved: `run(ctx)`, THE JOB, hands no plan and is this
+release's probe to the byte (`league/tests/test_contam_probe.py` passes unchanged; the registry row is untouched).
+
+- **The import rules of section 1 stand as written, and so does every seal test.** `contam_probe.py` imports
+  nothing of `league/xs` and no module outside section 1's list. The panel store is opened by a module of release
+  E4, `league/ops/contam_xs.py`, which imports no module of this release (T1's rule for the sealed trees is the
+  report's own for league/ops: `test_forward_report.TheReportShowsOnlyWhatItMay`). The two meet only through
+  parameters: `probe(ctx, panel=maker)` calls `maker(ctx, settings, capability, periods=periods, eras=tuple(ERAS))`.
+- **NOT WIRED.** Nothing in the tree hands `probe` a maker. Doing so from `run` needs `contam_probe.py` to import
+  `league.ops.contam_xs` inside that function, which section 1's list and T1 do not allow. Whether to allow that
+  one import is the captain's ruling (release E4's contract, section 14, and the patch in the captain's scratch).
+- **Names added in `contam_probe`:** `PANEL_STRATA` ("P4", "P5", "P6"), `FACTORS`, `FACTOR_WORDS`, `NAME`,
+  `panel_questions(panel, *, per_cell)`, `probe(ctx, *, panel=None)`; `Probe.__init__` takes `panel=None`; `WORDS`
+  and `WEEKLY` name the panel strata; `periods(stratum, era)` answers for them (the calendar's months and weeks);
+  `_grid` is the one hash rule `grid` and `panel_questions` share; `_owing` is the view `due` is shown while a
+  plan asks (a route whose published result lacks a panel stratum reads as never published: due at once).
+- **A plan** has `names(stratum, era)`, `periods(stratum, era)`, `truths(questions)` and `published(doc)`. The
+  probe builds every question from the names and period names it hands in (a name outside `NAME` or a period
+  outside `periods(stratum, era)` is a ValueError before any route is marked), asks the panel's cells after its
+  own and before the recall, asks the plan for a cell's truths only once the cell's answers are in, and hands it
+  the file's content after a publish and after any other run that had a plan.
+- **The file.** `routes[route].cells` may carry "P4", "P5" and "P6" (the cell shape of section 9); a partial may
+  carry `panel_qset`. `qset` is still the sha of this release's own questions, so its cells never move with the
+  panel's. A partial's panel cells are dropped when the panel's question set moved or no plan is handed in.
+- **The receipt** gains `panel` and, on a publish, `permit`, only with a plan.
+- **The dollars, the keys, the ledger rows, the eras and one route a run are unchanged.** A probe with a plan asks
+  about 70% more questions inside the same `usd_run` and day line, so it is published that many runs later, and
+  CP1's 45 days of a route no probe finished on are reached sooner on a small line (section 10's "left open").

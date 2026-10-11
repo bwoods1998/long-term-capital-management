@@ -31,8 +31,9 @@ The path (league/xs/E4_INTERFACES.md's packages, in order):
    be read retires nobody.
 
 WHAT THE TEST WRITES IN ANOTHER PACKAGE'S PLACE, and only that: the contamination probe's permit with the panel strata
-(package B's patch 18 to release E3's probe: owed), and the twin marker (package J's panel night writes it,
-league/ops/forward_xs.py; no forward night runs in this test, so it is written here with that module's own writer:
+(package B's patch 18: its writer is league/ops/contam_xs.py, the plan the probe can be handed; no model is asked
+here, and league/tests/test_contam_xs.py holds the probe with it), and the twin marker (package J's panel night writes
+it, league/ops/forward_xs.py; no forward night runs in this test, so it is written here with that module's own writer:
 league/tests/test_forward_xs_twin.py holds the night itself). Without either the lane stops where its rule says (no
 look; no live seat); `TheLaneStopsWhereItsRuleSays` holds both.
 
@@ -365,8 +366,9 @@ class ThePanelLaneEndToEnd(unittest.TestCase):
         self.forget()
 
     def probe_file(self) -> None:
-        """THE PROBE'S PERMIT with the panel strata (package B's patch 18 writes it from the probe's job: owed),
-        written here in its shape: for the birth route, two words a stratum and era on P4-P6, no count and no rate."""
+        """THE PROBE'S PERMIT with the panel strata (package B's patch 18: league/ops/contam_xs.py is its writer),
+        written here in its shape: for the birth route, two words a stratum and era on P4-P6, no count and no
+        rate."""
         cell = {"readable": True, "recalled": False}
         row = {"model": "fake-model", "at": "2026-10-10T00:20:00Z",
                "cells": {s: {"2016-24": dict(cell), "2025": dict(cell)} for s in elane_xs.PROBE_STRATA}}

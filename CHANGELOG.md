@@ -42,8 +42,9 @@ gateway is `0c093de7` (11:43Z Oct 11), and the box's updater is on. What is buil
 - **Ships off.** policy.json `elane.panel.mode` "off": no birth, no run, no fetch of the live path, no model question.
   The ladder is "train", "gate", "live", each the captain's settings change and each falling back to the one before.
   **Mode "live" reads as "gate" until the forward twin's marker is written and while it is behind** (package J,
-  built: below), and **no panel look runs until E3's contamination probe has published the panel strata and written
-  the look permit** (the captain's A22; package B's patch to the probe, owed).
+  built: below), and **no panel look runs until E3's contamination probe has published the panel strata for the
+  route that wrote the program and written the look permit** (the captain's A22; package B's patch to the probe:
+  built and not yet handed to the House's job, below).
 - **Before any real money on an XS1 pass** (A22): a style-open program takes no live seat on a pass alone (recorded
   and shadowed, never seated); at most 2 XS1 looks an agenda cell; the equity code review and the contamination probe
   before a look; a ninth conformance vector beside the study's eight.
@@ -76,8 +77,8 @@ gateway is `0c093de7` (11:43Z Oct 11), and the box's updater is on. What is buil
   nightly I6 failed or its shadow twin stopped (the seat rule read Candidates only). Now a seated panel family has a
   row only while the lane is live, its planned entries are held at the send, and the book retires it on the lane's
   own word; a switch file caught mid-write retires nobody. The xs rounding bound is E1's own, re-exported.
-- **Owed, each holding real money back by design (step two):** package B's probe strata P4-P6 with the look
-  permit the probe's job writes (patch 18, E3's file: until then every panel look waits); the receipt at the
+- **Owed, each holding real money back by design (step two):** the hand-over of the probe's panel plan to the
+  House's job (patch 18 is built and not wired, below: until then every panel look waits); the receipt at the
   captain's bar (A23); the universe commit R-E4b (needs
   the House's `tradable.json`; its gateway half is a patch for the owner) with the money row of a panel sleeve. And
   one thing for the captain to know before mode "live": at the Probe sleeve of 0.50 x E a five-name basket alone
@@ -109,6 +110,19 @@ gateway is `0c093de7` (11:43Z Oct 11), and the box's updater is on. What is buil
   evidence module) and a day's meters wait for its panel rows (the second morning after the day, where they were
   written the same evening). NOT BUILT: `fill_minutes` fetches no panel
   symbol; the forward route's own verdict; panel controls. With `elane.panel.mode` "off" none of it runs or writes.
+- **The probe's panel strata P4-P6 and the look permit (package B's patch 18; Oct 11; BUILT, NOT WIRED; nothing
+  deployed; no id moves).** Release E3's probe can be handed a plan of three more strata
+  (`contam_probe.probe(ctx, panel=contam_xs.plan)`; the plan is the new `league/ops/contam_xs.py`): a member against
+  its sector's fund by month and by week, and the House panel factors by month, asked after E3's own cells while
+  `elane.panel.mode` is not "off", inside the SAME dollars a run (`elane.contam.usd_run`, E2's day line: nothing
+  raised; about 70% more questions, so a route's probe takes that many more Saturdays). Prompts are names and the
+  calendar only and every word is the probe's; truth comes from the panel store through its own windows (2025 and
+  2026 through the sealed "look" window alone; never a period of 2016, 2020 or 2021); the result keeps E3's shape
+  and E3's own cells byte for byte. After each publish the plan writes `<state>/xs-look-permit.json` (two words a
+  cell, no figure), which is what `elane_xs.probed` reads. **The House's job (`contam_probe.run`) hands no plan
+  yet:** two of E3's seal tests leave no import between the probe and the plan's module, neither was changed, and
+  the two lines that hand the plan over need one allowance in E3's seal test, the captain's to give (the patch is
+  in the captain's scratch). Until then the House's probe is E3's to the byte and every panel look waits.
 - **The ship pass (Oct 11; nothing deployed; the three ids are main's on both Pythons, the xs identity moves).**
   MERGED: main's E2.2 and E3 (`7d2d3c84`); E3's six jobs then E4's six in the registry, the forward record's counts
   beside the asset-years in the funnel. WHAT THE MERGE MADE TRUE: a panel family is born with a hidden year (E3's

@@ -9,9 +9,10 @@ is the lane's one path from a birth to the Done meter; this module is what stand
   word the book retires on is "demoted" ONLY when the captain's switch is down, "held" when a store-side leg of the
   lane failed (E4-SPEC 17: its opens stop, its exits go on, nothing is retired) and "unknown" when the lane cannot be
   read; an ETF family is asked nothing of it.
-- `TheLaneStopsWhereItsRuleSays`: with no contamination reading of the panel strata (the probe's permit and package B's
-  patch 18: owed) no look runs and none is spent (the captain's A22 (3)); with no twin marker (package J's panel
-  night writes it: league/ops/forward_xs.py) the effective mode is "gate" whatever the setting.
+- `TheLaneStopsWhereItsRuleSays`: with no contamination reading of the panel strata (the probe's permit; its writer
+  is package B's patch 18, league/ops/contam_xs.py, the plan the probe can be handed) no look runs and none is
+  spent (the captain's A22 (3)); with no twin marker (package J's panel night writes it: league/ops/forward_xs.py)
+  the effective mode is "gate" whatever the setting.
 - `TheDataJobsOnTheRealStore`: package B's spreads and N_eff jobs on package C's real store (they were built against
   fakes of it), and package A's and the twins' readers of what they leave.
 - `TheLiveColumnsOnTheRealUniverse`: package H's columns on package C's real universe: the live eligibility is the
@@ -489,8 +490,9 @@ class TheLaneStopsWhereItsRuleSays(_Root):
         self.assertEqual(bands.read(self.root, lanes=LANES), [], "a panel Candidate is seatless")
 
     def test_without_the_probes_panel_strata_no_look_runs_and_none_is_spent(self):
-        """A22 (3): the contamination probe before a panel look. Release E3's probe has no panel strata until package
-        B's patch 18 lands, so on the House every panel look WAITS (nothing spent) until then."""
+        """A22 (3): the contamination probe before a panel look. Until the probe has published the panel strata
+        for the route that wrote a program and the permit holds that route (package B's patch 18:
+        league/ops/contam_xs.py is the permit's writer), that program's look WAITS, nothing spent."""
         for strata in ((), ("P4", "P5")):                         # a permit with no panel stratum; and one short
             cells = self.probe["routes"][ROUTE]["cells"]
             doc = {**self.probe, "routes": {ROUTE: {**self.probe["routes"][ROUTE],
@@ -747,9 +749,10 @@ class TheSeams(unittest.TestCase):
         named). The other was the SWARM's (the look's gate, the captain's A22 (3), read the probe's own file), which
         E3's seal forbids: no module of league/swarm names a file of the forward record or the probe's, nor imports
         an E3 ops module. So the swarm reads a PERMIT the probe's job writes (two words a stratum and era); the
-        probe's own file opens no look, whatever it holds; and the probe's strata do not yet hold the panel's
-        (package B's patch to the probe, owed), so no permit exists and every panel look waits."""
-        from league.ops import contam_probe, equity_neff, forward_db, forward_report
+        probe's own file opens no look, whatever it holds. The panel's strata are the probe's `PANEL_STRATA`, asked
+        only when it is handed the plan of league/ops/contam_xs.py (package B's patch 18), which also writes the
+        permit: E3's own `STRATA` are what they were, and the probe's module still imports nothing of the panel."""
+        from league.ops import contam_probe, contam_xs, equity_neff, forward_db, forward_report
         from league.tests import test_e3_seal_imports as seal
 
         self.assertEqual(equity_neff.FORWARD_REPORT, forward_report.FILE)
@@ -759,8 +762,11 @@ class TheSeams(unittest.TestCase):
         self.assertNotEqual(elane_xs.PROBE_FILE, contam_probe.FILE)
         self.assertEqual(seal.named(REPO, "league/swarm", seal.NAMES, pattern=r"\bfwd_[a-z0-9_]+"), [])
         self.assertEqual(seal.e3_ops_imports(REPO, "league/swarm"), [])
-        self.assertEqual(set(elane_xs.PROBE_STRATA) & set(contam_probe.STRATA), set(),
-                         "the day the probe carries the panel strata it writes the permit, and a look may be taken")
+        self.assertEqual(set(elane_xs.PROBE_STRATA) & set(contam_probe.STRATA), set(), "E3's strata are E3's")
+        self.assertEqual(contam_probe.PANEL_STRATA, elane_xs.PROBE_STRATA, "the strata the look reads are the probe's")
+        self.assertEqual(seal.outside(REPO, REPO / "league" / "ops" / "contam_probe.py", seal.OPS_MAY), [])
+        self.assertEqual(contam_xs.permit(None), {"version": elane_xs.PROBE_VERSION, "routes": {}},
+                         "the permit's writer is an ops module of the panel's; with nothing published it permits nothing")
         fam = {"spec": {"e2_route": ROUTE}}
         with tempfile.TemporaryDirectory() as tmp:
             cells = {s: {"2016-24": {"readable": True, "recalled": False}} for s in elane_xs.PROBE_STRATA}

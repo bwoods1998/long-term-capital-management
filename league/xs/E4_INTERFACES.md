@@ -531,7 +531,8 @@ captain's bar; the forward twin (package J), the universe commit and the money r
 | `equity_spreads`' grace | six hours (done by 13:20Z: past a pre-open) | three (done by 10:20Z) | `league/ops/registry.py` |
 | the coverage probe | two built-in test tickers; one verdict for two questions; the token's file beside `--root`; exit 2 for everything; a ladder's end read as the limit; a refusal retried | the test names read off the spell file; `asof_differs` and `differs_accepted` apart from `test_accepted`; the file beside the release, a missing token said at once; exit 3 for a probe that could not run; `reading` "found", "at least" or "not measured"; a 4xx but 429 is refused once and is no error | `scripts/panel_probe.py` |
 
-Open after the ship pass, stated: package J; patch 18 with the look permit; the universe commit and the money row
+Open after the ship pass, stated: package J (built since: section 13); patch 18 with the look permit (built since,
+not wired: section 14); the universe commit and the money row
 (a held basket uses the whole window: after a loss a partial rotation is a name short, and live and its twin part
 there); the receipt at the captain's bar; the gateway's follow-up for the two protected paths; a name that joined
 the index after 2024 is charged the universe's half-spread (sampling its own Train-era days is a spec change for
@@ -612,3 +613,51 @@ own section 13 (league/ops/E3_INTERFACES.md): the import rule admits `league/ops
 **Still owed after package J:** patch 18 with the look permit; the universe commit and the money row; the receipt
 at the captain's bar; `fill_minutes`' panel symbols; the forward route's verdict (c_FX and the placebo rank over the
 first n sessions: `runner.Isolated.forward(placebos=, seed=)` exists and nothing asks it); panel controls.
+
+## 14. The probe's panel strata and the look's permit (patch 18; Oct 11, 2026; `feat/equity-e4-p`; BUILT, NOT WIRED; nothing pushed, nothing deployed)
+
+Section 4a's rule (3) and section 12's permit now have their writer, and the House's job does not call it yet.
+No identity moves (the options execution fingerprint, the equity identity, the money digest and the xs identity are
+the base's: no evidence module, no file of `league/live/`, `league/gym/` or `league/equity/`, no line of the
+constitution, of policy.json or of the registry changed).
+
+**Why it is not wired, and what wiring is.** Two of release E3's seal tests bind the two modules:
+`test_e3_seal_imports` (T1) lets `contam_probe.py` import only what E3's contract lists (nothing of `league/xs`,
+and no module outside the list), and `test_forward_report.TheReportShowsOnlyWhatItMay` lets no ops module outside
+the forward record's own import `contam_probe`. So no import can join the probe and the panel's plan without an
+allowance in one of them, and a seal test is not a package's to change. AS BUILT neither module imports the other:
+the probe hands the plan its calendar and its file's content and takes the plan's maker as a parameter. WIRING is
+`contam_probe.run` handing that maker to `probe` (`from . import contam_xs` inside `run`), with ONE allowance in T1
+(that module, for that function). The patch and its tests' expected results are in the captain's scratch
+(`eqe4/p/wiring.patch`, `WIRING.md`). Until it is applied the House's probe is E3's to the byte, no permit is
+written and every panel look waits, as before this patch.
+
+| what | where | notes |
+|---|---|---|
+| the strata's words, the plan's seam | `league/ops/contam_probe.py`: `PANEL_STRATA`, `FACTORS`, `FACTOR_WORDS`, `NAME`, `panel_questions(plan, *, per_cell)`, `probe(ctx, *, panel=None)`, `Probe(..., panel=None)` | E3's module, patched; it imports nothing of `league/xs`; `run(ctx)` hands no plan and is E3's probe to the byte |
+| the plan's maker | `league/ops/contam_xs.py` `plan(ctx, settings, capability, *, periods, eras)` -> a `Plan`, None (no panel stratum this run) or a skipped receipt (a wall) | the probe calls it once its own store is open and before any route is marked; it imports nothing of the probe |
+| THE PLAN: `names(stratum, era)`, `periods(stratum, era)`, `truths(questions)`, `published(doc)` | `contam_xs.Plan(store, state_root, *, periods, eras)` | names and period names only reach a prompt; `truths` a cell at once, after its answers |
+| the permit's writer | `contam_xs.permit(doc)`, `write_permit(root, doc)` | the shape of section 12's row; one row a route whose PUBLISHED result carries P4, P5 and P6; handed the probe's file's content, never its name |
+| the probe's file | `routes[route].cells` gains "P4", "P5", "P6" (E3's cell shape); a partial gains `panel_qset` while a plan asks | E3's `qset` and cells are unchanged; the report job reads the file as it is |
+| the receipt | `panel` (the panel cells this probe asks) and, on a publish, `permit` | absent with no plan |
+
+**What a later package must know** (each is true of the probe once it is handed the plan).
+1. **A look opens route by route.** `elane_xs.probed` needs the permit to hold the route that wrote the program
+   (its spec's `e2_route`). The probe takes one route a Saturday, a whole probe is published only when every cell
+   is in, and at the shipped dollars a probe is several Saturdays: a route's first permit is weeks after its first
+   run, and the last route's is that many times the routes. Nothing in this patch shortens that (the dollars are
+   capped as shipped). If the captain wants a look sooner the levers are `elane.contam.usd_run`, E2's day line, and
+   a run by hand.
+2. **A recalled panel cell holds no look back.** The permit carries the word and the look records it; the rule that
+   would act on it is not written anywhere. A22 (3) says the probe runs BEFORE a look, which is what is built.
+3. **The truth of P4 and P5 is against the House's statistical sector's fund**, not a published classification; the
+   question does not name the fund. A route that knows a name's published sector answers about that fund; where the
+   two differ the truth is the House's.
+4. **The members asked about are survivors of their era.** A probe of names that left the index is not built.
+5. **The panel's "2016-24" cell is the panel's Train years less each segment's first month** (70 months, 310
+   weeks); 2025 and 2026H1 are whole.
+6. **The job fails, loudly and before any cost, while a panel store that exists cannot be read.** E3's own strata
+   are not asked that Saturday either. The lane's switch ("off") gives E3's probe back.
+7. **A route published without the panel strata is due again at once** when a plan first asks them, its E3 cells
+   with it: so the Saturdays a route's probe spends before the wiring are spent again after it. The sooner the
+   allowance is given or refused, the fewer.
