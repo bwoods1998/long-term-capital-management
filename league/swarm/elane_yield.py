@@ -475,12 +475,13 @@ UNCONFIRMED = ("provider_poll_timeout", "provider_transport_timeout", "provider_
 SENT_UNANSWERED = "sent and unanswered"
 
 
-def booked_for(store: Any, call_key: str) -> float:
-    """What the swarm booked for one request key of E2's (its window fallback's key included: it keeps the prefix): the
-    hold of a call that failed after it was sent, or its settled cost. 0 for a store with no spend table (a fake)."""
+def booked_for(store: Any, call_key: str, since: float = 0.0) -> float:
+    """What the swarm booked for one request key of E2's (its window fallback's key included: it keeps the prefix) since
+    `since` (seconds; the rows of a call just made are recent, and the table's index is by kind and time): the hold of
+    a call that failed after it was sent, or its settled cost. 0 for a store with no spend table (a fake)."""
     try:
-        row = store._one("SELECT COALESCE(SUM(usd),0) AS usd FROM spend WHERE instr(detail, ?) > 0",
-                         (':"' + str(call_key)[:120],))
+        row = store._one(f"SELECT COALESCE(SUM(usd),0) AS usd FROM spend WHERE kind IN ({','.join('?' * len(SPEND_KINDS))}) "
+                         "AND epoch>=? AND instr(detail, ?) > 0", (*SPEND_KINDS, float(since), ':"' + str(call_key)[:120]))
     except Exception:  # noqa: BLE001 - nothing to read: nothing known
         return 0.0
     return max(0.0, float(row["usd"])) if row else 0.0
@@ -519,7 +520,7 @@ def ask(router: Any, store: Any, settings: Mapping[str, Any] | None, *, first: R
         except Exception as exc:  # noqa: BLE001 - the next route answers; the failure is booked
             billed = sum(_num(b.get("cost_usd")) or 0.0 for b in getattr(exc, "billed", []) or [] if isinstance(b, Mapping))
             said = billed + max(0.0, _num(getattr(exc, "held_usd", 0.0)) or 0.0)
-            held = booked_for(store, call_key)
+            held = booked_for(store, call_key, since=float(now) - 6 * 3600.0)
             book(store, row_of(route), usd=max(said, held), known=held <= said, purpose=purpose, answered=False, now=now)
             text = f"{type(exc).__name__}: {str(exc)[:200]}"
             errors.append(f"{route.key}: {text}")

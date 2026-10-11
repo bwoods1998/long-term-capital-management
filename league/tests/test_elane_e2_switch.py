@@ -32,9 +32,10 @@ from league.tests.test_swarm_loop import LoopCase
 REPO = Path(__file__).resolve().parents[2]
 E2_MODULES = (elane_births, elane_train, elane_review, elane_yield)
 E2_FILES = tuple(f"league/swarm/elane_{name}.py" for name in ("births", "train", "yield", "seal", "review"))
-#: E2's own footprints in the store's kv: its two rounds' clocks, the last pass, the Train liveness mark, the ledger.
+#: E2's own footprints in the store's kv: its two rounds' clocks, the last pass, the Train liveness mark, the ledger,
+#: the last alert of a standing House failure.
 E2_KEYS = (elane_births.BIRTHS_AT_KEY, elane_births.LAST_KEY, elane_train.TRAIN_AT_KEY, elane_train.TRAIN_OK_KEY,
-           elane_yield.LEDGER_KEY)
+           elane_yield.LEDGER_KEY, elane_train.HOUSE_ALERT_KEY)
 
 
 def policy() -> dict:

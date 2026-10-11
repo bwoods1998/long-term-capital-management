@@ -145,9 +145,11 @@ def due(store: Any, settings: Mapping[str, Any] | None, *, now: float | None = N
         return False
     now = time.time() if now is None else float(now)
     c = cfg(settings)
+    last = _num(store.get(BIRTHS_AT_KEY)) or 0.0
+    if now - last < min(c["births_refill_seconds"], c["births_every_seconds"]):
+        return False  # inside even the shorter cadence: the families and the spend are not read on every loop pass
     if elane_yield.hold(store, settings, now) is not None:
         return False
-    last = _num(store.get(BIRTHS_AT_KEY)) or 0.0
     every = c["births_refill_seconds"] if researching(store) < c["start"] else c["births_every_seconds"]
     return now - last >= every
 
