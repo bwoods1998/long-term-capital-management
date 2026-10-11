@@ -76,7 +76,8 @@ E3_POLICY = {
     "memory": {"mode": "record"},
     "contam": {"mode": "record", "usd_run": 3.0, "every_days": 28, "batch": 20, "questions_per_cell": 120},
 }
-#: Section 10: what waits for the gateway's merge list before E3 (release E2's five) and what E3 adds.
+#: Section 10: what waited for the gateway's merge list before E3 (release E2's five, in that list since the gateway's
+#: follow-up of Oct 11, 2026) and what E3 adds.
 E2_PENDING = ("league/swarm/elane_births.py", "league/swarm/elane_train.py", "league/swarm/elane_yield.py",
               "league/swarm/elane_seal.py", "league/swarm/elane_review.py")
 #: The forward screen's shape as the spec's section 4 writes it, and its sha.
@@ -323,10 +324,14 @@ class TheWiringIsWhole(unittest.TestCase):
         self.assertEqual(settings.policy_shape({"elane": dict(elane)}), [], "no settings.py change is needed")
 
     def test_the_three_paths_behind_the_wall(self):
+        # Release E2's five left the waiting list with the gateway's follow-up of Oct 11, 2026: FORBIDDEN names them.
+        for path in E2_PENDING:
+            self.assertIn(path, ci.FORBIDDEN)
+            self.assertNotIn(path, ci.PENDING_GATEWAY)
         if not self.wired():
-            self.assertEqual(ci.PENDING_GATEWAY, E2_PENDING, "the base: release E2's five wait for the gateway")
+            self.assertEqual(ci.PENDING_GATEWAY, (), "the base: nothing waits for the gateway")
             return
-        self.assertEqual(ci.PENDING_GATEWAY, (*E2_PENDING, *E3_SWARM))
+        self.assertEqual(ci.PENDING_GATEWAY, E3_SWARM)
         for path in E3_SWARM:
             self.assertIn(path, ci.FORBIDDEN)
             self.assertTrue(ci.guard([path], None), path)
