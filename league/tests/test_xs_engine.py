@@ -1034,6 +1034,24 @@ class TheResultRecord(EngineCase):
         self.assertAlmostEqual(summary["sd_date_return"], math.sqrt(math.fsum((v - mean) ** 2 for v in values) / (
             len(values) - 1)), places=15)
 
+    def test_the_year_rows_add_up_to_the_run(self):
+        bars = panel(sessions=120, start=dt.date(2031, 11, 3))           # a run across a year's end
+        result = engine.run(Program(keyed(5)), bars)
+        years = result["by_year"]
+        self.assertEqual(sorted(years), ["2031", "2032"])
+        summary = result["summary"]
+        self.assertEqual(sum(row["days"] for row in years.values()), summary["days"])
+        self.assertEqual(sum(row["closed"] for row in years.values()), summary["closed"])
+        self.assertEqual(sum(row["rebalances"] for row in years.values()), summary["rebalances"])
+        self.assertAlmostEqual(math.fsum(row["sum_x"] for row in years.values()), summary["sum_x"], places=14)
+        self.assertAlmostEqual(math.fsum(row["sum_x15"] for row in years.values()), summary["sum_x15"], places=14)
+        x = [row[results.DAILY.index("x")] for row in result["daily"] if row[0].startswith("2032")]
+        self.assertEqual(years["2032"]["sumsq_x"], math.fsum(v * v for v in x))
+        self.assertEqual(years["2032"]["sum_r"], math.fsum(
+            row[results.DAILY.index("r")] for row in result["daily"] if row[0].startswith("2032")))
+        with self.assertRaises(ValueError):
+            results.column(result, "close")
+
     def test_the_views(self):
         train = results.view(self.result, "train")
         self.assertEqual(tuple(train), results.TRAIN_VIEW)
@@ -1125,6 +1143,82 @@ class TheResultRecord(EngineCase):
         for lot in log.lots:
             self.assertNotIn(lot["col"], visible)
             self.assertFalse(visible & {int(c) for c in lot["members"]}, "in no cell, no placebo candidate")
+
+
+class WhatAProgramIsTold(EngineCase):
+    """The rows the engine hands `ctx.inputs_from_panel` (package C's contract: `ctx.Inputs`' docstring), at EVERY
+    close, and what never is in them: a session, a day, a price level."""
+
+    def setUp(self):
+        super().setUp()
+        self.seen: list[tuple[int, dict[str, Any]]] = []
+        real = ctx.inputs_from_panel
+
+        def spy(bars: Any, t: int, **kw: Any) -> Any:
+            self.seen.append((t, json.loads(json.dumps({k: v for k, v in kw.items() if k != "needs"}))))
+            return real(bars, t, **kw)
+
+        patcher = mock.patch.object(ctx, "inputs_from_panel", spy)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.bars = no_bar(panel(), REF + 3, (40,))
+
+        def decide(value: Any, state: dict) -> Any:
+            state["n"] = state.get("n", 0) + 1
+            ids = sorted(value.ids)
+            return {"target": {int(s): 0.2 for s in ids[5 * (state["n"] % 2):][:5]}, "at": "close"}
+
+        self.result, self.log = self.run_log(Program(decide, params={"a": 1}, max_hold_sessions=6), self.bars)
+
+    def test_one_reading_a_close_with_the_books_rows(self):
+        self.assertEqual([t for t, _ in self.seen], [row["t"] for row in self.log.decisions])
+        held = closed = 0
+        for t, book in self.seen:
+            self.assertEqual(set(book), {"positions", "closed", "rejects", "cash", "equity", "budget", "params"})
+            self.assertEqual((book["budget"], book["params"]), (1000.0, {"a": 1}))
+            for row in book["positions"]:
+                self.assertEqual(set(row), {"lid", "col", "qty", "value", "entry_value", "held_sessions", "at", "tag"})
+                lot = self.log.lots[row["lid"] - 1]
+                self.assertEqual((row["col"], row["held_sessions"], row["at"]),
+                                 (lot["col"], t - lot["entry"], lot["entry_at"]))
+                self.assertAlmostEqual(row["entry_value"], lot["weight"] * 1000, places=6)
+                self.assertAlmostEqual(row["value"], row["qty"] * self.bars.raw[t, lot["col"], 3], places=3)
+                held += 1
+            for row in book["closed"]:
+                self.assertEqual(set(row), {"lid", "col", "net_ret", "held_sessions", "reason", "tag"})
+                lot = self.log.lots[row["lid"] - 1]
+                self.assertEqual((row["col"], row["held_sessions"]), (lot["col"], lot["exit"] - lot["entry"]))
+                self.assertIn(row["reason"], ("program", "house", "max_hold", "vanished"))
+                closed += 1
+            marked = math.fsum(row["value"] for row in book["positions"])
+            self.assertAlmostEqual(book["equity"], book["cash"] + marked, places=6)
+        self.assertGreater(held, 100)
+        self.assertGreater(closed, 20)
+
+    def test_the_lots_closed_and_the_rejects_since_the_last_call_reach_the_next_call_once(self):
+        called = {row["t"] for row in self.log.decisions if row["called"]}
+        told: dict[int, int] = {}
+        for t, book in self.seen:
+            if t in called:
+                for row in book["closed"]:
+                    told[row["lid"]] = told.get(row["lid"], 0) + 1
+        last_call = max(called)
+        closed = {lot["lid"] for lot in self.log.lots if lot["exit"] is not None and lot["exit"] <= last_call}
+        self.assertEqual(set(told), closed)
+        self.assertEqual(set(told.values()), {1}, "a closed lot is told at one call, the next after it closed")
+        rejects = [r for t, book in self.seen if t in called for r in book["rejects"]]
+        self.assertTrue(any("no bar" in text for text in rejects), "the buy the session could not make")
+
+    def test_no_reject_names_a_day_or_a_price(self):
+        import re
+
+        texts = [text for _, book in self.seen for text in book["rejects"]]
+        self.assertTrue(texts)
+        iso = [d.isoformat() for d in (from_ordinal(int(o)) for o in self.bars.days)]
+        for text in texts:
+            self.assertIsNone(re.search(r"\d{4}-\d{2}-\d{2}", text), text)
+            self.assertFalse(any(day in text for day in iso))
+            self.assertTrue(text.startswith(("buy ", "sell ", "order cap")), text)
 
 
 class SplitsAndDividends(EngineCase):
