@@ -2784,6 +2784,36 @@ class TheOperatorsReport(Case):
         self.assertTrue(by_name()["stall"].in_pause, "read-only, in a pause too")
 
 
+class TheDocumentsSayTheRuling(unittest.TestCase):
+    """What the three documents say of `elane_idle` is what the tree does (the second check's wording d, and the cost
+    of the captain's ruling, which is the owner's to know): it alarms on a broken lane only, a lane starved by a
+    setting is read in the funnel and the receipt and not in the mail, and the hourly trickle of Oct 11 is the
+    check's invented replay, never something read from the House."""
+
+    def test_the_documents_say_where_starvation_is_read_and_call_the_replay_a_replay(self):
+        flat = lambda path: " ".join((REPO / path).read_text().split())  # noqa: E731
+        ops, notes, log = flat("docs/operations.md"), flat("league/swarm/ELANE_E2.md"), flat("CHANGELOG.md")
+        for name, text in (("operations", ops), ("notes", notes), ("changelog", log), ("module", " ".join(EH.__doc__.split()))):
+            self.assertNotIn("STARVED BY WORK LOST", text, name)
+            self.assertIn("not in the mail", text, name)
+            self.assertRegex(text, r"A BROKEN LANE(,| ONLY| AND ONLY THAT)", name)
+        self.assertIn("STARVATION BY A SETTING IS NO STANDING CAUSE", ops)
+        self.assertIn("is seen in the funnel and the receipt, not in the mail", ops)
+        self.assertIn("in the check's replay of Oct 11 a version was scored about hourly", notes)
+        self.assertNotIn("On Oct 11 a version was scored about hourly", notes)
+        # The rule that is gone left no constant behind, and the registry's line says what the job covers now.
+        for name in ("STARVED_MIN_STEPS", "STARVED_SHARE"):
+            self.assertFalse(hasattr(EH, name), name)
+        from league.ops.registry import by_name
+
+        self.assertIn("broken lanes", by_name()["stall"].what)
+        self.assertNotIn("starved", by_name()["stall"].what)
+        # The gateway is not changed for the ruling: its list keeps the cause, in the words it was deployed with.
+        self.assertIn("elane_idle", gateway_causes())
+        self.assertIn("the equity lanes are idle or starved", (REPO / "gateway" / "lib" / "email.mjs").read_text())
+        self.assertIn('still say "idle or starved"', ops)
+
+
 # ---------------------------------------------------------------------------------------------- the architect's universe
 class TheArchitectIsNotLedOutsideTheUniverse(unittest.TestCase):
     """Release E2.4, item 3 (league/swarm/elane_births.py `lanes_text`): the lanes block speaks of the universe's own

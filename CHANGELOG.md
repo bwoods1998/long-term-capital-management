@@ -46,35 +46,44 @@ owner when the lanes next go wrong.
   - `elane_dq`: more than half of the versions scored in the last 6 h (6 at least) could not be judged for a fault of
     their own program (disqualified, refused at load, failed by the decider child), in at least two families. With
     fewer than 6 in the 6 h it judges the last 6 scored since the running release started, and before the sixth
-    version it stands once 4 of two families could not be judged. It names the first error's class only when one
-    class is more than half of the disqualifications (else the classes that tie) and, for a class it names, the
-    reading rule's sentence for it or what the class most often is. The owner's step: fix the text the generators
-    read, in a release.
+    version it stands once 4 of two families could not be judged. Once it stood under a release it holds until
+    versions scored after it stood are judged by the bar in two families, or the release changes. It names the
+    first error's class only when one class is more than half of the disqualifications (else the classes that tie)
+    and, for a class it names, the reading rule's sentence for it or what the class most often is. The owner's
+    step: fix the text the generators read, in a release.
   - `elane_births`: the last 3 equity passes that asked a model bore no family. It names how, the commonest refusals
     in the House's own closed words and the symbols `elane.universe` does not hold. The owner's step after 6 h with
     no birth, when a setting clears it (the universe, the structures, the output limit); at once when every route
     refused the request for a setting, which the pass's event now names.
-  - `elane_idle`: work is owed and not done. STARVED BY WORK LOST: of the Train steps due in the last 3 h (6 at
-    least) more than half were skipped because E2 might ask no model (its pace, its day, the House's Sail day),
-    whether or not a version was scored. Or nothing scored for 3 h: STARVED when E2 may ask no model now, BROKEN
-    when it may and scores nothing (rounds that raise, Train runs failing on the House's side, steps that fail, no
-    round: the owner's step). A starved lane says which line binds, the hourly pace or the day's, and names that
-    lever; it needs nobody. The day's dollars spent, with a version scored since 00:00 UTC, is no stall: the cause
-    reads clear and says so.
+  - `elane_idle`: A BROKEN LANE ONLY. Work is owed and no version was scored for 3 h (a clock kept per release,
+    less the time the swarm was down), and either the lane's own record shows two rounds that raised, two Train
+    steps failed on the House's side or two step errors (it then stands whatever E2's lines hold, with that kind's
+    owner step, and says the line second when E2 is also held), or no hold of E2's was seen in those 3 h (the lane
+    may ask a model and still scores nothing). STARVATION BY A SETTING IS NO STANDING CAUSE: a lane held by its
+    own hourly pace, its day's dollars or the House's Sail day reads judged clear, never stands and never mails,
+    and its sentence and numbers say what the setting cost (the Train steps due, taken and skipped by reason;
+    whether E2 is held now; the lever). The cost: a lane starved by a setting is read in the receipt and the
+    research funnel (`train_steps`), not in the mail.
   - `elane_refused`: more than half of the programs written in the last 6 h (8 at least) were refused before a run by
-    one static rule. It names the rule and its commonest sentence. The owner's step: teach the rule, in a release.
+    one static rule. With fewer than 8 in the 6 h it judges the last 8 written since the running release started,
+    and before the eighth it stands once 5 were refused by one rule. It names the rule and its commonest sentence.
+    The owner's step: teach the rule, in a release.
 - **Judged only when there is something to judge:** the lanes on (`elane.mode`, `elane.birth_share`), the floor not
   paused, E2's dollars not set to zero, an equity family or pass on record, and enough evidence SINCE THE RUNNING
   RELEASE FIRST STARTED (kept in `stall.json`, `elane`: a release that fixes a fault is a new release; a restart of
-  the same one resets nothing). Else "Not judged", with the reason; and lanes that could not be READ (the settings,
-  one of E2's readers) are an `errors` entry naming the class, so the alarm never switches itself off in silence.
+  the same one resets nothing, and neither the idle clock nor when `elane_dq` stood, which are kept under it). Else
+  "Not judged", with the reason; and lanes that could not be READ (the settings, one of E2's readers, the store, the
+  lane's own reading of its hold) are an `errors` entry naming the class at every run and one House warning every
+  12 h, so the alarm never switches itself off in silence.
 - **Raised by the stall job's own machinery**, under their own names: standing in `stall.json`, one House warning
   every 12 h, the notice at the job's pace (an owner step at once and every 12 h, the rest every 24 h), cleared when
   it no longer holds, on the daily page's standing causes, and counted by Done's item 7 like any owner step waiting.
 - **Each is an entry of its own in the mail,** under the gateway's words for it ("most equity versions could not be
   judged", "the equity passes bear no family", "the equity lanes are idle or starved", "most equity programs
   refused before a run by one rule") and keyed by its own name: an equity owner step is mailed at once whatever the
-  swarm's own alerts told, and theirs whatever these told. Nothing rides `swarm_alerts`.
+  swarm's own alerts told, and theirs whatever these told. Nothing rides `swarm_alerts`. (The gateway's words for
+  `elane_idle` still say "idle or starved": the gateway is not changed again, and a starved lane no longer reaches
+  the mail under them.) A House warning keeps an owner step whole inside its 900 characters.
 - **No text a program or a model wrote reaches a notice, a warning or a standing check's sentence:** a
   disqualification is told by its class and line, a refusal by its rule and this module's words for its sentence, a
   refused proposal by its class and the symbols of the code's own universe. (The receipt's examples name families by
@@ -108,15 +117,30 @@ owner when the lanes next go wrong.
   main's.
 - **After its independent check (Oct 11; one blocker, three majors, seven minors, each fixed with a test; and the
   output settings' bound, found by the captain the same day):**
-  starvation is judged by work lost, and the day's dollars spent is no stall (the cause was silent on the morning's
-  pace starvation and stood every evening on a healthy lane); the four causes are worded by the gateway and each
-  keys its own mail (carried in `swarm_alerts`, they and the swarm's own alerts held back each other's mail for up
-  to 12 h); a reader that fails is an `errors` entry (all four read "Not judged" in silence); the architect is told a
+  the day's dollars spent is no stall (the cause stood every evening on a healthy lane; the rule that judged
+  starvation by work lost, added then, is removed by the ruling below); the four causes are worded by the gateway
+  and each keys its own mail (carried in `swarm_alerts`, they and the swarm's own alerts held back each other's mail
+  for up to 12 h); a reader that fails is an `errors` entry (all four read "Not judged" in silence); the architect is told a
   barren pass in closed words; `elane_dq` needs two families, does not lapse at its window's edge, names a class
   only when one is most, stands at four that could not be judged, and says in its step what the class most often
   is; evidence counts from the running release's first start, not from every restart; the starved lane's lever says
   which line binds; with no family left, barren passes come before what the families now gone left behind. The
   check's two replays are tests on an invented House where the real equity pass, Train round and stall job run.
+- **After its second independent check (Oct 11; two majors, both in `elane_idle`, and five minors) and the captain's
+  ruling on it:** `elane_idle` alarms on a BROKEN lane only. A lane whose every Train run failed on the House's
+  side read "STARVED, not broken" at every run whenever E2 was also at its pace, and the owner's step never came:
+  BROKEN is now judged first, by the lane's own record. And the starved-by-work-lost rule of the first fix counted
+  only the steps of rounds that started (no round starts while E2 is held), so it stood for one cost ratio only,
+  flapped and mailed daily where it did: it is REMOVED, with every standing or mailing of a lane held by a setting;
+  its counts stay, in the check's sentence and numbers and in the funnel. The minors: `elane_refused` judges the
+  last 8 written and stands early at 5 by one rule (it lapsed to "Not judged" at a slow pace with nothing fixed);
+  unreadable lanes are a House warning every 12 h (the receipt's `errors` reached no one); `elane_dq` holds once it
+  stood (it cleared and stood again as its window slid); the idle clock is kept per release less the time the
+  swarm was down (a broken lane restarted inside 3 h was never judged idle); a House warning no longer cuts an
+  owner step, the budget's floor is said before the lever's command, the idle hours say "at least" when the
+  lookback bounds them, and the design notes call the replay a replay. The second check's probes are tests: the
+  broken lane at its pace and the slow reading-rule world on the invented House, the restarts and the unreadable
+  readers on the stall job. `gateway/` is not touched by this round.
 - **Merged with main** (Oct 11; main at `7d2d3c84`: release E3 as deployed). Six files touched by both, each merged
   mechanically, every line of E3 and of this release kept; `league/ops/stall.py` keeps E3's release receipts and its
   receipt's keys (the four are among its `checks`), `league/ops/funnel.py` an import and one call,
@@ -125,8 +149,8 @@ owner when the lanes next go wrong.
 - Tests: `league/tests/test_elane_health.py` (the closed words held to the code that writes the records by running
   it: the equity pass's admission, the static rules, a disqualification's record, a real pass and Train rounds; the
   notice held to the gateway's cause list and its cuts; hostile text in every field of a barren pass; the two
-  replays, `league/tests/elane_e24_house.py`) and `gateway/test/stall-notice.test.mjs`. Operations:
-  [docs/operations.md](docs/operations.md), "The equity lanes' births" and "The stall alarm and the funnel".
+  checks' replays, `league/tests/elane_e24_house.py`) and `gateway/test/stall-notice.test.mjs`. Operations:
+  [docs/operations.md](docs/operations.md), "The equity lanes' own alarms" and "The stall alarm and the funnel".
 
 ### 14:37Z Oct 11, 2026: release E3, record and measure (#539), House `20261011T143700Z-c8e41ae6e37f`, main `7d2d3c84`; gateway `f9528af2`
 

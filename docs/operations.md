@@ -445,21 +445,30 @@ the look on the House; real money only at Probe, inside the shared loss budget).
   RELEASE first started, so a release that fixes a fault is not judged on what the generators did under the one
   before, and a restart of the same release (the watchdog's, a settings apply) resets nothing. The job keeps that
   start in `stall.json` (`elane`: `release`, the release directory the swarm's heartbeat names, and `since`, the start
-  first seen under it). Otherwise the check reads "Not judged" and says why. **A "Not judged" that is no design is an
-  error:** when the swarm's settings, one of E2's own readers or the lane's own reading of whether it may ask a model
-  cannot be read, the receipt's `errors` name the class ("the equity lanes' readers could not be read (<class>): the
-  four equity causes are not judged") and the job's warning is raised. How to read each, and what to do:
+  first seen under it) and, under it, what the four keep while that release runs and drop when it changes: `idle`
+  (the idle clock), `held` (the last run that read E2 held), `dq` (when `elane_dq` first stood) and `unread` (when
+  unreadable lanes were last warned). Otherwise the check reads "Not judged" and says why. **A "Not judged" that is
+  no design is an error, and a House warning:** when the swarm's settings, one of E2's own readers, the store or the
+  lane's own reading of whether it may ask a model cannot be read, the receipt's `errors` name the class at every
+  run ("the equity lanes' readers could not be read (<class>): the four equity causes are not judged") and ONE House
+  warning says it every 12 h while it lasts ("stall: the equity lanes' alarm cannot see: ..."). The receipt's
+  `warning` flag alone reaches no one: the job's runner does not alert on it. How to read each, and what to do:
   - `elane_dq`: more than half of the versions scored in the last 6 h (6 at least) could not be judged for a fault of
     their own program: disqualified by its errors or timeouts, refused at load, or failed by the decider child, in at
     least two families (one family's bad programs are no fault of the contract: the check reads clear and names the
     family). No mechanism was judged in them. When fewer than 6 fall in the 6 h it judges the last 6 scored since the
-    running release started (inside 12 h), so it does not lapse by itself while nothing is fixed; and it stands
-    early, before the sixth version, once 4 of two families could not be judged (they are most of six whatever
-    comes). It names the first error's class (TypeError, KeyError, a malformed intent...) only when one class is more
-    than half of the disqualifications, else the classes that tie; and, for a class it names, the reading rule's
-    commonest sentence for it, or, with none on record, what that class most often is. **Your step:** the text the
-    generators read is wrong or silent about it: fix `league/equity/EQUITY.md` "Reading ctx" and
-    `elane_review.READING_CTX`, or make a static rule refuse the shape, in a release (Oct 11's was release E2.2).
+    running release started (inside 12 h); and it stands early, before the sixth version, once 4 of two families
+    could not be judged (they are most of six whatever comes). **Once it stood under a release it HOLDS** until
+    versions scored after it stood are judged by the bar in two families (the generators write programs that run),
+    or the release changes: it no longer clears as its window slides past a fault nothing fixed, or when one
+    family's bar fails sit beside the retired families' versions and read "half". While it holds for that alone its
+    sentence says since when and how many families the bar has judged since (`standing_since`,
+    `bar_families_since`). It names the first error's class (TypeError, KeyError, a malformed intent...) only when
+    one class is more than half of the disqualifications, else the classes that tie; and, for a class it names, the
+    reading rule's commonest sentence for it, or, with none on record, what that class most often is. **Your
+    step:** the text the generators read is wrong or silent about it: fix `league/equity/EQUITY.md` "Reading ctx"
+    and `elane_review.READING_CTX`, or make a static rule refuse the shape, in a release (Oct 11's was release
+    E2.2).
   - `elane_births`: the last 3 equity passes that asked a model bore no family. It says how (every proposal refused,
     none proposed, the answer cut short, no route answered, the pass raised), the commonest refusals in the House's
     own closed words, and the symbols the code knows that `elane.universe` does not hold. Nothing to do for 6 h:
@@ -471,37 +480,59 @@ the look on the House; real money only at Probe, inside the shared loss budget).
     pass's event names the `elane.e2` key: an output limit above the provider's, an effort or a Sail profile the
     provider does not know): asking again changes nothing until the setting does. Cards refused, an empty answer or
     a route that did not answer stay information.
-  - `elane_idle`: work is owed (families in Train research, or births wanted) and is not being done (not judged
-    while the swarm itself is not running: its heartbeat ten minutes old). Two ways. STARVED BY WORK LOST: of the
-    Train steps due in the last 3 h (6 at least), more than half were skipped because E2 might ask no model (its
-    hourly pace, its day's line, the House's Sail day), whether or not a version was scored: a lane that scores a
-    version an hour while two families in three wait is starved, and no count of idle hours shows it. Or NOTHING
-    SCORED for 3 h (from the later of the last version scored, when the work became owed and the running swarm's
-    own start): STARVED when E2 may ask no model now, BROKEN when it may and still scores nothing. STARVED is no
-    step of yours: the lanes run as their settings say, and it says which line binds and names that lever: the
-    hourly pace (`elane.e2.pace_share`), or the day's line, which is `elane.e2.usd_day` only when that is under 24
-    hours at the hourly pace (at the release's settings it is not, and the lever is the pace again); where the
-    budget is at its floor (no usable `budget.json`) it says the budget's line binds before the share
-    (`python3 set_swarm.py elane.e2.pace_share=<lines> --apply`). **The day's dollars spent is no stall:** while
-    E2's day's line is spent and a version was scored since 00:00 UTC the cause reads clear and says so (a busy lane
-    spends its day before the day ends, every day; E2 asks again at 00:00 UTC). BROKEN: **your step** when its
-    rounds raise (the swarm log's "elane failed" and "elane_train failed" lines), when its Train runs fail on the
-    House's side (the `equity_data` job's receipt, the swarm's `equity-decider.log`), when its steps fail with
-    errors, or when no round starts or judges anything (the swarm log's `elane_train` lines); model routes that do
-    not answer heal by themselves, and with no family left and barren passes it points at `elane_births`.
+  - `elane_idle`: **A BROKEN LANE, and only that** (the captain's ruling of Oct 11 on the second independent check).
+    Work is owed (families in Train research, or births wanted) and no version was scored for 3 h. BROKEN is judged
+    first, by the lane's own record since it went idle: two rounds that raised, two Train steps that failed on the
+    House's side (or a family waiting out a House backoff after two failures), or two steps that failed with an
+    error of their own. It then stands WHATEVER E2's own lines hold, with that kind's step, and a second sentence
+    says the line when E2 is also held ("BROKEN, whatever E2's own lines hold: ... E2 is also held now: ..."): a
+    lane whose every Train run fails scores nothing at any pace, and before this it read "STARVED, not broken"
+    and the step never came. Else it stands only when the lane MAY ASK A MODEL and still scores nothing: no hold of
+    E2's was seen for those 3 h (not now, not at an earlier run of the job, no Train step or equity pass skipped for
+    want of model dollars). **Your step** when its rounds raise (the swarm log's "elane failed" and "elane_train
+    failed" lines), when its Train runs fail on the House's side (the `equity_data` job's receipt, the swarm's
+    `equity-decider.log`), when its steps fail with errors, or when no round starts or judges anything (the swarm
+    log's `elane_train` lines); model routes that do not answer heal by themselves, programs refused before a run
+    are `elane_refused`'s, and with no family left and barren passes it points at `elane_births`.
+    **STARVATION BY A SETTING IS NO STANDING CAUSE.** A lane held by its own hourly pace, its day's dollars or the
+    House's Sail day is the budget you chose, at work: the check reads judged, clear, never stands, raises no House
+    warning and is never mailed, for an hour or for a whole day. What the setting costs is SAID, in the check's
+    sentence and numbers at every run (the receipt and the report): the Train steps due in the last 3 h, taken and
+    skipped by reason (`steps_due`, `steps_taken`, `steps_skipped`, `skipped_pace`, `skipped_usd_day`,
+    `skipped_sail_day`), whether E2 is held now and by which line (`held_now`), whether a hold was seen in the 3 h
+    (`held_lately`), the idle hours (`idle_hours`; `starved` true once they pass 3), and the lever: the hourly pace
+    (`elane.e2.pace_share`), or the day's line, which is `elane.e2.usd_day` only when that is under 24 hours at the
+    hourly pace (at the release's settings it is not, and the lever is the pace again); where the budget is at its
+    floor (no usable `budget.json`) it says the budget's line binds before the share, before the command
+    (`python3 set_swarm.py elane.e2.pace_share=<lines> --apply`). The research funnel carries the same counts for
+    the day and the release (`train_steps`; the passes' `skipped`). **The cost of this ruling: a lane starved by a
+    setting is seen in the funnel and the receipt, not in the mail.** Read `train_steps` in the `scoreboard` job's
+    receipt when you set a pace: on Oct 11 the pace cost the lanes more than half their Train steps and nothing
+    will mail that.
+    The idle clock is kept per release (`stall.json` `elane.idle`): from the later of the last version scored and
+    when the work became owed, less the time the swarm was down (at a restart, from the heartbeat the last run read
+    to the new start), so a broken lane that is restarted every two hours is still judged idle; its hours say "at
+    least" unless they start at a version scored. Not judged while the swarm itself is not running (its heartbeat
+    ten minutes old), or under 3 h of running time.
   - `elane_refused`: more than half of the programs the generators wrote in the last 6 h (8 at least) were refused
     before a run by ONE static rule (the reading, level or memory rule, the code rules, NEEDS). It names the rule
-    and its commonest sentence. **Your step:** the generators are not being taught that rule: teach it where they
-    read it (the contract, the researcher's system prompt, `elane_review.READING_CTX`), in a release.
+    and its commonest sentence. As `elane_dq`: when fewer than 8 fall in the 6 h (a slow lane writes one program an
+    hour) it judges the last 8 written since the running release started (inside 12 h), and it stands early once 5
+    were refused by one rule (most of eight whatever is still to be written). **Your step:** the generators are not
+    being taught that rule: teach it where they read it (the contract, the researcher's system prompt,
+    `elane_review.READING_CTX`), in a release.
 
   **In the mail** each of the four is an entry of its own, under its own words (the gateway's, since its deploy
   before this release: "most equity versions could not be judged", "the equity passes bear no family", "the equity
   lanes are idle or starved", "most equity programs refused before a run by one rule") and keyed by its own name:
   an equity owner step is mailed at once whatever the swarm's own alerts told, and theirs whatever these told.
+  (The gateway's words for `elane_idle` still say "idle or starved"; the gateway is not changed again for the
+  ruling, and a lane starved by a setting no longer reaches the mail under them.)
   Nothing rides "the swarm raised alerts". An entry is the cause's sentence (its leading sentences whole inside the
   mail's 400 characters; the receipt has all of it), its figures (the telling ones first; E2's dollar figures are in
   the sentence, to the tenth of a cent, never among the mail's two-place numbers), what the floor is doing and your
-  step.
+  step. **A House warning keeps your step whole:** where a cause's sentence, what the floor does and the step pass
+  the warning's 900 characters, what is shortened is what comes before the step.
 
   **Read them** with no exec (`python3 scripts/desk_receipts.py`): the `stall` job's receipt holds the four among
   its `checks`, each as it holds every cause (`stalled`, `what`, `numbers`, `doing`, `owner_step`); a check's
@@ -3565,16 +3596,18 @@ and `data/nightly.stop`), all read-only, and names a stall by its cause:
 | `birth_yield` (no-captain) | over the last 3 h at least 4 passes asked a model and bore at most 1, or the card checks refused 80% of their proposals; or no birth in 2 h while 3 passes wanted one (from the `swarm.architect` events) | none (INFO); the jam above is the owner's step |
 | `swarm_alerts` (no-captain) | an owner kind whose condition stands now (`stall.alert_states`, from the swarm's settings and store, whatever its alert's age), or a `swarm.status` alert (`alert` true) in the last 12 h whose condition is not read or cleared, but the self-healing ones (`sail_window_stall`, `funding_alert`) alone | for `reader_cut`, `agenda_guard`, `policy_layer`, `train_span_pending`, `train_span_mismatch`, `gate_missing_data`, `gate_coverage`, `game_waits` while their condition stands, and `look_failed_three_times` on the UTC day it fired: the setting or fix each names (`stall.ALERT_STEPS`); none for the rest |
 | `underspend` (no-captain) | Sail's booked research today under 70% of what its day's figure buys by now at an even pace (from 6 h into the day, the guard braked under 2 h of it; Claude's reading is said, never a cause), or two settings that cannot both hold while they bind (`settings_binds` conflicts: the class cap once a direction card met it in the last 6 h); the settings that bind research are named either way | none (INFO): the settings named are the owner's to change |
-| `elane_dq` (release E2.4) | the equity lanes on and judged: more than half of the equity versions scored in the last 6 h (6 at least, since the running release started; fewer in the 6 h: the last 6 scored; before the sixth: 4 that could not be judged) could not be judged for a fault of their own program (disqualified, refused at load, failed by the decider child), in at least two families | "the equity generators misread the program contract, mostly <the class> (<what it most often is>): fix the text they read (league/equity/EQUITY.md "Reading ctx", elane_review.READING_CTX) or the static rule that should refuse it, in a release" |
+| `elane_dq` (release E2.4) | the equity lanes on and judged: more than half of the equity versions scored in the last 6 h (6 at least, since the running release started; fewer in the 6 h: the last 6 scored; before the sixth: 4 that could not be judged) could not be judged for a fault of their own program (disqualified, refused at load, failed by the decider child), in at least two families; once it stood under a release, until versions scored after are judged by the bar in two families or the release changes | "the equity generators misread the program contract, mostly <the class> (<what it most often is>): fix the text they read (league/equity/EQUITY.md "Reading ctx", elane_review.READING_CTX) or the static rule that should refuse it, in a release" |
 | `elane_births` (release E2.4) | the last 3 equity passes that asked a model (in the last 12 h, since the running release started) bore no family | none for 6 h (each pass tells the next its refusals); then, when a setting clears the main way they bore nothing: widening `elane.universe` or `elane.structures` (your decision), `elane.e2.births_max_output_tokens` or `elane.e2.max_per_pass` for answers cut short, a release for a pass that raises; at once for a setting every route refuses the request for; none for the rest |
-| `elane_idle` (release E2.4) | families in Train research or births wanted, and: more than half of the Train steps due in the last 3 h (6 at least) skipped because E2 might ask no model, or no equity version scored for 3 h; never while E2's day's dollars are spent and a version was scored since 00:00 UTC | none while STARVED (E2 at its own pace, its day's line, the House's Sail day): the line that binds and its lever are named, never a step; BROKEN: "the equity lanes' rounds raise ...", "... Train runs fail on the House's side: check the equity_data job's receipt and the swarm's equity-decider.log", "... Train steps fail with errors", "... rounds run and judge nothing" or "... start no round"; none for routes that do not answer |
-| `elane_refused` (release E2.4) | more than half of the programs the equity generators wrote in the last 6 h (8 at least, since the running release started) were refused before a run by one static rule | "the equity generators are not being taught <the rule>: teach it where they read it (league/equity/EQUITY.md, the researcher's system prompt, elane_review.READING_CTX), in a release" |
+| `elane_idle` (release E2.4) | a BROKEN lane only: families in Train research or births wanted, no equity version scored for 3 h (the swarm's running time, kept per release), and the lane's own record shows two rounds that raised, two Train steps failed on the House's side or two step errors (whatever E2's lines hold), or no hold of E2's was seen in those 3 h. NEVER for a lane held by its own pace, its day's dollars or the House's Sail day: that reads judged clear and says the steps it cost | "the equity lanes' rounds raise ...", "... Train runs fail on the House's side: check the equity_data job's receipt and the swarm's equity-decider.log", "... Train steps fail with errors", "... rounds run and judge nothing" or "... start no round"; none for routes that do not answer, programs refused before a run or barren passes |
+| `elane_refused` (release E2.4) | more than half of the programs the equity generators wrote in the last 6 h (8 at least, since the running release started; fewer in the 6 h: the last 8 written; before the eighth: 5 refused by one rule) were refused before a run by one static rule | "the equity generators are not being taught <the rule>: teach it where they read it (league/equity/EQUITY.md, the researcher's system prompt, elane_review.READING_CTX), in a release" |
 | `forward` (weekend fixes) | the nightly's ready file (`gym-forward.json`) does not carry the last session before today once the UTC day is 10 h in; `data/nightly.json` has carried an error 6 h or more (from the first run that saw it, kept in `stall.json`); or `data/nightly.stop` has stood 2 h or more | for a stop: "remove /workspace/state/data/nightly.stop ... the nightly forward replay, and with it the Done meter's replay twins, waits while it stands"; none for the rest |
 
 **The equity lanes' own causes** (release E2.4; the four `elane_` rows; `league/ops/elane_health.py`, which the
 stall job calls once): judged only while the lanes are on and not paused, on evidence since the running release first
-started (`stall.json` `elane`), else "Not judged" with the reason, and an `errors` entry when the lanes could not be
-read; **The equity lanes' births**, at the top, says how to read each and what to do. They are the last four of
+started (`stall.json` `elane`, with the clocks kept under it), else "Not judged" with the reason, and an `errors`
+entry and a House warning every 12 h when the lanes could not be read; `elane_idle` stands for a broken lane only,
+and a lane starved by a setting is read in the check's numbers and the research funnel, never in the mail;
+**The equity lanes' own alarms**, at the top, says how to read each and what to do. They are the last four of
 `stall.CAUSES`, causes like any other (`stall.json`, the House's warnings, the daily page's standing causes, the
 receipt's `checks`, the notice), and Done's item 7, which reads the receipts' checks, counts an owner step of theirs
 like any other's. The gateway words each (`STALL_CAUSES`, which its own test holds equal to `stall.CAUSES`; an

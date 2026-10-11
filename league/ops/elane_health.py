@@ -1215,13 +1215,13 @@ def _holds(f: Mapping[str, Any], passes: Sequence[tuple[float, Mapping[str, Any]
     seen: list[tuple[float, str]] = [(now, held_now)] if held_now else []
     k = kept if isinstance(kept, Mapping) else {}
     at = _num(k.get("at"))
-    if at is not None and edge < at <= now and isinstance(k.get("kind"), str):
+    if at is not None and edge <= at <= now and isinstance(k.get("kind"), str):
         seen.append((at, k["kind"]))
     for at, payload in f.get("rounds") or []:
-        if edge < at <= now:
+        if edge <= at <= now:
             seen += [(at, kind) for kind in (step_read(step)["skipped"] for step in payload.get("steps") or [])
                      if kind in STARVED_KINDS]
-    seen += [(at, row["skipped"]) for at, row in passes if edge < at <= now and row["skipped"] in STARVED_KINDS]
+    seen += [(at, row["skipped"]) for at, row in passes if edge <= at <= now and row["skipped"] in STARVED_KINDS]
     return max(seen, key=lambda row: row[0]) if seen else None
 
 
