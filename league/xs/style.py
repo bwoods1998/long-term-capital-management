@@ -27,16 +27,23 @@ ranked ascending by (value, column), the lot's name at rank q (0-based) has p = 
 on c is 2 p - 1: -1 the lowest name of the day, +1 the highest, 0 the middle. Read at the lot's DECISION close, as
 its cell is, and never again.
 
-A PROGRAM'S LOADING on c: L_c = sum over its Train lots of w x (2 p - 1) / sum of w, the lots whose c is undefined
-left out (`math.fsum`). THE TRAIN LOTS are the lots of the version's seen-span runs of the full universe at k 1.0
-(the Train bar's own runs: `engine.run(..., style=True)` puts each run's `block` in its result; `pooled` reads them as
-one). A program that picks uniformly at random has L_c near 0 (its standard error is about 0.58 / sqrt(lots)).
+A PROGRAM'S LOADING on c: L_c = sum over its Train lots of w x h x (2 p - 1) / sum of w x h, the lots whose c is
+undefined left out (`math.fsum`), h THE SESSIONS THE LOT WAS HELD: the closes from its entry session through the one
+before its exit (exit - entry), and through the run's last close for a lot still open then. WHAT IT HELD, NOT WHAT IT
+BOUGHT: a loading by entry weight alone counts a lot once however long it stood, so a tilted core kept to the
+maximum hold beside a small counter-tilted satellite churned every week read "not open" (six highest-volatility
+names at 0.14 for sixty sessions and two lowest at 0.04 swapped weekly: 0.24 by lots bought, 0.86 by sessions held),
+and the author sees the verdict in the brief and has four Train versions to find that. `MIN_LOTS` stays a count of
+lots. THE TRAIN LOTS are the lots of the version's seen-span runs of the full universe at k 1.0 (the Train bar's own
+runs: `engine.run(..., style=True)` puts each run's `block` in its result; `pooled` reads them as one). A program
+that picks uniformly at random has L_c near 0 (its standard error is about 0.58 / sqrt(lots)).
 
 THE RULE (`style_open`; fixed, direction-blind, and no threshold of it is a setting). A program is STYLE-OPEN when
 1. fewer than `MIN_LOTS` of its Train lots carry a characteristic, or no reading exists at all ("unmeasured": the rule
    fails CLOSED, as the receipt's own flag does for an unmeasured label); or
-2. |L_c| >= `TILT` for ANY of the four: the weighted mean rank of what it held sits in the top third or the bottom
-   third of the day's eligible names by that characteristic, which is where the study's no-skill tilt programs hold.
+2. |L_c| >= `TILT` for ANY of the four: the mean rank of what it held, weighted by dollars and by sessions held,
+   sits in the top third or the bottom third of the day's eligible names by that characteristic, which is where the
+   study's no-skill tilt programs hold.
 Otherwise it is not. The verdict names the characteristics that opened it and their signs, so the report can say
 which style a passer leans on. WHAT THIS COSTS, stated: a momentum or a low-volatility program is style-open by
 construction and is seated only by the forward route, though the study measured one direction of one tilt (the
@@ -46,8 +53,8 @@ identity, never a setting.
 
 THE BAR IS HELD AT ITS EDGE: a loading within `EDGE` of `TILT` is at it (open), so a tilt of exactly one third never
 hangs on the last bit of a float. A LOT THE READING CANNOT READ (no decision row, a column outside the bars, a weight
-that is no positive number) is counted among the run's lots and carries no characteristic: it can only bring the
-reading under `MIN_LOTS`, which opens the program.
+that is no positive number, an entry or an exit session that gives no session held) is counted among the run's lots
+and carries no characteristic: it can only bring the reading under `MIN_LOTS`, which opens the program.
 
 Evidence module (in the xs identity: `engine` imports it; a fixed judge: league/ci.py holds league/xs/ out of every
 role's reach). numpy and the standard library only; of this package, `config`'s constants.
@@ -155,9 +162,10 @@ def _ranks_at(bars: Any, t: int, derived: Any) -> dict[str, np.ndarray]:
 
 def block(bars: Any, log: Any) -> dict[str, Any]:
     """One run's style block, from the bars (`store.PanelBars`) and the holdings log (`engine.Log`) alone: {"lots":
-    the run's lots, "n": {c: the lots whose c is defined}, "weight": {c: the sum of their w}, "sum": {c: the sum of
-    w x (2 p - 1)}} for c in `CHARACTERISTICS`, each lot read at its decision close. Computed in the child at the end
-    of a run asked with `style=True`; no id, column or price is in it.
+    the run's lots, "n": {c: the lots whose c is defined}, "weight": {c: the sum of their w x h}, "sum": {c: the sum
+    of w x h x (2 p - 1)}} for c in `CHARACTERISTICS`, each lot read at its decision close and weighed by the sessions
+    it was held (h: the module docstring). Computed in the child at the end of a run asked with `style=True`; no id,
+    column or price is in it.
 
     It never fails a run: a lot it cannot read (the module docstring) is counted in "lots" and nowhere else."""
     decided: dict[int, Any] = {}
@@ -176,6 +184,13 @@ def block(bars: Any, log: Any) -> dict[str, Any]:
             t, col, w = int(lot["decided"]), int(lot["col"]), float(lot["weight"])
             if not (math.isfinite(w) and w > 0 and 0 <= t < sessions and t in decided):
                 continue
+            # h: the closes it was held at, from its entry session through the one before its exit (the run's last
+            # close for a lot still open)
+            entry, left = int(lot["entry"]), lot["exit"]
+            held = (sessions if left is None else int(left)) - entry
+            if isinstance(left, bool) or not 0 <= entry < sessions or held <= 0 or entry + held > sessions:
+                continue
+            w *= held
             if t not in at:
                 try:
                     at[t] = _ranks_at(bars, t, decided[t])
@@ -224,7 +239,7 @@ def _block_ok(block_: Any) -> bool:
         weight, total = _real(block_["weight"].get(name)), _real(block_["sum"].get(name))
         if n is None or n > lots or weight is None or total is None or weight < 0:
             return False
-        if abs(total) > weight + EDGE or (n == 0) != (weight == 0):
+        if abs(total) > weight * (1.0 + EDGE) + EDGE or (n == 0) != (weight == 0):
             return False
     return True
 

@@ -52,10 +52,12 @@ def log_of(lots, decisions) -> SimpleNamespace:
     return SimpleNamespace(lots=list(lots), decisions=list(decisions))
 
 
-def lot(lid: int, col: int, weight: float, decided: int) -> dict:
+def lot(lid: int, col: int, weight: float, decided: int, held: int | None = 1) -> dict:
+    """A holdings-log row: bought the session after `decided` and held `held` sessions (None: still open at the
+    run's end)."""
     return {"lid": lid, "col": col, "weight": weight, "decided": decided, "entry": decided + 1, "entry_at": "open",
-            "exit": None, "exit_at": None, "reason": None, "hs_open": 3e-4, "hs_close": 3e-4, "cell": 0,
-            "members": np.zeros(0, dtype=np.int32)}
+            "exit": None if held is None else decided + 1 + held, "exit_at": None if held is None else "open",
+            "reason": None, "hs_open": 3e-4, "hs_close": 3e-4, "cell": 0, "members": np.zeros(0, dtype=np.int32)}
 
 
 def hand_panel(sessions: int = 140) -> tuple[np.ndarray, np.ndarray, int]:
@@ -222,6 +224,29 @@ class TheBlock(unittest.TestCase):
         self.assertAlmostEqual(reading["loadings"]["size"], 5.0 / 18.0, delta=1e-15)
         self.assertEqual((reading["lots"], reading["n"]["size"]), (2, 2))
 
+    def test_a_lot_weighs_by_the_sessions_it_was_held(self):
+        """WHAT IT HELD, NOT WHAT IT BOUGHT: the highest name by size at 0.2 held thirty sessions and the lowest at
+        0.1 held one. Bought, the loading is 5/18 (the test above); held, the first lot is sixty times the second."""
+        got = self.block([lot(1, REF + 5, 0.2, self.t, held=30), lot(2, REF + 0, 0.1, self.t, held=1)])
+        self.assertEqual((got["lots"], got["n"]["size"]), (2, 2), "the count is of lots, as MIN_LOTS reads it")
+        self.assertAlmostEqual(got["weight"]["size"], 0.2 * 30 + 0.1 * 1, delta=1e-12)
+        self.assertAlmostEqual(got["sum"]["size"], (0.2 * 30 - 0.1 * 1) * 5.0 / 6.0, delta=1e-12)
+        self.assertAlmostEqual(style.pooled([got])["loadings"]["size"], (5.9 / 6.1) * 5.0 / 6.0, delta=1e-12)
+        # A lot still open at the run's end is held through the run's last close.
+        sessions = len(self.raw)
+        still = self.block([lot(1, REF + 5, 0.2, self.t, held=None), lot(2, REF + 0, 0.1, self.t, held=1)])
+        self.assertAlmostEqual(still["weight"]["size"], 0.2 * (sessions - (self.t + 1)) + 0.1, delta=1e-12)
+        # A lot whose sessions cannot be read is counted and carries nothing (it can only open the program).
+        for broken in ({"entry": None}, {"exit": self.t + 1}, {"exit": self.t}, {"exit": sessions + 5}, {"entry": -1},
+                       {"exit": True}):
+            row = {**lot(1, REF + 5, 0.2, self.t, held=30), **broken}
+            got = self.block([row, lot(2, REF + 0, 0.1, self.t)])
+            self.assertEqual((got["lots"], got["n"]["size"]), (2, 1), broken)
+            self.assertAlmostEqual(got["weight"]["size"], 0.1, delta=1e-15)
+        no_key = lot(1, REF + 5, 0.2, self.t)
+        del no_key["entry"]
+        self.assertEqual(self.block([no_key])["n"]["size"], 0)
+
     def test_the_block_holds_counts_and_sums_and_nothing_that_names_a_holding(self):
         got = self.block([lot(1, REF + 5, 0.2, self.t), lot(2, REF + 0, 0.1, self.t)])
         self.assertEqual(json.loads(json.dumps(got)), got, "plain counts and sums: it is stored as it is")
@@ -235,7 +260,11 @@ class TheBlock(unittest.TestCase):
         raw, adj = self.raw.copy(), self.adj.copy()
         raw[self.t + 1:], adj[self.t + 1:] = 1e9, 1e-9                 # every later row changed
         self.assertEqual(self.block(lots, raw=raw, adj=adj), before)
-        self.assertEqual(self.block(lots, raw=raw[:self.t + 1], adj=adj[:self.t + 1]), before, "nor is one needed")
+        # ... nor is one needed for a rank: with the rows cut at the lots' exit (the sessions they were held are the
+        # log's own figures, inside the run) the block is the same.
+        self.assertEqual(self.block(lots, raw=raw[:self.t + 3], adj=adj[:self.t + 3]), before, "nor is one needed")
+        cut = self.block(lots, raw=raw[:self.t + 1], adj=adj[:self.t + 1])
+        self.assertEqual((cut["lots"], cut["n"]["size"]), (2, 0), "a lot entered after the run's last session is unread")
         adj[self.t, REF + 0, 3] *= 1.5                                 # the decision close itself IS read: the
         moved = self.block(lots, raw=raw, adj=adj)                     # quietest name's last return is now the widest
         self.assertAlmostEqual(moved["sum"]["vol"], 0.2 * (1.0 / 2.0) + 0.1 * (5.0 / 6.0), delta=1e-15)
@@ -324,6 +353,38 @@ class ThePickers(unittest.TestCase):
         order = np.argsort(np.where(np.isfinite(values), values, np.inf), kind="stable")[:int(np.isfinite(values).sum())]
         k = len(order) // 3
         return order[-k:] if top else order[:k]
+
+    def test_a_tilted_core_held_long_beside_a_churned_counter_tilt_is_open(self):
+        """The review's evidence-1, on hand-built holdings: six of the HIGHEST-volatility names at 0.14 each, held
+        sixty sessions (84% of the sleeve for as long as the House lets a lot stand), beside two of the LOWEST at
+        0.04 swapped every week. By what it BOUGHT the churned satellite outvotes the core and the program read not
+        open (and could be seated on an XS1 pass); by what it HELD it is a high-volatility program."""
+        lots: list[dict] = []
+        weeks = self.decisions[::2]                                   # four sessions apart: a week of this panel
+        for i, decision in enumerate(weeks):
+            values = self.values[self.decisions.index(decision)]
+            t = decision["t"]
+            if i == 0:                                                # the core: bought once, kept to the maximum hold
+                lots += [lot(len(lots), int(col), 0.14, t, held=60) for col in self.third(values["vol"], True)[-6:]]
+            week = 4 if t + 1 + 4 <= self.SESSIONS else None          # (the last week's are still open at the end)
+            lots += [lot(len(lots), int(col), 0.04, t, held=week)
+                     for col in self.third(values["vol"], False)[2 * (i % 3):][:2]]   # the satellite: new names a week
+        self.assertEqual(len(lots), 6 + 2 * len(weeks))
+        self.assertGreaterEqual(len(lots), style.MIN_LOTS)
+        got = style.style_open(style.pooled([style.block(self.bars, log_of(lots, self.decisions))]))
+        self.assertEqual((got["open"], got["why"]), (True, style.OPEN), got)
+        self.assertIn(["vol", 1], got["tilts"])
+        self.assertGreater(got["loadings"]["vol"], 0.6, "what it held: the core, by a wide margin")
+        self.assertEqual(style.seat_refusal(got)[:len(style.OPEN)], style.OPEN, "no seat on an XS1 pass alone")
+        # THE SAME LOTS BY ENTRY WEIGHT ALONE (every lot one session: what the rule read before): under the bar.
+        once = [{**row, "exit": row["entry"] + 1} for row in lots]
+        bought = style.style_open(style.pooled([style.block(self.bars, log_of(once, self.decisions))]))
+        self.assertLess(abs(bought["loadings"]["vol"]), style.TILT, "by lots bought the satellite hides the core")
+        self.assertFalse(["vol", 1] in bought["tilts"])
+        # Without the satellite the core alone reads open either way.
+        core = [row for row in lots if row["weight"] > 0.1]
+        alone = style.pooled([style.block(self.bars, log_of(core, self.decisions))])
+        self.assertGreater(alone["loadings"]["vol"], 0.8)
 
     def test_a_uniform_picker_is_not_style_open(self):
         got = self.verdict(lambda i, values: np.arange(REF, self.m))

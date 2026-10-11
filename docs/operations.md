@@ -181,8 +181,9 @@ rules, the receipt is pinned as built):
 1. **A STYLE-OPEN program takes no live seat on an XS1 pass alone.** The study measured that a no-skill tilt to a
    style that happened to win the holdout passes far above the owner's wall. So the House computes each panel
    program's loadings on size, beta, 12-1 momentum and volatility from its Train holdings (`league/xs/style.py`: a
-   lot's rank among the day's eligible names at its decision close; a program's loading is the weighted mean over
-   its Train lots) and marks it style-open by one fixed, tested rule (any loading at or beyond the rule's tilt, or
+   lot's rank among the day's eligible names at its decision close; a program's loading is the mean over its Train
+   lots weighted by each lot's dollars AND by the sessions it was held: what the program held, not what it bought,
+   so a tilted core kept for months beside a small counter-tilted satellite churned weekly is read as the core) and marks it style-open by one fixed, tested rule (any loading at or beyond the rule's tilt, or
    too few lots to read). **A style-open passer is RECORDED AND SHADOWED, NEVER SEATED:** the look says passed with
    seat "style-open", the family takes no band and no proof, and the report names it and why. Its way to a seat is
    the forward route. The rule is holdings-based and direction-blind; its cost, stated: a momentum or a low-volatility
