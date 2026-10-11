@@ -14,8 +14,8 @@ THE ADJ VINTAGE (4.2): `adj` of one asset is always ONE fetch's series. The dail
 `INCREMENTAL_SESSIONS` sessions of every active asset; an asset whose adj/raw close ratios on the overlap equal the
 store's WITHIN THE VENDOR'S CENTS (`league.xs.config.rounding_bound`: the adjustment=all series is served rounded to
 the cent, so two readings of one unrestated series differ by nothing and two a dividend restated by more than the
-rounding) takes the window's rows; any other (a dividend or split restated its history, a bar came or went) is
-refetched whole in the same run and its `vintage` set to today. A whole refetch of every asset (`full`) runs when
+rounding) takes the window's rows; any other (a dividend or split restated its history, a bar came or went, a raw
+price of the overlap was revised) is refetched whole in the same run and its `vintage` set to today. A whole refetch of every asset (`full`) runs when
 `full_at` is older than `FULL_EVERY_DAYS`; if a call still fails after its `TRIES` it writes nothing new, the run
 falls back to the incremental, and it is tried again the next night (`full_at` does not move; two nights running is
 an alarm). A raw price that a refetch changed is counted in `revisions` (an alarm above `REVISIONS_ALARM`; a volume
@@ -178,8 +178,16 @@ def fetch_asof(gateway: Any, symbols: Sequence[str], start: str, end: str, *, ad
                 seen[stamp] = {"t": stamp, **{k: row.get(k) for k in RAW_FIELDS}}
         token = answer.get("next_page_token") if isinstance(answer, Mapping) else None
         if not token:
-            return {s: [rows[k] for k in sorted(rows, key=_when)] for s, rows in out.items()}
+            return {s: [rows[k] for k in _in_order(rows)] for s, rows in out.items()}
     raise ValueError(f"the bars did not end within {MAX_PAGES} pages")
+
+
+def _in_order(stamps: Mapping[str, Any]) -> list[str]:
+    """Bar times oldest first. The venue writes one format (RFC 3339 in UTC), which sorts as text; anything else is
+    parsed (`_when`)."""
+    if all(len(s) == 20 and s.endswith("Z") for s in stamps):
+        return sorted(stamps)
+    return sorted(stamps, key=_when)
 
 
 def _when(stamp: str) -> dt.datetime:
@@ -498,10 +506,9 @@ def incremental(root: str | Path, gateway: Any, last: dt.date, *, assets: Mappin
             continue
         k, w = grid.col[aid], window.col[aid]
         if not ratios_equal(grid.raw[start:n_old, k], grid.adj[start:n_old, k], window.raw[:overlap, w],
-                            window.adj[:overlap, w]):
-            again.add(aid)
+                            window.adj[:overlap, w]) or _revised(grid.raw[start:n_old, k], window.raw[:overlap, w]):
+            again.add(aid)  # restated, or the tape itself revised: one fetch's series again, counted below
             continue
-        revisions += _revised(grid.raw[start:n_old, k], window.raw[:overlap, w])
         grid.raw[start:, k] = window.raw[:, w]
         grid.adj[start:, k] = window.adj[:, w]
     vintage = {}
