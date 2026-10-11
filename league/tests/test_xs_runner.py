@@ -331,7 +331,7 @@ class TheLiveChildPlansTheGymsOrders(fx.EngineCase):
 
     def test_every_called_decision_and_every_standing_day_of_a_run(self):
         whole = fx.panel()
-        bars = fx.no_bar(whole, fx.col_of(whole, int(sorted(whole.ids)[1])), (whole.first,))   # no bar at the first fill
+        bars = fx.no_bar(whole, fx.col_of(whole, int(sorted(whole.ids)[1])), (whole.first,))   # none at the first fill
         result, log = self.run_log(fx.Core.load_program(CODE, name="p"), bars, calls=True)
         state: dict[str, Any] = {}
         child.handle("load", {"key": "p", "code": CODE, "params": {}, "name": "p"}, state)

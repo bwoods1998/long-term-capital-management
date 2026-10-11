@@ -52,6 +52,7 @@ Evidence module (in the xs identity).
 
 from __future__ import annotations
 
+import bisect
 import json
 import math
 from typing import Any, Mapping, Sequence
@@ -164,6 +165,24 @@ def _sd(values: Sequence[float]) -> float | None:
     return math.sqrt(math.fsum((v - mean) ** 2 for v in values) / (n - 1))
 
 
+def _held(daily: Sequence[Sequence[Any]], lots: Sequence[Mapping[str, Any]]) -> list[int]:
+    """The lots held at each session's close (bought on or before it, not yet sold by it)."""
+    days = [str(row[0]) for row in daily]
+    steps = [0] * (len(days) + 1)
+    for lot in lots:
+        entry, leave = str(lot.get("entry_day")), lot.get("exit_day")
+        first = bisect.bisect_left(days, entry)
+        last = len(days) if leave in (None, "") else bisect.bisect_left(days, str(leave))
+        if first < last:
+            steps[first] += 1
+            steps[last] -= 1
+    out, now = [], 0
+    for step in steps[:-1]:
+        now += step
+        out.append(now)
+    return out
+
+
 def summarize(daily: Sequence[Sequence[Any]], lots: Sequence[Mapping[str, Any]],
               picks: Sequence[Mapping[str, Any]], capital: Any, *,
               beside: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -181,11 +200,7 @@ def summarize(daily: Sequence[Sequence[Any]], lots: Sequence[Mapping[str, Any]],
     sum_x, sum_bench, sum_w = math.fsum(x), math.fsum(bench), math.fsum(w)
     closed = [lot for lot in lots if lot.get("exit_day") not in (None, "")]
     by_date = close_dates(lots, capital)
-    held = []
-    for row in daily:
-        day = str(row[0])
-        held.append(sum(1 for lot in lots if str(lot.get("entry_day")) <= day
-                        and (lot.get("exit_day") in (None, "") or day < str(lot.get("exit_day")))))
+    held = _held(daily, lots)
     called = [p for p in picks if p.get("called")]
     costs, gross, delta = beside.get("costs"), beside.get("gross"), beside.get("delta")
     years = max(days, 1) / YEAR_SESSIONS

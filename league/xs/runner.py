@@ -7,8 +7,8 @@ As E1's (amendment A3): every panel run is ON THE HOUSE, the program inside the 
 opens the store (with E1's gate capability for a sealed window), learns NEEDS through the child and re-parses them,
 builds the `store.Slice` (run key `run_sha|window|first run day`, D8), and sends
 `decider.kind("panel", "run", {"code", "params", "name", "bars": PanelBars, "k", "capital", "placebos", "seed",
-"calls", "style", "nice"}, budget_seconds=...)`. The CHILD (league/xs/child.py) loads the program and calls `run_bars`. A
-program never reaches the store, an aid or a symbol, and the store never leaves the House.
+"calls", "style", "nice"}, budget_seconds=...)`. The CHILD (league/xs/child.py) loads the program and calls
+`run_bars`. A program never reaches the store, an aid or a symbol, and the store never leaves the House.
 
 IN-PROCESS (the child's; tests call it directly):
 

@@ -139,6 +139,15 @@ class Log:
         raise KeyError(f"the log holds no decision at the close of session {t}")
 
 
+def build_ctx(inputs: Any, derived: Any) -> Any:
+    """`ctx.build(inputs)`, the ONE constructor of what a program sees (the Gym's engine and the live child both call
+    it here). The decision's own `Derived` is handed over when `ctx.build` takes it, so the eligible set is not
+    derived twice; a `build` of the published signature alone derives it again, to the same ctx."""
+    if "derived" in inspect.signature(_ctx.build).parameters:
+        return _ctx.build(inputs, derived=derived)
+    return _ctx.build(inputs)
+
+
 # --------------------------------------------------------------------------------------------- the KEEP rule
 def _cents(value: Decimal) -> Decimal:
     return value.quantize(_e1.CENT, rounding=ROUND_DOWN)
@@ -567,7 +576,7 @@ class _Account:
         rows = [{"lid": lot.lid, "id": lot.slot, "pending": False} for lot in self.lots.values()]
         orders: list[dict[str, Any]] = []
         if called:
-            ctx = _ctx.build(inputs)
+            ctx = build_ctx(inputs, derived)
             ctx_sha = hashlib.sha256(_ctx.ctx_bytes(ctx)).hexdigest()
             if self.calls is not None:
                 self.calls.append({"t": j, **book})
@@ -641,7 +650,8 @@ def _tables_sha() -> str:
         "sleeve": str(config.XS_SLEEVE_USD), "min_name": str(config.MIN_NAME_USD),
         "position_share": str(config.POSITION_SHARE), "risk_weight": str(config.RISK_WEIGHT),
         "names": [config.MIN_NAMES, config.MAX_NAMES, config.MAX_WEIGHT], "caps": [config.MAX_BUYS, config.MAX_SELLS],
-        "rung": config.RUNG, "rungs": {k: [[least, list(groups)] for least, groups in v] for k, v in config.RUNGS.items()},
+        "rung": config.RUNG,
+        "rungs": {name: [[least, list(groups)] for least, groups in rows] for name, rows in config.RUNGS.items()},
         "cells": [config.MIN_CELL, config.SMALL_CELL, config.CELL_SECTOR, config.CELL_BETA],
         "derive": [config.DERIVE_SESSIONS, config.MIN_VALID, config.MOM_SKIP, config.MOM_BACK, config.MEMBER_AHEAD],
         "stress": [config.STRESS_SPREAD, config.STRESS_FEES], "vanish": [config.VANISH_SESSIONS, config.VANISH_HAIRCUT],
@@ -822,5 +832,5 @@ def run_isolated(program: Any, bars: Any, *, cfg: EngineConfig = EngineConfig(),
         return results.failed(str(getattr(program, "name", "program")), f"{type(exc).__name__}: {exc}")
 
 
-__all__ = ["EngineConfig", "Log", "plan_orders", "refused_whole", "ratio_tolerance", "split_of", "look_spans", "run",
-           "run_isolated", "ORDER_CAP"]
+__all__ = ["EngineConfig", "Log", "build_ctx", "plan_orders", "refused_whole", "ratio_tolerance", "split_of",
+           "look_spans", "run", "run_isolated", "ORDER_CAP"]

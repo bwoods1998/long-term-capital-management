@@ -121,7 +121,8 @@ def _seed(text: str) -> int:
 
 
 def look_seed(receipt_sha256: str, code_sha256: str) -> int:
-    """The sealed look's seed: int.from_bytes(sha256(`LOOK_SEED` filled).digest()[:16], "big"). Fixed before the look."""
+    """The sealed look's seed: int.from_bytes(sha256(`LOOK_SEED` filled).digest()[:16], "big"). Fixed before the
+    look."""
     return _seed(LOOK_SEED.format(receipt=str(receipt_sha256), code=str(code_sha256)))
 
 
@@ -415,8 +416,8 @@ def _rung(log: Any, rung: str | None) -> str:
     found = {str(row["derived"].rung) for row in getattr(log, "decisions", None) or ()
              if getattr(row["derived"], "rung", None) is not None}
     if found - {wanted}:
-        raise ValueError(f"the log's cells are rung {', '.join(sorted(found))}, not {wanted}: a residual is read on the "
-                         "cells its lots were given")
+        raise ValueError(f"the log's cells are rung {', '.join(sorted(found))}, not {wanted}: a residual is read on "
+                         "the cells its lots were given")
     return wanted
 
 

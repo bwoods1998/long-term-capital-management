@@ -1204,6 +1204,16 @@ class ThePooledReading(EngineCase):
         self.assertLess(abs(results.nw_t(slow)), abs(results.nw_t(slow, lag=0)))
 
 
+class TheCtxBuilder(unittest.TestCase):
+    def test_the_decisions_own_derived_is_handed_over_when_build_takes_it(self):
+        seen: list[Any] = []
+        with mock.patch.object(ctx, "build", lambda inputs, derived=None: seen.append((inputs, derived)) or "ctx"):
+            self.assertEqual(engine.build_ctx("inputs", "derived"), "ctx")
+        with mock.patch.object(ctx, "build", lambda inputs: seen.append((inputs,)) or "ctx"):
+            self.assertEqual(engine.build_ctx("inputs", "derived"), "ctx")
+        self.assertEqual(seen, [("inputs", "derived"), ("inputs",)])
+
+
 class TheDoubleIsTheContract(unittest.TestCase):
     """The doubles' cells are the pre-registration's 3.3: the study's own vector (CH) holds them."""
 

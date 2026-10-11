@@ -107,7 +107,7 @@ def _decide(payload: Mapping[str, Any], runners: Mapping[str, Any]) -> dict[str,
             budget = float(inputs.budget)
             ctx = ctx_sha = None
             if called:
-                ctx = C.build(inputs)
+                ctx = E.build_ctx(inputs, derived)
                 ctx_sha = hashlib.sha256(C.ctx_bytes(ctx)).hexdigest()
         except Exception as exc:  # noqa: BLE001 - one job's inputs never cost the batch
             results[key] = {**row, "failed": True, "error": f"ctx: {type(exc).__name__}: {str(exc)[:300]}"}

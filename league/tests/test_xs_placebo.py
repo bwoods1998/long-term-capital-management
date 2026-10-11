@@ -417,7 +417,8 @@ class TheAccounting(unittest.TestCase):
     def test_it_fails_closed_on_a_log_it_cannot_read(self):
         bars, log = self.data.case("V2")
         good = log.lots[0]
-        for change, words in (({"col": 24}, "column"), ({"weight": float("nan")}, "weight"), ({"weight": 0.0}, "weight"),
+        for change, words in (({"col": 24}, "column"), ({"weight": float("nan")}, "weight"),
+                              ({"weight": 0.0}, "weight"),
                               ({"entry": good["decided"]}, "sessions"), ({"exit": good["entry"], "exit_at": "open"},
                                                                          "entry session"),
                               ({"exit": 444, "exit_at": "open"}, "exit session"), ({"entry_at": "noon"}, "entry at"),
