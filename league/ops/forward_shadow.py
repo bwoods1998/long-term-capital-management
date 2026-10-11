@@ -43,9 +43,9 @@ use `math.fsum`.
 
 THE NIGHT (`Shadow.night`): `preflight`; `forward_register.sync`; `engine_id` (a new label: one `engine_moved` event,
 and that night every active program's whole history is written again under the new id; rows of an older id stay and
-are never read as the current series); `marks`; `forward_twins.begin`; `controls`; `finals`; `due()` in order until the child
-seconds spent reach `cpu_seconds_night` or the clock is within 300 s of the next session's 09:00 ET (the rest are
-`stale`: a `budget_hit` event, once a night); `forward_twins.on_run` after each `write`; THE RETRY;
+are never read as the current series); `marks`; `forward_twins.begin`; `controls`; `finals`; `due()` in order until
+the child seconds spent reach `cpu_seconds_night` or the clock is within 300 s of the next session's 09:00 ET (the
+rest are `stale`: a `budget_hit` event, once a night); `forward_twins.on_run` after each `write`; THE RETRY;
 `forward_twins.finish`; one `fwd_runs` row (`programs` = the programs whose run completed THAT NIGHT, whichever start
 of the job ran them: what the registry's suspect rule reads beside `run_failed`, which is attributed the same way;
 `sessions`, `errors`, `stale` and `seconds` are this start's own: the run sessions it recomputed, what it left, the
@@ -109,15 +109,16 @@ ex-days as every holder's, so "same" there would name the routine case as the no
 
 The receipt: {through, engine, programs, sessions, new_days, restated, checks, stale, errors, data_failed,
 disqualified, retried, budget_hit, seconds, controls, twins, head, finals, register, marks, house}: counts and
-verdicts, never a program's figure. Every event payload and receipt text holds ids, counts, dates and class names only (a
-decimal figure in a failure's text is masked).
+verdicts, never a program's figure. Every event payload and receipt text holds ids, counts, dates and class names
+only (a decimal figure in a failure's text is masked).
 
 THE HOUSE'S OWN FAILURES ARE SAID ONCE A NIGHT (`house_failures`; the job raises ONE `ctx.alert("warning", ...)` for
 them). What a night leaves no event for would else be read by nobody: `house` (in `errors`: the programs left without
 rows by a write the forward store refused, by a retry with no fresh child, or by failing twice on a night no other
 program's run completed), the controls left without rows by anything but the data, and each step of the night that
 raised (the registry's sync, the audit marks, the controls, the final checkpoints, the twins). The data's failures
-and a program that failed alone are not in it: they have their events, and league/ops/forward_report.py's alarms read those.
+and a program that failed alone are not in it: they have their events, and league/ops/forward_report.py's alarms
+read those.
 
 Standard library and numpy only.
 """
