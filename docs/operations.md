@@ -13,11 +13,12 @@ is [archive/docs/operations.md](../archive/docs/operations.md).
 The owner's goal of Oct 10, 2026, on the House's side: agent programs trade long-only ETFs (stocks later, E3) with real
 money through the House's own **EquityBook** (`league/equity/live.py`; its tables `eq_lots`, `eq_orders`, `eq_fills`,
 `eq_intents`, `eq_bars`, `eq_activities`, `eq_exports`, `eq_instances` in `live.sqlite`). The lane's code is
-`league/equity/` (its own identity, `equity_fingerprint`: an equity change never resets the options evidence), its swarm
+`league/equity/` (its own identity, `equity_fingerprint`: an equity change never resets the options evidence; see **The
+equity identity** below for what moves it), its swarm
 side `league/swarm/elane.py`, its contract `league/equity/INTERFACES.md` and `league/equity/EQUITY.md`. E1 deploys with
 `equity_money.enabled` TRUE (the captain's A10.2: the switch ships on), `elane.mode` "off" (the captain sets "gate" with
-set_swarm.py once the deploy is verified) and the S1 receipt pinned; nothing trades until a program passes its sealed
-look AND the stock paper proof's BUY stage passes. In E1 the
+set_swarm.py once the deploy is verified) and the S2 screen's receipt pinned for both lanes (A11); nothing trades until
+a program passes its sealed look AND the stock paper proof's BUY stage passes. In E1 the
 lane's programs are the three captain-seeded BETA programs (`seed-overnight-spy`, `seed-overnight-qqq`,
 `seed-reversal-index`: agent-written, judged by the swarm's screen like any family, and said plainly to be seeded);
 architect and researcher births in the beta and equity lanes are E2.
@@ -31,11 +32,34 @@ architect and researcher births in the beta and equity lanes are E2.
 - `STOCK_BUYS_REAL` (gateway/wrangler.jsonc): deployed "on" with PR #532; while the House's `equity_money.enabled` is
   false nothing sends a buy, so the House's switch is the one that matters. "off" closes the gateway's route (closes go
   either way).
-- The screen (A9): the share screen S1's receipt, copied verbatim to `docs/benchmarks/equity_screen_1.json` and pinned in
-  policy.json's `elane.screens`; with no pinned receipt every equity look is refused (no look spent). The House screen
-  is to be S2 (A11: receipt `equity_screen_2.json`); until S2's code lands S1+F1 stays pinned and the seeds' looks wait
-  for it; the captain swaps the pin before ON. Every look reads 2026-01-02 through 2026-10-09 (A12: exactly the 194
-  holdout sessions the screens are calibrated on; later days are forward days only).
+- The screen: **S2 is the gate** (the captain's A11; `league/equity/screen.py` `floor_s2`, `verdict_s2`). Its receipt,
+  the study's, is copied verbatim to `docs/benchmarks/equity_screen_2.json` (sha256 `45634dfc...`) and pinned for BOTH
+  lanes in policy.json's `elane.screens` (`"screen": "S2"`, `c_R` 0.0, `c_H_floor` 0.95, `c_H_margin` 0.05, `c_X` 0.85,
+  `fp_cap` 0.12); with no pinned receipt every equity look is refused (no look spent), and a receipt file at hand
+  whose bytes are not the pinned sha256 refuses the screen too (`elane._receipt`; the file never reaches the box, where
+  CI's pin of the exact commit stands for it). The rule, per program:
+  - Validation's pre-check (calendar 2025, 250 sessions): 20 round trips or 120 invested days, and a P&L above zero.
+  - The one sealed look passes when the holdout's P&L is above zero AND its holdout-only daily t is at least c_H,used.
+    **c_R is 0**: the pooled t over Validation and the holdout is reported and is never a bar.
+  - c_H,used = max(**0.95** (the receipt's floor), c_pF1 + **0.05** (its margin)) on the 0.01 grid. c_pF1 is the
+    program's OWN 12% point of the holdout-only t, counted exactly (no seeds) over every placement of a 250-session
+    Validation and a 194- or 251-session holdout that share no session, on the program's own 2016-19 and 2022-24
+    series. A program with too little of that history, or a c_H,used above 5.00, cannot be looked at (refused before
+    the look; nothing spent).
+  - **The look cap is 2026-10-09** (A12): every look reads 2026-01-02 through 2026-10-09, exactly the 194 holdout
+    sessions the receipt is calibrated on; later days are forward days only. The look waits while the daily store ends
+    before the cap (a shorter holdout would fail the verdict's windows and spend the look).
+  - Measured (the receipt): the false-positive rate at zero edge is **at most 7.51% over the 336 cells the study
+    measured** (5.06% on the archetypes' calibration cells), none above the 12% cap, under the owner's 15% wall.
+  - **The stated cost: S2 lets more zero-edge programs pass than S1+F1 did** (1.3 to 7.3 times as many on the study's
+    worlds), so a pass under S2 is weaker evidence of edge; the live record and the pre-registered demotion rule (EDM1)
+    carry that. In exchange it finds a real edge more often (at +10% a year the study's first archetype passes 18.55%
+    of the time against 12.45%).
+  - Beside every live trade: the receipt's line with the program's own figures from its own floor (its FP at zero edge,
+    its holdout-only rate at c_H,used, its drift-kept pass rate), the S1-X label (alpha or beta, with its FP from an S1
+    floor of the same series) and the contamination sentence.
+  S1+F1 (A9; receipt `docs/benchmarks/equity_screen_1.json`, the pooled-t bar c_R 1.49) stays in code and in the
+  repository as receipt 1's screen. No lane pins it; a pin back to it would be a reviewed policy.json change.
 - The stock paper proof, STAGED (A8.7 as amended by A10.1; `league/live/paper.py` `StockPaperProof`, run by the equity
   book in its own OPEN window): stage BUY (kv `paper_proof_stock_buy`) buys a fractional SPY marketable limit on
   `alpaca-paper` from 09:30:30 ET to the 09:45 entry cut-off and passes on its fill, its lot row and the reconciled
@@ -105,13 +129,40 @@ minus twin; EDM1 demotes past 15 bp a side over 5 priced closes), each fill's sl
 the same-risk buy-and-hold over the same sessions. The `dlane` report's Done meters count from Oct 10, 2026 (the goal:
 `done.counted_from`; every earlier agent close is listed in `done.earlier`, never counted); an equity close is one lot
 fully closed, its net cash with fees and dividends, on `:r` (both meters), matched to its own twin; beside every close
-and checkpoint ride the lane's label (MARKET BETA or EQUITY), the buy-and-hold, MTE, the S1 line recorded at the
-program's look and "profit from market direction". Done is also read without the three seeded programs
-(`done.without_seeded`, A8.12). A checkpoint holding an equity close stays provisional until its lot's broker fees are
+and checkpoint ride the lane's label (MARKET BETA or EQUITY), the buy-and-hold, MTE, the screen's line recorded at the
+program's look (S2's, `fp.screen` "S2") and "profit from market direction". Done is also read without the three seeded
+programs (`done.without_seeded`, A8.12). A checkpoint holding an equity close stays provisional until its lot's broker fees are
 posted: the book reads the account's `FEE` activities (the REG and TAF rows without an order id; an option's "OPT REG",
 "OPT TAF", "ORF" rows are never an equity lot's) and posts each exit day's rows to that day's equity sales pro rata by
 proceeds (`eq_lots.info.fee_basis` "broker", the estimate kept beside); a day without a fee row five sessions on is told
 to the owner once a lot. The funnel (`league/ops/funnel.py`) counts the equity lanes apart (`equity`).
+
+**Pre-registered before the first equity close** (the captain's A14, Oct 10, 2026; the same three sentences ride in
+every `dlane` report as `done.preregistered`). They are TEXT NOW: the code that reads them comes in a later release, and
+until it lands the meters read consistency by the pinned Done rule's own measure, no reading carries the close-date
+figures and no forward rule moves a seat. The Done rule itself is unchanged.
+- Done's "live fills consistent with their replay" is read at each Done checkpoint, over its counted closes: the mean
+  fill gap against the official-price model is at most 15 bp a side AND the live and the shadow intents agree on at
+  least 95% of the counted sessions. A checkpoint that does not meet both says "not consistent" beside its P&L.
+- Every Done reading is reported beside the number of distinct close dates among its counted closes and a
+  date-clustered t of their P&L.
+- The forward seat rule is written and inactive: an incumbent with fewer than 5 real closes is never unseated, except
+  by EDM1.
+
+The official-price model is the engine's fill (the session's official open or close moved by the half-spread,
+`league.equity.engine.fill_price`: what each equity twin is priced with); the shadow intents are the same program's
+decisions replayed on the same sessions. Closes that share a close date are one cluster of the t.
+
+**The equity identity** (the captain's A13). `equity_fingerprint` hashes the EVIDENCE modules of `league/equity/` only
+(`league.swarm.evaluator.EQUITY_EVIDENCE`: `__init__`, `config`, `store`, `program`, `ctx`, `engine`, `results`,
+`runner`, `synth`, `sizing`, `screen`, `child`: what Validation, the look and a live decision execute), the four shared
+league files and the Gym modules they import. A change to one of them sends every live equity band back to the Gym for
+fresh qualification (no new try, no new look). The PLUMBING is out (`live`, `actions`, `schedule`, `families`, `bands`,
+`kinds`): a fix to the EquityBook, its clock, its corporate actions or its band plumbing retires no lineage. The cost
+stated: nothing in the identity then proves the live path matches the Gym after such a fix; the I6 ctx test
+(`test_equity_i6`) and the equity twins police it. `league/xs/` is the panel kind's slot (`kinds.KINDS["panel"]`): its
+`handle` refuses every op today, and a later cross-sectional lane is built there without touching `league/live` (the
+options fingerprint) or the equity evidence modules.
 
 **Roll back: flatten first.** In order, each step verified before the next:
 1. `elane.mode` "off" in swarm.json (no seeded birth, no equity look).

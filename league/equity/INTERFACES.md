@@ -5,10 +5,13 @@ Branch `feat/equity-e1` (worktree `~/Work/ltcm-v3/eqe1`), from `origin/main` a48
 captain. The stubs it names exist on the branch now (bodies raise `NotImplementedError("<package>: <file> <name>")`;
 their docstrings say what each must do), so every package imports every other package's names from day one.
 
-**Sources, in order of authority.** The captain's amendments A1-A9 (A9, the share screen as adopted, overrides A7;
-A8, the design review's 13 decisions, overrides any brief), then the design (DESIGN.md), then the package briefs.
-Where a brief and an amendment differ, this file already follows the amendment and says so (section 13). The share
-screen is the pinned sscreen-1010 pre-registration with A9's fixes F1, D3, D5, D6, exactly as its receipt states.
+**Sources, in order of authority.** The captain's amendments A1-A16 (a later one over an earlier: A11, the S2 screen,
+over A9's gate; A10 over A6 and A8.7; A12's look cap over A9 D6; A8, the design review's 13 decisions, over any brief),
+then the design (DESIGN.md), then the package briefs. Where a brief and an amendment differ, this file follows the
+amendment and says so (section 13). THE HOUSE'S SHARE SCREEN IS S2 (A11: sscreen2-1010, receipt 2, pinned for both
+lanes; section 9). S1+F1, the pinned sscreen-1010 pre-registration with A9's fixes F1, D3, D5, D6, stays in code as
+receipt 1's screen, pinned by no lane; A9's D3 (the lineage), its D5 pools as S2's sets restate them, and the
+no-feedback rule carry over.
 
 **Hard rules for every package.** No private figure is committed: no census or market result, no price or return from
 any real year, no Phase A number, no price scale from the census; rule-level simulation figures are allowed. No

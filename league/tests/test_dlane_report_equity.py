@@ -216,6 +216,35 @@ class WhatRidesBeside(EquityFixture):
         self.assertNotIn("fp_why", row)
         self.assertIn("no screen line", R.EquityScreens(self.store).of("p-s2", 2)["fp_why"], "another version: no look")
 
+    def test_a14s_pre_registered_text_rides_in_every_report_and_in_the_operators_page(self):
+        """A14 (the captain's pre-registration, before the first equity close): Done's "fills consistent" reading (15
+        bp a side AND 95% of the counted sessions, at each checkpoint), the close-date figures beside every reading
+        and the inactive forward seat rule are in the report, verbatim, and in docs/operations.md in the same words;
+        the status says plainly that none of the three is computed yet."""
+        import re
+        from pathlib import Path
+
+        self.eq_family("seed-overnight-spy")
+        self.eq_close("seed-overnight-spy")
+        pre = self.report()["done"]["preregistered"]
+        self.assertEqual(pre, R.PREREGISTERED)
+        self.assertEqual((pre["id"], pre["registered"], pre["consistency"], pre["beside_done"], pre["forward_seat_rule"]),
+                         ("A14", "2026-10-10", R.A14_CONSISTENCY, R.A14_BESIDE_DONE, R.A14_SEAT_RULE))
+        for words in ("live fills consistent with their replay", "at each Done checkpoint", "at most 15 bp a side",
+                      "official-price model", "at least 95% of the counted sessions", "not consistent"):
+            self.assertIn(words, R.A14_CONSISTENCY)
+        for words in ("distinct close dates", "date-clustered t"):
+            self.assertIn(words, R.A14_BESIDE_DONE)
+        for words in ("written and inactive", "fewer than 5 real closes", "never unseated", "except by EDM1"):
+            self.assertIn(words, R.A14_SEAT_RULE)
+        self.assertIn("not computed yet", pre["status"])
+        page = re.sub(r"\s+", " ", (Path(R.__file__).resolve().parents[2] / "docs" / "operations.md").read_text())
+        for sentence in (R.A14_CONSISTENCY, R.A14_BESIDE_DONE, R.A14_SEAT_RULE):
+            self.assertIn(sentence, page)
+        self.assertIn("A14", page)
+        # The pinned Done rule is not this text's to change.
+        self.assertEqual(self.report()["rule"]["sha256"], dlane.DONE["rule_sha256"])
+
     def test_done_is_read_with_and_without_the_three_seeded_programs(self):
         for fid in ("seed-overnight-spy", "agent-one"):
             self.eq_family(fid)

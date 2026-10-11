@@ -147,6 +147,15 @@ THE GOAL OF OCT 10, 2026 AND THE EQUITY LANES (release E1; the captain's design 
 - THE SHARED BUDGET'S CONSEQUENCE (A8.6): `equity.options_probe_room` says plainly that while the equity lane holds its
   full Probe sleeves (max_programs x sleeve_share x E, open risk at the ETF weight) the options Probe lane has only
   the rest of the $400 window: about $400 - 0.15 x E, effectively off.
+- PRE-REGISTERED BEFORE THE FIRST EQUITY CLOSE (the captain's A14, Oct 10, 2026; `PREREGISTERED`, verbatim in every
+  report as `done.preregistered` and in docs/operations.md; TEXT NOW, the code in a later release): how the Done rule's
+  "live fills consistent with their replay" is read (`A14_CONSISTENCY`: the mean fill gap against the official-price
+  model at most 15 bp a side AND the live and the shadow intents agreeing on at least 95% of the counted sessions, read
+  at each Done checkpoint over its counted closes; else "not consistent" beside the P&L), what every Done reading is
+  reported beside (`A14_BESIDE_DONE`: the number of distinct close dates and a date-clustered t), and the forward
+  seat rule, written and inactive (`A14_SEAT_RULE`). None of the three is computed here yet: until its reader lands the
+  meters read consistency by the pinned rule's own measure (CONSISTENT WITH REPLAY, above), no reading carries the
+  close-date figures, and no forward rule moves a seat (`PREREGISTERED["status"]` says so in the report).
 
 Standard library only, except the Probe envelope's figures (`fast_lane.probe_budget` and `real.probe_figures` read
 `league.live.real`, whose Gym legs need numpy, as the House box has): they are an `error` entry where that cannot load.
@@ -204,6 +213,29 @@ EQUITY_DIRECTION = (
     "symbol over the same sessions, cost-free); MTE is what the program's timing added after costs. A MARKET BETA "
     "program's profit is the market's direction, not alpha, and a delta-one lane can reach Done whenever the market rises: "
     "a Done read on such closes is weak evidence of skill.")
+#: A14 (the captain's pre-registration of Oct 10, 2026, written BEFORE the first equity close so that it cannot be read
+#: after the fact; text now, its code in a later release): how the Done rule's "live fills consistent with their
+#: replay" is read, what every Done reading is reported beside, and the forward seat rule. The three sentences are in
+#: every report verbatim (`done.preregistered`) and in docs/operations.md (league/tests/test_dlane_report_equity.py
+#: holds the page to these words). The Done rule itself (DONE-RULE.md, `dlane.DONE`) is unchanged.
+A14_CONSISTENCY = (
+    "Done's \"live fills consistent with their replay\" is read at each Done checkpoint, over its counted closes: the "
+    "mean fill gap against the official-price model is at most 15 bp a side AND the live and the shadow intents agree "
+    "on at least 95% of the counted sessions. A checkpoint that does not meet both says \"not consistent\" beside its "
+    "P&L.")
+A14_BESIDE_DONE = (
+    "Every Done reading is reported beside the number of distinct close dates among its counted closes and a "
+    "date-clustered t of their P&L.")
+A14_SEAT_RULE = (
+    "The forward seat rule is written and inactive: an incumbent with fewer than 5 real closes is never unseated, "
+    "except by EDM1.")
+PREREGISTERED = {
+    "id": "A14", "registered": "2026-10-10", "before": "the first equity close",
+    "consistency": A14_CONSISTENCY, "beside_done": A14_BESIDE_DONE, "forward_seat_rule": A14_SEAT_RULE,
+    "status": "text only, not computed yet: until the reader lands the meters read consistency by the pinned Done "
+              "rule's own measure (the replay gap within its bound per program), no reading carries the close-date "
+              "figures, and no forward rule moves a seat",
+}
 #: A8.6: the shared loss budget's consequence for the options Probe lane, said in the report and the docs.
 EQUITY_PROBE_NOTE = (
     "THE LOSS BUDGET IS SHARED (A8.6): the equity lane's open Probe risk counts in the same $400 window and $800 total as "
@@ -2490,6 +2522,7 @@ def report(root: str | Path, *, settings: Mapping[str, Any] | None = None, now: 
                                  else None,
                                  "note": "agent closes before the count began: reported beside, never counted (the goal "
                                          "of Oct 10, 2026)"},
+                     "preregistered": dict(PREREGISTERED),
                      "p_done_zero_edge": zero_edge(settings),
                      "net_after_costs": {**net_after_costs(root, counted, now=now), "counted_from": _iso(count_from),
                                          "counted_note": "the meters' closes count from counted_from; the costs are the "
@@ -2694,7 +2727,8 @@ def lane_off(ctx: Any, root: Path, settings: Mapping[str, Any] | None) -> dict[s
             "alarms": [a["id"] for a in out["alarms"]], "retired": retired}
 
 
-__all__ = ["run", "report", "FILE", "CONTAMINATION", "LOOSENED", "TIGHTENED", "closes", "meter", "reading", "replay_gap",
+__all__ = ["run", "report", "FILE", "CONTAMINATION", "PREREGISTERED", "A14_CONSISTENCY", "A14_BESIDE_DONE",
+           "A14_SEAT_RULE", "LOOSENED", "TIGHTENED", "closes", "meter", "reading", "replay_gap",
            "replay_twins", "twin_records",
            "buy_and_hold", "entry_delta", "funnel", "probes", "probe_envelope", "alarms", "fee_corrections", "read_book",
            "version_of", "inception", "Lanes", "ZERO_EDGE_LABEL", "trade_screens", "ALPHA_FP", "finality",

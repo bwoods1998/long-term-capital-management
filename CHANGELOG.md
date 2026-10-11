@@ -29,6 +29,55 @@ any other deploy.
 The running House release is `20261010T214125Z-d4667186f969` (main `ac6d008b`, the no-captain automations, 21:42Z
 Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. What is built and not deployed is on branches.
 
+### Release E1, ready for review: S2 is the gate, the equity identity covers evidence only, the Done text pre-registered, on `feat/equity-e1` (unreleased; an owner deploy with the rest of E1; no further money-digest move)
+
+- **S2 is the House's share screen** (the captain's A11). Both lanes' blocks of policy.json pin receipt 2
+  (`docs/benchmarks/equity_screen_2.json`, the study's receipt copied verbatim, sha256 `45634dfc...`), and every look
+  runs S2's code (`league/equity/screen.py` `floor_s2`, `verdict_s2`, merged from `feat/equity-e1-s2`). The gate:
+  Validation's pre-check, then the one sealed look passes when the holdout's P&L is above zero and its holdout-only
+  daily t is at least c_H,used = max(the c_H floor 0.95, the program's own exact floor c_pF1 + the margin 0.05). **c_R
+  is 0**: the pooled t is reported, never a bar. The look cap is 2026-10-09 (A12: the 194 calibrated sessions).
+  Measured (the receipt): the false-positive rate at zero edge is at most 7.51% over the 336 measured cells, none above
+  the 12% cap. **The stated cost: more zero-edge programs pass than under S1+F1** (1.3 to 7.3 times as many on the
+  study's worlds), so a pass is weaker evidence of edge; the live record and EDM1 carry that. S1+F1 stays in code and
+  in the repository as receipt 1's screen; no lane pins it.
+- Fixed with it (`league/swarm/elane.py` `look`): the look ran S1's floor whatever the receipt, which S2's verdict
+  refuses AFTER the look, so the first S2 look would have been spent on a certain failure. The floor is now the pinned
+  receipt's (`screen.floor(segments, receipt=)`), kept for a version only while `screen.floor_fits` it, and a floor
+  that does not fit spends no look. The look and its events record the screen that judged them ("S2": c_H,used and
+  c_pF1), an S1 floor of the same Train-era series fills S1-X's rate beside the S2 line, and the Done report's row
+  beside an equity trade names that screen.
+- The receipt's bytes at the look: where the pinned screen's receipt file is at hand, `elane._receipt` reads it under
+  the pinned sha256 and compares its figures with the block's; a mismatch refuses the screen (the look waits, nothing
+  is spent). `docs/benchmarks/` never reaches the House box, where CI's pin of the exact commit stands for it.
+- A12 at the look: it waits while the daily store ends before 2026-10-09 (`elane._holdout_gap`): a shorter holdout
+  fails the verdict's windows and would have spent the lineage's one look.
+- **The equity identity covers the evidence modules only** (A13): `evaluator.equity_fingerprint` hashes
+  `EQUITY_EVIDENCE` (league/equity's `__init__`, `config`, `store`, `program`, `ctx`, `engine`, `results`, `runner`,
+  `synth`, `sizing`, `screen`, `child`), the four shared league files and the Gym modules they import. The plumbing
+  (`live`, `actions`, `schedule`, `families`, `bands`, `kinds`) is out, so a plumbing fix no longer sends every live
+  equity band back to the Gym; the I6 ctx test and the twins police that live and Gym agree. A CI test holds the list
+  to the import closure of the runner, the child, the screen and the engine (plus `synth`). **The panel kind's slot**:
+  `kinds.KINDS["panel"]` = `league.xs.child`, the child's runtime carries `league/xs/`, and `league/xs/child.py`
+  refuses every op until the cross-sectional lane is built there.
+- **Pre-registered before the first equity close** (A14; text now, code later; `docs/operations.md` and every `dlane`
+  report's `done.preregistered`): Done's "live fills consistent with their replay" is the mean fill gap against the
+  official-price model at most 15 bp a side AND live and shadow intents agreeing on at least 95% of the counted
+  sessions, read at each Done checkpoint; Done is reported beside the number of distinct close dates and a
+  date-clustered t; the forward seat rule is written and inactive (an incumbent with fewer than 5 real closes is never
+  unseated, except by EDM1). The Done rule itself is unchanged.
+- Protected: `league/ci.py` `PENDING_GATEWAY` gains `league/xs/` and `ltcm/broker.py`, so every file of the decider
+  child's sealed runtime is behind the updater's wall (`test_ci` holds `decider.runtime_files()` to it).
+- STILL OPEN, a gateway follow-up (gateway/ is read only in E1): `MERGE_FORBIDDEN` lacks `league/equity/`,
+  `league/swarm/elane.py`, `league/xs/` and `ltcm/broker.py`, and `gateway/test/merge.test.mjs` still reads the
+  decider's old in-function runtime tuple and finds league/live importing an unprotected `league/equity/`, so the
+  gateway CI job fails on this branch until that follow-up lands with it.
+- Proof: `test_equity_screen` (S2's conformance vectors, brute force, routing; the vectors at the committed receipt's
+  floor and margin), `test_elane` (the pin is receipt 2's bytes and figures, both lanes; a receipt file that is not
+  the pin's refuses), `test_elane_gate` (the floor by the receipt and its fit, an S2 look's record, the store's last
+  day), `test_equity_e2e` (a seeded program passes its look under the committed receipt 2), `test_equity_identity`,
+  `test_equity_isolation`, `test_equity_decider` (A13), `test_dlane_report_equity` (A14, an S2 row), `test_ci`.
+
 ### Release E1, the equity lane: ops, data, twins and the Done meter, on `feat/equity-e1` (unreleased; an owner deploy with the rest of E1)
 
 - **The data job** `equity_data` (`league/ops/equity_data.py`, registered at the House's start and daily 22:30Z, in a
@@ -48,7 +97,7 @@ Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. 
   a report that counted from the same instant); the rule itself unchanged. An equity close is one EquityBook lot fully
   closed with its net cash (fees and dividends), on `:r`, matched to its own twin (no nightly fallback: no twin is a
   replay not landed); beside every close and checkpoint its lane's label (MARKET BETA or EQUITY), the buy-and-hold, MTE,
-  the S1 line recorded at the look and "profit from market direction"; Done also read without the three seeded
+  the screen's line recorded at the look (S2's, above) and "profit from market direction"; Done also read without the three seeded
   programs (`done.without_seeded`, A8.12); the equity trades' screen lines in `fp_beside_trades.equity_trades`; the
   `equity` section with A8.6's statement that the options Probe lane is effectively off while the equity sleeves are
   full. The funnel counts the equity lanes apart (`league/ops/funnel.py` `equity`; the daily page's table is unchanged).
@@ -60,11 +109,11 @@ Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. 
   route as the House sees it). Proof: `test_equity_data`, `test_equity_twins`, `test_dlane_report_equity`,
   `test_floor_box_equity`; `test_dlane_report`'s fixtures now count from the rule's inception explicitly.
 
-### Release E1 integrated: the seven packages agree, the S1 receipt pinned, the staged stock proof, the switch on, on `feat/equity-e1` (unreleased; an owner deploy; the options execution fingerprint moves once, the money digest moves, a new equity identity)
+### Release E1 integrated: the seven packages agree, receipt 1 pinned (since replaced by receipt 2: S2, above), the staged stock proof, the switch on, on `feat/equity-e1` (unreleased; an owner deploy; the options execution fingerprint moves once, the money digest moves, a new equity identity)
 
 - The integration of the seven E1 packages (core, money, screen, book, hooks, swarm, ops) and `origin/main`. What the
   packages had built against each other's stubs now meets: `league/tests/test_equity_e2e.py` runs a seeded program from
-  its birth through Validation (the decider's "equity" kind), the S1 look under the pinned receipt, the band decision,
+  its birth through Validation (the decider's "equity" kind), the look under the pinned receipt, the band decision,
   a live session (the 16:30 decide, Monday's 15:55 close-window buy sized by `size_entry` on the House-wide cash and the
   shared budget, Tuesday's open sale), the morning audits, the twin and the Done meter, against a fake venue.
 - Fixed where they met: the decider child's sealed runtime lacked the engine's NYSE calendar (`ltcm/data`), so every
@@ -81,7 +130,8 @@ Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. 
   need both days audited); the book posts the broker's REG and TAF fees to closed lots (`info.fee_basis`), which the Done
   meter's finality waits for.
 - The captain's amendments applied at integration: A9, the study's receipt copied verbatim to
-  `docs/benchmarks/equity_screen_1.json` (sha256 `6fb84bd5...`) and pinned in policy.json for both lanes; A10.1, the
+  `docs/benchmarks/equity_screen_1.json` (sha256 `6fb84bd5...`) and pinned in policy.json for both lanes (receipt 1,
+  the S1+F1 screen: no lane pins it any more, A11 above; the file and its code stay); A10.1, the
   stock paper proof staged in the equity book's OPEN window (`paper_proof_stock_buy` gates real buys,
   `paper_proof_stock_sell` real sales, the practice sale first, a failed SELL stage alarms and stops new buys);
   A10.2, `equity_money.enabled` ships True (money digest `fdf2ac7c` -> `ad8c761b`, full digest -> `65b0e025`; the stop,
@@ -91,11 +141,9 @@ Oct 10), the gateway is `95e7a8d0` (#534, 22:20Z), and the box's updater is on. 
 - Also applied: A12, `config.LOOK_CAP` 2026-10-09 (every look reads the 194 calibrated holdout sessions); A16,
   `evaluator.adopt_equity` marks a family's recorded equity Validation verdicts stale, so a family validated but not yet
   looked at is validated again under a new equity identity instead of waiting forever (no try or look spent).
-- Not yet in E1: the S2 screen (A11: its code, its receipt's copy and pin), so S1+F1 stays pinned (fails safe; the seeds'
-  looks wait for S2) and the captain swaps before ON; A13 (the equity identity over evidence modules only, the panel
-  kind's slot) and A14 (the Done consistency text), the E1 fixer's; the gateway's `MERGE_FORBIDDEN` lacks
-  `league/equity/` and `league/swarm/elane.py` (and `ltcm/broker.py`, now in the decider child's runtime), and its decider
-  runtime test still reads the old in-function tuple, so the gateway CI job fails until a gateway follow-up.
+- Landed since (the section above): the S2 screen with its receipt's copy and pin (A11), the equity identity over the
+  evidence modules only with the panel kind's slot (A13), and the Done consistency text (A14). Still open: the
+  gateway's `MERGE_FORBIDDEN` follow-up (above).
 
 ### 22:20Z Oct 10, 2026: the stock path's races (#534), gateway `95e7a8d0`, main `3177bb14`
 
