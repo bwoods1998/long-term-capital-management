@@ -177,7 +177,7 @@ class Gate(StoreCase):
         self.assertTrue(gated.gate)
         holdout = gated.bars(["SPY"], "holdout", history=3)
         self.assertEqual((holdout.day(holdout.first), holdout.day(holdout.n - 1)), (D(2026, 1, 2), D(2026, 9, 25)))
-        self.assertEqual(holdout.first, 3)
+        self.assertEqual(holdout.first, 4, "history + 1 sessions before the first: the first decision's whole ctx")
         self.assertEqual(holdout.day(0).year, 2025, "history comes from the window before")
 
     def test_the_look_runs_to_the_last_close_capped_at_oct_9_2026(self):
@@ -186,13 +186,15 @@ class Gate(StoreCase):
         self.assertEqual(config.LOOK_CAP, D(2026, 10, 9))
         gated = EquityStore(self.root, gate=mint_equity_gate_capability(self.root, "the look"))
         look = gated.bars(["SPY"], LOOK, history=0)
-        self.assertEqual((look.day(0), look.day(look.n - 1)), (config.LOOK_FIRST, D(2026, 10, 9)))
+        self.assertEqual((look.day(look.first), look.day(look.n - 1)), (config.LOOK_FIRST, D(2026, 10, 9)))
         self.assertEqual(look.window, LOOK)
-        self.assertEqual(look.n, 194)
+        self.assertEqual((look.first, look.n - look.first), (1, 194), "the first decision's own session, then the 194")
+        self.assertEqual(look.day(0), D(2025, 12, 31), "a Validation day: the session the first decision closes on")
         later = Path(self.dir.name) / "later"
         synth.synthetic_store(later, symbols=("SPY",), start=D(2025, 12, 1), end=D(2027, 1, 29), gate=True)
         capped = EquityStore(later, gate=mint_equity_gate_capability(later, "the look")).bars(["SPY"], LOOK, history=0)
-        self.assertEqual((capped.day(0), capped.day(capped.n - 1), capped.n), (config.LOOK_FIRST, D(2026, 10, 9), 194))
+        self.assertEqual((capped.day(capped.first), capped.day(capped.n - 1), capped.n - capped.first),
+                         (config.LOOK_FIRST, D(2026, 10, 9), 194))
 
     def test_validation_history_never_reads_a_sealed_day_and_train_spans_stay_in_train(self):
         store = EquityStore(self.root)
@@ -213,7 +215,7 @@ class Slices(StoreCase):
         store = EquityStore(self.root)
         bars = store.bars(["spy", "QQQ"], "validation", history=4, start=D(2025, 1, 3), end=D(2025, 1, 31))
         self.assertEqual(bars.symbols, ("SPY", "QQQ"))
-        self.assertEqual((bars.first, bars.day(bars.first), bars.day(bars.n - 1)), (4, D(2025, 1, 3), D(2025, 1, 31)))
+        self.assertEqual((bars.first, bars.day(bars.first), bars.day(bars.n - 1)), (5, D(2025, 1, 3), D(2025, 1, 31)))
         self.assertEqual(bars.raw["SPY"].shape, (bars.n, 5))
         self.assertEqual(bars.adj["SPY"].shape, (bars.n, 4))
         gap = [bars.day(i) for i in range(bars.n)].index(D(2025, 1, 6))

@@ -56,7 +56,7 @@ def execution_fingerprint(repo: Path | None = None) -> str:
 
 #: THE EQUITY IDENTITY (release E1, A8.8 as amended by the captain's A13; owner: core): the store kv key of the adopted
 #: equity fingerprint, and every league/gym module the evidence modules import (hashed with them, listed explicitly; a
-#: test holds the list to the imports).
+#: test holds the list to the imports). What they import outside league/ is `EQUITY_CALENDAR_FILES`, below.
 EQUITY_KEY = "equity_evaluator"
 EQUITY_GYM_FILES = ("league/gym/__init__.py", "league/gym/safety.py", "league/gym/runtime.py", "league/gym/events.py")
 #: THE EQUITY EVIDENCE (A13): the modules of league/equity whose code decides what a program's evidence IS, hashed into
@@ -73,6 +73,16 @@ EQUITY_EVIDENCE = ("__init__", "config", "store", "program", "ctx", "engine", "r
                    "screen", "child")
 EQUITY_EVIDENCE_ROOTS = ("runner", "child", "screen", "engine")
 EQUITY_EVIDENCE_EXTRA = ("synth",)
+#: THE CALENDAR'S FILES: what the evidence modules import of this repository OUTSIDE league/, hashed with them. The
+#: store's session list and the ctx's calendar read the NYSE calendar of `ltcm.data` (league/equity/store.py
+#: `nyse_sessions`, league/equity/ctx.py `calendar_around`): a holiday or an early-close rule changed there changes
+#: the sessions a Validation or a sealed look runs over and the ctx's half_day, session_of_month and
+#: sessions_to_month_end, so a band proof must not outlive it. The three files are everything importing `ltcm.data`
+#: executes (it imports `ltcm.broker`; both run ltcm/__init__.py), the same three league/equity/kinds.py `RUNTIME`
+#: gives the child. A CI test holds the list equal to that import closure (league/tests/test_equity_fx_swarm.py), so
+#: the evidence cannot come to import another file of the repository unhashed. They are not plumbing: from E1 on a
+#: change to any of them moves the equity identity, as an evidence module's does.
+EQUITY_CALENDAR_FILES = ("ltcm/__init__.py", "ltcm/broker.py", "ltcm/data/__init__.py")
 #: An equity family's state keys an adoption archives and clears beside `SELECTION_KEYS` (its evidence under the old
 #: engine: the Validation runs' spread and the screen's floor, both run again before any look). Its tries and its look
 #: (`elane_try`, `elane_look`) are never cleared: a lineage's spent try and look stay spent. Nor is THE LOOK'S LINEAGE
@@ -98,14 +108,15 @@ def is_equity_family(fam: Mapping[str, Any] | None) -> bool:
 def equity_fingerprint(repo: Path | None = None) -> str:
     """THE EQUITY LANE's evidence identity (A8.8 as amended by A13; owner: core): sha256 over the EVIDENCE modules of
     league/equity (`EQUITY_EVIDENCE`: league/equity/<name>.py, each of them, and no other file of the package), the 4
-    `LEAGUE_FILES` and `EQUITY_GYM_FILES`, path and bytes, in path order (as `execution_fingerprint`). Equity bands bind
-    to it as options bands bind to `execution_fingerprint`; it never moves for a league/live or options-only change,
-    nor for league/equity's plumbing (live, actions, schedule, families, bands, kinds), nor for league/xs. A release
-    that lacks an evidence module has no identity (the read raises: no band proof, no look)."""
+    `LEAGUE_FILES`, `EQUITY_GYM_FILES` and the calendar they read (`EQUITY_CALENDAR_FILES`), path and bytes, in path
+    order (as `execution_fingerprint`). Equity bands bind to it as options bands bind to `execution_fingerprint`; it
+    never moves for a league/live or options-only change, nor for league/equity's plumbing (live, actions, schedule,
+    families, bands, kinds), nor for league/xs. A release that lacks one of its files has no identity (the read raises:
+    no band proof, no look)."""
     from ..gym.driver import LEAGUE_FILES
 
     repo = repo or Path(__file__).resolve().parents[2]
-    files = {repo / name for name in (*LEAGUE_FILES, *EQUITY_GYM_FILES)}
+    files = {repo / name for name in (*LEAGUE_FILES, *EQUITY_GYM_FILES, *EQUITY_CALENDAR_FILES)}
     files.update(repo / "league" / "equity" / f"{name}.py" for name in EQUITY_EVIDENCE)
     digest = hashlib.sha256()
     for path in sorted(files):
@@ -309,5 +320,5 @@ def adopt(store: Any, expected: Mapping[str, Any] | None) -> dict[str, Any]:
 
 __all__ = ["KEY", "SELECTION_KEYS", "HOLD_KEYS", "identity", "matches", "row_matches", "gym_changed", "adopt",
            "execution_fingerprint", "EQUITY_KEY", "EQUITY_GYM_FILES", "EQUITY_EVIDENCE", "EQUITY_EVIDENCE_ROOTS",
-           "EQUITY_EVIDENCE_EXTRA", "EQUITY_SELECTION_KEYS", "equity_fingerprint",
+           "EQUITY_EVIDENCE_EXTRA", "EQUITY_CALENDAR_FILES", "EQUITY_SELECTION_KEYS", "equity_fingerprint",
            "equity_identity", "equity_band_current", "is_equity_family", "adopt_equity"]

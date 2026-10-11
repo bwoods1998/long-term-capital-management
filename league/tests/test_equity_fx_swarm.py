@@ -609,3 +609,170 @@ class ATryOwedAgain(FixCase):
         self.rounds(precheck=False)  # v1 again (the lowest stale): the hash is still v2's, never the newest version's
         held = self.store.family("b1")["state"][elane.TRY_KEY]
         self.assertEqual((held["version"], held["retry_sha"]), (1, run_sha(v2)))
+
+
+class TheCalendarIsEvidence(unittest.TestCase):
+    """evidence-8: the equity identity did not cover the whole import closure of the evidence: the NYSE calendar the
+    store's session list and the ctx read (`ltcm.data`, and `ltcm.broker` which it imports) was not hashed, and the CI
+    closure test followed only modules named league.*, so it could not see them."""
+
+    @staticmethod
+    def import_time(path):
+        """The modules `path` imports when it is imported (function bodies left out: they run later, or never)."""
+        import ast
+
+        from league.tests.test_equity_identity import REPO
+
+        package = path.relative_to(REPO).with_suffix("").parts[:-1]
+        if path.name == "__init__.py":
+            package = path.relative_to(REPO).parts[:-1]
+        out: set[str] = set()
+        pending = list(ast.parse(path.read_text()).body)
+        while pending:
+            node = pending.pop()
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                continue
+            if isinstance(node, ast.Import):
+                out.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                base = list(package[:len(package) - node.level + 1]) if node.level else []
+                module = ".".join([*base, *(node.module.split(".") if node.module else [])])
+                out.add(module)
+                out.update(f"{module}.{alias.name}" for alias in node.names)
+            pending.extend(ast.iter_child_nodes(node))
+        return out
+
+    def outside(self):
+        """Every file of the repository outside league/ that importing what the evidence modules import executes."""
+        from league.swarm.evaluator import EQUITY_EVIDENCE
+        from league.tests.test_equity_identity import REPO, _file_of, _imports, evidence_closure
+
+        pending = [target for name in sorted(evidence_closure(EQUITY_EVIDENCE)) for module in _imports(REPO / name)
+                   if not module.startswith("league.") and (target := _file_of(module)) is not None]
+        seen: set = set()
+        while pending:
+            path = pending.pop()
+            if path in seen:
+                continue
+            seen.add(path)
+            parts = path.relative_to(REPO).parts
+            pending += [init for i in range(1, len(parts)) if (init := REPO.joinpath(*parts[:i], "__init__.py")).is_file()]
+            pending += [target for module in self.import_time(path) if (target := _file_of(module)) is not None]
+        return {p.relative_to(REPO).as_posix() for p in seen}
+
+    def test_the_hashed_calendar_files_are_what_the_evidence_imports_outside_league(self):
+        from league.equity import kinds
+        from league.swarm.evaluator import EQUITY_CALENDAR_FILES
+
+        reached = self.outside()
+        self.assertEqual({f for f in reached if not f.startswith("league/")}, set(EQUITY_CALENDAR_FILES))
+        self.assertEqual(EQUITY_CALENDAR_FILES, ("ltcm/__init__.py", "ltcm/broker.py", "ltcm/data/__init__.py"))
+        self.assertLessEqual(set(EQUITY_CALENDAR_FILES), set(kinds.RUNTIME), "the same three the child is given")
+        self.assertFalse({f for f in reached if f.startswith("league/")} - {"league/__init__.py"},
+                         "the calendar reaches nothing of league/ (it would be evidence too)")
+
+    def test_a_calendar_change_moves_the_equity_identity_and_only_it(self):
+        import tempfile
+        from pathlib import Path
+
+        from league.gym.driver import LEAGUE_FILES
+        from league.swarm.evaluator import (EQUITY_CALENDAR_FILES, EQUITY_EVIDENCE, EQUITY_GYM_FILES,
+                                            equity_fingerprint, execution_fingerprint)
+
+        self.addCleanup(equity_fingerprint.cache_clear)
+        self.addCleanup(execution_fingerprint.cache_clear)
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            names = (*LEAGUE_FILES, *EQUITY_GYM_FILES, *EQUITY_CALENDAR_FILES, "ltcm/data/kalshi.py", "league/live/step.py",
+                     *(f"league/equity/{name}.py" for name in EQUITY_EVIDENCE))
+            for name in names:
+                (repo / name).parent.mkdir(parents=True, exist_ok=True)
+                (repo / name).write_text("VALUE = 1\n")
+            equity_fingerprint.cache_clear()
+            execution_fingerprint.cache_clear()
+            original, options = equity_fingerprint(repo), execution_fingerprint(repo)
+            for name in EQUITY_CALENDAR_FILES:
+                (repo / name).write_text("VALUE = 2  # a holiday rule changed\n")
+                equity_fingerprint.cache_clear()
+                execution_fingerprint.cache_clear()
+                self.assertNotEqual(equity_fingerprint(repo), original, name)
+                self.assertEqual(execution_fingerprint(repo), options, "the options identity never reads the calendar's files")
+                (repo / name).write_text("VALUE = 1\n")
+            (repo / "ltcm/data/kalshi.py").write_text("VALUE = 2\n")
+            equity_fingerprint.cache_clear()
+            self.assertEqual(equity_fingerprint(repo), original, "a data source the calendar never imports moves nothing")
+            (repo / "ltcm/broker.py").unlink()
+            equity_fingerprint.cache_clear()
+            with self.assertRaises(OSError):
+                equity_fingerprint(repo)  # a release without the calendar has no identity, never a smaller one
+
+
+class TheFirstDecisionsWindow(unittest.TestCase):
+    """evidence-4: the Gym's first decision of every run saw `history` rows where a live decision sees `history` + 1.
+    The store sliced `history` sessions before the run's first, the engine decides at the close of the session before
+    it, and the ctx then reached back only to the slice's start. The I6 test never draws that session."""
+
+    PROGRAM = ("NEEDS = {'symbols': ['SPY'], 'history': 5, 'max_hold_sessions': 2}\nPARAMS = {}\n\n\n"
+               "def decide(ctx):\n"
+               "    close = ctx.bars['SPY'].close\n"
+               "    oldest = float(close[-6])  # history 5: the session and the five before it\n"
+               "    if ctx.positions or oldest <= 0:\n        return []\n"
+               "    return [{'buy': 'SPY', 'share': 0.5, 'at': 'open', 'tag': 'first'}]\n")
+
+    @classmethod
+    def setUpClass(cls):
+        import datetime as dt
+        import tempfile
+
+        from league.equity import synth
+
+        cls.dir = tempfile.TemporaryDirectory()
+        cls.root = synth.synthetic_store(cls.dir.name, symbols=("SPY", "QQQ"), start=dt.date(2024, 6, 3),
+                                         end=dt.date(2025, 6, 30), seed=5,
+                                         dividends={"SPY": [(dt.date(2025, 3, 21), 1.5)]})
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.dir.cleanup()
+
+    def test_the_first_decision_reads_the_rows_a_live_decision_reads(self):
+        from league.equity import ctx as C
+        from league.equity import synth
+        from league.equity.program import Needs
+        from league.equity.store import EquityStore
+
+        for history in (0, 1, 5, 30):
+            with self.subTest(history=history):
+                needs = Needs(("SPY", "QQQ"), history, 20)
+                bars = EquityStore(self.root).bars(needs.symbols, "validation", history=history)
+                self.assertEqual(bars.first, history + 1)
+                t = bars.first - 1  # the engine's first decision: the close of the session before the run's first
+                common = dict(needs=needs, cash=1000.0, equity=1000.0, budget=1000.0, caps={"SPY": 500.0, "QQQ": 500.0},
+                              params={})
+                gym = C.inputs_from_bars(bars, t, **common)
+                self.assertEqual(len(gym.days), history + 1, "the session and `history` before it")
+                live = C.inputs_from_fetch({s: synth.bar_rows(bars, s, t, adjustment="raw") for s in needs.symbols},
+                                           {s: synth.bar_rows(bars, s, t, adjustment="all") for s in needs.symbols},
+                                           day=bars.day(t).isoformat(), **common)
+                self.assertEqual(C.ctx_bytes(C.build(live)), C.ctx_bytes(C.build(gym)), "I6 at the first decision")
+
+    def test_a_program_that_reads_its_whole_history_trades_the_windows_first_session(self):
+        import datetime as dt
+
+        from league.equity.runner import run_bars
+        from league.equity.store import EquityStore
+
+        bars = EquityStore(self.root).bars(["SPY"], "validation", history=5)
+        result = run_bars(self.PROGRAM, None, bars, name="whole-history")
+        self.assertEqual((result["status"], result["runtime"]["errors"]), ("ok", 0), "no IndexError at the first decision")
+        self.assertEqual(min(lot["entry_day"] for lot in result["lots"]), dt.date(2025, 1, 2).isoformat(),
+                         "it trades the window's first session, as it would live")
+
+    def test_a_store_that_starts_at_the_runs_first_session_gives_what_it_has(self):
+        import datetime as dt
+
+        from league.equity.store import EquityStore
+
+        bars = EquityStore(self.root).bars(["SPY"], "train", history=5)
+        self.assertEqual((bars.first, bars.day(0)), (0, dt.date(2024, 6, 3)), "nothing before the store's first day")
+
