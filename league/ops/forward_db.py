@@ -24,10 +24,20 @@ THE STORE (`SCHEMA`; each table's columns are commented there):
 
 APPEND-ONLY: a trigger aborts UPDATE and DELETE on every table but `fwd_kv` (`APPEND_ONLY`), a replace included (the
 schema turns recursive triggers on for its connection: SQLite fires no delete trigger for a replaced row without
-them). The first value written for a key stands; a later different value is an event, never an overwrite. AN EVENT IS WRITTEN ONCE: every event that
-restates a standing fact goes through `event(..., once=<key>)` (`ONCE_KINDS`), so none repeats night after night for
-one cause. A FAILURE OF THE HOUSE NEVER MARKS A PROGRAM: a decider that cannot start, a store being rewritten, a
-missing bar or minute end nobody's forward record and tag nobody; they are events and alarms.
+them). The first value written for a key stands; a later different value is an event, never an overwrite. AN EVENT
+IS WRITTEN ONCE: every event that restates a standing fact goes through `event(..., once=<key>)` (`ONCE_KINDS`: a
+kind of that list written without its key is refused, and so is a kind outside `EVENT_KINDS`), so none repeats night
+after night for one cause. A FAILURE OF THE HOUSE NEVER MARKS A PROGRAM: a decider that cannot start, a store being
+rewritten, a missing bar or minute end nobody's forward record and tag nobody; they are events and alarms.
+
+TRANSACTIONS: a writable connection is in sqlite3's default transaction mode, as the in-memory databases the packages
+test on. Each write of this module (`event`, `tag`, `append_registry`, `kv_put`, `kv_first`, `engine_id`) is its own
+transaction, committed before it returns, unless the caller already holds one, which it then joins; `with
+transaction(db):` makes several of them one. A row a job writes with `execute` is the job's to commit.
+
+THE REGISTRY'S OWN REFUSALS (`append_registry`, before anything is written): a row outside release E3's route and
+alpha, a control or a program carrying the other's, a `program_sha` that is not its code's, a row with no event that
+claims a time before the registry saw it, and a forward window that opens before its code existed (D2).
 
 TIMES AND DAYS: days are ISO `YYYY-MM-DD` New York session days; times are epoch seconds UTC (REAL) here and ISO text
 (one-second resolution) in the swarm store. Calendar questions go to `league.equity.schedule` (`moments`, which is
