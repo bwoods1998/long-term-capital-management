@@ -131,7 +131,8 @@ class House:
         self.db.commit()
 
     def night(self, index: int, *, programs: int = 1, marks: dict | None = None) -> str:
-        """One shadow night named by session `index`: its `fwd_runs` row and each pid's event of that night."""
+        """One shadow night named by session `index`: its `fwd_runs` row and each pid's event of that night, as the
+        shadow writes them (league/ops/forward_shadow.py: `day` the night, `once` the word "night")."""
         through = self.days[index].isoformat()
         self.clock.t = at(self.days[index], 19)
         self.db.execute("INSERT INTO fwd_runs(job, through, engine, started, finished, seconds, programs) VALUES("
@@ -139,7 +140,7 @@ class House:
         self.db.commit()
         for pid, kind in (marks or {}).items():
             F.event(self.db, kind, pid=pid, day=through, payload={"why": "an invented night"}, at=self.clock(),
-                    once=through)
+                    once="night")
         return through
 
 
@@ -365,6 +366,18 @@ class RetroOnlyWithAnEvent(unittest.TestCase):
             self.assertGreaterEqual(dt.date.fromisoformat(row["first_day"]), F.t0())
         # A live instance the book created days ago is dated by the registry's sighting, not by the book's row.
         self.assertEqual((h.row("loner@3")["reason"], h.row("loner@3")["created_at"]), ("live", at(h.days[6], 10)))
+
+    def test_pids_follow_the_order_the_programs_came_to_exist(self):
+        # Oldest evidence first, whatever the families' own order; a version with no event after them.
+        h = House(self)
+        late = h.family("alpha", {1: PASSED})
+        unseen = h.family("beta", {1: FAILED})
+        early = h.family("zeta", {1: FAILED})
+        h.scored(early, when=at(h.days[1], 10))
+        h.scored(late, bar_passed=True, when=at(h.days[1], 11))
+        h.sync(at(h.days[2], 10))
+        self.assertEqual(h.keys(), [f"{early}@1", f"{late}@1", f"{unseen}@1"])
+        self.assertEqual([h.row(key)["evidence"] for key in h.keys()], ["event:1", "event:2", "registry"])
 
     def test_a_version_older_than_the_look_cap_starts_at_t0(self):
         h = House(self)
@@ -823,6 +836,27 @@ class StopRules(unittest.TestCase):
         self.assertEqual([t["value"] for t in F.tags(h.db, failer)["stopped"]],
                          [f"disqualified:{h.days[5].isoformat()}", f"disqualified:{h.days[8].isoformat()}"])
 
+    def test_a_night_whose_event_is_older_than_the_resume_is_an_old_night(self):
+        # Whenever its `fwd_runs` row landed: the event is the program's own doing that night, and the undo came after it.
+        h, _, failer = self.house()
+        for index in (3, 4, 5):
+            h.night(index, marks={failer: "run_disqualified"})
+        self.assertEqual(h.sync()["stopped"], 1)
+        through = h.days[6].isoformat()
+        h.clock.t = at(h.days[6], 19)
+        F.event(h.db, "run_disqualified", pid=failer, day=through, payload={"why": "an invented night"}, at=h.clock(),
+                once="night")
+        self.assertTrue(R.resume(h.db, "beta@1", why="resumed while the night was running", at=h.clock() + 600.0))
+        h.db.execute("INSERT INTO fwd_runs(job, through, engine, started, finished, seconds, programs) VALUES("
+                     "'forward_shadow', ?, 1, ?, ?, 1.0, 1)", (through, h.clock() - 60.0, h.clock() + 1200.0))
+        h.db.commit()
+        h.night(7, marks={failer: "run_disqualified"})
+        h.night(8, marks={failer: "run_disqualified"})
+        self.assertEqual(h.sync()["stopped"], 0, "two nights since the resume are not three")
+        h.night(9, marks={failer: "run_disqualified"})
+        self.assertEqual(h.sync()["stopped"], 1)
+        self.assertEqual(F.tags(h.db, failer)["stopped"][-1]["value"], f"disqualified:{h.days[9].isoformat()}")
+
     def test_after_a_resume_the_cap_counts_only_days_stored_since(self):
         h, _, failer = self.house()
         engine = h.engine()
@@ -938,6 +972,20 @@ class WhoseFailure(unittest.TestCase):
         self.assertEqual((out["stopped"], out["chain"]["ok"]), (1, True))
         self.assertEqual(F.events(h.db, "register_skipped"), [], "no version is refused for the House's failure")
         self.assertFalse(F.active(h.db, h.row(f"{fid}@1")["pid"]))
+
+    def test_nothing_is_tagged_from_a_run_that_could_not_read_the_swarm_store(self):
+        # The tags are one run's reading of the swarm store and the book together: the run that read only the book
+        # writes none (a live tag neither), and the next run that reads both writes it.
+        h = House(self)
+        fid = h.family("alpha", {1: FAILED})
+        h.sync()
+        h.book(h.instance(fid))
+        with mock.patch.object(R, "_families", side_effect=sqlite3.OperationalError("database is locked")):
+            out = h.sync()
+        self.assertEqual((out["tagged"], [row["key"] for row in out["skipped"]]), (0, [R.SWARM_DB]))
+        self.assertNotIn("live", F.tags(h.db, h.row(f"{fid}@1")["pid"]))
+        self.assertEqual(h.sync()["tagged"], 1)
+        self.assertEqual(F.tags(h.db, h.row(f"{fid}@1")["pid"])["live"][0]["value"], f"{fid}@1:r")
 
     def test_a_live_instance_waits_for_a_run_that_can_read_its_lineage(self):
         # The registry is append-only: a live instance is never registered under a lineage the swarm could not say.

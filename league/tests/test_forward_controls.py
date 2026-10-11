@@ -388,6 +388,30 @@ class TheCostFreeSeries(unittest.TestCase):
         by_hand[x] = 0.25 * (o[x] / c[e] - 1.0)       # bought at the close of e at no cost: nothing earned that day
         np.testing.assert_allclose(r0, by_hand[bars.first:], rtol=0, atol=1e-15)
 
+    def test_the_fee_added_back_is_read_at_the_lots_own_entry_price(self):
+        # On a $250 lot both fees round up to a cent whatever the price. On a sleeve large enough for the per-share fee
+        # to move with the share count, a fee read at the other fill point would leave a residue in r0.
+        bars, sessions = self.slice(["SPY"])
+        o, c = bars.adj["SPY"][:, 0], bars.adj["SPY"][:, 3]
+        e = next(t for t in range(bars.first + 1, bars.n - 3) if abs(c[t] / o[t] - 1.0) > 0.005)
+        x = e + 2
+        capital = Decimal(int(4.0 / float(config.TAF_PER_SHARE) / 0.25 * o[e]))     # a TAF of about four dollars
+        fees = [config.sell_fees(Decimal("0.25") * capital, Decimal(str(0.25 * float(capital) / price)))
+                for price in (o[e], c[e])]
+        self.assertNotEqual(fees[0], fees[1], "the fixture: the sale's fee moves with the entry price")
+        for entry_at in ("open", "close"):
+            lot = {"lid": 1, "symbol": "SPY", "class": "etf", "weight": 0.25, "entry_day": sessions[e].isoformat(),
+                   "entry_at": entry_at, "exit_day": sessions[x].isoformat(), "exit_at": "open", "hs": 0.0}
+            by_hand = np.zeros(bars.n)
+            by_hand[e] = 0.25 * (c[e] / o[e] - 1.0) if entry_at == "open" else 0.0
+            by_hand[e + 1] = 0.25 * (c[e + 1] / c[e] - 1.0)
+            by_hand[x] = 0.25 * (o[x] / c[x - 1] - 1.0)
+            r0 = C.cost_free([lot], bars, capital=capital)
+            np.testing.assert_allclose(r0, by_hand[bars.first:], rtol=0, atol=1e-13, err_msg=entry_at)
+            net0 = screen.series([lot], bars, universe=["SPY"], capital=capital).r
+            self.assertAlmostEqual(float(r0[x - bars.first] - net0[x - bars.first]),
+                                   float(fees[0 if entry_at == "open" else 1]) / float(capital), places=13)
+
     def test_an_open_lot_pays_no_fee_yet(self):
         bars, sessions = self.slice(["SPY"])
         lot = {"lid": 1, "symbol": "SPY", "class": "etf", "weight": 0.25, "entry_day": sessions[4].isoformat(),

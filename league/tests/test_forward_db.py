@@ -395,6 +395,23 @@ class TheChain(unittest.TestCase):
         self.tamper("UPDATE fwd_registry SET alpha_f='0.12', row_hash=? WHERE pid=2", (F.row_hash(row["prev_hash"], row),))
         self.assertEqual(F.verify_chain(self.db)["first_bad"], 3)
 
+    def test_a_row_taken_out_is_found_even_when_every_link_left_was_made_to_hold(self):
+        # The pid is in the hashed row and the registry numbers its rows 1, 2, 3, ...: whoever takes a row out and
+        # links the next one to the row before it, its own hash recomputed, still leaves a hole in the numbering.
+        self.fill(3)
+        rows = [dict(row) for row in self.db.execute("SELECT * FROM fwd_registry ORDER BY pid").fetchall()]
+        third = {**rows[2], "prev_hash": rows[0]["row_hash"]}
+        third["row_hash"] = F.row_hash(third["prev_hash"], third)
+        self.tamper("DELETE FROM fwd_registry WHERE pid=2")
+        self.db.execute("UPDATE fwd_registry SET prev_hash=?, row_hash=? WHERE pid=3", (third["prev_hash"], third["row_hash"]))
+        self.db.commit()
+        left = self.db.execute("SELECT * FROM fwd_registry ORDER BY pid").fetchall()
+        self.assertEqual([(row["prev_hash"], row["row_hash"]) for row in left],
+                         [(F.GENESIS, rows[0]["row_hash"]), (rows[0]["row_hash"], F.row_hash(rows[0]["row_hash"], dict(left[1])))],
+                         "every link of what is left holds")
+        answer = F.verify_chain(self.db)
+        self.assertEqual((answer["ok"], answer["rows"], answer["first_bad"]), (False, 2, 3))
+
     def test_a_known_key_is_refused_and_leaves_nothing(self):
         self.fill(2)
         before = F.verify_chain(self.db)
@@ -607,6 +624,11 @@ class Programs(unittest.TestCase):
         self.assertTrue(F.tag(self.db, 3, "resumed", "50.0|early", at=50.0))
         self.assertTrue(F.tag(self.db, 3, "stopped", "cap:2026-10-20", at=60.0))
         self.assertFalse(F.active(self.db, 3))
+        # Only a stop NEWER than the latest resume stops: an undo written at the stop's own instant undoes it.
+        self.assertTrue(F.tag(self.db, 1, "stopped", "cap:2026-10-20", at=400.0))
+        self.assertTrue(F.tag(self.db, 1, "resumed", "400.0|the same instant", at=400.0))
+        self.assertTrue(F.active(self.db, 1))
+        self.assertEqual([p.pid for p in F.programs(self.db)], [1, 4])
 
     def test_the_tags(self):
         self.assertEqual(F.tags(self.db, 1), {})
