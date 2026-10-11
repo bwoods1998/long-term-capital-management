@@ -73,7 +73,8 @@ THREE MORE GRIDS ARE CLOSED THE SAME WAY (each narrower than the registered cont
   hash under the field b"v") and put on the total-return basis first (x raw close / adjusted close: a split then
   leaves no step in it that would date the session). Its median is over the valid bars of the
   `config.REL_VOLUME_SESSIONS` sessions through that session; NaN when fewer than `REL_VOLUME_MIN_VALID` of them
-  have a valid bar.
+  have a valid bar, and for the oldest 62 of a decision's 253 sessions, whose 63 it does not hold (so a session's
+  value, like every other field's, is one number in every ctx that shows it).
 - THE SLEEVE'S DOLLARS. `equity` is the cash plus the open lots marked at their DITHERED closes, and `cash` and
   `equity` are rounded to the cent: with one lot held, an exact equity series is that lot's exact marks.
 - A NAME WITH NO VALID BAR AT t is not a slot (it is outside U(t)); a held lot of it is marked at its last bar's
@@ -122,8 +123,9 @@ REL_VOLUME_MIN_VALID = 32
 #: A held lot's `weight` and `ret`, and a closed lot's `net_ret`, are rounded to this many decimals; dollars to cents.
 LOT_PLACES = 4
 USD_PLACES = 2
-#: How many sessions' dithers one process keeps (a run's look-back and three years of sessions; about 25 MB).
-_DITHER_ROWS = 1400
+#: How many sessions' dithers one process keeps for a run key (a run's look-back and three years of sessions: about
+#: 27 MB at 600 columns), and how many `rel_volume` rows (kept by content: about 5 MB).
+_DITHER_ROWS = 1100
 
 
 class Fields:
@@ -412,9 +414,12 @@ def ineligible(inputs: Inputs, derived: Derived) -> list[int]:
     elig = np.asarray(derived.elig, dtype=bool)
     out = []
     for row in inputs.positions:
-        col = int(row["col"])
+        try:
+            col, lid = int(row["col"]), int(row["lid"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"a held lot's row names its lid and its col: {type(exc).__name__}: {exc}") from None
         if not (0 <= col < elig.shape[0] and bool(elig[col])):
-            out.append(int(row["lid"]))
+            out.append(lid)
     return out
 
 
@@ -436,7 +441,8 @@ def lot_dither(key: bytes, lid: int) -> float:
 
 #: (dither key, the ids' bytes) -> {session ordinal: float64 (len(ids), 5)}: one run's dithers, each drawn once.
 _DITHERS: "OrderedDict[tuple[bytes, bytes], OrderedDict[int, np.ndarray]]" = OrderedDict()
-_DITHER_RUNS = 4
+#: The run keys kept: a span's runs at both k and its two halves share one, so two cover a version's round.
+_DITHER_RUNS = 2
 
 
 def _dithers(key: bytes, idents: np.ndarray, sessions: np.ndarray) -> np.ndarray:
@@ -483,15 +489,20 @@ _REL: "OrderedDict[bytes, np.ndarray]" = OrderedDict()
 
 def _rel_volume(basis: np.ndarray, first: int) -> np.ndarray:
     """float64 (L, k): each session's volume over the median of the column's valid volumes on the
-    `config.REL_VOLUME_SESSIONS` sessions through it (those the inputs hold), for the rows from `first` on (NaN
-    before; NaN with fewer than `REL_VOLUME_MIN_VALID` valid bars among them, so a session the inputs do not hold and
-    a session without a bar read alike). `basis` (L, k): the dithered volumes, NaN where no valid bar. A row is a
-    pure function of its window, and is kept by the window's digest (`_REL`): a run's next decision computes its new
+    `config.REL_VOLUME_SESSIONS` sessions through it, for the rows from `first` on (NaN before). `basis` (L, k): the
+    dithered volumes, NaN where no valid bar.
+
+    A session has a value only when the decision's `config.DERIVE_SESSIONS` sessions hold all 63 through it (so the
+    oldest 62 are NaN, and a session's value is the same in every ctx that shows one), and when at least
+    `REL_VOLUME_MIN_VALID` of them have a valid bar. Inputs that hold fewer sessions read as inputs whose missing
+    sessions have no bar: the Gym's first windows of a store and a live fetch's empty rows agree. A row is a pure
+    function of its window, and is kept by the window's digest (`_REL`): a run's next decision computes its new
     sessions only."""
     length, k = basis.shape
     span = config.REL_VOLUME_SESSIONS
     out = np.full((length, k), np.nan)
-    first = max(0, first)
+    missing = max(0, config.DERIVE_SESSIONS - length)          # sessions the inputs do not hold: no bar
+    first = max(first, span - 1 - missing, 0)
     if first >= length or not k:
         return out
     block = np.ascontiguousarray(basis)
@@ -500,7 +511,6 @@ def _rel_volume(basis: np.ndarray, first: int) -> np.ndarray:
     blank = hashlib.blake2b(np.full(k, np.nan).tobytes(), digest_size=16).digest()
     for row in range(first, length):
         start = max(0, row - span + 1)
-        # a session the inputs do not hold is a session without a bar: the same digest, the same row
         held = [blank] * (span - (row - start + 1)) + marks[start - low:row - low + 1]
         name = hashlib.blake2b(b"".join(held), digest_size=16).digest()
         found = _REL.get(name)
@@ -614,21 +624,25 @@ def build(inputs: Inputs, derived: Derived | None = None) -> XsCtx:
     cash = float(inputs.cash)
     lots, marked, readable = [], cash, True
     for row in inputs.positions:
-        col, qty, lid = int(row["col"]), float(row["qty"]), int(row["lid"])
+        try:
+            col, qty, lid = int(row["col"]), float(row["qty"]), int(row["lid"])
+            entry, held, at = float(row["entry_value"]), int(row["held_sessions"]), str(row["at"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"a held lot's row is {{lid, col, qty, value, entry_value, held_sessions, at, tag}}: "
+                             f"{type(exc).__name__}: {exc}") from None
         if not ref <= col < m:
             raise ValueError("a held lot's column is a member column of the decision")
         close = dithered_close(col)
         if close is None or not close > 0 or not qty > 0:
             readable = False
-            value, ret = float(row["value"]), None
+            value, ret = float(row.get("value") or 0.0), None
         else:
             value = qty * close
-            basis_price = float(row["entry_value"]) / qty + lot_dither(key, lid)
+            basis_price = entry / qty + lot_dither(key, lid)
             ret = round(close / basis_price - 1.0, LOT_PLACES) if basis_price > 0 else None
         marked += value
         lots.append((value, {"id": lid, "slot": int(ids[col - ref]), "weight": None, "ret": ret,
-                             "held_sessions": int(row["held_sessions"]), "at": str(row["at"]),
-                             "tag": str(row.get("tag") or "")}))
+                             "held_sessions": held, "at": at, "tag": str(row.get("tag") or "")}))
     equity = round(marked if readable else float(inputs.equity), USD_PLACES)
     positions = []
     for value, lot in lots:
@@ -636,14 +650,16 @@ def build(inputs: Inputs, derived: Derived | None = None) -> XsCtx:
         positions.append(lot)
     closed = []
     for row in inputs.closed:
-        col = int(row["col"])
+        try:
+            col, lid, held, reason = int(row["col"]), int(row["lid"]), int(row["held_sessions"]), str(row["reason"])
+            net = None if row.get("net_ret") is None else round(float(row["net_ret"]), LOT_PLACES)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"a closed lot's row is {{lid, col, net_ret, held_sessions, reason, tag}}: "
+                             f"{type(exc).__name__}: {exc}") from None
         if not ref <= col < m:
             raise ValueError("a closed lot's column is a member column of the decision")
-        net = row.get("net_ret")
-        closed.append({"id": int(row["lid"]), "slot": int(ids[col - ref]),
-                       "net_ret": None if net is None else round(float(net), LOT_PLACES),
-                       "held_sessions": int(row["held_sessions"]), "reason": str(row["reason"]),
-                       "tag": str(row.get("tag") or "")})
+        closed.append({"id": lid, "slot": int(ids[col - ref]), "net_ret": net, "held_sessions": held,
+                       "reason": reason, "tag": str(row.get("tag") or "")})
     session_of_month, left, last_of_week = _calendar(inputs, t)
     perm = np.asarray(inputs.sector_perm, dtype=np.int8)
     if perm.shape != (len(config.FUNDS),) or sorted(perm.tolist()) != list(range(len(config.FUNDS))):

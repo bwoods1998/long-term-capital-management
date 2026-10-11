@@ -40,8 +40,9 @@ THE CENTS (a binding fact of the vendor, found on real SIP bars after the design
 rounded to the cent. So an as-of price, a split or a dividend read from the adj/raw ratio is exact only to that
 rounding: every comparison of two such readings takes `config.rounding_bound` (league/xs's own copy of the helper E1
 gained after this build's base, same name, same figures), never a fixed tolerance, and a live fetch's ctx equals a
-later store's only within it, never byte for byte by assumption (the nightly I6 measures it; D7's dither is drawn on
-the RAW price, which is the tape's own and exact).
+later store's only within it, never byte for byte by assumption (the nightly I6 measures it). It is also why the
+ctx's dither is drawn on the ADJUSTED price's own cent grid (league/xs/ctx.py): that is the grid a ratio of two
+history prices keeps.
 
 WHAT A PROGRAM'S RUN IS SENT: a `PanelBars`, and nothing else of the store. It holds NO aid and NO symbol: the PARENT
 computes the salted ids, puts the member columns in ascending id and keeps the aids (`Slice`); the child plans orders

@@ -594,10 +594,27 @@ class Build(Panel):
                 row = len(days) - 1 - back
                 median = statistics.median(volume(r) for r in range(row - 62, row + 1))
                 self.assertAlmostEqual(float(got[-1 - back]), round(volume(row) / median, 6), delta=1.5e-6)
-            self.assertTrue(np.isnan(got[:31]).all(), "fewer than 32 valid bars among the sessions through it")
-            self.assertTrue(np.isfinite(got[31:]).all())
-            early = statistics.median(volume(r) for r in range(0, 41))
-            self.assertAlmostEqual(float(got[40]), round(volume(40) / early, 6), delta=1.5e-6)
+            self.assertTrue(np.isnan(got[:62]).all(), "the decision does not hold the 63 sessions through these")
+            self.assertTrue(np.isfinite(got[62:]).all())
+
+    def test_rel_volume_reads_a_session_the_inputs_do_not_hold_as_one_without_a_bar(self):
+        """The Gym's first windows of a store are shorter than a live fetch's 253 rows, whose missing sessions are
+        rows of NaN: both give the same field."""
+        inputs = self.inputs()
+        cut = 150
+        short = self.edited(inputs, days=np.array(inputs.days)[cut:], raw=np.array(inputs.raw)[cut:],
+                            adj=np.array(inputs.adj)[cut:])
+        raw, adj = np.array(inputs.raw), np.array(inputs.adj)
+        raw[:cut], adj[:cut] = np.nan, np.nan
+        raw[:cut, config.MARKET_COLUMN], adj[:cut, config.MARKET_COLUMN] = np.nan, np.nan
+        padded = self.edited(inputs, raw=raw, adj=adj)
+        a, b = ctx.build(short), ctx.build(padded)
+        self.assertEqual((a.n, b.n), (0, 0), "253 sessions of history are not there: no slot")
+        for name in ctx.FIELDS:
+            self.assertTrue(np.array_equal(getattr(a.mkt, name), getattr(b.mkt, name), equal_nan=True), name)
+        self.assertTrue(np.isnan(a.mkt.rel_volume[:cut + 31]).all(), "fewer than 32 sessions with a bar")
+        self.assertTrue(np.isfinite(a.mkt.rel_volume[cut + 31:]).all())
+        self.assertEqual(ctx.ctx_bytes(a), ctx.ctx_bytes(b))
 
     def test_rel_volume_needs_its_valid_bars_and_ignores_the_missing(self):
         inputs = self.inputs()
@@ -725,11 +742,18 @@ class Build(Panel):
                                                                         {"theta": 0.5}))
         c.params["theta"] = 9
         self.assertEqual(inputs.params, {"theta": 0.5}, "the ctx's PARAMS are a copy")
-        for bad in ({"positions": ({"lid": 1, "col": 0, "qty": 1.0, "value": 1.0, "entry_value": 1.0,
-                                    "held_sessions": 0, "at": "open"},)},
-                    {"closed": ({"lid": 1, "col": 10 ** 6, "net_ret": 0.0, "held_sessions": 0, "reason": "x"},)}):
-            with self.assertRaises(ValueError):
+        lot = {"lid": 1, "col": col, "qty": 1.0, "value": 1.0, "entry_value": 1.0, "held_sessions": 0, "at": "open"}
+        done = {"lid": 1, "col": col, "net_ret": 0.0, "held_sessions": 0, "reason": "x"}
+        for bad in ({"positions": ({**lot, "col": 0},)}, {"closed": ({**done, "col": 10 ** 6},)},
+                    {"positions": ({k: v for k, v in lot.items() if k != "qty"},)},
+                    {"positions": ({**lot, "entry_value": "much"},)},
+                    {"closed": ({k: v for k, v in done.items() if k != "reason"},)},
+                    {"closed": ({**done, "net_ret": "some"},)}):
+            with self.subTest(bad=str(bad)[:60]), self.assertRaises(ValueError):
                 ctx.build(self.edited(inputs, **bad))
+        with self.assertRaises(ValueError):
+            ctx.ineligible(self.edited(inputs, positions=({"lid": 1},)), ctx.derive(inputs))
+        self.assertEqual(ctx.build(self.edited(inputs, positions=(lot,))).positions[0]["tag"], "", "a tag is optional")
 
     def test_a_shorter_history_is_the_same_ctxs_last_columns(self):
         long = ctx.build(self.inputs())

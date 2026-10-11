@@ -83,7 +83,7 @@ sessions, oldest first, the last one session t.
 | `ctx.oret` | (n, h + 1): the open over the previous close, minus 1 (the first column is NaN) |
 | `ctx.iret` | (n, h + 1): the close over the open, minus 1 |
 | `ctx.range` | (n, h + 1): (high - low) / close |
-| `ctx.rel_volume` | (n, h + 1): the session's volume over the median of the name's own 63 sessions through it (split-adjusted; NaN with fewer than 32 traded sessions among them) |
+| `ctx.rel_volume` | (n, h + 1): the session's volume over the median of the name's own 63 sessions through it (split-adjusted; NaN with fewer than 32 traded sessions among them, and for sessions more than 190 back) |
 | `ctx.sector` | int8 (n,): the sector code, 0-10. The fund the name's market-residual returns followed most closely over the last 252 sessions; the codes are relabelled in every run |
 | `ctx.beta` | (n,): beta to the market over the last 252 returns, 2 decimals |
 | `ctx.mkt` | the market's own five fields, each (h + 1,): `ctx.mkt.ret`, `.oret`, `.iret`, `.range`, `.rel_volume` |
@@ -108,8 +108,8 @@ last week may be missing today, and a new one may appear.
 
 **The numbers carry a little noise, on purpose.** Each price is moved by up to half a cent before any ratio is
 formed, and each volume by up to half a percent, so that no arithmetic on the fields gives a price or a share count
-back. A return of a $10 name is off by up to about 7 basis points, of a $100 name by under 1; a session's `range`
-whose high and low were a cent apart can read slightly negative. One bar reads the same in every ctx of a run. Fills,
+back. A return of a $10 name carries about 4 basis points of noise (10 at the very most), of a $100 name a tenth of
+that; a session's `range` whose high and low were a cent apart can read slightly negative. One bar reads the same in every ctx of a run. Fills,
 your P&L and every statistic you are judged on use the true prices.
 
 ## What decide returns
