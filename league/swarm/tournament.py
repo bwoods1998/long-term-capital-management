@@ -169,7 +169,7 @@ import random
 import time
 from typing import Any, Callable, Mapping
 
-from . import diagnostics, dlane, elane, evidence, game, incubator, practice
+from . import diagnostics, dlane, elane, elane_train, evidence, game, incubator, practice
 from .architect import allowed_structures
 from .pool import GymJob, PoolError
 from .researcher import (IDLE_CAUSE, MAX_ROOTS, VALIDATED_CYCLES_KEY, awaiting_validation, dormant_count, dormant_limit,
@@ -1336,6 +1336,11 @@ class Tournament:
                         out["retired"].append(fid)
                     continue
                 n = elane.next_try(self.store, fam, self.settings)
+                if not elane_train.may_validate(self.store, fam, n):
+                    # RELEASE E2 (league/swarm/elane_train.py): a family the equity pass bore takes its lineage's one try
+                    # only with its pass (the first version that passed equity-v1 AND the equity review, under the equity
+                    # identity in force); `next_try` keeps its due, stale and retry logic.
+                    continue
                 version = self.store.version(fid, n) if n is not None else None
                 if version is None or not version.get("code"):
                     continue
