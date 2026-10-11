@@ -484,6 +484,56 @@ class AQuietLaneIsNotJudged(Case):
         # Settings that could not be loaded: not judged either.
         self.assertEqual(EH.lanes(None)[:2], (False, "the swarm's settings could not be read"))
 
+    BLIND = ("stall: the equity lanes' alarm cannot see: {what}. It is said here every 12 h while it lasts and in the stall "
+             "receipt's errors at every run; it needs a fix, in a release or on the box (python3 -m league.ops.elane_health "
+             "--state /workspace/state shows what reads).")
+
+    def test_lanes_that_cannot_be_read_are_one_house_warning_every_twelve_hours(self):
+        """The second check's finding (probe_unread): with E2's readers failing at four runs the receipt's errors said
+        so each time and no one was told: House warnings [], 0 notify tries (the job's runner does not alert on a
+        receipt's warning flag). One House warning every 12 hours while it lasts, naming the class."""
+        self.assertEqual(EH.BLIND_WARN_SECONDS, ST.WARN_EVERY_SECONDS)
+        self.damning()
+        entry = "the equity lanes' readers could not be read (RuntimeError): the four equity causes are not judged"
+        warned = []
+        for k in range(27):  # thirteen hours, a run every half hour
+            with mock.patch.object(elane_yield, "cfg", side_effect=RuntimeError("an invented failure")):
+                out, ctx = self.run_at(now=NOW + k * 0.5 * HOUR)
+            self.assertIn(entry, out["errors"], "the receipt says it at every run")
+            warned += [(k, a["level"], a["text"]) for a in ctx.alerts if "equity" in a["text"]]
+        self.assertEqual(warned, [(0, "warning", self.BLIND.format(what=entry)), (24, "warning", self.BLIND.format(what=entry))])
+        self.assertNotIn("invented", json.dumps(warned), "the class, never the exception's text")
+        self.assertFalse([c for call in self.notify.calls for c in call["causes"] if c["cause"] in EH.CAUSES])
+        kept = json.loads((self.root / ST.STATE_FILE).read_text())[EH.STATE_KEEP]
+        self.assertEqual(kept["unread"], {"warned_at": NOW + 12 * HOUR})
+        # The store's facts unreadable, and the lane's own reading of whether it may ask a model: the same warning.
+        for patch, what in ((mock.patch.object(EH, "facts", side_effect=KeyError("an invented failure")),
+                             "the equity lanes' health could not be read (KeyError)"),
+                            (mock.patch.object(elane_yield, "hold", side_effect=ZeroDivisionError("an invented failure")),
+                             "the equity lanes' own reading of whether E2 may ask a model could not be read "
+                             "(ZeroDivisionError): elane_idle cannot tell a starved lane from a broken one")):
+            self.setUp()
+            self.damning()
+            with patch:
+                out, ctx = self.run_at()
+                again, later = self.run_at(now=NOW + 0.5 * HOUR)
+            self.assertIn(what, out["errors"])
+            self.assertIn(what, again["errors"])
+            self.assertIn(self.BLIND.format(what=what), [a["text"] for a in ctx.alerts])
+            self.assertFalse([a for a in later.alerts if "cannot see" in a["text"]], "once in twelve hours")
+        # Lanes that are off by design are no warning; the operator's report (it keeps no record) warns nobody.
+        self.setUp()
+        self.damning()
+        self.lanes(mode="off", birth_share=0.25)
+        out, ctx = self.run_at()
+        self.assertEqual((out["errors"], ctx.alerts), ([], []))
+        self.lanes(mode="gate", birth_share=0.25)
+        before = (self.root / ST.STATE_FILE).read_text()
+        with mock.patch.object(elane_yield, "cfg", side_effect=RuntimeError("an invented failure")):
+            self.assertFalse(EH.report(self.root, now=NOW)["judged"])
+        self.assertEqual((self.root / ST.STATE_FILE).read_text(), before)
+        self.assertNotIn("unread", json.loads(before)[EH.STATE_KEEP])
+
     def test_readers_that_raise_are_an_error_naming_the_class_never_a_silent_not_judged(self):
         """The check's finding (Oct 11): with E2's own readers failing inside the stall job all four causes read "Not
         judged" with no error and no warning: the alarm switched itself off silently."""
@@ -668,7 +718,10 @@ class MostVersionsDisqualified(Case):
         self.assertEqual((check["stalled"], check["numbers"]["scored"], check["numbers"]["faulted"]), (True, 5, 4))
         self.assertIn("4 of the 5 equity versions scored in the last 12 h", check["what"])
         # Three of five could not be judged: not yet most of six.
-        self.record(b, versions={"2": verdict(0.5, "Y2")})
+        self.setUp()
+        a, b = self.bred("alpha-one"), self.bred("beta-two")
+        self.record(a, versions={"1": verdict(2.0, "DQ"), "2": verdict(1.0, "DQ"), "3": verdict(0.2, "Y1")})
+        self.record(b, versions={"1": verdict(1.5, "DQ"), "2": verdict(0.5, "Y2")})
         check = self.equity()["elane_dq"]
         self.assertEqual((check["stalled"], check["judged"]), (False, False))
         self.assertIn("5 equity versions were scored in the last 12 h", check["what"])
@@ -677,6 +730,71 @@ class MostVersionsDisqualified(Case):
         a = self.bred("alpha-one")
         self.record(a, versions={str(n): verdict(1.0, "DQ") for n in range(1, 5)})
         self.assertFalse(self.equity()["elane_dq"]["judged"])
+
+    def test_once_it_stood_under_a_release_it_holds_until_the_bar_judges_versions_scored_after_in_two_families(self):
+        """The second check's finding (replay-1-release): with nothing fixed the cause cleared at 13:20 (4 of 8), stood
+        again at 13:50 (4 of 7) and cleared for good at 14:20 (3 of the last 6, once the retired families' versions sat
+        beside one family's bar fails). Once it stood under a release it holds until versions scored AFTER it stood are
+        judged by the bar in two families (the generators write programs that run), or the release changes."""
+        one = "/workspace/releases/an-invented-release"
+        self.beat(48, release=one)
+        a, b, c = self.bred("alpha-one"), self.bred("beta-two"), self.bred("gamma-three")
+        self.record(a, versions={str(n): verdict(3.0 - n / 10.0, "DQ") for n in range(1, 4)})
+        self.record(b, versions={"1": verdict(2.5, "DQ"), "2": verdict(2.4, "LOAD")})
+        out, _ = self.run_at()
+        self.assertEqual((out["stalled"], self.own(out)["elane_dq"]["numbers"]["basis"]), (["elane_dq"], "early"))
+        self.assertEqual(json.loads((self.root / ST.STATE_FILE).read_text())[EH.STATE_KEEP]["dq"], {"stood_at": NOW})
+        # ONE family's versions are judged by the bar, hour after hour: three of the last six, then two, could not be
+        # judged. Nothing shows the fault fixed (the other families' programs still do not run): it holds, at every run.
+        later = lambda hours: elane_train.compact({"passed": False, "fails": ["Y1"]}, at=iso(NOW + hours * HOUR))  # noqa: E731
+        for n, hours in enumerate((1.0, 2.0, 3.0, 4.0), start=1):
+            self.record(c, versions={str(n): later(hours - 0.5)})
+            out, ctx = self.run_at(now=NOW + hours * HOUR)
+            check = self.own(out)["elane_dq"]
+            self.assertEqual((check["stalled"], bool(check["owner_step"]), check["numbers"]["bar_families_since"],
+                              check["numbers"]["standing_since"]), (True, True, 1, iso(NOW)), hours)
+            self.assertNotIn("elane_dq", out["cleared"])
+        self.assertEqual((check["numbers"]["scored"], check["numbers"]["faulted"], check["numbers"]["basis"]), (6, 2, "last_scored"))
+        self.assertEqual(check["what"], (
+            "2 of the last 6 equity versions scored (over 6.5 h: fewer than 6 fall in the last 6 h) could not be judged for "
+            "a fault of their own program (1 disqualified, 1 refused at load, 0 failed by the decider child): no mechanism "
+            f"was judged in them. It stood at {iso(NOW)} under the running release and HOLDS until versions scored after "
+            "that are judged by the bar in 2 families (1 so far), or the release changes. The commonest first error: "
+            "TypeError (1 of 1)."))
+        self.assertTrue(check["owner_step"].startswith("the equity generators misread the program contract, mostly TypeError"))
+        self.assertEqual(self.notify.entry("elane_dq")["since"], iso(NOW - 2.9 * HOUR), "since the first version that was not judged")
+        # It holds with no version left in the lookback, too (the families retired, no pass bears): never "not judged".
+        check = self.equity(now=NOW + 17 * HOUR)["elane_dq"]
+        self.assertEqual((check["stalled"], check["judged"], check["numbers"]["scored"], bool(check["owner_step"])),
+                         (True, True, 0, True))
+        self.assertTrue(check["what"].startswith(f"No equity version was scored in the last 12 h. It stood at {iso(NOW)} under "
+                                                 "the running release and HOLDS until"), check["what"])
+        # A version of a SECOND family judged by the bar after it stood: the generators write programs that run. Clear.
+        self.record(b, versions={"3": later(17.5)})
+        out, _ = self.run_at(now=NOW + 18 * HOUR)
+        check = self.own(out)["elane_dq"]
+        self.assertEqual((check["stalled"], "elane_dq" in out["cleared"]), (False, True))
+        self.assertNotIn("dq", json.loads((self.root / ST.STATE_FILE).read_text())[EH.STATE_KEEP])
+        self.assertNotIn("HOLDS", check["what"])
+        # Versions judged by the bar BEFORE it stood prove nothing of the generators since: it holds.
+        self.setUp()
+        self.beat(48, release=one)
+        a, b, c, d = (self.bred(slug) for slug in ("alpha-one", "beta-two", "gamma-three", "delta-four"))
+        self.record(a, versions={str(n): verdict(3.0 - n / 10.0, "DQ") for n in range(1, 4)})
+        self.record(b, versions={"1": verdict(2.5, "DQ"), "2": verdict(2.4, "LOAD")})
+        self.record(c, versions={"1": verdict(2.3, "Y1")})
+        self.record(d, versions={"1": verdict(2.2, "Y2")})
+        self.assertTrue(self.equity()["elane_dq"]["stalled"], "5 of 7")
+        self.record(c, versions={"2": later(0.2), "3": later(0.4), "4": later(0.6)})
+        check = self.equity(now=NOW + HOUR)["elane_dq"]
+        self.assertEqual((check["stalled"], check["numbers"]["faulted"], check["numbers"]["scored"],
+                          check["numbers"]["bar_families_since"]), (True, 5, 10, 1), "half is not most, and it holds")
+        # ANOTHER release: the record of when it stood goes with the release it stood under.
+        (self.root / EH.HEARTBEAT).write_text(json.dumps({"at": NOW + 2 * HOUR, "started_at": NOW + 1.9 * HOUR,
+                                                          "release": "/workspace/releases/another-invented-release"}))
+        out, _ = self.run_at(now=NOW + 2 * HOUR)
+        self.assertEqual((self.own(out)["elane_dq"]["stalled"], "elane_dq" in out["cleared"]), (False, True))
+        self.assertNotIn("dq", json.loads((self.root / ST.STATE_FILE).read_text())[EH.STATE_KEEP])
 
     def test_it_does_not_lapse_at_the_windows_edge_and_names_a_class_only_when_one_is_most(self):
         """The check's finding: with nothing fixed the cause read clear at exactly half, stood again naming a class
@@ -741,16 +859,23 @@ class MostVersionsDisqualified(Case):
         out, _ = self.run_at()
         self.assertEqual(out["stalled"], ["elane_dq"])
         kept = json.loads((self.root / ST.STATE_FILE).read_text())[EH.STATE_KEEP]
-        self.assertEqual(kept, {"release": one, "since": NOW - 48 * HOUR})
+        self.assertEqual({k: kept[k] for k in ("release", "since", "dq")},
+                         {"release": one, "since": NOW - 48 * HOUR, "dq": {"stood_at": NOW}})
+        self.assertLessEqual(set(kept), {"release", "since", *EH.KEPT})
         # The same release restarts ten minutes on: what was scored before the restart still counts.
         later = NOW + 10 * 60.0
         (self.root / EH.HEARTBEAT).write_text(json.dumps({"at": later, "started_at": later - 60.0, "release": one}))
         out, _ = self.run_at(now=later)
         check = self.own(out)["elane_dq"]
         self.assertEqual((check["stalled"], check["numbers"]["scored"]), (True, 8))
-        self.assertEqual(json.loads((self.root / ST.STATE_FILE).read_text())[EH.STATE_KEEP], kept, "kept as it was")
-        self.assertIn("the swarm started 0.0 h ago", self.own(out)["elane_idle"]["what"],
-                      "the idle clock alone starts at the running swarm's own start")
+        again = json.loads((self.root / ST.STATE_FILE).read_text())[EH.STATE_KEEP]
+        self.assertEqual({k: again[k] for k in ("release", "since", "dq")}, {k: kept[k] for k in ("release", "since", "dq")},
+                         "kept as it was")
+        # The idle clock is kept under the release too: the restart took nine minutes off it and reset nothing.
+        idle = self.own(out)["elane_idle"]
+        self.assertEqual((idle["numbers"]["idle_hours"], idle["numbers"]["down_hours"], again["idle"]["from"]),
+                         (1.1, 0.1, NOW - 1.1 * HOUR))
+        self.assertNotIn("the swarm started", idle["what"])
         # And the report reads the same record, read-only.
         self.assertTrue(EH.report(self.root, now=later)["checks"]["elane_dq"]["stalled"])
         # Another release: what the generators did under the one before is not held against it.
@@ -760,7 +885,9 @@ class MostVersionsDisqualified(Case):
         self.assertEqual((check["stalled"], check["judged"], check["numbers"]["scored"]), (False, False, 0))
         self.assertIn("since the running release started", check["what"])
         self.assertEqual(json.loads((self.root / ST.STATE_FILE).read_text())[EH.STATE_KEEP],
-                         {"release": two, "since": later + 540.0})
+                         {"release": two, "since": later + 540.0, "idle": {"from": NOW - 1.1 * HOUR, "down": 1.1 * HOUR + 1140.0,
+                                                                         "started": later + 540.0, "beat_at": later + 600.0}},
+                         "nothing kept under the release before: not when elane_dq stood, not its idle clock")
         self.assertIn("elane_dq", out["cleared"])
         # The record as the function keeps it: no heartbeat to read keeps what was kept; garbage keeps nothing.
         (self.root / EH.HEARTBEAT).unlink()
@@ -768,6 +895,20 @@ class MostVersionsDisqualified(Case):
                          {"release": two, "since": later + 540.0})
         self.assertEqual(EH.release_since("x", self.root, later), {"release": None, "since": None})
         self.assertEqual(EH.release_since({"release": two, "since": later + 9e9}, self.root, later), {"release": two, "since": None})
+        # What is kept under a release goes with it: carried while the release is the same, dropped with another.
+        carried = {"release": two, "since": later + 540.0, "dq": {"stood_at": later + 600.0}, "idle": {"from": later, "down": 0.0},
+                   "held": {"at": later, "kind": "pace"}, "unread": {"warned_at": later}, "another": {"key": 1}}
+        self.assertEqual(EH.release_since(carried, self.root, later + 900.0), {k: carried[k] for k in carried if k != "another"})
+        self.beat(0.0, at=later + 900.0, release=two)
+        self.assertEqual(set(EH.release_since(carried, self.root, later + 900.0)), {"release", "since", *EH.KEPT})
+        self.beat(0.0, at=later + 900.0, release=one)
+        self.assertEqual(EH.release_since(carried, self.root, later + 900.0), {"release": one, "since": NOW})
+        # A heartbeat that names no release: what was kept stands for that one run of the swarm.
+        nameless = {"release": None, "since": NOW - 48 * HOUR, "dq": {"stood_at": NOW - HOUR}}
+        self.beat(48, at=later)
+        self.assertEqual(EH.release_since(nameless, self.root, later), nameless)
+        self.beat(1, at=later)
+        self.assertEqual(EH.release_since(nameless, self.root, later), {"release": None, "since": NOW - HOUR})
 
     def test_it_clears_when_the_generators_write_programs_that_run(self):
         a, b = self.faulted()
@@ -902,6 +1043,10 @@ class TheLastPassesBoreNothing(Case):
 
 # ---------------------------------------------------------------------------------------------- elane_idle
 class OwedWorkAndNothingScored(Case):
+    """`elane_idle` alarms on a BROKEN lane only (the captain's ruling on the second check of Oct 11): BROKEN is judged
+    first, by the lane's own record, whatever E2's lines hold; a lane held by its pace, its day's dollars or the Sail
+    guard is the chosen budget at work, reads judged clear, never stands, never mails, and says what the setting cost."""
+
     def researching(self, last_scored: float = 5.0) -> str:
         """A family in Train research whose last version was scored `last_scored` hours ago."""
         a = self.bred("alpha-one")
@@ -914,49 +1059,56 @@ class OwedWorkAndNothingScored(Case):
     FLOOR = "The budget holds the Sail model line at its floor (no usable budget.json): the budget's line binds before " \
             "the share does."
     SET_PACE = "Set it with python3 set_swarm.py elane.e2.pace_share=<lines> --apply."
+    #: The pace's lever: the lever, the budget's floor where it binds first, then the command (a cut loses the command
+    #: before it loses the floor).
+    LEVER = f"The lever is elane.e2.pace_share. {FLOOR} {SET_PACE}"
+    DAY_LEVER = ("The day's line is 24 hours at the hourly pace, under elane.e2.usd_day ($8.00), which does not bind: the "
+                 f"lever is elane.e2.pace_share. {FLOOR} {SET_PACE}")
+    HOUSE = "the equity lanes' Train runs fail on the House's side: check the equity_data job's receipt and the swarm's " \
+            "equity-decider.log; it needs a fix, in a release or on the box (python3 -m league.ops.elane_health --state " \
+            "/workspace/state prints each family's state)"
 
-    def test_a_lane_at_its_pace_is_starved_and_names_its_lever(self):
+    def quiet(self, out: dict, ctx) -> dict:
+        """The idle cause of a run on which it is judged, clear, nobody's step, and nothing was raised or mailed."""
+        check = self.own(out)["elane_idle"]
+        self.assertEqual((check["stalled"], check["judged"], check["owner_step"]), (False, True, None), check["what"])
+        self.assertNotIn("elane_idle", out["stalled"])
+        self.assertEqual((self.notify.calls, ctx.alerts), ([], []), "a setting at work is told to nobody")
+        return check
+
+    def test_a_lane_held_at_its_pace_is_no_stall_and_says_which_line_binds(self):
         self.researching()
         self.spend(0.5, 0.05)  # over the pace of the tests' settings (a quarter of the floor's line)
-        out, _ = self.run_at()
-        check = self.own(out)["elane_idle"]
-        self.assertTrue(check["stalled"])
-        self.assertIsNone(check["owner_step"], "a starved lane runs as its settings say")
-        self.assertEqual((check["numbers"]["kind"], check["numbers"]["held_now"], check["numbers"]["idle_hours"],
-                          check["numbers"]["researching"], check["numbers"]["basis"]), ("pace", "pace", 5.0, 2, "idle_hours"))
-        # Which line binds, from the figures: the hourly pace; its lever; and, the budget being at its floor here (the
-        # tests' House has no budget.json), that the budget's line binds before the share.
+        check = self.quiet(*self.run_at())
+        self.assertEqual({k: check["numbers"][k] for k in ("kind", "held_now", "idle_hours", "researching", "basis", "starved",
+                                                           "held_lately", "steps_due", "steps_skipped")},
+                         {"kind": "pace", "held_now": "pace", "idle_hours": 5.0, "researching": 2, "basis": "idle_hours",
+                          "starved": True, "held_lately": True, "steps_due": 0, "steps_skipped": 0})
+        # Which line binds, from the figures: the hourly pace; that it is no stall; its lever; and, the budget being at
+        # its floor here (the tests' House has no budget.json), that the budget's line binds before the share: said
+        # BEFORE the command, where a cut would have lost it (the second check's wording b).
         self.assertEqual(check["what"], (
-            "No equity version was scored on Train for 5.0 h while 2 families are in Train research. STARVED, not broken: "
-            "E2's hourly pace binds ($0.050 booked in the last hour against a pace of $0.017 an hour: elane.e2.pace_share "
-            f"0.25 of the Sail model line), so no model is asked. The lever is elane.e2.pace_share. {self.SET_PACE} "
-            f"{self.FLOOR}"))
-        self.assertNotIn("BOTH", check["what"])
+            "No equity version was scored on Train for 5.0 h while 2 families are in Train research. STARVED BY A SETTING, "
+            "not broken: E2's hourly pace binds ($0.050 booked in the last hour against a pace of $0.017 an hour: "
+            f"elane.e2.pace_share 0.25 of the Sail model line), so no model is asked. {EH.NO_STALL} {self.LEVER}"))
+        self.assertLess(check["what"].index(self.FLOOR), check["what"].index(self.SET_PACE))
         self.assertEqual(check["doing"], EH.DOING["starved"])
-        self.assertEqual(out["stalled"], ["elane_idle"])
-        self.assertEqual(self.notify.calls[-1]["notice_id"], "stall:info:elane_idle")
-        entry = self.notify.entry("elane_idle")
-        self.assertTrue(entry["what"].endswith(f"The lever is elane.e2.pace_share. {self.SET_PACE}"), "the lever is in the mail")
-        self.assertLessEqual(len(entry["what"]), EH.WHAT_CHARS)
+        self.assertFalse(json.loads((self.root / ST.STATE_FILE).read_text())["causes"]["elane_idle"].get("standing"))
+        for name in ("pace_usd_hour", "spent_last_hour_usd", "day_line_usd", "spent_today_usd"):
+            self.assertIn(name, check["numbers"], "E2's dollars are in the receipt")
 
-    def test_the_days_dollars_spent_is_no_stall_while_a_version_was_scored_today(self):
-        """The check's finding (the blocker's second half): a healthy lane stood STARVED every UTC evening once its
-        day's line was spent, the runs around the 23:30Z public page among them. A busy lane spends its day early,
-        every day, by design."""
+    def test_the_days_dollars_spent_is_no_stall(self):
+        """The first check's finding: a healthy lane stood STARVED every UTC evening once its day's line was spent, the
+        runs around the 23:30Z public page among them. A busy lane spends its day early, every day, by design."""
         self.researching()  # its last version was scored at 05:20 UTC today
         self.spend(4.0, 0.45)  # today, over the day's line; outside the last hour
-        out, ctx = self.run_at()
-        check = self.own(out)["elane_idle"]
-        self.assertEqual((check["stalled"], check["judged"], check["owner_step"]), (False, True, None))
+        check = self.quiet(*self.run_at())
         self.assertEqual((check["numbers"]["held_now"], check["numbers"]["scored_today"], check["numbers"]["kind"]),
                          ("usd_day", 1, "usd_day"))
         # At the release's settings the day's line is 24 hourly paces, under usd_day: usd_day does not bind.
         self.assertEqual(check["what"], (
             "E2's model dollars for the UTC day are spent ($0.450 of a day's line of $0.400) and 1 equity versions were "
-            "scored since 00:00 UTC: no stall. E2 asks again at 00:00 UTC. The day's line is 24 hours at the hourly pace, "
-            "under elane.e2.usd_day ($8.00), which does not bind: the lever is elane.e2.pace_share. "
-            f"{self.SET_PACE} {self.FLOOR}"))
-        self.assertEqual((out["stalled"], self.notify.calls, ctx.alerts), ([], [], []))
+            f"scored since 00:00 UTC: no stall. E2 asks again at 00:00 UTC. {self.DAY_LEVER}"))
         # However long ago today: at 23:50 UTC the same lane, nothing scored for 18 hours, is still no stall.
         late = TS.at("2026-10-07T23:50:00Z")
         check = self.equity(now=late)["elane_idle"]
@@ -970,24 +1122,33 @@ class OwedWorkAndNothingScored(Case):
                                                "pace: the lever is elane.e2.usd_day. Set it with python3 set_swarm.py "
                                                "elane.e2.usd_day=<dollars> --apply."), check["what"])
 
-    def test_a_day_spent_with_nothing_scored_today_and_the_houses_sail_day_are_starved(self):
-        self.researching(last_scored=12.0)  # yesterday, 22:20 UTC
+    def test_a_day_spent_with_nothing_scored_today_and_the_houses_sail_day_never_stand(self):
+        """The ruling: a lane held by its day's dollars or by the Sail guard is the chosen budget at work, whether or
+        not a version was scored today. Before, both stood STARVED and were mailed every 24 hours."""
+        self.researching(last_scored=12.0)  # yesterday, 22:20 UTC; the families were born at 00:20 today
         self.spend(4.0, 0.45)
-        check = self.equity()["elane_idle"]
-        self.assertEqual((check["stalled"], check["numbers"]["kind"], check["owner_step"], check["numbers"]["scored_today"]),
-                         (True, "usd_day", None, 0))
-        self.assertIn("No equity version was scored on Train for 10.0 h while 2 families are in Train research. STARVED, not "
-                      "broken: E2's day's line binds ($0.450 booked this UTC day against a line of $0.400), so no model is "
-                      "asked. The day's line is 24 hours at the hourly pace, under elane.e2.usd_day ($8.00), which does not "
-                      "bind: the lever is elane.e2.pace_share.", check["what"])
+        check = self.quiet(*self.run_at())
+        self.assertEqual((check["numbers"]["kind"], check["numbers"]["scored_today"], check["numbers"]["starved"]),
+                         ("usd_day", 0, True))
+        self.assertEqual(check["what"], (
+            "No equity version was scored on Train for at least 10.0 h while 2 families are in Train research. STARVED BY A "
+            "SETTING, not broken: E2's day's line binds ($0.450 booked this UTC day against a line of $0.400), so no model "
+            f"is asked. {EH.NO_STALL} {self.DAY_LEVER}"))
         self.setUp()
         self.researching()
         self.store.put(elane_yield.GUARD_KEY, {"braked": True, "reason": "an invented brake"})
-        check = self.equity()["elane_idle"]
-        self.assertEqual((check["stalled"], check["numbers"]["kind"], check["owner_step"]), (True, "sail_day", None))
-        self.assertTrue(check["what"].endswith("STARVED, not broken: the House's Sail day holds E2 (the Sail guard is "
-                                               "braked), so no model is asked."), "no lever of E2's")
+        check = self.quiet(*self.run_at())
+        self.assertEqual((check["numbers"]["kind"], check["numbers"]["held_now"]), ("sail_day", "sail_day"))
+        self.assertTrue(check["what"].endswith("STARVED BY A SETTING, not broken: the House's Sail day holds E2 (the Sail "
+                                               f"guard is braked), so no model is asked. {EH.NO_STALL}"), "no lever of E2's")
         self.assertNotIn("an invented brake", check["what"])
+        # A WHOLE DAY under the Sail guard, a stall run every half hour: it never stands and nothing of it is mailed.
+        for k in range(1, 49):
+            out, _ = self.run_at(now=NOW + k * 0.5 * HOUR)
+            check = self.own(out)["elane_idle"]
+            self.assertEqual((check["stalled"], check["judged"], check["numbers"]["kind"]), (False, True, "sail_day"), k)
+        self.assertNotIn("elane_idle", {c for call in self.notify.calls for c in (x["cause"] for x in call["causes"])})
+        self.assertEqual(check["numbers"]["idle_hours"], 29.0, "the idle hours are counted, and said, and stand on nothing")
 
     def trickle(self, rounds: int = 3, skipped: int = 2, why: str | None = None) -> list[str]:
         """Three families, a Train round an hour for the last `rounds` hours: one version scored (failing the bar) and
@@ -1005,114 +1166,197 @@ class OwedWorkAndNothingScored(Case):
             self.record(fid, versions=versions[fid])
         return fams
 
-    def test_a_lane_that_scores_while_most_of_its_steps_are_skipped_is_starved_by_work_lost(self):
-        """The check's finding (the blocker's first half): 19 of 48 Train steps were skipped for E2's pace while three
-        families waited, and the cause read clear throughout because a version was still scored about hourly."""
+    def test_a_trickle_at_the_pace_never_stands_and_its_work_lost_is_in_the_receipt_and_the_funnel(self):
+        """The second check's finding B and the ruling: the starved-by-work-lost rule stood for one cost ratio only,
+        flapped and mailed daily. A lane at its pace is the chosen budget at work: the steps it cost are COUNTED, in
+        the check's sentence and numbers and in the research funnel, and stand on nothing."""
         self.trickle()
-        out, ctx = self.run_at()
-        check = self.own(out)["elane_idle"]
-        self.assertEqual((check["stalled"], check["judged"], check["owner_step"]), (True, True, None))
+        check = self.quiet(*self.run_at())
         self.assertEqual({k: check["numbers"][k] for k in ("kind", "basis", "steps_due", "steps_taken", "steps_skipped",
                                                            "skipped_pace", "skipped_usd_day", "skipped_sail_day",
-                                                           "held_now", "scored_today")},
-                         {"kind": "pace", "basis": "work_lost", "steps_due": 9, "steps_taken": 3, "steps_skipped": 6,
+                                                           "held_now", "held_lately", "scored_today", "idle_hours")},
+                         {"kind": "pace", "basis": "idle_hours", "steps_due": 9, "steps_taken": 3, "steps_skipped": 6,
                           "skipped_pace": 6, "skipped_usd_day": 0, "skipped_sail_day": 0, "held_now": "none",
-                          "scored_today": 3})
-        # A version was scored half an hour ago: no idle hours at all, and it stands. The lever is the pace's.
+                          "held_lately": True, "scored_today": 3, "idle_hours": 0.5})
+        self.assertNotIn("starved", check["numbers"], "a version was scored half an hour ago")
         self.assertEqual(check["what"], (
-            "6 of the 9 equity Train steps due in the last 3 h were skipped because E2 might ask no model (its hourly pace "
-            "6); 3 versions were scored. STARVED, not broken: E2's hourly pace binds (a pace of $0.017 an hour: "
-            f"elane.e2.pace_share 0.25 of the Sail model line). The lever is elane.e2.pace_share. {self.SET_PACE} "
-            f"{self.FLOOR}"))
+            "The last equity version was scored 0.5 h ago. The lanes are idle after 3 h with nothing scored. Of the 9 "
+            "equity Train steps due in the last 3 h, 3 were taken and 6 were skipped because E2 might ask no model (its "
+            "hourly pace 6); 3 versions were scored. E2's hourly pace binds (a pace of $0.017 an hour: elane.e2.pace_share "
+            f"0.25 of the Sail model line); E2 may ask a model now and was last held 0.5 h ago. {EH.NO_STALL} {self.LEVER}"))
         self.assertEqual(check["doing"], EH.DOING["starved"])
-        self.assertEqual((out["stalled"], out["notice"]["notice_id"]), (["elane_idle"], "stall:info:elane_idle"))
-        entry = self.notify.entry("elane_idle")
-        self.assertEqual(entry["what"], check["what"][:-len(self.FLOOR) - 1], "the mail: every sentence but the last, whole")
-        self.assertEqual(list(entry["numbers"])[:6], ["kind", "steps_due", "steps_skipped", "researching", "held_now",
-                                                      "births_wanted"])
-        for name in ("pace_usd_hour", "spent_last_hour_usd", "day_line_usd", "spent_today_usd"):
-            self.assertIn(name, check["numbers"], "E2's dollars are in the receipt")
-            self.assertNotIn(name, entry["numbers"], "and not among the mail's two-place figures: the sentence says them")
-        self.assertEqual(len(ctx.alerts), 1)
-        # It needs nobody: the Done meter's day is not failed by it (`TheDoneMeterCountsThem`).
-
-    def test_work_lost_is_judged_on_six_steps_and_on_more_than_half(self):
-        self.trickle(rounds=1)  # three steps due
-        check = self.equity()["elane_idle"]
-        self.assertEqual((check["stalled"], check["numbers"]["steps_due"]), (False, 3))
-        self.setUp()
-        self.trickle(rounds=3, skipped=1)  # six due, three skipped: half is not most
-        check = self.equity()["elane_idle"]
-        self.assertEqual((check["stalled"], check["numbers"]["steps_due"], check["numbers"]["steps_skipped"]), (False, 6, 3))
-        self.assertEqual(check["what"], "The last equity version was scored 0.5 h ago. The lanes are idle after 3 h with "
-                                        "nothing scored.")
-        self.setUp()
-        self.trickle(rounds=2)  # six due, four skipped
-        check = self.equity()["elane_idle"]
-        self.assertEqual((check["stalled"], check["numbers"]["steps_due"], check["numbers"]["steps_skipped"]), (True, 6, 4))
-        # A step skipped for another reason (a passing version that cannot be read) is no starvation.
+        # The funnel carries the same counts for the same hours.
+        funnel = guard.read(self.root / EH.SWARM_DB, lambda db: EH.research_counts(db, NOW - 3 * HOUR, NOW + 1.0))
+        self.assertEqual(funnel["train_steps"], {"taken": 3, "skipped": {"pace": 6, "usd_day": 0, "sail_day": 0, "other": 0}})
+        self.assertEqual((funnel["train_steps"]["taken"], funnel["train_steps"]["skipped"]["pace"]),
+                         (check["numbers"]["steps_taken"], check["numbers"]["skipped_pace"]))
+        # However the steps divide, the cause does not stand: one round, half skipped, most skipped.
+        for rounds, skipped, due, lost in ((1, 2, 3, 2), (3, 1, 6, 3), (2, 2, 6, 4)):
+            self.setUp()
+            self.trickle(rounds=rounds, skipped=skipped)
+            check = self.quiet(*self.run_at())
+            self.assertEqual((check["numbers"]["steps_due"], check["numbers"]["steps_skipped"]), (due, lost))
+            self.assertIn(f"Of the {due} equity Train steps due in the last 3 h, {due - lost} were taken and {lost} were "
+                          "skipped because E2 might ask no model", check["what"])
+        # A step skipped for another reason (a passing version that cannot be read) is no work lost to a setting.
         self.setUp()
         self.trickle(rounds=3, why="its passing version cannot be read")
-        check = self.equity()["elane_idle"]
-        self.assertEqual((check["stalled"], check["numbers"]["steps_due"], check["numbers"]["steps_skipped"]), (False, 9, 0))
+        check = self.quiet(*self.run_at())
+        self.assertEqual((check["numbers"]["steps_due"], check["numbers"]["steps_skipped"], check["numbers"]["held_lately"]),
+                         (9, 0, False))
+        self.assertEqual(check["what"], "The last equity version was scored 0.5 h ago. The lanes are idle after 3 h with "
+                                        "nothing scored.")
         # Rounds before the running release started are not this release's work; nor are those before the window.
         self.setUp()
         self.trickle(rounds=3)
         self.beat(1.0)
-        check = self.equity()["elane_idle"]
-        self.assertEqual((check["stalled"], check["numbers"]["steps_due"]), (False, 3))
+        self.assertEqual(self.equity()["elane_idle"]["numbers"]["steps_due"], 3)
         self.beat(48)
         check = self.equity(now=NOW + 1.2 * HOUR)["elane_idle"]
-        self.assertEqual((check["stalled"], check["numbers"]["steps_due"], check["numbers"]["steps_skipped"]), (True, 6, 4),
+        self.assertEqual((check["stalled"], check["numbers"]["steps_due"], check["numbers"]["steps_skipped"]), (False, 6, 4),
                          "the window slid past the first round: two rounds are in it")
 
     def test_work_lost_to_the_days_line_or_the_sail_day_names_that_line(self):
         fams = self.trickle(why=elane_yield.DAY_SPENT)
-        check = self.equity()["elane_idle"]
-        # The day's line is not spent now (the tests' House booked nothing) and versions were scored: it stands on the
-        # steps the day's line cost.
-        self.assertEqual((check["stalled"], check["numbers"]["kind"], check["numbers"]["skipped_usd_day"]), (True, "usd_day", 6))
-        self.assertIn("(its day's line 6); 3 versions were scored. STARVED, not broken: E2's day's line binds (a line of "
-                      "$0.400 a UTC day). The day's line is 24 hours at the hourly pace, under elane.e2.usd_day ($8.00), "
-                      "which does not bind: the lever is elane.e2.pace_share.", check["what"])
-        # Once the day's dollars ARE spent, with versions scored today: no stall, whatever the window holds.
+        check = self.quiet(*self.run_at())
+        # The day's line is not spent now (the tests' House booked nothing): the steps it cost are said against it.
+        self.assertEqual((check["numbers"]["kind"], check["numbers"]["skipped_usd_day"]), ("usd_day", 6))
+        self.assertIn("(its day's line 6); 3 versions were scored. E2's day's line binds (a line of $0.400 a UTC day); E2 "
+                      f"may ask a model now and was last held 0.5 h ago. {EH.NO_STALL} {self.DAY_LEVER}", check["what"])
+        # Once the day's dollars ARE spent, with versions scored today: the day's own sentence, and the work lost.
         self.spend(0.2, 0.45)
-        check = self.equity()["elane_idle"]
-        self.assertEqual((check["stalled"], check["judged"]), (False, True))
-        self.assertIn("E2's model dollars for the UTC day are spent", check["what"])
+        check = self.quiet(*self.run_at())
+        self.assertTrue(check["what"].startswith(
+            "E2's model dollars for the UTC day are spent ($0.450 of a day's line of $0.400) and 3 equity versions were "
+            "scored since 00:00 UTC: no stall. E2 asks again at 00:00 UTC. Of the 9 equity Train steps due in the last 3 h, "
+            "3 were taken and 6 were skipped because E2 might ask no model (its day's line 6)"), check["what"])
         self.setUp()
         self.trickle(why=f"{elane_yield.SAIL_DAY} holds new research (an invented reason)")
-        check = self.equity()["elane_idle"]
-        self.assertEqual((check["stalled"], check["numbers"]["kind"], check["owner_step"]), (True, "sail_day", None))
-        self.assertTrue(check["what"].endswith("STARVED, not broken: the House's Sail day holds E2 (the Sail guard's line or "
-                                               "its brake)."), check["what"])
+        check = self.quiet(*self.run_at())
+        self.assertEqual(check["numbers"]["kind"], "sail_day")
+        self.assertTrue(check["what"].endswith("The House's Sail day holds E2 (the Sail guard's line or its brake); E2 may "
+                                               f"ask a model now and was last held 0.5 h ago. {EH.NO_STALL}"), check["what"])
         self.assertEqual(len(fams), 3)
+
+    def house(self, a: str) -> dict:
+        return {"family": a, "version": 2, "house": "store", "why": "MissingData: invented", "retry_in": 600.0}
 
     def test_a_lane_that_may_ask_and_scores_nothing_is_broken_and_the_owners_step(self):
         a = self.researching()
-        house = {"family": a, "version": 2, "house": "store", "why": "MissingData: invented", "retry_in": 600.0}
-        self.round(2.0, house, house)
-        self.round(1.0, house, {"family": a, "error": "no route answered", "errors": ["invented"], "retry_in": 1200.0})
+        self.round(2.0, self.house(a), self.house(a))
+        self.round(1.0, self.house(a), {"family": a, "error": "no route answered", "errors": ["invented"], "retry_in": 1200.0})
         self.record(a, infra={"version": 2, "kind": "store", "next_at": NOW + 3600.0})
         self.ago(0.2)
         self.store.put(EH.TRAIN_AT_KEY, self.t)
         check = self.equity()["elane_idle"]
         self.assertTrue(check["stalled"])
-        self.assertEqual({k: check["numbers"][k] for k in ("kind", "held_now", "train_rounds", "house_failures", "unanswered",
-                                                           "families_waiting", "train_round_age_min")},
-                         {"kind": "house", "held_now": "none", "train_rounds": 2, "house_failures": 3, "unanswered": 1,
-                          "families_waiting": 1, "train_round_age_min": 12.0})
-        self.assertIn("BROKEN, not starved: E2 may ask a model now and 2 Train rounds ran; 3 steps failed on the House's "
-                      "side (store 4); 1 questions got no answer from a model route; 1 of 2 families wait out a backoff; "
-                      "the Train round last started 12 min ago.", check["what"])
-        self.assertIn("check the equity_data job's receipt and the swarm's equity-decider.log", check["owner_step"])
+        self.assertEqual({k: check["numbers"][k] for k in ("kind", "held_now", "held_lately", "train_rounds", "house_failures",
+                                                           "unanswered", "families_waiting", "train_round_age_min")},
+                         {"kind": "house", "held_now": "none", "held_lately": False, "train_rounds": 2, "house_failures": 3,
+                          "unanswered": 1, "families_waiting": 1, "train_round_age_min": 12.0})
+        self.assertEqual(check["what"], (
+            "No equity version was scored on Train for 5.0 h while 2 families are in Train research. BROKEN, not starved: "
+            "E2 may ask a model now and 2 Train rounds ran; 3 steps failed on the House's side (store 4); 1 questions got "
+            "no answer from a model route; 1 of 2 families wait out a backoff; the Train round last started 12 min ago."))
+        self.assertEqual(check["owner_step"], self.HOUSE)
         self.assertEqual(check["doing"], EH.DOING["broken"])
         self.assertNotIn("MissingData", json.dumps(check))
+
+    def test_a_broken_lane_stands_broken_whatever_its_pace_holds(self):
+        """The second check's first major: a lane whose every Train run failed on the House's side read "STARVED, not
+        broken" (info, "Nothing here needs you") at 29 of 29 runs because E2 was also at its pace, and the owner's step
+        never came. BROKEN is judged first, by the lane's own record; the pace is said second."""
+        a = self.researching()
+        self.round(2.0, self.house(a), {"family": "beta-two", "skipped": self.PACE})
+        self.round(1.0, self.house(a), {"family": "beta-two", "skipped": self.PACE})
+        self.spend(0.5, 0.05)
+        out, ctx = self.run_at()
+        check = self.own(out)["elane_idle"]
+        self.assertEqual((check["stalled"], check["numbers"]["kind"], check["numbers"]["held_now"],
+                          check["numbers"]["house_failures"], check["numbers"]["steps_skipped"]), (True, "house", "pace", 2, 2))
+        self.assertEqual(check["what"], (
+            "No equity version was scored on Train for 5.0 h while 2 families are in Train research. BROKEN, whatever E2's "
+            "own lines hold: 2 Train rounds ran; 2 steps failed on the House's side (store 2). E2 is also held now: E2's "
+            "hourly pace binds ($0.050 booked in the last hour against a pace of $0.017 an hour: elane.e2.pace_share 0.25 "
+            "of the Sail model line). That is its setting at work: a broken lane scores nothing at any pace."))
+        self.assertNotIn("STARVED", check["what"])
+        self.assertEqual((check["owner_step"], check["doing"]), (self.HOUSE, EH.DOING["broken"]))
+        # Raised like any owner cause: standing, a House warning with the step whole, the mail keyed by its own name.
+        self.assertEqual((out["stalled"], out["notice"]["sent"], out["notice"]["notice_id"]),
+                         (["elane_idle"], True, "stall:owner:elane_idle"))
+        self.assertTrue(ctx.alerts[0]["text"].endswith(f" Owner step: {self.HOUSE}."), ctx.alerts[0]["text"])
+        entry = self.notify.entry("elane_idle")
+        self.assertEqual(entry["owner_step"], self.HOUSE)
+        self.assertTrue(entry["what"].startswith("No equity version was scored on Train for 5.0 h while 2 families are in "
+                                                 "Train research. BROKEN, whatever E2's own lines hold: 2 Train rounds ran; "
+                                                 "2 steps failed on the House's side (store 2). E2 is also held now"))
+        self.assertLessEqual(len(entry["what"]), EH.WHAT_CHARS)
+        self.assertEqual(list(entry["numbers"])[:6], ["kind", "idle_hours", "researching", "held_now", "steps_due",
+                                                      "steps_skipped"])
+
+    def held_mixture(self, taken) -> dict:
+        """The second check's mixtures (probe_mask): three families, nothing scored for seven hours, a round every 48
+        minutes in which one step is taken (`taken(family)`) and two are skipped at E2's pace; E2 is held now."""
+        self.setUp()
+        fams = [self.bred(f"mix-{x}", hours=9) for x in "abc"]
+        for fid in fams:
+            self.record(fid, versions={"1": verdict(7.0, "Y1")})
+        for i in range(7):
+            one = fams[i % 3]
+            self.round(4.9 - i * 0.8, taken(one), *[{"family": other, "skipped": self.PACE} for other in fams if other != one])
+        self.spend(0.5, 0.05)
+        return self.equity()
+
+    def test_what_the_taken_steps_show_decides_between_broken_and_held(self):
+        self.assertEqual((EH.BROKEN_MIN_FAILS, EH.BROKEN_KINDS), (2, ("raised", "house", "errors")))
+        by_key = refusal(BY_KEY)
+        # Every taken step fails on the House's side, or with an error of its own: BROKEN, the owner's step, at a pace.
+        for taken, kind, words in (
+                (self.house, "house", "7 Train rounds ran; 7 steps failed on the House's side (store 7)"),
+                (lambda f: {"family": f, "error": "ValueError: an invented failure"}, "errors",
+                 "7 Train rounds ran; 7 steps failed with an error of their own")):
+            check = self.held_mixture(taken)["elane_idle"]
+            self.assertEqual((check["stalled"], check["numbers"]["kind"], bool(check["owner_step"]),
+                              check["numbers"]["steps_skipped"]), (True, kind, True, 8), kind)
+            self.assertIn(f"for 7.0 h while 3 families are in Train research. BROKEN, whatever E2's own lines hold: {words}. "
+                          "E2 is also held now: E2's hourly pace binds", check["what"])
+            self.assertNotIn("an invented failure", json.dumps(check))
+        # Questions no route answered and programs a static rule refused are no failing lane: held, it does not stand
+        # (the routes heal by themselves; the refusals are `elane_refused`'s, which stands on them early).
+        checks = self.held_mixture(lambda f: {"family": f, "error": "no route answered", "errors": ["x"], "retry_in": 600.0})
+        self.assertEqual((checks["elane_idle"]["stalled"], checks["elane_idle"]["numbers"]["kind"],
+                          checks["elane_idle"]["numbers"]["unanswered"]), (False, "pace", 7))
+        checks = self.held_mixture(lambda f: refused_step(f, by_key))
+        self.assertEqual((checks["elane_idle"]["stalled"], checks["elane_idle"]["numbers"]["refused_answers"]), (False, 7))
+        self.assertEqual((checks["elane_refused"]["stalled"], checks["elane_refused"]["numbers"]["top_rule_n"]), (True, 7))
+        # ONE failure before a hold is no broken lane (a store rewritten for a minute, then the day's dollars spent):
+        # it takes `BROKEN_MIN_FAILS`, or a family waiting out a House backoff after as many failures.
+        self.setUp()
+        a = self.researching()
+        self.round(4.0, self.house(a))
+        self.spend(0.5, 0.05)
+        check = self.equity()["elane_idle"]
+        self.assertEqual((check["stalled"], check["numbers"]["house_failures"], check["numbers"]["starved"]), (False, 1, True))
+        self.record(a, infra={"version": 2, "kind": "store", "count": 4, "next_at": NOW + 3600.0})
+        check = self.equity()["elane_idle"]
+        self.assertEqual((check["stalled"], check["numbers"]["kind"], check["owner_step"]), (True, "house", self.HOUSE))
+        self.assertIn("BROKEN, whatever E2's own lines hold: 1 Train rounds ran; 1 steps failed on the House's side (store 2)"
+                      "; 1 of 2 families wait out a backoff. E2 is also held now", check["what"])
+        # Rounds that raise, at a pace: the same.
+        self.setUp()
+        self.researching()
+        for hours in (2.0, 1.0):
+            self.ago(hours)
+            self.store.event("swarm.status", None, {"round": "elane_train", "error": "Traceback: an invented failure"})
+        self.spend(0.5, 0.05)
+        check = self.equity()["elane_idle"]
+        self.assertEqual((check["stalled"], check["numbers"]["kind"], check["numbers"]["rounds_raised"]), (True, "raised", 2))
+        self.assertIn("the equity lanes' rounds raise", check["owner_step"])
 
     def test_the_other_ways_it_is_broken(self):
         self.researching()
         check = self.equity()["elane_idle"]
-        self.assertEqual((check["numbers"]["kind"], check["stalled"]), ("no_round", True))
+        self.assertEqual((check["numbers"]["kind"], check["stalled"], check["numbers"]["held_lately"]), ("no_round", True, False))
         self.assertIn("the equity lanes owe work, may ask a model and start no round", check["owner_step"])
         self.ago(1.0)
         self.store.event("swarm.status", None, {"round": "elane_train", "error": "Traceback: an invented failure"})
@@ -1138,6 +1382,47 @@ class OwedWorkAndNothingScored(Case):
         check = self.equity()["elane_idle"]
         self.assertEqual((check["numbers"]["kind"], check["stalled"], check["owner_step"]), ("unanswered", True, None))
 
+    def test_a_lane_that_may_ask_a_model_is_one_no_hold_was_seen_on_for_three_hours(self):
+        """The second check's finding B: E2's hold flaps (a write, an hour held, a write), and no round starts while
+        it is held, so the steps skipped undercount it. The job keeps the last run that read E2 held: a lane is one
+        that MAY ASK A MODEL only when no hold was seen for `IDLE_HOURS`, at any run, step or pass."""
+        self.researching()
+        self.spend(0.9, 0.05)  # held at 10:20; the hour's spend is off the pace by 10:26
+        self.quiet(*self.run_at())
+        kept = json.loads((self.root / ST.STATE_FILE).read_text())[EH.STATE_KEEP]
+        self.assertEqual(kept["held"], {"at": NOW, "kind": "pace"})
+        # 10:50, 11:50, 12:50: E2 may ask a model at each of these moments and nothing was scored for 5.5 h and more.
+        # The hold the job read at 10:20 is inside the last three hours: no stall, and said.
+        for hours in (0.5, 1.5, 2.5):
+            check = self.equity(now=NOW + hours * HOUR)["elane_idle"]
+            self.assertEqual((check["stalled"], check["judged"], check["numbers"]["held_now"], check["numbers"]["held_lately"],
+                              check["numbers"]["starved"]), (False, True, "none", True, True), hours)
+            self.assertIn(f"STARVED BY A SETTING, not broken: E2's hourly pace binds (a pace of $0.017 an hour: "
+                          f"elane.e2.pace_share 0.25 of the Sail model line); E2 may ask a model now and was last held "
+                          f"{hours:.1f} h ago.", check["what"])
+        # 13:50: free to ask for three hours and a half, and still nothing scored: it stands, and is the owner's step.
+        check = self.equity(now=NOW + 3.5 * HOUR)["elane_idle"]
+        self.assertEqual((check["stalled"], check["numbers"]["kind"], check["numbers"]["held_lately"],
+                          check["numbers"]["idle_hours"]), (True, "no_round", False, 8.5))
+        self.assertIn("BROKEN, not starved: E2 may ask a model now and 0 Train rounds ran", check["what"])
+        # A step or a pass skipped for want of model dollars inside the three hours is a hold seen, with nothing kept.
+        for write in (lambda: self.round(2.0, {"family": "alpha-one", "skipped": self.PACE}),
+                      lambda: self.births(2.5, skipped="usd_day")):
+            self.setUp()
+            self.researching()
+            write()
+            check = self.equity()["elane_idle"]
+            self.assertEqual((check["stalled"], check["numbers"]["held_lately"], check["numbers"]["starved"]),
+                             (False, True, True))
+        # The lane's own reading unreadable: it cannot say the lane is held, and the cause stands as it would.
+        self.setUp()
+        self.researching()
+        self.spend(0.5, 0.05)
+        with mock.patch.object(elane_yield, "hold", side_effect=ZeroDivisionError("an invented failure")):
+            check = self.equity()["elane_idle"]
+        self.assertEqual((check["stalled"], check["numbers"]["kind"]), (True, "no_round"))
+        self.assertIn("BROKEN, not starved: whether E2 may ask a model now could not be read and", check["what"])
+
     def test_a_swarm_that_is_not_running_is_not_judged_idle(self):
         self.researching()
         self.beat(48, at=NOW - 0.5 * HOUR)  # its last heartbeat is half an hour old
@@ -1146,6 +1431,58 @@ class OwedWorkAndNothingScored(Case):
         self.assertIn("Not judged: the swarm is not running (its heartbeat is 30 min old)", check["what"])
         (self.root / EH.HEARTBEAT).unlink()  # no heartbeat to read: judged on the records alone
         self.assertTrue(self.equity()["elane_idle"]["stalled"])
+
+    def restarted(self, now: float, ago: float, release: str = "/workspace/releases/an-invented-release") -> None:
+        """The swarm's heartbeat at `now`: it restarted `ago` seconds before (the same release unless another is named)."""
+        (self.root / EH.HEARTBEAT).write_text(json.dumps({"at": now, "started_at": now - ago, "release": release}))
+
+    def test_the_idle_clock_is_kept_per_release_less_the_time_the_swarm_was_down(self):
+        """The second check's finding (probe_restarts, part B): the idle clock started again at every swarm restart, so
+        a broken lane restarted every two and a half hours was never judged idle in twelve. The clock is kept in
+        stall.json under the running release, and only the time the swarm was down is taken off it."""
+        fams = [self.bred(f"br-{i}", hours=0.9) for i in range(3)]
+        self.restarted(NOW, 3600.0)
+        seen = []
+        for k in range(12):  # twelve hours, a stall run an hour, every Train step a failure of the House's
+            now = NOW + k * HOUR
+            for minutes in (25, 5):
+                self.ago((NOW - now) / HOUR + minutes / 60.0)
+                self.store.event("swarm.elane", None, {"pass": "train", "steps": [self.house(f) for f in fams]})
+            if k and k % 5 in (0, 2):  # a restart of the SAME release, 30 minutes or one minute before the run
+                self.restarted(now, 1800.0 if k % 5 == 0 else 60.0)
+            else:
+                beat = json.loads((self.root / EH.HEARTBEAT).read_text())
+                self.restarted(now, now - beat["started_at"])
+            out, _ = self.run_at(now=now)
+            check = self.own(out)["elane_idle"]
+            seen.append((k, check["stalled"], check["judged"], check["numbers"].get("idle_hours"),
+                         check["numbers"].get("down_hours")))
+            self.said = [*getattr(self, "said", []), check["what"]]
+        # Restarts at +2 h (a minute before the run), +5 h (half an hour before), +7 h, +10 h: the hour between the last
+        # heartbeat the job read and each new start is taken off, and nothing else.
+        self.assertEqual(seen[:5], [(0, False, True, 0.9, 0.0), (1, False, True, 1.9, 0.0), (2, False, False, 1.9, 1.0),
+                                    (3, False, False, 2.9, 1.0), (4, True, True, 3.9, 1.0)])
+        self.assertEqual(seen[5:], [(5, True, True, 4.4, 1.5), (6, True, True, 5.4, 1.5), (7, True, True, 5.4, 2.5),
+                                    (8, True, True, 6.4, 2.5), (9, True, True, 7.4, 2.5), (10, True, True, 7.9, 3.0),
+                                    (11, True, True, 8.9, 3.0)])
+        self.assertEqual((check["numbers"]["kind"], check["owner_step"]), ("house", self.HOUSE))
+        self.assertIn("No equity version was scored on Train for at least 8.9 h of the swarm's running time (it was down "
+                      "3.0 h more) while 3 families are in Train research.", check["what"])
+        # Under three hours of running time it was not judged, and said the time taken off.
+        self.assertEqual(self.said[2], "Not judged: nothing was scored for 2.9 h, 1.0 h of them with the swarm down (the "
+                                       "lanes are judged idle after 3 h with nothing scored).")
+        kept = json.loads((self.root / ST.STATE_FILE).read_text())[EH.STATE_KEEP]
+        self.assertEqual(kept["idle"], {"from": NOW - 0.9 * HOUR, "down": 3.0 * HOUR - 120.0, "started": NOW + 10 * HOUR - 1800.0,
+                                        "beat_at": NOW + 11 * HOUR}, "since when (the families' birth), and the time down")
+        # ANOTHER release: its clock starts at its own start, whatever the one before did not do.
+        later = NOW + 12 * HOUR
+        self.restarted(later, 600.0, release="/workspace/releases/another-invented-release")
+        check = self.equity(now=later)["elane_idle"]
+        self.assertEqual((check["stalled"], check["judged"]), (False, False))
+        self.assertIn("Not judged: the swarm started 0.2 h ago", check["what"])
+        kept = json.loads((self.root / ST.STATE_FILE).read_text())[EH.STATE_KEEP]
+        self.assertEqual((kept["release"], kept["idle"]["down"]), ("/workspace/releases/another-invented-release",
+                                                                   12.9 * HOUR - 600.0))
 
     def test_a_lane_that_scored_lately_or_owes_nothing_is_not_idle(self):
         a = self.researching(last_scored=1.0)
@@ -1162,15 +1499,18 @@ class OwedWorkAndNothingScored(Case):
         self.assertEqual(check["what"], "The equity lanes have owed work for 0.4 h and scored no version since. The lanes are "
                                         "idle after 3 h with nothing scored.")
         self.assertEqual(self.store.family(old)["state"][EH.STATE_KEY]["status"], "passed")
-        # Nothing owed: every family past its research, the last pass bore what it wanted.
+        # Nothing owed: every family past its research, the last pass bore what it wanted. The idle clock is dropped.
         self.setUp()
         a = self.bred("alpha-one", record={"status": "passed", "versions": {"1": verdict(9.0)}, "passed_version": 1})
         self.births(8.0, born=[a], want=1)
         self.ago(1.0)
         self.store.put(EH.BIRTHS_AT_KEY, self.t)
+        (self.root / ST.STATE_FILE).write_text(json.dumps({EH.STATE_KEEP: {"release": None, "since": NOW - 48 * HOUR,
+                                                                         "idle": {"from": NOW - 30 * HOUR, "down": 0.0}}}))
         check = self.equity()["elane_idle"]
         self.assertEqual((check["stalled"], check["judged"]), (False, False))
         self.assertIn("no equity family is in Train research and no equity birth is wanted", check["what"])
+        self.assertNotIn("idle", json.loads((self.root / ST.STATE_FILE).read_text())[EH.STATE_KEEP])
 
     def test_no_family_yet_and_barren_passes_are_the_equity_passs_to_explain(self):
         symbols = "symbols: 1 to 20 of SPY, QQQ, IWM, DIA (XLK not)"
@@ -1182,9 +1522,9 @@ class OwedWorkAndNothingScored(Case):
         idle = checks["elane_idle"]
         self.assertEqual((idle["stalled"], idle["numbers"]["kind"], idle["owner_step"], idle["numbers"]["barren_passes"]),
                          (True, "barren", None, 3))
-        self.assertIn("for 5.0 h while no family is in Train research and births are wanted. Not starved (E2 may ask a model "
-                      "now): 3 equity passes asked a model and bore no family, so there is none to score (see elane_births).",
-                      idle["what"])
+        self.assertIn("for at least 5.0 h while no family is in Train research and births are wanted. Not starved (E2 may "
+                      "ask a model now): 3 equity passes asked a model and bore no family, so there is none to score (see "
+                      "elane_births).", idle["what"])
         self.assertEqual(idle["doing"], EH.DOING["elane_births"])
         self.assertTrue(checks["elane_births"]["stalled"])
         # A pass that is overdue and may ask a model is a lane that starts no round: the owner's step.
@@ -1196,6 +1536,27 @@ class OwedWorkAndNothingScored(Case):
         self.assertEqual((idle["stalled"], idle["numbers"]["kind"], idle["numbers"]["pass_overdue"]), (True, "no_round", True))
         self.assertIn("while no family is in Train research and the equity pass is overdue. BROKEN, not starved", idle["what"])
         self.assertIn("start no round", idle["owner_step"])
+
+    def test_the_hours_are_at_least_when_the_lookback_bounds_them_and_the_kept_clock_goes_on(self):
+        """The second check's wording (c): a lane with no family for days said "No equity version was scored on Train
+        for 11.8 h" every day, since when the work is owed being read inside the 12-hour lookback. It says "at least",
+        and the clock the job keeps counts on past the lookback's edge."""
+        symbols = "symbols: 1 to 20 of SPY, QQQ, IWM, DIA (XLK not)"
+        for hours in (14.0, 11.8, 9.0, 6.0, 3.0):  # the first is outside the lookback
+            self.births(hours, refused=[("far", symbols)])
+        idle = self.equity()["elane_idle"]
+        self.assertTrue(idle["stalled"])
+        self.assertIn("No equity version was scored on Train for at least 11.8 h while no family is in Train research and "
+                      "births are wanted.", idle["what"])
+        for hours in (-3.0, -6.0):  # six hours on, two more barren passes
+            self.births(hours, refused=[("far", symbols)])
+        idle = self.equity(now=NOW + 6.2 * HOUR)["elane_idle"]
+        self.assertEqual((idle["stalled"], idle["numbers"]["idle_hours"]), (True, 18.0))
+        self.assertIn("for at least 18.0 h while no family", idle["what"])
+        # A clock that starts at a version scored is exact, and says so by saying no more.
+        self.setUp()
+        self.researching()
+        self.assertIn("No equity version was scored on Train for 5.0 h while", self.equity()["elane_idle"]["what"])
 
     def test_with_no_family_left_barren_passes_come_before_what_the_families_now_gone_left_behind(self):
         """The check's finding: "BROKEN, not starved: ... 5 programs were refused before a run" while the lanes simply
@@ -1220,16 +1581,16 @@ class OwedWorkAndNothingScored(Case):
         self.assertIn("BROKEN, not starved: E2 may ask a model now and 1 Train rounds ran; 5 programs were refused before a "
                       "run (see elane_refused); 1 steps failed with an error of their own.", check["what"])
 
-    def test_births_wanted_and_held_back_before_any_family_is_starved(self):
+    def test_births_wanted_and_held_back_before_any_family_never_stand(self):
         self.births(5.0, skipped="pace")
         self.ago(5.0)
         self.store.put(EH.BIRTHS_AT_KEY, self.t)
         self.spend(0.5, 0.05)
-        check = self.equity()["elane_idle"]
-        self.assertEqual((check["stalled"], check["numbers"]["kind"], check["numbers"]["researching"],
-                          check["numbers"]["births_wanted"]), (True, "pace", 0, True))
-        self.assertIn("for 5.0 h while no family is in Train research and births are wanted. STARVED, not broken",
-                      check["what"])
+        check = self.quiet(*self.run_at())
+        self.assertEqual((check["numbers"]["kind"], check["numbers"]["researching"], check["numbers"]["births_wanted"],
+                          check["numbers"]["starved"]), ("pace", 0, True, True))
+        self.assertIn("for at least 5.0 h while no family is in Train research and births are wanted. STARVED BY A SETTING, "
+                      "not broken: E2's hourly pace binds", check["what"])
 
 
 # ---------------------------------------------------------------------------------------------- elane_refused
@@ -1263,10 +1624,11 @@ class MostProgramsRefusedByOneRule(Case):
 
     def test_too_few_programs_are_not_judged_and_two_rules_sharing_them_is_no_one_rule(self):
         a = self.bred("alpha-one")
-        self.round(1.0, *[refused_step(a, refusal(BY_KEY)) for _ in range(7)])
+        self.round(1.0, *[refused_step(a, refusal(BY_KEY)) for _ in range(4)], *[refused_step(a, refusal(LEVEL)) for _ in range(3)])
         check = self.equity()["elane_refused"]
-        self.assertEqual((check["stalled"], check["judged"]), (False, False))
-        self.assertIn("wrote 7 programs in the last 6 h (at least 8 are needed)", check["what"])
+        self.assertEqual((check["stalled"], check["judged"], check["numbers"]["basis"]), (False, False, "early"))
+        self.assertEqual(check["what"], "Not judged: the equity generators wrote 7 programs in the last 12 h (at least 8 are "
+                                        "needed, or 5 refused by one rule).")
         self.setUp()
         a = self.bred("alpha-one")
         self.round(1.0, *[refused_step(a, refusal(BY_KEY)) for _ in range(4)], *[refused_step(a, refusal(LEVEL)) for _ in range(4)],
@@ -1274,6 +1636,81 @@ class MostProgramsRefusedByOneRule(Case):
         check = self.equity()["elane_refused"]
         self.assertEqual((check["stalled"], check["judged"], check["numbers"]["top_rule_n"], check["numbers"]["answers"]),
                          (False, True, 4, 10))
+
+    def test_five_refused_by_one_rule_stand_before_the_eighth_program(self):
+        """The second check's finding: at a slow pace the cause was told late (+5.3 h, at the eighth program). Five
+        refused by one rule are most of eight whatever is still to be written."""
+        self.assertEqual(EH.REFUSED_EARLY, 5)
+        a, b = self.bred("alpha-one"), self.bred("beta-two")
+        for hours in (4.0, 3.0):
+            self.round(hours, refused_step(a, refusal(BY_KEY)), refused_step(b, refusal(BY_KEY)))
+        check = self.equity()["elane_refused"]
+        self.assertEqual((check["stalled"], check["judged"]), (False, False), "four")
+        self.round(1.0, refused_step(a, refusal(BY_KEY)), scored_step(b, 1, "Y1"))
+        out, ctx = self.run_at()
+        check = self.own(out)["elane_refused"]
+        self.assertEqual({k: check["numbers"][k] for k in ("answers", "stored", "refused", "top_rule", "top_rule_n", "basis")},
+                         {"answers": 6, "stored": 1, "refused": 5, "top_rule": "reading", "top_rule_n": 5, "basis": "early"})
+        self.assertEqual(check["what"], (
+            "5 of the 6 programs the equity generators wrote in the last 12 h were refused before a run by ONE static rule, "
+            "the reading rule (5 refused in all: the reading rule 5). Fewer than 8 are written, and these 5 are already most "
+            "of 8. Its commonest sentence: a symbol's bars read by key (ctx.bars[sym] is ONE object: its arrays are read by "
+            "attribute) (5x)."))
+        self.assertTrue(check["stalled"] and check["owner_step"].startswith("the equity generators are not being taught the "
+                                                                            "reading rule: teach it where they read it"))
+        self.assertEqual((out["stalled"], out["notice"]["notice_id"]), (["elane_idle", "elane_refused"], "stall:owner:elane_refused"),
+                         "the idle cause beside it needs nobody: three rounds ran and no version was scored")
+        self.assertEqual(list(self.notify.entry("elane_refused")["numbers"])[:4], ["answers", "top_rule", "top_rule_n", "basis"])
+        # Five refused in all, by two rules: no one rule has five.
+        self.setUp()
+        a = self.bred("alpha-one")
+        self.round(1.0, *[refused_step(a, refusal(BY_KEY)) for _ in range(3)], *[refused_step(a, refusal(LEVEL)) for _ in range(2)])
+        self.assertFalse(self.equity()["elane_refused"]["judged"])
+
+    def slow(self) -> None:
+        """One program an hour for eleven hours, two in three refused by the reading rule (the second check's slow
+        replay of the reading-rule world: one write an hour is what E2's pace allowed)."""
+        a, b = self.bred("alpha-one", hours=11.5), self.bred("beta-two", hours=11.5)
+        for k in range(11):
+            fid = (a, b)[k % 2]
+            self.round(10.5 - k, scored_step(fid, k // 3 + 1, "Y1") if k % 3 == 2 else refused_step(fid, refusal(BY_KEY)))
+
+    def test_at_a_slow_pace_it_judges_the_last_eight_written_and_does_not_lapse(self):
+        """The second check's finding (replay-2-starved): it stood for two runs, then read "Not judged: the equity
+        generators wrote 6 programs in the last 6 h" at every run for ten hours, while two programs in three were still
+        refused by the reading rule. As `elane_dq`: with fewer than eight in the six hours, the last eight written
+        since the running release started are judged."""
+        self.slow()
+        check = self.equity()["elane_refused"]
+        self.assertEqual({k: check["numbers"][k] for k in ("answers", "refused", "top_rule_n", "basis", "hours", "share")},
+                         {"answers": 8, "refused": 6, "top_rule_n": 6, "basis": "last_written", "hours": 7.5, "share": 0.75})
+        self.assertTrue(check["stalled"])
+        self.assertTrue(check["what"].startswith(
+            "6 of the last 8 programs the equity generators wrote (over 7.5 h: fewer than 8 fall in the last 6 h) were "
+            "refused before a run by ONE static rule, the reading rule (6 refused in all: the reading rule 6). Its commonest "
+            "sentence: a symbol's bars read by key"), check["what"])
+        self.assertNotIn("Fewer than 8 are written", check["what"])
+        # It stands at every run while the lane writes on at its pace: an hour on, a program more, and so on.
+        for hours in (1.0, 2.0, 3.0, 4.0):
+            self.round(0.5 - hours, refused_step("alpha-one", refusal(BY_KEY)))
+            check = self.equity(now=NOW + hours * HOUR)["elane_refused"]
+            self.assertEqual((check["stalled"], check["judged"], check["numbers"]["answers"], check["numbers"]["basis"]),
+                             (True, True, 8, "last_written"), hours)
+        # Programs written before the running release started are not this release's.
+        self.setUp()
+        self.slow()
+        self.beat(4.0)
+        check = self.equity()["elane_refused"]
+        self.assertEqual((check["stalled"], check["judged"]), (False, False))
+        self.assertEqual(check["what"], "Not judged: the equity generators wrote 4 programs in the 4.0 h since the running "
+                                        "release started (at least 8 are needed, or 5 refused by one rule).")
+        # Eight in the six hours: the window, as before.
+        self.setUp()
+        a = self.bred("alpha-one")
+        self.round(1.0, *[refused_step(a, refusal(BY_KEY)) for _ in range(5)], *[scored_step(a, n, "Y1") for n in (1, 2, 3)])
+        check = self.equity()["elane_refused"]
+        self.assertEqual((check["stalled"], check["numbers"]["basis"], check["numbers"]["hours"]), (True, "window", 6.0))
+        self.assertIn("5 of the 8 programs the equity generators wrote in the last 6 h were refused", check["what"])
 
     def test_the_architects_programs_at_birth_count(self):
         a = self.bred("alpha-one", hours=2.0)
@@ -1501,9 +1938,10 @@ class TheDoneMeterCountsThem(Case):
     def test_an_equity_cause_that_needs_nobody_fails_nothing(self):
         a = self.bred("alpha-one")
         self.record(a, versions={"1": verdict(5.0, "Y1")})
-        self.spend(0.5, 0.05)
+        self.round(1.0, {"family": a, "error": "no route answered", "errors": ["invented"], "retry_in": 1200.0})
         out, _ = self.run_at()
-        self.assertEqual((out["stalled"], self.own(out)["elane_idle"]["owner_step"]), (["elane_idle"], None))
+        self.assertEqual((out["stalled"], self.own(out)["elane_idle"]["owner_step"]), (["elane_idle"], None),
+                         "questions no route answered heal by themselves")
         day = self.day(out)
         self.assertEqual((day["holds"], day["owner"]), (True, []))
         self.assertEqual(R.NEWS_CAUSES, ST.NEWS_CAUSES, "none of the four is news: an owner step of theirs is one waiting")

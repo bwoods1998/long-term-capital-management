@@ -1405,10 +1405,10 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
     if train_at is not None:
         said.append(f"the Train round last started {max(0.0, now - train_at) / 60.0:.0f} min ago")
     may = "E2 may ask a model now" if held is not None else "whether E2 may ask a model now could not be read"
-    pace = ""
+    pace: list[str] = []
     if held_now:  # BROKEN by its record while E2 is also held: the line is said second, and is not the fault
         why = "BROKEN, whatever E2's own lines hold: " + "; ".join(said) + "."
-        pace = f"E2 is also held now ({binds}): that is its setting at work, and a broken lane scores nothing at any pace."
+        pace = [f"E2 is also held now: {binds}.", "That is its setting at work: a broken lane scores nothing at any pace."]
     elif kind == "barren":
         why = (f"Not starved ({may}): {tally['passes']} equity passes asked a model and bore no family, so there is none "
                "to score (see elane_births).")
@@ -1425,7 +1425,7 @@ def _idle_check(f: Mapping[str, Any], now: float, started: float | None, c: Mapp
                  "no_round": ("the equity lanes owe work, may ask a model and start no round (the swarm log's elane_train "
                               "lines)"),
                  }[kind] + f"; it needs a fix, in a release or on the box ({REPORT} prints each family's state)"
-    parts = [part for part in (lead, why, pace) if part]
+    parts = [lead, why, *pace]
     return {
         "stalled": True, "judged": True, "what": " ".join(parts),
         "numbers": numbers, "owner_step": owner, "onset": idle_from,

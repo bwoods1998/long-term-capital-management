@@ -115,6 +115,16 @@ class House:
         beat = {"at": self.now, "started_at": self.started, "release": self.release}
         (self.root / EH.HEARTBEAT).write_text(json.dumps(beat))
 
+    def restart(self, release: str | None = None) -> None:
+        """The swarm restarts at `now`: the same release (the watchdog's, a settings apply) unless `release` names
+        another. Its settings are read again."""
+        self.started = self.now
+        self.release = release or self.release
+        with ops_guard.readonly():
+            self.settings = settings_mod.load(self.root, config={})
+        self.arch.settings = self.researcher.settings = self.settings
+        self.beat()
+
     def keep_options(self) -> None:
         """The options lanes healthy at `now` (a birth, ten Gym runs and a Validation run): none of their causes stand."""
         if self.store.family("opt") is None:
@@ -145,7 +155,8 @@ class House:
         self.beat()
 
     def stall(self) -> dict[str, Any]:
-        """One run of the real stall job at `now`: {at, stalled, notice, errors, checks (the four equity causes')}."""
+        """One run of the real stall job at `now`: {at, stalled, notice, errors, checks (the four equity causes'),
+        alerts (the House warnings it raised)}."""
         self.keep_options()
         ctx = Context("stall", root=self.root, base=self.base, due_at=self.now, config={}, clock=lambda: self.now,
                       settings_value={})
@@ -154,7 +165,7 @@ class House:
         ctx.binds = []
         out = ST.run(ctx)
         row = {"at": self.now, "stalled": out["stalled"], "notice": out["notice"], "errors": out["errors"],
-               "checks": {cause: out["checks"][cause] for cause in EH.CAUSES}}
+               "checks": {cause: out["checks"][cause] for cause in EH.CAUSES}, "alerts": [a["text"] for a in ctx.alerts]}
         self.rows.append(row)
         return row
 
