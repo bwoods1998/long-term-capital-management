@@ -10,10 +10,10 @@ THE RESULT RECORD (a plain dict; in-House only: `view` decides what a researcher
                 half-spreads), capital, k, rung, trials (1), status ("ok" | "disqualified" | "no_data"; "error" from
                 `failed`), needs
     summary     {days, invested_days, rebalances (called decisions with a non-empty target), calls, lots, closed,
-                round_trips, pnl, realized, fees, dividends (cash-book dollars), sum_r, sum_x, sum_x15, sum_u,
-                sum_bench, sum_w, t_x, t_x_nw5 (Newey-West, lag 5), t_r, basket ("basket-led" when sum bench >= sum
-                x, else "selection-led"), exposure_mean, names_mean, turnover (entry notional over E0, a year), costs,
-                gross, delta (the sums of the residual's cost series, gross residual and diluted exposure),
+                open_lots, round_trips, pnl, realized, fees, dividends (cash-book dollars), sum_r, sum_x, sum_x15,
+                sum_u, sum_bench, sum_w, t_x, t_x_nw5 (Newey-West, lag 5), t_r, basket ("basket-led" when sum bench
+                >= sum x, else "selection-led"), exposure_mean, names_mean, turnover (entry notional over E0, a year),
+                costs, gross, delta (the sums of the residual's cost series, gross residual and diluted exposure),
                 cost_share (costs over the gross residual, when that is above zero), dilution (delta over sum_w),
                 cells {small, under5}, vanished {deal, other}, refused {no_bar, ahead, last}, sum_x_h0, sum_x_h1
                 (sum x at haircut 0 and 1), close_dates, sd_date_return (over the run's close dates, the sd, ddof 1,
@@ -22,11 +22,16 @@ THE RESULT RECORD (a plain dict; in-House only: `view` decides what a researcher
     daily       rows in `DAILY`'s order, one a run session: the day (ISO), then THE PRE-REGISTERED SERIES of
                 `placebo.residual` (constant-weight on E0, never the cash book): r, x, x15, u, w, bench (B), exits (lots
                 fully exited that session), invested (a lot held at the close), and the cash book's equity beside
+    series_sha  sha256 over the exact bytes of that series (`engine.series_sha`: `result_sha` rounds a float to 6
+                places, coarser than a daily residual; this one moves with the last bit)
     lots        [{lid, id, cell, weight, decided_day, entry_day, entry_at, exit_day, exit_at, net, fees, div, hs,
-                reason, held_sessions}]: ids and cell ids, never an aid or a symbol
+                hs_exit, reason, tag ("ineligible" on that House exit), held_sessions}]: ids and cell ids, never an aid
+                or a symbol
     picks       [{decided, exec, at, called (1 | 0: a standing-target day), targets [[id, w]], buys [[id, usd]], sells
                 [[lid, id, entry_day]], dropped [[id, why]], budget, equity, ctx_sha}]: one a decision that planned a
-                program order, plus every called decision
+                program order, plus every called decision (`buys` and `sells` are what the decision PLANNED; a buy the
+                next session did not make is in `dropped` with its reason, as a target the order cap refused whole
+                is, under the id None)
     picks_sha, factors [[day, mkt, mom, strev, beta]] (the House panel factors over the run's days: SPY's return;
                 top-minus-bottom third equal-weight returns by 12-1 momentum, by the trailing 5-session return reversed
                 and by beta, thirds re-formed at each month's first session: beside, never a bar)

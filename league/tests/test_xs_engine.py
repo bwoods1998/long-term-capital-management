@@ -956,8 +956,8 @@ class TheResultRecord(EngineCase):
         result = self.result
         for key in ("run_id", "program", "program_sha", "run_sha", "params", "window", "panel", "half", "engine",
                     "data_version", "universe", "capital", "k", "rung", "trials", "status", "needs", "summary",
-                    "by_year", "daily", "lots", "picks", "picks_sha", "factors", "actions", "runtime", "result_sha",
-                    "start", "end"):
+                    "by_year", "daily", "series_sha", "lots", "picks", "picks_sha", "factors", "actions", "runtime",
+                    "result_sha", "start", "end"):
             self.assertIn(key, result)
         for absent in ("placebo", "style", "calls"):
             self.assertNotIn(absent, result)
@@ -979,6 +979,12 @@ class TheResultRecord(EngineCase):
         self.assertEqual(results.column(self.result, "invested"), series["invested"].tolist())
         x, r, bench = (np.array(results.column(self.result, n)) for n in ("x", "r", "bench"))
         self.assertTrue(np.array_equal(x, r - bench))
+        # the series' own sha moves with the last bit of one residual; the record's canonical JSON would not see it
+        self.assertEqual(self.result["series_sha"], engine.series_sha(series))
+        nudged = dict(series, x=series["x"].copy())
+        nudged["x"][7] = np.nextafter(nudged["x"][7], 1.0)
+        self.assertNotEqual(engine.series_sha(nudged), self.result["series_sha"])
+        self.assertEqual(results.sha(nudged["x"].tolist()), results.sha(series["x"].tolist()))
         summary = self.result["summary"]
         self.assertEqual(summary["sum_x"], math.fsum(x.tolist()))
         self.assertEqual(summary["t_x"], results.t_stat(x))

@@ -673,6 +673,18 @@ def _universe_sha(bars: Any) -> str:
     return digest.hexdigest()[:24]
 
 
+def series_sha(series: Mapping[str, Any]) -> str:
+    """sha256 over the EXACT bytes of a run's pre-registered daily series (r, x, x15, u, w, bench as little-endian
+    float64, exits as int64, invested as bytes, in that order): the record's own sha rounds a float to 6 places (E1's
+    canonical JSON), which is coarser than a daily residual; this one moves with the last bit."""
+    digest = hashlib.sha256()
+    for name in ("r", "x", "x15", "u", "w", "bench"):
+        digest.update(name.encode() + b"\0" + np.ascontiguousarray(series[name], dtype="<f8").tobytes() + b"\0")
+    digest.update(np.ascontiguousarray(series["exits"], dtype="<i8").tobytes() + b"\0")
+    digest.update(np.ascontiguousarray(series["invested"], dtype=np.uint8).tobytes())
+    return digest.hexdigest()
+
+
 def look_spans(bars: Any) -> dict[str, tuple[int, int]] | None:
     """The spans a run's placebos are read on: for the sealed look's run ("look": Validation's first session through
     the holdout) {"V": Validation's sessions, "H": the holdout's (`league.equity.config.LOOK_FIRST` .. `LOOK_CAP`)} as
@@ -782,8 +794,9 @@ def _result(acct: _Account, seconds: float, *, placebos: int, seed: int | None, 
     result: dict[str, Any] = {
         "run_id": results.sha(identity)[:24], "program": program.name, **identity, "half": None, "trials": 1,
         "status": status, "needs": needs.as_dict(), "summary": summary,
-        "by_year": results.by_year(daily, lots, picks), "daily": daily, "lots": lots, "picks": picks,
-        "picks_sha": results.sha(picks), "factors": _factors(acct), "actions": acct.actions,
+        "by_year": results.by_year(daily, lots, picks), "daily": daily, "series_sha": series_sha(series),
+        "lots": lots, "picks": picks, "picks_sha": results.sha(picks), "factors": _factors(acct),
+        "actions": acct.actions,
         "runtime": {key: value for key, value in stats.items() if key != "seconds"},
     }
     if int(placebos) > 0:
@@ -833,4 +846,4 @@ def run_isolated(program: Any, bars: Any, *, cfg: EngineConfig = EngineConfig(),
 
 
 __all__ = ["EngineConfig", "Log", "build_ctx", "plan_orders", "refused_whole", "ratio_tolerance", "split_of",
-           "look_spans", "run", "run_isolated", "ORDER_CAP"]
+           "series_sha", "look_spans", "run", "run_isolated", "ORDER_CAP"]
