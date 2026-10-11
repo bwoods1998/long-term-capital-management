@@ -33,53 +33,95 @@ THE METERS (`meters`; arithmetic in league/ops/forward_stats.py), for every forw
   sides have n >= `RC_MIN_GROUP`; a pair's k-th read is taken the night of its `RC_READS[k]`-th usable session, over
   exactly those sessions (`rc_pairs`). NO DIFFERENCE IS COMPUTED OR SHOWN BEFORE A PAIR'S READ.
 
+READINGS THE SPEC LEFT OPEN, each fixed here and held by a test:
+- AS OF THE DAY. A day's meters read the registry as it stood: a row counts from its `first_day` (a representative,
+  a NEEDS symbol of hist_iy), a checkpoint from its own `day`, so a day written late reads what its own night would
+  have. The swarm's `runs` rows carry no forward day: sim_py reads every one present when the row is first written.
+- THE ENGINE. A day's counted rows are the newest engine's (`forward_db.engine_now`): the night a label moves, every
+  active program's history is written again under the new id.
+- A CHECKPOINT WITH NO p (a program that never traded has no t) stays in D8's family with p = 1: it was tested and
+  showed nothing, and the family's size is the number of lineages tested, not the number that traded. `min_p` is the
+  smallest p a lineage does have. It stays in the store and is never in the report (one program's figure).
+- A GROUP'S ROW is written every forward day, n 0 and its means NULL when no pid of it has a counted row.
+
 THE REPORT (`section`, written to `FILE`; read by the dlane report through `read_section`): `SECTION_KEYS`. Forward
 rows reach only this file, the dlane report's `forward_record` section and `forward_twins.a14_reading`: no
 per-program forward figure for a pid without a "live" tag, no RC difference before a pair's read, no figure of the
 sealed memory tables (counts only). There is no running A14: A14 is read only at a Done checkpoint, by the Done
-meter, over its own counted closes.
+meter, over its own counted closes. A part of the report that cannot be read is {"error": <the exception's name>},
+never a zero, and the rest is written.
+
+WHEN THE REPORT IS STALE (`read_section`, `alarms`): older than `STALE_HOURS` AND a run of this job fell due after it
+was written and is `DUE_GRACE_HOURS` overdue (the job is due 35 minutes before each open: `DUE_BEFORE_OPEN_MINUTES`).
+A Friday night's report read on a Sunday is two days old and not stale: no run was due.
 
 THE FUNNEL (`funnel_rows`, read by league/ops/funnel.py `window` as `forward_record`): INTEGERS ONLY (`FUNNEL_KEYS`).
 
 THE ALARMS (`alarms`; `ALARMS`: id -> level). Each row is {"id", "level": "info" | "warning", "text", "new"}; the
 dlane report carries them and each warning is also a `ctx.alert` of the job that finds it. EVERY TEXT HOLDS IDS, COUNTS
-AND DATES ONLY: no decimal figure, no "bp", no "%", no return, no dollar figure. With `elane.forward.mode` off none
-of FW1-FW8 is raised.
+AND DATES ONLY: no decimal figure, no "bp", no "%", no return, no dollar figure (`text_ok`). With
+`elane.forward.mode` off none of FW1-FW8 is raised. Each alarm is read on its own: one that cannot be read (a store
+locked that minute) is an info row under its id that says so, never silence and never the loss of the others.
 - FW1 (warning): the mode is "record" AND (no `fwd_days` row by 09:00 ET the next session for the last closed forward
-  day on which at least one active registry row had `first_day` <= that day, OR the report is over `STALE_HOURS`
-  old): a stalled job. Silent on an empty registry, on the sessions before a first registration's `first_day`, and
-  while the mode is off.
+  day on which at least one active registry row had `first_day` <= that day, OR the report is stale): a stalled job.
+  Silent on an empty registry, on the sessions before a first registration's `first_day`, and while the mode is off.
+  THE QUESTION IS SETTLED AT THIS JOB'S MORNING RUN, 35 minutes before the open (08:55): the forward shadow starts no
+  program within 300 s of 09:00 (`FW1_SETTLED_S`) and an after-trigger never fires for a shadow that failed, so the
+  morning run is the first to see a night that wrote nothing and says so before the open (read from 09:00 on, it
+  would be told a day late). "Had" is read as of that day: a row counts when the registry held it by that day's close
+  (one registered later was owed no row that night; the next night's whole recompute fills its days).
 - FW2 (warning): programs left stale two nights running, or a pid with a `data_failed` or a `run_failed` event on two
   nights running (counts in the text).
-- FW3 (warning): a `restated` event written last night (written once a value, so this is its first night).
+- FW3 (warning): a `restated` event written last night (written once a value, so this is its first night). The text
+  counts the restatements by cause, as the event's bars hash tells it (league/ops/E3_INTERFACES.md, fact 1): those
+  whose decisions read bars that have moved since (the vendor's: a correction, or adjusted prices rounded to cents)
+  and those that read the same bars (the recompute itself is not deterministic).
 - FW4 (warning): `verify_chain` not ok (owner step: stop the forward jobs and compare with the backup).
 - FW5 (warning): cey_day under its 20-day median for 10 forward days running while equity births continue.
 - FW6 (warning): a live instance with 5 or more priced closes whose mean twin gap is beyond the A14 bound either
   way, or with 20 or more sessions under the A14 agreement bound (before any checkpoint); the text names the instance
-  and the counts, no figure.
+  and the counts, no figure. A session whose intents differ counts against the bound whatever its cause (A14's rule is
+  not changed by it); the text says how many of them read other bars (the bars hash: a disagreement is data).
 - FW7 (warning): while `eq_instances` holds a live row: the live book's kv `eq_decide` for the last session is status
   "failed", or status "done" with no `why` and `at` later than that session's `close_at` + 2,400 s.
 - FW8 (warning): the equity fingerprint moved while a lineage is live (`identity_moved`).
 - RR1 (warning): a declared release receipt unread 24 h after its window closed; RR2 (info): a receipt read "flat"
-  or "wrong_way" (listed, never reverted).
+  or "wrong_way" (listed for `RR2_DAYS` days, never reverted).
 - CP1 (info): a route unprobed for 45 days, or a readable 2025 or 2026H1 cell newly "recalled"; CP2 (warning): a route
   whose last three attempts added no cell.
 - MM1 (warning): a `swarm.status` "elane_memory" alert in the last 24 h.
+FW8 and MM1 read back to the report before this one when that is longer than 24 h (never past `LOOKBACK_DAYS`): the
+job does not run between a Friday night and a Monday morning, and what happened then is still told once.
 
-Standard library and numpy only.
+Standard library and numpy only (numpy inside the functions that read arrays).
 """
 
 from __future__ import annotations
 
+import datetime as dt
+import hashlib
+import json
+import math
+import re
 import sqlite3
+import statistics
+import time
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
+
+from . import forward_db, forward_stats, guard
+from . import schedule as S
+from .context import read_json, write_json
 
 FILE = "forward-report.json"
 #: The reason the job mints its `EquityGateCapability` with (D7's hist_iy reads prices up to the look cap).
 GATE_REASON = "forward-report"
-#: The report file is stale past this many hours (`read_section` then gives None and `alarms` one FW1 row).
+#: The report file is stale past this many hours (`read_section` then gives None and `alarms` one FW1 row), once a
+#: run of the job fell due after it was written (the module docstring).
 STALE_HOURS = 36.0
+#: The job's calendar trigger (league/ops/registry.py: `S.session_open(-35)`) and its grace.
+DUE_BEFORE_OPEN_MINUTES = 35
+DUE_GRACE_HOURS = 3.0
 #: The report's top-level keys (`section`).
 SECTION_KEYS = ("at", "mode", "t0", "through", "engine", "registry", "shadow", "checkpoints", "meter", "cey", "fills",
                 "rc", "memory", "contamination", "receipts", "alarms")
@@ -92,51 +134,998 @@ ALARMS: dict[str, str] = {"FW1": "warning", "FW2": "warning", "FW3": "warning", 
                           "CP1": "info", "CP2": "warning", "MM1": "warning"}
 #: The RC pairs among the program groups (D9); each of the four groups is also read against the pooled controls.
 RC_PAIRS = (("look_pass", "look_fail"), ("train_pass", "train_fail"))
+#: The pooled controls' name as a pair's second side (`rc_pairs`).
+RC_CONTROLS = "controls"
+#: D9's program groups: registry reasons, then tags.
+GROUP_REASONS = ("train_pass", "train_fail", "seed")
+GROUP_TAGS = ("look_pass", "look_fail")
+#: The reasons a lineage's representative is first taken from (D6).
+REPRESENTATIVE_REASONS = ("train_pass", "seed", "live")
+#: FW1's deadline: 09:00 New York, this many seconds before the next session's open; and how long before it the
+#: question is settled (the forward shadow starts no program within these seconds of 09:00, its `OPEN_MARGIN_SECONDS`:
+#: this job's morning run, `DUE_BEFORE_OPEN_MINUTES` before the open, is the first moment that reads it).
+FW1_BEFORE_OPEN_S = 1800
+FW1_SETTLED_S = 300
+#: FW5: cey_day under the median of the last `MEDIAN_DAYS` forward days for this many forward days running.
+FW5_DAYS = 10
+MEDIAN_DAYS = 20
+#: FW6: the fewest priced closes, and the fewest readable sessions, an instance is read on.
+FW6_CLOSES = 5
+FW6_SESSIONS = 20
+#: FW7: a decide later than this many seconds after its session's close is late (16:40 New York).
+FW7_LATE_S = 2400
+#: CP1: a route with no completed probe for this many days; the eras whose recalled cells it names; CP2: idle attempts.
+CP1_DAYS = 45
+CP1_ERAS = ("2025", "2026H1")
+CP2_IDLE = 3
+#: RR2 lists a receipt read "flat" or "wrong_way" for this many days after its read.
+RR2_DAYS = 7
+#: MM1 and FW8 read the last 24 hours, or back to the report before this one, never past this many days.
+RECENT_HOURS = 24.0
+LOOKBACK_DAYS = 7
+#: What no alarm text and no alert of an E3 job may hold (T8): a decimal figure, "bp", a percent or a dollar sign.
+_FIGURE = re.compile(r"\d[.,]\d|\bbp\b|%|\$", re.IGNORECASE)
 
 
-def run(ctx: Any) -> dict[str, Any]:
-    """THE JOB (league/ops/registry.py). With the mode "off" it writes {"at", "mode": "off", "alarms": []} to `FILE`
-    and returns skipped; else `meters`, then `section` written to `FILE`; each warning alarm is also a
-    `ctx.alert("warning", text)`. The receipt holds counts, never a figure."""
-    raise NotImplementedError("C: league/ops/forward_report.py run")
+# ------------------------------------------------------------------------------------------------------------ settings
+def _cfg(settings: Mapping[str, Any] | None) -> dict[str, Any]:
+    """`forward_db.cfg`, or its code defaults (mode "off") when the settings cannot be read."""
+    try:
+        return dict(forward_db.cfg(settings))
+    except Exception:  # noqa: BLE001 - an unreadable block is "off"
+        return dict(forward_db.DEFAULTS)
 
 
-def meters(root: str | Path, db: sqlite3.Connection, *, now: float, settings: Mapping[str, Any] | None
-           ) -> dict[str, Any]:
-    """The D6, D7, D8 and D9 rows of every forward day up to the last `fwd_runs` `through` that has no `fwd_cey` row,
-    in order (first write stands: a second call writes nothing): {"days", "cey", "meter", "groups" (rows written)}."""
-    raise NotImplementedError("C: league/ops/forward_report.py meters")
+def _mode(settings: Mapping[str, Any] | None) -> str:
+    value = _cfg(settings).get("mode")
+    return value if value in forward_db.MODES else "off"
+
+
+def _settings(root: Path, settings: Mapping[str, Any] | None, config: Any = None) -> Mapping[str, Any] | None:
+    """The swarm's settings as it loads them when none were handed in (None when they cannot be read: "off")."""
+    if settings is not None:
+        return settings
+    try:
+        from ..swarm import settings as settings_mod
+
+        return settings_mod.load(root, config=config if isinstance(config, Mapping) else None)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def text_ok(text: Any) -> bool:
+    """Whether an alarm or alert text holds ids, counts and dates only (T8): no decimal figure, no "bp", no percent
+    sign, no dollar sign. What every E3 job's alert is held to (league/tests/test_forward_report.py)."""
+    return isinstance(text, str) and bool(text) and _FIGURE.search(text) is None
+
+
+# -------------------------------------------------------------------------------------------------------- the calendar
+def _iso_day(value: Any) -> str:
+    return value.isoformat() if isinstance(value, dt.date) else str(value)[:10]
+
+
+def forward_days(first: Any, last: Any) -> list[str]:
+    """The sessions d with first <= d <= last, as ISO days (league/equity/schedule.py's calendar)."""
+    from ..equity import schedule as ES
+
+    day, end = dt.date.fromisoformat(_iso_day(first)), dt.date.fromisoformat(_iso_day(last))
+    out = []
+    while day <= end:
+        if ES.is_session(day):
+            out.append(day.isoformat())
+        day += dt.timedelta(days=1)
+    return out
+
+
+def _window(day: str, size: int) -> list[str]:
+    """The last `size` forward days up to `day` (D1: none before `forward_db.t0()`)."""
+    return forward_days(forward_db.t0(), day)[-int(size):]
+
+
+def _close_at(day: str) -> float | None:
+    from ..equity import schedule as ES
+
+    moments = ES.moments(day)
+    return None if moments is None else float(moments.close_at)
+
+
+def _last_due(now: float) -> float | None:
+    """The latest instant this job fell due on its calendar trigger and is `DUE_GRACE_HOURS` overdue; None when the
+    calendar names none in its horizon."""
+    from ..equity import schedule as ES
+
+    day = ES.ny_day(now)
+    for _ in range(ES.HORIZON_DAYS + 1):
+        moments = ES.moments(day)
+        if moments is not None:
+            due = float(moments.open_at) - 60.0 * DUE_BEFORE_OPEN_MINUTES
+            if due + DUE_GRACE_HOURS * 3600.0 <= now:
+                return due
+        day -= dt.timedelta(days=1)
+    return None
+
+
+def _stale(at: float | None, now: float) -> bool:
+    """WHEN THE REPORT IS STALE (the module docstring); a report with no readable time is."""
+    if at is None:
+        return True
+    if now - at <= STALE_HOURS * 3600.0:
+        return False
+    due = _last_due(now)
+    return due is not None and at < due
+
+
+# -------------------------------------------------------------------------------------------------------- the readers
+def _rows(db: sqlite3.Connection, sql: str, params: Sequence[Any] = ()) -> list[dict[str, Any]]:
+    return guard.rows(db, sql, params)
+
+
+def _one(db: sqlite3.Connection, sql: str, params: Sequence[Any] = ()) -> Any:
+    found = guard.ids(db, sql, params)
+    return found[0] if found else None
+
+
+def _mean(values: Sequence[float]) -> float | None:
+    return math.fsum(values) / len(values) if values else None
+
+
+def _counted(db: sqlite3.Connection, engine: int | None, first: str, last: str) -> list[dict[str, Any]]:
+    """D4's COUNTED rows of every pid with first <= day <= last, as `forward_db.counted_days` reads one pid's: the
+    engine's rows with status "ok" and no `audit_mismatch` event for that (pid, day)."""
+    if engine is None:
+        return []
+    return _rows(db, "SELECT d.pid, d.day, d.r, d.w, d.b, d.r0 FROM fwd_days d WHERE d.engine=? AND d.status='ok' AND "
+                     "d.day>=? AND d.day<=? AND NOT EXISTS (SELECT 1 FROM fwd_events e WHERE e.kind='audit_mismatch' "
+                     "AND e.pid=d.pid AND e.day=d.day)", (int(engine), first, last))
+
+
+def _lineage_representatives(db: sqlite3.Connection, day: str) -> list[tuple[int, str]]:
+    """(pid, key) of each lineage's representative among the rows registered by `day` (D6), in pid order."""
+    best: dict[str, tuple[int, int, str]] = {}
+    for row in _rows(db, "SELECT pid, key, lineage, reason FROM fwd_registry WHERE lane!='control' AND first_day<=? "
+                         "ORDER BY pid", (day,)):
+        rank = (0 if row["reason"] in REPRESENTATIVE_REASONS else 1, int(row["pid"]), str(row["key"]))
+        if row["lineage"] not in best or rank < best[row["lineage"]]:
+            best[row["lineage"]] = rank
+    return sorted((pid, key) for _, pid, key in best.values())
+
+
+def _representatives(db: sqlite3.Connection, day: str, max_members: int | None) -> list[tuple[int, str]]:
+    found = _lineage_representatives(db, day)
+    if max_members is not None and len(found) > int(max_members):
+        found = sorted(found, key=lambda row: hashlib.sha256(("neff-1|" + row[1]).encode()).hexdigest())[:int(max_members)]
+    return sorted(found)
 
 
 def representatives(db: sqlite3.Connection, day: str) -> list[int]:
     """D6's representatives on `day`: one pid a lineage (its lowest pid whose reason is train_pass, seed or live,
-    else its lowest pid), controls excluded, cut to `neff_max_members` by the smallest `sha256("neff-1|" + key)`."""
-    raise NotImplementedError("C: league/ops/forward_report.py representatives")
+    else its lowest pid), controls excluded, cut to `neff_max_members` by the smallest `sha256("neff-1|" + key)`
+    (the code default here; `meters` passes the setting)."""
+    return [pid for pid, _ in _representatives(db, _iso_day(day), int(forward_db.DEFAULTS["neff_max_members"]))]
+
+
+def _population(db: sqlite3.Connection, day: str, max_members: int | None) -> tuple[list[str], Any]:
+    import numpy as np
+
+    window = _window(day, forward_db.NEFF_WINDOW)
+    members = _representatives(db, day, max_members)
+    out = np.full((len(members), len(window)), np.nan, dtype=np.float64)
+    if not window or not members:
+        return [key for _, key in members], out
+    row_of = {pid: i for i, (pid, _) in enumerate(members)}
+    column = {d: j for j, d in enumerate(window)}
+    held = np.full(out.shape, np.nan, dtype=np.float64)
+    for row in _counted(db, forward_db.engine_now(db), window[0], window[-1]):
+        i = row_of.get(int(row["pid"]))
+        if i is not None:
+            held[i, column[row["day"]]] = float(row["r"]) - float(row["w"]) * float(row["b"])
+    # Only the unbroken run ending at `day` is a member's record: a gap (no row, a disqualified day, an audit mark)
+    # ends it, and what lies before the gap is not read.
+    back = np.isfinite(held)[:, ::-1]
+    runs = np.where(back.all(axis=1), len(window), np.argmin(back, axis=1))
+    for i, n in enumerate(runs.tolist()):
+        if n:
+            out[i, len(window) - n:] = held[i, len(window) - n:]
+    return [key for _, key in members], out
 
 
 def population(db: sqlite3.Connection, day: str) -> tuple[list[str], Any]:
     """(the representatives' registry keys, X) for D6 on `day`: X an (N, T) float ndarray of daily excess over the
     window's forward days, NaN outside a member's unbroken run of counted days ending at `day`
     (`forward_stats.pairwise_corr`'s shape)."""
-    raise NotImplementedError("C: league/ops/forward_report.py population")
+    return _population(db, _iso_day(day), int(forward_db.DEFAULTS["neff_max_members"]))
 
 
 def sim_program_years(root: str | Path, db: sqlite3.Connection, day: str) -> float:
     """D7's sim_py through `day` (the swarm store read-only)."""
-    raise NotImplementedError("C: league/ops/forward_report.py sim_program_years")
+    from . import funnel
+
+    path = Path(root) / funnel.SWARM_DB
+    simulated = 0.0
+    if path.exists():
+        marks = ", ".join("?" * len(funnel.NOT_RUN))
+        where = (f"FROM runs r JOIN families f ON f.id=r.family WHERE f.structure IN ('etf', 'stock') AND r.trials>0 "
+                 f"AND r.status NOT IN ({marks})")
+
+        def read(swarm: sqlite3.Connection) -> float:
+            try:
+                return float(_one(swarm, "SELECT coalesce(sum(json_extract(r.summary, '$.days') * r.trials), 0) " + where,
+                                  funnel.NOT_RUN) or 0.0)
+            except sqlite3.OperationalError:   # an SQLite built without its JSON functions: read the summaries here
+                parts = []
+                for row in _rows(swarm, "SELECT r.summary, r.trials " + where, funnel.NOT_RUN):
+                    try:
+                        days = json.loads(row["summary"]).get("days")
+                    except (TypeError, ValueError, AttributeError):
+                        continue
+                    if isinstance(days, (int, float)) and not isinstance(days, bool):
+                        parts.append(float(days) * int(row["trials"]))
+                return math.fsum(parts)
+
+        simulated = guard.read(path, read)
+    recorded = int(_one(db, "SELECT count(*) FROM fwd_days d JOIN fwd_registry r ON r.pid=d.pid WHERE r.lane!='control' "
+                            "AND d.day<=?", (_iso_day(day),)) or 0)
+    return (simulated + recorded) / forward_stats.YEAR_SESSIONS
+
+
+def _year_bars(store: Any, symbols: Sequence[str], year: int) -> Any:
+    """One calendar year's slice up to the look cap, with history before it (the first return's base is its last
+    session: `Bars.first` says where the year begins, however many history sessions the store hands a slice): Train
+    days through `EquityStore.span`, the Validation year through its window, the look's span after it."""
+    from ..equity import config
+    from ..equity import store as ST
+
+    first, last = dt.date(year, 1, 1), min(dt.date(year, 12, 31), config.LOOK_CAP)
+    train_first, train_last = config.WINDOWS["train"]
+    if last <= train_last:
+        return store.span(symbols, max(first, train_first), last, history=1)
+    name = "validation" if last <= config.WINDOWS["validation"][1] else ST.LOOK
+    return store.bars(symbols, name, history=1, start=first, end=last)
 
 
 def hist_independent_years(root: str | Path, symbols: Sequence[str]) -> float | None:
     """D7's hist_iy over `symbols` (`forward_stats.independent_years` on the store's as-of close-to-close returns, a
     year at a time through `config.LOOK_CAP`); None when the store cannot give it (`MissingData`)."""
-    raise NotImplementedError("C: league/ops/forward_report.py hist_independent_years")
+    import numpy as np
+
+    from ..equity import config
+    from ..equity import store as ST
+
+    try:
+        store_root = Path(root) / ST.STORE_DIR
+        store = ST.EquityStore(store_root, gate=ST.mint_equity_gate_capability(store_root, GATE_REASON))
+        held = store.symbols()
+        names = sorted({str(s).strip().upper() for s in symbols} & set(held))
+        if not names:
+            return None
+        by_year: dict[int, Any] = {}
+        for year in range(ST.FIRST_YEAR, config.LOOK_CAP.year + 1):
+            bars = _year_bars(store, names, year)
+            # The year's sessions and the ONE session before them (none before the store's first): a slice carries
+            # as many history sessions as the store gives a run, and only the last is a return's base here.
+            base = max(int(bars.first) - 1, 0)
+            if bars.n - base < 2:
+                continue
+            # The as-of return of a session is the adjustment=all close ratio (the as-of factor cancels in a ratio).
+            closes = np.vstack([bars.adj[sym][base:, 3] for sym in bars.symbols])
+            whole = np.isfinite(closes).all(axis=1) & (closes > 0).all(axis=1)   # a bar on each of those sessions
+            closes = closes[whole]
+            by_year[year] = closes[:, 1:] / closes[:, :-1] - 1.0
+        return forward_stats.independent_years(by_year)
+    except (ST.MissingData, ST.StoreRefused, ValueError, OSError):
+        return None
+
+
+def _needs_symbols(db: sqlite3.Connection, day: str) -> list[str]:
+    """The union of the NEEDS symbols of the non-control rows registered by `day`."""
+    out: set[str] = set()
+    for text in guard.ids(db, "SELECT DISTINCT needs FROM fwd_registry WHERE lane!='control' AND first_day<=?", (day,)):
+        try:
+            symbols = json.loads(text).get("symbols")
+        except (TypeError, ValueError, AttributeError):
+            continue
+        out.update(str(s).upper() for s in symbols or () if isinstance(s, str))
+    return sorted(out)
+
+
+def _universe(settings: Mapping[str, Any] | None) -> list[str]:
+    from ..swarm import elane
+
+    return [str(s).upper() for s in elane.cfg(settings)["universe"]]
+
+
+# ----------------------------------------------------------------------------------------------------- the day's rows
+def _latest_checks(db: sqlite3.Connection, day: str, *, controls: bool) -> dict[int, dict[str, Any]]:
+    """{pid: its latest checkpoint by `day`}: the largest n (a final one included) under the NEWEST engine that pid
+    has a checkpoint for (D8)."""
+    out: dict[int, dict[str, Any]] = {}
+    for row in _rows(db, "SELECT c.pid, c.n, c.engine, c.p_x, c.p_x0 FROM fwd_checks c JOIN fwd_registry r ON r.pid=c.pid "
+                         f"WHERE c.day<=? AND r.lane{'=' if controls else '!='}'control'", (day,)):
+        held = out.get(int(row["pid"]))
+        if held is None or (int(row["engine"]), int(row["n"])) > (int(held["engine"]), int(held["n"])):
+            out[int(row["pid"])] = row
+    return out
+
+
+def _meter_row(db: sqlite3.Connection, day: str) -> dict[str, Any]:
+    """D8's row of `day` (the module docstring: a checkpoint with no p is in the family at p = 1)."""
+    latest = _latest_checks(db, day, controls=False)
+    family = [latest[pid]["p_x"] for pid, _ in _lineage_representatives(db, day) if pid in latest]
+    ps = [1.0 if p is None else float(p) for p in family]
+    known = [float(p) for p in family if p is not None]
+    controls = [row["p_x0"] for row in _latest_checks(db, day, controls=True).values()]
+    cs = [1.0 if p is None else float(p) for p in controls]
+    return {"day": day, "m": len(ps), "bh": forward_stats.bh(ps), "by_": forward_stats.by(ps),
+            "min_p": min(known) if known else None, "controls_m": len(cs), "controls_bh": forward_stats.bh(cs),
+            "controls_by": forward_stats.by(cs),
+            "controls_p10": sum(1 for p in controls if p is not None and float(p) <= forward_db.Q) / len(cs) if cs else None}
+
+
+def _base_groups(ugroups: Sequence[str]) -> str:
+    return "+".join(sorted({part for text in ugroups for part in str(text).split("+") if part}))
+
+
+def _group_rows(db: sqlite3.Connection, day: str) -> list[dict[str, Any]]:
+    """D9's rows of `day`: one a program group, and one a control group registered by then."""
+    close = _close_at(day)
+    counted = {int(row["pid"]): row for row in _counted(db, forward_db.engine_now(db), day, day)}
+    registry = {int(row["pid"]): row for row in _rows(
+        db, "SELECT pid, lane, reason, ugroup FROM fwd_registry WHERE first_day<=?", (day,))}
+    groups: dict[str, list[int]] = {name: [] for name in (*GROUP_REASONS, *GROUP_TAGS)}
+    for pid, row in registry.items():
+        if row["lane"] == "control":
+            groups.setdefault(f"control:{row['ugroup']}", [])
+            if pid in counted:
+                groups[f"control:{row['ugroup']}"].append(pid)
+        elif row["reason"] in GROUP_REASONS and pid in counted:
+            groups[row["reason"]].append(pid)
+    if close is not None:
+        for row in _rows(db, "SELECT pid, tag, min(at) AS at FROM fwd_tags WHERE tag IN (?, ?) GROUP BY pid, tag", GROUP_TAGS):
+            pid = int(row["pid"])
+            if float(row["at"]) < close and pid in counted and pid in registry and registry[pid]["lane"] != "control":
+                groups[row["tag"]].append(pid)
+    out = []
+    for name in sorted(groups):
+        pids = sorted(groups[name])
+        rows = [counted[pid] for pid in pids]
+        x = [float(r["r"]) - float(r["w"]) * float(r["b"]) for r in rows]
+        x0 = [float(r["r0"]) - float(r["w"]) * float(r["b"]) for r in rows if r["r0"] is not None]
+        out.append({"day": day, "grp": name, "n": len(pids), "mean_x": _mean(x),
+                    "mean_r": _mean([float(r["r"]) for r in rows]), "mean_w": _mean([float(r["w"]) for r in rows]),
+                    "mean_x0": _mean(x0) if name.startswith("control:") and len(x0) == len(rows) else None,
+                    "ugroups": _base_groups([registry[pid]["ugroup"] for pid in pids])})
+    return out
 
 
 def rc_pairs(db: sqlite3.Connection, day: str) -> list[dict[str, Any]]:
     """D9 through `day`: one object a pair: {"a", "b", "usable" (its usable sessions so far), "next_read" (the count
     its next read is taken at; None after the last), "reads": [{"n", "day", "mean_bp", "t"}] (only the reads taken)}.
     No difference before a pair's read."""
-    raise NotImplementedError("C: league/ops/forward_report.py rc_pairs")
+    by_day: dict[str, dict[str, dict[str, Any]]] = {}
+    for row in _rows(db, "SELECT day, grp, n, mean_x, mean_x0, ugroups FROM fwd_groups WHERE day<=? ORDER BY day",
+                     (_iso_day(day),)):
+        by_day.setdefault(row["day"], {})[row["grp"]] = row
+    floor = forward_db.RC_MIN_GROUP
+
+    def program(groups: Mapping[str, Mapping[str, Any]], name: str) -> float | None:
+        row = groups.get(name)
+        return float(row["mean_x"]) if row and int(row["n"]) >= floor and row["mean_x"] is not None else None
+
+    def pooled(groups: Mapping[str, Mapping[str, Any]], name: str) -> float | None:
+        """THE POOLED CONTROLS of a program group's day: every control group it names has `floor` pids."""
+        named = [g for g in str((groups.get(name) or {}).get("ugroups") or "").split("+") if g]
+        values = []
+        for group in named:
+            row = groups.get(f"control:{group}")
+            if not row or int(row["n"]) < floor or row["mean_x0"] is None:
+                return None
+            values.append(float(row["mean_x0"]))
+        return _mean(values)
+
+    pairs = [*RC_PAIRS, *((name, RC_CONTROLS) for pair in RC_PAIRS for name in pair)]
+    out = []
+    for a, b in pairs:
+        days, first, second = [], [], []
+        for d in sorted(by_day):
+            left = program(by_day[d], a)
+            right = pooled(by_day[d], a) if b == RC_CONTROLS else program(by_day[d], b)
+            if left is not None and right is not None:
+                days.append(d)
+                first.append(left)
+                second.append(right)
+        reads = []
+        for count in forward_db.RC_READS:
+            if len(days) >= count:   # over exactly its first `count` usable sessions, whatever came after
+                reads.append({**forward_stats.rc_read(first[:count], second[:count]), "day": days[count - 1]})
+        out.append({"a": a, "b": b, "usable": len(days),
+                    "next_read": next((c for c in forward_db.RC_READS if c > len(days)), None), "reads": reads})
+    return out
+
+
+def _write_day(root: str | Path, db: sqlite3.Connection, day: str, *, now: float, settings: Mapping[str, Any] | None,
+               cap: int, history: dict[tuple[str, ...], float | None]) -> dict[str, int]:
+    """One forward day's D6, D7, D8 and D9 rows, computed and then written in one transaction; the rows written."""
+    n = forward_stats.neff(_population(db, day, cap)[1])
+    cey_day = float(n["neff"]) / forward_stats.YEAR_SESSIONS
+    total = math.fsum([*(float(v) for v in guard.ids(db, "SELECT cey_day FROM fwd_cey WHERE day<?", (day,))), cey_day])
+    try:
+        sim_py: float | None = sim_program_years(root, db, day)
+    except Exception:  # noqa: BLE001 - an unread swarm store is None that day, never a zero
+        sim_py = None
+    try:
+        symbols = tuple(_needs_symbols(db, day) or _universe(settings))
+        if symbols not in history:
+            history[symbols] = hist_independent_years(root, symbols)
+        hist_iy = history[symbols]
+    except Exception:  # noqa: BLE001
+        hist_iy = None
+    meter, groups = _meter_row(db, day), _group_rows(db, day)
+    wrote = {"cey": 0, "meter": 0, "groups": 0}
+    with db:   # one transaction a day; the `fwd_cey` row is the day's mark and goes last
+        for g in groups:
+            wrote["groups"] += db.execute(
+                "INSERT OR IGNORE INTO fwd_groups(day, grp, n, mean_x, mean_r, mean_w, mean_x0, ugroups) "
+                "VALUES(?, ?, ?, ?, ?, ?, ?, ?)", (g["day"], g["grp"], g["n"], g["mean_x"], g["mean_r"], g["mean_w"],
+                                                   g["mean_x0"], g["ugroups"])).rowcount
+        wrote["meter"] += db.execute(
+            "INSERT OR IGNORE INTO fwd_meter(day, m, bh, by_, min_p, controls_m, controls_bh, controls_by, "
+            "controls_p10, at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (day, meter["m"], meter["bh"], meter["by_"], meter["min_p"], meter["controls_m"], meter["controls_bh"],
+             meter["controls_by"], meter["controls_p10"], float(now))).rowcount
+        wrote["cey"] += db.execute(
+            "INSERT OR IGNORE INTO fwd_cey(day, n_w, members, neff, neff_raw, cey_day, cey_total, sim_py, hist_iy, "
+            "replay_multiple, at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (day, n["n_w"], n["members"], n["neff"], n["neff_raw"], cey_day, total, sim_py, hist_iy,
+             forward_stats.replay_multiple(sim_py, hist_iy, total), float(now))).rowcount
+    return wrote
+
+
+def meters(root: str | Path, db: sqlite3.Connection, *, now: float, settings: Mapping[str, Any] | None
+           ) -> dict[str, Any]:
+    """The D6, D7, D8 and D9 rows of every forward day up to the last `fwd_runs` `through` that has no `fwd_cey` row,
+    in order (first write stands: a second call writes nothing): {"days", "cey", "meter", "groups" (rows written)}.
+
+    A DAY THAT CANNOT BE WRITTEN STOPS THE PASS THERE: the answer then also holds "error": {"day", "why" (the
+    exception's name)}, nothing of that day is written (one transaction a day) and no later day is (CEY is a running
+    sum: a later day written first would stand without it for good). The next pass begins at that day again."""
+    out: dict[str, Any] = {"days": 0, "cey": 0, "meter": 0, "groups": 0}
+    through = _one(db, "SELECT max(through) FROM fwd_runs WHERE through IS NOT NULL")
+    if through is None:
+        return out
+    have = set(guard.ids(db, "SELECT day FROM fwd_cey"))
+    cap = int(_cfg(settings)["neff_max_members"])
+    history: dict[tuple[str, ...], float | None] = {}
+    for day in forward_days(forward_db.t0(), through):
+        if day in have:
+            continue
+        try:
+            wrote = _write_day(root, db, day, now=now, settings=settings, cap=cap, history=history)
+        except Exception as exc:  # noqa: BLE001 - named, and the pass stops: unread is never zero
+            out["error"] = {"day": day, "why": type(exc).__name__}
+            break
+        for key, rows in wrote.items():
+            out[key] += rows
+        out["days"] += 1
+    return out
+
+
+# ------------------------------------------------------------------------------------------------------- the report
+def _part(read: Callable[[], Any]) -> Any:
+    """One part of the report; what cannot be read is named, never a zero, and the rest is written."""
+    try:
+        return read()
+    except Exception as exc:  # noqa: BLE001
+        return {"error": type(exc).__name__}
+
+
+def _registry(db: sqlite3.Connection, now: float) -> dict[str, Any]:
+    by_reason = {reason: 0 for reason in forward_db.REASONS}
+    today = dict(by_reason)
+    for row in _rows(db, "SELECT reason, count(*) AS n, sum(registered_at>=?) AS fresh FROM fwd_registry GROUP BY reason",
+                     (now - 86400.0,)):
+        by_reason[row["reason"]] = int(row["n"])
+        today[row["reason"]] = int(row["fresh"] or 0)
+    stopped: dict[str, int] = {"cap": 0, "disqualified": 0}
+    for pid in guard.ids(db, "SELECT DISTINCT pid FROM fwd_tags WHERE tag='stopped'"):
+        if not forward_db.active(db, int(pid)):
+            value = _one(db, "SELECT value FROM fwd_tags WHERE pid=? AND tag='stopped' ORDER BY at DESC, value DESC LIMIT 1",
+                         (pid,))
+            cause = str(value or "").split(":")[0] or "other"
+            stopped[cause] = stopped.get(cause, 0) + 1
+    suspects = sum(1 for pid in guard.ids(db, "SELECT DISTINCT pid FROM fwd_tags WHERE tag='suspect'")
+                   if forward_db.suspect(db, int(pid)))
+    try:
+        chain = forward_db.verify_chain(db)
+        chain = {"ok": chain.get("ok") is True, "rows": chain.get("rows"), "first_bad": chain.get("first_bad")}
+    except Exception as exc:  # noqa: BLE001 - unread is not ok, and not broken either: it is named
+        chain = {"ok": None, "error": type(exc).__name__}
+    return {"total": sum(by_reason.values()), "programs": sum(n for r, n in by_reason.items() if r != "control"),
+            "controls": by_reason["control"],
+            "lineages": int(_one(db, "SELECT count(DISTINCT lineage) FROM fwd_registry WHERE lane!='control'") or 0),
+            "by_reason": by_reason, "today": today, "stopped": stopped, "suspects": suspects, "chain": chain}
+
+
+def _nights(db: sqlite3.Connection) -> list[dict[str, Any]]:
+    """The last two nights (a night is a `through`; its latest `fwd_runs` row), newest first."""
+    out: list[dict[str, Any]] = []
+    for row in _rows(db, "SELECT * FROM fwd_runs WHERE through IS NOT NULL ORDER BY run DESC LIMIT 20"):
+        if all(row["through"] != held["through"] for held in out):
+            out.append(row)
+    return sorted(out, key=lambda row: row["through"], reverse=True)[:2]
+
+
+def _shadow(db: sqlite3.Connection) -> dict[str, Any]:
+    nights = _nights(db)
+    last = nights[0] if nights else None
+    night = last["through"] if last else None
+    failed = {kind: int(_one(db, "SELECT count(DISTINCT pid) FROM fwd_events WHERE kind=? AND day=?", (kind, night)) or 0)
+              for kind in ("run_failed", "data_failed", "run_disqualified")} if night else \
+        {"run_failed": 0, "data_failed": 0, "run_disqualified": 0}
+    lost = _rows(db, "SELECT day, at FROM fwd_events WHERE kind='night_failed' ORDER BY seq DESC LIMIT 1")
+    sessions = "SELECT count(*) FROM fwd_days d JOIN fwd_registry r ON r.pid=d.pid WHERE r.lane!='control' AND d.engine=?"
+    engine = forward_db.engine_now(db)
+    return {"through": night, "nights": int(_one(db, "SELECT count(DISTINCT through) FROM fwd_runs") or 0),
+            "programs": last["programs"] if last else None, "sessions": last["sessions"] if last else None,
+            "stale": last["stale"] if last else None, "errors": last["errors"] if last else None,
+            "budget_hit": bool(last["budget_hit"]) if last else None,
+            "seconds": int(round(float(last["seconds"]))) if last else None,
+            "program_sessions": int(_one(db, sessions + " AND d.day=?", (engine, night)) or 0) if night else 0,
+            "program_sessions_total": int(_one(db, sessions, (engine,)) or 0), **failed,
+            "night_failed": {"day": lost[0]["day"], "at": S.iso(lost[0]["at"])} if lost else None}
+
+
+def _checkpoints(db: sqlite3.Connection) -> dict[str, Any]:
+    """How many programs have a checkpoint at each count (the checkpoint of record: any engine), controls apart."""
+    out: dict[str, Any] = {str(n): 0 for n in forward_db.CHECKPOINTS}
+    out.update(later=0, final=0, controls=0)
+    for row in _rows(db, "SELECT c.n, c.final, r.lane='control' AS control, count(DISTINCT c.pid) AS pids FROM "
+                         "fwd_checks c JOIN fwd_registry r ON r.pid=c.pid GROUP BY c.n, c.final, r.lane='control'"):
+        if row["control"]:
+            out["controls"] += int(row["pids"])
+        elif str(row["n"]) in out and not row["final"]:
+            out[str(row["n"])] += int(row["pids"])
+        elif row["final"]:
+            out["final"] += int(row["pids"])
+        else:
+            out["later"] += int(row["pids"])
+    return out
+
+
+def _meter(db: sqlite3.Connection) -> dict[str, Any] | None:
+    """The latest `fwd_meter` row as the report shows it: counts and the controls' share; never `min_p`."""
+    rows = _rows(db, "SELECT day, m, bh, by_, controls_m, controls_bh, controls_by, controls_p10 FROM fwd_meter "
+                     "ORDER BY day DESC LIMIT 1")
+    engines = [int(e) for e in guard.ids(db, "SELECT DISTINCT engine FROM fwd_days ORDER BY engine")]
+    if not rows:
+        return {"day": None, "engines": engines}
+    row = rows[0]
+    return {**row, "q": forward_db.Q, "reading": "none yet" if not row["by_"] else "edge somewhere",
+            "unreliable": bool(row["controls_by"]), "engines": engines}
+
+
+def _cey(db: sqlite3.Connection) -> dict[str, Any] | None:
+    rows = _rows(db, f"SELECT * FROM fwd_cey ORDER BY day DESC LIMIT {MEDIAN_DAYS}")
+    if not rows:
+        return {"day": None}
+    row = {k: v for k, v in rows[0].items() if k != "at"}
+    return {**row, "provisional": int(row["n_w"]) < forward_db.NEFF_PROVISIONAL,
+            "median20": statistics.median(float(r["cey_day"]) for r in rows), "days": len(rows)}
+
+
+def _under_median(db: sqlite3.Connection) -> tuple[int, str | None]:
+    """(for how many forward days running, ending at the latest, cey_day was under the median of the last
+    `MEDIAN_DAYS` forward days up to it; the first of those days)."""
+    rows = _rows(db, f"SELECT day, cey_day FROM fwd_cey ORDER BY day DESC LIMIT {MEDIAN_DAYS + 10 * FW5_DAYS}")[::-1]
+    run, first = 0, None
+    for i in range(len(rows) - 1, max(-1, len(rows) - 1 - 10 * FW5_DAYS), -1):
+        window = [float(r["cey_day"]) for r in rows[max(0, i - MEDIAN_DAYS + 1):i + 1]]
+        if not float(rows[i]["cey_day"]) < statistics.median(window):
+            break
+        run, first = run + 1, rows[i]["day"]
+    return run, first
+
+
+def _live_pids(db: sqlite3.Connection) -> set[int]:
+    return {int(pid) for pid in guard.ids(db, "SELECT DISTINCT pid FROM fwd_tags WHERE tag='live'")}
+
+
+def _fills(db: sqlite3.Connection) -> dict[str, Any]:
+    """The fill gap and the twins as recorded (D10-D12): aggregates, and one row a live instance (the seated programs'
+    twins are shown: the Done meter's A14 reads them). An instance whose registry row has no "live" tag is in the
+    aggregates only."""
+    timing = {}
+    for at in ("open", "close"):
+        drift = [float(v) for v in guard.ids(db, "SELECT drift_bp FROM fwd_fillgap WHERE at=?", (at,))]
+        mean = _mean(drift)
+        sd = math.sqrt(math.fsum((v - mean) ** 2 for v in drift) / (len(drift) - 1)) if len(drift) > 1 else None
+        timing[at] = {"n": len(drift), "mean_bp": mean, "se_bp": None if sd is None else sd / math.sqrt(len(drift))}
+    lots = _rows(db, "SELECT * FROM fwd_lotgap")
+    columns = ("model_bp", "entry_slip_bp", "exit_slip_bp", "timing_entry_bp", "timing_exit_bp", "exec_entry_bp",
+               "exec_exit_bp", "side_gap_bp", "twin_gap_bp")
+    twins = _rows(db, "SELECT instance, pid, agree, cause FROM fwd_twins")
+    causes = {cause: 0 for cause in forward_db.CAUSES}
+    for row in twins:
+        if row["agree"] == 0:
+            causes[row["cause"] or "unknown"] = causes.get(row["cause"] or "unknown", 0) + 1
+    readable = [row for row in twins if row["agree"] is not None]
+    agreed = sum(1 for row in readable if row["agree"] == 1)
+    part = _rows(db, "SELECT p.* FROM fwd_part p WHERE p.through=(SELECT max(q.through) FROM fwd_part q WHERE "
+                     "q.instance=p.instance)")
+    matched, missed, extra = (sum(int(row[k]) for row in part) for k in ("matched", "missed", "extra"))
+    live = _live_pids(db)
+    return {"timing": timing,
+            "livelike": {"rows": int(_one(db, "SELECT count(*) FROM fwd_ll") or 0),
+                         "no_minute": int(_one(db, "SELECT count(*) FROM fwd_events WHERE kind='no_minute'") or 0)},
+            "lots": {"n": len(lots), "priced": sum(1 for row in lots if row["twin_gap_bp"] is not None),
+                     "mean": {c: _mean([float(row[c]) for row in lots if row[c] is not None]) for c in columns},
+                     "bound_bp": forward_db.A14_GAP_BP},
+            "participation": {"instances": len(part), "matched": matched, "missed": missed, "extra": extra,
+                              "rate": matched / (matched + missed + extra) if matched + missed + extra else None},
+            "intents": {"sessions": len(readable), "agreed": agreed, "disagreed": len(readable) - agreed, "causes": causes,
+                        "unreadable": len(twins) - len(readable),
+                        "share": agreed / len(readable) if readable else None, "bound": forward_db.A14_AGREE},
+            "by_instance": [row for row in _instances(lots, twins) if row["pid"] in live]}
+
+
+def _instances(lots: Sequence[Mapping[str, Any]], twins: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """One row an instance of the twins' tables: its priced closes and their mean twin gap, its readable sessions,
+    those that agreed and those that did not, by cause (`forward_db.CAUSES`: "bars" when the live decision read other
+    as-of bars than the store now gives; the vendor rounds adjusted prices to cents)."""
+    out: dict[str, dict[str, Any]] = {}
+
+    def slot(row: Mapping[str, Any]) -> dict[str, Any]:
+        held = out.setdefault(str(row["instance"]), {"instance": str(row["instance"]), "pid": row["pid"], "lots": 0,
+                                                     "gaps": [], "sessions": 0, "agreed": 0, "unreadable": 0,
+                                                     "causes": {cause: 0 for cause in forward_db.CAUSES}})
+        if held["pid"] is None:
+            held["pid"] = row["pid"]
+        return held
+
+    for row in lots:
+        held = slot(row)
+        held["lots"] += 1
+        if row["twin_gap_bp"] is not None:
+            held["gaps"].append(float(row["twin_gap_bp"]))
+    for row in twins:
+        held = slot(row)
+        if row["agree"] is None:
+            held["unreadable"] += 1
+        else:
+            held["sessions"] += 1
+            held["agreed"] += 1 if row["agree"] == 1 else 0
+            if row["agree"] == 0:   # a disagreement is data: counted with its cause (the bars hash), never an error
+                cause = row["cause"] if row["cause"] in held["causes"] else "unknown"
+                held["causes"][cause] += 1
+    return [{"instance": v["instance"], "pid": None if v["pid"] is None else int(v["pid"]), "lots": v["lots"],
+             "priced": len(v["gaps"]), "mean_twin_gap_bp": _mean(v["gaps"]), "sessions": v["sessions"],
+             "agreed": v["agreed"], "disagreed": v["sessions"] - v["agreed"], "causes": v["causes"],
+             "unreadable": v["unreadable"]} for _, v in sorted(out.items())]
+
+
+def _rc(db: sqlite3.Connection) -> dict[str, Any]:
+    day = _one(db, "SELECT max(day) FROM fwd_groups")
+    if day is None:
+        return {"day": None, "groups": {}, "pairs": []}
+    return {"day": day, "groups": {row["grp"]: int(row["n"]) for row in _rows(
+        db, "SELECT grp, n FROM fwd_groups WHERE day=? ORDER BY grp", (day,))}, "pairs": rc_pairs(db, day)}
+
+
+def _memory(root: Path) -> dict[str, Any] | None:
+    """The memory tables' row counts (league/swarm/elane_memory.py `counts`: counts only, never a figure of a row)."""
+    from ..swarm import elane_memory
+    from . import funnel
+
+    path = root / funnel.SWARM_DB
+    return guard.read(path, lambda db: dict(elane_memory.counts(db))) if path.exists() else None
+
+
+def _contamination(root: Path) -> dict[str, Any] | None:
+    """`<state>/contamination.json` as the report carries it: one row a route, its cells as counts and names only."""
+    from . import contam_probe
+
+    doc = read_json(root / contam_probe.FILE, None)
+    if not isinstance(doc, Mapping) or not isinstance(doc.get("routes"), Mapping):
+        return None
+    routes: dict[str, Any] = {}
+    for key, row in sorted(doc["routes"].items()):
+        if not isinstance(row, Mapping):
+            continue
+        cells = [(f"{stratum}/{era}", cell) for stratum, eras in sorted((row.get("cells") or {}).items())
+                 if isinstance(eras, Mapping) for era, cell in sorted(eras.items()) if isinstance(cell, Mapping)]
+        routes[str(key)] = {"at": row.get("at"), "attempted_at": row.get("attempted_at"), "model": row.get("model"),
+                            "probes": row.get("probes"), "idle": row.get("idle"), "partial": "partial" in row,
+                            "cells": len(cells), "readable": sum(1 for _, c in cells if c.get("readable") is True),
+                            "recalled": [name for name, c in cells if c.get("recalled") is True]}
+    return {"version": doc.get("version"), "routes": routes}
+
+
+def _receipts(root: Path, now: float) -> list[dict[str, Any]]:
+    from . import release_receipts
+
+    return release_receipts.summary(root, now=now)
+
+
+def _previously_recalled(root: Path, route: str, at: Any) -> set[str] | None:
+    """The cells the route's probe BEFORE its current one called recalled (the file's `history`); None with none."""
+    from . import contam_probe
+
+    doc = read_json(root / contam_probe.FILE, None)
+    history = doc.get("history") if isinstance(doc, Mapping) else None
+    older = [row for row in history or () if isinstance(row, Mapping) and row.get("route") == route
+             and S.epoch(row.get("at")) is not None and S.epoch(at) is not None and S.epoch(row["at"]) < S.epoch(at)]
+    if not older:
+        return None
+    last = max(older, key=lambda row: S.epoch(row["at"]))
+    return {f"{stratum}/{era}" for stratum, eras in (last.get("cells") or {}).items() if isinstance(eras, Mapping)
+            for era, cell in eras.items() if isinstance(cell, Mapping) and cell.get("recalled") is True}
+
+
+# ------------------------------------------------------------------------------------------------------- the alarms
+def _row(alarm: str, text: str, subject: str = "") -> dict[str, Any]:
+    """One alarm row; its text opens with its id and its subject, then a colon: what `new` is told by."""
+    head = f"{alarm} {subject}".strip()
+    return {"id": alarm, "level": ALARMS[alarm], "text": f"{head}: {text}", "new": True}
+
+
+def _head(text: Any) -> str:
+    return str(text).split(": ", 1)[0]
+
+
+def _owed(db: sqlite3.Connection, now: float) -> tuple[str, str, int] | None:
+    """FW1's day: (the last forward day whose rows were due by `now`, the session whose 09:00 New York was the
+    deadline, how many registered rows were owed one), or None when nothing was owed: an empty registry, or no active
+    row whose `first_day` is on or before that day and that the registry held by that day's close. The deadline is
+    read as passed from `FW1_SETTLED_S` before it (the module docstring: this job's morning run)."""
+    from ..equity import schedule as ES
+
+    first, day = forward_db.t0(), ES.ny_day(now)
+    for _ in range(2 * ES.HORIZON_DAYS):
+        if day < first:
+            return None
+        if ES.is_session(day):
+            after = ES.next_session(day)
+            moments, closed = ES.moments(after), _close_at(day.isoformat())
+            if moments is not None and closed is not None \
+                    and float(moments.open_at) - FW1_BEFORE_OPEN_S - FW1_SETTLED_S <= now:
+                iso = day.isoformat()
+                held = "FROM fwd_registry WHERE first_day<=? AND registered_at<=? AND pid {op} (SELECT pid FROM fwd_tags " \
+                       "WHERE tag='stopped')"
+                owed = int(_one(db, "SELECT count(*) " + held.format(op="NOT IN"), (iso, closed)) or 0)
+                owed += sum(1 for pid in guard.ids(db, "SELECT pid " + held.format(op="IN"), (iso, closed))
+                            if forward_db.active(db, int(pid)))
+                return (iso, after.isoformat(), owed) if owed else None
+        day -= dt.timedelta(days=1)
+    return None
+
+
+def _stalled(db: sqlite3.Connection, now: float) -> list[dict[str, Any]]:
+    """FW1's first half (the stale report is `alarms`': the reader's)."""
+    owed = _owed(db, now)
+    if owed is None or _one(db, "SELECT count(*) FROM fwd_days WHERE day=?", (owed[0],)):
+        return []
+    return [_row("FW1", f"no forward row for {owed[0]} by 09:00 New York on {owed[1]} though {owed[2]} registered rows "
+                        "were owed one: the forward shadow did not complete (its receipt and forward-decider.log say "
+                        "why)")]
+
+
+def _backlog(db: sqlite3.Connection) -> list[dict[str, Any]]:
+    """FW2: the last two nights."""
+    nights = _nights(db)
+    if len(nights) < 2:
+        return []
+    out = []
+    new, old = nights
+    if int(new["stale"] or 0) > 0 and int(old["stale"] or 0) > 0:
+        out.append(_row("FW2", f"programs were left stale two nights running ({old['through']}: {int(old['stale'])}, "
+                               f"{new['through']}: {int(new['stale'])}): the night's budget does not cover the registry",
+                        "stale"))
+    failed = {(kind, night["through"]): set(guard.ids(
+        db, "SELECT DISTINCT pid FROM fwd_events WHERE kind=? AND day=? AND pid IS NOT NULL", (kind, night["through"])))
+        for kind in ("data_failed", "run_failed") for night in nights}
+    earlier = failed[("data_failed", old["through"])] | failed[("run_failed", old["through"])]
+    data, alone = failed[("data_failed", new["through"])] & earlier, failed[("run_failed", new["through"])] & earlier
+    if data or alone:
+        out.append(_row("FW2", f"{len(data | alone)} programs failed on both {old['through']} and {new['through']} "
+                               f"({len(data)} without data, {len(alone)} whose run failed alone)", "failed"))
+    return out
+
+
+def _restated(db: sqlite3.Connection) -> list[dict[str, Any]]:
+    """FW3: `restated` events written since the last night began, counted by cause. One event is one program's
+    restatement that night: its payload holds how many stored days differ (`days`; 1 when it does not say) and whether
+    the decisions behind them read bars that have moved since (`bars`: "moved" | "same")."""
+    nights = _nights(db)
+    if not nights:
+        return []
+    found = _rows(db, "SELECT pid, payload FROM fwd_events WHERE kind='restated' AND at>=?", (float(nights[0]["started"]),))
+    if not found:
+        return []
+    days, causes = 0, {"moved": 0, "same": 0}
+    for row in found:
+        try:
+            payload = json.loads(row["payload"])
+        except (TypeError, ValueError):
+            payload = None
+        payload = payload if isinstance(payload, Mapping) else {}
+        count = payload.get("days")
+        days += count if isinstance(count, int) and not isinstance(count, bool) and count > 0 else 1
+        if payload.get("bars") in causes:
+            causes[payload["bars"]] += 1
+    untold = len(found) - causes["moved"] - causes["same"]
+    return [_row("FW3", f"{days} stored days of {len({row['pid'] for row in found})} programs were restated on the night of "
+                        f"{nights[0]['through']}: {causes['moved']} of the {len(found)} restatements read bars that have "
+                        f"moved since (a vendor correction, or adjusted prices rounded to cents), {causes['same']} read "
+                        f"the same bars (a recompute that is not deterministic)"
+                        + (f", {untold} carry no bars hash" if untold else ""))]
+
+
+def _chain(db: sqlite3.Connection) -> list[dict[str, Any]]:
+    """FW4."""
+    chain = forward_db.verify_chain(db)
+    if chain.get("ok") is True:
+        return []
+    return [_row("FW4", f"the registry's hash chain does not hold from pid {chain.get('first_bad')} ({chain.get('rows')} "
+                        "rows): stop the forward jobs and compare with the backup")]
+
+
+def _converging(db: sqlite3.Connection, root: Path, now: float) -> list[dict[str, Any]]:
+    """FW5."""
+    run, first = _under_median(db)
+    if run < FW5_DAYS or first is None:
+        return []
+    births = _equity_births(root, _close_at(first) or now - FW5_DAYS * 86400.0, now)
+    if not births:
+        return []
+    return [_row("FW5", f"the day's clean-evidence increment has been under its {MEDIAN_DAYS}-day median for {run} "
+                        f"forward days running (since {first}) while {births} equity births went on: the generators may "
+                        "be converging")]
+
+
+def _twins_early(db: sqlite3.Connection, root: Path) -> list[dict[str, Any]]:
+    """FW6: a living instance's twins before any checkpoint reads them."""
+    out = []
+    retired = _retired_instances(root)
+    for row in _instances(_rows(db, "SELECT instance, pid, twin_gap_bp FROM fwd_lotgap"),
+                          _rows(db, "SELECT instance, pid, agree, cause FROM fwd_twins")):
+        if row["instance"] in retired:
+            continue
+        gap = row["mean_twin_gap_bp"]
+        if row["priced"] >= FW6_CLOSES and gap is not None and abs(gap) > forward_db.A14_GAP_BP:
+            out.append(_row("FW6", f"its mean twin gap over {row['priced']} priced closes is beyond the A14 bound "
+                                   f"({'worse' if gap < 0 else 'better'} than the model)", f"instance {row['instance']} gap"))
+        if row["sessions"] >= FW6_SESSIONS and row["agreed"] < forward_db.A14_AGREE * row["sessions"]:
+            out.append(_row("FW6", f"{row['agreed']} of {row['sessions']} sessions agree with its twin, under the A14 "
+                                   f"bound ({row['causes']['bars']} of the {row['disagreed']} that differ read other bars "
+                                   "than the store now holds)", f"instance {row['instance']} intents"))
+    return out
+
+
+def _identity(db: sqlite3.Connection, since: float) -> list[dict[str, Any]]:
+    """FW8."""
+    moved = int(_one(db, "SELECT count(*) FROM fwd_events WHERE kind='identity_moved' AND at>=?", (since,)) or 0)
+    if not moved:
+        return []
+    return [_row("FW8", f"the equity fingerprint moved while a lineage is live ({moved} identity_moved events since "
+                        f"{S.iso(since)[:10]}): the forward series go on under a new engine label")]
+
+
+def _each(checks: Sequence[tuple[str, Callable[[], list[dict[str, Any]]]]]) -> list[dict[str, Any]]:
+    """Every alarm read on its own: one that cannot be read is an info row that says so (never silence, and never
+    the loss of the others)."""
+    out: list[dict[str, Any]] = []
+    for alarm, read in checks:
+        try:
+            out += read()
+        except Exception as exc:  # noqa: BLE001
+            out.append({**_row(alarm, f"this alarm could not be read ({type(exc).__name__})", "unread"), "level": "info"})
+    return out
+
+
+def _equity_births(root: Path, start: float, end: float) -> int:
+    """Equity-lane births in [start, end) (the funnel's own count); 0 when the swarm store cannot say."""
+    from . import funnel
+
+    try:
+        counts = guard.read(root / funnel.SWARM_DB, lambda db: funnel.equity_counts(db, start, end))
+        return sum(int(counts[lane]["births"]) for lane in funnel.EQUITY_LANES)
+    except Exception:  # noqa: BLE001 - FW5 needs births it can see
+        return 0
+
+
+def _retired_instances(root: Path) -> set[str]:
+    """The live book's retired equity instances (FW6 reads the living ones); empty when the book cannot say."""
+    from . import funnel
+
+    try:
+        return set(guard.read(root / funnel.LIVE_DB, lambda db: guard.ids(
+            db, "SELECT id FROM eq_instances WHERE retired_at IS NOT NULL")))
+    except Exception:  # noqa: BLE001
+        return set()
+
+
+def _decide_alarm(root: Path) -> list[dict[str, Any]]:
+    """FW7, from the live book (read-only)."""
+    from . import funnel
+
+    path = root / funnel.LIVE_DB
+    if not path.exists():
+        return []
+
+    def read(db: sqlite3.Connection) -> tuple[int, Any]:
+        tables = set(guard.ids(db, "SELECT name FROM sqlite_master WHERE type='table'"))
+        if not {"eq_instances", "kv"} <= tables:
+            return 0, None
+        return (int(_one(db, "SELECT count(*) FROM eq_instances WHERE retired_at IS NULL") or 0),
+                _one(db, "SELECT value FROM kv WHERE key='eq_decide'"))
+
+    live, raw = guard.read(path, read)
+    try:
+        decide = json.loads(raw) if raw else None
+    except (TypeError, ValueError):
+        decide = None
+    if not live or not isinstance(decide, Mapping) or not isinstance(decide.get("day"), str):
+        return []
+    day, status = decide["day"][:10], decide.get("status")
+    if status == "failed":
+        return [_row("FW7", f"the equity decide of {day} failed: the live programs took no decision that session")]
+    close, at = _close_at(day), S.epoch(decide.get("at"))
+    if status == "done" and not decide.get("why") and close is not None and at is not None and at > close + FW7_LATE_S:
+        return [_row("FW7", f"the equity decide of {day} ran late (past 40 minutes after its close)")]
+    return []
+
+
+def _receipt_alarms(receipts: Any, now: float) -> list[dict[str, Any]]:
+    out = []
+    for row in receipts if isinstance(receipts, list) else ():
+        day = S.iso(row["closes_at"])[:10]
+        if row.get("unread"):
+            out.append(_row("RR1", f"unread though its window closed on {day}: the stall job's receipts step did not "
+                                   "read it", f"receipt {row['id']}"))
+        elif row.get("verdict") in ("flat", "wrong_way") and now - float(row["read_at"]) <= RR2_DAYS * 86400.0:
+            out.append(_row("RR2", f"read {row['verdict']} on {S.iso(row['read_at'])[:10]} (listed, never reverted)",
+                            f"receipt {row['id']}"))
+    return out
+
+
+def _probe_alarms(root: Path, contamination: Any, now: float) -> list[dict[str, Any]]:
+    out = []
+    routes = contamination.get("routes") if isinstance(contamination, Mapping) else None
+    for key, row in (routes or {}).items():
+        at = S.epoch(row.get("at"))
+        seen = at if at is not None else S.epoch(row.get("attempted_at"))
+        if seen is not None and now - seen > CP1_DAYS * 86400.0:
+            out.append(_row("CP1", f"no completed probe since {S.iso(seen)[:10]}", f"route {key} unprobed"))
+        recalled = [name for name in row.get("recalled") or () if name.split("/")[-1] in CP1_ERAS]
+        before = _previously_recalled(root, key, row.get("at")) if recalled else None
+        fresh = [name for name in recalled if before is None or name not in before]
+        if fresh and at is not None and now - at <= RR2_DAYS * 86400.0:
+            out.append(_row("CP1", f"{len(fresh)} readable cells newly recalled ({', '.join(fresh)})",
+                            f"route {key} recall"))
+        if isinstance(row.get("idle"), int) and not isinstance(row.get("idle"), bool) and row["idle"] >= CP2_IDLE:
+            out.append(_row("CP2", f"its last {row['idle']} probe attempts added no cell", f"route {key}"))
+    return out
+
+
+def _memory_alarm(root: Path, since: float) -> list[dict[str, Any]]:
+    """MM1: the swarm's `swarm.status` alerts of action "elane_memory" since `since`."""
+    from . import funnel
+
+    path = root / funnel.SWARM_DB
+    if not path.exists():
+        return []
+    rows = guard.read(path, lambda db: _rows(
+        db, "SELECT payload FROM events WHERE kind='swarm.status' AND at>=? AND payload LIKE '%elane_memory%' ORDER BY seq "
+            "DESC LIMIT 2000", (S.iso(since),)))
+    n = 0
+    for row in rows:
+        try:
+            payload = json.loads(row["payload"])
+        except (TypeError, ValueError):
+            continue
+        n += 1 if isinstance(payload, Mapping) and payload.get("action") == "elane_memory" and payload.get("alert") is True \
+            else 0
+    return [_row("MM1", f"{n} memory alerts (swarm.status elane_memory) since {S.iso(since)[:10]}: a hidden year not "
+                        "stamped at a birth, or an ingest that failed")] if n else []
 
 
 def section(root: str | Path, *, now: float, settings: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -146,12 +1135,67 @@ def section(root: str | Path, *, now: float, settings: Mapping[str, Any] | None)
     `neff_raw` beside), `fills` (timing, livelike, lots, participation, intents: agreed, disagreed by cause,
     unreadable), `rc` (one object a pair; group counts), `memory` (counts), `contamination`, `receipts`, `alarms`.
     Each object carries its tables' column names; what may appear is bounded by the module docstring."""
-    raise NotImplementedError("C: league/ops/forward_report.py section")
+    root, now = Path(root), float(now)
+    mode = _mode(settings)
+    previous = read_json(root / FILE, None)
+    before = S.epoch(previous.get("at")) if isinstance(previous, Mapping) else None
+    since = max(now - LOOKBACK_DAYS * 86400.0, min(now - RECENT_HOURS * 3600.0, before if before is not None else now))
+    out: dict[str, Any] = {key: None for key in SECTION_KEYS}
+    out.update(at=S.iso(now), mode=mode, t0=_part(lambda: forward_db.t0().isoformat()))
+    alarms: list[dict[str, Any]] = []
+    db = None
+    try:
+        db = forward_db.open_db(root, readonly=True)
+    except Exception:  # noqa: BLE001 - no forward store yet (or one that cannot be opened): nothing recorded to report
+        db = None
+    if db is not None:
+        try:
+            engine = _part(lambda: forward_db.engine_now(db))
+            out["engine"] = engine if isinstance(engine, dict) else \
+                {"id": engine, "label": None if engine is None else _part(lambda: forward_db.engine_label(db, engine))}
+            for key, read in (("registry", lambda: _registry(db, now)), ("shadow", lambda: _shadow(db)),
+                              ("checkpoints", lambda: _checkpoints(db)), ("meter", lambda: _meter(db)),
+                              ("cey", lambda: _cey(db)), ("fills", lambda: _fills(db)), ("rc", lambda: _rc(db))):
+                out[key] = _part(read)
+            out["through"] = (out["shadow"] or {}).get("through")
+            if mode != "off":
+                alarms += _each((("FW1", lambda: _stalled(db, now)), ("FW2", lambda: _backlog(db)),
+                                 ("FW3", lambda: _restated(db)), ("FW4", lambda: _chain(db)),
+                                 ("FW5", lambda: _converging(db, root, now)), ("FW6", lambda: _twins_early(db, root)),
+                                 ("FW8", lambda: _identity(db, since))))
+        finally:
+            db.close()
+    out["memory"] = _part(lambda: _memory(root))
+    out["contamination"] = _part(lambda: _contamination(root))
+    out["receipts"] = _part(lambda: _receipts(root, now))
+    alarms += _each(((("FW7", lambda: _decide_alarm(root)),) if mode != "off" else ())
+                    + (("RR1", lambda: _receipt_alarms(out["receipts"], now)),
+                       ("CP1", lambda: _probe_alarms(root, out["contamination"], now)),
+                       ("MM1", lambda: _memory_alarm(root, since))))
+    known = {_head(a.get("text")) for a in (previous.get("alarms") or ()) if isinstance(a, Mapping)} \
+        if isinstance(previous, Mapping) and isinstance(previous.get("alarms"), list) else set()
+    out["alarms"] = [{**a, "new": _head(a["text"]) not in known} for a in alarms]
+    return out
+
+
+def _alarm_rows(doc: Any) -> list[dict[str, Any]]:
+    rows = doc.get("alarms") if isinstance(doc, Mapping) else None
+    return [{"id": a["id"], "level": a["level"], "text": a["text"], "new": bool(a.get("new"))}
+            for a in rows or () if isinstance(a, Mapping) and isinstance(a.get("id"), str)
+            and a.get("level") in ("info", "warning") and isinstance(a.get("text"), str)]
 
 
 def read_section(root: str | Path) -> dict[str, Any] | None:
-    """`<root>/forward-report.json` as written; None when absent, unreadable or older than `STALE_HOURS`."""
-    raise NotImplementedError("C: league/ops/forward_report.py read_section")
+    """`<root>/forward-report.json` as written; None when absent, unreadable or stale (older than `STALE_HOURS` with a
+    run of the job overdue since: the module docstring)."""
+    doc = read_json(Path(root) / FILE, None)
+    if not isinstance(doc, dict) or _stale(S.epoch(doc.get("at")), time.time()):
+        return None
+    return doc
+
+
+def _zero() -> dict[str, int]:
+    return {key: 0 for key in FUNNEL_KEYS}
 
 
 def funnel_rows(root: str | Path, start: float, end: float) -> dict[str, int]:
@@ -159,17 +1203,127 @@ def funnel_rows(root: str | Path, start: float, end: float) -> dict[str, int]:
     `lineages`, `controls`, `program_sessions` and `program_sessions_total` (non-control `fwd_days` rows), `stale`,
     `errors`, `checkpoints`, `bh`, `by`, and from the swarm store read-only `oof_seen` and `oof_rows` (the seen-fact
     and out-of-fold rows with `at` in the window: `elane_memory.counts`' tables). An absent forward store or memory
-    table is zeros (nothing was recorded); an unreadable one raises."""
-    raise NotImplementedError("C: league/ops/forward_report.py funnel_rows")
+    table is zeros (nothing was recorded); an unreadable one raises.
+
+    A program-session and a checkpoint are counted once, when first written (the row of its first engine: the night a
+    label moves writes every stored day again and counts nothing twice); the `_total`s, `lineages` and `controls` are
+    everything up to `end`; `stale` is the last night's that ended in the window; `errors` the window's nights'
+    errors and the nights that failed at their preflight; `bh` and `by` the latest meter row written before `end`."""
+    from . import funnel
+
+    root, a, b = Path(root), float(start), float(end)
+    out = _zero()
+    if (root / forward_db.DB).exists():
+        first_engine = "NOT EXISTS (SELECT 1 FROM {t} e WHERE e.pid=d.pid AND e.{k}=d.{k} AND e.engine<d.engine)"
+        days = ("SELECT count(*) FROM fwd_days d JOIN fwd_registry r ON r.pid=d.pid WHERE r.lane!='control' AND "
+                + first_engine.format(t="fwd_days", k="day"))
+        checks = ("SELECT count(*) FROM fwd_checks d JOIN fwd_registry r ON r.pid=d.pid WHERE r.lane!='control' AND "
+                  + first_engine.format(t="fwd_checks", k="n"))
+
+        def read(db: sqlite3.Connection) -> dict[str, int]:
+            registry = "SELECT count(*) FROM fwd_registry WHERE lane{op}'control' AND registered_at<?"
+            night = _rows(db, "SELECT stale FROM fwd_runs WHERE finished>=? AND finished<? ORDER BY run DESC LIMIT 1", (a, b))
+            meter = _rows(db, "SELECT bh, by_ FROM fwd_meter WHERE at<? ORDER BY day DESC LIMIT 1", (b,))
+            return {"registered": _one(db, registry.format(op="!=") + " AND registered_at>=?", (b, a)),
+                    "registered_total": _one(db, registry.format(op="!="), (b,)),
+                    "lineages": _one(db, "SELECT count(DISTINCT lineage) FROM fwd_registry WHERE lane!='control' AND "
+                                         "registered_at<?", (b,)),
+                    "controls": _one(db, registry.format(op="="), (b,)),
+                    "program_sessions": _one(db, days + " AND d.at>=? AND d.at<?", (a, b)),
+                    "program_sessions_total": _one(db, days + " AND d.at<?", (b,)),
+                    "stale": night[0]["stale"] if night else 0,
+                    "errors": (_one(db, "SELECT coalesce(sum(errors), 0) FROM fwd_runs WHERE finished>=? AND finished<?",
+                                    (a, b)) or 0)
+                    + (_one(db, "SELECT count(*) FROM fwd_events WHERE kind='night_failed' AND at>=? AND at<?", (a, b)) or 0),
+                    "checkpoints": _one(db, checks + " AND d.at>=? AND d.at<?", (a, b)),
+                    "bh": meter[0]["bh"] if meter else 0, "by": meter[0]["by_"] if meter else 0}
+
+        out.update({key: int(value or 0) for key, value in guard.read(root / forward_db.DB, read).items()})
+    if (root / funnel.SWARM_DB).exists():
+        def memory(db: sqlite3.Connection) -> dict[str, int]:
+            tables = set(guard.ids(db, "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'mem_%'"))
+            return {key: int(_one(db, f"SELECT count(*) FROM {table} WHERE at>=? AND at<?", (S.iso(a), S.iso(b))) or 0)
+                    if table in tables else 0 for key, table in (("oof_seen", "mem_seen"), ("oof_rows", "mem_contrib"))}
+
+        out.update(guard.read(root / funnel.SWARM_DB, memory))
+    return out
 
 
 def alarms(root: str | Path, *, now: float, settings: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:
     """The forward alarms for the dlane report: [] when `forward_db.mode(settings)` is "off" or the file says `mode`
     "off"; the file's alarms when it is under `STALE_HOURS` old; else one FW1 row. Every row is {"id", "level",
-    "text", "new"}. Never raises for a missing or unreadable file."""
-    raise NotImplementedError("C: league/ops/forward_report.py alarms")
+    "text", "new"}. Never raises for a missing or unreadable file.
+
+    `settings` None: the swarm's own, as it loads them. A report that is old with no run of the job overdue since is
+    not stale (the module docstring). FW1 keeps its silences here too: with the report stale or absent it is raised
+    only when the registry holds a row that was owed a forward day (an empty registry, the sessions before a first
+    registration's first day and a store not yet created owe nothing)."""
+    try:
+        root, now = Path(root), float(now)
+        if _mode(_settings(root, settings)) == "off":
+            return []
+        doc = read_json(root / FILE, None)
+        if isinstance(doc, Mapping) and doc.get("mode") == "off":
+            return []
+        at = S.epoch(doc.get("at")) if isinstance(doc, Mapping) else None
+        if isinstance(doc, Mapping) and not _stale(at, now):
+            return _alarm_rows(doc)
+        if not (root / forward_db.DB).exists():
+            return []
+        try:
+            db = forward_db.open_db(root, readonly=True)
+            try:
+                owed = _owed(db, now)
+            finally:
+                db.close()
+            if owed is None:
+                return []
+            why = f"{owed[2]} registered rows were owed the forward day {owed[0]}"
+        except Exception:  # noqa: BLE001 - a stale report over a store that cannot be read is told, not hidden
+            why = "the forward store could not be read"
+        when = "there is no forward report" if at is None else f"the forward report was last written on {S.iso(at)[:10]}"
+        return [{**_row("FW1", f"{when} though {why}: the forward_report job is stalled (its receipts say why)", "report"),
+                 "new": True}]
+    except Exception:  # noqa: BLE001 - never the dlane report's failure
+        return []
+
+
+def run(ctx: Any) -> dict[str, Any]:
+    """THE JOB (league/ops/registry.py). With the mode "off" it writes {"at", "mode": "off", "alarms": []} to `FILE`
+    and returns skipped; else `meters`, then `section` written to `FILE`; each warning alarm is also a
+    `ctx.alert("warning", text)`. The receipt holds counts, never a figure.
+
+    THE REPORT IS WRITTEN WHATEVER THE METERS DID: when a day's meters cannot be written (a store locked, a row that
+    cannot be read), that day and the days after it stay unwritten for the next run, the report and its alarms are
+    still written, and the receipt is `failed` with the day and the exception's name (the runner starts the job again
+    inside its grace)."""
+    root, now = Path(ctx.root), float(ctx.now())
+    settings = _settings(root, None, getattr(ctx, "config", None))
+    if _mode(settings) == "off":
+        write_json(root / FILE, {"at": S.iso(now), "mode": "off", "alarms": []})
+        return {"status": "skipped", "why": "the forward record is off (elane.forward.mode)"}
+    wrote: dict[str, Any] = {"days": 0, "cey": 0, "meter": 0, "groups": 0}
+    try:
+        db = forward_db.open_db(root)
+        try:
+            wrote = meters(root, db, now=now, settings=settings)
+        finally:
+            db.close()
+    except Exception as exc:  # noqa: BLE001 - the report is written without today's meters; the receipt says so
+        wrote["error"] = {"day": None, "why": type(exc).__name__}
+    error = wrote.pop("error", None)
+    doc = section(root, now=now, settings=settings)
+    write_json(root / FILE, doc)
+    for alarm in doc["alarms"]:
+        if alarm["level"] == "warning":
+            ctx.alert("warning", f"forward: {alarm['text']}")
+    out = {"path": str(root / FILE), "through": doc["through"], **wrote, "alarms": [alarm["id"] for alarm in doc["alarms"]]}
+    if error is not None:
+        return {"status": "failed", "error": f"the meters of {error['day'] or 'the night'} could not be written "
+                                             f"({error['why']}); the report was written without them", **out}
+    return {"ok": True, **out}
 
 
 __all__ = ["FILE", "GATE_REASON", "STALE_HOURS", "SECTION_KEYS", "FUNNEL_KEYS", "ALARMS", "RC_PAIRS", "run", "meters",
            "representatives", "population", "sim_program_years", "hist_independent_years", "rc_pairs", "section",
-           "read_section", "funnel_rows", "alarms"]
+           "read_section", "funnel_rows", "alarms", "text_ok", "forward_days"]
