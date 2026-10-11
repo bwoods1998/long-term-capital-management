@@ -229,8 +229,8 @@ gateway is `f9528af2` (14:36:49Z Oct 11), and the box's updater is on. What is b
   the spec wrote it five scenarios differ. FIXED: **the zero-edge job could not finish one program inside the ops
   child's 500 MB** (a store opened a run, every run kept whole): a judgment reads one store, keeps results and
   lets slices go, and the restart check cuts a slice again when it reads it; three judgments at the real panel's
-  size peak about 80 MB under the cap, held by a test under the child's own limit, and the swarm's judgments use
-  the same code. **A decide is limited by WALL time and the box stood still for longer:** in the Train judgment,
+  size peak about 80 MB under the cap, held by a test under the child's own limit (the real job run whole on the
+  desk: 57 MB under it; not measured on the box), and the swarm's judgments use the same code. **A decide is limited by WALL time and the box stood still for longer:** in the Train judgment,
   the zero-edge job and the forward night a run whose runtime shows a decide timeout is made again, three times at
   most, and never read; timeouts in every run that repeat as a program's do are the program's (`SLOW`, with the
   measured seconds, which its author reads), and those that do not are the House's (nothing scored, a backoff, one

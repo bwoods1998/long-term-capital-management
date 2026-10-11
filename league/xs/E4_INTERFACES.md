@@ -853,7 +853,8 @@ the job failed on the second run of its first program. In `league/swarm/elane_xs
   three judgments at 2,455 sessions by 767 columns under `league.ops.__main__.limit(None, 500)`, with the real
   store, runner and decider (the House's side and its child's loop; the engine canned), peak about 80 MB under the
   cap on the desk and are held to 50; the judgment as it was meets the cap inside its first program, and the test
-  holds that too. The real job, run whole on the desk under the same limits, peaked at 452 MB of 522.
+  holds that too. The real job, run whole on the desk under the same limits (the real engine in a real child:
+  eleven programs, 99 runs), peaked at 465 MB of 522: 57 MB to spare. Not measured on the box.
 
 **4. No run that lost a decide to the clock is judged or recorded** (`elane_xs.steady`, `CLOCK_RUNS` 3,
 `SLOW_SHARE` 0.05; asked by `score` through `bar_runs`, by the hidden run, by `xs_zero_edge.judge` and by
@@ -894,8 +895,10 @@ the identity).
 **7. Open, for the captain.** The fix at the root of point 4 (the child's own CPU time), and the rule in
 Validation and the look before any look. The spreads job's quotes route has never been sent; its CPU figure is an
 inference from bars calls, and a kept connection (a change to the ops client of every job) would cut it sevenfold.
-The zero-edge job's headroom is about 60 MB on the box by the desk's figure and the rehearsal's offset: a memory
-room of the row's own is the next lever (`league/ops/runner.py` `EXTRA_MB` is one figure for every job). Whether
+The zero-edge job's headroom was 57 MB in the real job on the desk and is not measured on the box: a memory room of
+the row's own is the next lever (`league/ops/runner.py` `EXTRA_MB` is one figure for every job), and releasing the
+store before a slice is sent would free its 135 MB of maps (a change to `league/xs/runner.py`, an evidence module).
+Whether
 release E1's entry rule should change for share programs too (B8's reason holds for them: a cut buy's size is
 final) is a decision of its own, with a rehearsal of its own. The lane alarms of release E2.4 do not watch a panel
 family's Train stalls; the panel's own alarms and the funnel do.
