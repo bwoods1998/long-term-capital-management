@@ -182,10 +182,11 @@ def _symbols(program: Program) -> tuple[str, ...]:
 
 @contextlib.contextmanager
 def _transaction(db: sqlite3.Connection) -> Iterator[None]:
-    """One transaction on `db`, whatever its isolation level: committed when the block ends, rolled back when it
-    raises (league/ops/forward_db.py `event` may commit on its own; what was committed then stays)."""
+    """One transaction on `db`, whatever its isolation level: begun with the write lock (never a read that must be
+    upgraded mid-way), committed when the block ends, rolled back when it raises. The writes league/ops/forward_db.py
+    makes inside it (`event`) join it; were one to commit on its own, what it committed stays."""
     if not db.in_transaction:
-        db.execute("BEGIN")
+        db.execute("BEGIN IMMEDIATE")
     try:
         yield
     except BaseException:
