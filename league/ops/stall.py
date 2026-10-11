@@ -96,11 +96,15 @@ was found by the captain reading the log, never by an alarm):
 
 THE EQUITY LANES' OWN CAUSES (release E2.4, Oct 11, 2026; league/ops/elane_health.py, which judges them): `elane_dq`
 (most equity versions scored could not be judged for a fault of their own program), `elane_births` (the last equity
-passes that asked a model bore no family), `elane_idle` (work owed and no version scored for hours: starved or broken)
-and `elane_refused` (most programs written were refused before a run by one static rule). Each is judged only while
-the lanes are on and on enough evidence, and stands here like any cause (`EVERY_CAUSE`: since when, warned, noticed
-at this job's pace, cleared, among the receipt's `checks`). The gateway words only `CAUSES`, so they reach the mail
-inside `swarm_alerts` (`elane_health.carried`) until it words them.
+passes that asked a model bore no family), `elane_idle` (work owed and not done: no version scored for hours, or most
+Train steps skipped for want of model dollars; starved or broken) and `elane_refused` (most programs written were
+refused before a run by one static rule). Each is judged only while the lanes are on and on enough evidence, and
+stands here like any cause (the last four of `CAUSES`: since when, warned, noticed at this job's pace, cleared, among
+the receipt's `checks`). The gateway words each (gateway/lib/email.mjs STALL_CAUSES; the gateway is deployed before
+this release), so each is an entry of its own in the notice and keys its own mail: none rides `swarm_alerts`, and none
+holds back another's mail or the swarm's own alerts. The job keeps, for them, since when the running release has run
+(`stall.json` `elane`: {release, since}; `elane_health.release_since`), so a restart that fixes nothing resets no
+evidence.
 
 THE NOTICE: one `POST /v1/notify` kind `stall` a run at most, listing EVERY cause standing (`cause_facts` each: the
 cause, the numbers, how long, what the House is doing about it, the owner step when one is needed), owner steps first,
@@ -262,15 +266,12 @@ ARCHITECT_HOLD_USD = 2.0
 #: lifts each.
 PAUSE_FILES = {"PAUSE": ("maintenance", "lift the maintenance pause once its work is done (scripts/floor_box.py maintenance off)"),
                "swarm.stop": ("swarm_stop", "remove state/swarm.stop once the swarm should run again (the House starts it then)")}
+#: EVERY CAUSE THIS JOB RAISES, each worded by the gateway (gateway/lib/email.mjs STALL_CAUSES, which its own test holds
+#: equal to this tuple: a cause is worded there, and the gateway deployed, before it is named here). The last four are THE
+#: EQUITY LANES' OWN (release E2.4; league/ops/elane_health.py `CAUSES`, which judges them; a test holds the two equal).
 CAUSES = ("births", "birth_yield", "gym_runs", "validations", "braked", "runway_sail", "runway_claude", "owner_deploy",
-          "paused", "grant_refused", "kill_on", "dlane", "done", "preopen", "forward", "swarm_alerts", "underspend")
-#: EVERY CAUSE THIS JOB RAISES: `CAUSES`, the causes the gateway words (gateway/lib/email.mjs STALL_CAUSES, which its own
-#: test holds equal to the tuple above: a cause is worded there before it is named here), and THE EQUITY LANES' OWN
-#: (release E2.4; league/ops/elane_health.py `CAUSES`; here those of them the gateway does not word yet), which stand in
-#: stall.json, the House's warnings and the receipt's `checks` under their own names and reach the mail inside
-#: `elane_health.CARRIER` (`elane_health.carried`).
-EQUITY_CAUSES = tuple(c for c in EH.CAUSES if c not in CAUSES)
-EVERY_CAUSE = (*CAUSES, *EQUITY_CAUSES)
+          "paused", "grant_refused", "kill_on", "dlane", "done", "preopen", "forward", "swarm_alerts", "underspend",
+          "elane_dq", "elane_births", "elane_idle", "elane_refused")
 #: THE EQUITY LANES (release E2): their births (a `swarm.born` whose payload's lane is "beta" or "equity"), their families
 #: (structure "etf" or "stock": league/swarm/store.py `OPTIONS_ONLY_SQL`) and their Train runs on the House are their own:
 #: none masks a stalled options architect, population or Gym here.
@@ -1966,11 +1967,10 @@ def run(ctx: Any) -> dict[str, Any]:
                    nightly_error_since=None if nightly_error is None else S.epoch(nightly_error["since"]),
                    done_told=done_told, binds=binds, alert_states=states)
     # THE EQUITY LANES' OWN CAUSES (release E2.4): judged in league/ops/elane_health.py and raised from here on like any
-    # other. Below, `CAUSES` is every cause this job raises (the loop, the receipt's `checks`); the module's `CAUSES` stays
-    # the list the gateway words, and the notice alone is held to it (`EH.carried`).
-    found.update(EH.checks(ctx, root, now, loaded, errors=errors,
+    # other. Their evidence counts from the first start of the RUNNING RELEASE (kept in stall.json: `EH.release_since`).
+    running = EH.release_since(state.get(EH.STATE_KEEP), root, now)
+    found.update(EH.checks(ctx, root, now, loaded, errors=errors, since=running.get("since"),
                            paused=found["paused"]["numbers"]["paused_since"] is not None))
-    CAUSES = EVERY_CAUSE  # noqa: N806 - the job's own list from here on, under the name the lines below read
 
     told = state.get("causes") if isinstance(state.get("causes"), dict) else {}
     mail = dict(state.get("mail")) if isinstance(state.get("mail"), dict) else {}
@@ -2004,7 +2004,7 @@ def run(ctx: Any) -> dict[str, Any]:
                          f"told at {mail.get('owner_at') or mail.get('info_at')}: the owner causes at most every 12 h, the "
                          "rest at most every 24 h")
     else:
-        facts = notice_facts(EH.carried(entries, EQUITY_CAUSES, found), now)  # they travel in a cause the gateway words
+        facts = notice_facts(EH.mailed(entries, found), now)  # the equity causes' entries as the gateway prints them
         notice["notice_id"] = facts["notice_id"]
         notify = _notifier(ctx)
         if notify is None:
@@ -2046,7 +2046,7 @@ def run(ctx: Any) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 - the stall alarm goes on without it
         receipts = {"errors": [f"{type(exc).__name__}: {str(exc)[:160]}"]}
     write_json(root / STATE_FILE, {"schema": 2, "at": S.iso(now), "causes": told, "mail": mail,
-                                   "nightly_error": nightly_error, "done_told": done_told})
+                                   "nightly_error": nightly_error, "done_told": done_told, EH.STATE_KEEP: running})
     return {"stalled": stalled, "cleared": cleared, "warned": warned, "notice": notice,
             "checks": {c: {k: found[c].get(k) for k in ("stalled", "what", "numbers", "doing", "owner_step")} for c in CAUSES},
             "ceiling": ceiling, "errors": errors, "warning": bool(stalled or errors), "receipts": receipts}
@@ -2064,4 +2064,3 @@ __all__ = ["run", "checks", "swarm_facts", "owner_deploy", "pause_facts", "grant
            "UNDERSPEND_MIN_HOURS", "UNDERSPEND_MIN_USD", "UNDERSPEND_BRAKE_HOURS", "ARCHITECT_HOLD_USD", "JAM_OWNER_KINDS",
            "PACED_METERS", "ALERT_LOOKBACK_KINDS", "ALERT_STATE_DAYS", "GAME_T0_KEY", "alert_states", "release_settings",
            "told_lately"]
-__all__ += ["EQUITY_CAUSES", "EVERY_CAUSE"]  # release E2.4, listed apart from the list above

@@ -1,9 +1,13 @@
 """Release E2.4, THE EQUITY LANES' HEALTH (league/ops/elane_health.py): the equity lanes' own stall causes (`elane_dq`,
 `elane_births`, `elane_idle`, `elane_refused`) raised through the stall job's machinery (league/ops/stall.py), each judged
-only while the lanes are on and on enough evidence; the notice that carries them under a cause the gateway words; the
-Done meter's item 7 counting their owner steps; the lanes' research funnel (league/ops/funnel.py `equity.research`, the
-`scoreboard` job's receipt); and the operator's report. The closed words are held to the code that writes the
-records (the equity pass, the Train round, the static rules, a disqualification's record) by running that code.
+only while the lanes are on and on enough evidence counted from the running release's first start; the notice, in
+which each is an entry of its own under a cause the gateway words; the Done meter's item 7 counting their owner
+steps; the lanes' research funnel (league/ops/funnel.py `equity.research`, the `scoreboard` job's receipt); the
+operator's report; what the equity architect's next request is shown of a barren pass, in closed words
+(league/swarm/elane_births.py `last_text`); and the lanes' output settings held to the model provider's own limit. The
+closed words are held to the code that writes the records (the equity pass, the Train round, the static rules, a
+disqualification's record) by running that code, and the two replays of Oct 11 (a lane starved at its pace, a healthy
+lane that spends its day) run the real equity pass, Train round and stall job (league/tests/elane_e24_house.py).
 
 Every family, program, refusal, dollar and number here is invented."""
 
@@ -111,19 +115,21 @@ class Case(TS.Base):
     def lanes(self, **block):
         (self.root / "swarm.json").write_text(json.dumps({"elane": block}))
 
-    def beat(self, hours: float, at: float = NOW):
-        """The swarm's heartbeat, written at `at`: it started `hours` before NOW."""
-        (self.root / EH.HEARTBEAT).write_text(json.dumps({"at": at, "started_at": NOW - hours * HOUR}))
+    def beat(self, hours: float, at: float = NOW, release: str | None = None):
+        """The swarm's heartbeat, written at `at`: it started `hours` before NOW (`release`: the release directory it
+        was started from, as league/swarm/loop.py writes it; None: a heartbeat that names none)."""
+        body = {"at": at, "started_at": NOW - hours * HOUR, **({"release": release} if release else {})}
+        (self.root / EH.HEARTBEAT).write_text(json.dumps(body))
 
     def run_at(self, now=NOW, **kw):
         """One stall run at `now`, the swarm alive then (its heartbeat fresh) unless a test wrote a stale one."""
         path = self.root / EH.HEARTBEAT
         beat = json.loads(path.read_text()) if path.exists() else {}
         if beat.get("at") == NOW:
-            self.beat((NOW - beat["started_at"]) / HOUR, at=now)
+            self.beat((NOW - beat["started_at"]) / HOUR, at=now, release=beat.get("release"))
         out = super().run_at(now=now, **kw)
         if beat.get("at") == NOW:
-            self.beat((NOW - beat["started_at"]) / HOUR)
+            self.beat((NOW - beat["started_at"]) / HOUR, release=beat.get("release"))
         return out
 
     def bred(self, slug: str, *, hours: float = 10.0, lane: str = "equity", symbols=("SPY",), record=None) -> str:
@@ -140,14 +146,16 @@ class Case(TS.Base):
         self.store.set_state(fid, **{EH.STATE_KEY: rec})
 
     def births(self, hours: float, *, born=(), refused=(), proposed=None, truncated=False, error=False, skipped=None,
-               want: int = 3) -> None:
-        """One equity pass's event, as `EquityPass.run` writes it, `hours` before NOW."""
+               want: int = 3, setting: str | None = None) -> None:
+        """One equity pass's event, as `EquityPass.run` writes it, `hours` before NOW (`setting`: the `elane.e2` key
+        every route refused the request for)."""
         self.ago(hours)
         quota = {"equity_want": want, "equity_short": max(0, want - len(born)), "researching": 0}
         if skipped:
             payload = {"pass": "births", "skipped": skipped, "why": "an invented reason"}
         elif error:
-            payload = {"pass": "births", "born": [], "error": "no route answered", "errors": ["invented"], **quota}
+            payload = {"pass": "births", "born": [], "error": "no route answered", "errors": ["invented"],
+                       **({"setting": setting} if setting else {}), **quota}
         else:
             payload = {"pass": "births", "born": list(born), "route": ROUTE, "cost_usd": 0.11, "truncated": truncated,
                        "proposed": len(born) + len(refused) if proposed is None else proposed,
@@ -215,7 +223,16 @@ class TheWords(unittest.TestCase):
             self.assertIn(f'self._round("{name}", ', loop, "the loop's own name of the round")
         self.assertEqual(EH.HEARTBEAT, ST.HEARTBEAT)
         self.assertEqual(EH.SWARM_DB, FN.SWARM_DB)
+        self.assertEqual(EH.STATE_FILE, ST.STATE_FILE)
         self.assertEqual(set(elane.MODES), {"off", "gate"})
+        # The heartbeat names the release the running swarm was started from (`release_since` reads it).
+        self.assertIn('"release": str(CODE_DIR), "started_at": self.started_at', loop)
+        # A short hint for every class the contract has a sentence for, and for no other; a pass's setting words for
+        # every key the equity pass may name.
+        self.assertEqual(set(EH.DQ_SHORT), set(elane_train.DQ_HINTS))
+        self.assertLessEqual(set(EH.DQ_SHORT), EH.ERROR_CLASSES)
+        self.assertEqual(set(EH.SETTINGS), set(elane_births.SETTING_KEYS.values()))
+        self.assertEqual({name for _, name in elane_yield.SETTING_FAULTS}, set(elane_births.SETTING_KEYS))
 
     def test_a_disqualification_is_read_back_into_its_closed_class(self):
         def said(reason: str) -> str:
@@ -349,6 +366,13 @@ class TheAdmissionsWords(unittest.TestCase):
                          (True, 2, 11, 9, False, None))
         for words in EH.REFUSAL_WORDS.values():
             self.assertNotIn("wirefunds", words)
+        # The class the admission itself names beside each refusal (what the next request is written from) is the
+        # class this module reads from the refusal's text: one vocabulary.
+        kept = self.store.get(LAST_KEY)["refused"]
+        self.assertEqual(len(kept), 9)
+        for record in kept:
+            self.assertEqual(record["cls"], EH.refusal_class(record["why"]), record["why"])
+        self.assertEqual(set(elane_births.REFUSAL_SAID), {cls for _, cls, _ in EH.REFUSALS})
 
     def test_a_tried_lineage_and_a_closed_cell_have_their_classes(self):
         tried = "it continues an-invented-family's lineage, which has its one Validation try (outcome sealed): propose a different idea"
@@ -398,10 +422,11 @@ class AQuietLaneIsNotJudged(Case):
         self.assertEqual((out["stalled"], self.notify.calls, ctx.alerts), ([], [], []))
         for cause in EH.CAUSES:
             self.assertEqual((checks[cause]["stalled"], checks[cause]["judged"]), (False, False), cause)
-        self.assertIn("0 equity versions were scored in the 0.5 h since the swarm started", checks["elane_dq"]["what"])
-        self.assertIn("0 equity passes asked a model in the 0.5 h since the swarm started", checks["elane_births"]["what"])
+        self.assertIn("0 equity versions were scored in the 0.5 h since the running release started", checks["elane_dq"]["what"])
+        self.assertIn("0 equity passes asked a model in the 0.5 h since the running release started",
+                      checks["elane_births"]["what"])
         self.assertIn("the swarm started 0.5 h ago", checks["elane_idle"]["what"])
-        self.assertIn("wrote 0 programs in the 0.5 h since the swarm started", checks["elane_refused"]["what"])
+        self.assertIn("wrote 0 programs in the 0.5 h since the running release started", checks["elane_refused"]["what"])
         # The same evidence under a swarm that has been up for days stands.
         self.beat(48)
         self.assertEqual({c for c, check in self.equity().items() if check["stalled"]},
@@ -454,9 +479,49 @@ class AQuietLaneIsNotJudged(Case):
         # Settings that could not be loaded: not judged either.
         self.assertEqual(EH.lanes(None)[:2], (False, "the swarm's settings could not be read"))
 
+    def test_readers_that_raise_are_an_error_naming_the_class_never_a_silent_not_judged(self):
+        """The check's finding (Oct 11): with E2's own readers failing inside the stall job all four causes read "Not
+        judged" with no error and no warning: the alarm switched itself off silently."""
+        self.damning()
+        for target, name, exc in ((elane_yield, "cfg", RuntimeError("an invented failure")),
+                                  (elane_births, "birth_share", KeyError("invented")),
+                                  (elane_births, "cfg", ImportError("an invented failure"))):
+            with mock.patch.object(target, name, side_effect=exc):
+                out, _ = self.run_at()
+            cls = type(exc).__name__
+            self.assertIn(f"the equity lanes' readers could not be read ({cls}): the four equity causes are not judged",
+                          out["errors"], name)
+            self.assertTrue(out["warning"], "the receipt warns: the alarm could not see")
+            for check in self.own(out).values():
+                self.assertEqual((check["stalled"], check["judged"]), (False, False))
+                self.assertIn(f"Not judged: release E2's readers could not be read ({cls})", check["what"])
+            self.assertTrue(all(cause in out["checks"] for cause in ST.CAUSES), "the run still succeeds")
+            self.assertNotIn("invented", json.dumps(out["errors"]), "the class, never the exception's text")
+        # The swarm's settings unread: the same entry, naming them.
+        errors: list[str] = []
+        found = EH.checks(self.ctx(), self.root, NOW, None, errors=errors)
+        self.assertEqual(errors, ["the equity lanes' readers could not be read (the swarm's settings): the four equity "
+                                  "causes are not judged"])
+        self.assertEqual({check["judged"] for check in found.values()}, {False})
+        # Lanes that are off, paused or empty are no error: a "Not judged" that is by design says so and no more.
+        self.lanes(mode="off", birth_share=0.25)
+        out, _ = self.run_at()
+        self.assertEqual(out["errors"], [])
+        # The lane's own reading of whether it may ask a model: unread, the idle cause cannot tell starved from broken.
+        self.lanes(mode="gate", birth_share=0.25)
+        with mock.patch.object(elane_yield, "hold", side_effect=ZeroDivisionError("an invented failure")):
+            out, _ = self.run_at()
+        self.assertIn("the equity lanes' own reading of whether E2 may ask a model could not be read (ZeroDivisionError): "
+                      "elane_idle cannot tell a starved lane from a broken one", out["errors"])
+        self.assertTrue(self.own(out)["elane_dq"]["stalled"], "the other causes are judged as they were")
+
 
 # ---------------------------------------------------------------------------------------------- elane_dq
 class MostVersionsDisqualified(Case):
+    STEP = ("the equity generators misread the program contract{named}: fix the text they read (league/equity/EQUITY.md "
+            "\"Reading ctx\", elane_review.READING_CTX) or the static rule that should refuse it, in a release; python3 -m "
+            "league.ops.elane_health --state /workspace/state lists the lines")
+
     def faulted(self) -> tuple[str, str]:
         """Two families, eight versions scored in the last six hours: five disqualified on a TypeError, one on a
         KeyError, one refused at load, one judged by the bar."""
@@ -476,9 +541,10 @@ class MostVersionsDisqualified(Case):
         check = self.own(out)["elane_dq"]
         self.assertTrue(check["stalled"] and check["judged"])
         self.assertEqual({k: check["numbers"][k] for k in ("scored", "faulted", "disqualified", "load_refused", "run_failed",
-                                                           "share", "families", "retired_stalled", "top_error", "top_error_n")},
+                                                           "share", "families", "retired_stalled", "top_error", "top_error_n",
+                                                           "basis")},
                          {"scored": 8, "faulted": 7, "disqualified": 6, "load_refused": 1, "run_failed": 0, "share": 0.88,
-                          "families": 2, "retired_stalled": 1, "top_error": "typeerror", "top_error_n": 5})
+                          "families": 2, "retired_stalled": 1, "top_error": "typeerror", "top_error_n": 5, "basis": "window"})
         self.assertEqual(check["what"], (
             "7 of the 8 equity versions scored in the last 6 h could not be judged for a fault of their own program (6 "
             "disqualified, 1 refused at load, 0 failed by the decider child): no mechanism was judged in them, and 1 "
@@ -487,56 +553,208 @@ class MostVersionsDisqualified(Case):
             "read by attribute) (2x)."))
         self.assertEqual(set(out["checks"]["elane_dq"]), {"stalled", "what", "numbers", "doing", "owner_step"},
                          "the receipt keeps a check as it keeps every cause's")
-        self.assertEqual(check["owner_step"], (
-            "the equity generators misread the program contract (the commonest first error: TypeError): fix the text they "
-            "read (league/equity/EQUITY.md \"Reading ctx\", elane_review.READING_CTX) or the static rule that should refuse "
-            "it, in a release; python3 -m league.ops.elane_health --state /workspace/state lists the families and lines"))
+        # The reading rule's own sentence is on record for the class: the step names the class and no hint beside it.
+        self.assertEqual(check["owner_step"], self.STEP.format(named=", mostly TypeError"))
         self.assertEqual(check["numbers"]["examples"][0], {"family": a, "version": 1, "error": "TypeError", "line": 12})
-        # The contract's own sentence for the class is beside the check for the operator's report.
+        # The contract's own sentence for the class is among the receipt's fields and in the operator's report.
+        self.assertEqual(check["numbers"]["hint"], elane_train.DQ_HINTS["TypeError"])
         found = EH.checks(ctx, self.root, NOW, ST._load(ctx, self.root)[0])
         self.assertEqual(found["elane_dq"]["hint"], elane_train.DQ_HINTS["TypeError"])
         self.assertIn(f"  {elane_train.DQ_HINTS['TypeError']}.", EH.text(EH.report(self.root, now=NOW)))
-        # Raised like any cause: standing in stall.json, a House warning, the notice.
+        # Raised like any cause: standing in stall.json, a House warning, the notice under its own name.
         self.assertEqual(out["stalled"], ["elane_dq"])
         state = json.loads((self.root / ST.STATE_FILE).read_text())
         self.assertTrue(state["causes"]["elane_dq"]["standing"])
         self.assertEqual(state["mail"]["owner_causes"], ["elane_dq"])
         self.assertEqual(len(ctx.alerts), 1)
         self.assertTrue(ctx.alerts[0]["text"].startswith("stall: elane_dq: 7 of the 8 equity versions"))
-        self.assertIn(" Owner step: the equity generators misread the program contract", ctx.alerts[0]["text"])
+        self.assertIn(" Owner step: the equity generators misread the program contract, mostly TypeError", ctx.alerts[0]["text"])
         self.assertIn('fix the text they read (league/equity/EQUITY.md "Reading ctx"', ctx.alerts[0]["text"],
                       "one House warning holds the sentence, what the floor does and the step's lever")
-        self.assertEqual(out["notice"]["sent"], True)
+        self.assertEqual((out["notice"]["sent"], out["notice"]["notice_id"]), (True, "stall:owner:elane_dq"))
+        # The mail's entry: the sentence inside the gateway's cut (its leading sentences whole, the next one cut), the
+        # step whole, the mail's figures first.
+        entry = self.notify.entry("elane_dq")
+        self.assertTrue(entry["what"].startswith(check["what"][:check["what"].index(" The reading rule's")]))
+        self.assertTrue(entry["what"].endswith("for it: a symbol's bars read by key (ctx.bars[sym] is..."), entry["what"])
+        self.assertEqual((len(entry["what"]), entry["owner_step"]), (EH.WHAT_CHARS, check["owner_step"]))
+        self.assertEqual(list(entry["numbers"])[:5], ["scored", "faulted", "families", "top_error", "basis"])
+        for name in EH.NOT_MAILED:
+            self.assertNotIn(name, entry["numbers"], "what is no figure stays on the House")
         # Nothing a program chose is anywhere: not its exception's text, not its source.
         for text in (json.dumps(out), self.told(), json.dumps(ctx.alerts)):
             self.assertNotIn(SECRET, text)
             self.assertNotIn("zebra", text)
 
+    def test_with_no_reading_sentence_on_record_the_step_says_what_the_class_most_often_is(self):
+        """The check's finding: the fixed sentence of the class was computed and then dropped from the receipt, the
+        House warning and the mail, so an operator still had to open a program to learn it was bars read by key."""
+        self.faulted()
+        out, ctx = self.run_at()
+        check = self.own(out)["elane_dq"]
+        self.assertNotIn("The reading rule's commonest sentence", check["what"])
+        hint = "most often ctx.bars[sym] read by key or as rows, ctx.positions read as a dict, or None in arithmetic"
+        self.assertEqual(EH.DQ_SHORT["TypeError"], hint)
+        self.assertEqual(check["owner_step"], self.STEP.format(named=f", mostly TypeError ({hint})"))
+        self.assertEqual(self.notify.entry("elane_dq")["owner_step"], check["owner_step"], "the mail carries it whole")
+        self.assertIn(f"mostly TypeError ({hint})", ctx.alerts[0]["text"])
+        self.assertEqual(check["numbers"]["hint"], elane_train.DQ_HINTS["TypeError"])
+        # Every class's step is inside the gateway's cut of a step, whole.
+        for name, short in EH.DQ_SHORT.items():
+            self.assertLessEqual(len(self.STEP.format(named=f", mostly {name} ({short})")), EH.STEP_CHARS, name)
+            self.assertFalse(short.endswith("."), name)
+
     def test_too_few_scored_versions_are_not_judged_and_half_is_not_most(self):
         a = self.bred("alpha-one")
-        self.record(a, versions={str(n): verdict(1.0, "DQ") for n in range(1, 6)})
+        self.record(a, versions={str(n): verdict(1.0, "DQ") for n in range(1, 4)})
         check = self.equity()["elane_dq"]
         self.assertEqual((check["stalled"], check["judged"]), (False, False))
-        self.assertEqual(check["what"], "Not judged: 5 equity versions were scored in the last 6 h (at least 6 are needed).")
+        self.assertEqual(check["what"], "Not judged: 3 equity versions were scored in the last 12 h (at least 6 are needed, "
+                                        "or 4 of 2 families with none judged by the bar).")
         b = self.bred("beta-two")
+        self.record(a, versions={"4": verdict(1.0, "DQ"), "5": verdict(1.0, "R1")})
         self.record(b, versions={str(n): verdict(1.0, "Y1") for n in range(1, 4)})
-        self.record(a, versions={"5": verdict(1.0, "R1")})
         check = self.equity()["elane_dq"]  # 4 of 8
         self.assertEqual((check["stalled"], check["judged"], check["numbers"]["share"], check["owner_step"]),
                          (False, True, 0.5, None))
         self.record(b, versions={"3": verdict(1.0, "RUN")})
-        self.assertTrue(self.equity()["elane_dq"]["stalled"], "5 of 8 is most")
+        self.assertTrue(self.equity()["elane_dq"]["stalled"], "5 of 8 is most, in two families")
 
-    def test_versions_scored_before_the_window_or_before_the_swarm_started_are_not_counted(self):
-        a = self.bred("alpha-one", hours=30)
-        self.record(a, versions={str(n): verdict(7.0 + n, "DQ") for n in range(1, 9)})
-        self.assertEqual(self.equity()["elane_dq"]["numbers"]["scored"], 0)
-        self.record(a, versions={str(n): verdict(2.0 + n / 10.0, "DQ") for n in range(1, 9)})
-        self.assertTrue(self.equity()["elane_dq"]["stalled"])
-        self.beat(2.44)  # the swarm restarted (a release): four of the eight were scored under the one before
+    def test_one_familys_bad_programs_are_no_fault_of_the_contract(self):
+        """The check's finding: four disqualified versions of ONE family beside a healthy family's two bar fails (4 of
+        6) raised the owner's step, against the minimum's own reason."""
+        a, b = self.bred("alpha-one"), self.bred("beta-two")
+        self.record(a, versions={str(n): verdict(1.0 + n / 10.0, "DQ") for n in range(1, 5)})
+        self.record(b, versions={"1": verdict(1.0, "Y1"), "2": verdict(0.5, "Y2")})
+        out, ctx = self.run_at()
+        check = self.own(out)["elane_dq"]
+        self.assertEqual((check["stalled"], check["judged"], check["owner_step"], check["numbers"]["families"]),
+                         (False, True, None, 1))
+        self.assertIn("4 of the 6 equity versions scored in the last 6 h could not be judged", check["what"])
+        self.assertIn(f"They are all of ONE family ({a}): one family's bad programs are no fault of the contract (at least "
+                      "2 families are needed).", check["what"])
+        self.assertEqual((out["stalled"], self.notify.calls, ctx.alerts), ([], [], []))
+        # One disqualified version of the second family: the fault is the generators', not one family's.
+        self.record(b, versions={"3": verdict(0.2, "DQ")})
         check = self.equity()["elane_dq"]
-        self.assertEqual((check["stalled"], check["judged"], check["numbers"]["scored"]), (False, False, 4))
-        self.assertIn("in the 2.4 h since the swarm started", check["what"])
+        self.assertEqual((check["stalled"], check["numbers"]["families"], check["numbers"]["faulted"]), (True, 2, 5))
+        self.assertNotIn("ONE family", check["what"])
+
+    def test_none_judged_by_the_bar_stands_before_the_sixth_version(self):
+        """The check's finding: at a slow pace 4 of 4, then 4 of 5 disqualified versions read "at least 6 are needed"
+        for two hours more."""
+        a, b = self.bred("alpha-one"), self.bred("beta-two")
+        self.record(a, versions={"1": verdict(2.0, "DQ"), "2": verdict(1.0, "DQ")})
+        self.record(b, versions={"1": verdict(1.5, "DQ")})
+        self.assertFalse(self.equity()["elane_dq"]["judged"], "three versions")
+        self.record(b, versions={"2": verdict(0.5, "LOAD")})
+        check = self.equity()["elane_dq"]
+        self.assertEqual((check["stalled"], check["numbers"]["scored"], check["numbers"]["basis"]), (True, 4, "none_judged"))
+        self.assertTrue(check["what"].startswith(
+            "All 4 equity versions scored in the last 12 h could not be judged for a fault of their own program (3 "
+            "disqualified, 1 refused at load, 0 failed by the decider child): no mechanism was judged in them."))
+        self.assertTrue(check["owner_step"].startswith("the equity generators misread the program contract, mostly TypeError"))
+        # One version the bar judged: the early reading no longer holds, and five are not yet six.
+        self.record(a, versions={"3": verdict(0.2, "Y1")})
+        check = self.equity()["elane_dq"]
+        self.assertEqual((check["stalled"], check["judged"]), (False, False))
+        self.assertIn("5 equity versions were scored in the last 12 h", check["what"])
+        # Four of one family alone are that family's.
+        self.setUp()
+        a = self.bred("alpha-one")
+        self.record(a, versions={str(n): verdict(1.0, "DQ") for n in range(1, 5)})
+        self.assertFalse(self.equity()["elane_dq"]["judged"])
+
+    def test_it_does_not_lapse_at_the_windows_edge_and_names_a_class_only_when_one_is_most(self):
+        """The check's finding: with nothing fixed the cause read clear at exactly half, stood again naming a class
+        that was one of three in a tie, then "not judged" for good once the faulty families were retired and no family
+        was born."""
+        a, b, c = self.bred("alpha-one", hours=11), self.bred("beta-two", hours=11), self.bred("gamma-three", hours=11)
+        self.record(a, versions={"1": verdict(9.0, "DQ"), "2": verdict(8.0, "DQ", reason="25 errors (first: line 4: KeyError: x)"),
+                                 "3": verdict(7.5, "DQ", reason="25 errors (first: line 4: AttributeError: x)")})
+        self.record(b, versions={"1": verdict(8.5, "DQ"), "2": verdict(7.0, "LOAD")})
+        self.record(c, versions={"1": verdict(2.0, "Y1"), "2": verdict(1.0, "Y1")})
+        check = self.equity()["elane_dq"]
+        # Two versions fall in the last six hours: the last six scored since the release started are judged.
+        self.assertEqual({k: check["numbers"][k] for k in ("scored", "faulted", "disqualified", "basis", "hours", "top_error",
+                                                           "top_error_n")},
+                         {"scored": 6, "faulted": 4, "disqualified": 3, "basis": "last_scored", "hours": 8.5,
+                          "top_error": "attributeerror,keyerror,typeerror", "top_error_n": 1})
+        self.assertTrue(check["stalled"])
+        self.assertEqual(check["what"], (
+            "4 of the last 6 equity versions scored (over 8.5 h: fewer than 6 fall in the last 6 h) could not be judged for "
+            "a fault of their own program (3 disqualified, 1 refused at load, 0 failed by the decider child): no mechanism "
+            "was judged in them. No one first error is most of the 3 disqualifications: AttributeError 1, KeyError 1, "
+            "TypeError 1."))
+        self.assertEqual(check["owner_step"],
+                         self.STEP.format(named=" (first errors: AttributeError, KeyError, TypeError)"))
+        self.assertNotIn("mostly", check["owner_step"])
+        # It stands at every run while nothing is fixed and nothing more is scored, to the end of the lookback.
+        for hours in (0.5, 1.0, 2.0, 2.9):
+            self.assertTrue(self.equity(now=NOW + hours * HOUR)["elane_dq"]["stalled"], hours)
+        # Two of three is most: named.
+        self.record(a, versions={"3": verdict(7.5, "DQ")})
+        check = self.equity()["elane_dq"]
+        self.assertIn("The commonest first error: TypeError (2 of 3; then KeyError 1).", check["what"])
+        self.assertIn(", mostly TypeError (", check["owner_step"])
+        # A record that names no class, most of them: said so, and no class in the step.
+        for n in ("1", "2", "3"):
+            self.record(a, versions={n: verdict(9.0 - int(n) / 2.0, "DQ", reason="something else")})
+        check = self.equity()["elane_dq"]
+        self.assertIn("The commonest first error: none its record names (2 of 3; then TypeError 1).", check["what"])
+        self.assertEqual((check["owner_step"], check["numbers"]["top_error"]), (self.STEP.format(named=""), "unnamed"))
+
+    def test_versions_scored_before_the_lookback_or_before_the_release_started_are_not_counted(self):
+        a, b = self.bred("alpha-one", hours=30), self.bred("beta-two", hours=30)
+        for fid in (a, b):
+            self.record(fid, versions={str(n): verdict(12.5 + n, "DQ") for n in range(1, 5)})
+        self.assertEqual(self.equity()["elane_dq"]["numbers"]["scored"], 0)
+        for fid in (a, b):
+            self.record(fid, versions={str(n): verdict(2.0 + n / 10.0, "DQ") for n in range(1, 5)})
+        self.assertTrue(self.equity()["elane_dq"]["stalled"])
+        self.beat(2.14)  # a swarm whose heartbeat names no release: counted from its own start, as before the record
+        check = self.equity()["elane_dq"]
+        self.assertEqual((check["stalled"], check["judged"], check["numbers"]["scored"]), (False, False, 2))
+        self.assertIn("in the 2.1 h since the running release started", check["what"])
+
+    def test_a_restart_that_fixes_nothing_resets_no_evidence_and_a_new_release_does(self):
+        """The check's finding: `elane_dq` stood on 8 of 8; ten minutes later the swarm restarted with nothing fixed
+        (the watchdog, a settings apply, any release of another lane) and it read "not judged" for good."""
+        one, two = "/workspace/releases/an-invented-release", "/workspace/releases/another-invented-release"
+        a, b = self.bred("alpha-one"), self.bred("beta-two")
+        for fid in (a, b):
+            self.record(fid, versions={str(n): verdict(1.0 + n / 10.0, "DQ") for n in range(1, 5)})
+        self.beat(48, release=one)
+        out, _ = self.run_at()
+        self.assertEqual(out["stalled"], ["elane_dq"])
+        kept = json.loads((self.root / ST.STATE_FILE).read_text())[EH.STATE_KEEP]
+        self.assertEqual(kept, {"release": one, "since": NOW - 48 * HOUR})
+        # The same release restarts ten minutes on: what was scored before the restart still counts.
+        later = NOW + 10 * 60.0
+        (self.root / EH.HEARTBEAT).write_text(json.dumps({"at": later, "started_at": later - 60.0, "release": one}))
+        out, _ = self.run_at(now=later)
+        check = self.own(out)["elane_dq"]
+        self.assertEqual((check["stalled"], check["numbers"]["scored"]), (True, 8))
+        self.assertEqual(json.loads((self.root / ST.STATE_FILE).read_text())[EH.STATE_KEEP], kept, "kept as it was")
+        self.assertIn("the swarm started 0.0 h ago", self.own(out)["elane_idle"]["what"],
+                      "the idle clock alone starts at the running swarm's own start")
+        # And the report reads the same record, read-only.
+        self.assertTrue(EH.report(self.root, now=later)["checks"]["elane_dq"]["stalled"])
+        # Another release: what the generators did under the one before is not held against it.
+        (self.root / EH.HEARTBEAT).write_text(json.dumps({"at": later + 600.0, "started_at": later + 540.0, "release": two}))
+        out, _ = self.run_at(now=later + 600.0)
+        check = self.own(out)["elane_dq"]
+        self.assertEqual((check["stalled"], check["judged"], check["numbers"]["scored"]), (False, False, 0))
+        self.assertIn("since the running release started", check["what"])
+        self.assertEqual(json.loads((self.root / ST.STATE_FILE).read_text())[EH.STATE_KEEP],
+                         {"release": two, "since": later + 540.0})
+        self.assertIn("elane_dq", out["cleared"])
+        # The record as the function keeps it: no heartbeat to read keeps what was kept; garbage keeps nothing.
+        (self.root / EH.HEARTBEAT).unlink()
+        self.assertEqual(EH.release_since({"release": two, "since": later + 540.0}, self.root, later + 900.0),
+                         {"release": two, "since": later + 540.0})
+        self.assertEqual(EH.release_since("x", self.root, later), {"release": None, "since": None})
+        self.assertEqual(EH.release_since({"release": two, "since": later + 9e9}, self.root, later), {"release": two, "since": None})
 
     def test_it_clears_when_the_generators_write_programs_that_run(self):
         a, b = self.faulted()
