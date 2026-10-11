@@ -318,7 +318,7 @@ def write_permit(root: str | Path, doc: Mapping[str, Any] | None) -> dict[str, A
 
 
 # -------------------------------------------------------------------------------------------------------------- the job
-def asked(root: str | Path, settings: Mapping[str, Any] | None) -> str | None:
+def unasked(root: str | Path, settings: Mapping[str, Any] | None) -> str | None:
     """Why this run asks NO panel stratum, or None: the lane's switch is off (`elane.panel.mode`, read as set), or
     the House holds no panel store or no universe yet. Files' names only: nothing is opened."""
     from ..swarm import elane_xs
@@ -340,7 +340,7 @@ def asked(root: str | Path, settings: Mapping[str, Any] | None) -> str | None:
 def plan(ctx: Any, settings: Mapping[str, Any] | None, capability: Any, *,
          periods: Callable[[str, str], Sequence[Sequence[str]]], eras: Sequence[str]) -> Plan | dict[str, Any] | None:
     """THE PLAN'S MAKER (what `contam_probe.probe` calls once its own store is open, with its calendar). None: no
-    panel stratum this run (`asked`, or a panel whose coverage verdict is "insufficient": the lane is off by its own
+    panel stratum this run (`unasked`, or a panel whose coverage verdict is "insufficient": the lane is off by its own
     rule). A skipped receipt: the panel's work could meet a wall of the session (`league.xs.config.quiet(now,
     WALL_S)`: no E4 work runs through one). Else a `Plan`: the panel store opened under the probe's own capability
     and READ ONCE here: the membership of every era, and one Train session's slice (every array's sha against the
@@ -349,7 +349,7 @@ def plan(ctx: Any, settings: Mapping[str, Any] | None, capability: Any, *,
     from ..xs import store as xs_store
 
     root = Path(ctx.root)
-    if asked(root, settings) is not None:
+    if unasked(root, settings) is not None:
         return None
     try:
         why = xs_config.quiet(ctx.now(), WALL_S)
@@ -368,4 +368,4 @@ def plan(ctx: Any, settings: Mapping[str, Any] | None, capability: Any, *,
 
 
 __all__ = ["WALL_S", "STORE_DIR", "RUN_KEY", "TRAIN_ERA", "MEMBER_STRATA", "MONTH_STRATUM", "FACTORS", "thirds",
-           "factor_days", "Plan", "permit", "write_permit", "asked", "plan"]
+           "factor_days", "Plan", "permit", "write_permit", "unasked", "plan"]
