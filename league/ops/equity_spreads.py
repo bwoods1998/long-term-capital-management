@@ -34,9 +34,12 @@ A RUN: `league.xs.config.quiet` first; then the work still owed (every member of
 with no answer yet: the fixed names' and their early samples first), a call at a time, `PAUSE_S` before each, until
 `CALLS_RUN` calls, `BUDGET_S` seconds or `ERRORS_STOP` errors in a row (the venue or the gateway is down: what was
 answered is kept, the receipt is a failed one and the next run goes on). The file is rewritten every `SAVE_EVERY`
-calls, so a killed run loses little. A request the venue REFUSES (HTTP 400, 404 or 422) is an answer of no sample;
-a run in which more than `REFUSED_MAX` of at least `REFUSED_MIN` calls were refused keeps none of those refusals
-and fails (the request itself is then wrong, and a table of nulls would silently price every name at the default).
+answers, so a killed run loses little. A request answered 429 is asked again after `BACKOFF_S` (each try is a call).
+A request the venue REFUSES (HTTP 400, 404 or 422) is an answer of no sample; a run in which more than
+`REFUSED_MAX` of at least `REFUSED_MIN` calls were refused keeps none of those refusals and fails (the request
+itself is then wrong, and a table of nulls would silently price every name at the default). A run in which more
+than that share of the windows held NO valid quote keeps them (a halted name has none) and raises a warning: package
+A's `hs_share` then falls, and the lane's own switch holds a Train pass to "provisional costs" under it.
 """
 
 from __future__ import annotations
@@ -77,6 +80,10 @@ BUDGET_S = 2400.0
 SAVE_EVERY = 500
 #: This many errors in a row end a run (the venue or the gateway is down).
 ERRORS_STOP = 10
+#: A request the venue answers 429 (too many requests) is asked again after each of these waits (seconds), then an
+#: error like any other.
+BACKOFF_S = (5.0, 20.0)
+RATE_LIMITED = 429
 #: A request the venue answers with one of these is refused for good: an answer of no sample.
 REFUSED_STATUS = (400, 404, 422)
 #: A run with at least `REFUSED_MIN` calls of which more than this share were refused keeps none of the refusals.
@@ -168,7 +175,8 @@ def sample(gateway: Any, symbol: str, day: dt.date, time_et: str, *, asof: str |
     quote counts when its bid is above 0, its ask above its bid and its time inside the window; the sample is the
     median of (ask - bid) / (ask + bid) over them. ValueError, and no request, for a day outside
     `league.xs.config.TRAIN_YEARS` (the cost table reads no other year); ValueError for an answer that is not the
-    venue's shape. A gateway error is the caller's to read."""
+    venue's shape (no `quotes`, a quote that is no object, has no time with a zone, or carries a bid or an ask that
+    is not a number: such an answer is never read as "no quote"). A gateway error is the caller's to read."""
     from ..xs import config as xs_config
 
     if day.year not in xs_config.TRAIN_YEARS:
@@ -196,8 +204,14 @@ def sample(gateway: Any, symbol: str, day: dt.date, time_et: str, *, asof: str |
     for row in rows:
         if not isinstance(row, Mapping):
             raise ValueError("a quote is not an object")
-        bid, ask, at = _figure(row.get("bp")), _figure(row.get("ap")), _moment(row.get("t"))
-        if bid is None or ask is None or at is None or not ask > bid or not start <= at <= end:
+        at = _moment(row.get("t"))
+        if at is None:
+            raise ValueError("a quote has no time with a zone")
+        for side in ("bp", "ap"):
+            if row.get(side) is not None and (isinstance(row[side], bool) or not isinstance(row[side], (int, float))):
+                raise ValueError("a quote's bid or ask is not a number")
+        bid, ask = _figure(row.get("bp")), _figure(row.get("ap"))
+        if bid is None or ask is None or not ask > bid or not start <= at <= end:
             continue
         ratios.append((ask - bid) / (ask + bid))
     return statistics.median(ratios) if ratios else None
@@ -377,6 +391,21 @@ def early_report(state: Mapping[str, Any]) -> dict[str, Any]:
 
 
 # ------------------------------------------------------------------------------------------------- the job
+def _ask(gateway: Any, symbol: str, day: dt.date, time_et: str, *, sleep: Callable[[float], None]
+         ) -> tuple[float | None, int, Exception | None]:
+    """(the sample, the requests made, the error that ended it or None): `sample` with the day as `asof`, asked again
+    after each wait of `BACKOFF_S` while the venue answers `RATE_LIMITED`."""
+    tries = 0
+    while True:
+        try:
+            return sample(gateway, symbol, day, time_et, asof=day.isoformat()), tries + 1, None
+        except Exception as exc:  # noqa: BLE001 - the caller reads what kind of failure it is
+            if getattr(exc, "status", None) != RATE_LIMITED or tries >= len(BACKOFF_S):
+                return None, tries + 1, exc
+            sleep(BACKOFF_S[tries])
+            tries += 1
+
+
 def _blank() -> dict[str, Any]:
     return {"version": VERSION, "sampled": {}, "names": {}, "default": {}, "dropped": {}, "calls": 0, "done": False,
             "samples": {}, "early": {}, "early_names": [], "runs": 0, "checked_at": None}
@@ -465,26 +494,25 @@ def run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, A
         if counts["calls"] >= CALLS_RUN or ctx.now() - began >= BUDGET_S:
             break
         sleep(PAUSE_S)
-        counts["calls"] += 1
         key = day.isoformat()
-        try:
-            value = sample(ctx.gateway, symbol, day, EARLY_ET if kind == "early" else TIMES_ET[POINTS.index(kind)],
-                           asof=key)
-        except Exception as exc:  # noqa: BLE001 - a refusal is an answer; anything else leaves the item owed
-            if getattr(exc, "status", None) not in REFUSED_STATUS:
-                counts["errors"] += 1
-                streak += 1
-                if streak >= ERRORS_STOP:
-                    error = (f"the run was ended: {streak} requests in a row failed, the last: {type(exc).__name__}: "
-                             f"{str(exc)[:160]}")
-                    break
-                continue
-            value = None
+        value, tries, failed = _ask(ctx.gateway, symbol, day,
+                                    EARLY_ET if kind == "early" else TIMES_ET[POINTS.index(kind)], sleep=sleep)
+        counts["calls"] += tries
+        if failed is not None and getattr(failed, "status", None) not in REFUSED_STATUS:
+            # anything but a refusal leaves the item owed
+            counts["errors"] += 1
+            streak += 1
+            if streak >= ERRORS_STOP:
+                error = (f"the run was ended: {streak} requests in a row failed, the last: {type(failed).__name__}: "
+                         f"{str(failed)[:160]}")
+                break
+            continue
+        streak = 0
+        if failed is not None:
             counts["refused"] += 1
             refusals.append((kind, aid, key))
         else:
             counts["sampled" if value is not None else "empty"] += 1
-        streak = 0
         bp = None if value is None else round(value * 1e4, 4)
         if kind == "early":
             state["early"].setdefault(str(aid), {})[key] = bp
@@ -502,7 +530,7 @@ def run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, A
                     state["samples"].get(str(aid_), {}).get(kind_, {}).pop(key_, None)
             answered -= len(refusals)
             break
-        if counts["calls"] % SAVE_EVERY == 0:
+        if answered % SAVE_EVERY == 0:
             state["calls"] = before + counts["calls"]
             _save(root, state, exchange, now=ctx.now(), remaining=len(items) - answered)
     state["calls"] = before + counts["calls"]
@@ -510,6 +538,9 @@ def run(ctx: Any, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, A
     summary = _save(root, state, exchange, now=ctx.now(), remaining=remaining)
     for text in summary["warnings"]:
         ctx.alert("warning", f"equity_spreads: {text}")
+    if counts["calls"] >= REFUSED_MIN and counts["empty"] > REFUSED_MAX * counts["calls"]:
+        ctx.alert("warning", f"equity_spreads: {counts['empty']} of this run's {counts['calls']} windows held no valid "
+                             "quote; they are kept as answers of no sample, and those names take the universe's figure")
     report = state["early_report"]
     out: dict[str, Any] = {"ok": error is None, **counts, "remaining": remaining, "done": remaining == 0,
                            "calls_total": state["calls"], "names": len(summary["names"]), "full": summary["full"],
@@ -568,6 +599,7 @@ def panel_half_spread(root: str | Path) -> Callable[[str, str], tuple[float, flo
 
 __all__ = ["QUOTES", "TIMES_ET", "EARLY_ET", "EARLY_NAMES", "WINDOW_S", "SESSIONS_YEAR", "LIMIT", "CALLS_RUN",
            "MIN_SAMPLES", "DROPPED_WARNING", "VERSION", "FILE", "WALL_S", "STORE_DIR", "POINTS", "PAUSE_S", "BUDGET_S",
-           "SAVE_EVERY", "ERRORS_STOP", "REFUSED_STATUS", "REFUSED_MAX", "REFUSED_MIN", "MONTHLY_S", "DROPPED_MIN",
+           "SAVE_EVERY", "ERRORS_STOP", "BACKOFF_S", "RATE_LIMITED", "REFUSED_STATUS", "REFUSED_MAX", "REFUSED_MIN",
+           "MONTHLY_S", "DROPPED_MIN",
            "sample_days", "sample", "summarize", "run", "percentile", "name_bp", "read", "exchanges", "early_names",
            "plan", "early_report", "panel_half_spread"]

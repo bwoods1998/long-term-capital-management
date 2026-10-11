@@ -173,10 +173,9 @@ class TheSample(unittest.TestCase):
                 quote(at(1), 100.10, 100.10),                      # locked
                 quote(at(1), 100.20, 100.10),                      # crossed
                 quote(at(1), float("nan"), 100.10),
+                quote(at(1), None, 100.10),                        # no bid at all
                 quote(utc(self.DAY, 9, 31, 59), 90.0, 110.0),      # before the window
-                quote(utc(self.DAY, 9, 32, 3), 90.0, 110.0),       # after it
-                {"t": None, "bp": 90.0, "ap": 110.0},              # no time
-                {"t": "2023-03-08T09:32:01", "bp": 90.0, "ap": 110.0}]   # a time with no zone
+                quote(utc(self.DAY, 9, 32, 3), 90.0, 110.0)]       # after it
         got = SP.sample(self.gateway({"quotes": {"ZZZ": rows}}), "ZZZ", self.DAY, "09:32:00", asof=None)
         self.assertAlmostEqual(got, 0.0005, places=12)
         want = statistics.median([(100.02 - 99.98) / 200.0, (100.05 - 99.95) / 200.0, (100.10 - 99.90) / 200.0])
@@ -194,8 +193,14 @@ class TheSample(unittest.TestCase):
             self.assertIsNone(SP.sample(self.gateway(answer), "ZZZ", self.DAY, "09:32:00", asof=None))
 
     def test_an_answer_that_is_not_the_venues_is_refused(self):
-        for answer in (None, [], {"bars": {}}, {"quotes": []}, {"quotes": {"ZZZ": {}}}, {"quotes": {"ZZZ": ["x"]}}):
-            with self.assertRaises(ValueError):
+        at = utc(self.DAY, 9, 32, 1)
+        for answer in (None, [], {"bars": {}}, {"quotes": []}, {"quotes": {"ZZZ": {}}}, {"quotes": {"ZZZ": ["x"]}},
+                       {"quotes": {"ZZZ": [{"t": None, "bp": 90.0, "ap": 110.0}]}},                     # no time
+                       {"quotes": {"ZZZ": [{"t": "2023-03-08T09:32:01", "bp": 90.0, "ap": 110.0}]}},    # no zone
+                       {"quotes": {"ZZZ": [{"bp": 90.0, "ap": 110.0}]}},
+                       {"quotes": {"ZZZ": [{"t": at, "bp": "99.98", "ap": "100.02"}]}},   # prices as text: never
+                       {"quotes": {"ZZZ": [quote(at, 99.98, 100.02), {"t": at, "bp": True, "ap": 100.02}]}}):
+            with self.assertRaises(ValueError, msg=answer):
                 SP.sample(self.gateway(answer), "ZZZ", self.DAY, "09:32:00", asof=None)
 
         def down():
@@ -526,6 +531,37 @@ class TheJob(unittest.TestCase):
         asked = [(c["symbols"], c["start"]) for c in self.gateway.calls]
         self.assertEqual(len(set(asked)), TOTAL)
         self.assertEqual(len(asked) - before, TOTAL - 36)
+
+    def test_a_rate_limit_is_waited_out_and_the_same_sample_asked_again(self):
+        limited = {2: 1, 5: 2, 9: 3}              # the n-th item is answered 429 this many times before its answer
+        seen: dict[tuple, int] = {}
+
+        def busy(n, params):
+            item = (params["symbols"], params["start"])
+            seen[item] = seen.get(item, 0) + 1
+            order = list(seen).index(item) + 1
+            return GatewayError("GET quotes: HTTP 429", status=429) if seen[item] <= limited.get(order, 0) else None
+
+        self.gateway.raises = busy
+        self.limit(CALLS_RUN=30)
+        out = self.go()
+        # items 2 and 5 are answered on their second and third try; item 9 is still 429 after both waits: an error
+        self.assertEqual((out["ok"], out["errors"], out["calls"]), (True, 1, 30))
+        self.assertEqual(out["sampled"] + out["empty"], 30 - (1 + 2 + 3))
+        self.assertEqual([w for w in self.slept if w != SP.PAUSE_S], [5.0, 5.0, 20.0, 5.0, 20.0])
+        self.assertEqual((SP.BACKOFF_S, SP.RATE_LIMITED), ((5.0, 20.0), 429))
+        self.assertEqual(out["remaining"], TOTAL - (out["sampled"] + out["empty"]))
+
+    def test_a_run_whose_windows_are_mostly_empty_keeps_them_and_says_so(self):
+        self.gateway.bp = lambda symbol, start: None if symbol in ("QAZ", "QBZ") else 4.0
+        self.limit(CALLS_RUN=120)
+        ctx = self.ctx()
+        out = self.go(ctx)
+        # 18 requests a day: six whole days (two of six names empty) and the first four names of the seventh
+        self.assertEqual((out["ok"], out["calls"], out["empty"], out["sampled"]), (True, 120, 6 * 6 + 6, 6 * 12 + 6))
+        self.assertEqual([a["level"] for a in ctx.alerts], ["warning"])
+        self.assertIn("42 of this run's 120 windows held no valid quote", ctx.alerts[0]["text"])
+        self.assertEqual(self.file()["remaining"], TOTAL - 120)
 
     def test_a_malformed_answer_is_an_error_not_a_sample(self):
         answers = iter([{"bars": {}}, None])
