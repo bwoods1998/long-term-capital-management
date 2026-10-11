@@ -824,11 +824,10 @@ def _epochs(db: sqlite3.Connection, inst: Mapping[str, Any], book: Mapping[str, 
                        and isinstance(e.get("payload"), Mapping) and e["payload"].get("instance") == iid})
 
     retired = d_retired(inst)
-    if retired is not None and forward_db.event(db, "twin_retired", pid=pid, day=retired.isoformat(), at=float(now),
-                                                once=iid, payload={"instance": iid, "why": "the book shows the instance "
-                                                                   "retired from this session on: kept, a revival "
-                                                                   "clears it there"}):
-        pass
+    if retired is not None:     # written once an (instance, session): a second night's call writes nothing
+        forward_db.event(db, "twin_retired", pid=pid, day=retired.isoformat(), at=float(now), once=iid, payload={
+            "instance": iid, "why": "the book shows the instance retired from this session on: kept here, a revival "
+                                    "clears it there"})
     retirements, revivals = seen("twin_retired"), seen("twin_revived")
     if retired is None and retirements and not any(v > retirements[-1] for v in revivals):
         named = (book.get("since") or {}).get(iid)
