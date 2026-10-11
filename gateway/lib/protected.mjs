@@ -47,6 +47,9 @@ export const MERGE_FORBIDDEN = Object.freeze([
   // secrecy rules of the share lanes, like league/swarm/dlane.py for the options lanes.
   'league/swarm/elane_births.py', 'league/swarm/elane_train.py', 'league/swarm/elane_yield.py',
   'league/swarm/elane_seal.py', 'league/swarm/elane_review.py',
+  // The equity lanes' folds, out-of-fold effects and memory tables (release E3, Oct 2026): the hidden Train year a
+  // family is born with (an input of the Train bar) and that year's sealed tables, which no generator may read.
+  'league/swarm/elane_folds.py', 'league/swarm/elane_effects.py', 'league/swarm/elane_memory.py',
   // What league/live/ and league/gym/ import from outside their trees, and what is sealed into the Gym bundle and the
   // decider's runtime with them: the packages' own __init__ files run first in every House process and in the sandbox;
   // structure_core classifies, limits and prices every real order; ltcm.performance names the owner's flows the stops

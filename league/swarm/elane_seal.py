@@ -30,6 +30,11 @@ and the diagnostician are generators too, of the options lanes. This module is t
   one reserve bar is in every program's 2022-2024 slice. Blanking the look-back before 2022-01-03 would
   need a hook in E1's runner or store and would cost a long-look-back program most of 2022: the captain's call when
   the reserve's accessor is built.
+- THE HIDDEN YEAR (release E3; league/swarm/elane_folds.py, elane_memory.py): a family's hidden Train year is never a
+  session of its Train runs, and its results reach no generator, its own researcher included: `elane_memory` and ops
+  alone read the tables that hold them (`SEALED_TABLES`). Its bars reach the stretch that follows it as look-back, as
+  the reserve's do (league/tests/test_elane_memory_seal.py holds the record, the brief, the Train map, the route
+  choice and the stored runs byte for byte the same in two markets that differ only inside the hidden year).
 - INVARIANCE IS THE TEST. Two stores that differ only in what happened to share programs after Train (a Validation
   try passed or failed, a look passed or failed, a band, a retirement after the look, a look row, a graveyard row with
   an outcome lesson) give the equity request, the researcher's brief and the route choice byte for byte the same
@@ -63,6 +68,9 @@ SEALED_KEYS = frozenset({
 #: The family columns no generator reads of an equity family.
 SEALED_COLUMNS = frozenset({"band", "band_since", "retired_at", "retire_reason", "validated_version", "best_validation",
                             "validations", "weight"})
+#: The swarm store's tables no generator reads (release E3): a hidden year's out-of-fold contribution and its daily
+#: series. Named only here, in `elane_memory` and in league/ops/.
+SEALED_TABLES = frozenset({"mem_contrib", "mem_series"})
 
 
 def lane_of_spec(spec: Any) -> str | None:
@@ -147,5 +155,5 @@ def families_in(store: Any, lines: Iterable[str]) -> list[dict[str, Any]]:
     return out
 
 
-__all__ = ["SEALED_KEYS", "SEALED_COLUMNS", "lane_of_spec", "equity_ids", "without_equity_rows", "equity_families",
-           "e2_record", "train_facts", "lineages_of", "families_in", "BETA", "EQUITY", "LANES"]
+__all__ = ["SEALED_KEYS", "SEALED_COLUMNS", "SEALED_TABLES", "lane_of_spec", "equity_ids", "without_equity_rows",
+           "equity_families", "e2_record", "train_facts", "lineages_of", "families_in", "BETA", "EQUITY", "LANES"]

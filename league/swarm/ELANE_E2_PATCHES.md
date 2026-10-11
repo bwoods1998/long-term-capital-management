@@ -35,10 +35,9 @@ commit moved those into `FORBIDDEN`'s own list and into the gateway's merge list
 the hunks no longer applied. As applied: `PENDING_GATEWAY` holds exactly E2's five modules, `FORBIDDEN` gains them, and
 `league/tests/test_ci.py` pins the tuple, the path guard for every role and the updater's wall (`protected_changes`)
 on two of them. What this buys now: no role may change the five files and the updater never self-deploys a change to
-them. **Still open, outside this release:** the gateway's own merge list (`gateway/lib/protected.mjs`
-`MERGE_FORBIDDEN`) does not name the five yet, because `gateway/` ships separately; its next follow-up adds them and
-moves them out of `PENDING_GATEWAY`, as E1's did. Until then `league/tests/test_ci.py` allows exactly these five in
-`FORBIDDEN` beyond the gateway's list.
+them. **Closed Oct 11, 2026 (with release E2.2):** the gateway's own merge list (`gateway/lib/protected.mjs`
+`MERGE_FORBIDDEN`) names the five since gateway `0c093de7`, and `PENDING_GATEWAY` is empty again, as after E1's
+follow-up.
 
 **A15 (the reserve and the restart check) and its review's fixes needed no patch.** Everything they read, E1
 provides: the isolated runner's `train(start, end)` and `decider`, the decider kinds (`kind_load`,
