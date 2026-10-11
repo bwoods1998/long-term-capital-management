@@ -10,7 +10,9 @@ and the ctx's calendar fields read).
 
 WHAT MOVES WHAT. A change to an xs evidence module moves the xs identity: `league.swarm.evaluator.adopt_xs` sends every
 live PANEL band back to "gym" and touches no ETF family. PLUMBING IS OUT: `book.py` and this file; every league/swarm
-and league/ops file; policy.json and the constitution. E4 moves NEITHER the equity identity NOR the options execution
+and league/ops file; policy.json and the constitution. THE STYLE RULE IS EVIDENCE (`style`, the captain's A22: the
+engine imports it, so it is in the closure): changing what marks a program style-open sends every live panel band
+back to the Gym, as a change to the screen does. E4 moves NEITHER the equity identity NOR the options execution
 fingerprint (`test_xs_identity.E4MovesNoIdentity`): nothing of league/xs is in league/equity's evidence import closure.
 
 `test_xs_identity.TheClosure` holds `XS_EVIDENCE` equal to the import closure of `XS_EVIDENCE_ROOTS` inside league/xs
@@ -28,8 +30,8 @@ from typing import Any, Mapping
 #: The swarm store's kv key of the xs identity `adopt_xs` last adopted (no band reads it: a band's currency is read
 #: from the running release's own files).
 XS_KEY = "xs_evaluator"
-XS_EVIDENCE = ("__init__", "config", "store", "ctx", "program", "engine", "results", "placebo", "screen", "runner",
-               "child", "synth")
+XS_EVIDENCE = ("__init__", "config", "store", "ctx", "program", "engine", "results", "placebo", "style", "screen",
+               "runner", "child", "synth")
 XS_EVIDENCE_ROOTS = ("runner", "child", "screen", "engine")
 XS_EVIDENCE_EXTRA = ("synth",)
 XS_EQUITY_DEPS = ("__init__", "config", "store", "ctx", "program", "engine", "results", "sizing", "screen", "runner",

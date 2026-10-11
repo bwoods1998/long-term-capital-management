@@ -26,6 +26,7 @@ THE RESULT RECORD (a plain dict; in-House only: `view` decides what a researcher
                 top-minus-bottom third equal-weight returns by 12-1 momentum, by the trailing 5-session return reversed
                 and by beta, thirds re-formed at each month's first session: beside, never a bar)
     placebo     `placebo.run`'s block (only when placebos were asked for)
+    style       `style.block`'s block (only with style=True: the captain's A22; counts and sums of ranks, no id)
     calls       only with calls=True, never stored: [{t, positions, closed, rejects, cash, equity, budget}] of every
                 CALLED decision, no array: with the run's own `PanelBars` they rebuild the exact `Inputs` each call read
     runtime, result_sha, start, end
@@ -46,7 +47,8 @@ from typing import Any, Mapping, Sequence
 DAILY = ("day", "r", "x", "x15", "u", "w", "bench", "exits", "invested", "equity")
 VIEWS = ("train", "validation", "look", "forward")
 STATUSES = ("ok", "disqualified", "no_data", "error")
-#: What a "train" view carries (never daily, lots, picks' ids, calls or placebo); every other view is the status alone.
+#: What a "train" view carries (never daily, lots, picks' ids, calls, placebo or style); every other view is the status
+#: alone.
 TRAIN_VIEW = ("status", "summary", "by_year", "pick_counts", "runtime")
 
 _STUB = "league.xs.results is a Step 0 stub: package D builds it (league/xs/E4_INTERFACES.md)"

@@ -8,7 +8,7 @@ As E1's (amendment A3): every panel run is ON THE HOUSE, the program inside the 
 opens the store (with E1's gate capability for a sealed window), learns NEEDS through the child and re-parses them,
 builds the `store.Slice` (run key `run_sha|window|first run day`, D8), and sends
 `decider.kind("panel", "run", {"code", "params", "name", "bars": PanelBars, "k", "capital", "placebos", "seed",
-"calls", "nice"}, budget_seconds=...)`. The CHILD (league/xs/child.py) loads the program and calls `run_bars`. A
+"calls", "style", "nice"}, budget_seconds=...)`. The CHILD (league/xs/child.py) loads the program and calls `run_bars`. A
 program never reaches the store, an aid or a symbol, and the store never leaves the House.
 
 A run the child took whole and never answered is `RunLost` (every other failure a plain `RunFailed`), exactly as E1's
@@ -52,9 +52,10 @@ class Run:
 
 def run_bars(code: str, params: Mapping[str, Any] | None, bars: Any, *, name: str = "program", k: float = 1.0,
              capital: Any = None, placebos: int = 0, seed: int | None = None,
-             calls: bool = False) -> dict[str, Any]:
+             calls: bool = False, style: bool = False) -> dict[str, Any]:
     """Load the program and replay it over `bars` (`engine.run_isolated`): the child's entry point, and the tests'.
-    CodeRefused / NeedsRefused when it does not load. `capital` None is `config.XS_SLEEVE_USD`."""
+    CodeRefused / NeedsRefused when it does not load. `capital` None is `config.XS_SLEEVE_USD`. `style`: the run's
+    style block in `result["style"]` (the captain's A22; `league.xs.style.block`)."""
     raise NotImplementedError(_STUB)
 
 
@@ -72,9 +73,11 @@ class Isolated:
         raise NotImplementedError(_STUB)
 
     def train(self, code: str, params: Mapping[str, Any] | None, *, name: str, start: dt.date, end: dt.date,
-              k: float = 1.0, half: int | None = None, placebos: int = 0, calls: bool = False) -> Run:
+              k: float = 1.0, half: int | None = None, placebos: int = 0, calls: bool = False,
+              style: bool = False) -> Run:
         """One Train run over [start, end] inside ONE span of `config.TRAIN_SEGMENTS` (a seen span, a hidden year),
-        starting flat; `half`: a D18 half run; `placebos`: the Train bar's, under `placebo.train_seed`."""
+        starting flat; `half`: a D18 half run; `placebos`: the Train bar's, under `placebo.train_seed`; `style`: the
+        run's style block (the captain's A22: asked of the seen spans' full-universe runs at k 1.0)."""
         raise NotImplementedError(_STUB)
 
     def validation(self, code: str, params: Mapping[str, Any] | None, *, name: str, k: float = 1.0) -> Run:

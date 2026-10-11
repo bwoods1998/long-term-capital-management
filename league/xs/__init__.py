@@ -32,6 +32,8 @@ shapes, and where the pinned pre-registration overrides the spec). The pieces:
 - `runner`    the in-process entry points and the decider-isolated wrapper;
 - `child`     the module the decider child runs for the "panel" kind;
 - `screen`    XS1: the pre-check, the program's own floor, the look, the sentence stated beside every live trade;
+- `style`     the style reading (the captain's A22): a program's loadings on size, beta, momentum and volatility from
+              its Train holdings, and the rule that marks it style-open (a style-open passer takes no live seat);
 - `identity`  the xs evidence identity (panel bands bind to it);
 - `synth`     synthetic panels for tests (never market data);
 - `book`      the parent-side adapter between a live panel program and E1's EquityBook (plumbing: no identity).

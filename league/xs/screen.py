@@ -5,10 +5,28 @@ Owner: package E. STEP 0 STUB: the constants and `ReceiptXS` are the contract; `
 
 THE RULE IS THE PINNED PRE-REGISTRATION, EXACTLY: XSCREEN-1 revision 2 (sha256 c46aec17..., pinned 2026-10-11
 03:03:08Z), section 4. Where E4-SPEC section 9 differs (it was revised in parallel without seeing it), the
-pre-registration wins. THE THRESHOLDS ARE THE RECEIPT'S: docs/benchmarks/equity_screen_xs_1.json, which the captain
-lands when the study finishes and pins in policy.json `elane.screens.equity_xs`. UNTIL THEN THERE IS NO RECEIPT, AND A
-SCREEN WITH NO PINNED RECEIPT REFUSES EVERY PROGRAM (`ScreenRefused`): tests use the fixture marked fake
-(league/tests/fixtures/equity_screen_xs_fake.json).
+pre-registration wins. THE THRESHOLDS ARE THE RECEIPT'S, READ AT RUNTIME, NEVER WRITTEN HERE: the study finished and
+adopted XS1 by its own mechanical rule (rung R0), and its receipt is docs/benchmarks/equity_screen_xs_1.json, which
+the integrator copies verbatim and pins in policy.json `elane.screens.equity_xs`. The captain may replace it with a
+rebuilt receipt at another c_XS: so no figure of a receipt is a constant of this module (the constants below are the
+PRE-REGISTRATION's fixed figures, which every receipt must state, and the loader refuses one that states another).
+A SCREEN WITH NO PINNED RECEIPT REFUSES EVERY PROGRAM (`ScreenRefused`); tests use the fixture marked fake
+(league/tests/fixtures/equity_screen_xs_fake.json), shaped as the real receipt is (`RECEIPT_KEYS`).
+
+THE CONFORMANCE VECTORS (the study's HOUSE-RULE-XS1, section 9; synthetic inputs, no market data) are committed:
+league/tests/fixtures/xs1_conformance.json, the study's file byte for byte (eight vectors: V1 pass, V2 fail, V3
+refused at the pre-check, V4 the stress leg, V5 the own floor, V6 ineligible, CH the characteristics and cells, H the
+hand vector), and league/tests/fixtures/xs1_conformance_inputs.npz, the synthetic inputs V1-V6 were computed from
+(prices, the eligible set, every lot with its cell, members and leaving sessions, the Train pools) with the study's
+plain reference's daily series beside (r, B, x, x15, s, f, w, exits, invested, the universe excess u, and the 999
+placebo t's on the holdout). `test_xs_screen.TheStudyVectors` reproduces EVERY integer and verdict exactly and every
+float to 1e-12 (the floor from the pools; the pre-check, the look and the verdict from the series and the placebo
+t's); `test_xs_placebo.TheStudyVectors` (package D) reproduces the series from the prices and the lots. AND A NINTH,
+THE CAPTAIN'S A22 (4): no study vector has a 2022-24 pool of 550 sessions or more alone, which is the House's own
+third floor cell ("C": its second Train segment is 753 sessions). Package E derives one BY HAND (a small pool whose
+every (Validation, holdout) tuple a brute-force loop enumerates), commits it as
+league/tests/fixtures/xs1_conformance_c.json and holds `floor` to it. Neither implementation is rewritten to fit the
+other after the receipt exists.
 
 x is the residual, x15 the stress residual (`league.xs.placebo`), one observation a session.
 
@@ -23,7 +41,9 @@ x is the residual, x15 the stress residual (`league.xs.placebo`), one observatio
    `MIN_POOL_BOTH` sessions; (ii) each single pool that has at least `MIN_POOL_ALONE`, alone. A world is a holdout
    block of 194 consecutive pool sessions, circular inside one pool, weighted by its number of non-overlapping
    Validation blocks. The null is N0: x0 = x - w x kappa_H. In each cell k_cell = the smallest k in 0..500 with
-   HO[k] x 100 <= 12 x T; k_p = the largest k_cell; c_p = k_p / 100. THIS IS NOT `league.equity.screen.floor_s2` AS IT
+   HO[k] x 100 <= 12 x T; k_p = the largest k_cell; c_p = k_p / 100. The cells are named as the study names them
+   (`FLOOR_CELLS`): "both", "D" (the first Train segment's pool alone) and "C" (the second's alone); on the House's
+   two segments (754 and 753 sessions) all three exist. THIS IS NOT `league.equity.screen.floor_s2` AS IT
    STANDS (that reads L 194 and 251 and has no first-span-alone cell): package E's note in E4_INTERFACES.md says how
    the enumeration is reused. INELIGIBLE: no floor cell, a cell with T = 0 or with no such k, zero exposure, a series
    that is not finite, a session outside the spans, k_used above 500.
@@ -37,7 +57,9 @@ x is the residual, x15 the stress residual (`league.xs.placebo`), one observatio
 6. THE LABELS BESIDE, never a gate (4.5): the basket share ("basket-led" when the sum over V and H of the cells' P&L
    is at least the sum of x, else "selection-led"); the French label ("no style loading found", "style-loaded: ...",
    or "unmeasured" when fewer than `FRENCH_MIN_DAYS` days of French's factors are on the House, which is the case
-   until a route to them exists: the receipt's "style-open" flag then attaches).
+   until a route to them exists: the receipt's "style-open" flag then attaches, and the sentence says so). THE SEAT
+   RULE IS NOT THIS LABEL'S: the captain's A22 reads style-open from the House's own loadings (`league.xs.style`),
+   and a style-open passer takes no live seat on an XS1 pass alone (`league.swarm.elane_xs.look`).
 7. LINEAGE (4.6): one look a lineage; the same lineage = the same template, or a Train daily correlation of 0.7 or
    more (`league.equity.screen.same_lineage`) with a program already looked at OR already refused at the pre-check, IN
    EITHER SERIES, the residual x or the universe excess u. No Validation-only retry (`VALIDATION_TRIES` 1). A lineage
@@ -50,6 +72,11 @@ x is the residual, x15 the stress residual (`league.xs.placebo`), one observatio
 Failure order of `verdict` (the first is `why`): no receipt (ScreenRefused); the floor ineligible, or run under other
 figures than the receipt's; a placebo block of another rung, another number of draws or another seed than the
 receipt and the program's code fix; the windows; the pre-check; the look.
+
+WHAT THE HOUSE HOLDS BEFORE A LOOK, BESIDE THIS MODULE (the captain's A22; `league.swarm.elane_xs.look` keeps them,
+never this judge): at most `league.swarm.elane_xs.MAX_CELL_LOOKS` XS1 looks an agenda cell until a forward verdict
+exists there; the equity code review (no embedded return table, no calendar recognition) and the contamination probe
+before the look; and the style reading above before a seat.
 
 THE FORWARD ROUTE F-GS-XS (the pre-registration's section 11; measured by a later study, read by package J and E6):
 checkpoints at `CHECKPOINTS` forward sessions, a pass = t_n >= c_FX AND sum x > 1e-12 AND sum x15 > 1e-12 AND the
@@ -72,7 +99,8 @@ SCREEN = "XS1"
 RECEIPT_NAME = "equity_screen_xs_1"
 RECEIPT_PATH = "docs/benchmarks/equity_screen_xs_1.json"
 CONTRACT = "C-XS-1"
-#: The keys a receipt must carry (the pre-registration's 10.1); the loader refuses a receipt that lacks one.
+#: The keys a receipt must carry (the pre-registration's 10.1); the loader refuses a receipt that lacks one, and
+#: lets a receipt carry more (the adopted one adds "eligibility" and "beside_calibrated_reading").
 RECEIPT_KEYS = ("name", "screen", "study", "rule", "contract", "fp_cap", "owner_wall", "c_XS", "c_margin",
                 "alpha_plac", "placebo_draws", "stratum", "residual", "precheck", "look", "floor", "windows", "lineage",
                 "R3_retry_permitted", "labels", "flags", "screen_flags", "ladder", "fp_zero_edge", "fp_zero_edge_B",
@@ -82,7 +110,14 @@ RECEIPT_KEYS = ("name", "screen", "study", "rule", "contract", "fp_cap", "owner_
 #: What policy.json `elane.screens.equity_xs` pins, every value copied from the receipt (it ships with nulls, and with
 #: nulls every panel look waits).
 PIN_KEYS = ("name", "screen", "receipt_sha256", "c_XS", "c_margin", "alpha_plac", "placebo_draws", "rung", "fp_cap",
-            "owner_wall", "retry", "flags", "screen_flags", "beside")
+            "owner_wall", "validation_tries", "holdout_looks", "retry", "flags", "screen_flags", "beside")
+#: Where each pinned value sits in the receipt file (a dotted path): what `pinned_receipt` is held equal to
+#: (`receipt_sha256` is the sha256 of the file's own bytes).
+PIN_SOURCES = {"name": "screen", "screen": "screen", "c_XS": "c_XS", "c_margin": "c_margin",
+               "alpha_plac": "alpha_plac", "placebo_draws": "placebo_draws", "rung": "stratum.rung",
+               "fp_cap": "fp_cap", "owner_wall": "owner_wall", "validation_tries": "lineage.validation_tries",
+               "holdout_looks": "lineage.holdout_looks", "retry": "R3_retry_permitted", "flags": "flags",
+               "screen_flags": "screen_flags", "beside": "stated_beside_every_live_trade"}
 #: The per-program placeholders of the sentence beside every live trade (the receipt fills its own figures once).
 BESIDE_FIELDS = ("c_used", "c_p", "own_fp", "n_cell", "basket", "label", "flags")
 #: The figures the pre-registration fixes; a receipt that states another is refused.
@@ -104,6 +139,8 @@ H_LENGTH = 194
 V_LENGTH = 250
 MIN_POOL_BOTH = 251
 MIN_POOL_ALONE = 550
+#: The floor's cells, by the study's names: both pools together, the first Train segment's alone, the second's alone.
+FLOOR_CELLS = ("both", "D", "C")
 POOL_SKIP = 2
 ACTIVITY_ROUND_TRIPS = 20
 ACTIVITY_INVESTED_DAYS = 120
@@ -131,9 +168,10 @@ class ReceiptXS:
     """The pinned XS1 receipt as policy.json carries it (`PIN_KEYS`, copied from the receipt file's keys):
     `receipt_sha256` (the file's bytes, 64 hex), `c_XS` and `c_margin` (on the 0.01 grid), `alpha_plac` (0.12),
     `placebo_draws` (999), `rung` (the adopted stratum: "R0", or "R1" when the ladder fell back), `fp_cap` (0.12),
-    `owner_wall` (0.15), `retry` (`R3_retry_permitted`: False), `flags` ({archetype: (flag, ...)}, DR4's),
-    `screen_flags` (("style-open",) or ()), `beside` (`stated_beside_every_live_trade`: the sentence, with
-    `BESIDE_FIELDS` as placeholders) and `fp` (the receipt's rule-level figures stated beside)."""
+    `owner_wall` (0.15), `validation_tries` and `holdout_looks` (1 and 1: `lineage`'s), `retry`
+    (`R3_retry_permitted`: False), `flags` ({archetype: (flag, ...)}, DR4's), `screen_flags` (("style-open",) or ()),
+    `beside` (`stated_beside_every_live_trade`: the sentence, with `BESIDE_FIELDS` as placeholders) and `fp` (the
+    receipt's rule-level figures stated beside, `style_known_rate` among them)."""
 
     receipt_sha256: str
     c_XS: float
@@ -143,6 +181,8 @@ class ReceiptXS:
     rung: str
     fp_cap: float
     owner_wall: float
+    validation_tries: int
+    holdout_looks: int
     retry: bool
     flags: Mapping[str, tuple[str, ...]]
     screen_flags: tuple[str, ...]
@@ -165,8 +205,9 @@ def load_receipt(path: str | Path, *, pinned_sha256: str) -> ReceiptXS:
     """The receipt file, verified against its pin. ScreenRefused on: a sha that is not the pin's; a missing key of
     `RECEIPT_KEYS`; a `screen` other than "XS1" or a `contract` other than `CONTRACT`; c_XS or c_margin off the 0.01
     grid, c_XS outside 0..3.00; alpha_plac above `ALPHA_PLAC`; fp_cap above `FP_CAP`; an owner_wall above
-    `OWNER_WALL`; placebo_draws other than `PLACEBO_DRAWS`; a rung outside `RUNGS`; `R3_retry_permitted` true; a
-    sentence that lacks a placeholder of `BESIDE_FIELDS`."""
+    `OWNER_WALL`; placebo_draws other than `PLACEBO_DRAWS`; a rung outside `RUNGS`; `lineage.validation_tries` other
+    than `VALIDATION_TRIES` or `lineage.holdout_looks` other than `LOOKS_PER_LINEAGE`; `R3_retry_permitted` true; a
+    sentence that lacks a placeholder of `BESIDE_FIELDS`. A key beyond `RECEIPT_KEYS` is not refused."""
     raise NotImplementedError(_STUB)
 
 
@@ -200,7 +241,8 @@ def floor(segments: Sequence[Series | None], *, receipt: ReceiptXS) -> dict[str,
     """Step 3: the program's own floor from its Train-era residual series (one `Series` per `config.TRAIN_SEGMENTS`
     entry, `r` = x; None or empty where it has none). Deterministic: an exact enumeration, no seed. -> {screen "XS1",
     eligible, why, method "exact", L 194, c_p, k_p, c_used, k_used, own_fp, fp_cap, c_XS, c_margin (as run:
-    `floor_fits` checks them against the receipt), cells {"both" | "0" | "1": {pools [lengths], T, k_cell, HO_used}}}.
+    `floor_fits` checks them against the receipt), cells {"both" | "D" | "C" (`FLOOR_CELLS`): {pools [lengths], T,
+    k_cell, kappa_H, HO_0, HO_used}}} (the conformance vectors' integers: T, k_cell, HO[0], HO[k_used]).
     Computed on the House, never committed. ScreenRefused without a receipt; ValueError on arrays of unequal length."""
     raise NotImplementedError(_STUB)
 
@@ -261,9 +303,11 @@ def beside_line(result: Mapping[str, Any], receipt: ReceiptXS, *, n_cell: int) -
     raise NotImplementedError(_STUB)
 
 
-__all__ = ["SCREEN", "RECEIPT_NAME", "RECEIPT_PATH", "CONTRACT", "RECEIPT_KEYS", "PIN_KEYS", "BESIDE_FIELDS",
+__all__ = ["SCREEN", "RECEIPT_NAME", "RECEIPT_PATH", "CONTRACT", "RECEIPT_KEYS", "PIN_KEYS", "PIN_SOURCES",
+           "BESIDE_FIELDS",
            "FP_CAP", "OWNER_WALL", "ALPHA_PLAC", "PLACEBO_DRAWS", "PLACEBO_COUNT_MAX", "C_MARGIN", "C_GRID_STEP",
-           "K_XS_MAX", "K_MAX", "RUNGS", "H_LENGTH", "V_LENGTH", "MIN_POOL_BOTH", "MIN_POOL_ALONE", "POOL_SKIP",
+           "K_XS_MAX", "K_MAX", "RUNGS", "H_LENGTH", "V_LENGTH", "MIN_POOL_BOTH", "MIN_POOL_ALONE", "FLOOR_CELLS",
+           "POOL_SKIP",
            "ACTIVITY_ROUND_TRIPS", "ACTIVITY_INVESTED_DAYS", "SAME_LINEAGE_CORR", "LINEAGE_SERIES",
            "LOOKS_PER_LINEAGE", "VALIDATION_TRIES", "ZERO", "BASKET_LABELS", "FRENCH_FACTORS", "FRENCH_MIN_DAYS",
            "FRENCH_T", "UNMEASURED", "STYLE_OPEN", "CHECKPOINTS", "ALPHA_F", "ScreenRefused", "Series", "ReceiptXS",

@@ -104,16 +104,18 @@ def plan_orders(target: Mapping[int, float], at: str, lots: Sequence[Mapping[str
 
 
 def run(program: Any, bars: Any, *, cfg: EngineConfig = EngineConfig(), placebos: int = 0,
-        calls: bool = False, seed: int | None = None) -> dict[str, Any]:
+        calls: bool = False, seed: int | None = None, style: bool = False) -> dict[str, Any]:
     """Replay `program` (a `program.XsProgram`) over `bars` (a `store.PanelBars`) and return the result record
     (`league.xs.results`). `placebos`: also draw that many matched placebos on the run's sessions (`placebo.run`;
     `seed` is the draw's, None: derived from the run's sha) and put their block in `result["placebo"]`. `calls`: also
-    return `result["calls"]`, the book facts of every CALLED decision (for the restart check; never stored)."""
+    return `result["calls"]`, the book facts of every CALLED decision (for the restart check; never stored). `style`:
+    also put `league.xs.style.block(bars, log)` in `result["style"]` (the captain's A22: the run's holdings read on
+    size, beta, momentum and volatility; ONE call, the rule is package E's)."""
     raise NotImplementedError(_STUB)
 
 
 def run_isolated(program: Any, bars: Any, *, cfg: EngineConfig = EngineConfig(), placebos: int = 0,
-                 calls: bool = False, seed: int | None = None) -> dict[str, Any]:
+                 calls: bool = False, seed: int | None = None, style: bool = False) -> dict[str, Any]:
     """`run`, an exception becoming `results.failed` (status "error")."""
     raise NotImplementedError(_STUB)
 

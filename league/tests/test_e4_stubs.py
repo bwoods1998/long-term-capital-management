@@ -6,6 +6,9 @@ module imports and has the names it publishes, the DDL creates, and the shared s
 told. It is the INTEGRATOR'S file: a package that needs one of these shapes changed says so to the integrator and
 changes nothing here. It never asserts that a function is unbuilt, so it keeps passing as the packages land.
 
+It also holds the study's conformance fixtures (synthetic inputs; XSCREEN-1's vectors, byte for byte, and the inputs
+they were computed from) to each other, so packages D and E reproduce ONE set of vectors.
+
 Nothing here reads market data: there is none in the repository.
 """
 
@@ -14,13 +17,23 @@ from __future__ import annotations
 import ast
 import dataclasses
 import datetime as dt
+import hashlib
 import importlib
+import inspect
+import json
+import math
 import sqlite3
 import unittest
 from decimal import Decimal
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
+#: The study's conformance vectors (XSCREEN-1's work/conformance_xs1.json), committed byte for byte.
+VECTORS = FIXTURES / "xs1_conformance.json"
+VECTORS_SHA256 = "386995d8d8c86baec17f1c378b7c067be43ef39653c3879f71d059d0beae7e3c"
+#: The synthetic inputs of V1-V6 and the plain reference's series (written at Step 0 from the study's own generator).
+INPUTS = FIXTURES / "xs1_conformance_inputs.npz"
 
 #: Every module release E4 adds, by the package that owns it (league/xs/E4_INTERFACES.md's table). J is owed.
 MODULES = {
@@ -29,7 +42,7 @@ MODULES = {
     "C": ("league.xs", "league.xs.config", "league.xs.store", "league.xs.ctx", "league.xs.program",
           "league.xs.synth"),
     "D": ("league.xs.engine", "league.xs.results", "league.xs.placebo", "league.xs.runner", "league.xs.child"),
-    "E": ("league.xs.screen", "league.xs.identity"),
+    "E": ("league.xs.screen", "league.xs.identity", "league.xs.style"),
     "G": ("league.swarm.elane_xs", "league.ops.xs_zero_edge"),
     "H": ("league.xs.book",),
     "J": ("league.ops.forward_xs",),
@@ -183,8 +196,14 @@ class TheSharedShapes(unittest.TestCase):
         from league.xs import placebo, screen
 
         self.assertEqual(fields(screen.ReceiptXS), ("receipt_sha256", "c_XS", "c_margin", "alpha_plac",
-                                                     "placebo_draws", "rung", "fp_cap", "owner_wall", "retry", "flags",
+                                                     "placebo_draws", "rung", "fp_cap", "owner_wall",
+                                                     "validation_tries", "holdout_looks", "retry", "flags",
                                                      "screen_flags", "beside", "fp"))
+        # every pinned value but the file's own sha has its place in the receipt, and the pin is the dataclass
+        self.assertEqual(set(screen.PIN_SOURCES), set(screen.PIN_KEYS) - {"receipt_sha256"})
+        self.assertLessEqual({source.split(".")[0] for source in screen.PIN_SOURCES.values()}, set(screen.RECEIPT_KEYS))
+        self.assertLessEqual(set(screen.PIN_KEYS) - {"name", "screen"}, set(fields(screen.ReceiptXS)))
+        self.assertEqual(screen.FLOOR_CELLS, ("both", "D", "C"))
         self.assertEqual(screen.BESIDE_FIELDS, ("c_used", "c_p", "own_fp", "n_cell", "basket", "label", "flags"))
         self.assertEqual((screen.SCREEN, screen.RECEIPT_PATH), ("XS1", "docs/benchmarks/equity_screen_xs_1.json"))
         self.assertEqual((screen.FP_CAP, screen.OWNER_WALL, screen.ALPHA_PLAC, screen.C_MARGIN), (0.12, 0.15, 0.12, 0.05))
@@ -293,12 +312,144 @@ class TheConstants(unittest.TestCase):
             self.assertTrue(low <= elane_xs.DEFAULTS[key] <= high, key)
         self.assertEqual(set(elane_xs.JUDGED_XS) - set(elane_xs.FAILS_XS), set())
 
+    def test_the_captains_a22_is_in_the_contract(self):
+        """Before any real money on an XS1 pass: a style-open program takes no seat on the pass alone; at most 2 looks
+        an agenda cell; the review and the contamination probe before a look."""
+        from league.swarm import elane_xs
+        from league.xs import engine, identity, runner, style
+
+        self.assertEqual(style.CHARACTERISTICS, ("size", "beta", "mom", "vol"))
+        self.assertEqual((style.TILT, style.MIN_LOTS), (1.0 / 3.0, 40))
+        self.assertEqual((style.SIZE_SESSIONS, style.SIZE_MIN_VALID, style.VOL_SESSIONS, style.VOL_MIN_VALID),
+                         (63, 55, 60, 55), "the study's own definitions (its arm STYLE)")
+        self.assertEqual(elane_xs.SEAT_STYLE, style.OPEN)
+        self.assertIn("style", identity.XS_EVIDENCE, "the style rule is evidence: the engine imports it")
+        for function in (engine.run, engine.run_isolated, runner.run_bars, runner.Isolated.train):
+            parameter = inspect.signature(function).parameters["style"]
+            self.assertIs(parameter.default, False, f"{function.__qualname__}: no style block unless asked")
+        self.assertEqual(elane_xs.MAX_CELL_LOOKS, 2)
+        self.assertNotIn("cell_looks", elane_xs.DEFAULTS, "the cap on a cell's looks is a House rule, never a setting")
+        self.assertEqual(elane_xs.PROBE_STRATA, ("P4", "P5", "P6"))
+        self.assertEqual(elane_xs.PROBE_FILE, "contamination.json")
+        rubric = " ".join(elane_xs.REVIEW_XS)
+        for words in ("embedded return table", "calendar recognition"):
+            self.assertIn(words, rubric)
+        # the style verdict is a Train fact (the record's own field), never one of the sealed keys
+        self.assertNotIn(elane_xs.STYLE_FIELD, elane_xs.SEALED)
+
     def test_each_jobs_wall_is_stated_once(self):
         """E4-SPEC 13: every E4 job asks `quiet` with its own wall; package A's registry rows are held to these."""
         walls = {"equity_universe": 900, "equity_panel": 3300, "equity_spreads": 3000, "equity_neff": 900,
                  "french": 300, "xs_zero_edge": 3000}
         for name, wall in walls.items():
             self.assertEqual(importlib.import_module(f"league.ops.{name}").WALL_S, wall, name)
+
+
+class TheStudysVectors(unittest.TestCase):
+    """XSCREEN-1's conformance vectors and their synthetic inputs: one set, for packages D and E alike."""
+
+    @classmethod
+    def setUpClass(cls):
+        import numpy as np
+
+        cls.np = np
+        cls.vectors = json.loads(VECTORS.read_text(encoding="utf-8"))
+        cls.inputs = np.load(INPUTS)
+        cls.manifest = json.loads(bytes(cls.inputs["manifest"]).decode("utf-8"))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.inputs.close()
+
+    def looks(self):
+        for key, vector in self.vectors["vectors"].items():
+            if "look" in vector:
+                yield key.split()[0], vector
+
+    def test_the_vectors_are_the_studys_file_byte_for_byte(self):
+        self.assertEqual(hashlib.sha256(VECTORS.read_bytes()).hexdigest(), VECTORS_SHA256)
+        self.assertEqual(self.manifest["vectors_sha256"], VECTORS_SHA256, "the inputs were made for these vectors")
+        self.assertEqual(sorted(self.vectors["vectors"]),
+                         ["CH", "H", "V1 pass", "V2 fail", "V3 pre-check", "V4 stress", "V5 own floor",
+                          "V6 ineligible"])
+        self.assertEqual((self.vectors["world"]["validation"], self.vectors["world"]["holdout"]),
+                         ([0, 249], [250, 443]))
+        self.assertEqual({v["look"]["verdict"] for _, v in self.looks()},
+                         {"PASS", "FAIL", "REFUSED AT THE PRE-CHECK", "INELIGIBLE"})
+
+    def test_no_vector_has_the_second_segments_floor_cell_alone(self):
+        """Why the captain's A22 (4) asks package E for a ninth, derived by hand: the House's own third floor cell."""
+        cells = {name for _, v in self.looks() for name in v["floor"]["cells"]}
+        self.assertEqual(cells, {"both", "D"})
+
+    def test_the_inputs_give_the_vectors_own_sums_and_counts(self):
+        np = self.np
+        for tag, vector in self.looks():
+            with self.subTest(vector=tag):
+                row = self.manifest["vectors"][tag]
+                self.assertEqual(row["vector"].split()[0], tag)
+                x, x15 = self.inputs[f"{tag}/x"], self.inputs[f"{tag}/x15"]
+                self.assertEqual(len(x), 444)
+                series = vector["series"]
+                self.assertEqual(math.fsum(x[:250].tolist()), series["sum_V_x"])
+                self.assertEqual(math.fsum(x[250:].tolist()), series["sum_H_x"])
+                self.assertEqual(math.fsum(x15[250:].tolist()), series["sum_H_x15"])
+                for name, key in (("w", "sum_H_w"), ("s", "sum_H_s"), ("f", "sum_H_f"), ("B", "sum_H_B")):
+                    self.assertEqual(math.fsum(self.inputs[f"{tag}/{name}"][250:].tolist()), series[key], name)
+                exits, invested = self.inputs[f"{tag}/exits"], self.inputs[f"{tag}/invested"]
+                self.assertEqual((int(exits[:250].sum()), int(invested[:250].sum())), (series["RT_V"], series["ID_V"]))
+                self.assertEqual((int(exits[250:].sum()), int(invested[250:].sum())),
+                                 (series["exits_H"], series["invested_H"]))
+                # x = r - B and x15 = x - 0.5 s - f, session by session
+                r, bench = self.inputs[f"{tag}/r"], self.inputs[f"{tag}/B"]
+                self.assertTrue(np.array_equal(x, r - bench))
+                self.assertTrue(np.array_equal(x15, x - 0.5 * self.inputs[f"{tag}/s"] - self.inputs[f"{tag}/f"]))
+                # the holdings log
+                lots = vector["lots"]
+                rows = [[int(n), float(w), int(d), int(e), int(q)] for n, w, d, e, q in zip(
+                    self.inputs[f"{tag}/lot_name"], self.inputs[f"{tag}/lot_weight"], self.inputs[f"{tag}/lot_d"],
+                    self.inputs[f"{tag}/lot_e"], self.inputs[f"{tag}/lot_q"])]
+                self.assertEqual(rows, lots["rows_name_weight_d_e_q"])
+                self.assertEqual(self.inputs[f"{tag}/lot_cell"].tolist(), lots["cell"])
+                start = self.inputs[f"{tag}/member_start"]
+                self.assertEqual(np.diff(start).tolist(), lots["members_count"])
+                members = self.inputs[f"{tag}/member"]
+                self.assertEqual((int(start[-1]), int(members.sum())), (len(members), lots["members_sum"]))
+                self.assertEqual(members[:start[1]].tolist(), lots["first_lot_members"])
+                self.assertEqual(self.inputs[f"{tag}/member_leave"].shape, members.shape)
+                placebos = vector["placebos"]
+                self.assertEqual(self.inputs[f"{tag}/pos_draw_0"].tolist(), placebos["counterpart_position_draw_0"])
+                self.assertEqual(self.inputs[f"{tag}/pos_draw_998"].tolist(),
+                                 placebos["counterpart_position_draw_998"])
+                # the prices, the eligible set and the pools (a vector may read another's world: the manifest says)
+                world = row["world"]
+                for name in ("O", "C", "U", "entry_ok"):
+                    self.assertEqual(self.inputs[f"{world}/{name}"].shape, (444, 24), name)
+                pools = vector["inputs"]["train_pools"]
+                for label, length in (("pool_d", pools["n_2016_19"]), ("pool_c", pools["n_2022_24"])):
+                    if length is None:
+                        self.assertNotIn(f"{tag}/{label}_x", self.inputs.files)
+                    else:
+                        self.assertEqual((len(self.inputs[f"{tag}/{label}_x"]), len(self.inputs[f"{tag}/{label}_w"])),
+                                         (length, length))
+
+    def test_the_placebo_ts_give_each_looks_count(self):
+        """The 999 placebo t's on the holdout are the reference's: counted against the vector's own t they give its
+        placebo count (an undefined t counts as not above), so 119 passes and 120 fails is read on the study's draws."""
+        np = self.np
+        spent = 0
+        for tag, vector in self.looks():
+            look = vector["look"]
+            ts = self.inputs[f"{tag}/placebo_t_H"]
+            self.assertEqual(ts.shape, (999,))
+            if not look.get("look_spent"):
+                continue
+            spent += 1
+            with self.subTest(vector=tag):
+                with np.errstate(invalid="ignore"):
+                    self.assertEqual(int(np.sum(ts >= look["t_H"])), look["placebo_count"])
+                self.assertEqual(look["p_plac_thousandths"], 1 + look["placebo_count"])
+        self.assertEqual(spent, 4)
 
 
 if __name__ == "__main__":

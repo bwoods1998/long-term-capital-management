@@ -3,9 +3,19 @@
 Owner: package D. STEP 0 STUB: the constants are the contract; every function raises NotImplementedError until D lands.
 
 THIS MODULE IS THE PINNED PRE-REGISTRATION'S SECTION 3, to the letter (XSCREEN-1 revision 2; where E4-SPEC D13 and D14
-differ, the pre-registration wins). The study's own numpy reference and its conformance vectors (HOUSE-RULE-XS1.md,
-conformance_xs1.json) land with the receipt: `test_xs_placebo.TheStudyVectors` must then reproduce them, x to 1e-12
-and the placebo t's to 1e-9, and neither implementation is rewritten to fit the other after the receipt exists.
+differ, the pre-registration wins). THE STUDY'S CONFORMANCE VECTORS ARE COMMITTED (synthetic inputs, no market data):
+league/tests/fixtures/xs1_conformance.json (the study's file, byte for byte) and
+league/tests/fixtures/xs1_conformance_inputs.npz (for V1-V6: the prices O and C, the eligible set U, entry validity,
+every lot of the holdings log with its cell, members and each member's leaving session, and the study's plain
+reference's series r, B, x, x15, s, f, w, exits, invested, u, the 999 placebo t's on the holdout and the counterpart
+positions of draws 0 and 998; the file's "manifest" says which vector reads which world). `test_xs_placebo
+.TheStudyVectors` reproduces them: every integer exactly (the vectors' lot, member and counterpart-position counts
+and sums, exits, invested), x, x15 and u to 1e-12, the placebo t's to 1e-9, the hand vector H, and CH (through
+`ctx.derive`'s arithmetic). THE COLUMN ORDER STANDS FOR THE STUDY'S ASSET ID: a fixture hands its names 0..23 as
+columns in that order, so "ascending asset id" is ascending column, as it is ascending salted id on the House.
+Neither implementation is rewritten to fit the other after the receipt exists. One thing the reference does that a
+reader may not expect, and the vectors hold: on a session where a lot's OWN leg is invalid, r itself carries the
+cell's mean (so x is 0 there), so r is not the same number under one cell (u) as under the lot's cell.
 
 THE ACCOUNTING is E1's constant-weight accounting on E0 (`league.equity.screen.series`'s leg expressions): a lot of
 weight w (its entry notional over the run's capital) earns w times each leg's simple return on total-return

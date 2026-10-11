@@ -45,6 +45,27 @@ the pre-registration gives the House three duties, kept here:
    receipt's sentence (`league.xs.screen.beside_line`, {n_cell}) is recorded with the look (`LOOK_KEY`) and
    `beside_line` hands it to the reports, which print it beside EVERY live panel trade.
 
+THE CAPTAIN'S A22 (from the study's review; binding): BEFORE ANY REAL MONEY ON AN XS1 PASS THE HOUSE ALSO HOLDS
+1. A STYLE-OPEN PROGRAM TAKES NO LIVE SEAT ON AN XS1 PASS ALONE. `score` asks the seen spans' full-universe k 1.0
+   runs for their style blocks (`league.xs.runner.Isolated.train(..., style=True)`), reads them as one
+   (`league.xs.style.pooled`) and keeps the rule's verdict (`league.xs.style.style_open`) in the version's Train
+   record under `STYLE_FIELD`. At the look, a passer whose verdict is open, or missing, or made under other figures
+   (`league.xs.style.seat_refusal`) is RECORDED AND SHADOWED, NEVER SEATED: the look event and `LOOK_KEY` say passed
+   with `seat` `SEAT_STYLE`, the family takes NO band and no proof (so no reader of the bands can seat it), and the
+   forward record goes on shadowing it; the forward route is its way to a seat. Only a passer the rule reads as not
+   open becomes a Candidate.
+2. AT MOST `MAX_CELL_LOOKS` XS1 LOOKS AN AGENDA CELL until a forward verdict exists in that cell (`look_room`; the
+   study measured that one zero-edge mechanism given eight looks passes at least one in most worlds). No forward
+   verdict can exist before the forward route is measured and built, so in this release the cap is flat. A look the
+   cap holds back is not spent: the family waits.
+3. THE CODE REVIEW AND THE CONTAMINATION PROBE COME BEFORE A LOOK. E2's equity review of a panel program carries the
+   rubric `REVIEW_XS` (no embedded return table, no calendar recognition, and the spec's three); and `probed` holds
+   the look back until E3's contamination probe has a published result, with the panel strata `PROBE_STRATA`, for
+   the route that wrote the program (`<root>/contamination.json`, aggregates only; while release E3 or its panel
+   strata are not merged there is none, and every panel look waits). The probe's reading is recorded with the look.
+4. The screen reproduces the study's conformance vectors and one more for the second segment's floor cell alone
+   (package E's; `league.xs.screen`).
+
 Imports nothing of league.live at import time (the panel's own decider is built in `runner`). league.xs is imported
 inside the functions that need it, as E1's `elane` imports league.equity.
 """
@@ -79,6 +100,25 @@ SEALED = (FLOOR_KEY, TRAIN_X_KEY, TRAIN_U_KEY, PRECHECK_KEY, PLACEBO_KEY, HALVES
 CPU_KEY = "elane_xs_cpu"
 ZERO_KEY = "elane_xs_zero_edge"
 ALERTS_KEY = "elane_xs_alerts"
+#: THE CAPTAIN'S A22. The Train record's field of the style verdict (per version: `league.xs.style.style_open`'s
+#: answer); what a look's record says of a passer's seat; the cap on a cell's XS1 looks (a House rule, never a
+#: setting); E3's probe file under the root and the panel strata a route's result must hold before a look; and what
+#: the equity review's rubric gains for a panel program.
+STYLE_FIELD = "style"
+SEAT_CANDIDATE = "candidate"
+SEAT_STYLE = "style-open"
+MAX_CELL_LOOKS = 2
+PROBE_FILE = "contamination.json"
+PROBE_STRATA = ("P4", "P5", "P6")
+REVIEW_XS = (
+    "an embedded return table: constants, a string or a structure that could hold returns, ranks or outcomes of "
+    "past sessions or names",
+    "calendar recognition: any test that could tell which year, month or event a session is from the calendar "
+    "counts, the market's path or the slots' histories",
+    "any use of ctx.ids beyond naming targets",
+    "any constant that could name a calendar period",
+    "any search for a price level",
+)
 #: The settings block (`elane.panel`) and the screen's pin (`elane.screens.equity_xs`).
 SETTINGS_KEY = "panel"
 SCREEN_KEY = "equity_xs"
@@ -105,8 +145,8 @@ CENSUS_NOTE_MAX = 200
 #: `elane.screens.equity_xs` as policy.json ships it: every value a null, and with nulls every panel look waits.
 SCREEN_NULLS: dict[str, Any] = {
     "name": "XS1", "screen": "XS1", "receipt_sha256": None, "c_XS": None, "c_margin": None, "alpha_plac": None,
-    "placebo_draws": None, "rung": None, "fp_cap": None, "owner_wall": None, "retry": False, "flags": {},
-    "screen_flags": [], "beside": None,
+    "placebo_draws": None, "rung": None, "fp_cap": None, "owner_wall": None, "validation_tries": None,
+    "holdout_looks": None, "retry": False, "flags": {}, "screen_flags": [], "beside": None,
 }
 
 #: THE PANEL AGENDA: the spec's `agenda` keys, each with its published prior (no figure). `earnings_drift` stays
@@ -169,7 +209,7 @@ def is_panel(fam: Mapping[str, Any] | None) -> bool:
 
 def seatable(root: str | Path) -> Callable[[Any], bool]:
     """The seat rule `bands.equity_seating` is handed: E1's for "etf" and "stock"; "panel" iff the effective mode is
-    "live"."""
+    "live". (A style-open passer never reaches this rule: `look` gives it no band, A22.)"""
     raise NotImplementedError(_STUB)
 
 
@@ -195,6 +235,27 @@ def closed_cells(store: Any, settings: Mapping[str, Any] | None) -> list[tuple[s
 
 def cell_looks(store: Any, cell: Sequence[str]) -> int:
     """THE HOUSE'S COUNT (duty 3): the XS1 looks already taken by panel families of `cell`, in flight included."""
+    raise NotImplementedError(_STUB)
+
+
+def look_room(store: Any, cell: Sequence[str]) -> str | None:
+    """A22 (2): why `cell` has no XS1 look left, or None: `cell_looks(store, cell)` has reached `MAX_CELL_LOOKS` and
+    no forward verdict exists in the cell (none can in this release: the cap is flat). The look it holds back is not
+    spent."""
+    raise NotImplementedError(_STUB)
+
+
+def probed(root: str | Path, fam: Mapping[str, Any]) -> str | None:
+    """A22 (3): why the look must wait on the contamination probe, or None: `<root>/PROBE_FILE` (E3's
+    `league.ops.contam_probe.FILE`, read by name: aggregates only) holds a published result (`at`) for the route that
+    wrote the family's program (its spec's `e2_route`) whose cells carry every stratum of `PROBE_STRATA`. No file, no
+    such route, no panel stratum, an unreadable file: the reason, and the look waits (nothing spent)."""
+    raise NotImplementedError(_STUB)
+
+
+def style_of(fam: Mapping[str, Any], version: int | None = None) -> dict[str, Any] | None:
+    """A22 (1): the style verdict the Train record keeps for a version (default: the banded or latest judged one),
+    or None when it has none (read as style-open: `league.xs.style.seat_refusal(None)`)."""
     raise NotImplementedError(_STUB)
 
 
@@ -279,13 +340,17 @@ def score(researcher: Any, fam: Mapping[str, Any], version: Mapping[str, Any], *
           rescore: bool = False) -> dict[str, Any]:
     """One version's Train judgment (`may_run` first; the runs, the bar, the restart check, the record, then the
     hidden run). It writes E2's scored event for every version judged on the bar (`swarm.elane` {"pass": "scored",
-    version, sha, bar_passed, fails, objective: OBJECTIVE, judged}), which is the forward registry's time evidence."""
+    version, sha, bar_passed, fails, objective: OBJECTIVE, judged}), which is the forward registry's time evidence.
+    THE STYLE READING (A22 (1)) is taken here, from the seen spans' full-universe k 1.0 runs, and kept in the record
+    under `STYLE_FIELD` whatever the bar said."""
     raise NotImplementedError(_STUB)
 
 
 def train_facts(fam: Mapping[str, Any]) -> dict[str, Any]:
-    """What a researcher sees of its own family: the seen-span facts at both k and each rule's pass or fail. NEVER a
-    half's figure, a placebo rank, an id, the hidden year, or anything after Train."""
+    """What a researcher sees of its own family: the seen-span facts at both k and each rule's pass or fail, and
+    whether its Train holdings read style-open and on which characteristics (a Train fact: a style-open program can
+    pass the look and still take no seat). NEVER a half's figure, a placebo rank, an id, the hidden year, or anything
+    after Train."""
     raise NotImplementedError(_STUB)
 
 
@@ -313,12 +378,16 @@ def validate(tournament: Any, fam: Mapping[str, Any], version: Mapping[str, Any]
 
 def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str) -> bool | None:
     """A panel family's ONE sealed look under XS1 (mode at least "gate"): the pinned receipt (none: wait, nothing
-    spent); one look a lineage; E2's review; the panel store holds the whole calibrated holdout; the floor (kept a
-    version while it fits the receipt; an ineligible floor spends no look); E1's gate capability; the look's run with
-    the receipt's draws under `league.xs.placebo.look_seed`; `league.xs.screen.verdict`; the look event records the
-    screen "XS1", the receipt sha, c_used, p_plac and the sentence beside (duty 3). THE RUN'S STATUS FIRST, by E1's
-    rules word for word (a run sent whole and never answered is owed once, then spent and failed). True passed (a
-    Candidate, proof {"engine": XS_ENGINE_VERSION, "xs_sha256", "run_sha"}), False failed, None not run."""
+    spent); one look a lineage; the cell's looks (`look_room`, A22 (2): wait); E2's review under `REVIEW_XS` and the
+    contamination probe (`probed`, A22 (3): wait); the panel store holds the whole calibrated holdout; the floor (kept
+    a version while it fits the receipt; an ineligible floor spends no look); E1's gate capability; the look's run
+    with the receipt's draws under `league.xs.placebo.look_seed`; `league.xs.screen.verdict`; the look event records
+    the screen "XS1", the receipt sha, c_used, p_plac, the probe's reading and the sentence beside (duty 3). THE RUN'S
+    STATUS FIRST, by E1's rules word for word (a run sent whole and never answered is owed once, then spent and
+    failed). True passed, False failed, None not run. A PASS SEATS ONLY A PROGRAM THAT IS NOT STYLE-OPEN (A22 (1)):
+    `league.xs.style.seat_refusal(style_of(fam))` None: a Candidate, proof {"engine": XS_ENGINE_VERSION, "xs_sha256",
+    "run_sha"}, `seat` `SEAT_CANDIDATE`; else the pass is recorded with `seat` `SEAT_STYLE` and its reason, the
+    family takes no band and no proof, and the forward record shadows it."""
     raise NotImplementedError(_STUB)
 
 
@@ -330,9 +399,11 @@ def beside_line(fam: Mapping[str, Any]) -> str | None:
 
 __all__ = ["STRUCTURE", "PANELS", "OBJECTIVE", "LANE", "MODES", "STATE_KEY", "FLOOR_KEY", "TRAIN_X_KEY",
            "TRAIN_U_KEY", "PRECHECK_KEY", "PLACEBO_KEY", "HALVES_KEY", "OOF_KEY", "LOOK_KEY", "SEALED", "CPU_KEY",
-           "ZERO_KEY", "ALERTS_KEY", "SETTINGS_KEY", "SCREEN_KEY", "DECIDER_LOG", "DEFAULTS", "BOUNDS",
+           "ZERO_KEY", "ALERTS_KEY", "STYLE_FIELD", "SEAT_CANDIDATE", "SEAT_STYLE", "MAX_CELL_LOOKS", "PROBE_FILE",
+           "PROBE_STRATA", "REVIEW_XS", "SETTINGS_KEY", "SCREEN_KEY", "DECIDER_LOG", "DEFAULTS", "BOUNDS",
            "CENSUS_NOTE_MAX", "SCREEN_NULLS", "PANEL_AGENDA", "BAR_XS", "FAILS_XS", "JUDGED_XS", "cfg", "mode",
-           "live_ready", "is_panel", "seatable", "card_errors", "cell_of", "closed_cells", "cell_looks", "assign",
+           "live_ready", "is_panel", "seatable", "card_errors", "cell_of", "closed_cells", "cell_looks", "look_room",
+           "probed", "style_of", "assign",
            "seen_spans", "hidden_span", "agenda_text", "contract_text", "bar_text", "quota", "runner", "may_run",
            "book_cpu", "train_score_xs", "state_check", "score", "train_facts", "train_map", "same_lineage",
            "validate", "look", "beside_line"]

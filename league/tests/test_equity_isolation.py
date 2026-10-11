@@ -158,9 +158,12 @@ class TheEvidenceModules(unittest.TestCase):
                 self.assertIn("/".join(module.split(".")[:-1]) + "/", kinds.RUNTIME)
 
     def test_the_panel_slot_imports_nothing_of_the_live_path_or_the_swarm(self):
+        """A13's slot is the panel lane's package since release E4: a FLAT package (the decider child's runtime copies
+        league/xs/*.py only) that still holds the kind's child, and no module of it names the live path or the swarm."""
         modules = sorted(XS.rglob("*.py"))
-        self.assertEqual([p.relative_to(XS).as_posix() for p in modules], ["__init__.py", "child.py"],
-                         "A13's slot: a package and its refusing child, nothing else until the panel lane is built")
+        names = [p.relative_to(XS).as_posix() for p in modules]
+        self.assertLessEqual({"__init__.py", "child.py"}, set(names), "the package and the kind's child")
+        self.assertEqual([name for name in names if "/" in name], [], "league/xs stays flat")
         for path in modules:
             with self.subTest(module=path.name):
                 bad = {n for n in references(path) if within(n, "league.live") or within(n, "league.swarm")}
