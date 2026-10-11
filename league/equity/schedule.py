@@ -9,7 +9,8 @@ is an offset from the session's own open or close, so a half day needs no rule o
     entry_until   open + 900 s     (09:45)     no open-window entry after it (a missed entry is recorded, never chased)
     exit_until    close - 300 s    (15:55)     open-window exits re-priced each minute until it, then go at the bid
                                                (a marketable limit at the widest collar, in the close window)
-    close_send    close - 300 s    (15:55:00)  the CLOSE window (A2): exits first, then entries, marketable limits
+    close_send    close - 300 s    (15:55:00)  the CLOSE window (A2): exits first, then entries (once the exits
+                                               filled or 60 s passed, the book's `CLOSE_EXIT_WAIT_S`), marketable limits
     close_until   close - 30 s     (15:59:30)  re-priced every 30 s until it, then recorded missed
     bars_at       close + 1200 s   (16:20)     the 1Day bars of the universe, adjustment=raw and adjustment=all
     decide_at     close + 1800 s   (16:30)     each live equity instance decides (the decider's "equity" kind)
@@ -18,6 +19,14 @@ The offsets come from the constitution's `equity_money.order_path` (league/live/
 from here; `DEFAULTS` are the design's values, used by tests and by a House whose equity table cannot be read. A key the
 table does not carry keeps its default. The House's minute sets the pace: a moment is "due" at the first minute at or
 after it, so a 30-second re-price runs at most once a minute.
+
+THE EFFECTIVE SEND TIMES. A moment above is the EARLIEST a thing may happen, never the time it happens. The House's
+minute starts three seconds past the wall minute (league/live/step.py `MINUTE_OFFSET`) and the equity book runs after
+the options path's whole minute (up to most of a minute of decisions), so the open window's first send is the 09:31
+minute's (09:31:03 plus the options minute; never 09:30:30) and the close window's the 15:55 minute's (15:55:03 plus the
+same), each later send a minute after the last. A cut-off is judged on the minute's own start AND, at each send, on the
+wall clock (league/equity/live.py `_send`): nothing is POSTed at or after 09:45:00 (an open entry) or 15:59:30 (an exit
+or a close entry), so the last send of a slow minute is dropped rather than left to rest for the next session.
 
 THE PHASES of a session day (`phase`), in order: "closed" (midnight to the audit), "audit", "preopen", "open_window"
 (the open's sends to the entry cut-off), "session", "close_window" (the close's sends to the close), "after_close",

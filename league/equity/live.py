@@ -24,14 +24,32 @@ replacement can go in the same minute. ONE DAY ORDER COUNT (A8.3): at most `orde
 orders a day (cancels counted, as the options book counts its own), entries leaving room for every open lot's exit and
 one cancel of it, and none while the House-wide count would leave less than the options book's `exit_reserve()`.
 
+THE HOUSE'S MINUTE (the clock every window runs on): `tick(now)` is handed the minute's start, three seconds past the
+wall minute, and runs AFTER the whole options minute, so its sends go later by however long that took (up to most of a
+minute). A moment is due at the first minute at or after it: the open window's first send is the 09:31 minute's (09:30:30
+is its earliest moment, never its send time), the close window's the 15:55 minute's, and a re-price goes at most once a
+minute, its age counted from the minute an order was sent in (`answer.tick`), never from `placed_at` (the wall clock at
+its POST). EVERY CUT-OFF IS JUDGED AGAIN ON THE WALL CLOCK at the send (`_send`): nothing is written or POSTed at or
+after its window's cut-off (09:45:00 an open entry, 15:59:30 every exit and every close entry), since a day order POSTed
+at or after the close would rest for the next session; no order is cancelled for a re-price its replacement could
+not follow; and one the venue still shows working on a later day than its own is cancelled wherever the minute finds
+it (`_end_stale`). THE GATEWAY'S UNREAD READINGS (`RETRY_CAPS`: 424 positions, 424 orders, 503 equity, 409 stock_close; nothing
+was sent and nothing judged) go again next minute like the House's own rate refusal: never an entry's end, never one of
+the `MAX_EXIT_REFUSALS` that carry an exit to the next session; an order refused before the venue widens no collar.
+ONE INTENT, ONE LOT: every fill of a buy intent's orders joins the lot its first fill opened (`_intent_lot`).
+THE OWNER'S COMMANDS (`OWNER_FLATTEN`, `OWNER_CLEAR_FREEZE`: `python3 -m league.live --flatten-equity "<why>"`,
+`--clear-equity-freeze "<why>"`) are key-values read first every minute and done once, in the House's own thread.
+
 THE WINDOWS (`schedule`): OPEN: exits first at open+30 s (09:30:30 ET), entries after the exits filled or 2 minutes,
 sized on cash after the exit fills (no entry is funded by an exit that has not filled: the account is read again before
 the entries are sized, and an unfilled sale adds nothing to its cash); collar `entry_collar_bp` (10 ETF / 25 stock) on
 the first send, widening by the same step each re-price to `max_collar_bp` (50 / 100), and at the widest collar
 re-priced only when the quote has moved through the limit (`_reprice_due`: the day's order count is shared); entries stop at open+15 min
 (09:45); exits continue to close-5 min (15:55), then go at the bid at the widest collar in the close window. CLOSE (A2):
-at close-5 min (15:55:00) exits first then entries, marketable limits re-priced every 30 s to close-30 s (15:59:30),
-then recorded missed. PRE-OPEN (09:25): the day's first reconciliation reading and an activities read (a split or a
+at close-5 min (15:55:00) exits first, then entries once those exits filled or a minute passed (`CLOSE_EXIT_WAIT_S`: as
+at the open, sized on the cash after the exits), marketable limits re-priced every 30 s to close-30 s (15:59:30), then
+recorded missed. In either window an entry sized to nothing is not final while an exit may still fill (`_exits_due`): it
+is sized again each minute, and its cut-off records it missed with the reason. PRE-OPEN (09:25): the day's first reconciliation reading and an activities read (a split or a
 dividend posted overnight); the windows' orders are the decide's intents (`eq_intents`), each written `pending` at its
 own send with that minute's quote, never at 09:25 with a pre-open price. A missed entry is recorded, never chased; an exit the windows could not fill is recorded missed
 and carried to the next session's open (a "house_exit" intent of the same reason). MIN HOLD: a lot never sells in the
@@ -173,10 +191,27 @@ PENDING_GRACE_S = 30.0
 LOOKUP_LIMIT = 6
 #: A cancel is not sent again for the same order within this many seconds.
 CANCEL_AGAIN_S = 50.0
+#: THE OWNER'S COMMANDS (`python3 -m league.live --root <state> --flatten-equity "<why>"` and `--clear-equity-freeze
+#: "<why>"`, league/live/__main__.py): key-values only the owner's command writes ({why, at, by}). The tick reads them
+#: every minute, acts once in the House's own thread and deletes them (`EquityBook._owner`), as the options path reads
+#: `owner_clear_assignment`.
+OWNER_FLATTEN = "owner_equity_flatten"
+OWNER_CLEAR_FREEZE = "owner_equity_clear_freeze"
 #: A symbol whose equity order is working, or ended this recently, is not reconciled that minute.
 FLUX_S = 120.0
 #: An exit the gateway or the venue refused this many times in a session is carried to the next one (and alarmed).
 MAX_EXIT_REFUSALS = 3
+#: THE GATEWAY'S "NOTHING WAS SENT, SEND IT AGAIN" ANSWERS, by their `cap` (gateway/lib/router.mjs and gate.mjs: 424
+#: `positions` and `orders`, the account's book could not be read; 503 `equity`, the account could not be read; 409
+#: `stock_close`, an earlier close of the same shares is still held in flight, a minute at most): a reading that could
+#: not be made, never a verdict on the order. Like the House's own rate refusal the order goes again next minute until
+#: its window's cut-off: never an entry's end, never one of the `MAX_EXIT_REFUSALS` that carry an exit to the next
+#: session (the owner is told once a day a lot when an exit met `MAX_EXIT_REFUSALS` of them).
+RETRY_CAPS = ("positions", "orders", "equity", "stock_close")
+#: THE CLOSE WINDOW's wait (A2: close exits, then close entries, sized on the cash after the exits): its entries wait
+#: this long after `close_send` for the window's exits to fill, then go on the cash there is (the open window's
+#: `exit_wait_s` is 120 s of fifteen minutes; this is one House minute of the close's four and a half).
+CLOSE_EXIT_WAIT_S = 60.0
 #: The widest quoted spread an entry is sized on (a wider quote waits a minute): a fraction of the mid.
 MAX_ENTRY_SPREAD = Decimal("0.02")
 #: Seconds after `decide_at` the decide waits for a missing bar before deciding without it (those instances fail).
@@ -479,6 +514,12 @@ class Order:
     @property
     def filled_value(self) -> Decimal:
         return self.filled_qty * (self.avg_px or ZERO)
+
+    @property
+    def again(self) -> bool:
+        """A refusal that says nothing of the order itself (the House's own rate, or a reading the gateway could not
+        make: `RETRY_CAPS`): nothing was sent, and it is sent again next minute."""
+        return self.status == "refused" and bool(self.answer.get("house") or self.answer.get("retry"))
 
     def row(self) -> dict:
         return {"eid": self.eid, "client_id": self.client_id, "venue_id": self.venue_id, "instance": self.instance,
@@ -826,6 +867,41 @@ class EquityBook:
         self.record("equity.flatten", {"why": why[:300], "lots": n})
         return n
 
+    def _owner(self, now: float, out: dict) -> None:
+        """THE OWNER'S COMMANDS (`OWNER_FLATTEN`, `OWNER_CLEAR_FREEZE`), read first every minute, whatever the phase:
+        `flatten` run in the House's own thread (a second process on live.sqlite would race the book's row ids), and
+        the corporate-action freeze `eq_freeze` lifted (the reconciliation's own freeze is never the owner's to lift:
+        two clean readings lift it). Each is done once and its key deleted; one that fails keeps its key and is tried
+        again the next minute (a flatten queues each lot once), and never stops the other."""
+        for key, act in ((OWNER_FLATTEN, self._owner_flatten), (OWNER_CLEAR_FREEZE, self._owner_clear_freeze)):
+            ask = self.state.get(key)
+            if not ask:
+                continue
+            ask = ask if isinstance(ask, Mapping) else {}
+            try:
+                act(f"{ask.get('by') or 'the owner'}: {ask.get('why') or 'no reason given'}", out)
+            except Exception as exc:  # noqa: BLE001 - again next minute
+                self._error(key, exc, out)
+
+    def _owner_flatten(self, why: str, out: dict) -> None:
+        n = self.flatten(why)
+        self.state.execute("DELETE FROM kv WHERE key=?", (OWNER_FLATTEN,))
+        out["flatten"] = n
+        self.alert("warning", f"equity: flatten, {n} lots queued to exit through the normal path ({why[:200]})")
+
+    def _owner_clear_freeze(self, why: str, out: dict) -> None:
+        was = self.state.get("eq_freeze")
+        with self.state.transaction():
+            self.state.execute("DELETE FROM kv WHERE key IN ('eq_freeze', ?)", (OWNER_CLEAR_FREEZE,))
+        out["freeze_cleared"] = bool(was)
+        if not was:
+            return
+        old = str(was.get("why") if isinstance(was, Mapping) else was)[:300]
+        self.record("equity.freeze", {"frozen": bool(self.frozen), "cleared": "eq_freeze", "by": why[:300],
+                                      "why": f"cleared (was: {old})",
+                                      "activity": was.get("activity") if isinstance(was, Mapping) else None})
+        self.alert("warning", f"equity: the corporate-action freeze is cleared ({why[:200]}); it was: {old[:200]}")
+
     # ------------------------------------------------------------------ the minute
     def tick(self, now: float, *, account_row: Mapping[str, Any] | None, positions: Sequence[Mapping[str, Any]] | None,
              open_orders: Sequence[Mapping[str, Any]] | None, real_block: Callable[..., str | None],
@@ -851,6 +927,7 @@ class EquityBook:
             today = S.ny_day(now)
             m = S.moments(today, self._offsets())
             steps: list[tuple[str, Callable[[], Any]]] = [
+                ("owner", lambda: self._owner(now, out)),
                 ("orders", lambda: self._sync_orders(now, out)),
                 ("activities", lambda: self._activities(now, m, out)),
                 ("reconcile", lambda: self._reconcile_step(now, m, out)),
@@ -951,6 +1028,23 @@ class EquityBook:
                     self.alert("warning", f"equity: order {order.client_id}, given up as lost, is at the venue after all")
                     self._absorb(order, row)
         self._look_up(now, shown)
+        self._end_stale(now)
+
+    def _end_stale(self, now: float) -> None:
+        """A DAY ORDER NEVER OUTLIVES ITS SESSION: one the venue still shows working on a later New York day than its
+        own (`day`) reached the venue after its session's close and rests for the next one (`_send` posts nothing at or
+        after a cut-off by the wall clock, so this takes a slow gateway and a House that was down at the cut-off's own
+        cancel). It is cancelled wherever the minute finds it, the quiet hours included, before the next open can fill
+        it as a lot of a session it never traded in; its intent then ends as any other (an entry missed, an exit sent
+        again in today's window)."""
+        today = S.ny_day(now).isoformat()
+        for order in self._orders(("working",)):
+            if order.day >= today or not order.venue_id:
+                continue
+            if "cancel_sent" not in order.answer:
+                self.alert("warning", f"equity: order {order.client_id} of {order.day} is still working at the venue: "
+                                      "cancelled (a day order ends with its session)")
+            self._cancel(order, "left working past its own session", now)
 
     def _look_up(self, now: float, shown: set[str]) -> None:
         candidates = [o for o in self._orders(WORKING) if o.status in ("unknown", "pending")]
@@ -1020,6 +1114,8 @@ class EquityBook:
         intent = self._intent(order.iid)
         if order.side == "buy":
             lid = order.lid if order.lid is not None else (intent.lid if intent is not None else None)
+            if lid is None:
+                lid = self._intent_lot(order)
             lot = self._lot(lid)
             if lot is None:
                 inst = self._instance(order.instance)
@@ -1037,6 +1133,9 @@ class EquityBook:
                 lot.entry_notional += dq * px
                 lot.entry_px = (lot.entry_notional / lot.opened_qty).quantize(PRICE_PLACES)
                 lot.cash -= dq * px
+                if intent is not None and intent.lid != lot.lid:
+                    intent.lid = lot.lid
+                    self._save_intent(intent)
             order.lid = lot.lid
             self._save_lot(lot)
             fees = ZERO
@@ -1079,19 +1178,41 @@ class EquityBook:
                                          "symbol": lot.symbol, "cash": text(lot.cash), "reason": lot.reason},
                         agent=lot.family)
 
+    def _intent_lot(self, order: Order) -> int | None:
+        """The open lot an earlier order of this buy's intent already opened (`eq_lots.iid`), when neither the order nor
+        the intent's row names it: ONE INTENT, ONE LOT, as the Gym has one lot a buy, whatever a row lost."""
+        if order.iid is None:
+            return None
+        rows = self.state.rows("SELECT lid FROM eq_lots WHERE iid=? AND instance=? AND symbol=? AND status IN "
+                               "('open', 'closing') ORDER BY lid LIMIT 1", (int(order.iid), order.instance, order.symbol))
+        return int(rows[0]["lid"]) if rows else None
+
     # ------------------------------------------------------------------ sending
     def _send(self, intent: Intent, *, side: str, symbol: str, klass: str, qty: Decimal, limit: Decimal, collar: int,
-              day: str, lid: int | None, replaces: int | None, probe: bool, why: str, at: str | None = None) -> Order:
+              day: str, lid: int | None, replaces: int | None, probe: bool, why: str, at: str | None = None,
+              tick: float | None = None, until: float | None = None) -> Order | None:
         """Write the order `pending` (the intent `sent`, a sold lot `closing`) BEFORE the POST; then POST it once. `at`
         is the window it goes in (the fill point a lot's `entry_at` / `exit_at` and its twin read), the intent's by
-        default."""
+        default. `tick` is the minute's `now` the send belongs to, kept as the order's `answer.tick` (a re-price is due
+        on the House's minute clock, `_reprice_due`; `placed_at` stays the wall clock at the POST). `until` is the
+        window's cut-off, judged here on the WALL clock: the minute's `now` passed it at the minute's start, but the
+        equity minute runs after the whole options minute, and a day order POSTed at or after the close would rest for
+        the next session. At or after `until` nothing is written or sent (None); the next minute ends the intent (an
+        entry missed, an exit carried)."""
         now = self.clock()
+        if until is not None and now >= until:
+            late = "not sent: the window's cut-off passed on the wall clock before the order could go"
+            if intent.why != late:
+                intent.why = late
+                self._save_intent(intent)
+            return None
         exit_ = side == "sell"
+        stamp = {} if tick is None else {"tick": float(tick)}
         with self.state.transaction():
             eid = self._next("eq_orders", "eid")
             order = Order(eid, client_id(eid, intent.family, nonce=getattr(self.state, "nonce", "")), intent.instance,
                           intent.family, side, symbol, klass, at or intent.at, qty, limit, int(collar), "pending", now, day,
-                          lid=lid, iid=intent.iid, replaces=replaces, probe=probe, why=why[:300])
+                          lid=lid, iid=intent.iid, replaces=replaces, probe=probe, why=why[:300], answer=dict(stamp))
             if exit_:
                 try:
                     order.fees_est = config.sell_fees(qty * limit, qty)
@@ -1128,6 +1249,9 @@ class EquityBook:
                 order.status = "refused" if gateway else "rejected"
                 order.answer = {"error": result.error, "status": result.status, "gateway": gateway,
                                 "cap": payload.get("cap")}
+                if gateway and payload.get("cap") in RETRY_CAPS:
+                    order.answer["retry"] = True     # nothing was sent, and nothing judged: again next minute
+        order.answer = {**stamp, **order.answer}
         self._save_order(order)
         if result is not None and result.ok:
             self._absorb(order, result.order)
@@ -1300,7 +1424,9 @@ class EquityBook:
                                      real_block=real_block, killed=killed, out=out)
                 except Exception as exc:  # noqa: BLE001
                     self._error(f"entry {intent.iid}", exc, out)
-        if now >= m.close_send:
+        # THE CLOSE WINDOW keeps the session's order too (A2: close exits, then close entries): its entries wait for the
+        # window's exits (today's close exits, and an open exit still going late) to fill, or `CLOSE_EXIT_WAIT_S`.
+        if now >= m.close_send and (now >= m.close_send + CLOSE_EXIT_WAIT_S or not self._exits_due(today, now, m)):
             for intent in entries:
                 if intent.at != "close":
                     continue
@@ -1309,6 +1435,17 @@ class EquityBook:
                                      real_block=real_block, killed=killed, out=out)
                 except Exception as exc:  # noqa: BLE001
                     self._error(f"entry {intent.iid}", exc, out)
+
+    def _exits_due(self, today: str, now: float, m: S.Moments) -> list[dict]:
+        """The exits that may still fill in the window open now ([{iid, instance}]): planned or sent, of a lot that may
+        sell today (the min hold), today's close exits only from `close_send` (before it they wait for the close). An
+        entry is sized on the cash AFTER them (A2, as the Gym's session: exits, then entries): each one that fills frees
+        its program's sleeve, the House-wide cash, the invested cap and the loss budget's room."""
+        rows = self.state.rows("SELECT iid, instance, at, exec_day FROM eq_intents WHERE status IN ('planned', 'sent') "
+                               "AND exec_day<=? AND kind IN ('sell', 'house_exit') AND lid IN "
+                               "(SELECT lid FROM eq_lots WHERE opened_day<? AND status IN ('open', 'closing'))",
+                               (today, today))
+        return [r for r in rows if not (r["at"] == "close" and r["exec_day"] == today and now < m.close_send)]
 
     def _finish(self, intent: Intent, status: str, why: str) -> None:
         intent.status, intent.why = status, why[:400]
@@ -1331,7 +1468,8 @@ class EquityBook:
         if current is not None and current.working:
             if now >= m.close_until:
                 self._cancel(current, "the close window ended", now)
-            elif self._reprice_due(current, now, reprice, m):
+            elif self.clock() < m.close_until and self._reprice_due(current, now, reprice, m):
+                # (Never cancelled for a re-price its replacement could not follow: `_send`'s wall-clock cut-off.)
                 self._cancel(current, "re-priced: cancel, then resend once it is terminal", now)
             current = Order.of(self.state.rows("SELECT * FROM eq_orders WHERE eid=?", (current.eid,))[0])
             if current.working:
@@ -1362,13 +1500,20 @@ class EquityBook:
             intent.why = "the gateway's kill switch is engaged (it blocks sells too)"
             self._save_intent(intent)
             return
-        refused = [o for o in orders if o.day == today and o.status in ("rejected", "refused")
-                   and not o.answer.get("house")]
+        refused = [o for o in orders if o.day == today and o.status in ("rejected", "refused") and not o.again]
         if len(refused) >= MAX_EXIT_REFUSALS:
             self.alert("error", f"equity: the exit of lot {lot.lid} ({lot.symbol}) was refused {len(refused)} times today; "
                                 "carried to the next session")
             self._carry(intent, lot, today, f"refused {len(refused)} times: {refused[-1].answer.get('error')}")
             return
+        unread = [o for o in orders if o.day == today and o.again and o.answer.get("retry")]
+        if len(unread) >= MAX_EXIT_REFUSALS and lot.info.get("exit_unread_told") != today:
+            # `RETRY_CAPS`: nothing was sent and nothing judged, so the exit is never carried for them; said once a day.
+            lot.info["exit_unread_told"] = today
+            self._save_lot(lot)
+            self.alert("error", f"equity: the gateway could not check the exit of lot {lot.lid} ({lot.symbol}) "
+                                f"{len(unread)} times today ({unread[-1].answer.get('cap')}: nothing was sent); it is "
+                                "sent again each minute until the session's windows end")
         why = self._symbol_busy(lot.symbol) or self._count_refusal(today, exit_=True)
         if why is None and any(o.status == "lost" for o in orders):
             why = self._lost_sale_check(lot)
@@ -1388,14 +1533,17 @@ class EquityBook:
                 self._save_intent(intent)
                 return
         entry_bp, max_bp = self._collars(lot.klass)
-        attempt = sum(1 for o in orders if o.day == today)
+        # The collar widens with each order that reached the venue; one refused before it (the House's rate, a gateway
+        # cap or an unread reading) priced nothing.
+        attempt = sum(1 for o in orders if o.day == today and o.status != "refused")
         late = intent.at == "open" and now >= m.exit_until
         collar = max_bp if late else collar_for(attempt, entry_bp, max_bp)
         limit = limit_for("sell", bid, collar)
         reason = "program" if intent.kind == "sell" else (intent.tag or "house")
         self._send(intent, side="sell", symbol=lot.symbol, klass=lot.klass, qty=lot.qty, limit=limit, collar=collar,
                    day=today, lid=lot.lid, replaces=current.eid if current is not None else None, probe=lot.probe,
-                   why=f"exit ({reason}){' at the bid, late' if late else ''}", at="close" if in_close else "open")
+                   why=f"exit ({reason}){' at the bid, late' if late else ''}", at="close" if in_close else "open",
+                   tick=now, until=m.close_until)
 
     def _sell_proof(self) -> str | None:
         """Why no real equity SALE may go yet (A10.1: the stock paper proof's SELL stage gates every one; the practice
@@ -1433,8 +1581,15 @@ class EquityBook:
     def _reprice_due(self, order: Order, now: float, reprice: float, m: S.Moments) -> bool:
         """Whether a working order is re-priced now: once it is `reprice` seconds old, while its collar can still widen;
         at the widest collar only when the quote has moved through its limit (a marketable order that does not fill is
-        not helped by another, and each re-price costs two of the day's orders, A8.3)."""
-        if order.status != "working" or now - order.placed_at < reprice:
+        not helped by another, and each re-price costs two of the day's orders, A8.3). Its age is counted on the
+        House's minute clock, from the `now` of the minute it was sent in (`answer.tick`) to this minute's `now`:
+        `placed_at` is the wall clock at the POST, later than its minute's `now` by however long the options minute
+        ran, and an age counted from it is always under a minute at the next minute (a 60-second re-price then went
+        every second minute). An order without the stamp (written by a process that stopped before its answer) is
+        aged from `placed_at`."""
+        sent = order.answer.get("tick")
+        since = float(sent) if isinstance(sent, (int, float)) and not isinstance(sent, bool) else order.placed_at
+        if order.status != "working" or now - since < reprice:
             return False
         if order.collar_bp < self._collars(order.klass)[1]:
             return True
@@ -1465,19 +1620,23 @@ class EquityBook:
         if current is not None and current.working:
             if now >= deadline:
                 self._cancel(current, "the entry cut-off", now)
-            elif self._reprice_due(current, now, reprice, m):
+            elif self.clock() < deadline and self._reprice_due(current, now, reprice, m):
+                # (Never cancelled for a re-price its replacement could not follow: `_send`'s wall-clock cut-off.)
                 self._cancel(current, "re-priced: cancel, then resend once it is terminal", now)
             orders = self._intent_orders(intent.iid)
             current = orders[-1]
             if current.working:
                 return
+            # The cancel's own lookup may have booked a fill, and with it the intent's lot (`_book_fill` saves the lot's
+            # id on the row): read the row again, so nothing below saves or sends from the row as it was before.
+            intent = self._intent(intent.iid) or intent
         et = self._et()
         min_order = Decimal(str(getattr(et, "min_order_usd", "10"))) if et is not None else Decimal("10")
         filled_qty = sum((o.filled_qty for o in orders), ZERO)
         filled_usd = sum((o.filled_value for o in orders), ZERO)
         target = orders[0].qty * orders[0].limit_px if orders else None
         if current is not None:
-            final = current.status in ("rejected", "lost") or (current.status == "refused" and not current.answer.get("house"))
+            final = current.status in ("rejected", "lost") or (current.status == "refused" and not current.again)
             if final:
                 cause = current.answer.get("reject_reason") or current.answer.get("error") or current.answer.get("lookup")
                 self._finish(intent, "done" if filled_qty > 0 else ("refused" if current.status == "refused" else "missed"),
@@ -1517,18 +1676,31 @@ class EquityBook:
             self._save_intent(intent)
             return
         entry_bp, max_bp = self._collars(klass)
-        collar = collar_for(len(orders), entry_bp, max_bp)
+        # The collar widens with each order that reached the venue; one refused before it priced nothing.
+        collar = collar_for(sum(1 for o in orders if o.status != "refused"), entry_bp, max_bp)
         limit = limit_for("buy", ask, collar)
         usd = None if target is None else target - filled_usd
         sized = self._size(intent, inst, symbol, klass, limit, usd, today)
         if sized is None:
             return
         if sized.qty <= 0:
+            due = self._exits_due(today, now, m)
+            if due:
+                # Not final while an exit may still fill (A2: entries are sized on the cash after the exits; the Gym
+                # fills a session's exits before it sizes its entries): sized again next minute, and the cut-off
+                # records it missed with this reason when no exit filled in time.
+                own = sum(1 for r in due if r["instance"] == intent.instance)
+                why = (f"sizing ({sized.binding}): {sized.reason}; sized again when the exits still working fill "
+                       f"({own} of its own program, {len(due)} in all)")
+                if intent.why != why:
+                    intent.why = why
+                    self._save_intent(intent)
+                return
             self._finish(intent, "done" if filled_qty > 0 else "refused", f"sizing ({sized.binding}): {sized.reason}")
             return
         self._send(intent, side="buy", symbol=symbol, klass=klass, qty=sized.qty, limit=limit, collar=collar, day=today,
                    lid=intent.lid, replaces=current.eid if current is not None else None, probe=inst.band == "probe",
-                   why=f"entry ({sized.binding}: {sized.reason})"[:300])
+                   why=f"entry ({sized.binding}: {sized.reason})"[:300], tick=now, until=deadline)
 
     # ------------------------------------------------------------------ sizing
     def _size(self, intent: Intent, inst: Instance, symbol: str, klass: str, limit: Decimal, usd: Decimal | None,

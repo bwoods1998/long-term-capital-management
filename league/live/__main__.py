@@ -3,6 +3,8 @@
     python3 -m league.live --root /workspace/state --status
     python3 -m league.live --root /workspace/state --release-drawdown     # lift the drawdown stop's pause
     python3 -m league.live --root /workspace/state --clear-assignment     # lift an assignment's freeze on real entries
+    python3 -m league.live --root /workspace/state --flatten-equity "<why>"        # queue every equity lot to exit
+    python3 -m league.live --root /workspace/state --clear-equity-freeze "<why>"   # lift a corporate action's freeze
     python3 -m league.live --root /workspace/state --calibration          # the D3 calibration samples, read-only
     python3 -m league.live --root /workspace/state --incubator            # the incubator's state, read-only
 
@@ -13,6 +15,13 @@ the mid in ticks, median seconds to fill); it prints quotes-derived numbers to t
 public. `--incubator` only reads (`mode=ro`) `<root>/live.sqlite` and `<root>/swarm.json`: the switch, today's pins
 (and why each passing cohort was not pinned), every first look with its P1-P6 values, the tally (R, H, W, what is held
 or working, today's legs and dispatch) and today's incubator refusals (`league/live/incubator.py`).
+
+THE EQUITY LANE's two owner commands (release E1) only write a key-value the equity book reads at its next minute, in
+the House's own thread (league/equity/live.py `EquityBook._owner`), each with the owner's reason, recorded:
+`--flatten-equity` (the rollback's step 3, docs/operations.md: every open equity lot queued to exit at the next window
+through the normal order path, never a market order) and `--clear-equity-freeze` (lifts `eq_freeze`, the freeze an
+unexplained corporate action or a rename set on real opens in both lanes; the reconciliation's own freeze lifts itself
+after two clean readings). The status shows a command the House has not read yet under `equity`.
 """
 
 from __future__ import annotations
@@ -24,6 +33,19 @@ from pathlib import Path
 
 from .state import STATE_FILE, LiveState
 
+#: THE EQUITY LANE's owner commands: the key-values the equity book reads each minute (league/equity/live.py
+#: `OWNER_FLATTEN`, `OWNER_CLEAR_FREEZE`; a test holds the names equal: league/live never imports the book).
+EQUITY_FLATTEN = "owner_equity_flatten"
+EQUITY_CLEAR_FREEZE = "owner_equity_clear_freeze"
+
+
+def equity_ask(why: str) -> dict:
+    """An equity owner command's key-value: {why, at, by}. The reason is required (it is recorded with the act)."""
+    why = " ".join(str(why or "").split())
+    if not why:
+        raise SystemExit("say why: the reason is recorded with the command")
+    return {"why": why[:300], "at": time.time(), "by": "the owner (python -m league.live)"}
+
 
 def main(argv: list[str] | None = None) -> dict:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -32,6 +54,10 @@ def main(argv: list[str] | None = None) -> dict:
     action.add_argument("--status", action="store_true", help="Print the live path's state (the default).")
     action.add_argument("--release-drawdown", action="store_true", help="Owner: lift the drawdown stop's pause.")
     action.add_argument("--clear-assignment", action="store_true", help="Owner: lift the freeze an assignment set.")
+    action.add_argument("--flatten-equity", metavar="WHY",
+                        help="Owner: queue every open equity lot to exit at the next window (the rollback's step 3).")
+    action.add_argument("--clear-equity-freeze", metavar="WHY",
+                        help="Owner: lift the equity freeze an unexplained corporate action set (eq_freeze).")
     action.add_argument("--calibration", action="store_true",
                         help="Read-only: the D3 calibration round trips' samples per cell (league/live/calibration.py).")
     action.add_argument("--incubator", action="store_true",
@@ -56,6 +82,10 @@ def main(argv: list[str] | None = None) -> dict:
             state.put("owner_release_drawdown", {"at": time.time(), "by": "the owner (python -m league.live)"})
         elif args.clear_assignment:
             state.put("owner_clear_assignment", {"at": time.time()})
+        elif args.flatten_equity is not None:
+            state.put(EQUITY_FLATTEN, equity_ask(args.flatten_equity))
+        elif args.clear_equity_freeze is not None:
+            state.put(EQUITY_CLEAR_FREEZE, equity_ask(args.clear_equity_freeze))
         out = {
             "stops": state.get("stops"), "reconciliation": state.get("recon"), "paper_proof": state.get("paper_proof"),
             "assignment_latch": state.get("assignment_latch"), "orders_today": state.get("count"),
@@ -66,6 +96,9 @@ def main(argv: list[str] | None = None) -> dict:
                                          "WHERE status IN ('pending', 'working', 'unknown') ORDER BY oid"),
             "instances": state.rows("SELECT id, family, band, tuition, mode, why FROM instances WHERE retired_at IS NULL"),
         }
+        out["equity"] = {"freeze": state.get("eq_freeze"), "reconciliation": state.get("eq_recon"),
+                         "pending_owner_actions": {k: state.get(k) for k in (EQUITY_FLATTEN, EQUITY_CLEAR_FREEZE)
+                                                   if state.get(k)}}
         print(json.dumps(out, indent=2, default=str))
         return out
     finally:
