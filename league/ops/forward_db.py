@@ -22,8 +22,9 @@ THE STORE (`SCHEMA`; each table's columns are commented there):
 - `fwd_events`: the forward log (`EVENT_KINDS`), through `event`; `fwd_engines`: the engine labels, through `engine_id`;
   `fwd_kv`: the one table that can be overwritten (`KV_KEYS`).
 
-APPEND-ONLY: a trigger aborts UPDATE and DELETE on every table but `fwd_kv` (`APPEND_ONLY`). The first value written
-for a key stands; a later different value is an event, never an overwrite. AN EVENT IS WRITTEN ONCE: every event that
+APPEND-ONLY: a trigger aborts UPDATE and DELETE on every table but `fwd_kv` (`APPEND_ONLY`), a replace included (the
+schema turns recursive triggers on for its connection: SQLite fires no delete trigger for a replaced row without
+them). The first value written for a key stands; a later different value is an event, never an overwrite. AN EVENT IS WRITTEN ONCE: every event that
 restates a standing fact goes through `event(..., once=<key>)` (`ONCE_KINDS`), so none repeats night after night for
 one cause. A FAILURE OF THE HOUSE NEVER MARKS A PROGRAM: a decider that cannot start, a store being rewritten, a
 missing bar or minute end nobody's forward record and tag nobody; they are events and alarms.
@@ -64,12 +65,18 @@ Standard library and numpy only (numpy inside functions).
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import hashlib
+import json
+import math
+import os
+import re
 import sqlite3
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterator, Mapping, Sequence
 
 from ..equity import results
 
@@ -257,9 +264,15 @@ CREATE TABLE IF NOT EXISTS fwd_part (instance TEXT NOT NULL, through TEXT NOT NU
 _TRIGGERS_SQL = "".join(
     f"CREATE TRIGGER IF NOT EXISTS {t}_no_{verb.lower()} BEFORE {verb} ON {t} BEGIN SELECT RAISE(ABORT, "
     f"'{APPEND_ONLY_ERROR}'); END;\n" for t in APPEND_ONLY for verb in ("UPDATE", "DELETE"))
+#: SQLite's REPLACE (`INSERT OR REPLACE`, `REPLACE INTO`) deletes the row it conflicts with WITHOUT firing a delete
+#: trigger unless recursive triggers are on, so with the triggers alone a replace would overwrite a row of an
+#: append-only table in silence. The pragma is a connection's own setting (never stored in the file), so it rides at
+#: the top of `SCHEMA`: every connection that runs the schema (a writable `open_db`, a package's in-memory test
+#: database) refuses a replace as it refuses UPDATE and DELETE.
+_PRAGMAS_SQL = "PRAGMA recursive_triggers=ON;\n"
 #: The whole store: `sqlite3.Connection.executescript(SCHEMA)` (idempotent). Complete from step 0: every package tests
 #: on an in-memory database made from it.
-SCHEMA = _TABLES_SQL + _TRIGGERS_SQL
+SCHEMA = _PRAGMAS_SQL + _TABLES_SQL + _TRIGGERS_SQL
 
 
 # ------------------------------------------------------------------------------------------------------- shared types
@@ -324,163 +337,488 @@ def bars_hash(inputs: Any) -> str:
 # ------------------------------------------------------------------------------------------------------------ settings
 def cfg(settings: Mapping[str, Any] | None) -> dict[str, Any]:
     """`elane.forward` in the swarm's settings: every key of `DEFAULTS`, each value inside its bound (`BOUNDS`; `mode`
-    one of `MODES`; `fill_minutes` and `twins` booleans). A malformed value is its code default; an unreadable block
-    is `DEFAULTS` (mode "off")."""
-    raise NotImplementedError("A: league/ops/forward_db.py cfg")
+    one of `MODES`; `fill_minutes` and `twins` booleans). A malformed value is its code default (a bounded value is a
+    whole number inside its bound: anything else, a number outside the bound included, is malformed); an unreadable
+    block is `DEFAULTS` (mode "off")."""
+    out = dict(DEFAULTS)
+    raw = settings.get("elane") if isinstance(settings, Mapping) else None
+    raw = raw.get("forward") if isinstance(raw, Mapping) else None
+    if not isinstance(raw, Mapping):
+        return out
+    if isinstance(raw.get("mode"), str) and raw["mode"] in MODES:
+        out["mode"] = raw["mode"]
+    for key, (low, high) in BOUNDS.items():
+        value = raw.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            continue
+        if low <= value <= high and float(value) == int(value):
+            out[key] = int(value)
+    for key in ("fill_minutes", "twins"):
+        if isinstance(raw.get(key), bool):
+            out[key] = raw[key]
+    return out
 
 
 def mode(settings: Mapping[str, Any] | None) -> str:
     """`cfg(settings)["mode"]`: "off" | "record"."""
-    raise NotImplementedError("A: league/ops/forward_db.py mode")
+    return str(cfg(settings)["mode"])
 
 
 # ------------------------------------------------------------------------------------------------------- forward days
 def t0() -> dt.date:
     """D1: the first forward day, `schedule.next_session(config.LOOK_CAP)` (computed, never a literal date)."""
-    raise NotImplementedError("A: league/ops/forward_db.py t0")
+    from ..equity import config, schedule
+
+    return schedule.next_session(config.LOOK_CAP)
 
 
 def first_close(created_at: float) -> dt.date:
     """D2: the earliest session d with `schedule.moments(d).close_at > created_at` and d >= `config.LOOK_CAP`: the
     close a program first decides at (a half day closes at 13:00; a weekend or a holiday moves it to the next
-    session)."""
-    raise NotImplementedError("A: league/ops/forward_db.py first_close")
+    session). ValueError for a time that is not a finite number, or one the calendar does not reach."""
+    from ..equity import config, schedule
+
+    if isinstance(created_at, bool) or not isinstance(created_at, (int, float)) or not math.isfinite(created_at):
+        raise ValueError(f"created_at is an epoch time: {created_at!r}")
+    day = max(schedule.ny_day(float(created_at)), config.LOOK_CAP)
+    for _ in range(schedule.HORIZON_DAYS + 1):
+        moments = schedule.moments(day)          # None: not a session
+        if moments is not None and moments.close_at > float(created_at):
+            return day
+        day += dt.timedelta(days=1)
+    raise ValueError(f"no NYSE session closes within {schedule.HORIZON_DAYS} days after {created_at!r}")
 
 
 def first_day(first_close: dt.date) -> dt.date:
     """D2: `schedule.next_session(first_close)`: the first session a program has a fill, a mark or P&L on; always
     on or after `t0()`."""
-    raise NotImplementedError("A: league/ops/forward_db.py first_day")
+    from ..equity import schedule
+
+    return schedule.next_session(first_close)
 
 
 def fwd_engine() -> str:
     """Tonight's engine label (the module docstring): `EQUITY_ENGINE_VERSION + "+" +
     evaluator.equity_fingerprint()[:12] + "+" + FWD_SERIES`, read once a night by the forward shadow."""
-    raise NotImplementedError("A: league/ops/forward_db.py fwd_engine")
+    from ..equity import EQUITY_ENGINE_VERSION
+    from ..swarm import evaluator
+
+    return f"{EQUITY_ENGINE_VERSION}+{evaluator.equity_fingerprint()[:12]}+{FWD_SERIES}"
 
 
 # ------------------------------------------------------------------------------------------------------------ the store
+@contextlib.contextmanager
+def _tx(db: sqlite3.Connection) -> Iterator[None]:
+    """One write of this module: its own transaction when the caller holds none (begun and committed here, rolled
+    back whole on any error), else a part of the caller's (the caller commits: `with db:` around several calls makes
+    them one transaction, as the forward shadow's one transaction a program)."""
+    if db.in_transaction:
+        yield
+        return
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        yield
+    except BaseException:
+        db.rollback()
+        raise
+    db.commit()
+
+
+def _json(value: Any, default: Any = None) -> Any:
+    try:
+        return json.loads(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def open_db(root: str | Path, *, readonly: bool = False) -> sqlite3.Connection:
     """`<root>/forward.sqlite`, rows as `sqlite3.Row`. Writable: creates the file 0600 (WAL), runs `SCHEMA` and, when
     `fgs_prereg` is absent, writes that kv (`kv_first`: `FGS_SHA`) and one `prereg` event holding the sha and `FGS`.
-    `readonly`: `guard.connect_ro` (it raises `sqlite3.OperationalError` when the file is absent)."""
-    raise NotImplementedError("A: league/ops/forward_db.py open_db")
+    `readonly`: `guard.connect_ro` (it raises `sqlite3.OperationalError` when the file is absent).
+
+    THE FIRST VALUE STANDS: a store whose `fgs_prereg` is another sha than this release's `FGS_SHA` keeps it, and this
+    release's sha is one more `prereg` event (once a sha), never an overwrite: a forward screen that differs from the
+    pinned shape judges only days after its own pin. A writable connection is in sqlite3's default transaction mode,
+    as the in-memory databases the packages test on: a write made with `execute` is the caller's to commit (`with
+    db:`); this module's own writes commit themselves unless the caller already holds a transaction (`_tx`)."""
+    path = Path(root) / DB
+    if readonly:
+        from . import guard
+
+        return guard.connect_ro(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        os.close(os.open(path, os.O_RDWR | os.O_CREAT, 0o600))
+    db = sqlite3.connect(str(path), timeout=30.0)
+    try:
+        db.row_factory = sqlite3.Row
+        db.execute("PRAGMA journal_mode=WAL")
+        db.execute("PRAGMA synchronous=NORMAL")
+        db.executescript(SCHEMA)
+        pinned = kv_get(db, "fgs_prereg")
+        if pinned != FGS_SHA:
+            with _tx(db):
+                first = kv_first(db, "fgs_prereg", FGS_SHA)
+                why = ("the forward screen's shape, pinned before any forward day exists" if first else
+                       "this release's forward screen shape differs from the one pinned at the store's creation: the "
+                       "pinned one stands, and this one judges only days after its own pin")
+                event(db, "prereg", payload={"fgs_sha": FGS_SHA, "fgs": FGS, "pinned": FGS_SHA if first else pinned,
+                                             "why": why}, at=time.time(), once=FGS_SHA)
+    except BaseException:
+        db.close()
+        raise
+    return db
+
+
+def _stored(row: Mapping[str, Any]) -> dict[str, Any]:
+    """A registry row's hashed columns as the store holds them (TEXT, INTEGER and REAL), so a row hashes the same
+    before its insert and read back: `version` an integer or None, the two times floats, `family` text or None, every
+    other column text."""
+    out: dict[str, Any] = {}
+    for key in HASHED:
+        value = row[key]
+        if key in ("pid", "version"):
+            out[key] = None if value is None else int(value)
+        elif key in ("created_at", "registered_at"):
+            out[key] = float(value)
+        elif key == "family":
+            out[key] = None if value is None else str(value)
+        else:
+            out[key] = str(value)
+    return out
 
 
 def row_hash(prev_hash: str, row: Mapping[str, Any]) -> str:
     """The chain link of one registry row: `sha256((prev_hash + "\\n" + results.canonical({k: row[k] for k in HASHED})
-    + "\\n" + sha256(row["code"].encode()).hexdigest()).encode()).hexdigest()`."""
-    raise NotImplementedError("A: league/ops/forward_db.py row_hash")
+    + "\\n" + sha256(row["code"].encode()).hexdigest()).encode()).hexdigest()` (each hashed column as the store holds
+    it: `_stored`)."""
+    code_sha = hashlib.sha256(str(row["code"]).encode()).hexdigest()
+    return hashlib.sha256((str(prev_hash) + "\n" + results.canonical(_stored(row)) + "\n" + code_sha).encode()).hexdigest()
+
+
+def _text(value: Any, name: str) -> str:
+    """A canonical JSON object as text: a mapping is encoded (`results.canonical`), a string must already be one."""
+    if isinstance(value, Mapping):
+        return results.canonical(value)
+    if not isinstance(value, str) or not isinstance(_json(value), dict):
+        raise ValueError(f"a registry row's {name} is a JSON object")
+    return value
+
+
+def _day(value: Any, name: str) -> dt.date:
+    if isinstance(value, dt.datetime):
+        raise ValueError(f"a registry row's {name} is a session day, not a time")
+    if isinstance(value, dt.date):
+        return value
+    try:
+        return dt.date.fromisoformat(str(value))
+    except ValueError:
+        raise ValueError(f"a registry row's {name} is an ISO session day: {value!r}") from None
+
+
+_EVIDENCE = re.compile(r"^(?:event:[1-9][0-9]*|registry)$")
+#: Why each registry reason is registered (the `registered` event's `why`).
+_REGISTERED_WHY = {"train_pass": "judged on the Train bar: passed", "train_fail": "judged on the Train bar: failed",
+                   "seed": "a captain-seeded program", "live": "a live instance the registry did not hold yet",
+                   "control": "a skill-free control of its universe group"}
 
 
 def append_registry(db: sqlite3.Connection, row: Mapping[str, Any]) -> int:
     """One registry row in one transaction: pid = the largest + 1; `prev_hash` = the last row's `row_hash` (`GENESIS`
     for the first); the insert; a `registered` event. The new pid. `sqlite3.IntegrityError` on a known key. A row
     whose (`route`, `alpha_f`) is neither (`E3_ROUTE`, `E3_ALPHA_F`) nor (`CONTROL_ROUTE`, `CONTROL_ALPHA_F`) is a
-    ValueError in E3."""
-    raise NotImplementedError("A: league/ops/forward_db.py append_registry")
+    ValueError in E3.
+
+    `row` holds every column of `fwd_registry` but `pid`, `prev_hash` and `row_hash` (`params` and `needs` as mappings
+    or canonical JSON text; `first_close` and `first_day` as dates or ISO days; `author` "" when left out). REFUSED
+    with a ValueError, before anything is written (fail closed: the chain never holds a row that breaks its own
+    pre-registration): a reason, lane or evidence outside its vocabulary; a control without the control's route and
+    alpha, or a program with them; a `program_sha` that is not sha256 of `code`; and D2's window: a row with evidence
+    "registry" whose `created_at` is before its `registered_at` (no row claims a time before its evidence), a
+    `first_close` before `first_close(created_at)`, or a `first_day` that is not `first_day(first_close)`."""
+    reason, lane = str(row["reason"]), str(row["lane"])
+    if reason not in REASONS or lane not in LANES:
+        raise ValueError(f"a registry row's reason is one of {', '.join(REASONS)} and its lane one of {', '.join(LANES)}")
+    pair = (str(row["route"]), str(row["alpha_f"]))
+    if pair not in ((E3_ROUTE, E3_ALPHA_F), (CONTROL_ROUTE, CONTROL_ALPHA_F)):
+        raise ValueError(f"a registry row of release E3 carries route {E3_ROUTE} and alpha_f {E3_ALPHA_F} (a control "
+                         f"{CONTROL_ROUTE} and {CONTROL_ALPHA_F}), not {pair[0]!r} and {pair[1]!r}")
+    control = reason == "control"
+    if control != (lane == "control") or control != (pair == (CONTROL_ROUTE, CONTROL_ALPHA_F)):
+        raise ValueError("a control, and only a control, carries the control's lane, route and alpha_f")
+    if control != (row.get("family") is None) or control != (row.get("version") is None):
+        raise ValueError("a control, and only a control, has no family and no version")
+    code = row["code"]
+    if not isinstance(code, str) or hashlib.sha256(code.encode()).hexdigest() != str(row["program_sha"]):
+        raise ValueError("a registry row's program_sha is sha256 of its code")
+    evidence = str(row["evidence"])
+    if not _EVIDENCE.match(evidence):
+        raise ValueError(f'a registry row\'s evidence is "event:<seq>" or "registry", not {evidence!r}')
+    created, registered = float(row["created_at"]), float(row["registered_at"])
+    if not (math.isfinite(created) and math.isfinite(registered)):
+        raise ValueError("a registry row's times are finite epoch seconds")
+    if evidence == "registry" and created < registered:
+        raise ValueError("a registry row with no event claims a time before the registry first saw it")
+    close, day = _day(row["first_close"], "first_close"), _day(row["first_day"], "first_day")
+    if close < first_close(created) or day != first_day(close):
+        raise ValueError(f"a registry row's forward window opens before its code existed (D2): first_close {close}, "
+                         f"first_day {day}")
+    values = {"key": str(row["key"]), "family": row.get("family"), "version": row.get("version"), "lane": lane,
+              "reason": reason, "ugroup": str(row["ugroup"]), "lineage": str(row["lineage"]), "code": code,
+              "params": _text(row["params"], "params"), "needs": _text(row["needs"], "needs"),
+              "program_sha": str(row["program_sha"]), "run_sha": str(row["run_sha"]),
+              "author": str(row.get("author") or ""), "created_at": created, "evidence": evidence,
+              "first_close": close.isoformat(), "first_day": day.isoformat(), "registered_at": registered,
+              "route": pair[0], "alpha_f": pair[1]}
+    with _tx(db):
+        last = db.execute("SELECT pid, row_hash FROM fwd_registry ORDER BY pid DESC LIMIT 1").fetchone()
+        values["pid"] = (int(last["pid"]) if last is not None else 0) + 1
+        values["prev_hash"] = str(last["row_hash"]) if last is not None else GENESIS
+        values = {**values, **_stored(values)}
+        values["row_hash"] = row_hash(values["prev_hash"], values)
+        names = list(values)
+        db.execute(f"INSERT INTO fwd_registry({', '.join(names)}) VALUES({', '.join('?' * len(names))})",
+                   [values[name] for name in names])
+        event(db, "registered", pid=values["pid"], day=values["first_day"],
+              payload={"key": values["key"], "reason": reason, "evidence": evidence, "why": _REGISTERED_WHY[reason]},
+              at=registered)
+    return int(values["pid"])
 
 
 def verify_chain(db: sqlite3.Connection) -> dict[str, Any]:
     """The registry's chain read whole: {"ok", "rows", "head" (the last row's hash; `GENESIS` when empty),
     "first_bad" (the pid of the first row whose `prev_hash` or `row_hash` does not hold; None)}. A tampered column of
-    `HASHED` (its `route` or `alpha_f` among them) or a changed `code` is found."""
-    raise NotImplementedError("A: league/ops/forward_db.py verify_chain")
+    `HASHED` (its `route` or `alpha_f` among them) or a changed `code` is found; so is a row taken out from the
+    middle (the next row's `prev_hash` no longer holds, and the pids are no longer 1, 2, 3, ...)."""
+    rows, prev, first_bad, head_ = 0, GENESIS, None, GENESIS
+    cursor = db.execute("SELECT * FROM fwd_registry ORDER BY pid")
+    try:
+        for row in cursor:
+            rows += 1
+            held = dict(row)
+            head_ = str(held["row_hash"])
+            if first_bad is None and (int(held["pid"]) != rows or held["prev_hash"] != prev
+                                      or row_hash(prev, held) != held["row_hash"]):
+                first_bad = int(held["pid"])
+            prev = head_
+    finally:
+        cursor.close()
+    return {"ok": first_bad is None, "rows": rows, "head": head_, "first_bad": first_bad}
 
 
 def head(db: sqlite3.Connection) -> str:
     """The last registry row's `row_hash` (`GENESIS` when the registry is empty)."""
-    raise NotImplementedError("A: league/ops/forward_db.py head")
+    row = db.execute("SELECT row_hash FROM fwd_registry ORDER BY pid DESC LIMIT 1").fetchone()
+    return str(row[0]) if row is not None else GENESIS
+
+
+def _once_seen(db: sqlite3.Connection, kind: str, pid: int | None, day: str | None, once: str) -> bool:
+    """Whether a row of that kind, pid and day already carries `once` in its payload."""
+    where, params = "kind=? AND pid IS ? AND day IS ?", (kind, pid, day)
+    try:
+        return db.execute(f"SELECT 1 FROM fwd_events WHERE {where} AND json_extract(payload, '$.once')=? LIMIT 1",
+                          (*params, once)).fetchone() is not None
+    except sqlite3.OperationalError:          # an SQLite built without its JSON functions: read the payloads here
+        return any((_json(r[0], {}) or {}).get("once") == once
+                   for r in db.execute(f"SELECT payload FROM fwd_events WHERE {where}", params).fetchall())
 
 
 def event(db: sqlite3.Connection, kind: str, *, pid: int | None = None, day: str | None = None,
           payload: Mapping[str, Any] | None = None, at: float, once: str | None = None) -> int:
     """One `fwd_events` row; its seq. With `once` (a short string) the row is written only when no row of that kind,
     pid and day carries the same `once` in its payload (it then returns 0); the payload holds it under "once". A
-    payload is small JSON with a `why`: ids, counts and dates only, never a price or a return."""
-    raise NotImplementedError("A: league/ops/forward_db.py event")
+    payload is small JSON with a `why`: ids, counts and dates only, never a price or a return.
+
+    ValueError for a kind outside `EVENT_KINDS`, and for a kind of `ONCE_KINDS` written without `once` (an event that
+    restates a standing fact is written once, never night after night)."""
+    if kind not in EVENT_KINDS:
+        raise ValueError(f"no forward event kind {kind!r}; one of {', '.join(EVENT_KINDS)}")
+    if once is None and kind in ONCE_KINDS:
+        raise ValueError(f"a {kind} event is written once: it names its `once` key")
+    if payload is not None and not isinstance(payload, Mapping):
+        raise ValueError("a forward event's payload is a mapping")
+    pid = None if pid is None else int(pid)
+    day = None if day is None else (day.isoformat() if isinstance(day, dt.date) else str(day))
+    body = dict(payload or {})
+    with _tx(db):
+        if once is not None:
+            body["once"] = once = str(once)
+            if _once_seen(db, kind, pid, day, once):
+                return 0
+        cursor = db.execute("INSERT INTO fwd_events(at, kind, pid, day, payload) VALUES(?, ?, ?, ?, ?)",
+                            (float(at), kind, pid, day, results.canonical(body)))
+        return int(cursor.lastrowid or 0)
 
 
 def events(db: sqlite3.Connection, kind: str, *, pid: int | None = None, since: float | None = None
            ) -> list[dict[str, Any]]:
     """The `kind` events in seq order (of `pid` only when given; those with `at` >= `since` only when given): each
     {"seq", "at", "kind", "pid", "day", "payload" (a dict)}."""
-    raise NotImplementedError("A: league/ops/forward_db.py events")
+    sql, params = "SELECT seq, at, kind, pid, day, payload FROM fwd_events WHERE kind=?", [kind]
+    if pid is not None:
+        sql += " AND pid=?"
+        params.append(int(pid))
+    if since is not None:
+        sql += " AND at>=?"
+        params.append(float(since))
+    out = []
+    for row in db.execute(sql + " ORDER BY seq", params).fetchall():
+        held = _json(row["payload"], {})
+        out.append({"seq": int(row["seq"]), "at": float(row["at"]), "kind": row["kind"], "pid": row["pid"],
+                    "day": row["day"], "payload": held if isinstance(held, dict) else {}})
+    return out
 
 
 def kv_get(db: sqlite3.Connection, key: str, default: Any = None) -> Any:
     """`fwd_kv[key]` (JSON), `default` when absent."""
-    raise NotImplementedError("A: league/ops/forward_db.py kv_get")
+    row = db.execute("SELECT value FROM fwd_kv WHERE key=?", (str(key),)).fetchone()
+    return default if row is None else _json(row[0], default)
 
 
 def kv_put(db: sqlite3.Connection, key: str, value: Any) -> None:
     """`fwd_kv[key] = value` (JSON; the one table that can be overwritten)."""
-    raise NotImplementedError("A: league/ops/forward_db.py kv_put")
+    with _tx(db):
+        db.execute("INSERT INTO fwd_kv(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                   (str(key), json.dumps(value, sort_keys=True, separators=(",", ":"))))
 
 
 def kv_first(db: sqlite3.Connection, key: str, value: Any) -> bool:
     """`fwd_kv[key] = value` only when the key is absent (True); never overwrites (False)."""
-    raise NotImplementedError("A: league/ops/forward_db.py kv_first")
+    with _tx(db):
+        cursor = db.execute("INSERT OR IGNORE INTO fwd_kv(key, value) VALUES(?, ?)",
+                            (str(key), json.dumps(value, sort_keys=True, separators=(",", ":"))))
+        return cursor.rowcount == 1
 
 
 def engine_id(db: sqlite3.Connection, label: str, *, at: float) -> tuple[int, bool]:
     """(the label's id in `fwd_engines`, whether this call created it)."""
-    raise NotImplementedError("A: league/ops/forward_db.py engine_id")
+    label = str(label)
+    if not label:
+        raise ValueError("an engine label is not empty")
+    with _tx(db):
+        row = db.execute("SELECT id FROM fwd_engines WHERE label=?", (label,)).fetchone()
+        if row is not None:
+            return int(row[0]), False
+        cursor = db.execute("INSERT INTO fwd_engines(label, at) VALUES(?, ?)", (label, float(at)))
+        return int(cursor.lastrowid), True
 
 
 def engine_now(db: sqlite3.Connection) -> int | None:
     """The newest engine id (None before the first night)."""
-    raise NotImplementedError("A: league/ops/forward_db.py engine_now")
+    row = db.execute("SELECT MAX(id) FROM fwd_engines").fetchone()
+    return None if row is None or row[0] is None else int(row[0])
 
 
 def engine_label(db: sqlite3.Connection, id: int) -> str | None:  # noqa: A002 - the contract's name
     """The label of an engine id (None when unknown)."""
-    raise NotImplementedError("A: league/ops/forward_db.py engine_label")
+    row = db.execute("SELECT label FROM fwd_engines WHERE id=?", (int(id),)).fetchone()
+    return None if row is None else str(row[0])
 
 
 # ---------------------------------------------------------------------------------------------------------- programs
+def _program(row: Mapping[str, Any]) -> Program:
+    params, needs = _json(row["params"], {}), _json(row["needs"], {})
+    return Program(pid=int(row["pid"]), key=str(row["key"]), family=row["family"],
+                   version=None if row["version"] is None else int(row["version"]), lane=str(row["lane"]),
+                   reason=str(row["reason"]), ugroup=str(row["ugroup"]), lineage=str(row["lineage"]),
+                   code=str(row["code"]), params=params if isinstance(params, dict) else {},
+                   needs=needs if isinstance(needs, dict) else {}, program_sha=str(row["program_sha"]),
+                   run_sha=str(row["run_sha"]), created_at=float(row["created_at"]),
+                   first_close=dt.date.fromisoformat(str(row["first_close"])),
+                   first_day=dt.date.fromisoformat(str(row["first_day"])), route=str(row["route"]),
+                   alpha_f=str(row["alpha_f"]))
+
+
+def _stopped(db: sqlite3.Connection, pid: int | None = None) -> set[int]:
+    """The pids (of `pid` alone when given) with a "stopped" tag newer than their latest "resumed" tag."""
+    sql = ("SELECT pid, MAX(CASE WHEN tag='stopped' THEN at END) AS stopped, MAX(CASE WHEN tag='resumed' THEN at END) "
+           "AS resumed FROM fwd_tags WHERE tag IN ('stopped', 'resumed')")
+    params: tuple[Any, ...] = ()
+    if pid is not None:
+        sql, params = sql + " AND pid=?", (int(pid),)
+    return {int(r["pid"]) for r in db.execute(sql + " GROUP BY pid", params).fetchall()
+            if r["stopped"] is not None and (r["resumed"] is None or r["stopped"] > r["resumed"])}
+
+
 def programs(db: sqlite3.Connection, *, reasons: Sequence[str] | None = None, active: bool = True) -> list[Program]:
     """The registry's rows as `Program`s in pid order (of `reasons` only when given; `active` True: those `active`
     says are; False: every row)."""
-    raise NotImplementedError("A: league/ops/forward_db.py programs")
+    sql, params = "SELECT * FROM fwd_registry", []
+    if reasons is not None:
+        params = [str(r) for r in reasons]
+        if not params:
+            return []
+        sql += f" WHERE reason IN ({', '.join('?' * len(params))})"
+    stopped = _stopped(db) if active else set()
+    return [_program(row) for row in db.execute(sql + " ORDER BY pid", params).fetchall()
+            if int(row["pid"]) not in stopped]
 
 
 def active(db: sqlite3.Connection, pid: int) -> bool:
     """No "stopped" tag newer than its latest "resumed" tag (a control never stops)."""
-    raise NotImplementedError("A: league/ops/forward_db.py active")
+    return int(pid) not in _stopped(db, int(pid))
+
+
+def last_stored_day(db: sqlite3.Connection, pid: int) -> str | None:
+    """The latest day a pid has a `fwd_days` row for, under any engine (None with no row)."""
+    row = db.execute("SELECT MAX(day) FROM fwd_days WHERE pid=?", (int(pid),)).fetchone()
+    return None if row is None or row[0] is None else str(row[0])
 
 
 def suspect(db: sqlite3.Connection, pid: int) -> bool:
     """A "suspect" tag whose value, a night, is on or after its last stored day (a suspect is not stopped: it runs
-    last and is counted in the report)."""
-    raise NotImplementedError("A: league/ops/forward_db.py suspect")
+    last and is counted in the report). A night it completes a run again stores a later day, and it is suspect no
+    more."""
+    row = db.execute("SELECT MAX(value) FROM fwd_tags WHERE pid=? AND tag='suspect'", (int(pid),)).fetchone()
+    if row is None or row[0] is None:
+        return False
+    last = last_stored_day(db, pid)
+    return last is None or str(row[0]) >= last
 
 
 def program(db: sqlite3.Connection, key: str) -> Program | None:
     """The registry row of `key` (None when not registered)."""
-    raise NotImplementedError("A: league/ops/forward_db.py program")
+    row = db.execute("SELECT * FROM fwd_registry WHERE key=?", (str(key),)).fetchone()
+    return None if row is None else _program(row)
 
 
 def tags(db: sqlite3.Connection, pid: int) -> dict[str, list[dict[str, Any]]]:
     """{tag: [{"value", "at"}, ...]} of a pid, each list by `at`."""
-    raise NotImplementedError("A: league/ops/forward_db.py tags")
+    out: dict[str, list[dict[str, Any]]] = {}
+    for row in db.execute("SELECT tag, value, at FROM fwd_tags WHERE pid=? ORDER BY at, value", (int(pid),)).fetchall():
+        out.setdefault(str(row["tag"]), []).append({"value": str(row["value"]), "at": float(row["at"])})
+    return out
 
 
 def tag(db: sqlite3.Connection, pid: int, tag: str, value: str = "", *, at: float) -> bool:
     """One `fwd_tags` row (`tag` one of `TAGS`); False when (pid, tag, value) is already there."""
-    raise NotImplementedError("A: league/ops/forward_db.py tag")
+    if tag not in TAGS:
+        raise ValueError(f"no forward tag {tag!r}; one of {', '.join(TAGS)}")
+    with _tx(db):
+        cursor = db.execute("INSERT OR IGNORE INTO fwd_tags(pid, tag, value, at) VALUES(?, ?, ?, ?)",
+                            (int(pid), tag, str(value), float(at)))
+        return cursor.rowcount == 1
 
 
 def counted_days(db: sqlite3.Connection, pid: int, *, engine: int | None = None) -> list[dict[str, Any]]:
     """D4's COUNTED days of a pid, in day order: its `fwd_days` rows of `engine` (the newest engine id when None) with
     status "ok" and no `audit_mismatch` event for that (pid, day); each a dict of the row's columns."""
-    raise NotImplementedError("A: league/ops/forward_db.py counted_days")
+    engine = engine_now(db) if engine is None else int(engine)
+    if engine is None:
+        return []
+    return [dict(row) for row in db.execute(
+        "SELECT d.* FROM fwd_days d WHERE d.pid=? AND d.engine=? AND d.status='ok' AND NOT EXISTS (SELECT 1 FROM "
+        "fwd_events e WHERE e.kind='audit_mismatch' AND e.pid=d.pid AND e.day=d.day) ORDER BY d.day",
+        (int(pid), engine)).fetchall()]
 
 
 def stored_days(db: sqlite3.Connection, pid: int, *, engine: int | None = None) -> int:
     """How many `fwd_days` rows a pid has under `engine` (the newest engine id when None), any status: what the session
     caps count."""
-    raise NotImplementedError("A: league/ops/forward_db.py stored_days")
+    engine = engine_now(db) if engine is None else int(engine)
+    if engine is None:
+        return 0
+    return int(db.execute("SELECT COUNT(*) FROM fwd_days WHERE pid=? AND engine=?", (int(pid), engine)).fetchone()[0])
 
 
 __all__ = ["DB", "SCHEMA", "GENESIS", "MODES", "REASONS", "LANES", "CHECKPOINTS", "CHECKPOINT_EVERY", "FWD_SERIES",
@@ -491,4 +829,4 @@ __all__ = ["DB", "SCHEMA", "GENESIS", "MODES", "REASONS", "LANES", "CHECKPOINTS"
            "ShadowRun", "bars_hash", "cfg", "mode", "t0", "first_close", "first_day", "fwd_engine", "open_db",
            "row_hash", "append_registry", "verify_chain", "head", "event", "events", "kv_get", "kv_put", "kv_first",
            "engine_id", "engine_now", "engine_label", "programs", "active", "suspect", "program", "tags", "tag",
-           "counted_days", "stored_days"]
+           "counted_days", "stored_days", "last_stored_day"]
