@@ -680,6 +680,8 @@ class TheHouseExits(EngineCase):
         self.assertEqual((lot["exit"], lot["exit_at"], lot["reason"]), (entry + 3, "open", "house"))
         row = next(r for r in result["lots"] if r["lid"] == lot["lid"])
         self.assertEqual((row["reason"], row["tag"]), ("house", "ineligible"))
+        self.assertEqual(result["summary"]["exits"], {"program": 0, "house": 0, "ineligible": 1, "max_hold": 0,
+                                                      "vanished": 0})
         # the program reads why at its next call, by slot and lot id, never by a day
         self.assertEqual([lot2 for lot2 in log.lots if lot2["col"] == col and lot2["decided"] > entry + 2], [],
                          "a name out of U is no slot of any later ctx, so it is never bought again")
@@ -1291,8 +1293,9 @@ class ThePooledReading(EngineCase):
         self.assertAlmostEqual(summary["exposure_mean"], summary["sum_w"] / summary["days"], places=6)
         weights = [lot["weight"] for result in (one, two) for lot in result["lots"]]
         self.assertAlmostEqual(summary["turnover"], math.fsum(weights) / (summary["days"] / 252), places=4)
-        for key in ("vanished", "cells", "refused"):
+        for key in ("vanished", "cells", "refused", "exits"):
             self.assertEqual(summary[key], {name: a[key][name] + b[key][name] for name in a[key]}, key)
+        self.assertEqual(sum(summary["exits"].values()), summary["closed"])
         self.assertEqual(sorted(pooled["by_year"]), ["2031", "2032"])
         self.assertEqual(pooled["by_year"]["2031"]["days"], one["by_year"]["2031"]["days"])
         self.assertEqual(math.fsum(row["sum_x"] for row in pooled["by_year"].values()), summary["sum_x"])

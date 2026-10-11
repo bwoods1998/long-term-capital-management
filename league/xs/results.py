@@ -15,7 +15,8 @@ THE RESULT RECORD (a plain dict; in-House only: `view` decides what a researcher
                 >= sum x, else "selection-led"), exposure_mean, names_mean, turnover (entry notional over E0, a year),
                 costs, gross, delta (the sums of the residual's cost series, gross residual and diluted exposure),
                 cost_share (costs over the gross residual, when that is above zero), dilution (delta over sum_w),
-                cells {small, under5}, vanished {deal, other}, refused {no_bar, ahead, last}, sum_x_h0, sum_x_h1
+                cells {small, under5}, vanished {deal, other}, refused {no_bar, ahead, last}, exits {program, house,
+                ineligible, max_hold, vanished: how the closed lots left}, sum_x_h0, sum_x_h1
                 (sum x at haircut 0 and 1), close_dates, sd_date_return (over the run's close dates, the sd, ddof 1,
                 of that date's summed lot net over their summed entry notional; None under 2 dates)}
     by_year     {year: {days, sum_x, sumsq_x, sum_x15, sum_r, rebalances, closed}}
@@ -84,7 +85,7 @@ NW_LAG = 5
 POOLED_SUMS = ("sum_r", "sum_x", "sum_x15", "sum_u", "sum_bench", "sum_w", "pnl", "realized", "fees", "dividends",
                "costs", "gross", "delta", "sum_x_h0", "sum_x_h1")
 POOLED_COUNTS = ("days", "invested_days", "rebalances", "calls", "lots", "closed", "round_trips")
-POOLED_TALLIES = ("cells", "vanished", "refused")
+POOLED_TALLIES = ("cells", "vanished", "refused", "exits")
 _ZERO = 1e-12
 
 
@@ -163,6 +164,18 @@ def close_dates(lots: Sequence[Mapping[str, Any]], capital: Any) -> dict[str, fl
         base = math.fsum(notional[day])
         if base > 0:
             out[day] = math.fsum(net[day]) / base
+    return out
+
+
+def exits_by_reason(lots: Sequence[Mapping[str, Any]]) -> dict[str, int]:
+    """How a run's closed lots left: {"program", "house" (the failed-decides exit), "ineligible" (a name out of U at a
+    close: the House exit whose tag says so), "max_hold", "vanished"}, a count each."""
+    out = {"program": 0, "house": 0, "ineligible": 0, "max_hold": 0, "vanished": 0}
+    for lot in lots:
+        if lot.get("exit_day") in (None, ""):
+            continue
+        reason = str(lot.get("tag") or "") if lot.get("tag") == "ineligible" else str(lot.get("reason") or "")
+        out[reason] = out.get(reason, 0) + 1
     return out
 
 
@@ -245,7 +258,7 @@ def summarize(daily: Sequence[Sequence[Any]], lots: Sequence[Mapping[str, Any]],
         "costs": None if costs is None else float(costs), "gross": None if gross is None else float(gross),
         "delta": None if delta is None else float(delta), **_shares(costs, gross, delta, sum_w),
         "cells": dict(beside.get("cells") or {}), "vanished": dict(beside.get("vanished") or {}),
-        "refused": dict(beside.get("refused") or {}),
+        "refused": dict(beside.get("refused") or {}), "exits": exits_by_reason(lots),
         "sum_x_h0": beside.get("sum_x_h0"), "sum_x_h1": beside.get("sum_x_h1"),
         "close_dates": len(by_date), "sd_date_return": sd_dates,
     }
@@ -362,4 +375,4 @@ def pooled(results: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
 
 
 __all__ = ["DAILY", "VIEWS", "STATUSES", "TRAIN_VIEW", "canonical", "sha", "t_stat", "nw_t", "column", "close_dates",
-           "summarize", "by_year", "pick_counts", "failed", "view", "pooled"]
+           "exits_by_reason", "summarize", "by_year", "pick_counts", "failed", "view", "pooled"]
