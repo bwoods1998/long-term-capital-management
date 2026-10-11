@@ -330,7 +330,9 @@ class TheConstants(unittest.TestCase):
         self.assertEqual(elane_xs.MAX_CELL_LOOKS, 2)
         self.assertNotIn("cell_looks", elane_xs.DEFAULTS, "the cap on a cell's looks is a House rule, never a setting")
         self.assertEqual(elane_xs.PROBE_STRATA, ("P4", "P5", "P6"))
-        self.assertEqual(elane_xs.PROBE_FILE, "contamination.json")
+        # The swarm reads the probe's PERMIT (two words a stratum and era, written by the probe's job), never the
+        # probe's own file: release E3's seal lets no module of league/swarm name that one.
+        self.assertEqual((elane_xs.PROBE_FILE, elane_xs.PROBE_VERSION), ("xs-probe.json", "xs-probe-1"))
         rubric = " ".join(elane_xs.REVIEW_XS)
         for words in ("embedded return table", "calendar recognition"):
             self.assertIn(words, rubric)

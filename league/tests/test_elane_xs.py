@@ -9,6 +9,7 @@ interfaces (league/tests/elane_xs_fakes.py); every family, program and number is
 from __future__ import annotations
 
 import datetime as dt
+import ast
 import hashlib
 import json
 import re
@@ -581,33 +582,44 @@ class TheQuotaAndTheHiddenYear(unittest.TestCase):
         F.panel_family(self.store, "rev-12")
         self.assertEqual(elane_xs.quota(self.store, self.settings, 6), 0)
 
-    def test_without_release_e3_no_year_is_hidden(self):
-        with mock.patch.dict(sys.modules, {"league.swarm.elane_folds": None}):
-            self.assertIsNone(elane_xs.assign(self.store, CELL, self.settings))
+    def test_the_folds_three_facts_are_e3s_own_and_the_lane_imports_no_memory_module(self):
+        """Release E3's seal T1: only its Train module, its births and league/ops import the memory modules. The
+        panel lane spells the three facts of the fold it needs; they are E3's, input for input."""
+        from league.swarm import elane_folds
+
+        self.assertEqual((elane_xs.FOLD_GID0, elane_xs._gid()), (elane_folds.GID0, elane_folds.GID0))
+        self.assertIn(elane_xs.FOLD_RECORD, elane_folds.MODES)
+        for cell in (CELL, ("beta", "other", "index"), ("equity", "xs_momentum", "panel:sp500"), ("a",), ()):
+            self.assertEqual(elane_xs.fold_hash(cell), elane_folds.cell_hash(cell), cell)
+        for settings in (None, {}, [], {"elane": None}, {"elane": {"memory": None}}, {"elane": {"memory": []}},
+                         {"elane": {"memory": {}}}, {"elane": {"memory": {"mode": "off"}}},
+                         {"elane": {"memory": {"mode": "record"}}}, {"elane": {"memory": {"mode": "Record"}}},
+                         {"elane": {"memory": {"mode": True}}}, {"elane": {"memory": {"mode": ["record"]}}}):
+            self.assertEqual(elane_xs.fold_recording(settings), elane_folds.mode(settings) == "record", settings)
+        tree = ast.parse(Path(elane_xs.__file__).read_text(encoding="utf-8"))
+        named = {alias.name for node in ast.walk(tree) if isinstance(node, (ast.Import, ast.ImportFrom))
+                 for alias in node.names} | {node.module or "" for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
+        self.assertFalse({n for n in named if n.split(".")[-1] in ("elane_folds", "elane_effects", "elane_memory")})
 
     def test_the_hidden_year_rotates_over_the_panels_six_train_years_by_cell(self):
-        folds = types.ModuleType("league.swarm.elane_folds")
-        folds.GID0 = "g0"
-        folds.mode = lambda settings: (settings.get("elane") or {}).get("memory", {}).get("mode", "off")
-        folds.cell_hash = lambda cell: int(hashlib.sha256(("fold-1|" + "/".join(cell)).encode()).hexdigest()[:8], 16)
+        from league.swarm import elane_folds as folds
+
         recording = {**self.settings, "elane": {**self.settings["elane"], "memory": {"mode": "record"}}}
-        with mock.patch.dict(sys.modules, {"league.swarm.elane_folds": folds}), \
-                mock.patch.object(sys.modules["league.swarm"], "elane_folds", folds, create=True):
-            self.assertIsNone(elane_xs.assign(self.store, CELL, self.settings), "the folds are not recording")
-            start = folds.cell_hash(CELL) % 6
-            years = []
-            for i in range(7):
-                year = elane_xs.assign(self.store, CELL, recording)
-                years.append(year)
-                F.panel_family(self.store, f"rev-{i}", hidden=year)
-            self.assertEqual(years, [xconfig.TRAIN_YEARS[(start + i) % 6] for i in range(7)])
-            self.assertFalse(set(years) & {2016, 2020, 2021}, "never a history year: nothing would be hidden")
-            other = ("equity", "xs_momentum", "panel:sp500")
-            self.assertEqual(elane_xs.assign(self.store, other, recording),
-                             xconfig.TRAIN_YEARS[folds.cell_hash(other) % 6], "each cell has its own count")
-            F.panel_family(self.store, "no-year", hidden=None)
-            self.assertEqual(elane_xs.assign(self.store, CELL, recording), xconfig.TRAIN_YEARS[(start + 7) % 6],
-                             "a family born with no hidden year does not move the count")
+        self.assertIsNone(elane_xs.assign(self.store, CELL, self.settings), "the folds are not recording")
+        start = folds.cell_hash(CELL) % 6
+        years = []
+        for i in range(7):
+            year = elane_xs.assign(self.store, CELL, recording)
+            years.append(year)
+            F.panel_family(self.store, f"rev-{i}", hidden=year)
+        self.assertEqual(years, [xconfig.TRAIN_YEARS[(start + i) % 6] for i in range(7)])
+        self.assertFalse(set(years) & {2016, 2020, 2021}, "never a history year: nothing would be hidden")
+        other = ("equity", "xs_momentum", "panel:sp500")
+        self.assertEqual(elane_xs.assign(self.store, other, recording),
+                         xconfig.TRAIN_YEARS[folds.cell_hash(other) % 6], "each cell has its own count")
+        F.panel_family(self.store, "no-year", hidden=None)
+        self.assertEqual(elane_xs.assign(self.store, CELL, recording), xconfig.TRAIN_YEARS[(start + 7) % 6],
+                         "a family born with no hidden year does not move the count")
 
 
 class NoThresholdReachesAGenerator(unittest.TestCase):

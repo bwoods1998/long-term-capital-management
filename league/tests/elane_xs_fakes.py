@@ -783,14 +783,15 @@ def write_twins(root: Any, *, through: str = "2026-10-09", instances: Mapping[st
 
 def write_probe(root: Any, route: str = ROUTE, *, strata: Sequence[str] = elane_xs.PROBE_STRATA,
                 published: bool = True) -> None:
-    """The contamination probe's file (release E3's shape: aggregates only), with the panel strata for `route`."""
-    cell = {"n": 40, "correct": 21, "acc": 0.52, "base": 0.55, "p_perm": 0.6, "readable": True, "recalled": False}
-    row: dict[str, Any] = {"model": "fake-model", "usd": 0.5, "probes": 1,
-                           "cells": {s: {"2016-24": dict(cell), "2025": dict(cell)} for s in ("S1", *strata)}}
+    """The contamination probe's PERMIT for panel looks (`elane_xs.PROBE_FILE`: what the probe's job writes for the
+    swarm), with the panel strata for `route`: two words a stratum and era, no count and no rate."""
+    cell = {"readable": True, "recalled": False}
+    row: dict[str, Any] = {"model": "fake-model",
+                           "cells": {s: {"2016-24": dict(cell), "2025": dict(cell)} for s in strata}}
     if published:
         row["at"] = "2026-10-10T00:20:00Z"
-    (Path(root) / elane_xs.PROBE_FILE).write_text(json.dumps({"version": "contam-1", "routes": {route: row},
-                                                               "history": []}))
+    (Path(root) / elane_xs.PROBE_FILE).write_text(json.dumps({"version": elane_xs.PROBE_VERSION,
+                                                               "routes": {route: row}}))
 
 
 def ready(root: Any, **manifest: Any) -> None:

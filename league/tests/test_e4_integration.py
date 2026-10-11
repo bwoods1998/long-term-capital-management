@@ -9,7 +9,7 @@ is the lane's one path from a birth to the Done meter; this module is what stand
   word the book retires on is "demoted" ONLY when the captain's switch is down, "held" when a store-side leg of the
   lane failed (E4-SPEC 17: its opens stop, its exits go on, nothing is retired) and "unknown" when the lane cannot be
   read; an ETF family is asked nothing of it.
-- `TheLaneStopsWhereItsRuleSays`: with no contamination reading of the panel strata (release E3's file and package B's
+- `TheLaneStopsWhereItsRuleSays`: with no contamination reading of the panel strata (the probe's permit and package B's
   patch 18: owed) no look runs and none is spent (the captain's A22 (3)); with no twin marker (package J: owed) the
   effective mode is "gate" whatever the setting.
 - `TheDataJobsOnTheRealStore`: package B's spreads and N_eff jobs on package C's real store (they were built against
@@ -106,10 +106,10 @@ class _Root(unittest.TestCase):
                                                 live_from=dt.date(2026, 9, 1))
         self.manifest(i6={"day": FRIDAY.isoformat(), "equal": True, "source": "fetch", "live": {}})
         self.marker()
-        cell = {"n": 40, "correct": 21, "acc": 0.52, "base": 0.55, "p_perm": 0.6, "readable": True, "recalled": False}
-        self.probe = {"version": "contam-1", "history": [], "routes": {ROUTE: {
-            "model": "fake-model", "usd": 0.5, "probes": 1, "at": "2026-10-10T00:20:00Z",
-            "cells": {s: {"2016-24": dict(cell), "2025": dict(cell)} for s in ("S1", *elane_xs.PROBE_STRATA)}}}}
+        cell = {"readable": True, "recalled": False}
+        self.probe = {"version": elane_xs.PROBE_VERSION, "routes": {ROUTE: {
+            "model": "fake-model", "at": "2026-10-10T00:20:00Z",
+            "cells": {s: {"2016-24": dict(cell), "2025": dict(cell)} for s in elane_xs.PROBE_STRATA}}}}
         (self.root / elane_xs.PROBE_FILE).write_text(json.dumps(self.probe), encoding="utf-8")
         self.switch(self.SWITCHES)
 
@@ -491,10 +491,10 @@ class TheLaneStopsWhereItsRuleSays(_Root):
     def test_without_the_probes_panel_strata_no_look_runs_and_none_is_spent(self):
         """A22 (3): the contamination probe before a panel look. Release E3's probe has no panel strata until package
         B's patch 18 lands, so on the House every panel look WAITS (nothing spent) until then."""
-        for strata in ((), ("P4", "P5")):                         # E3's file as it is; and one stratum short
+        for strata in ((), ("P4", "P5")):                         # a permit with no panel stratum; and one short
             cells = self.probe["routes"][ROUTE]["cells"]
             doc = {**self.probe, "routes": {ROUTE: {**self.probe["routes"][ROUTE],
-                                                    "cells": {k: v for k, v in cells.items() if k in ("S1", *strata)}}}}
+                                                    "cells": {k: v for k, v in cells.items() if k in strata}}}}
             (self.root / elane_xs.PROBE_FILE).write_text(json.dumps(doc), encoding="utf-8")
             self.forget()
             self.assertIsNotNone(elane_xs.probed(self.root, self.family(f"rev-{len(strata)}")), strata)
@@ -740,29 +740,48 @@ class TheSeams(unittest.TestCase):
             self.assertEqual(elane_folds.born(store, elane_train.cell_of(facts["lane"], facts["agenda"], facts["symbols"])), 1)
             self.assertEqual(elane_xs.assign(store, panel_cell, recording), second)
 
-    def test_what_the_lane_reads_of_release_e3_is_what_e3_writes(self):
-        """The panel lane reads two of E3's files by name (it was built before E3 was merged): the contamination
-        probe's (the look's gate, the captain's A22 (3)) and the forward report's (an ETF program's N_eff for the
-        funnel's asset-years). The names and the fields are E3's own; and the probe's strata do NOT yet hold the
-        panel's (package B's patch to E3's probe, owed), so every panel look waits, as the lane's rule says."""
+    def test_what_the_lane_reads_of_release_e3_keeps_e3s_seal(self):
+        """The panel lane was built before E3 was merged and read two of E3's files by name. One reader is an ops
+        job (the funnel's asset-years read the forward report's N_eff: league/ops, where E3 lets its files be
+        named). The other was the SWARM's (the look's gate, the captain's A22 (3), read the probe's own file), which
+        E3's seal forbids: no module of league/swarm names a file of the forward record or the probe's, nor imports
+        an E3 ops module. So the swarm reads a PERMIT the probe's job writes (two words a stratum and era); the
+        probe's own file opens no look, whatever it holds; and the probe's strata do not yet hold the panel's
+        (package B's patch to the probe, owed), so no permit exists and every panel look waits."""
         from league.ops import contam_probe, equity_neff, forward_db, forward_report
+        from league.tests import test_e3_seal_imports as seal
 
-        self.assertEqual(elane_xs.PROBE_FILE, contam_probe.FILE)
         self.assertEqual(equity_neff.FORWARD_REPORT, forward_report.FILE)
         self.assertIn("cey", forward_report.SECTION_KEYS)
         self.assertIn("hist_iy REAL", " ".join(forward_db.SCHEMA.split()), "the report's `cey` is a row of fwd_cey")
+        self.assertNotIn(elane_xs.PROBE_FILE, seal.NAMES)
+        self.assertNotEqual(elane_xs.PROBE_FILE, contam_probe.FILE)
+        self.assertEqual(seal.named(REPO, "league/swarm", seal.NAMES, pattern=r"\bfwd_[a-z0-9_]+"), [])
+        self.assertEqual(seal.e3_ops_imports(REPO, "league/swarm"), [])
         self.assertEqual(set(elane_xs.PROBE_STRATA) & set(contam_probe.STRATA), set(),
-                         "the day E3's probe carries the panel strata this reads all three, and a look may be taken")
+                         "the day the probe carries the panel strata it writes the permit, and a look may be taken")
+        fam = {"spec": {"e2_route": ROUTE}}
         with tempfile.TemporaryDirectory() as tmp:
-            asked = {s: {"2016-24": {"readable": True, "recalled": False}} for s in contam_probe.STRATA}
+            cells = {s: {"2016-24": {"readable": True, "recalled": False}} for s in elane_xs.PROBE_STRATA}
+            row = {"at": "2026-10-10T00:20:00Z", "model": "fake-model", "cells": cells}
+            # The probe's own file, panel strata and all, at its own name: never read, the look waits.
             (Path(tmp) / contam_probe.FILE).write_text(json.dumps(
-                {"version": contam_probe.VERSION, "history": [],
-                 "routes": {ROUTE: {"at": "2026-10-10T00:20:00Z", "model": "fake-model", "cells": asked}}}),
-                encoding="utf-8")
-            why = elane_xs.probed(tmp, {"spec": {"e2_route": ROUTE}})
-            self.assertIsNotNone(why, "E3's probe as it runs today (S1-S4) opens no panel look")
-            for stratum in elane_xs.PROBE_STRATA:
-                self.assertIn(stratum, why)
+                {"version": contam_probe.VERSION, "history": [], "routes": {ROUTE: row}}), encoding="utf-8")
+            self.assertIn("no published result", elane_xs.probed(tmp, fam))
+            # The same text under the permit's name is no permit either (another version).
+            (Path(tmp) / elane_xs.PROBE_FILE).write_text(json.dumps(
+                {"version": contam_probe.VERSION, "routes": {ROUTE: row}}), encoding="utf-8")
+            self.assertIn("no published result", elane_xs.probed(tmp, fam))
+            # The permit: every panel stratum published for the route.
+            (Path(tmp) / elane_xs.PROBE_FILE).write_text(json.dumps(
+                {"version": elane_xs.PROBE_VERSION, "routes": {ROUTE: row}}), encoding="utf-8")
+            self.assertIsNone(elane_xs.probed(tmp, fam))
+            # Whatever else a permit carried, the swarm keeps the two words and nothing else.
+            row["cells"]["P4"]["2016-24"].update(acc=0.61, base=0.55, n=40)
+            (Path(tmp) / elane_xs.PROBE_FILE).write_text(json.dumps(
+                {"version": elane_xs.PROBE_VERSION, "routes": {ROUTE: row}}), encoding="utf-8")
+            self.assertEqual(elane_xs.probe_reading(tmp, ROUTE)["strata"]["P4"],
+                             {"2016-24": {"readable": True, "recalled": False}})
 
     def test_no_stub_is_left_on_a_built_path(self):
         left = []

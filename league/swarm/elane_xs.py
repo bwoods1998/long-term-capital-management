@@ -74,8 +74,12 @@ THE CAPTAIN'S A22 (from the study's review; binding): BEFORE ANY REAL MONEY ON A
 3. THE CODE REVIEW AND THE CONTAMINATION PROBE COME BEFORE A LOOK. The equity review of a panel program carries the
    rubric `REVIEW_XS` (no embedded return table, no calendar recognition, and the spec's three); and `probed` holds
    the look back until E3's contamination probe has a published result, with the panel strata `PROBE_STRATA`, for
-   the route that wrote the program (`<root>/contamination.json`, aggregates only; while release E3 or its panel
-   strata are not merged there is none, and every panel look waits). The probe's reading is recorded with the look.
+   the route that wrote the program. THE SWARM NEVER OPENS THE PROBE'S OWN FILE (release E3's seal: no module of
+   league/swarm names it; it holds counts and rates of the eras programs are judged on). It reads THE PERMIT,
+   `<root>/PROBE_FILE`, which the probe's job alone writes when it publishes a route's panel strata: for each
+   route `at`, `model` and, a stratum and era, the two words `readable` and `recalled`, and nothing else. While
+   the probe's panel strata are not built (package B's patch to the probe: owed) no permit exists, and every panel
+   look waits. The permit's reading is recorded with the look.
 4. The screen reproduces the study's conformance vectors and one more for the second segment's floor cell alone
    (package E's; `league.xs.screen`).
 
@@ -135,7 +139,10 @@ SEAT_STYLE = "style-open"
 #: that has none is recorded and never seated by the look).
 SEAT_UNSTATED = "unstated"
 MAX_CELL_LOOKS = 2
-PROBE_FILE = "contamination.json"
+#: THE PROBE'S PERMIT for panel looks (duty 3 above): written by the probe's job in league/ops, read here. A file of
+#: another version is no permit (the look waits).
+PROBE_FILE = "xs-probe.json"
+PROBE_VERSION = "xs-probe-1"
 PROBE_STRATA = ("P4", "P5", "P6")
 REVIEW_XS = (
     "an embedded return table: constants, a string or a structure that could hold returns, ranks or outcomes of "
@@ -1127,11 +1134,14 @@ def look_room(store: Any, cell: Sequence[str]) -> str | None:
 
 
 def probe_reading(root: str | Path, route: str) -> dict[str, Any] | None:
-    """The contamination probe's published reading for a model route (`<root>/PROBE_FILE`: aggregates only), cut to the
-    panel strata: {route, at, model, strata {stratum: {era: {readable, recalled}}}}; None when the file, the route or
-    its published result is missing."""
+    """The contamination probe's published reading for a model route as THE PERMIT holds it (`<root>/PROBE_FILE`:
+    {"routes": {route: {"at", "model", "cells": {stratum: {era: {"readable", "recalled"}}}}}}), cut to the panel
+    strata and to those two words whatever else a cell carries: {route, at, model, strata {stratum: {era: {readable,
+    recalled}}}}; None when the permit (a file of `PROBE_VERSION`), the route or its published result is missing."""
     doc = _read_json(Path(root) / PROBE_FILE)
-    routes = doc.get("routes") if isinstance(doc, Mapping) and isinstance(doc.get("routes"), Mapping) else {}
+    if not isinstance(doc, Mapping) or doc.get("version") != PROBE_VERSION:
+        return None
+    routes = doc.get("routes") if isinstance(doc.get("routes"), Mapping) else {}
     row = routes.get(str(route))
     if not isinstance(row, Mapping) or not row.get("at") or not isinstance(row.get("cells"), Mapping):
         return None
@@ -1146,24 +1156,25 @@ def probe_reading(root: str | Path, route: str) -> dict[str, Any] | None:
 
 
 def probed(root: str | Path, fam: Mapping[str, Any]) -> str | None:
-    """A22 (3): why the look must wait on the contamination probe, or None: `<root>/PROBE_FILE` (E3's
-    `league.ops.contam_probe.FILE`, read by name: aggregates only) holds a published result (`at`) for the route that
-    wrote the family's program (its spec's `e2_route`) whose cells carry every stratum of `PROBE_STRATA`. No file, no
-    such route, no panel stratum, an unreadable file: the reason, and the look waits (nothing spent)."""
+    """A22 (3): why the look must wait on the contamination probe, or None: the permit `<root>/PROBE_FILE` (the
+    probe's job writes it; never the probe's own file, which no swarm module names) holds a published result (`at`)
+    for the route that wrote the family's program (its spec's `e2_route`) whose cells carry every stratum of
+    `PROBE_STRATA`. No permit, no such route, no panel stratum, an unreadable permit: the reason, and the look waits
+    (nothing spent)."""
     route = str(_spec(fam).get("e2_route") or "")
     if not route:
         return "the family names no birth route: the contamination probe cannot be read for it"
     try:
         reading = probe_reading(root, route)
     except Exception as exc:  # noqa: BLE001 - a probe that cannot be read holds the look
-        return f"the contamination probe's file cannot be read ({type(exc).__name__})"
+        return f"the contamination probe's permit cannot be read ({type(exc).__name__})"
     if reading is None:
-        return (f"the contamination probe has no published result for {route} ({PROBE_FILE}: release E3's probe has "
-                "not run for the route that wrote this program)")
+        return (f"the contamination probe has no published result for {route} ({PROBE_FILE}: the probe has not "
+                "published its panel strata for the route that wrote this program)")
     missing = [s for s in PROBE_STRATA if not reading["strata"].get(s)]
     if missing:
         return (f"the contamination probe's result for {route} carries no panel stratum {', '.join(missing)} (the "
-                "probe's panel strata are not merged or have not run)")
+                "probe's panel strata are not built or have not run)")
     return None
 
 
@@ -1184,36 +1195,51 @@ def style_of(fam: Mapping[str, Any], version: int | None = None) -> dict[str, An
     return dict(verdict) if isinstance(verdict, Mapping) else None
 
 
+#: RELEASE E3'S FOLD, AT ARM'S LENGTH. Release E3 lets only its own Train module, its births and league/ops import
+#: the memory modules (`elane_folds`, `elane_effects`, `elane_memory`: its seal T1, league/tests/
+#: test_e3_seal_imports.py), and the panel lane keeps to it: IT IMPORTS NONE OF THEM. It draws its own hidden year
+#: over its own six Train years (`assign`), and of the fold it needs three facts, spelled here: the switch
+#: (`elane.memory.mode` "record"), the cell hash and the first genome id. league/tests/test_elane_xs.py holds each
+#: equal to `elane_folds`' own (`mode`, `cell_hash`, `GID0`), so the two cannot drift apart unseen.
+FOLD_RECORD = "record"
+FOLD_HASH_PREFIX = "fold-1|"
+FOLD_GID0 = "g0"
+
+
+def fold_recording(settings: Mapping[str, Any] | None) -> bool:
+    """Whether release E3's folds are recording: `elane.memory.mode` is "record" in the swarm's settings (anything
+    else, a block that is no object included, is not: `elane_folds.mode`'s reading)."""
+    lane = settings.get("elane") if isinstance(settings, Mapping) else None
+    block = lane.get("memory") if isinstance(lane, Mapping) else None
+    return isinstance(block, Mapping) and block.get("mode") == FOLD_RECORD
+
+
+def fold_hash(cell: Sequence[str]) -> int:
+    """`elane_folds.cell_hash`'s formula: int(sha256(("fold-1|" + "/".join(cell)).encode()).hexdigest()[:8], 16)."""
+    return int(hashlib.sha256((FOLD_HASH_PREFIX + "/".join(str(part) for part in cell)).encode()).hexdigest()[:8], 16)
+
+
 def assign(store: Any, cell: Sequence[str], settings: Mapping[str, Any] | None = None) -> int | None:
-    """THE HIDDEN YEAR of a new panel family: `league.xs.config.TRAIN_YEARS[(k_c + elane_folds.cell_hash(cell)) % 6]`,
-    k_c = the panel families already born in that cell with a hidden year; None while E3 is not merged or its folds
-    are not recording (the bar then reads all six Train years, stated on the map). Never E3's own `assign` (it rotates
-    over seven years) and never `elane_folds.birth_fields` (it takes no cell). `settings`: the swarm's (default: the
-    store root's)."""
+    """THE HIDDEN YEAR of a new panel family: `league.xs.config.TRAIN_YEARS[(k_c + fold_hash(cell)) % 6]`, k_c = the
+    panel families already born in that cell with a hidden year; None while release E3's folds are not recording
+    (the bar then reads all six Train years, stated on the map). Never E3's own `assign` (it rotates over seven
+    years) and never its `birth_fields` (it takes no cell); E3's count in turn holds no panel family. `settings`:
+    the swarm's (default: the store root's)."""
     from ..xs import config as xconfig
 
     try:
-        from . import elane_folds
-    except ImportError:
-        return None
-    try:
-        if elane_folds.mode(_settings_of(getattr(store, "root", None), settings)) != "record":
+        if not fold_recording(_settings_of(getattr(store, "root", None), settings)):
             return None
         cell = tuple(str(part) for part in cell)
         born = sum(1 for fam in panel_families(store) if family_cell(fam) == cell and hidden_year_of(fam) is not None)
-        return int(xconfig.TRAIN_YEARS[(born + int(elane_folds.cell_hash(cell))) % len(xconfig.TRAIN_YEARS)])
+        return int(xconfig.TRAIN_YEARS[(born + fold_hash(cell)) % len(xconfig.TRAIN_YEARS)])
     except Exception:  # noqa: BLE001 - a fold that cannot be drawn hides nothing (six Train years, no out-of-fold row)
         return None
 
 
 def _gid() -> str:
-    """E3's first genome id (`elane_folds.GID0`), "g0" while E3 is not merged."""
-    try:
-        from . import elane_folds
-
-        return str(elane_folds.GID0)
-    except Exception:  # noqa: BLE001
-        return "g0"
+    """E3's first genome id (`FOLD_GID0`)."""
+    return FOLD_GID0
 
 
 def run_spans(hidden: int | None, years_ok: Iterable[int] | None = None) -> tuple[tuple[dt.date, dt.date], ...]:
@@ -3605,7 +3631,8 @@ __all__ = ["STRUCTURE", "PANELS", "OBJECTIVE", "LANE", "MODES", "STATE_KEY", "FL
            "TRAIN_U_KEY", "PRECHECK_KEY", "PLACEBO_KEY", "HALVES_KEY", "OOF_KEY", "LOOK_KEY", "SEALED", "CPU_KEY",
            "ZERO_KEY", "ALERTS_KEY", "TRAIN_OK_KEY", "STYLE_FIELD", "SEAT_CANDIDATE", "SEAT_STYLE", "SEAT_UNSTATED",
            "MAX_CELL_LOOKS",
-           "PROBE_FILE", "PROBE_STRATA", "REVIEW_XS", "REVIEW_OBJECTIVE", "REVIEW_SYSTEM", "RESEARCHER_SYSTEM",
+           "PROBE_FILE", "PROBE_VERSION", "PROBE_STRATA", "FOLD_RECORD", "FOLD_HASH_PREFIX", "FOLD_GID0",
+           "fold_recording", "fold_hash", "REVIEW_XS", "REVIEW_OBJECTIVE", "REVIEW_SYSTEM", "RESEARCHER_SYSTEM",
            "SETTINGS_KEY", "SCREEN_KEY", "SCREEN_NAME", "DECIDER_LOG", "STORE_DIR", "PANEL_MANIFEST",
            "UNIVERSE_MANIFEST", "DEFAULTS", "BOUNDS", "CENSUS_NOTE_MAX", "CENSUS_LABEL", "SCREEN_NULLS", "PANEL_AGENDA",
            "INPUTS", "BAR_XS", "FAILS_XS", "PROGRAM_FAILS", "JUDGED_XS", "MAP_LABEL", "K_BASE", "K_STRESS",

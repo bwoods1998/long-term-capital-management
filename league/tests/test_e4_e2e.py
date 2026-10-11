@@ -30,8 +30,8 @@ The path (league/xs/E4_INTERFACES.md's packages, in order):
    retires the seated program on the lane's own word, and its lots leave at the next open; a switch file that cannot
    be read retires nobody.
 
-WHAT THE TEST WRITES IN ANOTHER PACKAGE'S PLACE, and only that: the contamination probe's file with the panel strata
-(release E3's and package B's patch 18: owed), and the twin marker (package J's, after release E3: owed). Without
+WHAT THE TEST WRITES IN ANOTHER PACKAGE'S PLACE, and only that: the contamination probe's permit with the panel strata
+(package B's patch 18 to release E3's probe: owed), and the twin marker (package J's, on release E3: owed). Without
 either the lane stops where its rule says (no look; no live seat); `TheLaneStopsWhereItsRuleSays` holds both.
 
 The market is synthetic (no figure here is a market result): the store's prices are seeded pseudo-random walks with a
@@ -364,13 +364,13 @@ class ThePanelLaneEndToEnd(unittest.TestCase):
         self.forget()
 
     def probe_file(self) -> None:
-        """RELEASE E3'S FILE with package B's panel strata (patch 18: owed), written here in its shape: aggregates
-        only, the birth route read on P4-P6."""
-        cell = {"n": 40, "correct": 21, "acc": 0.52, "base": 0.55, "p_perm": 0.6, "readable": True, "recalled": False}
-        row = {"model": "fake-model", "usd": 0.5, "probes": 1, "at": "2026-10-10T00:20:00Z",
-               "cells": {s: {"2016-24": dict(cell), "2025": dict(cell)} for s in ("S1", *elane_xs.PROBE_STRATA)}}
-        (self.root / elane_xs.PROBE_FILE).write_text(json.dumps({"version": "contam-1", "routes": {ROUTE: row},
-                                                                 "history": []}), encoding="utf-8")
+        """THE PROBE'S PERMIT with the panel strata (package B's patch 18 writes it from the probe's job: owed),
+        written here in its shape: for the birth route, two words a stratum and era on P4-P6, no count and no rate."""
+        cell = {"readable": True, "recalled": False}
+        row = {"model": "fake-model", "at": "2026-10-10T00:20:00Z",
+               "cells": {s: {"2016-24": dict(cell), "2025": dict(cell)} for s in elane_xs.PROBE_STRATA}}
+        (self.root / elane_xs.PROBE_FILE).write_text(json.dumps({"version": elane_xs.PROBE_VERSION,
+                                                                 "routes": {ROUTE: row}}), encoding="utf-8")
         self.forget()
 
     def market(self) -> "PanelMarket":

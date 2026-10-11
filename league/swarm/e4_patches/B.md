@@ -28,8 +28,9 @@ without the other.
 ("etf", "stock", "panel"), the Gym's Train runs of the window as simulated program-years, the independent asset-years
 they read (their Train years, never more than the structure's Train era holds, x the N_eff of their data) and the
 ratio of the two, the replay multiple. The panel's N_eff is `neff_pr` of `<state>/equity-daily/neff.json` (the
-`equity_neff` job); an ETF program's is release E3's figure when `<state>/forward-report.json` carries one
-(`cey.hist_iy` over the history's years), else 2.3; a structure with no N_eff reads None for it, never a zero.
+`equity_neff` job); an ETF program's is release E3's figure when its report's file under `<state>`
+(`forward_report.FILE`; release E3's seal lets no text of league/swarm spell that name) carries one (`cey.hist_iy`
+over the history's years), else 2.3; a structure with no N_eff reads None for it, never a zero.
 Nothing the funnel carried before moves; rows that cannot be read are `errors["asset_years"]` and take no other
 section with them. The daily page (`scoreboard.funnel_lines`) prints from its own allowlist and shows none of it.
 
@@ -472,11 +473,20 @@ What it adds, so its author starts from a decided shape (E4-SPEC 15, row 18; the
   E3's S1-S4 mint theirs); the questions are built from names and the calendar only, as E3's are. The members asked
   about are drawn by E3's own grid rule (`sha256("contam-1|<stratum>|<era>|<symbol>")`) over the era's members
   (`Universe.members`), so the same questions are asked of every route.
-- The cells are written under the keys "P4", "P5" and "P6" of `routes[route].cells` in `<state>/contamination.json`
-  (aggregates only, E3's own shape), which is what `elane_xs.probed` reads.
+- The cells are written under the keys "P4", "P5" and "P6" of `routes[route].cells` in the probe's own file
+  under `<state>` (`contam_probe.FILE`: aggregates only, E3's own shape).
+- AND THE PROBE'S JOB WRITES THE PERMIT (decided when E4 was merged over E3: release E3's seal lets no module of
+  league/swarm name the probe's file or import the probe, so the swarm cannot read it, and must not: the file holds
+  counts and rates of the eras programs are judged on). Each time it publishes a route's result the job rewrites
+  `<state>/xs-probe.json` (`elane_xs.PROBE_FILE`; atomic, 600): {"version": "xs-probe-1" (`elane_xs.PROBE_VERSION`),
+  "routes": {route: {"at", "model", "cells": {"P4" | "P5" | "P6": {era: {"readable": bool, "recalled": bool}}}}}},
+  one row for every route with a published result that carries all three panel strata, and NOTHING ELSE of a cell
+  (no n, no accuracy, no base rate, no p). That file is what `elane_xs.probed` reads; a file of another version, or
+  none, is no permit and every panel look waits.
 - Its test: the three strata's questions are pure of prices; a period of 2020 or 2021 is never asked about and never
   read; truth for a 2025 period is refused without the capability; a route's published result carries the three
-  cells; E3's own S1-S4 cells are byte for byte what they were.
+  cells; E3's own S1-S4 cells are byte for byte what they were; the permit holds the two words a cell and no figure,
+  and `elane_xs.probed` reads None on it for a route with all three strata.
 
 ---
 
