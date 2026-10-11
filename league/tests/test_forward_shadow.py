@@ -23,8 +23,10 @@ import datetime as dt
 import hashlib
 import json
 import math
+import os
 import shutil
 import sqlite3
+import sys
 import tempfile
 import unittest
 from decimal import Decimal
@@ -1860,6 +1862,64 @@ class TheJob(Case):
         receipt = forward_shadow.run(self.ctx())
         self.assertEqual(receipt["status"], "failed")
         self.assertIn("StoreRefused", receipt["error"])
+
+
+# ================================================================================================= a real child process
+@unittest.skipUnless(sys.platform.startswith("linux"), "the decider child's limits are Linux's")
+class TheRealChild(Case):
+    """The night through E1's REAL decider child (a subprocess; `allow_unisolated`, as E1's own tests start one off a
+    root House): the job's own `Decider` with its own log, the slices pickled down the pipe, the results read back."""
+
+    def test_a_night_in_a_child_process_writes_what_the_same_night_writes_in_process(self):
+        (self.root / "swarm.json").write_text(json.dumps(RECORD))
+        db = forward_db.open_db(self.root)
+        self.addCleanup(db.close)
+        made: list[Decider] = []
+
+        def child(root: Path) -> Decider:
+            made.append(Decider(python=sys.executable, log=root / forward_shadow.DECIDER_LOG, allow_unisolated=True))
+            self.addCleanup(made[-1].close)
+            return made[-1]
+
+        pids = {}
+        for book in (db, self.db):                             # the job's store, and an in-process night's beside it
+            pids = {"always": register(book, "always@1", ALWAYS, first_close=BEFORE),
+                    "flip": register(book, "flip@1", FLIPPER, first_close=FWD[1], reason="train_fail"),
+                    "broken": register(book, "broken@1", BROKEN, first_close=BEFORE),
+                    "refused": register(book, "refused@1", REFUSED, first_close=BEFORE,
+                                        needs={"symbols": ["SPY"], "history": 5, "max_hold_sessions": 60})}
+        write_night(self.root, FWD[30])
+        self.t = evening(FWD[30])
+        ctx = Context("forward_shadow", root=self.root, due_at=self.t, clock=self.clock, config={}, settings_value={})
+        with mock.patch.object(forward_shadow, "_decider", child):
+            receipt = forward_shadow.run(ctx)
+        inline = self.shadow(FWD[30], write=False, fresh=InlineDecider).night()
+        counts = ("programs", "sessions", "new_days", "checks", "errors", "disqualified", "retried", "house", "stale")
+        self.assertEqual({k: receipt[k] for k in counts}, {k: inline[k] for k in counts})
+        self.assertEqual((receipt["programs"], receipt["disqualified"], receipt["errors"], receipt["retried"]),
+                         (3, 1, 1, 1))
+
+        def stored(book: sqlite3.Connection, table: str) -> list[tuple]:
+            return [tuple(v for k, v in dict(row).items() if k != "at") for row in book.execute(
+                f"SELECT * FROM {table} ORDER BY pid, {'day' if table == 'fwd_days' else 'n'}").fetchall()]
+
+        # Every figure and every bars hash, to the last bit: the pipe carries the slice and the result whole.
+        self.assertEqual(stored(db, "fwd_days"), stored(self.db, "fwd_days"))
+        self.assertEqual(stored(db, "fwd_checks"), stored(self.db, "fwd_checks"))
+        self.assertEqual(len(stored(db, "fwd_days")), 31 + 29 + 31)
+        self.assertEqual({row[0] for row in db.execute("SELECT status FROM fwd_days WHERE pid=?", (pids["broken"],))},
+                         {"disqualified"})
+        # The child refused one program's code twice, the second time alone in a newly started child, while the
+        # others' runs completed: its event, and nobody tagged.
+        self.assertEqual([(e["pid"], e["payload"]["class"]) for e in forward_db.events(db, "run_failed")],
+                         [(pids["refused"], "RunFailed")])
+        self.assertEqual(db.execute("SELECT COUNT(*) FROM fwd_tags").fetchone()[0], 0)
+        self.assertEqual(ctx.alerts, [])
+        # Two children, each a process of its own, each closed; the job's own log beside the store.
+        self.assertEqual(len(made), 2)
+        self.assertTrue(all(isinstance(d.pid, int) and d.pid != os.getpid() and d.proc is None for d in made))
+        self.assertNotEqual(made[0].pid, made[1].pid)
+        self.assertTrue((self.root / forward_shadow.DECIDER_LOG).is_file())
 
 
 if __name__ == "__main__":
