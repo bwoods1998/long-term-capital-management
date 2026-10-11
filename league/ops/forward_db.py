@@ -347,9 +347,11 @@ def bars_hash(inputs: Any) -> str:
 # ------------------------------------------------------------------------------------------------------------ settings
 def cfg(settings: Mapping[str, Any] | None) -> dict[str, Any]:
     """`elane.forward` in the swarm's settings: every key of `DEFAULTS`, each value inside its bound (`BOUNDS`; `mode`
-    one of `MODES`; `fill_minutes` and `twins` booleans). A malformed value is its code default (a bounded value is a
-    whole number inside its bound: anything else, a number outside the bound included, is malformed); an unreadable
-    block is `DEFAULTS` (mode "off")."""
+    one of `MODES`; `fill_minutes` and `twins` booleans). A malformed value is its code default; an unreadable block
+    is `DEFAULTS` (mode "off").
+
+    A bounded value is a whole number: one outside its bound is held at the bound it passed (as `elane.cfg` holds the
+    lane's own numbers), and anything that is no whole number (a string, a boolean, a fraction, NaN) is malformed."""
     out = dict(DEFAULTS)
     raw = settings.get("elane") if isinstance(settings, Mapping) else None
     raw = raw.get("forward") if isinstance(raw, Mapping) else None
@@ -359,10 +361,10 @@ def cfg(settings: Mapping[str, Any] | None) -> dict[str, Any]:
         out["mode"] = raw["mode"]
     for key, (low, high) in BOUNDS.items():
         value = raw.get(key)
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) \
+                or float(value) != int(value):
             continue
-        if low <= value <= high and float(value) == int(value):
-            out[key] = int(value)
+        out[key] = int(min(high, max(low, value)))
     for key in ("fill_minutes", "twins"):
         if isinstance(raw.get(key), bool):
             out[key] = raw[key]

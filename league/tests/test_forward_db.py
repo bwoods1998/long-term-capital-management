@@ -110,7 +110,12 @@ class Settings(unittest.TestCase):
         for key, (low, high) in F.BOUNDS.items():
             for value in (low, high):
                 self.assertEqual(F.cfg({"elane": {"forward": {key: value}}})[key], value, key)
-            for value in (low - 1, high + 1, 10 ** 9, -1, float("nan"), float("inf"), "50", None, True, [low],
+            # Outside its bound it is held at the bound it passed, never past it.
+            for value, held in ((low - 1, low), (-1, low), (-10 ** 9, low), (high + 1, high), (10 ** 9, high),
+                                (float(high + 7), high)):
+                self.assertEqual(F.cfg({"elane": {"forward": {key: value}}})[key], held, (key, value))
+            # What is no whole number is malformed: the code default.
+            for value in (float("nan"), float("inf"), -float("inf"), "50", None, True, False, [low], {"n": low},
                           low + 0.5):
                 self.assertEqual(F.cfg({"elane": {"forward": {key: value}}})[key], F.DEFAULTS[key], (key, value))
             self.assertEqual(F.cfg({"elane": {"forward": {key: float(low)}}})[key], low)
