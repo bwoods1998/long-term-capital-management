@@ -683,7 +683,9 @@ class SwarmStore:
                         "reason": "the operator holds this family's validated version at the gate; it retires only once the "
                                   "hold is cleared"}
             if counts is None:
-                alive, counted = self._one("SELECT COUNT(*) AS n FROM families WHERE retired_at IS NULL")["n"], True
+                # The options population's floor: the equity lanes' families are their own (release E2).
+                alive = self._one(f"SELECT COUNT(*) AS n FROM families WHERE retired_at IS NULL AND {OPTIONS_ONLY_SQL}")["n"]
+                counted = True
             else:
                 alive, counted = sum(1 for f in self.families(alive=True) if counts(f)), bool(counts(fam))
             if counted and int(alive) <= max(0, int(floor)):
