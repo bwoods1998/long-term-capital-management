@@ -1864,7 +1864,7 @@ def fault(researcher: Any, fam: Mapping[str, Any], n: int, exc: BaseException, *
     return (None, out) if out is not None else (program_fault("RUN", why), None)
 
 
-def _years_ok(root: Any) -> list[int] | None:
+def years_ok(root: Any) -> list[int] | None:
     """The Train years the panel store covers (its manifest's `train_years_ok`), or None when it names none."""
     from ..xs import config as xconfig
 
@@ -1935,9 +1935,9 @@ def score(researcher: Any, fam: Mapping[str, Any], version: Mapping[str, Any], *
     code, params = str(version.get("code") or ""), dict(version.get("params") or {})
     if MODES.index(mode(settings, root)) < MODES.index("train"):
         return {"family": fid, "version": n, "skipped": "the panel lane is closed (elane.panel.mode)"}
-    years_ok = _years_ok(root)
+    covered = years_ok(root)
     hidden = hidden_year_of(fam)
-    spans = run_spans(hidden, years_ok) if years_ok is not None else ()
+    spans = run_spans(hidden, covered) if covered is not None else ()
     if not spans:
         return house_failure(researcher, fam, n, "the panel store names no Train year the bar can run on",
                              kind="store") or {}
@@ -1986,7 +1986,7 @@ def score(researcher: Any, fam: Mapping[str, Any], version: Mapping[str, Any], *
         else:
             try:
                 verdict = train_score_xs({"spans": spans, "base": parts["base"], "stress": parts["stress"],
-                                          "halves": {0: parts[0], 1: parts[1]}}, years_ok=years_ok or ())
+                                          "halves": {0: parts[0], 1: parts[1]}}, years_ok=covered or ())
             except Exception as exc:  # noqa: BLE001 - a reading that cannot be made is the House's
                 return house_failure(researcher, fam, n, f"the bar could not read the runs ({type(exc).__name__}: "
                                                          f"{str(exc)[:160]})", kind="store") or {}
@@ -2039,7 +2039,7 @@ def score(researcher: Any, fam: Mapping[str, Any], version: Mapping[str, Any], *
         except Exception:  # noqa: BLE001 - the verdict stands; the registry then dates the version from its sighting
             pass
     if entry["facts"] and hidden is not None:
-        _hidden_run(researcher, fam, version, hidden, years_ok or ())  # AFTER the verdict is recorded
+        _hidden_run(researcher, fam, version, hidden, covered or ())  # AFTER the verdict is recorded
     out: dict[str, Any] = {"family": fid, "version": n, "passed": bool(entry["passed"]), "fails": list(entry["fails"])}
     if entry["passed"]:
         out["review"] = review_step(researcher, store.family(fid) or fam, n)
@@ -3313,7 +3313,8 @@ __all__ = ["STRUCTURE", "PANELS", "OBJECTIVE", "LANE", "MODES", "STATE_KEY", "FL
            "assign", "run_spans", "seen_spans", "hidden_span", "agenda_text", "contract_text", "bar_text",
            "request_text", "researching", "quota", "check_code", "admit", "birth", "runner", "cpu_spent", "may_run",
            "book_cpu", "outside", "train_score_xs", "same_targets", "state_check", "with_state", "program_fault",
-           "compact", "house_failure", "fault", "score", "rescored", "version_text", "restart_text", "style_text",
+           "compact", "house_failure", "fault", "years_ok", "score", "rescored", "version_text", "restart_text",
+           "style_text",
            "train_facts", "brief", "step", "write", "review_question", "review_step", "review_failed", "rubric_sha",
            "finish", "pass_current", "may_validate", "zero_edge_rate", "train_map", "map_notes", "train_map_text",
            "same_lineage", "validate", "lineage_spent", "look", "beside_line", "view"]
