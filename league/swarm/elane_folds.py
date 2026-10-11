@@ -48,8 +48,14 @@ year inside a span starts the following stretch flat (no lot is carried across i
 runs and 1 hidden run a k. THE LOOSENING, reported: such a family is judged on six seen years, not seven; more
 zero-edge versions pass Train, and the screen's false-positive rate per program is untouched (Train is in-sample).
 
-`league.swarm.elane_train` and `elane_seal` are imported INSIDE FUNCTIONS only (`elane_train` and `elane_births`
-import this module at the top), and so is `league.equity.store`. Standard library only.
+THE PANEL LANE BESIDE IT (release E4, merged over this release). A panel family (structure "panel") also carries a
+`hidden_year` in its spec, drawn by ITS OWN lane over the panel's six Train years (`elane_xs.assign`: the same
+`cell_hash`, its own cell and its own count) and honoured by its own bar and brief (league/swarm/elane_xs.py). `born`
+counts no panel family, so the two rotations never move each other; `hidden_year` reads a panel family's year as it
+reads any spec's, and nothing of this module's spans is applied to a panel family (its runs are the panel lane's).
+
+`league.swarm.elane_train`, `elane_seal` and `elane_xs` are imported INSIDE FUNCTIONS only (`elane_train` and
+`elane_births` import this module at the top), and so is `league.equity.store`. Standard library only.
 """
 
 from __future__ import annotations
@@ -96,17 +102,29 @@ def cell_hash(cell: Sequence[str]) -> int:
 
 
 def born(store: Any, cell: Sequence[str]) -> int:
-    """k_c: the equity families already born in `cell` with a `hidden_year` in their spec (alive or retired)."""
+    """k_c: the equity families already born in `cell` with a `hidden_year` in their spec (alive or retired). NEVER A
+    PANEL FAMILY (release E4's structure "panel", merged over this release): its hidden year is the panel lane's own
+    draw over the panel's six Train years (`elane_xs.assign`, counted over panel families alone), it names no symbol,
+    and read as E2's facts it would stand in the cell (lane, "other", "none") and move that cell's rotation."""
     from . import elane_seal, elane_train
 
     cell = tuple(str(part) for part in cell)
     count = 0
     for fam in elane_seal.equity_families(store):
-        if hidden_year(fam) is None:
+        if hidden_year(fam) is None or _panel(fam):
             continue
         facts = elane_seal.train_facts(fam, elane_train.STATE_KEY)
         count += int(elane_train.cell_of(facts["lane"], facts["agenda"], facts["symbols"]) == cell)
     return count
+
+
+def _panel(fam: Mapping[str, Any]) -> bool:
+    """Whether a family is the panel lane's (`elane_xs.is_panel`; a tree without that lane has none)."""
+    try:
+        from . import elane_xs
+    except ImportError:
+        return False
+    return bool(elane_xs.is_panel(fam))
 
 
 def assign(store: Any, cell: Sequence[str]) -> int:

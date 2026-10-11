@@ -688,6 +688,44 @@ class TheSeams(unittest.TestCase):
         self.assertEqual(forward_register.STRUCTURES, tuple(s for s in store_mod.EQUITY_STRUCTURES if s != "panel"),
                          "the forward record's structures are the store's less the panel (package J's)")
 
+    def test_the_two_hidden_year_rotations_never_move_each_other(self):
+        """Release E3's fold beside the panel lane's (league/xs/E4_INTERFACES.md, "for release E3's integrator"): a
+        panel family carries a hidden year of ITS lane's draw (six Train years, counted over panel families alone),
+        an ETF family one of E3's (seven, counted over the others). Read as E2's facts a panel family names no symbol
+        and an agenda E2 does not know, so it would stand in E2's cell (lane, "other", "none"): `elane_folds.born`
+        counts none there, and `elane_xs.assign` counts no ETF family."""
+        from league.swarm import elane_folds, elane_seal, elane_train
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = SwarmStore(Path(tmp), clock=Clock(at(SUNDAY, 12, 0)))
+            self.addCleanup(store.close)
+            recording = {"elane": {"memory": {"mode": "record"}}}
+            panel_cell = elane_xs.cell_of("equity", "xs_reversal", "sp500")
+            first = elane_xs.assign(store, panel_cell, recording)
+            self.assertEqual(first, xconfig.TRAIN_YEARS[elane_folds.cell_hash(panel_cell) % len(xconfig.TRAIN_YEARS)])
+            self.assertIsNone(elane_xs.assign(store, panel_cell, {"elane": {"memory": {"mode": "off"}}}))
+            fam = store.add_family({"id": "rev-a", "mechanism": PROPOSAL["mechanism"], "structure": "panel", "roots": [],
+                                    "lane": "equity", "agenda": "xs_reversal", "panel": "sp500", "max_names": 5,
+                                    "rebalance": "weekly", "weekday": 0, "e2_route": ROUTE, "hidden_year": first,
+                                    "gid": elane_folds.GID0}, origin="architect")
+            self.assertEqual(elane_folds.hidden_year(fam), first, "one of E3's work years too: read as any spec's")
+            facts = elane_seal.train_facts(fam, elane_train.STATE_KEY)
+            as_e2 = elane_train.cell_of(facts["lane"], facts["agenda"], facts["symbols"])
+            self.assertEqual(as_e2, ("equity", "other", "none"))
+            self.assertEqual(elane_folds.born(store, as_e2), 0, "E3's count holds no panel family")
+            self.assertEqual(elane_folds.assign(store, as_e2),
+                             elane_folds.WORK_YEARS[elane_folds.cell_hash(as_e2) % len(elane_folds.WORK_YEARS)])
+            # The panel's own count does hold it: the cell's next panel family draws the next of the six years.
+            second = elane_xs.assign(store, panel_cell, recording)
+            self.assertEqual(second, xconfig.TRAIN_YEARS[(1 + elane_folds.cell_hash(panel_cell)) % len(xconfig.TRAIN_YEARS)])
+            # An ETF family with a hidden year moves E3's count of ITS cell and not the panel's.
+            etf = store.add_family({"id": "ovn-a", "mechanism": "Index holders are paid for overnight risk.",
+                                    "structure": "etf", "roots": ["SPY"], "lane": "beta", "symbols": ["SPY"],
+                                    "agenda": "other", "hidden_year": 2018, "gid": elane_folds.GID0}, origin="architect")
+            facts = elane_seal.train_facts(etf, elane_train.STATE_KEY)
+            self.assertEqual(elane_folds.born(store, elane_train.cell_of(facts["lane"], facts["agenda"], facts["symbols"])), 1)
+            self.assertEqual(elane_xs.assign(store, panel_cell, recording), second)
+
     def test_no_stub_is_left_on_a_built_path(self):
         left = []
         for path in [*sorted((REPO / "league" / "xs").glob("*.py")), REPO / "league" / "swarm" / "elane_xs.py",
