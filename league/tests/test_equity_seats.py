@@ -1256,6 +1256,27 @@ class TheBook(SeatCase):
         f.session(12)
         self.assertEqual((f.band("rare"), f.band("late")), ("candidate", "probe"))
 
+    def test_the_seat_rules_own_trouble_never_stops_the_days_decision(self):
+        """A seat mark the book cannot read (a day that is no date): the seat rule's pass fails, is recorded, moves
+        no seat, and the day's decision runs all the same: the seated programs are asked, nobody is retired and
+        nothing is sold. (A decision that did not run would count as a failed decide, and two of those exit a
+        program's lots: the seat rule must never be a way there.)"""
+        f = self.rare()
+        f.run(1, 3)
+        since = f.h.state.get("eq_band_since")
+        since[f.key("rare")] = {"band": "probe", "day": "not-a-day"}
+        f.h.state.put("eq_band_since", since)
+        events = len(f.events())
+        out = f.session(4)
+        self.assertTrue(any(e.startswith("seats: ") for e in f.h.book._last.get("errors", []) + out.get("errors", [])))
+        self.assertEqual(len(f.events()), events, "no seat changed hands")
+        day = f.days[4].isoformat()
+        self.assertEqual(f.h.state.get("eq_decide")["day"], day)
+        self.assertEqual(sorted(f.h.state.get("eq_decide")["instances"]), sorted(f.key(x) for x in ("busy-1", "busy-2", "rare")))
+        self.assertEqual({f.inst(x).last_decided_day for x in ("busy-1", "busy-2", "rare")}, {day})
+        self.assertEqual({f.inst(x).failed_decides for x in ("busy-1", "busy-2", "rare")}, {0})
+        self.assert_nothing_was_ever_forced(f)
+
     def test_a_restart_keeps_the_plan_and_the_flags(self):
         f = self.rare()
         f.run(1, 10)

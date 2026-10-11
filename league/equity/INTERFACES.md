@@ -1349,7 +1349,10 @@ is the code. "First come" above describes the rollback value.
   `PREREGISTERED["seat_rule"]` says A24 replaced A14's forward seat sentence (which stays as registered).
 - **Costs and limits** (A24's, and the build's): closes concentrate in frequent traders; a daily slice of a quarter
   sleeve can buy rank; a slow, non-idle incumbent keeps its seat; a sale is not an ask, so a program that held one
-  lot longer than the idle clock is idle at the first decision after it is flat. Outranking is NOT adopted.
+  lot longer than the idle clock is idle at the first decision after it is flat; a buy the House itself refuses
+  (the switch, the kill switch, a freeze, the grant, the proof) is not an ask either, so the clock runs on through
+  such a block. Outranking is NOT adopted. The seat rule's own trouble (a row or a day it cannot read) is an
+  `equity.error` "seats", moves no further seat and never stops the day's decision.
 - **Rollback**: `probe.seat.rule` "first-come", one owner deploy, one money-digest move.
 - **Tests**: league/tests/test_equity_seats.py; league/tests/equity_seat_sequence.py and
   fixtures/equity_seat_first_come.json (the week recorded on release E5-S); the changed pins in test_constitution,

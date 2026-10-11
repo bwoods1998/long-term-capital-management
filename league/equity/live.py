@@ -2092,8 +2092,13 @@ class EquityBook:
         day = t.isoformat()
         rule = B.seat_settings()
         if et is not None and et.enabled and not rule.first_come:
-            # THE SEAT RULE in force (the module docstring): the book ranks the waiting programs itself.
-            self._seat_bands(rows, et, rule, sticky, since, day, now, out, late=late)
+            # THE SEAT RULE in force (the module docstring): the book ranks the waiting programs itself. Its own trouble
+            # (a row or a day it cannot read) moves no further seat and NEVER stops the day's decision: the programs
+            # the book holds decide as they are, and the error is recorded each time.
+            try:
+                self._seat_bands(rows, et, rule, sticky, since, day, now, out, late=late)
+            except Exception as exc:  # noqa: BLE001
+                self._error("seats", exc, out)
         elif et is not None and et.enabled:
             # "first-come" (the rollback): release E5-S's band sync, to the line.
             live_n = sum(1 for r in rows if r.get("band") in LIVE_BANDS)
@@ -2125,7 +2130,10 @@ class EquityBook:
                 row["band"] = band
                 since[key] = {"band": band, "day": day}
         if et is not None and rule.first_come:
-            self._seat_note_first_come(rows, et, since, day)
+            try:
+                self._seat_note_first_come(rows, et, since, day)
+            except Exception as exc:  # noqa: BLE001 - a note for the health page: never the band sync's end
+                self._error("seats", exc, out)
         if not late or dumps(sticky) != before[0]:
             self.state.put("eq_sticky", sticky)
         holds = self._holds()

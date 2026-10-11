@@ -1053,9 +1053,11 @@ In plain words, and where each part lives:
   in one line of its summary.
 - **Its costs, as A24 states them.** Closes concentrate in frequent traders, so Done reached this way is weaker
   evidence of skill. A daily slice of a quarter sleeve can buy rank. A slow, non-idle incumbent keeps its seat.
-  And one this build found in the rule's own words: a sale is not an ask, so a program that held one lot for more
+  And two this build found in the rule's own words. A sale is not an ask, so a program that held one lot for more
   than ten sessions is idle at the first decision after it is flat, unless a buy of its own reached the venue
-  since; it then yields if an unflagged program waits.
+  since; it then yields if an unflagged program waits. And while the House itself refuses every open (the lane's
+  switch off, the kill switch, a stop, a freeze, the grant not yet ratified, the paper proof not passed), no buy
+  reaches the venue, so a flat program's idle clock runs on through no doing of its own.
 - **At the deploy.** Nobody is unseated: every seated program keeps its seat and its seat's own day, and the idle
   clock counts from that day. The first band sync reads the waiting Candidates; a free seat goes to the
   best-ranked of them. The swarm's next equity round writes K's counts for every passed program.
