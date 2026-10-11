@@ -349,8 +349,8 @@ def run(ctx: Any) -> dict[str, Any]:
         answer = ctx.gateway.post(DOCS_ROUTE, {"path": path, "content": text, "message": f"desk: scoreboard {day}"})
     except GatewayError as exc:
         if exc.status in (404, 405):
-            return {"status": "skipped", "why": "the gateway's docs route is not deployed", "local": str(local), "bytes": len(text),
-                    "equity": equity_funnel(funnel)}
+            return {"status": "skipped", "why": "the gateway's docs route is not deployed", "local": str(local),
+                    "bytes": len(text), "equity": equity_funnel(funnel)}
         raise
-    return {"posted": path, "local": str(local), "bytes": len(text),
-            "commit": (answer or {}).get("commit") if isinstance(answer, dict) else None, "equity": equity_funnel(funnel)}
+    return {"posted": path, "local": str(local), "bytes": len(text), "equity": equity_funnel(funnel),
+            "commit": (answer or {}).get("commit") if isinstance(answer, dict) else None}
