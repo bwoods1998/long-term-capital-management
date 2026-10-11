@@ -54,10 +54,25 @@ def execution_fingerprint(repo: Path | None = None) -> str:
     return digest.hexdigest()
 
 
-#: THE EQUITY IDENTITY (release E1, A8.8; owner: core): the store kv key of the adopted equity fingerprint, and every
-#: league/gym module league/equity imports (hashed with it, listed explicitly; a test holds the list to the imports).
+#: THE EQUITY IDENTITY (release E1, A8.8 as amended by the captain's A13; owner: core): the store kv key of the adopted
+#: equity fingerprint, and every league/gym module the evidence modules import (hashed with them, listed explicitly; a
+#: test holds the list to the imports).
 EQUITY_KEY = "equity_evaluator"
 EQUITY_GYM_FILES = ("league/gym/__init__.py", "league/gym/safety.py", "league/gym/runtime.py", "league/gym/events.py")
+#: THE EQUITY EVIDENCE (A13): the modules of league/equity whose code decides what a program's evidence IS, hashed into
+#: the equity identity, and nothing else of that package. They are the import closure, inside league/equity, of
+#: `EQUITY_EVIDENCE_ROOTS` (the isolated runner, the decider child's "equity" kind, the screen and the engine: what
+#: Validation, the sealed look and a live decision execute), and `synth` (the synthetic store the I6 ctx test and every
+#: package's tests build their evidence on; it imports only modules already in the closure). A CI test holds this list
+#: equal to that closure plus `EQUITY_EVIDENCE_EXTRA` (league/tests/test_equity_identity.py), so a new evidence module
+#: cannot hide outside the identity. PLUMBING IS OUT: live, actions, schedule, families, bands and kinds (the
+#: EquityBook, its clock, its corporate actions, the swarm reader, the band rules, the decider's kind table) move no
+#: identity, so a plumbing fix never sends a live equity band back to the Gym; that live and Gym agree is policed
+#: instead by the I6 ctx test (league/tests/test_equity_i6.py) and the equity twins (league/ops/twins.py).
+EQUITY_EVIDENCE = ("__init__", "config", "store", "program", "ctx", "engine", "results", "runner", "synth", "sizing",
+                   "screen", "child")
+EQUITY_EVIDENCE_ROOTS = ("runner", "child", "screen", "engine")
+EQUITY_EVIDENCE_EXTRA = ("synth",)
 #: An equity family's state keys an adoption archives and clears beside `SELECTION_KEYS` (its evidence under the old
 #: engine: the Validation runs' spread, the screen's floor, the Train series a lineage check reads). Its tries and its
 #: look (`elane_try`, `elane_look`) are never cleared: a lineage's spent try and look stay spent.
@@ -78,14 +93,17 @@ def is_equity_family(fam: Mapping[str, Any] | None) -> bool:
 
 @lru_cache(maxsize=4)
 def equity_fingerprint(repo: Path | None = None) -> str:
-    """THE EQUITY LANE's evidence identity (A8.8; owner: core): sha256 over every league/equity/**/*.py, the 4
+    """THE EQUITY LANE's evidence identity (A8.8 as amended by A13; owner: core): sha256 over the EVIDENCE modules of
+    league/equity (`EQUITY_EVIDENCE`: league/equity/<name>.py, each of them, and no other file of the package), the 4
     `LEAGUE_FILES` and `EQUITY_GYM_FILES`, path and bytes, in path order (as `execution_fingerprint`). Equity bands bind
-    to it as options bands bind to `execution_fingerprint`; it never moves for a league/live or options-only change."""
+    to it as options bands bind to `execution_fingerprint`; it never moves for a league/live or options-only change,
+    nor for league/equity's plumbing (live, actions, schedule, families, bands, kinds), nor for league/xs. A release
+    that lacks an evidence module has no identity (the read raises: no band proof, no look)."""
     from ..gym.driver import LEAGUE_FILES
 
     repo = repo or Path(__file__).resolve().parents[2]
     files = {repo / name for name in (*LEAGUE_FILES, *EQUITY_GYM_FILES)}
-    files.update(p for p in (repo / "league" / "equity").rglob("*.py") if "__pycache__" not in p.parts)
+    files.update(repo / "league" / "equity" / f"{name}.py" for name in EQUITY_EVIDENCE)
     digest = hashlib.sha256()
     for path in sorted(files):
         digest.update(path.relative_to(repo).as_posix().encode() + b"\0" + path.read_bytes() + b"\0")
@@ -286,5 +304,6 @@ def adopt(store: Any, expected: Mapping[str, Any] | None) -> dict[str, Any]:
 
 
 __all__ = ["KEY", "SELECTION_KEYS", "HOLD_KEYS", "identity", "matches", "row_matches", "gym_changed", "adopt",
-           "execution_fingerprint", "EQUITY_KEY", "EQUITY_GYM_FILES", "EQUITY_SELECTION_KEYS", "equity_fingerprint",
+           "execution_fingerprint", "EQUITY_KEY", "EQUITY_GYM_FILES", "EQUITY_EVIDENCE", "EQUITY_EVIDENCE_ROOTS",
+           "EQUITY_EVIDENCE_EXTRA", "EQUITY_SELECTION_KEYS", "equity_fingerprint",
            "equity_identity", "equity_band_current", "is_equity_family", "adopt_equity"]

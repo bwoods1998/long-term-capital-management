@@ -1,5 +1,7 @@
-"""The equity lane's evidence identity (A8.8, I5): its own fingerprint, the league/gym modules it hashes held equal
-to the ones it imports, evidence modules that never reach league.live or league.swarm, and an adoption that resets equity
+"""The equity lane's evidence identity (A8.8, I5, as amended by the captain's A13): its own fingerprint over the
+EVIDENCE modules only (`EQUITY_EVIDENCE`, held equal to the import closure of the runner, the child, the screen and the
+engine, plus `synth`; league/equity's plumbing moves nothing), the league/gym modules it hashes held equal to the ones
+the evidence imports, evidence modules that never reach league.live or league.swarm, and an adoption that resets equity
 families only (and `adopt`, the options one, that never touches them).
 """
 
@@ -14,13 +16,17 @@ from pathlib import Path
 from league.equity import EQUITY_ENGINE_VERSION
 from league.gym.driver import LEAGUE_FILES
 from league.swarm import bands
-from league.swarm.evaluator import (EQUITY_GYM_FILES, EQUITY_KEY, adopt, adopt_equity, equity_fingerprint,
-                                    equity_identity, execution_fingerprint, identity, is_equity_family)
+from league.swarm.evaluator import (EQUITY_EVIDENCE, EQUITY_EVIDENCE_EXTRA, EQUITY_EVIDENCE_ROOTS, EQUITY_GYM_FILES,
+                                    EQUITY_KEY, adopt, adopt_equity, equity_fingerprint, equity_identity,
+                                    execution_fingerprint, identity, is_equity_family)
 from league.tests.test_swarm_store import SPEC, StoreCase
 
 REPO = Path(__file__).resolve().parents[2]
+EQUITY = REPO / "league" / "equity"
+#: A13, as the captain listed them: the evidence modules (the identity) and the plumbing (out of it).
 EVIDENCE = ("__init__", "config", "store", "program", "ctx", "engine", "results", "runner", "synth", "sizing",
-            "screen", "child", "kinds")
+            "screen", "child")
+PLUMBING = ("live", "actions", "schedule", "families", "bands", "kinds")
 
 
 def _imports(path: Path) -> set[str]:
@@ -50,26 +56,33 @@ def _file_of(module: str) -> Path | None:
     return None
 
 
-def gym_closure() -> set[str]:
-    """The league/gym files league/equity reaches: what it imports, what those import, and the package's __init__."""
-    pending = [p for p in (REPO / "league" / "equity").rglob("*.py")]
+def closure(roots: list[Path]) -> set[str]:
+    """Every file of the repository's league package the `roots` reach (repository-relative): the roots, what they
+    import (at module level or inside a function: the child imports per op), what those import, and the __init__ of
+    every package on the way (importing a module runs them)."""
+    pending = list(roots)
     seen: set[Path] = set()
-    found: set[str] = set()
     while pending:
         path = pending.pop()
         if path in seen:
             continue
         seen.add(path)
+        parts = path.relative_to(REPO).parts
+        pending += [init for i in range(1, len(parts)) if (init := REPO.joinpath(*parts[:i], "__init__.py")).is_file()]
         for module in _imports(path):
-            if not module.startswith("league.gym"):
-                continue
-            target = _file_of(module)
-            if target is None:
-                continue
-            found.add(target.relative_to(REPO).as_posix())
-            found.add("league/gym/__init__.py")
-            pending.append(target)
-    return found
+            target = _file_of(module) if module.startswith("league.") else None
+            if target is not None:
+                pending.append(target)
+    return {p.relative_to(REPO).as_posix() for p in seen}
+
+
+def evidence_closure(roots=EQUITY_EVIDENCE_ROOTS) -> set[str]:
+    return closure([EQUITY / f"{name}.py" for name in roots])
+
+
+def gym_closure() -> set[str]:
+    """The league/gym files the equity evidence reaches (the modules of `EQUITY_EVIDENCE`, synth included)."""
+    return {f for f in evidence_closure(EQUITY_EVIDENCE) if f.startswith("league/gym/")}
 
 
 def write(repo: Path, name: str, text: str = "VALUE = 1\n") -> Path:
@@ -84,25 +97,39 @@ class Fingerprint(unittest.TestCase):
         equity_fingerprint.cache_clear()
         execution_fingerprint.cache_clear()
 
-    def test_it_moves_for_equity_code_and_what_it_imports_only(self):
+    def test_it_moves_for_the_evidence_modules_and_what_they_import_only(self):
+        """A13: the identity is the evidence modules (each one), the 4 LEAGUE_FILES and the gym files they import.
+        league/equity's plumbing, a new module beside them, league/xs, league/live, the swarm and the documentation
+        move nothing: a plumbing fix never sends a live equity band back to the Gym."""
+        evidence = [f"league/equity/{name}.py" for name in EVIDENCE]
+        plumbing = [f"league/equity/{name}.py" for name in PLUMBING]
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
-            for name in (*LEAGUE_FILES, *EQUITY_GYM_FILES, "league/gym/fills.py", "league/live/step.py",
-                         "league/equity/engine.py", "league/equity/deep/kind.py", "league/swarm/elane.py"):
+            for name in (*LEAGUE_FILES, *EQUITY_GYM_FILES, *evidence, *plumbing, "league/gym/fills.py",
+                         "league/live/step.py", "league/equity/deep/kind.py", "league/equity/newcomer.py",
+                         "league/xs/__init__.py", "league/xs/child.py", "league/swarm/elane.py"):
                 write(repo, name)
             original = equity_fingerprint(repo)
             options = execution_fingerprint(repo)
-            for name in ("league/equity/EQUITY.md", "league/equity/INTERFACES.md", "league/live/step.py",
-                         "league/gym/fills.py", "league/swarm/elane.py"):
+            for name in (*plumbing, "league/equity/deep/kind.py", "league/equity/newcomer.py", "league/xs/child.py",
+                         "league/xs/__init__.py", "league/equity/EQUITY.md", "league/equity/INTERFACES.md",
+                         "league/live/step.py", "league/gym/fills.py", "league/swarm/elane.py"):
                 write(repo, name, "VALUE = 2\n")
                 equity_fingerprint.cache_clear()
                 self.assertEqual(equity_fingerprint(repo), original, name)
-            for name in ("league/equity/engine.py", "league/equity/deep/kind.py", "league/gym/runtime.py",
-                         "league/gym/events.py", "league/stats.py"):
+            for name in (*evidence, *EQUITY_GYM_FILES, *LEAGUE_FILES):
                 write(repo, name, "VALUE = 3\n")
                 equity_fingerprint.cache_clear()
                 self.assertNotEqual(equity_fingerprint(repo), original, name)
                 write(repo, name)
+            equity_fingerprint.cache_clear()
+            self.assertEqual(equity_fingerprint(repo), original)
+            # A release that lacks an evidence module has no identity (no band proof, no look), never a smaller one.
+            (repo / "league/equity/sizing.py").unlink()
+            equity_fingerprint.cache_clear()
+            with self.assertRaises(OSError):
+                equity_fingerprint(repo)
+            write(repo, "league/equity/sizing.py")
             equity_fingerprint.cache_clear()
             self.assertEqual(equity_fingerprint(repo), original)
             write(repo, "league/equity/engine.py", "VALUE = 4\n")
@@ -121,11 +148,67 @@ class Fingerprint(unittest.TestCase):
 
 
 class Boundaries(unittest.TestCase):
-    def test_the_hashed_gym_files_are_exactly_the_ones_league_equity_reaches(self):
+    def test_the_evidence_list_is_the_import_closure_of_the_runner_the_child_the_screen_and_the_engine(self):
+        """A13's CI test: `EQUITY_EVIDENCE` equals the import closure, inside league/equity, of the runner, the child,
+        the screen and the engine, plus `synth` (named apart: the four never import it, and it imports nothing outside
+        the closure). So a new module the evidence comes to import cannot hide outside the identity: the closure grows
+        and this fails until the list, and with it the fingerprint, names it. The plumbing is none of it."""
+        self.assertEqual(EQUITY_EVIDENCE, EVIDENCE)
+        self.assertEqual((EQUITY_EVIDENCE_ROOTS, EQUITY_EVIDENCE_EXTRA), (("runner", "child", "screen", "engine"),
+                                                                        ("synth",)))
+        inside = {Path(f).stem for f in evidence_closure() if f.startswith("league/equity/")}
+        self.assertEqual(inside | set(EQUITY_EVIDENCE_EXTRA), set(EQUITY_EVIDENCE))
+        self.assertFalse(inside & set(EQUITY_EVIDENCE_EXTRA), "an extra the roots import is no extra: drop it from the list")
+        for name in EQUITY_EVIDENCE_EXTRA:
+            reached = {Path(f).stem for f in evidence_closure((name,)) if f.startswith("league/equity/")}
+            self.assertLessEqual(reached - {name}, inside, f"{name} brings nothing new into the identity")
+        self.assertFalse(set(EQUITY_EVIDENCE) & set(PLUMBING))
+        on_disk = {p.stem for p in EQUITY.glob("*.py")}
+        self.assertEqual(on_disk, set(EVIDENCE) | set(PLUMBING), "a new module of league/equity is named evidence "
+                         "(EQUITY_EVIDENCE, by the closure) or plumbing (here), never left unsaid")
+        self.assertFalse([p for p in EQUITY.rglob("*.py") if p.parent != EQUITY and "__pycache__" not in p.parts],
+                         "the identity lists files of league/equity itself: a sub-package would be outside it")
+
+    def test_the_real_fingerprint_reads_exactly_the_listed_files(self):
+        """The repository's own identity: the same digest as one taken over EQUITY_EVIDENCE, LEAGUE_FILES and
+        EQUITY_GYM_FILES by hand, and unmoved by a byte of plumbing (read through a copy)."""
+        import hashlib
+        import shutil
+
+        files = sorted({*(f"league/equity/{name}.py" for name in EVIDENCE), *LEAGUE_FILES, *EQUITY_GYM_FILES})
+        self.assertEqual(len(files), len(EVIDENCE) + len(LEAGUE_FILES) + len(EQUITY_GYM_FILES))
+        digest = hashlib.sha256()
+        for name in files:
+            digest.update(name.encode() + b"\0" + (REPO / name).read_bytes() + b"\0")
+        equity_fingerprint.cache_clear()
+        self.assertEqual(equity_fingerprint(), digest.hexdigest())
+        with tempfile.TemporaryDirectory() as tmp:
+            copy = Path(tmp)
+            for name in (*files, *(f"league/equity/{name}.py" for name in PLUMBING)):
+                (copy / name).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(REPO / name, copy / name)
+            self.assertEqual(equity_fingerprint(copy), digest.hexdigest())
+            for name in PLUMBING:
+                with (copy / "league" / "equity" / f"{name}.py").open("a") as handle:
+                    handle.write("\n# a plumbing fix\n")
+            equity_fingerprint.cache_clear()
+            self.assertEqual(equity_fingerprint(copy), digest.hexdigest(), "plumbing retires no lineage")
+            with (copy / "league" / "equity" / "screen.py").open("a") as handle:
+                handle.write("\n# an evidence change\n")
+            equity_fingerprint.cache_clear()
+            self.assertNotEqual(equity_fingerprint(copy), digest.hexdigest())
+        equity_fingerprint.cache_clear()
+
+    def test_the_hashed_gym_files_are_exactly_the_ones_the_evidence_reaches(self):
         self.assertEqual(gym_closure(), set(EQUITY_GYM_FILES))
+        # ... and what it reaches of league/ itself is inside the 4 LEAGUE_FILES (hashed whole, reached or not).
+        top = {f for f in evidence_closure(EQUITY_EVIDENCE) if f.count("/") == 1}
+        self.assertLessEqual(top, set(LEAGUE_FILES), top)
 
     def test_evidence_modules_never_import_league_live_or_league_swarm(self):
-        for name in EVIDENCE:
+        reached = evidence_closure(EQUITY_EVIDENCE)
+        self.assertFalse(sorted(f for f in reached if f.startswith(("league/live/", "league/swarm/", "league/xs/"))))
+        for name in (*EVIDENCE, "kinds"):
             path = REPO / "league" / "equity" / f"{name}.py"
             with self.subTest(module=name):
                 bad = sorted(m for m in _imports(path) if re.match(r"league\.(live|swarm)(\.|$)", m))

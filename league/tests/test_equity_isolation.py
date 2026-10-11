@@ -6,11 +6,13 @@ code itself, by its syntax tree.
    league/live edit).
 2. league/live/step.py contains `.equity.tick(` exactly once, inside `OptionsLive.minute`: equity behaviour cannot hide
    in the options step.
-3. The evidence modules of league/equity import nothing of league.live and nothing of league.swarm, and the kind table
-   names only modules of league/equity.
+3. The evidence modules of league/equity (and its kind table) import nothing of league.live and nothing of
+   league.swarm, and the kind table names only modules of league/equity and of league/xs (the panel kind's slot, A13).
+4. league/xs (A13) imports nothing of league.live and nothing of league.swarm, and league/live never names it: the
+   decider reaches it through the kind table alone.
 
-A change to league/live moves the options execution fingerprint; one to league/equity the equity fingerprint only. These
-tests are what keep the second true."""
+A change to league/live moves the options execution fingerprint; one to league/equity's evidence modules the equity
+fingerprint only (A13: its plumbing moves neither). These tests are what keep the second true."""
 
 import ast
 import re
@@ -20,11 +22,15 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 LIVE = REPO / "league" / "live"
 EQUITY = REPO / "league" / "equity"
+XS = REPO / "league" / "xs"
 #: league/live module -> the league.equity modules it may name (None: any).
 DOORS = {"equity_hook.py": None, "decider.py": {"league.equity.kinds"}}
-#: INTERFACES.md 2.2: the evidence modules (their code decides what a program's evidence is).
+#: INTERFACES.md 2.2: the evidence modules (their code decides what a program's evidence is) and the decider's kind
+#: table (plumbing since A13, outside the equity identity, but read inside the child like them).
 EVIDENCE = ("config", "store", "program", "ctx", "engine", "results", "runner", "synth", "sizing", "screen", "child",
             "kinds")
+#: The packages a decider kind's module may live in: the equity lane's, and the panel kind's slot (A13).
+KIND_HOMES = ("league.equity", "league.xs")
 MODULE_NAME = re.compile(r"^league(\.[A-Za-z_][A-Za-z0-9_]*)+$")
 
 
@@ -75,6 +81,13 @@ class TheOneDoor(unittest.TestCase):
         self.assertIn("equity_hook.py", found, "the door is used")
         self.assertEqual(found.get("decider.py"), {"league.equity.kinds"})
 
+    def test_league_live_never_names_the_panel_slot(self):
+        """A13: league/xs is reached only through the kind table (league/equity/kinds.py), never by a league/live
+        import, so building the panel lane there needs no league/live edit (the options fingerprint does not move)."""
+        found = {path.relative_to(LIVE).as_posix(): names for path in sorted(LIVE.rglob("*.py"))
+                 if (names := {n for n in references(path) if within(n, "league.xs")})}
+        self.assertEqual(found, {})
+
     def test_the_reader_sees_every_spelling(self):
         """The check itself: relative, absolute, package-level and string spellings are all caught."""
         import tempfile
@@ -120,14 +133,26 @@ class TheEvidenceModules(unittest.TestCase):
                 bad = {n for n in references(path) if within(n, "league.live") or within(n, "league.swarm")}
                 self.assertEqual(bad, set())
 
-    def test_the_kind_table_names_modules_of_the_lane(self):
+    def test_the_kind_table_names_modules_of_the_lane_and_of_the_panel_slot(self):
         from league.equity import kinds
 
+        self.assertEqual(kinds.KINDS, {"equity": "league.equity.child", "panel": "league.xs.child"})
         for kind, module in kinds.KINDS.items():
             with self.subTest(kind=kind):
-                self.assertTrue(within(module, "league.equity"), module)
+                self.assertTrue(any(within(module, home) for home in KIND_HOMES), module)
                 self.assertTrue(REPO.joinpath(*module.split(".")).with_suffix(".py").is_file(), module)
                 self.assertTrue(callable(getattr(kinds.module_for(kind), "handle", None)))
+                # Each kind's package is in the child's sealed runtime, whole.
+                self.assertIn("/".join(module.split(".")[:-1]) + "/", kinds.RUNTIME)
+
+    def test_the_panel_slot_imports_nothing_of_the_live_path_or_the_swarm(self):
+        modules = sorted(XS.rglob("*.py"))
+        self.assertEqual([p.relative_to(XS).as_posix() for p in modules], ["__init__.py", "child.py"],
+                         "A13's slot: a package and its refusing child, nothing else until the panel lane is built")
+        for path in modules:
+            with self.subTest(module=path.name):
+                bad = {n for n in references(path) if within(n, "league.live") or within(n, "league.swarm")}
+                self.assertEqual(bad, set())
 
 
 if __name__ == "__main__":

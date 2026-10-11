@@ -4,8 +4,11 @@ The plan is the captain's design (private scratch) with its amendments; the buil
 `league/equity/INTERFACES.md` (every module, signature, shape, table and owner). This package is the lane's one home,
 outside the options execution fingerprint (`league.swarm.evaluator.execution_fingerprint` hashes league/gym and
 league/live only): equity semantics change here without resetting the options lane's evidence, and bind to their own
-identity (`league.swarm.evaluator.equity_fingerprint`). `league/live` reaches this package only through
-`league/live/equity_hook.py` and the decider's kind table (`league/equity/kinds.py`).
+identity (`league.swarm.evaluator.equity_fingerprint`: the EVIDENCE modules only, the captain's A13: this file,
+`config`, `store`, `program`, `ctx`, `engine`, `results`, `runner`, `synth`, `sizing`, `screen` and `child`; the
+plumbing, `live`, `actions`, `schedule`, `families`, `bands` and `kinds`, moves no identity, so a plumbing fix retires
+no live equity lineage). `league/live` reaches this package only through `league/live/equity_hook.py` and the decider's
+kind table (`league/equity/kinds.py`).
 
 The pieces:
 

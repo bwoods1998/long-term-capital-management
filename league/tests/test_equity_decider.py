@@ -199,6 +199,27 @@ class TheEquityKindInProcess(unittest.TestCase):
         args, kw = self.runs[-1]
         self.assertEqual((args, kw), (("C", {"h": 8}, {"n": 3}), {"name": "r", "k": 1.5, "capital": "1000"}))
 
+    def test_the_panel_kind_is_a_slot_that_refuses_every_op(self):
+        """A13: "panel" -> league/xs/child.py, whose `handle` refuses whatever is asked: nothing loads, decides or
+        runs, and the House's side reads a refusal (a load raises ProgramRefused and is not remembered)."""
+        from league.xs import child as panel
+
+        self.assertEqual(panel.OPS, ())
+        for op in ("load", "drop", "decide", "needs", "run", "train", "", None):
+            state: dict = {}
+            answer = panel.handle(op, {"key": "k", "code": "raise SystemExit", "jobs": [{"key": "k"}]}, state)
+            self.assertEqual((answer["ok"], answer["refused"]), (False, True), op)
+            self.assertIn("not built", answer["error"])
+            self.assertEqual(state, {}, "the slot keeps nothing")
+        for op in ("decide", "needs", "run"):
+            answer = self.decider.kind("panel", op, {"jobs": [{"key": "a"}], "code": "C"})
+            self.assertEqual((answer["ok"], answer["refused"]), (False, True), op)
+        with self.assertRaises(D.ProgramRefused):
+            self.decider.kind_load("panel", "p@1:r", {"code": "C", "params": {}, "name": "p"})
+        self.assertEqual(self.decider.kind_loaded, {}, "a refused load is not remembered for a restarted child")
+        self.decider.kind_drop("panel", "p@1:r")
+        self.assertNotIn("runners", self.decider._kinds.get("panel", {}))
+
     def test_unknown_ops_and_kinds_and_the_remembered_routes(self):
         self.assertIn("unknown equity op", self.decider.kind("equity", "train", {})["error"])
         answer = self.decider.kind("options", "decide", {"jobs": []})
@@ -233,8 +254,12 @@ class TheTable(unittest.TestCase):
     def test_module_for(self):
         from league.equity import child, kinds
 
-        self.assertEqual(kinds.KINDS, {"equity": "league.equity.child"})
+        from league.xs import child as panel
+
+        self.assertEqual(kinds.KINDS, {"equity": "league.equity.child", "panel": "league.xs.child"})
         self.assertIs(kinds.module_for("equity"), child)
+        self.assertIs(kinds.module_for("panel"), panel)
+        self.assertIn("league/xs/", kinds.RUNTIME)
         for bad in ("options", None, 3):
             with self.assertRaises(ValueError):
                 kinds.module_for(bad)
@@ -249,14 +274,17 @@ class TheTable(unittest.TestCase):
         repo = D.REPO
         for name in D.RUNTIME_FILES:
             self.assertIn(name, files)
-        for directory in ("league/equity", "league/gym"):
+        for directory in ("league/equity", "league/gym", "league/xs"):
             for path in (repo / directory).glob("*.py"):
                 self.assertIn(path.relative_to(repo).as_posix(), files)
+        self.assertLessEqual({"league/xs/__init__.py", "league/xs/child.py"}, set(files), "the panel kind's slot (A13)")
         self.assertFalse([f for f in files if not f.endswith(".py")], "documentation is never copied")
         script = ("import league.live.decider\n"
                   "from league.equity import kinds\n"
                   "for kind in kinds.KINDS:\n"
                   "    kinds.module_for(kind)\n"
+                  "panel = kinds.module_for('panel').handle('run', {}, {})\n"
+                  "assert panel['ok'] is False and panel['refused'] is True, panel\n"
                   "import league.equity.program, league.equity.ctx, league.equity.runner, league.equity.store\n"
                   "import tempfile\n"
                   "from league.equity import child, synth\n"

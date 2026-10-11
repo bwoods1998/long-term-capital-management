@@ -279,11 +279,12 @@ class TheEquityLane(unittest.TestCase):
         return ci.check_equity(self.root)
 
     def test_the_tree_and_the_swarm_lane_are_protected(self):
-        self.assertEqual(ci.PENDING_GATEWAY, ("league/equity/", "league/swarm/elane.py"))
+        self.assertEqual(ci.PENDING_GATEWAY, ("league/equity/", "league/swarm/elane.py", "league/xs/", "ltcm/broker.py"))
         for entry in ci.PENDING_GATEWAY:
             self.assertIn(entry, ci.FORBIDDEN)
         for path in ("league/equity/sizing.py", "league/equity/live.py", "league/equity/INTERFACES.md",
-                     "League/Equity/bands.py", "league/swarm/elane.py"):
+                     "League/Equity/bands.py", "league/swarm/elane.py", "league/xs/child.py", "league/xs/__init__.py",
+                     "league/xs/engine.py", "ltcm/broker.py"):
             self.assertTrue(ci.guard([path], None), path)
             for role in ci.ROLE_PATHS:
                 self.assertTrue(ci.guard([path], role), (path, role))
@@ -292,11 +293,27 @@ class TheEquityLane(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             running, incoming = Path(tmp) / "running", Path(tmp) / "incoming"
             for root, text in ((running, "X = 1\n"), (incoming, "X = 2\n")):
-                for rel in ("league/equity/sizing.py", "league/swarm/elane.py", "league/swarm/pool.py"):
+                for rel in ("league/equity/sizing.py", "league/swarm/elane.py", "league/swarm/pool.py",
+                            "league/xs/child.py", "ltcm/broker.py"):
                     (root / rel).parent.mkdir(parents=True, exist_ok=True)
                     (root / rel).write_text(text)
             self.assertEqual([p.split(":")[0] for p in protected_changes(incoming, running)],
-                             ["league/equity/sizing.py", "league/swarm/elane.py"])
+                             ["league/equity/sizing.py", "league/swarm/elane.py", "league/xs/child.py", "ltcm/broker.py"])
+
+    def test_every_file_of_the_decider_childs_sealed_runtime_is_protected(self):
+        """What the isolated child may import decides real orders (an options decision, an equity decision, every
+        Validation run and look), so no role may change it and the updater never self-deploys it: every file of
+        `league.live.decider.runtime_files()` (the options decision's files and every kind's `RUNTIME`: league/gym/,
+        league/equity/, league/xs/, the calendar's ltcm files) is held by `FORBIDDEN`. The gateway's merge test holds
+        the same from its side for the files its own list names."""
+        from league.live import decider
+
+        files = decider.runtime_files()
+        self.assertIn("league/xs/child.py", files)
+        self.assertIn("ltcm/broker.py", files)
+        self.assertIn("league/equity/child.py", files)
+        for path in files:
+            self.assertTrue(ci.guard([path], None), f"{path} is in the decider child's runtime and is not FORBIDDEN")
 
     def test_the_repository_as_it_stands_agrees(self):
         self.assertEqual(ci.check_equity(), [])

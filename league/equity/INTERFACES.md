@@ -65,21 +65,34 @@ no package writes it).
    import) and `league/live/decider.py` (it imports `league.equity.kinds` only). `test_equity_isolation.py` (hooks)
    asserts this over every `league/live/*.py` by AST, and that `league/live/step.py` contains the text
    `.equity.tick(` exactly once, inside `OptionsLive.minute`.
-2. **Evidence modules of league/equity** (`config`, `store`, `program`, `ctx`, `engine`, `results`, `runner`, `synth`,
-   `sizing`, `screen`, `child`, `kinds`) import nothing of `league.live` and nothing of `league.swarm`. They may import
-   `league.gym` modules listed in `league.swarm.evaluator.EQUITY_GYM_FILES` (core keeps the list equal to the imports;
+2. **Evidence modules of league/equity** (`__init__`, `config`, `store`, `program`, `ctx`, `engine`, `results`,
+   `runner`, `synth`, `sizing`, `screen`, `child`: `league.swarm.evaluator.EQUITY_EVIDENCE`, the captain's A13) and the
+   kind table `kinds` import nothing of `league.live` and nothing of `league.swarm`. They may import `league.gym`
+   modules listed in `league.swarm.evaluator.EQUITY_GYM_FILES` (core keeps the list equal to the imports;
    `test_equity_identity.py` holds it) and `league/__init__.py`, `league/safety.py`, `league/structure_core.py`,
    `league/stats.py` (the 4 `LEAGUE_FILES`).
-3. **Plumbing modules of league/equity** (`live`, `schedule`, `actions`, `families`, `bands`) may import
-   `league.live.state`, `league.live.venue`, `league.live.money`, `league.live.real` (its constants and
+3. **Plumbing modules of league/equity** (`live`, `schedule`, `actions`, `families`, `bands`, and since A13 `kinds`)
+   may import `league.live.state`, `league.live.venue`, `league.live.money`, `league.live.real` (its constants and
    `probe_figures`, the shared budget's reader),
    `league.swarm.bands`, `league.swarm.store`, `ltcm.data`. `bands` imports nothing of league.live (it reads the
-   money table by attribute).
-4. **The equity fingerprint** (`league.swarm.evaluator.equity_fingerprint`, core): sha256 over every
-   `league/equity/**/*.py` (code, not this file or EQUITY.md: as `execution_fingerprint`, documentation never
-   resets evidence), the 4 `LEAGUE_FILES` and `EQUITY_GYM_FILES`, path and bytes, in path order. It never includes
-   league/live. A change to league/live moves the OPTIONS fingerprint only; a change to league/equity moves the EQUITY
-   fingerprint only. E1 moves the options fingerprint once (its hooks and the stubs in money.py and decider.py).
+   money table by attribute); `kinds` imports nothing of either (the child reads it).
+4. **The equity fingerprint** (`league.swarm.evaluator.equity_fingerprint`, core; AS AMENDED BY A13): sha256 over the
+   EVIDENCE modules only (`EQUITY_EVIDENCE`: `league/equity/<name>.py` for each, never this file or EQUITY.md: as
+   `execution_fingerprint`, documentation never resets evidence), the 4 `LEAGUE_FILES` and `EQUITY_GYM_FILES`, path and
+   bytes, in path order. `EQUITY_EVIDENCE` is the import closure, inside league/equity, of the runner, the child, the
+   screen and the engine, plus `synth` (which the four never import; it imports nothing outside the closure):
+   `test_equity_identity.py` holds the list equal to that closure, so a new evidence module cannot hide. THE PLUMBING
+   IS OUT (`live`, `actions`, `schedule`, `families`, `bands`, `kinds`): a plumbing fix moves no identity and retires
+   no live equity lineage; that live and Gym agree is policed by the I6 ctx test and the twins. It never includes
+   league/live or league/xs. A change to league/live moves the OPTIONS fingerprint only; a change to an evidence module
+   of league/equity moves the EQUITY fingerprint only. E1 moves the options fingerprint once (its hooks and the stubs
+   in money.py and decider.py).
+4a. **The panel kind's slot** (A13): `kinds.KINDS["panel"]` = `"league.xs.child"`, `kinds.RUNTIME` carries
+   `"league/xs/"`, and `league/xs/__init__.py` and `league/xs/child.py` exist as stubs (`handle` refuses every op). A
+   later release builds the cross-sectional lane inside league/xs/, with no edit of league/live and none of an
+   evidence module here. league/xs imports nothing of `league.live` or `league.swarm`, league/live never names it
+   (`test_equity_isolation.py`), and league/ci.py protects it (`PENDING_GATEWAY`, with `ltcm/broker.py`: every file of
+   the decider child's sealed runtime is `FORBIDDEN`, `test_ci.py`).
 5. **Options consumers skip equity families** (swarm, core). ONE MECHANISM: `SwarmStore.families(*, alive=None,
    lanes=None)` (swarm, league/swarm/store.py): `lanes` None returns the options lanes only (a family whose spec's
    `lane` is "beta" or "equity" is left out), so the researcher's selection, the tournament's Gym validation, forks,
@@ -498,7 +511,8 @@ ProbeFigures`; `working_buys_worst(rows) -> Decimal`; `orders_today(rows, day) -
 - **venue.py**: `MarketData.bars(symbols, *, timeframe, start, end=None, adjustment="raw")` (the book reads "all" too).
 
 ### 6.3 `league/equity/kinds.py`, `league/equity/child.py` (stubs present)
-`KINDS = {"equity": "league.equity.child"}`, `module_for(kind) -> module`. `child.handle(op, payload, state) -> dict`
+`KINDS = {"equity": "league.equity.child", "panel": "league.xs.child"}` (A13: "panel" is a slot whose module refuses
+every op), `module_for(kind) -> module`. `child.handle(op, payload, state) -> dict`
 with ops `load` {key, code, params, name, timeout, max_errors} -> {ok, needs, sha, run_sha, params} (integration:
 `params` the merged PARAMS the book builds the live ctx with, as the engine does: I6); `drop` {key}; `decide`
 {jobs: [{key, inputs}]} -> {ok, results: {key: {intents, stats, ctx_sha}}}; `needs` {code, params, name} -> {ok,
@@ -537,8 +551,9 @@ Nothing above changes; these are added beside it.
   plus league/equity/kinds.py `RUNTIME`); `kind()` refuses op "load" / "drop" (ValueError: use `kind_load` /
   `kind_drop`, which a restart replays); its deadline is `batch_deadline` of the jobs for "decide", else
   `budget_seconds` (30 s when None), so a 1200 s isolated run is not cut at `MAX_BATCH_SECONDS`.
-- kinds.py: `RUNTIME` (what every kind's child may import: the 4 `LEAGUE_FILES`, league/gym/*.py, league/equity/*.py;
-  a kind module that imports more names it here) and `runtime_files(repo)`.
+- kinds.py: `RUNTIME` (what every kind's child may import: the 4 `LEAGUE_FILES`, league/gym/*.py, league/equity/*.py,
+  league/xs/*.py (A13's panel slot) and the calendar's three `ltcm` files; a kind module that imports more names it
+  here) and `runtime_files(repo)`.
 - paper.py: `STOCK_KEY`; `StockPaperProof.step` reads `market.stocks(["SPY"])`; its witnesses are `buy_witness`,
   `hold_witness`, `sell_witness`, `activity_witness`, `recon_witness`; one attempt a session.
 - venue.py: `BAR_ADJUSTMENTS` ("raw", "all").
@@ -784,7 +799,8 @@ own Train-era series: c_p and c_H (F1: the holdout-only t's 12% point, with sum_
 0.00..5.00 with the pass share <= fp_cap at BOTH L = 194 and 251, the maximum over IND22 and IND1622 where the program
 has that history (D5); ineligible with no 300-session pool or a threshold above 5.00; c_used = max(c_R, c_p). Step 1
 the pre-check on Validation. Step 2 after the one look: pooled t >= c_used, sum_H > 0 and t_H >= c_H. The holdout is
-2026-01-02 .. min(the last close before the look, 2026-12-31) (D6). S1-X labels alpha or beta (c_X, no floor, no
+2026-01-02 .. min(the last close before the look, `config.LOOK_CAP`) (D6 said 2026-12-31; A12 made it 2026-10-09: the
+194 calibrated sessions). S1-X labels alpha or beta (c_X, no floor, no
 guard). Beside every live trade: the receipt's template filled (c_used, c_H, own FP, drift-kept rate from the
 program's own floor run, S1-X label and FP, the contamination sentence). Lineage (D3): one look; R3's Validation-only
 retry only after a FAILED pre-check (its version hashed at the first try); same lineage by Train correlation >= 0.7 or
@@ -921,7 +937,7 @@ receipts are judged only through the repository's pin (`test_the_committed_pin`,
 | screens | DESIGN's EB and EQ, c_B, FP <= 10% | A7 as amended by A9: S1-R gates (c_used = max(c_R, c_p), and t_H >= c_H), S1-X labels |
 | who writes `docs/benchmarks/equity_screen_1.json` | swarm brief: "which the screen package writes" | A9: the integrator copies the study's receipt verbatim and pins it in policy.json; the screen package reads it (screen.py) and tests with a fake fixture |
 | the floor's worlds | screen brief: IND22, IND13 as the fallback, 2016-19 + 2022-24 stated as a deviation | A9 D5: the maximum over IND22 and IND1622 (the adopted rule, not a deviation); ineligible with no 300-session pool or a threshold above 5.00; plus c_H (F1) |
-| the holdout | the store's holdout window (to 2026-09-25) | A9 D6: 2026-01-02 .. min(the last close before the look, 2026-12-31) |
+| the holdout | the store's holdout window (to 2026-09-25) | A9 D6 as amended by A12: 2026-01-02 .. min(the last close before the look, 2026-10-09), the 194 calibrated sessions (D6 had 2026-12-31) |
 | a lineage | one try and one look per lineage | A9 D3: plus same lineage by Train correlation >= 0.7 or the same template; R3's retry only after a failed pre-check, hashed at the first try |
 | where Validation runs | swarm brief: "in-process on the House" | A3: on the House, the program inside the decider-isolated child (`runner.Isolated`); never in the swarm process itself (it holds credentials) |
 | Gym boxes, `driver.py` | DESIGN 6a: a bundle to Gym boxes | A3: none in E1 |

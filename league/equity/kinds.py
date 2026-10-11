@@ -2,14 +2,20 @@
 
 Owner: hooks. `league/live/decider.py` imports THIS module only (never another of league.equity): its child answers a
 ("kind", <kind>, <op>, <payload>) message by `module_for(kind).handle(op, payload, state)`, with the same isolation as
-an options decision (uid 65534, its own network namespace, rlimits, an empty environment). A later equity kind is a row
+an options decision (uid 65534, its own network namespace, rlimits, an empty environment). A later kind is a row
 here and a module beside it: no league/live edit, so the options execution fingerprint does not move for it.
+
+THE PANEL SLOT (the captain's A13): "panel" -> `league.xs.child`, a module OUTSIDE this package whose `handle` refuses
+every op today. A later release builds the cross-sectional lane inside league/xs/, so it lands without an edit of
+league/live (the options fingerprint) and without one of league/equity's evidence modules (the equity identity,
+`league.swarm.evaluator.EQUITY_EVIDENCE`). This module is plumbing: it is NOT in the equity identity, so a row added
+here retires no equity lineage.
 
 THE CHILD'S RUNTIME: on the root production House the child runs from a root-owned, read-only copy of exactly the files
 it may import (`league.live.decider` `runtime_files`): the options decision's own, and `RUNTIME` here (the 4
-`LEAGUE_FILES`, league/gym's modules and every module of this package). A kind whose module imports anything else
-names it in `RUNTIME`, or the child cannot import it there (league/tests/test_equity_decider.py imports every kind's
-module from such a copy).
+`LEAGUE_FILES`, league/gym's modules, every module of this package and of league/xs). A kind whose module imports
+anything else names it in `RUNTIME`, or the child cannot import it there (league/tests/test_equity_decider.py imports
+every kind's module from such a copy).
 """
 
 from __future__ import annotations
@@ -18,8 +24,9 @@ import importlib
 from pathlib import Path
 from types import ModuleType
 
-#: kind -> the importable module whose `handle(op, payload, state) -> dict` the child calls.
-KINDS: dict[str, str] = {"equity": "league.equity.child"}
+#: kind -> the importable module whose `handle(op, payload, state) -> dict` the child calls. "panel" is a slot (A13):
+#: league/xs/child.py refuses every op until the panel lane is built there.
+KINDS: dict[str, str] = {"equity": "league.equity.child", "panel": "league.xs.child"}
 
 #: What every kind's child may import, beside the options decision's files: a path ending in "/" is every *.py file
 #: directly in that directory (documentation is never copied). Repository-relative, POSIX. The three `ltcm` files are
@@ -27,7 +34,7 @@ KINDS: dict[str, str] = {"equity": "league.equity.child"}
 #: `ltcm.data` imports `ltcm.broker`; both are standard library only): without them a Validation run or a look fails
 #: in the root House's child at its first decision.
 RUNTIME: tuple[str, ...] = ("league/__init__.py", "league/safety.py", "league/structure_core.py", "league/stats.py",
-                            "league/gym/", "league/equity/", "ltcm/__init__.py", "ltcm/broker.py",
+                            "league/gym/", "league/equity/", "league/xs/", "ltcm/__init__.py", "ltcm/broker.py",
                             "ltcm/data/__init__.py")
 
 

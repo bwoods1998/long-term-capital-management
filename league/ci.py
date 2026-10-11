@@ -156,13 +156,16 @@ FORBIDDEN: tuple[str, ...] = (
     "scripts/floor_box.py", "league/house.py", "CHANGELOG.md",
 )
 #: THE EQUITY LANE (release E1, Oct 2026): its tree (the engine, the sizing, the bands, the screen and the book that
-#: trade real money, inside their own evidence identity) and its swarm lane (births, the look, the roster) are judges
-#: and money movers like the options lane's, so no role may change them and the updater never self-deploys them. They
-#: are named apart from the list above ONLY because the gateway's merge list (`gateway/lib/protected.mjs`
+#: trade real money, its evidence modules their own identity) and its swarm lane (births, the look, the roster) are
+#: judges and money movers like the options lane's, so no role may change them and the updater never self-deploys them;
+#: and what the decider child's sealed runtime carries beside league/equity/ since E1 (league/equity/kinds.py
+#: `RUNTIME`; league/tests/test_ci.py holds every file of `league.live.decider.runtime_files()` to this wall):
+#: league/xs/ (the panel kind's slot, A13) and ltcm/broker.py (`ltcm.data`, the engine's NYSE calendar, imports it).
+#: They are named apart from the list above ONLY because the gateway's merge list (`gateway/lib/protected.mjs`
 #: MERGE_FORBIDDEN, which gateway/test/merge.test.mjs holds to that list as written) cannot change in E1: gateway/ ships
-#: separately. A gateway follow-up adds both to MERGE_FORBIDDEN and moves them into the list above, leaving this empty;
-#: until then league/tests/test_ci.py allows exactly these in `FORBIDDEN` beyond the gateway's list.
-PENDING_GATEWAY: tuple[str, ...] = ("league/equity/", "league/swarm/elane.py")
+#: separately. A gateway follow-up adds them to MERGE_FORBIDDEN and moves them into the list above, leaving this
+#: empty; until then league/tests/test_ci.py allows exactly these in `FORBIDDEN` beyond the gateway's list.
+PENDING_GATEWAY: tuple[str, ...] = ("league/equity/", "league/swarm/elane.py", "league/xs/", "ltcm/broker.py")
 FORBIDDEN += PENDING_GATEWAY
 #: The one path the gateway's merge route refuses (`gateway/lib/protected.mjs` MERGE_FORBIDDEN) that is not FORBIDDEN:
 #: the House's configuration. The operator role proposes its dials (`CONFIG_DIALS`), and the updater ships a change to
