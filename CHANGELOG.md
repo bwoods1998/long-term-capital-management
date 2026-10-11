@@ -85,7 +85,6 @@ Money digest `6c0bc42b`, full digest `c3c061b0` (`PINNED_DIGEST`); the rollback,
   E1's `7e41909a` / `e909eb10` again, to the last hex (the rollback, one owner deploy).
 - **Also changed.** `league/ops/dlane_report.py`: A8.6's statement is built from the rows (`equity_probe_note`), no
   longer a sentence with A20's figures in it. The gateway is not edited.
-
 ### Release E3.1: an exit's wait for the practice proof has an end, and the twin is re-based after a difference, on `feat/equity-e31-exits-twin` (unreleased; an owner deploy on main `e36c7e39`; no identity moves: the options execution fingerprint, the equity identity, the money digest and the constitution digest are main's; no evidence reset)
 
 Two rules the captain registered at 20:13Z Oct 11, 2026, from the rehearsal of the first real-money share session,
