@@ -109,7 +109,8 @@ def control_lots(spec: Mapping[str, Any], sessions: Sequence[dt.date], *, k: flo
     k = float(k)
     if not (math.isfinite(k) and k >= 0.0):
         raise ValueError(f"k is a half-spread multiple, at least 0: {k!r}")
-    days = [day if isinstance(day, dt.date) else dt.date.fromisoformat(str(day)[:10]) for day in sessions]
+    days = [day.date() if isinstance(day, dt.datetime) else day if isinstance(day, dt.date)
+            else dt.date.fromisoformat(str(day)[:10]) for day in sessions]
     f = F_GRID[n // 10]
     p = min(1.0, f / (MEAN_HOLD * (1.0 - f)))
     low, high = HOLD
@@ -156,6 +157,7 @@ def cost_free(lots0: Sequence[Mapping[str, Any]], bars: Any, *, capital: Any) ->
     import numpy as np
 
     from ..equity import config, screen
+    from ..equity.store import as_date, ordinal
 
     for lot in lots0:
         if lot.get("hs") is None or float(lot["hs"]) != 0.0:
@@ -169,7 +171,7 @@ def cost_free(lots0: Sequence[Mapping[str, Any]], bars: Any, *, capital: Any) ->
     for lot in lots0:
         if lot.get("exit_day") in (None, ""):
             continue
-        e, x = where[screen._ordinal(lot["entry_day"])], where[screen._ordinal(lot["exit_day"])]
+        e, x = where[ordinal(as_date(lot["entry_day"]))], where[ordinal(as_date(lot["exit_day"]))]
         if x < lo:
             continue
         adj = np.asarray(bars.adj[lot["symbol"]], dtype=np.float64)

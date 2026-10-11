@@ -380,7 +380,10 @@ def first_close(created_at: float) -> dt.date:
 
     if isinstance(created_at, bool) or not isinstance(created_at, (int, float)) or not math.isfinite(created_at):
         raise ValueError(f"created_at is an epoch time: {created_at!r}")
-    day = max(schedule.ny_day(float(created_at)), config.LOOK_CAP)
+    try:
+        day = max(schedule.ny_day(float(created_at)), config.LOOK_CAP)
+    except (OverflowError, OSError) as exc:      # a time no calendar holds
+        raise ValueError(f"created_at is outside the calendar: {created_at!r}") from exc
     for _ in range(schedule.HORIZON_DAYS + 1):
         moments = schedule.moments(day)          # None: not a session
         if moments is not None and moments.close_at > float(created_at):

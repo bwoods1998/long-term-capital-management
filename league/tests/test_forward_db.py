@@ -183,8 +183,8 @@ class ForwardDays(unittest.TestCase):
                 self.assertGreater(F.first_day(close), close)
 
     def test_a_time_that_is_no_time_is_refused(self):
-        for bad in (None, "2026-10-12", float("nan"), float("inf"), True):
-            with self.assertRaises(ValueError):
+        for bad in (None, "2026-10-12", float("nan"), float("inf"), True, 1e18, 1e300, -1e300):
+            with self.assertRaises(ValueError, msg=bad):
                 F.first_close(bad)
 
     def test_the_engine_label(self):
