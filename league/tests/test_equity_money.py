@@ -263,19 +263,16 @@ class TheGrantReRatifies(StandingCase):
         at_a20 = reference()
         at_a20.__enter__()
         self.addCleanup(at_a20.__exit__, None, None, None)
+        # These digests are release E1's: read with E1's universe (release E4's is a digest of its own, below).
+        pin = patch.dict(CONSTITUTION["equity_money"], universe=e1_universe())
+        pin.start()
+        self.addCleanup(pin.stop)
 
     def pre_e1(self):
         patcher = patch.dict(CONSTITUTION)
         patcher.start()
         CONSTITUTION.pop("equity_money", None)
         return patcher
-
-    def setUp(self):
-        super().setUp()
-        # These digests are release E1's: read with E1's universe (release E4's is a digest of its own, below).
-        pin = patch.dict(CONSTITUTION["equity_money"], universe=e1_universe())
-        pin.start()
-        self.addCleanup(pin.stop)
 
     def pinned_before(self):
         patcher = self.pre_e1()

@@ -52,7 +52,7 @@ import shutil
 import sys
 import tempfile
 import unittest
-from decimal import Decimal as D
+from decimal import ROUND_DOWN, Decimal as D
 from pathlib import Path
 from typing import Any, Iterator, Mapping
 from unittest import mock
@@ -568,8 +568,13 @@ class ThePanelLaneEndToEnd(unittest.TestCase):
         self.assertFalse(self.tickers & set(real.equity.universe), "no made-up ticker is the constitution's")
         table = dataclasses.replace(real, equity=dataclasses.replace(
             real.equity, universe={**real.equity.universe, **{s: "stock" for s in sorted(self.tickers)}}))
-        self.assertEqual((table.equity.position_share["stock"], table.equity.open_risk_weight["stock"],
-                          table.equity.probe_sleeve_share), (D("0.20"), D("0.40"), D("0.50")), "the constitution's own")
+        # THE SEATS AND THE SLEEVE ARE TWO NUMBERS (release E5-S): the pair in force is read, never assumed, and every
+        # size below is computed from the table's rows.
+        self.assertEqual((table.equity.position_share["stock"], table.equity.open_risk_weight["stock"]),
+                         (D("0.20"), D("0.40")), "the constitution's own")
+        from league.tests.equity_design import in_force
+
+        self.assertEqual(table.equity.probe_sleeve_share, D(in_force()[1]))
         events, alerts = [], []
         decider = InProcess()
         book = L.EquityBook(state, venue, market, table, EquityFamilies(self.root), decider=decider,
@@ -621,13 +626,15 @@ class ThePanelLaneEndToEnd(unittest.TestCase):
         self.assertEqual((first["exec_day"], first["at"], first["called"], first["n_names"], first["n_sells"],
                           first["n_buys"], first["n_skipped"], first["status"]),
                          (WEEK[0].isoformat(), "open", 1, 5, 0, 5, 0, "planned"))
-        # THE WHOLE BASKET IS SCALED TO THE ROOM (the review's spec-2): at the Probe sleeve of 0.50 x E a full sleeve of
-        # stocks is 0.40 x $1,114.50 = $445.80 of open risk, above the $400 window, so the decision's budget is what a
-        # full basket fits: $400 / 0.40 = $1,000, and every name is a fifth of THAT.
+        # THE WHOLE BASKET IS SCALED TO THE ROOM (the review's spec-2): the decision's budget is the smaller of the
+        # sleeve and what a FULL basket fits in the $400 window, $400 / 0.40 = $1,000, and every name is a fifth of
+        # THAT. At the design in force since release E5-S (six seats, a sleeve of 0.25 x E = $557.25) the sleeve is
+        # the smaller: a full basket is 0.40 x $557.25 = $222.90 of open risk, inside the window. At A20's design (a
+        # sleeve of 0.50 x E = $1,114.50, $445.80 of open risk) the window was, and the budget was the $1,000
+        # (league/tests/test_equity_book_panel.py `TheWholeBasketIsScaledToTheRoom` holds that case on its own table).
         sleeve = table.equity.probe_sleeve_share * E
         window = table.probe_loss_budget
-        budget = window / table.equity.open_risk_weight["stock"]
-        self.assertLess(budget, sleeve)
+        budget = min(sleeve, window / table.equity.open_risk_weight["stock"]).quantize(D("0.01"), rounding=ROUND_DOWN)
         self.assertEqual(D(first["budget"]), budget)
         basket = sorted(symbol for symbol, _ in json.loads(first["targets"]))
         self.assertTrue(set(basket) <= self.tickers and len(basket) == 5, basket)
@@ -643,8 +650,9 @@ class ThePanelLaneEndToEnd(unittest.TestCase):
 
         # ---------------------------------------------------------------------------- 7. a live week
         # Monday's open: five limit buys through E1's order path, sized by money's own rules. FIVE WHOLE LOTS, each a
-        # fifth of the scaled budget ($200): together they fill the $400 window, where a stock's open risk weighs
-        # 0.40, and none is cut (before the fix: four lots of $222.90 and the fifth cut to $108.40 by the budget).
+        # fifth of the decision's budget, and none is cut: together they are the budget's open risk at a stock's 0.40
+        # (the whole sleeve's, $222.90, at the design in force; the whole $400 window at A20's, where before the fix
+        # four lots of $222.90 were bought and the fifth cut to $108.40 by the budget).
         market.extend(WEEK[0], lambda symbol: 0.001)
         tick(WEEK[0], 8, 31)
         self.assertEqual((rebalance(FRIDAY)["audit"], venue.sent), ("ok", []))
@@ -682,7 +690,8 @@ class ThePanelLaneEndToEnd(unittest.TestCase):
         invested = sum((lot.qty * lot.entry_px for lot in bought), D(0))
         self.assertEqual(at_risk, table.equity.open_risk_weight["stock"] * invested, "one budget, stocks at 0.40")
         self.assertLessEqual(at_risk, window)
-        self.assertGreater(at_risk, window - 2, "the whole basket took the window, a fifth a name")
+        self.assertGreater(at_risk, table.equity.open_risk_weight["stock"] * budget - 2,
+                           "the whole basket is the budget's open risk, a fifth a name")
         self.assertLessEqual(invested, table.equity.invested_share * E)
         self.assertEqual([o for o in state.rows("SELECT why FROM eq_orders") if "budget" in (o["why"] or "")], [],
                          "no order was cut by the budget")

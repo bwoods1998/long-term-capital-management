@@ -698,8 +698,16 @@ class TheSeams(unittest.TestCase):
         # record spells out ITS OWN two, on purpose narrower: it registers ETF and stock programs and counts their
         # runs (the registry's `STRUCTURES`; the report's replay multiple, which names the panel beside them since
         # package J); a panel program's forward row and shadow are package J's own reader's (league/ops/forward_xs.py:
-        # it spells no structure, it asks the panel lane). No other ops job names the structures.
-        self.assertEqual(sorted(found), ["forward_register.py", "forward_report.py", "stall.py"])
+        # it spells no structure, it asks the panel lane). Release E2.4's lane health (league/ops/elane_health.py
+        # `e2_families`) spells out the two it reads, on purpose narrower too: its causes judge E2's OWN Train record
+        # (family state `elane_e2`: the reading rules, the closed error classes, the pace of the share lanes), and a
+        # panel family keeps the panel's (`elane_xs`) and is watched by the panel's own alarms (`elane_xs.health`,
+        # the forward report's panel lines). No other ops job names the structures.
+        self.assertEqual(sorted(found), ["elane_health.py", "forward_register.py", "forward_report.py", "stall.py"])
+        from league.ops import elane_health
+
+        self.assertEqual((elane_health.STATE_KEY, elane_xs.STATE_KEY), ("elane_e2", "elane_xs"),
+                         "the lane health reads E2's record, which no panel family has")
         from league.ops import forward_register
 
         self.assertEqual(forward_register.STRUCTURES, tuple(s for s in store_mod.EQUITY_STRUCTURES if s != "panel"),
