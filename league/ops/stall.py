@@ -255,6 +255,9 @@ CAUSES = ("births", "birth_yield", "gym_runs", "validations", "braked", "runway_
 OPTIONS_BIRTHS = "COALESCE(json_extract(payload, '$.lane'), '') NOT IN ('beta', 'equity')"
 OPTIONS_FAMILIES = "structure NOT IN ('etf', 'stock', 'panel')"
 OPTIONS_RUNS = "family NOT IN (SELECT id FROM families WHERE structure IN ('etf', 'stock', 'panel'))"
+#: The same structures for a row read in Python (`validation`'s awaiting list), spelled as the store's own
+#: `EQUITY_STRUCTURES` (league/tests/test_e4_integration.py holds the two equal).
+EQUITY_STRUCTURES = ("etf", "stock", "panel")
 #: The causes a pause stops by design: not raised while the floor is paused.
 RESEARCH_CAUSES = ("births", "birth_yield", "gym_runs", "validations", "braked", "underspend")
 #: The causes that are news to the owner, not a stall nor a step WAITING (Oct 10, 2026): a Done checkpoint that holds is
@@ -542,7 +545,7 @@ def swarm_facts(db: Any, now: float) -> dict[str, Any]:
         n = candidate(fam["best_version"], fam["state"])
         if n is None:
             continue
-        equity = str(fam["structure"]) in ("etf", "stock")  # `OPTIONS_FAMILIES`: an equity family is the equity round's
+        equity = str(fam["structure"]) in EQUITY_STRUCTURES  # `OPTIONS_FAMILIES`: an equity family is the equity round's
         bests += 0 if equity else 1
         if fam["validated_version"] is None or int(fam["validated_version"]) != n:
             (equity_awaiting if equity else awaiting).append(str(fam["id"]))
