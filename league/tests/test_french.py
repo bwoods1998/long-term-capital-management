@@ -188,6 +188,8 @@ class TheLibrarysFormat(unittest.TestCase):
             "the line before it": [head, "20190102,0.1,0.1,0.1,0.1\n", "20190102,0.1,0.1,0.1,0.1\n"],
             "not a number": [head, "20190102,0.1,x,0.1,0.1\n"],
             "is not a number": [head, "20190102,0.1,nan,0.1,0.1\n"],
+            "the lines are text": [head.encode(), b"20190102,0.1,0.1,0.1,0.1\n"],
+            "lines are text": [head, b"20200102,0.1,0.1,0.1,0.1\n"],
         }
         for why, lines in cases.items():
             with self.assertRaisesRegex(ValueError, why, msg=why):

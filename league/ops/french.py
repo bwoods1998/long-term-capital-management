@@ -21,7 +21,9 @@ THE SEAL. The library serves whole files, every year in one member: `parse` read
 every line whose first four characters are a year of `DROPPED_YEARS` (never split, never held, never written: seal
 X13, `test_french.ParseDropsTheReserve`); a line of those years that does not BEGIN with its year is not the
 library's format and refuses the whole file. Lines of `SEALED_FROM` on are the look's reader's alone: that reader and
-its file come with the route and are not built now, so `run` COUNTS them and writes none of them anywhere.
+its file come with the route and are not built now, so `run` COUNTS them and writes none of them anywhere. WHAT
+THAT MEANS TODAY: an inbox file gives the House the factor days of the Train era and before; XS1's French label is
+read on Validation and the holdout (2025 on), so it stays "unmeasured" until the look's file and its reader exist.
 
 WHAT IS WRITTEN: `<state>/equity-daily/french/<file>.json` (600, atomic): {"version", "name", "unit": "fraction",
 "days": [ISO day...], "factors": {name: [float | null...]}, "rows", "first", "last"}: the library's percent figures
@@ -86,6 +88,8 @@ def parse(lines: Iterable[str]) -> dict[str, Any]:
     started = ended = False
     last: dt.date | None = None
     for line in lines:
+        if not isinstance(line, str):
+            raise ValueError("the lines are text (a file's bytes are decoded before they are read)")
         if line[:4] in DROPPED_YEARS:
             dropped += 1  # the reserve and its history year: never split, never parsed, never held
             continue
