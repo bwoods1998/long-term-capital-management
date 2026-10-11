@@ -26,10 +26,17 @@ entry sized to nothing (`size_entry`'s binding) or a missing official price are 
 
 DIVIDENDS AND SPLITS come through the two series: the cash book holds raw shares at raw prices. At the start of each
 session the step of the all/raw close ratio from a symbol's previous bar, g = (all/raw)_prev / (all/raw)_now, names
-what happened in between: within `RATIO_TOLERANCE` of 1 nothing; a split of factor F where g x F is within
+what happened in between: within the step's tolerance of 1 nothing; a split of factor F where g x F is within
 `SPLIT_RESIDUAL` of 1 for a small ratio F = p/q (p, q <= `SPLIT_TERMS`) at least `SPLIT_MIN_STEP` from 1 (shares x F,
-entry price / F); what remains below 1, r = g x F, a cash dividend of (1 - r) x the previous raw close a pre-split
-share, credited to every lot held at that close (to the cent). The program sees as-of prices only (`ctx.as_of`).
+entry price / F); what remains below 1 by more than the tolerance, r = g x F, a cash dividend of (1 - r) x the
+previous raw close a pre-split share, credited to every lot held at that close (to the cent). THE TOLERANCE
+(`ratio_tolerance`) is `RATIO_TOLERANCE` or, when that is more, the vendor's cent rounding of the two adjusted closes
+(`config.rounding_bound`, the bound the book's morning audit uses too): the adjustment=all series is rounded to the
+cent, so its ratio to the raw close jitters from bar to bar with no event at all, and a split's own step lands a
+little above or below its exact factor. With the fixed bound alone the engine read that jitter as dividends (cash
+credited) and as anomalies, and took a neighbouring fraction for a split whose step the rounding had pushed above its
+factor (the rehearsal on real SIP bars, Oct 11, 2026). A dividend smaller than the rounding of its two closes cannot
+be told from it and is not credited. The program sees as-of prices only (`ctx.as_of`).
 
 THE RESULT (`run`), shaped like the options `league.gym.results` record: {run_id, program, program_sha, run_sha,
 params, window, symbols, engine, data_version, capital, k, status ("ok" | "disqualified" | "no_data"), needs,
@@ -64,7 +71,7 @@ from .ctx import build, closed_row, inputs_from_bars, lot_row
 from .store import from_ordinal
 
 OPEN, CLOSE = "open", "close"
-#: A ratio step closer to 1 than this is the series' rounding, not an event.
+#: A ratio step closer to 1 than this is the series' rounding, not an event (the floor of `ratio_tolerance`).
 RATIO_TOLERANCE = 2e-5
 #: A split moves the all/raw ratio by at least this much (a dividend of a quarter of the price is not a split).
 SPLIT_MIN_STEP = 0.2
@@ -124,8 +131,20 @@ def _decimal_price(value: float) -> Decimal:
     return Decimal(f"{value:.6f}")
 
 
-def split_factor(step: float) -> Fraction | None:
-    """The split a ratio step g names (`RATIO_TOLERANCE` ... `SPLIT_TERMS`, the module docstring), or None."""
+def ratio_tolerance(adj_prev: float, adj_now: float) -> float:
+    """How far from 1 the all/raw ratio's step between two bars may lie and still be the series' rounding:
+    `RATIO_TOLERANCE`, or the vendor's cent rounding of the two adjusted closes when that is more
+    (`config.rounding_bound`). A close that is no positive finite number has no rounding to allow for."""
+    try:
+        return max(RATIO_TOLERANCE, config.rounding_bound(adj_prev, adj_now))
+    except (TypeError, ValueError):
+        return RATIO_TOLERANCE
+
+
+def split_factor(step: float, tolerance: float = RATIO_TOLERANCE) -> Fraction | None:
+    """The split a ratio step g names (`SPLIT_MIN_STEP` ... `SPLIT_TERMS`, the module docstring), or None. `tolerance`:
+    the step's own (`ratio_tolerance`): g x F may lie that far above 1 and F still be the factor (the rounding of the
+    two adjusted closes; what lies below 1 is the same day's dividend, up to `SPLIT_RESIDUAL`)."""
     if not (math.isfinite(step) and step > 0) or abs(step - 1.0) < SPLIT_MIN_STEP:
         return None
     best: tuple[float, Fraction] | None = None
@@ -135,7 +154,7 @@ def split_factor(step: float) -> Fraction | None:
             if factor == 1 or math.gcd(p, q) != 1:
                 continue
             residual = step * float(factor)
-            if residual > 1.0 + RATIO_TOLERANCE or residual < 1.0 - SPLIT_RESIDUAL:
+            if residual > 1.0 + tolerance or residual < 1.0 - SPLIT_RESIDUAL:
                 continue
             gap = abs(1.0 - residual)
             if best is None or gap < best[0]:
@@ -241,11 +260,13 @@ class _Account:
             prev = int(valid[j - 1])
             raw_c, adj_c = self.bars.raw[sym][:, 3], self.bars.adj[sym][:, 3]
             step = (adj_c[prev] / raw_c[prev]) / (adj_c[j] / raw_c[j])
-            if abs(step - 1.0) <= RATIO_TOLERANCE:
+            # The vendor rounds the adjusted closes to the cent: the step's own tolerance, for all three readings.
+            tolerance = ratio_tolerance(adj_c[prev], adj_c[j])
+            if abs(step - 1.0) <= tolerance:
                 continue
-            factor = split_factor(step)
+            factor = split_factor(step, tolerance)
             residual = step * (float(factor) if factor else 1.0)
-            per_share = (1.0 - residual) * float(raw_c[prev]) if residual < 1.0 - RATIO_TOLERANCE else 0.0
+            per_share = (1.0 - residual) * float(raw_c[prev]) if residual < 1.0 - tolerance else 0.0
             if factor is None and per_share == 0.0:
                 self.actions.append({"symbol": sym, "day": self.days[j], "kind": "anomaly", "step": round(step, 8)})
                 continue
@@ -511,5 +532,5 @@ def run_isolated(program: Any, bars: Any, *, cfg: EngineConfig = EngineConfig())
         return results.failed(str(getattr(program, "name", "program")), f"{type(exc).__name__}: {exc}")
 
 
-__all__ = ["EngineConfig", "fill_price", "run", "run_isolated", "official", "split_factor", "RATIO_TOLERANCE",
+__all__ = ["EngineConfig", "fill_price", "run", "run_isolated", "official", "split_factor", "ratio_tolerance", "RATIO_TOLERANCE",
            "SPLIT_MIN_STEP", "SPLIT_RESIDUAL", "SPLIT_TERMS"]

@@ -32,9 +32,10 @@ from league.tests.test_swarm_loop import LoopCase
 REPO = Path(__file__).resolve().parents[2]
 E2_MODULES = (elane_births, elane_train, elane_review, elane_yield)
 E2_FILES = tuple(f"league/swarm/elane_{name}.py" for name in ("births", "train", "yield", "seal", "review"))
-#: E2's own footprints in the store's kv: its two rounds' clocks, the last pass, the Train liveness mark, the ledger.
+#: E2's own footprints in the store's kv: its two rounds' clocks, the last pass, the Train liveness mark, the ledger,
+#: the last alert of a standing House failure.
 E2_KEYS = (elane_births.BIRTHS_AT_KEY, elane_births.LAST_KEY, elane_train.TRAIN_AT_KEY, elane_train.TRAIN_OK_KEY,
-           elane_yield.LEDGER_KEY)
+           elane_yield.LEDGER_KEY, elane_train.HOUSE_ALERT_KEY)
 
 
 def policy() -> dict:
@@ -303,16 +304,29 @@ class TheLoop(LoopCase):
     def test_the_share_set_back_to_zero_stops_the_births_and_lets_the_born_finish(self):
         # Stated in ELANE_E2.md and docs/operations.md: a zero share stops BIRTHS at once; the families already born
         # finish their Train research, and `elane.e2.usd_day` 0 keeps that from asking a model.
-        fx.e2_family(self.store, "e2-born")
+        fx.e2_family(self.store, "e2-born", code=fx.program())        # a program to Train-score: no model needed
+        fx.e2_family(self.store, "e2-unwritten", symbols=("QQQ",))    # no program yet: its next step asks a model
         names, sw = self.started({"mode": "gate", "birth_share": 0.0, "e2": {"usd_day": 0.0}})
         self.assertNotIn("elane", names, "no equity pass: no birth")
         self.assertFalse(sw.architect.equity_due())
         self.assertIn("elane_train", names, "the family already born still has its Train round")
         out = sw.elane_train.run()
-        self.assertEqual([s.get("skipped") for s in out["steps"]],
-                         ["E2's model dollars for the day are spent (elane.e2.usd_day)"])
+        steps = {s["family"]: s for s in out["steps"]}
+        self.assertEqual(steps["e2-unwritten"].get("skipped"), elane_yield.DAY_SPENT)
+        self.assertEqual(elane_yield.DAY_SPENT, "E2's model dollars for the day are spent (elane.e2.usd_day)")
+        self.assertIsNotNone(steps["e2-born"].get("house"), "no equity store under this root: the House's, a backoff")
         self.assertEqual(self.asked(), [], "with the day line at zero no model is asked")
-        self.assertEqual(self.e2_families(), ["e2-born"])
+        self.assertEqual(self.e2_families(), ["e2-born", "e2-unwritten"])
+        # What is left needs a model E2 may not ask (and a family waiting out its backoff): no round has work, so none
+        # starts and nothing is written (the review's merge-4: an empty round every ten minutes before).
+        self.assertTrue(sw.elane_train.idle())
+        self.store.put(elane_train.TRAIN_AT_KEY, 0)
+        events = self.footprints()["events"]
+        names.clear()
+        sw.step()
+        self.assertNotIn("elane_train", names)
+        self.assertFalse(sw.elane_train.due())
+        self.assertEqual(self.footprints()["events"], events)
 
     def test_the_switch_on_starts_both_rounds(self):
         # The positive control: the recorder sees E2's rounds once the captain's two keys are set.
@@ -323,6 +337,36 @@ class TheLoop(LoopCase):
         names, sw = self.started({"mode": "gate", "birth_share": 0.25, "e2": {"usd_day": 8.0}})
         self.assertIn("elane", names)
         self.assertIn("elane_train", names)
+
+    def test_e2s_rounds_need_no_gym_and_stop_at_the_research_guard(self):
+        # Patch 1's placement, re-read on E1's s2-7 (its equity rounds left the Gym's branch): an equity Train run needs
+        # no Gym box (A3), so a Gym that is down holds neither of E2's rounds; they make new research with model
+        # dollars, so THE GATE'S RESERVE and the brake hold both.
+        fx.e2_family(self.store, "e2-first")
+        block = {"mode": "gate", "birth_share": 0.25, "e2": {"usd_day": 8.0}}
+        names, sw = self.started(block)
+        self.assertIn("elane", names)
+        self.assertIn("elane_train", names)
+
+        def again() -> list[str]:
+            names.clear()
+            sw.step()
+            return list(names)
+        sw.gym_ready = lambda: False
+        after = again()
+        self.assertNotIn("tournament", after, "the options rounds wait for the Gym")
+        self.assertIn("elane", after)
+        self.assertIn("elane_train", after)
+        self.guard.research_held = True
+        after = again()
+        self.assertNotIn("elane", after, "THE GATE'S RESERVE holds new research, E2's too")
+        self.assertNotIn("elane_train", after)
+        self.guard.research_held, self.guard.braked = False, True
+        after = again()
+        self.assertNotIn("elane", after, "and so does the brake")
+        self.assertNotIn("elane_train", after)
+        self.guard.braked = False
+        self.assertIn("elane_train", again())
 
     def test_one_equity_pass_on_the_real_router_is_born_and_booked(self):
         # The wiring production runs: the loop's own Architect and EquityResearcher, the real ModelRouter and Provider (a
@@ -366,6 +410,168 @@ class TheLoop(LoopCase):
         record = dlane_report.equity_yield(self.store, sw.settings)
         self.assertEqual(record["routes"]["sail:pro_asap"]["families"], 1, record)
         self.assertEqual(record["usd_day"], 8.0)
+
+    # ------------------------------------------------------------------ E2's dollars and the researchers' pace
+    def unpace(self, sw) -> dict:
+        """The pace as a fresh read (its spend is cached for 10 s)."""
+        sw._pace = (float("-inf"), "", 0.0, 0.0)
+        return sw.pace_status()
+
+    def e2_row(self, usd: float, n: int) -> None:
+        """A model call of E2's as the router books it (kind `sail_model`, its request key in the detail)."""
+        key = f"swarm:elane:train:e2-wired:{n}:sail:pro_asap"
+        self.store.add_spend("sail_model", usd, family="e2-wired", detail={"profile": "pro_asap", "key": key, "desk": "e2-wired"})
+
+    def test_e2s_dollars_never_pause_the_researchers_and_e2_waits_at_its_own_pace(self):
+        # The review's blocker (loop-1, merge-1), on the real loop, router, Provider and the committed policy.json: E2's
+        # calls are booked as `sail_model` with keys "swarm:elane:...", the meter the researchers' hourly pace sums, and
+        # nothing held E2's own rounds. E2's first switch values gave it the whole pace: every options researcher slept.
+        from league.swarm.loop import architect_spent
+
+        row = fx.proposal("e2-wired", lane="beta", agenda="overnight", symbols=("DIA",), code=fx.program("DIA"))
+        self.sail.script = lambda body: {"text": json.dumps({"families": [row]})}
+        names, sw = self.started({"mode": "gate", "birth_share": 0.25, "e2": {"usd_day": 8.0}})
+        limit = sw.pace_status()["limit_usd_per_hour"]
+        share = elane_yield.cfg(sw.settings)["pace_share"]
+        self.assertGreater(limit, 0.0)
+        self.assertEqual(elane_yield.model_line(sw.settings), (limit, True), "E2 reads the line the loop's pace reads")
+        self.assertEqual(share, 0.25)
+        out = sw.architect.equity_pass()
+        self.assertEqual(out.get("born"), ["e2-wired"], json.dumps(out, default=str)[:600])
+        booked = elane_yield.spent_since(self.store, sw.clock() - 3600)
+        self.assertGreater(booked, 0.0)
+        self.assertAlmostEqual(booked, elane_yield.ledger(self.store)["routes"]["sail:pro_asap"]["usd"], places=6)
+        self.assertAlmostEqual(self.store.spent(["sail_model"], since=sw.clock() - 3600), booked, places=6)
+        self.assertEqual(architect_spent(self.store, ["sail_model"], sw.clock() - 3600), 0.0, "no key of the architect's")
+        pace = self.unpace(sw)
+        self.assertEqual((pace["spent_last_hour_usd"], pace["paused"]), (0.0, False), "E2's pass is not the researchers' spend")
+        self.assertAlmostEqual(pace["equity"]["spent_last_hour_usd"], booked, places=6)
+        self.assertAlmostEqual(pace["equity"]["limit_usd_per_hour"], share * limit, places=6)
+        # E2 at three times the whole line in the hour: the researchers are not paused, and E2 is, by its own pace.
+        self.e2_row(3 * limit, 1)
+        pace = self.unpace(sw)
+        self.assertFalse(sw.over_pace(), pace)
+        self.assertTrue(pace["equity"]["paused"])
+        self.assertAlmostEqual(pace["equity"]["taken_usd"], share * limit, places=6)
+        held = elane_yield.hold(self.store, sw.settings, sw.clock())
+        self.assertIsNotNone(held)
+        self.assertIn("pace", held)
+        # Neither of E2's rounds asks a model while it waits: no equity pass is due, and a family that needs a program
+        # is skipped, the reason named.
+        self.store.put(elane_births.BIRTHS_AT_KEY, 0)
+        self.assertFalse(sw.architect.equity_due())
+        names.clear()
+        sw.step()
+        self.assertNotIn("elane", names)
+        asked = len(self.asked())
+        self.assertEqual(sw.architect.equity_pass().get("skipped"), "pace")
+        fx.e2_family(self.store, "e2-needs-a-program")
+        steps = {s["family"]: s for s in sw.elane_train.run()["steps"]}
+        self.assertEqual(steps["e2-needs-a-program"].get("skipped"), held)
+        self.assertEqual(len(self.asked()), asked, "no model was asked")
+        # The researchers keep the line less E2's share, whatever E2 spent over it: under it they run, at it they pause.
+        self.store.add_spend("sail_model", (1 - share) * limit - 0.001, family="a-family",
+                             detail={"desk": "a-family", "key": "swarm:a-family:c3:m0:2", "profile": "flash_asap"})
+        self.assertFalse(self.unpace(sw)["paused"])
+        self.store.add_spend("sail_model", 0.002, family="a-family",
+                             detail={"desk": "a-family", "key": "swarm:a-family:c4:m0:2", "profile": "flash_asap"})
+        pace = self.unpace(sw)
+        self.assertTrue(pace["paused"])
+        self.assertTrue(sw.over_pace())
+        self.assertIn("the equity lanes took", pace["reason"])
+        self.assertAlmostEqual(pace["spent_last_hour_usd"], (1 - share) * limit + 0.001, places=6)
+
+    def test_with_e2_idle_the_researchers_have_the_whole_line(self):
+        names, sw = self.started({"mode": "gate", "birth_share": 0.25, "e2": {"usd_day": 8.0}})
+        limit = sw.pace_status()["limit_usd_per_hour"]
+        self.store.add_spend("sail_model", limit - 0.001, family="a-family",
+                             detail={"desk": "a-family", "key": "swarm:a-family:c3:m0:2", "profile": "flash_asap"})
+        pace = self.unpace(sw)
+        self.assertEqual((pace["paused"], pace["equity"]["taken_usd"]), (False, 0.0), "nothing is set aside for an idle E2")
+        self.e2_row(0.002, 1)
+        self.assertTrue(self.unpace(sw)["paused"], "the two together fit the line")
+
+    def test_the_budgets_floor_tightens_e2s_day_with_the_line(self):
+        # No budget.json under this root: the budget rule's floor. E2's day is a quarter of the floor's model dollars,
+        # whatever `elane.e2.usd_day` says (the review: at the floor E2's line was still $8 against a $4 research day).
+        from league.ops import budget
+
+        names, sw = self.started({"mode": "gate", "birth_share": 0.25, "e2": {"usd_day": 8.0}})
+        line = budget.knobs(budget.floor_usd_day("sail"), budget.floor_usd_day("claude"))["researcher.sail_usd_per_hour"]
+        self.assertAlmostEqual(sw.pace_status()["limit_usd_per_hour"], line, places=6)
+        self.assertAlmostEqual(elane_yield.day_line(sw.settings), 0.25 * line * 24, places=6)
+        self.assertLess(elane_yield.day_line(sw.settings), 8.0)
+        self.assertEqual(elane_yield.cfg(sw.settings)["usd_day"], 8.0)
+
+    # ------------------------------------------------------------------ the routes when Sail is slow or silent
+    def bar_passed(self, fid: str) -> None:
+        """A family whose v1 passed the bar and awaits its review (what `EquityResearcher.score` writes)."""
+        fx.e2_family(self.store, fid, code=fx.program())
+        verdict = {"passed": True, "fails": [], "score": 1.0, "years": {}, "summary": {}, "beside": {}}
+        elane_train._update(self.store, fid, lambda r: r.update(
+            versions={"1": elane_train.compact(verdict, at=self.store.now(), ident=None)},
+            review={"version": 1, "unclear": {}, "at": self.store.now()}))
+
+    def test_the_audit_finds_a_second_model_while_the_balanced_window_is_stalled(self):
+        # The integration review's seal-7 and loop-3, on the real router: with Sail's balanced window flagged stalled
+        # (one poll timeout flags it for an hour) the router answers pro_balanced AND k3_balanced on pro_asap for E2's
+        # role, so the audit's first candidate came back from the reviewer's own model, was discarded, glm_balanced was
+        # never asked, and the same key was re-read every round (booked again each time; empty once the router had
+        # blanked it; three empty reads failed the version at REVIEW).
+        from league.swarm import models
+
+        self.sail.script = lambda body: {"text": json.dumps({"verdict": "pass", "reasons": ["invented"], "findings": []})}
+        names, sw = self.started({"mode": "gate", "birth_share": 0.25, "e2": {"usd_day": 8.0}})
+        self.assertEqual(sw.router.sail_fallback("k3_balanced", role=elane_yield.ROLE), ("balanced", "pro_asap"))
+        self.bar_passed("e2-a")
+        now = sw.clock()
+        self.store.put(models.STALL_KEY, {"balanced": {"until": now + 3600, "since": now, "at": now, "profile": "pro_balanced",
+                                                       "fallback": "pro_asap", "role": "elane",
+                                                       "code": "provider_poll_timeout"}})
+        asked = len(self.sail.bodies)
+        out = sw.elane_train.review_step(self.store.family("e2-a"), 1)
+        self.assertEqual((out.get("passed"), out.get("review")), (True, "pass"), json.dumps(out)[:400])
+        rec = elane_train.record_of(self.store.family("e2-a"))
+        held = rec["passed_review"]
+        self.assertEqual((held["route"], held["audit"]["route"]), ("sail:pro_asap", "sail:glm_balanced"))
+        self.assertNotEqual(elane_review.model_of(held["route"]), elane_review.model_of(held["audit"]["route"]))
+        self.assertEqual(len(self.sail.bodies) - asked, 2, "one review, one audit: k3_balanced was never sent to pro_asap")
+        rows = elane_yield.ledger(self.store)["routes"]
+        self.assertEqual({k: v["requests"] for k, v in rows.items()}, {"review:sail:pro_asap": 1, "review:sail:glm_balanced": 1})
+        self.assertAlmostEqual(elane_yield.ledger(self.store)["days"][elane_yield._today(now)],
+                               self.store.spent(["sail_model"]), places=6, msg="E2's ledger books each call once")
+        self.assertEqual(rec["passed_version"], 1)
+
+    def test_a_call_that_timed_out_after_it_was_sent_is_booked_and_ends_the_question(self):
+        # The review's loop-2, on the real router and Provider with a transport that times out: one family's write sent
+        # three calls (every route in turn), the swarm's meter booked three holds, E2's own day booked nothing, and the
+        # family asked all three again next round under a new key.
+        def boom(body):
+            raise TimeoutError("the socket timed out after the request went")
+
+        names, sw = self.started({"mode": "gate", "birth_share": 0.25, "e2": {"usd_day": 8.0}})
+        fx.e2_family(self.store, "e2-a")
+        self.sail.script = boom
+        sent = len(self.sail.bodies)
+        out = sw.elane_train.write(self.store.family("e2-a"))
+        self.assertEqual(out.get("error"), "no route answered", json.dumps(out)[:400])
+        self.assertTrue(out["errors"][0].startswith(elane_yield.SENT_UNANSWERED), out["errors"])
+        self.assertGreater(out["retry_in"], 0)
+        booked = self.store.spent(["sail_model"])
+        self.assertGreater(booked, 0.0, "the Provider's hold for the call that may still be billed")
+        self.assertEqual(len(self.store._all("SELECT 1 FROM spend WHERE kind='sail_model'")), 1, "one call, one hold")
+        rows = elane_yield.ledger(self.store)["routes"]
+        self.assertEqual(list(rows), ["sail:pro_asap"], "no other route was asked the same question on top of it")
+        self.assertEqual((rows["sail:pro_asap"]["failed"], rows["sail:pro_asap"]["unknown_cost"]), (1, 1))
+        self.assertAlmostEqual(rows["sail:pro_asap"]["usd"], booked, places=6)
+        self.assertAlmostEqual(elane_yield.spent_today(self.store, sw.clock()), booked, places=6)
+        # The family waits out its backoff: the next round asks nothing for it.
+        rec = elane_train.record_of(self.store.family("e2-a"))
+        self.assertEqual((rec["unanswered"]["count"], rec["unanswered"]["sent"], rec.get("attempts")), (1, True, None))
+        tried = len(self.sail.bodies)
+        self.assertEqual(sw.elane_train.run()["steps"], [])
+        self.assertEqual(len(self.sail.bodies), tried)
+        self.assertGreaterEqual(tried - sent, 1)
 
 
 if __name__ == "__main__":

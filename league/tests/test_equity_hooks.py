@@ -45,6 +45,7 @@ class FakeBook:
         self.fail = None
         self.ticks = []
         self.tick_error = None
+        self.taken = []
 
     def expected_shares(self):
         if self.fail:
@@ -53,6 +54,12 @@ class FakeBook:
 
     def busy(self):
         return set(self.working)
+
+    def shares_taken(self, symbol, qty, px, *, why):
+        taken = min(self.owned.get(symbol, D(0)), qty)
+        self.taken.append((symbol, taken, px))
+        self.owned = {k: v for k, v in {**self.owned, symbol: self.owned.get(symbol, D(0)) - taken}.items() if v}
+        return taken
 
     def tick(self, now, **kw):
         self.ticks.append((now, kw))
@@ -237,13 +244,9 @@ class BuildingTheBook(unittest.TestCase):
         self.assertIsInstance(kw["stock_proof"], P.StockPaperProof)
         self.assertEqual(kw["stock_proof"].key, "paper_proof_stock")
         self.assertEqual(kw["sizing_equity"](), D("2229"))
-        # One proof at a time on the practice account: the stock proof starts once the options route's have passed.
-        self.assertTrue(kw["stock_proof"].after(), "no options proof on this House")
-        self.live.proof = types.SimpleNamespace(passed=lambda: True)
-        self.live.proof_single = types.SimpleNamespace(passed=lambda: False)
-        with mock.patch.object(B, "EquityBook", Book), mock.patch.object(EF, "MemoryEquityFamilies", lambda: "memory"):
-            H.build_book(self.live)
-        self.assertFalse(made["kw"]["stock_proof"].after())
+        # A10.1: stage BUY goes in the first open window after the deploy; the proof is given no wait on the options
+        # route's own paper proofs (league/tests/test_equity_fx_hooks.py runs it beside an unpassed options proof).
+        self.assertFalse(hasattr(kw["stock_proof"], "after"))
 
     def test_a_book_that_cannot_be_built(self):
         from league.equity import live as B
@@ -260,7 +263,8 @@ class BuildingTheBook(unittest.TestCase):
 # ------------------------------------------------------------------------------------------------ league/live/step.py
 @unittest.skipUnless(HAVE, "numpy not installed")
 class TheAccountsShares(LiveCase):
-    """A8.2: `_close_shares` sells or covers only what no program owns; a lot the equity book owns is never touched."""
+    """A8.2: `_close_shares` sells or covers only what no program owns; a lot the equity book owns is never touched (the
+    review's cases, the gateway's cover rule among them, are league/tests/test_equity_fx_hooks.py's)."""
 
     def start(self, owned=None, **kw):
         live = self.make([])
@@ -281,14 +285,15 @@ class TheAccountsShares(LiveCase):
 
     def test_a_long_excess_is_sold_after_two_readings_and_only_the_excess(self):
         live = self.start({"SPY": "2.5"})
-        self.venue.held["SPY"] = D("3.75")
+        live._book_shares("OPEXC", "SPY261016C00600000", 1)          # a long call exercised: 100 shares received
+        self.venue.held["SPY"] = D("102.5")
         live._close_shares()
         self.assertEqual(self.stock(), [], "the first reading only remembers it")
-        self.assertEqual(live.state.get("unattributed_seen"), {"SPY": "1.25"})
+        self.assertEqual({k: D(v) for k, v in live.state.get("unattributed_seen").items()}, {"SPY": D("100")})
         self.assertTrue(live._stock_held)
         live._close_shares()
         [sale] = self.stock()
-        self.assertEqual((sale["side"], sale["type"], sale["qty"]), ("sell", "market", "1.25"))
+        self.assertEqual((sale["side"], sale["type"], sale["qty"]), ("sell", "market", "100"))
         self.assertTrue(sale["client_order_id"].startswith("lv-shares-spy-"))
         self.assertEqual(self.venue.held["SPY"], D("2.5"), "the lots are still held")
         self.assertTrue(any("SPY" in text for level, text in self.alerts if level == "error"))
@@ -305,17 +310,20 @@ class TheAccountsShares(LiveCase):
         live._close_shares()
         self.assertEqual(self.stock(), [])
 
-    def test_a_short_is_covered_at_once_back_to_what_the_lots_hold(self):
+    def test_a_short_is_covered_at_once_by_exactly_the_accounts_short(self):
         live = self.start({"SPY": "2"})
         self.venue.held["SPY"] = D("-98")                              # an assignment's -100 netted with the 2-share lot
         live._close_shares()
         [cover] = self.stock()
-        self.assertEqual((cover["side"], cover["type"], cover["qty"]), ("buy", "market", "100"))
-        self.assertEqual(self.venue.held["SPY"], D("2"), "the lot is still the program's")
-        live.equity.owned = {}
+        self.assertEqual((cover["side"], cover["type"], cover["qty"]), ("buy", "market", "98"),
+                         "the gateway admits a cover of at most the short: never the lot's 2 shares with it")
+        self.assertEqual(self.venue.held["SPY"], D("0"), "the account is flat")
+        live._close_shares()
+        self.assertEqual(live.equity.taken, [("SPY", D("2"), D("600.0"))], "the lot the assignment took: closed in the book")
         self.venue.held["SPY"] = D("-5")
         live._close_shares()
-        self.assertEqual([b["qty"] for b in self.stock()], ["100", "5"], "nothing owned: covered to flat")
+        self.assertEqual([b["qty"] for b in self.stock()], ["98", "5"], "nothing owned: covered to flat")
+        self.assertEqual(len(live.equity.taken), 1)
 
     def test_an_account_below_the_lots_is_a_mismatch_never_an_order(self):
         live = self.start({"SPY": "5"})
@@ -328,7 +336,7 @@ class TheAccountsShares(LiveCase):
         self.assertIn("SPY: 3 shares held, 5 expected", " ".join(problems))
 
     def test_a_symbol_with_a_working_order_in_either_book_waits(self):
-        live = self.start({"SPY": "1"}, busy={"SPY"})
+        live = self.start({}, busy={"SPY"})
         self.venue.held["SPY"] = D("4")
         for _ in range(3):
             live._close_shares()
@@ -337,7 +345,7 @@ class TheAccountsShares(LiveCase):
         live.equity.working = set()
         live._close_shares()
         live._close_shares()
-        self.assertEqual([b["qty"] for b in self.stock()], ["3"])
+        self.assertEqual([b["qty"] for b in self.stock()], ["4"])
 
     def test_an_unreadable_book_sells_no_long_share_and_still_covers_a_short(self):
         live = self.start({"SPY": "1"})
@@ -367,7 +375,7 @@ class TheShareLedger(LiveCase):
         live._book_shares("OPASN", "SPXW261016C06000000", 1)         # an index option settles in cash
         self.assertEqual(live.state.get("shares"), {"SPY": "-100", "QQQ": "100", "IWM": "-300"})
 
-    def test_an_assignment_netted_against_a_lot_is_covered_without_the_lot_and_the_latch_lifts(self):
+    def test_an_assignment_netted_against_a_lot_is_covered_the_lot_closed_and_the_latch_lifts(self):
         live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 600})])
         live.equity = FakeBook()
         self.run_to(9, 31)
@@ -381,16 +389,26 @@ class TheShareLedger(LiveCase):
                                          "qty": str(-contracts), "date": "2026-09-28"})
         live._activities_at = float("-inf")
         self.run_to(9, 33)
+        short = -contracts * 100 - D("0.5")                            # what the account shows: 99.5 short
         [cover] = [b for b in self.venue.sent if b.get("symbol") == "SPY"]
-        self.assertEqual((cover["side"], cover["qty"]), ("buy", str(-contracts * 100)),
-                         "the unattributed short only (the account showed it netted with the lot), at once")
-        self.assertEqual(self.venue.held["SPY"], D("0.5"), "the program's lot is untouched")
-        self.assertEqual(live.state.get("shares"), {}, "the cover filled: the ledger is back at zero")
+        self.assertEqual((cover["side"], cover["qty"]), ("buy", str(int(short))),
+                         "the account's short and never more (the gateway refuses a buy that covers and opens): its "
+                         "whole shares at once")
+        self.assertEqual(self.venue.held["SPY"], D("-0.5"))
+        self.assertEqual(live.equity.taken, [("SPY", D("0.5"), D("600.0"))], "the lot went with the assignment: closed")
+        self.assertEqual(live.state.get("shares"), {"SPY": "-0.5"}, "what is left of the delivery is the fraction")
+        self.assertFalse([p for p in live.book.mismatch if p.startswith("SPY")])
+        live._activities_at = float("-inf")
+        self.run_to(9, 34)
+        self.assertEqual([b["qty"] for b in self.venue.sent if b.get("symbol") == "SPY"], [str(int(short)), "0.5"],
+                         "the fraction of a share at the next reading")
+        self.assertEqual(self.venue.held["SPY"], D("0"), "flat")
+        self.assertEqual(live.state.get("shares"), {}, "the covers filled: the ledger is back at zero")
         self.assertEqual(live.state.get("shares_orders"), {})
         self.assertFalse([p for p in live.book.mismatch if p.startswith("SPY")])
         live._activities_at = float("-inf")
-        self.run_to(9, 36)
-        self.assertIsNone(live.state.get("assignment_latch"), "resolved although a program holds SPY")
+        self.run_to(9, 37)
+        self.assertIsNone(live.state.get("assignment_latch"), "resolved: the short covered, the lot closed")
 
     def test_the_owners_clear_resets_the_ledger(self):
         live = self.make([])

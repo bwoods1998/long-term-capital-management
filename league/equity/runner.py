@@ -29,6 +29,15 @@ slices the store for NEEDS symbols and history, and sends ("kind", "equity", "ru
 `results.view` decides what a researcher sees). A child failure raises `RunFailed` (no trial is counted); a program the
 child refuses (it does not load) raises `ProgramRefused` (a `CodeRefused`). The parent re-checks the child's NEEDS
 (`program.parse_needs`) before it slices anything, so a child's answer never widens what is read.
+
+SENT, AND NOT ANSWERED (`RunLost`, a `RunFailed`). The child took the whole "run" request, so the program held its
+bars, and then no answer came: it ran past its budget or it exited (`SENT_NOT_ANSWERED`: the decider's two failures
+that can only follow a request it took whole). The difference matters for the sealed look alone (league/swarm/elane.py
+`look`): a program that could choose not to answer, and be owed its look again, would draw its holdout more than once.
+EVERY OTHER FAILURE stays a plain `RunFailed` and counts against no program: the NEEDS call, the store's slice, a
+child that could not be started or did not take the request (its pipe, its namespace, a frame too large), and an
+answer that came back and is not a result (the child's own error, the engine's): those are the House's to fix, and a
+look they cost is owed.
 """
 
 from __future__ import annotations
@@ -50,6 +59,18 @@ NEEDS_BUDGET_SECONDS = 60.0
 
 class RunFailed(RuntimeError):
     """The isolated run did not return a result (the child failed, timed out or refused the program)."""
+
+
+class RunLost(RunFailed):
+    """The run was sent whole (the program held its bars) and no answer came back: the child ran past its budget or
+    exited (`SENT_NOT_ANSWERED`; the module docstring)."""
+
+
+#: The decider's failures that can only follow a request the child took whole (league/live/decider.py `Decider._read`:
+#: the frame was written and no answer came): it did not answer inside its budget, or it exited. Matched in the
+#: failure's words, which is all an evidence module sees of league/live; a test holds the decider to these words
+#: (league/tests/test_equity_fx_swarm.py), so a rewording there cannot quietly lift the sealed look's limit.
+SENT_NOT_ANSWERED = ("the decider did not answer in time", "the decider exited")
 
 
 class ProgramRefused(CodeRefused):
@@ -119,7 +140,12 @@ class Isolated:
     def _run(self, code: str, params: Mapping[str, Any] | None, name: str, bars: Any, k: float) -> Run:
         payload = {"code": code, "params": dict(params or {}), "name": name, "bars": bars, "k": float(k),
                    "capital": None}
-        answer = self._ask("run", payload, self.budget_seconds)
+        try:
+            answer = self._ask("run", payload, self.budget_seconds)
+        except RunFailed as exc:
+            if any(mark in str(exc) for mark in SENT_NOT_ANSWERED):
+                raise RunLost(str(exc)) from None  # sent whole, never answered: the program held its bars
+            raise
         result = answer.get("result")
         if not isinstance(result, Mapping):
             raise RunFailed("the decider child returned no result")
@@ -159,5 +185,5 @@ class Isolated:
                 for first, last in config.TRAIN_ERA_SEGMENTS]
 
 
-__all__ = ["RunFailed", "ProgramRefused", "Run", "RUN_BUDGET_SECONDS", "NEEDS_BUDGET_SECONDS", "KIND", "run_bars",
-           "Isolated"]
+__all__ = ["RunFailed", "RunLost", "SENT_NOT_ANSWERED", "ProgramRefused", "Run", "RUN_BUDGET_SECONDS",
+           "NEEDS_BUDGET_SECONDS", "KIND", "run_bars", "Isolated"]

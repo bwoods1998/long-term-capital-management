@@ -211,7 +211,8 @@ class WhatRidesBeside(EquityFixture):
         row = R.EquityScreens(self.store).of("p-s2", 1)
         self.assertEqual((row["screen"], row["beside"], row["receipt"]), ("S2", line, "r" * 64))
         self.assertEqual((row["c_R"], row["c_pF1"], row["c_H"], row["own_fp"], row["holdout_only"], row["drift_kept"],
-                          row["label"], row["fp_x"]), (0.0, 1.02, 1.07, 0.031, 0.094, 0.21, "beta", 0.04))
+                          row["s1x"], row["fp_x"]), (0.0, 1.02, 1.07, 0.031, 0.094, 0.21, "beta", 0.04))
+        self.assertNotIn("label", row, "S1-X's label is `s1x`; the lane's is `lane_label` (never one ambiguous `label`)")
         self.assertEqual((row["c_used"], row["c_p"]), (None, None), "S2 has no pooled-t bar")
         self.assertNotIn("fp_why", row)
         self.assertIn("no screen line", R.EquityScreens(self.store).of("p-s2", 2)["fp_why"], "another version: no look")
@@ -220,7 +221,8 @@ class WhatRidesBeside(EquityFixture):
         """A14 (the captain's pre-registration, before the first equity close): Done's "fills consistent" reading (15
         bp a side AND 95% of the counted sessions, at each checkpoint), the close-date figures beside every reading
         and the inactive forward seat rule are in the report, verbatim, and in docs/operations.md in the same words;
-        the status says plainly that none of the three is computed yet."""
+        the status says plainly what is computed (the fill-gap half) and what is not (the intents half, the
+        close-date figures, the seat rule)."""
         import re
         from pathlib import Path
 
@@ -237,7 +239,9 @@ class WhatRidesBeside(EquityFixture):
             self.assertIn(words, R.A14_BESIDE_DONE)
         for words in ("written and inactive", "fewer than 5 real closes", "never unseated", "except by EDM1"):
             self.assertIn(words, R.A14_SEAT_RULE)
-        self.assertIn("not computed yet", pre["status"])
+        for words in ("partly computed", "fill-gap half is computed", "intents-agreement half has no reader yet",
+                      "does not hold", "No reading carries the close-date figures"):
+            self.assertIn(words, pre["status"])
         page = re.sub(r"\s+", " ", (Path(R.__file__).resolve().parents[2] / "docs" / "operations.md").read_text())
         for sentence in (R.A14_CONSISTENCY, R.A14_BESIDE_DONE, R.A14_SEAT_RULE):
             self.assertIn(sentence, page)
@@ -283,14 +287,50 @@ class TheFunnelAndTheBudget(EquityFixture):
         self.assertEqual(out["bands_now"]["beta"]["probe"], 1)
 
     def test_the_shared_budget_leaves_the_options_probe_lane_little_room_a8_6(self):
+        """The lane holds the LOWER of its Probe sleeves and the invested cap. Since the captain's A20 (the sleeves at
+        0.50 x E) three whole sleeves ask for 1.50 x E, so the invested cap's 1.00 x E is the bound: 0.20 x E of open
+        risk at most (three one-ETF programs, a lot of 0.25 x E each, hold 0.15 x E of it; the note says both)."""
+        from league.constitution import CONSTITUTION
+
         constitution = {"options_money": {"probe": {"loss_budget_usd": "400"}},
-                        "equity_money": {"probe": {"sleeve_share": "0.25", "max_programs": 3},
+                        "equity_money": {"probe": {"sleeve_share": "0.50", "max_programs": 3}, "invested_share": "1.00",
                                          "open_risk_weight": {"etf": "0.20", "stock": "0.40"}}}
+        em, probe = CONSTITUTION["equity_money"], CONSTITUTION["options_money"]["probe"]
+        self.assertEqual((em["probe"]["sleeve_share"], em["probe"]["max_programs"], em["invested_share"],
+                          em["open_risk_weight"]["etf"], probe["loss_budget_usd"]), ("0.50", 3, "1.00", "0.20", "400"),
+                         "the fixture is the table in force")
         room = R.options_probe_room(2000, constitution)
+        self.assertEqual(room, R.options_probe_room(2000), "and the table in force is read when none is passed")
+        self.assertEqual((room["open_risk_share_of_e"], room["invested_share_of_e"], room["bound"]),
+                         (0.2, 1.0, "invested_cap"))
+        self.assertEqual((room["equity_open_risk_usd"], room["options_window_room_usd"]), (400.0, 0.0))
+        room = R.options_probe_room(1000, constitution)
+        self.assertEqual((room["equity_open_risk_usd"], room["options_window_room_usd"], room["bound"]),
+                         (200.0, 200.0, "invested_cap"))
+        # Past E = $2,000 the window itself is the bound: every equity entry is cut to the budget's room.
+        room = R.options_probe_room(3000, constitution)
+        self.assertEqual((room["open_risk_share_of_e"], room["equity_open_risk_usd"], room["options_window_room_usd"],
+                          room["bound"]), (0.2, 400.0, 0.0, "budget"))
+        # Sleeves that fit under the invested cap bind by themselves (the quarter of E the block carried before A20).
+        quarter = {**constitution, "equity_money": {**constitution["equity_money"],
+                                                     "probe": {"sleeve_share": "0.25", "max_programs": 3}}}
+        room = R.options_probe_room(2000, quarter)
         self.assertEqual(room["open_risk_share_of_e"], 0.15)
-        self.assertEqual((room["equity_open_risk_usd"], room["options_window_room_usd"]), (300.0, 100.0))
+        self.assertEqual((room["equity_open_risk_usd"], room["options_window_room_usd"], room["bound"]),
+                         (300.0, 100.0, "sleeves"))
+        # A table with no invested_share row is read by its sleeves alone: the larger risk, never a smaller one.
+        bare = {**constitution, "equity_money": {k: v for k, v in constitution["equity_money"].items()
+                                                  if k != "invested_share"}}
+        room = R.options_probe_room(1000, bare)
+        self.assertEqual((round(room["open_risk_share_of_e"], 6), room["equity_open_risk_usd"],
+                          room["options_window_room_usd"], room["bound"], room["invested_share"]),
+                         (0.3, 300.0, 100.0, "sleeves", None))
         self.assertEqual(room["statement"], R.EQUITY_PROBE_NOTE)
         self.assertIn("effectively off", R.EQUITY_PROBE_NOTE)
+        self.assertIn("3 x 0.50 E", R.EQUITY_PROBE_NOTE)
+        self.assertIn("at most 0.20 x E", R.EQUITY_PROBE_NOTE)
+        self.assertIn("three one-ETF programs hold a lot of 0.25 x E each, 0.15 x E of open risk", R.EQUITY_PROBE_NOTE)
+        self.assertIn("$400 less its realized loss less 0.20 x the equity lots", R.EQUITY_PROBE_NOTE)
         self.assertIn("why", R.options_probe_room(2000, {"options_money": {"probe": {"loss_budget_usd": "400"}}}))
         self.assertIn("why", R.options_probe_room(None, constitution))
         self.assertEqual(self.report()["equity"]["options_probe_room"]["statement"], R.EQUITY_PROBE_NOTE)
@@ -325,8 +365,13 @@ class TheResearchFunnel(EquityFixture):
         self.store.event("swarm.born", "born-beta", {"lane": "beta"})
         self.store.event("swarm.born", "born-equity", {})
         self.store.event("swarm.born", "dir-a", {"lane": "direction"})
-        self.store.event("swarm.tournament", None, {"validation": {"judged": {"born-beta": {"passed": True},
+        # An equity verdict is the equity rounds' own event (`elane.validate`); the hourly tournament row holds options
+        # families only, so an equity id in it is never read as an equity verdict.
+        self.store.event("swarm.tournament", None, {"validation": {"judged": {"born-equity": {"passed": True},
                                                                               "dir-a": {"passed": False}}}})
+        self.store.event("swarm.status", "born-beta", {"action": "elane_validation", "version": 1, "lane": "beta",
+                                                       "entered": True})
+        self.store.event("swarm.status", "born-beta", {"action": "elane_validation_error", "version": 1, "lane": "beta"})
         self.store.add_look("born-beta", 1, "sha-1", passed=True, p_value=None, detail={"screen": "S1"})
         self.eq_close("born-beta", closed_at=self.now - 600)
         self.lid += 1
@@ -341,6 +386,7 @@ class TheResearchFunnel(EquityFixture):
         eq = out["equity"]
         self.assertEqual((eq["beta"]["births"], eq["equity"]["births"]), (1, 1))
         self.assertEqual(eq["beta"]["validations"], {"judged": 1, "passed": 1})
+        self.assertEqual(eq["equity"]["validations"], {"judged": 0, "passed": 0})
         self.assertEqual(eq["beta"]["looks"], {"taken": 1, "passed": 1})
         self.assertEqual((eq["beta"]["band_moves"]["probe"], eq["equity"]["band_moves"]["candidate"]), (1, 1),
                          "the fixture's band moves (`set_band`)")

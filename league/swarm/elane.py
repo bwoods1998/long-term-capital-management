@@ -35,6 +35,12 @@ SETTINGS (`cfg`; policy.json "elane", swarm.json over it; `DEFAULTS` is the roll
   (A9 D3; league/equity/screen.py `retry_permitted`);
 - `program_loss_usd` -300 (a tightening only: -300 to -25).
 
+THE ROUNDS RUN ON THEIR OWN (A3: no Gym box, no model dollar). The swarm's main loop starts the two equity rounds below on
+their own thread every `ROUND_SECONDS` while the lane is on (league/swarm/loop.py `Swarm.equity_rounds`: the
+tournament's step, then the gate's, so a version validated in a round takes its look in the same round). Neither the
+research budget's brake nor a Gym that is down or switched off holds them, and no options round carries them: an
+options Validation that fails or runs long never costs an equity family its turn.
+
 THE ROUND (who calls what). The tournament's equity round (league/swarm/tournament.py `Tournament.equity_round`) asks
 `validate` of each living Gym-band equity family's candidate version (`candidate`: its best, else its newest) while
 `try_open` allows it, and retires a family whose lineage is spent (`lineage_spent`). `validate` runs the version on
@@ -51,6 +57,17 @@ run reproduced and pre-checked again, then the ONE sealed look with a freshly mi
 equity identity (`banded_evaluator` {"engine", "equity_sha256", "run_sha"}). From there the EquityBook moves its band
 (league/equity/bands.py `next_band`), inside `roster` seats.
 
+THE RUN'S STATUS, AND A RUN THAT DOES NOT RETURN. Every run the look reads is read by its status first, as Validation's
+is. A Train-era run its own errors ended ("disqualified") gives no floor (refused at the floor, no look spent); one with
+no data is no history there (the screen's rule). A holdout run that ended "disqualified" is a look SPENT AND FAILED: a
+partial series is never judged. A holdout run the House could not make at all (the capability, the store's slice, the
+NEEDS call, a child that could not be started or did not take the request, an answer that is not a result, "no_data")
+is no look and is owed again, counted against no program. But once the child took the sealed run whole and no answer
+came back (league/equity/runner.py `RunLost`: it ran past its budget or exited while the program held its holdout), it
+is owed again only once: the second time (`LOOK_SENDS`) the look is spent and failed, with a House warning each time,
+so a program cannot stop answering until its holdout suits it. The evidence child's hash seed is pinned
+(`EVIDENCE_HASH_SEED`), so the run owed again is the same run.
+
 THE REVIEW (E1). The gate's paid program review and audit read options programs. In E1 an equity look is taken only for
 a captain-seeded program (its code is reviewed in the release's pull request) or a version whose state carries a passed
 review and audit of its exact program (`reviewed`): the architect's and researcher's equity births (E2) wait for the
@@ -59,18 +76,36 @@ equity review.
 THE LINEAGE (A9 D3): a program whose Train daily returns correlate >= 0.7 with a program already looked at in either
 equity lane (`league.equity.screen.same_lineage`, over the House-only Train series each look keeps, `TRAIN_R_KEY`), or
 that uses the same template in its own lane (`TEMPLATE_KEY`: its code's sha, lane-scoped by `lineage_key`), is the same
-lineage: one look a lineage. Look and Validation outcomes of share programs are never fed back to generators or the
-diagnostician: no graveyard row is written for an equity family in E1 (the options architect reads the graveyard), and
-no options reader sees an equity family (`SwarmStore.families`).
+lineage: one look a lineage. The series and the template are THE LOOK'S LINEAGE RECORD: kept for good, an equity
+identity adoption included (league/swarm/evaluator.py `EQUITY_SELECTION_KEYS` leaves them), and the test FAILS CLOSED:
+a program already looked at that keeps no series has it written again from its looked version's Train-era runs
+(`_restore_train`), and where that cannot be done the look waits (`LineageUnread`). Look and Validation outcomes of
+share programs are never fed back to generators or the diagnostician: no graveyard row is written for an equity family
+in E1 (the options architect reads the graveyard), and no options reader sees an equity family
+(`SwarmStore.families`).
 
 LANE-SCOPED KEYS (A8.12): lineage, spent-root and graveyard keys carry the lane (`lineage_key`), so the options lanes'
 spent SPY/QQQ/IWM always-in roots never refuse an equity birth, and a REFUTED equity row binds only its own lane's cards
 (league/swarm/cards.py: an equity card's cell is "<lane>:etf", and `RebirthIndex` reads each lane's rows apart).
 
-THE SEEDS (A4; league/swarm/seeds.py `EQUITY_SEEDS`): seed-overnight-spy, seed-overnight-qqq, seed-reversal-index,
+THE SEEDS (A4; league/swarm/seeds.py `EQUITY_SEEDS`): seed-overnight-qqq, seed-reversal-index, seed-overnight-spy,
 each born once as an agent-authored family (`birth_seeds`), then Validation, the screen's pre-check and one sealed look
-like any family. Every report says plainly that these three were seeded by the captain's build agents (`SEEDED_NOTE`), and
-the Done meter reads Done with and without them (`seeded`).
+like any family. THEIR LOOKS ARE TAKEN IN THAT DECLARED ORDER, and the order is a decision (the captain's, Oct 11,
+2026, from Train-era figures only, before any Validation or look: amendment A18): the two overnight seeds share a
+template and are one lineage, so only the first of them declared is ever judged and the other is refused with no
+look and retired as the same lineage. Two rules hold it: `round_order` (both equity rounds walk the seeds as one block,
+in the list's order, whatever second each was born in) and `seed_wait`, which is STRICT WITHIN A LINEAGE (amendment
+A18): each seed's `lineage` in the list declares the lineage it is in, and a seed's look is never taken while a seed
+declared before it in the same lineage is alive without a verdict (`seed_owed`). THERE IS NO TIMEOUT: the later seed
+waits until the earlier one has been looked at (D3 then refuses the later one), has FAILED its Validation pre-check
+with no retry owed, or is retired, so a look the House owes again, a hold or a slow data job never hands the lineage's
+one look to the wrong seed. `look` asks it at its last step before the sealed run, so the wait's clock counts only the
+rounds in which the later seed's own look was otherwise ready; a counted wait past `SEED_WAIT_SECONDS` is ONE House
+warning naming both seeds and why the earlier one has no verdict yet (again at most daily), cleared when the wait
+ends. Seeds of different lineages never wait on each other, and a family that is no seed waits for none. A version
+refused at the gate before its look retires for what happened (`REFUSED_CAUSES`: the same lineage, no eligible floor),
+not as a spent Validation try. Every report says plainly that these three were seeded by the captain's build agents
+(`SEEDED_NOTE`), and the Done meter reads Done with and without them (`seeded`).
 
 Standard library only at import (league/equity/__init__.py and config.py); the screen, the runner and the store (numpy)
 are imported where they are used, on the House.
@@ -97,14 +132,39 @@ BETA_NOTE = "MARKET BETA: profit from market direction, reported beside the same
 SEEDED_NOTE = "seeded by the captain's build agents (A4), judged by the swarm's screen like any family"
 #: The store's kv key of the seeds already born ({seed id: family id}).
 SEEDS_KEY = "elane_seeds"
+#: THE EQUITY LANES' ROUNDS (league/swarm/loop.py `Swarm.equity_rounds`): the store's kv key of the last round's start,
+#: and the seconds between two rounds (the gate's own default pace: a Validation or a look is milliseconds a year of
+#: daily bars, and a look that waits for the data job is asked again each round).
+ROUND_KEY = "elane_round_at"
+ROUND_SECONDS = 300.0
+#: THE SEEDS' DECLARED ORDER, STRICT WITHIN A LINEAGE (`seed_wait`, amendment A18): the family state's key of a seed's
+#: wait for the earlier seed of its declared lineage ({for, why, since, at, waited, asks, alerted}); the counted wait
+#: past which ONE House warning names both seeds (NO TIMEOUT: the wait goes on); the seconds before that warning is
+#: said again while the wait lasts; and the longest time between two asks that still counts as waiting (two rounds:
+#: the clock counts only the rounds in which the later seed's own look was otherwise ready).
+SEED_WAIT_KEY = "elane_seed_wait"
+SEED_WAIT_SECONDS = 1800.0
+SEED_WAIT_REPEAT_SECONDS = 86400.0
+SEED_WAIT_GAP_SECONDS = 2 * ROUND_SECONDS
 #: The family state's key of its equity lineage's Validation try ({version, at, first, precheck, entered, retry_sha}).
 TRY_KEY = "elane_try"
-#: The family state's keys (league/equity/INTERFACES.md section 8.4): the one look ({version, at, verdict, beside}),
+#: The family state's keys (league/equity/INTERFACES.md section 8.4): the one look ({version, at, verdict, beside,
+#: activity: the invested-day shares `_invested_shares` records beside it, House-only}),
 #: the program floor by version, the looked version's Train daily series (House-only: never in a view), the version's
 #: lane-scoped template key, the last Validation ({version, passed, precheck, screen, status, at, result_sha, stale}),
 #: each version's Validation verdict ({str(n): {entered, at, stale}}) and EDM1's sigma by version.
 LOOK_KEY = "elane_look"
 FLOOR_KEY = "elane_floor"
+#: THE SEALED RUN, SENT AND NOT ANSWERED (`look`; league/equity/runner.py `RunLost`): the family state's count of it
+#: for one program ({sha, count, at}), and how often a program's sealed run may be sent. A first run that does not
+#: return is owed again (a House that lost its child once costs no lineage its look); a second spends the look as
+#: FAILED. Without the line a program that stops answering when its holdout goes badly would be shown it again.
+LOST_KEY = "elane_look_lost"
+LOOK_SENDS = 2
+#: The hash seed of the swarm's evidence child (`isolated_runner`): every Validation, Train-era and sealed run is the
+#: same run on every start of the child (a program that iterates a set of strings would otherwise differ from process
+#: to process; the options Gym pins PYTHONHASHSEED=0 for the same reason, league/gym/driver.py).
+EVIDENCE_HASH_SEED = 0
 TRAIN_R_KEY = "elane_train_r"
 TEMPLATE_KEY = "elane_template"
 VALIDATION_KEY = "elane_validation"
@@ -138,6 +198,16 @@ NOT_A_TRY = ("error", "no_data")
 #: The public causes of `lineage_spent` (a `swarm.retired` cause): rules only, no figure.
 SPENT_LOOK = "its equity lineage has used its one sealed look (one Validation try and one look an equity lineage)"
 SPENT_TRY = "its equity lineage has used its one Validation try (one Validation try and one look an equity lineage)"
+#: A version that passed its Validation pre-check and was REFUSED AT THE GATE BEFORE ITS LOOK (`_refuse`: no look was
+#: taken) retires for what happened, by the refusal's stage; a stage not named here reads `REFUSED_BEFORE_LOOK`.
+SAME_LINEAGE = ("its program is the same lineage as a program already looked at (A9 D3: Train daily returns "
+                "correlating at 0.7 or more, or the same template): one sealed look a lineage, so it was refused "
+                "before any look")
+FLOOR_INELIGIBLE = ("the share screen has no eligible program floor for it (too little Train-era history, a Train-era "
+                    "run its own errors ended, or no threshold on the screen's grid): it was refused before any look")
+REFUSED_BEFORE_LOOK = ("the gate refused its program before the sealed look (its recorded Validation no longer passes "
+                       "the screen's pre-check, or the lineage's look was already spent): no look was taken")
+REFUSED_CAUSES = {"same lineage": SAME_LINEAGE, "screen floor": FLOOR_INELIGIBLE}
 
 DEFAULTS: dict[str, Any] = {
     "mode": "off",
@@ -340,6 +410,166 @@ def seeded(store: Any, fid: str) -> bool:
         return False
     spec = (fam or {}).get("spec") if isinstance(fam, Mapping) else None
     return isinstance(spec, Mapping) and spec.get("seeded") is True
+
+
+def _seed_places(store: Any) -> dict[str, int]:
+    """{family id: its place in `seeds.EQUITY_SEEDS`} of the seeds born in this store (`SEEDS_KEY`)."""
+    from . import seeds
+
+    rank = {str(spec["id"]): i for i, spec in enumerate(seeds.EQUITY_SEEDS)}
+    return {str(fid): rank[str(sid)] for sid, fid in (store.get(SEEDS_KEY) or {}).items() if str(sid) in rank}
+
+
+def round_order(store: Any, fams: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    """THE ORDER OF AN EQUITY ROUND, which is the order the looks are taken in. D3 makes it a decision: of two programs
+    of one lineage the second is refused with no look. Oldest first by the second of birth, then by id; THE
+    CAPTAIN-SEEDED PROGRAMS ARE ONE BLOCK IN THE DECLARED ORDER of `seeds.EQUITY_SEEDS`, standing where the first of
+    them was born, whatever second each was born in (by birth and id alone their order was the ids' alphabet, or a
+    clock tick's when a second ended between two births). A store that cannot say which families are seeds leaves the
+    order as given."""
+    try:
+        place = _seed_places(store)
+    except Exception:  # noqa: BLE001
+        return list(fams)
+    block = min((str(f.get("born_at") or "") for f in fams if str(f.get("id")) in place), default="")
+
+    def key(f: Mapping[str, Any]) -> tuple:
+        fid = str(f.get("id"))
+        if fid in place:
+            return (block, 0, place[fid], fid)
+        return (str(f.get("born_at") or ""), 1, 0, fid)
+
+    return sorted(fams, key=key)
+
+
+def _seed_lineages(store: Any) -> dict[str, str]:
+    """{family id: the lineage its seed is DECLARED in (`seeds.EQUITY_SEEDS` `lineage`; a seed that declares none is a
+    lineage of its own)} of the seeds born in this store (`SEEDS_KEY`)."""
+    from . import seeds
+
+    declared = {str(spec["id"]): str(spec.get("lineage") or spec["id"]) for spec in seeds.EQUITY_SEEDS}
+    return {str(fid): declared[str(sid)] for sid, fid in (store.get(SEEDS_KEY) or {}).items() if str(sid) in declared}
+
+
+def seed_owed(store: Any, fam: Mapping[str, Any] | None, settings: Mapping[str, Any] | None) -> str | None:
+    """WHY A SEED HAS NO VERDICT YET (so it can still spend its lineage's one look), or None when it cannot: it is
+    retired, it was looked at (its lineage's look is spent, passed or failed), or it FAILED its Validation pre-check
+    with no retry owed (`lineage_spent` reads `SPENT_TRY` on a recorded failed pre-check). Everything else is a seed
+    alive without a verdict, and the words say which: its look in flight, its look owed (with the gate's last word
+    when it waits), its Validation or its pre-registered retry owed, or a version the gate is done with before any
+    look, which the tournament's next equity step retires. The operator's hold (`gate_hold`) is no verdict."""
+    if not fam or fam.get("retired_at"):
+        return None
+    fid = str(fam["id"])
+    state = fam.get("state") or {}
+    if isinstance(state.get(LOOK_KEY), Mapping) or store.lineage_looks(fid) >= cfg(settings)["looks_per_lineage"]:
+        return None
+    hold = "; the operator holds it (gate_hold)" if state.get("gate_hold") else ""
+    if (state.get("look_inflight") or {}).get("sha"):
+        return "its sealed look is in flight, or owed again after the process that sent it stopped" + hold
+    held = state.get(TRY_KEY) if isinstance(state.get(TRY_KEY), Mapping) else {}
+    spent = lineage_spent(store, fam, settings)
+    if spent == SPENT_TRY and held.get("precheck") is False:
+        return None
+    if spent is not None:
+        return "the gate is done with it before any look, and it retires at the tournament's next equity step" + hold
+    if held.get("entered") is True and state.get("validation_version") == held.get("version"):
+        word = str(state.get("gate") or "")
+        return "its one sealed look is still owed" + hold + (f"; the gate's last word: {word[:120]}"
+                                                             if word.startswith("waiting") else "")
+    if held.get("precheck") is False:
+        return "its pre-registered Validation retry is still owed" + hold
+    return "its Validation is still owed" + hold
+
+
+def seed_ahead(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any] | None) -> str | None:
+    """THE SEED `fam`'S LOOK WAITS FOR, or None: the first seed declared before it in `seeds.EQUITY_SEEDS`, IN ITS OWN
+    DECLARED LINEAGE (`_seed_lineages`), that is alive without a verdict (`seed_owed`). A seed of another lineage is
+    never waited for, and a family that is no seed has none ahead. Raises as the store does."""
+    place = _seed_places(store)
+    fid = str(fam["id"])
+    mine = place.get(fid)
+    if mine is None:
+        return None
+    lineage = _seed_lineages(store)
+    for other in sorted((f for f, rank in place.items() if rank < mine and lineage.get(f) == lineage.get(fid)),
+                        key=lambda f: place[f]):
+        if seed_owed(store, store.family(other), settings) is not None:
+            return other
+    return None
+
+
+def _seed_wait_end(store: Any, fid: str, held: Mapping[str, Any]) -> None:
+    """A seed's wait ended: its record (`SEED_WAIT_KEY`) is cleared, and the House warning with it when one was said
+    (a `swarm.status` row with `alert` false, as the funding watch clears its own)."""
+    store.set_state(str(fid), **{SEED_WAIT_KEY: None})
+    if held.get("alerted") is not None:
+        store.event("swarm.status", str(fid), {
+            "action": "equity_seed_wait_over", "alert": False, "ahead": held.get("for"),
+            "text": f"the equity seed {fid} no longer waits for {held.get('for')}, declared before it in its lineage: "
+                    "the wait is over"})
+
+
+def seed_wait(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any] | None) -> str | None:
+    """THE SEEDS' DECLARED ORDER IS STRICT WITHIN A LINEAGE (amendment A18): the earlier-declared seed of its lineage
+    `fam`'s look waits for (`seed_ahead`), or None when its look may be taken. Asked by `look` at its last step before
+    the sealed run, and the wait spends nothing. THERE IS NO TIMEOUT: of two seeds of one lineage the first declared
+    is the one judged, however long its look is owed (a run the House cannot make, the operator's hold, a wait of its
+    own); the later seed's look is taken only once the earlier one has been looked at (D3 then refuses the later
+    one), has FAILED its Validation pre-check with no retry owed, or is retired.
+
+    THE RECORD (`SEED_WAIT_KEY` in `fam`'s state): {for, why (`seed_owed` of the earlier seed), since, at (the last
+    ask), waited, asks, alerted}. `waited` counts the time between two asks only when they are at most
+    `SEED_WAIT_GAP_SECONDS` apart, so rounds in which the later seed's own look was not ready, or the House was down,
+    count as nothing. A counted wait of `SEED_WAIT_SECONDS` raises ONE House warning naming both seeds and why the
+    earlier one has no verdict yet; it is said again after `SEED_WAIT_REPEAT_SECONDS` while the wait lasts, and
+    cleared when the wait ends (`_seed_wait_end`; `seed_waits_over` for a wait that ends without being asked again).
+    Raises as the store does: `look` takes no look of a seed whose order cannot be read."""
+    fid = str(fam["id"])
+    ahead = seed_ahead(store, fam, settings)
+    state = (store.family(fid) or fam).get("state") or {}
+    held = dict(state[SEED_WAIT_KEY]) if isinstance(state.get(SEED_WAIT_KEY), Mapping) else None
+    if ahead is None:
+        if held is not None:
+            _seed_wait_end(store, fid, held)
+        return None
+    held = held or {}
+    why = seed_owed(store, store.family(ahead), settings) or "it has no verdict yet"
+    now = float(store.clock())
+    last, said = _num(held.get("at")), _num(held.get("alerted"))
+    step = now - last if last is not None else 0.0
+    waited = float(_num(held.get("waited")) or 0.0) + (step if 0.0 <= step <= SEED_WAIT_GAP_SECONDS else 0.0)
+    record = {"for": ahead, "why": why, "since": held.get("since", now), "at": now, "waited": waited,
+              "asks": int(_num(held.get("asks")) or 0) + 1, "alerted": said}
+    if waited >= SEED_WAIT_SECONDS and (said is None or now - said >= SEED_WAIT_REPEAT_SECONDS):
+        record["alerted"] = now
+        store.event("swarm.status", fid, {  # a House warning (the swarm's alerts are its status rows)
+            "action": "equity_seed_waits", "alert": True, "ahead": ahead, "why": why, "minutes": int(waited // 60),
+            "repeat": said is not None,
+            "text": f"the equity seed {fid} has waited {int(waited // 60)} minutes for {ahead}, declared before it in "
+                    f"its lineage, which has no verdict yet: {why}. There is no timeout (A18): {fid} is looked at "
+                    f"only once {ahead} has been looked at (then {fid} is refused as the same lineage), has failed "
+                    "its Validation pre-check with no retry owed, or is retired"})
+    store.set_state(fid, **{SEED_WAIT_KEY: record})
+    return ahead
+
+
+def seed_waits_over(store: Any, settings: Mapping[str, Any] | None) -> list[str]:
+    """THE WAITS THAT ENDED WITHOUT BEING ASKED AGAIN (the gate's equity round calls it last): a seed that keeps a
+    wait's record (`SEED_WAIT_KEY`) and is retired, or has no earlier seed of its lineage without a verdict any more
+    (the earlier one was looked at, so D3 refused this one before the wait's step), has the record cleared and its
+    warning with it (`_seed_wait_end`). A seed still waiting, whose own look was not ready this round, keeps it.
+    Returns the families whose wait ended."""
+    ended: list[str] = []
+    for fid in sorted(_seed_places(store)):
+        fam = store.family(fid) or {}
+        held = (fam.get("state") or {}).get(SEED_WAIT_KEY)
+        if not isinstance(held, Mapping):
+            continue
+        if fam.get("retired_at") or seed_ahead(store, fam, settings) is None:
+            _seed_wait_end(store, fid, held)
+            ended.append(fid)
+    return ended
 
 
 def candidate(fam: Mapping[str, Any], store: Any = None) -> int | None:
@@ -547,9 +777,13 @@ def try_open(store: Any, fam: Mapping[str, Any], n: Any, settings: Mapping[str, 
 
 
 def next_try(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any] | None) -> int | None:
-    """The version the tournament's equity round validates now, or None: the family's candidate (`candidate`) while
-    `try_open` allows it and it has no current verdict (none recorded for it, or the recorded one went stale: `look`
-    found the recorded run did not reproduce), else R3's pre-registered retry version while it is open."""
+    """The version the tournament's equity round validates now, or None. First A TRY OWED AGAIN: a version already
+    tried whose recorded verdict went stale (`look` found its recorded run did not reproduce after the store's daily
+    write, or an equity identity adoption marked it), the lowest first, while `try_open` allows it (it does, for the
+    lineage's own try and its admitted retry: the same try) and WHATEVER THE FAMILY'S CANDIDATE IS NOW: the candidate
+    moves when a later version is written or an adoption clears `best_version`, and a stale verdict nobody asks about
+    again would leave the family waiting for good. Then the family's candidate (`candidate`) while `try_open` allows it
+    and it has no current verdict, else R3's pre-registered retry version while it is open."""
     try:
         if lane_of(store, fam) is None:
             return None
@@ -561,6 +795,10 @@ def next_try(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any] | N
             noted = verdicts.get(str(n))
             return not isinstance(noted, Mapping) or noted.get("stale") is True
 
+        for n in sorted(int(key) for key, noted in verdicts.items()
+                        if isinstance(noted, Mapping) and noted.get("stale") is True and str(key).isdigit()):
+            if store.version(str(fam["id"]), n) is not None and try_open(store, fam, n, settings):
+                return n
         n = candidate(fam, store)
         if n is not None and due(n) and try_open(store, fam, n, settings):
             return int(n)
@@ -575,8 +813,20 @@ def next_try(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any] | N
         return None
 
 
+def _refused_cause(store: Any, fid: str, n: int) -> str:
+    """The public cause of a version the gate refused before its look (`_refuse`): its last refusal's stage read through
+    `REFUSED_CAUSES`, `REFUSED_BEFORE_LOOK` for another stage or when no row can be read. Rules only, no figure."""
+    try:
+        rows = [r for r in store.refusals(str(fid)) if r.get("version") == int(n)]
+    except Exception:  # noqa: BLE001 - the stage cannot be read: the general words
+        rows = []
+    return REFUSED_CAUSES.get(str(rows[-1].get("stage") or ""), REFUSED_BEFORE_LOOK) if rows else REFUSED_BEFORE_LOOK
+
+
 def lineage_spent(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any] | None) -> str | None:
-    """Why the family's equity lineage can take no look (its one look used, or its one try failed), or None."""
+    """Why the family's equity lineage can take no look, or None: its one look used (`SPENT_LOOK`), its one try failed
+    (`SPENT_TRY`), or its version refused at the gate before any look (`REFUSED_CAUSES`: the same lineage as a program
+    already looked at, no eligible program floor; `REFUSED_BEFORE_LOOK` otherwise)."""
     try:
         if lane_of(store, fam) is None:
             return None
@@ -599,6 +849,8 @@ def lineage_spent(store: Any, fam: Mapping[str, Any], settings: Mapping[str, Any
             sha = _run_sha(store.version(fid, last["version"]))
             if sha is not None and not store.looked(sha) and state.get("gated_sha") != sha:
                 return None  # it entered the gate and waits for its one look
+            if sha is not None and not store.looked(sha):
+                return _refused_cause(store, fid, last["version"])  # the gate refused it before any look
             return SPENT_TRY
         n_next = held.get("retry_sha")
         if n_next and len(tries) <= c["val_tries"]:
@@ -686,7 +938,8 @@ _runners_lock = threading.Lock()
 
 def isolated_runner(root: str | Path) -> Any:
     """The swarm process's `league.equity.runner.Isolated` over <root>/equity-daily with its own decider child
-    (`league.live.decider.Decider`, its log <root>/equity-decider.log), built once a process."""
+    (`league.live.decider.Decider`, its log <root>/equity-decider.log, its hash seed pinned: `EVIDENCE_HASH_SEED`),
+    built once a process."""
     key = str(Path(root).resolve())
     with _runners_lock:
         runner = _runners.get(key)
@@ -694,7 +947,9 @@ def isolated_runner(root: str | Path) -> Any:
             from ..equity.runner import Isolated
             from ..live.decider import Decider
 
-            runner = Isolated(Decider(log=Path(root) / "equity-decider.log"), Path(root) / STORE_DIR)
+            decider = Decider(log=Path(root) / "equity-decider.log")
+            decider.hash_seed = EVIDENCE_HASH_SEED  # the evidence child is deterministic across its restarts
+            runner = Isolated(decider, Path(root) / STORE_DIR)
             _runners[key] = runner
         return runner
 
@@ -805,14 +1060,17 @@ def validate(tournament: Any, fam: Mapping[str, Any], version: Mapping[str, Any]
     first = any(t["family"] == fid and t["version"] == n for t in tries[:k])
     state = fam.get("state") or {}
     held = state.get(TRY_KEY) if isinstance(state.get(TRY_KEY), Mapping) else {}
-    if first and held.get("version") == n and held.get("retry_sha") is not None:
-        retry_sha = held.get("retry_sha")  # the retry's hash is the first try's, recorded once
+    if "retry_sha" in held:
+        # RECORDED ONCE, at the lineage's first try, and kept by every later Validation of the family, None included:
+        # a version validated again (stale after the store's daily write or an adoption) never registers a retry
+        # version that was written after the first verdict.
+        retry_sha = held.get("retry_sha")
     elif first:
         # R3 (A9 D3): the retry version is pre-registered: a version written before this first try, hashed now.
         later = [v for v in store.versions(fid) if int(v["n"]) > n]
         retry_sha = _run_sha(later[0]) if later else None
     else:
-        retry_sha = held.get("retry_sha")
+        retry_sha = None
     sd = _num((result.get("summary") or {}).get("sd_net_return"))
     sigma = dict(state.get(SIGMA_KEY) or {}) if isinstance(state.get(SIGMA_KEY), Mapping) else {}
     if sd is not None and sd > 0:
@@ -848,6 +1106,48 @@ def reviewed(state: Mapping[str, Any], sha: str) -> bool:
     return review.get("sha") == sha and review.get("verdict") == "pass" and audit.get("verdict") == "pass"
 
 
+def _status(run: Any) -> str:
+    """A run's status ("ok" | "disqualified" | "no_data"; "unknown" when its result names none)."""
+    result = getattr(run, "result", None)
+    return str((result if isinstance(result, Mapping) else {}).get("status") or "unknown")
+
+
+def _segment_series(S: Any, runs: Sequence[Any]) -> tuple[list[Any], str | None]:
+    """THE FLOOR'S INPUTS from the program's Train-era runs (the screen's rule: one series per span, None where the
+    program has no history): ([`screen.Series` | None], None), a "no_data" run read as None; or ([], the status) when a
+    run ended any other way than "ok" ("disqualified": the program's own errors ended it, so its series is partial and
+    no floor is read from it)."""
+    statuses = [_status(run) for run in runs]
+    bad = next((s for s in statuses if s not in ("ok", "no_data")), None)
+    if bad is not None:
+        return [], bad
+    return [None if status == "no_data" else _series(S, run) for run, status in zip(runs, statuses)], None
+
+
+def _invested_shares(v: Any, segments: Sequence[Any]) -> dict[str, Any] | None:
+    """THE PROGRAM'S ACTIVITY, WHERE ITS FLOOR IS BUILT AND WHERE IT IS JUDGED: the share of sessions it was invested
+    on in Validation and on each Train-era span ({"validation", "train" [per span, None where it has no history],
+    "ratio": Validation over the Train-era mean}). A FIGURE BESIDE THE LOOK, NEVER A CONDITION OF IT: the screen's
+    floor is the program's own Train-era behaviour, so a program much sparser there than in the judged windows lowers
+    its own threshold (down to the receipt's floor, never below). The rule that would refuse on it is not written (it
+    needs a pre-registered factor: the review of the first non-seeded programs); until then the look records the
+    figures so that review can read them. House-only, never in a view. None when they cannot be computed."""
+    def share(series: Any) -> float | None:
+        invested = getattr(series, "invested", None)
+        values = [bool(x) for x in invested] if invested is not None else []
+        return round(sum(values) / len(values), 4) if values else None
+
+    try:
+        train = [share(s) for s in segments]
+        known = [x for x in train if x is not None]
+        validation = share(v)
+        mean = sum(known) / len(known) if known else None
+        ratio = round(validation / mean, 4) if validation is not None and mean else None
+        return {"validation": validation, "train": train, "ratio": ratio}
+    except Exception:  # noqa: BLE001 - a figure beside the look: never its condition
+        return None
+
+
 def _train_series(segments: Sequence[Any]) -> dict[str, list]:
     """The Train-era daily series a look keeps for THE LINEAGE: {"days": [int ordinal], "r": [float]}, every segment's
     sessions in order (House-only: never in a view)."""
@@ -862,11 +1162,22 @@ def _train_series(segments: Sequence[Any]) -> dict[str, list]:
     return {"days": days, "r": r}
 
 
+class LineageUnread(RuntimeError):
+    """THE LINEAGE cannot be judged: `family` was looked at (or its look is in flight) and keeps no Train series
+    (`TRAIN_R_KEY`) for D3's correlation test. The look waits (`look`); it never passes D3 unjudged."""
+
+    def __init__(self, family: str):
+        super().__init__(f"{family} keeps no Train series of its look")
+        self.family = str(family)
+
+
 def same_lineage(store: Any, fam: Mapping[str, Any], lane: str, template: str,
                  train: Mapping[str, Sequence]) -> str | None:
     """THE LINEAGE (A9 D3): the family already looked at that `fam`'s program is the same lineage as, or None: the same
     template in its own lane (`TEMPLATE_KEY`, lane-scoped), or Train daily returns correlating >= 0.7 on their common
-    sessions with any equity program already looked at, in either equity lane (`league.equity.screen.same_lineage`)."""
+    sessions with any equity program already looked at, in either equity lane (`league.equity.screen.same_lineage`).
+    FAILS CLOSED (`LineageUnread`): a family that was looked at, or a living one whose look is in flight, with no Train
+    series kept is never skipped (a retired family's marker of a look that never landed is: nothing was looked at)."""
     import numpy as np
 
     from ..equity import screen as S
@@ -876,12 +1187,17 @@ def same_lineage(store: Any, fam: Mapping[str, Any], lane: str, template: str,
         if str(other["id"]) == str(fam["id"]):
             continue
         state = other.get("state") or {}
-        if not isinstance(state.get(LOOK_KEY), Mapping) and not (state.get("look_inflight") or {}).get("sha"):
+        looked = isinstance(state.get(LOOK_KEY), Mapping)
+        if not looked and not (state.get("look_inflight") or {}).get("sha"):
             continue
         if lane_of(store, other) == lane and state.get(TEMPLATE_KEY) == template:
             return str(other["id"])
         theirs = state.get(TRAIN_R_KEY) if isinstance(state.get(TRAIN_R_KEY), Mapping) else {}
         pairs = dict(zip(theirs.get("days") or [], theirs.get("r") or []))
+        if not pairs:
+            if looked or not other.get("retired_at"):
+                raise LineageUnread(str(other["id"]))
+            continue
         common = sorted(set(mine) & set(pairs))
         if len(common) < 3:
             continue
@@ -890,6 +1206,41 @@ def same_lineage(store: Any, fam: Mapping[str, Any], lane: str, template: str,
         if bool(S.same_lineage(a, b, same_template=False)):
             return str(other["id"])
     return None
+
+
+def _restore_train(gate: Any, fid: str) -> bool:
+    """THE LOOK'S LINEAGE RECORD written again: a looked-at family's missing Train series (`TRAIN_R_KEY`), from its
+    looked version's Train-era runs (`Isolated.segments`: the runs its look kept the series of; Train-era data only,
+    nothing sealed, no try and no look). False when it cannot be (no recorded look: the gate's round owes a look in
+    flight again; no program to run; a run that failed or gave no session)."""
+    store = gate.store
+    other = store.family(str(fid)) or {}
+    state = other.get("state") or {}
+    looked = state.get(LOOK_KEY) if isinstance(state.get(LOOK_KEY), Mapping) else None
+    try:
+        version = store.version(str(fid), int(looked["version"])) if looked else None
+    except (KeyError, TypeError, ValueError):
+        version = None
+    if not version or not version.get("code"):
+        return False
+    from ..equity import screen as S
+
+    try:
+        runs = _runner(gate).segments(version["code"], dict(version.get("params") or {}), name=str(fid))
+        segments, bad = _segment_series(S, runs)
+        if bad is not None:
+            raise ValueError(f"a Train-era run ended {bad}")
+        train = _train_series(segments)
+    except Exception as exc:  # noqa: BLE001 - it stays unread, and the look that asked waits
+        store.event("swarm.gate", str(fid), {"action": "equity_lineage_unread", "version": version.get("n"),
+                                             "error": type(exc).__name__})
+        return False
+    if not train["days"]:
+        return False
+    store.set_state(str(fid), **{TRAIN_R_KEY: train})
+    store.event("swarm.gate", str(fid), {"action": "equity_lineage_restored", "version": version.get("n"),
+                                         "sessions": len(train["days"])})
+    return True
 
 
 def _refuse(gate: Any, fid: str, n: int, sha: str, stage: str, why: str, *, screen: str | None) -> None:
@@ -946,7 +1297,12 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
     receipt=)`, kept a version while `screen.floor_fits` the receipt; a floor the verdict would refuse spends no look);
     the look with a freshly minted `EquityGateCapability` (`Isolated.look`), only once the daily store holds its whole
     calibrated holdout (`_holdout_gap`); `screen.verdict` and `screen.beside_line` recorded with the look, under the
-    screen that judged it. True passed (the family becomes a Candidate), False failed, None not run (no look spent)."""
+    screen that judged it. THE RUN'S STATUS FIRST (the module docstring): a Train-era run that ended "disqualified"
+    refuses the floor; a holdout run that did is a look spent and failed, never judged; a sealed run sent and not
+    answered is owed once, then the look is spent and failed (`LOOK_SENDS`). THE LAST STEP BEFORE THE SEALED RUN is the
+    seeds' declared order (`seed_wait`, A18): a seed waits, nothing spent, while an earlier seed of its declared
+    lineage is alive without a verdict. True passed (the family becomes a Candidate), False failed, None not run (no
+    look spent)."""
     store, settings = gate.store, gate.settings
     fid, n = str(fam["id"]), int(version["n"])
     lane = lane_of(store, fam)
@@ -970,6 +1326,7 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
               screen=screen)
         return None
     from ..equity import screen as S
+    from ..equity.runner import RunFailed, RunLost
     from ..equity.store import mint_equity_gate_capability
     from .evaluator import equity_fingerprint
 
@@ -992,9 +1349,11 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
     code, params = version["code"], dict(version.get("params") or {})
     floors = state.get(FLOOR_KEY) if isinstance(state.get(FLOOR_KEY), Mapping) else {}
     try:
-        segments = [_series(S, run) for run in runner.segments(code, params, name=fid)]
+        segments, ended = _segment_series(S, runner.segments(code, params, name=fid))
         cached = floors.get(str(n))
-        if S.floor_fits(cached, receipt):
+        if ended is not None:
+            floor = {"eligible": False, "why": f"a Train-era run ended {ended}: its series is partial"}
+        elif S.floor_fits(cached, receipt):
             floor = dict(cached)  # computed once a version under this receipt (deterministic: S2 exact, S1 its seeds)
         else:
             # The pinned receipt's own floor (A11: `floor_s2` for receipt 2). A floor kept for the version under
@@ -1013,11 +1372,23 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
         return None
     template = lineage_key(lane, str(version.get("sha") or ""))
     train = _train_series(segments)
-    try:
-        twin = same_lineage(store, fam, lane, template, train)
-    except Exception as exc:  # noqa: BLE001 - a lineage that cannot be read spends no look
-        store.event("swarm.gate", fid, {"action": "look_failed", "version": n, "stage": "lineage", "error": type(exc).__name__})
-        return None
+    restored: set[str] = set()
+    while True:
+        try:
+            twin = same_lineage(store, fam, lane, template, train)
+            break
+        except LineageUnread as exc:
+            # D3 FAILS CLOSED: a program already looked at keeps no Train series. Its looked version's Train-era runs
+            # write it again (once a family a look); where they cannot, this look waits: it never passes D3 unjudged.
+            if exc.family in restored or not _restore_train(gate, exc.family):
+                _wait(gate, fid, n, sha, f"the lineage cannot be judged (A9 D3): {exc.family} was looked at, or its "
+                      "look is in flight, and keeps no Train series to compare with", screen=screen)
+                return None
+            restored.add(exc.family)
+        except Exception as exc:  # noqa: BLE001 - a lineage that cannot be read spends no look
+            store.event("swarm.gate", fid, {"action": "look_failed", "version": n, "stage": "lineage",
+                                            "error": type(exc).__name__})
+            return None
     if twin is not None:
         _refuse(gate, fid, n, sha, "same lineage",
                 f"the same lineage as {twin}, already looked at (A9 D3: Train correlation >= 0.7 or the same template)",
@@ -1044,7 +1415,23 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
         _refuse(gate, fid, n, sha, "precheck", f"{screen}'s Validation pre-check does not pass on the recorded run",
                 screen=screen)
         return None
+    # THE SEEDS' DECLARED ORDER, STRICT WITHIN A LINEAGE (A18; `seed_wait`), asked at the last step before the sealed
+    # run: everything this look needs of its own is ready, so the wait's clock counts only such rounds. What follows
+    # (S1-X's rate, the activity figures) is beside the look and refuses nothing.
+    try:
+        ahead = seed_wait(store, fam, settings)
+    except Exception as exc:  # noqa: BLE001 - a seed whose order cannot be read is not looked at (nothing spent)
+        if seeded(store, fid):
+            store.event("swarm.gate", fid, {"action": "look_failed", "version": n, "stage": "seed order",
+                                            "error": type(exc).__name__})
+            return None
+        ahead = None  # a family that is no seed waits for no seed
+    if ahead is not None:
+        _wait(gate, fid, n, sha, f"the seeds' declared order (A18): {ahead}, declared before it in its lineage, has "
+              "no verdict yet", screen=screen)
+        return None
     s1x = _s1x_floor(S, segments, receipt)  # S1-X's rate beside an S2 verdict: Train-era series only, before the look
+    activity = _invested_shares(v, segments)  # beside the look, never its condition
     marker = {"sha": sha, "n": n, "at": gate.clock(), "lane": lane}
     with store.atomic():
         current = store.family(fid) or {}
@@ -1056,9 +1443,40 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
             return None
     try:
         capability = mint_equity_gate_capability(Path(store.root) / STORE_DIR, reason=f"the equity look of {fid} v{n}")
-        h = _series(S, runner.look(code, params, name=fid, gate=capability))
-        verdict = _plain(S.verdict(v, h, receipt=receipt, program_floor=floor, s1_floor=s1x))
-        beside = str(S.beside_line(verdict, receipt))
+        ran = runner.look(code, params, name=fid, gate=capability)
+        ended = _status(ran)
+        if ended in NOT_A_TRY:
+            raise RunFailed(f"the holdout run ended {ended}")  # the House could not run it: no look, owed again
+        if ended != "ok":
+            # THE RUN'S STATUS FIRST (as Validation's): a holdout run its own errors ended ("disqualified") left a
+            # partial series. It is never judged: the look is spent and FAILED.
+            verdict = {"screen": screen, "passed": False, "status": ended,
+                       "why": f"the holdout run ended {ended}: a partial series is never judged"}
+            beside = f"no verdict: {verdict['why']}"
+        else:
+            h = _series(S, ran)
+            verdict = _plain(S.verdict(v, h, receipt=receipt, program_floor=floor, s1_floor=s1x))
+            beside = str(S.beside_line(verdict, receipt))
+    except RunLost as exc:
+        # THE SEALED RUN WAS SENT AND DID NOT RETURN (`LOOK_SENDS`): the program held its holdout. Owed again once;
+        # the second time the look is spent and FAILED, so no program is shown its holdout a third time.
+        held = (store.family(fid) or {}).get("state") or {}
+        held = held.get(LOST_KEY) if isinstance(held.get(LOST_KEY), Mapping) else {}
+        count = (int(held.get("count") or 0) if held.get("sha") == sha else 0) + 1
+        spent = count >= LOOK_SENDS
+        store.event("swarm.gate", fid, {"action": "look_lost", "version": n, "lane": lane, "count": count,
+                                        "spent": spent, "error": type(exc).__name__})
+        store.event("swarm.status", fid, {  # a House warning (the swarm's alerts are its status rows)
+            "action": "equity_look_lost", "alert": True, "version": n, "count": count, "spent": spent,
+            "text": f"the sealed equity look of {fid} v{n} was sent and did not return ({count} of {LOOK_SENDS}): "
+                    + ("its look is spent and failed" if spent else "it is owed once more; read equity-decider.log")})
+        if not spent:
+            store.compare_and_set_state(fid, {"look_inflight": marker}, look_inflight=None, gate_ready=True,
+                                        **{LOST_KEY: {"sha": sha, "count": count, "at": store.now()}})
+            return None
+        verdict = {"screen": screen, "passed": False, "status": "lost",
+                   "why": f"the sealed run was sent {LOOK_SENDS} times and did not return"}
+        beside = f"no verdict: {verdict['why']}"
     except Exception as exc:  # noqa: BLE001 - the look did not land: owed again next round (no look row)
         store.compare_and_set_state(fid, {"look_inflight": marker}, look_inflight=None, gate_ready=True)
         store.event("swarm.gate", fid, {"action": "look_failed", "version": n, "stage": "look", "error": type(exc).__name__})
@@ -1069,13 +1487,15 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
     figures = {"c_pF1": verdict.get("c_pF1")} if screen == "S2" else {"c_used": verdict.get("c_used")}
     detail = {"lane": lane, "label": label(lane), "screen": screen, "receipt": receipt.receipt_sha256,
               **figures, "c_H": verdict.get("c_H"), "s1x": verdict.get("label"),
-              "seeded": seeded(store, fid), "beside": beside, "passed": passed}
+              "seeded": seeded(store, fid), "beside": beside, "passed": passed,
+              **({"status": verdict["status"], "why": verdict.get("why")} if verdict.get("status") else {})}
     with store.atomic():
         store.add_look(fid, n, sha, passed=passed, p_value=None, detail=detail)
         store.compare_and_set_state(fid, {"look_inflight": marker}, look_inflight=None)
         store.set_state(fid, gated_sha=sha, gate_ready=False, gate="pass" if passed else "fail", dormant_cycles=0,
                         gate_outcome={"sha": sha, "result": "passed" if passed else "failed", "at": gate.clock()},
-                        **{LOOK_KEY: {"version": n, "at": store.now(), "verdict": verdict, "beside": beside},
+                        **{LOOK_KEY: {"version": n, "at": store.now(), "verdict": verdict, "beside": beside,
+                                      "activity": activity},
                            FLOOR_KEY: {**dict(floors), str(n): floor},
                            TRAIN_R_KEY: train, TEMPLATE_KEY: template})
         current = store.family(fid) or {}
@@ -1084,7 +1504,7 @@ def look(gate: Any, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str
                             banded_evaluator=proof)
             store.set_band(fid, "candidate", reason=f"passed its sealed look ({screen}, {label(lane)})")
     store.event("swarm.gate", fid, {"action": "look", "version": n, "passed": passed, "lane": lane, "screen": screen,
-                                    "receipt": receipt.receipt_sha256, "_verdict": verdict})
+                                    "receipt": receipt.receipt_sha256, "_verdict": verdict, "_activity": activity})
     return passed
 
 
@@ -1147,6 +1567,8 @@ def view(fam: Mapping[str, Any], *, lane: str | None) -> dict[str, Any]:
     notes = [BETA_NOTE] if lane == BETA else []
     if out["seeded"]:
         notes.append(SEEDED_NOTE)
+        if isinstance(spec.get("provenance"), str) and spec["provenance"].strip():
+            notes.append(f"where it came from: {spec['provenance']}")  # as it is: the reversal seed is not blind
     out["notes"] = notes
     return out
 
@@ -1156,5 +1578,10 @@ __all__ = ["MODES", "STRUCTURES", "LABELS", "BETA_NOTE", "SEEDED_NOTE", "SEEDS_K
            "try_open", "lineage_spent",
            "roster_seats", "isolated_runner", "validate", "look", "birth_seeds", "seeded", "view", "BETA", "EQUITY",
            "LANES", "LOOK_KEY", "FLOOR_KEY", "TRAIN_R_KEY", "TEMPLATE_KEY", "VALIDATION_KEY", "VERDICTS_KEY", "SIGMA_KEY", "SCREEN",
+           "ROUND_KEY", "ROUND_SECONDS", "round_order", "seed_ahead", "seed_owed", "seed_wait", "seed_waits_over",
+           "SEED_WAIT_KEY", "SEED_WAIT_SECONDS", "SEED_WAIT_REPEAT_SECONDS", "SEED_WAIT_GAP_SECONDS",
+           "LOST_KEY", "LOOK_SENDS", "EVIDENCE_HASH_SEED", "SAME_LINEAGE",
+           "FLOOR_INELIGIBLE", "REFUSED_BEFORE_LOOK", "REFUSED_CAUSES",
            "STORE_DIR", "SEED_AUTHOR", "CLASSES", "INPUTS", "NOT_A_TRY", "SPENT_LOOK", "SPENT_TRY", "ROSTER_CLOSED",
-           "card_lane", "candidate", "lineage_tries", "next_try", "reviewed", "same_lineage", "LOSS_LINE", "loss_line"]
+           "card_lane", "candidate", "lineage_tries", "next_try", "reviewed", "same_lineage", "LineageUnread", "LOSS_LINE",
+           "loss_line"]

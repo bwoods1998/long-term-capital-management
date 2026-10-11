@@ -153,7 +153,9 @@ class Bars:
 
     `days`: int32 ordinals of every session in the slice, oldest first (history sessions first, then the run's).
     `early`: bool per session (a 13:00 close). `first`: the index of the run's first session (before it: history
-    only, never traded). `symbols`: the slice's symbols. `raw[sym]`: float64 (n, 5) open, high, low, close, volume
+    only, never traded: `history` + 1 sessions where the store holds them, so the engine's first decision, at the close
+    of session `first` - 1, reads `history` + 1 rows as every later one and as a live decision does). `symbols`: the
+    slice's symbols. `raw[sym]`: float64 (n, 5) open, high, low, close, volume
     (adjustment=raw; NaN where the symbol has no bar). `adj[sym]`: float64 (n, 4) open, high, low, close
     (adjustment=all, as of the store's fetch day). `window`: the run's window name. `data_version`: the hash of
     exactly the files read (`EquityStore.data_version`), part of every run's identity."""
@@ -292,8 +294,12 @@ class EquityStore:
             raise ValueError("history is a count of sessions, at least 0")
         before: list[dt.date] = []
         if run:
+            # `history` + 1 sessions before the run's first: the engine's FIRST decision is at the close of the session
+            # before it, and its ctx is that session and `history` before it (league/equity/ctx.py `inputs_from_bars`),
+            # the rows a live decision is always given (`inputs_from_fetch`). With `history` sessions alone the first
+            # decision of every run was one row short of the live ctx (I6).
             i = self._dates.index(run[0])
-            before = self._dates[max(0, i - history):i]
+            before = self._dates[max(0, i - history - 1):i]
             for day in before:
                 if window_of(day) in config.SEALED and self._gate is None:
                     raise StoreRefused(f"a history session ({window_of(day)}) opens only for the gate")
@@ -325,9 +331,9 @@ class EquityStore:
 
     def bars(self, symbols: Sequence[str], window: str, *, history: int, start: dt.date | None = None,
              end: dt.date | None = None) -> Bars:
-        """The slice a run reads: the window's sessions (cut to [start, end]) with `history` sessions before its first,
-        never a sealed day without the capability (a history session inside a sealed window is refused too). `window`
-        may also be `LOOK` (A9 D6), the one sealed look's span."""
+        """The slice a run reads: the window's sessions (cut to [start, end]) with `history` + 1 sessions before its
+        first (the first decision's whole ctx: `_slice`), never a sealed day without the capability (a history session
+        inside a sealed window is refused too). `window` may also be `LOOK` (A9 D6), the one sealed look's span."""
         self._check(window)
         first, last = self._span(window)
         run = [d for d in self._dates

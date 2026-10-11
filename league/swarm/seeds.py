@@ -612,14 +612,27 @@ def family_spec(spec: Mapping[str, Any]) -> dict[str, Any]:
 # --------------------------------------------------------------------------- THE EQUITY SEEDS (release E1, A4)
 #: THE THREE BETA SEEDS (amendment A4; league/swarm/elane.py `birth_seeds`): each a program with a published prior,
 #: written by the captain's build agents under the EQUITY.md contract (league/equity/EQUITY.md: NEEDS, PARAMS,
-#: decide(ctx); math and numpy only, no date), before any data was seen, and judged by the swarm's screen like any
-#: family: born once as a beta-lane family (MARKET BETA), then Validation (2025) with the share screen's pre-check, then
-#: one sealed look under the pinned screen (S2, amendment A11). Their cards name the prior and no figure (no census or
-#: market result: the repository is public).
+#: decide(ctx); math and numpy only, no date), and judged by the swarm's screen like any family: born once as a
+#: beta-lane family (MARKET BETA), then Validation (2025) with the share screen's pre-check, then one sealed look under
+#: the pinned screen (S2, amendment A11). Their cards name the prior and no figure (no census or market result: the
+#: repository is public).
+#: WHERE EACH CAME FROM, stated as it is (`provenance` in each spec and in the family's record; the program's own
+#: header says the same without a year, since a program names no year even in a comment). The two overnight seeds are
+#: written from a published prior. The reversal seed is NOT blind on history: its theta and h are the cell a
+#: pre-registered census selected on earlier history, which overlaps the Train-era pools its own screen floor is built
+#: from. No session of 2020, 2021, 2025 or 2026 was used for any of the three, so Validation and the one sealed look
+#: are clean of that choice.
+_OVERNIGHT_PROVENANCE = "written from a published prior"
+_REVERSAL_PROVENANCE = ("its theta and h are the cell a pre-registered census selected on earlier history, which "
+                        "overlaps the Train-era pools its own screen floor is built from; no 2020, 2021, 2025 or 2026 "
+                        "session was used")
+_OVERNIGHT_WRITTEN = "Written from its published prior."
+_REVERSAL_WRITTEN = ("Its theta and h are the cell a pre-registered census selected on earlier history; the Validation "
+                     "year and the sealed holdout were never used. They are PARAMS.")
 EQUITY_OVERNIGHT = '''# {fid}: MARKET BETA (the beta lane). Seeded by the captain's build agents (A4) and judged by the swarm's screen
 # like any family.
 # Prior: {prior}.
-# {rule} Written before any data was seen.
+# {rule} {written}
 import math
 
 NEEDS = {needs}
@@ -647,7 +660,8 @@ def decide(ctx):
 EQUITY_REVERSAL = '''# {fid}: MARKET BETA (the beta lane). Seeded by the captain's build agents (A4) and judged by the swarm's screen
 # like any family.
 # Prior: {prior}.
-# {rule} Written before any data was seen; theta and h are PARAMS.
+# {rule}
+# {written}
 import math
 
 NEEDS = {needs}
@@ -690,25 +704,28 @@ _FALSIFICATION = ("refuted when its one sealed look fails the share screen S2: t
                   "zero, or the holdout-only daily t below c_H,used (the larger of the receipt's floor and the program's "
                   "own floor plus the receipt's margin)")
 
+#: THE ORDER OF THIS LIST IS THE ORDER THE SEEDS' LOOKS ARE TAKEN IN (league/swarm/elane.py `round_order`, `seed_wait`),
+#: and it is a decision: the captain's, made on Oct 11, 2026, before any Validation or look, from Train-era figures only
+#: (amendment A18; what it was decided on stays off this public file). The two overnight seeds are written from one
+#: program template (`EQUITY_OVERNIGHT`) and are ONE LINEAGE, so only one of them is ever looked at (D3: one look a
+#: lineage) and the other is refused its look and retired as the same lineage. Which one must not be the ids' alphabet
+#: or a clock tick: seed-overnight-qqq goes first by that decision; seed-reversal-index, a lineage of its own, follows;
+#: seed-overnight-spy is last and, with seed-overnight-qqq looked at, is refused its look as the same lineage and
+#: retired with that reason, plainly reported.
+#: WITHIN A LINEAGE THE ORDER IS STRICT (amendment A18; `elane.seed_wait`): each seed's `lineage` below DECLARES the
+#: lineage it is in (the two overnight seeds are one; the reversal seed is its own), and a seed's look is never taken
+#: while a seed declared before it in the same lineage is alive without a verdict. There is no timeout: the later seed
+#: waits until the earlier one has been looked at (D3 then refuses the later one), has failed its Validation pre-check
+#: with no retry owed, or is retired. Seeds of different lineages never wait on each other. The declaration is read by
+#: that wait alone: D3's own test (the Train correlation, the template) still judges every look, and `lineage` is no
+#: part of a family's record (`equity_family_spec`).
 EQUITY_SEEDS: list[dict[str, Any]] = [
-    {"id": "seed-overnight-spy", "lane": "beta", "structure": "etf", "symbols": ["SPY"], "template": "overnight",
-     "mechanism": "SPY's return accrues overnight: hold SPY from each close to the next open, every session (MARKET BETA).",
-     "prior": _OVERNIGHT_PRIOR,
-     "rule": "Buy SPY at the next close, every session; sell each lot at the following open.",
-     "needs": {"symbols": ["SPY"], "history": 2, "max_hold_sessions": 2}, "params": {"share": 0.5},
-     "condition": "True",
-     "card": {"lane": "beta", "structure": "etf", "symbols": ["SPY"],
-              "hypothesis": "Most of the index's long-run return has accrued overnight, between the close and the next "
-                            "open: holders who carry the overnight gap bear the news that arrives while the market is "
-                            "shut and are paid for it (Cliff, Cooper and Gulen 2008; Lou, Polk and Skouras 2019).",
-              "mechanism_class": "calendar_flow", "inputs": ["clock"], "holding": "days_1_3",
-              "cost": {"hurdle": 0.0003, "why": "a round trip pays two SPY half-spreads at the close and the open, and "
-                                                "the SEC and TAF fees on the sale"},
-              "comparison": _COMPARISON, "falsification": _FALSIFICATION}},
     {"id": "seed-overnight-qqq", "lane": "beta", "structure": "etf", "symbols": ["QQQ"], "template": "overnight-down",
+     "lineage": "overnight",
      "mechanism": "QQQ's overnight return after a down close: hold QQQ from a close below the prior close to the next "
                   "open (MARKET BETA).",
      "prior": _OVERNIGHT_PRIOR + ", conditioned on short-term reversal (Connors and Alvarez 2008)",
+     "provenance": _OVERNIGHT_PROVENANCE,
      "rule": "Buy QQQ at the next close when QQQ closed below its prior close; sell each lot at the following open.",
      "needs": {"symbols": ["QQQ"], "history": 2, "max_hold_sessions": 2}, "params": {"share": 0.5},
      "condition": "last < prior",
@@ -721,10 +738,10 @@ EQUITY_SEEDS: list[dict[str, Any]] = [
                                                 "the SEC and TAF fees on the sale"},
               "comparison": _COMPARISON, "falsification": _FALSIFICATION}},
     {"id": "seed-reversal-index", "lane": "beta", "structure": "etf", "symbols": ["SPY", "QQQ", "IWM", "DIA"],
-     "template": "reversal", "mechanism": "Index ETF reversal: buy SPY, QQQ, IWM or DIA at the open after a close at least "
-                                          "theta below its prior close, and sell it at the open h sessions later (MARKET "
-                                          "BETA).",
-     "prior": _REVERSAL_PRIOR,
+     "template": "reversal", "lineage": "reversal",
+     "mechanism": "Index ETF reversal: buy SPY, QQQ, IWM or DIA at the open after a close at least theta below its "
+                  "prior close, and sell it at the open h sessions later (MARKET BETA).",
+     "prior": _REVERSAL_PRIOR, "provenance": _REVERSAL_PROVENANCE,
      "rule": "Buy a symbol at the next open after a close at least theta below its prior close; sell it at the open h "
              "sessions later.",
      "needs": {"symbols": ["SPY", "QQQ", "IWM", "DIA"], "history": 2, "max_hold_sessions": 10},
@@ -736,6 +753,21 @@ EQUITY_SEEDS: list[dict[str, Any]] = [
               "mechanism_class": "reversal_liquidity", "inputs": ["underlying_price"], "holding": "days_4_10",
               "cost": {"hurdle": 0.0003, "why": "a round trip pays two index-ETF half-spreads at the opens, and the SEC "
                                                 "and TAF fees on the sale"},
+              "comparison": _COMPARISON, "falsification": _FALSIFICATION}},
+    {"id": "seed-overnight-spy", "lane": "beta", "structure": "etf", "symbols": ["SPY"], "template": "overnight",
+     "lineage": "overnight",
+     "mechanism": "SPY's return accrues overnight: hold SPY from each close to the next open, every session (MARKET BETA).",
+     "prior": _OVERNIGHT_PRIOR, "provenance": _OVERNIGHT_PROVENANCE,
+     "rule": "Buy SPY at the next close, every session; sell each lot at the following open.",
+     "needs": {"symbols": ["SPY"], "history": 2, "max_hold_sessions": 2}, "params": {"share": 0.5},
+     "condition": "True",
+     "card": {"lane": "beta", "structure": "etf", "symbols": ["SPY"],
+              "hypothesis": "Most of the index's long-run return has accrued overnight, between the close and the next "
+                            "open: holders who carry the overnight gap bear the news that arrives while the market is "
+                            "shut and are paid for it (Cliff, Cooper and Gulen 2008; Lou, Polk and Skouras 2019).",
+              "mechanism_class": "calendar_flow", "inputs": ["clock"], "holding": "days_1_3",
+              "cost": {"hurdle": 0.0003, "why": "a round trip pays two SPY half-spreads at the close and the open, and "
+                                                "the SEC and TAF fees on the sale"},
               "comparison": _COMPARISON, "falsification": _FALSIFICATION}},
 ]
 
@@ -749,17 +781,19 @@ def equity_program_for(spec: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
     common = {"fid": spec["id"], "prior": prior, "rule": spec["rule"], "needs": repr(dict(spec["needs"])),
               "params": repr(dict(spec["params"]))}
     if spec.get("template") == "reversal":
-        return EQUITY_REVERSAL.format(**common), {}
-    return EQUITY_OVERNIGHT.format(**common, symbol=spec["symbols"][0], condition=spec["condition"]), {}
+        return EQUITY_REVERSAL.format(**common, written=_REVERSAL_WRITTEN), {}
+    return EQUITY_OVERNIGHT.format(**common, written=_OVERNIGHT_WRITTEN, symbol=spec["symbols"][0],
+                                   condition=spec["condition"]), {}
 
 
 def equity_family_spec(spec: Mapping[str, Any]) -> dict[str, Any]:
     """The family's record (what the store keeps) from an `EQUITY_SEEDS` spec: its lane, structure and symbols (the
-    store's roots), its prior, and `seeded` (the Done meter reads the three seeds apart, A8.12)."""
+    store's roots), its prior, where it came from (`provenance`, stated as it is), and `seeded` (the Done meter reads
+    the three seeds apart, A8.12)."""
     return {"id": spec["id"], "mechanism": spec["mechanism"], "structure": spec["structure"], "roots": list(spec["symbols"]),
             "symbols": list(spec["symbols"]), "lane": spec["lane"], "seeded": True, "template": spec["template"],
-            "prior": spec["prior"], "rejection": _FALSIFICATION, "needs": dict(spec["needs"]),
-            "params": dict(spec["params"])}
+            "prior": spec["prior"], "provenance": spec["provenance"], "rejection": _FALSIFICATION,
+            "needs": dict(spec["needs"]), "params": dict(spec["params"])}
 
 
 __all__ = ["SEEDS", "FOUNDERS", "LIBRARY", "program_for", "family_spec", "SIGNALS", "BUILDS", "EQUITY_SEEDS",

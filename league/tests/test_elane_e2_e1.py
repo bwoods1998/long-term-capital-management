@@ -107,6 +107,43 @@ class OnE1(unittest.TestCase):
             self.round()
             self.assertEqual(self.validated, [("e2-adopt", 1)])
 
+    def test_a_looked_at_programs_lineage_survives_e1s_adoption_for_a_bred_near_copy(self):
+        # The integration review's seal-2 (E1's fix 8ffdc6bb, carried by the merge of feat/equity-e1): `adopt_equity`
+        # cleared `elane_train_r`, the Train series D3's correlation test reads, for every ALIVE equity family, so after
+        # any equity identity move a re-worded copy of a program that PASSED its look (alive: candidate, probe, sized)
+        # was no longer the same lineage and took a second sealed look. E2 is what breeds such copies.
+        from league.swarm import evaluator
+
+        seed = self.store.add_family({"id": "seed-x", "mechanism": "An invented always-in overnight idea on SPY.",
+                                      "structure": "etf", "roots": ["SPY"], "lane": "beta", "symbols": ["SPY"]},
+                                     origin="seed")
+        version = self.store.add_version(seed["id"], fx.program(), {}, author="seed")
+        days = list(range(17000, 17300))
+        series = {"days": days, "r": [((i * 37) % 11 - 5) / 1000.0 for i in range(len(days))]}
+        # What E1's look leaves on a program that passed it and trades.
+        self.store.set_state(seed["id"], **{elane.LOOK_KEY: {"version": 1, "verdict": {"passed": True}},
+                                            elane.TRAIN_R_KEY: series,
+                                            elane.TEMPLATE_KEY: elane.lineage_key("beta", version["sha"]),
+                                            "banded_evaluator": {"engine": "e1", "equity_sha256": "a" * 64}})
+        self.store.update_family(seed["id"], band="probe")
+        self.store.put(evaluator.EQUITY_KEY, {"equity": "a" * 64, "engine": "e1"})
+        copy = fx.e2_family(self.store, "e2-near-copy", lane="equity", symbols=("SPY", "QQQ"), code=fx.program(share=0.3),
+                            mechanism="A differently worded idea that trades the same sessions as the seed.")
+        self.assertEqual(elane.same_lineage(self.store, copy, "equity", "equity:another-template", series), "seed-x")
+        out = evaluator.adopt_equity(self.store, {"equity": "b" * 64, "engine": "e1"})
+        self.assertTrue(out["adopted"])
+        state = self.store.family("seed-x")["state"]
+        self.assertIsInstance(state.get(elane.LOOK_KEY), dict, "the adoption grants no other look")
+        self.assertEqual(state.get(elane.TRAIN_R_KEY), series, "the look's Train series stays with the look")
+        self.assertNotIn(elane.TRAIN_R_KEY, evaluator.EQUITY_SELECTION_KEYS)
+        self.assertEqual(elane.same_lineage(self.store, self.store.family("e2-near-copy"), "equity",
+                                            "equity:another-template", series), "seed-x",
+                         "after the adoption the bred near-copy is still refused at the look")
+        # And with the series gone for any other reason the test fails closed: never a second look by omission.
+        self.store.set_state("seed-x", **{elane.TRAIN_R_KEY: None})
+        with self.assertRaises(elane.LineageUnread):
+            elane.same_lineage(self.store, self.store.family("e2-near-copy"), "equity", "equity:another-template", series)
+
     def test_e1s_graveyard_binds_its_own_lane_only(self):
         from league.swarm import cards
         from league.swarm.architect import Architect
@@ -155,6 +192,89 @@ class OnE1(unittest.TestCase):
             self.store.add_run(fam["id"], None, fx.train_result(), window="train", stress=1.0, purpose="elane_train")
         facts = guard.read(root / "swarm.sqlite", lambda db: ST.swarm_facts(db, self.clock()))
         self.assertEqual((facts["births"], facts["alive"], facts["gym_runs"]), (0, 1, 0))
+
+    def test_an_equity_validation_never_reads_a_stalled_options_validation_as_moving(self):
+        # The integration review's loop-4 and merge-3: patch 10 took the equity lanes out of the births, population and
+        # Gym counts; the `validations` cause still counted equity Validation runs and listed an E2 family between its
+        # Train pass and E1's try among those owed an OPTIONS Validation.
+        from league.ops import guard
+        from league.ops import stall as ST
+
+        root = Path(self.store.root)
+        self.store.add_family({"id": "opt-owed", "mechanism": "An invented options idea owed a Validation.",
+                               "structure": "debit_vertical", "roots": ["SPY"]}, origin="architect")
+        self.store.add_version("opt-owed", "def decide(ctx):\n    return []\n", {}, author="t")
+        self.store.update_family("opt-owed", best_version=1)
+
+        def facts() -> dict:
+            return guard.read(root / "swarm.sqlite", lambda db: ST.swarm_facts(db, self.clock()))
+
+        def stalled(f: dict) -> bool:
+            # The cause's own rule (league/ops/stall.py `checks`, "validations"), with no round on record.
+            return (f["validation_runs"] == 0 and f["judged"] == 0 and f["validation_inherited"] == 0
+                    and len(f["awaiting_ids"]) > 0)
+
+        before = facts()
+        self.assertEqual((before["validation_runs"], before["awaiting_ids"]), (0, ["opt-owed"]))
+        self.assertTrue(stalled(before))
+        # An E2 family passed Train (its best_version set by E2's review step) and waits for E1's try.
+        fx.e2_family(self.store, "e2-pass", code=fx.program(),
+                     record={"status": "passed", "passed_version": 1, "versions": {"1": {"passed": True, "fails": []}}})
+        self.store.update_family("e2-pass", best_version=1)
+        waiting = facts()
+        self.assertEqual((waiting["awaiting_ids"], waiting["equity_awaiting_ids"], waiting["train_bests"]),
+                         (["opt-owed"], ["e2-pass"], 1), "it is owed the equity round's Validation, not the options one")
+        # Its Validation runs on the House (E1's rows), and an inherited verdict's row beside it.
+        self.store.add_run("e2-pass", 1, {"run_id": "eqval-1", "status": "ok", "trials": 1, "summary": {}},
+                           window="validation", stress=1.0, purpose="validation")
+        self.store.add_run("e2-pass", 1, {"run_id": "eqval-2", "status": "ok", "trials": 0, "summary": {}},
+                           window="validation", stress=1.5, purpose="validation")
+        self.store.update_family("e2-pass", validated_version=1)
+        after = facts()
+        self.assertEqual((after["validation_runs"], after["validation_inherited"], after["last_validation_at"],
+                          after["equity_validation_runs"], after["awaiting_ids"]), (0, 0, None, 2, ["opt-owed"]))
+        self.assertTrue(stalled(after), "the options family is still owed one and no options Validation ran")
+        # An options Validation does move it.
+        self.store.add_run("opt-owed", 1, {"run_id": "optval-1", "status": "ok", "trials": 1, "summary": {}},
+                           window="validation", stress=1.0, purpose="validation")
+        moved = facts()
+        self.assertEqual((moved["validation_runs"], moved["equity_validation_runs"]), (1, 2))
+        self.assertIsNotNone(moved["last_validation_at"])
+        self.assertFalse(stalled(moved))
+
+    def test_done_item_7_counts_the_options_lanes_and_reports_the_equity_lanes_beside(self):
+        # loop-4, the Done rule's item 7 read (league/ops/dlane_report.py `Research247.day`): on a UTC day when only
+        # the equity lanes did anything it read births 1, Gym runs 5 and Validations 1, so a day when the options
+        # researchers were paused read as research running.
+        import time
+
+        from league.ops import dlane_report as R
+
+        day = time.strftime("%Y-%m-%d", time.gmtime(self.clock()))
+        self.store.add_family({"id": "opt-0", "mechanism": "An invented options idea number zero.",
+                               "structure": "debit_vertical", "roots": ["SPY"]}, origin="architect")
+        eq = fx.e2_family(self.store, "eq-0", code=fx.program())
+        self.store.event("swarm.born", eq["id"], {"lane": "beta", "structure": "etf", "roots": ["SPY"]})
+        for i, k in enumerate((1.0, 1.0, 1.5, 1.5)):
+            self.store.add_run(eq["id"], 1, {"run_id": f"eqt-{i}", "status": "ok", "trials": 1, "summary": {}},
+                               window="train", stress=k, purpose="elane_train")
+        self.store.add_run(eq["id"], 1, {"run_id": "eqv-1", "status": "ok", "trials": 1, "summary": {}},
+                           window="validation", stress=1.0, purpose="validation")
+        read = R.Research247(self.store, Path(self.store.root)).day(day)
+        self.assertEqual((read["births"], read["gym_runs"], read["validations"]), (0, 0, 0))
+        self.assertEqual(read["equity"], {"births": 1, "train_runs": 4, "validations": 1})
+        self.assertFalse(read["holds"])
+        for word in ("no births", "no Gym runs", "no Validations"):
+            self.assertIn(word, read["why"])
+        # The options lanes' own day is counted as before, the equity rows beside it unchanged.
+        self.store.event("swarm.born", "opt-0", {"structure": "debit_vertical", "roots": ["SPY"]})
+        self.store.add_run("opt-0", None, {"run_id": "g-1", "status": "ok", "trials": 1, "summary": {}}, window="train",
+                           stress=1.0, purpose="research")
+        self.store.add_run("opt-0", None, {"run_id": "v-1", "status": "ok", "trials": 1, "summary": {}}, window="validation",
+                           stress=1.0, purpose="validation")
+        read = R.Research247(self.store, Path(self.store.root)).day(day)
+        self.assertEqual((read["births"], read["gym_runs"], read["validations"]), (1, 2, 1))
+        self.assertEqual(read["equity"], {"births": 1, "train_runs": 4, "validations": 1})
 
 
 @unittest.skipUnless(E1, "E1's equity lanes are not in this tree (the E2 branch's skeleton)")
@@ -394,10 +514,11 @@ class StateOnE1(unittest.TestCase):
 class ReserveMoved:
     """E1's decider with the reserve's bars moved in every run it is sent: each 2020-2021 row of the slice has its
     prices scaled by a smooth bump over the two years (one at both ends, `1 + bump` in the middle), so the market is the
-    same on every Train session and differs only inside the reserve. `moved`: the reserve rows of each run's slice."""
+    same on every Train session and differs only inside the reserve. `moved`: the reserve rows of each run's slice; `last`: the latest reserve day of
+    each (None for none)."""
 
     def __init__(self, inner, bump: float):
-        self.inner, self.bump, self.moved = inner, float(bump), []
+        self.inner, self.bump, self.moved, self.last = inner, float(bump), [], []
 
     def __getattr__(self, name):
         return getattr(self.inner, name)
@@ -420,6 +541,7 @@ class ReserveMoved:
         rows = np.array([d.year in elane_train.RESERVE_YEARS for d in days])
         assert not rows[bars.first:].any(), "no run session is a reserve session"
         self.moved.append(int(rows.sum()))
+        self.last.append(max((d for d in days if d.year in elane_train.RESERVE_YEARS), default=None))
         factor = np.array([1.0 + self.bump * math.sin(math.pi * (d.toordinal() - first) / (last - first)) ** 2
                            if d.year in elane_train.RESERVE_YEARS else 1.0 for d in days])
         raw = {sym: a.copy() for sym, a in bars.raw.items()}
@@ -452,9 +574,12 @@ def decide(ctx):
 @unittest.skipUnless(E1, "E1's equity lanes are not in this tree (the E2 branch's skeleton)")
 class ReserveOnE1(unittest.TestCase):
     """THE RESERVE on E1's runner (the A15 review's fourth finding): what holds, and what does not. E2 runs no reserve
-    session and keeps no reserve row; the reserve's BARS still reach the 2022-2024 Train figures of a program with
-    look-back (E1's runner hands the run its NEEDS `history` before 2022-01-03). Two markets that differ only in
-    2020-2021: a program that asks for no history is the same byte for byte, and one with look-back is the same in
+    session and keeps no reserve row; the reserve's BARS still reach the 2022-2024 Train figures (E1's runner hands the
+    run its NEEDS `history` + 1 sessions before 2022-01-03: the engine's first decision is at the close of the session
+    before the run's first, E1's `store._slice`). So EVERY program's 2022-2024 run reads the last 2021 session, a
+    program with no look-back too, and one with look-back reads `history` more. Two markets that differ only in
+    2020-2021: a program that asks for no history and holds no price against another has the same figures of its own
+    (the buy-and-hold reported beside its 2022 moves with the last 2021 close), and one with look-back is the same in
     2016-2019 and differs from 2022 on."""
 
     @classmethod
@@ -471,7 +596,8 @@ class ReserveOnE1(unittest.TestCase):
 
     def verdict(self, code: str, bump: float | None) -> tuple[dict, list[int]]:
         """The verdict E2 keeps of `code` (its Train figures: `train_score` of the summed spans) in the market as it is
-        (`bump` None) or with the reserve moved, and the reserve rows each run's slice held."""
+        (`bump` None) or with the reserve moved, and the reserve rows each run's slice held (`self.last`: the latest
+        reserve day of each)."""
         from league.equity.runner import Isolated
         from league.live.decider import InlineDecider
 
@@ -483,21 +609,44 @@ class ReserveOnE1(unittest.TestCase):
             for result, span in zip(results, elane_train.TRAIN_SPANS):
                 self.assertEqual(elane_train.outside_years(result, spans=[span]), [], "no reserve row, day or figure")
                 self.assertFalse({row[0][:4] for row in result["daily"]} & {"2020", "2021"}, "no reserve session")
+        self.last = decider.last
         return elane_train.train_score(elane_train.combine(parts[1.0]), elane_train.combine(parts[1.5])), decider.moved
 
-    def test_a_program_that_asks_for_no_history_reads_nothing_of_the_reserve(self):
+    def test_a_program_that_asks_for_no_history_reads_the_last_reserve_session_alone(self):
+        # E1's slice is `history` + 1 sessions before the run's first (the first decision's own session): with no
+        # look-back at all, each 2022-2024 run still holds ONE reserve bar, the last 2021 session, and its first
+        # decision reads it. This program holds no price against another, so the two markets give it the same figures
+        # of its own; the same-exposure buy-and-hold reported BESIDE its 2022 is measured from that close and moves.
         code = fx.program().replace('"history": 2', '"history": 0')
         as_is, held = self.verdict(code, None)
         moved, held_moved = self.verdict(code, 2.0)
-        self.assertEqual((held, held_moved), ([0] * 4, [0] * 4), "its slices hold no reserve bar at all")
+        self.assertEqual((held, held_moved), ([0, 1, 0, 1], [0, 1, 0, 1]),
+                         "each 2022-2024 slice holds one reserve bar (history + 1), the 2016-2019 slices none")
+        days = [d for d in self.last if d is not None]
+        self.assertEqual(len(days), 2)
+        self.assertEqual({(d.year, d.month) for d in days}, {(2021, 12)}, "the last 2021 session")
+        self.assertTrue(all(d >= dt.date(2021, 12, 27) for d in days), days)
         self.assertTrue(as_is["years"] and as_is["summary"]["trades"], "really run")
-        self.assertEqual(json.dumps(as_is, sort_keys=True), json.dumps(moved, sort_keys=True))
+
+        def own(verdict: dict) -> str:
+            """The verdict less the buy-and-hold reported beside it (never a bar)."""
+            out = json.loads(json.dumps(verdict))
+            out["beside"].pop("bh_pnl")
+            out["beside"].pop("drift_share")
+            out["years"]["2022"].pop("bh_pnl")
+            return json.dumps(out, sort_keys=True)
+        self.assertEqual(own(as_is), own(moved), "its own lots, P&L, t and fails, and every other year's row")
+        self.assertNotEqual(as_is["years"]["2022"]["bh_pnl"], moved["years"]["2022"]["bh_pnl"],
+                            "the buy-and-hold beside its 2022 starts from the last 2021 close")
+        self.assertEqual({y: r["bh_pnl"] for y, r in as_is["years"].items() if y != "2022"},
+                         {y: r["bh_pnl"] for y, r in moved["years"].items() if y != "2022"})
 
     def test_a_program_with_look_back_reads_the_reserves_bars_in_2022(self):
         as_is, held = self.verdict(TREND, None)
         moved, held_moved = self.verdict(TREND, 2.0)
-        # Each 2022-2024 run's slice holds the 252 sessions before 2022-01-03 (reserve bars); the 2016-2019 runs' none.
-        self.assertEqual((held, held_moved), ([0, 252, 0, 252], [0, 252, 0, 252]))
+        # Each 2022-2024 run's slice holds the 252 + 1 sessions before 2022-01-03 (reserve bars: NEEDS `history` and the
+        # first decision's own session); the 2016-2019 runs' none.
+        self.assertEqual((held, held_moved), ([0, 253, 0, 253], [0, 253, 0, 253]))
         early = ("2016", "2017", "2018", "2019")
         self.assertEqual(sorted(as_is["years"]), [str(y) for y in elane_train.TRAIN_YEARS], "the seven Train years only")
         self.assertEqual({y: as_is["years"][y] for y in early}, {y: moved["years"][y] for y in early},

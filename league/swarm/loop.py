@@ -40,7 +40,19 @@ THE EQUITY LANES (release E1, Oct 2026; league/swarm/elane.py). At each start, b
 the equity identity's (`evaluator.adopt_equity` with `evaluator.equity_identity()`: equity families only; a failure is
 logged and never stops the start, and `bands.read` then reads no equity band as current). While `elane.mode` is "gate",
 each main-loop pass births the three captain-seeded programs not yet born (`equity_births`: `elane.birth_seeds`, once
-each, ever); their Validation and their one look are the tournament's and the gate's equity rounds.
+each, ever). THE EQUITY ROUNDS (`equity_rounds`, on their own thread every `elane.ROUND_SECONDS`): the tournament's
+equity step (Validation, the retirements), then the gate's (the one sealed look), so a version validated in a round
+takes its look in the same round. They run on the House in the decider child (A3): no Gym box and no model dollar, so
+the main loop starts them whatever the guard says and whether or not the Gym is up (`equity_due`), outside the branch
+that holds the options rounds, and no options round carries or delays them. A Validation the House could not make is
+reported apart from a failed pre-check (`validation_errors`, in the round's log line and in the heartbeat).
+
+THE EQUITY LANES' BIRTHS AND TRAIN (release E2; league/swarm/ELANE_E2.md): two rounds of their own, `elane` (the
+architect's equity pass) and `elane_train` (the equity researcher), off unless `elane.mode` is "gate" (births also
+need `elane.birth_share` above zero). They ask models, so they start only while the guard allows new research; they
+need no Gym box, so a Gym that is down holds neither. THEIR DOLLARS ARE COUNTED APART (`pace_status`): a share of the
+Sail model line (`elane.e2.pace_share`), paced by E2 itself before each call, never the researchers' own spend, and
+what E2 took of the line in the hour comes off the researchers' limit.
 
 The heartbeat (`<root>/swarm.heartbeat`, JSON) carries the pid, the release directory, the time, and a live
 status (families, cycles and spend in the last hour by kind, the guard, the pool): the House's `SwarmStep`
@@ -64,7 +76,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from . import allocation as allocation_mod
-from . import elane, game
+from . import elane, elane_yield, game
 from . import HEARTBEAT, LOCK_FILE, LOG_FILE, PID_FILE, settings as settings_mod
 from .architect import AGENDA_KEY, Architect, GraveyardDigest, allowed_structures
 from .diagnostician import Diagnostician
@@ -523,10 +535,13 @@ class Swarm:
         self.stop = threading.Event()
         self.workers: list[threading.Thread] = []
         self.rounds: dict[str, threading.Thread] = {}
+        # THE EQUITY ROUNDS' Validations the House could not make in the last round ({family: error}; `equity_rounds`
+        # replaces the whole dict each round, `equity_status` shows it in the heartbeat).
+        self.equity_unmade: dict[str, str] = {}
         self.started_at = clock()
         self.why_stopped = ""
         self._beat = float("-inf")
-        self._pace = (float("-inf"), "", 0.0)
+        self._pace = (float("-inf"), "", 0.0, 0.0)  # (read at, scope, the researchers' own spend, the equity lanes')
         self._concurrency: tuple[float, dict[str, Any]] | None = None  # THE CONCURRENCY, cached for 10 s
         self._concurrency_lock = threading.Lock()  # one refresh at a time (every worker reads it)
         self._threads = False  # run() started the researcher threads (step() may add workers up to the ceiling)
@@ -620,7 +635,19 @@ class Swarm:
                 "guard": getattr(self.guard, "last", {}), "braked": not self.guard.allows(), "pool": self.pool.status(),
                 "rounds": sorted(k for k, t in self.rounds.items() if t.is_alive()),
                 "concurrency": self.concurrency_status(),
-                "funding": getattr(getattr(self, "funding", None), "last", {})}
+                "funding": getattr(getattr(self, "funding", None), "last", {}),
+                "equity": self.equity_status()}
+
+    def equity_status(self) -> dict[str, Any]:
+        """THE EQUITY LANES in the heartbeat: `elane.mode` and when the last equity round started (None before the first):
+        the operator sees the rounds running under the brake and with the Gym down. `validation_errors` {family: error}
+        while the last round left any: Validations the House could not make (`equity_rounds`), never failed pre-checks."""
+        try:
+            unmade = dict(self.equity_unmade)
+            return {"mode": elane.cfg(self.settings)["mode"], "round_at": self.store.get(elane.ROUND_KEY),
+                    **({"validation_errors": unmade} if unmade else {})}
+        except Exception as exc:  # noqa: BLE001 - the heartbeat never fails on it
+            return {"error": f"{type(exc).__name__}"}
 
     def library_status(self) -> dict[str, Any] | None:
         """THE LIBRARY in the heartbeat: on or off, and today's counted calls against `research.requests_day`."""
@@ -667,7 +694,12 @@ class Swarm:
 
     def pace_status(self) -> dict[str, Any]:
         """The funded researcher stream's trailing-hour spend; absent/null Sail limit keeps the legacy combined cap. The
-        architect's own pass is not in it (F1, `architect_spent`): one pass never pauses every researcher for an hour."""
+        architect's own pass is not in it (F1, `architect_spent`): one pass never pauses every researcher for an hour.
+        THE EQUITY LANES' DOLLARS (release E2; league/swarm/elane_yield.py) are counted apart too: E2's births, Train
+        research and review are paid from this same line, held to their own hourly pace (`elane.e2.pace_share` of the
+        limit, checked by E2 before each of its model calls), and their rows are not the researchers' spend. What E2
+        took of the line in the hour, at most its pace, comes off the researchers' limit (`equity`), so the two together
+        fit the line and E2 never takes more than its share from the researchers."""
         cfg = self.settings.get("researcher", {})
         sail_limit = cfg.get("sail_usd_per_hour")
         scope = "sail_model" if sail_limit is not None else "all_models"
@@ -682,15 +714,24 @@ class Swarm:
         cached = self._pace
         if now - cached[0] >= 10.0 or now < cached[0] or cached[1] != scope:
             kinds = ["sail_model"] if scope == "sail_model" else ["sail_model", "openai"]
-            # F1: the researchers' stream, the architect's own pass apart (`architect_spent`; the guard's day counts it).
-            spent = max(0.0, self.store.spent(kinds, since=now - 3600) - architect_spent(self.store, kinds, now - 3600))
-            cached = self._pace = (now, scope, spent)
-        paused = not valid or cached[2] >= limit
+            # F1: the researchers' stream, the architect's own pass apart (`architect_spent`; the guard's day counts it),
+            # and the equity lanes' own rows apart (E2: their keys are "swarm:elane:...", `elane_yield.SPEND_MARK`).
+            equity = elane_yield.spent_since(self.store, now - 3600, kinds)
+            spent = max(0.0, self.store.spent(kinds, since=now - 3600) - architect_spent(self.store, kinds, now - 3600)
+                        - equity)
+            cached = self._pace = (now, scope, spent, equity)
+        # What E2 took of the line in the hour, at most its own pace: the researchers' room is the line less that.
+        equity_pace = elane_yield.usd_hour(self.settings, limit) if valid else 0.0
+        taken = min(cached[3], equity_pace)
+        paused = not valid or cached[2] >= limit - taken
         label = "Sail models" if scope == "sail_model" else "Sail and OpenAI models"
         reason = (f"invalid researcher.{key}; research paused" if not valid else
-                  f"{label} spent ${cached[2]:.4f} in the last hour, at the ${limit:.4f} pace" if paused else None)
+                  (f"{label} spent ${cached[2]:.4f} in the last hour, at the ${limit:.4f} pace"
+                   + (f" (the equity lanes took ${taken:.4f} of it)" if taken > 0 else "")) if paused else None)
         return {"scope": scope, "limit_usd_per_hour": limit if valid else None,
-                "spent_last_hour_usd": round(cached[2], 6), "paused": paused, "reason": reason}
+                "spent_last_hour_usd": round(cached[2], 6), "paused": paused, "reason": reason,
+                "equity": {"spent_last_hour_usd": round(cached[3], 6), "limit_usd_per_hour": round(equity_pace, 6),
+                           "taken_usd": round(taken, 6), "paused": cached[3] >= equity_pace}}
 
     def over_pace(self) -> bool:
         """No new cycles/rewrites above their configured model pace (spend reads cached for at most 10 s)."""
@@ -960,6 +1001,11 @@ class Swarm:
         except Exception:  # noqa: BLE001 - a notice never stops the loop
             pass
         self.equity_births()
+        # THE EQUITY ROUNDS (release E1, A3): on the House, no Gym box, no model dollar. Started here, before the guard
+        # is read and the Gym's pool is managed and outside the branch that holds the options rounds, so neither the
+        # brake, nor a Gym that is down, nor a pass that fails on either holds a seed's Validation or its look.
+        if self.equity_due():
+            self._round("equity", self.equity_rounds)
         if getattr(self.guard, "due", lambda: True)():
             was = not self.guard.allows()
             held = bool(getattr(self.guard, "research_held", False))
@@ -1012,19 +1058,24 @@ class Swarm:
                 born = self.reseed()
                 if born:
                     log(f"reseeded {len(born)}: {', '.join(born)}")
-            # THE EQUITY LANES' BIRTHS AND TRAIN (release E2; league/swarm/elane_births.py, elane_train.py): their own
-            # rounds, never inside the options architect's pass (its ceiling and its closed cells stop neither). Each is
-            # off unless `elane.mode` is "gate" (births also need `elane.birth_share` above zero).
-            if research and self.architect.equity_due():
-                self._round("elane", self.architect.equity_pass)
-            if research and self.elane_train.due():
-                self._round("elane_train", self.elane_train.run)
             if research and self.diagnostician.due():  # Claude's own funded line and daily budget, not the researchers' pace
                 self._round("diagnostician", self.diagnostician.run)
             if not self.over_pace():
                 # PARKED DORMANCY (F1): a park counts toward the dormancy clause only while a cycle could have run, as
                 # the timer's holds did (never under the brake, with the Gym down or over the pace).
                 self.scheduler.count_parked()
+        # THE EQUITY LANES' BIRTHS AND TRAIN (release E2; league/swarm/elane_births.py, elane_train.py): their own
+        # rounds, never inside the options architect's pass (its ceiling and its closed cells stop neither). Each is
+        # off unless `elane.mode` is "gate" (births also need `elane.birth_share` above zero). They make new research
+        # with model dollars, so THE GATE'S RESERVE and the brake hold them (`guard.allows("research")`) and E2's own
+        # pace and day hold each model call (`elane_yield.hold`); they run on the House's decider child, no Gym box
+        # (A3), so they start outside the branch that holds the options rounds: a Gym that is down holds neither, as
+        # it holds none of E1's equity rounds above (s2-7).
+        if self.guard.allows("research"):
+            if self.architect.equity_due():
+                self._round("elane", self.architect.equity_pass)
+            if self.elane_train.due():
+                self._round("elane_train", self.elane_train.run)
         self._grow_workers()
         if self.clock() - self._beat >= float(self.settings.get("heartbeat_seconds", 20)):
             self._beat = self.clock()
@@ -1044,6 +1095,60 @@ class Swarm:
         if born:
             log(f"equity lanes: seeded {len(born)} ({', '.join(born)}; {elane.SEEDED_NOTE})")
         return born
+
+    def equity_due(self) -> bool:
+        """THE EQUITY ROUNDS are due: `elane.mode` is "gate" and `elane.ROUND_SECONDS` have passed since the last one
+        started (the store's `elane.ROUND_KEY`). Never the guard, never the Gym (A3). False on any error (asked again
+        next pass)."""
+        try:
+            if not elane.on(self.settings):
+                return False
+            return self.clock() - float(self.store.get(elane.ROUND_KEY, 0.0) or 0.0) >= elane.ROUND_SECONDS
+        except Exception:  # noqa: BLE001 - a store that cannot say: nothing starts this pass
+            return False
+
+    def equity_rounds(self) -> dict[str, Any]:
+        """THE EQUITY ROUNDS (the module docstring): the tournament's equity step (`Tournament.equity_round`: Validation
+        by lane, the spent lineages and the program loss line retired), then the gate's (`Gate.equity_round`: the one
+        sealed look of each gate-ready family), on this one thread, so the two never meet a second copy of themselves.
+        Never raises: a failure of either is one private event, and the other still runs.
+
+        A VALIDATION THE HOUSE COULD NOT MAKE IS NOT A FAILED PRE-CHECK. `validated` {family: entered} holds the real
+        verdicts only (false there is a FAILED pre-check: the lineage's try is spent). A verdict that carries `error`
+        (the evidence child could not start, a run that ended with no data: no run recorded, no try spent, asked again
+        next round) or `refused` (no Validation was made) is under `validation_errors` {family: the error, or
+        "refused: why"}, in the round's log line and, until the next round, in the heartbeat (`equity_status`)."""
+        self.store.put(elane.ROUND_KEY, self.clock())
+        out: dict[str, Any] = {"looked": [], "refused": [], "waiting": [], "held": [], "look_held": []}
+        try:
+            step = self.tournament.equity_round()
+        except Exception as exc:  # noqa: BLE001 - `equity_round` never raises; whatever does costs the gate nothing
+            step = {"validated": {}, "retired": [], "errors": {"round": type(exc).__name__}}
+            self.store.event("swarm.status", None, {"action": "elane_round_error", "error": type(exc).__name__})
+        try:
+            self.gate.equity_round(out)
+        except Exception as exc:  # noqa: BLE001 - asked again next round; a look in flight is owed again
+            self.store.event("swarm.gate", None, {"action": "equity_round_error", "error": type(exc).__name__,
+                                                  "text": str(exc)[:300]})
+            out["error"] = type(exc).__name__
+        validated: dict[str, bool] = {}
+        unmade: dict[str, str] = {}
+        for fid, v in (step.get("validated") or {}).items():
+            if not isinstance(v, Mapping):
+                continue
+            if v.get("error"):
+                unmade[str(fid)] = str(v["error"])[:80]
+            elif v.get("refused"):
+                unmade[str(fid)] = f"refused: {str(v['refused'])[:120]}"
+            else:
+                validated[str(fid)] = bool(v.get("entered"))
+        self.equity_unmade = unmade
+        return {"validated": validated, **({"validation_errors": dict(unmade)} if unmade else {}),
+                "retired": list(step.get("retired") or []), "errors": dict(step.get("errors") or {}),
+                "looked": out["looked"], "held": out["held"],
+                **({"waits": dict(out["waits"])} if out.get("waits") else {}),
+                **({"look_errors": dict(out["errors"])} if out.get("errors") else {}),
+                **({"error": out["error"]} if "error" in out else {})}
 
     def adopt_equity(self) -> dict[str, Any] | None:
         """THE EQUITY IDENTITY's adoption at the start (`evaluator.adopt_equity`, core's): equity families only. None on an

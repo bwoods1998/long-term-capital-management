@@ -33,9 +33,9 @@ family in Train research holds the same idea on the same slice; its card is vali
 admission through `elane.card_errors`); THE GRAVEYARD BINDS (the design's lane-scoped REFUTED rows, PR #519): a card in
 the cell of a family E2 refuted on Train (its own lane's rows only: E1's `cards.RebirthIndex`, every other row excluded,
 so no row with an outcome lesson is read) needs a valid `card.rebirth` naming the row, as an options card does, while
-`architect.card_rebirth` is "refuse"; the lineage it continues (a named equity parent, or a dead family of its
-slice with the same idea) has taken no Validation try (no seeded program and no Train pass in it: an outcome-free
-rule, A9 D3); and THE EQUITY QUOTA admits it. Its spec carries `lane`, `symbols` (its `roots` too), `agenda`, the card's
+`architect.card_rebirth` is "refuse"; NO lineage it continues (the equity parent it names, EVERY family of its slice
+with the same idea, and the row it is reborn from) has taken a Validation try (no seeded program and no Train pass in
+any of them: an outcome-free rule, A9 D3; naming an untried parent hides no tried one); and THE EQUITY QUOTA admits it. Its spec carries `lane`, `symbols` (its `roots` too), `agenda`, the card's
 sha and `e2_route` (the route that bore it: its yield row, and the route its Train revisions are asked on). A program
 it carries that passes the static checks (league/swarm/elane_train.py `check_code`) is its version 1 (author
 "architect:<route>"); one that does not is recorded, and the equity researcher writes v1. Each birth is a `swarm.born`
@@ -58,7 +58,7 @@ from .elane_train import AGENDA, STATE_KEY
 from .elane_yield import ROLE
 
 #: The store's kv keys: the last equity pass's time and its births and refusals (for the next request).
-BIRTHS_AT_KEY = "elane_e2_births_at"
+BIRTHS_AT_KEY = elane_train.BIRTHS_AT  # "elane_e2_births_at": the Train round's `due` reads it too
 LAST_KEY = "elane_e2_last"
 #: The equity pass's settings (`elane.e2` keys; defaults here, policy.json in ELANE_E2_PATCHES.md) and their bounds.
 DEFAULTS: dict[str, Any] = {"births_every_seconds": 7200, "births_refill_seconds": 1800, "start": 8, "max_alive": 24,
@@ -138,15 +138,18 @@ def researching(store: Any) -> int:
 
 
 def due(store: Any, settings: Mapping[str, Any] | None, *, now: float | None = None) -> bool:
-    """The equity pass is due: THE SWITCH is on, its day's dollars have room, and `births_every_seconds` passed since the
-    last pass (`births_refill_seconds` while fewer than `start` families are in Train research)."""
+    """The equity pass is due: THE SWITCH is on, E2 may ask a model now (its day's line has room and it is under its
+    hourly pace: `elane_yield.hold`), and `births_every_seconds` passed since the last pass (`births_refill_seconds`
+    while fewer than `start` families are in Train research)."""
     if not births_on(settings):
         return False
     now = time.time() if now is None else float(now)
     c = cfg(settings)
-    if elane_yield.room(store, settings, now) <= 0:
-        return False
     last = _num(store.get(BIRTHS_AT_KEY)) or 0.0
+    if now - last < min(c["births_refill_seconds"], c["births_every_seconds"]):
+        return False  # inside even the shorter cadence: the families and the spend are not read on every loop pass
+    if elane_yield.hold(store, settings, now) is not None:
+        return False
     every = c["births_refill_seconds"] if researching(store) < c["start"] else c["births_every_seconds"]
     return now - last >= every
 
@@ -232,7 +235,10 @@ lane, a universe slice, a card and its first program. Every program is judged th
 passes, real money at Probe size. The Validation and holdout outcomes are SEALED: nobody who writes programs ever sees
 them, you included, so they cannot be fitted; write mechanisms, not history. You know the market's history: a rule that
 works only because you know which years fell is not a mechanism. Use scale-free state (returns, realized volatility, a
-price against its own moving average or recent high, the calendar fields), never a price level or a date.
+price against its own moving average or recent high, the calendar fields), never a price level or a date, and never the
+sleeve's own dollars since the run began (ctx.equity, ctx.cash, ctx.budget, ctx.caps or a lot's value, pnl or qty against
+a constant, a PARAMS value, ctx.budget or what a lot cost: every judged run starts flat, live trading never restarts where
+a window does, and a rule whose trading depends on how far the run is ahead or behind is refused, whatever its spelling).
 
 Reply with ONE JSON object: {"families": [{"slug": "short-kebab-name", "lane": "beta or equity", "agenda": "<one key of
 THE AGENDA>", "mechanism": "one or two sentences: why it should make money and who pays", "structure": "etf", "symbols":
@@ -470,8 +476,9 @@ class EquityPass:
         quota = EquityQuota(self.store, self.settings, now=began)
         if quota.want <= 0:
             return self.finish({"skipped": "full", "why": "no equity birth is wanted now", **quota.event()})
-        if elane_yield.room(self.store, self.settings, began) <= 0:
-            return self.finish({"skipped": "usd_day", "why": "E2's model dollars for the day are spent (elane.e2.usd_day)"})
+        held = elane_yield.hold(self.store, self.settings, began)
+        if held is not None:
+            return self.finish({"skipped": "usd_day" if held == elane_yield.DAY_SPENT else "pace", "why": held})
         candidates = elane_yield.routes(self.settings, self.router)
         turn = elane_yield.next_turn(self.store)
         first, why_route = elane_yield.choose(self.store, self.settings, candidates, turn=turn, train_key=STATE_KEY)
@@ -596,18 +603,24 @@ class EquityPass:
             if busy:
                 self.refuse(slug, f"the same idea on the same symbols is in Train research: {busy[-1]['id']}")
                 continue
-            parent = None
+            # THE LINEAGE IT CONTINUES, every one of them: the parent it declares AND every family of its slice with the
+            # same idea (the admission checked ONE, the declared parent or else the newest of the slice, so naming any
+            # untried equity family as the parent, or a newer untried family of the slice, hid a lineage that has its
+            # try: the integration review's seal-3). Any of them tried refuses the birth; the lineage is assigned only
+            # once all are clear.
+            mother = None
             declared = str(row.get("parent") or "").strip()
             if declared:
-                mother = self.store.family(declared)
-                if mother is not None and elane_seal.lane_of_spec(mother.get("spec")) is not None:
-                    parent = mother
-            if parent is None and same_slice:
-                parent = same_slice[-1]
-            if parent is not None and self.lineage_tried(parent):
-                self.refuse(slug, f"it continues {parent['id']}'s lineage, which has its one Validation try "
+                found = self.store.family(declared)
+                if found is not None and elane_seal.lane_of_spec(found.get("spec")) is not None:
+                    mother = found
+            kin = ([mother] if mother is not None else []) + list(reversed(same_slice))
+            tried_kin = next((f for f in kin if self.lineage_tried(f)), None)
+            if tried_kin is not None:
+                self.refuse(slug, f"it continues {tried_kin['id']}'s lineage, which has its one Validation try "
                                   "(outcome sealed): propose a different idea")
                 continue
+            parent = mother if mother is not None else (same_slice[-1] if same_slice else None)
             card = dict(raw_card or {})
             card.update({"lane": lane, "structure": structure, "symbols": symbols})
             try:
@@ -632,12 +645,13 @@ class EquityPass:
                     checked = {k: v for k, v in checked.items() if k != "rebirth"}
                 if verdict.get("rebirth"):
                     reborn = self.store.family(str(verdict.get("row") or ""))
-                    if parent is None and reborn is not None:
-                        if self.lineage_tried(reborn):
+                    if reborn is not None:
+                        if self.lineage_tried(reborn):  # whatever parent it declared: the row it is reborn from binds
                             self.refuse(slug, f"its rebirth continues {reborn['id']}'s lineage, which has its one "
                                               "Validation try (outcome sealed): propose a different idea")
                             continue
-                        parent = reborn
+                        if parent is None:
+                            parent = reborn
                     note = getattr(index, "note_birth", None)
                     if callable(note):
                         note(checked, structure)

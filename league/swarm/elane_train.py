@@ -11,12 +11,15 @@ exactly as a 2025 or 2026 one: a by-year row, a daily row, a trade's, a lot's or
 end) is refused whole and judged on nothing (WINDOW). No 2020-2021 session is ever a run session, so no 2020-2021
 figure or P&L exists to reach a family's record, the Train map, the yield ledger or a generator. WHAT OF THE RESERVE
 DOES REACH TRAIN, stated: its BARS, as look-back. The 2022-2024 run's decisions read the bars before 2022-01-03 as
-history (NEEDS `history`, up to `league.equity.config.MAX_HISTORY` sessions, so back into 2020), as a Validation run
-looks back on 2024's. So a program with look-back has 2022-2024 Train figures that are functions of reserve bars
-(directly while its look-back still reaches before 2022-01-03, at most two years; after that only through the lots,
-cash and equity the run carries), and so are the sums and the pooled t they enter. Its 2016-2019 figures are not, and a
-program that reads no history has none. E2 blanks nothing: a blanked look-back would need a hook in E1's runner or
-store and would cost a long-look-back program most of 2022 (the captain's call, with the later accessor).
+history (NEEDS `history` + 1 sessions, the first decision's own session among them: E1's `store._slice`; up to
+`league.equity.config.MAX_HISTORY` + 1, so back into 2020), as a Validation run looks back on 2024's. So a program
+with look-back has 2022-2024 Train figures that are functions of reserve bars (directly while its look-back still
+reaches before 2022-01-03, at most two years; after that only through the lots, cash and equity the run carries), and
+so are the sums and the pooled t they enter. Its 2016-2019 figures are not. EVEN A PROGRAM WITH NO LOOK-BACK READS THE
+LAST 2021 SESSION: the 2022-2024 run's first decision is at that session's close, so its bar is in every program's
+slice (one reserve bar at least, never none), and the buy-and-hold reported beside 2022 is measured from that close. E2
+blanks nothing: a blanked look-back would need a hook in E1's runner
+or store and would cost a long-look-back program most of 2022 (the captain's call, with the later accessor).
 THE LOOSENING, stated: the bar reads seven Train years, not the nine of 2016-2024, so "active in three years" is three
 of seven, "no year's t below the floor" has two years fewer to fail in, and the two P&L rules sum seven years.
 
@@ -89,7 +92,8 @@ and is sent once. Of the verdicts, only Y1, Y2, P1 and R1 judge the MECHANISM (`
 that could not be judged.
 
 THE REVIEW (league/swarm/elane_review.py). A program holding a raw price or volume level against a constant or a PARAMS
-value is refused before it is stored (`check_code`). At a version's first bar pass two different models read it under
+value is refused before it is stored (`check_code`), and so is one that reads its own profit since the run began: the
+sleeve's dollars against a constant, the run's capital or what a lot cost (the level rule's 1b and 1d). At a version's first bar pass two different models read it under
 the leakage rubric (`EquityResearcher.review_step`) before it may be its lineage's Validation try: a pass of both
 writes the record E1's look reads (`state["review"]`) and makes it the family's pass; a failure is a Train failure of
 that version ("REVIEW") and spends no try.
@@ -158,6 +162,13 @@ TRAIN_AT_KEY = "elane_e2_train_at"
 TRAIN_OK_KEY = "elane_e2_train_ok_at"
 #: The longest backoff after a failure of the House's (no store, a child that could not start, a result outside Train).
 BACKOFF_MAX = 6 * 3600.0
+#: How often `EquityResearcher.due` looks again while no round has work (a look reads the equity families; it writes
+#: nothing), and the kv key of the equity pass's clock (league/swarm/elane_births.py `BIRTHS_AT_KEY`): a pass since the
+#: last look is looked at at once, so a family's first Train round never waits on the look.
+IDLE_LOOK_SECONDS = 30.0
+BIRTHS_AT = "elane_e2_births_at"
+#: The store's kv key of the last alert of a standing House failure, by kind ({"run": epoch, "store": epoch}).
+HOUSE_ALERT_KEY = "elane_e2_house_alert_at"
 #: E1's TRAIN WINDOW (league/equity/config.py WINDOWS["train"]): the outer bounds of the spans below.
 TRAIN_FIRST, TRAIN_LAST = eqconfig.WINDOWS["train"][0], eqconfig.WINDOWS["train"][1]
 #: THE TRAIN SPANS (A15; the module docstring): the only sessions an E2 run has, each span one run starting flat.
@@ -182,7 +193,8 @@ FAILS: dict[str, str] = {
     "RUN": "the decider child failed this program's Train run again and again while other programs' runs completed",
     "DQ": "the program was disqualified on Train by its own errors or timeouts",
     "LOAD": "the decider child refused to load the program",
-    "REVIEW": "the equity review refused the program (an absolute level, a reconstructed calendar or lookahead)",
+    "REVIEW": "the equity review refused the program (an absolute level, a reconstructed calendar, a rule keyed to the "
+              "run's own profit since it began, or lookahead)",
     "STATE": f"run again with its STATE emptied every {BAR['state_every']} sessions (as a restart of the House's decider "
              f"empties it), the program's intents matched the uninterrupted run's on fewer than "
              f"{BAR['state_match']:.0%} of the Train sessions (a decide that fails in one run and not the other is no "
@@ -657,7 +669,8 @@ def may_validate(store: Any, fam: Mapping[str, Any] | None, n: Any) -> bool:
 
 def compact(score: Mapping[str, Any], *, at: str, ident: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """A version's verdict as the record keeps it (Train figures and its restart check's counts only), with the identity
-    it was judged under."""
+    it was judged under. Of a verdict's words the record keeps `said` alone (`program_fault`: what its author may
+    read), never its raw `why`."""
     out = {"at": at, "objective": OBJECTIVE, "passed": bool(score.get("passed")), "fails": list(score.get("fails") or []),
            "score": score.get("score"), "active_years": score.get("active_years"), "pnl_10": score.get("pnl_10"),
            "pnl_15": score.get("pnl_15"), "ratio": score.get("ratio"), "years": dict(score.get("years") or {}),
@@ -665,12 +678,52 @@ def compact(score: Mapping[str, Any], *, at: str, ident: Mapping[str, Any] | Non
            "identity": dict(ident) if isinstance(ident, Mapping) else None}
     if isinstance(score.get("state"), Mapping):
         out["state"] = dict(score["state"])
+    if isinstance(score.get("said"), str) and score["said"]:
+        out["why"] = score["said"][:400]
     return out
 
 
-def program_fault(code: str, why: str) -> dict[str, Any]:
-    """The verdict of a version judged on its program alone (RUN, DQ, LOAD): no figure."""
-    return {"objective": OBJECTIVE, "passed": False, "fails": [code], "why": f"{FAILS[code]}: {why}"[:400], "score": None,
+#: The exception classes a disqualification may name to its author (`dq_said`): Python's own and numpy's, by name. A
+#: program defines no class (league/gym/safety.py), so its errors are of these; any other word is not shown.
+ERROR_CLASSES = frozenset({
+    "ArithmeticError", "AssertionError", "AttributeError", "FloatingPointError", "IndexError", "KeyError", "LookupError",
+    "MemoryError", "NameError", "NotImplementedError", "OverflowError", "RecursionError", "RuntimeError", "StopIteration",
+    "TypeError", "UnboundLocalError", "ValueError", "ZeroDivisionError", "LinAlgError", "AxisError", "Exception"})
+_DQ_ERRORS = re.compile(r"^(\d{1,6}) errors \(first: (.*)\)$", re.S)
+_DQ_LINE = re.compile(r"^line (\d{1,6})$")
+
+
+def dq_said(reason: Any) -> str:
+    """WHAT A DISQUALIFICATION SAYS TO ITS AUTHOR: counts, a line of its own file and an exception CLASS, never the
+    exception's text. E1's reason carries the program's own message (`25 errors (first: line 12: ValueError: <up to 160
+    characters the program chose>)`), and a program can put anything it read there (a bar of the 2020-21 reserve it
+    reads as look-back), so the text never reaches a record or a brief."""
+    text = str(reason or "")
+    found = _DQ_ERRORS.match(text)
+    if found:
+        parts = found.group(2).split(": ", 2)
+        where = parts[0] if parts and _DQ_LINE.match(parts[0]) else ""
+        kind = parts[1] if len(parts) > 1 and parts[1] in ERROR_CLASSES else ""
+        if not kind and "ran past" in (parts[0] if parts else ""):
+            kind = "time limit"
+        first = " ".join(x for x in (f"a {kind}" if kind and kind != "time limit" else
+                                     "a decide past its time limit" if kind else "", f"at {where}" if where else "") if x)
+        return f"{int(found.group(1))} errors in decide" + (f", the first {first}" if first else "")
+    if text.startswith("decide used") and "budget" in text:
+        return "its decides ran past the run's time budget"
+    return "its own errors or timeouts"
+
+
+def program_fault(code: str, why: str, *, said: str | None = None) -> dict[str, Any]:
+    """The verdict of a version judged on its program alone (RUN, DQ, LOAD): no figure. `why` is the House's own record
+    of the step; `said` is what the version's record keeps and its author reads in the next brief (`compact`): the
+    House's own refusal text for LOAD (static, bounded: a program that would not load read no market data), counts and
+    an exception class for DQ (`dq_said`), the failure's class for RUN. A `said` that only repeats the end of the
+    failure's own sentence adds nothing and is said once (a disqualification with no count to name read "... by its own
+    errors or timeouts: its own errors or timeouts" in `version_text`)."""
+    told = FAILS[code] if said and FAILS[code].endswith(str(said)) else f"{FAILS[code]}: {said}"
+    return {"objective": OBJECTIVE, "passed": False, "fails": [code], "why": f"{FAILS[code]}: {why}"[:400],
+            "said": told[:400] if said else None, "score": None,
             "years": {}, "active_years": 0, "pnl_10": None, "pnl_15": None, "ratio": None, "summary": {}, "beside": {}}
 
 
@@ -1058,8 +1111,9 @@ def needs_literal(code: str) -> dict[str, Any] | None:
 
 def check_code(code: Any, symbols: Sequence[str]) -> str | None:
     """Why a program cannot be a version of a family trading `symbols`, or None: the Gym's static rules
-    (`league.gym.safety.check_program`, never executed here), NEEDS a literal dict whose symbols are the family's, and the
-    equity level rule (`elane_review.level_text`)."""
+    (`league.gym.safety.check_program`, never executed here), NEEDS a literal dict whose symbols are the family's, the
+    equity memory rule (`elane_review.memory_text`: no object of a module held as memory) and the equity level rule
+    (`elane_review.level_text`)."""
     from ..gym.safety import CodeRefused, check_program
 
     text = str(code or "")
@@ -1079,7 +1133,13 @@ def check_code(code: Any, symbols: Sequence[str]) -> str | None:
     foreign = [str(s) for s in named if str(s).upper() not in own]
     if foreign:
         return f"NEEDS names {', '.join(foreign[:6])}, outside the family's symbols ({', '.join(sorted(own))})"
-    # THE LEVEL RULE (league/swarm/elane_review.py): a raw price or volume level held against a constant or a PARAMS value.
+    # THE MEMORY RULE (league/swarm/elane_review.py): an object that belongs to a module is memory outside STATE, shared
+    # by every program in the decider child.
+    memory = elane_review.memory_text(text)
+    if memory is not None:
+        return memory
+    # THE LEVEL RULE (league/swarm/elane_review.py): a raw price or volume level held against a constant or a PARAMS
+    # value, and the run's own dollars held against a constant or the run's anchor.
     return elane_review.level_text(text)
 
 
@@ -1127,9 +1187,15 @@ Validation try: send the version you would stake the lineage on. A rule that wor
 is not a mechanism; use scale-free state (returns, volatility, a price against its own moving average or recent high, the
 calendar fields), never a price level or a date. THE LEVEL RULE refuses, before it runs, a program that holds a price, an
 average or range of prices, a lot's entry or mark, a share volume, or the log of any of them, against a constant or a
-PARAMS value (compared with, offset by, bucketed by or clipped at one); a ratio of two levels is fine. THE REVIEW (two
+PARAMS value (compared with, offset by, bucketed by or clipped at one); a ratio of two levels of the SAME symbol is fine
+(a ratio of two different symbols' prices against a constant is not). It also refuses RUN-START DEPENDENCE: every judged
+run starts flat with the same capital (ctx.budget), so never hold ctx.equity, ctx.cash, ctx.budget, ctx.caps or a lot's
+value, pnl or qty against a constant or a PARAMS value, never the sleeve's dollars against ctx.budget, ctx.caps or what
+a lot cost (its qty times a price, its value less its pnl), and never write them into a lot's tag (no profit lock, no
+sleeve-wide stop, no size that changes once the run is ahead or behind, whatever its spelling): size by a share of the
+sleeve, check a sign (a lot's pnl below zero) and exit on a lot's own return (mark over entry). THE REVIEW (two
 other models) refuses absolute levels, a calendar reconstructed by counting sessions in STATE, tables of dates or levels,
-and lookahead. THE STATE RULE (part of the bar): the House's decider restarts on every deploy and a restart empties STATE,
+run-start dependence and lookahead. THE STATE RULE (part of the bar): the House's decider restarts on every deploy and a restart empties STATE,
 so the bar runs your program again with STATE emptied every 20 sessions and fails it (STATE) unless its intents match the
 uninterrupted run's on 99% of sessions. Keep in STATE only a cache of what ctx gives again; read holdings from
 ctx.positions and the clock from ctx's calendar fields, never from a count you keep. Your decide must work on an empty
@@ -1231,6 +1297,9 @@ class EquityResearcher:
         self._runner = runner
         self.root = root if root is not None else getattr(store, "root", None)
         self.clock = clock
+        #: When `due` last looked and found nothing a round could do, and the equity pass's clock it saw then (in
+        #: memory: no key, no event, no log line).
+        self._looked: tuple[float, Any] = (float("-inf"), None)
 
     # ------------------------------------------------------------------ plumbing
     def runner(self) -> Any:
@@ -1241,31 +1310,101 @@ class EquityResearcher:
         return self._runner
 
     def due(self) -> bool:
-        """The lane is on, `train_every_seconds` passed since the last round, and a family of E2's has a round to be
-        given (`idle`). So while `elane.birth_share` has been zero since the start (no equity pass ever bore a family)
-        no round runs, no key is written and no event is made: with the births off E2 does nothing at all."""
+        """The lane is on, `train_every_seconds` passed since the last round (or since the last look that found nothing
+        to do), and a round has WORK it can do now (`idle`). So while `elane.birth_share` has been zero since the start
+        (no equity pass ever bore a family) no round runs, no key is written and no event is made: with the births off
+        E2 does nothing at all. Nor does a round start while every family of E2's is past its research (a Candidate or
+        a Probe program lives for weeks), waits out a backoff, or needs a model E2 may not ask now: before, one empty
+        round every ten minutes left an event and a log line each (the integration review's merge-4)."""
         if not lane_on(self.settings):
             return False
-        last = _num(self.store.get(TRAIN_AT_KEY)) or 0.0
-        if self.clock() - last < cfg(self.settings)["train_every_seconds"]:
+        now = self.clock()
+        if now - (_num(self.store.get(TRAIN_AT_KEY)) or 0.0) < cfg(self.settings)["train_every_seconds"]:
             return False
         try:
-            return not self.idle()
+            # Nothing to do is looked at again every `IDLE_LOOK_SECONDS`, and at once after an equity pass (a birth).
+            births_at = self.store.get(BIRTHS_AT)
+            if births_at == self._looked[1] and 0.0 <= now - self._looked[0] < IDLE_LOOK_SECONDS:
+                return False
+            if self.idle():
+                self._looked = (now, births_at)
+                return False
+            return True
         except Exception:  # noqa: BLE001 - a store that cannot be read gives no round
             return False
 
     def idle(self) -> bool:
-        """No family of E2's needs a round: none is alive, and none was retired elsewhere with its record still saying
-        it researches (`close_retired`'s work). The captain's seeds are never E2's."""
-        for fam in elane_seal.equity_families(self.store):
-            if e2_family(fam) and (not fam.get("retired_at") or record_of(fam).get("status", "researching") == "researching"):
+        """No round has work it can do now: no E2 family retired elsewhere with its record still saying it researches
+        (`close_retired`'s work), no standing pass whose review record or best version an adoption cleared (`upkeep`'s),
+        and no family of the queue whose step can be taken now (`needs_model`: one that must ask a model is no work
+        while E2 may ask none, `elane_yield.hold`). The captain's seeds are never E2's."""
+        for fam in elane_seal.equity_families(self.store, alive=False):
+            if e2_family(fam) and record_of(fam).get("status", "researching") == "researching":
                 return False
-        return True
+        if self.upkeep(dry=True):
+            return False
+        queue = self.queue()
+        if not queue:
+            return True
+        if elane_yield.hold(self.store, self.settings, self.clock()) is None:
+            return False
+        return all(self.needs_model(fam) for fam in queue)
+
+    def needs_model(self, fam: Mapping[str, Any]) -> bool:
+        """Whether a family's next step (`step`) asks a model: a review still to be read, or a program to be written.
+        Re-scoring a stale pass, scoring its newest version and retiring it ask none."""
+        c = cfg(self.settings)
+        fid = str(fam["id"])
+        rec = record_of(fam)
+        if rec.get("status") == "passed":
+            return False
+        pending = rec.get("review") if isinstance(rec.get("review"), Mapping) else None
+        if pending is not None and pending.get("version") is not None:
+            return True
+        latest = self.store.latest_version(fid)
+        versions = versions_of(rec)
+        if latest is not None and str(latest["n"]) not in versions:
+            return False
+        return not (len(versions) >= c["train_budget"] or int(rec.get("attempts") or 0) >= c["train_max_attempts"])
 
     def waiting(self, rec: Mapping[str, Any]) -> bool:
-        """Whether a family waits out a backoff after a failure of the House's (`infra.next_at`)."""
-        infra = rec.get("infra") if isinstance(rec.get("infra"), Mapping) else {}
-        return (_num(infra.get("next_at")) or 0.0) > self.clock()
+        """Whether a family waits out a backoff: after a failure of the House's (`infra.next_at`), or after a question
+        of its own no route answered (`unanswered.next_at`)."""
+        for name in ("infra", "unanswered"):
+            held = rec.get(name) if isinstance(rec.get(name), Mapping) else {}
+            if (_num(held.get("next_at")) or 0.0) > self.clock():
+                return True
+        return False
+
+    def unanswered(self, fid: str, what: str, errors: Sequence[str]) -> dict[str, Any]:
+        """A QUESTION NO ROUTE ANSWERED (a Train write, a review or an audit read): nothing is counted against the
+        program, and the family waits out a backoff before it asks again (`train_every_seconds` doubling with every
+        question in a row left unanswered, at most `BACKOFF_MAX`), as it does after a failure of the House's. Without it
+        a family whose routes were down asked every route again each round under a fresh key, each timed-out call a
+        hold on the swarm's meter (the integration review's loop-2). An answered question clears it (`answered`)."""
+        c = cfg(self.settings)
+        now = self.clock()
+        held = record_of(self.store.family(fid) or {}).get("unanswered")
+        count = int(held.get("count") or 0) + 1 if isinstance(held, Mapping) else 1
+        delay = min(float(c["train_every_seconds"]) * (2 ** min(count, 12)), BACKOFF_MAX)
+        record = {"count": count, "at": now, "next_at": now + delay, "what": what,
+                  "sent": not elane_yield.unsent(errors)}
+        _update(self.store, fid, lambda r: r.update(unanswered=record))
+        return {"family": fid, "error": f"no {what} route answered" if what != "train" else "no route answered",
+                "errors": list(errors)[:3], "retry_in": delay}
+
+    def reader_now(self, route: Any) -> str:
+        """The model that would answer `route` NOW: its own, or, for a Sail profile whose window is flagged stalled, the
+        model of the asap profile the router's window fallback sends E2's role to (league/swarm/models.py
+        `sail_fallback`: k3_balanced and pro_balanced both fall to pro_asap for a role that is not the gate's audit)."""
+        if getattr(route, "kind", None) == "sail":
+            try:
+                fallback = self.router.sail_fallback(route.name, role=elane_yield.ROLE)
+                if fallback is not None and self.router.window_stalled(fallback[0]) is not None:
+                    return elane_review.model_of(f"sail:{fallback[1]}")
+            except Exception:  # noqa: BLE001 - a router that cannot say: the route's own model
+                pass
+        return elane_review.model_of(route.key)
 
     def queue(self) -> list[dict[str, Any]]:
         """The living E2 families with a step to take (researching, or a pass to re-score under a new equity identity),
@@ -1284,7 +1423,8 @@ class EquityResearcher:
         return [r[2] for r in rows[: cfg(self.settings)["train_per_round"]]]
 
     def run(self) -> dict[str, Any]:
-        """One round: the upkeep of the passes, then a step for each family of the queue; one `swarm.elane` event."""
+        """One round: the upkeep of the passes, then a step for each family of the queue; one `swarm.elane` event when
+        anything was done (a step, a record closed, a pass restored), none for a round that found nothing."""
         self.store.put(TRAIN_AT_KEY, self.clock())
         if not lane_on(self.settings):
             return {"pass": "train", "skipped": "the equity lanes are off (elane.mode)"}
@@ -1301,7 +1441,8 @@ class EquityResearcher:
             out["closed"] = closed
         if kept:
             out["restored"] = kept
-        self.store.event("swarm.elane", None, out)
+        if steps or closed or kept:
+            self.store.event("swarm.elane", None, out)
         return out
 
     def close_retired(self) -> list[str]:
@@ -1314,10 +1455,11 @@ class EquityResearcher:
                 out.append(str(fam["id"]))
         return out
 
-    def upkeep(self) -> list[str]:
+    def upkeep(self, *, dry: bool = False) -> list[str]:
         """THE PASSES KEPT IN FORCE (the module docstring, THE IDENTITY): for each living E2 family whose current pass
         stands, the review record E1's look reads and the family's `best_version` are written again when they are missing
-        (E1's equity adoption clears both). No model is asked and nothing is run."""
+        (E1's equity adoption clears both). No model is asked and nothing is run. `dry`: the families it would write,
+        nothing written (`idle`)."""
         from .gate import run_sha
 
         out = []
@@ -1333,11 +1475,13 @@ class EquityResearcher:
             changed = False
             sha = run_sha(version)
             if kept.get("sha") == sha and not elane_review.holds(fam.get("state"), sha):
-                self.store.set_state(fid, **{elane_review.STATE_REVIEW: dict(kept)})
+                if not dry:
+                    self.store.set_state(fid, **{elane_review.STATE_REVIEW: dict(kept)})
                 changed = True
             if fam.get("best_version") != n:
-                score = (versions_of(rec).get(str(n)) or {}).get("score")
-                self.store.update_family(fid, best_version=n, best_train=score)
+                if not dry:
+                    score = (versions_of(rec).get(str(n)) or {}).get("score")
+                    self.store.update_family(fid, best_version=n, best_train=score)
                 changed = True
             if changed:
                 out.append(fid)
@@ -1365,8 +1509,9 @@ class EquityResearcher:
             return self.score(fam, latest)
         if len(versions) >= c["train_budget"] or int(rec.get("attempts") or 0) >= c["train_max_attempts"]:
             return self.finish(fam, "its Train budget is spent with no version passing")
-        if elane_yield.room(self.store, self.settings, self.clock()) <= 0:
-            return {"family": fid, "skipped": "E2's model dollars for the day are spent (elane.e2.usd_day)"}
+        held = elane_yield.hold(self.store, self.settings, self.clock())
+        if held is not None:  # the day's line, or E2's own hourly pace: no model is asked
+            return {"family": fid, "skipped": held}
         return self.write(fam)
 
     def brief(self, fam: Mapping[str, Any]) -> str:
@@ -1419,9 +1564,13 @@ class EquityResearcher:
             system=RESEARCHER_SYSTEM + contract_text(), user=self.brief(fam), key=f"swarm:elane:train:{fid}:{int(self.clock())}",
             max_output=c["train_max_output_tokens"], effort=c["train_effort"], purpose="research", now=self.clock(), family=fid)
         if answer is None:
-            return {"family": fid, "error": "no route answered", "errors": errors[:3]}
+            return self.unanswered(fid, "train", errors)
         # An answered question is one attempt (`train_max_attempts`); a route that could not answer spends none.
-        _update(self.store, fid, lambda r: r.update(attempts=int(r.get("attempts") or 0) + 1))
+
+        def answered(r: dict[str, Any]) -> None:
+            r.pop("unanswered", None)
+            r["attempts"] = int(r.get("attempts") or 0) + 1
+        _update(self.store, fid, answered)
         code, note, stop = program_of(answer)
         if stop is not None:
             if not judged(record_of(self.store.family(fid) or fam)):
@@ -1467,10 +1616,11 @@ class EquityResearcher:
         rest)."""
         why = f"{type(exc).__name__}: {str(exc)[:200]}"
         if _named(exc, LOAD_REFUSALS):
-            return program_fault("LOAD", str(exc)[:300]), None
+            refusal = " ".join(str(exc).split())[:300]
+            return program_fault("LOAD", refusal, said=refusal), None
         kind = "run" if _named(exc, RUN_FAILURES) else ("state" if check else "store")
         out = self.house_failure(fam, n, why, kind=kind)
-        return (None, out) if out is not None else (program_fault("RUN", why), None)
+        return (None, out) if out is not None else (program_fault("RUN", why, said=f"a {type(exc).__name__}"), None)
 
     def restart(self, fid: str, code: str, params: Mapping[str, Any], runs: Sequence[Any]) -> dict[str, Any]:
         """THE RESTART CHECK of a version on its uninterrupted 1.0x Train runs (`restart_check` over `state_inputs`),
@@ -1489,7 +1639,11 @@ class EquityResearcher:
         None: the caller judges the program RUN (never on the strength of the House's other failures). A result outside
         the Train years ("window") is an alert at once; a restart check that could not run or finish ("state") once,
         when the version has `train_max_errors` of them (one restart of the child is no news; a check that never
-        finishes is), whatever failed in between."""
+        finishes is), whatever failed in between. A STANDING FAILURE OF THE HOUSE'S ("run": the child fails every
+        program's runs; "store": no equity store, a store being rewritten for good) is an alert too, when a version has
+        `train_max_errors` of that kind since it was last judged, and at most once every `BACKOFF_MAX` for the lanes
+        whichever family meets it (`HOUSE_ALERT_KEY`): before, every Train score ended in a backoff doubling to six
+        hours, births went on until the lanes were full, and nobody was told (the integration review's loop-5)."""
         c = cfg(self.settings)
         fid = str(fam["id"])
         now = self.clock()
@@ -1508,8 +1662,15 @@ class EquityResearcher:
             return None
         delay = min(float(c["train_every_seconds"]) * (2 ** min(count - 1, 12)), BACKOFF_MAX)
         tell = kind == "state" and kinds[kind] >= c["train_max_errors"] and kind not in alerted
-        if tell:
+        standing = kind in ("run", "store") and kinds[kind] >= c["train_max_errors"] and kind not in alerted
+        if tell or standing:
             alerted.append(kind)
+        if standing:  # one alert for the lanes, not one a family: every family meets the same missing store
+            said = self.store.get(HOUSE_ALERT_KEY)
+            said = dict(said) if isinstance(said, Mapping) else {}
+            standing = now - (_num(said.get(kind)) or float("-inf")) >= BACKOFF_MAX
+            if standing:
+                self.store.put(HOUSE_ALERT_KEY, {**said, kind: now})
         record = {"version": n, "count": count, "first_at": first, "next_at": now + delay, "kind": kind, "why": why[:240],
                   "streak": streak, "streak_at": since, "kinds": kinds, "alerted": alerted}
         _update(self.store, fid, lambda r: r.update(infra=record))
@@ -1518,6 +1679,18 @@ class EquityResearcher:
                                                    "text": f"an equity Train result carried a day outside the "
                                                            f"{TRAIN_LABEL}: refused whole; E2 judges nothing on it "
                                                            "(check the runner)"})
+        if standing:
+            what = ("the swarm's decider child failed its Train runs" if kind == "run" else
+                    "its Train runs could not start (the equity store under equity-daily is missing, unreadable or "
+                    "being rewritten, or the child gave no result)")
+            last = _num(self.store.get(TRAIN_OK_KEY))
+            self.store.event("swarm.status", fid, {
+                "action": "elane_train_house", "alert": True, "version": n, "kind": kind,
+                "text": f"the equity lanes' Train is not running: {what} {kinds[kind]} times for this version with no "
+                        f"judgment in between ({why[:160]}); no equity program is scored until it does, and the "
+                        f"families born meanwhile wait (the last equity Train judgment: "
+                        f"{'never' if last is None else time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(last))}). "
+                        "Check the equity data job and the swarm's equity-decider.log"})
         if tell:
             self.store.event("swarm.status", fid, {"action": "elane_train_state", "alert": True, "version": n,
                                                    "text": f"the equity Train bar's restart check (STATE) could not "
@@ -1553,7 +1726,7 @@ class EquityResearcher:
             if "disqualified" in statuses:
                 why = next((str(r["reason"]) for rs in parts.values() for r in rs if r.get("reason")),
                            "its own errors or timeouts")
-                verdict = program_fault("DQ", why)
+                verdict = program_fault("DQ", why, said=dq_said(why))
             elif statuses != {"ok"}:
                 return self.house_failure(fam, n, f"the Train runs ended {', '.join(sorted(statuses))}",
                                           kind="store") or {}
@@ -1637,7 +1810,20 @@ class EquityResearcher:
         """THE EQUITY REVIEW of a bar pass (league/swarm/elane_review.py): the level rule, then the review and the audit on
         two different models. Both pass: the version is the family's pass (its lineage's one Validation try). A failure
         (or `review_max_unclear` unclear reads of one stage) is a Train failure of the version ("REVIEW"). A question no
-        route answered counts nothing and is asked again next round."""
+        route answered counts nothing and is asked again after a backoff (`unanswered`).
+
+        THE AUDIT'S READER IS NEVER THE REVIEWER'S MODEL, wherever the router takes the call: a candidate whose window
+        is flagged stalled is read as the model its fallback reaches (`reader_now`) and left out when that is the
+        reviewer's, and an answer that came back from the reviewer's model all the same (the window stalled on this very
+        call) is booked, discarded, and the next candidate is asked in the same step. EVERY QUESTION HAS ITS OWN KEY
+        (`asked`, counted once its outcome is handled): the Provider answers a repeated key from its store, so a key
+        asked again would be booked a second time for one call, and once the router's hourly compaction has blanked the
+        stored answer the re-read is empty. An answer with no text at all counts as no answer (at most
+        `review_max_unclear` times a stage; after that it is an unclear read).
+
+        E2'S DOLLARS ARE READ BEFORE EVERY MODEL CALL (`elane_yield.hold`): before the review, and AGAIN before the audit
+        when the review was asked in this same step, for the review's own call may have used up the hour's pace or the
+        day's line. A held audit keeps the review's pass and is asked in a later step."""
         from .gate import run_sha
 
         fid = str(fam["id"])
@@ -1647,11 +1833,13 @@ class EquityResearcher:
         if version is None or not version.get("code"):
             return {"family": fid, "version": n, "error": "the version cannot be read"}
         code = str(version["code"])
-        static = elane_review.level_text(code)
+        static = elane_review.memory_text(code) or elane_review.level_text(code)
         if static is not None:
-            return self.review_failed(fam, n, "the level rule", [static])
-        if elane_yield.room(self.store, self.settings, self.clock()) <= 0:
-            return {"family": fid, "version": n, "skipped": "E2's model dollars for the day are spent (elane.e2.usd_day)"}
+            return self.review_failed(fam, n, "the level rule" if static.startswith("refused by the equity level") else
+                                      "the memory rule", [static])
+        held = elane_yield.hold(self.store, self.settings, self.clock())
+        if held is not None:  # the day's line, or E2's own hourly pace: no model is asked
+            return {"family": fid, "version": n, "skipped": held}
         rc = elane_review.cfg(self.settings)
         served = elane_yield.served([elane_yield.Route.of(k) for k in rc["review_routes"]], self.router)
         from . import cards, elane
@@ -1664,29 +1852,50 @@ class EquityResearcher:
         lane_label = elane.LABELS.get(facts["lane"], str(facts["lane"]).upper())
         train = version_text(n, versions_of(rec).get(str(n)) or {})
         unclear = dict(pending.get("unclear") or {})
+        asked_now = False
         for stage in ("review", "audit"):
             done = pending.get(stage)
             if isinstance(done, Mapping) and done.get("verdict") == "pass":
                 continue
+            if asked_now:  # the review was asked in this step: its dollars count before the audit is
+                held = elane_yield.hold(self.store, self.settings, self.clock())
+                if held is not None:
+                    return {"family": fid, "version": n, "skipped": held, "stage": stage}
             reader = (pending.get("review") or {}).get("route") if stage == "audit" else None
+            taken = elane_review.model_of(str(reader or "")) if stage == "audit" else None
             if stage == "audit":
-                taken = elane_review.model_of(str(reader or ""))
-                candidates = [r for r in served if elane_review.model_of(r.key) != taken]
+                candidates = [r for r in served if self.reader_now(r) != taken]
             else:
                 candidates = list(served)
             if not candidates:
                 return {"family": fid, "version": n, "error": f"no {stage} route on a second model (elane.e2.review_routes)"}
             tries = int(unclear.get(stage) or 0)
+            asked = dict(pending.get("asked") or {})
+            turn = int(asked.get(stage) or 0)
             answer, route, errors = elane_yield.ask(
                 self.router, self.store, self.settings, first=None, role=elane_yield.ROLE,
                 system=elane_review.REVIEW + contract_text(),
                 user=elane_review.question(fam, version, card=card, train=train, lane_label=lane_label, stage=stage),
-                key=f"swarm:elane:{stage}:{fid}:{n}:{tries}", max_output=rc["review_max_output_tokens"],
+                key=f"swarm:elane:{stage}:{fid}:{n}:{turn}", max_output=rc["review_max_output_tokens"],
                 effort=rc["review_effort"], purpose="review", now=self.clock(), family=fid, candidates=candidates,
-                book_as=lambda r: f"review:{r.key}")
+                book_as=lambda r: f"review:{r.key}",
+                accept=(lambda r, taken=taken: elane_review.model_of(r.key) != taken) if stage == "audit" else None)
+            # This question's outcome is handled from here on: the next one of this stage has a key of its own.
+            asked[stage] = turn + 1
+            pending["asked"] = asked
+            asked_now = True
             if answer is None or route is None:
                 _update(self.store, fid, lambda r: r.update(review={**pending, "unclear": unclear}))
-                return {"family": fid, "version": n, "error": f"no {stage} route answered", "errors": errors[:3]}
+                return {"version": n, **self.unanswered(fid, stage, errors)}
+            if not str(answer.get("text") or "").strip() and not answer.get("json"):
+                blank = dict(pending.get("blank") or {})
+                blank[stage] = int(blank.get(stage) or 0) + 1
+                pending["blank"] = blank
+                if blank[stage] <= rc["review_max_unclear"]:
+                    # An answer with no text is no read (a key re-read after the router blanked its stored answer).
+                    _update(self.store, fid, lambda r: r.update(review={**pending, "unclear": unclear}))
+                    return {"family": fid, "version": n, "error": f"the {stage} answered nothing", "blank": blank[stage]}
+            _update(self.store, fid, lambda r: r.pop("unanswered", None))
             read = {**elane_review.grounded(answer, code), "route": route.key}
             if read["verdict"] == "fail":
                 return self.review_failed(fam, n, stage, read["reasons"] or [f"the {stage} failed it"], read=read)
@@ -1697,8 +1906,9 @@ class EquityResearcher:
                                               + read["reasons"][:2], read=read)
                 _update(self.store, fid, lambda r: r.update(review={**pending, "unclear": unclear}))
                 return {"family": fid, "version": n, stage: "unclear", "reads": unclear[stage]}
-            if stage == "audit" and elane_review.model_of(route.key) == elane_review.model_of(str(reader or "")):
-                # A fallback inside the router reached the reviewer's own model: no second reader; asked again next round.
+            if stage == "audit" and elane_review.model_of(route.key) == taken:
+                # Never reached (`accept` refuses such an answer): the two-reader rule is held here too.
+                _update(self.store, fid, lambda r: r.update(review={**pending, "unclear": unclear}))
                 return {"family": fid, "version": n, "error": "the audit was answered by the reviewer's model"}
             pending[stage] = {k: read.get(k) for k in ("verdict", "route", "model", "reasons")}
             _update(self.store, fid, lambda r: r.update(review={**pending, "unclear": unclear}))
@@ -1797,11 +2007,11 @@ def versions_of(rec: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
     return {str(k): dict(v) for k, v in versions.items() if isinstance(v, Mapping) and str(k).isdigit()}
 
 
-__all__ = ["OBJECTIVE", "STATE_KEY", "TRAIN_AT_KEY", "TRAIN_OK_KEY", "TRAIN_FIRST", "TRAIN_LAST", "TRAIN_SPANS",
+__all__ = ["OBJECTIVE", "STATE_KEY", "TRAIN_AT_KEY", "TRAIN_OK_KEY", "HOUSE_ALERT_KEY", "TRAIN_FIRST", "TRAIN_LAST", "TRAIN_SPANS",
            "RESERVE_YEARS", "TRAIN_YEARS", "TRAIN_LABEL", "BAR", "FAILS", "JUDGED", "DEFAULTS", "AGENDA", "GROUPS",
            "MAP_LABEL", "cfg", "lane_on", "symbols_group", "cell_of", "cell_text", "outside_years", "combine", "year_rows",
            "train_score", "bar_text", "record_of", "e2_family", "passed_version", "identity", "judged", "tried",
-           "pass_current", "may_validate", "compact", "program_fault", "KIND", "StateCheckInterrupted", "state_inputs",
+           "pass_current", "may_validate", "compact", "dq_said", "program_fault", "KIND", "StateCheckInterrupted", "state_inputs",
            "SIZE_TOL", "same_intents", "restart_check", "with_state", "restart_text", "train_map",
            "closed_cells", "train_map_text", "refuted_rows", "needs_literal", "check_code", "program_of", "contract_text",
            "RESEARCHER_SYSTEM", "version_text", "EquityResearcher", "versions_of", "BETA", "EQUITY", "LANES"]

@@ -231,7 +231,7 @@ class Gates(LiveCase):
         self.assertEqual(live.proof.status()["status"], "passed")
         self.assertEqual([b["legs"][0]["position_intent"] for b in self.paper.sent if b.get("legs")],
                          ["buy_to_open", "sell_to_close"])
-        opened = self.paper.sent[0]
+        opened = next(b for b in self.paper.sent if b.get("legs"))    # the stock proof's SPY buy is the paper's too (E1)
         self.assertEqual((opened["qty"], opened["order_class"], len(opened["legs"])), ("1", "mleg", 2))
 
     def test_credit_structures_wait_for_two_thousand_dollars(self):

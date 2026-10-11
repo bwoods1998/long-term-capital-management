@@ -23,10 +23,11 @@ and the diagnostician are generators too, of the options lanes. This module is t
   one of 2025 or 2026 is (`elane_train.outside_years`), so no reserve session is run or scored and no 2020-2021
   figure or P&L reaches a family's record, the Train map, the yield ledger or any generator. WHAT THIS IS NOT: a seal
   of the reserve's BARS. On E1's runner the 2022-2024 run reads the bars before 2022-01-03 as look-back (NEEDS
-  `history`, up to `league.equity.config.MAX_HISTORY` sessions), so the 2022-2024 Train figures of a program with
-  look-back, the sums and the pooled t they enter, and the Train map's best t are functions of reserve bars (two
+  `history` + 1 sessions, up to `league.equity.config.MAX_HISTORY` + 1), so the 2022-2024 Train figures of a program
+  with look-back, the sums and the pooled t they enter, and the Train map's best t are functions of reserve bars (two
   markets that differ only in 2020-2021 can give such a program other 2022-2024 rows; its 2016-2019 rows are the
-  same, and a program that reads no history is the same throughout). Blanking the look-back before 2022-01-03 would
+  same). Even a program with no look-back reads the last 2021 session (the run's first decision is at its close):
+  one reserve bar is in every program's 2022-2024 slice. Blanking the look-back before 2022-01-03 would
   need a hook in E1's runner or store and would cost a long-look-back program most of 2022: the captain's call when
   the reserve's accessor is built.
 - INVARIANCE IS THE TEST. Two stores that differ only in what happened to share programs after Train (a Validation
@@ -35,8 +36,9 @@ and the diagnostician are generators too, of the options lanes. This module is t
   (league/tests/test_elane_e2_seal.py). For the reserve the tests say what holds and no more: E2 asks the runner for
   the two Train spans only and keeps no reserve row, figure or day, whatever the reserve's P&L would have been
   (test_elane_e2_seal.py, an invented runner with no look-back); on E1's runner no reserve session is run, a program
-  without look-back is byte for byte the same in two markets that differ only in 2020-2021, and one with look-back
-  differs in 2022-2024 only (test_elane_e2_e1.py).
+  without look-back holds one reserve bar (the last 2021 session) and, holding no price against another, has the same
+  figures of its own in two markets that differ only in 2020-2021 (the buy-and-hold beside its 2022 is measured from
+  that bar's close and moves), and one with look-back differs in 2022-2024 only (test_elane_e2_e1.py).
 
 Why E2 cares beyond the rule: a generator that sees which programs passed the sealed look learns the holdout, and
 the screen's false-positive cap per program (the pinned share screen S2's `fp_cap`, amendment A11; S1-R's before it)

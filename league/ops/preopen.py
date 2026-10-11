@@ -226,8 +226,11 @@ def collect(root: Path, base: Path, release: Path, gateway: Any, *, now: float, 
 
         obs = B.observe(root)
         rows = B.read(root)
+        # The options lanes' families only, as `B.read(root)` and the options roster above are: an equity family in a live
+        # band has its row in the equity lanes' own read (`B.read(root, lanes=LANES)`) and is check 10's (release E2).
         live_fams = guard.read(root / "swarm.sqlite", lambda db: guard.rows(
-            db, "SELECT id, band FROM families WHERE retired_at IS NULL AND band IN ('candidate','probe','sized') ORDER BY id"))
+            db, "SELECT id, band FROM families WHERE retired_at IS NULL AND band IN ('candidate','probe','sized') "
+                "AND structure NOT IN ('etf', 'stock') ORDER BY id"))
         acct = (out.get("gateway") or {}).get("account") or {}
         cap = ((out.get("grant") or {}).get("policy") or {}).get("capital_usd")
         E = min(M.D(acct["equity"]), M.D(cap)) if acct.get("equity") is not None and cap is not None else None

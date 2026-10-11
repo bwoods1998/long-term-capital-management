@@ -10,8 +10,11 @@ the hook. `table` is a `league.live.money.EquityTable` (read by attribute; this 
 
 THE BANDS (the EquityBook moves them, writing through its families reader, league/equity/families.py):
 - candidate -> probe: the family passed its lane's look (its row's `holdout_passed`) and an equity roster seat is free
-  (`elane.roster`, league/swarm/bands.py `seating`): its sleeve is `probe.sleeve_share` x E (0.25, A5);
-- probe -> sized: `sized_up` holds on its version's real closes: its sleeve is then `sized_sleeve_share` x E;
+  (`elane.roster`, league/swarm/bands.py `seating`): its sleeve is `probe.sleeve_share` x E (0.50: A5 as amended by
+  the captain's A20, Oct 11, 2026);
+- probe -> sized: `sized_up` holds on its version's real closes: its sleeve is then `sized_sleeve_share` x E (since A20
+  the Probe's own 0.50 x E: the Sized cap, 0.50, is the Probe sleeve). PARKED at the table in force
+  (`sized.min_trades` 1000): no equity program is Sized, so every equity close stays in the loss budget's tallies;
 - probe | sized -> candidate, exits only and sticky for the version: `edm1` names why (EDM1), or the program's realized
   Probe net reached `demotion.program_loss_usd` (-$300; the swarm's `elane.program_loss_usd` retires it too).
 """
@@ -96,7 +99,9 @@ def edm1_sigma(record: EquityRecord, returns: list[float] | None = None) -> tupl
 
 
 def sized_up(record: EquityRecord, table: Any) -> tuple[bool, str]:
-    """(money) THE SIZING-UP RULE: True when ALL hold on the version's real closes: n >= `sized.min_trades` (20); mean
+    """(money) THE SIZING-UP RULE: True when ALL hold on the version's real closes: n >= `sized.min_trades` (20 as
+    pre-registered; THE STEP IS PARKED at the table in force, whose row is 1000, until Sized closes count in the loss
+    budget: the constitution's `sized` comment, so no equity program is Sized); mean
     net return > 0 with its one-sided `sized.confidence` (80%) lower bound > 0; pnl beats `bh_pnl` when
     `sized.beat_bh` (an unpriced buy-and-hold fails it); `probe_sessions` >= `sized.min_probe_sessions` (5). The reason
     names the first that fails (or the figures that passed). A record with no spread at all (every return the same) is
@@ -131,7 +136,11 @@ def sized_sleeve_share(record: EquityRecord, table: Any) -> Decimal:
     """(money) A Sized program's sleeve share of E: `sized.kelly_fraction` (quarter) Kelly on the lower bound of its
     mean net return (`stats.quarter_kelly`: fraction x lcb / variance of the per-close net return), at most
     `sized.sleeve_share` (0.50), never below `probe.sleeve_share` (a Sized program never trades smaller than a Probe).
-    Floored to `SLEEVE_PLACES`. A record that sizes nothing (no bound above zero) gets the Probe's share."""
+    Floored to `SLEEVE_PLACES`. A record that sizes nothing (no bound above zero) gets the Probe's share.
+
+    AT THE TABLE IN FORCE (the captain's A20, Oct 11, 2026: `probe.sleeve_share` 0.50) the cap EQUALS the floor, so
+    the answer is the Probe's 0.50 for every record: a Sized program keeps the Probe sleeve and sizes nothing up. The
+    rule itself is unchanged (league/tests/test_equity_bands_money.py holds both)."""
     floor, cap = Decimal(table.probe_sleeve_share), Decimal(table.sized_sleeve_share)
     returns = _returns(record)
     bounds = stats.mean_bounds(returns, 1.0 - float(table.sized_confidence)) if len(returns) >= 2 else None

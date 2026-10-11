@@ -179,7 +179,10 @@ model cannot spend every round; the next UTC day it is asked again (Claude's lin
 A complete answer is judged exactly as before; `grounded_answer` (league/gym) is untouched.
 
 THE EQUITY LANES (release E1, Oct 2026; league/swarm/elane.py). The options round above never sees an equity-lane family
-(`SwarmStore.families` leaves them out). The equity round (`equity_round`, while `elane.mode` is "gate") takes each
+(`SwarmStore.families` leaves them out), and `run` never calls the equity round: the swarm's loop runs it on a thread of
+its own, after the tournament's equity step, every `elane.ROUND_SECONDS`, under the brake and with the Gym down too
+(league/swarm/loop.py `Swarm.equity_rounds`; A3: an equity look needs no Gym box), so neither the options lanes' alarms
+nor a failed options round holds an equity look. The equity round (`equity_round`, while `elane.mode` is "gate") takes each
 living Gym-band equity family whose validated version entered the gate (the share screen's Validation pre-check passed:
 `Tournament.equity_round`), not held by the operator, not already done with (`gated_sha`) and with no look in flight,
 and `look` dispatches it to `elane.look`: the one sealed look ON THE HOUSE, in the decider-isolated child, with a freshly
@@ -190,7 +193,9 @@ refuses it (the look waits, nothing is spent), and so does a daily store that en
 (A12). The look records its lane, the screen that judged it ("S2"), the receipt, c_H,used (S1: c_used) and the line
 stated beside every live trade, in its `detail` and its `swarm.gate` event. An equity look is never
 counted by the options lanes' leakage alarms (`alarms`). A look in flight from a process that died (`look_inflight`
-older than this process) is owed again. A failure of the equity round never stops the options round.
+older than this process) is owed again. A captain-seeded program's look waits, with no timeout and nothing spent,
+while a seed declared before it in its own declared lineage is alive without a verdict (`elane.seed_wait`, amendment
+A18; the round's `waits`).
 
 Every step is a `swarm.gate` event; band moves are `swarm.band` events (the site's news).
 Standard library only.
@@ -886,12 +891,6 @@ class Gate:
         out: dict[str, Any] = {"looked": [], "refused": [], "waiting": [], "held": [], "look_held": []}
         self._incubator_owed()  # a verdict an error kept from its bar last round: recorded first
         self._incubator_sweep()  # a look that landed, or a demotion, since the last round: its mark goes first
-        if elane.on(self.settings):
-            try:  # THE EQUITY LANES (release E1): their own round, apart from the options lanes' alarms
-                self.equity_round(out)
-            except Exception as exc:  # noqa: BLE001 - an equity failure never stops the options round
-                self.store.event("swarm.gate", None, {"action": "equity_round_error", "error": type(exc).__name__,
-                                                      "text": str(exc)[:300]})
         if self.alarm():  # every lane's alarm (the lane off: the one alarm, alpha-line looks): the whole gate stops
             self._record_alarms(self.stopped_lanes() if dlane.on(self.settings) else None)
             out["alarm"] = True
@@ -1324,31 +1323,58 @@ class Gate:
     def equity_round(self, out: dict[str, Any]) -> None:
         """THE EQUITY LANES' round (the module docstring): each living Gym-band equity family whose validated version is
         gate-ready goes to `look` (so to `elane.look`), one look at a time; a look in flight from a dead process is owed
-        again. Its looks are listed in `out["looked"]` with their lane."""
-        for fam in self.store.families(alive=True, lanes=elane.LANES):
+        again. Its looks are listed in `out["looked"]` with their lane. Called by the swarm's loop on the equity rounds'
+        own thread (`Swarm.equity_rounds`), never by `run`. ONE FAMILY'S ERROR NEVER STOPS THE OTHERS (as the
+        tournament's equity step): it is one private event and `out["errors"][family]`, and the next family is asked."""
+        # THE ORDER THE LOOKS ARE TAKEN IN is a decision under D3 (`elane.round_order`): by birth, the seeds as declared.
+        for fam in elane.round_order(self.store, self.store.families(alive=True, lanes=elane.LANES)):
             fid = str(fam["id"])
+            try:
+                self._equity_look(fam, out)
+            except Exception as exc:  # noqa: BLE001 - the families after it in the order still get their looks
+                out.setdefault("errors", {})[fid] = type(exc).__name__
+                self.store.event("swarm.gate", fid, {"action": "equity_round_error", "error": type(exc).__name__,
+                                                     "text": str(exc)[:300]})
+        try:  # a seed's wait that ended without being asked again (D3 refused it, it was retired): its warning clears
+            elane.seed_waits_over(self.store, self.settings)
+        except Exception as exc:  # noqa: BLE001 - a record that cannot be cleared is cleared next round
+            self.store.event("swarm.gate", None, {"action": "equity_round_error", "error": type(exc).__name__,
+                                                  "text": "the seeds' waits could not be read"})
+
+    def _equity_look(self, fam: Mapping[str, Any], out: dict[str, Any]) -> None:
+        """One family's turn in the equity round (`equity_round`): a look in flight from a dead process owed again, then
+        its one look when it is gate-ready, in the Gym band, not held and not already done with. A SEED'S LOOK that
+        waited at its last step for an earlier seed of its declared lineage (`elane.seed_wait`, asked by `elane.look`:
+        strict, no timeout) is listed in `out["waits"]`: {family: the seed it waits for}."""
+        fid = str(fam["id"])
+        state = fam.get("state") or {}
+        marker = state.get("look_inflight") or {}
+        if marker.get("sha") and float(marker.get("at") or 0) < self.started_at and not self.store.looked(marker["sha"]):
+            # Its look died with a process (the equity look runs in the round): owed again, nothing was recorded.
+            self.store.compare_and_set_state(fid, {"look_inflight": marker}, look_inflight=None, gate_ready=True)
+            self.store.event("swarm.gate", fid, {"action": "look_owed", "version": marker.get("n"), "lane": marker.get("lane")})
+            fam = self.store.family(fid) or fam
             state = fam.get("state") or {}
-            marker = state.get("look_inflight") or {}
-            if marker.get("sha") and float(marker.get("at") or 0) < self.started_at and not self.store.looked(marker["sha"]):
-                # Its look died with a process (the equity look runs in the round): owed again, nothing was recorded.
-                self.store.compare_and_set_state(fid, {"look_inflight": marker}, look_inflight=None, gate_ready=True)
-                self.store.event("swarm.gate", fid, {"action": "look_owed", "version": marker.get("n"), "lane": marker.get("lane")})
-                fam = self.store.family(fid) or fam
-                state = fam.get("state") or {}
-            if state.get("look_inflight") or fam["band"] != "gym" or not state.get("gate_ready"):
-                continue
-            if state.get("gate_hold"):
-                out["held"].append(fid)  # THE OPERATOR'S HOLD: nothing of it is looked at, its gate_ready stays
-                continue
-            version = self.store.version(fid, state.get("validation_version"))
-            if version is None or not version.get("code"):
-                continue
-            sha = run_sha(version)
-            if state.get("gated_sha") == sha:
-                continue
-            looked = self.look(fam, version, sha)
-            if looked is not None:
-                out["looked"].append({"family": fid, "passed": looked, "lane": elane.lane_of(self.store, fam)})
+        if state.get("look_inflight") or fam["band"] != "gym" or not state.get("gate_ready"):
+            return
+        if state.get("gate_hold"):
+            out["held"].append(fid)  # THE OPERATOR'S HOLD: nothing of it is looked at, its gate_ready stays
+            return
+        version = self.store.version(fid, state.get("validation_version"))
+        if version is None or not version.get("code"):
+            return
+        sha = run_sha(version)
+        if state.get("gated_sha") == sha:
+            return
+        asked = state.get(elane.SEED_WAIT_KEY)
+        looked = self.look(fam, version, sha)
+        if looked is not None:
+            out["looked"].append({"family": fid, "passed": looked, "lane": elane.lane_of(self.store, fam)})
+            return
+        # THE SEEDS' DECLARED ORDER (`elane.seed_wait`): the look asked it this turn (each ask moves the record).
+        wait = ((self.store.family(fid) or {}).get("state") or {}).get(elane.SEED_WAIT_KEY)
+        if isinstance(wait, Mapping) and wait != asked:
+            out.setdefault("waits", {})[fid] = wait.get("for")
 
     def look(self, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str) -> bool | None:
         """The one holdout look. None when the gate box did not run it (no look is spent). The version is marked as

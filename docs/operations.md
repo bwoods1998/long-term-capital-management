@@ -25,7 +25,13 @@ them). No evidence is reset, no grant re-ratifies. Train runs happen on the Hous
 
 **Switch it on** (after E1 is live: `elane.mode` "gate", the daily store written, the seeds born). On the owner's
 machine: `python3 set_swarm.py elane.birth_share=0.25 elane.e2.usd_day=8.0 --apply` (the captain's first values, A16).
-Read on the next loop pass; no deploy. The release itself ships `elane.mode` "off" and `elane.birth_share` 0 in
+Read on the next loop pass; no deploy. **The pace, said plainly:** the equity lanes' research spend (births, Train
+research and the equity review together) is `elane.e2.pace_share` of the researchers' hourly pace, the Sail model line:
+about a quarter of it at the shipped 0.25, and never more than half (the bound is 0 to 0.5). `elane.e2.usd_day` is only
+a cap above it: it can end a day's spend earlier, it never raises it, so 8.0 buys no more than the share does. The split
+is the captain's to set, with the settings tool, at switch-on: `python3 set_swarm.py elane.e2.pace_share=<share>
+--apply`, in the same command as the two values above or after it; left alone it is the shipped 0.25 (the details are
+under **The budget** below). The release itself ships `elane.mode` "off" and `elane.birth_share` 0 in
 policy.json, and with either one off NOTHING in E2 acts: neither round starts, no key is written, no event is made, no
 model is asked (the test runs E1's real loop on the committed policy). The bounds are in code: `elane.birth_share` 0
 to 0.5 (above reads 0.5; a value that is no number reads 0, so births stay off); `elane.e2.usd_day` 0 to 100 (outside
@@ -39,7 +45,29 @@ reads the default 8); every other `elane.e2` key has its own bound and a malform
   the options birth quota, floor and stall alarms count the options lanes only.
 - The equity researcher (`elane_train` round; every 10 min, 3 families a round) gives each family one step: score its
   newest version on Train, review a pass, ask its birth route for a program or a revision, or retire it (REFUTED on
-  Train with a graveyard row in E2's own words, or STALLED when no version could be judged).
+  Train with a graveyard row in E2's own words, or STALLED when no version could be judged). A round starts only
+  when it has work it can do now: none while every family is past its research, in a backoff, or needs a model E2
+  may not ask.
+- **Three static rules refuse a program before it is stored or run**, each with its reason in the author's next
+  brief: the Gym's code rules; the LEVEL rule (a price or volume level, or the ratio of two different symbols'
+  prices, held against a constant or a PARAMS value) with RUN-START DEPENDENCE (the sleeve's own dollars of the run,
+  `ctx.equity`, `ctx.cash`, `ctx.budget`, `ctx.caps`, a lot's `value`, `pnl` or `qty`, held against a constant, a
+  PARAMS value or the run's anchor: a profit lock reads where a window starts, and the screen's false-positive line
+  holds only for programs blind to that. The anchor is `ctx.budget`, `ctx.caps` or THE CAPITAL A LOT WAS BOUGHT WITH:
+  a lot's `qty` times its `entry` or `exit`, its `value` less its `pnl`, `exit` times `qty` less `net`, and the
+  sleeve's dollars written into a lot's `tag`; a program with no memory rebuilt the run's capital that way and was
+  the profit lock again, and the restart check passed it. A lot's own return, however it is written, a count of
+  sessions held and a size from `ctx.budget` are untouched); and the MEMORY rule (no object of `numpy` or `math` held as memory: it would
+  outlive a restart and be shared by every program in the decider child).
+- **What the static rule cannot see is the two paid readers' to refuse.** A lot's weight in the sleeve (its `value`
+  over `ctx.equity`) and the sleeve's cash share are allowed against a constant, because a weight cap is an honest
+  rule; set against the lot's own return, the same weight is the run's profit, and a program built on it locks its
+  profit, keeps no memory, and passes the static rule and the restart check. The same holds for a value the pass
+  cannot follow, and for the first equity a run saw kept in STATE (the restart check judges that one). The readers'
+  rubric names the pattern and ends on the rule: a rule whose trading depends on how far the run is ahead or behind is
+  refused, whatever its spelling (`league/swarm/ELANE_E2.md`, "What the static rule cannot see"). So a profit lock
+  the two readers both miss reaches the screen, whose false-positive line does not hold for it: read a bred program's
+  first live weeks with that in mind until E1's screen floor sees fresh starts.
 - **Train is 2016-19 and 2022-24** (A15): seven years, two runs a stress, summed. **2020-21 is the reserve**: no E2
   run has a session in it and a result carrying a row of it is refused whole (alert `elane_train_window`). The
   loosening, stated: the bar reads seven years, not nine.
@@ -51,10 +79,28 @@ reads the default 8); every other `elane.e2` key has its own bound and a malform
 - **Nothing after Train reaches a generator** (A9 D3): no Validation or look outcome, no band, no retirement after the
   look. The equity generators read Train facts only, and no options generator reads an equity graveyard row.
 
-**The budget.** `elane.e2.usd_day` (8 dollars a UTC day at the first switch-on) caps E2's MODEL dollars: births, Train
-research and the equity review together. They are Sail research dollars inside the swarm's research budget and under
-THE GATE'S RESERVE like any new research, never beside it; once the day's line is spent no equity question is asked
-until the next UTC day. Per family: at most 4 Train-scored versions and 7 write attempts. Train runs spend no model
+**The budget: a share of the Sail model line.** E2's MODEL dollars (births, Train research and the equity review
+together) are Sail research dollars inside the swarm's research budget and under THE GATE'S RESERVE like any new
+research, never beside it. The budget rule gives the swarm one hourly line for Sail models
+(`researcher.sail_usd_per_hour` after the budget's overlay: $0.3333 an hour, $8.00 a day, at the owner's ceiling;
+$0.0667 an hour at the floor), and E2 is paid from it, counted apart from the options researchers:
+- **E2's hourly pace** is `elane.e2.pace_share` (0.25, held to 0-0.5) of that line: $0.0833 an hour at the ceiling,
+  $0.0167 at the floor. Before each model call E2 reads what the swarm booked for its own request keys
+  (`swarm:elane:...`) in the trailing hour, holds for unanswered calls included, and asks nothing at or over it.
+- **E2's day** is `elane.e2.usd_day` and never more than a day at that pace: $2.00 at the ceiling and $0.40 at the
+  floor with the shipped share, so the captain's first value `usd_day` 8.0 is a cap above it and the budget's taper
+  tightens E2 with the line. Once the day is spent no equity question is asked until the next UTC day. To give E2
+  more, raise `pace_share` (`python3 set_swarm.py elane.e2.pace_share=0.4 --apply`); a `usd_day` under the share's
+  day binds.
+- **The options researchers** keep the rest: their hourly pace no longer counts E2's rows as their own spend (as it
+  never counted the architect's), and what E2 spent in the hour, at most its pace, comes off their limit. With E2
+  idle they have the whole line; with E2 at its pace, three quarters. Before this, E2's first switch values made it
+  the whole pace and every options researcher slept while E2 spent. The heartbeat's `status.researcher_pace.equity`
+  shows E2's spend, limit and what it took; `allocation.plan_usd_per_hour`, when set, counts E2's dollars as research
+  spend.
+Per family: at most 4 Train-scored versions and 7 write attempts. A question no route answered backs the family off
+(20 minutes, doubling to six hours); a Sail call that timed out after it was sent is booked at its hold and no other
+route is asked the same question. Train runs spend no model
 dollar (House CPU: up to about 72 short daily-bar runs an hour). After a Train pass the costs are E1's (Validation and
 the look on the House; real money only at Probe, inside the shared loss budget).
 
@@ -71,7 +117,16 @@ the look on the House; real money only at Probe, inside the shared loss budget).
   review's dollars are on rows of their own ("review:<route>"); `days` is the spend by UTC day against `usd_day`. The
   route for the next question is chosen from births, dollars and Train passes ONLY, never from a later stage (a choice
   made on look outcomes would feed the holdout back into which model writes programs).
-- Alerts (House warnings through the swarm's status events): `elane_train_window`, `elane_train_state`.
+- Alerts (House warnings through the swarm's status events, in the owner's `swarm_alerts` cause):
+  `elane_train_window`, `elane_train_state`, and `elane_train_house` (the equity Train is not running: a version's
+  third failure of the House's since it was last judged, the decider child failing every run or no equity store; at
+  most once every six hours).
+- **The owner's alarms and Done.** The stall causes (births, population, Gym runs, Validations) and pre-open check 6
+  read the options lanes only; an equity family in a live band is check 10's, and an equity Validation never reads a
+  stalled options pipeline as moving (`equity_validation_runs` and `equity_awaiting_ids` are beside). Done's item 7
+  ("births, Gym runs and Validations every UTC day") counts the options lanes; each day's `equity` row (births, Train
+  runs, Validations) is reported beside it, never a bar. Counting the equity lanes in item 7 would be the owner's
+  change of the pinned rule.
 
 **Stop it**, from the lightest (each read on the next loop pass, no deploy):
 1. `elane.birth_share=0`: no more births. The families already born finish their Train research, and one that passed
@@ -91,14 +146,18 @@ in `league/ci.py` `PENDING_GATEWAY`.
 **Verify after the deploy** (read-only): `policy.json` on the box has the `elane.e2` block and `elane.birth_share` 0;
 before the switch the swarm log has no `elane:` or `elane_train:` line and `swarm.sqlite` no `swarm.elane` event; the
 three identities are E1's. After the switch: an `elane:` line within the first loop passes, `swarm.born` events with an
-equity lane, `elane_train:` lines every 10 minutes while a family researches, and the `dlane` report's `equity_yield`
-with a row for the route that answered.
+equity lane, `elane_train:` lines while a family has a step to take, the heartbeat's `researcher_pace.equity`, and the
+`dlane` report's `equity_yield` with a row for the route that answered and its `day_line` and `usd_hour`.
 
-**Not handled, stated.** E2's rounds start only while the options Gym is configured and the Sail guard allows
-research, like every round that makes new research, though an equity Train run needs no Gym box. The restart check
-does not catch memory that changes fewer than 1% of sessions. **The reserve's bars reach Train as look-back**: no
-2020-21 session is run or scored, but a 2022-24 run reads up to 504 sessions before 2022-01-03 as its NEEDS `history`,
-so a program with look-back has 2022-24 Train figures that are functions of 2020-21 bars; sealing those bars too would
+**Not handled, stated.** E2's rounds start only while the Sail guard allows new research (THE GATE'S RESERVE and
+the brake hold them, as they hold every round that makes new research); the options Gym being down holds neither, since
+an equity Train run needs no Gym box. The restart check
+does not catch memory that changes fewer than 1% of sessions. The static rules do not follow a tuple or a dict stored
+whole, a container read in another function than it was filled in, or a level's digits (the two paid readers do), and the memory rule covers the programs the swarm breeds, not the seeds or
+the options Gym's programs (the root is E1's, for its next identity move). **The reserve's bars reach Train as look-back**: no
+2020-21 session is run or scored, but a 2022-24 run reads its NEEDS `history` + 1 sessions before 2022-01-03 (up to
+505), so a program with look-back has 2022-24 Train figures that are functions of 2020-21 bars, and even a program
+with no look-back reads the last 2021 session; sealing those bars too would
 be a change in E1's runner or store, the captain's call when the reserve's accessor is built. Post-earnings drift is
 named in the agenda and refused until earnings data exist.
 
@@ -113,14 +172,77 @@ side `league/swarm/elane.py`, its contract `league/equity/INTERFACES.md` and `le
 `equity_money.enabled` TRUE (the captain's A10.2: the switch ships on), `elane.mode` "off" (the captain sets "gate" with
 set_swarm.py once the deploy is verified) and the S2 screen's receipt pinned for both lanes (A11); nothing trades until
 a program passes its sealed look AND the stock paper proof's BUY stage passes. In E1 the
-lane's programs are the three captain-seeded BETA programs (`seed-overnight-spy`, `seed-overnight-qqq`,
-`seed-reversal-index`: agent-written, judged by the swarm's screen like any family, and said plainly to be seeded);
+lane's programs are the three captain-seeded BETA programs (`seed-overnight-qqq`, `seed-reversal-index`,
+`seed-overnight-spy`, in the order their looks are taken: agent-written, judged by the swarm's screen like any family,
+and said plainly to be seeded);
 architect and researcher births in the beta and equity lanes are E2.
+
+**The equity rounds run on their own** (A3: an equity Validation or look runs on the House in the decider child; no Gym
+box, no model dollar). While `elane.mode` is "gate" the swarm's main loop births the seeds each pass and starts the
+equity rounds on a thread of their own every 5 minutes (`league/swarm/loop.py` `equity_rounds`, `elane.ROUND_SECONDS`):
+the tournament's equity step (Validation, the retirements), then the gate's (the one sealed look), so a version
+validated in a round takes its look in the same round. **Neither the research budget's brake nor a Gym that is down or
+switched off holds them**, and no options round carries them: an options Validation that fails or runs long costs an
+equity family nothing. They need only the swarm process running (`enabled` in swarm.json) and `elane.mode` "gate". The
+heartbeat's `status.equity` shows the mode and when the last equity round started; the swarm's log has one `equity:`
+line a round (who was validated, who was looked at). **A Validation the House could not make is not a failed
+pre-check**: `validated` {family: entered} holds real verdicts only (`false` there is a FAILED pre-check, and the
+lineage's one try is spent), while a Validation that could not be made (the evidence child could not start, or a run
+that ended with no data: nothing is recorded, no try is spent, and it is asked again next round) or that was refused
+is named under `validation_errors` {family: the error}, in that line and, until the next round, in the heartbeat's
+`status.equity`. Read `equity-decider.log` on the box when one stays there.
+
+**The order of the looks** is the seed list's DECLARED order (`league/swarm/seeds.py` `EQUITY_SEEDS`,
+`elane.round_order`): `seed-overnight-qqq, seed-reversal-index, seed-overnight-spy`. It is a decision (the captain's,
+Oct 11, 2026, before any Validation or look, from Train-era figures only: amendment A18), because it matters under D3:
+of two programs of one lineage (Train daily returns correlating at 0.7 or more, or the same template) the later one
+is refused with no look. **The two overnight seeds share a template and are one lineage**, so only one of them is
+ever looked at. `seed-overnight-qqq` goes first by that decision; `seed-reversal-index`, a lineage of its own, follows;
+`seed-overnight-spy` is last and, once `seed-overnight-qqq` has been looked at (passed OR failed: the lineage's look
+is spent either way), it is refused its look as the same lineage and retired with that cause said
+(`elane.SAME_LINEAGE`), plainly reported. **The consequence to know: SPY's overnight seed, the one that buys at every
+close, is not expected to trade.** `seed-overnight-qqq` buys at a close only after a down close of QQQ, and
+`seed-reversal-index` only after a close at least theta below the prior one, so a session with no such close has no
+equity buy. Two rules hold the order (`league/swarm/elane.py`):
+- `round_order`: both equity rounds walk the seeds as one block in the declared order, whatever second each was born
+  in (the store's own order is by the second of birth and then the id: the alphabet's, or a clock tick's);
+- `seed_wait`, **strict within a lineage, with no timeout** (amendment A18): each seed's `lineage` in the list
+  declares the lineage it is in (the two overnight seeds are one; the reversal seed is its own). A seed's look is
+  never taken while a seed declared before it in the same lineage is alive without a verdict: it waits until that
+  earlier seed has been looked at (D3 then refuses the later one), has FAILED its Validation pre-check with no retry
+  owed, or is retired. So a look the House owes again (a run it could not make, a turn that raised), a slow data job
+  or a hold never hands the lineage's one look to the later seed. The wait spends nothing and shows in the round's
+  `waits` and in the family's `gate` word. It is asked at the look's last step before the sealed run, so its clock
+  counts only the rounds in which the later seed's own look was otherwise ready. After 30 counted minutes
+  (`SEED_WAIT_SECONDS`) ONE House warning (`equity_seed_waits`) names both seeds and why the earlier one has no
+  verdict yet; it is said again at most daily while the wait lasts, and cleared when the wait ends
+  (`equity_seed_wait_over`). **The warning is no timeout: the later seed keeps waiting. The operator's hold on the
+  earlier seed (`gate_hold`) holds the later seed of its lineage too; to give the lineage's look to the later seed,
+  retire the earlier one.** Seeds of different lineages never wait on each other (`seed-reversal-index` waits for
+  nobody, and nobody for it), a family that is no seed waits for none, and a seed whose order cannot be read is not
+  looked at that round (nothing spent).
+A program refused at the gate before its look retires with its cause said (`elane.SAME_LINEAGE`,
+`elane.FLOOR_INELIGIBLE`), not as a spent Validation try. After the first look, read the refusal rows on the box to
+confirm that SPY's seed was refused as QQQ's lineage (the figure stays on the House).
+
+**What a look does with a run that went wrong** (`league/swarm/elane.py` `look`):
+- a holdout run its own errors ended ("disqualified") is a look SPENT AND FAILED, never judged on its partial series;
+- a Train-era run that ended "disqualified" refuses the program at the floor (no look spent);
+- a look the House could not make (the capability, the store, the NEEDS call, a child that could not be started or
+  did not take the request, an answer that is not a result, no data) is no look and is owed again, however often: it
+  counts against no program (each try is a `look_failed` gate event naming the stage);
+- a sealed run the child TOOK and did not answer (it ran past its 20-minute budget, or it exited, while the program
+  held its holdout) is owed once more, then the look is spent and failed. Each time is a House warning ("the sealed
+  equity look of ... was sent and did not return"): read `<state>/equity-decider.log`. The evidence child's hash seed
+  is pinned, so the run owed again is the same run.
+- a validated version whose recorded run no longer reproduces (the data job wrote the next day, or the equity identity
+  moved) is validated again in the next round, the same try, whichever version the family's candidate is by then.
 
 **The switches** (all three must be on for a real equity open; any one off stops new opens):
 - `equity_money.enabled` (league/constitution.py, a CON change: the money digest moves and the standing grant re-ratifies
-  at the House's start). E1 ships True (money digest `ad8c761b`); False (`ea97607c`) is the stop: the book keeps its
-  tables, runs its exits and reconciles; no equity open.
+  at the House's start). E1 ships True (money digest `7e41909a`, with the Probe sleeve at 0.50 x E: **The Probe
+  sleeve** below); False (`23f17a14`) is the stop: the book keeps its tables, runs its exits and reconciles; no equity
+  open.
 - `elane.mode` (league/swarm/policy.json, swarm.json over it): "off" (the rollback: no seeded birth, no equity look) or
   "gate".
 - `STOCK_BUYS_REAL` (gateway/wrangler.jsonc): deployed "on" with PR #532; while the House's `equity_money.enabled` is
@@ -163,8 +285,28 @@ architect and researcher births in the beta and equity lanes are E2.
   an error alert with the owner's step (look at the practice account's SPY position and orders), real lots stay held
   (the max-hold rule applies once it passes) and new real buys stop until it passes; the next open window buys again
   and the one after sells. The attempt row is kv `paper_proof_stock`. Only the equity book waits on it (options entries
-  never do); its client ids are `lq-pp-...`. After a Sunday deploy: stage BUY at Monday 09:30:30 ET, the first real
-  close-window buy Monday 15:55 ET, stage SELL Tuesday 09:30:30 ET.
+  never do); its client ids are `lq-pp-...`. **Stage BUY never waits on the options route's own paper proofs**
+  (`paper_proof`, `paper_proof_single`): it goes in the first open window after the deploy. While it has nothing to do
+  (waiting outside its BUY window, or holding its lot outside the SELL stage's window) the proof makes no call to the
+  practice account. It tries once a session: a refused or unfilled practice buy costs a day. **A practice order the
+  venue never shows** (its POST answered unknown) is looked up by its client id, never sent again blind, and by the
+  equity book's own rule it is LOST after four lookups or ten minutes: one warning, nothing owned by it. A lost buy
+  costs that session (the next open window buys again, on a baseline read then); a lost sale goes again at once
+  while the practice account still holds the lot, and not at all when it holds less (it may have filled: the SELL
+  stage then fails at the window's end, with its error alert, each session until the owner has looked). A lost order
+  is looked for again for three days: one the venue shows after all is a second warning, and its fills are the
+  practice lot's (no second buy when it is found before the next one).
+- **After a Sunday deploy**, each step needing the one before it: the seeds are validated and looked at on Sunday by
+  the equity rounds (above), in the declared order; a seed that passes is seated at Probe and decided for Friday's
+  close by the book's SEATING PASS (below), so a look passed AFTER the day's decision still trades the next session,
+  not the one after; stage BUY goes in Monday's open window (its first send is the 09:31 minute's); the first real
+  close-window buy can then go in Monday's close window (the 15:55 minute's send); stage SELL goes in Tuesday's open
+  window. **No real buy on Monday** when any of these holds: no seed passed its look before Monday 15:54 ET (the
+  seating pass stops a minute before the close window); the seated program's decision on Friday's bars asks for no
+  buy (see **The order of the looks**: the seeds expected to trade buy only after a down close); stage BUY not
+  passed; or the options route's `paper_proof` is not passed while `live.require_paper_proof` is on (`real_block`
+  then refuses every real open in BOTH lanes: check that health shows `paper_proof` passed). An `at: open` intent of
+  a program seated after 09:45 ET is recorded missed.
 
 **Cash only, by choice** (amendment A1). The gateway (PR #532) admits margin where the account offers it (its book cap is
 equity x min(2, the multiplier), bounded by buying power). The House's equity book in E1 does not use it: margin
@@ -174,47 +316,244 @@ equity open is refused while account cash is below 0 or any us_equity position i
 (A8.1): no real open in either lane may push cash below the reserve. Available cash = cash - |short_market_value| -
 every working buy's worst cost (both books) - working reservations - `equity_money.cash_reserve_usd` ($50, above the
 gateway's $25 floor). The options book reserves against min(`options_buying_power`, available cash), and equity sizing
-reads the same figure. If cash is ever below 0, every open in both lanes refuses and an alarm fires. A later release may
-raise `invested_share` toward the venue's overnight multiplier once a margin-interest row is metered.
+reads the same figure. If cash is ever below 0, every open in both lanes refuses and an alarm fires. The same sum
+binds option opens (`money.invested_room`): equity lots and working equity buys + the options book's open maximum
+loss + the new open at most `invested_share` x E, in `plan_open`, the incubator, the House live test and the
+calibration. With no equity lot it never binds before `book_share`. A later release may raise `invested_share` toward
+the venue's overnight multiplier once a margin-interest row is metered.
 
 **The loss budget is shared** (A8.6). The options lane's `options_money.probe` rows ($400 net in any rolling 20 sessions,
 $800 net in total) bound every agent program's Probe opens in both lanes, read by one `probe_tally`: an open ETF lot
-counts 20% of its value, a stock 40%, an option its maximum loss, and ONE slot a program (never one a lot). With the
-equity lane invested at `probe.max_programs` x `probe.sleeve_share` x E (3 x 0.25 E), its open risk is 0.15 x E, so the
-options Probe lane keeps only $400 - 0.15 x E of window room: **effectively off** while the equity sleeves are full.
-The `dlane` report says so with the figures (`equity.options_probe_room`).
+counts 20% of its value, a stock 40%, an option its maximum loss, and ONE slot a program (never one a lot). The
+equity lane holds at most the LOWER of its Probe sleeves (`probe.max_programs` x `probe.sleeve_share` x E: 3 x 0.50 E)
+and the invested cap (`invested_share` x E: 1.00 E). Three one-ETF programs hold a lot of 0.25 x E each: 0.75 x E of
+ETFs, 0.15 x E of open risk, and no cross-program cap binds them. A program that holds several ETFs can fill its whole
+sleeve; three whole sleeves ask for more than the account holds, and the invested cap is the bound then: at most
+1.00 x E of ETFs, 0.20 x E of open risk. The options Probe lane keeps the window's rest, $400 less its realized loss
+less 0.20 x the equity lots: $400 - 0.15 x E against three one-ETF lots ($100 at E = $2,000, nothing from
+E = $2,667), and no room under the invested cap once the equity lane is invested to it: **effectively off** while the
+equity lane is full. From E = $2,667 the budget is what cuts the third one-ETF lot (each entry is cut to the budget's
+room over 0.20, so the lane stops at $2,000 of ETFs, less five times what the window has lost and the options lane
+has at risk). The `dlane` report says so with the figures (`equity.options_probe_room`: the lane's most, whose
+`bound` names which rule set it: the sleeves, the invested cap or the budget).
+
+**The Probe sleeve is 0.50 x E** (the captain's amendment A20, Oct 11, 2026; `equity_money.probe.sleeve_share`,
+league/constitution.py). The rule: a program that passed its look takes one of three seats, first come, with a sleeve
+of 0.50 x E; a program's position in one ETF is at most half its sleeve, so a one-ETF program's lot is 0.25 x E (it
+was 0.125 x E under the sleeve of 0.25 the branch carried before). Seats, seating and every other row are unchanged.
+- **Its source.** A pre-registered study (EQDONE-2: its design and decision rule pinned before any code or figure,
+  its code before the run) and that study's review, both finished before the first live equity trade and before the
+  result of the options lane's next close was known. Its question: Done reads the sum of the realized P&L of every
+  agent program's closes since Oct 10, both lanes together, so a losing close early in that sum must be earned back
+  by the lots that follow, and a lot of an eighth of E earns too little to do it. What the larger lot is exposed to
+  is long-only index-ETF direction: mostly the market, not alpha.
+- **Why 0.50 and not the study rule's 0.66.** The pre-registered rule over first-come designs picked 0.66. Its review
+  adopted that with a fallback to 0.50 if entries the House refuses or cuts make live trading differ from the replay
+  that Done's consistency clause reads (A14: the live and the shadow intents agree on at least 95% of the counted
+  sessions). They do: at 0.66 three one-ETF lots meet the invested cap and the cash reserve, so some entries are cut
+  or refused live that the Gym, which judges each program alone in its own sleeve, fills. At 0.50 no cross-program
+  cap binds for three one-ETF programs (0.75 x E, under the invested cap; two of them in one ETF are exactly the
+  instrument's 0.50 x E), so what a one-ETF program is filled live is what its replay fills.
+- **Its cost, plainly.** Against 0.66: a smaller rise in the chance of Done. Against 0.25: about twice the dollar
+  swings, losses as much as gains, and twice the spread and fees paid at zero edge. **The larger lot buys variance and
+  exposure to the market's direction, not edge and not a higher expected profit.** It was fixed before Monday's
+  option result was known and before the first live share trade.
+- **What it is.** A loosening of ONE row and its bound (`EQUITY_MONEY_BOUNDS["probe.sleeve_share"]`: 0.25 -> 0.50),
+  decided by the captain (Claude) under goal item 4 and reported here with its cost. **It is bounded by the owner's
+  caps and loss budget, none of which moved**, and `size_entry` applies each to every entry at any sleeve, naming the
+  one that binds:
+  - an ETF at most 0.50 x E across all programs (`instrument`): two programs in one ETF hold exactly 0.50 x E
+    together, each lot whole, and a third program's entry in that ETF is refused;
+  - at most 1.00 x E invested, the options' open maximum loss included (`invested`): three one-ETF lots are 0.75 x E
+    and fit; a fourth lot (a seated program's second ETF) fills the cap, and the next entry is refused;
+  - the House-wide cash reserve (`cash`): when E is the account's own equity, that fourth lot is cut to the invested
+    cap's room less the $50 kept in cash;
+  - the shared loss budget, $400 net in any rolling 20 sessions and $800 net in total (`budget`): an entry is cut to
+    the budget's room over the ETF weight;
+  - the kill switch, the daily stop and the drawdown stop, as before.
+- **The risk, stated** (the study's review; rules only, no result of the study). The lane is long only and cash only.
+  **The stops do not bound this lane's loss**: a tripped daily or drawdown stop, or the kill switch, blocks entries
+  and sells nothing, so lots already held ride the market until their own exits. What bounds the lane's loss is the
+  shared budget ($400 net in any rolling 20 sessions with open risk counted at 20% of an ETF lot's value, and $800
+  net in total: no new entry beyond their room), EDM1 (a demoted program's lots exit at the next open) and the
+  program's -$300 line. An open lot can lose more than the 20% it counts for. **The option-sign note**: by the
+  study's own table, if Monday's option (the options lane's open Probe position, which expires Monday) closes at or
+  above zero, the smaller lot would have been the better row. One row was shipped, fixed before that result was
+  known, and this is its stated price.
+- **The sizing-up step is parked** (`equity_money.sized.min_trades` 1000, inside its bound and a tightening; the
+  captain's decision on the study's review). The owner's loss budget ($400 net in any rolling 20 sessions, $800 net
+  in total) covers all real money, and E1 as built leaves a Sized program's closes outside the Probe window, the
+  total and the -$300 line; with the Probe sleeve equal to the Sized cap (0.50) the step would size nothing up
+  anyway. With 1000 no equity program is Sized, so every equity close stays inside the loss budget's tallies. The
+  sizing-up RULE stays pre-registered as written (**Sizing up and demotion** below); the row is switched back only
+  together with a change that counts Sized closes in the budget.
+- **The money digest** is `7e41909a` (full digest `e909eb10`): one move with the E1 block, ratified at the House's
+  start on the owner's deploy. **Rollback of the sleeve**, one owner deploy: `sleeve_share` "0.25" (the bound may
+  stay; the sizing-up step stays parked) and `PINNED_DIGEST` re-pinned; the digest is then `3a7c52d5`, the grant
+  re-ratifies, no fingerprint moves and no evidence is reset. Lots already held are not resized: a sleeve applies to
+  the entries sized after it.
+- Proof: `league/tests/test_equity_sleeve.py` (three lots of 0.25 x E with no cap binding, the fourth lot against
+  the invested cap and the cash reserve, two programs in one ETF, the budget's cut, a Sized program's sleeve),
+  `test_constitution` and `test_ci` (the row, its bound and one step past it), `test_equity_bands_money`,
+  `test_equity_money`, `test_equity_e2e` (the real book's lot).
 
 **The schedule** (New York time; `league/equity/schedule.py`, the offsets in force in `equity_money.order_path`; half days
 by the same offsets from the 13:00 close):
-- 16:20 the bars: each live program's symbols, 1Day raw and adjustment=all through the session just closed, written to
-  `eq_bars` with the arrays' sha (A8.11); 16:30 the decide: one isolated "equity" decider request a session, the intents
-  recorded in `eq_intents` for the NEXT session, at its open (`"at": "open"`, the default) or its close (`"at":
-  "close"`), with the House's exits (a lot is held at most its program's `max_hold_sessions`, default 20, cap 60: it
-  exits at the open that completes them, the Gym's rule too; a demoted, retired or band-dropped program; 2 sessions of
-  failed decides) as `house_exit`. A decide missed by a restart runs as a catch-up for the last close. A day's bars
-  fetched again by a later decision keep their morning audit while unchanged.
-- 08:30 the morning re-fetch audits yesterday's bars against a new fetch (a mismatch is an alarm and a twin note);
+- 16:20 the bars: each live program's symbols and the symbol of every lot open, opened or closed that session (a
+  retired or demoted program's last lot keeps its exit day's bar for its twin), read even when no program is live,
+  1Day raw and adjustment=all through the session just closed, written to `eq_bars` with the arrays' sha (A8.11). A
+  missing bar of a held symbol waits for the same 30-minute grace, then the day closes without it. 16:30 the decide:
+  one isolated "equity" decider request a session, the intents recorded in `eq_intents` for the NEXT session, at its
+  open (`"at": "open"`, the default) or its close (`"at": "close"`), with the House's exits (a lot is held at most its
+  program's `max_hold_sessions`, default 20, cap 60: it exits at the open that completes them, the Gym's rule too; a
+  demoted, retired or band-dropped program; 2 sessions of failed decides) as `house_exit`. A decide missed by a
+  restart runs as a catch-up for the last close. A day's bars fetched again by a later decision keep their morning
+  audit while their PRICES are unchanged (the next day's fetch always reads a later volume: the volume is no part of
+  the mark).
+- **A House exit rule that is due** (max hold, 2 failed decides, a demoted or retired program) goes at the next OPEN
+  even when the program planned its own `at: close` sale of that lot: that sale is recorded refused and the program
+  reads why in its next rejects, as the Gym rejects it. A program's own sale at the open goes first, and a House exit
+  already planned (a carried one, a flatten) stands.
+- **An instance is asked once a session**: a decide that runs again (a failed step, a restart between two programs'
+  commits) skips a program whose `last_decided_day` is the day. **A failed decide is counted once a session** (kv
+  `eq_failed` {instance: day}), whatever failed: the House could not ask (no program loaded, no bar, no ctx, the
+  decider), the program's own decide failed (it raised, ran past its limit or is disqualified: the child's answer
+  says `failed`, as the Gym engine counts), or the morning audit found a price mismatch. A program the House could
+  not ask is asked again every 10 minutes until the next session's pre-open; a program whose own decide failed has
+  spent the session (`last_decided_day` moves, no intent recorded: `last_decided_day` is the last session it was
+  ASKED, not the last it decided well).
+- 08:30 the morning re-fetch audits the last decision's bars against a new fetch: raw open, high, low and close
+  exactly, and the adjusted series as the as-of prices a program saw, to the vendor's cent rounding (see **The
+  vendor's cents** below). A PRICE mismatch is an error alert and a twin note (kv `eq_bars_audit`), cancels that
+  decision's planned buys of the programs that read the symbol and counts one failed decide for each (A8.5: two in a
+  row exit the program's lots). A VOLUME-only difference is a note (`eq_decision.volume`,
+  `eq_bars_audit[day].volume`, the `equity.bars_audit` record) and nothing else: the 1Day bar's volume goes on
+  counting late and after-hours prints after 16:20. Each symbol's rows are marked on its own verdict
+  (`eq_bars.audit` ok | mismatch); a symbol the decision did not read is left unmarked.
   09:25 the pre-open: the account, positions and orders read, reconciliation, the plan.
-- THE OPEN: exits at 09:30:30; entries after the exits filled or 2 minutes, sized on cash after the exit fills, until
-  09:45 (a missed entry is recorded, never chased); exits go on until 15:55. THE CLOSE (A2): at 15:55:00 exits then
-  entries, marketable limits re-priced every 30 s to 15:59:30, then recorded missed. Collars 10 bp (ETF) / 25 bp
-  (stock) widening to 50 / 100. A replacement goes only once the old order is terminal (A8.4). The book caps itself at
-  60 orders a day and never sends while the House-wide day count would leave less than the options book's exit reserve
-  (A8.3).
+- THE OPEN: exits from 09:30:30; entries after the exits filled or 2 minutes (`exit_wait_s`), sized on cash after the
+  exit fills, until 09:45 (a missed entry is recorded, never chased); exits go on until 15:55. THE CLOSE (A2): from
+  15:55:00 exits then entries, marketable limits re-priced each minute to 15:59:30, then recorded missed. In the
+  close window the entries wait for the window's exits to fill, or one minute (`CLOSE_EXIT_WAIT_S`, 60 s), as the open
+  window waits `exit_wait_s`. In either window an entry sized to nothing is not final while an exit may still fill:
+  it is sized again each minute and recorded missed at its cut-off. Cost stated: when an exit is still unfilled
+  after the wait, an entry that is cut but not to nothing goes at the smaller size, and its target is then fixed by
+  that first order. Collars 10 bp (ETF) / 25 bp (stock) widening to 50 / 100; an order refused before the venue
+  widens no collar. A replacement goes only once the old order is terminal (A8.4), and one buy intent is one lot
+  whatever a re-price finds. The book caps itself at 60 orders a day and never sends while the House-wide day count
+  would leave less than the options book's exit reserve (A8.3).
+- **The send times are effective, not nominal**: 09:30:30 and 15:55:00 are the earliest moments, never the send
+  times. The House's minute starts 3 s past the wall minute and the equity book runs after the options minute, so the
+  open window's first send is the 09:31 minute's (09:31:03 plus the options minute) and the close window's the 15:55
+  minute's (15:55:03 plus the same), with one re-price a minute at most (an order's age is counted in whole House
+  minutes, so a minute that started milliseconds early is still a minute). The close window therefore has the 15:55 to
+  15:58 minutes, and 15:59's only when the options minute ends before 15:59:30. Nothing is POSTed at or after a
+  cut-off by the wall clock (09:45:00 an open entry; 15:59:30 every exit and every close entry), and an order the
+  venue still shows working on a later day than its own is cancelled at the first minute that sees it.
 - MIN HOLD: a lot is never sold in the session it was bought (a close-bought lot may sell at the next open), kill switch
   included: the gateway's kill switch blocks sells too, so exits wait on it.
 - The House jobs: `equity_data` at the House's start and 22:30Z (below); `equity_twins` at the start, 01:15Z and 40
   minutes before each open; the `dlane` report (01:30Z, 30 minutes before each open) reads the twins.
 
+**The seating pass** (`league/equity/live.py` `_seat_step`). Once the day's decision is recorded (kv `eq_decide`
+{day, status, at, instances, why, seated_at}), the book reads the equity families again every minute until one minute
+before the next session's close window (15:54 ET). A Candidate that has since passed its look and holds a roster seat
+goes to Probe, gets its instance and is decided for the same close on the same bars, so its first order goes in the
+next session. Nothing else moves in that pass: no demotion, no sizing up, no retirement, no new version of a running
+family; those happen once a day at the decision. A record without `instances` (an idle or failed day, or one written
+by hand) is closed to the pass. The pass reads the swarm store once a minute around the clock (one read-only
+connection and a few rows); a store it cannot read shows in the minute's `equity.families` (`unreadable: ...`), with
+no alert until the decide.
+
+**The band sync retires only on positive evidence** (`_sync_instances`, `league/equity/families.py`,
+`league/swarm/bands.py` `read(..., strict=True)`). The book retires an instance only on a row that names another
+version or a band that does not run, or, for a family with no row, on the swarm store's own record (retired, another
+banded version, a band that does not run, a band proof that is not the current equity identity). A swarm store that
+cannot be read, a family whose code file or version row cannot be read, or a family the store does not hold changes
+nothing: the instance keeps deciding on the program the book holds, a warning alert names it once a decision day, and
+the sync runs again each minute until the decide. Every retirement is a warning alert. A retired instance whose
+family's row is back in the Probe or Sized band on the same version and program runs again at the next decision
+(never an EDM1 demotion, which is sticky for the version). **To stop a program, retire or re-band its family in the
+swarm**: `eq_instances.retired_at` set by hand is undone while the row runs.
+
+**Shares on the real account (A8.2;** `league/live/step.py` `_close_shares`**).** A SHORT share position is covered at
+once with a market buy of exactly the account's short (the gateway admits no larger buy on a symbol held short): whole
+shares first when the short is a share or more with a fraction, the fraction at the next reading (5 minutes in
+session, 15 outside). If a program's lot was netted against the assignment its shares are gone and are never bought
+back: the equity book closes the lot as `forced`, at the cover's fill price once the House's cover has filled, or at
+the lot's mark once a reading finds the short closed outside the House and the account short of the lot; it is
+exported with reason `forced`. A refused `lv-shares-` order is an error alert at once and hourly while it lasts, and a
+refused cover also mails the owner (stop `assignment`). Owner step: look at the real account's position and close it
+by hand if the House cannot; after a short closed by hand run `python3 -m league.live --root <state>
+--clear-assignment` (the ledger keeps what the House did not cover). A LONG excess is sold at market after two
+readings only on a symbol the equity book holds no lot of, or for the part an assignment or exercise explains; shares
+beyond a held lot that nothing explains (a split not yet booked) are never sold: an error alert names them and
+reconciliation freezes real entries until the book or the owner accounts for them. health.json `live.shares` shows
+the ledger, the House's share orders, a refused order's run, unexplained shares and swallowed lots.
+
+**The two books' reconciliations.** The options book's reconciliation does not judge a us_equity symbol while the
+equity book has an order working on it or one that changed in the last two minutes (`equity_hook.flux`, `FLUX_S`); the
+equity book's own reconciliation judges it once it settles, and its freeze blocks options opens too. An equity book
+that cannot be read gives the empty set: everything is judged (fail closed).
+
+**The minute.** An options pass that raises no longer costs the equity book its minute. The equity book's minute is
+skipped (summary `equity.skipped`, one warning a run) only when the real account's reads hung in the options pass
+(10 s or more in failed reads) and the pass ended past second 45 of the minute. A failure inside the share handling
+(`_close_shares`) is a warning and is read again at the next reading; it never ends the options pass. The owner's two
+commands (below) are read first in the equity book's minute, so they stay pending on a minute it skips.
+
 **The data job** (`league/ops/equity_data.py`, `equity_data`): Alpaca SIP daily bars of the universe through the gateway
 (`GET v2/stocks/bars`, already allowed), adjustment=raw and adjustment=all, from 2016-01-04 to the last closed session,
-the whole history each run (the all series restates every earlier row at a corporate action). The audit (calendar with
-no gap or extra day; sane bars; every raw/all ratio jump a split the raw close shows, and no raw jump the all series did
-not adjust; volumes; the 1Day bar against SPY's 1Min bars on 20 sessions, the design's fact 1: "regular", "extended" or
-"unverified") must pass, then `league.equity.store.write_store` writes `<state>/equity-daily/` atomically with the GATE
-mark. A failed fetch or audit writes nothing (a failed receipt, retried in its grace) and the last good store stays.
-"extended" is a stop for E1 (the store must then be built from 1Min bars); "unverified" is written and warned. The data
-never leaves the House's state directory (the vendor's terms; a public repository).
+the whole history each run (the all series restates every earlier row at a corporate action). The audit must pass
+(calendar with no gap or extra day; sane bars; every raw/all ratio jump a split the raw close shows, and no raw jump
+the all series did not adjust; volumes; the regular session, the design's fact 1), then
+`league.equity.store.write_store` writes `<state>/equity-daily/` atomically with the GATE mark. A failed fetch or
+audit writes nothing (a failed receipt, retried in its grace) and the last good store stays; a failed audit's receipt
+lists the first five problems of each failed check (symbols, days and verdict words; every decimal figure masked). The
+data never leaves the House's state directory (the vendor's terms; a public repository).
+- **Volumes**: every raw bar has a volume above zero, or is a FLAT bar of volume 0 (open = high = low = close: a
+  session without a trade), which passes and is listed in the manifest's audit (`volume.zero`).
+- **The regular session** (SPY's 1Day bar against its 1Min bars on 20 sessions): the session's prints are the minutes
+  from 09:30 through the closing minute (16:00; 13:00 on a half day), where the closing cross prints. A day agrees
+  when its open is the first minute's open or lies inside the 09:30 minute's range, its close is the last minute's
+  close or lies inside the closing minute's range, and its high and low lie between the extreme before the closing
+  minute and the extreme with it; the volume is not compared. A field that does not agree is "extended" when it is
+  the whole 04:00-20:00 day's figure and no session print shows it, else "neither". **"extended"** (more than 2 of
+  the 20 days hold an extended field) FAILS the audit and is a stop for E1 (the store must then be built from 1Min
+  bars); **"regular"** needs every day compared, at most 2 stray days and none extended; anything else is
+  **"unverified"**, written and warned.
+- **Why they read so** (the rehearsal on the House box against real SIP data, Oct 11, 2026; the rules and their
+  reasons only: no count read from the vendor's data is written here): as first written both checks were wrong about
+  real data and the job could never write a store. A flat bar of volume 0 is a session without a trade; the history
+  holds such bars, and history never changes. The daily bar's open is the opening cross (inside the 09:30 minute's
+  range) and its close is the closing cross (inside the closing minute's range), while its volume counts prints the
+  minute bars leave out; a rule that ended the session before the closing minute and compared the volume could never
+  read "regular", and read a close-set high or low as "extended". These correct the checks; they loosen no evidence,
+  and a bar truly built from extended hours still fails.
+
+**The vendor's cents** (the rehearsal's other finding; `league/equity/config.py` `rounding_bound`). The vendor rounds
+its adjustment=all prices to the cent and restates the whole series at every dividend and split. One bound says how
+far that rounding can move a ratio or product of adjusted prices (1.5 x half a cent x the sum of 1 / price), and two
+places share it so they cannot drift apart:
+- **the Gym engine** (`league/equity/engine.py` `ratio_tolerance`): a step of the all/raw close ratio inside its own
+  tolerance is no event. With a fixed bound the engine read the rounding as dividends (cash credited) and as
+  anomalies, and read a split whose step the rounding had pushed above its factor as a neighbouring fraction. A
+  dividend is credited to within about a cent a share; one smaller than the rounding of its two closes is not
+  credited. `engine.py` and `config.py` are evidence modules: this moved the equity identity, before any look.
+- **the book's morning audit** (`league/equity/live.py` `_as_of_equal`): two readings of a series an ex-date restated
+  give the same as-of prices within that bound. Raw prices are compared exactly. What the audit can still see is a
+  move larger than the bound: about 0.03 / price (half a basis point at $600, three at $100).
+- **I6 is the two builders on the same bars, not a live ctx against a later store.** After a later event the store's
+  as-of prices differ from the ones a live decision saw by up to that rounding, so a live decision's `ctx_sha` does
+  not reproduce byte for byte from a later store. A program whose condition sits within that rounding of its
+  threshold can decide differently live and in a later replay. A14's intent-agreement reading (95% of counted
+  sessions) polices it.
+  Owed before E2's births depend on it: as-of prices built from raw bars and per-event factors.
+- **The event tables have a first and a last row** (`league/gym/events.py`; `ctx.events`): fomc 2017-02-01 through
+  2026-12-09, cpi 2017-01-18 through 2026-09-11, jobs 2017-01-06 through 2026-09-04. Outside a table's rows its flag
+  is False on every session, in the Gym and live alike (one constructor): every session of 2016, and live every
+  session after the table's last row. The three seeds read no events. `events.py` is in the equity identity, so the
+  tables are extended, with verified dates, BEFORE any event-conditioned program is born (E2), never after its look.
 
 **The twins and the Done meter.** `equity_twins` (league/ops/twins.py) prices each closed lot's twin in closed form from
 the House's own official opens and closes (`eq_bars`, raw) with the engine's fill function (open and close fills, the
@@ -232,9 +571,14 @@ proceeds (`eq_lots.info.fee_basis` "broker", the estimate kept beside); a day wi
 to the owner once a lot. The funnel (`league/ops/funnel.py`) counts the equity lanes apart (`equity`).
 
 **Pre-registered before the first equity close** (the captain's A14, Oct 10, 2026; the same three sentences ride in
-every `dlane` report as `done.preregistered`). They are TEXT NOW: the code that reads them comes in a later release, and
-until it lands the meters read consistency by the pinned Done rule's own measure, no reading carries the close-date
-figures and no forward rule moves a seat. The Done rule itself is unchanged.
+every `dlane` report as `done.preregistered`). PARTLY COMPUTED: a reading that holds an equity close reads item 4
+("consistent with replay") by A14, never by the options replay gap (that gap divides by the maximum loss, a long lot's
+whole notional, so its 0.10 bound is a thousand basis points). The fill-gap half is computed from the equity twins
+(`a14` on each reading and checkpoint: the mean `gap_bp` of the counted equity closes with a final priced twin; a mean
+past 15 bp a side fails item 4, "not consistent"). The intents-agreement half has no reader yet, so item 4 of such a
+reading is NOT READ and never true: **no Done is declared on a reading with an equity close until that reader lands**,
+and the reading says why. No reading carries the close-date figures and no forward rule moves a seat. A reading with
+no equity close is read by the pinned rule's own measure, as before. The Done rule itself is unchanged.
 - Done's "live fills consistent with their replay" is read at each Done checkpoint, over its counted closes: the mean
   fill gap against the official-price model is at most 15 bp a side AND the live and the shadow intents agree on at
   least 95% of the counted sessions. A checkpoint that does not meet both says "not consistent" beside its P&L.
@@ -247,12 +591,75 @@ The official-price model is the engine's fill (the session's official open or cl
 `league.equity.engine.fill_price`: what each equity twin is priced with); the shadow intents are the same program's
 decisions replayed on the same sessions. Closes that share a close date are one cluster of the t.
 
+**P(Done | zero edge) beside equity closes.** `done.p_done_zero_edge` is the options Probe rules' simulation figure. It
+was never measured for share closes: a delta-one lane reaches Done whenever the market rises, so its zero-edge P(Done)
+is far higher. With any equity close counted the figure says so (`applies_to`, `equity_note`) and each checkpoint's
+`equity` block carries the same sentence (`zero_edge_note`); no figure for the share lanes is stated. The screen's row
+beside an equity trade (`fp`) carries S1-X's label as `s1x` (alpha or beta) and the lane's as `lane_label` (MARKET BETA
+or EQUITY), never one `label`.
+
+**Sizing up and demotion (pre-registered before the first live trade;** `league/equity/bands.py`, the rows in
+`equity_money.sized` and `equity_money.demotion`**).** Fixed here before the first live equity trade, as coded. Both
+rules read ONE PROGRAM VERSION's real record (`EquityRecord`, built by the book's `_record_of`): its closed real lots
+in close order, each close's net return = its net cash (fees and dividends included) over its entry notional. The
+bands move once a day, at the decision's band sync (never in the seating pass, never at send time).
+- **Candidate to Probe**: a Candidate that passed its lane's sealed look takes a free roster seat (at most
+  `probe.max_programs` 3 live programs, first come): a sleeve of `probe.sleeve_share` x E (0.50 since the captain's
+  A20: **The Probe sleeve** above).
+- **Probe to Sized** (`sized_up`), when ALL hold, checked in this order (the reason recorded names the first that
+  fails). **PARKED at the table in force**: `sized.min_trades` is 1000, so no equity program is Sized and every
+  equity close stays inside the loss budget's tallies (**The Probe sleeve** above says why); the rule below is the
+  rule as pre-registered, switched back only with a change that counts Sized closes in the budget:
+  1. at least 20 real closes (`sized.min_trades` as pre-registered; 1000 in force);
+  2. the closes have a spread (an sd above zero: closes with no spread at all never size up), their mean net return
+     is above zero, and its one-sided 80% lower bound is above zero (`sized.confidence` 0.80: mean - t(0.80, n - 1) x
+     sd / sqrt(n), sd the sample's);
+  3. the version's summed net cash is above the same-risk buy-and-hold's over the same sessions (`sized.beat_bh`: a
+     buy-and-hold that cannot be priced fails it);
+  4. at least 5 whole sessions in its live band (`sized.min_probe_sessions`).
+- **The same-risk buy-and-hold** (`_bh_pnl`): per symbol, the lots' average exposure over their span (entry notional
+  x sessions held, over the span's sessions) held from the close before the first entry to the close of the last
+  exit, at adjustment=all closes (total return). It is priced on ONE adjustment basis: the two closes are read from
+  `eq_bars` only when one fetch wrote both, else read again in one request at the daily band sync once the record
+  holds `sized.min_trades` closes; otherwise the figure is unpriced and `beat_bh` fails that day.
+- **The Sized sleeve** (`sized_sleeve_share`, read from the record each time an entry is sized): quarter Kelly on
+  that lower bound (`sized.kelly_fraction` 0.25 x the lower bound / the variance of the per-close net return),
+  floored to four decimals of E, capped at 0.50 x E (`sized.sleeve_share`) and **never below the Probe's 0.50 x E**:
+  a Sized program never trades smaller than a Probe. As coded: max(the Probe's share, min(quarter Kelly, the cap)).
+  **Since A20 the cap (0.50) is the Probe's own share (0.50), so the answer is 0.50 x E for every record: a Sized
+  program would keep the Probe sleeve and size nothing up.** The rule and its row are left as pre-registered; raising
+  `sized.sleeve_share` is a later decision, with its bound. What Sized would still change: a lot bought while Sized
+  carries no Probe mark, so its close joins neither the loss budget's realized figures nor the program's own -$300
+  line; its open value still counts as open risk at the same weight.
+- **Sized stays Sized**: no rule steps a Sized version back to Probe; it leaves its band only by EDM1 (or its
+  family's retirement).
+- **EDM1, the demotion** (`edm1`): the version goes back to Candidate, exits only, sticky for the version
+  (`eq_sticky`: no later reading re-seats it), when ANY holds, checked in this order:
+  1. at least 10 real closes (`demotion.min_trades`) and their summed net returns below -1.645 x sigma x sqrt(n)
+     (`demotion.z`). **Sigma, in this order** (`edm1_sigma`): the per-trade net-return sd of the version's Validation
+     run; else the sample sd of its own real closes once it has 10 of them (and that sd is above 1e-12: equal returns
+     are no sd of their own); else the rule's fallback 0.02 (a net return of 2% of notional a trade: a round figure,
+     chosen and not measured; a smaller sigma demotes sooner);
+  2. its realized Probe net (the net cash of its closed Probe lots) at or below -$300 (`demotion.program_loss_usd`;
+     the swarm's `elane.program_loss_usd` retires the family at the same line);
+  3. its fills on average more than 15 bp a side BELOW their replay twins over at least 5 priced closes
+     (`demotion.twin_gap_bp`, `demotion.twin_min_closes`; a twin gap is the close's live net return minus its
+     twin's, in basis points a side). Fills better than the replay never demote.
+  A demoted program's lots exit at the next open (the House's exit rule, A8.5). A record that cannot be read (a
+  return or a gap that is not a finite number) moves no band that day and is reported.
+
 **The equity identity** (the captain's A13). `equity_fingerprint` hashes the EVIDENCE modules of `league/equity/` only
 (`league.swarm.evaluator.EQUITY_EVIDENCE`: `__init__`, `config`, `store`, `program`, `ctx`, `engine`, `results`,
 `runner`, `synth`, `sizing`, `screen`, `child`: what Validation, the look and a live decision execute), the four shared
-league files and the Gym modules they import. A change to one of them sends every live equity band back to the Gym for
-fresh qualification (no new try, no new look). The PLUMBING is out (`live`, `actions`, `schedule`, `families`, `bands`,
-`kinds`): a fix to the EquityBook, its clock, its corporate actions or its band plumbing retires no lineage. The cost
+league files, the Gym modules they import, and THE CALENDAR'S THREE FILES (`EQUITY_CALENDAR_FILES`: `ltcm/__init__.py`,
+`ltcm/broker.py`, `ltcm/data/__init__.py`: the NYSE calendar the store's session list and the ctx read; a holiday or
+early-close rule changed there changes the sessions a Validation or a look runs over). **Treat those three as evidence
+files: a byte changed in any of them moves the equity identity.** A change to one of them sends every live equity band
+back to the Gym for fresh qualification (no new try, no new look: with its one look spent, a live program does not
+come back). An adoption keeps each look's LINEAGE RECORD (the looked version's Train series and template): D3 goes on
+binding later programs against every program already looked at, and where a looked-at program keeps no series the next
+look writes it again from that program's Train-era runs or waits, never passing D3 unjudged. The PLUMBING is out
+(`live`, `actions`, `schedule`, `families`, `bands`, `kinds`): a fix to the EquityBook, its clock, its corporate actions or its band plumbing retires no lineage. The cost
 stated: nothing in the identity then proves the live path matches the Gym after such a fix; the I6 ctx test
 (`test_equity_i6`) and the equity twins police it. `league/xs/` is the panel kind's slot (`kinds.KINDS["panel"]`): its
 `handle` refuses every op today, and a later cross-sectional lane is built there without touching `league/live` (the
@@ -261,8 +668,15 @@ options fingerprint) or the equity evidence modules.
 **Roll back: flatten first.** In order, each step verified before the next:
 1. `elane.mode` "off" in swarm.json (no seeded birth, no equity look).
 2. `equity_money.enabled` false (a CON change; the grant re-ratifies at the start): the book keeps running its exits only.
-3. `EquityBook.flatten(why)`: every open lot queued to exit at the next window through the normal path (never a market
-   order). Wait until health's `equity` line shows no lot held and no order working.
+3. On the box (the House need not stop): `python3 -m league.live --root /workspace/state --flatten-equity "<why>"` (a
+   reason is required). The command only writes a key-value (`owner_equity_flatten`); the book reads it first at its
+   next minute, in the House's own thread, and runs `EquityBook.flatten` once: every open lot queued to exit at the
+   next window through the normal order path (never a market order; the min hold stands, so a lot bought today leaves
+   at the next open), recorded as `equity.flatten` with who and why. `python3 -m league.live --root /workspace/state
+   --status` shows the command under `equity.pending_owner_actions` until the House has read it (within a minute; it
+   stays pending while the House runs no equity book, and on a minute the equity book skips). A flatten that fails
+   keeps its key and is tried again the next minute. Run it again if a lot appears afterwards (a buy that was still
+   working when it ran). Wait until health's `equity` line shows no lot held and no order working.
 4. Only then `python3 scripts/floor_box.py rollback`. **The guard (A8.9):** `deploy` and `rollback` refuse a release
    that lacks the EquityBook (`EQUITY_BOOK_MARKERS`: `league/equity/live.py` `class EquityBook`) while the box's
    `live.sqlite` has an `eq_lots` row open or closing or an `eq_orders` row working (read-only). `--force-equity-risk` is
@@ -270,18 +684,41 @@ options fingerprint) or the equity evidence modules.
    close, recorded as one) and its reconciliation freezes on them. Prefer fixing forward.
 `STOCK_BUYS_REAL` "off" (a gateway var deploy) closes the gateway's route at any point; closes go either way.
 
+**The equity freeze** (`eq_freeze` in live.sqlite's kv, A8.10). The book sets it, with an error alert, when an activity
+it cannot book touches a held symbol: any type outside the dividends and corporate actions it handles, or a rename.
+While it stands, `real_block` refuses every real OPEN IN BOTH LANES (options opens too) and the equity book opens
+nothing; exits go on. **It never lifts itself.** The owner books the action by hand (the lot's quantity, entry price or
+symbol), then on the box: `python3 -m league.live --root /workspace/state --clear-equity-freeze "<why>"` (a key-value,
+`owner_equity_clear_freeze`, which the book reads at its next minute: it deletes `eq_freeze` and records who cleared it
+and why, `equity.freeze` with `cleared: eq_freeze` and the old reason; opens go again in the same minute). The
+reconciliation's own freeze (`eq_recon`, shares held that the book does not explain) is a different one: the command
+never lifts it, it lifts itself after two clean readings and needs no command.
+
 **The gateway's stock route as the House sees it** (the gateway README's House-side note, kept here: `gateway/` ships on
 its own). The book sends `limit` `day` orders in shares (fractional, six decimals sent; the venue takes nine), never a
-notional, market or stop order, with client ids `lq-<eid>-<family>` (`league/live/real.py` `ingest` skips them: never a
-foreign order). A buy is a marketable limit at the ask x (1 + collar), a sale at the bid x (1 - collar). Each row is
-written `pending` before the POST; a lost answer is `unknown` and is looked up by its client id, never re-sent blind.
+notional, market or stop order, with client ids `lq-<nonce>-<eid>-<family slug>` (the state's nonce first, as the
+options book's `lv-<nonce>-...`: a rolled-back state never repeats an id the venue has seen; `league/live/real.py`
+`ingest` skips every `lq-` id: never a foreign order). A buy is a marketable limit at the ask x (1 + collar), a sale at
+the bid x (1 - collar). Each row is written `pending` before the POST; a lost answer is `unknown` and is looked up by its client id, never re-sent blind.
 The gateway's answers the book reads: `403 {cap}` (`stock_order`, `stock_position`, `stock_day`, `stock_total`,
 `buying_power`): a refusal recorded on the order; `503 equity` (Retry-After 30), `424 orders`, `424 positions`: the
 account or its book could not be read, nothing sent; `409 stock_close`: a second close of the same shares in flight;
-`423`: the kill switch, buys and sells alike. A buy is an open for the shared day counts (`MAX_DAY_OPEN_ORDERS` 250,
+`423`: the kill switch, buys and sells alike. `503 equity`, `424 orders`, `424 positions` and `409 stock_close` say
+nothing was sent and nothing was judged (`RETRY_CAPS`): the book sends the order again at its next minute until the
+window's cut-off. They never end an entry and never count toward the three refusals that carry an exit to the next
+session; after three in a day on one lot the owner is told once and the exit keeps going each minute. An order
+refused before the venue widens no collar. A `403 {cap}` is a verdict: an entry ends refused, and three on an exit in
+a session carry it to the next open. A buy is an open for the shared day counts (`MAX_DAY_OPEN_ORDERS` 250,
 `MAX_DAY_ORDERS` 300, both books together). The gateway's caps (50% of equity an ETF, 20% a stock, the margin line,
 buying power, 4x equity of buys a day) are the backstop under the House's tighter rules, never the rule the House sizes
 to. `/v1/health` `stock_buys` shows the switch, the shares, the day's buys and the buys in flight.
+**Against the lot of 0.25 x E** (A20; the gateway reads the account's equity, and E is never above it): one order and
+one ETF's position are under the gateway's 50%; the lane at its invested cap (1.00 x E) is at the gateway's book line
+on a multiplier of 1 (1.00 x equity), which the House's $50 cash reserve keeps it under; and the gateway's day line
+counts every buy it admits, a cancelled one too, so it admits sixteen sends of such a lot a day (it admitted 32 of the
+lot of 0.125 x E). Three entries a day sent once each use under a fifth of it; three entries can each climb the
+collar's whole ladder of five sends, with one send to spare, and a sixth send of each would meet `stock_day` and end
+refused (`league/tests/test_ci.py` holds the figures to the release's own gateway files).
 
 ## Real stock and ETF buys at the gateway (Oct 10, 2026): deployed 21:18Z Oct 10 (gateway `3cc811b0`, #532)
 

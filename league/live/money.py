@@ -97,8 +97,10 @@ by their own unit):
   `INCUBATOR_DAY_LEGS` order legs a day and `INCUBATOR_DAY_OPEN_SHARE` of the gateway's day cap; and it keeps room in
   the book's and the day's caps for the families' Probe room (`probe_room`) and the House live test. Its eligibility is the practice
   rule (`practice_ok`: the first look, pre-registered). Never evidence, never a band, never a promotion.
-- Every open: the book's open maximum loss at most `book_share x E`; the gateway's caps (one order's maximum loss at
-  most min(`gateway.order_max_loss_usd`, `gateway.order_equity_share x E`), today's opening maximum loss at most
+- Every open: the book's open maximum loss at most `book_share x E`, and with what the equity lane holds and is buying
+  at most `equity_money.invested_share x E` (THE HOUSE'S INVESTED CAP, A1: `invested_room`); the gateway's caps (one
+  order's maximum loss at most min(`gateway.order_max_loss_usd`, `gateway.order_equity_share x E`), today's opening
+  maximum loss at most
   `gateway.day_equity_share x E`) are checked here first so the House refuses before the gateway does. Today's opening
   maximum loss counts every open that reached the venue, filled or not, exactly as the gateway reserves it (it cannot
   see fills): the cap bounds what is sent; each real instance's orders a day and the gateway's 250 opens bound churn.
@@ -336,10 +338,10 @@ class EquityTable:
     invested_share: Decimal                     # "1.00" (A1: cash only by choice)
     cash_reserve: Decimal                       # "50" (A8.1), above the gateway's $25 floor
     open_risk_weight: Mapping[str, Decimal] = field(hash=False)  # class -> its share of a mark (0.20 / 0.40)
-    probe_sleeve_share: Decimal                 # "0.25" (A5)
+    probe_sleeve_share: Decimal                 # "0.50" (A5 as amended by A20: a one-ETF lot is 0.25 x E)
     probe_max_programs: int                     # 3 (A5) == elane.roster
     min_order_usd: Decimal                      # "10"
-    sized_min_trades: int                       # 20
+    sized_min_trades: int                       # 1000: the sizing-up step is parked (the rule's own count is 20)
     sized_confidence: float                     # 0.80
     sized_kelly_fraction: float                 # 0.25
     sized_sleeve_share: Decimal                 # "0.50"
@@ -792,7 +794,8 @@ class Exposure:
     probe_realized_total: Decimal | None = None
     # THE EQUITY LANE (release E1; owner: money; filled by league/live/real.py `RealBook.exposure` through
     # league/live/equity_hook.py): the equity rows' open risk (open_risk_weight x mark value of open ":r" lots, plus
-    # working ":r" buys; already inside `probe_at_risk`), and the equity long value plus working buys (the invested cap).
+    # working ":r" buys; already inside `probe_at_risk`), and the equity long value plus working buys (the invested
+    # cap: `invested_room` reads it for every option open, as league/equity/sizing.py reads `book_loss` for an equity one).
     equity_open_risk: Decimal = ZERO
     equity_invested: Decimal = ZERO
 
@@ -842,6 +845,32 @@ def family_cap(table: Table, band: str, equity: Decimal) -> Decimal:
     if band == "sized":
         return table.sized_family_share * equity
     return max(table.probe_family_share * equity, table.probe_floor)
+
+
+def invested_room(table: Table, equity: Decimal, exposure: Exposure) -> Decimal | None:
+    """THE HOUSE'S INVESTED CAP on the options side (A1; release E1): the dollars of maximum loss the options book may
+    still open under "equity lane long value + open equity buys + options open maximum loss <= `invested_share` x E"
+    (`Exposure.equity_invested` and `book_loss`; negative when it is already passed). The equity book applies the same
+    sum to its own opens (league/equity/sizing.py). None when the table carries no equity block (a hand-built table):
+    the rule is the equity lane's, and there is none. With no equity lot or buy it is `invested_share` x E less the
+    book's open maximum loss, which the book's own cap (`book_share`) binds first."""
+    share = getattr(getattr(table, "equity", None), "invested_share", None)
+    if share is None:
+        return None
+    return D(share) * equity - exposure.equity_invested - exposure.book_loss
+
+
+def invested_refusal(table: Table, equity: Decimal, exposure: Exposure, loss: Decimal) -> str | None:
+    """Why an option open of `loss` dollars of maximum loss would pass THE HOUSE'S INVESTED CAP (`invested_room`), or
+    None: every route's open asks it (`plan_open` sizes within it; the incubator, the House live test and the
+    calibration send one structure or none)."""
+    room = invested_room(table, equity, exposure)
+    if room is None or loss <= room:
+        return None
+    share = D(table.equity.invested_share)
+    return (f"the House's invested cap: the equity lots and buys ${cents(exposure.equity_invested)} and the options "
+            f"book's open maximum loss ${cents(exposure.book_loss)} leave ${cents(max(ZERO, room))} under {share:%} of "
+            f"equity (${cents(share * equity)}), and this risks ${cents(loss)}")
 
 
 def plan_open(table: Table, *, band: str, tuition: bool, equity: Decimal, unit: Decimal, fwd: Forward | None,
@@ -921,6 +950,12 @@ def plan_open(table: Table, *, band: str, tuition: bool, equity: Decimal, unit: 
     if qty < 1:
         return Plan(0, cap, f"the book's open maximum loss ${cents(exposure.book_loss)} leaves no room under "
                             f"{table.book_share:%} of equity (${cents(book)})")
+    # THE HOUSE'S INVESTED CAP (A1): what the equity lane holds and is buying counts beside the book's maximum loss.
+    room = invested_room(table, equity, exposure)
+    if room is not None:
+        qty = min(qty, int((room / unit).to_integral_value(rounding=ROUND_FLOOR)) if room > 0 else 0)
+        if qty < 1:
+            return Plan(0, cap, invested_refusal(table, equity, exposure, unit) or "the House's invested cap")
     order_cap = min(table.gateway_order_max_loss, table.gateway_order_share * equity)
     qty = min(qty, int((order_cap / unit).to_integral_value(rounding=ROUND_FLOOR)) if order_cap > 0 else 0)
     if qty < 1:
@@ -1074,6 +1109,9 @@ def plan_incubator(table: Table, *, unit: Decimal, equity: Decimal | None, tally
     if exposure.book_loss + unit + room > book:
         return Plan(0, cap, f"the book's cap: ${cents(exposure.book_loss)} of ${cents(book)} open maximum loss, and "
                             f"${cents(room)} is kept for the families' Probe room and the House live test")
+    invested = invested_refusal(table, equity, exposure, unit)
+    if invested:
+        return Plan(0, cap, invested)
     order_cap = min(table.gateway_order_max_loss, table.gateway_order_share * equity)
     if unit > order_cap:
         return Plan(0, cap, f"the gateway's per-order cap ${cents(order_cap)} is under one structure's ${cents(unit)}")

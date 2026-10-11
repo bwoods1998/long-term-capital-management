@@ -46,8 +46,9 @@ class StoreBacked(unittest.TestCase):
         self.rows = [row(self.fid), row("an-options-family", lane=None)]
         self.families = F.EquityFamilies(self.root)
 
-        def fake_read(root, *, family=None, lanes=None):
+        def fake_read(root, *, family=None, lanes=None, strict=False):
             self.assertEqual(lanes, LANES)
+            self.assertTrue(strict, "the book's reader must tell an unreadable store from one with no row")
             out = [dict(r) for r in self.rows if family is None or r["family"] == family]
             for r in out:
                 r["band"] = (self.store.family(r["family"]) or {}).get("band", r["band"])

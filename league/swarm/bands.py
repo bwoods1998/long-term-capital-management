@@ -88,6 +88,10 @@ every live trade) and `forward`. THE EQUITY ROSTER (`elane.roster`, `elane.roste
 apart from `dlane.roster`: a Probe family holds one, the Candidates queue for the rest by `banded_at` (`seating` with
 `equity_seatable`), and a Candidate waiting for a seat has no row; unlike the options roster, 0 seats no equity program
 at all. `read(root, lanes="all")` is both. `roster(root, lanes=LANES)` is the equity roster for reports.
+`read(root, lanes=LANES, strict=True)` (the EquityBook's reader asks so) RAISES `EquityUnreadable` where the plain read
+answers [] for a store it could not read (no store, a read that failed within its second, no equity identity): the book
+must tell "no equity row" from "could not read", because it retires an instance whose family is gone and a retirement
+sells its lots (A8.5; league/equity/live.py `_sync_instances`).
 
 `read(root, family=f)` and `observe(root, family=f)` read one family only (the live path's per-minute admissions). The
 Gym bundle's version is built once per `BUNDLE_TTL` seconds a process, not once per call (it reads and hashes every file
@@ -360,14 +364,16 @@ def _banded(db: sqlite3.Connection, *, equity: bool = False) -> list[dict[str, A
     return out
 
 
-def read(root: str | Path, *, family: str | None = None, lanes: Any = None) -> list[dict[str, Any]]:
+def read(root: str | Path, *, family: str | None = None, lanes: Any = None,
+         strict: bool = False) -> list[dict[str, Any]]:
     """The rows (the module docstring); `family`: that family's row only. [] when there is no store or it cannot be read
     within a second. `lanes` (THE EQUITY LANES): None the options lanes only (every existing reader); `LANES` (or one
-    equity lane) the equity rows only (`_read_equity`); "all" both."""
+    equity lane) the equity rows only (`_read_equity`); "all" both. `strict` (the equity rows only): raise
+    `EquityUnreadable` in place of that [] (the options rows are read as before)."""
     if lanes is not None:
         if lanes == "all":
-            return read(root, family=family) + _read_equity(root, family=family, lanes=EQUITY_LANES)
-        return _read_equity(root, family=family, lanes=lanes)
+            return read(root, family=family) + _read_equity(root, family=family, lanes=EQUITY_LANES, strict=strict)
+        return _read_equity(root, family=family, lanes=lanes, strict=strict)
     path = Path(root) / DB_NAME
     if not path.exists():
         return []
@@ -486,18 +492,44 @@ def current_equity_evaluator(state: Mapping[str, Any], sha: str, equity_sha: str
             and proof.get("equity_sha256") == equity_sha and proof.get("run_sha") == sha)
 
 
-def _read_equity(root: str | Path, *, family: str | None, lanes: Any) -> list[dict[str, Any]]:
+def equity_proof_current(state: Mapping[str, Any], version: Mapping[str, Any]) -> bool | None:
+    """Whether an equity family's band proof (`current_equity_evaluator`) is the CURRENT equity identity for the program
+    of `version` (its versions row: `sha`, `params`); None when the identity cannot be computed (no answer either way).
+    The EquityBook's reader asks it about a family that has no row (league/equity/families.py `standing`)."""
+    equity_sha = _equity_sha()
+    if equity_sha is None:
+        return None
+    from .gate import run_sha
+
+    return current_equity_evaluator(state, run_sha({"sha": version["sha"], "params": version.get("params") or {}}),
+                                    equity_sha)
+
+
+class EquityUnreadable(RuntimeError):
+    """`read(..., strict=True)`: the equity rows could not be READ (no store, a store that could not be read within its
+    second, or no equity identity to check a band against). Never raised for a store that was read and holds no row."""
+
+
+def _read_equity(root: str | Path, *, family: str | None, lanes: Any, strict: bool = False) -> list[dict[str, Any]]:
     """`read(root, lanes=...)`: the equity rows (the module docstring), the lanes `lanes` names. [] when there is no
-    store, it cannot be read within a second, or the equity identity cannot be computed (fail-closed)."""
+    store, it cannot be read within a second, or the equity identity cannot be computed (fail-closed); with `strict`
+    each of those three raises `EquityUnreadable` instead, so the caller can tell them from a store with no row. One
+    family's own trouble (its code file or its version row cannot be read) leaves that family out either way: the
+    EquityBook asks the store about a missing family before it retires its instance (league/equity/families.py
+    `standing`)."""
     wanted = {str(x) for x in ([lanes] if isinstance(lanes, str) else lanes)}
     unknown = sorted(wanted - set(EQUITY_LANES))
     if unknown:
         raise ValueError(f"lanes: {', '.join(unknown)} is no equity lane")
     path = Path(root) / DB_NAME
     if not path.exists():
+        if strict:
+            raise EquityUnreadable(f"no swarm store at {path}")
         return []
     equity_sha = _equity_sha()
     if equity_sha is None:
+        if strict:
+            raise EquityUnreadable("the equity identity could not be computed")
         return []
     from . import elane
 
@@ -524,7 +556,9 @@ def _read_equity(root: str | Path, *, family: str | None, lanes: Any) -> list[di
                     versions[fam["id"]] = dict(row)
         finally:
             db.close()
-    except sqlite3.Error:
+    except sqlite3.Error as exc:
+        if strict:
+            raise EquityUnreadable(f"{type(exc).__name__}: {str(exc)[:160]}") from exc
         return []
     from .gate import run_sha
 
@@ -915,4 +949,5 @@ def incubator(root: str | Path, *, family: str, version: int) -> list[dict[str, 
 
 __all__ = ["read", "observe", "incubator", "incubator_refusal", "program_refusal", "owed_bars", "priority", "practice_tier",
            "demoted", "LIVE_BANDS", "TIERS", "BUNDLE_TTL", "BELT_RECORDS", "BARS_OWED_FILE", "BAD_OUTCOMES",
-           "seating", "waiting", "roster", "equity_seatable", "equity_seats", "equity_seating", "current_equity_evaluator"]
+           "seating", "waiting", "roster", "equity_seatable", "equity_seats", "equity_seating",
+           "current_equity_evaluator", "equity_proof_current", "EquityUnreadable"]

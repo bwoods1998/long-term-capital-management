@@ -16,9 +16,9 @@ from pathlib import Path
 from league.equity import EQUITY_ENGINE_VERSION
 from league.gym.driver import LEAGUE_FILES
 from league.swarm import bands
-from league.swarm.evaluator import (EQUITY_EVIDENCE, EQUITY_EVIDENCE_EXTRA, EQUITY_EVIDENCE_ROOTS, EQUITY_GYM_FILES,
-                                    EQUITY_KEY, adopt, adopt_equity, equity_fingerprint, equity_identity,
-                                    execution_fingerprint, identity, is_equity_family)
+from league.swarm.evaluator import (EQUITY_CALENDAR_FILES, EQUITY_EVIDENCE, EQUITY_EVIDENCE_EXTRA, EQUITY_EVIDENCE_ROOTS,
+                                    EQUITY_GYM_FILES, EQUITY_KEY, adopt, adopt_equity, equity_fingerprint,
+                                    equity_identity, execution_fingerprint, identity, is_equity_family)
 from league.tests.test_swarm_store import SPEC, StoreCase
 
 REPO = Path(__file__).resolve().parents[2]
@@ -105,19 +105,20 @@ class Fingerprint(unittest.TestCase):
         plumbing = [f"league/equity/{name}.py" for name in PLUMBING]
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
-            for name in (*LEAGUE_FILES, *EQUITY_GYM_FILES, *evidence, *plumbing, "league/gym/fills.py",
-                         "league/live/step.py", "league/equity/deep/kind.py", "league/equity/newcomer.py",
-                         "league/xs/__init__.py", "league/xs/child.py", "league/swarm/elane.py"):
+            for name in (*LEAGUE_FILES, *EQUITY_GYM_FILES, *EQUITY_CALENDAR_FILES, *evidence, *plumbing,
+                         "league/gym/fills.py", "league/live/step.py", "league/equity/deep/kind.py",
+                         "league/equity/newcomer.py", "league/xs/__init__.py", "league/xs/child.py",
+                         "league/swarm/elane.py", "ltcm/data/kalshi.py"):
                 write(repo, name)
             original = equity_fingerprint(repo)
             options = execution_fingerprint(repo)
             for name in (*plumbing, "league/equity/deep/kind.py", "league/equity/newcomer.py", "league/xs/child.py",
                          "league/xs/__init__.py", "league/equity/EQUITY.md", "league/equity/INTERFACES.md",
-                         "league/live/step.py", "league/gym/fills.py", "league/swarm/elane.py"):
+                         "league/live/step.py", "league/gym/fills.py", "league/swarm/elane.py", "ltcm/data/kalshi.py"):
                 write(repo, name, "VALUE = 2\n")
                 equity_fingerprint.cache_clear()
                 self.assertEqual(equity_fingerprint(repo), original, name)
-            for name in (*evidence, *EQUITY_GYM_FILES, *LEAGUE_FILES):
+            for name in (*evidence, *EQUITY_GYM_FILES, *LEAGUE_FILES, *EQUITY_CALENDAR_FILES):
                 write(repo, name, "VALUE = 3\n")
                 equity_fingerprint.cache_clear()
                 self.assertNotEqual(equity_fingerprint(repo), original, name)
@@ -170,13 +171,15 @@ class Boundaries(unittest.TestCase):
                          "the identity lists files of league/equity itself: a sub-package would be outside it")
 
     def test_the_real_fingerprint_reads_exactly_the_listed_files(self):
-        """The repository's own identity: the same digest as one taken over EQUITY_EVIDENCE, LEAGUE_FILES and
-        EQUITY_GYM_FILES by hand, and unmoved by a byte of plumbing (read through a copy)."""
+        """The repository's own identity: the same digest as one taken over EQUITY_EVIDENCE, LEAGUE_FILES,
+        EQUITY_GYM_FILES and EQUITY_CALENDAR_FILES by hand, and unmoved by a byte of plumbing (read through a copy)."""
         import hashlib
         import shutil
 
-        files = sorted({*(f"league/equity/{name}.py" for name in EVIDENCE), *LEAGUE_FILES, *EQUITY_GYM_FILES})
-        self.assertEqual(len(files), len(EVIDENCE) + len(LEAGUE_FILES) + len(EQUITY_GYM_FILES))
+        files = sorted({*(f"league/equity/{name}.py" for name in EVIDENCE), *LEAGUE_FILES, *EQUITY_GYM_FILES,
+                        *EQUITY_CALENDAR_FILES})
+        self.assertEqual(len(files), len(EVIDENCE) + len(LEAGUE_FILES) + len(EQUITY_GYM_FILES)
+                         + len(EQUITY_CALENDAR_FILES))
         digest = hashlib.sha256()
         for name in files:
             digest.update(name.encode() + b"\0" + (REPO / name).read_bytes() + b"\0")
@@ -231,6 +234,7 @@ class Adoption(StoreCase):
         self.store.set_state("eq-beta", banded_version=1, elane_try={"version": 1, "precheck": True},
                              elane_look={"version": 1, "verdict": {"passed": True}}, gate_ready=True,
                              validation_r_sd_by_version={"1": 0.01}, elane_floor={"1": {"c_p": 1.2}},
+                             elane_train_r={"days": [1, 2, 3], "r": [0.01, -0.02, 0.0]}, elane_template="beta:t",
                              banded_evaluator={"engine": EQUITY_ENGINE_VERSION, "equity_sha256": "old-equity-code",
                                                "run_sha": "r"})
 
@@ -249,8 +253,11 @@ class Adoption(StoreCase):
         state = fam["state"]
         self.assertEqual(state["elane_try"], {"version": 1, "precheck": True}, "a spent try stays spent")
         self.assertEqual(state["elane_look"]["version"], 1, "a spent look stays spent")
-        for key in ("validation_r_sd_by_version", "elane_floor", "elane_train_r"):
+        for key in ("validation_r_sd_by_version", "elane_floor"):
             self.assertIsNone(state[key])
+        # The look's lineage record stays with the look (A9 D3 reads it for every later program; nothing rewrites it).
+        self.assertEqual(state["elane_train_r"], {"days": [1, 2, 3], "r": [0.01, -0.02, 0.0]})
+        self.assertEqual(state["elane_template"], "beta:t")
         self.assertFalse(state["gate_ready"])
         self.assertEqual(state["equity_evaluator"], current)
         self.assertEqual(state["previous_evaluator_selection"]["elane_floor"], {"1": {"c_p": 1.2}})
