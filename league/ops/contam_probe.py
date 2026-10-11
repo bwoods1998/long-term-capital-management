@@ -59,9 +59,11 @@ being rewritten) ends the run with the cells already scored kept and the billed 
 AS BUILT, beside the words above.
 - THE BOUND of a run's dollars is min(`usd_run`, E2's room for the UTC day when the run starts), and a run is skipped
   only when that room is zero. The probe's dollars are E2's (booked inside its day's line), so a run never takes
-  more than the day has left; where E2's day line is under `usd_run` (E2 holds its day to a share of the swarm's
-  Sail model line), a probe moves on by what each Saturday's line gives it and finishes over the next weeks, where
-  "skipped while the room is under `usd_run`" would have skipped every run and told nobody.
+  more than the day has left, and it asks nothing more once the day's line is spent by anyone (the room is read again
+  before every call: the swarm's own equity questions spend the same line meanwhile). Where E2's day line is under
+  `usd_run` (E2 holds its day to a share of the swarm's Sail model line), a probe moves on by what each Saturday's
+  line gives it and finishes over the next weeks, where "skipped while the room is under `usd_run`" would have
+  skipped every run and told nobody.
 - THE KEY's prefix is E2's own (`KEY_PREFIX`, "swarm:elane:probe"): the swarm tells the equity lanes' model dollars
   from the options researchers' by a request key that begins "swarm:elane:" (league/swarm/elane_yield.py; the
   loop's hourly pace), so the probe's dollars sit in the equity lanes' meters and one probe does not pause every
@@ -702,7 +704,8 @@ class Probe:
 
         def ask(batch: Sequence[Mapping[str, Any]]) -> list[Any] | None:
             """One batch's answers, or None once the run stopped asking (`state["stopped"]` says why)."""
-            if round(state["spent"], 6) >= bound:  # dollars to the ledger's own six places
+            # THE BOUND, and E2's day as it stands NOW: the swarm's own equity questions spend the same line meanwhile.
+            if round(state["spent"], 6) >= bound or not elane_yield.room(self.store, self.settings, now) > 0:
                 state["stopped"] = "usd"
                 return None
             if self.clock() - began >= ASK_SECONDS:

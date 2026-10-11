@@ -603,12 +603,29 @@ class TheJob(Jobs):
         self.clock.advance(WEEK)
         out, _ = self.probe()
         self.assertEqual((out["route"], out["bound"], out["finished"]), ("sail:pro_asap", 3.0, True))
+        # The swarm's own equity questions spend the same line while a probe runs: once the day is spent, by anyone,
+        # the probe asks nothing more.
+        store, clock = self.store, self.clock
+
+        class Meanwhile(ProbeRouter):
+            def ask(inner, **kw):   # noqa: N805
+                out = ProbeRouter.ask(inner, **kw)
+                if len(inner.calls) == 3:   # E2's research, in the swarm's process, takes the rest of the day
+                    elane_yield.book(store, "sail:k3", usd=elane_yield.room(store, settings(), clock()), known=True,
+                                     purpose="research", answered=True, now=clock())
+                return out
+        self.clock.advance(86400)
+        busy = Meanwhile()
+        out, _ = self.probe(router=busy)
+        self.assertEqual((out["route"], out["bound"], out["asked"], out["usd"], out["stopped"]),
+                         ("sail:glm_asap", 3.0, 3, 0.15, "usd"))
+        self.assertAlmostEqual(elane_yield.room(self.store, settings(), self.clock()), 0.0, places=6)
         # A day line under `usd_run` (E2 holds its day to a share of the swarm's model line) still lets a probe move.
         small = settings()
         small["elane"]["e2"]["usd_day"] = 0.5
         self.clock.advance(86400)
         out, _ = self.probe(settings_=small)
-        self.assertEqual((out["route"], out["bound"], out["stopped"]), ("sail:glm_asap", 0.5, "usd"))
+        self.assertEqual((out["route"], out["bound"], out["stopped"], out["usd"]), ("sail:glm_asap", 0.5, "usd", 0.5))
         self.assertGreater(out["cells"], 0)
 
     def test_the_dollar_stop_leaves_a_partial_that_the_next_run_finishes(self):
