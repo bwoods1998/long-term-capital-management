@@ -1224,6 +1224,7 @@ class WhoseFailure(Case):
 
         receipt = self.night(FWD[3], decider=Ticking(self, broken=("flip@1",)), fresh=fresh)
         self.assertEqual((receipt["programs"], receipt["errors"], receipt["retried"], receipt["stale"]), (1, 1, 1, 0))
+        self.assertEqual(receipt["house"], 0)                  # the program's own: it has its event
         (event,) = self.events("run_failed", bad)
         self.assertEqual((event["day"], event["payload"]["class"], event["payload"]["completed"]),
                          (FWD[3].isoformat(), "DeciderError", 1))
@@ -1266,7 +1267,7 @@ class WhoseFailure(Case):
         everyone = ("always@1", "flip@1")
         receipt = self.night(FWD[3], decider=Ticking(self, broken=everyone),
                              fresh=lambda: Ticking(self, broken=everyone))
-        self.assertEqual((receipt["programs"], receipt["errors"], receipt["retried"]), (0, 2, 2))
+        self.assertEqual((receipt["programs"], receipt["errors"], receipt["retried"], receipt["house"]), (0, 2, 2, 2))
         self.assertEqual(self.events("run_failed"), [])
         self.assertEqual((self.count("fwd_days"), self.count("fwd_tags"), self.count("fwd_runs")), (0, 0, 1))
 
@@ -1275,7 +1276,8 @@ class WhoseFailure(Case):
         bad = register(self.db, "flip@1", FLIPPER, first_close=BEFORE)
         for night, fresh in ((FWD[3], Dead), (FWD[4], None)):  # no child to retry in, or no retry at all
             receipt = self.night(night, decider=Ticking(self, broken=("flip@1",)), fresh=fresh)
-            self.assertEqual((receipt["programs"], receipt["errors"], receipt["retried"]), (1, 1, 0))
+            self.assertEqual((receipt["programs"], receipt["errors"], receipt["retried"], receipt["house"]),
+                             (1, 1, 0, 1))
         self.assertEqual((self.events("run_failed"), self.rows(bad)), ([], []))
 
     def test_one_that_completes_at_the_retry_is_written_as_any_other(self):
@@ -1310,7 +1312,7 @@ class WhoseFailure(Case):
 
         with mock.patch.object(forward_shadow.Shadow, "_put", put):
             receipt = self.night(FWD[3], fresh=InlineDecider)
-        self.assertEqual((receipt["programs"], receipt["errors"], receipt["retried"]), (1, 1, 0))
+        self.assertEqual((receipt["programs"], receipt["errors"], receipt["retried"], receipt["house"]), (1, 1, 0, 1))
         self.assertEqual(self.events("run_failed") + self.events("data_failed"), [])
         self.assertEqual((self.rows(bad), len(self.rows(good)), self.count("fwd_tags")), ([], 4, 0))
         self.assertEqual(self.night(FWD[4])["new_days"], 5 + 1)               # the next night fills it
@@ -1383,7 +1385,7 @@ class TheNight(Case):
         self.assertEqual((row["started"], row["finished"], row["seconds"]), (began, began + 10.0, 10.0))
         self.assertEqual(set(receipt), {"through", "engine", "programs", "sessions", "new_days", "restated", "checks",
                                         "stale", "errors", "data_failed", "disqualified", "retried", "budget_hit",
-                                        "seconds", "controls", "twins", "head", "finals", "register"})
+                                        "seconds", "controls", "twins", "head", "finals", "register", "house"})
         self.assertEqual((receipt["through"], receipt["engine"], receipt["seconds"], receipt["head"]),
                          (FWD[3].isoformat(), shadow.engine, 10.0, row["head"]))
         self.assertEqual(receipt["twins"], {"begin": {"days": 0, "rows": 0}, "rows": 2, "errors": 0,
@@ -1642,6 +1644,7 @@ class Controls(Case):
         receipt = self.night(FWD[14], gaps={"DIA": FWD[4:13]})
         self.assertEqual((receipt["controls"]["rows"], receipt["controls"]["errors"], receipt["controls"]["groups"]),
                          (15, 1, 2))
+        self.assertEqual((receipt["controls"]["data_failed"], forward_shadow.house_failures(receipt)), (1, []))
         self.assertEqual((self.rows(on_dia), len(self.rows(on_spy)), len(self.rows(program))), ([], 15, 15))
         (event,) = self.events("data_failed", on_dia)
         self.assertEqual((event["day"], event["payload"]["symbol"]), (FWD[14].isoformat(), "DIA"))
@@ -1654,6 +1657,8 @@ class Controls(Case):
             receipt = self.night(FWD[3])
         self.assertEqual((receipt["controls"]["errors"], receipt["controls"]["rows"], receipt["programs"]), (1, 0, 1))
         self.assertEqual((len(self.rows(program)), self.events("data_failed")), (4, []))
+        self.assertEqual((receipt["controls"]["data_failed"], forward_shadow.house_failures(receipt)),
+                         (0, ["1 controls left without rows"]))
 
 
 # ============================================================================================================= the job
@@ -1716,6 +1721,91 @@ class TheJob(Case):
         self.assertEqual(db.execute("SELECT COUNT(*) FROM fwd_runs").fetchone()[0], 1)
         self.assertEqual([d.closed for d in self.made], [1])   # its own child, closed in `finally`
         json.dumps(receipt)                                    # a receipt is plain JSON
+
+    def test_a_night_with_failures_of_the_houses_own_is_one_warning(self):
+        # Everything a night leaves no event for, at once: the registry's sync and every call of the twins raise, a
+        # control's draw raises, the forward store refuses one program's write. The other program is still written.
+        self.settings(mode="record")
+        db = self.book()
+        bad = register(db, "always@1", ALWAYS, first_close=BEFORE)
+        good = register(db, "flip@1", FLIPPER, first_close=BEFORE)
+        register_control(db, "index", 40, SYMBOLS, first_close=BEFORE)
+        write_night(self.root, FWD[3])
+        self.t = evening(FWD[3])
+        self.twins_raise = True
+
+        def locked(db_: sqlite3.Connection) -> None:
+            raise sqlite3.OperationalError("database is locked")
+
+        self.on_sync = locked
+        real = forward_shadow.Shadow._put
+
+        def put(shadow, pid, days, **kwargs):
+            if pid == bad:
+                raise sqlite3.OperationalError("database or disk is full")
+            return real(shadow, pid, days, **kwargs)
+
+        ctx = self.ctx()
+        with mock.patch.object(forward_shadow.Shadow, "_put", put), \
+                mock.patch.object(forward_controls, "control_lots", side_effect=RuntimeError("a draw's bug")):
+            receipt = forward_shadow.run(ctx)
+        self.assertEqual((receipt.get("status"), receipt["programs"], receipt["errors"], receipt["house"]),
+                         (None, 1, 1, 1))
+        (alert,) = ctx.alerts                                   # ONE warning a night, whatever failed
+        self.assertEqual(alert["level"], "warning")
+        for part in (FWD[3].isoformat(), "1 programs left without rows", "1 controls left without rows",
+                     "the registry's sync raised OperationalError", "the twins' timing table raised RuntimeError",
+                     "the twins' own runs raised RuntimeError", "the twins' re-price of 1 runs raised",
+                     "no program is marked"):
+            self.assertIn(part, alert["text"])
+        self.assertNotRegex(alert["text"], r"\d+\.\d+|%|\bbp\b")           # ids, counts and dates only (T8)
+        self.assertLess(len(alert["text"]), 900)
+        self.assertEqual(db.execute("SELECT COUNT(*) FROM fwd_tags").fetchone()[0], 0)
+        self.assertEqual(db.execute("SELECT COUNT(*) FROM fwd_days WHERE pid=?", (good,)).fetchone()[0], 4)
+        # The next night is clean: the day the House left out is filled, and nothing is said.
+        self.twins_raise, self.on_sync = False, None
+        write_night(self.root, FWD[4])
+        self.t = evening(FWD[4])
+        ctx = self.ctx()
+        receipt = forward_shadow.run(ctx)
+        self.assertEqual((receipt["new_days"], receipt["controls"]["rows"], receipt["house"], ctx.alerts),
+                         (5 + 1, 5, 0, []))
+
+    def test_the_datas_failures_and_a_program_that_failed_alone_are_not_the_houses(self):
+        # Each has its event (`data_failed`, `run_failed`), which the report's alarms read: the job says nothing.
+        self.settings(mode="record")
+        db = self.book()
+        register(db, "always@1", ALWAYS, first_close=BEFORE)
+        register(db, "dia@1", ON_DIA, first_close=BEFORE)
+        register(db, "flip@1", FLIPPER, first_close=BEFORE)
+        register_control(db, "defensive", 40, ("DIA",), first_close=BEFORE)
+        write_night(self.root, FWD[3], gaps={"DIA": FWD[:4]})
+        self.t = evening(FWD[3])
+        self.factory = lambda root: Ticking(self, broken=("flip@1",))
+        ctx = self.ctx()
+        receipt = forward_shadow.run(ctx)
+        self.assertEqual((receipt["programs"], receipt["errors"], receipt["data_failed"], receipt["house"]),
+                         (1, 1, 1, 0))
+        self.assertEqual((receipt["controls"]["errors"], receipt["controls"]["data_failed"]), (1, 1))
+        self.assertEqual((len(forward_db.events(db, "run_failed")), len(forward_db.events(db, "data_failed"))), (1, 2))
+        self.assertEqual(ctx.alerts, [])
+
+    def test_the_houses_failures_of_a_receipt(self):
+        clean = {"through": "2026-10-14", "errors": 2, "house": 0, "data_failed": 3,
+                 "controls": {"groups": 4, "rows": 200, "checks": 0, "restated": 0, "errors": 50, "data_failed": 50},
+                 "twins": {"begin": {"days": 1, "rows": 80}, "finish": {"instances": 2}, "rows": 7, "errors": 0},
+                 "finals": 1, "register": {"registered": 3, "chain_ok": True}}
+        self.assertEqual(forward_shadow.house_failures(clean), [])
+        self.assertEqual(forward_shadow.house_failures({}), [])
+        self.assertEqual(forward_shadow.house_failures({**clean, "house": 2}), ["2 programs left without rows"])
+        self.assertEqual(forward_shadow.house_failures({**clean, "controls": {**clean["controls"], "errors": 53}}),
+                         ["3 controls left without rows"])
+        self.assertEqual(forward_shadow.house_failures({**clean, "controls": {"error": "KeyError"},
+                                                        "finals": {"error": "OperationalError"}}),
+                         ["the controls raised KeyError", "the final checkpoints raised OperationalError"])
+        self.assertEqual(forward_shadow.house_failures(
+            {**clean, "twins": {"begin": {"error": "ValueError"}, "finish": {"instances": 2}, "rows": 0, "errors": 4}}),
+            ["the twins' timing table raised ValueError", "the twins' re-price of 3 runs raised"])
 
     def test_the_jobs_child_is_its_own_decider_with_its_own_log(self):
         child = self.real_decider(self.root)

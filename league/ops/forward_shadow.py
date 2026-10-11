@@ -95,9 +95,18 @@ with every decision's inputs as they were: a correction of that day's own mark, 
 deterministic); `"bars"` is "same" when any day is, else "moved" (a control reads no bar: "same").
 
 The receipt: {through, engine, programs, sessions, new_days, restated, checks, stale, errors, data_failed,
-disqualified, retried, budget_hit, seconds, controls, twins, head, finals, register}: counts and verdicts, never a
-program's figure. Every event payload and receipt text holds ids, counts, dates and class names only (a decimal figure
-in a failure's text is masked). Standard library and numpy only.
+disqualified, retried, budget_hit, seconds, controls, twins, head, finals, register, house}: counts and verdicts,
+never a program's figure. Every event payload and receipt text holds ids, counts, dates and class names only (a
+decimal figure in a failure's text is masked).
+
+THE HOUSE'S OWN FAILURES ARE SAID ONCE A NIGHT (`house_failures`; the job raises ONE `ctx.alert("warning", ...)` for
+them). What a night leaves no event for would else be read by nobody: `house` (in `errors`: the programs left without
+rows by a write the forward store refused, by a retry with no fresh child, or by failing twice on a night no other
+program's run completed), the controls left without rows by anything but the data, and each step of the night that
+raised (the registry's sync, the controls, the final checkpoints, the twins). The data's failures and a program that
+failed alone are not in it: they have their events, and league/ops/forward_report.py's alarms read those.
+
+Standard library and numpy only.
 """
 
 from __future__ import annotations
@@ -243,12 +252,45 @@ def _decider(root: Path) -> Any:
     return Decider(log=root / DECIDER_LOG)
 
 
+def house_failures(receipt: Mapping[str, Any]) -> list[str]:
+    """What of a night's receipt is the House's own failure and has no event (THE HOUSE'S OWN FAILURES, the module
+    docstring), each a short text of counts and class names only; [] for a clean night."""
+    def whole(value: Any) -> int:
+        return int(value) if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
+
+    def raised(part: Any) -> str | None:
+        return str(part["error"])[:60] if isinstance(part, Mapping) and "error" in part else None
+
+    out = []
+    if whole(receipt.get("house")):
+        out.append(f"{whole(receipt.get('house'))} programs left without rows")
+    controls = receipt.get("controls")
+    if isinstance(controls, Mapping):
+        unmade = whole(controls.get("errors")) - whole(controls.get("data_failed"))
+        if unmade > 0:
+            out.append(f"{unmade} controls left without rows")
+    twins = receipt.get("twins")
+    parts = [("the registry's sync", receipt.get("register")), ("the controls", controls),
+             ("the final checkpoints", receipt.get("finals"))]
+    if isinstance(twins, Mapping):
+        parts += [("the twins' timing table", twins.get("begin")), ("the twins' own runs", twins.get("finish"))]
+    for name, part in parts:
+        if raised(part) is not None:
+            out.append(f"{name} raised {raised(part)}")
+    if isinstance(twins, Mapping):
+        steps = sum(1 for part in ("begin", "finish") if raised(twins.get(part)) is not None)
+        if whole(twins.get("errors")) > steps:
+            out.append(f"the twins' re-price of {whole(twins.get('errors')) - steps} runs raised")
+    return out
+
+
 def run(ctx: Any) -> dict[str, Any]:
     """THE JOB (league/ops/registry.py): skipped when `forward_db.mode` is "off", inside `quiet`, or with no forward
     day in the store; else `Decider(log=<root>/forward-decider.log)` (its own instance; `InlineDecider` in tests
     only), `Shadow(...).night()`, the decider closed in `finally`. A `NightFailed` from the preflight is {"status":
     "failed", "error": ...} (the ops runner starts the job again inside its grace). A `MissingData` on opening the
-    store (it is being rewritten) is a failed receipt too."""
+    store (it is being rewritten) is a failed receipt too. A night that ran with failures of the House's own is one
+    warning (`house_failures`)."""
     from ..swarm import settings as swarm_settings
 
     root = Path(ctx.root)
@@ -284,7 +326,13 @@ def run(ctx: Any) -> dict[str, Any]:
 
     try:
         shadow = Shadow(root, db, decider=fresh(), settings=settings, clock=ctx.now, fresh=fresh)
-        return shadow.night()
+        receipt = shadow.night()
+        failures = house_failures(receipt)
+        if failures:
+            ctx.alert("warning", f"forward_shadow: the night of {receipt['through']} had failures of the House's own "
+                                 f"({'; '.join(failures)}): no program is marked for them, and the next night's "
+                                 "recompute fills what was left out")
+        return receipt
     except NightFailed as exc:
         return {"status": "failed", "error": f"the preflight failed, nobody was run or marked: {exc}"}
     except (MissingData, StoreRefused) as exc:
@@ -656,12 +704,12 @@ class Shadow:
         `fwd_days` rows with `r0` (and `bars` NULL: a control reads no bar); its checkpoints with `t_x0` and `p_x0`
         beside D4's.
 
-        Also {"checks", "restated", "errors"}: a control whose series cannot be made tonight is counted (the data's
-        is one `data_failed` event, once a (pid, night)) and the others go on; one written through `through` is
-        skipped."""
+        Also {"checks", "restated", "errors", "data_failed"}: a control whose series cannot be made tonight is
+        counted in `errors` (the data's, counted in `data_failed` too, is one `data_failed` event, once a (pid,
+        night)) and the others go on; one written through `through` is skipped."""
         last = self._last_stored()
         groups: set[str] = set()
-        out = {"groups": 0, "rows": 0, "checks": 0, "restated": 0, "errors": 0}
+        out = {"groups": 0, "rows": 0, "checks": 0, "restated": 0, "errors": 0, "data_failed": 0}
         for program in forward_db.programs(self.db, reasons=("control",), active=True):
             if program.first_day > self.through:
                 continue
@@ -674,6 +722,7 @@ class Shadow:
                 self._rollback()
                 self._data_failed(program, exc)
                 out["errors"] += 1
+                out["data_failed"] += 1
                 continue
             except Exception:  # noqa: BLE001 - one control never costs the others, or the programs' night
                 self._rollback()
@@ -794,6 +843,7 @@ class Shadow:
         except Exception:  # noqa: BLE001 - the forward store's own failure: counted, never the program's
             self._rollback()
             tally["errors"] += 1
+            tally["house"] += 1
             return None
         tally["programs"] += 1
         tally["sessions"] += len(run.series.days)
@@ -849,6 +899,7 @@ class Shadow:
                 child = None
         if child is None:
             tally["errors"] += len(failed)
+            tally["house"] += len(failed)
         else:
             self.decider = child
             for i, (program, _first) in enumerate(failed):
@@ -863,6 +914,7 @@ class Shadow:
             for program, why in twice:
                 completed = self._completed(program.pid)
                 if completed < 1:
+                    tally["house"] += 1
                     continue    # nobody else's run completed tonight: the House's, no program is named
                 forward_db.event(self.db, "run_failed", pid=program.pid, day=self.night_day, at=self.clock(),
                                  once="night", payload={"why": "failed again, alone, in a fresh child while another "
@@ -897,7 +949,7 @@ class Shadow:
                 "errors": int(tally["errors"]), "data_failed": int(tally["data_failed"]),
                 "disqualified": int(tally["disqualified"]), "retried": retried, "budget_hit": 1 if stale else 0,
                 "seconds": round(self.spent, 3), "controls": controls, "twins": twins, "head": head,
-                "finals": finals, "register": synced}
+                "finals": finals, "register": synced, "house": int(tally["house"])}
 
 
-__all__ = ["GATE_REASON", "DECIDER_LOG", "QUIET", "CANARY", "NightFailed", "quiet", "run", "Shadow"]
+__all__ = ["GATE_REASON", "DECIDER_LOG", "QUIET", "CANARY", "NightFailed", "quiet", "house_failures", "run", "Shadow"]
