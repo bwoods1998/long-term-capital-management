@@ -139,8 +139,9 @@ owner when the lanes next go wrong.
   swarm was down (a broken lane restarted inside 3 h was never judged idle); a House warning no longer cuts an
   owner step, the budget's floor is said before the lever's command, the idle hours say "at least" when the
   lookback bounds them, and the design notes call the replay a replay. The second check's probes are tests: the
-  broken lane at its pace and the slow reading-rule world on the invented House, the restarts and the unreadable
-  readers on the stall job. `gateway/` is not touched by this round.
+  broken lane at its pace, the slow reading-rule world and a lane of one family whose hold flaps (no step of its is
+  ever skipped: the job's own reading of the hold, kept from run to run, is what says it is held) on the invented
+  House, the restarts and the unreadable readers on the stall job. `gateway/` is not touched by this round.
 - **Merged with main** (Oct 11; main at `7d2d3c84`: release E3 as deployed). Six files touched by both, each merged
   mechanically, every line of E3 and of this release kept; `league/ops/stall.py` keeps E3's release receipts and its
   receipt's keys (the four are among its `checks`), `league/ops/funnel.py` an import and one call,

@@ -2436,10 +2436,11 @@ class TheOutputSettingsAreHeldToTheProvidersLimit(unittest.TestCase):
 class TheReplays(unittest.TestCase):
     """The replays of the two independent checks of Oct 11, on an invented House where the real equity pass, Train
     round, pace and stall job run (league/tests/elane_e24_house.py). THE RULING they hold: `elane_idle` alarms on a
-    broken lane only. A lane at its pace (the morning's trickle) and a lane that spends its day (the 54-hour healthy
-    lane) never stand and are never mailed, and what the settings cost is counted in the receipt and the funnel; a
-    lane whose every Train run fails on the House's side stands BROKEN with its owner step at any pace; and a slow
-    lane's programs refused by one rule are told early and do not lapse."""
+    broken lane only. A lane at its pace (the morning's trickle), a lane that spends its day (the 54-hour healthy
+    lane) and a lane of one family (no step of whose is ever skipped) never stand and are never mailed, and what the
+    settings cost is counted in the receipt and the funnel; a lane whose every Train run fails on the House's side
+    stands BROKEN with its owner step at any pace; and a slow lane's programs refused by one rule are told early and
+    do not lapse."""
 
     def write(self, code: str, usd: float) -> dict:
         return fx.answer([], cost=usd) | {"json": {"program": code, "note": "an invented note"}}
@@ -2654,6 +2655,79 @@ class TheReplays(unittest.TestCase):
             self.assertEqual((row["errors"], [c for c in ("elane_dq", "elane_refused") if row["checks"][c]["stalled"]]), ([], []))
             self.assertEqual([c for c in EH.CAUSES if row["checks"][c]["owner_step"]], [])
         self.assertTrue(all(mail["key"].startswith("stall:info:") and not mail["owner"] for mail in house.gateway.mails))
+
+    def test_a_lane_of_one_family_at_its_pace_never_stands_though_no_step_is_ever_skipped(self):
+        """The second check's finding B, its hardest case: with ONE family a Train round has one step, and no round
+        starts while E2 is held, so no step is ever skipped and nothing in the swarm's events says the lane was held
+        (the check's lanes of one and of two: held 93% and 98% of the time). Here every program is refused by the
+        reading rule, so NO version is ever scored and the lane is idle by its hours all day; E2's hold flaps (a write,
+        an hour held, a minute free, a write), and some runs of the job fall in the free minute. What says the lane is
+        held is the job's own reading at each run, kept from one to the next: a lane may ask a model only when no run
+        read a hold for three hours. The fault is `elane_refused`'s to tell, and it does."""
+        house = E24.House(self, E24.at("2026-11-02T00:02:00Z"),
+                          e2={"start": 1, "max_alive": 1, "min_per_pass": 1, "max_per_pass": 1})
+        count = itertools.count(1)
+        cells = (("equity", "trend"), ("equity", "reversal"), ("equity", "low_vol"), ("equity", "rotation"),
+                 ("equity", "turn_of_month"), ("beta", "overnight"), ("beta", "turn_of_month"), ("equity", "overnight"),
+                 ("equity", "other"), ("beta", "other"))
+        classes = ("trend_momentum", "reversal_liquidity", "relative_value", "calendar_flow", "event_premium", "equity_premium")
+        holdings = ("days_1_3", "days_4_10", "days_11_plus")
+
+        def answer(call: dict):
+            key = str(call.get("key") or "")
+            if fx.is_review(call):
+                return fx.review_answer("pass", model=call.get("sail_profile") or "pro_balanced", cost=0.0)
+            if key.startswith("swarm:elane:births:"):
+                i = next(count)
+                (lane, agenda), sym = cells[i % len(cells)], ("SPY", "QQQ", "IWM", "DIA")[i % 4]
+                row = fx.proposal(f"one-{i}", lane=lane, agenda=agenda, symbols=(sym,),
+                                  mechanism=f"Invented lone idea number {i}: a distinct {agenda} premium numbered "
+                                            f"{i * 7919} on {sym}.") | {"program": None}
+                row["card"] = {**row["card"], "mechanism_class": classes[i % len(classes)],
+                               "holding": holdings[(i // len(classes)) % 3]}
+                return fx.answer([row], cost=0.004)
+            if key.startswith("swarm:elane:train:"):
+                sym = (house.store.family(key.split(":")[3]) or {}).get("roots", ["SPY"])[0]
+                code = fx.program(sym, share=round(0.05 + next(count) / 10000.0, 4))
+                return self.write(code.replace("    out = [", f'    zebra = ctx.bars["{sym}"]["close"]\n    out = [', 1), 0.02)
+            return fx.answer([], cost=0.0)
+
+        house.router.script = answer
+        house.run(house.started + 48 * E24.HOUR)
+        idle = [(iso(row["at"]), row["checks"]["elane_idle"]) for row in house.rows]
+        self.assertEqual(len(idle), 96)
+        fams = house.store.families(alive=None, lanes=EH.LANES)
+        scored = sum(len(((f.get("state") or {}).get(EH.STATE_KEY) or {}).get("versions") or {}) for f in fams)
+        self.assertEqual(scored, 0, "no version is ever scored")
+        # No step was ever skipped: the events alone would call this lane free to ask at every moment.
+        steps = self.steps(house)
+        self.assertEqual(steps["skipped"], {"pace": 0, "usd_day": 0, "sail_day": 0, "other": 0})
+        self.assertGreater(steps["taken"], 30)
+        # It stands at none of the 96 runs, is in no mail and no House warning.
+        self.assertFalse([at for at, check in idle if check["stalled"]])
+        self.assertFalse([mail for mail in house.gateway.mails if "elane_idle" in mail["causes"]])
+        self.assertFalse([text for row in house.rows for text in row["alerts"] if text.startswith("stall: elane_idle")])
+        # With nothing scored for three hours it reads starved by a setting at every run that owes work: held now at
+        # most of them, and at the runs that fell in a free minute, held at the run before (the kept reading: nothing
+        # else says it). (Between a family's retirement and the next birth no work is owed, and the clock is dropped.)
+        starved = [(at, check) for at, check in idle if check["numbers"].get("starved")]
+        self.assertGreater(len(starved), 40)
+        self.assertEqual(len(starved), sum(1 for _, check in idle if (check["numbers"].get("idle_hours") or 0.0) >= EH.IDLE_HOURS))
+        for at, check in starved:
+            self.assertEqual((check["numbers"]["judged"], check["numbers"]["held_lately"], check["numbers"]["steps_skipped"],
+                              check["owner_step"]), (True, True, 0, None), at)
+            self.assertIn("STARVED BY A SETTING, not broken: ", check["what"], at)
+        free = [(at, check) for at, check in starved if check["numbers"]["held_now"] == "none"]
+        self.assertTrue(free, "some runs read E2 free to ask at that moment")
+        for at, check in free:
+            self.assertIn("; E2 may ask a model now and was last held 0.5 h ago.", check["what"], at)
+            self.assertIn("programs were refused before a run (see elane_refused)", check["what"], at)
+        # The fault is told by the cause that owns it, with its step.
+        refused = [row["checks"]["elane_refused"] for row in house.rows]
+        self.assertTrue(refused[-1]["stalled"] and refused[-1]["owner_step"])
+        self.assertGreater(sum(1 for check in refused if check["stalled"]), 80)
+        for row in house.rows:
+            self.assertNotIn("zebra", json.dumps(row))
 
     HOUSE = OwedWorkAndNothingScored.HOUSE
 
