@@ -840,13 +840,9 @@ class TheBook(SeatCase):
         if name == "instrument":
             h.decider.needs[f.key("rare")] = {"symbols": ["SPY"], "history": 5, "max_hold_sessions": 60}
             h.book._loaded.pop(f.key("rare"), None)
-        f.plan("rare", {"buy": symbol, "share": 0.5, "at": "open"})
-        for hh, mm in ((16, 21), (16, 31)):
-            h.tick(hh, mm, day=f.days[2]) if False else None
-        # (session 2 is already decided by `run`; plan the buy at session 3's own decision of the day before is gone,
-        # so the buy is written as the decision would have written it: one planned intent for session 3's open.)
+        # Session 2 is decided: the buy is written as that decision would have written it, one planned intent for
+        # session 3's open.
         h.intent(f.inst("rare"), "buy", symbol=symbol, share="0.5", at_="open", exec_day=f.days[3], decided=f.days[2])
-        f.plan("rare")
         risk = L.probe_figures(h.state.rows, weights={"etf": D("0.20"), "stock": D("0.40")}).open_risk
         lot = None
         if name == "budget refused":
@@ -912,10 +908,8 @@ class TheBook(SeatCase):
                 sold = 0
                 if name == "filled":                           # it sells its lot itself at session 4, and is flat again
                     [lot] = f.h.book._lots(instance=f.key("rare"))
-                    f.plan("rare", {"sell": lot.lid, "at": "open"})
                     f.h.intent(f.inst("rare"), "sell", symbol=lot.symbol, lid=lot.lid, at_="open", exec_day=f.days[4],
                                decided=f.days[3])
-                    f.plan("rare")
                     sold = 1
                 f.run(4, 10)
                 self.assertTrue(f.h.book._flat(f.key("rare")) or f.band("rare") != "probe")
