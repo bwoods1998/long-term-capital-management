@@ -146,8 +146,9 @@ THE GOAL OF OCT 10, 2026 AND THE EQUITY LANES (release E1; the captain's design 
   every program but the seeded ones (the swarm store's kv `elane_seeds` and the book's `eq_instances.seeded`).
 - THE SHARED BUDGET'S CONSEQUENCE (A8.6): `equity.options_probe_room` says plainly that while the equity lane holds all
   it may (the lower of its Probe sleeves, max_programs x sleeve_share x E, and the invested cap, invested_share x E:
-  the cap's 1.00 x E since the captain's A20 set the sleeves at 0.66; open risk at the ETF weight) the options Probe
-  lane has only the rest of the $400 window: about $400 - 0.20 x E, effectively off.
+  the cap's 1.00 x E since the captain's A20 set the sleeves at 0.50, three of which ask for 1.50 x E; open risk at
+  the ETF weight) the options Probe lane has only the rest of the $400 window: about $400 - 0.20 x E, effectively
+  off. Three one-ETF programs hold less (a lot of 0.25 x E each: 0.15 x E of open risk), and the statement says so.
 - PRE-REGISTERED BEFORE THE FIRST EQUITY CLOSE (the captain's A14, Oct 10, 2026; `PREREGISTERED`, verbatim in every
   report as `done.preregistered` and in docs/operations.md; TEXT NOW, the code in a later release): how the Done rule's
   "live fills consistent with their replay" is read (`A14_CONSISTENCY`: the mean fill gap against the official-price
@@ -262,9 +263,10 @@ ZERO_EDGE_EQUITY_NOTE = (
 EQUITY_PROBE_NOTE = (
     "THE LOSS BUDGET IS SHARED (A8.6): the equity lane's open Probe risk counts in the same $400 window and $800 total as "
     "the options Probe lane. The equity lane holds at most the lower of its Probe sleeves (max_programs x sleeve_share x "
-    "E: 3 x 0.66 E) and the invested cap (invested_share x E: 1.00 E), so its open risk at the ETF weight (0.20) is at "
-    "most 0.20 x E. While the equity lane is invested to that cap the options Probe lane has only the window's rest, "
-    "$400 - 0.20 x E, and no room under the invested cap: effectively off.")
+    "E: 3 x 0.50 E) and the invested cap (invested_share x E: 1.00 E), so its open risk at the ETF weight (0.20) is at "
+    "most 0.20 x E; three one-ETF programs hold a lot of 0.25 x E each, 0.15 x E of open risk. The options Probe lane "
+    "has only the window's rest ($400 less its realized loss less 0.20 x the equity lots), and no room under the "
+    "invested cap once the equity lane is invested to it: effectively off.")
 #: PT1 (THE PROBE TOTAL AT $800, Oct 10, 2026): PREREG-T measured the $800 total and the -$300 program loss line at this
 #: roster alone (at no roster the operator's grid found the $800 total almost all cost), and L-D's $400 total and -$200
 #: line are the rules it measured them against.
@@ -781,8 +783,9 @@ def options_probe_room(equity_usd: Any, constitution: Mapping[str, Any] | None =
     `open_risk_weight.etf`, and what that leaves of the options Probe lane's window
     (`options_money.probe.loss_budget_usd`). What the lane may hold is the LOWER of every Probe sleeve invested
     (`equity_money.probe.max_programs` x `sleeve_share` x E) and THE INVESTED CAP (`invested_share` x E): since the
-    captain's A20 (Oct 11, 2026: sleeves of 0.66 x E) three sleeves ask for 1.98 x E and the cap's 1.00 x E is the
-    bound, so the open risk is 0.20 x E, not the sleeves' 0.396 x E. `bound` names what set the figure: "sleeves",
+    captain's A20 (Oct 11, 2026: sleeves of 0.50 x E) three whole sleeves ask for 1.50 x E and the cap's 1.00 x E is
+    the bound, so the open risk is 0.20 x E at most, not the sleeves' 0.30 x E (three one-ETF programs, a lot of
+    0.25 x E each, hold 0.15 x E of it: the figure here is the lane's most). `bound` names what set the figure: "sleeves",
     "invested_cap", or "budget" when that open risk in dollars would pass the window itself (every equity entry is cut
     to the budget's room, so the lane's open risk is never above it). A table with no `invested_share` row is read by
     its sleeves alone (the larger figure). E is the House's sizing equity (`dlane.unit_context`); the constitution's

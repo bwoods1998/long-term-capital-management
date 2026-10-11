@@ -341,7 +341,7 @@ def equity_table(**over) -> M.EquityTable:
     """THE HARNESS'S TABLE, INVENTED: a Probe sleeve of 0.25 x E (a $500 sleeve at the harness's E of $2,000) and, where
     Sized, money's share stubbed at 0.50. The book's plumbing reads the sleeve as a figure it is given, and the scenarios
     of this file and of test_equity_fx_orders are built by hand on that $500. It is NOT the table in force: since the
-    captain's A20 (Oct 11, 2026) `equity_money.probe.sleeve_share` is 0.66, which test_equity_money pins,
+    captain's A20 (Oct 11, 2026) `equity_money.probe.sleeve_share` is 0.50, which test_equity_money pins,
     test_equity_sleeve sizes through the real `size_entry`, and test_equity_e2e trades through the real book."""
     base = dict(enabled=True, universe=dict(config.UNIVERSE), position_share={"etf": D("0.50"), "stock": D("0.20")},
                 invested_share=D("1.00"), cash_reserve=D("50"), open_risk_weight={"etf": D("0.20"), "stock": D("0.40")},

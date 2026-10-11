@@ -338,7 +338,7 @@ class EquityTable:
     invested_share: Decimal                     # "1.00" (A1: cash only by choice)
     cash_reserve: Decimal                       # "50" (A8.1), above the gateway's $25 floor
     open_risk_weight: Mapping[str, Decimal] = field(hash=False)  # class -> its share of a mark (0.20 / 0.40)
-    probe_sleeve_share: Decimal                 # "0.25" (A5)
+    probe_sleeve_share: Decimal                 # "0.50" (A5 as amended by A20: a one-ETF lot is 0.25 x E)
     probe_max_programs: int                     # 3 (A5) == elane.roster
     min_order_usd: Decimal                      # "10"
     sized_min_trades: int                       # 20

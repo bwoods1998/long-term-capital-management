@@ -15,7 +15,7 @@ from league.live.money import EquityTable
 TABLE = EquityTable.from_constitution()
 #: The Sized sleeve's own arithmetic needs a Probe sleeve UNDER the Sized cap, where the Kelly leg and the cap can be
 #: reached: the quarter of E the block carried before the captain's A20 (Oct 11, 2026). At the table in force the Probe
-#: sleeve (0.66) is above the cap (0.50) and the rule answers the Probe's for every record (`AtTheTableInForce`).
+#: sleeve (0.50) is the cap itself (0.50) and the rule answers the Probe's for every record (`AtTheTableInForce`).
 UNDER_THE_CAP = replace(TABLE, probe_sleeve_share=D("0.25"))
 
 
@@ -99,30 +99,31 @@ class SizedSleeve(unittest.TestCase):
 
 
 class AtTheTableInForce(unittest.TestCase):
-    """THE PROBE SLEEVE AT 0.66 (the captain's A20, Oct 11, 2026): `sized.sleeve_share` 0.50 now sits BELOW
-    `probe.sleeve_share` 0.66, and the rule never sizes under the Probe's, so a Sized program keeps the Probe sleeve."""
+    """THE PROBE SLEEVE AT 0.50 (the captain's A20, Oct 11, 2026): `sized.sleeve_share` 0.50 now EQUALS
+    `probe.sleeve_share` 0.50, and the rule never sizes under the Probe's nor above the cap, so a Sized program keeps
+    the Probe sleeve."""
 
     def test_the_table_in_force(self):
         self.assertEqual((TABLE.probe_sleeve_share, TABLE.sized_sleeve_share, TABLE.probe_max_programs),
-                         (D("0.66"), D("0.50"), 3))
-        self.assertLess(TABLE.sized_sleeve_share, TABLE.probe_sleeve_share)
+                         (D("0.50"), D("0.50"), 3))
+        self.assertEqual(TABLE.sized_sleeve_share, TABLE.probe_sleeve_share)
 
     def test_a_sized_programs_sleeve_is_the_probes_whatever_its_record(self):
         for returns in RECORDS:
-            self.assertEqual(sized_sleeve_share(record(returns), TABLE), D("0.66"), returns[:2])
+            self.assertEqual(sized_sleeve_share(record(returns), TABLE), D("0.50"), returns[:2])
         # ...the record that sizes up among them (every leg met), and one whose quarter Kelly alone is far past E.
         self.assertTrue(sized_up(record(GOOD), TABLE)[0])
         bounds = stats.mean_bounds(GOOD, 0.2)
         self.assertGreater(stats.quarter_kelly(bounds["lcb"], bounds["sd"] ** 2, fraction=0.25, cap=10.0), 1.0)
-        self.assertEqual(sized_sleeve_share(record(GOOD), TABLE), D("0.66"), "the cap, then the Probe's floor: never E")
+        self.assertEqual(sized_sleeve_share(record(GOOD), TABLE), D("0.50"), "the cap, then the Probe's floor: never E")
 
     def test_a_sized_sleeve_is_never_below_the_probes_at_any_probe_sleeve_inside_the_bound(self):
         """Never under the Probe's, and never above the larger of the Probe's and the Sized cap: at each Probe sleeve
         from zero to the bound's loose end, for every record."""
         from league.constitution import EQUITY_MONEY_BOUNDS
 
-        self.assertEqual(EQUITY_MONEY_BOUNDS["probe.sleeve_share"], ("0", "0.66"))
-        for probe in ("0", "0.10", "0.25", "0.4999", "0.50", "0.5001", "0.66"):
+        self.assertEqual(EQUITY_MONEY_BOUNDS["probe.sleeve_share"], ("0", "0.50"))
+        for probe in ("0", "0.10", "0.25", "0.4999", "0.50"):
             table = replace(TABLE, probe_sleeve_share=D(probe))
             for returns in RECORDS:
                 share = sized_sleeve_share(record(returns), table)
