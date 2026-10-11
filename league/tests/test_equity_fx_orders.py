@@ -199,7 +199,7 @@ class ExitsThenEntries(T.BookTest):
     the entries in the minute it sent the exits, the lot being sold still in the sleeve, and a zero size was final."""
 
     def rotation(self, **kw) -> tuple[T.Harness, L.Lot, L.Lot, L.Intent, L.Intent]:
-        """A program whose Probe sleeve (0.25 x $2,000) is full of SPY and IWM decides: sell IWM at the close, buy QQQ
+        """A program whose Probe sleeve (the harness's $500) is full of SPY and IWM decides: sell IWM at the close, buy QQQ
         at the same close."""
         h = with_venue(self.harness(**kw), LateVenue)
         a = h.instance("rotator")
@@ -227,7 +227,7 @@ class ExitsThenEntries(T.BookTest):
     def test_the_whole_sleeve_rotates(self):
         h = with_venue(self.harness(cash="1500"), LateVenue)
         a = h.instance("rot")
-        lot = h.lot(a, "QQQ", "1.0", "500")                                 # the whole 0.25 x E sleeve
+        lot = h.lot(a, "QQQ", "1.0", "500")                                 # the harness's whole $500 sleeve
         h.intent(a, "sell", symbol="QQQ", lid=lot.lid, at_="close")
         buy = h.intent(a, "buy", symbol="SPY", share="0.5", at_="close")
         for mm in (55, 56, 57):
