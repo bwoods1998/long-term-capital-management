@@ -88,6 +88,15 @@ if HAVE:
                     o["filled_at"] = iso(self.clock())
                 self.held[symbol] = self.held.get(symbol, D(0)) + (add if buying else -add)
 
+    class CountingPaper(PaperStocks):
+        """The practice account, counting every read of its positions."""
+
+        reads = 0
+
+        def positions(self):
+            self.reads += 1
+            return super().positions()
+
 
 def stock_proof_passed(state) -> None:
     """Both stages of the stock paper proof taken as passed (league/tests/test_equity_paper.py proves them)."""
@@ -517,6 +526,135 @@ class TheRace(LiveCase):
         with self.assertRaises(RuntimeError):
             H.flux(live.equity, live.state.rows, now)
         self.assertEqual(live._equity_flux(now), set(), "unreadable: every symbol is judged (fail closed)")
+
+
+# ------------------------------------------------------------------------------------------ the minute (money-11, ops-15)
+@unittest.skipUnless(HAVE, "numpy not installed")
+class TheMinute(LiveCase):
+    def test_an_options_pass_that_raises_still_gives_the_equity_book_its_minute(self):
+        live = self.make([])
+        live.equity = book = FakeBook()
+        with mock.patch.object(live, "_options_minute", side_effect=RuntimeError("an options bug")):
+            with self.assertRaisesRegex(RuntimeError, "an options bug"):
+                live.minute()
+        self.assertEqual([now for now, _ in book.ticks], [self.clock()], "its fills are booked and its exits sent")
+        self.assertIsNone(book.ticks[0][1]["positions"], "nothing read this pass: the book reads what it needs")
+        self.clock.set(self.clock() + 60)
+        out = live.minute()                                            # the next pass is whole again
+        self.assertEqual((out["state"], len(book.ticks)), ("session", 2))
+
+    def test_the_equity_minute_is_skipped_only_when_the_account_reads_failed_late_in_the_minute(self):
+        live = self.make([])
+        live.equity = book = FakeBook()
+        self.run_to(9, 31)
+        self.assertEqual(len(book.ticks), 1)
+
+        def hang(seconds):
+            def positions():
+                self.clock.set(self.clock() + seconds)                # the venue's timeout
+                raise TimeoutError("timed out")
+            return positions
+
+        self.clock.set(at(MONDAY, 9, 32))
+        with mock.patch.object(self.venue, "positions", side_effect=hang(50)):
+            out = live.minute()
+        self.assertIn("positions: TimeoutError", " ".join(out["venue_errors"]))
+        self.assertIn("reads of the real account failed", out["equity"]["skipped"])
+        self.assertEqual(len(book.ticks), 1, "the next options pass must start on time")
+        self.clock.set(at(MONDAY, 9, 33))
+        with mock.patch.object(self.venue, "positions", side_effect=hang(50)):
+            live.minute()
+        self.assertEqual(sum(1 for _, text in self.alerts if "equity book's minute is skipped" in text), 1,
+                         "said once a run of skipped minutes")
+        self.clock.set(at(MONDAY, 9, 34))
+        with mock.patch.object(self.venue, "positions", side_effect=hang(1)):
+            out = live.minute()                                        # it failed at once: the minute is not spent
+        self.assertEqual((len(book.ticks), out["equity"]), (2, {"ticked": at(MONDAY, 9, 34)}))
+        self.clock.set(at(MONDAY, 9, 35))
+        real = self.venue.positions
+
+        def slow():
+            self.clock.set(self.clock() + 50)
+            return real()
+
+        with mock.patch.object(self.venue, "positions", side_effect=slow):
+            out = live.minute()                                        # slow, but it answered: never skipped
+        self.assertEqual(len(book.ticks), 3)
+        self.assertNotIn("venue_errors", out)
+
+
+@unittest.skipUnless(HAVE, "numpy not installed")
+class TheIdleProof(unittest.TestCase):
+    """ops-15: the book steps the stock proof every minute, around the clock, until both stages pass; a minute with
+    nothing for it to do reads nothing of the practice account."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.clock = Clock(at(MONDAY, 9, 0))
+        self.market = Market(self.clock)
+        self.paper = CountingPaper(self.market)
+        self.state = LiveState(Path(self.dir.name) / "live.sqlite", clock=self.clock)
+        self.alerts = []
+        self.proof = StockPaperProof(self.state, self.paper, clock=self.clock,
+                                     alert=lambda level, text: self.alerts.append((level, text)))
+
+    def tearDown(self):
+        self.state.close()
+        self.dir.cleanup()
+
+    def step(self, day, hh, mm, ss=3):
+        self.clock.set(at(day, hh, mm, ss))
+        return self.proof.step(self.clock(), market=self.market, window=S.moments(day))
+
+    def test_waiting_outside_its_window_reads_nothing(self):
+        sunday = MONDAY - dt.timedelta(days=1)
+        self.clock.set(at(sunday, 22, 0))
+        row = self.proof.step(self.clock(), market=self.market, window=S.moments(sunday))
+        self.assertEqual((row["status"], self.state.get("paper_proof_stock")["status"]), ("waiting", "waiting"))
+        for hh, mm in ((4, 0), (9, 25), (9, 30)):
+            self.step(MONDAY, hh, mm)
+        self.assertEqual(self.paper.reads, 0, "the night, the pre-open, the minute before the first send")
+        self.step(MONDAY, 9, 31)
+        self.assertEqual((self.paper.reads, len(self.paper.sent)), (1, 1), "the BUY window: it reads, and buys")
+
+    def test_holding_its_lot_reads_nothing_until_the_sell_window(self):
+        self.step(MONDAY, 9, 31)
+        self.step(MONDAY, 9, 32)
+        self.assertTrue(self.proof.buy_passed())
+        reads = self.paper.reads
+        for hh, mm in ((9, 33), (12, 0), (15, 20), (15, 56), (20, 0)):
+            self.step(MONDAY, hh, mm)
+        self.step(TUESDAY, 9, 30)
+        self.assertEqual(self.paper.reads, reads, "the buy's own session and the night: nothing to do, nothing read")
+        self.step(TUESDAY, 9, 31)
+        self.assertEqual([b["side"] for b in self.paper.sent], ["buy", "sell"])
+        self.step(TUESDAY, 9, 32)
+        self.assertTrue(self.proof.passed(), self.proof.status())
+
+    def test_a_missed_buy_window_and_a_failed_sell_stage_go_idle_too(self):
+        self.paper.stock_fill = "none"
+        self.step(MONDAY, 9, 31)
+        self.step(MONDAY, 9, 46)                                       # the entry cut-off: cancelled, tried again tomorrow
+        self.step(MONDAY, 9, 47)
+        reads = self.paper.reads
+        for hh, mm in ((9, 48), (13, 0), (16, 30)):
+            self.step(MONDAY, hh, mm)
+        self.assertEqual(self.paper.reads, reads, "tried today: idle until the next open window")
+        self.paper.stock_fill = "natural"
+        self.step(TUESDAY, 9, 31)
+        self.step(TUESDAY, 9, 32)
+        self.assertTrue(self.proof.buy_passed())
+        wednesday = TUESDAY + dt.timedelta(days=1)
+        self.paper.stock_fill = "none"
+        self.step(wednesday, 9, 31)
+        for hh, mm in ((12, 0), (15, 55), (15, 56), (15, 57)):
+            self.step(wednesday, hh, mm)
+        self.assertTrue(self.proof.sell_failed())
+        self.assertEqual(sum(1 for _, text in self.alerts if "SELL stage failed" in text), 1)
+        reads = self.paper.reads
+        for hh, mm in ((15, 58), (16, 30), (23, 0)):
+            self.step(wednesday, hh, mm)
+        self.assertEqual(self.paper.reads, reads, "failed for the day and flat of orders: idle until the next window")
 
 
 @unittest.skipUnless(HAVE, "numpy not installed")

@@ -626,13 +626,17 @@ class StockPaperProof:
     def step(self, now: float, *, market: Any, window: Any = None) -> dict:
         """Advance the one durable attempt (the module docstring) inside the book's OPEN window of the day (`window`:
         the book's `schedule.Moments`, None on a day without a session). Never raises for the venue's trouble: an
-        unreadable reading is the row's `why`, and nothing new is sent without readable evidence."""
+        unreadable reading is the row's `why`, and nothing new is sent without readable evidence. A minute with nothing
+        to do (`_idle`) reads nothing of the practice account."""
         row = self._row()
         if self.passed():
             return row
         if row.get("schema") != 1:
             row = self._new()
+            self._put(row)
         today = dt.datetime.fromtimestamp(now, NEW_YORK).date()
+        if self._idle(row, today, now, window):
+            return row
         try:
             if row.get("orders"):
                 work = row["orders"][-1]
@@ -650,6 +654,25 @@ class StockPaperProof:
             row["why"] = f"stock paper proof: {type(exc).__name__}: {str(exc)[:160]}"
         self._put(row)
         return row
+
+    def _idle(self, row: Mapping[str, Any], today: dt.date, now: float, window: Any) -> bool:
+        """Whether this minute has nothing for the proof to do, so the practice account is not read at all (the book
+        steps the proof every minute, around the clock, until both stages pass): no order of it is still working, and
+        it is waiting outside a BUY window it may still use, or holding its lot with stage BUY passed outside the SELL
+        stage's window (the buy's own session, a day without a session, before the window's first send, or after its
+        end once the day's failure is recorded). Exactly the minutes in which `_advance` would return the row as it
+        is."""
+        work = row["orders"][-1] if row.get("orders") else None
+        if work is not None and not work.get("terminal"):
+            return False
+        opened = window is not None and float(window.open_send) <= now
+        if row.get("status") == "waiting":
+            return not opened or row.get("tried_day") == today.isoformat() or now >= float(window.entry_until)
+        if row.get("status") == "held" and self.buy_passed():
+            if not opened or today.isoformat() <= str(row.get("buy_day")):
+                return True
+            return now >= float(window.exit_until) and row.get("sell_day") != today.isoformat()
+        return False
 
     def _advance(self, row: dict, held: Decimal, today: dt.date, now: float, window: Any, market: Any) -> dict:
         status = row["status"]

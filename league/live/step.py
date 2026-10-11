@@ -86,7 +86,8 @@ own sums), and its positions are Profit, labelled "incubator" on the site.
 
 THE EQUITY LANE (release E1; league/equity/live.py's `EquityBook`, reached only through league/live/equity_hook.py):
 `self.equity` is built with the real book, and `minute` calls its `tick` exactly once (a CI test holds the call site
-to one), after the options path's own reads and in its own guard, so an equity failure never ends the options minute.
+to one), after the options path's own reads and in its own guard, so an equity failure never ends the options minute,
+and an options pass that raises never costs the equity book its minute.
 The equity book asks `real_block(opening=True)` before any open, and its own freeze blocks options opens too (one
 account). Shares on the account (A8.2): what the equity book owns (its open lots and the filled part of its working
 orders) is never touched; every other us_equity quantity is UNATTRIBUTED: a short account quantity is covered at once,
@@ -151,6 +152,9 @@ ACTIVITIES_EVERY = 300.0
 FLOWS_EVERY = 300.0
 #: A House share order (`lv-shares-`) still refused is alarmed again after this many seconds (`_share_order_refused`).
 SHARES_REFUSED_EVERY = 3600.0
+#: The equity book's minute is skipped when the options path's own account reads failed and its pass ended past this
+#: second of the wall minute (`_equity_minute_spent`): the pass starts `MINUTE_OFFSET` seconds into each minute.
+EQUITY_TICK_UNTIL = 45.0
 #: Funding types `ltcm.performance.ALPACA_FUNDING` classifies but Alpaca's activities endpoint does not accept as a
 #: filter: naming one fails the whole read with HTTP 422 "invalid activity type: WIRE" (the real account, Sept 28,
 #: 2026, the first session after the owner's deposit), and with no funding read the stops stay provisional and block
@@ -346,6 +350,7 @@ class OptionsLive:
         self._activities_changed = False
         self._stock_held = False
         self._cash_told = False
+        self._equity_skipped = False
         #: The minute's own account reads, passed to the equity book's tick: {"positions": [...], "open_orders": [...]}.
         self._reads: dict[str, Any] = {}
         self._flows_at = float("-inf")
@@ -527,11 +532,24 @@ class OptionsLive:
 
     def minute(self) -> dict:
         """One pass: the session's minute, the close's bookkeeping, or the quiet hours' reconciliation; then the
-        equity book's minute, whatever the options path's state (its ONE call site, A8.8; never the minute's end)."""
+        equity book's minute, whatever the options path's state (its ONE call site, A8.8; never the minute's end).
+        Neither path ends the other's minute: an options pass that RAISES still gives the equity book its minute (its
+        fills are booked and its exits sent), and is raised again after it, for the loop's alert and event as before."""
         now = self.clock()
         self._reads = {}
-        out = self._options_minute(now)
-        if self.equity is not None:
+        failed: Exception | None = None
+        try:
+            out = self._options_minute(now)
+        except Exception as exc:  # noqa: BLE001 - raised again below, once the equity book has had its minute
+            failed, out = exc, {"state": "failed"}
+        spent = self._equity_minute_spent(now, out) if self.equity is not None else None
+        if spent:
+            out["equity"] = {"skipped": spent}
+            if not self._equity_skipped:     # said once a run of skipped minutes (the summary carries each one)
+                self.alert("warning", f"live: the equity book's minute is skipped: {spent}")
+            self._equity_skipped = True
+        elif self.equity is not None:
+            self._equity_skipped = False
             try:
                 out["equity"] = self.equity.tick(now, account_row=self.account_row, positions=self._reads.get("positions"),
                                                  open_orders=self._reads.get("open_orders"), real_block=self.real_block,
@@ -541,7 +559,27 @@ class OptionsLive:
                 self.alert("warning", f"live: the equity book's minute failed ({type(exc).__name__}: {str(exc)[:160]})")
                 self.state.event("live.error", {"instance": "equity", "error": f"{type(exc).__name__}: {exc}",
                                                 "trace": traceback.format_exc()[-2000:]})
+        if failed is not None:
+            raise failed
         return self._done(out)
+
+    def _equity_minute_spent(self, now: float, out: Mapping[str, Any]) -> str | None:
+        """Why the equity book's minute is skipped this pass, or None (it runs): the options path's own reads of the
+        real account failed (`venue_errors`: its orders, positions or account; the quiet hours' `venue_error`) AND its
+        pass ended past second `EQUITY_TICK_UNTIL` of the wall minute. The book would read the same failing venue
+        again, each read up to the client's timeout, and the next options pass (the one that sends an expiring
+        position's forced close) must start on time. A venue that answers, however slow the pass, never skips it."""
+        errors = [str(e) for e in (out.get("venue_errors") or [])
+                  if str(e).startswith(("orders:", "positions:", "account:"))]
+        if out.get("venue_error"):
+            errors.append(str(out["venue_error"]))
+        if not errors:
+            return None
+        ended = self.clock()
+        if ended // 60 == now // 60 and ended % 60 < EQUITY_TICK_UNTIL:
+            return None
+        return (f"the options path's reads of the real account failed ({errors[0][:120]}) and its pass ended "
+                f"{ended - (now // 60) * 60:.0f} s into the minute")
 
     def _options_minute(self, now: float) -> dict:
         """The options path's pass (`minute`); its summary."""
