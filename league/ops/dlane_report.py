@@ -826,6 +826,18 @@ def equity_section(book: Mapping[str, Any], every: Sequence[Mapping[str, Any]], 
     }
 
 
+def equity_yield(store: Any, settings: Mapping[str, Any] | None) -> dict[str, Any]:
+    """RELEASE E2: the equity lanes' model routes (league/swarm/elane_yield.py `report`): births, Train passes, Validation
+    entries, looks passed and live programs per route, each per dollar, and the equity review's own rows. The operator's
+    alone: never shown to an agent (A9 D3). An error is named, never raised."""
+    from ..swarm import elane_train, elane_yield
+
+    try:
+        return elane_yield.report(store, settings, train_key=elane_train.STATE_KEY)
+    except Exception as exc:  # noqa: BLE001 - the report goes on without it
+        return {"error": type(exc).__name__}
+
+
 def _order(close: Mapping[str, Any]) -> tuple:
     """Close order across both books: the close time, then an options close before an equity close, then its id."""
     pid = close["pid"]
@@ -2540,6 +2552,7 @@ def report(root: str | Path, *, settings: Mapping[str, Any] | None = None, now: 
                                               lots=book.get("lots") or (), screens=screens),
             "equity": equity_section(book, every, eq_twins, count_from=count_from, unit=unit, seeded=seeded,
                                      screens=screens),
+            "equity_yield": equity_yield(store, settings),
             "direction_net": lane_net,
             "account": account(root, every, activity, previous, now=now),
             "costs": costs(store, since=start, lane_since=_epoch(started) if isinstance(started, str) else None),
