@@ -18,7 +18,8 @@ PATH FAILS IT: when the change is meant, record again on the new tree and say in
                          "store" (the REAL `EquityFamilies` over a real `SwarmStore` of six seated ETF families; `panel`:
                          the lane's switch in the root's swarm.json, and at "train" a panel family in Train research)
     Market, Venue        quotes by the clock; an Alpaca account's shapes, a fill `fill_delay` seconds after the POST
-    SCENARIOS            name -> (kind, setup): "monday" (the open window), "next" (and Tuesday's), "week" (five sessions)
+    SCENARIOS            name -> {kind, setup, ...}: "monday" (the open window), "next" (and Tuesday's), "week"
+                         (five sessions)
     run, snapshot        one scenario on this tree; everything it left, as plain JSON
     record               every scenario of a tree, for the fixture:
                              python league/tests/equity_week.py --tree <a clean tree's root> --out <file>
@@ -929,10 +930,9 @@ SCENARIOS: dict[str, dict[str, Any]] = {
     "week: a rolling and a rotating program, sales resting five minutes": {
         "kind": "week", "roll": "open", "rotate": "open", "setup": sales_rest(("SPY", "IWM", "DIA"), 300.0)},
 }
-#: The scenarios also run through the REAL reader (`store_families`), at every position of the panel lane's switch.
-STORE_SCENARIOS = ("normal", "two Candidates take their seats at Friday's decide", "week: normal",
-                   "week: stage SELL cannot pass, no FILL activity",
-                   "week: a rotating program's sales rest five minutes at every open")
+#: The scenarios run again through the REAL reader (`store_families`), at every position of the panel lane's switch:
+#: all of them.
+STORE_SCENARIOS = tuple(SCENARIOS)
 
 
 def open_window(house: House, day: dt.date, last: tuple[int, int]) -> None:
@@ -1057,19 +1057,21 @@ def digest(part: Any) -> str:
     return hashlib.sha256(json.dumps(part, sort_keys=True, separators=(",", ":")).encode()).hexdigest()[:20]
 
 
-def kept(snap: dict[str, Any]) -> dict[str, Any]:
+def kept(snap: dict[str, Any], *, whole: bool = True) -> dict[str, Any]:
     """A snapshot as the fixture keeps it, in main's shape (`main_shape`): `WHOLE` parts as they are, every other part
-    by its count and its digest."""
+    by its count and its digest. `whole` False (the real reader's record, whose orders are the test double's own):
+    every part by its count and its digest."""
     snap = main_shape(snap)
-    return {**{k: snap[k] for k in WHOLE},
-            "sha": {k: [len(v), digest(v)] for k, v in sorted(snap.items()) if k not in WHOLE}}
+    apart = WHOLE if whole else ()
+    return {**{k: snap[k] for k in apart},
+            "sha": {k: [len(v), digest(v)] for k, v in sorted(snap.items()) if k not in apart}}
 
 
 def record() -> dict[str, Any]:
     """Every scenario of the tree this module runs on, as the fixture keeps it: {"memory": {name: kept}, "store":
-    {name: kept}} (the real reader's with no panel key in swarm.json: main has no such lane)."""
+    {name: kept, by digest}} (the real reader's with no panel key in swarm.json: main has no such lane)."""
     return {"memory": {name: kept(run(name)) for name in SCENARIOS},
-            "store": {name: kept(run(name, reader="store")) for name in STORE_SCENARIOS}}
+            "store": {name: kept(run(name, reader="store"), whole=False) for name in STORE_SCENARIOS}}
 
 
 if __name__ == "__main__":  # pragma: no cover - the recorder

@@ -32,8 +32,8 @@ ship check's fixes (below). The records are `league/xs/E4_INTERFACES.md` section
   (`EquityBook._cut_waits`). The proof is a recorded comparison (`league/tests/test_equity_etf_orders.py`): the
   rehearsal's harness of the lane's first Monday (the real book, schedule, sizing, stock proof and decider kind
   over a fake venue and invented prices) runs 65 scenarios, the normal Monday, every way a buy can miss, the week
-  and its failing weeks, and programs that sell and buy in one window; five of them again through the real swarm
-  reader with the panel switch absent, "off" and at "train" (a panel family in Train research in the store). The
+  and its failing weeks, and programs that sell and buy in one window; and every one of them again through the real
+  swarm reader with the panel switch absent, "off" and at "train" (a panel family in Train research in the store). The
   fixture was recorded on main `81963c87`; every POST, cancel, fill, alert, intent, order, lot, instance row,
   record and minute's answer of this tree equals it. With B8 as the spec wrote it five scenarios differ, and the
   test holds that it would see them.

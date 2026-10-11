@@ -825,9 +825,9 @@ share program's live behaviour is main's, order for order, with the lane off and
   normal Monday three ways; the practice order filled late, refused, lost; quotes stale or wide; the ladder; the
   loss budget and the caps; the order counts and the House's block; restarts, a restated bar, the kill switch,
   skipped minutes; the week, and the weeks in which stage SELL cannot pass or the owner flattens; and programs that
-  sell and buy in one window with sales that rest. Five of them again through the REAL reader
+  sell and buy in one window with sales that rest. EVERY ONE AGAIN through the REAL reader
   (`league.equity.families.EquityFamilies` over a real swarm store) with the panel switch absent, "off" and at
-  "train" (a panel family in Train research in the store). The fixture
+  "train" (a panel family in Train research in the store): 195 more runs. The fixture
   (`league/tests/fixtures/equity_etf_orders.json`) was recorded on main `81963c87` and is the same file on both
   Pythons. Held equal: every POST to either account, cancel, fill and alert, whole; every intent, order, lot and
   instance row, the book's keys, every record and every minute's answer, by digest.

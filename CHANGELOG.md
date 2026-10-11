@@ -222,8 +222,8 @@ gateway is `f9528af2` (14:36:49Z Oct 11), and the box's updater is on. What is b
   E1's rule; B8 is now the panel kind's alone. Proved by a recorded comparison
   (`league/tests/test_equity_etf_orders.py`, its harness `league/tests/equity_week.py`, its fixture recorded on
   main `81963c87`): the lane's first Monday the normal way, every way a buy can miss, the week and its failing
-  weeks, programs that sell and buy in one window, 65 scenarios, and five again through the real swarm reader with
-  the switch absent, "off" and at "train"; every POST, cancel, fill, alert, intent, order, lot, instance row,
+  weeks, programs that sell and buy in one window, 65 scenarios, and every one again through the real swarm reader
+  with the switch absent, "off" and at "train"; every POST, cancel, fill, alert, intent, order, lot, instance row,
   record and minute's answer equals main's. Two differences are allowed and held: the column `eq_instances.kind`
   and the empty table `eq_rebalances` (main's book trades the same weeks on a state that holds them). With B8 as
   the spec wrote it five scenarios differ. FIXED: **the zero-edge job could not finish one program inside the ops

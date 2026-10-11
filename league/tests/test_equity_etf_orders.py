@@ -17,10 +17,10 @@ instance row, of the book's keys, of every record and of every minute's answer.
     python league/tests/equity_week.py --tree <a clean tree of main> --out league/tests/fixtures/equity_etf_orders.json
 
 These tests run the same scenarios on the tree they are in and hold each to that file, through the test double of the
-swarm's reader and through the REAL reader over a real swarm store at every position of the panel lane's switch (none,
-"off", "train"; at "train" the store also holds a panel family in Train research). TWO DIFFERENCES ARE ALLOWED, each
-held to what it must be (`equity_week.main_shape`): the column `eq_instances.kind`, "equity" on every row, and the
-panel adapter's table `eq_rebalances`, empty.
+swarm's reader and, every one again, through the REAL reader over a real swarm store at every position of the panel
+lane's switch (none, "off", "train"; at "train" the store also holds a panel family in Train research). TWO
+DIFFERENCES ARE ALLOWED, each held to what it must be (`equity_week.main_shape`): the column `eq_instances.kind`,
+"equity" on every row, and the panel adapter's table `eq_rebalances`, empty.
 
 A LATER CHANGE OF THE SHARE PROGRAMS' PATH FAILS HERE. When it is meant (a release of main that changes the book),
 record the fixture again on that release's clean tree and say in the commit which scenarios moved and why."""
@@ -51,7 +51,7 @@ def differences(name: str, want: dict, got: dict) -> str:
     """What differs between a scenario as the fixture keeps it and as this tree ran it, for a failure's message."""
     lines = [f"{name}:"]
     for part in W.WHOLE:
-        if want[part] != got[part]:
+        if part in want and want[part] != got[part]:
             lines.append(f"  {part} (main -, this tree +):")
             lines.extend("    " + row for row in difflib.unified_diff(want[part], got[part], lineterm="", n=1)
                          if not row.startswith(("---", "+++")))
@@ -73,7 +73,7 @@ class TheSeatedShareProgramsTradeAsOnMain(unittest.TestCase):
 
     def hold(self, group: str, name: str, got: dict) -> None:
         want = self.fixture[group][name]
-        kept = W.kept(got)
+        kept = W.kept(got, whole=group == "memory")
         if kept != want:
             self.fail("a share program's live path is not main's.\n" + differences(name, want, kept))
 
@@ -81,7 +81,15 @@ class TheSeatedShareProgramsTradeAsOnMain(unittest.TestCase):
         self.assertEqual(self.fixture["_recorded_on"], RECORDED_ON)
         self.assertEqual(sorted(self.fixture["memory"]), sorted(W.SCENARIOS))
         self.assertEqual(sorted(self.fixture["store"]), sorted(W.STORE_SCENARIOS))
-        self.assertTrue(set(W.STORE_SCENARIOS) <= set(W.SCENARIOS))
+        self.assertEqual(set(W.STORE_SCENARIOS), set(W.SCENARIOS), "every scenario runs through the real reader too")
+        self.assertGreaterEqual(len(W.SCENARIOS), 65)
+        # MAIN'S OWN TWO READERS AGREE ON THE ORDERS: through the real reader main's book sent what it sent through
+        # the test double, in every scenario (the rows differ in what names a program: its run sha).
+        for name in W.SCENARIOS:
+            for part in ("posts", "cancels", "fills", "alerts"):
+                self.assertEqual(self.fixture["store"][name]["sha"][part],
+                                 [len(self.fixture["memory"][name][part]), W.digest(self.fixture["memory"][name][part])],
+                                 (name, part))
         # It is a record of TRADING: the normal Monday's three buys after the practice buy, and a week of sales.
         normal = self.fixture["memory"]["normal"]
         self.assertEqual([row.split()[2:5] for row in normal["posts"]],
@@ -103,7 +111,7 @@ class TheSeatedShareProgramsTradeAsOnMain(unittest.TestCase):
     def test_through_the_real_reader_at_every_position_of_the_panels_switch(self):
         """The swarm's own reader (`league.equity.families.EquityFamilies` over `league.swarm.bands.read`) gives the
         book the six programs' rows; the panel lane's switch is the root's swarm.json. No key (policy.json's "off"),
-        "off" and "train": the same orders as main's reader gave main's book."""
+        "off" and "train", EVERY scenario at each: what main's reader gave main's book, to the row."""
         for name in W.STORE_SCENARIOS:
             for panel in W.SWITCHES:
                 with self.subTest(scenario=name, panel=panel or "no key"):

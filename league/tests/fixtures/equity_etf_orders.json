@@ -4983,25 +4983,743 @@
   }
  },
  "store": {
-  "normal": {
-   "alerts": [],
-   "cancels": [],
-   "fills": [
-    "10-12 09:31:11 paper buy SPY 0.042995 @ 580.87 lq-pp-20261012-00000001-1-b",
-    "10-12 09:32:11 alpaca buy QQQ 0.460014 @ 484.06 lq-00000001-0000001-bred-a-hold3",
-    "10-12 09:32:11 alpaca buy SPY 0.191672 @ 580.87 lq-00000001-0000002-bred-b-range",
-    "10-12 09:33:11 alpaca buy QQQ 0.230003 @ 484.06 lq-00000001-0000003-bred-b-range"
-   ],
-   "posts": [
-    "10-12 09:31:11 paper buy SPY 0.042995 @ 581.46 limit day lq-pp-20261012-00000001-1-b",
-    "10-12 09:32:11 alpaca buy QQQ 0.460014 @ 484.55 limit day lq-00000001-0000001-bred-a-hold3",
-    "10-12 09:32:11 alpaca buy SPY 0.191672 @ 581.46 limit day lq-00000001-0000002-bred-b-range",
-    "10-12 09:33:11 alpaca buy QQQ 0.230003 @ 484.55 limit day lq-00000001-0000003-bred-b-range"
-   ],
+  "56 equity orders already counted today": {
    "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
     "errors": [
      0,
      "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     3,
+     "03c328ba6f84bd05c5e5"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "65284e7561a7c21b3cab"
+    ],
+    "kv": [
+     8,
+     "adb566359abf506b8665"
+    ],
+    "lots": [
+     2,
+     "993281cee37f14bccbb3"
+    ],
+    "orders": [
+     58,
+     "5120c420d1f509eaf69b"
+    ],
+    "posts": [
+     3,
+     "13aa51f70cd2871f362b"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     16,
+     "17f69b7173c818f3375b"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "55e67ccdd043d3419226"
+    ]
+   }
+  },
+  "58 equity orders already counted today": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     3,
+     "9cd7dd8b92759240a15b"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "c49a7a8349b81d461a1b"
+    ],
+    "kv": [
+     8,
+     "adb566359abf506b8665"
+    ],
+    "lots": [
+     2,
+     "993281cee37f14bccbb3"
+    ],
+    "orders": [
+     60,
+     "3e8ef8d0e410d5820ab8"
+    ],
+    "posts": [
+     3,
+     "1cfbd07bed0e7c99f990"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     16,
+     "3c0e87478da5b49504ce"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "55e67ccdd043d3419226"
+    ]
+   }
+  },
+  "A's QQQ buy needs all five sends": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     4,
+     "85c41c78186fc1f2418d"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     4,
+     "ac075f7045ad4c6ebbed"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "f5a3f522df521151429d"
+    ],
+    "kv": [
+     8,
+     "adb566359abf506b8665"
+    ],
+    "lots": [
+     3,
+     "2db133935a3c8cae2029"
+    ],
+    "orders": [
+     7,
+     "fa0e89eb4a245f2d9848"
+    ],
+    "posts": [
+     8,
+     "f7fa4cb65043e623f785"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     26,
+     "2f98926509a3a1e7ccb0"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "439f1ec91b57dcdad163"
+    ]
+   }
+  },
+  "A's QQQ buy rests one send": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     1,
+     "8be698453266582ae745"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     4,
+     "9d22580ed3cafcb409ef"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "dafde87debc1c55328c4"
+    ],
+    "kv": [
+     8,
+     "adb566359abf506b8665"
+    ],
+    "lots": [
+     3,
+     "e06c9b177b1d08137e22"
+    ],
+    "orders": [
+     4,
+     "9b4b59de1f3d19ee3420"
+    ],
+    "posts": [
+     5,
+     "5aa50848ce3b7581bd3e"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     20,
+     "988b19068a48c08a750f"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "5d4674463642f1fb243e"
+    ]
+   }
+  },
+  "Friday's IWM close restated before the 08:30 audit": {
+   "sha": {
+    "alerts": [
+     1,
+     "efc859110653869f98d4"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     4,
+     "f4a02d67a310008f6fe9"
+    ],
+    "instances": [
+     6,
+     "e753b79b7bbb60247576"
+    ],
+    "intents": [
+     3,
+     "5e54298748408c99bf10"
+    ],
+    "kv": [
+     10,
+     "1d7e89765aa86effbd0c"
+    ],
+    "lots": [
+     3,
+     "13c7ecd92a2b96b7b485"
+    ],
+    "orders": [
+     3,
+     "927d29582335599fbc01"
+    ],
+    "posts": [
+     4,
+     "ea55c1490a030dbc7052"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     19,
+     "d38d275075a7dfa46a81"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     26,
+     "9354a2c3f76902aba120"
+    ]
+   }
+  },
+  "Friday's QQQ close restated before the 08:30 audit": {
+   "sha": {
+    "alerts": [
+     1,
+     "be4c91f4e949029f2f4a"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     5,
+     "19499dfb3affdea7fb3c"
+    ],
+    "instances": [
+     6,
+     "6b06e0b44eb8a42d80be"
+    ],
+    "intents": [
+     7,
+     "3347457afa9288e579f8"
+    ],
+    "kv": [
+     11,
+     "284e3b795911b46c4ab6"
+    ],
+    "lots": [
+     3,
+     "1c6954de380dca4c6a43"
+    ],
+    "orders": [
+     3,
+     "7802151d7eadd3040802"
+    ],
+    "posts": [
+     5,
+     "abc9741c4a21afb1ec4d"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     25,
+     "54769dceebe3ec8a076b"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     45,
+     "75a07f583bd71a6215b2"
+    ]
+   }
+  },
+  "QQQ jumps 12 bp through A's first four limits": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     2,
+     "8b0166624f7e51102388"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     4,
+     "bdbbe0429a5aa575ff2e"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "f8052acf46aefee8d07b"
+    ],
+    "kv": [
+     8,
+     "adb566359abf506b8665"
+    ],
+    "lots": [
+     3,
+     "3dd3f180cb8104d8cea4"
+    ],
+    "orders": [
+     5,
+     "b24fcf6c437c984935c4"
+    ],
+    "posts": [
+     6,
+     "ccee0ff56075b34ef8d0"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     22,
+     "71a4e6bc94db4955fb44"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "bda819d994ae014ae62a"
+    ]
+   }
+  },
+  "QQQ quoted 150 bp wide all window": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     4,
+     "0af4dba850f4f08bcc86"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "34287f787ce0b152385b"
+    ],
+    "kv": [
+     8,
+     "adb566359abf506b8665"
+    ],
+    "lots": [
+     3,
+     "1cc55f74e15d0c9c7ca0"
+    ],
+    "orders": [
+     3,
+     "386ae0af65c4664500be"
+    ],
+    "posts": [
+     4,
+     "bd53bc94f7f8b5887cf7"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     18,
+     "eeaf768f5dce0bca3139"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "85fb9475f1ed799d83b1"
+    ]
+   }
+  },
+  "QQQ quoted 250 bp wide until 09:36": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     4,
+     "f3b56a9e92522c9ce960"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "e66f756689b061f5f15a"
+    ],
+    "kv": [
+     8,
+     "adb566359abf506b8665"
+    ],
+    "lots": [
+     3,
+     "875659bfeeee44bcaff4"
+    ],
+    "orders": [
+     3,
+     "00906a5bbb681068407a"
+    ],
+    "posts": [
+     4,
+     "16d8bd8cfdf7d6750184"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     18,
+     "c3115e631e70a34a3d39"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "b99e741e16e204cb1f5c"
+    ]
+   }
+  },
+  "account cash $300": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     4,
+     "f7ebd9178eb361c6031e"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "ced9c4492ae0b130a5b7"
+    ],
+    "kv": [
+     8,
+     "adb566359abf506b8665"
+    ],
+    "lots": [
+     3,
+     "7081e200d276d397c41e"
+    ],
+    "orders": [
+     3,
+     "dbaed1d8e6587c796f28"
+    ],
+    "posts": [
+     4,
+     "5ff7190da2809432ac03"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     18,
+     "06fc50fbe211bcc5056f"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "85fb9475f1ed799d83b1"
+    ]
+   }
+  },
+  "no QQQ buy ever fills": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     5,
+     "11fe3acbe51f5c654889"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     2,
+     "306169a6aebc1f01906b"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "6bd5e1e2b4d37c1af3fe"
+    ],
+    "kv": [
+     8,
+     "adb566359abf506b8665"
+    ],
+    "lots": [
+     1,
+     "d295b79855e081f6a7ef"
+    ],
+    "orders": [
+     6,
+     "b7d054c5d54df86c18ed"
+    ],
+    "posts": [
+     7,
+     "6e0abba08f11cdd896fb"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     24,
+     "67acc3b75ca3995f7806"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "ca5da209681e0be500ae"
+    ]
+   }
+  },
+  "no QQQ buy ever fills, stage BUY already passed": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     5,
+     "d5de27247a3387f953fd"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     2,
+     "45b40ace17bfd3f4d598"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "88a65e9eed342924febd"
+    ],
+    "kv": [
+     8,
+     "62ff30507eb854c4782f"
+    ],
+    "lots": [
+     1,
+     "461e43c471c6267133dd"
+    ],
+    "orders": [
+     6,
+     "e84d46cb6f906c8aa87e"
+    ],
+    "posts": [
+     7,
+     "a65c4da7a494fa9ec15f"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     23,
+     "c71ea286b3c80afab5db"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "a9fecda2e7e5991766cd"
+    ]
+   }
+  },
+  "normal": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     4,
+     "f4a02d67a310008f6fe9"
     ],
     "instances": [
      6,
@@ -5023,6 +5741,10 @@
      3,
      "927d29582335599fbc01"
     ],
+    "posts": [
+     4,
+     "ea55c1490a030dbc7052"
+    ],
     "rebalances": [
      0,
      "4f53cda18c2baa0c0354"
@@ -5041,31 +5763,1643 @@
     ]
    }
   },
-  "two Candidates take their seats at Friday's decide": {
-   "alerts": [],
-   "cancels": [],
-   "fills": [
-    "10-12 09:31:11 paper buy SPY 0.042995 @ 580.87 lq-pp-20261012-00000001-1-b",
-    "10-12 09:32:11 alpaca buy QQQ 0.460014 @ 484.06 lq-00000001-0000001-bred-a-hold3",
-    "10-12 09:32:11 alpaca buy SPY 0.191672 @ 580.87 lq-00000001-0000002-bred-b-range",
-    "10-12 09:33:11 alpaca buy QQQ 0.230003 @ 484.06 lq-00000001-0000003-bred-b-range",
-    "10-13 09:31:11 paper sell SPY 0.042995 @ 580.68 lq-pp-20261012-00000001-1-s1",
-    "10-13 09:32:11 alpaca sell SPY 0.191672 @ 580.68 lq-00000001-0000004-bred-b-range",
-    "10-13 09:32:11 alpaca sell QQQ 0.230003 @ 483.90 lq-00000001-0000005-bred-b-range"
-   ],
-   "posts": [
-    "10-12 09:31:11 paper buy SPY 0.042995 @ 581.46 limit day lq-pp-20261012-00000001-1-b",
-    "10-12 09:32:11 alpaca buy QQQ 0.460014 @ 484.55 limit day lq-00000001-0000001-bred-a-hold3",
-    "10-12 09:32:11 alpaca buy SPY 0.191672 @ 581.46 limit day lq-00000001-0000002-bred-b-range",
-    "10-12 09:33:11 alpaca buy QQQ 0.230003 @ 484.55 limit day lq-00000001-0000003-bred-b-range",
-    "10-13 09:31:11 paper sell SPY 0.042995 @ 580.09 limit day lq-pp-20261012-00000001-1-s1",
-    "10-13 09:32:11 alpaca sell SPY 0.191672 @ 580.09 limit day lq-00000001-0000004-bred-b-range",
-    "10-13 09:32:11 alpaca sell QQQ 0.230003 @ 483.41 limit day lq-00000001-0000005-bred-b-range"
-   ],
+  "normal, B's intents first": {
    "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
     "errors": [
      0,
      "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     4,
+     "cee23359d9e5d4b172fe"
+    ],
+    "instances": [
+     6,
+     "1057a7fa5c7f6d1981b0"
+    ],
+    "intents": [
+     3,
+     "ad8cb59785667409a88c"
+    ],
+    "kv": [
+     8,
+     "5b6bdead9584acbb50b3"
+    ],
+    "lots": [
+     3,
+     "879f6cb4be701cc9816d"
+    ],
+    "orders": [
+     3,
+     "7af931934b35878acdb6"
+    ],
+    "posts": [
+     4,
+     "98aa974aae7d4d5ff2b0"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     18,
+     "d444a3de1ec20b5dcf8f"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "2725abfeb04ecd309c5a"
+    ]
+   }
+  },
+  "normal, the equity tick 50 s into the minute": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     4,
+     "3e834c23d745dcf94bec"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "140c630296d114d69f21"
+    ],
+    "kv": [
+     8,
+     "71e210cb7ff76f8e3c15"
+    ],
+    "lots": [
+     3,
+     "2aa20a665669108f4955"
+    ],
+    "orders": [
+     3,
+     "b6ea78c68143e7a15751"
+    ],
+    "posts": [
+     4,
+     "c82eac83e60677d6eb16"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     18,
+     "aae96dfed7c2c32cd3aa"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "85fb9475f1ed799d83b1"
+    ]
+   }
+  },
+  "options book: 249 of 250 House orders sent": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     2,
+     "a7f9ae22e9ba6c484c4f"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "c0843f61d7f44a385aa5"
+    ],
+    "kv": [
+     8,
+     "adb566359abf506b8665"
+    ],
+    "lots": [
+     1,
+     "195b3e014a5e60f65ed4"
+    ],
+    "orders": [
+     1,
+     "121d8d62357fa69e4464"
+    ],
+    "posts": [
+     2,
+     "9f73844f82f718f9a336"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     14,
+     "f851c278b08b31069cb0"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "95004fe4230d791b17ab"
+    ]
+   }
+  },
+  "practice POST refused by the House's own rate": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     4,
+     "fd21f56ff1914a22a783"
+    ],
+    "instances": [
+     6,
+     "6b06e0b44eb8a42d80be"
+    ],
+    "intents": [
+     7,
+     "ba84cbd06a0ba6f5f5c0"
+    ],
+    "kv": [
+     8,
+     "87614ce23b8da841441a"
+    ],
+    "lots": [
+     3,
+     "ff2795c024a68154b60b"
+    ],
+    "orders": [
+     3,
+     "6c4d58b97ab8a75eb3ea"
+    ],
+    "posts": [
+     5,
+     "e0e7f040d79e60288764"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     23,
+     "c9043cdebbb54a8f69b9"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     44,
+     "f3e5a914099ea7a96ab4"
+    ]
+   }
+  },
+  "practice POST rejected by the venue": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "f3d1a735ab729ad5f7c7"
+    ],
+    "kv": [
+     7,
+     "087dc8bf138e741c79f7"
+    ],
+    "lots": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "orders": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "posts": [
+     1,
+     "1d68d1d6518625810b66"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     11,
+     "36f60d73d1f55aed7d68"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "cb8cfd09c4e6eeb24f8a"
+    ]
+   }
+  },
+  "practice POST's answer lost, no order made": {
+   "sha": {
+    "alerts": [
+     1,
+     "f3ad5795fc74576dd1a8"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "f3d1a735ab729ad5f7c7"
+    ],
+    "kv": [
+     7,
+     "60113c3e7535621b9d33"
+    ],
+    "lots": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "orders": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "posts": [
+     1,
+     "1d68d1d6518625810b66"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     11,
+     "36f60d73d1f55aed7d68"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "5be0944357048d7bc186"
+    ]
+   }
+  },
+  "practice POST's answer lost, the order exists": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     4,
+     "f4a02d67a310008f6fe9"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "5e54298748408c99bf10"
+    ],
+    "kv": [
+     8,
+     "adb566359abf506b8665"
+    ],
+    "lots": [
+     3,
+     "13c7ecd92a2b96b7b485"
+    ],
+    "orders": [
+     3,
+     "927d29582335599fbc01"
+    ],
+    "posts": [
+     4,
+     "ea55c1490a030dbc7052"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     18,
+     "94aaca6571d31878be8f"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "85fb9475f1ed799d83b1"
+    ]
+   }
+  },
+  "practice account unreadable until 09:36": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     4,
+     "3902dc18e874aec78368"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "39e720a555977f5b6d01"
+    ],
+    "kv": [
+     8,
+     "60e3b278176976913964"
+    ],
+    "lots": [
+     3,
+     "b30ef0837c190f135213"
+    ],
+    "orders": [
+     3,
+     "75a6fb590fcc173a9b3c"
+    ],
+    "posts": [
+     4,
+     "ec0d35b61c64f2be0ffc"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     18,
+     "f1383286077421d9d165"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "7705445524ff5e593d71"
+    ]
+   }
+  },
+  "practice account unreadable until 09:44": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     1,
+     "56766acf49b03d17ff8c"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "f3d1a735ab729ad5f7c7"
+    ],
+    "kv": [
+     8,
+     "d97f33b4333bd09a9693"
+    ],
+    "lots": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "orders": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "posts": [
+     1,
+     "a0a918b041e98e8555c1"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     12,
+     "fe3ce05086b4e334a3e3"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "fa23915bcfad96f950fd"
+    ]
+   }
+  },
+  "practice account unreadable until 09:45": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "f3d1a735ab729ad5f7c7"
+    ],
+    "kv": [
+     7,
+     "4d50a221ba72364eda67"
+    ],
+    "lots": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "orders": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "posts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     11,
+     "36f60d73d1f55aed7d68"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "73a06b66064b75744a60"
+    ]
+   }
+  },
+  "practice fill never seen": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     1,
+     "36a8a9401333404aef3b"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "f3d1a735ab729ad5f7c7"
+    ],
+    "kv": [
+     7,
+     "d90397be4df2b186ba60"
+    ],
+    "lots": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "orders": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "posts": [
+     1,
+     "1d68d1d6518625810b66"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     11,
+     "36f60d73d1f55aed7d68"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "cef1efd7ee0e7cab5914"
+    ]
+   }
+  },
+  "practice fill seen after 10 min": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     4,
+     "ac0a5eba4643c9462536"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "cd102d7089f241b65849"
+    ],
+    "kv": [
+     8,
+     "af9570701c95e9dd1162"
+    ],
+    "lots": [
+     3,
+     "1fdd8c2a0991328cfe2e"
+    ],
+    "orders": [
+     3,
+     "be03b4403173ffe2c8d9"
+    ],
+    "posts": [
+     4,
+     "732f186819fc2d3b696d"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     18,
+     "80015b18c7b366dd9e44"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "e5267fe22ddeb7c1c0e0"
+    ]
+   }
+  },
+  "practice fill seen after 12 min": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     4,
+     "6c5e4584a1368dcafc23"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "711fcc0bbe880488e734"
+    ],
+    "kv": [
+     8,
+     "68078065437bce50e4b5"
+    ],
+    "lots": [
+     3,
+     "3215aa360be7ab8fd28d"
+    ],
+    "orders": [
+     3,
+     "7a7411f4c628eca021f5"
+    ],
+    "posts": [
+     4,
+     "c72722fa44ee7fd2d08f"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     18,
+     "354e75408b3630bc3e23"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "728c78ced11c15234794"
+    ]
+   }
+  },
+  "practice fill seen after 13 min": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     3,
+     "84eb8094d0f194f61fc8"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "cb1ddf61e7a634980537"
+    ],
+    "kv": [
+     8,
+     "25b7edb54c839fdb8cf5"
+    ],
+    "lots": [
+     2,
+     "adac4f78b42d15d91fc0"
+    ],
+    "orders": [
+     2,
+     "e6e27e25737c1205cf9f"
+    ],
+    "posts": [
+     3,
+     "b454ba0cf0fe17bbc040"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     16,
+     "412ec05ddddbe5614fb7"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "9a2b2170faf643cd7c12"
+    ]
+   }
+  },
+  "practice fill seen after 14 min": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     1,
+     "1c147e3ecf5a1eb0a1ab"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "f3d1a735ab729ad5f7c7"
+    ],
+    "kv": [
+     8,
+     "5fe286f486528075c8d8"
+    ],
+    "lots": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "orders": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "posts": [
+     1,
+     "1d68d1d6518625810b66"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     12,
+     "fe3ce05086b4e334a3e3"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "cc02aea4ff934befcb4b"
+    ]
+   }
+  },
+  "practice fill seen after 2 min": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     4,
+     "6b4d21b5beb21072b448"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "772cb3ee4b5bde81a1ab"
+    ],
+    "kv": [
+     8,
+     "c08e309b9a7f7aa0f38e"
+    ],
+    "lots": [
+     3,
+     "50dd54a89996e4a48fa3"
+    ],
+    "orders": [
+     3,
+     "1ecd732fc5cbd6c26316"
+    ],
+    "posts": [
+     4,
+     "8f1ea2913c8ff6854961"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     18,
+     "14fa0599fb3faad1028f"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "140350804326d003adc0"
+    ]
+   }
+  },
+  "practice fill seen after 5 min": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     4,
+     "b712d0bb7d261ba15acb"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "1ae547cce8b4ab80418a"
+    ],
+    "kv": [
+     8,
+     "50a34e7b37b7ba7ddaca"
+    ],
+    "lots": [
+     3,
+     "10a39d1c2f287f4dbc13"
+    ],
+    "orders": [
+     3,
+     "afa79be42054000290c9"
+    ],
+    "posts": [
+     4,
+     "da58afc25a018864f3d2"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     18,
+     "a25f3c8227394f45f740"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "bcc52b4357598afc04cd"
+    ]
+   }
+  },
+  "practice positions trail the fill by 90 s": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     4,
+     "65d306686adb4240dfc8"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "772cb3ee4b5bde81a1ab"
+    ],
+    "kv": [
+     8,
+     "daf23922ff49f484bc97"
+    ],
+    "lots": [
+     3,
+     "50dd54a89996e4a48fa3"
+    ],
+    "orders": [
+     3,
+     "1ecd732fc5cbd6c26316"
+    ],
+    "posts": [
+     4,
+     "8f1ea2913c8ff6854961"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     18,
+     "14fa0599fb3faad1028f"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "1c47a458068dea354bf3"
+    ]
+   }
+  },
+  "quotes stamped before the open until 09:35": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     4,
+     "75e445bd23326c0f5b54"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "2486dc73b8a0e5cbd017"
+    ],
+    "kv": [
+     8,
+     "adb566359abf506b8665"
+    ],
+    "lots": [
+     3,
+     "1e35952f0b7877747ddd"
+    ],
+    "orders": [
+     3,
+     "d95c08990be614f44343"
+    ],
+    "posts": [
+     4,
+     "11fd6c8cf78db86e37b6"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     18,
+     "fc98dffe097b2289fb51"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "07a8c89259a624b1ec52"
+    ]
+   }
+  },
+  "real_block until 09:40": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     4,
+     "eadf1461c6021a176958"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "153336e997d8252a5e5e"
+    ],
+    "kv": [
+     8,
+     "62ff30507eb854c4782f"
+    ],
+    "lots": [
+     3,
+     "688586e25834962169dc"
+    ],
+    "orders": [
+     3,
+     "856b132428b91ae4333f"
+    ],
+    "posts": [
+     4,
+     "ef4e78f63cfb747f3fca"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     17,
+     "bea231a72c782fcf43fb"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "92dd4941468bfcff3c27"
+    ]
+   }
+  },
+  "real_block until 09:45": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     1,
+     "fa2d3e28a056312bcf39"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "33cb5c55afdca4e93393"
+    ],
+    "kv": [
+     8,
+     "62ff30507eb854c4782f"
+    ],
+    "lots": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "orders": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "posts": [
+     1,
+     "1d68d1d6518625810b66"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     11,
+     "d381961291e4ca7b3dfd"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "c9d269bcb47724e74e82"
+    ]
+   }
+  },
+  "restart before 09:31, 09:32, 09:33 and 09:34": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     4,
+     "4908c085b53bd21b1188"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "5e54298748408c99bf10"
+    ],
+    "kv": [
+     8,
+     "f9db8607c1c1ee2ce030"
+    ],
+    "lots": [
+     3,
+     "13c7ecd92a2b96b7b485"
+    ],
+    "orders": [
+     3,
+     "6012d545b6091c9387ca"
+    ],
+    "posts": [
+     4,
+     "b571c6e165a3cea04b90"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     18,
+     "38d5ff2e2d68dc58cb5c"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "85fb9475f1ed799d83b1"
+    ]
+   }
+  },
+  "restart before the 09:32 minute": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     4,
+     "a5b611bdfb90d4ec6fc2"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "5e54298748408c99bf10"
+    ],
+    "kv": [
+     8,
+     "adb566359abf506b8665"
+    ],
+    "lots": [
+     3,
+     "13c7ecd92a2b96b7b485"
+    ],
+    "orders": [
+     3,
+     "edef2ea3bc8550d1abe8"
+    ],
+    "posts": [
+     4,
+     "cf59810dd5e65565fa74"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     18,
+     "ef69f3d71ade89082fcc"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "85fb9475f1ed799d83b1"
+    ]
+   }
+  },
+  "restart before the 09:33 minute": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     4,
+     "c84c7410ec0192660274"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "5e54298748408c99bf10"
+    ],
+    "kv": [
+     8,
+     "adb566359abf506b8665"
+    ],
+    "lots": [
+     3,
+     "13c7ecd92a2b96b7b485"
+    ],
+    "orders": [
+     3,
+     "cea4f03229c246f52309"
+    ],
+    "posts": [
+     4,
+     "46d34792b18e23b4d7cd"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     18,
+     "2b1bd47c65931e31302a"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "85fb9475f1ed799d83b1"
+    ]
+   }
+  },
+  "the equity minute skipped 09:31 to 09:43": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     1,
+     "56766acf49b03d17ff8c"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "f3d1a735ab729ad5f7c7"
+    ],
+    "kv": [
+     8,
+     "728e05e3c425c6897bbb"
+    ],
+    "lots": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "orders": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "posts": [
+     1,
+     "a0a918b041e98e8555c1"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     12,
+     "fe3ce05086b4e334a3e3"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     12,
+     "25e9e77ebcc07edee4f2"
+    ]
+   }
+  },
+  "the equity minute skipped at 09:31 and 09:32": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     4,
+     "898a1ddc8636275da185"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "7bee0c967ace8e72f18e"
+    ],
+    "kv": [
+     8,
+     "00b077e458dee8b31e88"
+    ],
+    "lots": [
+     3,
+     "bfe2ee0c0a1f45908831"
+    ],
+    "orders": [
+     3,
+     "077de963b95626abf3da"
+    ],
+    "posts": [
+     4,
+     "668f76bca1ef22719a18"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     18,
+     "f4b7b4ec476a8dd85c25"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     23,
+     "4a44c3ad94804fc97877"
+    ]
+   }
+  },
+  "the kill switch engaged until 09:38": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     4,
+     "ad9c93b74ab17be52ad6"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "e39df59ff3812021df80"
+    ],
+    "kv": [
+     8,
+     "adb566359abf506b8665"
+    ],
+    "lots": [
+     3,
+     "f5e53e8b346b21590d93"
+    ],
+    "orders": [
+     3,
+     "d39b38cd97d51fa51901"
+    ],
+    "posts": [
+     4,
+     "69b9ca0fb7bf4c199bec"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     18,
+     "6ea65817e5b0e906a3c8"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "678734d95cf9f3a6c95e"
+    ]
+   }
+  },
+  "two Candidates take their seats at Friday's decide": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     7,
+     "3d084d1d98a07c46cbf6"
     ],
     "instances": [
      6,
@@ -5087,6 +7421,10 @@
      5,
      "877307f588e3cfe3db98"
     ],
+    "posts": [
+     7,
+     "e9b3655551b0f68a577a"
+    ],
     "rebalances": [
      0,
      "4f53cda18c2baa0c0354"
@@ -5105,154 +7443,683 @@
     ]
    }
   },
-  "week: a rotating program's sales rest five minutes at every open": {
-   "alerts": [],
-   "cancels": [
-    "10-13 09:33:11 alpaca alpaca-o-00011",
-    "10-13 09:33:11 alpaca alpaca-o-00013",
-    "10-13 09:33:11 alpaca alpaca-o-00014",
-    "10-13 09:34:11 alpaca alpaca-o-00016",
-    "10-13 09:34:11 alpaca alpaca-o-00017",
-    "10-13 09:34:11 alpaca alpaca-o-00018",
-    "10-13 09:35:11 alpaca alpaca-o-00019",
-    "10-13 09:35:11 alpaca alpaca-o-00020",
-    "10-13 09:35:11 alpaca alpaca-o-00021",
-    "10-13 09:36:11 alpaca alpaca-o-00022",
-    "10-13 09:36:11 alpaca alpaca-o-00023",
-    "10-13 09:36:11 alpaca alpaca-o-00024",
-    "10-14 09:32:11 alpaca alpaca-o-00035",
-    "10-14 09:33:11 alpaca alpaca-o-00038",
-    "10-14 09:34:11 alpaca alpaca-o-00039",
-    "10-14 09:35:11 alpaca alpaca-o-00046",
-    "10-15 09:32:11 alpaca alpaca-o-00054",
-    "10-15 09:32:11 alpaca alpaca-o-00055",
-    "10-15 09:32:11 alpaca alpaca-o-00056",
-    "10-15 09:33:11 alpaca alpaca-o-00058",
-    "10-15 09:33:11 alpaca alpaca-o-00059",
-    "10-15 09:33:11 alpaca alpaca-o-00060",
-    "10-15 09:34:11 alpaca alpaca-o-00063",
-    "10-15 09:34:11 alpaca alpaca-o-00064",
-    "10-15 09:34:11 alpaca alpaca-o-00065",
-    "10-15 09:35:11 alpaca alpaca-o-00068",
-    "10-15 09:35:11 alpaca alpaca-o-00069",
-    "10-15 09:35:11 alpaca alpaca-o-00070",
-    "10-16 09:32:11 alpaca alpaca-o-00081",
-    "10-16 09:33:11 alpaca alpaca-o-00084",
-    "10-16 09:34:11 alpaca alpaca-o-00085",
-    "10-16 09:35:11 alpaca alpaca-o-00092"
-   ],
-   "fills": [
-    "10-12 09:31:11 paper buy SPY 0.042995 @ 580.87 lq-pp-20261012-00000001-1-b",
-    "10-12 09:32:11 alpaca buy QQQ 0.460014 @ 484.06 lq-00000001-0000001-bred-a-hold3",
-    "10-12 09:32:11 alpaca buy SPY 0.191672 @ 580.87 lq-00000001-0000002-bred-b-range",
-    "10-12 09:32:11 alpaca buy IWM 0.914767 @ 212.99 lq-00000001-0000003-bred-d-rotate",
-    "10-12 09:32:11 alpaca buy DIA 0.447231 @ 435.66 lq-00000001-0000004-bred-d-rotate",
-    "10-12 09:33:11 alpaca buy QQQ 0.229999 @ 484.06 lq-00000001-0000005-bred-b-range",
-    "10-13 09:31:11 paper sell SPY 0.042995 @ 580.68 lq-pp-20261012-00000001-1-s1",
-    "10-13 09:32:11 alpaca sell QQQ 0.229999 @ 483.90 lq-00000001-0000007-bred-b-range",
-    "10-13 09:41:11 alpaca sell SPY 0.191672 @ 580.68 lq-00000001-0000019-bred-b-range",
-    "10-13 09:41:11 alpaca sell IWM 0.914767 @ 212.92 lq-00000001-0000020-bred-d-rotate",
-    "10-13 09:41:11 alpaca sell DIA 0.447231 @ 435.51 lq-00000001-0000021-bred-d-rotate",
-    "10-13 09:41:11 alpaca buy SPY 0.479184 @ 580.80 lq-00000001-0000022-bred-d-rotate",
-    "10-13 15:55:11 alpaca buy QQQ 0.574543 @ 484.46 lq-00000001-0000023-seed-overnight-qqq",
-    "10-14 09:31:11 alpaca sell QQQ 0.574543 @ 484.51 lq-00000001-0000025-seed-overnight-qqq",
-    "10-14 09:33:11 alpaca buy QQQ 0.229746 @ 484.61 lq-00000001-0000028-bred-b-range",
-    "10-14 09:33:11 alpaca buy IWM 0.913738 @ 213.23 lq-00000001-0000029-bred-d-rotate",
-    "10-14 09:33:11 alpaca buy DIA 0.191633 @ 436.15 lq-00000001-0000030-bred-d-rotate",
-    "10-14 09:40:11 alpaca sell SPY 0.479184 @ 581.41 lq-00000001-0000032-bred-d-rotate",
-    "10-14 09:40:11 alpaca buy SPY 0.191455 @ 581.53 lq-00000001-0000033-bred-b-range",
-    "10-14 15:55:11 alpaca buy QQQ 0.573786 @ 485.10 lq-00000001-0000034-seed-overnight-qqq",
-    "10-15 09:31:11 alpaca sell QQQ 0.229746 @ 485.11 lq-00000001-0000035-bred-b-range",
-    "10-15 09:32:11 alpaca sell QQQ 0.573786 @ 485.11 lq-00000001-0000042-seed-overnight-qqq",
-    "10-15 09:33:11 alpaca sell QQQ 0.460014 @ 485.11 lq-00000001-0000046-bred-a-hold3",
-    "10-15 09:40:11 alpaca sell SPY 0.191455 @ 582.13 lq-00000001-0000050-bred-b-range",
-    "10-15 09:40:11 alpaca sell IWM 0.913738 @ 213.45 lq-00000001-0000051-bred-d-rotate",
-    "10-15 09:40:11 alpaca sell DIA 0.191633 @ 436.60 lq-00000001-0000052-bred-d-rotate",
-    "10-15 09:40:11 alpaca buy SPY 0.478047 @ 582.25 lq-00000001-0000053-bred-d-rotate",
-    "10-15 15:55:11 alpaca buy QQQ 0.573479 @ 485.36 lq-00000001-0000054-seed-overnight-qqq",
-    "10-16 09:31:11 alpaca sell QQQ 0.573479 @ 485.09 lq-00000001-0000056-seed-overnight-qqq",
-    "10-16 09:33:11 alpaca buy QQQ 0.458944 @ 485.19 lq-00000001-0000059-bred-a-hold3",
-    "10-16 09:33:11 alpaca buy IWM 0.912669 @ 213.48 lq-00000001-0000060-bred-d-rotate",
-    "10-16 09:33:11 alpaca buy DIA 0.191737 @ 436.67 lq-00000001-0000061-bred-d-rotate",
-    "10-16 09:34:11 alpaca buy QQQ 0.229472 @ 485.19 lq-00000001-0000063-bred-b-range",
-    "10-16 09:40:11 alpaca sell SPY 0.478047 @ 582.11 lq-00000001-0000064-bred-d-rotate",
-    "10-16 09:40:11 alpaca buy SPY 0.191228 @ 582.22 lq-00000001-0000065-bred-b-range",
-    "10-16 15:55:11 alpaca buy QQQ 0.574046 @ 484.88 lq-00000001-0000066-seed-overnight-qqq"
-   ],
-   "posts": [
-    "10-12 09:31:11 paper buy SPY 0.042995 @ 581.46 limit day lq-pp-20261012-00000001-1-b",
-    "10-12 09:32:11 alpaca buy QQQ 0.460014 @ 484.55 limit day lq-00000001-0000001-bred-a-hold3",
-    "10-12 09:32:11 alpaca buy SPY 0.191672 @ 581.46 limit day lq-00000001-0000002-bred-b-range",
-    "10-12 09:32:11 alpaca buy IWM 0.914767 @ 213.21 limit day lq-00000001-0000003-bred-d-rotate",
-    "10-12 09:32:11 alpaca buy DIA 0.447231 @ 436.10 limit day lq-00000001-0000004-bred-d-rotate",
-    "10-12 09:33:11 alpaca buy QQQ 0.229999 @ 484.55 limit day lq-00000001-0000005-bred-b-range",
-    "10-13 09:31:11 paper sell SPY 0.042995 @ 580.09 limit day lq-pp-20261012-00000001-1-s1",
-    "10-13 09:32:11 alpaca sell SPY 0.191672 @ 580.09 limit day lq-00000001-0000006-bred-b-range",
-    "10-13 09:32:11 alpaca sell QQQ 0.229999 @ 483.41 limit day lq-00000001-0000007-bred-b-range",
-    "10-13 09:32:11 alpaca sell IWM 0.914767 @ 212.70 limit day lq-00000001-0000008-bred-d-rotate",
-    "10-13 09:32:11 alpaca sell DIA 0.447231 @ 435.07 limit day lq-00000001-0000009-bred-d-rotate",
-    "10-13 09:33:11 alpaca sell SPY 0.191672 @ 579.51 limit day lq-00000001-0000010-bred-b-range",
-    "10-13 09:33:11 alpaca sell IWM 0.914767 @ 212.49 limit day lq-00000001-0000011-bred-d-rotate",
-    "10-13 09:33:11 alpaca sell DIA 0.447231 @ 434.63 limit day lq-00000001-0000012-bred-d-rotate",
-    "10-13 09:34:11 alpaca sell SPY 0.191672 @ 578.93 limit day lq-00000001-0000013-bred-b-range",
-    "10-13 09:34:11 alpaca sell IWM 0.914767 @ 212.28 limit day lq-00000001-0000014-bred-d-rotate",
-    "10-13 09:34:11 alpaca sell DIA 0.447231 @ 434.20 limit day lq-00000001-0000015-bred-d-rotate",
-    "10-13 09:35:11 alpaca sell SPY 0.191672 @ 578.35 limit day lq-00000001-0000016-bred-b-range",
-    "10-13 09:35:11 alpaca sell IWM 0.914767 @ 212.06 limit day lq-00000001-0000017-bred-d-rotate",
-    "10-13 09:35:11 alpaca sell DIA 0.447231 @ 433.76 limit day lq-00000001-0000018-bred-d-rotate",
-    "10-13 09:36:11 alpaca sell SPY 0.191672 @ 577.77 limit day lq-00000001-0000019-bred-b-range",
-    "10-13 09:36:11 alpaca sell IWM 0.914767 @ 211.85 limit day lq-00000001-0000020-bred-d-rotate",
-    "10-13 09:36:11 alpaca sell DIA 0.447231 @ 433.33 limit day lq-00000001-0000021-bred-d-rotate",
-    "10-13 09:41:11 alpaca buy SPY 0.479184 @ 581.39 limit day lq-00000001-0000022-bred-d-rotate",
-    "10-13 15:55:11 alpaca buy QQQ 0.574543 @ 484.95 limit day lq-00000001-0000023-seed-overnight-qqq",
-    "10-14 09:31:11 alpaca sell SPY 0.479184 @ 580.82 limit day lq-00000001-0000024-bred-d-rotate",
-    "10-14 09:31:11 alpaca sell QQQ 0.574543 @ 484.02 limit day lq-00000001-0000025-seed-overnight-qqq",
-    "10-14 09:32:11 alpaca sell SPY 0.479184 @ 580.24 limit day lq-00000001-0000026-bred-d-rotate",
-    "10-14 09:33:11 alpaca sell SPY 0.479184 @ 579.66 limit day lq-00000001-0000027-bred-d-rotate",
-    "10-14 09:33:11 alpaca buy QQQ 0.229746 @ 485.10 limit day lq-00000001-0000028-bred-b-range",
-    "10-14 09:33:11 alpaca buy IWM 0.913738 @ 213.45 limit day lq-00000001-0000029-bred-d-rotate",
-    "10-14 09:33:11 alpaca buy DIA 0.191633 @ 436.59 limit day lq-00000001-0000030-bred-d-rotate",
-    "10-14 09:34:11 alpaca sell SPY 0.479184 @ 579.08 limit day lq-00000001-0000031-bred-d-rotate",
-    "10-14 09:35:11 alpaca sell SPY 0.479184 @ 578.50 limit day lq-00000001-0000032-bred-d-rotate",
-    "10-14 09:40:11 alpaca buy SPY 0.191455 @ 582.12 limit day lq-00000001-0000033-bred-b-range",
-    "10-14 15:55:11 alpaca buy QQQ 0.573786 @ 485.59 limit day lq-00000001-0000034-seed-overnight-qqq",
-    "10-15 09:31:11 alpaca sell QQQ 0.229746 @ 484.62 limit day lq-00000001-0000035-bred-b-range",
-    "10-15 09:31:11 alpaca sell SPY 0.191455 @ 581.54 limit day lq-00000001-0000036-bred-b-range",
-    "10-15 09:31:11 alpaca sell IWM 0.913738 @ 213.23 limit day lq-00000001-0000037-bred-d-rotate",
-    "10-15 09:31:11 alpaca sell DIA 0.191633 @ 436.16 limit day lq-00000001-0000038-bred-d-rotate",
-    "10-15 09:32:11 alpaca sell SPY 0.191455 @ 580.96 limit day lq-00000001-0000039-bred-b-range",
-    "10-15 09:32:11 alpaca sell IWM 0.913738 @ 213.02 limit day lq-00000001-0000040-bred-d-rotate",
-    "10-15 09:32:11 alpaca sell DIA 0.191633 @ 435.72 limit day lq-00000001-0000041-bred-d-rotate",
-    "10-15 09:32:11 alpaca sell QQQ 0.573786 @ 484.62 limit day lq-00000001-0000042-seed-overnight-qqq",
-    "10-15 09:33:11 alpaca sell SPY 0.191455 @ 580.38 limit day lq-00000001-0000043-bred-b-range",
-    "10-15 09:33:11 alpaca sell IWM 0.913738 @ 212.80 limit day lq-00000001-0000044-bred-d-rotate",
-    "10-15 09:33:11 alpaca sell DIA 0.191633 @ 435.29 limit day lq-00000001-0000045-bred-d-rotate",
-    "10-15 09:33:11 alpaca sell QQQ 0.460014 @ 484.62 limit day lq-00000001-0000046-bred-a-hold3",
-    "10-15 09:34:11 alpaca sell SPY 0.191455 @ 579.80 limit day lq-00000001-0000047-bred-b-range",
-    "10-15 09:34:11 alpaca sell IWM 0.913738 @ 212.59 limit day lq-00000001-0000048-bred-d-rotate",
-    "10-15 09:34:11 alpaca sell DIA 0.191633 @ 434.85 limit day lq-00000001-0000049-bred-d-rotate",
-    "10-15 09:35:11 alpaca sell SPY 0.191455 @ 579.21 limit day lq-00000001-0000050-bred-b-range",
-    "10-15 09:35:11 alpaca sell IWM 0.913738 @ 212.38 limit day lq-00000001-0000051-bred-d-rotate",
-    "10-15 09:35:11 alpaca sell DIA 0.191633 @ 434.41 limit day lq-00000001-0000052-bred-d-rotate",
-    "10-15 09:40:11 alpaca buy SPY 0.478047 @ 582.84 limit day lq-00000001-0000053-bred-d-rotate",
-    "10-15 15:55:11 alpaca buy QQQ 0.573479 @ 485.85 limit day lq-00000001-0000054-seed-overnight-qqq",
-    "10-16 09:31:11 alpaca sell SPY 0.478047 @ 581.52 limit day lq-00000001-0000055-bred-d-rotate",
-    "10-16 09:31:11 alpaca sell QQQ 0.573479 @ 484.60 limit day lq-00000001-0000056-seed-overnight-qqq",
-    "10-16 09:32:11 alpaca sell SPY 0.478047 @ 580.94 limit day lq-00000001-0000057-bred-d-rotate",
-    "10-16 09:33:11 alpaca sell SPY 0.478047 @ 580.36 limit day lq-00000001-0000058-bred-d-rotate",
-    "10-16 09:33:11 alpaca buy QQQ 0.458944 @ 485.68 limit day lq-00000001-0000059-bred-a-hold3",
-    "10-16 09:33:11 alpaca buy IWM 0.912669 @ 213.70 limit day lq-00000001-0000060-bred-d-rotate",
-    "10-16 09:33:11 alpaca buy DIA 0.191737 @ 437.11 limit day lq-00000001-0000061-bred-d-rotate",
-    "10-16 09:34:11 alpaca sell SPY 0.478047 @ 579.78 limit day lq-00000001-0000062-bred-d-rotate",
-    "10-16 09:34:11 alpaca buy QQQ 0.229472 @ 485.68 limit day lq-00000001-0000063-bred-b-range",
-    "10-16 09:35:11 alpaca sell SPY 0.478047 @ 579.19 limit day lq-00000001-0000064-bred-d-rotate",
-    "10-16 09:40:11 alpaca buy SPY 0.191228 @ 582.81 limit day lq-00000001-0000065-bred-b-range",
-    "10-16 15:55:11 alpaca buy QQQ 0.574046 @ 485.37 limit day lq-00000001-0000066-seed-overnight-qqq"
-   ],
+  "week: FILL activities listed 5 minutes late": {
    "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
     "errors": [
      0,
      "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     22,
+     "c8d67902887690d963ba"
+    ],
+    "instances": [
+     6,
+     "4ec22aa449dfaa0880ff"
+    ],
+    "intents": [
+     24,
+     "bbf88c189f464952eb2c"
+    ],
+    "kv": [
+     10,
+     "fdad3771a91e1cd8806f"
+    ],
+    "lots": [
+     12,
+     "af4dc63d97730d052358"
+    ],
+    "orders": [
+     20,
+     "35778af7fdbfa835ade1"
+    ],
+    "posts": [
+     22,
+     "3bb01110a855ae695249"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     81,
+     "53262564c7a1bdc3305c"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     197,
+     "49e713a7da85b72d5375"
+    ]
+   }
+  },
+  "week: a program rotates between ETFs at every open": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     36,
+     "e00b14de63ec0432b362"
+    ],
+    "instances": [
+     6,
+     "22282fee6d993baa8f9f"
+    ],
+    "intents": [
+     41,
+     "0e3017fb1521868fb063"
+    ],
+    "kv": [
+     10,
+     "d6831878547dbcc6160c"
+    ],
+    "lots": [
+     20,
+     "e9f29bc1189ce14ba7b0"
+    ],
+    "orders": [
+     34,
+     "c425cf32028468b8ac1a"
+    ],
+    "posts": [
+     36,
+     "7a69fcc559e3911c0139"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     123,
+     "ca9a5db606bea4f54b1b"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     197,
+     "c2f651e454a2806685ae"
+    ]
+   }
+  },
+  "week: a program sells and buys again at every close": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     31,
+     "426fe4c984062b4d9602"
+    ],
+    "instances": [
+     6,
+     "29b5e70a886fe6b690fd"
+    ],
+    "intents": [
+     35,
+     "6eed0e797a5681a36fda"
+    ],
+    "kv": [
+     10,
+     "4f4b87ee95cf4273bae6"
+    ],
+    "lots": [
+     17,
+     "7bc73a863fcf81cbdc5c"
+    ],
+    "orders": [
+     29,
+     "70574e15f178eef67332"
+    ],
+    "posts": [
+     31,
+     "1d5dbf72c0017fd693b7"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     108,
+     "7bc39658f31c2faf873a"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     197,
+     "d4c600e24e517870e31d"
+    ]
+   }
+  },
+  "week: a program sells and buys again at every open": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     31,
+     "c48555d3f0d39c2dda98"
+    ],
+    "instances": [
+     6,
+     "49bf5b2de625d2278831"
+    ],
+    "intents": [
+     35,
+     "aeb54df31d392b84d80e"
+    ],
+    "kv": [
+     10,
+     "4f4b87ee95cf4273bae6"
+    ],
+    "lots": [
+     17,
+     "3425cd070cfa320b13d9"
+    ],
+    "orders": [
+     29,
+     "1688abfba2ab26c5e8b0"
+    ],
+    "posts": [
+     31,
+     "a62ad401c2eb7e57ba55"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     108,
+     "6759c0813265a6611206"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     197,
+     "078642cd784fa78945ce"
+    ]
+   }
+  },
+  "week: a rolling and a rotating program, sales resting five minutes": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     40,
+     "bf7f1fb412c5e2c4ecb1"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     41,
+     "8a9ad4dd275f8b512602"
+    ],
+    "instances": [
+     6,
+     "d1a07e97b053e8d42bee"
+    ],
+    "intents": [
+     50,
+     "ff3d716060def98d216b"
+    ],
+    "kv": [
+     10,
+     "81cfda639e3b05e78e35"
+    ],
+    "lots": [
+     23,
+     "70fe1d8a4acf7a0c233d"
+    ],
+    "orders": [
+     79,
+     "a6467ce3bf0d6fa3d1c8"
+    ],
+    "posts": [
+     81,
+     "c6309d5bd6d71890df99"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     220,
+     "42976138eaaf89b2db23"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     197,
+     "ed0cc7c44e9e195c2b95"
+    ]
+   }
+  },
+  "week: a rolling program while stage SELL cannot pass": {
+   "sha": {
+    "alerts": [
+     2,
+     "824d8760b8b20eca0736"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     10,
+     "0da825f12b567ee54121"
+    ],
+    "instances": [
+     6,
+     "49bf5b2de625d2278831"
+    ],
+    "intents": [
+     51,
+     "7a459d4c9dde720fd467"
+    ],
+    "kv": [
+     10,
+     "98e551b781a777b12168"
+    ],
+    "lots": [
+     5,
+     "2f158696be00485aa268"
+    ],
+    "orders": [
+     5,
+     "94a78cfa5300d9a504a6"
+    ],
+    "posts": [
+     10,
+     "aadff27e859350fe5098"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     78,
+     "7d0e72b104a9e0515ad4"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     197,
+     "001ac4f0054cae8ecd2b"
+    ]
+   }
+  },
+  "week: a rolling program's sale never fills": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     20,
+     "ba010637d0eecb413c39"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     23,
+     "af314ec2aea3ffbb9dce"
+    ],
+    "instances": [
+     6,
+     "49bf5b2de625d2278831"
+    ],
+    "intents": [
+     39,
+     "f0c06973513e1445b2b4"
+    ],
+    "kv": [
+     10,
+     "4f4b87ee95cf4273bae6"
+    ],
+    "lots": [
+     13,
+     "e7ec149e0b1fcf682cbd"
+    ],
+    "orders": [
+     41,
+     "1e62d44b5319cc7fb506"
+    ],
+    "posts": [
+     43,
+     "1d1927f0d3adcd958f0d"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     136,
+     "3671114b60fde3994a91"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     197,
+     "1586ce5a2cd83845a082"
+    ]
+   }
+  },
+  "week: a rolling program's sale rests five minutes at every open": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     16,
+     "6d0707e16b7f31936ad8"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     31,
+     "320240414567dc5c5264"
+    ],
+    "instances": [
+     6,
+     "49bf5b2de625d2278831"
+    ],
+    "intents": [
+     35,
+     "52d4cf5e05d1ffc593fc"
+    ],
+    "kv": [
+     10,
+     "4f4b87ee95cf4273bae6"
+    ],
+    "lots": [
+     17,
+     "ff8b9340af0809b94a4f"
+    ],
+    "orders": [
+     45,
+     "a70186f1b88a30a438e4"
+    ],
+    "posts": [
+     47,
+     "440eed96f6195ab39d6a"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     140,
+     "732140ecbaee8a0b7b23"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     197,
+     "c4dea9acaf5a034b5b43"
+    ]
+   }
+  },
+  "week: a rolling program's sale rests two minutes at every close": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     18,
+     "f4becd7836442f62618d"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     27,
+     "1bb57c82e3967ee1ed4e"
+    ],
+    "instances": [
+     6,
+     "29b5e70a886fe6b690fd"
+    ],
+    "intents": [
+     37,
+     "8c9604153c6481d818f6"
+    ],
+    "kv": [
+     10,
+     "4f4b87ee95cf4273bae6"
+    ],
+    "lots": [
+     15,
+     "2b2f349545c41f3ca788"
+    ],
+    "orders": [
+     43,
+     "8853ac4434ba4a443c3f"
+    ],
+    "posts": [
+     45,
+     "3a2b3b284f2947dd367b"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     138,
+     "0c8693239cbc71efa197"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     197,
+     "c70b053d02408d839949"
+    ]
+   }
+  },
+  "week: a rotating program while stage SELL cannot pass": {
+   "sha": {
+    "alerts": [
+     2,
+     "824d8760b8b20eca0736"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     11,
+     "7a1ad45a0643f9f180fe"
+    ],
+    "instances": [
+     6,
+     "22282fee6d993baa8f9f"
+    ],
+    "intents": [
+     65,
+     "f9b6714a6b07370b014d"
+    ],
+    "kv": [
+     10,
+     "fd1a41eb8aeb15e72c16"
+    ],
+    "lots": [
+     6,
+     "428edf5da669f5024808"
+    ],
+    "orders": [
+     6,
+     "e0edd7bf1768003aa85b"
+    ],
+    "posts": [
+     11,
+     "cc93cbb9ce2c9fa7bf66"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     92,
+     "c4ae0a75d27d77dae3e1"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     197,
+     "272565f41ff6cea0f8e9"
+    ]
+   }
+  },
+  "week: a rotating program's sales never fill": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     60,
+     "3650577440edff55db58"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     17,
+     "37650ecc1465bd238721"
+    ],
+    "instances": [
+     6,
+     "22282fee6d993baa8f9f"
+    ],
+    "intents": [
+     49,
+     "60d65398768caef3c8de"
+    ],
+    "kv": [
+     10,
+     "d6831878547dbcc6160c"
+    ],
+    "lots": [
+     10,
+     "d9a8d3746a86ed67afd6"
+    ],
+    "orders": [
+     75,
+     "f6862710c0f229c229ca"
+    ],
+    "posts": [
+     77,
+     "415f427bfb6949f84449"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     214,
+     "e96e67de91896122df06"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     197,
+     "7a80ae4f1a208db5b069"
+    ]
+   }
+  },
+  "week: a rotating program's sales rest five minutes at every open": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     32,
+     "c208e270ed412835af93"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     36,
+     "0c7bbff531ca168f0e5f"
     ],
     "instances": [
      6,
@@ -5274,6 +8141,10 @@
      66,
      "92d093445a616adefd4d"
     ],
+    "posts": [
+     68,
+     "f73d87e8f2f77fbc6a6b"
+    ],
     "rebalances": [
      0,
      "4f53cda18c2baa0c0354"
@@ -5292,61 +8163,83 @@
     ]
    }
   },
-  "week: normal": {
-   "alerts": [],
-   "cancels": [],
-   "fills": [
-    "10-12 09:31:11 paper buy SPY 0.042995 @ 580.87 lq-pp-20261012-00000001-1-b",
-    "10-12 09:32:11 alpaca buy QQQ 0.460014 @ 484.06 lq-00000001-0000001-bred-a-hold3",
-    "10-12 09:32:11 alpaca buy SPY 0.191672 @ 580.87 lq-00000001-0000002-bred-b-range",
-    "10-12 09:33:11 alpaca buy QQQ 0.230003 @ 484.06 lq-00000001-0000003-bred-b-range",
-    "10-13 09:31:11 paper sell SPY 0.042995 @ 580.68 lq-pp-20261012-00000001-1-s1",
-    "10-13 09:32:11 alpaca sell SPY 0.191672 @ 580.68 lq-00000001-0000004-bred-b-range",
-    "10-13 09:32:11 alpaca sell QQQ 0.230003 @ 483.90 lq-00000001-0000005-bred-b-range",
-    "10-13 15:55:11 alpaca buy QQQ 0.574543 @ 484.46 lq-00000001-0000006-seed-overnight-qqq",
-    "10-14 09:31:11 alpaca sell QQQ 0.574543 @ 484.51 lq-00000001-0000007-seed-overnight-qqq",
-    "10-14 09:32:11 alpaca buy SPY 0.191455 @ 581.53 lq-00000001-0000008-bred-b-range",
-    "10-14 09:32:11 alpaca buy QQQ 0.229746 @ 484.61 lq-00000001-0000009-bred-b-range",
-    "10-14 15:55:11 alpaca buy QQQ 0.573786 @ 485.10 lq-00000001-0000010-seed-overnight-qqq",
-    "10-15 09:31:11 alpaca sell SPY 0.191455 @ 582.13 lq-00000001-0000011-bred-b-range",
-    "10-15 09:31:11 alpaca sell QQQ 0.229746 @ 485.11 lq-00000001-0000012-bred-b-range",
-    "10-15 09:32:11 alpaca sell QQQ 0.573786 @ 485.11 lq-00000001-0000013-seed-overnight-qqq",
-    "10-15 09:33:11 alpaca sell QQQ 0.460014 @ 485.11 lq-00000001-0000014-bred-a-hold3",
-    "10-15 15:55:11 alpaca buy QQQ 0.573479 @ 485.36 lq-00000001-0000015-seed-overnight-qqq",
-    "10-16 09:31:11 alpaca sell QQQ 0.573479 @ 485.09 lq-00000001-0000016-seed-overnight-qqq",
-    "10-16 09:32:11 alpaca buy QQQ 0.458944 @ 485.19 lq-00000001-0000017-bred-a-hold3",
-    "10-16 09:32:11 alpaca buy SPY 0.191228 @ 582.22 lq-00000001-0000018-bred-b-range",
-    "10-16 09:33:11 alpaca buy QQQ 0.229472 @ 485.19 lq-00000001-0000019-bred-b-range",
-    "10-16 15:55:11 alpaca buy QQQ 0.574046 @ 484.88 lq-00000001-0000020-seed-overnight-qqq"
-   ],
-   "posts": [
-    "10-12 09:31:11 paper buy SPY 0.042995 @ 581.46 limit day lq-pp-20261012-00000001-1-b",
-    "10-12 09:32:11 alpaca buy QQQ 0.460014 @ 484.55 limit day lq-00000001-0000001-bred-a-hold3",
-    "10-12 09:32:11 alpaca buy SPY 0.191672 @ 581.46 limit day lq-00000001-0000002-bred-b-range",
-    "10-12 09:33:11 alpaca buy QQQ 0.230003 @ 484.55 limit day lq-00000001-0000003-bred-b-range",
-    "10-13 09:31:11 paper sell SPY 0.042995 @ 580.09 limit day lq-pp-20261012-00000001-1-s1",
-    "10-13 09:32:11 alpaca sell SPY 0.191672 @ 580.09 limit day lq-00000001-0000004-bred-b-range",
-    "10-13 09:32:11 alpaca sell QQQ 0.230003 @ 483.41 limit day lq-00000001-0000005-bred-b-range",
-    "10-13 15:55:11 alpaca buy QQQ 0.574543 @ 484.95 limit day lq-00000001-0000006-seed-overnight-qqq",
-    "10-14 09:31:11 alpaca sell QQQ 0.574543 @ 484.02 limit day lq-00000001-0000007-seed-overnight-qqq",
-    "10-14 09:32:11 alpaca buy SPY 0.191455 @ 582.12 limit day lq-00000001-0000008-bred-b-range",
-    "10-14 09:32:11 alpaca buy QQQ 0.229746 @ 485.10 limit day lq-00000001-0000009-bred-b-range",
-    "10-14 15:55:11 alpaca buy QQQ 0.573786 @ 485.59 limit day lq-00000001-0000010-seed-overnight-qqq",
-    "10-15 09:31:11 alpaca sell SPY 0.191455 @ 581.54 limit day lq-00000001-0000011-bred-b-range",
-    "10-15 09:31:11 alpaca sell QQQ 0.229746 @ 484.62 limit day lq-00000001-0000012-bred-b-range",
-    "10-15 09:32:11 alpaca sell QQQ 0.573786 @ 484.62 limit day lq-00000001-0000013-seed-overnight-qqq",
-    "10-15 09:33:11 alpaca sell QQQ 0.460014 @ 484.62 limit day lq-00000001-0000014-bred-a-hold3",
-    "10-15 15:55:11 alpaca buy QQQ 0.573479 @ 485.85 limit day lq-00000001-0000015-seed-overnight-qqq",
-    "10-16 09:31:11 alpaca sell QQQ 0.573479 @ 484.60 limit day lq-00000001-0000016-seed-overnight-qqq",
-    "10-16 09:32:11 alpaca buy QQQ 0.458944 @ 485.68 limit day lq-00000001-0000017-bred-a-hold3",
-    "10-16 09:32:11 alpaca buy SPY 0.191228 @ 582.81 limit day lq-00000001-0000018-bred-b-range",
-    "10-16 09:33:11 alpaca buy QQQ 0.229472 @ 485.68 limit day lq-00000001-0000019-bred-b-range",
-    "10-16 15:55:11 alpaca buy QQQ 0.574046 @ 485.37 limit day lq-00000001-0000020-seed-overnight-qqq"
-   ],
+  "week: a rotating program's sales rest two minutes at every close": {
    "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     53,
+     "9047a3fafda97ec693d9"
+    ],
     "errors": [
      0,
      "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     33,
+     "88d476b43dbcb686c545"
+    ],
+    "instances": [
+     6,
+     "62f7538c558fb18ecd77"
+    ],
+    "intents": [
+     50,
+     "287b94cc08351aba47c1"
+    ],
+    "kv": [
+     10,
+     "d6831878547dbcc6160c"
+    ],
+    "lots": [
+     18,
+     "30ee15117bb6b605a0f5"
+    ],
+    "orders": [
+     84,
+     "4d1b52235c238ccb011c"
+    ],
+    "posts": [
+     86,
+     "1e94f172675ce3b5dc1d"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     232,
+     "95abb78edeb6610766ee"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     197,
+     "8642a8bd15ab9ff3e4a8"
+    ]
+   }
+  },
+  "week: normal": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     22,
+     "aa9e833ea2bad0b402c0"
     ],
     "instances": [
      6,
@@ -5368,6 +8261,10 @@
      20,
      "6928f4e047e7d1ed3a99"
     ],
+    "posts": [
+     22,
+     "ec9a67d688f798d8959a"
+    ],
     "rebalances": [
      0,
      "4f53cda18c2baa0c0354"
@@ -5387,35 +8284,22 @@
    }
   },
   "week: stage SELL cannot pass, no FILL activity": {
-   "alerts": [
-    "10-13 15:55:11 error: equity: the stock paper proof's SELL stage failed (the round trip ended without activity_witness). Real equity lots stay held and new real equity buys stop until it passes. Owner step: look at the practice account (alpaca-paper) and its SPY position and orders; the proof tries again at the next open window.",
-    "10-15 15:55:11 error: equity: the stock paper proof's SELL stage failed (the round trip ended without activity_witness). Real equity lots stay held and new real equity buys stop until it passes. Owner step: look at the practice account (alpaca-paper) and its SPY position and orders; the proof tries again at the next open window."
-   ],
-   "cancels": [],
-   "fills": [
-    "10-12 09:31:11 paper buy SPY 0.042995 @ 580.87 lq-pp-20261012-00000001-1-b",
-    "10-12 09:32:11 alpaca buy QQQ 0.460014 @ 484.06 lq-00000001-0000001-bred-a-hold3",
-    "10-12 09:32:11 alpaca buy SPY 0.191672 @ 580.87 lq-00000001-0000002-bred-b-range",
-    "10-12 09:33:11 alpaca buy QQQ 0.230003 @ 484.06 lq-00000001-0000003-bred-b-range",
-    "10-13 09:31:11 paper sell SPY 0.042995 @ 580.68 lq-pp-20261012-00000001-1-s1",
-    "10-14 09:31:11 paper buy SPY 0.042946 @ 581.53 lq-pp-20261014-00000001-2-b",
-    "10-15 09:31:11 paper sell SPY 0.042946 @ 582.13 lq-pp-20261014-00000001-2-s1",
-    "10-16 09:31:11 paper buy SPY 0.042895 @ 582.22 lq-pp-20261016-00000001-3-b"
-   ],
-   "posts": [
-    "10-12 09:31:11 paper buy SPY 0.042995 @ 581.46 limit day lq-pp-20261012-00000001-1-b",
-    "10-12 09:32:11 alpaca buy QQQ 0.460014 @ 484.55 limit day lq-00000001-0000001-bred-a-hold3",
-    "10-12 09:32:11 alpaca buy SPY 0.191672 @ 581.46 limit day lq-00000001-0000002-bred-b-range",
-    "10-12 09:33:11 alpaca buy QQQ 0.230003 @ 484.55 limit day lq-00000001-0000003-bred-b-range",
-    "10-13 09:31:11 paper sell SPY 0.042995 @ 580.09 limit day lq-pp-20261012-00000001-1-s1",
-    "10-14 09:31:11 paper buy SPY 0.042946 @ 582.12 limit day lq-pp-20261014-00000001-2-b",
-    "10-15 09:31:11 paper sell SPY 0.042946 @ 581.54 limit day lq-pp-20261014-00000001-2-s1",
-    "10-16 09:31:11 paper buy SPY 0.042895 @ 582.81 limit day lq-pp-20261016-00000001-3-b"
-   ],
    "sha": {
+    "alerts": [
+     2,
+     "824d8760b8b20eca0736"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
     "errors": [
      0,
      "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     8,
+     "1f0652895793ae6ffc51"
     ],
     "instances": [
      6,
@@ -5437,6 +8321,10 @@
      3,
      "927d29582335599fbc01"
     ],
+    "posts": [
+     8,
+     "490a34ff0385363ed82f"
+    ],
     "rebalances": [
      0,
      "4f53cda18c2baa0c0354"
@@ -5452,6 +8340,546 @@
     "ticks": [
      197,
      "b02fff48c91c53effeb5"
+    ]
+   }
+  },
+  "week: stage SELL cannot pass, the practice sale rests": {
+   "sha": {
+    "alerts": [
+     4,
+     "316f3e5b1104588ba45b"
+    ],
+    "cancels": [
+     48,
+     "38b9069d28483b99fe06"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     4,
+     "f4a02d67a310008f6fe9"
+    ],
+    "instances": [
+     6,
+     "4ec22aa449dfaa0880ff"
+    ],
+    "intents": [
+     29,
+     "c33cd4738d5894eb606a"
+    ],
+    "kv": [
+     10,
+     "ba724fdd3e49322dd33d"
+    ],
+    "lots": [
+     3,
+     "a2b8a17e1d372c1c67b4"
+    ],
+    "orders": [
+     3,
+     "927d29582335599fbc01"
+    ],
+    "posts": [
+     52,
+     "b5497e65034bf67f43c4"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     57,
+     "f1d41c3a81fa3f6f738e"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     197,
+     "2553b04e8a2c9ba14c24"
+    ]
+   }
+  },
+  "week: the owner's flatten on Tuesday, stage SELL not passing": {
+   "sha": {
+    "alerts": [
+     3,
+     "dc2efe86c8ec5a6ea8eb"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     8,
+     "1f0652895793ae6ffc51"
+    ],
+    "instances": [
+     6,
+     "4ec22aa449dfaa0880ff"
+    ],
+    "intents": [
+     31,
+     "d1e6cd5b31eead9ae3b1"
+    ],
+    "kv": [
+     10,
+     "f65b03238333e9a2bea8"
+    ],
+    "lots": [
+     3,
+     "a2b8a17e1d372c1c67b4"
+    ],
+    "orders": [
+     3,
+     "927d29582335599fbc01"
+    ],
+    "posts": [
+     8,
+     "490a34ff0385363ed82f"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     59,
+     "3f84e4da79f132653f65"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     197,
+     "93bccf1da346a733fe09"
+    ]
+   }
+  },
+  "window loss $0 realized and an option position at risk": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     4,
+     "f4a02d67a310008f6fe9"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "5e54298748408c99bf10"
+    ],
+    "kv": [
+     8,
+     "adb566359abf506b8665"
+    ],
+    "lots": [
+     3,
+     "13c7ecd92a2b96b7b485"
+    ],
+    "orders": [
+     3,
+     "927d29582335599fbc01"
+    ],
+    "posts": [
+     4,
+     "ea55c1490a030dbc7052"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     18,
+     "94aaca6571d31878be8f"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "85fb9475f1ed799d83b1"
+    ]
+   }
+  },
+  "window loss $250 realized and an option position at risk": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     4,
+     "f4a02d67a310008f6fe9"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "5e54298748408c99bf10"
+    ],
+    "kv": [
+     8,
+     "adb566359abf506b8665"
+    ],
+    "lots": [
+     3,
+     "13c7ecd92a2b96b7b485"
+    ],
+    "orders": [
+     3,
+     "927d29582335599fbc01"
+    ],
+    "posts": [
+     4,
+     "ea55c1490a030dbc7052"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     18,
+     "94aaca6571d31878be8f"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "85fb9475f1ed799d83b1"
+    ]
+   }
+  },
+  "window loss $270 realized and an option position at risk": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     4,
+     "c2e8b9c660490919601a"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "ee8411b998e506717ef7"
+    ],
+    "kv": [
+     8,
+     "adb566359abf506b8665"
+    ],
+    "lots": [
+     3,
+     "fb0a8fb9b60b8bb18b57"
+    ],
+    "orders": [
+     3,
+     "b03a5a63e218abe13ce9"
+    ],
+    "posts": [
+     4,
+     "a6ee26803d295f86bf7e"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     18,
+     "3e7541b3dfb44a3c47df"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "85fb9475f1ed799d83b1"
+    ]
+   }
+  },
+  "window loss $300 realized and an option position at risk": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     3,
+     "d7fe7f70b575dd8db3d5"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "e00376ebc31649945196"
+    ],
+    "kv": [
+     8,
+     "adb566359abf506b8665"
+    ],
+    "lots": [
+     2,
+     "957ae6e80984298532ad"
+    ],
+    "orders": [
+     2,
+     "b12bc7367059c828914d"
+    ],
+    "posts": [
+     3,
+     "1ee39120e681210b2d6e"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     16,
+     "a608d7f1c33f59bc5a84"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "d54d583530808e1da3b6"
+    ]
+   }
+  },
+  "window loss $330 realized and an option position at risk": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     2,
+     "8a8737627f397d133612"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "94068e69d3c4b72e6fee"
+    ],
+    "kv": [
+     8,
+     "adb566359abf506b8665"
+    ],
+    "lots": [
+     1,
+     "d3ea1451fc84ef203cb9"
+    ],
+    "orders": [
+     1,
+     "76aa2f91939a5b456fae"
+    ],
+    "posts": [
+     2,
+     "7645e4790d211ccbb067"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     14,
+     "729559aa837e3d63bfb9"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "d42964801f223ac03a67"
+    ]
+   }
+  },
+  "window loss $345 realized and an option position at risk": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     2,
+     "d8352ac88d0a5800e5fb"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "dfa9d6026cee9bb3f676"
+    ],
+    "kv": [
+     8,
+     "adb566359abf506b8665"
+    ],
+    "lots": [
+     1,
+     "2d88fac95fd8bee1c245"
+    ],
+    "orders": [
+     1,
+     "f6d1ab2a6823e8dac268"
+    ],
+    "posts": [
+     2,
+     "2e7d1e1c3c2dbd259702"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     14,
+     "02c8b9412e4597750477"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "d42964801f223ac03a67"
+    ]
+   }
+  },
+  "window loss $356 realized and an option position at risk": {
+   "sha": {
+    "alerts": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "cancels": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "errors": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "fills": [
+     1,
+     "fa2d3e28a056312bcf39"
+    ],
+    "instances": [
+     6,
+     "ba04a79a5bf69fcb4451"
+    ],
+    "intents": [
+     3,
+     "b12de52d93321dd806f9"
+    ],
+    "kv": [
+     8,
+     "adb566359abf506b8665"
+    ],
+    "lots": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "orders": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "posts": [
+     1,
+     "1d68d1d6518625810b66"
+    ],
+    "rebalances": [
+     0,
+     "4f53cda18c2baa0c0354"
+    ],
+    "records": [
+     12,
+     "aa40dbe066ff6453d616"
+    ],
+    "tables": [
+     8,
+     "af5f52d6bcdf97229c38"
+    ],
+    "ticks": [
+     25,
+     "438688867945905d517a"
     ]
    }
   }
