@@ -49,7 +49,8 @@ THE NIGHT (`Shadow.night`): `preflight`; `forward_register.sync`; `engine_id` (a
 and that night every active program's whole history is written again under the new id; rows of an older id stay and
 are never read as the current series); `marks`; `forward_twins.begin`; `controls`; `finals`; `due()` in order until
 the child seconds spent reach `cpu_seconds_night` or the clock is within 300 s of the next session's 09:00 ET (the
-rest are `stale`: a `budget_hit` event, once a night); `forward_twins.on_run` after each `write`; THE RETRY;
+rest are `stale`: a `budget_hit` event, once a night; THE RETRY'S ROOM is kept back: the loop stops that much sooner
+for each program on the retry list); `forward_twins.on_run` after each `write`; THE RETRY;
 `forward_twins.finish`; one `fwd_runs` row (`programs` = the programs whose run completed THAT NIGHT, whichever start
 of the job ran them: what the registry's suspect rule reads beside `run_failed`, which is attributed the same way;
 `sessions`, `errors`, `stale` and `seconds` are this start's own: the run sessions it recomputed, what it left, the
@@ -86,7 +87,18 @@ reads the events.
   list. THE RETRY, after the due loop: `fresh()` gives a newly started decider, pinged; each listed program is run
   again alone while the budget allows. One that completes is written as any other. One that fails again gets a
   `run_failed` event (once a (pid, night); payload the class and `completed`) only when at least one other program's
-  run completed that night; with none, or with a fresh child that does not ping, nothing is written for it.
+  run completed that night; with none it gets a `run_behind` event (an order, never a mark: below); with a fresh child
+  that does not ping, nothing is written for it.
+  THE RETRY'S ROOM, AND THE QUEUE'S HEAD (the review's fix). A run the child cannot finish burns its whole
+  `run_budget_seconds`, and `due()` puts the oldest last-stored day first: such a program was the first run of every
+  night, and on a night the budget binds the retry that attributes its failure never ran (measured: eight nights, no
+  `run_failed`, no tag; fifteen such programs would have taken every night whole). So (1) the due loop keeps back
+  `RETRY_RUNS` x `run_budget_seconds` of the night's budget, and of the clock, for each program on the retry list,
+  so a listed program's retry is not what the budget cuts; and (2) a program whose LAST attempt failed twice (a
+  `run_failed` or a `run_behind` event newer than every row of its own) stands BEHIND ITS CLASS in `due()` until a
+  run of it completes: it can never again take the head of the queue from the programs that do complete. Neither
+  stops or tags anybody; league/ops/forward_register.py reads `run_failed` alone, over the program's own attempted
+  nights.
 - The forward store's own (a write that fails for another cause than the data): counted in the receipt's `errors`,
   never an event on the program.
 - The program's own: a k 1.0 result of status "disqualified" is stored (its rows are not counted) and is one
@@ -172,6 +184,9 @@ JOB = "forward_shadow"
 CANARY_SESSIONS = 5
 #: No program is started once the clock is within this many seconds of the next session's 09:00 New York time.
 OPEN_MARGIN_SECONDS = 300.0
+#: THE RETRY'S ROOM: the child runs of one attempt (k 1.0 and k 1.5), each `run_budget_seconds` at most, kept back from
+#: the night's budget and clock for each program on the retry list.
+RETRY_RUNS = 2
 #: `fwd_days.status`: what a run's k 1.0 result may be to have rows.
 STATUSES = ("ok", "disqualified")
 #: A failure that is the data's (the module docstring): no row that night, one `data_failed` event, nobody marked.
@@ -504,13 +519,26 @@ class Shadow:
         return {int(row[0]): str(row[1]) for row in self.db.execute(
             "SELECT pid, MAX(day) FROM fwd_days WHERE engine=? GROUP BY pid", (self.engine,)).fetchall()}
 
+    def _behind(self) -> set[int]:
+        """The pids whose LAST attempt failed twice in the child (THE QUEUE'S HEAD, the module docstring): a
+        `run_failed` or a `run_behind` event newer than every row of theirs, under any engine."""
+        out: set[int] = set()
+        for pid, at in self.db.execute("SELECT pid, MAX(at) FROM fwd_events WHERE kind IN ('run_failed', 'run_behind') "
+                                       "AND pid IS NOT NULL GROUP BY pid").fetchall():
+            wrote = self.db.execute("SELECT MAX(at) FROM fwd_days WHERE pid=?", (int(pid),)).fetchone()[0]
+            if wrote is None or float(wrote) < float(at):
+                out.add(int(pid))
+        return out
+
     def due(self) -> list[Program]:
         """The active non-control programs whose last stored day is before `through`: tag "live" first, then reasons
-        seed and train_pass, then train_fail, then the suspects; inside a class the oldest last-stored day first,
-        then pid (so the programs a budget left stale go first the next night). A program with no stored day stands
-        at its `first_close`; one whose first day is after `through` has nothing to store and is not due."""
+        seed and train_pass, then train_fail, then the suspects; inside a class the programs whose last attempt
+        failed twice in the child go last (`_behind`), and else the oldest last-stored day first, then pid (so the
+        programs a budget left stale go first the next night). A program with no stored day stands at its
+        `first_close`; one whose first day is after `through` has nothing to store and is not due."""
         last = self._last_stored()
         live = {int(row[0]) for row in self.db.execute("SELECT DISTINCT pid FROM fwd_tags WHERE tag='live'").fetchall()}
+        behind = self._behind()
         rows = []
         for program in forward_db.programs(self.db, active=True):
             if program.lane == "control" or program.reason == "control" or program.first_day > self.through:
@@ -526,8 +554,9 @@ class Shadow:
                 rank = 2
             else:
                 rank = 1
-            rows.append((rank, stored or program.first_close.isoformat(), program.pid, program))
-        return [row[3] for row in sorted(rows, key=lambda row: row[:3])]
+            rows.append((rank, int(program.pid in behind), stored or program.first_close.isoformat(), program.pid,
+                         program))
+        return [row[4] for row in sorted(rows, key=lambda row: row[:4])]
 
     # ------------------------------------------------------------------------------------------------------ the run
     def slice(self, program: Program, *, first_day: dt.date | None = None) -> Any:
@@ -905,16 +934,18 @@ class Shadow:
         finals = self._guarded(self.finals)
         budget = float(self.cfg["cpu_seconds_night"])
         deadline = self._deadline(started)
+        room = RETRY_RUNS * float(self.cfg["run_budget_seconds"])    # THE RETRY'S ROOM, a listed program
 
-        def over() -> bool:
-            return self.spent >= budget or self.clock() >= deadline
+        def over(listed: int = 0) -> bool:
+            held = listed * room
+            return self.spent + held >= budget or self.clock() + held >= deadline
 
         tally: Counter = Counter()
         failed: list[tuple[Program, str]] = []
         due = self.due()
         stale = 0
         for i, program in enumerate(due):
-            if over():
+            if over(len(failed)):
                 stale = len(due) - i
                 break
             why = self._attempt(program, tally)
@@ -946,8 +977,15 @@ class Shadow:
             for program, why in twice:
                 completed = self._completed(program.pid)
                 if completed < 1:
+                    # Nobody else's run completed tonight: the House's, no program is named or counted. It stands
+                    # behind its class until a run of it completes (THE QUEUE'S HEAD: an order, never a mark).
                     tally["house"] += 1
-                    continue    # nobody else's run completed tonight: the House's, no program is named
+                    forward_db.event(self.db, "run_behind", pid=program.pid, day=self.night_day, at=self.clock(),
+                                     once="night", payload={"why": "failed again, alone, in a fresh child on a night "
+                                                                   "no other program's run completed: it marks "
+                                                                   "nobody; it runs behind its class until a run of "
+                                                                   "it completes", "class": why, "completed": 0})
+                    continue
                 forward_db.event(self.db, "run_failed", pid=program.pid, day=self.night_day, at=self.clock(),
                                  once="night", payload={"why": "failed again, alone, in a fresh child while another "
                                                                "program's run completed", "class": why,

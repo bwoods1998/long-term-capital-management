@@ -35,11 +35,19 @@ THE STOP RULES, each run, from the forward store's own rows and events, counting
 "resumed" tag. A FAILURE NEVER STOPS A PROGRAM.
 - stopped, value "cap:<night>": its STORED days (any status, the newest engine) reach its reason's session cap
   (`stop_after_sessions`: train_pass, seed, live; `stop_fail_after_sessions`: train_fail);
-- stopped, value "disqualified:<night>": a `run_disqualified` event on each of the last `DQ_NIGHTS` nights (its own
-  doing, three nights running). The shadow then writes its FINAL checkpoint, so what it earned stays in the meters;
-- suspect, value the night: a `run_failed` event on each of the last `SUSPECT_NIGHTS` nights whose `fwd_runs` row has
-  programs >= 1. A suspect is not stopped: it runs last and is counted in the report;
-- `data_failed` and `night_failed` events mark no program and count toward nothing.
+- stopped, value "disqualified:<night>": a `run_disqualified` event on each of the program's last `DQ_NIGHTS`
+  COMPLETED runs (its own doing, three runs running). The shadow then writes its FINAL checkpoint, so what it earned
+  stays in the meters;
+- suspect, value the night: a `run_failed` event on each of the program's last `SUSPECT_NIGHTS` attempted nights
+  whose `fwd_runs` row has programs >= 1. A suspect is not stopped: it runs last and is counted in the report;
+- `data_failed`, `night_failed` and `run_behind` events mark no program and count toward nothing.
+ITS OWN ATTEMPTED NIGHTS (`_attempts`; the review's fix). Both rules count the nights THE PROGRAM was run, never the
+calendar's: the nights it has a `run_disqualified` or a `run_failed` event for, and the nights a run of it completed
+(its row for the night's day written by that night). A night the budget left it stale, a night the data failed it and
+a night it was not due are no night of its own: they neither count nor break the run of nights. Counted by the
+calendar ("an event on each of the last N nights", the spec's words), neither rule could ever fire once the registry
+outgrew the night: the budget's rotation then runs a program every other night or less, so a program disqualified at
+every run was never stopped and a program the child cannot finish was never tagged.
 `resume` is the operator's undo of a stop; no job calls it. The next night's whole recompute fills every day the stop
 left out.
 
@@ -502,6 +510,31 @@ def _night_of(row: Mapping[str, Any]) -> str | None:
     return once if len(once) == 10 and once[4] == "-" and once[7] == "-" else None
 
 
+def _attempts(db: sqlite3.Connection, pid: int, nights: Sequence[tuple[str, int, float]],
+              marks: Mapping[str, Mapping[int, Mapping[str, float]]], since: float | None) -> list[tuple[str, int, str]]:
+    """A pid's OWN ATTEMPTED NIGHTS of `nights` (each (through, the programs it completed, when it ended); those after
+    the pid's resume), oldest first: (night, the night's completed programs, how the pid's attempt ended). An attempt
+    ended "run_disqualified" or "run_failed" when the shadow wrote that event for the night, and "ran" when the pid's
+    row for the night's day was written by that night (a run of it completed and was not disqualified). A night that
+    left the pid stale, gave it no data or did not have it due is NOT an attempt: it is no night of the pid's at all,
+    so it neither counts toward a rule nor breaks a run of nights (a row for that day written by a LATER night's whole
+    recompute is that later night's attempt)."""
+    wrote = {str(r["day"]): float(r["at"]) for r in db.execute(
+        "SELECT day, MIN(at) AS at FROM fwd_days WHERE pid=? GROUP BY day", (int(pid),)).fetchall()}
+    out: list[tuple[str, int, str]] = []
+    for night, programs, finished in nights:
+        for kind in ("run_disqualified", "run_failed"):
+            at = marks[kind].get(pid, {}).get(night)
+            if at is not None and (since is None or at > since):
+                out.append((night, programs, kind))
+                break
+        else:
+            at = wrote.get(night)
+            if at is not None and at <= finished and (since is None or at > since):
+                out.append((night, programs, "ran"))
+    return out
+
+
 def _stops(db: sqlite3.Connection, out: dict[str, Any], *, now: float, settings: Mapping[str, Any] | None) -> None:
     """THE STOP RULES (the module docstring), from the forward store's own rows and events."""
     c = forward_db.cfg(settings)
@@ -524,6 +557,7 @@ def _stops(db: sqlite3.Connection, out: dict[str, Any], *, now: float, settings:
         night = _night_of(row)
         if night is not None:
             marks[str(row["kind"])].setdefault(int(row["pid"]), {})[night] = float(row["at"])
+    marked = set(marks["run_disqualified"]) | set(marks["run_failed"])
     for row in db.execute("SELECT pid, key, reason FROM fwd_registry WHERE reason != 'control' ORDER BY pid").fetchall():
         pid, since = int(row["pid"]), resumed.get(int(row["pid"]))
         if pid in stopped:
@@ -536,22 +570,22 @@ def _stops(db: sqlite3.Connection, out: dict[str, Any], *, now: float, settings:
                 "SELECT COUNT(*) AS n, MAX(day) AS last FROM fwd_days WHERE pid=? AND engine=? AND day > COALESCE((SELECT "
                 "MAX(day) FROM fwd_days WHERE pid=? AND at<=?), '')", (pid, engine, pid, since)).fetchone()
             count, last = int(fresh["n"]), str(fresh["last"] or "")
-        after = [n for n in nights if since is None or n[2] > since]
+        # ITS OWN ATTEMPTED NIGHTS (the module docstring), oldest first: read only for a pid that has a mark at all.
+        tried = _attempts(db, pid, [n for n in nights if since is None or n[2] > since], marks, since) \
+            if pid in marked else []
 
-        def running(kind: str, of: Sequence[tuple[str, int, float]], need: int) -> str | None:
-            """The latest of the last `need` nights when the pid has a `kind` event on each of them (after its resume)."""
-            if len(of) < need:
+        def running(kind: str, of: Sequence[tuple[str, int, str]], need: int) -> str | None:
+            """The latest of the pid's last `need` attempted nights of `of` when each of them ended `kind`."""
+            if len(of) < need or any(n[2] != kind for n in of[-need:]):
                 return None
-            seen = marks[kind].get(pid, {})
-            if all(n[0] in seen and (since is None or seen[n[0]] > since) for n in of[-need:]):
-                return of[-1][0]
-            return None
+            return of[-1][0]
 
         cause = night = None
         if count >= cap:
             cause, night = "cap", last
         else:
-            night = running("run_disqualified", after, forward_db.DQ_NIGHTS)
+            # Its last runs that COMPLETED (a night the child failed it says nothing of what the program does).
+            night = running("run_disqualified", [n for n in tried if n[2] != "run_failed"], forward_db.DQ_NIGHTS)
             cause = "disqualified" if night is not None else None
         if cause is not None:
             with forward_db.transaction(db):
@@ -562,18 +596,20 @@ def _stops(db: sqlite3.Connection, out: dict[str, Any], *, now: float, settings:
                                        why=f"its stored days reached its session cap ({count} of {cap})")
                     else:
                         payload.update(nights=forward_db.DQ_NIGHTS,
-                                       why=f"disqualified by its own errors on {forward_db.DQ_NIGHTS} nights running")
+                                       why=f"disqualified by its own errors on its last {forward_db.DQ_NIGHTS} runs "
+                                           "running (its own attempted nights)")
                     forward_db.event(db, "stopped", pid=pid, day=night, payload=payload, at=now)
                     out["stopped"] += 1
             continue
-        night = running("run_failed", [n for n in after if n[1] >= 1], forward_db.SUSPECT_NIGHTS)
+        night = running("run_failed", [n for n in tried if n[1] >= 1], forward_db.SUSPECT_NIGHTS)
         if night is not None:
             with forward_db.transaction(db):
                 if forward_db.tag(db, pid, "suspect", night, at=now):
                     forward_db.event(db, "suspect", pid=pid, day=night,
                                      payload={"key": str(row["key"]), "nights": forward_db.SUSPECT_NIGHTS,
-                                              "why": f"its run failed alone on {forward_db.SUSPECT_NIGHTS} nights running "
-                                                     "while other programs' runs completed: it runs last, never stopped"},
+                                              "why": f"its run failed alone on its last {forward_db.SUSPECT_NIGHTS} "
+                                                     "attempted nights running while other programs' runs completed: "
+                                                     "it runs last, never stopped"},
                                      at=now)
                     out["suspect"] += 1
 

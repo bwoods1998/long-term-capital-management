@@ -163,16 +163,20 @@ TAGS = ("review_pass", "review_fail", "try", "try_entered", "look_pass", "look_f
         "suspect")
 #: `fwd_events.kind` -> the package that writes it. `live_bars` (D) holds the bars hash of a live decision, taken the
 #: night of the decision (THE BARS HASH: the book's adjusted rows are fetched again at the next session's decide).
+#: `run_behind` (B; the review's fix) is an ORDER, never a mark: a program whose run failed in the night's child and
+#: again alone in a fresh one on a night no other program's run completed (so `run_failed` is not written: the
+#: House's) stands behind its class in the next nights' queue until a run of it completes; no rule counts it.
 EVENT_KINDS: dict[str, str] = {
     "prereg": "A", "registered": "A", "register_skipped": "A", "stopped": "A", "suspect": "A", "resumed": "A",
     "identity_moved": "A",
-    "night_failed": "B", "engine_moved": "B", "run_failed": "B", "data_failed": "B", "run_disqualified": "B",
-    "restated": "B", "budget_hit": "B", "audit_mismatch": "B", "chain_ok": "B", "chain_broken": "B",
+    "night_failed": "B", "engine_moved": "B", "run_failed": "B", "run_behind": "B", "data_failed": "B",
+    "run_disqualified": "B", "restated": "B", "budget_hit": "B", "audit_mismatch": "B", "chain_ok": "B",
+    "chain_broken": "B",
     "no_minute": "D", "twin_unregistered": "D", "twin_sha_mismatch": "D", "twin_interrupted": "D", "live_bars": "D"}
 #: The kinds written through `event(..., once=<key>)`: a second call for the same kind, pid, day and key writes nothing.
-ONCE_KINDS = ("prereg", "register_skipped", "identity_moved", "engine_moved", "night_failed", "run_failed", "data_failed",
-              "run_disqualified", "restated", "budget_hit", "audit_mismatch", "no_minute", "twin_unregistered",
-              "twin_sha_mismatch", "twin_interrupted", "live_bars")
+ONCE_KINDS = ("prereg", "register_skipped", "identity_moved", "engine_moved", "night_failed", "run_failed", "run_behind",
+              "data_failed", "run_disqualified", "restated", "budget_hit", "audit_mismatch", "no_minute",
+              "twin_unregistered", "twin_sha_mismatch", "twin_interrupted", "live_bars")
 #: `fwd_kv` keys: the equity fingerprint last seen; `FGS_SHA` (written once through `kv_first`); the swarm event cursor.
 KV_KEYS = ("equity_sha", "fgs_prereg", "scored_seq")
 #: `fwd_twins.cause` of a session the live and the shadow intents disagree on (THE BARS HASH): "bars" when both bars

@@ -1435,6 +1435,142 @@ class WhoseFailure(Case):
 
 
 # ============================================================================================== the night's own rules
+class Hanging(Ticking):
+    """A `Ticking` child that cannot finish the run of a program in `hang`: the parent's deadline burns the whole run
+    budget, the child is killed, and the run fails as E1's decider fails it."""
+
+    def __init__(self, case: Any, cost: float = 0.0, *, hang: Sequence[str] = ()):
+        super().__init__(case, cost)
+        self.hang = set(hang)
+
+    def kind(self, kind: str, op: str, payload: Mapping[str, Any], *, budget_seconds: float | None = None) -> dict:
+        if op == "run" and str(payload["name"]) in self.hang:
+            self.runs.append((str(payload["name"]), float(payload["k"])))
+            self.case.t += float(budget_seconds or 0.0)
+            self.restarts += 1
+            raise DeciderError("the decider did not answer in time; the child was killed (a test's)")
+        return super().kind(kind, op, payload, budget_seconds=budget_seconds)
+
+
+class TheBudgetBinds(Case):
+    """The review's finding, on the real `Shadow.night` and the registry's real stop rules: on nights the budget
+    binds, a program the child cannot finish was the first run of every night, never retried and never tagged, and a
+    program disqualified at every run was never stopped."""
+
+    #: A night of 600 child seconds; a run costs 100 (a healthy program's attempt 200); a hung run burns its 120.
+    TIGHT = {"elane": {"forward": {"mode": "record", "cpu_seconds_night": 600, "run_budget_seconds": 120}}}
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.on_sync = lambda db: forward_register._stops(db, {"stopped": 0, "suspect": 0}, now=self.t,
+                                                          settings=self.settings)
+        self.settings = self.TIGHT
+
+    def a_night(self, through: dt.date, *, hang: Sequence[str] = ()) -> tuple[dict[str, Any], list[str]]:
+        """One night on a child that hangs on `hang`: (its receipt, the programs it ran, in order)."""
+        child = Hanging(self, 100.0, hang=hang)
+        fresh: list[Hanging] = []
+
+        def another() -> Hanging:
+            fresh.append(Hanging(self, 100.0, hang=hang))
+            return fresh[-1]
+        receipt = self.night(through, decider=child, settings=self.settings, fresh=another)
+        order = [name for d in (child, *fresh) for name, k in d.runs if name != "forward-canary" and k == 1.0]
+        return receipt, order
+
+    def tags(self, pid: int) -> list[tuple[str, str]]:
+        return [(str(r[0]), str(r[1])) for r in self.db.execute("SELECT tag, value FROM fwd_tags WHERE pid=? ORDER BY at",
+                                                                (pid,)).fetchall()]
+
+    def test_a_program_the_child_cannot_finish_is_retried_and_never_heads_the_queue_again(self):
+        hang = register(self.db, "hang@1", FLIPPER, first_close=BEFORE)
+        healthy = [register(self.db, f"ok{i}@1", ALWAYS, first_close=BEFORE) for i in range(6)]
+        receipt, order = self.a_night(FWD[1], hang=("hang@1",))
+        self.assertEqual(order[0], "hang@1", "the oldest last-stored day first: nothing yet says otherwise")
+        # THE RETRY'S ROOM: the loop stopped a retry's seconds short of the budget, so the hung program was run again
+        # alone in a fresh child, and its failure was attributed while another program's run completed.
+        self.assertEqual((receipt["retried"], receipt["budget_hit"], receipt["programs"]), (1, 1, 1))
+        self.assertEqual(order, ["hang@1", "ok0@1", "hang@1"])
+        self.assertEqual([(e["day"], e["payload"]["completed"]) for e in self.events("run_failed", hang)],
+                         [(FWD[1].isoformat(), 1)])
+        ran = []
+        for n in range(2, 9):
+            receipt, order = self.a_night(FWD[n], hang=("hang@1",))
+            self.assertNotEqual(order[0], "hang@1", f"night {n}: it stands behind its class")
+            ran.append(order)
+        self.assertFalse(any("hang@1" in order for order in ran),
+                         "and on nights the budget binds it costs the programs that do complete nothing more")
+        self.assertEqual({pid: len(self.rows(pid)) > 0 for pid in healthy}, {pid: True for pid in healthy})
+        self.assertEqual(sum(len(order) for order in ran), 7 * 3, "three whole programs a night, none lost to a hung run")
+        self.assertEqual((self.rows(hang), self.tags(hang)), ([], []), "one failed night tags nobody")
+
+    def test_with_room_it_is_attempted_last_of_its_class_and_three_such_nights_tag_it_suspect(self):
+        self.settings = {"elane": {"forward": {"mode": "record", "cpu_seconds_night": 1200, "run_budget_seconds": 120}}}
+        hang = register(self.db, "hang@1", FLIPPER, first_close=BEFORE)
+        register(self.db, "ok0@1", ALWAYS, first_close=BEFORE)
+        register(self.db, "ok1@1", ALWAYS, first_close=BEFORE)
+        late = register(self.db, "late@1", ALWAYS, first_close=BEFORE, reason="train_fail")
+        orders = []
+        for n in range(1, 4):
+            receipt, order = self.a_night(FWD[n], hang=("hang@1",))
+            orders.append(order)
+            self.assertEqual((receipt["programs"], receipt["retried"], receipt["stale"]), (3, 1, 0))
+            self.assertEqual(self.tags(hang), [], f"night {n}")
+        self.assertEqual(orders[0], ["hang@1", "ok0@1", "ok1@1", "late@1", "hang@1"])
+        for order in orders[1:]:
+            self.assertEqual(order, ["ok0@1", "ok1@1", "hang@1", "late@1", "hang@1"],
+                             "behind its class (the passers), ahead of the next (the failers); retried after the loop")
+        self.assertEqual(len(self.events("run_failed", hang)), 3)
+        receipt, order = self.a_night(FWD[4], hang=("hang@1",))   # the night's own sync reads three failed nights of its own
+        self.assertEqual(self.tags(hang), [("suspect", FWD[3].isoformat())])
+        self.assertEqual(order, ["ok0@1", "ok1@1", "late@1", "hang@1", "hang@1"], "a suspect runs last of all")
+        self.assertTrue(forward_db.active(self.db, hang), "a failure never stops a program")
+        self.assertEqual([row["day"] for row in self.rows(late)], iso(FWD[:5]))
+        # The night it completes a run it is behind nobody and suspect no more.
+        receipt, order = self.a_night(FWD[5])
+        self.assertEqual((receipt["programs"], [row["day"] for row in self.rows(hang)]), (4, iso(FWD[:6])))
+        self.assertFalse(forward_db.suspect(self.db, hang))
+        self.assertEqual(self.shadow(FWD[6])._behind(), set())
+
+    def test_a_program_disqualified_at_every_run_is_stopped_at_its_third_however_far_apart(self):
+        bad = register(self.db, "broken@1", BROKEN, first_close=BEFORE)
+        for i in range(6):
+            register(self.db, f"ok{i}@1", ALWAYS, first_close=BEFORE)
+        ran = []
+        for n in range(30, 44):
+            child = Ticking(self, 100.0)
+            self.night(FWD[n], decider=child, settings=self.settings)
+            ran.append(any(name == "broken@1" for name, _ in child.runs))
+        events = self.events("run_disqualified", bad)
+        self.assertEqual(len(events), 3, "run on three nights, disqualified on each, then never again")
+        nights = [e["day"] for e in events]
+        self.assertGreater((dt.date.fromisoformat(nights[2]) - dt.date.fromisoformat(nights[0])).days, 3,
+                           "the budget ran it on nights apart: by the calendar no three nights running")
+        self.assertEqual(self.tags(bad), [("stopped", f"disqualified:{nights[2]}")])
+        self.assertEqual(sum(ran), 3)
+        self.assertFalse(forward_db.active(self.db, bad))
+
+    def test_hung_programs_that_fill_a_night_are_behind_the_next_night_though_nobody_is_named(self):
+        hung = [register(self.db, f"hang{i}@1", FLIPPER, first_close=BEFORE) for i in range(3)]
+        ok = [register(self.db, f"ok{i}@1", ALWAYS, first_close=BEFORE) for i in range(2)]
+        names = tuple(f"hang{i}@1" for i in range(3))
+        receipt, order = self.a_night(FWD[1], hang=names)
+        self.assertEqual(order, ["hang0@1", "hang1@1", "hang0@1", "hang1@1"])
+        self.assertEqual((receipt["programs"], receipt["retried"], receipt["house"], receipt["stale"]), (0, 2, 2, 3))
+        self.assertEqual(self.events("run_failed"), [], "no other program's run completed: the House's, nobody named")
+        self.assertEqual([(e["pid"], e["day"], e["payload"]["completed"]) for e in self.events("run_behind")],
+                         [(pid, FWD[1].isoformat(), 0) for pid in hung[:2]])
+        self.assertEqual(self.count("fwd_tags"), 0)
+        self.assertEqual(self.shadow(FWD[1], write=False)._behind(), set(hung[:2]))
+        receipt, order = self.a_night(FWD[2], hang=names)
+        self.assertEqual(order[:2], ["hang2@1", "ok0@1"], "the two that failed twice no longer head the queue")
+        self.assertEqual([row["day"] for row in self.rows(ok[0])], iso(FWD[:3]))
+        self.assertEqual([e["pid"] for e in self.events("run_failed")], [hung[2]], "attributed: ok0's run completed")
+        receipt, order = self.a_night(FWD[3], hang=names)
+        self.assertEqual(order[:2], ["ok1@1", "ok0@1"], "every program that completes goes before the three")
+        self.assertEqual(self.count("fwd_tags"), 0)
+
+
 class TheNight(Case):
     def test_it_calls_the_others_in_order_and_writes_one_run_row(self):
         pids = [register(self.db, "always@1", ALWAYS, first_close=BEFORE),

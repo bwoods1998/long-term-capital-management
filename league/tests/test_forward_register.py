@@ -130,11 +130,17 @@ class House:
                                                            self.clock() if written is None else written))
         self.db.commit()
 
-    def night(self, index: int, *, programs: int = 1, marks: dict | None = None) -> str:
+    def night(self, index: int, *, programs: int = 1, marks: dict | None = None, ran: dict | None = None) -> str:
         """One shadow night named by session `index`: its `fwd_runs` row and each pid's event of that night, as the
-        shadow writes them (league/ops/forward_shadow.py: `day` the night, `once` the word "night")."""
+        shadow writes them (league/ops/forward_shadow.py: `day` the night, `once` the word "night"). `ran`: {pid: the
+        status of the run of it that completed that night}: its rows from its last stored day through the night's,
+        written by that night (the whole recompute fills the days earlier nights left it stale on)."""
         through = self.days[index].isoformat()
         self.clock.t = at(self.days[index], 19)
+        for pid, status in (ran or {}).items():
+            last = self.db.execute("SELECT MAX(day) FROM fwd_days WHERE pid=?", (pid,)).fetchone()[0]
+            first = 0 if last is None else [d.isoformat() for d in self.days].index(last) + 1
+            self.stored(pid, index + 1 - first, engine=self.engine(), first=first, status=status, written=self.clock() - 30)
         self.db.execute("INSERT INTO fwd_runs(job, through, engine, started, finished, seconds, programs) VALUES("
                         "'forward_shadow', ?, 1, ?, ?, 1.0, ?)", (through, self.clock() - 60, self.clock(), programs))
         self.db.commit()
@@ -741,7 +747,7 @@ class StopRules(unittest.TestCase):
         h.night(3, marks={passer: "run_disqualified"})
         h.night(4, marks={passer: "run_disqualified", failer: "run_disqualified"})
         self.assertEqual(h.sync()["stopped"], 0, "two nights are not three")
-        h.night(5, marks={failer: "run_disqualified"})               # the passer ran clean that night
+        h.night(5, marks={failer: "run_disqualified"}, ran={passer: "ok"})    # the passer ran clean that night
         self.assertEqual(h.sync()["stopped"], 0)
         h.night(6, marks={passer: "run_disqualified", failer: "run_disqualified"})
         out = h.sync()
@@ -754,6 +760,88 @@ class StopRules(unittest.TestCase):
         h.night(8, marks={passer: "run_disqualified"})
         self.assertEqual(h.sync()["stopped"], 1)
         self.assertEqual(F.tags(h.db, passer)["stopped"][0]["value"], f"disqualified:{h.days[8].isoformat()}")
+
+    def test_the_nights_are_the_programs_own_a_night_that_left_it_stale_is_none(self):
+        """The review's finding: on nights the budget binds a program is run every other night or less. Counted by
+        the calendar, "an event on each of the last three nights" never held, and a program disqualified at every
+        run was run whole for the life of the House."""
+        h, passer, failer = self.house()
+        dq = {"marks": {passer: "run_disqualified"}, "ran": {passer: "disqualified"}}
+        h.night(3, **dq)
+        h.night(4)                                   # the budget left it stale: no row, no event
+        h.night(5, **dq)                             # its row for night 4's day is written here, by night 5's run
+        h.night(6)
+        self.assertEqual(h.sync()["stopped"], 0, "two runs are not three")
+        through = h.night(7, **dq)
+        out = h.sync()
+        self.assertEqual(out["stopped"], 1, "disqualified at each of its last three runs, five nights apart")
+        self.assertEqual(F.tags(h.db, passer)["stopped"][0]["value"], f"disqualified:{through}")
+        self.assertTrue(F.active(h.db, failer))
+        (event,) = F.events(h.db, "stopped")
+        self.assertIn("its own attempted nights", event["payload"]["why"])
+
+    def test_a_clean_run_between_breaks_the_run_whichever_night_it_was(self):
+        h, passer, _ = self.house()
+        dq = {"marks": {passer: "run_disqualified"}, "ran": {passer: "disqualified"}}
+        h.night(3, **dq)
+        h.night(4)
+        h.night(5, **dq)
+        h.night(6, ran={passer: "ok"})               # a run of it completed clean: its own night, and it breaks the run
+        h.night(7, **dq)
+        self.assertEqual(h.sync()["stopped"], 0)
+        h.night(8)
+        h.night(9, **dq)
+        self.assertEqual(h.sync()["stopped"], 0, "two since the clean run")
+        h.night(10, **dq)
+        self.assertEqual(h.sync()["stopped"], 1)
+
+    def test_a_night_the_child_failed_it_says_nothing_of_what_the_program_does(self):
+        # Disqualified, failed in the child, disqualified, disqualified: its last three COMPLETED runs were its own.
+        h, passer, _ = self.house()
+        dq = {"marks": {passer: "run_disqualified"}, "ran": {passer: "disqualified"}}
+        h.night(3, **dq)
+        h.night(4, marks={passer: "run_failed"})
+        h.night(5, **dq)
+        self.assertEqual(h.sync()["stopped"], 0)
+        h.night(6, **dq)
+        out = h.sync()
+        self.assertEqual((out["stopped"], out["suspect"]), (1, 0))
+
+    def test_three_failed_nights_of_its_own_give_suspect_however_far_apart(self):
+        """A program the child cannot finish, attempted every other night: three attempts running, all failed."""
+        h, passer, failer = self.house()
+        for index in (3, 5):
+            h.night(index, marks={passer: "run_failed"})
+            h.night(index + 1, ran={failer: "ok"})   # nights it was left stale; another program's runs completed
+        self.assertEqual(h.sync()["suspect"], 0)
+        through = h.night(7, marks={passer: "run_failed"})
+        out = h.sync()
+        self.assertEqual((out["suspect"], out["stopped"]), (1, 0))
+        self.assertEqual(F.tags(h.db, passer)["suspect"], [{"value": through, "at": h.clock()}])
+        self.assertFalse(F.suspect(h.db, failer))
+        (event,) = F.events(h.db, "suspect")
+        self.assertIn("attempted nights", event["payload"]["why"])
+
+    def test_a_completed_run_between_two_failed_nights_breaks_the_run(self):
+        h, passer, _ = self.house()
+        h.night(3, marks={passer: "run_failed"})
+        h.night(4, marks={passer: "run_failed"})
+        h.night(5, ran={passer: "ok"})
+        h.night(6, marks={passer: "run_failed"})
+        self.assertEqual(h.sync()["suspect"], 0)
+        h.night(7, marks={passer: "run_failed"})
+        self.assertEqual(h.sync()["suspect"], 0)
+        h.night(8, marks={passer: "run_failed"})
+        self.assertEqual(h.sync()["suspect"], 1)
+
+    def test_a_run_behind_event_marks_nobody(self):
+        h, passer, _ = self.house()
+        for index in range(3, 12):
+            h.night(index, programs=0, marks={passer: "run_behind"})
+            out = h.sync()
+            self.assertEqual((out["stopped"], out["suspect"]), (0, 0))
+        self.assertTrue(F.active(h.db, passer))
+        self.assertFalse(F.suspect(h.db, passer))
 
     def test_the_night_is_read_from_the_events_key_when_it_has_no_day(self):
         h, passer, _ = self.house()
