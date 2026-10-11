@@ -65,9 +65,17 @@ locked that minute) is an info row under its id that says so, never silence and 
 - FW1 (warning): the mode is "record" AND (no `fwd_days` row by 09:00 ET the next session for the last closed forward
   day on which at least one active registry row had `first_day` <= that day, OR the report is stale): a stalled job.
   Silent on an empty registry, on the sessions before a first registration's `first_day`, and while the mode is off.
+  THE QUESTION IS SETTLED AT THIS JOB'S MORNING RUN, 35 minutes before the open (08:55): the forward shadow starts no
+  program within 300 s of 09:00 (`FW1_SETTLED_S`) and an after-trigger never fires for a shadow that failed, so the
+  morning run is the first to see a night that wrote nothing and says so before the open (read from 09:00 on, it
+  would be told a day late). "Had" is read as of that day: a row counts when the registry held it by that day's close
+  (one registered later was owed no row that night; the next night's whole recompute fills its days).
 - FW2 (warning): programs left stale two nights running, or a pid with a `data_failed` or a `run_failed` event on two
   nights running (counts in the text).
-- FW3 (warning): a `restated` event written last night (written once a value, so this is its first night).
+- FW3 (warning): a `restated` event written last night (written once a value, so this is its first night). The text
+  counts the restatements by cause, as the event's bars hash tells it (league/ops/E3_INTERFACES.md, fact 1): those
+  whose decisions read bars that have moved since (the vendor's: a correction, or adjusted prices rounded to cents)
+  and those that read the same bars (the recompute itself is not deterministic).
 - FW4 (warning): `verify_chain` not ok (owner step: stop the forward jobs and compare with the backup).
 - FW5 (warning): cey_day under its 20-day median for 10 forward days running while equity births continue.
 - FW6 (warning): a live instance with 5 or more priced closes whose mean twin gap is beyond the A14 bound either
@@ -133,8 +141,11 @@ GROUP_REASONS = ("train_pass", "train_fail", "seed")
 GROUP_TAGS = ("look_pass", "look_fail")
 #: The reasons a lineage's representative is first taken from (D6).
 REPRESENTATIVE_REASONS = ("train_pass", "seed", "live")
-#: FW1's deadline: 09:00 New York, this many seconds before the next session's open.
+#: FW1's deadline: 09:00 New York, this many seconds before the next session's open; and how long before it the
+#: question is settled (the forward shadow starts no program within these seconds of 09:00, its `OPEN_MARGIN_SECONDS`:
+#: this job's morning run, `DUE_BEFORE_OPEN_MINUTES` before the open, is the first moment that reads it).
 FW1_BEFORE_OPEN_S = 1800
+FW1_SETTLED_S = 300
 #: FW5: cey_day under the median of the last `MEDIAN_DAYS` forward days for this many forward days running.
 FW5_DAYS = 10
 MEDIAN_DAYS = 20
@@ -859,7 +870,8 @@ def _head(text: Any) -> str:
 def _owed(db: sqlite3.Connection, now: float) -> tuple[str, str, int] | None:
     """FW1's day: (the last forward day whose rows were due by `now`, the session whose 09:00 New York was the
     deadline, how many registered rows were owed one), or None when nothing was owed: an empty registry, or no active
-    row whose `first_day` is on or before that day."""
+    row whose `first_day` is on or before that day and that the registry held by that day's close. The deadline is
+    read as passed from `FW1_SETTLED_S` before it (the module docstring: this job's morning run)."""
     from ..equity import schedule as ES
 
     first, day = forward_db.t0(), ES.ny_day(now)
@@ -868,13 +880,14 @@ def _owed(db: sqlite3.Connection, now: float) -> tuple[str, str, int] | None:
             return None
         if ES.is_session(day):
             after = ES.next_session(day)
-            moments = ES.moments(after)
-            if moments is not None and float(moments.open_at) - FW1_BEFORE_OPEN_S <= now:
+            moments, closed = ES.moments(after), _close_at(day.isoformat())
+            if moments is not None and closed is not None \
+                    and float(moments.open_at) - FW1_BEFORE_OPEN_S - FW1_SETTLED_S <= now:
                 iso = day.isoformat()
-                owed = int(_one(db, "SELECT count(*) FROM fwd_registry WHERE first_day<=? AND pid NOT IN (SELECT pid FROM "
-                                    "fwd_tags WHERE tag='stopped')", (iso,)) or 0)
-                owed += sum(1 for pid in guard.ids(db, "SELECT pid FROM fwd_registry WHERE first_day<=? AND pid IN (SELECT "
-                                                       "pid FROM fwd_tags WHERE tag='stopped')", (iso,))
+                held = "FROM fwd_registry WHERE first_day<=? AND registered_at<=? AND pid {op} (SELECT pid FROM fwd_tags " \
+                       "WHERE tag='stopped')"
+                owed = int(_one(db, "SELECT count(*) " + held.format(op="NOT IN"), (iso, closed)) or 0)
+                owed += sum(1 for pid in guard.ids(db, "SELECT pid " + held.format(op="IN"), (iso, closed))
                             if forward_db.active(db, int(pid)))
                 return (iso, after.isoformat(), owed) if owed else None
         day -= dt.timedelta(days=1)
@@ -914,16 +927,32 @@ def _backlog(db: sqlite3.Connection) -> list[dict[str, Any]]:
 
 
 def _restated(db: sqlite3.Connection) -> list[dict[str, Any]]:
-    """FW3: `restated` events written since the last night began."""
+    """FW3: `restated` events written since the last night began, counted by cause. One event is one program's
+    restatement that night: its payload holds how many stored days differ (`days`; 1 when it does not say) and whether
+    the decisions behind them read bars that have moved since (`bars`: "moved" | "same")."""
     nights = _nights(db)
     if not nights:
         return []
-    found = _rows(db, "SELECT count(*) AS n, count(DISTINCT pid) AS pids FROM fwd_events WHERE kind='restated' AND at>=?",
-                  (float(nights[0]["started"]),))[0]
-    if not int(found["n"] or 0):
+    found = _rows(db, "SELECT pid, payload FROM fwd_events WHERE kind='restated' AND at>=?", (float(nights[0]["started"]),))
+    if not found:
         return []
-    return [_row("FW3", f"{int(found['n'])} stored days of {int(found['pids'])} programs were restated on the night of "
-                        f"{nights[0]['through']}: a recompute that is not deterministic, or a vendor correction")]
+    days, causes = 0, {"moved": 0, "same": 0}
+    for row in found:
+        try:
+            payload = json.loads(row["payload"])
+        except (TypeError, ValueError):
+            payload = None
+        payload = payload if isinstance(payload, Mapping) else {}
+        count = payload.get("days")
+        days += count if isinstance(count, int) and not isinstance(count, bool) and count > 0 else 1
+        if payload.get("bars") in causes:
+            causes[payload["bars"]] += 1
+    untold = len(found) - causes["moved"] - causes["same"]
+    return [_row("FW3", f"{days} stored days of {len({row['pid'] for row in found})} programs were restated on the night of "
+                        f"{nights[0]['through']}: {causes['moved']} of the {len(found)} restatements read bars that have "
+                        f"moved since (a vendor correction, or adjusted prices rounded to cents), {causes['same']} read "
+                        f"the same bars (a recompute that is not deterministic)"
+                        + (f", {untold} carry no bars hash" if untold else ""))]
 
 
 def _chain(db: sqlite3.Connection) -> list[dict[str, Any]]:

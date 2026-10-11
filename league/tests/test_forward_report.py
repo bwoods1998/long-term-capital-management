@@ -170,6 +170,9 @@ class Fixture(unittest.TestCase):
         self.pid += 1
         key = key or f"fam-{self.pid}@1"
         family, version = (None, None) if lane == "control" else (key.split("@")[0], 1)
+        # D2: a row whose first day is d existed before the close of the session before d (its first close); the
+        # registry saw it within the hour. A test that registers one late says so (`registered_at`).
+        existed = close(ES.previous_session(first_day).isoformat()) - 3600.0
         with self.db:
             self.db.execute(
                 "INSERT INTO fwd_registry(pid, key, family, version, lane, reason, ugroup, lineage, code, params, needs, "
@@ -177,9 +180,9 @@ class Fixture(unittest.TestCase):
                 "alpha_f, prev_hash, row_hash) VALUES(?, ?, ?, ?, ?, ?, ?, ?, 'fake', '{}', ?, 'sha', 'run', 'fake', ?, "
                 "'registry', ?, ?, ?, ?, ?, 'p', ?)",
                 (self.pid, key, family, version, lane, reason, ugroup, lineage or f"{lane}:{key.split('@')[0]}",
-                 json.dumps({"symbols": list(symbols), "history": 1, "max_hold_sessions": 20}), self.now,
+                 json.dumps({"symbols": list(symbols), "history": 1, "max_hold_sessions": 20}), existed,
                  ES.previous_session(first_day).isoformat(), first_day,
-                 self.now if registered_at is None else registered_at, "none" if lane == "control" else "S2",
+                 existed if registered_at is None else registered_at, "none" if lane == "control" else "S2",
                  "0" if lane == "control" else "0.03", f"h{self.pid}"))
         return self.pid
 
@@ -210,10 +213,11 @@ class Fixture(unittest.TestCase):
             self.db.execute("INSERT INTO fwd_tags(pid, tag, value, at) VALUES(?, ?, ?, ?)",
                             (pid, tag, value, self.now if at is None else at))
 
-    def event(self, kind: str, *, pid: int | None = None, day: str | None = None, at: float | None = None) -> None:
+    def event(self, kind: str, *, pid: int | None = None, day: str | None = None, at: float | None = None,
+              payload: dict | None = None) -> None:
         with self.db:
-            self.db.execute("INSERT INTO fwd_events(at, kind, pid, day, payload) VALUES(?, ?, ?, ?, '{}')",
-                            (self.now if at is None else at, kind, pid, day))
+            self.db.execute("INSERT INTO fwd_events(at, kind, pid, day, payload) VALUES(?, ?, ?, ?, ?)",
+                            (self.now if at is None else at, kind, pid, day, json.dumps(payload or {})))
 
     def night(self, through: str, *, programs: int = 1, sessions: int = 1, stale: int = 0, errors: int = 0,
               started: float | None = None) -> None:
@@ -724,8 +728,8 @@ class TheReads(Fixture):
 class TheSection(Fixture):
     def test_its_keys_and_its_counts(self):
         a = self.register("a@1", reason="train_pass", lineage="equity:a")
-        b = self.register("b@1", reason="train_fail", lineage="equity:b")
-        self.register("b@2", reason="train_fail", lineage="equity:b", registered_at=self.now - 3 * 86400)
+        b = self.register("b@1", reason="train_fail", lineage="equity:b", registered_at=ny(DAYS[1], 10, 25))
+        self.register("b@2", reason="train_fail", lineage="equity:b", registered_at=ny(DAYS[1], 10, 25) - 3 * 86400)
         c = self.register("c@1", reason="seed", lineage="beta:c")
         d = self.register("d@1", reason="live", lineage="equity:d")
         for n in range(3):
@@ -958,15 +962,50 @@ class TheFunnelRows(Fixture):
 # ============================================================================================== the alarms
 class FW1TheStalledJob(Fixture):
     def test_no_row_by_nine_the_next_session_for_a_day_a_program_was_owed(self):
+        # Settled at this job's morning run, 35 minutes before the open: the shadow starts no program within 300 s of
+        # 09:00, so a day with no row at 08:55 has none at 09:00.
         self.register(first_day=DAYS[0])
-        self.now = ny(DAYS[1], 8, 59)
+        self.now = ny(DAYS[1], 8, 54)
         self.assertNotIn("FW1", self.ids())
-        self.now = ny(DAYS[1], 9, 0)
-        (alarm,) = [a for a in self.section()["alarms"] if a["id"] == "FW1"]
-        self.assertEqual(alarm["level"], "warning")
-        self.assertIn(f"no forward row for {DAYS[0]} by 09:00 New York on {DAYS[1]} though 1 registered rows", alarm["text"])
+        for hh, mm in ((8, 55), (9, 0), (15, 0)):
+            self.now = ny(DAYS[1], hh, mm)
+            (alarm,) = [a for a in self.section()["alarms"] if a["id"] == "FW1"]
+            self.assertEqual(alarm["level"], "warning")
+            self.assertIn(f"no forward row for {DAYS[0]} by 09:00 New York on {DAYS[1]} though 1 registered rows",
+                          alarm["text"])
         self.day(1, DAYS[0], 0.01)
         self.assertNotIn("FW1", self.ids())
+
+    def test_the_deadline_is_this_jobs_morning_run_and_the_shadows_last_start(self):
+        from league.ops import forward_shadow
+
+        self.assertEqual(60 * R.DUE_BEFORE_OPEN_MINUTES, R.FW1_BEFORE_OPEN_S + R.FW1_SETTLED_S)
+        moments = ES.moments(DAYS[1])
+        self.assertEqual(ny(DAYS[1], 9, 0), moments.open_at - R.FW1_BEFORE_OPEN_S, "09:00 New York")
+        # Package B's own margin, once it has landed (a stub has no such name): the two must not drift apart.
+        self.assertIn(getattr(forward_shadow, "OPEN_MARGIN_SECONDS", float(R.FW1_SETTLED_S)), (float(R.FW1_SETTLED_S),))
+        # Package A's registry row for this job, once it has landed: its calendar trigger is the one read here.
+        from league.ops import registry
+
+        job = next((j for j in registry.JOBS if j.name == "forward_report"), None)
+        if job is not None:
+            self.assertIn(("open", -R.DUE_BEFORE_OPEN_MINUTES), [(g.kind, g.offset_minutes) for g in job.triggers])
+
+    def test_a_row_the_registry_first_held_after_the_days_close_was_owed_no_row_that_night(self):
+        # A version scored on DAYS[-1] that the registry first saw two evenings later (its job was down): its first
+        # day is DAYS[0] by D2, but the night of DAYS[0] could not have run it. Nothing was owed; the night of DAYS[1]
+        # recomputes it whole, and a row for THAT day is owed.
+        self.register(first_day=DAYS[0], registered_at=close(DAYS[0]) + 4 * 3600)
+        self.now = ny(DAYS[1], 10)
+        self.assertNotIn("FW1", self.ids())
+        self.assertEqual(R.alarms(self.root, now=self.now, settings=RECORD), [])
+        self.now = ny(DAYS[2], 8, 55)
+        (alarm,) = [a for a in self.section()["alarms"] if a["id"] == "FW1"]
+        self.assertIn(f"no forward row for {DAYS[1]} by 09:00 New York on {DAYS[2]}", alarm["text"])
+        # One registered just before the close was owed that night's row.
+        self.register(first_day=DAYS[0], registered_at=close(DAYS[0]) - 60)
+        self.now = ny(DAYS[1], 10)
+        self.assertIn("FW1", self.ids())
 
     def test_silent_on_an_empty_registry(self):
         self.now = ny(DAYS[5], 12)
@@ -976,11 +1015,11 @@ class FW1TheStalledJob(Fixture):
     def test_silent_on_the_two_sessions_after_a_first_registration(self):
         # Registered during the first forward session: it first decides at that close, its first day is the next.
         self.register(first_day=DAYS[1])
-        for now in (ny(DAYS[0], 11), ny(DAYS[0], 20), ny(DAYS[1], 9, 30), ny(DAYS[1], 23), ny(DAYS[2], 8, 59)):
+        for now in (ny(DAYS[0], 11), ny(DAYS[0], 20), ny(DAYS[1], 9, 30), ny(DAYS[1], 23), ny(DAYS[2], 8, 54)):
             self.now = now
             self.assertNotIn("FW1", self.ids(), S.iso(now))
             self.assertEqual(R.alarms(self.root, now=now, settings=RECORD), [], "no report yet, and nothing owed")
-        self.now = ny(DAYS[2], 9, 0)
+        self.now = ny(DAYS[2], 8, 55)
         self.assertIn("FW1", self.ids())
 
     def test_silent_when_every_owed_program_is_stopped_and_loud_again_once_one_is_resumed(self):
@@ -1100,6 +1139,32 @@ class EachForwardAlarm(Fixture):
         self.event("restated", pid=self.pid_a, day=DAYS[5], at=ny(DAYS[11], 18, 36))
         (alarm,) = [a for a in self.section()["alarms"] if a["id"] == "FW3"]
         self.assertIn(f"2 stored days of 1 programs were restated on the night of {DAYS[11]}", alarm["text"])
+        self.assertIn("0 of the 2 restatements read bars that have moved since", alarm["text"])
+        self.assertIn("2 carry no bars hash", alarm["text"])
+
+    def test_fw3_counts_the_restatements_by_their_bars(self):
+        # The shadow's event as it writes it: one a program and cause, with the stored days that differ and whether the
+        # decisions behind them read bars that have moved since (the vendor rounds adjusted prices to cents: data,
+        # counted with its cause) or the same bars (the recompute itself).
+        b, c = self.register("b@1"), self.register("c@1")
+        self.night(DAYS[11])
+        at = ny(DAYS[11], 18, 36)
+        self.event("restated", pid=self.pid_a, day=DAYS[3], at=at, payload={"days": 4, "bars": "moved", "night": DAYS[11]})
+        self.event("restated", pid=b, day=DAYS[5], at=at, payload={"days": 1, "bars": "moved", "night": DAYS[11]})
+        self.event("restated", pid=c, day=DAYS[6], at=at, payload={"days": 2, "bars": "same", "night": DAYS[11]})
+        (alarm,) = [a for a in self.section()["alarms"] if a["id"] == "FW3"]
+        self.assertIn(f"7 stored days of 3 programs were restated on the night of {DAYS[11]}: 2 of the 3 restatements "
+                      "read bars that have moved since (a vendor correction, or adjusted prices rounded to cents), 1 read "
+                      "the same bars (a recompute that is not deterministic)", alarm["text"])
+        self.assertNotIn("carry no bars hash", alarm["text"])
+        self.assertTrue(R.text_ok(alarm["text"]))
+        # A payload that cannot be read is one day of one program with no cause, never an error.
+        with self.db:
+            self.db.execute("INSERT INTO fwd_events(at, kind, pid, day, payload) VALUES(?, 'restated', ?, ?, 'torn')",
+                            (at, b, DAYS[7]))
+        (alarm,) = [a for a in self.section()["alarms"] if a["id"] == "FW3"]
+        self.assertIn("8 stored days of 3 programs", alarm["text"])
+        self.assertIn("1 carry no bars hash", alarm["text"])
 
     def test_fw4_the_chain_does_not_hold(self):
         FakeA.chain = {"ok": False, "rows": 9, "first_bad": 4}
@@ -1427,6 +1492,21 @@ class TheJob(Fixture):
         again = R.run(ctx)
         self.assertEqual((again["days"], again["cey"]), (0, 0))
         self.assertEqual([a["new"] for a in read_json(self.root / R.FILE)["alarms"]], [False, False])
+
+    def test_the_morning_run_tells_a_night_that_wrote_nothing_before_the_open(self):
+        # The shadow failed at its preflight: no row, no `fwd_runs` row, and no after-trigger for this job (it fires
+        # only when the shadow ends ok). The first run to see the night is the morning one, 35 minutes before the open.
+        self.register(first_day=DAYS[0])
+        self.event("night_failed", day=DAYS[0], at=ny(DAYS[0], 18, 36))
+        self.now = float(ES.moments(DAYS[1]).open_at) - 60.0 * R.DUE_BEFORE_OPEN_MINUTES
+        ctx = self.ctx(RECORD)
+        out = R.run(ctx)
+        self.assertEqual((out["ok"], out["alarms"], out["through"]), (True, ["FW1"], None))
+        self.assertEqual([a["level"] for a in ctx.alerts], ["warning"])
+        self.assertIn(f"forward: FW1: no forward row for {DAYS[0]} by 09:00 New York on {DAYS[1]}", ctx.alerts[0]["text"])
+        self.assertEqual(read_json(self.root / R.FILE)["shadow"]["night_failed"]["day"], DAYS[0])
+        # The dlane report reads the file all that day and carries the alarm.
+        self.assertEqual([a["id"] for a in R.alarms(self.root, now=self.now + 6 * 3600, settings=RECORD)], ["FW1"])
 
     def test_the_report_is_written_whatever_the_meters_did(self):
         self.series(self.register(), DAYS[:3], [0.01, -0.01, 0.02])
